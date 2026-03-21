@@ -22,6 +22,11 @@ export const DOCUMENT_VARIANT_TYPES = Object.freeze([
   "classification"
 ]);
 
+export const INBOX_CHANNEL_STATUSES = Object.freeze(["active", "disabled"]);
+export const EMAIL_INGEST_STATES = Object.freeze(["received", "accepted", "rejected", "quarantined"]);
+export const EMAIL_ATTACHMENT_STATES = Object.freeze(["received", "queued", "quarantined"]);
+export const ATTACHMENT_SCAN_RESULTS = Object.freeze(["clean", "malware", "spam", "policy_violation"]);
+
 export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
   const state = {
     documents: new Map(),
@@ -29,6 +34,12 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     links: new Map(),
     versionIdsByDocument: new Map(),
     linkIdsByDocument: new Map(),
+    inboxChannels: new Map(),
+    inboxChannelIdByKey: new Map(),
+    inboxChannelIdByAddress: new Map(),
+    emailMessages: new Map(),
+    attachmentIdsByMessage: new Map(),
+    attachments: new Map(),
     auditEvents: []
   };
 
@@ -38,6 +49,9 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     linkDocumentRecord,
     exportDocumentChain,
     getDocumentRecord,
+    registerInboxChannel,
+    ingestEmailMessage,
+    getEmailIngestMessage,
     snapshotDocumentArchive
   };
 
@@ -108,7 +122,7 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     const document = requireDocument({ companyId, documentId });
     const resolvedVariantType = requireVariantType(variantType);
     const resolvedStorageKey = requireText(storageKey, "storage_key_required", "Storage key is required.");
-    const resolvedMimeType = requireText(mimeType, "mime_type_required", "MIME type is required.");
+    const resolvedMimeType = normalizeMimeType(mimeType);
     const existingVersions = listDocumentVersions(document.documentId);
     const originalVersion = existingVersions.find((candidate) => candidate.variantType === "original");
 
@@ -311,13 +325,345 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     return copy(requireDocument({ companyId, documentId }));
   }
 
+  function registerInboxChannel({
+    companyId,
+    channelCode,
+    inboundAddress,
+    useCase,
+    allowedMimeTypes,
+    maxAttachmentSizeBytes,
+    defaultDocumentType = null,
+    metadataJson = {},
+    actorId = "system",
+    correlationId = crypto.randomUUID(),
+    inboxChannelId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required", "Company id is required.");
+    const resolvedChannelCode = requireText(channelCode, "channel_code_required", "Channel code is required.");
+    const resolvedInboundAddress = normalizeEmailAddress(inboundAddress);
+    const resolvedUseCase = requireText(useCase, "use_case_required", "Use case is required.");
+    const resolvedAllowedMimeTypes = resolveAllowedMimeTypes(allowedMimeTypes);
+    const resolvedMaxAttachmentSizeBytes = requirePositiveInteger(
+      maxAttachmentSizeBytes,
+      "max_attachment_size_invalid",
+      "Max attachment size must be a positive integer."
+    );
+    const channelKey = `${resolvedCompanyId}:${resolvedChannelCode}`;
+
+    if (state.inboxChannelIdByKey.has(channelKey)) {
+      throw createError(409, "inbox_channel_exists", "Inbox channel already exists for this company and channel code.");
+    }
+    if (state.inboxChannelIdByAddress.has(resolvedInboundAddress)) {
+      throw createError(409, "inbound_address_exists", "Inbound address is already registered.");
+    }
+
+    const now = nowIso();
+    const channel = {
+      inboxChannelId,
+      companyId: resolvedCompanyId,
+      channelCode: resolvedChannelCode,
+      inboundAddress: resolvedInboundAddress,
+      useCase: resolvedUseCase,
+      status: "active",
+      allowedMimeTypes: resolvedAllowedMimeTypes,
+      maxAttachmentSizeBytes: resolvedMaxAttachmentSizeBytes,
+      defaultDocumentType: defaultDocumentType || null,
+      metadataJson: copy(metadataJson),
+      createdAt: now,
+      updatedAt: now
+    };
+
+    state.inboxChannels.set(channel.inboxChannelId, channel);
+    state.inboxChannelIdByKey.set(channelKey, channel.inboxChannelId);
+    state.inboxChannelIdByAddress.set(channel.inboundAddress, channel.inboxChannelId);
+
+    pushAudit({
+      companyId: channel.companyId,
+      actorId,
+      action: "inbox.channel.registered",
+      result: "success",
+      entityType: "inbox_channel",
+      entityId: channel.inboxChannelId,
+      explanation: `Inbox channel ${channel.channelCode} registered for ${channel.inboundAddress}.`,
+      correlationId
+    });
+
+    return copy(channel);
+  }
+
+  function ingestEmailMessage({
+    companyId = null,
+    recipientAddress,
+    messageId,
+    rawStorageKey,
+    senderAddress = null,
+    subject = null,
+    payloadJson = {},
+    receivedAt = nowIso(),
+    attachments = [],
+    actorId = "system",
+    correlationId = crypto.randomUUID(),
+    emailIngestMessageId = crypto.randomUUID()
+  } = {}) {
+    const channel = requireInboxChannelByAddress(recipientAddress);
+    if (companyId && channel.companyId !== companyId) {
+      throw createError(403, "cross_company_forbidden", "Inbox channel belongs to another company.");
+    }
+
+    const resolvedMessageId = requireText(messageId, "message_id_required", "Message id is required.");
+    const resolvedRawStorageKey = requireText(rawStorageKey, "raw_storage_key_required", "Raw storage key is required.");
+    const resolvedAttachments = requireArray(attachments, "attachments_required", "Attachments must be an array.");
+    const existingMessage = findEmailMessageDuplicate({
+      companyId: channel.companyId,
+      channelId: channel.inboxChannelId,
+      messageId: resolvedMessageId
+    });
+
+    if (existingMessage) {
+      pushAudit({
+        companyId: channel.companyId,
+        actorId,
+        action: "email_ingest.duplicate_detected",
+        result: "warning",
+        entityType: "email_ingest_message",
+        entityId: existingMessage.emailIngestMessageId,
+        explanation: `Duplicate message-id ${resolvedMessageId} received for channel ${channel.channelCode}.`,
+        correlationId
+      });
+      const existing = buildEmailIngestSummary(existingMessage, channel);
+      return {
+        ...existing,
+        duplicateDetected: true
+      };
+    }
+
+    const now = nowIso();
+    const message = {
+      emailIngestMessageId,
+      companyId: channel.companyId,
+      inboxChannelId: channel.inboxChannelId,
+      channelCode: channel.channelCode,
+      messageId: resolvedMessageId,
+      recipientAddress: normalizeEmailAddress(recipientAddress),
+      senderAddress: senderAddress ? normalizeEmailAddress(senderAddress) : null,
+      subject: subject ? String(subject) : null,
+      rawStorageKey: resolvedRawStorageKey,
+      status: "received",
+      duplicateOfEmailIngestMessageId: null,
+      routedDocumentCount: 0,
+      quarantinedAttachmentCount: 0,
+      payloadJson: copy(payloadJson),
+      receivedAt: normalizeTimestamp(receivedAt),
+      createdAt: now,
+      updatedAt: now
+    };
+
+    state.emailMessages.set(message.emailIngestMessageId, message);
+    state.attachmentIdsByMessage.set(message.emailIngestMessageId, []);
+
+    pushAudit({
+      companyId: message.companyId,
+      actorId,
+      action: "email_ingest.received",
+      result: "success",
+      entityType: "email_ingest_message",
+      entityId: message.emailIngestMessageId,
+      explanation: `Raw email ${resolvedMessageId} received for ${channel.channelCode}.`,
+      correlationId
+    });
+
+    if (resolvedAttachments.length === 0) {
+      message.status = "rejected";
+      message.updatedAt = nowIso();
+      pushAudit({
+        companyId: message.companyId,
+        actorId,
+        action: "email_ingest.rejected",
+        result: "warning",
+        entityType: "email_ingest_message",
+        entityId: message.emailIngestMessageId,
+        explanation: "Email ingest rejected because no attachments were provided.",
+        correlationId
+      });
+      return {
+        ...buildEmailIngestSummary(message, channel),
+        duplicateDetected: false
+      };
+    }
+
+    for (const [index, attachmentInput] of resolvedAttachments.entries()) {
+      const attachment = createEmailAttachmentRecord({
+        channel,
+        message,
+        attachmentInput,
+        attachmentIndex: index,
+        actorId,
+        correlationId
+      });
+      if (attachment.status === "quarantined") {
+        message.quarantinedAttachmentCount += 1;
+      }
+      if (attachment.documentId) {
+        message.routedDocumentCount += 1;
+      }
+    }
+
+    if (message.routedDocumentCount > 0) {
+      message.status = "accepted";
+    } else if (message.quarantinedAttachmentCount > 0) {
+      message.status = "quarantined";
+    } else {
+      message.status = "rejected";
+    }
+    message.updatedAt = nowIso();
+
+    pushAudit({
+      companyId: message.companyId,
+      actorId,
+      action: `email_ingest.${message.status}`,
+      result: message.status === "accepted" ? "success" : "warning",
+      entityType: "email_ingest_message",
+      entityId: message.emailIngestMessageId,
+      explanation: `Email ingest finished with ${message.routedDocumentCount} routed attachment(s) and ${message.quarantinedAttachmentCount} quarantined attachment(s).`,
+      correlationId
+    });
+
+    return {
+      ...buildEmailIngestSummary(message, channel),
+      duplicateDetected: false
+    };
+  }
+
+  function getEmailIngestMessage({ companyId, emailIngestMessageId } = {}) {
+    const message = requireEmailMessage({ companyId, emailIngestMessageId });
+    const channel = state.inboxChannels.get(message.inboxChannelId);
+    return buildEmailIngestSummary(message, channel);
+  }
+
   function snapshotDocumentArchive() {
     return {
       documents: [...state.documents.values()].map((candidate) => copy(candidate)),
       versions: [...state.versions.values()].map((candidate) => copy(candidate)),
       links: [...state.links.values()].map((candidate) => copy(candidate)),
+      inboxChannels: [...state.inboxChannels.values()].map((candidate) => copy(candidate)),
+      emailMessages: [...state.emailMessages.values()].map((candidate) => copy(candidate)),
+      emailAttachments: [...state.attachments.values()].map((candidate) => copy(candidate)),
       auditEvents: state.auditEvents.map((candidate) => copy(candidate))
     };
+  }
+
+  function createEmailAttachmentRecord({ channel, message, attachmentInput, attachmentIndex, actorId, correlationId }) {
+    const resolvedInput = attachmentInput && typeof attachmentInput === "object" ? attachmentInput : {};
+    const resolvedMimeType = normalizeMimeType(resolvedInput.mimeType);
+    const resolvedFilename = requireText(resolvedInput.filename, "filename_required", "Attachment filename is required.");
+    const resolvedStorageKey = requireText(resolvedInput.storageKey, "storage_key_required", "Attachment storage key is required.");
+    const resolvedScanResult = resolveAttachmentScanResult(resolvedInput.scanResult);
+    const sourceReference = `${message.messageId}:${attachmentIndex}`;
+    const { resolvedHash, resolvedSize } = resolveContent({
+      contentText: resolvedInput.contentText || null,
+      contentBase64: resolvedInput.contentBase64 || null,
+      fileHash: resolvedInput.fileHash || null,
+      fileSizeBytes: resolvedInput.fileSizeBytes ?? null
+    });
+
+    const quarantineReasonCode = resolveAttachmentQuarantineReason({
+      channel,
+      mimeType: resolvedMimeType,
+      fileSizeBytes: resolvedSize,
+      scanResult: resolvedScanResult
+    });
+    const attachment = {
+      emailIngestAttachmentId: crypto.randomUUID(),
+      emailIngestMessageId: message.emailIngestMessageId,
+      companyId: message.companyId,
+      attachmentIndex,
+      filename: resolvedFilename,
+      mimeType: resolvedMimeType,
+      fileHash: resolvedHash,
+      fileSizeBytes: resolvedSize,
+      storageKey: resolvedStorageKey,
+      scanResult: resolvedScanResult,
+      status: quarantineReasonCode ? "quarantined" : "queued",
+      quarantineReasonCode,
+      documentId: null,
+      metadataJson: copy(resolvedInput.metadataJson || {}),
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    };
+
+    state.attachments.set(attachment.emailIngestAttachmentId, attachment);
+    state.attachmentIdsByMessage.get(message.emailIngestMessageId).push(attachment.emailIngestAttachmentId);
+
+    if (attachment.status === "quarantined") {
+      pushAudit({
+        companyId: attachment.companyId,
+        actorId,
+        action: "email_ingest.attachment.quarantined",
+        result: "warning",
+        entityType: "email_ingest_attachment",
+        entityId: attachment.emailIngestAttachmentId,
+        explanation: `Attachment ${attachment.filename} quarantined with reason ${attachment.quarantineReasonCode}.`,
+        correlationId
+      });
+      return attachment;
+    }
+
+    const document = createDocumentRecord({
+      companyId: message.companyId,
+      documentType: resolvedInput.documentType || channel.defaultDocumentType || null,
+      sourceChannel: "email_inbox",
+      sourceReference,
+      retentionPolicyCode: resolvedInput.retentionPolicyCode || null,
+      metadataJson: {
+        inboxChannelId: channel.inboxChannelId,
+        mailboxCode: channel.channelCode,
+        rawMailId: message.emailIngestMessageId,
+        sourceMessageId: message.messageId,
+        sourceAttachmentIndex: attachmentIndex,
+        recipientAddress: message.recipientAddress,
+        filename: attachment.filename,
+        ...copy(attachment.metadataJson)
+      },
+      receivedAt: message.receivedAt,
+      actorId,
+      correlationId
+    });
+
+    appendDocumentVersion({
+      companyId: message.companyId,
+      documentId: document.documentId,
+      variantType: "original",
+      storageKey: attachment.storageKey,
+      mimeType: attachment.mimeType,
+      contentText: resolvedInput.contentText || null,
+      contentBase64: resolvedInput.contentBase64 || null,
+      fileHash: attachment.fileHash,
+      fileSizeBytes: attachment.fileSizeBytes,
+      sourceReference,
+      metadataJson: {
+        inboxChannelId: channel.inboxChannelId,
+        rawMailId: message.emailIngestMessageId,
+        filename: attachment.filename
+      },
+      actorId,
+      correlationId
+    });
+
+    attachment.documentId = document.documentId;
+    attachment.updatedAt = nowIso();
+
+    pushAudit({
+      companyId: attachment.companyId,
+      actorId,
+      action: "email_ingest.attachment.queued",
+      result: "success",
+      entityType: "email_ingest_attachment",
+      entityId: attachment.emailIngestAttachmentId,
+      explanation: `Attachment ${attachment.filename} routed to the document queue as document ${document.documentId}.`,
+      correlationId
+    });
+
+    return attachment;
   }
 
   function requireDocument({ companyId, documentId }) {
@@ -332,6 +678,35 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     return document;
   }
 
+  function requireEmailMessage({ companyId, emailIngestMessageId }) {
+    const resolvedEmailIngestMessageId = requireText(
+      emailIngestMessageId,
+      "email_ingest_message_id_required",
+      "Email ingest message id is required."
+    );
+    const message = state.emailMessages.get(resolvedEmailIngestMessageId);
+    if (!message) {
+      throw createError(404, "email_ingest_message_not_found", "Email ingest message was not found.");
+    }
+    if (companyId && message.companyId !== companyId) {
+      throw createError(403, "cross_company_forbidden", "Email ingest message belongs to another company.");
+    }
+    return message;
+  }
+
+  function requireInboxChannelByAddress(recipientAddress) {
+    const resolvedRecipientAddress = normalizeEmailAddress(recipientAddress);
+    const channelId = state.inboxChannelIdByAddress.get(resolvedRecipientAddress);
+    if (!channelId) {
+      throw createError(404, "inbox_channel_not_found", "No inbox channel matches the recipient address.");
+    }
+    const channel = state.inboxChannels.get(channelId);
+    if (!channel || channel.status !== "active") {
+      throw createError(409, "inbox_channel_disabled", "Inbox channel is not active.");
+    }
+    return channel;
+  }
+
   function listDocumentVersions(documentId) {
     return (state.versionIdsByDocument.get(documentId) || [])
       .map((versionId) => state.versions.get(versionId))
@@ -344,6 +719,27 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       .map((linkId) => state.links.get(linkId))
       .filter(Boolean)
       .sort((left, right) => left.linkedAt.localeCompare(right.linkedAt));
+  }
+
+  function listEmailAttachments(emailIngestMessageId) {
+    return (state.attachmentIdsByMessage.get(emailIngestMessageId) || [])
+      .map((attachmentId) => state.attachments.get(attachmentId))
+      .filter(Boolean)
+      .sort((left, right) => left.attachmentIndex - right.attachmentIndex);
+  }
+
+  function buildEmailIngestSummary(message, channel) {
+    const attachments = listEmailAttachments(message.emailIngestMessageId);
+    const routedDocuments = attachments
+      .filter((candidate) => candidate.documentId)
+      .map((candidate) => requireDocument({ companyId: message.companyId, documentId: candidate.documentId }));
+
+    return {
+      channel: copy(channel),
+      message: copy(message),
+      attachments: attachments.map((candidate) => copy(candidate)),
+      routedDocuments: routedDocuments.map((candidate) => copy(candidate))
+    };
   }
 
   function findDuplicateDocumentIds({ companyId, documentId, contentHash, sourceReference }) {
@@ -369,6 +765,15 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       }
     }
     return [...duplicates].sort();
+  }
+
+  function findEmailMessageDuplicate({ companyId, channelId, messageId }) {
+    for (const message of state.emailMessages.values()) {
+      if (message.companyId === companyId && message.inboxChannelId === channelId && message.messageId === messageId) {
+        return message;
+      }
+    }
+    return null;
   }
 
   function pushAudit({ companyId, actorId, action, result, entityType, entityId, explanation, correlationId }) {
@@ -399,6 +804,38 @@ function requireVariantType(value) {
   return variantType;
 }
 
+function resolveAllowedMimeTypes(value) {
+  const items = requireArray(value, "allowed_mime_types_required", "Allowed MIME types must be an array.");
+  if (items.length === 0) {
+    throw createError(400, "allowed_mime_types_required", "At least one allowed MIME type is required.");
+  }
+  return [...new Set(items.map((item) => normalizeMimeType(item)))];
+}
+
+function resolveAttachmentScanResult(value) {
+  if (value === undefined || value === null || value === "") {
+    return "clean";
+  }
+  const scanResult = requireText(value, "scan_result_required", "Scan result is required.");
+  if (!ATTACHMENT_SCAN_RESULTS.includes(scanResult)) {
+    throw createError(400, "scan_result_invalid", `Unsupported attachment scan result: ${scanResult}.`);
+  }
+  return scanResult;
+}
+
+function resolveAttachmentQuarantineReason({ channel, mimeType, fileSizeBytes, scanResult }) {
+  if (!channel.allowedMimeTypes.includes(mimeType)) {
+    return "mime_type_not_allowed";
+  }
+  if (fileSizeBytes > channel.maxAttachmentSizeBytes) {
+    return "attachment_too_large";
+  }
+  if (scanResult !== "clean") {
+    return `${scanResult}_detected`;
+  }
+  return null;
+}
+
 function resolveContent({ contentText, contentBase64, fileHash, fileSizeBytes }) {
   let buffer = null;
   if (typeof contentBase64 === "string" && contentBase64.length > 0) {
@@ -420,6 +857,28 @@ function resolveContent({ contentText, contentBase64, fileHash, fileSizeBytes })
 
 function normalizeTimestamp(value) {
   return new Date(value).toISOString();
+}
+
+function normalizeEmailAddress(value) {
+  return requireText(value, "email_address_required", "Email address is required.").toLowerCase();
+}
+
+function normalizeMimeType(value) {
+  return requireText(value, "mime_type_required", "MIME type is required.").toLowerCase();
+}
+
+function requirePositiveInteger(value, code, message) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw createError(400, code, message);
+  }
+  return Number(value);
+}
+
+function requireArray(value, code, message) {
+  if (!Array.isArray(value)) {
+    throw createError(400, code, message);
+  }
+  return value;
 }
 
 function requireText(value, code, message) {

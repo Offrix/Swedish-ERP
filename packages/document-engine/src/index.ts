@@ -53,6 +53,60 @@ export interface DocumentLink {
   readonly linkedAt: string;
 }
 
+export interface InboxChannel {
+  readonly inboxChannelId: string;
+  readonly companyId: string;
+  readonly channelCode: string;
+  readonly inboundAddress: string;
+  readonly useCase: string;
+  readonly status: "active" | "disabled";
+  readonly allowedMimeTypes: readonly string[];
+  readonly maxAttachmentSizeBytes: number;
+  readonly defaultDocumentType: string | null;
+  readonly metadataJson: Record<string, unknown>;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface EmailIngestMessage {
+  readonly emailIngestMessageId: string;
+  readonly companyId: string;
+  readonly inboxChannelId: string;
+  readonly channelCode: string;
+  readonly messageId: string;
+  readonly recipientAddress: string;
+  readonly senderAddress: string | null;
+  readonly subject: string | null;
+  readonly rawStorageKey: string;
+  readonly status: "received" | "accepted" | "rejected" | "quarantined";
+  readonly duplicateOfEmailIngestMessageId: string | null;
+  readonly routedDocumentCount: number;
+  readonly quarantinedAttachmentCount: number;
+  readonly payloadJson: Record<string, unknown>;
+  readonly receivedAt: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface EmailIngestAttachment {
+  readonly emailIngestAttachmentId: string;
+  readonly emailIngestMessageId: string;
+  readonly companyId: string;
+  readonly attachmentIndex: number;
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly fileHash: string;
+  readonly fileSizeBytes: number;
+  readonly storageKey: string;
+  readonly scanResult: "clean" | "malware" | "spam" | "policy_violation";
+  readonly status: "received" | "queued" | "quarantined";
+  readonly quarantineReasonCode: string | null;
+  readonly documentId: string | null;
+  readonly metadataJson: Record<string, unknown>;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface DocumentArchiveAuditEvent {
   readonly auditId: string;
   readonly companyId: string;
@@ -73,3 +127,10 @@ export interface DocumentChainExport {
   readonly auditTrail: readonly DocumentArchiveAuditEvent[];
 }
 
+export interface EmailIngestSummary {
+  readonly channel: InboxChannel;
+  readonly message: EmailIngestMessage;
+  readonly attachments: readonly EmailIngestAttachment[];
+  readonly routedDocuments: readonly DocumentRecord[];
+  readonly duplicateDetected?: boolean;
+}

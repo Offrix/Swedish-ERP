@@ -43,13 +43,16 @@ async function handleRequest({ req, res, platform, flags }) {
             status: "ok",
             phase1AuthOnboardingEnabled: flags.phase1AuthOnboardingEnabled,
             phase2DocumentArchiveEnabled: flags.phase2DocumentArchiveEnabled,
+            phase2CompanyInboxEnabled: flags.phase2CompanyInboxEnabled,
             routes: [
               "/healthz",
               "/readyz",
               "/v1/auth/login",
               "/v1/onboarding/runs",
               "/v1/documents",
-              "/v1/documents/:documentId/export"
+              "/v1/documents/:documentId/export",
+              "/v1/inbox/channels",
+              "/v1/inbox/messages"
             ]
           }
         : { status: "ok" }
@@ -69,6 +72,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 2.1 document archive routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if ((!flags.phase2DocumentArchiveEnabled || !flags.phase2CompanyInboxEnabled) && isPhase2InboxRoute(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 2.2 company inbox routes are disabled by configuration."
     });
     return;
   }
@@ -434,6 +445,84 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "POST" && path === "/v1/inbox/channels") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage"
+    });
+    writeJson(
+      res,
+      201,
+      platform.registerInboxChannel({
+        companyId,
+        channelCode: body.channelCode,
+        inboundAddress: body.inboundAddress,
+        useCase: body.useCase,
+        allowedMimeTypes: body.allowedMimeTypes,
+        maxAttachmentSizeBytes: body.maxAttachmentSizeBytes,
+        defaultDocumentType: body.defaultDocumentType || null,
+        metadataJson: body.metadataJson || {},
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/inbox/messages") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage"
+    });
+    const result = platform.ingestEmailMessage({
+      companyId,
+      recipientAddress: body.recipientAddress,
+      messageId: body.messageId,
+      rawStorageKey: body.rawStorageKey,
+      senderAddress: body.senderAddress || null,
+      subject: body.subject || null,
+      payloadJson: body.payloadJson || {},
+      receivedAt: body.receivedAt || new Date().toISOString(),
+      attachments: Array.isArray(body.attachments) ? body.attachments : [],
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    });
+    writeJson(res, result.duplicateDetected ? 200 : 201, result);
+    return;
+  }
+
+  const emailIngestMessageMatch = matchPath(path, "/v1/inbox/messages/:emailIngestMessageId");
+  if (emailIngestMessageMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getEmailIngestMessage({
+        companyId,
+        emailIngestMessageId: emailIngestMessageMatch.emailIngestMessageId
+      })
+    );
+    return;
+  }
+
   writeJson(res, 404, { error: "not_found" });
 }
 
@@ -482,6 +571,10 @@ function isPhase1Route(path) {
 
 function isPhase2Route(path) {
   return path.startsWith("/v1/documents");
+}
+
+function isPhase2InboxRoute(path) {
+  return path.startsWith("/v1/inbox");
 }
 
 async function readJsonBody(req, allowEmpty = false) {
@@ -544,7 +637,8 @@ function createHttpError(status, code, message) {
 function readFeatureFlags(env) {
   return {
     phase1AuthOnboardingEnabled: String(env.PHASE1_AUTH_ONBOARDING_ENABLED || "true").toLowerCase() !== "false",
-    phase2DocumentArchiveEnabled: String(env.PHASE2_DOCUMENT_ARCHIVE_ENABLED || "true").toLowerCase() !== "false"
+    phase2DocumentArchiveEnabled: String(env.PHASE2_DOCUMENT_ARCHIVE_ENABLED || "true").toLowerCase() !== "false",
+    phase2CompanyInboxEnabled: String(env.PHASE2_COMPANY_INBOX_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

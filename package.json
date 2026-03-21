@@ -43,6 +43,7 @@
     "verify:db": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-db.ps1",
     "verify:phase0": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase0.ps1",
     "verify:phase1": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase1.ps1",
-    "verify:phase2:archive": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase2-document-archive.ps1"
+    "verify:phase2:archive": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase2-document-archive.ps1",
+    "verify:phase2:inbox": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase2-company-inbox.ps1"
   }
 }

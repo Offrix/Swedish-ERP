@@ -25,6 +25,8 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - summeringar
 - formattering
 - parserfunktioner
+- inboxrouting per bolag och kanal
+- message-id dedupe och bilagestatus
 - search ranking och permissions trimming-beslut
 - retry/backoff-beräkningar och jobbstate
 - feature flag-upplösning och kill-switch-beslut
@@ -59,6 +61,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - cache/queue
 - objektlagring
 - inbound email
+- råmailmetadata, bilagesplit och karantän
 - bankhändelser
 - OCR pipeline
 - Peppol adapter
@@ -72,6 +75,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - operator workbench och guided flows i desktop-web
 - vardagliga faltfloden i field-mobile
 - mobilflöden för check-in, tid, resa och signatur
+- disable-flagga och återläsning av företagets inboxflöden
 
 ### 8. Performance tests
 - load på dokumentingest

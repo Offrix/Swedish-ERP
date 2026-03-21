@@ -54,6 +54,14 @@ Detta runbook beskriver hur domäner och adresser för företagsinbox sätts upp
 1. Skicka testmail med enkel PDF, flera bilagor, otillåten filtyp och avsiktlig dubblett.
 2. Verifiera att dedupe, karantän och routing beter sig enligt dokumentmotorn.
 
+## Repoimplementation i FAS 2.2
+
+- API:t exponerar `POST /v1/inbox/channels` for kanalregistrering per bolag.
+- API:t exponerar `POST /v1/inbox/messages` for ingest av råmailmetadata och bilagor.
+- API:t exponerar `GET /v1/inbox/messages/:emailIngestMessageId?companyId=...` for att lasa tillbaka routingutfall, bilagestatus och kopplade dokument.
+- `PHASE2_COMPANY_INBOX_ENABLED=false` returnerar `503` pa FAS 2.2-rutter utan att stoppa resten av API-processen.
+- Giltiga bilagor blir separata dokument med gemensam raw-mail-referens, medan ogiltiga eller skanningsflagga bilagor markeras som karantan.
+
 ## Verifiering
 
 - mail tas emot på rätt adresser och lagras som råmail i S3

@@ -638,14 +638,14 @@ Bygg beviskedjan för hela systemet: dokument, råmejl, bilagor, hashning, klass
 ### 2.2 Företagsinbox och mail ingestion
 
 **Bygg detta**
-- [ ] Per-bolag-inbox
-- [ ] Ingest av rått mejl och bilagor
-- [ ] Routing till dokumentkö
+- [x] Per-bolag-inbox
+- [x] Ingest av rått mejl och bilagor
+- [x] Routing till dokumentkö
 
 **Verifiera detta innan nästa delfas**
-- [ ] Flera bilagor hanteras korrekt
-- [ ] Message-ids dedupliceras
-- [ ] Felaktiga bilagor flaggas
+- [x] Flera bilagor hanteras korrekt
+- [x] Message-ids dedupliceras
+- [x] Felaktiga bilagor flaggas
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P2-02`.
 

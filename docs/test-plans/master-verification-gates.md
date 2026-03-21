@@ -124,10 +124,10 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 - [x] Prompt `P2-01` är körd och resultat dokumenterat
 
 ### 2.2 Företagsinbox och mail ingestion
-- [ ] Flera bilagor hanteras korrekt
-- [ ] Message-ids dedupliceras
-- [ ] Felaktiga bilagor flaggas
-- [ ] Prompt `P2-02` är körd och resultat dokumenterat
+- [x] Flera bilagor hanteras korrekt
+- [x] Message-ids dedupliceras
+- [x] Felaktiga bilagor flaggas
+- [x] Prompt `P2-02` är körd och resultat dokumenterat
 
 ### 2.3 OCR, klassificering och granskningskö
 - [ ] Fakturor, kvitton och avtal särskiljs
