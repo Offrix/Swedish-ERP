@@ -473,7 +473,7 @@ Ingen delfas är klar förrän följande finns:
   - [x] 2.2 Företagsinbox och mail ingestion
   - [x] 2.3 OCR, klassificering och granskningskö
 - [ ] **FAS 3 — Huvudbok, kontomodell, journaler och avstämningsgrund**
-  - [ ] 3.1 Ledger-schema och verifikationsmotor
+  - [x] 3.1 Ledger-schema och verifikationsmotor
   - [ ] 3.2 Dimensioner, perioder och bokföringsregler
   - [ ] 3.3 Avstämningscenter och rapportgrund
 - [ ] **FAS 4 — Momsmotor**
@@ -670,15 +670,15 @@ Skapa ledgern som alla andra domäner måste skriva genom.
 ### 3.1 Ledger-schema och verifikationsmotor
 
 **Bygg detta**
-- [ ] Konton
-- [ ] Verifikationsserier
-- [ ] Journal entries och lines
-- [ ] Balanskontroller
+- [x] Konton
+- [x] Verifikationsserier
+- [x] Journal entries och lines
+- [x] Balanskontroller
 
 **Verifiera detta innan nästa delfas**
-- [ ] Debet = kredit i alla tester
-- [ ] Verifikationsnummer är deterministiska
-- [ ] Import markerar källtyp
+- [x] Debet = kredit i alla tester
+- [x] Verifikationsnummer är deterministiska
+- [x] Import markerar källtyp
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P3-01`.
 

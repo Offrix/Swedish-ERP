@@ -11,6 +11,7 @@ Database foundation with migration framework, seed files and baseline governance
 - Core audit/idempotency/outbox tables available before domain rollout.
 - Placeholder domain tables exist for every table family listed i `docs/MASTER_BUILD_PLAN.md`.
 - Phase 1 org/auth/onboarding tables live in the same monotonic migration stream.
+- Phase 3.1 ledger hardening, DSAM chart seed and demo journals live in the same monotonic stream.
 
 ## Usage
 

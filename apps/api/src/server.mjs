@@ -45,6 +45,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase2DocumentArchiveEnabled: flags.phase2DocumentArchiveEnabled,
             phase2CompanyInboxEnabled: flags.phase2CompanyInboxEnabled,
             phase2OcrReviewEnabled: flags.phase2OcrReviewEnabled,
+            phase3LedgerEnabled: flags.phase3LedgerEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -55,7 +56,12 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/inbox/channels",
               "/v1/inbox/messages",
               "/v1/documents/:documentId/ocr/runs",
-              "/v1/review-tasks/:reviewTaskId"
+              "/v1/review-tasks/:reviewTaskId",
+              "/v1/ledger/chart/install",
+              "/v1/ledger/accounts",
+              "/v1/ledger/voucher-series",
+              "/v1/ledger/journal-entries",
+              "/v1/ledger/journal-entries/:journalEntryId"
             ]
           }
         : { status: "ok" }
@@ -91,6 +97,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 2.3 OCR and review routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase3LedgerEnabled && isPhase3Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 3.1 ledger routes are disabled by configuration."
     });
     return;
   }
@@ -681,18 +695,202 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "POST" && path === "/v1/ledger/chart/install") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.installLedgerCatalog({
+        companyId,
+        chartTemplateId: body.chartTemplateId || undefined,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ledger/accounts") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(res, 200, {
+      items: platform.listLedgerAccounts({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ledger/voucher-series") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(res, 200, {
+      items: platform.listVoucherSeries({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ledger/journal-entries") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createJournalEntry({
+        companyId,
+        journalDate: body.journalDate,
+        voucherSeriesCode: body.voucherSeriesCode,
+        sourceType: body.sourceType,
+        sourceId: body.sourceId,
+        description: body.description || null,
+        actorId: principal.userId,
+        idempotencyKey: body.idempotencyKey,
+        lines: body.lines,
+        importedFlag: body.importedFlag === true,
+        currencyCode: body.currencyCode || "SEK",
+        metadataJson: body.metadataJson || {},
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const journalEntryMatch = matchPath(path, "/v1/ledger/journal-entries/:journalEntryId");
+  if (journalEntryMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getJournalEntry({
+        companyId,
+        journalEntryId: journalEntryMatch.journalEntryId
+      })
+    );
+    return;
+  }
+
+  const journalEntryValidateMatch = matchPath(path, "/v1/ledger/journal-entries/:journalEntryId/validate");
+  if (journalEntryValidateMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.validateJournalEntry({
+        companyId,
+        journalEntryId: journalEntryValidateMatch.journalEntryId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const journalEntryPostMatch = matchPath(path, "/v1/ledger/journal-entries/:journalEntryId/post");
+  if (journalEntryPostMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.postJournalEntry({
+        companyId,
+        journalEntryId: journalEntryPostMatch.journalEntryId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   writeJson(res, 404, { error: "not_found" });
 }
 
 function authorizeDocumentAccess({ platform, sessionToken, companyId, permissionCode }) {
+  return authorizeCompanyAccess({
+    platform,
+    sessionToken,
+    companyId,
+    permissionCode,
+    objectType: "document",
+    scopeCode: "document"
+  });
+}
+
+function authorizeCompanyAccess({ platform, sessionToken, companyId, permissionCode, objectType, scopeCode }) {
   const { principal, decision } = platform.checkAuthorization({
     sessionToken,
     action: permissionCode,
     resource: {
       companyId,
-      objectType: "document",
+      objectType,
       objectId: companyId,
-      scopeCode: "document"
+      scopeCode
     }
   });
   if (!decision.allowed) {
@@ -737,6 +935,10 @@ function isPhase2InboxRoute(path) {
 
 function isPhase23Route(path) {
   return path.includes("/ocr/") || path.startsWith("/v1/review-tasks");
+}
+
+function isPhase3Route(path) {
+  return path.startsWith("/v1/ledger");
 }
 
 async function readJsonBody(req, allowEmpty = false) {
@@ -801,7 +1003,8 @@ function readFeatureFlags(env) {
     phase1AuthOnboardingEnabled: String(env.PHASE1_AUTH_ONBOARDING_ENABLED || "true").toLowerCase() !== "false",
     phase2DocumentArchiveEnabled: String(env.PHASE2_DOCUMENT_ARCHIVE_ENABLED || "true").toLowerCase() !== "false",
     phase2CompanyInboxEnabled: String(env.PHASE2_COMPANY_INBOX_ENABLED || "true").toLowerCase() !== "false",
-    phase2OcrReviewEnabled: String(env.PHASE2_OCR_REVIEW_ENABLED || "true").toLowerCase() !== "false"
+    phase2OcrReviewEnabled: String(env.PHASE2_OCR_REVIEW_ENABLED || "true").toLowerCase() !== "false",
+    phase3LedgerEnabled: String(env.PHASE3_LEDGER_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

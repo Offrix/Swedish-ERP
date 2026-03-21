@@ -49,6 +49,13 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/review-tasks/:reviewTaskId/claim`
 - `POST /v1/review-tasks/:reviewTaskId/correct`
 - `POST /v1/review-tasks/:reviewTaskId/approve`
+- `POST /v1/ledger/chart/install`
+- `GET /v1/ledger/accounts?companyId=...`
+- `GET /v1/ledger/voucher-series?companyId=...`
+- `POST /v1/ledger/journal-entries`
+- `GET /v1/ledger/journal-entries/:journalEntryId?companyId=...`
+- `POST /v1/ledger/journal-entries/:journalEntryId/validate`
+- `POST /v1/ledger/journal-entries/:journalEntryId/post`
 
 ## Disable strategy
 
@@ -59,3 +66,5 @@ Set `PHASE2_DOCUMENT_ARCHIVE_ENABLED=false` to return `503` for FAS 2.1 document
 Set `PHASE2_COMPANY_INBOX_ENABLED=false` to return `503` for FAS 2.2 company inbox routes while keeping the rest of the API process alive.
 
 Set `PHASE2_OCR_REVIEW_ENABLED=false` to return `503` for FAS 2.3 OCR and review routes while keeping the rest of the API process alive.
+
+Set `PHASE3_LEDGER_ENABLED=false` to return `503` for FAS 3.1 ledger routes while keeping the rest of the API process alive.

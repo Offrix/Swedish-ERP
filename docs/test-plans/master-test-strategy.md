@@ -175,6 +175,9 @@ En fas är inte klar förrän:
 ### 36.4 Särskilda verifieringar per domän
 #### Ledger
 - varje journal är balanserad
+- verifikationsnummer är deterministiska inom bolag och serie
+- samma idempotency key skapar inte ny verifikation
+- importerad historik är markerad utan att tyst skriva om bokad historik
 - historisk rapport kan återskapas
 - låst period kan inte muteras
 

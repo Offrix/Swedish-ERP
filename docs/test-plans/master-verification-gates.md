@@ -138,16 +138,16 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 ## Gate for FAS 3 — Huvudbok, kontomodell, journaler och avstämningsgrund
 
 ### Allmänt krav
-- [ ] Kod, tester och docs är uppdaterade i samma förändring
-- [ ] Demo kan köras på seed-data
+- [x] Kod, tester och docs är uppdaterade i samma förändring
+- [x] Demo kan köras på seed-data
 - [ ] Ingen kritisk eller hög bug står öppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen påverkar produktion
+- [x] Rollback eller disable-strategi finns om fasen påverkar produktion
 
 ### 3.1 Ledger-schema och verifikationsmotor
-- [ ] Debet = kredit i alla tester
-- [ ] Verifikationsnummer är deterministiska
-- [ ] Import markerar källtyp
-- [ ] Prompt `P3-01` är körd och resultat dokumenterat
+- [x] Debet = kredit i alla tester
+- [x] Verifikationsnummer är deterministiska
+- [x] Import markerar källtyp
+- [x] Prompt `P3-01` är körd och resultat dokumenterat
 
 ### 3.2 Dimensioner, perioder och bokföringsregler
 - [ ] Låsta perioder går inte att mutera
