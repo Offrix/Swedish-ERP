@@ -156,10 +156,10 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 - [x] Prompt `P3-02` är körd och resultat dokumenterat
 
 ### 3.3 Avstämningscenter och rapportgrund
-- [ ] Rapporter kan återskapas historiskt
-- [ ] Drilldown fungerar till källdokument
-- [ ] Avstämning sparar sign-off
-- [ ] Prompt `P3-03` är körd och resultat dokumenterat
+- [x] Rapporter kan återskapas historiskt
+- [x] Drilldown fungerar till källdokument
+- [x] Avstämning sparar sign-off
+- [x] Prompt `P3-03` är körd och resultat dokumenterat
 
 ## Gate for FAS 4 — Momsmotor
 

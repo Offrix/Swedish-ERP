@@ -699,15 +699,15 @@ Skapa ledgern som alla andra domäner måste skriva genom.
 ### 3.3 Avstämningscenter och rapportgrund
 
 **Bygg detta**
-- [ ] Trial balance
-- [ ] Verifikationssök
-- [ ] Avstämningsobjekt
-- [ ] Basrapporter
+- [x] Trial balance
+- [x] Verifikationssök
+- [x] Avstämningsobjekt
+- [x] Basrapporter
 
 **Verifiera detta innan nästa delfas**
-- [ ] Rapporter kan återskapas historiskt
-- [ ] Drilldown fungerar till källdokument
-- [ ] Avstämning sparar sign-off
+- [x] Rapporter kan återskapas historiskt
+- [x] Drilldown fungerar till källdokument
+- [x] Avstämning sparar sign-off
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P3-03`.
 

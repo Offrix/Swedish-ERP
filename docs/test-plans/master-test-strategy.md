@@ -179,9 +179,12 @@ En fas är inte klar förrän:
 - samma idempotency key skapar inte ny verifikation
 - importerad historik är markerad utan att tyst skriva om bokad historik
 - historisk rapport kan återskapas
+- reportsnapshot bevarar samma siffror efter senare bokningar
+- drilldown från rapport till journal till dokumentlänk fungerar
 - låst period kan inte muteras
 - correction och reversal skapar ny immutabel verifikation med länk till original
 - obligatoriska projektdimensioner valideras innan bokning
+- reconciliation sign-off binds till exakt snapshot-hash och evidence-ref
 
 #### Moms
 - beslutsträd returnerar förklaring

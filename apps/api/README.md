@@ -62,6 +62,15 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/ledger/accounting-periods/:accountingPeriodId/reopen`
 - `POST /v1/ledger/journal-entries/:journalEntryId/reverse`
 - `POST /v1/ledger/journal-entries/:journalEntryId/correct`
+- `GET /v1/reporting/report-definitions?companyId=...`
+- `POST /v1/reporting/report-snapshots`
+- `GET /v1/reporting/report-snapshots/:reportSnapshotId?companyId=...`
+- `GET /v1/reporting/report-snapshots/:reportSnapshotId/drilldown?companyId=...&lineKey=...`
+- `GET /v1/reporting/journal-search?companyId=...`
+- `GET /v1/reporting/reconciliations?companyId=...`
+- `POST /v1/reporting/reconciliations`
+- `GET /v1/reporting/reconciliations/:reconciliationRunId?companyId=...`
+- `POST /v1/reporting/reconciliations/:reconciliationRunId/signoff`
 
 ## Disable strategy
 
@@ -73,4 +82,4 @@ Set `PHASE2_COMPANY_INBOX_ENABLED=false` to return `503` for FAS 2.2 company inb
 
 Set `PHASE2_OCR_REVIEW_ENABLED=false` to return `503` for FAS 2.3 OCR and review routes while keeping the rest of the API process alive.
 
-Set `PHASE3_LEDGER_ENABLED=false` to return `503` for FAS 3.1 and 3.2 ledger routes while keeping the rest of the API process alive.
+Set `PHASE3_LEDGER_ENABLED=false` to return `503` for FAS 3.1, 3.2 and 3.3 ledger/reporting routes while keeping the rest of the API process alive.

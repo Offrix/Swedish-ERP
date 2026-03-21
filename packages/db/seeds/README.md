@@ -12,3 +12,4 @@ Seed execution policy:
 - `pnpm run seed:demo` applies all seeds, including `_demo_` files, in timestamp order
 - Phase 3.1 adds DSAM chart and voucher series baseline seed plus demo journals for ledger verification
 - Phase 3.2 adds dimension catalogs, next-period correction baseline data and demo reversals/corrections for ledger verification
+- Phase 3.3 adds report definitions plus demo report snapshots and signed reconciliation evidence for reporting verification

@@ -384,7 +384,7 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/accounting-foundation.md, docs/adr/ADR-0004-ledger-invariants.md
+docs/compliance/se/accounting-foundation.md, docs/compliance/se/reconciliation-and-close-engine.md, docs/adr/ADR-0004-ledger-invariants.md, docs/domain/reporting-metric-catalog-and-export-jobs.md, docs/domain/close-checklists-blockers-and-signoff.md
 
 Implement exactly this scope:
 - Konton

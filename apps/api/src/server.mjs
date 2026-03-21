@@ -65,7 +65,15 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/ledger/journal-entries",
               "/v1/ledger/journal-entries/:journalEntryId",
               "/v1/ledger/journal-entries/:journalEntryId/reverse",
-              "/v1/ledger/journal-entries/:journalEntryId/correct"
+              "/v1/ledger/journal-entries/:journalEntryId/correct",
+              "/v1/reporting/report-definitions",
+              "/v1/reporting/report-snapshots",
+              "/v1/reporting/report-snapshots/:reportSnapshotId",
+              "/v1/reporting/report-snapshots/:reportSnapshotId/drilldown",
+              "/v1/reporting/journal-search",
+              "/v1/reporting/reconciliations",
+              "/v1/reporting/reconciliations/:reconciliationRunId",
+              "/v1/reporting/reconciliations/:reconciliationRunId/signoff"
             ]
           }
         : { status: "ok" }
@@ -108,7 +116,7 @@ async function handleRequest({ req, res, platform, flags }) {
   if (!flags.phase3LedgerEnabled && isPhase3Route(path)) {
     writeJson(res, 503, {
       error: "feature_disabled",
-      message: "FAS 3.1 ledger routes are disabled by configuration."
+      message: "FAS 3 ledger and reporting routes are disabled by configuration."
     });
     return;
   }
@@ -1029,6 +1037,261 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/reporting/report-definitions") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(res, 200, {
+      items: platform.listReportDefinitions({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/reporting/report-snapshots") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(
+      res,
+      201,
+      platform.runReportSnapshot({
+        companyId,
+        reportCode: body.reportCode,
+        accountingPeriodId: body.accountingPeriodId || null,
+        viewMode: body.viewMode || null,
+        fromDate: body.fromDate || null,
+        toDate: body.toDate || null,
+        asOfDate: body.asOfDate || null,
+        filters: body.filters || {},
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const reportSnapshotMatch = matchPath(path, "/v1/reporting/report-snapshots/:reportSnapshotId");
+  if (reportSnapshotMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getReportSnapshot({
+        companyId,
+        reportSnapshotId: reportSnapshotMatch.reportSnapshotId
+      })
+    );
+    return;
+  }
+
+  const reportDrilldownMatch = matchPath(path, "/v1/reporting/report-snapshots/:reportSnapshotId/drilldown");
+  if (reportDrilldownMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getReportLineDrilldown({
+        companyId,
+        reportSnapshotId: reportDrilldownMatch.reportSnapshotId,
+        lineKey: requireText(url.searchParams.get("lineKey"), "line_key_required", "lineKey query parameter is required.")
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/reporting/journal-search") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    const dimensionFilters = {};
+    for (const key of ["projectId", "costCenterCode", "businessAreaCode"]) {
+      const value = url.searchParams.get(key);
+      if (value) {
+        dimensionFilters[key] = value;
+      }
+    }
+    writeJson(
+      res,
+      200,
+      platform.searchJournalEntries({
+        companyId,
+        reportSnapshotId: url.searchParams.get("reportSnapshotId") || null,
+        query: url.searchParams.get("query") || null,
+        accountNumber: url.searchParams.get("accountNumber") || null,
+        sourceType: url.searchParams.get("sourceType") || null,
+        sourceId: url.searchParams.get("sourceId") || null,
+        status: url.searchParams.get("status") || null,
+        voucherSeriesCode: url.searchParams.get("voucherSeriesCode") || null,
+        journalDateFrom: url.searchParams.get("journalDateFrom") || null,
+        journalDateTo: url.searchParams.get("journalDateTo") || null,
+        dimensionFilters
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/reporting/reconciliations") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createReconciliationRun({
+        companyId,
+        accountingPeriodId: body.accountingPeriodId,
+        areaCode: body.areaCode,
+        cutoffDate: body.cutoffDate || null,
+        ledgerAccountNumbers: Array.isArray(body.ledgerAccountNumbers) ? body.ledgerAccountNumbers : [],
+        subledgerBalanceAmount: body.subledgerBalanceAmount ?? null,
+        materialityThresholdAmount: body.materialityThresholdAmount ?? 0,
+        differenceItems: Array.isArray(body.differenceItems) ? body.differenceItems : [],
+        ownerUserId: body.ownerUserId || null,
+        signoffRequired: body.signoffRequired !== false,
+        checklistSnapshotRef: body.checklistSnapshotRef || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/reporting/reconciliations") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(res, 200, {
+      items: platform.listReconciliationRuns({
+        companyId,
+        accountingPeriodId: url.searchParams.get("accountingPeriodId") || null,
+        areaCode: url.searchParams.get("areaCode") || null
+      })
+    });
+    return;
+  }
+
+  const reconciliationMatch = matchPath(path, "/v1/reporting/reconciliations/:reconciliationRunId");
+  if (reconciliationMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getReconciliationRun({
+        companyId,
+        reconciliationRunId: reconciliationMatch.reconciliationRunId
+      })
+    );
+    return;
+  }
+
+  const reconciliationSignoffMatch = matchPath(path, "/v1/reporting/reconciliations/:reconciliationRunId/signoff");
+  if (reconciliationSignoffMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(
+      res,
+      200,
+      platform.signOffReconciliationRun({
+        companyId,
+        reconciliationRunId: reconciliationSignoffMatch.reconciliationRunId,
+        actorId: principal.userId,
+        signatoryRole: body.signatoryRole || "close_signatory",
+        comment: body.comment || null,
+        evidenceRefs: Array.isArray(body.evidenceRefs) ? body.evidenceRefs : [],
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   writeJson(res, 404, { error: "not_found" });
 }
 
@@ -1099,7 +1362,7 @@ function isPhase23Route(path) {
 }
 
 function isPhase3Route(path) {
-  return path.startsWith("/v1/ledger");
+  return path.startsWith("/v1/ledger") || path.startsWith("/v1/reporting");
 }
 
 async function readJsonBody(req, allowEmpty = false) {
