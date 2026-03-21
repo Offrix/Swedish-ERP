@@ -1,0 +1,13 @@
+[project]
+name = "swedish-erp-python"
+version = "0.0.0-phase0"
+description = "Phase 0 Python support configuration for Swedish ERP."
+requires-python = "==3.14.*"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]

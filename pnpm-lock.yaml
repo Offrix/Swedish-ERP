@@ -1,0 +1,43 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+  .: {}
+  apps/api: {}
+  apps/desktop-web: {}
+  apps/field-mobile: {}
+  apps/worker: {}
+  packages/auth-core: {}
+  packages/db: {}
+  packages/document-engine: {}
+  packages/domain-annual-reporting: {}
+  packages/domain-ap: {}
+  packages/domain-ar: {}
+  packages/domain-banking: {}
+  packages/domain-benefits: {}
+  packages/domain-core: {}
+  packages/domain-documents: {}
+  packages/domain-field: {}
+  packages/domain-hr: {}
+  packages/domain-hus: {}
+  packages/domain-integrations: {}
+  packages/domain-ledger: {}
+  packages/domain-org-auth: {}
+  packages/domain-payroll: {}
+  packages/domain-pension: {}
+  packages/domain-personalliggare: {}
+  packages/domain-projects: {}
+  packages/domain-reporting: {}
+  packages/domain-time: {}
+  packages/domain-travel: {}
+  packages/domain-vat: {}
+  packages/events: {}
+  packages/integration-core: {}
+  packages/rule-engine: {}
+  packages/test-fixtures: {}
+  packages/ui-core: {}
+  packages/ui-desktop: {}
+  packages/ui-mobile: {}

@@ -1,0 +1,21 @@
+{
+  "rule_pack_id": "vat-se-2026.1",
+  "domain": "vat",
+  "jurisdiction": "SE",
+  "effective_from": "2026-01-01",
+  "effective_to": null,
+  "version": "2026.1.0",
+  "checksum": "sha256:phase0-sample",
+  "source_snapshot_date": "2026-03-21",
+  "semantic_change_summary": "Phase 0 placeholder rule-pack manifest",
+  "machine_readable_rules": {
+    "decision_code": "VAT_SE_PLACEHOLDER"
+  },
+  "human_readable_explanation": [
+    "Placeholder golden fixture for Phase 0."
+  ],
+  "test_vectors": [
+    "tests/golden/rule-pack-fixture.test.mjs"
+  ],
+  "migration_notes": "Replace with domain-specific vectors in later phases."
+}

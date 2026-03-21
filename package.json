@@ -1,0 +1,46 @@
+{
+  "name": "@swedish-erp/monorepo",
+  "version": "0.0.0-phase0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.12.4",
+  "engines": {
+    "node": "24.14.0",
+    "pnpm": "10.12.4"
+  },
+  "config": {
+    "runtimeVersions": {
+      "node": "24.14.0",
+      "pnpm": "10.12.4",
+      "python": "3.14.0",
+      "postgresql": "18.0",
+      "valkey": "8.0.0",
+      "typescript": "5.8.3",
+      "react": "19.2.0",
+      "next": "16.0.0",
+      "expo": "54.0.0"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "db:seed": "node scripts/db-seed.mjs",
+    "dev": "node scripts/dev.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "healthcheck": "node scripts/healthcheck.mjs",
+    "infra:down": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-down.ps1",
+    "infra:up": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-up.ps1",
+    "lint": "node scripts/lint.mjs",
+    "runtime-log": "node scripts/runtime-log.mjs",
+    "security": "node scripts/security-scan.mjs",
+    "seed:demo": "node scripts/db-seed.mjs --demo",
+    "test": "node scripts/run-tests.mjs all",
+    "test:e2e": "node scripts/run-tests.mjs e2e",
+    "test:golden": "node scripts/run-tests.mjs golden",
+    "test:integration": "node scripts/run-tests.mjs integration",
+    "test:unit": "node scripts/run-tests.mjs unit",
+    "typecheck": "node scripts/typecheck.mjs",
+    "verify:db": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-db.ps1",
+    "verify:phase0": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase0.ps1"
+  }
+}

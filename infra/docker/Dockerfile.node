@@ -1,0 +1,5 @@
+FROM node:24.14.0-bookworm-slim
+
+WORKDIR /workspace
+
+RUN corepack enable && corepack prepare pnpm@10.12.4 --activate
