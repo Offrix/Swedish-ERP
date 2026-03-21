@@ -11,7 +11,7 @@ on:
 env:
   NODE_VERSION: "24.14.0"
   PNPM_VERSION: "10.12.4"
-  PYTHON_VERSION: "3.14.0"
+  PYTHON_VERSION: "3.14.3"
 
 jobs:
   baseline:

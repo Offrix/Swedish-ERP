@@ -12,7 +12,7 @@ Projektet ska byggas med Codex av en anvandare som inte sjalv kodar. Runtimes oc
 Vi laser FAS 0 till foljande exakta patchversioner:
 
 - **Node.js 24.14.0** for alla TypeScript-appar och workers.
-- **Python 3.14.0** for dokumenttolkning, ETL, batcher, rapportgeneratorer och AI-assisterade verktyg.
+- **Python 3.14.3** for dokumenttolkning, ETL, batcher, rapportgeneratorer och AI-assisterade verktyg.
 - **PostgreSQL 18.0** som enda primara relationsdatabas.
 - **Valkey 8.0.0** for cache, rate limiting, las och jobbkoer.
 - **TypeScript 5.8.3** som primart applikationssprak.
@@ -20,8 +20,8 @@ Vi laser FAS 0 till foljande exakta patchversioner:
 - **Next.js 16.0.0** for `desktop-web`.
 - **Expo SDK 54.0.0** for `field-mobile`.
 - **pnpm 10.12.4** via Corepack for JavaScript/TypeScript-monorepot.
-- **uv + pyproject.toml + uv.lock** for Python-beroenden med Python 3.14.0 som krav.
-- **Docker + docker compose** med `node:24.14.0-bookworm-slim`, `python:3.14.0-slim-bookworm`, `postgres:18.0` och `valkey/valkey:8.0.0-bookworm`.
+- **uv + pyproject.toml + uv.lock** for Python-beroenden med Python 3.14.3 som krav.
+- **Docker + docker compose** med `node:24.14.0-bookworm-slim`, `python:3.14.3-slim-bookworm`, `postgres:18.0` och `valkey/valkey:8.0.0-bookworm`.
 
 ## Rules
 
@@ -42,7 +42,7 @@ Vi laser FAS 0 till foljande exakta patchversioner:
 ## Why
 
 - **24.14.0** valdes for Node eftersom den redan finns i den aktuella utvecklingsmiljon och minskar risken for versionsglidning i FAS 0.
-- **3.14.0** valdes som tydlig GA-baslinje for Python till dess att en senare patch verifierats i staging.
+- **3.14.3** valdes for Python eftersom det ar senaste stabila 3.14-bugfixpatchen och ger en striktare, mer defensiv FAS 0-lasning an grundslappet.
 - **18.0** och **8.0.0** ger tydlig databaso ch cachebas som matchar MASTER BUILD PLAN utan att introducera en senare gren i FAS 0.
 - **19.2.0**, **16.0.0** och **54.0.0** laser UI-linjerna runt en enda `desktop-web` och en separat `field-mobile`.
 - **10.12.4** valdes for pnpm som stabil Corepack-styrd workspace-version.

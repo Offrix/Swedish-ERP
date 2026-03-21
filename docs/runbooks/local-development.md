@@ -20,7 +20,7 @@ En person utan egen kodvana ska kunna:
 - Docker Desktop eller OrbStack
 - VS Code
 - Node `24.14.0` via nvm eller fnm
-- Python `3.14.0` via pyenv eller uv-managed install
+- Python `3.14.3` via pyenv eller uv-managed install
 
 ### Windows
 - WSL2
@@ -28,13 +28,13 @@ En person utan egen kodvana ska kunna:
 - Docker Desktop med WSL integration
 - VS Code med Remote WSL
 - Node `24.14.0` i WSL
-- Python `3.14.0` i WSL
+- Python `3.14.3` i WSL
 
 ### Linux
 - Docker Engine + docker compose plugin
 - Git
 - Node `24.14.0`
-- Python `3.14.0`
+- Python `3.14.3`
 - VS Code eller annan editor
 
 ## Verktyg som ska installeras
@@ -44,7 +44,7 @@ En person utan egen kodvana ska kunna:
 - Node `24.14.0`
 - Corepack
 - pnpm `10.12.4` via Corepack
-- Python `3.14.0`
+- Python `3.14.3`
 - uv
 - jq
 - yq valfritt men rekommenderat
