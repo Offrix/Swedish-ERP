@@ -5,6 +5,9 @@ import {
   EMAIL_ATTACHMENT_STATES,
   EMAIL_INGEST_STATES,
   INBOX_CHANNEL_STATUSES,
+  OCR_RUN_STATES,
+  OCR_DOCUMENT_TYPES,
+  REVIEW_TASK_STATES,
   createDocumentArchiveEngine
 } from "../../document-engine/src/index.mjs";
 
@@ -14,7 +17,10 @@ export {
   DOCUMENT_VARIANT_TYPES,
   EMAIL_ATTACHMENT_STATES,
   EMAIL_INGEST_STATES,
-  INBOX_CHANNEL_STATUSES
+  INBOX_CHANNEL_STATUSES,
+  OCR_DOCUMENT_TYPES,
+  OCR_RUN_STATES,
+  REVIEW_TASK_STATES
 };
 
 export function createDocumentArchivePlatform(options = {}) {

@@ -26,6 +26,13 @@ export const INBOX_CHANNEL_STATUSES = Object.freeze(["active", "disabled"]);
 export const EMAIL_INGEST_STATES = Object.freeze(["received", "accepted", "rejected", "quarantined"]);
 export const EMAIL_ATTACHMENT_STATES = Object.freeze(["received", "queued", "quarantined"]);
 export const ATTACHMENT_SCAN_RESULTS = Object.freeze(["clean", "malware", "spam", "policy_violation"]);
+export const OCR_RUN_STATES = Object.freeze(["requested", "processing", "completed", "failed"]);
+export const REVIEW_TASK_STATES = Object.freeze(["open", "claimed", "corrected", "approved", "rejected", "requeued"]);
+export const OCR_DOCUMENT_TYPES = Object.freeze(["supplier_invoice", "expense_receipt", "contract", "unknown"]);
+
+const MAX_ATTACHMENTS_PER_MESSAGE = 10;
+const MAX_OCR_FILE_SIZE_BYTES = 15 * 1024 * 1024;
+const MAX_OCR_PAGE_COUNT = 200;
 
 export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
   const state = {
@@ -40,6 +47,10 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     emailMessages: new Map(),
     attachmentIdsByMessage: new Map(),
     attachments: new Map(),
+    ocrRuns: new Map(),
+    ocrRunIdsByDocument: new Map(),
+    reviewTasks: new Map(),
+    reviewTaskIdsByDocument: new Map(),
     auditEvents: []
   };
 
@@ -52,6 +63,12 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     registerInboxChannel,
     ingestEmailMessage,
     getEmailIngestMessage,
+    runDocumentOcr,
+    getDocumentOcrRuns,
+    claimReviewTask,
+    correctReviewTask,
+    approveReviewTask,
+    getReviewTask,
     snapshotDocumentArchive
   };
 
@@ -89,6 +106,8 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     state.documents.set(document.documentId, document);
     state.versionIdsByDocument.set(document.documentId, []);
     state.linkIdsByDocument.set(document.documentId, []);
+    state.ocrRunIdsByDocument.set(document.documentId, []);
+    state.reviewTaskIdsByDocument.set(document.documentId, []);
     pushAudit({
       companyId: document.companyId,
       actorId,
@@ -154,6 +173,10 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       fileHash,
       fileSizeBytes
     });
+    const storedMetadata = copy(metadataJson);
+    if (typeof contentText === "string" && contentText.length > 0 && storedMetadata.ocrSourceText === undefined) {
+      storedMetadata.ocrSourceText = contentText;
+    }
 
     const version = {
       documentVersionId: crypto.randomUUID(),
@@ -167,7 +190,7 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       fileSizeBytes: resolvedSize,
       sourceReference: sourceReference || document.sourceReference || null,
       derivesFromDocumentVersionId: derivedFromVersionId,
-      metadataJson: copy(metadataJson),
+      metadataJson: storedMetadata,
       createdAt: nowIso()
     };
 
@@ -333,6 +356,9 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     allowedMimeTypes,
     maxAttachmentSizeBytes,
     defaultDocumentType = null,
+    classificationConfidenceThreshold = null,
+    fieldConfidenceThreshold = null,
+    defaultReviewQueueCode = "classification_low_confidence",
     metadataJson = {},
     actorId = "system",
     correlationId = crypto.randomUUID(),
@@ -368,6 +394,21 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       allowedMimeTypes: resolvedAllowedMimeTypes,
       maxAttachmentSizeBytes: resolvedMaxAttachmentSizeBytes,
       defaultDocumentType: defaultDocumentType || null,
+      classificationConfidenceThreshold: resolveOptionalThreshold(
+        classificationConfidenceThreshold,
+        "classification_threshold_invalid",
+        "Classification confidence threshold must be between 0 and 1."
+      ),
+      fieldConfidenceThreshold: resolveOptionalThreshold(
+        fieldConfidenceThreshold,
+        "field_threshold_invalid",
+        "Field confidence threshold must be between 0 and 1."
+      ),
+      defaultReviewQueueCode: requireText(
+        defaultReviewQueueCode,
+        "review_queue_code_required",
+        "Default review queue code is required."
+      ),
       metadataJson: copy(metadataJson),
       createdAt: now,
       updatedAt: now
@@ -413,6 +454,14 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     const resolvedMessageId = requireText(messageId, "message_id_required", "Message id is required.");
     const resolvedRawStorageKey = requireText(rawStorageKey, "raw_storage_key_required", "Raw storage key is required.");
     const resolvedAttachments = requireArray(attachments, "attachments_required", "Attachments must be an array.");
+    if (resolvedAttachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+      throw createError(
+        400,
+        "attachment_limit_exceeded",
+        `A single message may not contain more than ${MAX_ATTACHMENTS_PER_MESSAGE} attachments.`
+      );
+    }
+
     const existingMessage = findEmailMessageDuplicate({
       companyId: channel.companyId,
       channelId: channel.inboxChannelId,
@@ -540,6 +589,324 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     return buildEmailIngestSummary(message, channel);
   }
 
+  function runDocumentOcr({
+    companyId,
+    documentId,
+    reasonCode = "initial_ingest",
+    modelVersion = "textract-stub-2026-03-21",
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const document = requireDocument({ companyId, documentId });
+    const channel = requireInboxChannelForDocument(document);
+    const thresholds = requireOcrThresholds(channel);
+    const originalVersion = requireOriginalDocumentVersion(document.documentId);
+    const pageCount = resolvePageCount(originalVersion);
+    if (originalVersion.fileSizeBytes > MAX_OCR_FILE_SIZE_BYTES) {
+      throw createError(409, "ocr_input_too_large", "Document exceeds the OCR size limit.");
+    }
+    if (pageCount > MAX_OCR_PAGE_COUNT) {
+      throw createError(409, "ocr_page_limit_exceeded", "Document exceeds the OCR page limit.");
+    }
+
+    const now = nowIso();
+    const run = {
+      ocrRunId: crypto.randomUUID(),
+      documentId: document.documentId,
+      companyId: document.companyId,
+      sourceDocumentVersionId: originalVersion.documentVersionId,
+      profileCode: determineOcrProfile({ channel, originalVersion }),
+      modelVersion: requireText(modelVersion, "model_version_required", "Model version is required."),
+      reasonCode: requireText(reasonCode, "reason_code_required", "Reason code is required."),
+      status: "requested",
+      reviewRequired: false,
+      suggestedDocumentType: "unknown",
+      classificationConfidence: 0,
+      classificationCandidatesJson: [],
+      extractedText: "",
+      extractedFieldsJson: {},
+      ocrDocumentVersionId: null,
+      classificationDocumentVersionId: null,
+      createdAt: now,
+      startedAt: null,
+      completedAt: null,
+      failedAt: null,
+      errorCode: null,
+      metadataJson: {}
+    };
+
+    state.ocrRuns.set(run.ocrRunId, run);
+    state.ocrRunIdsByDocument.get(document.documentId).push(run.ocrRunId);
+
+    pushAudit({
+      companyId: run.companyId,
+      actorId,
+      action: "ocr.run.requested",
+      result: "success",
+      entityType: "ocr_run",
+      entityId: run.ocrRunId,
+      explanation: `OCR run requested for document ${document.documentId}.`,
+      correlationId
+    });
+
+    run.status = "processing";
+    run.startedAt = nowIso();
+
+    const sourceText = buildOcrSourceText({ document, originalVersion });
+    const classification = classifyDocument({
+      channel,
+      sourceText,
+      filename: readMetadataText(originalVersion.metadataJson, "filename"),
+      mimeType: originalVersion.mimeType
+    });
+    const extractedFields = extractOcrFields({
+      sourceText,
+      suggestedDocumentType: classification.suggestedDocumentType
+    });
+    const reviewDecision = evaluateReviewRequirement({
+      classification,
+      extractedFields,
+      thresholds
+    });
+
+    const ocrVersion = appendDocumentVersion({
+      companyId: document.companyId,
+      documentId: document.documentId,
+      variantType: "ocr",
+      storageKey: `documents/ocr/${document.documentId}/${run.ocrRunId}.txt`,
+      mimeType: "text/plain",
+      contentText: sourceText,
+      sourceReference: `${document.documentId}:ocr:${run.ocrRunId}`,
+      derivesFromDocumentVersionId: originalVersion.documentVersionId,
+      metadataJson: {
+        ocrRunId: run.ocrRunId,
+        profileCode: run.profileCode,
+        modelVersion: run.modelVersion,
+        reasonCode: run.reasonCode,
+        pageCount
+      },
+      actorId,
+      correlationId
+    });
+
+    const classificationPayload = {
+      suggestedDocumentType: classification.suggestedDocumentType,
+      confidence: classification.confidence,
+      candidates: classification.candidates,
+      extractedFields,
+      reviewRequired: reviewDecision.reviewRequired
+    };
+    const classificationVersion = appendDocumentVersion({
+      companyId: document.companyId,
+      documentId: document.documentId,
+      variantType: "classification",
+      storageKey: `documents/classification/${document.documentId}/${run.ocrRunId}.json`,
+      mimeType: "application/json",
+      contentText: JSON.stringify(classificationPayload),
+      sourceReference: `${document.documentId}:classification:${run.ocrRunId}`,
+      derivesFromDocumentVersionId: ocrVersion.version.documentVersionId,
+      metadataJson: {
+        ocrRunId: run.ocrRunId,
+        suggestedDocumentType: classification.suggestedDocumentType,
+        confidence: classification.confidence,
+        candidates: classification.candidates,
+        extractedFields,
+        reviewRequired: reviewDecision.reviewRequired
+      },
+      actorId,
+      correlationId
+    });
+
+    run.status = "completed";
+    run.reviewRequired = reviewDecision.reviewRequired;
+    run.suggestedDocumentType = classification.suggestedDocumentType;
+    run.classificationConfidence = classification.confidence;
+    run.classificationCandidatesJson = classification.candidates;
+    run.extractedText = sourceText;
+    run.extractedFieldsJson = extractedFields;
+    run.ocrDocumentVersionId = ocrVersion.version.documentVersionId;
+    run.classificationDocumentVersionId = classificationVersion.version.documentVersionId;
+    run.completedAt = nowIso();
+    run.metadataJson = {
+      reviewReasonCode: reviewDecision.reasonCode,
+      thresholds
+    };
+
+    document.status = "classified";
+    document.updatedAt = nowIso();
+    document.metadataJson.latestOcrRunId = run.ocrRunId;
+    document.metadataJson.lastSuggestedDocumentType = classification.suggestedDocumentType;
+    document.metadataJson.lastClassificationConfidence = classification.confidence;
+
+    let reviewTask = null;
+    if (reviewDecision.reviewRequired) {
+      document.metadataJson.pendingReviewQueueCode = reviewDecision.queueCode;
+      reviewTask = createReviewTask({
+        document,
+        run,
+        reviewDecision,
+        actorId,
+        correlationId
+      });
+    } else {
+      document.documentType = classification.suggestedDocumentType;
+    }
+
+    pushAudit({
+      companyId: run.companyId,
+      actorId,
+      action: "ocr.run.completed",
+      result: reviewDecision.reviewRequired ? "warning" : "success",
+      entityType: "ocr_run",
+      entityId: run.ocrRunId,
+      explanation: `OCR run completed with suggestion ${classification.suggestedDocumentType} at confidence ${classification.confidence.toFixed(2)}.`,
+      correlationId
+    });
+
+    return {
+      document: copy(document),
+      ocrRun: copy(run),
+      reviewTask: reviewTask ? copy(reviewTask) : null,
+      ocrVersion: copy(ocrVersion.version),
+      classificationVersion: copy(classificationVersion.version)
+    };
+  }
+
+  function getDocumentOcrRuns({ companyId, documentId } = {}) {
+    const document = requireDocument({ companyId, documentId });
+    return {
+      document: copy(document),
+      ocrRuns: listOcrRuns(document.documentId).map((candidate) => copy(candidate)),
+      reviewTasks: listReviewTasks(document.documentId).map((candidate) => copy(candidate))
+    };
+  }
+
+  function claimReviewTask({ companyId, reviewTaskId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+    const task = requireReviewTask({ companyId, reviewTaskId });
+    if (!["open", "requeued"].includes(task.status)) {
+      throw createError(409, "review_task_not_claimable", "Review task cannot be claimed from its current status.");
+    }
+    task.status = "claimed";
+    task.claimedByActorId = actorId;
+    task.claimedAt = nowIso();
+    task.updatedAt = nowIso();
+
+    pushAudit({
+      companyId: task.companyId,
+      actorId,
+      action: "review_task.claimed",
+      result: "success",
+      entityType: "review_task",
+      entityId: task.reviewTaskId,
+      explanation: `Review task ${task.reviewTaskId} claimed.`,
+      correlationId
+    });
+
+    return buildReviewTaskSummary(task);
+  }
+
+  function correctReviewTask({
+    companyId,
+    reviewTaskId,
+    correctedDocumentType,
+    correctedFieldsJson = {},
+    correctionComment = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const task = requireReviewTask({ companyId, reviewTaskId });
+    if (task.status === "open" || task.status === "requeued") {
+      claimReviewTask({ companyId, reviewTaskId, actorId, correlationId });
+    }
+    if (task.status !== "claimed") {
+      throw createError(409, "review_task_not_correctable", "Review task must be claimed before it can be corrected.");
+    }
+
+    const document = requireDocument({ companyId: task.companyId, documentId: task.documentId });
+    const run = requireOcrRun({ companyId: task.companyId, ocrRunId: task.ocrRunId });
+    const correctedType = requireDocumentType(correctedDocumentType);
+    const manualClassificationVersion = appendDocumentVersion({
+      companyId: task.companyId,
+      documentId: task.documentId,
+      variantType: "classification",
+      storageKey: `documents/classification/${task.documentId}/${task.reviewTaskId}-manual.json`,
+      mimeType: "application/json",
+      contentText: JSON.stringify({
+        correctedDocumentType: correctedType,
+        correctedFieldsJson,
+        correctionComment
+      }),
+      sourceReference: `${task.documentId}:classification:manual:${task.reviewTaskId}`,
+      derivesFromDocumentVersionId: run.classificationDocumentVersionId,
+      metadataJson: {
+        reviewTaskId: task.reviewTaskId,
+        correctedDocumentType: correctedType,
+        correctedFieldsJson: copy(correctedFieldsJson),
+        correctionComment
+      },
+      actorId,
+      correlationId
+    });
+
+    task.correctedDocumentType = correctedType;
+    task.correctedFieldsJson = copy(correctedFieldsJson);
+    task.correctionComment = correctionComment || null;
+    task.manualClassificationVersionId = manualClassificationVersion.version.documentVersionId;
+    task.status = "corrected";
+    task.correctedAt = nowIso();
+    task.updatedAt = nowIso();
+    document.updatedAt = nowIso();
+
+    pushAudit({
+      companyId: task.companyId,
+      actorId,
+      action: "review_task.corrected",
+      result: "success",
+      entityType: "review_task",
+      entityId: task.reviewTaskId,
+      explanation: `Review task ${task.reviewTaskId} corrected to ${correctedType}.`,
+      correlationId
+    });
+
+    return buildReviewTaskSummary(task);
+  }
+
+  function approveReviewTask({ companyId, reviewTaskId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+    const task = requireReviewTask({ companyId, reviewTaskId });
+    if (!["claimed", "corrected"].includes(task.status)) {
+      throw createError(409, "review_task_not_approvable", "Review task cannot be approved from its current status.");
+    }
+
+    const document = requireDocument({ companyId: task.companyId, documentId: task.documentId });
+    const finalDocumentType = task.correctedDocumentType || task.suggestedDocumentType || "unknown";
+    document.documentType = finalDocumentType;
+    document.status = "reviewed";
+    document.updatedAt = nowIso();
+    delete document.metadataJson.pendingReviewQueueCode;
+
+    task.status = "approved";
+    task.approvedByActorId = actorId;
+    task.approvedAt = nowIso();
+    task.updatedAt = nowIso();
+
+    pushAudit({
+      companyId: task.companyId,
+      actorId,
+      action: "review_task.approved",
+      result: "success",
+      entityType: "review_task",
+      entityId: task.reviewTaskId,
+      explanation: `Review task ${task.reviewTaskId} approved with final type ${finalDocumentType}.`,
+      correlationId
+    });
+
+    return buildReviewTaskSummary(task);
+  }
+
+  function getReviewTask({ companyId, reviewTaskId } = {}) {
+    return buildReviewTaskSummary(requireReviewTask({ companyId, reviewTaskId }));
+  }
+
   function snapshotDocumentArchive() {
     return {
       documents: [...state.documents.values()].map((candidate) => copy(candidate)),
@@ -548,6 +915,8 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       inboxChannels: [...state.inboxChannels.values()].map((candidate) => copy(candidate)),
       emailMessages: [...state.emailMessages.values()].map((candidate) => copy(candidate)),
       emailAttachments: [...state.attachments.values()].map((candidate) => copy(candidate)),
+      ocrRuns: [...state.ocrRuns.values()].map((candidate) => copy(candidate)),
+      reviewTasks: [...state.reviewTasks.values()].map((candidate) => copy(candidate)),
       auditEvents: state.auditEvents.map((candidate) => copy(candidate))
     };
   }
@@ -559,6 +928,7 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     const resolvedStorageKey = requireText(resolvedInput.storageKey, "storage_key_required", "Attachment storage key is required.");
     const resolvedScanResult = resolveAttachmentScanResult(resolvedInput.scanResult);
     const sourceReference = `${message.messageId}:${attachmentIndex}`;
+    ensureContentIdentity(resolvedInput);
     const { resolvedHash, resolvedSize } = resolveContent({
       contentText: resolvedInput.contentText || null,
       contentBase64: resolvedInput.contentBase64 || null,
@@ -621,6 +991,7 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
         sourceMessageId: message.messageId,
         sourceAttachmentIndex: attachmentIndex,
         recipientAddress: message.recipientAddress,
+        subject: message.subject,
         filename: attachment.filename,
         ...copy(attachment.metadataJson)
       },
@@ -643,7 +1014,9 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       metadataJson: {
         inboxChannelId: channel.inboxChannelId,
         rawMailId: message.emailIngestMessageId,
-        filename: attachment.filename
+        filename: attachment.filename,
+        ocrSourceText: resolvedInput.contentText || null,
+        pageCount: resolvedInput.pageCount ?? 1
       },
       actorId,
       correlationId
@@ -664,6 +1037,52 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     });
 
     return attachment;
+  }
+
+  function createReviewTask({ document, run, reviewDecision, actorId, correlationId }) {
+    const task = {
+      reviewTaskId: crypto.randomUUID(),
+      companyId: document.companyId,
+      documentId: document.documentId,
+      ocrRunId: run.ocrRunId,
+      queueCode: reviewDecision.queueCode,
+      taskType: "document_review",
+      status: "open",
+      suggestedDocumentType: run.suggestedDocumentType,
+      suggestedFieldsJson: copy(run.extractedFieldsJson),
+      correctedDocumentType: null,
+      correctedFieldsJson: {},
+      confidenceScore: run.classificationConfidence,
+      createdByActorId: actorId,
+      claimedByActorId: null,
+      claimedAt: null,
+      correctionComment: null,
+      correctedAt: null,
+      approvedByActorId: null,
+      approvedAt: null,
+      manualClassificationVersionId: null,
+      metadataJson: {
+        reasonCode: reviewDecision.reasonCode
+      },
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    };
+
+    state.reviewTasks.set(task.reviewTaskId, task);
+    state.reviewTaskIdsByDocument.get(document.documentId).push(task.reviewTaskId);
+
+    pushAudit({
+      companyId: task.companyId,
+      actorId,
+      action: "review_task.opened",
+      result: "warning",
+      entityType: "review_task",
+      entityId: task.reviewTaskId,
+      explanation: `Review task opened in ${task.queueCode} for document ${task.documentId}.`,
+      correlationId
+    });
+
+    return task;
   }
 
   function requireDocument({ companyId, documentId }) {
@@ -707,6 +1126,64 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     return channel;
   }
 
+  function requireInboxChannelForDocument(document) {
+    const channelId = document.metadataJson?.inboxChannelId;
+    if (!channelId) {
+      throw createError(409, "document_inbox_channel_missing", "Document is missing inbox channel metadata.");
+    }
+    const channel = state.inboxChannels.get(channelId);
+    if (!channel) {
+      throw createError(404, "inbox_channel_not_found", "Document inbox channel was not found.");
+    }
+    return channel;
+  }
+
+  function requireOriginalDocumentVersion(documentId) {
+    const originalVersion = listDocumentVersions(documentId).find((candidate) => candidate.variantType === "original");
+    if (!originalVersion) {
+      throw createError(409, "document_original_missing", "Original document version is required before OCR can run.");
+    }
+    return originalVersion;
+  }
+
+  function requireReviewTask({ companyId, reviewTaskId }) {
+    const resolvedReviewTaskId = requireText(reviewTaskId, "review_task_id_required", "Review task id is required.");
+    const task = state.reviewTasks.get(resolvedReviewTaskId);
+    if (!task) {
+      throw createError(404, "review_task_not_found", "Review task was not found.");
+    }
+    if (companyId && task.companyId !== companyId) {
+      throw createError(403, "cross_company_forbidden", "Review task belongs to another company.");
+    }
+    return task;
+  }
+
+  function requireOcrRun({ companyId, ocrRunId }) {
+    const resolvedOcrRunId = requireText(ocrRunId, "ocr_run_id_required", "OCR run id is required.");
+    const run = state.ocrRuns.get(resolvedOcrRunId);
+    if (!run) {
+      throw createError(404, "ocr_run_not_found", "OCR run was not found.");
+    }
+    if (companyId && run.companyId !== companyId) {
+      throw createError(403, "cross_company_forbidden", "OCR run belongs to another company.");
+    }
+    return run;
+  }
+
+  function requireOcrThresholds(channel) {
+    if (channel.classificationConfidenceThreshold === null || channel.fieldConfidenceThreshold === null) {
+      throw createError(
+        409,
+        "inbox_channel_thresholds_missing",
+        "Inbox channel is missing OCR confidence thresholds."
+      );
+    }
+    return {
+      classificationConfidenceThreshold: channel.classificationConfidenceThreshold,
+      fieldConfidenceThreshold: channel.fieldConfidenceThreshold
+    };
+  }
+
   function listDocumentVersions(documentId) {
     return (state.versionIdsByDocument.get(documentId) || [])
       .map((versionId) => state.versions.get(versionId))
@@ -728,6 +1205,20 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       .sort((left, right) => left.attachmentIndex - right.attachmentIndex);
   }
 
+  function listOcrRuns(documentId) {
+    return (state.ocrRunIdsByDocument.get(documentId) || [])
+      .map((ocrRunId) => state.ocrRuns.get(ocrRunId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  function listReviewTasks(documentId) {
+    return (state.reviewTaskIdsByDocument.get(documentId) || [])
+      .map((reviewTaskId) => state.reviewTasks.get(reviewTaskId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
   function buildEmailIngestSummary(message, channel) {
     const attachments = listEmailAttachments(message.emailIngestMessageId);
     const routedDocuments = attachments
@@ -739,6 +1230,16 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       message: copy(message),
       attachments: attachments.map((candidate) => copy(candidate)),
       routedDocuments: routedDocuments.map((candidate) => copy(candidate))
+    };
+  }
+
+  function buildReviewTaskSummary(task) {
+    const document = requireDocument({ companyId: task.companyId, documentId: task.documentId });
+    const ocrRun = requireOcrRun({ companyId: task.companyId, ocrRunId: task.ocrRunId });
+    return {
+      task: copy(task),
+      document: copy(document),
+      ocrRun: copy(ocrRun)
     };
   }
 
@@ -804,6 +1305,14 @@ function requireVariantType(value) {
   return variantType;
 }
 
+function requireDocumentType(value) {
+  const documentType = requireText(value, "document_type_required", "Document type is required.");
+  if (!OCR_DOCUMENT_TYPES.includes(documentType)) {
+    throw createError(400, "document_type_invalid", `Unsupported OCR document type: ${documentType}.`);
+  }
+  return documentType;
+}
+
 function resolveAllowedMimeTypes(value) {
   const items = requireArray(value, "allowed_mime_types_required", "Allowed MIME types must be an array.");
   if (items.length === 0) {
@@ -816,7 +1325,7 @@ function resolveAttachmentScanResult(value) {
   if (value === undefined || value === null || value === "") {
     return "clean";
   }
-  const scanResult = requireText(value, "scan_result_required", "Scan result is required.");
+  const scanResult = requireText(value, "scan_result_required", "Scan result is required.").toLowerCase();
   if (!ATTACHMENT_SCAN_RESULTS.includes(scanResult)) {
     throw createError(400, "scan_result_invalid", `Unsupported attachment scan result: ${scanResult}.`);
   }
@@ -836,6 +1345,19 @@ function resolveAttachmentQuarantineReason({ channel, mimeType, fileSizeBytes, s
   return null;
 }
 
+function ensureContentIdentity(input) {
+  const hasContentText = typeof input.contentText === "string" && input.contentText.length > 0;
+  const hasContentBase64 = typeof input.contentBase64 === "string" && input.contentBase64.length > 0;
+  const hasFileHash = typeof input.fileHash === "string" && input.fileHash.length > 0;
+  if (!hasContentText && !hasContentBase64 && !hasFileHash) {
+    throw createError(
+      400,
+      "file_identity_required",
+      "Attachment content or file hash is required so the ingest remains deterministic."
+    );
+  }
+}
+
 function resolveContent({ contentText, contentBase64, fileHash, fileSizeBytes }) {
   let buffer = null;
   if (typeof contentBase64 === "string" && contentBase64.length > 0) {
@@ -848,11 +1370,222 @@ function resolveContent({ contentText, contentBase64, fileHash, fileSizeBytes })
     typeof fileHash === "string" && fileHash.length > 0
       ? fileHash
       : crypto.createHash("sha256").update(buffer || Buffer.from("")).digest("hex");
-  const resolvedSize = Number.isFinite(fileSizeBytes) ? Number(fileSizeBytes) : (buffer?.byteLength ?? 0);
+  const resolvedSize = Number.isFinite(fileSizeBytes) ? Number(fileSizeBytes) : buffer?.byteLength ?? 0;
   return {
     resolvedHash,
     resolvedSize
   };
+}
+
+function determineOcrProfile({ channel, originalVersion }) {
+  if (originalVersion.mimeType === "application/xml") {
+    return "structured_document_parse";
+  }
+  if (channel.useCase.includes("invoice") || channel.useCase.includes("receipt")) {
+    return "textract_analyze_expense_stub";
+  }
+  return "textract_generic_text_stub";
+}
+
+function buildOcrSourceText({ document, originalVersion }) {
+  const parts = [
+    readMetadataText(originalVersion.metadataJson, "ocrSourceText"),
+    readMetadataText(document.metadataJson, "ocrSourceText"),
+    readMetadataText(originalVersion.metadataJson, "filename"),
+    readMetadataText(document.metadataJson, "filename"),
+    readMetadataText(document.metadataJson, "subject"),
+    document.sourceReference || ""
+  ].filter(Boolean);
+  return parts.join("\n");
+}
+
+function classifyDocument({ channel, sourceText, filename, mimeType }) {
+  const text = normalizeForMatching([sourceText, filename, channel.useCase].filter(Boolean).join("\n"));
+  const scoreMap = new Map([
+    ["supplier_invoice", mimeType === "application/xml" ? 0.98 : 0.15],
+    ["expense_receipt", 0.15],
+    ["contract", 0.15],
+    ["unknown", 0.1]
+  ]);
+
+  addClassificationScore(scoreMap, "supplier_invoice", text, [
+    ["invoice", 0.38],
+    ["faktura", 0.42],
+    ["supplier", 0.18],
+    ["leverantor", 0.18],
+    ["ocr", 0.12],
+    ["buyer reference", 0.08],
+    ["iban", 0.08]
+  ]);
+  addClassificationScore(scoreMap, "expense_receipt", text, [
+    ["receipt", 0.42],
+    ["kvitto", 0.45],
+    ["store", 0.12],
+    ["butik", 0.12],
+    ["card", 0.08]
+  ]);
+  addClassificationScore(scoreMap, "contract", text, [
+    ["contract", 0.44],
+    ["agreement", 0.4],
+    ["avtal", 0.44],
+    ["effective date", 0.08],
+    ["parter", 0.08],
+    ["party", 0.08]
+  ]);
+
+  const candidates = [...scoreMap.entries()]
+    .map(([documentType, confidence]) => ({
+      documentType,
+      confidence: clampConfidence(confidence)
+    }))
+    .sort((left, right) => right.confidence - left.confidence);
+
+  const top = candidates[0];
+  return {
+    suggestedDocumentType: top.documentType,
+    confidence: top.confidence,
+    candidates
+  };
+}
+
+function addClassificationScore(scoreMap, documentType, haystack, patterns) {
+  let score = scoreMap.get(documentType) || 0;
+  for (const [pattern, weight] of patterns) {
+    if (haystack.includes(pattern)) {
+      score += weight;
+    }
+  }
+  scoreMap.set(documentType, score);
+}
+
+function extractOcrFields({ sourceText, suggestedDocumentType }) {
+  const normalized = sourceText.replace(/\r/g, "");
+  const fields = {};
+
+  if (suggestedDocumentType === "supplier_invoice") {
+    fields.counterparty = extractField(normalized, [/(?:supplier|leverantor)\s*[:#-]?\s*([^\n]+)/i]);
+    fields.invoiceNumber = extractField(normalized, [/(?:invoice|faktura)\s*(?:number|nr)?\s*[:#-]?\s*([A-Z0-9-]+)/i]);
+    fields.totalAmount = extractField(normalized, [/(?:total|summa|brutto)\s*[:#-]?\s*([0-9]+(?:[.,][0-9]{2})?)/i]);
+    fields.reference = extractField(normalized, [/(?:ocr|reference|referens|order)\s*[:#-]?\s*([A-Z0-9-]+)/i]);
+    return fields;
+  }
+
+  if (suggestedDocumentType === "expense_receipt") {
+    fields.storeName = extractField(normalized, [/(?:store|butik)\s*[:#-]?\s*([^\n]+)/i]);
+    fields.totalAmount = extractField(normalized, [/(?:total|summa)\s*[:#-]?\s*([0-9]+(?:[.,][0-9]{2})?)/i]);
+    fields.receiptDate = extractField(normalized, [/(?:date|datum)\s*[:#-]?\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/i]);
+    return fields;
+  }
+
+  if (suggestedDocumentType === "contract") {
+    fields.contractTitle = extractField(normalized, [/(?:contract|agreement|avtal)\s*[:#-]?\s*([^\n]+)/i]);
+    fields.counterparty = extractField(normalized, [/(?:party|motpart)\s*[:#-]?\s*([^\n]+)/i]);
+    fields.effectiveDate = extractField(normalized, [/(?:effective date|galler fran|galler fr o m)\s*[:#-]?\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/i]);
+    return fields;
+  }
+
+  return {};
+}
+
+function extractField(sourceText, patterns) {
+  for (const pattern of patterns) {
+    const match = sourceText.match(pattern);
+    if (match?.[1]) {
+      const value = match[1].trim();
+      return {
+        value,
+        confidence: guessFieldConfidence(value)
+      };
+    }
+  }
+  return {
+    value: null,
+    confidence: 0
+  };
+}
+
+function guessFieldConfidence(value) {
+  if (!value) {
+    return 0;
+  }
+  if (value.length >= 10) {
+    return 0.97;
+  }
+  if (value.length >= 5) {
+    return 0.93;
+  }
+  return 0.88;
+}
+
+function evaluateReviewRequirement({ classification, extractedFields, thresholds }) {
+  if (classification.suggestedDocumentType === "unknown") {
+    return {
+      reviewRequired: true,
+      queueCode: "classification_low_confidence",
+      reasonCode: "unknown_document_type"
+    };
+  }
+
+  if (classification.confidence < thresholds.classificationConfidenceThreshold) {
+    return {
+      reviewRequired: true,
+      queueCode: "classification_low_confidence",
+      reasonCode: "classification_below_threshold"
+    };
+  }
+
+  const requiredFields = requiredFieldsForType(classification.suggestedDocumentType);
+  for (const fieldName of requiredFields) {
+    const field = extractedFields[fieldName];
+    if (!field?.value || field.confidence < thresholds.fieldConfidenceThreshold) {
+      return {
+        reviewRequired: true,
+        queueCode: "ocr_low_confidence",
+        reasonCode: `field_${fieldName}_below_threshold`
+      };
+    }
+  }
+
+  return {
+    reviewRequired: false,
+    queueCode: null,
+    reasonCode: null
+  };
+}
+
+function requiredFieldsForType(documentType) {
+  if (documentType === "supplier_invoice") {
+    return ["counterparty", "invoiceNumber", "totalAmount"];
+  }
+  if (documentType === "expense_receipt") {
+    return ["storeName", "totalAmount"];
+  }
+  if (documentType === "contract") {
+    return ["contractTitle"];
+  }
+  return [];
+}
+
+function resolvePageCount(originalVersion) {
+  const pageCount = originalVersion.metadataJson?.pageCount;
+  return Number.isInteger(pageCount) && pageCount > 0 ? Number(pageCount) : 1;
+}
+
+function readMetadataText(metadataJson, key) {
+  const value = metadataJson?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeForMatching(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replaceAll("å", "a")
+    .replaceAll("ä", "a")
+    .replaceAll("ö", "o");
+}
+
+function clampConfidence(value) {
+  return Math.max(0, Math.min(0.99, Number(value.toFixed(2))));
 }
 
 function normalizeTimestamp(value) {
@@ -879,6 +1612,16 @@ function requireArray(value, code, message) {
     throw createError(400, code, message);
   }
   return value;
+}
+
+function resolveOptionalThreshold(value, code, message) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  if (typeof value !== "number" || Number.isNaN(value) || value < 0 || value > 1) {
+    throw createError(400, code, message);
+  }
+  return Number(value);
 }
 
 function requireText(value, code, message) {

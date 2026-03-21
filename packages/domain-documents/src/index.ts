@@ -33,6 +33,23 @@ export interface EmailIngestState {
   readonly quarantinedAttachmentCount: number;
 }
 
+export interface OcrRunState {
+  readonly ocrRunId: string;
+  readonly companyId: string;
+  readonly documentId: string;
+  readonly status: "requested" | "processing" | "completed" | "failed";
+  readonly suggestedDocumentType: "supplier_invoice" | "expense_receipt" | "contract" | "unknown";
+  readonly classificationConfidence: number;
+}
+
+export interface ReviewTaskState {
+  readonly reviewTaskId: string;
+  readonly companyId: string;
+  readonly documentId: string;
+  readonly queueCode: string;
+  readonly status: "open" | "claimed" | "corrected" | "approved" | "rejected" | "requeued";
+}
+
 export interface DocumentArchivePlatform {
   createDocumentRecord(input: {
     companyId: string;
@@ -84,6 +101,9 @@ export interface DocumentArchivePlatform {
     allowedMimeTypes: string[];
     maxAttachmentSizeBytes: number;
     defaultDocumentType?: string | null;
+    classificationConfidenceThreshold?: number | null;
+    fieldConfidenceThreshold?: number | null;
+    defaultReviewQueueCode?: string;
     metadataJson?: Record<string, unknown>;
     actorId?: string;
     correlationId?: string;
@@ -104,5 +124,42 @@ export interface DocumentArchivePlatform {
   getEmailIngestMessage(input: {
     companyId: string;
     emailIngestMessageId: string;
+  }): unknown;
+  runDocumentOcr(input: {
+    companyId: string;
+    documentId: string;
+    reasonCode?: string;
+    modelVersion?: string;
+    actorId?: string;
+    correlationId?: string;
+  }): unknown;
+  getDocumentOcrRuns(input: {
+    companyId: string;
+    documentId: string;
+  }): unknown;
+  claimReviewTask(input: {
+    companyId: string;
+    reviewTaskId: string;
+    actorId?: string;
+    correlationId?: string;
+  }): unknown;
+  correctReviewTask(input: {
+    companyId: string;
+    reviewTaskId: string;
+    correctedDocumentType: "supplier_invoice" | "expense_receipt" | "contract" | "unknown";
+    correctedFieldsJson?: Record<string, unknown>;
+    correctionComment?: string | null;
+    actorId?: string;
+    correlationId?: string;
+  }): unknown;
+  approveReviewTask(input: {
+    companyId: string;
+    reviewTaskId: string;
+    actorId?: string;
+    correlationId?: string;
+  }): unknown;
+  getReviewTask(input: {
+    companyId: string;
+    reviewTaskId: string;
   }): unknown;
 }

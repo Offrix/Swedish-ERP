@@ -44,6 +44,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase1AuthOnboardingEnabled: flags.phase1AuthOnboardingEnabled,
             phase2DocumentArchiveEnabled: flags.phase2DocumentArchiveEnabled,
             phase2CompanyInboxEnabled: flags.phase2CompanyInboxEnabled,
+            phase2OcrReviewEnabled: flags.phase2OcrReviewEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -52,7 +53,9 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/documents",
               "/v1/documents/:documentId/export",
               "/v1/inbox/channels",
-              "/v1/inbox/messages"
+              "/v1/inbox/messages",
+              "/v1/documents/:documentId/ocr/runs",
+              "/v1/review-tasks/:reviewTaskId"
             ]
           }
         : { status: "ok" }
@@ -80,6 +83,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 2.2 company inbox routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if ((!flags.phase2DocumentArchiveEnabled || !flags.phase2OcrReviewEnabled) && isPhase23Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 2.3 OCR and review routes are disabled by configuration."
     });
     return;
   }
@@ -465,6 +476,9 @@ async function handleRequest({ req, res, platform, flags }) {
         allowedMimeTypes: body.allowedMimeTypes,
         maxAttachmentSizeBytes: body.maxAttachmentSizeBytes,
         defaultDocumentType: body.defaultDocumentType || null,
+        classificationConfidenceThreshold: body.classificationConfidenceThreshold ?? null,
+        fieldConfidenceThreshold: body.fieldConfidenceThreshold ?? null,
+        defaultReviewQueueCode: body.defaultReviewQueueCode || "classification_low_confidence",
         metadataJson: body.metadataJson || {},
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
@@ -523,6 +537,150 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  const documentOcrRunsMatch = matchPath(path, "/v1/documents/:documentId/ocr/runs");
+  if (documentOcrRunsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage"
+    });
+    writeJson(
+      res,
+      201,
+      platform.runDocumentOcr({
+        companyId,
+        documentId: documentOcrRunsMatch.documentId,
+        reasonCode: body.reasonCode || "initial_ingest",
+        modelVersion: body.modelVersion || "textract-stub-2026-03-21",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (documentOcrRunsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getDocumentOcrRuns({
+        companyId,
+        documentId: documentOcrRunsMatch.documentId
+      })
+    );
+    return;
+  }
+
+  const reviewTaskMatch = matchPath(path, "/v1/review-tasks/:reviewTaskId");
+  if (reviewTaskMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getReviewTask({
+        companyId,
+        reviewTaskId: reviewTaskMatch.reviewTaskId
+      })
+    );
+    return;
+  }
+
+  const reviewTaskClaimMatch = matchPath(path, "/v1/review-tasks/:reviewTaskId/claim");
+  if (reviewTaskClaimMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage"
+    });
+    writeJson(
+      res,
+      200,
+      platform.claimReviewTask({
+        companyId,
+        reviewTaskId: reviewTaskClaimMatch.reviewTaskId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const reviewTaskCorrectMatch = matchPath(path, "/v1/review-tasks/:reviewTaskId/correct");
+  if (reviewTaskCorrectMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage"
+    });
+    writeJson(
+      res,
+      200,
+      platform.correctReviewTask({
+        companyId,
+        reviewTaskId: reviewTaskCorrectMatch.reviewTaskId,
+        correctedDocumentType: body.correctedDocumentType,
+        correctedFieldsJson: body.correctedFieldsJson || {},
+        correctionComment: body.correctionComment || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const reviewTaskApproveMatch = matchPath(path, "/v1/review-tasks/:reviewTaskId/approve");
+  if (reviewTaskApproveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveReviewTask({
+        companyId,
+        reviewTaskId: reviewTaskApproveMatch.reviewTaskId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   writeJson(res, 404, { error: "not_found" });
 }
 
@@ -575,6 +733,10 @@ function isPhase2Route(path) {
 
 function isPhase2InboxRoute(path) {
   return path.startsWith("/v1/inbox");
+}
+
+function isPhase23Route(path) {
+  return path.includes("/ocr/") || path.startsWith("/v1/review-tasks");
 }
 
 async function readJsonBody(req, allowEmpty = false) {
@@ -638,7 +800,8 @@ function readFeatureFlags(env) {
   return {
     phase1AuthOnboardingEnabled: String(env.PHASE1_AUTH_ONBOARDING_ENABLED || "true").toLowerCase() !== "false",
     phase2DocumentArchiveEnabled: String(env.PHASE2_DOCUMENT_ARCHIVE_ENABLED || "true").toLowerCase() !== "false",
-    phase2CompanyInboxEnabled: String(env.PHASE2_COMPANY_INBOX_ENABLED || "true").toLowerCase() !== "false"
+    phase2CompanyInboxEnabled: String(env.PHASE2_COMPANY_INBOX_ENABLED || "true").toLowerCase() !== "false",
+    phase2OcrReviewEnabled: String(env.PHASE2_OCR_REVIEW_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

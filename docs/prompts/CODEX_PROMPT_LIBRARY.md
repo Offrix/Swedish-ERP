@@ -343,7 +343,7 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/adr/ADR-0006-document-archive-philosophy.md, docs/domain/ubiquitous-language.md
+docs/adr/ADR-0006-document-archive-philosophy.md, docs/adr/ADR-0011-document-ingestion-and-ocr-strategy.md, docs/compliance/se/document-inbox-and-ocr-engine.md, docs/domain/ubiquitous-language.md, docs/runbooks/ocr-malware-scanning-operations.md
 
 Implement exactly this scope:
 - OCR pipeline

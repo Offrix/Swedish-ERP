@@ -43,6 +43,12 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/inbox/channels`
 - `POST /v1/inbox/messages`
 - `GET /v1/inbox/messages/:emailIngestMessageId?companyId=...`
+- `POST /v1/documents/:documentId/ocr/runs`
+- `GET /v1/documents/:documentId/ocr/runs?companyId=...`
+- `GET /v1/review-tasks/:reviewTaskId?companyId=...`
+- `POST /v1/review-tasks/:reviewTaskId/claim`
+- `POST /v1/review-tasks/:reviewTaskId/correct`
+- `POST /v1/review-tasks/:reviewTaskId/approve`
 
 ## Disable strategy
 
@@ -51,3 +57,5 @@ Set `PHASE1_AUTH_ONBOARDING_ENABLED=false` to return `503` for FAS 1 routes with
 Set `PHASE2_DOCUMENT_ARCHIVE_ENABLED=false` to return `503` for FAS 2.1 document archive routes while keeping the rest of the API process alive.
 
 Set `PHASE2_COMPANY_INBOX_ENABLED=false` to return `503` for FAS 2.2 company inbox routes while keeping the rest of the API process alive.
+
+Set `PHASE2_OCR_REVIEW_ENABLED=false` to return `503` for FAS 2.3 OCR and review routes while keeping the rest of the API process alive.

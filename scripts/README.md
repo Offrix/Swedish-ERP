@@ -17,6 +17,7 @@ Helper scripts for local setup, structure verification and phased rollout checks
 - `verify-phase1.ps1`: validates required FAS 1 auth, org and onboarding artifacts.
 - `verify-phase2-document-archive.ps1`: validates required FAS 2.1 document archive artifacts.
 - `verify-phase2-company-inbox.ps1`: validates required FAS 2.2 company inbox and mail ingest artifacts.
+- `verify-phase2-ocr-review.ps1`: validates required FAS 2.3 OCR, classification and review artifacts.
 - `verify-db.ps1`: validates migration file naming.
 - `new-migration.ps1`: creates timestamped migration file in `packages/db/migrations`.
 - `dev-up.ps1`: starts docker infra.

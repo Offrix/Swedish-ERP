@@ -468,10 +468,10 @@ Ingen delfas är klar förrän följande finns:
   - [x] 1.1 Organisation, roller och accesskontroll
   - [x] 1.2 Inloggning, sessioner och stark autentisering
   - [x] 1.3 Bolagssetup och onboarding wizard
-- [ ] **FAS 2 — Dokumentmotor, företagsinbox och OCR**
+- [x] **FAS 2 — Dokumentmotor, företagsinbox och OCR**
   - [x] 2.1 Dokumentarkiv och metadata
-  - [ ] 2.2 Företagsinbox och mail ingestion
-  - [ ] 2.3 OCR, klassificering och granskningskö
+  - [x] 2.2 Företagsinbox och mail ingestion
+  - [x] 2.3 OCR, klassificering och granskningskö
 - [ ] **FAS 3 — Huvudbok, kontomodell, journaler och avstämningsgrund**
   - [ ] 3.1 Ledger-schema och verifikationsmotor
   - [ ] 3.2 Dimensioner, perioder och bokföringsregler
@@ -652,14 +652,14 @@ Bygg beviskedjan för hela systemet: dokument, råmejl, bilagor, hashning, klass
 ### 2.3 OCR, klassificering och granskningskö
 
 **Bygg detta**
-- [ ] OCR pipeline
-- [ ] Klassificering av dokumenttyp
-- [ ] Granskningskö med confidence
+- [x] OCR pipeline
+- [x] Klassificering av dokumenttyp
+- [x] Granskningskö med confidence
 
 **Verifiera detta innan nästa delfas**
-- [ ] Fakturor, kvitton och avtal särskiljs
-- [ ] Människan kan korrigera tolkningen
-- [ ] Omkörning sparar ny derivatversion
+- [x] Fakturor, kvitton och avtal särskiljs
+- [x] Människan kan korrigera tolkningen
+- [x] Omkörning sparar ny derivatversion
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P2-03`.
 
@@ -1220,7 +1220,7 @@ Stresstesta systemet, kör verklig migrering och gå live kontrollerat.
 
 ## Domändokument per fas
 
-- FAS 2 → `docs/compliance/se/document-inbox-and-ocr-engine.md` och `docs/runbooks/fas-2-document-archive-verification.md`
+- FAS 2 → `docs/compliance/se/document-inbox-and-ocr-engine.md`, `docs/adr/ADR-0011-document-ingestion-and-ocr-strategy.md`, `docs/runbooks/fas-2-document-archive-verification.md`, `docs/runbooks/fas-2-company-inbox-verification.md`, `docs/runbooks/ocr-malware-scanning-operations.md` och `docs/runbooks/fas-2-ocr-review-verification.md`
 - FAS 3 → `docs/compliance/se/accounting-foundation.md`
 - FAS 4 → `docs/compliance/se/vat-engine.md`
 - FAS 5 → `docs/compliance/se/ar-customer-invoicing-engine.md` och `docs/compliance/se/einvoice-peppol-engine.md`

@@ -112,10 +112,10 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 ## Gate for FAS 2 — Dokumentmotor, företagsinbox och OCR
 
 ### Allmänt krav
-- [ ] Kod, tester och docs är uppdaterade i samma förändring
-- [ ] Demo kan köras på seed-data
+- [x] Kod, tester och docs är uppdaterade i samma förändring
+- [x] Demo kan köras på seed-data
 - [ ] Ingen kritisk eller hög bug står öppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen påverkar produktion
+- [x] Rollback eller disable-strategi finns om fasen påverkar produktion
 
 ### 2.1 Dokumentarkiv och metadata
 - [x] Original och derivat skiljs åt
@@ -130,10 +130,10 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 - [x] Prompt `P2-02` är körd och resultat dokumenterat
 
 ### 2.3 OCR, klassificering och granskningskö
-- [ ] Fakturor, kvitton och avtal särskiljs
-- [ ] Människan kan korrigera tolkningen
-- [ ] Omkörning sparar ny derivatversion
-- [ ] Prompt `P2-03` är körd och resultat dokumenterat
+- [x] Fakturor, kvitton och avtal särskiljs
+- [x] Människan kan korrigera tolkningen
+- [x] Omkörning sparar ny derivatversion
+- [x] Prompt `P2-03` är körd och resultat dokumenterat
 
 ## Gate for FAS 3 — Huvudbok, kontomodell, journaler och avstämningsgrund
 

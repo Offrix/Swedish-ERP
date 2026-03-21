@@ -27,6 +27,8 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - parserfunktioner
 - inboxrouting per bolag och kanal
 - message-id dedupe och bilagestatus
+- OCR-klassificering för faktura, kvitto och avtal
+- review-task-statusar, manuell korrigering och confidence-beslut
 - search ranking och permissions trimming-beslut
 - retry/backoff-beräkningar och jobbstate
 - feature flag-upplösning och kill-switch-beslut
@@ -64,6 +66,8 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - råmailmetadata, bilagesplit och karantän
 - bankhändelser
 - OCR pipeline
+- OCR-rerun och nya derivatversioner utan mutation
+- review queue och manuella korrigeringar per bolag
 - Peppol adapter
 - myndighetsadaptrar
 - sökindex och projektioner
@@ -76,6 +80,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - vardagliga faltfloden i field-mobile
 - mobilflöden för check-in, tid, resa och signatur
 - disable-flagga och återläsning av företagets inboxflöden
+- disable-flagga och reviewdriven OCR-korrigering med rerun-historik
 
 ### 8. Performance tests
 - load på dokumentingest

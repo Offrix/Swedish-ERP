@@ -63,6 +63,9 @@ export interface InboxChannel {
   readonly allowedMimeTypes: readonly string[];
   readonly maxAttachmentSizeBytes: number;
   readonly defaultDocumentType: string | null;
+  readonly classificationConfidenceThreshold: number | null;
+  readonly fieldConfidenceThreshold: number | null;
+  readonly defaultReviewQueueCode: string;
   readonly metadataJson: Record<string, unknown>;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -102,6 +105,57 @@ export interface EmailIngestAttachment {
   readonly status: "received" | "queued" | "quarantined";
   readonly quarantineReasonCode: string | null;
   readonly documentId: string | null;
+  readonly metadataJson: Record<string, unknown>;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface OcrRun {
+  readonly ocrRunId: string;
+  readonly documentId: string;
+  readonly companyId: string;
+  readonly sourceDocumentVersionId: string;
+  readonly profileCode: string;
+  readonly modelVersion: string;
+  readonly reasonCode: string;
+  readonly status: "requested" | "processing" | "completed" | "failed";
+  readonly reviewRequired: boolean;
+  readonly suggestedDocumentType: "supplier_invoice" | "expense_receipt" | "contract" | "unknown";
+  readonly classificationConfidence: number;
+  readonly classificationCandidatesJson: Array<Record<string, unknown>>;
+  readonly extractedText: string;
+  readonly extractedFieldsJson: Record<string, unknown>;
+  readonly ocrDocumentVersionId: string | null;
+  readonly classificationDocumentVersionId: string | null;
+  readonly createdAt: string;
+  readonly startedAt: string | null;
+  readonly completedAt: string | null;
+  readonly failedAt: string | null;
+  readonly errorCode: string | null;
+  readonly metadataJson: Record<string, unknown>;
+}
+
+export interface ReviewTask {
+  readonly reviewTaskId: string;
+  readonly companyId: string;
+  readonly documentId: string;
+  readonly ocrRunId: string;
+  readonly queueCode: string;
+  readonly taskType: string;
+  readonly status: "open" | "claimed" | "corrected" | "approved" | "rejected" | "requeued";
+  readonly suggestedDocumentType: string | null;
+  readonly suggestedFieldsJson: Record<string, unknown>;
+  readonly correctedDocumentType: string | null;
+  readonly correctedFieldsJson: Record<string, unknown>;
+  readonly confidenceScore: number;
+  readonly createdByActorId: string;
+  readonly claimedByActorId: string | null;
+  readonly claimedAt: string | null;
+  readonly correctionComment: string | null;
+  readonly correctedAt: string | null;
+  readonly approvedByActorId: string | null;
+  readonly approvedAt: string | null;
+  readonly manualClassificationVersionId: string | null;
   readonly metadataJson: Record<string, unknown>;
   readonly createdAt: string;
   readonly updatedAt: string;
