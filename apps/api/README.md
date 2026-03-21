@@ -89,4 +89,4 @@ Set `PHASE2_OCR_REVIEW_ENABLED=false` to return `503` for FAS 2.3 OCR and review
 
 Set `PHASE3_LEDGER_ENABLED=false` to return `503` for FAS 3.1, 3.2 and 3.3 ledger/reporting routes while keeping the rest of the API process alive.
 
-Set `PHASE4_VAT_ENABLED=false` to return `503` for FAS 4.1 VAT routes while keeping the rest of the API process alive.
+Set `PHASE4_VAT_ENABLED=false` to return `503` for FAS 4.1 and 4.2 VAT routes while keeping the rest of the API process alive.

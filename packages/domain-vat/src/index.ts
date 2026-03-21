@@ -42,14 +42,51 @@ export interface VatDecisionRecord {
   readonly effectiveDate: string;
   readonly status: string;
   readonly declarationBoxCodes: readonly string[];
+  readonly declarationBoxAmounts: readonly VatDecisionBoxAmount[];
+  readonly postingEntries: readonly VatDecisionPostingEntry[];
   readonly bookingTemplateCode: string;
-  readonly outputs: Record<string, unknown>;
+  readonly decisionCategory: string;
+  readonly invoiceTextRequirements: readonly string[];
+  readonly creditNoteFlag: boolean;
+  readonly originalVatDecisionId: string | null;
+  readonly outputs: VatDecisionOutputs;
   readonly warnings: readonly { code: string; message: string }[];
   readonly explanation: readonly string[];
   readonly reviewQueueCode: string | null;
   readonly reviewQueueItemId: string | null;
   readonly createdByActorId: string;
   readonly createdAt: string;
+}
+
+export interface VatDecisionBoxAmount {
+  readonly boxCode: string;
+  readonly amount: number;
+  readonly amountType: "taxable_base" | "output_vat" | "input_vat";
+}
+
+export interface VatDecisionPostingEntry {
+  readonly entryCode: string;
+  readonly direction: "debit" | "credit";
+  readonly amount: number;
+  readonly vatEffect: "taxable_base" | "output_vat" | "input_vat";
+}
+
+export interface VatDecisionOutputs {
+  readonly vatCode: string;
+  readonly decisionCategory: string;
+  readonly declarationBoxCodes: readonly string[];
+  readonly declarationBoxAmounts: readonly VatDecisionBoxAmount[];
+  readonly postingEntries: readonly VatDecisionPostingEntry[];
+  readonly bookingTemplateCode: string;
+  readonly invoiceTextRequirements: readonly string[];
+  readonly vatRate: number;
+  readonly rateType: string;
+}
+
+export interface VatDeclarationBoxSummary {
+  readonly boxCode: string;
+  readonly amountType: "taxable_base" | "output_vat" | "input_vat";
+  readonly amount: number;
 }
 
 export interface VatReviewQueueItem {

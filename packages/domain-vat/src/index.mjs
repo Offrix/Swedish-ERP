@@ -3,6 +3,8 @@ import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 
 export const VAT_DECISION_STATUSES = Object.freeze(["decided", "review_required"]);
 export const VAT_REVIEW_QUEUE_STATUSES = Object.freeze(["open", "resolved", "waived"]);
+export const VAT_BOX_AMOUNT_TYPES = Object.freeze(["taxable_base", "output_vat", "input_vat"]);
+export const VAT_POSTING_DIRECTIONS = Object.freeze(["debit", "credit"]);
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 const EU_COUNTRY_CODES = new Set([
@@ -75,74 +77,122 @@ const REQUIRED_DECISION_FIELDS = Object.freeze([
   "report_box_code"
 ]);
 
+const OPTIONAL_DECISION_FIELDS = Object.freeze(["credit_note_flag", "original_vat_decision_id", "deduction_ratio"]);
+const DOMESTIC_OUTPUT_BOX_BY_RATE = Object.freeze({
+  "25.00": "10",
+  "12.00": "11",
+  "6.00": "12"
+});
+const REVERSE_CHARGE_OUTPUT_BOX_BY_RATE = Object.freeze({
+  "25.00": "30",
+  "12.00": "31",
+  "6.00": "32"
+});
+const IMPORT_OUTPUT_BOX_BY_RATE = Object.freeze({
+  "25.00": "60",
+  "12.00": "61",
+  "6.00": "62"
+});
+
 const VAT_CODE_DEFINITIONS = Object.freeze([
   createVatCodeDefinition("VAT_SE_DOMESTIC_25", "Domestic 25 %", 25, ["05", "10"], "vat_se_domestic_25"),
   createVatCodeDefinition("VAT_SE_DOMESTIC_12", "Domestic 12 %", 12, ["05", "11"], "vat_se_domestic_12"),
   createVatCodeDefinition("VAT_SE_DOMESTIC_6", "Domestic 6 %", 6, ["05", "12"], "vat_se_domestic_6"),
-  createVatCodeDefinition("VAT_SE_EXEMPT", "Exempt or zero-rated", 0, ["40"], "vat_se_exempt"),
-  createVatCodeDefinition("VAT_SE_RC_BUILD_SELL", "Construction reverse charge", 25, ["41", "30"], "vat_se_rc_build_sell"),
-  createVatCodeDefinition("VAT_SE_EU_GOODS_B2B", "EU goods B2B", 0, ["35"], "vat_se_eu_goods_b2b"),
-  createVatCodeDefinition("VAT_SE_EU_SERVICES_B2B", "EU services B2B", 0, ["38"], "vat_se_eu_services_b2b"),
-  createVatCodeDefinition("VAT_SE_EU_B2C_OSS", "EU B2C OSS", 0, ["OSS"], "vat_se_eu_b2c_oss"),
+  createVatCodeDefinition("VAT_SE_EXEMPT", "Exempt or zero-rated", 0, ["42"], "vat_se_exempt"),
+  createVatCodeDefinition("VAT_SE_RC_BUILD_SELL", "Construction reverse charge sale", 0, ["41"], "vat_se_rc_build_sell"),
+  createVatCodeDefinition("VAT_SE_RC_BUILD_PURCHASE", "Construction reverse charge purchase", 25, ["24", "30", "48"], "vat_se_rc_build_purchase"),
+  createVatCodeDefinition("VAT_SE_EU_GOODS_B2B", "EU goods B2B sale", 0, ["35"], "vat_se_eu_goods_b2b"),
+  createVatCodeDefinition("VAT_SE_EU_SERVICES_B2B", "EU services B2B sale", 0, ["39"], "vat_se_eu_services_b2b"),
+  createVatCodeDefinition("VAT_SE_EU_B2C_OSS", "EU B2C OSS", 25, ["OSS"], "vat_se_eu_b2c_oss"),
   createVatCodeDefinition("VAT_SE_EXPORT_GOODS_0", "Export goods", 0, ["36"], "vat_se_export_goods_0"),
-  createVatCodeDefinition("VAT_SE_IMPORT_GOODS", "Import goods", 25, ["50", "60"], "vat_se_import_goods"),
-  createVatCodeDefinition("VAT_SE_NON_EU_SERVICE_PURCHASE_RC", "Non-EU service purchase reverse charge", 25, ["22", "30", "48"], "vat_se_non_eu_service_purchase_rc"),
+  createVatCodeDefinition("VAT_SE_EXPORT_SERVICE_0", "Export service", 0, ["40"], "vat_se_export_service_0"),
+  createVatCodeDefinition("VAT_SE_IMPORT_GOODS", "Import goods", 25, ["50", "60", "48"], "vat_se_import_goods"),
+  createVatCodeDefinition(
+    "VAT_SE_NON_EU_SERVICE_PURCHASE_RC",
+    "Non-EU service purchase reverse charge",
+    25,
+    ["22", "30", "48"],
+    "vat_se_non_eu_service_purchase_rc"
+  ),
+  createVatCodeDefinition("VAT_SE_EU_GOODS_PURCHASE_RC", "EU goods purchase reverse charge", 25, ["20", "30", "48"], "vat_se_eu_goods_purchase_rc"),
+  createVatCodeDefinition("VAT_SE_EU_SERVICES_PURCHASE_RC", "EU services purchase reverse charge", 25, ["21", "30", "48"], "vat_se_eu_services_purchase_rc"),
+  createVatCodeDefinition(
+    "VAT_SE_DOMESTIC_GOODS_PURCHASE_RC",
+    "Domestic goods purchase reverse charge",
+    25,
+    ["23", "30", "48"],
+    "vat_se_domestic_goods_purchase_rc"
+  ),
+  createVatCodeDefinition(
+    "VAT_SE_DOMESTIC_SERVICES_PURCHASE_RC",
+    "Domestic services purchase reverse charge",
+    25,
+    ["24", "30", "48"],
+    "vat_se_domestic_services_purchase_rc"
+  ),
   createVatCodeDefinition("VAT_REVIEW_REQUIRED", "Manual VAT review required", 0, [], "vat_review_required")
 ]);
 
 const SEEDED_RULE_PACKS = Object.freeze([
   {
-    rulePackId: "vat-se-2025.4",
+    rulePackId: "vat-se-2025.5",
     domain: "vat",
     jurisdiction: "SE",
     effectiveFrom: "2025-01-01",
     effectiveTo: "2025-12-31",
-    version: "2025.4",
-    sourceSnapshotDate: "2025-12-31",
-    semanticChangeSummary: "Historical VAT decision baseline before 2026 pack refresh.",
+    version: "2025.5",
+    sourceSnapshotDate: "2026-03-21",
+    semanticChangeSummary: "Expanded 2025 VAT rule execution for domestic, EU, import, export and reverse charge flows.",
     machineReadableRules: {
       requiredFields: REQUIRED_DECISION_FIELDS,
+      optionalFields: OPTIONAL_DECISION_FIELDS,
       reviewQueueCode: "vat_decision_review",
-      supportedDecisionCodes: VAT_CODE_DEFINITIONS.map((definition) => definition.vatCode),
-      decisionExpectations: buildDecisionExpectations()
+      supportedDecisionCodes: VAT_CODE_DEFINITIONS.map((definition) => definition.vatCode)
     },
     humanReadableExplanation: [
-      "Use the candidate only when the mandatory VAT facts are present and structurally consistent.",
-      "Missing or contradictory facts must route to manual review instead of silent booking."
+      "Domestic, EU, import, export and reverse-charge scenarios derive declaration boxes and VAT postings from transaction facts.",
+      "Credit notes mirror the original VAT decision and missing originals route to manual review."
     ],
     testVectors: [
-      { vectorId: "vat-historical-domestic-25", decisionCode: "VAT_SE_DOMESTIC_25" },
-      { vectorId: "vat-historical-review-required", decisionCode: "VAT_REVIEW_REQUIRED" }
+      { vectorId: "vat-2025-import", decisionCode: "VAT_SE_IMPORT_GOODS" },
+      { vectorId: "vat-2025-build-sell", decisionCode: "VAT_SE_RC_BUILD_SELL" }
     ],
-    migrationNotes: ["Historical rule pack retained for deterministic replay."]
+    migrationNotes: ["4.2 expands historical replay to detailed declaration boxes and reverse-charge VAT postings."]
   },
   {
-    rulePackId: "vat-se-2026.1",
+    rulePackId: "vat-se-2026.2",
     domain: "vat",
     jurisdiction: "SE",
     effectiveFrom: "2026-01-01",
     effectiveTo: null,
-    version: "2026.1",
+    version: "2026.2",
     sourceSnapshotDate: "2026-03-21",
-    semanticChangeSummary: "Initial production VAT masterdata and decision object baseline for 2026.",
+    semanticChangeSummary: "Expanded VAT scenario engine with declaration-box amounts, credit-note mirroring and reverse-charge double booking.",
     machineReadableRules: {
       requiredFields: REQUIRED_DECISION_FIELDS,
+      optionalFields: OPTIONAL_DECISION_FIELDS,
       reviewQueueCode: "vat_decision_review",
-      supportedDecisionCodes: VAT_CODE_DEFINITIONS.map((definition) => definition.vatCode),
-      decisionExpectations: buildDecisionExpectations()
+      supportedDecisionCodes: VAT_CODE_DEFINITIONS.map((definition) => definition.vatCode)
     },
     humanReadableExplanation: [
-      "Resolve a rule pack by jurisdiction and date before a VAT decision is accepted.",
-      "If a transaction misses mandatory fields or the candidate conflicts with structural facts, queue it for review."
+      "Transaction facts determine the VAT code, declaration boxes and VAT posting impact for Sweden, EU, import, export and reverse charge.",
+      "When a credit note references an original VAT decision, the original decision is mirrored with negative declaration-box amounts and posting lines."
     ],
     testVectors: [
-      { vectorId: "vat-domestic-25", decisionCode: "VAT_SE_DOMESTIC_25" },
-      { vectorId: "vat-eu-goods-b2b", decisionCode: "VAT_SE_EU_GOODS_B2B" },
-      { vectorId: "vat-review-missing-fields", decisionCode: "VAT_REVIEW_REQUIRED" }
+      { vectorId: "vat-2026-domestic-12", decisionCode: "VAT_SE_DOMESTIC_12" },
+      { vectorId: "vat-2026-eu-purchase-rc", decisionCode: "VAT_SE_EU_SERVICES_PURCHASE_RC" },
+      { vectorId: "vat-2026-credit-note", decisionCode: "VAT_SE_DOMESTIC_25" }
     ],
-    migrationNotes: ["4.1 pack establishes masterdata, decision object traceability and review routing."]
+    migrationNotes: ["4.2 adds executable scenario rules while preserving older rule packs for replay."]
   }
 ]);
+
+const VAT_CODE_BY_ID = Object.freeze(
+  VAT_CODE_DEFINITIONS.reduce((accumulator, definition) => {
+    accumulator[definition.vatCode] = definition;
+    return accumulator;
+  }, {})
+);
 
 export function createVatPlatform(options = {}) {
   return createVatEngine(options);
@@ -171,11 +221,14 @@ export function createVatEngine({ clock = () => new Date(), seedDemo = true } = 
   return {
     vatDecisionStatuses: VAT_DECISION_STATUSES,
     vatReviewQueueStatuses: VAT_REVIEW_QUEUE_STATUSES,
+    vatBoxAmountTypes: VAT_BOX_AMOUNT_TYPES,
+    vatPostingDirections: VAT_POSTING_DIRECTIONS,
     listVatCodes,
     listVatRulePacks,
     evaluateVatDecision,
     getVatDecision,
     listVatReviewQueue,
+    summarizeVatDeclarationBoxes,
     snapshotVat
   };
 
@@ -231,7 +284,8 @@ export function createVatEngine({ clock = () => new Date(), seedDemo = true } = 
     const classification = classifyVatDecision({
       companyId: resolvedCompanyId,
       normalizedLine,
-      rulePack
+      rulePack,
+      state
     });
     const decisionRecord = {
       vatDecisionId: crypto.randomUUID(),
@@ -247,7 +301,13 @@ export function createVatEngine({ clock = () => new Date(), seedDemo = true } = 
       effectiveDate: classification.decision.effectiveDate,
       status: classification.decision.needsManualReview ? "review_required" : "decided",
       declarationBoxCodes: classification.outputs.declarationBoxCodes,
+      declarationBoxAmounts: classification.outputs.declarationBoxAmounts,
+      postingEntries: classification.outputs.postingEntries,
       bookingTemplateCode: classification.outputs.bookingTemplateCode,
+      decisionCategory: classification.outputs.decisionCategory,
+      invoiceTextRequirements: classification.outputs.invoiceTextRequirements,
+      creditNoteFlag: normalizedLine.credit_note_flag === true,
+      originalVatDecisionId: normalizedLine.original_vat_decision_id || null,
       outputs: classification.decision.outputs,
       warnings: classification.decision.warnings,
       explanation: classification.decision.explanation,
@@ -321,12 +381,23 @@ export function createVatEngine({ clock = () => new Date(), seedDemo = true } = 
       .map(copy);
   }
 
+  function summarizeVatDeclarationBoxes({ companyId = null, vatDecisionIds = null } = {}) {
+    const decisions = companyId
+      ? (state.vatDecisionIdsByCompany.get(companyId) || []).map((decisionId) => state.vatDecisions.get(decisionId)).filter(Boolean)
+      : [...state.vatDecisions.values()];
+    const filtered = Array.isArray(vatDecisionIds)
+      ? decisions.filter((decision) => vatDecisionIds.includes(decision.vatDecisionId))
+      : decisions;
+    return summarizeDecisionBoxAmounts(filtered);
+  }
+
   function snapshotVat() {
     return copy({
       vatCodes: [...state.vatCodes.values()],
       vatDecisions: [...state.vatDecisions.values()],
       vatReviewQueueItems: [...state.vatReviewQueueItems.values()],
       vatRulePacks: ruleRegistry.listRulePacks({ domain: "vat", jurisdiction: "SE" }),
+      declarationBoxSummary: summarizeDecisionBoxAmounts([...state.vatDecisions.values()]),
       auditEvents: state.auditEvents
     });
   }
@@ -350,7 +421,7 @@ export function createVatEngine({ clock = () => new Date(), seedDemo = true } = 
   }
 }
 
-function classifyVatDecision({ companyId, normalizedLine, rulePack }) {
+function classifyVatDecision({ companyId, normalizedLine, rulePack, state }) {
   const missingFields = (rulePack.machineReadableRules.requiredFields || []).filter((field) => isMissingField(normalizedLine[field]));
   if (missingFields.length > 0) {
     return buildReviewDecision({
@@ -368,111 +439,195 @@ function classifyVatDecision({ companyId, normalizedLine, rulePack }) {
     });
   }
 
-  const vatCode = normalizedLine.vat_code_candidate;
-  const vatCodeDefinition = VAT_CODE_DEFINITIONS.find((definition) => definition.vatCode === vatCode);
-  if (!vatCodeDefinition) {
+  if (normalizedLine.credit_note_flag === true) {
+    return classifyCreditNoteMirror({ companyId, normalizedLine, rulePack, state });
+  }
+
+  if (normalizedLine.deduction_ratio !== null && (normalizedLine.deduction_ratio < 0 || normalizedLine.deduction_ratio > 1)) {
     return buildReviewDecision({
       normalizedLine,
       rulePack,
-      reviewReasonCode: "unknown_vat_code_candidate",
-      warningCode: "unknown_vat_code_candidate",
-      warningMessage: `VAT code candidate ${vatCode} is not registered in masterdata.`,
+      reviewReasonCode: "invalid_deduction_ratio",
+      warningCode: "invalid_deduction_ratio",
+      warningMessage: "deduction_ratio must be between 0 and 1 when provided.",
       explanation: [
-        `company_id=${companyId}`,
         `rule_pack_id=${rulePack.rulePackId}`,
-        `vat_code_candidate=${vatCode}`,
-        "Decision routed to manual review because the VAT code candidate is unknown."
+        `deduction_ratio=${normalizedLine.deduction_ratio}`,
+        "Decision routed to manual review because deduction ratio is outside the supported interval."
       ]
     });
   }
 
-  const expectation = rulePack.machineReadableRules.decisionExpectations?.[vatCodeDefinition.vatCode] || {};
-  const mismatches = findExpectationMismatches(expectation, normalizedLine);
-  if (mismatches.length > 0) {
+  const scenario = deriveScenario(normalizedLine);
+  if (!scenario.ok) {
+    return buildReviewDecision({
+      normalizedLine,
+      rulePack,
+      reviewReasonCode: scenario.reviewReasonCode,
+      warningCode: scenario.reviewReasonCode,
+      warningMessage: scenario.warningMessage,
+      explanation: [
+        `company_id=${companyId}`,
+        `rule_pack_id=${rulePack.rulePackId}`,
+        `seller_country=${normalizedLine.seller_country}`,
+        `buyer_country=${normalizedLine.buyer_country}`,
+        `goods_or_services=${normalizedLine.goods_or_services}`,
+        scenario.explanation
+      ]
+    });
+  }
+
+  if (normalizedLine.vat_code_candidate && normalizedLine.vat_code_candidate !== scenario.vatCode) {
     return buildReviewDecision({
       normalizedLine,
       rulePack,
       reviewReasonCode: "candidate_conflicts_with_inputs",
       warningCode: "candidate_conflicts_with_inputs",
-      warningMessage: `VAT code candidate ${vatCodeDefinition.vatCode} conflicts with inputs: ${mismatches.join(", ")}`,
+      warningMessage: `VAT code candidate ${normalizedLine.vat_code_candidate} conflicts with derived code ${scenario.vatCode}.`,
       explanation: [
         `rule_pack_id=${rulePack.rulePackId}`,
-        `vat_code_candidate=${vatCodeDefinition.vatCode}`,
-        `mismatches=${mismatches.join(",")}`,
-        "Decision routed to manual review because the candidate conflicts with structural VAT facts."
+        `candidate=${normalizedLine.vat_code_candidate}`,
+        `derived=${scenario.vatCode}`,
+        "Decision routed to manual review because the VAT code candidate conflicts with transaction facts."
       ]
     });
   }
 
+  const outputs = buildScenarioOutputs(normalizedLine, scenario);
   const explanation = [
     `rule_pack_id=${rulePack.rulePackId}`,
-    `vat_code=${vatCodeDefinition.vatCode}`,
+    `vat_code=${scenario.vatCode}`,
+    `decision_category=${outputs.decisionCategory}`,
     `seller_country=${normalizedLine.seller_country}`,
     `buyer_country=${normalizedLine.buyer_country}`,
     `goods_or_services=${normalizedLine.goods_or_services}`,
-    `vat_rate=${normalizedLine.vat_rate}`,
-    `source_type=${normalizedLine.source_type}`
+    `vat_rate=${outputs.vatRate}`,
+    `box_codes=${outputs.declarationBoxCodes.join(",") || "none"}`
   ];
 
-  const decision = {
-    ...createVatDecision(rulePack, normalizedLine, vatCodeDefinition, false, [], explanation),
-    outputs: {
-      vatCode: vatCodeDefinition.vatCode,
-      declarationBoxCodes: vatCodeDefinition.declarationBoxCodes,
-      bookingTemplateCode: vatCodeDefinition.bookingTemplateCode,
-      vatRate: vatCodeDefinition.vatRate,
-      rateType: vatCodeDefinition.rateType
-    }
-  };
+  const decision = createVatDecision({
+    normalizedLine,
+    rulePack,
+    decisionCode: scenario.vatCode,
+    outputs,
+    warnings: [],
+    explanation,
+    needsManualReview: false
+  });
 
   return {
     decision,
-    outputs: decision.outputs,
+    outputs,
     reviewReasonCode: null,
     reviewQueueCode: null
   };
 }
 
 function buildReviewDecision({ normalizedLine, rulePack, reviewReasonCode, warningCode, warningMessage, explanation }) {
-  const reviewCode = VAT_CODE_DEFINITIONS.find((definition) => definition.vatCode === "VAT_REVIEW_REQUIRED");
-  const decision = {
-    ...createVatDecision(
-      rulePack,
-      normalizedLine,
-      reviewCode,
-      true,
-      [{ code: warningCode, message: warningMessage }],
-      explanation
-    ),
-    outputs: {
-      vatCode: reviewCode.vatCode,
-      declarationBoxCodes: reviewCode.declarationBoxCodes,
-      bookingTemplateCode: reviewCode.bookingTemplateCode,
-      vatRate: reviewCode.vatRate,
-      rateType: reviewCode.rateType
-    }
+  const reviewCode = VAT_CODE_BY_ID.VAT_REVIEW_REQUIRED;
+  const outputs = {
+    vatCode: reviewCode.vatCode,
+    decisionCategory: "review_required",
+    declarationBoxCodes: [],
+    declarationBoxAmounts: [],
+    postingEntries: [],
+    bookingTemplateCode: reviewCode.bookingTemplateCode,
+    invoiceTextRequirements: [],
+    vatRate: 0,
+    rateType: reviewCode.rateType
   };
+  const decision = createVatDecision({
+    normalizedLine,
+    rulePack,
+    decisionCode: reviewCode.vatCode,
+    outputs,
+    warnings: [{ code: warningCode, message: warningMessage }],
+    explanation,
+    needsManualReview: true
+  });
 
   return {
     decision,
-    outputs: decision.outputs,
+    outputs,
     reviewReasonCode,
     reviewQueueCode: rulePack.machineReadableRules.reviewQueueCode || "vat_decision_review"
   };
 }
 
-function createVatDecision(rulePack, normalizedLine, vatCodeDefinition, needsManualReview, warnings, explanation) {
-  const decision = {
-    decisionCode: vatCodeDefinition.vatCode,
+function classifyCreditNoteMirror({ companyId, normalizedLine, rulePack, state }) {
+  if (!normalizedLine.original_vat_decision_id) {
+    return buildReviewDecision({
+      normalizedLine,
+      rulePack,
+      reviewReasonCode: "missing_original_vat_decision",
+      warningCode: "missing_original_vat_decision",
+      warningMessage: "Credit note VAT evaluation requires original_vat_decision_id.",
+      explanation: [
+        `rule_pack_id=${rulePack.rulePackId}`,
+        "Decision routed to manual review because the credit note does not reference an original VAT decision."
+      ]
+    });
+  }
+
+  const originalDecision = state.vatDecisions.get(normalizedLine.original_vat_decision_id);
+  if (!originalDecision || originalDecision.companyId !== companyId) {
+    return buildReviewDecision({
+      normalizedLine,
+      rulePack,
+      reviewReasonCode: "original_vat_decision_missing",
+      warningCode: "original_vat_decision_missing",
+      warningMessage: `Original VAT decision ${normalizedLine.original_vat_decision_id} was not found for credit-note mirroring.`,
+      explanation: [
+        `rule_pack_id=${rulePack.rulePackId}`,
+        `original_vat_decision_id=${normalizedLine.original_vat_decision_id}`,
+        "Decision routed to manual review because the original VAT decision could not be found."
+      ]
+    });
+  }
+
+  const outputs = {
+    ...copy(originalDecision.outputs || {}),
+    decisionCategory: "credit_note_mirror",
+    declarationBoxAmounts: invertAmounts(originalDecision.outputs?.declarationBoxAmounts || originalDecision.declarationBoxAmounts || []),
+    postingEntries: invertAmounts(originalDecision.outputs?.postingEntries || originalDecision.postingEntries || []),
+    declarationBoxCodes: uniqueBoxCodes(originalDecision.outputs?.declarationBoxAmounts || originalDecision.declarationBoxAmounts || []),
+    invoiceTextRequirements: copy(originalDecision.outputs?.invoiceTextRequirements || originalDecision.invoiceTextRequirements || [])
+  };
+  const decision = createVatDecision({
+    normalizedLine,
+    rulePack,
+    decisionCode: originalDecision.vatCode,
+    outputs,
+    warnings: [],
+    explanation: [
+      `rule_pack_id=${rulePack.rulePackId}`,
+      `mirrored_original_vat_decision_id=${normalizedLine.original_vat_decision_id}`,
+      `original_vat_code=${originalDecision.vatCode}`,
+      "Credit note mirrored the original VAT decision with inverted declaration-box amounts and posting entries."
+    ],
+    needsManualReview: false
+  });
+
+  return {
+    decision,
+    outputs,
+    reviewReasonCode: null,
+    reviewQueueCode: null
+  };
+}
+
+function createVatDecision({ normalizedLine, rulePack, decisionCode, outputs, warnings, explanation, needsManualReview }) {
+  return {
+    decisionCode,
     inputsHash: hashObject(normalizedLine),
     rulePackId: rulePack.rulePackId,
     effectiveDate: normalizedLine.tax_date || normalizedLine.invoice_date,
-    outputs: {},
+    outputs,
     warnings,
     explanation,
-    needsManualReview
+    needsManualReview,
+    generatedAt: new Date().toISOString()
   };
-  return decision;
 }
 
 function normalizeTransactionLine(transactionLine) {
@@ -481,12 +636,15 @@ function normalizeTransactionLine(transactionLine) {
   for (const field of REQUIRED_DECISION_FIELDS) {
     normalized[field] = normalizeFieldValue(candidate[field]);
   }
-  normalized.buyer_type = normalizeUpperString(candidate.buyer_type);
+  for (const field of OPTIONAL_DECISION_FIELDS) {
+    normalized[field] = normalizeFieldValue(candidate[field]);
+  }
+  normalized.buyer_type = normalizeLowerString(candidate.buyer_type);
   normalized.seller_country = normalizeCountry(candidate.seller_country);
   normalized.seller_vat_registration_country = normalizeCountry(candidate.seller_vat_registration_country);
   normalized.buyer_country = normalizeCountry(candidate.buyer_country);
   normalized.transport_end_country = normalizeCountry(candidate.transport_end_country);
-  normalized.goods_or_services = normalizeLowerString(candidate.goods_or_services);
+  normalized.goods_or_services = normalizeGoodsOrServices(candidate.goods_or_services);
   normalized.supply_type = normalizeLowerString(candidate.supply_type);
   normalized.supply_subtype = normalizeLowerString(candidate.supply_subtype);
   normalized.invoice_date = normalizeOptionalDate(candidate.invoice_date);
@@ -517,6 +675,10 @@ function normalizeTransactionLine(transactionLine) {
   normalized.property_related_flag = normalizeOptionalBoolean(candidate.property_related_flag);
   normalized.construction_service_flag = normalizeOptionalBoolean(candidate.construction_service_flag);
   normalized.buyer_is_taxable_person = normalizeOptionalBoolean(candidate.buyer_is_taxable_person);
+  normalized.credit_note_flag = normalizeOptionalBoolean(candidate.credit_note_flag);
+  normalized.original_vat_decision_id =
+    typeof candidate.original_vat_decision_id === "string" ? candidate.original_vat_decision_id.trim() : null;
+  normalized.deduction_ratio = normalizeOptionalNumber(candidate.deduction_ratio);
   normalized.line_uom = typeof candidate.line_uom === "string" ? candidate.line_uom.trim() : candidate.line_uom;
   normalized.region = deriveRegion(normalized.buyer_country);
   return normalized;
@@ -552,76 +714,319 @@ function createVatCodeDefinition(vatCode, label, vatRate, declarationBoxCodes, b
   };
 }
 
-function buildDecisionExpectations() {
-  return {
-    VAT_SE_DOMESTIC_25: {
-      seller_country: "SE",
-      buyer_country: "SE",
-      import_flag: false,
-      export_flag: false,
-      reverse_charge_flag: false
-    },
-    VAT_SE_DOMESTIC_12: {
-      seller_country: "SE",
-      buyer_country: "SE",
-      import_flag: false,
-      export_flag: false,
-      reverse_charge_flag: false
-    },
-    VAT_SE_DOMESTIC_6: {
-      seller_country: "SE",
-      buyer_country: "SE",
-      import_flag: false,
-      export_flag: false,
-      reverse_charge_flag: false
-    },
-    VAT_SE_EXEMPT: {
-      seller_country: "SE",
-      buyer_country: "SE"
-    },
-    VAT_SE_RC_BUILD_SELL: {
-      seller_country: "SE",
-      buyer_country: "SE",
-      construction_service_flag: true,
-      reverse_charge_flag: true
-    },
-    VAT_SE_EU_GOODS_B2B: {
-      seller_country: "SE",
-      region: "EU",
-      buyer_is_taxable_person: true,
-      goods_or_services: "goods"
-    },
-    VAT_SE_EU_SERVICES_B2B: {
-      seller_country: "SE",
-      region: "EU",
-      buyer_is_taxable_person: true,
-      goods_or_services: "services"
-    },
-    VAT_SE_EU_B2C_OSS: {
-      seller_country: "SE",
-      region: "EU",
-      buyer_is_taxable_person: false,
-      oss_flag: true
-    },
-    VAT_SE_EXPORT_GOODS_0: {
-      seller_country: "SE",
-      export_flag: true,
-      goods_or_services: "goods"
+function deriveScenario(normalizedLine) {
+  const region = normalizedLine.region;
+  const goodsOrServices = normalizeGoodsOrServices(normalizedLine.goods_or_services);
+  if (goodsOrServices !== "goods" && goodsOrServices !== "services") {
+    return reviewScenario("unsupported_goods_or_services", "goods_or_services must be goods or services.");
+  }
+
+  if (normalizedLine.supply_type === "sale") {
+    if (normalizedLine.seller_country !== "SE") {
+      return reviewScenario("unsupported_seller_country", "VAT engine only supports Swedish selling entities in this phase.");
     }
+    if (normalizedLine.construction_service_flag && normalizedLine.reverse_charge_flag === true && normalizedLine.buyer_country === "SE") {
+      return acceptScenario("VAT_SE_RC_BUILD_SELL", "construction_reverse_charge_sale", [
+        "buyer_vat_number_required",
+        "reverse_charge_invoice_text_required"
+      ]);
+    }
+    if (normalizedLine.export_flag === true || region === "NON_EU") {
+      return acceptScenario(
+        goodsOrServices === "goods" ? "VAT_SE_EXPORT_GOODS_0" : "VAT_SE_EXPORT_SERVICE_0",
+        goodsOrServices === "goods" ? "export_goods_sale" : "export_services_sale"
+      );
+    }
+    if (normalizedLine.buyer_country === "SE") {
+      if (normalizedLine.reverse_charge_flag === true) {
+        return reviewScenario("unsupported_domestic_reverse_charge_sale", "Non-construction domestic reverse-charge sales are not modeled in this phase.");
+      }
+      if (isExemptLine(normalizedLine)) {
+        return acceptScenario("VAT_SE_EXEMPT", "domestic_exempt_sale");
+      }
+      const domesticCode = domesticCodeFromRate(normalizedLine);
+      if (!domesticCode) {
+        return reviewScenario("unsupported_domestic_vat_rate", "Domestic sales must resolve to 25, 12, 6 or exempt.");
+      }
+      return acceptScenario(domesticCode, "domestic_standard_sale");
+    }
+    if (region === "EU" && normalizedLine.buyer_is_taxable_person === true) {
+      return acceptScenario(
+        goodsOrServices === "goods" ? "VAT_SE_EU_GOODS_B2B" : "VAT_SE_EU_SERVICES_B2B",
+        goodsOrServices === "goods" ? "eu_goods_b2b_sale" : "eu_services_b2b_sale",
+        ["buyer_vat_number_required"]
+      );
+    }
+    if (region === "EU" && normalizedLine.buyer_is_taxable_person === false) {
+      if (normalizedLine.oss_flag === true) {
+        return acceptScenario("VAT_SE_EU_B2C_OSS", "eu_b2c_oss_sale");
+      }
+      return reviewScenario("eu_b2c_requires_oss_classification", "EU B2C sales require OSS classification in a later subphase.");
+    }
+    return reviewScenario("unsupported_sale_scenario", "Could not derive a supported VAT scenario for the sale.");
+  }
+
+  if (normalizedLine.supply_type === "purchase") {
+    if (normalizedLine.buyer_country !== "SE") {
+      return reviewScenario("unsupported_buyer_country", "VAT engine only supports Swedish buying entities in this phase.");
+    }
+    if (goodsOrServices === "goods" && normalizedLine.import_flag === true) {
+      return acceptScenario("VAT_SE_IMPORT_GOODS", "import_goods_purchase");
+    }
+    if (normalizedLine.construction_service_flag && normalizedLine.reverse_charge_flag === true && normalizedLine.seller_country === "SE") {
+      return acceptScenario("VAT_SE_RC_BUILD_PURCHASE", "construction_reverse_charge_purchase");
+    }
+    if (normalizedLine.seller_country === "SE") {
+      if (normalizedLine.reverse_charge_flag === true) {
+        return acceptScenario(
+          goodsOrServices === "goods" ? "VAT_SE_DOMESTIC_GOODS_PURCHASE_RC" : "VAT_SE_DOMESTIC_SERVICES_PURCHASE_RC",
+          goodsOrServices === "goods" ? "domestic_goods_purchase_reverse_charge" : "domestic_services_purchase_reverse_charge"
+        );
+      }
+      return reviewScenario("domestic_purchase_not_in_scope_yet", "Domestic purchases with supplier-charged VAT are handled in the supplier-invoice phase.");
+    }
+    if (deriveRegion(normalizedLine.seller_country) === "EU") {
+      return acceptScenario(
+        goodsOrServices === "goods" ? "VAT_SE_EU_GOODS_PURCHASE_RC" : "VAT_SE_EU_SERVICES_PURCHASE_RC",
+        goodsOrServices === "goods" ? "eu_goods_purchase_reverse_charge" : "eu_services_purchase_reverse_charge"
+      );
+    }
+    if (deriveRegion(normalizedLine.seller_country) === "NON_EU" && goodsOrServices === "services") {
+      return acceptScenario("VAT_SE_NON_EU_SERVICE_PURCHASE_RC", "non_eu_service_purchase_reverse_charge");
+    }
+    return reviewScenario("unsupported_purchase_scenario", "Could not derive a supported VAT scenario for the purchase.");
+  }
+
+  return reviewScenario("unsupported_supply_type", "supply_type must be sale or purchase.");
+}
+
+function buildScenarioOutputs(normalizedLine, scenario) {
+  const definition = VAT_CODE_BY_ID[scenario.vatCode];
+  const baseAmount = roundMoney(normalizedLine.line_amount_ex_vat - (normalizedLine.line_discount || 0));
+  const rate = resolveVatRate(normalizedLine, definition);
+  const deductionRatio = normalizedLine.deduction_ratio === null ? 1 : normalizedLine.deduction_ratio;
+  let declarationBoxAmounts = [];
+  let postingEntries = [];
+  let invoiceTextRequirements = copy(scenario.invoiceTextRequirements || []);
+
+  switch (scenario.decisionCategory) {
+    case "domestic_standard_sale": {
+      const outputBox = requireBox(DOMESTIC_OUTPUT_BOX_BY_RATE, rate, "unsupported_domestic_vat_rate");
+      const outputVat = calculateVat(baseAmount, rate);
+      declarationBoxAmounts = [
+        createBoxAmount("05", baseAmount, "taxable_base"),
+        createBoxAmount(outputBox, outputVat, "output_vat")
+      ];
+      postingEntries = [
+        createPostingEntry("net_sale", "credit", baseAmount, "taxable_base"),
+        createPostingEntry("output_vat", "credit", outputVat, "output_vat")
+      ];
+      break;
+    }
+    case "domestic_exempt_sale":
+      declarationBoxAmounts = [createBoxAmount("42", baseAmount, "taxable_base")];
+      postingEntries = [createPostingEntry("net_sale", "credit", baseAmount, "taxable_base")];
+      break;
+    case "construction_reverse_charge_sale":
+      declarationBoxAmounts = [createBoxAmount("41", baseAmount, "taxable_base")];
+      postingEntries = [createPostingEntry("net_sale", "credit", baseAmount, "taxable_base")];
+      invoiceTextRequirements = uniqueStrings([...invoiceTextRequirements, "buyer_vat_number_required", "reverse_charge_invoice_text_required"]);
+      break;
+    case "eu_goods_b2b_sale":
+      declarationBoxAmounts = [createBoxAmount("35", baseAmount, "taxable_base")];
+      postingEntries = [createPostingEntry("net_sale", "credit", baseAmount, "taxable_base")];
+      invoiceTextRequirements = uniqueStrings([...invoiceTextRequirements, "buyer_vat_number_required"]);
+      break;
+    case "eu_services_b2b_sale":
+      declarationBoxAmounts = [createBoxAmount("39", baseAmount, "taxable_base")];
+      postingEntries = [createPostingEntry("net_sale", "credit", baseAmount, "taxable_base")];
+      invoiceTextRequirements = uniqueStrings([...invoiceTextRequirements, "buyer_vat_number_required", "reverse_charge_invoice_text_required"]);
+      break;
+    case "eu_b2c_oss_sale": {
+      const outputVat = calculateVat(baseAmount, rate);
+      declarationBoxAmounts = [createBoxAmount("OSS", baseAmount, "taxable_base")];
+      postingEntries = [
+        createPostingEntry("net_sale", "credit", baseAmount, "taxable_base"),
+        createPostingEntry("output_vat", "credit", outputVat, "output_vat")
+      ];
+      break;
+    }
+    case "export_goods_sale":
+      declarationBoxAmounts = [createBoxAmount("36", baseAmount, "taxable_base")];
+      postingEntries = [createPostingEntry("net_sale", "credit", baseAmount, "taxable_base")];
+      break;
+    case "export_services_sale":
+      declarationBoxAmounts = [createBoxAmount("40", baseAmount, "taxable_base")];
+      postingEntries = [createPostingEntry("net_sale", "credit", baseAmount, "taxable_base")];
+      break;
+    case "import_goods_purchase": {
+      const outputBox = requireBox(IMPORT_OUTPUT_BOX_BY_RATE, rate, "unsupported_import_vat_rate");
+      const vatAmount = calculateVat(baseAmount, rate);
+      declarationBoxAmounts = [
+        createBoxAmount("50", baseAmount, "taxable_base"),
+        createBoxAmount(outputBox, vatAmount, "output_vat")
+      ];
+      postingEntries = [createPostingEntry("output_vat_self_assessed", "credit", vatAmount, "output_vat")];
+      if (deductionRatio > 0) {
+        const deductible = roundMoney(vatAmount * deductionRatio);
+        declarationBoxAmounts.push(createBoxAmount("48", deductible, "input_vat"));
+        postingEntries.push(createPostingEntry("input_vat_deductible", "debit", deductible, "input_vat"));
+      }
+      break;
+    }
+    case "eu_goods_purchase_reverse_charge":
+      return buildReverseChargePurchaseOutputs("20", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory);
+    case "eu_services_purchase_reverse_charge":
+      return buildReverseChargePurchaseOutputs("21", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory);
+    case "non_eu_service_purchase_reverse_charge":
+      return buildReverseChargePurchaseOutputs("22", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory);
+    case "domestic_goods_purchase_reverse_charge":
+      return buildReverseChargePurchaseOutputs("23", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory);
+    case "domestic_services_purchase_reverse_charge":
+    case "construction_reverse_charge_purchase":
+      return buildReverseChargePurchaseOutputs("24", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory);
+    default:
+      throw createError(500, "vat_scenario_not_supported", `Unsupported VAT scenario ${scenario.decisionCategory}.`);
+  }
+
+  return {
+    vatCode: definition.vatCode,
+    decisionCategory: scenario.decisionCategory,
+    declarationBoxCodes: uniqueBoxCodes(declarationBoxAmounts),
+    declarationBoxAmounts,
+    postingEntries,
+    bookingTemplateCode: definition.bookingTemplateCode,
+    invoiceTextRequirements,
+    vatRate: rate,
+    rateType: definition.rateType
   };
 }
 
-function findExpectationMismatches(expectation, normalizedLine) {
-  const mismatches = [];
-  for (const [key, expectedValue] of Object.entries(expectation || {})) {
-    if (expectedValue === undefined) {
-      continue;
-    }
-    if (normalizedLine[key] !== expectedValue) {
-      mismatches.push(`${key}:${normalizedLine[key]}!=${expectedValue}`);
+function buildReverseChargePurchaseOutputs(baseBox, baseAmount, rate, deductionRatio, definition, decisionCategory) {
+  const outputBox = requireBox(REVERSE_CHARGE_OUTPUT_BOX_BY_RATE, rate, "unsupported_reverse_charge_vat_rate");
+  const vatAmount = calculateVat(baseAmount, rate);
+  const declarationBoxAmounts = [
+    createBoxAmount(baseBox, baseAmount, "taxable_base"),
+    createBoxAmount(outputBox, vatAmount, "output_vat")
+  ];
+  const postingEntries = [createPostingEntry("output_vat_self_assessed", "credit", vatAmount, "output_vat")];
+  if (deductionRatio > 0) {
+    const deductible = roundMoney(vatAmount * deductionRatio);
+    declarationBoxAmounts.push(createBoxAmount("48", deductible, "input_vat"));
+    postingEntries.push(createPostingEntry("input_vat_deductible", "debit", deductible, "input_vat"));
+  }
+  return {
+    vatCode: definition.vatCode,
+    decisionCategory,
+    declarationBoxCodes: uniqueBoxCodes(declarationBoxAmounts),
+    declarationBoxAmounts,
+    postingEntries,
+    bookingTemplateCode: definition.bookingTemplateCode,
+    invoiceTextRequirements: [],
+    vatRate: rate,
+    rateType: definition.rateType
+  };
+}
+
+function acceptScenario(vatCode, decisionCategory, invoiceTextRequirements = []) {
+  return {
+    ok: true,
+    vatCode,
+    decisionCategory,
+    invoiceTextRequirements
+  };
+}
+
+function reviewScenario(reviewReasonCode, warningMessage) {
+  return {
+    ok: false,
+    reviewReasonCode,
+    warningMessage,
+    explanation: warningMessage
+  };
+}
+
+function summarizeDecisionBoxAmounts(decisions) {
+  const totals = new Map();
+  for (const decision of decisions) {
+    const rows = decision.declarationBoxAmounts || decision.outputs?.declarationBoxAmounts || [];
+    for (const row of rows) {
+      const key = `${row.boxCode}:${row.amountType}`;
+      totals.set(key, roundMoney((totals.get(key) || 0) + Number(row.amount || 0)));
     }
   }
-  return mismatches;
+  return [...totals.entries()]
+    .map(([key, amount]) => {
+      const [boxCode, amountType] = key.split(":");
+      return { boxCode, amountType, amount };
+    })
+    .sort((left, right) => `${left.boxCode}:${left.amountType}`.localeCompare(`${right.boxCode}:${right.amountType}`));
+}
+
+function invertAmounts(rows) {
+  return rows.map((row) => ({
+    ...copy(row),
+    amount: roundMoney(-Number(row.amount || 0))
+  }));
+}
+
+function uniqueBoxCodes(rows) {
+  return [...new Set(rows.map((row) => row.boxCode).filter(Boolean))];
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function createBoxAmount(boxCode, amount, amountType) {
+  return {
+    boxCode,
+    amount: roundMoney(amount),
+    amountType
+  };
+}
+
+function createPostingEntry(entryCode, direction, amount, vatEffect) {
+  return {
+    entryCode,
+    direction,
+    amount: roundMoney(amount),
+    vatEffect
+  };
+}
+
+function domesticCodeFromRate(normalizedLine) {
+  const rate = formatRate(resolveVatRate(normalizedLine, null));
+  if (rate === "25.00") {
+    return "VAT_SE_DOMESTIC_25";
+  }
+  if (rate === "12.00") {
+    return "VAT_SE_DOMESTIC_12";
+  }
+  if (rate === "6.00") {
+    return "VAT_SE_DOMESTIC_6";
+  }
+  return null;
+}
+
+function isExemptLine(normalizedLine) {
+  return resolveVatRate(normalizedLine, null) === 0 || normalizedLine.exemption_reason === "exempt";
+}
+
+function resolveVatRate(normalizedLine, definition) {
+  return roundMoney(normalizedLine.tax_rate_candidate ?? normalizedLine.vat_rate ?? definition?.vatRate ?? 0);
+}
+
+function calculateVat(baseAmount, rate) {
+  return roundMoney(baseAmount * (rate / 100));
+}
+
+function requireBox(mapping, rate, code) {
+  const box = mapping[formatRate(rate)];
+  if (!box) {
+    throw createError(400, code, `No declaration box is configured for VAT rate ${rate}.`);
+  }
+  return box;
 }
 
 function deriveRegion(countryCode) {
@@ -664,6 +1069,17 @@ function normalizeLowerString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim().toLowerCase() : null;
 }
 
+function normalizeGoodsOrServices(value) {
+  const normalized = normalizeLowerString(value);
+  if (normalized === "good") {
+    return "goods";
+  }
+  if (normalized === "service") {
+    return "services";
+  }
+  return normalized;
+}
+
 function normalizeCountry(value) {
   const normalized = normalizeUpperString(value);
   return normalized || null;
@@ -684,7 +1100,7 @@ function normalizeOptionalNumber(value) {
   if (!Number.isFinite(number)) {
     return null;
   }
-  return Number(number.toFixed(2));
+  return roundMoney(number);
 }
 
 function normalizeOptionalBoolean(value) {
@@ -706,6 +1122,14 @@ function requireText(value, code) {
     throw createError(400, code, `${code} is required.`);
   }
   return value.trim();
+}
+
+function roundMoney(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
+function formatRate(value) {
+  return Number(value || 0).toFixed(2);
 }
 
 function createError(status, code, message) {

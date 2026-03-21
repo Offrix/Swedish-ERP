@@ -478,7 +478,7 @@ Ingen delfas är klar förrän följande finns:
   - [ ] 3.3 Avstämningscenter och rapportgrund
 - [ ] **FAS 4 — Momsmotor**
   - [ ] 4.1 Momsmasterdata och beslutsträd
-  - [ ] 4.2 Sverige, EU, import, export och omvänd moms
+  - [x] 4.2 Sverige, EU, import, export och omvänd moms
   - [ ] 4.3 OSS, IOSS, periodisk sammanställning och rapportering
 - [ ] **FAS 5 — Försäljning, kundreskontra och kundfakturor**
   - [ ] 5.1 Kundregister, artiklar, offerter och avtal
@@ -732,15 +732,15 @@ Bygg ett explicit beslutsträd för svensk moms, EU, import, export, reverse cha
 ### 4.2 Sverige, EU, import, export och omvänd moms
 
 **Bygg detta**
-- [ ] Sverige 25/12/6/0
-- [ ] EU B2B/B2C
-- [ ] Import/export
-- [ ] bygg-omvänd moms
+- [x] Sverige 25/12/6/0
+- [x] EU B2B/B2C
+- [x] Import/export
+- [x] bygg-omvänd moms
 
 **Verifiera detta innan nästa delfas**
-- [ ] Deklarationsboxar summerar rätt
-- [ ] Kreditnota spegelvänder moms korrekt
-- [ ] Importmoms och reverse charge dubbelbokas rätt
+- [x] Deklarationsboxar summerar rätt
+- [x] Kreditnota spegelvänder moms korrekt
+- [x] Importmoms och reverse charge dubbelbokas rätt
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P4-02`.
 

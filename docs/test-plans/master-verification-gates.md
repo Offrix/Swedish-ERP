@@ -176,10 +176,10 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 - [x] Prompt `P4-01` är körd och resultat dokumenterat
 
 ### 4.2 Sverige, EU, import, export och omvänd moms
-- [ ] Deklarationsboxar summerar rätt
-- [ ] Kreditnota spegelvänder moms korrekt
-- [ ] Importmoms och reverse charge dubbelbokas rätt
-- [ ] Prompt `P4-02` är körd och resultat dokumenterat
+- [x] Deklarationsboxar summerar rätt
+- [x] Kreditnota spegelvänder moms korrekt
+- [x] Importmoms och reverse charge dubbelbokas rätt
+- [x] Prompt `P4-02` är körd och resultat dokumenterat
 
 ### 4.3 OSS, IOSS, periodisk sammanställning och rapportering
 - [ ] B2C-distansförsäljning landas rätt

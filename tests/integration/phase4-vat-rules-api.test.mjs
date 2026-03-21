@@ -8,21 +8,30 @@ import { readText, stopServer } from "../../scripts/lib/repo.mjs";
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 const PROJECT_ID = "00000000-0000-4000-8000-000000000041";
 
-test("Phase 4.1 migration creates rule packs, VAT codes and VAT review queue tables", async () => {
-  const migration = await readText("packages/db/migrations/20260321080000_phase4_vat_masterdata_rulepacks.sql");
+test("Phase 4.2 migration and seed add VAT execution tables and rule-pack updates", async () => {
+  const migration = await readText("packages/db/migrations/20260321090000_phase4_vat_rule_execution.sql");
   for (const fragment of [
-    "CREATE TABLE IF NOT EXISTS rule_packs",
-    "CREATE TABLE IF NOT EXISTS vat_codes",
-    "CREATE TABLE IF NOT EXISTS vat_review_queue_items",
-    "ALTER TABLE vat_decisions"
+    "ALTER TABLE vat_decisions",
+    "CREATE TABLE IF NOT EXISTS vat_decision_box_amounts",
+    "CREATE TABLE IF NOT EXISTS vat_decision_posting_entries"
   ]) {
     assert.match(migration, new RegExp(fragment.replaceAll(" ", "\\s+")));
   }
+
+  const seed = await readText("packages/db/seeds/20260321090010_phase4_vat_rules_seed.sql");
+  for (const fragment of [
+    "vat-se-2026.2",
+    "VAT_SE_RC_BUILD_PURCHASE",
+    '["39"]',
+    '["40"]'
+  ]) {
+    assert.match(seed, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
 });
 
-test("Phase 4.1 API exposes VAT masterdata, dated rule packs, explainable decisions and review queue", async () => {
+test("Phase 4.2 API returns derived declaration-box amounts and mirrored credit notes", async () => {
   const platform = createApiPlatform({
-    clock: () => new Date("2026-03-21T23:40:00Z")
+    clock: () => new Date("2026-03-21T23:57:00Z")
   });
   const server = createApiServer({
     platform,
@@ -47,32 +56,66 @@ test("Phase 4.1 API exposes VAT masterdata, dated rule packs, explainable decisi
       email: DEMO_ADMIN_EMAIL
     });
 
-    const codes = await requestJson(`${baseUrl}/v1/vat/codes?companyId=${COMPANY_ID}`, {
-      token: adminSession.sessionToken
-    });
-    assert.ok(codes.items.find((item) => item.vatCode === "VAT_SE_DOMESTIC_25"));
-
-    const packs2025 = await requestJson(`${baseUrl}/v1/vat/rule-packs?companyId=${COMPANY_ID}&effectiveDate=2025-11-15`, {
-      token: adminSession.sessionToken
-    });
-    assert.equal(packs2025.items.length, 1);
-    assert.equal(packs2025.items[0].rulePackId, "vat-se-2025.5");
-
-    const decision2025 = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+    const decision = await requestJson(`${baseUrl}/v1/vat/decisions`, {
       method: "POST",
       token: adminSession.sessionToken,
       expectedStatus: 201,
       body: {
         companyId: COMPANY_ID,
         transactionLine: buildTransactionLine({
-          source_id: "phase4-1-api-2025",
-          invoice_date: "2025-11-15",
-          delivery_date: "2025-11-15",
-          tax_date: "2025-11-15"
+          source_id: "phase4-2-api-import",
+          source_type: "AP_IMPORT",
+          supply_type: "purchase",
+          seller_country: "CN",
+          buyer_country: "SE",
+          goods_or_services: "goods",
+          import_flag: true,
+          vat_code_candidate: "VAT_SE_IMPORT_GOODS",
+          line_amount_ex_vat: 2400
         })
       }
     });
-    assert.equal(decision2025.vatDecision.rulePackId, "vat-se-2025.5");
+    assert.equal(decision.vatDecision.rulePackId, "vat-se-2026.2");
+    assert.deepEqual(decision.vatDecision.declarationBoxAmounts, [
+      { boxCode: "50", amount: 2400, amountType: "taxable_base" },
+      { boxCode: "60", amount: 600, amountType: "output_vat" },
+      { boxCode: "48", amount: 600, amountType: "input_vat" }
+    ]);
+
+    const original = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_type: "AR_INVOICE",
+          source_id: "phase4-2-api-credit-original",
+          vat_code_candidate: "VAT_SE_DOMESTIC_25"
+        })
+      }
+    });
+
+    const mirrored = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_type: "AR_CREDIT_NOTE",
+          source_id: "phase4-2-api-credit-note",
+          credit_note_flag: true,
+          original_vat_decision_id: original.vatDecision.vatDecisionId,
+          vat_code_candidate: "VAT_SE_DOMESTIC_25"
+        })
+      }
+    });
+    assert.equal(mirrored.vatDecision.decisionCategory, "credit_note_mirror");
+    assert.deepEqual(mirrored.vatDecision.declarationBoxAmounts, [
+      { boxCode: "05", amount: -1000, amountType: "taxable_base" },
+      { boxCode: "10", amount: -250, amountType: "output_vat" }
+    ]);
 
     const review = await requestJson(`${baseUrl}/v1/vat/decisions`, {
       method: "POST",
@@ -81,42 +124,16 @@ test("Phase 4.1 API exposes VAT masterdata, dated rule packs, explainable decisi
       body: {
         companyId: COMPANY_ID,
         transactionLine: buildTransactionLine({
-          source_id: "phase4-1-api-review",
-          buyer_vat_number_status: null
+          source_type: "AR_CREDIT_NOTE",
+          source_id: "phase4-2-api-credit-missing",
+          credit_note_flag: true,
+          original_vat_decision_id: "00000000-0000-4000-8000-999999999999",
+          vat_code_candidate: "VAT_SE_DOMESTIC_25"
         })
       }
     });
     assert.equal(review.vatDecision.status, "review_required");
-    assert.equal(review.reviewQueueItem.reviewReasonCode, "missing_mandatory_vat_fields");
-
-    const decision = await requestJson(`${baseUrl}/v1/vat/decisions`, {
-      method: "POST",
-      token: adminSession.sessionToken,
-      expectedStatus: 201,
-      body: {
-        companyId: COMPANY_ID,
-        transactionLine: buildTransactionLine({
-          source_id: "phase4-1-api-domestic"
-        })
-      }
-    });
-    assert.equal(decision.vatDecision.status, "decided");
-    assert.ok(decision.vatDecision.inputsHash);
-    assert.equal(decision.vatDecision.rulePackId, "vat-se-2026.2");
-
-    const fetched = await requestJson(
-      `${baseUrl}/v1/vat/decisions/${decision.vatDecision.vatDecisionId}?companyId=${COMPANY_ID}`,
-      {
-        token: adminSession.sessionToken
-      }
-    );
-    assert.equal(fetched.vatDecisionId, decision.vatDecision.vatDecisionId);
-
-    const queue = await requestJson(`${baseUrl}/v1/vat/review-queue?companyId=${COMPANY_ID}`, {
-      token: adminSession.sessionToken
-    });
-    assert.equal(queue.items.length, 1);
-    assert.equal(queue.items[0].reviewReasonCode, "missing_mandatory_vat_fields");
+    assert.equal(review.reviewQueueItem.reviewReasonCode, "original_vat_decision_missing");
   } finally {
     await stopServer(server);
   }
@@ -196,7 +213,7 @@ function buildTransactionLine(overrides = {}) {
     report_box_code: "05",
     project_id: PROJECT_ID,
     source_type: "AR_INVOICE",
-    source_id: "phase4-1-api-default",
+    source_id: "phase4-2-api-default",
     ...overrides
   };
 }

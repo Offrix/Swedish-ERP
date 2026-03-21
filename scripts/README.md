@@ -22,6 +22,7 @@ Helper scripts for local setup, structure verification and phased rollout checks
 - `verify-phase3-ledger-rules.ps1`: validates required FAS 3.2 ledger dimension, period-lock and correction artifacts.
 - `verify-phase3-reporting.ps1`: validates required FAS 3.3 reporting, drilldown and reconciliation artifacts.
 - `verify-phase4-vat.ps1`: validates required FAS 4.1 VAT masterdata, rule-pack and decision artifacts.
+- `verify-phase4-vat-rules.ps1`: validates required FAS 4.2 VAT rule-execution, box-amount and credit-note artifacts.
 - `verify-db.ps1`: validates migration file naming.
 - `new-migration.ps1`: creates timestamped migration file in `packages/db/migrations`.
 - `dev-up.ps1`: starts docker infra.

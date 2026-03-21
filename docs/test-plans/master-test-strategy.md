@@ -191,6 +191,8 @@ En fas är inte klar förrän:
 - historiskt beslut återspelar rätt regelpaket för dåtidens datum
 - saknade eller motsägelsefulla VAT-fakta går till granskningskö
 - rapportboxar stämmer mot golden-data
+- kreditnota spegelvänder originalets boxbelopp och bokföringspåverkan
+- importmoms och omvänd moms ger både utgående och ingående moms enligt avdragsrätt
 - rättelse gör om hela deklarationen
 
 #### Lön
