@@ -150,10 +150,10 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 - [x] Prompt `P3-01` är körd och resultat dokumenterat
 
 ### 3.2 Dimensioner, perioder och bokföringsregler
-- [ ] Låsta perioder går inte att mutera
-- [ ] Rättelser skapar ny verifikation
-- [ ] Obligatoriska dimensioner valideras
-- [ ] Prompt `P3-02` är körd och resultat dokumenterat
+- [x] Låsta perioder går inte att mutera
+- [x] Rättelser skapar ny verifikation
+- [x] Obligatoriska dimensioner valideras
+- [x] Prompt `P3-02` är körd och resultat dokumenterat
 
 ### 3.3 Avstämningscenter och rapportgrund
 - [ ] Rapporter kan återskapas historiskt
@@ -457,3 +457,4 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 - [ ] Ingen fas markeras klar utan dokumenterat bevis.
 - [ ] Alla gate-checklistor kan följas av någon som inte skrivit koden.
 - [ ] Gate-status kan granskas i efterhand.
+

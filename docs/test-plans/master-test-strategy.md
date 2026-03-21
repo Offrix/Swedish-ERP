@@ -180,6 +180,8 @@ En fas är inte klar förrän:
 - importerad historik är markerad utan att tyst skriva om bokad historik
 - historisk rapport kan återskapas
 - låst period kan inte muteras
+- correction och reversal skapar ny immutabel verifikation med länk till original
+- obligatoriska projektdimensioner valideras innan bokning
 
 #### Moms
 - beslutsträd returnerar förklaring
@@ -307,3 +309,4 @@ När en fas använder någon av dessa förmågor ska respektive testplan läsas 
 - [ ] Restore-test kan köras.
 - [ ] Alla nya reglerade buggar genererar regressionstest.
 - [ ] Tvärgående testplaner är kopplade till relevanta faser och releases.
+

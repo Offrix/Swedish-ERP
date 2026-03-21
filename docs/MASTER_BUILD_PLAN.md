@@ -474,7 +474,7 @@ Ingen delfas är klar förrän följande finns:
   - [x] 2.3 OCR, klassificering och granskningskö
 - [ ] **FAS 3 — Huvudbok, kontomodell, journaler och avstämningsgrund**
   - [x] 3.1 Ledger-schema och verifikationsmotor
-  - [ ] 3.2 Dimensioner, perioder och bokföringsregler
+  - [x] 3.2 Dimensioner, perioder och bokföringsregler
   - [ ] 3.3 Avstämningscenter och rapportgrund
 - [ ] **FAS 4 — Momsmotor**
   - [ ] 4.1 Momsmasterdata och beslutsträd
@@ -685,14 +685,14 @@ Skapa ledgern som alla andra domäner måste skriva genom.
 ### 3.2 Dimensioner, perioder och bokföringsregler
 
 **Bygg detta**
-- [ ] Projekt/kostnadsställe/affärsområde
-- [ ] Periodlåsning
-- [ ] Reversal och korrigering
+- [x] Projekt/kostnadsställe/affärsområde
+- [x] Periodlåsning
+- [x] Reversal och korrigering
 
 **Verifiera detta innan nästa delfas**
-- [ ] Låsta perioder går inte att mutera
-- [ ] Rättelser skapar ny verifikation
-- [ ] Obligatoriska dimensioner valideras
+- [x] Låsta perioder går inte att mutera
+- [x] Rättelser skapar ny verifikation
+- [x] Obligatoriska dimensioner valideras
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P3-02`.
 
@@ -1278,3 +1278,4 @@ Ett regelpaket får inte aktiveras utan:
 ## Slutord
 
 Bygg aldrig “en app med bokföring”. Bygg ett system där arbete, dokument, pengar och rapportering är samma kedja.
+

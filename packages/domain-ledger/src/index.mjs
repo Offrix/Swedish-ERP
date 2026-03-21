@@ -1597,6 +1597,22 @@ export const DSAM_ACCOUNTS = Object.freeze([
 ]);
 
 const DEMO_LEDGER_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const DIMENSION_KEYS = Object.freeze(["projectId", "costCenterCode", "businessAreaCode"]);
+const LOCKED_PERIOD_STATUSES = Object.freeze(["soft_locked", "hard_closed"]);
+const DEMO_DIMENSION_CATALOG = Object.freeze({
+  projects: Object.freeze([
+    { code: "project-demo-alpha", label: "Demo Project Alpha", status: "active" },
+    { code: "project-demo-beta", label: "Demo Project Beta", status: "active" }
+  ]),
+  costCenters: Object.freeze([
+    { code: "CC-100", label: "Operations", status: "active" },
+    { code: "CC-200", label: "Projects", status: "active" }
+  ]),
+  businessAreas: Object.freeze([
+    { code: "BA-SERVICES", label: "Services", status: "active" },
+    { code: "BA-FIELD", label: "Field", status: "active" }
+  ])
+});
 
 export function createLedgerPlatform(options = {}) {
   return createLedgerEngine(options);
@@ -1609,6 +1625,7 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     voucherSeries: new Map(),
     voucherSeriesIdsByCompanyCode: new Map(),
     accountingPeriods: new Map(),
+    dimensionCatalogsByCompanyId: new Map(),
     journalEntries: new Map(),
     journalLinesByEntryId: new Map(),
     idempotencyKeys: new Map(),
@@ -1626,9 +1643,15 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     installLedgerCatalog,
     listLedgerAccounts,
     listVoucherSeries,
+    listAccountingPeriods,
+    listLedgerDimensions,
+    lockAccountingPeriod,
+    reopenAccountingPeriod,
     createJournalEntry,
     validateJournalEntry,
     postJournalEntry,
+    reverseJournalEntry,
+    correctJournalEntry,
     getJournalEntry,
     snapshotLedger
   };
@@ -1688,6 +1711,8 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
       installedVoucherSeries += 1;
     }
 
+    ensureDimensionCatalog(resolvedCompanyId);
+
     pushAudit({
       companyId: resolvedCompanyId,
       actorId,
@@ -1724,6 +1749,134 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
       .map(copy);
   }
 
+  function listAccountingPeriods({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return [...state.accountingPeriods.values()]
+      .filter((period) => period.companyId === resolvedCompanyId)
+      .sort((left, right) => left.startsOn.localeCompare(right.startsOn))
+      .map(copy);
+  }
+
+  function listLedgerDimensions({ companyId } = {}) {
+    return copy(ensureDimensionCatalog(requireText(companyId, "company_id_required")));
+  }
+
+  function lockAccountingPeriod({
+    companyId,
+    accountingPeriodId,
+    status = "soft_locked",
+    actorId,
+    reasonCode,
+    approvedByActorId = null,
+    approvedByRoleCode = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const accountingPeriod = requireAccountingPeriodForCompany(resolvedCompanyId, accountingPeriodId);
+    const targetStatus = assertLockStatus(status);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedReasonCode = requireText(reasonCode, "reason_code_required");
+
+    if (accountingPeriod.status === targetStatus) {
+      return {
+        accountingPeriod: copy(accountingPeriod),
+        affectedJournalEntries: []
+      };
+    }
+
+    if (accountingPeriod.status === "hard_closed" && targetStatus !== "hard_closed") {
+      throw httpError(409, "accounting_period_transition_invalid", "A hard-closed period must be reopened before its lock status changes.");
+    }
+
+    if (targetStatus === "hard_closed") {
+      assertSeniorFinanceApproval({
+        actorId: resolvedActorId,
+        approvedByActorId,
+        approvedByRoleCode
+      });
+    }
+
+    const now = nowIso();
+    accountingPeriod.status = targetStatus;
+    accountingPeriod.lockReasonCode = resolvedReasonCode;
+    accountingPeriod.lockedByActorId = resolvedActorId;
+    accountingPeriod.lockedAt = now;
+    accountingPeriod.updatedAt = now;
+
+    const affectedJournalEntries = toggleEntriesForLockedPeriod({
+      accountingPeriodId: accountingPeriod.accountingPeriodId,
+      action: "lock"
+    });
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.accounting_period.locked",
+      entityType: "accounting_period",
+      entityId: accountingPeriod.accountingPeriodId,
+      explanation: `Locked accounting period ${accountingPeriod.startsOn}..${accountingPeriod.endsOn} as ${targetStatus}.`
+    });
+
+    return {
+      accountingPeriod: copy(accountingPeriod),
+      affectedJournalEntries: affectedJournalEntries.map((entry) => presentJournalEntry(entry))
+    };
+  }
+
+  function reopenAccountingPeriod({
+    companyId,
+    accountingPeriodId,
+    actorId,
+    reasonCode,
+    approvedByActorId,
+    approvedByRoleCode = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const accountingPeriod = requireAccountingPeriodForCompany(resolvedCompanyId, accountingPeriodId);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    requireText(reasonCode, "reason_code_required");
+    assertSeniorFinanceApproval({
+      actorId: resolvedActorId,
+      approvedByActorId,
+      approvedByRoleCode
+    });
+
+    if (accountingPeriod.status === "open") {
+      return {
+        accountingPeriod: copy(accountingPeriod),
+        affectedJournalEntries: []
+      };
+    }
+
+    const now = nowIso();
+    accountingPeriod.status = "open";
+    accountingPeriod.reopenedByActorId = resolvedActorId;
+    accountingPeriod.reopenedAt = now;
+    accountingPeriod.updatedAt = now;
+
+    const affectedJournalEntries = toggleEntriesForLockedPeriod({
+      accountingPeriodId: accountingPeriod.accountingPeriodId,
+      action: "unlock"
+    });
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.accounting_period.reopened",
+      entityType: "accounting_period",
+      entityId: accountingPeriod.accountingPeriodId,
+      explanation: `Reopened accounting period ${accountingPeriod.startsOn}..${accountingPeriod.endsOn}.`
+    });
+
+    return {
+      accountingPeriod: copy(accountingPeriod),
+      affectedJournalEntries: affectedJournalEntries.map((entry) => presentJournalEntry(entry))
+    };
+  }
+
   function createJournalEntry({
     companyId,
     journalDate,
@@ -1737,6 +1890,9 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     importedFlag = false,
     currencyCode = DEFAULT_LEDGER_CURRENCY,
     metadataJson = {},
+    correctionOfJournalEntryId = null,
+    correctionKey = null,
+    correctionType = null,
     correlationId = crypto.randomUUID()
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
@@ -1760,7 +1916,8 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     const resolvedVoucherSeries = requireVoucherSeries(resolvedCompanyId, voucherSeriesCode);
     const resolvedJournalDate = normalizeDate(journalDate, "journal_date_required");
     const accountingPeriod = resolveAccountingPeriod(resolvedCompanyId, resolvedJournalDate);
-    ensurePeriodOpen(accountingPeriod);
+    const normalizedMetadata = normalizeMetadata(metadataJson, importedFlag);
+    ensurePeriodAllowsEntryCreation(accountingPeriod, normalizedMetadata);
 
     const journalEntryId = crypto.randomUUID();
     const draftLines = normalizeJournalLines({
@@ -1770,6 +1927,7 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
       sourceType: resolvedSourceType,
       sourceId: resolvedSourceId,
       entryCurrencyCode: normalizeCurrencyCode(currencyCode),
+      metadataJson: normalizedMetadata,
       lines
     });
     const totals = calculateTotals(draftLines);
@@ -1794,13 +1952,16 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
       importedFlag: Boolean(importedFlag),
       currencyCode: normalizeCurrencyCode(currencyCode),
       idempotencyKey: resolvedIdempotencyKey,
-      metadataJson: normalizeMetadata(metadataJson, importedFlag),
+      metadataJson: normalizedMetadata,
       createdAt: now,
       updatedAt: now,
       validatedAt: null,
       postedAt: null,
       reversalOfJournalEntryId: null,
       reversedByJournalEntryId: null,
+      correctionOfJournalEntryId: correctionOfJournalEntryId ? requireText(correctionOfJournalEntryId, "correction_of_journal_entry_id_required") : null,
+      correctionKey: correctionKey ? requireText(correctionKey, "correction_key_required") : null,
+      correctionType: correctionType ? assertCorrectionType(correctionType) : null,
       totalDebit: totals.totalDebit,
       totalCredit: totals.totalCredit
     };
@@ -1843,7 +2004,7 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     }
 
     const accountingPeriod = requireAccountingPeriod(entry.accountingPeriodId);
-    ensurePeriodOpen(accountingPeriod);
+    ensurePeriodAllowsEntryMutation(accountingPeriod, entry);
     const lines = requireJournalLines(entry.journalEntryId);
     validateLines(entry, lines);
 
@@ -1880,7 +2041,7 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     }
 
     const accountingPeriod = requireAccountingPeriod(entry.accountingPeriodId);
-    ensurePeriodOpen(accountingPeriod);
+    ensurePeriodAllowsEntryMutation(accountingPeriod, entry);
     const now = nowIso();
     entry.status = "posted";
     entry.postedAt = now;
@@ -1901,6 +2062,200 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     };
   }
 
+  function reverseJournalEntry({
+    companyId,
+    journalEntryId,
+    actorId,
+    reasonCode,
+    correctionKey,
+    journalDate = null,
+    voucherSeriesCode = "V",
+    metadataJson = {},
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const originalEntry = requireJournalEntry(requireText(companyId, "company_id_required"), journalEntryId);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedReasonCode = requireText(reasonCode, "reason_code_required");
+    const resolvedCorrectionKey = requireText(correctionKey, "correction_key_required");
+
+    if (originalEntry.status !== "posted" && originalEntry.status !== "reversed") {
+      throw httpError(409, "journal_entry_not_posted", "Only posted journal entries can be reversed.");
+    }
+
+    if (originalEntry.reversedByJournalEntryId) {
+      const existingReversal = requireJournalEntry(originalEntry.companyId, originalEntry.reversedByJournalEntryId);
+      if (existingReversal.correctionKey === resolvedCorrectionKey) {
+        return {
+          originalJournalEntry: presentJournalEntry(originalEntry),
+          reversalJournalEntry: presentJournalEntry(existingReversal),
+          idempotentReplay: true
+        };
+      }
+      throw httpError(409, "journal_entry_already_reversed", "Journal entry already has a linked full reversal.");
+    }
+
+    const target = resolveCorrectionTargetDate({
+      companyId: originalEntry.companyId,
+      originalEntry,
+      requestedJournalDate: journalDate
+    });
+    const reversalCreate = createJournalEntry({
+      companyId: originalEntry.companyId,
+      journalDate: target.journalDate,
+      voucherSeriesCode,
+      sourceType: "MANUAL_JOURNAL",
+      sourceId: `reversal:${originalEntry.journalEntryId}:${resolvedCorrectionKey}`,
+      description: `Reversal of ${originalEntry.voucherSeriesCode}${originalEntry.voucherNumber}`,
+      actorId: resolvedActorId,
+      idempotencyKey: `reversal:${originalEntry.journalEntryId}:${resolvedCorrectionKey}`,
+      lines: reverseLines(requireJournalLines(originalEntry.journalEntryId)),
+      metadataJson: {
+        ...copy(metadataJson),
+        originalJournalEntryId: originalEntry.journalEntryId,
+        originalPeriodUntouched: target.originalPeriodUntouched,
+        pipelineStage: "ledger_reversal",
+        reasonCode: resolvedReasonCode
+      },
+      correctionOfJournalEntryId: originalEntry.journalEntryId,
+      correctionKey: resolvedCorrectionKey,
+      correctionType: "full_reversal",
+      correlationId
+    });
+
+    const validated = validateJournalEntry({
+      companyId: originalEntry.companyId,
+      journalEntryId: reversalCreate.journalEntry.journalEntryId,
+      actorId: resolvedActorId,
+      correlationId
+    });
+    const posted = postJournalEntry({
+      companyId: originalEntry.companyId,
+      journalEntryId: validated.journalEntry.journalEntryId,
+      actorId: resolvedActorId,
+      correlationId
+    });
+
+    const now = nowIso();
+    originalEntry.status = "reversed";
+    originalEntry.reversedByJournalEntryId = posted.journalEntry.journalEntryId;
+    originalEntry.updatedAt = now;
+    const storedReversal = state.journalEntries.get(posted.journalEntry.journalEntryId);
+    storedReversal.reversalOfJournalEntryId = originalEntry.journalEntryId;
+    storedReversal.updatedAt = now;
+
+    pushAudit({
+      companyId: originalEntry.companyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.journal_entry.reversed",
+      entityType: "journal_entry",
+      entityId: originalEntry.journalEntryId,
+      explanation: `Created reversal ${storedReversal.voucherSeriesCode}${storedReversal.voucherNumber} for ${originalEntry.voucherSeriesCode}${originalEntry.voucherNumber}.`
+    });
+
+    return {
+      originalJournalEntry: presentJournalEntry(originalEntry),
+      reversalJournalEntry: presentJournalEntry(storedReversal),
+      idempotentReplay: reversalCreate.idempotentReplay === true
+    };
+  }
+
+  function correctJournalEntry({
+    companyId,
+    journalEntryId,
+    actorId,
+    reasonCode,
+    correctionKey,
+    lines,
+    journalDate = null,
+    voucherSeriesCode = "A",
+    reverseOriginal = false,
+    metadataJson = {},
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const originalEntry = requireJournalEntry(requireText(companyId, "company_id_required"), journalEntryId);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedReasonCode = requireText(reasonCode, "reason_code_required");
+    const resolvedCorrectionKey = requireText(correctionKey, "correction_key_required");
+
+    if (originalEntry.status !== "posted" && originalEntry.status !== "reversed") {
+      throw httpError(409, "journal_entry_not_posted", "Only posted journal entries can be corrected.");
+    }
+
+    const target = resolveCorrectionTargetDate({
+      companyId: originalEntry.companyId,
+      originalEntry,
+      requestedJournalDate: journalDate
+    });
+
+    let reversalJournalEntry = null;
+    if (reverseOriginal) {
+      reversalJournalEntry = reverseJournalEntry({
+        companyId: originalEntry.companyId,
+        journalEntryId: originalEntry.journalEntryId,
+        actorId: resolvedActorId,
+        reasonCode: resolvedReasonCode,
+        correctionKey: `${resolvedCorrectionKey}:reversal`,
+        journalDate: target.journalDate,
+        correlationId
+      }).reversalJournalEntry;
+    }
+
+    const correctionCreate = createJournalEntry({
+      companyId: originalEntry.companyId,
+      journalDate: target.journalDate,
+      voucherSeriesCode,
+      sourceType: "MANUAL_JOURNAL",
+      sourceId: `correction:${originalEntry.journalEntryId}:${resolvedCorrectionKey}`,
+      description: `Correction of ${originalEntry.voucherSeriesCode}${originalEntry.voucherNumber}`,
+      actorId: resolvedActorId,
+      idempotencyKey: `correction:${originalEntry.journalEntryId}:${resolvedCorrectionKey}`,
+      lines,
+      metadataJson: {
+        ...copy(metadataJson),
+        originalJournalEntryId: originalEntry.journalEntryId,
+        originalPeriodUntouched: target.originalPeriodUntouched,
+        pipelineStage: "ledger_correction",
+        reasonCode: resolvedReasonCode
+      },
+      correctionOfJournalEntryId: originalEntry.journalEntryId,
+      correctionKey: resolvedCorrectionKey,
+      correctionType: reverseOriginal ? "reversal_and_rebook" : "delta",
+      correlationId
+    });
+
+    const validated = validateJournalEntry({
+      companyId: originalEntry.companyId,
+      journalEntryId: correctionCreate.journalEntry.journalEntryId,
+      actorId: resolvedActorId,
+      correlationId
+    });
+    const posted = postJournalEntry({
+      companyId: originalEntry.companyId,
+      journalEntryId: validated.journalEntry.journalEntryId,
+      actorId: resolvedActorId,
+      correlationId
+    });
+
+    const storedCorrection = state.journalEntries.get(posted.journalEntry.journalEntryId);
+    pushAudit({
+      companyId: originalEntry.companyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.journal_entry.corrected",
+      entityType: "journal_entry",
+      entityId: originalEntry.journalEntryId,
+      explanation: `Created correction ${storedCorrection.voucherSeriesCode}${storedCorrection.voucherNumber} for ${originalEntry.voucherSeriesCode}${originalEntry.voucherNumber}.`
+    });
+
+    return {
+      originalJournalEntry: presentJournalEntry(originalEntry),
+      reversalJournalEntry: reversalJournalEntry ? presentJournalEntry(state.journalEntries.get(reversalJournalEntry.journalEntryId)) : null,
+      correctedJournalEntry: presentJournalEntry(storedCorrection),
+      idempotentReplay: correctionCreate.idempotentReplay === true
+    };
+  }
+
   function getJournalEntry({ companyId, journalEntryId } = {}) {
     return presentJournalEntry(requireJournalEntry(requireText(companyId, "company_id_required"), journalEntryId));
   }
@@ -1910,6 +2265,7 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
       accounts: [...state.accounts.values()],
       voucherSeries: [...state.voucherSeries.values()],
       accountingPeriods: [...state.accountingPeriods.values()],
+      dimensionCatalogs: [...state.dimensionCatalogsByCompanyId.values()],
       journalEntries: [...state.journalEntries.values()].map((entry) => presentJournalEntry(entry)),
       auditEvents: state.auditEvents
     });
@@ -1943,10 +2299,110 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     return accountingPeriod;
   }
 
-  function ensurePeriodOpen(accountingPeriod) {
-    if (accountingPeriod.status !== "open") {
+  function requireAccountingPeriodForCompany(companyId, accountingPeriodId) {
+    const accountingPeriod = requireAccountingPeriod(requireText(accountingPeriodId, "accounting_period_id_required"));
+    if (accountingPeriod.companyId !== companyId) {
+      throw httpError(404, "accounting_period_not_found", "Accounting period was not found.");
+    }
+    return accountingPeriod;
+  }
+
+  function ensurePeriodAllowsEntryCreation(accountingPeriod, metadataJson) {
+    if (accountingPeriod.status === "open") {
+      return;
+    }
+    if (accountingPeriod.status === "soft_locked" && hasSoftLockOverride(metadataJson)) {
+      return;
+    }
+    throw httpError(409, "period_locked", "Journal entry belongs to a locked accounting period.");
+  }
+
+  function ensurePeriodAllowsEntryMutation(accountingPeriod, entry) {
+    if (entry.status === "locked_by_period") {
       throw httpError(409, "period_locked", "Journal entry belongs to a locked accounting period.");
     }
+    ensurePeriodAllowsEntryCreation(accountingPeriod, entry.metadataJson);
+  }
+
+  function ensureDimensionCatalog(companyId) {
+    if (!state.dimensionCatalogsByCompanyId.has(companyId)) {
+      state.dimensionCatalogsByCompanyId.set(companyId, {
+        companyId,
+        projects: copy(DEMO_DIMENSION_CATALOG.projects),
+        costCenters: copy(DEMO_DIMENSION_CATALOG.costCenters),
+        businessAreas: copy(DEMO_DIMENSION_CATALOG.businessAreas)
+      });
+    }
+    return state.dimensionCatalogsByCompanyId.get(companyId);
+  }
+
+  function toggleEntriesForLockedPeriod({ accountingPeriodId, action }) {
+    const now = nowIso();
+    const affected = [];
+    for (const entry of state.journalEntries.values()) {
+      if (entry.accountingPeriodId !== accountingPeriodId) {
+        continue;
+      }
+      if (action === "lock" && (entry.status === "draft" || entry.status === "validated")) {
+        entry.metadataJson.lockedByPeriodPreviousState = entry.status;
+        entry.status = "locked_by_period";
+        entry.updatedAt = now;
+        affected.push(entry);
+      }
+      if (action === "unlock" && entry.status === "locked_by_period") {
+        const previousState = entry.metadataJson.lockedByPeriodPreviousState === "validated" ? "validated" : "draft";
+        delete entry.metadataJson.lockedByPeriodPreviousState;
+        entry.status = previousState;
+        entry.updatedAt = now;
+        affected.push(entry);
+      }
+    }
+    return affected;
+  }
+
+  function resolveCorrectionTargetDate({ companyId, originalEntry, requestedJournalDate }) {
+    const originalPeriod = requireAccountingPeriod(originalEntry.accountingPeriodId);
+    if (requestedJournalDate) {
+      const resolvedJournalDate = normalizeDate(requestedJournalDate, "journal_date_required");
+      const targetPeriod = resolveAccountingPeriod(companyId, resolvedJournalDate);
+      if (originalPeriod.status === "hard_closed" && targetPeriod.accountingPeriodId === originalPeriod.accountingPeriodId) {
+        throw httpError(
+          409,
+          "period_hard_closed_requires_next_open_period",
+          "Corrections for hard-closed periods must be posted in the next open period unless the period is reopened."
+        );
+      }
+      return {
+        journalDate: resolvedJournalDate,
+        targetPeriod,
+        originalPeriodUntouched: targetPeriod.accountingPeriodId !== originalPeriod.accountingPeriodId
+      };
+    }
+
+    if (originalPeriod.status === "hard_closed") {
+      const targetPeriod = findNextOpenAccountingPeriod(companyId, originalPeriod.endsOn);
+      return {
+        journalDate: targetPeriod.startsOn,
+        targetPeriod,
+        originalPeriodUntouched: true
+      };
+    }
+
+    return {
+      journalDate: originalEntry.journalDate,
+      targetPeriod: originalPeriod,
+      originalPeriodUntouched: false
+    };
+  }
+
+  function findNextOpenAccountingPeriod(companyId, afterDate) {
+    const candidate = [...state.accountingPeriods.values()]
+      .filter((period) => period.companyId === companyId && period.status === "open" && period.startsOn > afterDate)
+      .sort((left, right) => left.startsOn.localeCompare(right.startsOn))[0];
+    if (!candidate) {
+      throw httpError(409, "next_open_period_not_found", "No next open accounting period was found for the correction.");
+    }
+    return candidate;
   }
 
   function requireJournalEntry(companyId, journalEntryId) {
@@ -1981,6 +2437,13 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
       if (line.currencyCode !== DEFAULT_LEDGER_CURRENCY && !(Number(line.exchangeRate) > 0)) {
         throw httpError(400, "journal_line_exchange_rate_required", "Foreign-currency lines require a positive exchange rate.");
       }
+      ensureRequiredDimensions({
+        companyId: entry.companyId,
+        accountNumber: line.accountNumber,
+        dimensionJson: line.dimensionJson,
+        sourceType: line.sourceType,
+        metadataJson: entry.metadataJson
+      });
     }
 
     const totals = calculateTotals(lines);
@@ -1991,13 +2454,14 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     entry.totalCredit = totals.totalCredit;
   }
 
-  function normalizeJournalLines({ companyId, journalEntryId, actorId, sourceType, sourceId, entryCurrencyCode, lines }) {
+  function normalizeJournalLines({ companyId, journalEntryId, actorId, sourceType, sourceId, entryCurrencyCode, metadataJson, lines }) {
     if (!Array.isArray(lines) || lines.length === 0) {
       throw httpError(400, "journal_lines_required", "Journal entry lines are required.");
     }
 
     return lines.map((line, index) => {
       const account = requireAccount(companyId, line.accountNumber);
+      const lineSourceType = line.sourceType ? assertPostingSourceType(line.sourceType) : sourceType;
       const debitAmount = normalizeMoney(line.debitAmount || 0);
       const creditAmount = normalizeMoney(line.creditAmount || 0);
       const currencyCode = normalizeCurrencyCode(line.currencyCode || entryCurrencyCode);
@@ -2005,6 +2469,13 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
       if (currencyCode !== DEFAULT_LEDGER_CURRENCY && exchangeRate == null) {
         throw httpError(400, "journal_line_exchange_rate_required", "Foreign-currency lines require a positive exchange rate.");
       }
+      const dimensionJson = normalizeDimensionJson({
+        companyId,
+        accountNumber: account.accountNumber,
+        dimensionJson: line.dimensionJson || {},
+        sourceType: lineSourceType,
+        metadataJson
+      });
       return {
         journalLineId: crypto.randomUUID(),
         journalEntryId,
@@ -2017,8 +2488,8 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
         creditAmount,
         currencyCode,
         exchangeRate,
-        dimensionJson: copy(line.dimensionJson || {}),
-        sourceType: line.sourceType ? assertPostingSourceType(line.sourceType) : sourceType,
+        dimensionJson,
+        sourceType: lineSourceType,
         sourceId: requireText(line.sourceId || sourceId, "line_source_id_required"),
         actorId,
         createdAt: nowIso()
@@ -2074,11 +2545,22 @@ function seedDemoState(state, clock) {
       startsOn,
       endsOn,
       status: "open",
+      lockReasonCode: null,
+      lockedByActorId: null,
+      lockedAt: null,
+      reopenedByActorId: null,
+      reopenedAt: null,
       createdAt: now,
       updatedAt: now
     };
     state.accountingPeriods.set(accountingPeriod.accountingPeriodId, accountingPeriod);
   }
+  state.dimensionCatalogsByCompanyId.set(DEMO_LEDGER_COMPANY_ID, {
+    companyId: DEMO_LEDGER_COMPANY_ID,
+    projects: copy(DEMO_DIMENSION_CATALOG.projects),
+    costCenters: copy(DEMO_DIMENSION_CATALOG.costCenters),
+    businessAreas: copy(DEMO_DIMENSION_CATALOG.businessAreas)
+  });
 }
 
 function defaultSeriesDescription(seriesCode) {
@@ -2087,7 +2569,12 @@ function defaultSeriesDescription(seriesCode) {
     B: "Customer invoices",
     E: "Supplier invoices",
     H: "Payroll",
-    I: "VAT"
+    I: "VAT",
+    V: "Automated corrections and reversals",
+    W: "Historical imports",
+    X: "Audit and revision adjustments",
+    Y: "Technical migration reserve",
+    Z: "Blocked reserve series"
   };
   return knownDescriptions[seriesCode] || `Voucher series ${seriesCode}`;
 }
@@ -2149,6 +2636,126 @@ function normalizeMetadata(metadataJson, importedFlag) {
     normalized.pipelineStage = "ledger_posting";
   }
   return normalized;
+}
+
+function normalizeDimensionJson({ companyId, accountNumber, dimensionJson, sourceType, metadataJson }) {
+  if (!dimensionJson || typeof dimensionJson !== "object" || Array.isArray(dimensionJson)) {
+    throw httpError(400, "dimension_json_invalid", "Dimension data must be an object.");
+  }
+
+  const normalized = {};
+  for (const key of Object.keys(dimensionJson)) {
+    if (!DIMENSION_KEYS.includes(key)) {
+      throw httpError(400, "dimension_key_invalid", `Unsupported ledger dimension ${key}.`);
+    }
+    const value = dimensionJson[key];
+    if (value == null || String(value).trim().length === 0) {
+      continue;
+    }
+    normalized[key] = String(value).trim();
+  }
+
+  ensureRequiredDimensions({
+    companyId,
+    accountNumber,
+    dimensionJson: normalized,
+    sourceType,
+    metadataJson
+  });
+  return normalized;
+}
+
+function ensureRequiredDimensions({ companyId, accountNumber, dimensionJson, sourceType, metadataJson }) {
+  const catalog = ensureDimensionCatalogForValidation(companyId);
+
+  if (dimensionJson.projectId) {
+    requireDimensionValue(catalog.projects, "projectId", dimensionJson.projectId);
+  }
+  if (dimensionJson.costCenterCode) {
+    requireDimensionValue(catalog.costCenters, "costCenterCode", dimensionJson.costCenterCode);
+  }
+  if (dimensionJson.businessAreaCode) {
+    requireDimensionValue(catalog.businessAreas, "businessAreaCode", dimensionJson.businessAreaCode);
+  }
+
+  if (requiresProjectDimension({ accountNumber, sourceType, metadataJson }) && !dimensionJson.projectId) {
+    throw httpError(400, "project_dimension_required", "Project-cost postings require a project dimension.");
+  }
+}
+
+function ensureDimensionCatalogForValidation(companyId) {
+  return {
+    companyId,
+    projects: copy(DEMO_DIMENSION_CATALOG.projects),
+    costCenters: copy(DEMO_DIMENSION_CATALOG.costCenters),
+    businessAreas: copy(DEMO_DIMENSION_CATALOG.businessAreas)
+  };
+}
+
+function requireDimensionValue(values, dimensionKey, code) {
+  const value = values.find((candidate) => candidate.code === code);
+  if (!value || value.status !== "active") {
+    throw httpError(400, "dimension_value_not_found", `Dimension ${dimensionKey} value ${code} is not active for the company.`);
+  }
+}
+
+function requiresProjectDimension({ accountNumber, sourceType, metadataJson }) {
+  const dimensionRequiredByContext =
+    sourceType === "PROJECT_WIP" || (metadataJson && metadataJson.dimensionRequirementCode === "project_cost");
+  if (!dimensionRequiredByContext) {
+    return false;
+  }
+  const normalizedAccountNumber = String(accountNumber || "");
+  return /^[4-8]/.test(normalizedAccountNumber);
+}
+
+function reverseLines(lines) {
+  return lines.map((line) => ({
+    accountNumber: line.accountNumber,
+    debitAmount: line.creditAmount,
+    creditAmount: line.debitAmount,
+    currencyCode: line.currencyCode,
+    exchangeRate: line.exchangeRate,
+    dimensionJson: copy(line.dimensionJson),
+    sourceType: "MANUAL_JOURNAL",
+    sourceId: line.sourceId
+  }));
+}
+
+function hasSoftLockOverride(metadataJson) {
+  return Boolean(
+    metadataJson &&
+      typeof metadataJson === "object" &&
+      metadataJson.periodLockOverrideApprovedByActorId &&
+      metadataJson.periodLockOverrideReasonCode
+  );
+}
+
+function assertLockStatus(status) {
+  const resolvedStatus = requireText(status, "accounting_period_status_required");
+  if (!LOCKED_PERIOD_STATUSES.includes(resolvedStatus)) {
+    throw httpError(400, "accounting_period_status_invalid", `Unsupported accounting period lock status ${resolvedStatus}.`);
+  }
+  return resolvedStatus;
+}
+
+function assertSeniorFinanceApproval({ actorId, approvedByActorId, approvedByRoleCode }) {
+  const resolvedApprovedByActorId = requireText(approvedByActorId, "approved_by_actor_id_required");
+  if (resolvedApprovedByActorId === actorId) {
+    throw httpError(400, "dual_control_required", "Requester and approver must be different actors.");
+  }
+  const resolvedRoleCode = requireText(approvedByRoleCode, "approved_by_role_code_required").toLowerCase();
+  if (!["close_signatory", "finance_manager", "company_admin"].includes(resolvedRoleCode)) {
+    throw httpError(400, "senior_finance_role_required", "A senior finance approver is required for this operation.");
+  }
+}
+
+function assertCorrectionType(correctionType) {
+  const resolvedCorrectionType = requireText(correctionType, "correction_type_required");
+  if (!["delta", "full_reversal", "reversal_and_rebook"].includes(resolvedCorrectionType)) {
+    throw httpError(400, "correction_type_invalid", `Unsupported correction type ${resolvedCorrectionType}.`);
+  }
+  return resolvedCorrectionType;
 }
 
 function toCompanyScopedKey(companyId, value) {

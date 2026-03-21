@@ -84,9 +84,27 @@ export interface AccountingPeriod {
   readonly companyId: string;
   readonly startsOn: string;
   readonly endsOn: string;
-  readonly status: "open" | "locked";
+  readonly status: "open" | "soft_locked" | "hard_closed";
+  readonly lockReasonCode?: string | null;
+  readonly lockedByActorId?: string | null;
+  readonly lockedAt?: string | null;
+  readonly reopenedByActorId?: string | null;
+  readonly reopenedAt?: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+export interface LedgerDimensionCatalog {
+  readonly companyId: string;
+  readonly projects: readonly LedgerDimensionValue[];
+  readonly costCenters: readonly LedgerDimensionValue[];
+  readonly businessAreas: readonly LedgerDimensionValue[];
+}
+
+export interface LedgerDimensionValue {
+  readonly code: string;
+  readonly label: string;
+  readonly status: "active" | "inactive";
 }
 
 export interface JournalLineInput {
@@ -119,6 +137,14 @@ export interface JournalLine {
   readonly createdAt: string;
 }
 
+export interface CorrectionResult {
+  readonly originalJournalEntry: JournalEntry;
+  readonly reversalJournalEntry: JournalEntry | null;
+  readonly correctedJournalEntry: JournalEntry;
+}
+
+export type JournalCorrectionType = "delta" | "full_reversal" | "reversal_and_rebook";
+
 export interface JournalEntry {
   readonly journalEntryId: string;
   readonly companyId: string;
@@ -142,6 +168,9 @@ export interface JournalEntry {
   readonly postedAt: string | null;
   readonly reversalOfJournalEntryId: string | null;
   readonly reversedByJournalEntryId: string | null;
+  readonly correctionOfJournalEntryId: string | null;
+  readonly correctionKey: string | null;
+  readonly correctionType: JournalCorrectionType | null;
   readonly totalDebit: number;
   readonly totalCredit: number;
   readonly lines: readonly JournalLine[];

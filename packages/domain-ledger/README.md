@@ -11,3 +11,11 @@ Ledger boundary for DSAM chart seeding, voucher series, journal entry validation
 - Open-period enforcement and locked-period rejection.
 - Idempotent posting keys per company.
 - Imported history marking without silent mutation of posted entries.
+
+## Phase 3.2 scope
+
+- Project, cost center and business area dimensions with deterministic validation.
+- Soft lock and hard close support on accounting periods with audit metadata.
+- Reopen flow with dual-control approval requirements for senior finance roles.
+- Full reversal and correction vouchers that link back to the original journal.
+- Automatic redirection of hard-close corrections into the next open period.

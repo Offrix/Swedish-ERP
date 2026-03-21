@@ -59,9 +59,13 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/review-tasks/:reviewTaskId",
               "/v1/ledger/chart/install",
               "/v1/ledger/accounts",
+              "/v1/ledger/accounting-periods",
+              "/v1/ledger/dimensions",
               "/v1/ledger/voucher-series",
               "/v1/ledger/journal-entries",
-              "/v1/ledger/journal-entries/:journalEntryId"
+              "/v1/ledger/journal-entries/:journalEntryId",
+              "/v1/ledger/journal-entries/:journalEntryId/reverse",
+              "/v1/ledger/journal-entries/:journalEntryId/correct"
             ]
           }
         : { status: "ok" }
@@ -739,6 +743,44 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/ledger/accounting-periods") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(res, 200, {
+      items: platform.listAccountingPeriods({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ledger/dimensions") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(res, 200, platform.listLedgerDimensions({ companyId }));
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/ledger/voucher-series") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -792,6 +834,63 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  const accountingPeriodLockMatch = matchPath(path, "/v1/ledger/accounting-periods/:accountingPeriodId/lock");
+  if (accountingPeriodLockMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.lockAccountingPeriod({
+        companyId,
+        accountingPeriodId: accountingPeriodLockMatch.accountingPeriodId,
+        status: body.status || "soft_locked",
+        actorId: principal.userId,
+        reasonCode: body.reasonCode,
+        approvedByActorId: body.approvedByActorId || null,
+        approvedByRoleCode: body.approvedByRoleCode || null,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const accountingPeriodReopenMatch = matchPath(path, "/v1/ledger/accounting-periods/:accountingPeriodId/reopen");
+  if (accountingPeriodReopenMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.reopenAccountingPeriod({
+        companyId,
+        accountingPeriodId: accountingPeriodReopenMatch.accountingPeriodId,
+        actorId: principal.userId,
+        reasonCode: body.reasonCode,
+        approvedByActorId: body.approvedByActorId,
+        approvedByRoleCode: body.approvedByRoleCode || null,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   const journalEntryMatch = matchPath(path, "/v1/ledger/journal-entries/:journalEntryId");
   if (journalEntryMatch && req.method === "GET") {
     const companyId = requireText(
@@ -813,6 +912,68 @@ async function handleRequest({ req, res, platform, flags }) {
       platform.getJournalEntry({
         companyId,
         journalEntryId: journalEntryMatch.journalEntryId
+      })
+    );
+    return;
+  }
+
+  const journalEntryReverseMatch = matchPath(path, "/v1/ledger/journal-entries/:journalEntryId/reverse");
+  if (journalEntryReverseMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.reverseJournalEntry({
+        companyId,
+        journalEntryId: journalEntryReverseMatch.journalEntryId,
+        actorId: principal.userId,
+        reasonCode: body.reasonCode,
+        correctionKey: body.correctionKey,
+        journalDate: body.journalDate || null,
+        voucherSeriesCode: body.voucherSeriesCode || "V",
+        metadataJson: body.metadataJson || {},
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const journalEntryCorrectMatch = matchPath(path, "/v1/ledger/journal-entries/:journalEntryId/correct");
+  if (journalEntryCorrectMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.correctJournalEntry({
+        companyId,
+        journalEntryId: journalEntryCorrectMatch.journalEntryId,
+        actorId: principal.userId,
+        reasonCode: body.reasonCode,
+        correctionKey: body.correctionKey,
+        lines: body.lines,
+        journalDate: body.journalDate || null,
+        voucherSeriesCode: body.voucherSeriesCode || "A",
+        reverseOriginal: body.reverseOriginal === true,
+        metadataJson: body.metadataJson || {},
+        correlationId: body.correlationId || createCorrelationId()
       })
     );
     return;
