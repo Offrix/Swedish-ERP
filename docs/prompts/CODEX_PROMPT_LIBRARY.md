@@ -2,6 +2,22 @@
 
 Detta dokument innehåller nästan färdiga prompts till Codex för varje delfas. Kopiera en prompt åt gången.
 
+## Tvärgående läsning när scope berör stödplattformen
+
+När implementationen berör search, work items, submissions, async jobs, offline, migration, support/backoffice, reporting/export eller feature flags ska Codex läsa relevanta tvärgående dokument innan kod skrivs:
+
+- Search och index: `docs/domain/search-indexing-and-global-search.md`, `docs/adr/ADR-0013-search-and-indexing-strategy.md`, `docs/runbooks/search-index-rebuild-and-repair.md`, `docs/test-plans/search-relevance-and-permission-trimming-tests.md`
+- Work items och notifieringar: `docs/domain/work-items-deadlines-notifications.md`, `docs/adr/ADR-0014-work-items-deadlines-and-notifications-strategy.md`
+- Async jobs och replay: `docs/domain/async-jobs-retry-replay-and-dead-letter.md`, `docs/adr/ADR-0015-async-jobs-queues-and-replay-strategy.md`, `docs/runbooks/async-job-retry-replay-and-dead-letter.md`, `docs/test-plans/queue-resilience-and-replay-tests.md`
+- Feature flags och disable: `docs/adr/ADR-0016-feature-flags-rollout-and-kill-switch-strategy.md`, `docs/policies/feature-flag-and-emergency-disable-policy.md`, `docs/runbooks/feature-flag-rollout-and-emergency-disable.md`, `docs/test-plans/feature-flag-rollback-and-disable-tests.md`
+- Submissions och receipts: `docs/domain/submission-receipts-and-action-queue.md`, `docs/adr/ADR-0017-submission-receipt-and-action-queue-strategy.md`, `docs/runbooks/submission-operations-and-retry.md`
+- Offline sync: `docs/domain/offline-sync-and-conflict-resolution.md`, `docs/adr/ADR-0018-offline-sync-and-conflict-resolution-strategy.md`, `docs/runbooks/mobile-offline-conflict-repair.md`, `docs/test-plans/mobile-offline-sync-tests.md`
+- Reporting, metrics och export: `docs/domain/reporting-metric-catalog-and-export-jobs.md`, `docs/adr/ADR-0019-reporting-exports-and-metric-governance-strategy.md`, `docs/test-plans/report-reproducibility-and-export-integrity-tests.md`
+- Migration och cutover: `docs/domain/migration-cockpit-parallel-run-and-cutover.md`, `docs/adr/ADR-0020-migration-parallel-run-and-cutover-strategy.md`, `docs/runbooks/pilot-migration-and-cutover.md`, `docs/test-plans/migration-parallel-run-diff-tests.md`
+- Audit review, support och backoffice: `docs/domain/audit-review-support-and-admin-backoffice.md`, `docs/adr/ADR-0021-audit-review-support-and-backoffice-strategy.md`, `docs/policies/support-access-and-impersonation-policy.md`, `docs/runbooks/support-backoffice-and-audit-review.md`, `docs/test-plans/audit-review-and-sod-tests.md`
+- Byråportfölj, klientgodkännanden och close: `docs/domain/bureau-portfolio-client-requests-and-approvals.md`, `docs/domain/close-checklists-blockers-and-signoff.md`, `docs/policies/client-approval-deadline-and-escalation-policy.md`
+- Saved views och collaboration: `docs/domain/saved-views-dashboards-and-personalization.md`, `docs/domain/comments-mentions-and-collaboration.md`
+
 
 # FAS 0 — Bootstrap, repo och dokumentgrund
 
@@ -1196,7 +1212,7 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/rot-rut-engine.md, docs/compliance/se/personalliggare-engine.md
+docs/compliance/se/rot-rut-engine.md, docs/compliance/se/personalliggare-engine.md, docs/domain/offline-sync-and-conflict-resolution.md, docs/adr/ADR-0018-offline-sync-and-conflict-resolution-strategy.md, docs/runbooks/mobile-offline-conflict-repair.md, docs/test-plans/mobile-offline-sync-tests.md
 
 Implement exactly this scope:
 - Projektbudget
@@ -1235,13 +1251,14 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/rot-rut-engine.md, docs/compliance/se/personalliggare-engine.md
+docs/compliance/se/rot-rut-engine.md, docs/compliance/se/personalliggare-engine.md, docs/domain/offline-sync-and-conflict-resolution.md, docs/adr/ADR-0018-offline-sync-and-conflict-resolution-strategy.md, docs/runbooks/mobile-offline-conflict-repair.md, docs/test-plans/mobile-offline-sync-tests.md
 
 Implement exactly this scope:
 - Dispatch
 - fältmobil
 - material och lager
 - kundsignatur
+- offlinekö, syncstatus och konfliktlösning
 
 Rules:
 - do not skip migrations
@@ -1316,12 +1333,13 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/accounting-foundation.md, docs/ui/ENTERPRISE_UI_PLAN.md
+docs/compliance/se/accounting-foundation.md, docs/domain/search-indexing-and-global-search.md, docs/domain/saved-views-dashboards-and-personalization.md, docs/domain/reporting-metric-catalog-and-export-jobs.md, docs/adr/ADR-0013-search-and-indexing-strategy.md, docs/adr/ADR-0019-reporting-exports-and-metric-governance-strategy.md, docs/test-plans/search-relevance-and-permission-trimming-tests.md, docs/test-plans/report-reproducibility-and-export-integrity-tests.md, docs/ui/ENTERPRISE_UI_PLAN.md
 
 Implement exactly this scope:
 - P&L, balans, cashflow, reskontra, projekt
 - drilldown
 - rapportbyggare light
+- metric catalog och exportjobb
 
 Rules:
 - do not skip migrations
@@ -1354,13 +1372,14 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/accounting-foundation.md, docs/ui/ENTERPRISE_UI_PLAN.md
+docs/compliance/se/accounting-foundation.md, docs/domain/work-items-deadlines-notifications.md, docs/domain/search-indexing-and-global-search.md, docs/domain/saved-views-dashboards-and-personalization.md, docs/domain/bureau-portfolio-client-requests-and-approvals.md, docs/domain/comments-mentions-and-collaboration.md, docs/adr/ADR-0013-search-and-indexing-strategy.md, docs/adr/ADR-0014-work-items-deadlines-and-notifications-strategy.md, docs/policies/client-approval-deadline-and-escalation-policy.md, docs/ui/ENTERPRISE_UI_PLAN.md
 
 Implement exactly this scope:
 - Byråportfölj
 - deadlines
 - klientstatus
 - massåtgärder
+- klientrequester och approvals
 
 Rules:
 - do not skip migrations
@@ -1393,12 +1412,13 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/accounting-foundation.md, docs/ui/ENTERPRISE_UI_PLAN.md
+docs/compliance/se/accounting-foundation.md, docs/compliance/se/reconciliation-and-close-engine.md, docs/domain/work-items-deadlines-notifications.md, docs/domain/close-checklists-blockers-and-signoff.md, docs/adr/ADR-0014-work-items-deadlines-and-notifications-strategy.md, docs/policies/client-approval-deadline-and-escalation-policy.md, docs/ui/ENTERPRISE_UI_PLAN.md
 
 Implement exactly this scope:
 - Close workbench
 - avstämningslistor
 - sign-off
+- blockers och reopen/override
 
 Rules:
 - do not skip migrations
@@ -1472,12 +1492,13 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/annual-reporting-engine.md, docs/compliance/se/accounting-foundation.md
+docs/compliance/se/annual-reporting-engine.md, docs/compliance/se/accounting-foundation.md, docs/domain/work-items-deadlines-notifications.md, docs/domain/submission-receipts-and-action-queue.md, docs/adr/ADR-0014-work-items-deadlines-and-notifications-strategy.md, docs/adr/ADR-0017-submission-receipt-and-action-queue-strategy.md, docs/runbooks/submission-operations-and-retry.md
 
 Implement exactly this scope:
 - INK/NE/SRU-underlag
 - moms/AGI/HUS-översikter
 - myndighetsadapterlager
+- submission receipts och action queue
 
 Rules:
 - do not skip migrations
@@ -1552,13 +1573,14 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/adr/ADR-0003-domain-boundaries.md, docs/adr/ADR-0005-rule-engine-philosophy.md
+docs/adr/ADR-0003-domain-boundaries.md, docs/adr/ADR-0005-rule-engine-philosophy.md, docs/domain/async-jobs-retry-replay-and-dead-letter.md, docs/adr/ADR-0015-async-jobs-queues-and-replay-strategy.md, docs/runbooks/async-job-retry-replay-and-dead-letter.md, docs/test-plans/queue-resilience-and-replay-tests.md
 
 Implement exactly this scope:
 - Bank
 - Peppol
 - pension
 - CRM/e-handel/ID06
+- async jobs och replay-safe adapters
 
 Rules:
 - do not skip migrations
@@ -1633,12 +1655,13 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/test-plans/master-verification-gates.md, docs/runbooks/production-deploy.md
+docs/domain/audit-review-support-and-admin-backoffice.md, docs/adr/ADR-0021-audit-review-support-and-backoffice-strategy.md, docs/policies/support-access-and-impersonation-policy.md, docs/runbooks/support-backoffice-and-audit-review.md, docs/test-plans/audit-review-and-sod-tests.md, docs/test-plans/master-verification-gates.md, docs/runbooks/production-deploy.md
 
 Implement exactly this scope:
 - Penteståtgärder
 - behörighetsgranskning
 - SoD-kontroller
+- audit review och supportspärrar
 
 Rules:
 - do not skip migrations
@@ -1671,12 +1694,13 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/test-plans/master-verification-gates.md, docs/runbooks/production-deploy.md
+docs/domain/async-jobs-retry-replay-and-dead-letter.md, docs/adr/ADR-0015-async-jobs-queues-and-replay-strategy.md, docs/policies/feature-flag-and-emergency-disable-policy.md, docs/runbooks/async-job-retry-replay-and-dead-letter.md, docs/runbooks/feature-flag-rollout-and-emergency-disable.md, docs/test-plans/queue-resilience-and-replay-tests.md, docs/test-plans/feature-flag-rollback-and-disable-tests.md, docs/test-plans/master-verification-gates.md, docs/runbooks/production-deploy.md
 
 Implement exactly this scope:
 - Load profiler
 - backup/restore-prover
 - chaos-scenarier
+- replay, disable och recovery
 
 Rules:
 - do not skip migrations
@@ -1709,12 +1733,13 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/test-plans/master-verification-gates.md, docs/runbooks/production-deploy.md
+docs/domain/migration-cockpit-parallel-run-and-cutover.md, docs/adr/ADR-0020-migration-parallel-run-and-cutover-strategy.md, docs/runbooks/pilot-migration-and-cutover.md, docs/test-plans/migration-parallel-run-diff-tests.md, docs/test-plans/master-verification-gates.md, docs/runbooks/production-deploy.md
 
 Implement exactly this scope:
 - Pilotplan
 - migreringschecklistor
 - go-live och rollback-plan
+- parallel run, diff report och cutover
 
 Rules:
 - do not skip migrations

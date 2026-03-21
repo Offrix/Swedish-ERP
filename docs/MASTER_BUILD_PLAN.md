@@ -11,13 +11,14 @@ Bygg ett svenskt enterprise-system för ekonomi, dokument, projekt, lön, pensio
 1. `docs/MASTER_BUILD_PLAN.md`
 2. ADR:er i `docs/adr/`
 3. Compliance-motorer i `docs/compliance/se/`
-4. `docs/domain/ubiquitous-language.md`
-5. `docs/test-plans/master-test-strategy.md`
-6. `docs/test-plans/master-verification-gates.md`
-7. `docs/runbooks/local-development.md`
-8. `docs/runbooks/production-deploy.md`
-9. `docs/ui/ENTERPRISE_UI_PLAN.md`
-10. `docs/prompts/CODEX_PROMPT_LIBRARY.md`
+4. Domändokument i `docs/domain/`, inklusive work items, search, saved views, byråportfölj, close, submissions, async jobs, support/backoffice, offline, migration, reporting och collaboration
+5. `docs/domain/ubiquitous-language.md`
+6. `docs/test-plans/master-test-strategy.md`
+7. `docs/test-plans/master-verification-gates.md`
+8. `docs/runbooks/local-development.md`
+9. `docs/runbooks/production-deploy.md`
+10. `docs/ui/ENTERPRISE_UI_PLAN.md`
+11. `docs/prompts/CODEX_PROMPT_LIBRARY.md`
 
 
 ## Codex-kontrakt
@@ -459,14 +460,14 @@ Ingen delfas är klar förrän följande finns:
 
 ## Exakt byggordning i checkbox-format
 
-- [ ] **FAS 0 — Bootstrap, repo och dokumentgrund**
-  - [ ] 0.1 Monorepo och runtime-låsning
-  - [ ] 0.2 CI, kvalitet och säkerhetsbas
-  - [ ] 0.3 Domänskelett och docskeleton
-- [ ] **FAS 1 — Identitet, organisation, auth och onboarding**
-  - [ ] 1.1 Organisation, roller och accesskontroll
-  - [ ] 1.2 Inloggning, sessioner och stark autentisering
-  - [ ] 1.3 Bolagssetup och onboarding wizard
+- [x] **FAS 0 — Bootstrap, repo och dokumentgrund**
+  - [x] 0.1 Monorepo och runtime-låsning
+  - [x] 0.2 CI, kvalitet och säkerhetsbas
+  - [x] 0.3 Domänskelett och docskeleton
+- [x] **FAS 1 — Identitet, organisation, auth och onboarding**
+  - [x] 1.1 Organisation, roller och accesskontroll
+  - [x] 1.2 Inloggning, sessioner och stark autentisering
+  - [x] 1.3 Bolagssetup och onboarding wizard
 - [ ] **FAS 2 — Dokumentmotor, företagsinbox och OCR**
   - [ ] 2.1 Dokumentarkiv och metadata
   - [ ] 2.2 Företagsinbox och mail ingestion
@@ -528,42 +529,42 @@ Lås verktyg, repo, dokumentstruktur, CI och lokala miljöer innan någon affär
 ### 0.1 Monorepo och runtime-låsning
 
 **Bygg detta**
-- [ ] Monorepo med apps, packages, infra, docs
-- [ ] Låsta runtimes och lokala dev-verktyg
-- [ ] Docker Compose för lokala beroenden
+- [x] Monorepo med apps, packages, infra, docs
+- [x] Låsta runtimes och lokala dev-verktyg
+- [x] Docker Compose för lokala beroenden
 
 **Verifiera detta innan nästa delfas**
 - [ ] Ren maskin kan bootstrapa projektet
-- [ ] Versioner matchar ADR-0001
-- [ ] Health checks svarar grönt
+- [x] Versioner matchar ADR-0001
+- [x] Health checks svarar grönt
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P0-01`.
 
 ### 0.2 CI, kvalitet och säkerhetsbas
 
 **Bygg detta**
-- [ ] GitHub Actions
-- [ ] Lint, typecheck, test och security checks
-- [ ] Branch protection och CODEOWNERS
+- [x] GitHub Actions
+- [x] Lint, typecheck, test och security checks
+- [x] Branch protection och CODEOWNERS
 
 **Verifiera detta innan nästa delfas**
 - [ ] Trasig PR blockeras
-- [ ] Secrets och sårbarheter fångas
-- [ ] CI är deterministisk
+- [x] Secrets och sårbarheter fångas
+- [x] CI är deterministisk
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P0-02`.
 
 ### 0.3 Domänskelett och docskeleton
 
 **Bygg detta**
-- [ ] Package placeholders för alla domäner
-- [ ] ADR-bibliotek
-- [ ] Ubiquitous language
+- [x] Package placeholders för alla domäner
+- [x] ADR-bibliotek
+- [x] Ubiquitous language
 
 **Verifiera detta innan nästa delfas**
-- [ ] Inga cirkulära beroenden
-- [ ] Alla domäner har README
-- [ ] Alla obligatoriska dokument finns
+- [x] Inga cirkulära beroenden
+- [x] Alla domäner har README
+- [x] Alla obligatoriska dokument finns
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P0-03`.
 
@@ -574,44 +575,44 @@ Gör det möjligt att skapa bolag, användare, roller, attester och säkra sessi
 ### 1.1 Organisation, roller och accesskontroll
 
 **Bygg detta**
-- [ ] Bolagsmodell
-- [ ] Användarmodell
-- [ ] RBAC + objektbaserad åtkomst
-- [ ] Delegation och attestkedjor
+- [x] Bolagsmodell
+- [x] Användarmodell
+- [x] RBAC + objektbaserad åtkomst
+- [x] Delegation och attestkedjor
 
 **Verifiera detta innan nästa delfas**
-- [ ] Bolag kan inte se varandras data
-- [ ] Delegation respekterar datum och scope
-- [ ] Servern blockerar otillåtna actions
+- [x] Bolag kan inte se varandras data
+- [x] Delegation respekterar datum och scope
+- [x] Servern blockerar otillåtna actions
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P1-01`.
 
 ### 1.2 Inloggning, sessioner och stark autentisering
 
 **Bygg detta**
-- [ ] Login/logout
-- [ ] MFA
-- [ ] Passkeys/TOTP
-- [ ] BankID-provider-abstraktion
+- [x] Login/logout
+- [x] MFA
+- [x] Passkeys/TOTP
+- [x] BankID-provider-abstraktion
 
 **Verifiera detta innan nästa delfas**
-- [ ] Sessioner kan återkallas
-- [ ] MFA krävs för admins
-- [ ] Audit log skapas för autentisering
+- [x] Sessioner kan återkallas
+- [x] MFA krävs för admins
+- [x] Audit log skapas för autentisering
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P1-02`.
 
 ### 1.3 Bolagssetup och onboarding wizard
 
 **Bygg detta**
-- [ ] Skapa bolag
-- [ ] Registreringar och inställningar
-- [ ] Kontoplan-, moms- och periodsetup
+- [x] Skapa bolag
+- [x] Registreringar och inställningar
+- [x] Kontoplan-, moms- och periodsetup
 
 **Verifiera detta innan nästa delfas**
-- [ ] Onboarding skapar komplett bolagskonfiguration
-- [ ] Checklista visar saknade steg
-- [ ] Setup kan återupptas
+- [x] Onboarding skapar komplett bolagskonfiguration
+- [x] Checklista visar saknade steg
+- [x] Setup kan återupptas
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P1-03`.
 
@@ -1219,13 +1220,31 @@ Stresstesta systemet, kör verklig migrering och gå live kontrollerat.
 
 ## Domändokument per fas
 
+- FAS 2 → `docs/compliance/se/document-inbox-and-ocr-engine.md` och `docs/runbooks/fas-2-document-archive-verification.md`
 - FAS 3 → `docs/compliance/se/accounting-foundation.md`
 - FAS 4 → `docs/compliance/se/vat-engine.md`
+- FAS 5 → `docs/compliance/se/ar-customer-invoicing-engine.md` och `docs/compliance/se/einvoice-peppol-engine.md`
+- FAS 6 → `docs/compliance/se/ap-supplier-invoice-engine.md`, `docs/compliance/se/bank-and-payments-engine.md` och `docs/compliance/se/einvoice-peppol-engine.md`
 - FAS 8 → `docs/compliance/se/payroll-engine.md` och `docs/compliance/se/agi-engine.md`
-- FAS 9 → `docs/compliance/se/benefits-engine.md`, `docs/compliance/se/travel-and-traktamente-engine.md`, `docs/compliance/se/pension-and-salary-exchange-engine.md`
-- FAS 10 → `docs/compliance/se/rot-rut-engine.md`, `docs/compliance/se/personalliggare-engine.md`
-- FAS 5–6–12 → `docs/compliance/se/einvoice-peppol-engine.md`
-- FAS 12 → `docs/compliance/se/annual-reporting-engine.md`
+- FAS 9 → `docs/compliance/se/benefits-engine.md`, `docs/compliance/se/travel-and-traktamente-engine.md`, `docs/compliance/se/pension-and-salary-exchange-engine.md`, `docs/compliance/se/cash-card-and-clearing-engine.md` och `docs/compliance/se/collections-writeoff-and-bad-debt-engine.md`
+- FAS 10 → `docs/compliance/se/rot-rut-engine.md`, `docs/compliance/se/personalliggare-engine.md`, `docs/compliance/se/project-billing-and-revenue-recognition-engine.md` och `docs/domain/offline-sync-and-conflict-resolution.md`
+- FAS 11 → `docs/compliance/se/reconciliation-and-close-engine.md`, `docs/domain/work-items-deadlines-notifications.md`, `docs/domain/search-indexing-and-global-search.md`, `docs/domain/saved-views-dashboards-and-personalization.md`, `docs/domain/bureau-portfolio-client-requests-and-approvals.md`, `docs/domain/close-checklists-blockers-and-signoff.md`, `docs/domain/reporting-metric-catalog-and-export-jobs.md` och `docs/domain/comments-mentions-and-collaboration.md`
+- FAS 12 → `docs/compliance/se/annual-reporting-engine.md` och `docs/domain/submission-receipts-and-action-queue.md`
+- FAS 13 → `docs/domain/async-jobs-retry-replay-and-dead-letter.md`
+- FAS 14 → `docs/domain/audit-review-support-and-admin-backoffice.md` och `docs/domain/migration-cockpit-parallel-run-and-cutover.md`
+
+## Tvärgående ADR:er, policies, runbooks och testplaner
+
+- Search, index och global search styrs av `docs/adr/ADR-0013-search-and-indexing-strategy.md`, `docs/runbooks/search-index-rebuild-and-repair.md` och `docs/test-plans/search-relevance-and-permission-trimming-tests.md`.
+- Work items, deadlines och notifieringar styrs av `docs/adr/ADR-0014-work-items-deadlines-and-notifications-strategy.md`.
+- Async jobs, retry/replay och dead-letter styrs av `docs/adr/ADR-0015-async-jobs-queues-and-replay-strategy.md`, `docs/runbooks/async-job-retry-replay-and-dead-letter.md` och `docs/test-plans/queue-resilience-and-replay-tests.md`.
+- Feature flags och nödbrytare styrs av `docs/adr/ADR-0016-feature-flags-rollout-and-kill-switch-strategy.md`, `docs/policies/feature-flag-and-emergency-disable-policy.md`, `docs/runbooks/feature-flag-rollout-and-emergency-disable.md` och `docs/test-plans/feature-flag-rollback-and-disable-tests.md`.
+- Submissions, receipts och action queue styrs av `docs/adr/ADR-0017-submission-receipt-and-action-queue-strategy.md` och `docs/runbooks/submission-operations-and-retry.md`.
+- Offline sync och konfliktlösning styrs av `docs/adr/ADR-0018-offline-sync-and-conflict-resolution-strategy.md`, `docs/runbooks/mobile-offline-conflict-repair.md` och `docs/test-plans/mobile-offline-sync-tests.md`.
+- Rapportering, metric governance och exportjobb styrs av `docs/adr/ADR-0019-reporting-exports-and-metric-governance-strategy.md` och `docs/test-plans/report-reproducibility-and-export-integrity-tests.md`.
+- Migrering, parallellkörning och cutover styrs av `docs/adr/ADR-0020-migration-parallel-run-and-cutover-strategy.md`, `docs/runbooks/pilot-migration-and-cutover.md` och `docs/test-plans/migration-parallel-run-diff-tests.md`.
+- Audit review, support och backoffice styrs av `docs/adr/ADR-0021-audit-review-support-and-backoffice-strategy.md`, `docs/policies/support-access-and-impersonation-policy.md`, `docs/runbooks/support-backoffice-and-audit-review.md` och `docs/test-plans/audit-review-and-sod-tests.md`.
+- Klientgodkännanden, deadlines och eskalering styrs även av `docs/policies/client-approval-deadline-and-escalation-policy.md`.
 
 ## Verifieringsgrindar
 

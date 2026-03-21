@@ -2,9 +2,7 @@ import { failWith, listFiles, readText } from "./lib/repo.mjs";
 
 const files = [
   ...(await listFiles("apps", [".js", ".mjs"])),
-  ...(await listFiles("packages/ui-core", [".js", ".mjs"])),
-  ...(await listFiles("packages/ui-desktop", [".js", ".mjs"])),
-  ...(await listFiles("packages/ui-mobile", [".js", ".mjs"])),
+  ...(await listFiles("packages", [".js", ".mjs"])),
   ...(await listFiles("scripts", [".js", ".mjs"])),
   ...(await listFiles("tests", [".js", ".mjs"]))
 ];

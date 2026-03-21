@@ -47,57 +47,67 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 
 ## Fasgrindar
 
+### Tvärgående verifieringspaket som alltid ska passeras när scope berör området
+- `docs/test-plans/queue-resilience-and-replay-tests.md`
+- `docs/test-plans/search-relevance-and-permission-trimming-tests.md`
+- `docs/test-plans/mobile-offline-sync-tests.md`
+- `docs/test-plans/migration-parallel-run-diff-tests.md`
+- `docs/test-plans/audit-review-and-sod-tests.md`
+- `docs/test-plans/feature-flag-rollback-and-disable-tests.md`
+- `docs/test-plans/report-reproducibility-and-export-integrity-tests.md`
+
+
 ## Gate for FAS 0 — Bootstrap, repo och dokumentgrund
 
 ### Allmänt krav
-- [ ] Kod, tester och docs är uppdaterade i samma förändring
-- [ ] Demo kan köras på seed-data
+- [x] Kod, tester och docs är uppdaterade i samma förändring
+- [x] Demo kan köras på seed-data
 - [ ] Ingen kritisk eller hög bug står öppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen påverkar produktion
+- [x] Rollback eller disable-strategi finns om fasen påverkar produktion
 
 ### 0.1 Monorepo och runtime-låsning
 - [ ] Ren maskin kan bootstrapa projektet
-- [ ] Versioner matchar ADR-0001
-- [ ] Health checks svarar grönt
-- [ ] Prompt `P0-01` är körd och resultat dokumenterat
+- [x] Versioner matchar ADR-0001
+- [x] Health checks svarar grönt
+- [x] Prompt `P0-01` är körd och resultat dokumenterat
 
 ### 0.2 CI, kvalitet och säkerhetsbas
 - [ ] Trasig PR blockeras
-- [ ] Secrets och sårbarheter fångas
-- [ ] CI är deterministisk
-- [ ] Prompt `P0-02` är körd och resultat dokumenterat
+- [x] Secrets och sårbarheter fångas
+- [x] CI är deterministisk
+- [x] Prompt `P0-02` är körd och resultat dokumenterat
 
 ### 0.3 Domänskelett och docskeleton
-- [ ] Inga cirkulära beroenden
-- [ ] Alla domäner har README
-- [ ] Alla obligatoriska dokument finns
-- [ ] Prompt `P0-03` är körd och resultat dokumenterat
+- [x] Inga cirkulära beroenden
+- [x] Alla domäner har README
+- [x] Alla obligatoriska dokument finns
+- [x] Prompt `P0-03` är körd och resultat dokumenterat
 
 ## Gate for FAS 1 — Identitet, organisation, auth och onboarding
 
 ### Allmänt krav
-- [ ] Kod, tester och docs är uppdaterade i samma förändring
-- [ ] Demo kan köras på seed-data
+- [x] Kod, tester och docs är uppdaterade i samma förändring
+- [x] Demo kan köras på seed-data
 - [ ] Ingen kritisk eller hög bug står öppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen påverkar produktion
+- [x] Rollback eller disable-strategi finns om fasen påverkar produktion
 
 ### 1.1 Organisation, roller och accesskontroll
-- [ ] Bolag kan inte se varandras data
-- [ ] Delegation respekterar datum och scope
-- [ ] Servern blockerar otillåtna actions
-- [ ] Prompt `P1-01` är körd och resultat dokumenterat
+- [x] Bolag kan inte se varandras data
+- [x] Delegation respekterar datum och scope
+- [x] Servern blockerar otillåtna actions
+- [x] Prompt `P1-01` är körd och resultat dokumenterat
 
 ### 1.2 Inloggning, sessioner och stark autentisering
-- [ ] Sessioner kan återkallas
-- [ ] MFA krävs för admins
-- [ ] Audit log skapas för autentisering
-- [ ] Prompt `P1-02` är körd och resultat dokumenterat
+- [x] Sessioner kan återkallas
+- [x] MFA krävs för admins
+- [x] Audit log skapas för autentisering
+- [x] Prompt `P1-02` är körd och resultat dokumenterat
 
 ### 1.3 Bolagssetup och onboarding wizard
-- [ ] Onboarding skapar komplett bolagskonfiguration
-- [ ] Checklista visar saknade steg
-- [ ] Setup kan återupptas
-- [ ] Prompt `P1-03` är körd och resultat dokumenterat
+- [x] Onboarding skapar komplett bolagskonfiguration
+- [x] Checklista visar saknade steg
+- [x] Setup kan återupptas
+- [x] Prompt `P1-03` är körd och resultat dokumenterat
 
 ## Gate for FAS 2 — Dokumentmotor, företagsinbox och OCR
 

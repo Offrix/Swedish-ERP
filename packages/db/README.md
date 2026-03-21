@@ -1,8 +1,8 @@
 # @swedish-erp/db
 
-Phase 0 database foundation with migration framework, seed files and baseline governance tables.
+Database foundation with migration framework, seed files and baseline governance tables.
 
-## Phase 0 commitments
+## Commitments
 
 - One migration stream in `migrations/`.
 - One seed stream in `seeds/`.
@@ -10,6 +10,7 @@ Phase 0 database foundation with migration framework, seed files and baseline go
 - `schema_migrations` table for applied tracking.
 - Core audit/idempotency/outbox tables available before domain rollout.
 - Placeholder domain tables exist for every table family listed i `docs/MASTER_BUILD_PLAN.md`.
+- Phase 1 org/auth/onboarding tables live in the same monotonic migration stream.
 
 ## Usage
 
@@ -17,5 +18,5 @@ Phase 0 database foundation with migration framework, seed files and baseline go
 - Verify migration naming: `pnpm verify:db`
 - Dry-run migrations: `pnpm run db:migrate -- --dry-run`
 - Apply migrations through Docker infra: `pnpm run db:migrate`
-- Apply baseline seed: `pnpm run db:seed`
-- Apply demo seed: `pnpm run seed:demo`
+- Apply all baseline seeds in order: `pnpm run db:seed`
+- Apply baseline and demo seeds in order: `pnpm run seed:demo`

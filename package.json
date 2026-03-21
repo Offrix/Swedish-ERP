@@ -1,6 +1,6 @@
 {
   "name": "@swedish-erp/monorepo",
-  "version": "0.0.0-phase0",
+  "version": "0.0.0-phase1",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.12.4",
@@ -41,6 +41,7 @@
     "test:unit": "node scripts/run-tests.mjs unit",
     "typecheck": "node scripts/typecheck.mjs",
     "verify:db": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-db.ps1",
-    "verify:phase0": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase0.ps1"
+    "verify:phase0": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase0.ps1",
+    "verify:phase1": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase1.ps1"
   }
 }

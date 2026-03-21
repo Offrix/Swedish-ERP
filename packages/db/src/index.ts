@@ -48,6 +48,25 @@ export const EXPECTED_PHASE0_TABLES = [
   "outbox_events"
 ] as const;
 
+export const EXPECTED_PHASE1_TABLES = [
+  "roles",
+  "permissions",
+  "role_permissions",
+  "object_grants",
+  "approval_chains",
+  "approval_chain_steps",
+  "auth_identities",
+  "auth_sessions",
+  "auth_factors",
+  "auth_challenges",
+  "auth_providers",
+  "company_setup_blueprints",
+  "company_registrations",
+  "company_vat_setups",
+  "onboarding_runs",
+  "onboarding_step_states"
+] as const;
+
 export interface MigrationFile {
   readonly id: string;
   readonly slug: string;

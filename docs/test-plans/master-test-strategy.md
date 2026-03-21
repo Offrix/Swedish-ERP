@@ -25,6 +25,10 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - summeringar
 - formattering
 - parserfunktioner
+- search ranking och permissions trimming-beslut
+- retry/backoff-beräkningar och jobbstate
+- feature flag-upplösning och kill-switch-beslut
+- offline merge-regler och konfliktdetektion
 
 ### 3. Property-based tests
 - debit = credit
@@ -40,6 +44,10 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - XML/JSON-schema
 - webhook-signaturer
 - open banking- och Peppol-adaptrar
+- indexschema, snippets och saved-search payloads
+- receipt- och submissionkontrakt
+- offline sync-kontrakt och konfliktpayloads
+- exportmetadata och metric-versioner
 
 ### 5. Golden-data tests
 - hela affärsfall med låsta indata och förväntat utfall
@@ -55,6 +63,9 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - OCR pipeline
 - Peppol adapter
 - myndighetsadaptrar
+- sökindex och projektioner
+- support/backoffice och audit explorer
+- exportjobb och filmaterialisering
 
 ### 7. E2E-tests
 - UI till API till databas till bokföring till rapport
@@ -69,6 +80,9 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - rapportgenerering
 - close workbench
 - samtidiga bankavstämningar
+- global search och permissions trimming under last
+- queue-recovery och replay under incidentåterhämtning
+- stora Excel/PDF-exporter
 
 ### 9. Restore and resilience
 - databasåterläsning
@@ -203,6 +217,20 @@ En fas är inte klar förrän:
 - rapporter: tunga rapporter ska kunna gå async men ge tydlig status
 - sök: global sök ska svara snabbt för vardagliga objekt
 
+## Obligatoriska tvärgående testplaner
+
+Följande testplaner är obligatoriska när scope berör området och ska behandlas som officiell del av masterstrategin:
+
+- `docs/test-plans/queue-resilience-and-replay-tests.md` för köer, retry, replay och dead-letter.
+- `docs/test-plans/search-relevance-and-permission-trimming-tests.md` för search, ranking och behörighetsfiltrering.
+- `docs/test-plans/mobile-offline-sync-tests.md` för offlinekö, konfliktlösning och dubblettskydd i mobil/offline.
+- `docs/test-plans/migration-parallel-run-diff-tests.md` för importbatch, parallellkörning, diff report och cutover.
+- `docs/test-plans/audit-review-and-sod-tests.md` för audit explorer, supportåtkomst, impersonation, break-glass och SoD.
+- `docs/test-plans/feature-flag-rollback-and-disable-tests.md` för rollout, rollback, kill switch och emergency disable.
+- `docs/test-plans/report-reproducibility-and-export-integrity-tests.md` för metric catalog, reproducerbarhet, drilldown och exportjobb.
+
+När en fas använder någon av dessa förmågor ska respektive testplan läsas tillsammans med relevanta ADR:er, policies och runbooks innan implementation startar.
+
 ## Testdata policy
 
 - All testdata ska vara syntetisk eller avidentifierad.
@@ -248,6 +276,8 @@ En fas är inte klar förrän:
 - reglerade domäner får inte deployas utan golden-data-körning
 - schemaändringar kräver migrations- och rollback-plan
 - ändringar i submissionformat kräver contract tests och stagingkörning
+- ändringar i sökindex, metricdefinitioner, offlinekontrakt eller köpayloads kräver tillhörande tvärgående testplan
+- kill switches och feature-flag-ändringar i kritiska flöden kräver rollback- och disable-test
 
 ## Verktyg
 
@@ -264,3 +294,4 @@ En fas är inte klar förrän:
 - [ ] Golden data är versionsstyrd.
 - [ ] Restore-test kan köras.
 - [ ] Alla nya reglerade buggar genererar regressionstest.
+- [ ] Tvärgående testplaner är kopplade till relevanta faser och releases.

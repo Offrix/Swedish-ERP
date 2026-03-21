@@ -1,6 +1,6 @@
 # API
 
-Minimal HTTP baseline for the API surface.
+HTTP baseline plus FAS 1 organization, auth and onboarding routes.
 
 ## Start
 
@@ -13,3 +13,30 @@ pnpm --filter @swedish-erp/api start
 - `GET /`
 - `GET /healthz`
 - `GET /readyz`
+- `POST /v1/auth/login`
+- `POST /v1/auth/logout`
+- `POST /v1/auth/mfa/totp/enroll`
+- `POST /v1/auth/mfa/totp/verify`
+- `POST /v1/auth/mfa/passkeys/register-options`
+- `POST /v1/auth/mfa/passkeys/register-verify`
+- `POST /v1/auth/mfa/passkeys/assert`
+- `POST /v1/auth/bankid/start`
+- `POST /v1/auth/bankid/collect`
+- `GET/POST /v1/org/companies/:companyId/users`
+- `POST /v1/org/delegations`
+- `POST /v1/org/object-grants`
+- `POST /v1/org/attest-chains`
+- `GET /v1/org/attest-chains/:id`
+- `POST /v1/authz/check`
+- `POST /v1/onboarding/runs`
+- `GET /v1/onboarding/runs/:id`
+- `GET /v1/onboarding/runs/:id/checklist`
+- `POST /v1/onboarding/runs/:id/steps/company`
+- `POST /v1/onboarding/runs/:id/steps/registrations`
+- `POST /v1/onboarding/runs/:id/steps/chart`
+- `POST /v1/onboarding/runs/:id/steps/vat`
+- `POST /v1/onboarding/runs/:id/steps/periods`
+
+## Disable strategy
+
+Set `PHASE1_AUTH_ONBOARDING_ENABLED=false` to return `503` for FAS 1 routes without touching the rest of the API process.

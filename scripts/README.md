@@ -1,6 +1,6 @@
 # Scripts
 
-Phase 0 helper scripts for local setup and structure verification.
+Helper scripts for local setup, structure verification and phased rollout checks.
 
 - `build.mjs`: syntax-checks runnable JavaScript files.
 - `db-migrate.mjs`: applies SQL migrations through Docker or lists them in dry-run mode.
@@ -14,6 +14,7 @@ Phase 0 helper scripts for local setup and structure verification.
 - `typecheck.mjs`: validates runtime alignment and FAS 0 package boundaries.
 - `run-tests.mjs`: dispatches Node test suites by layer.
 - `verify-phase0.ps1`: validates required package and infra skeleton.
+- `verify-phase1.ps1`: validates required FAS 1 auth, org and onboarding artifacts.
 - `verify-db.ps1`: validates migration file naming.
 - `new-migration.ps1`: creates timestamped migration file in `packages/db/migrations`.
 - `dev-up.ps1`: starts docker infra.
