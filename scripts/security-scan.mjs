@@ -8,6 +8,7 @@ const secretPatterns = [
 ];
 
 const errors = [];
+const localBootstrapEnvPaths = new Set(["infra/docker/.env"]);
 const files = [
   ...(await listFiles("apps")),
   ...(await listFiles("packages")),
@@ -19,6 +20,10 @@ const files = [
 ];
 
 for (const file of files) {
+  const isLocalAppEnv = /^apps\/[^/]+\/\.env$/.test(file);
+  if (localBootstrapEnvPaths.has(file) || isLocalAppEnv) {
+    continue;
+  }
   if (file.endsWith(".env") && !file.endsWith(".example")) {
     errors.push(`Tracked non-example env file: ${file}`);
     continue;

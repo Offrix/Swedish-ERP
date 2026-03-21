@@ -10,12 +10,29 @@ const expectedPythonFile = (await readText(".python-version")).trim();
 
 const checks = [
   { label: "node", value: `v${expectedNode}`, expected: `v${expectedNode}` },
-  { label: "corepack", command: "corepack", args: ["--version"] },
+  {
+    label: "corepack",
+    command: process.platform === "win32" ? "cmd.exe" : "corepack",
+    args: process.platform === "win32" ? ["/d", "/s", "/c", "corepack --version"] : ["--version"]
+  },
   { label: "git", command: "git", args: ["--version"] },
   { label: "docker", command: "docker", args: ["--version"] },
-  { label: "python", command: "python", args: ["--version"], expectedContains: expectedPython },
   { label: "uv", command: "uv", args: ["--version"] }
 ];
+
+async function resolvePythonVersion() {
+  const direct = await commandResult("python", ["--version"]);
+  if (direct.code === 0) {
+    return direct;
+  }
+
+  const uvManaged = await commandResult("uv", ["run", "--python", expectedPython, "python", "--version"]);
+  if (uvManaged.code === 0) {
+    return uvManaged;
+  }
+
+  return direct;
+}
 
 if (expectedNode !== expectedNodeFile) {
   console.error(`Node mismatch between package.json (${expectedNode}) and .nvmrc (${expectedNodeFile}).`);
@@ -48,6 +65,18 @@ for (const check of checks) {
     continue;
   }
   console.log(`${check.label}: ${output}`);
+}
+
+const pythonResult = await resolvePythonVersion();
+const pythonOutput = `${pythonResult.stdout}${pythonResult.stderr}`.trim();
+if (pythonResult.code !== 0) {
+  failed = true;
+  console.error("python: missing");
+} else if (!pythonOutput.includes(expectedPython)) {
+  failed = true;
+  console.error(`python: expected output to include ${expectedPython}, got ${pythonOutput}`);
+} else {
+  console.log(`python: ${pythonOutput}`);
 }
 
 if (failed) {

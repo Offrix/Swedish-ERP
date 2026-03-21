@@ -8,6 +8,7 @@ Phase 0 local infrastructure profile.
 - Valkey 8.0.0
 - MinIO for local object storage
 - Mailpit for local outbound mail capture
+- PostgreSQL 18 stores data via `PGDATA=/var/lib/postgresql/18/docker` with the volume mounted at `/var/lib/postgresql`.
 
 ## Start
 
