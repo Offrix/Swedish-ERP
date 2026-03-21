@@ -718,14 +718,14 @@ Bygg ett explicit beslutsträd för svensk moms, EU, import, export, reverse cha
 ### 4.1 Momsmasterdata och beslutsträd
 
 **Bygg detta**
-- [ ] VAT codes
-- [ ] decision objects
-- [ ] regelpaket per datum
+- [x] VAT codes
+- [x] decision objects
+- [x] regelpaket per datum
 
 **Verifiera detta innan nästa delfas**
-- [ ] Alla transaktionstyper får ett spårbart momsbeslut
-- [ ] Historiska regler kan återspelas
-- [ ] Oklara fall går till granskningskö
+- [x] Alla transaktionstyper får ett spårbart momsbeslut
+- [x] Historiska regler kan återspelas
+- [x] Oklara fall går till granskningskö
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P4-01`.
 

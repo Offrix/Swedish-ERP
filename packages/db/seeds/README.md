@@ -13,3 +13,4 @@ Seed execution policy:
 - Phase 3.1 adds DSAM chart and voucher series baseline seed plus demo journals for ledger verification
 - Phase 3.2 adds dimension catalogs, next-period correction baseline data and demo reversals/corrections for ledger verification
 - Phase 3.3 adds report definitions plus demo report snapshots and signed reconciliation evidence for reporting verification
+- Phase 4.1 adds VAT rule-pack seed data, VAT code masterdata and demo VAT decisions with review queue evidence

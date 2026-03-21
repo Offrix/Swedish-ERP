@@ -188,6 +188,8 @@ En fas är inte klar förrän:
 
 #### Moms
 - beslutsträd returnerar förklaring
+- historiskt beslut återspelar rätt regelpaket för dåtidens datum
+- saknade eller motsägelsefulla VAT-fakta går till granskningskö
 - rapportboxar stämmer mot golden-data
 - rättelse gör om hela deklarationen
 

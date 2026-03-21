@@ -14,6 +14,7 @@ Database foundation with migration framework, seed files and baseline governance
 - Phase 3.1 ledger hardening, DSAM chart seed and demo journals live in the same monotonic stream.
 - Phase 3.2 ledger dimension catalogs, period-lock metadata and correction links live in the same monotonic stream.
 - Phase 3.3 reporting definitions, report snapshots and reconciliation sign-off objects live in the same monotonic stream.
+- Phase 4.1 adds VAT masterdata, dated rule packs, traceable VAT decisions and manual review queue objects in the same monotonic stream.
 
 ## Usage
 

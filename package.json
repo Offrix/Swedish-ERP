@@ -48,6 +48,7 @@
     "verify:phase2:ocr": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase2-ocr-review.ps1",
     "verify:phase3:ledger": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase3-ledger-foundation.ps1",
     "verify:phase3:ledger:rules": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase3-ledger-rules.ps1",
-    "verify:phase3:reporting": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase3-reporting.ps1"
+    "verify:phase3:reporting": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase3-reporting.ps1",
+    "verify:phase4:vat": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase4-vat.ps1"
   }
 }

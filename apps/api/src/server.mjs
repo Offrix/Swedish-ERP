@@ -46,6 +46,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase2CompanyInboxEnabled: flags.phase2CompanyInboxEnabled,
             phase2OcrReviewEnabled: flags.phase2OcrReviewEnabled,
             phase3LedgerEnabled: flags.phase3LedgerEnabled,
+            phase4VatEnabled: flags.phase4VatEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -73,7 +74,12 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/reporting/journal-search",
               "/v1/reporting/reconciliations",
               "/v1/reporting/reconciliations/:reconciliationRunId",
-              "/v1/reporting/reconciliations/:reconciliationRunId/signoff"
+              "/v1/reporting/reconciliations/:reconciliationRunId/signoff",
+              "/v1/vat/codes",
+              "/v1/vat/rule-packs",
+              "/v1/vat/decisions",
+              "/v1/vat/decisions/:vatDecisionId",
+              "/v1/vat/review-queue"
             ]
           }
         : { status: "ok" }
@@ -117,6 +123,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 3 ledger and reporting routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase4VatEnabled && isPhase4Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 4 VAT routes are disabled by configuration."
     });
     return;
   }
@@ -1292,6 +1306,123 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/vat/codes") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "vat_decision",
+      scopeCode: "vat"
+    });
+    writeJson(res, 200, {
+      items: platform.listVatCodes({
+        companyId
+      })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/vat/rule-packs") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "vat_decision",
+      scopeCode: "vat"
+    });
+    writeJson(res, 200, {
+      items: platform.listVatRulePacks({
+        effectiveDate: url.searchParams.get("effectiveDate") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/vat/decisions") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "vat_decision",
+      scopeCode: "vat"
+    });
+    writeJson(
+      res,
+      201,
+      platform.evaluateVatDecision({
+        companyId,
+        transactionLine: body.transactionLine || {},
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const vatDecisionMatch = matchPath(path, "/v1/vat/decisions/:vatDecisionId");
+  if (vatDecisionMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "vat_decision",
+      scopeCode: "vat"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getVatDecision({
+        companyId,
+        vatDecisionId: vatDecisionMatch.vatDecisionId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/vat/review-queue") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "vat_decision",
+      scopeCode: "vat"
+    });
+    writeJson(res, 200, {
+      items: platform.listVatReviewQueue({
+        companyId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
   writeJson(res, 404, { error: "not_found" });
 }
 
@@ -1365,6 +1496,10 @@ function isPhase3Route(path) {
   return path.startsWith("/v1/ledger") || path.startsWith("/v1/reporting");
 }
 
+function isPhase4Route(path) {
+  return path.startsWith("/v1/vat");
+}
+
 async function readJsonBody(req, allowEmpty = false) {
   const chunks = [];
   for await (const chunk of req) {
@@ -1428,7 +1563,8 @@ function readFeatureFlags(env) {
     phase2DocumentArchiveEnabled: String(env.PHASE2_DOCUMENT_ARCHIVE_ENABLED || "true").toLowerCase() !== "false",
     phase2CompanyInboxEnabled: String(env.PHASE2_COMPANY_INBOX_ENABLED || "true").toLowerCase() !== "false",
     phase2OcrReviewEnabled: String(env.PHASE2_OCR_REVIEW_ENABLED || "true").toLowerCase() !== "false",
-    phase3LedgerEnabled: String(env.PHASE3_LEDGER_ENABLED || "true").toLowerCase() !== "false"
+    phase3LedgerEnabled: String(env.PHASE3_LEDGER_ENABLED || "true").toLowerCase() !== "false",
+    phase4VatEnabled: String(env.PHASE4_VAT_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

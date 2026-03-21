@@ -170,10 +170,10 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 - [ ] Rollback eller disable-strategi finns om fasen påverkar produktion
 
 ### 4.1 Momsmasterdata och beslutsträd
-- [ ] Alla transaktionstyper får ett spårbart momsbeslut
-- [ ] Historiska regler kan återspelas
-- [ ] Oklara fall går till granskningskö
-- [ ] Prompt `P4-01` är körd och resultat dokumenterat
+- [x] Alla transaktionstyper får ett spårbart momsbeslut
+- [x] Historiska regler kan återspelas
+- [x] Oklara fall går till granskningskö
+- [x] Prompt `P4-01` är körd och resultat dokumenterat
 
 ### 4.2 Sverige, EU, import, export och omvänd moms
 - [ ] Deklarationsboxar summerar rätt

@@ -71,6 +71,11 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/reporting/reconciliations`
 - `GET /v1/reporting/reconciliations/:reconciliationRunId?companyId=...`
 - `POST /v1/reporting/reconciliations/:reconciliationRunId/signoff`
+- `GET /v1/vat/codes?companyId=...`
+- `GET /v1/vat/rule-packs?companyId=...&effectiveDate=...`
+- `POST /v1/vat/decisions`
+- `GET /v1/vat/decisions/:vatDecisionId?companyId=...`
+- `GET /v1/vat/review-queue?companyId=...`
 
 ## Disable strategy
 
@@ -83,3 +88,5 @@ Set `PHASE2_COMPANY_INBOX_ENABLED=false` to return `503` for FAS 2.2 company inb
 Set `PHASE2_OCR_REVIEW_ENABLED=false` to return `503` for FAS 2.3 OCR and review routes while keeping the rest of the API process alive.
 
 Set `PHASE3_LEDGER_ENABLED=false` to return `503` for FAS 3.1, 3.2 and 3.3 ledger/reporting routes while keeping the rest of the API process alive.
+
+Set `PHASE4_VAT_ENABLED=false` to return `503` for FAS 4.1 VAT routes while keeping the rest of the API process alive.

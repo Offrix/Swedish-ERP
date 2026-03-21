@@ -8,9 +8,9 @@ Phase 0 rule engine contracts for VAT, payroll, AGI, HUS and other regulated dec
 - Deterministic rule evaluation context.
 - Explainable decision output.
 - Warning/error channel for review queues.
+- Rule-pack resolution by jurisdiction and effective date.
 
 ## Constraints
 
 - Rule packs are data and versioned code, never UI logic.
 - Every decision must include reason and trace fields.
-

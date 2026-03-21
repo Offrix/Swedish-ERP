@@ -503,7 +503,9 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/vat-engine.md, docs/adr/ADR-0005-rule-engine-philosophy.md
+- docs/compliance/se/vat-engine.md
+- docs/compliance/se/accounting-foundation.md
+- docs/adr/ADR-0005-rule-engine-philosophy.md
 
 Implement exactly this scope:
 - VAT codes
