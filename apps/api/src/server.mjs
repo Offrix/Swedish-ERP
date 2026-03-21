@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import http from "node:http";
 import { defaultApiPlatform } from "./platform.mjs";
 import { isMainModule, stopServer } from "../../../scripts/lib/repo.mjs";
@@ -41,17 +42,33 @@ async function handleRequest({ req, res, platform, flags }) {
             service: "api",
             status: "ok",
             phase1AuthOnboardingEnabled: flags.phase1AuthOnboardingEnabled,
-            routes: ["/healthz", "/readyz", "/v1/auth/login", "/v1/onboarding/runs"]
+            phase2DocumentArchiveEnabled: flags.phase2DocumentArchiveEnabled,
+            routes: [
+              "/healthz",
+              "/readyz",
+              "/v1/auth/login",
+              "/v1/onboarding/runs",
+              "/v1/documents",
+              "/v1/documents/:documentId/export"
+            ]
           }
         : { status: "ok" }
     );
     return;
   }
 
-  if (!flags.phase1AuthOnboardingEnabled && path.startsWith("/v1/")) {
+  if (!flags.phase1AuthOnboardingEnabled && isPhase1Route(path)) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 1 auth and onboarding routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase2DocumentArchiveEnabled && isPhase2Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 2.1 document archive routes are disabled by configuration."
     });
     return;
   }
@@ -305,7 +322,136 @@ async function handleRequest({ req, res, platform, flags }) {
     }
   }
 
+  if (req.method === "POST" && path === "/v1/documents") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createDocumentRecord({
+        companyId,
+        documentType: body.documentType || null,
+        sourceChannel: body.sourceChannel || "manual",
+        sourceReference: body.sourceReference || null,
+        retentionPolicyCode: body.retentionPolicyCode || null,
+        metadataJson: body.metadataJson || {},
+        receivedAt: body.receivedAt || new Date().toISOString(),
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const documentVersionsMatch = matchPath(path, "/v1/documents/:documentId/versions");
+  if (documentVersionsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage"
+    });
+    writeJson(
+      res,
+      201,
+      platform.appendDocumentVersion({
+        companyId,
+        documentId: documentVersionsMatch.documentId,
+        variantType: body.variantType,
+        storageKey: body.storageKey,
+        mimeType: body.mimeType,
+        contentText: body.contentText || null,
+        contentBase64: body.contentBase64 || null,
+        fileHash: body.fileHash || null,
+        fileSizeBytes: body.fileSizeBytes ?? null,
+        sourceReference: body.sourceReference || null,
+        derivesFromDocumentVersionId: body.derivesFromDocumentVersionId || null,
+        metadataJson: body.metadataJson || {},
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const documentLinksMatch = matchPath(path, "/v1/documents/:documentId/links");
+  if (documentLinksMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage"
+    });
+    writeJson(
+      res,
+      201,
+      platform.linkDocumentRecord({
+        companyId,
+        documentId: documentLinksMatch.documentId,
+        targetType: body.targetType,
+        targetId: body.targetId,
+        metadataJson: body.metadataJson || {},
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const documentExportMatch = matchPath(path, "/v1/documents/:documentId/export");
+  if (documentExportMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read"
+    });
+    writeJson(
+      res,
+      200,
+      platform.exportDocumentChain({
+        companyId,
+        documentId: documentExportMatch.documentId,
+        actorId: principal.userId,
+        correlationId: createCorrelationId()
+      })
+    );
+    return;
+  }
+
   writeJson(res, 404, { error: "not_found" });
+}
+
+function authorizeDocumentAccess({ platform, sessionToken, companyId, permissionCode }) {
+  const { principal, decision } = platform.checkAuthorization({
+    sessionToken,
+    action: permissionCode,
+    resource: {
+      companyId,
+      objectType: "document",
+      objectId: companyId,
+      scopeCode: "document"
+    }
+  });
+  if (!decision.allowed) {
+    throw createHttpError(403, decision.reasonCode, decision.explanation);
+  }
+  return principal;
 }
 
 function matchPath(actualPath, template) {
@@ -328,6 +474,14 @@ function matchPath(actualPath, template) {
     }
   }
   return params;
+}
+
+function isPhase1Route(path) {
+  return path.startsWith("/v1/auth") || path.startsWith("/v1/org") || path.startsWith("/v1/onboarding");
+}
+
+function isPhase2Route(path) {
+  return path.startsWith("/v1/documents");
 }
 
 async function readJsonBody(req, allowEmpty = false) {
@@ -357,6 +511,13 @@ function readSessionToken(req, body = {}) {
   return body.sessionToken || null;
 }
 
+function requireText(value, code, message) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw createHttpError(400, code, message);
+  }
+  return value.trim();
+}
+
 function writeJson(res, statusCode, payload) {
   res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
   res.end(`${JSON.stringify(payload, null, 2)}\n`);
@@ -369,9 +530,21 @@ function writeError(res, error) {
   });
 }
 
+function createCorrelationId() {
+  return crypto.randomUUID();
+}
+
+function createHttpError(status, code, message) {
+  const error = new Error(message);
+  error.status = status;
+  error.code = code;
+  return error;
+}
+
 function readFeatureFlags(env) {
   return {
-    phase1AuthOnboardingEnabled: String(env.PHASE1_AUTH_ONBOARDING_ENABLED || "true").toLowerCase() !== "false"
+    phase1AuthOnboardingEnabled: String(env.PHASE1_AUTH_ONBOARDING_ENABLED || "true").toLowerCase() !== "false",
+    phase2DocumentArchiveEnabled: String(env.PHASE2_DOCUMENT_ARCHIVE_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

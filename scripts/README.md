@@ -15,6 +15,7 @@ Helper scripts for local setup, structure verification and phased rollout checks
 - `run-tests.mjs`: dispatches Node test suites by layer.
 - `verify-phase0.ps1`: validates required package and infra skeleton.
 - `verify-phase1.ps1`: validates required FAS 1 auth, org and onboarding artifacts.
+- `verify-phase2-document-archive.ps1`: validates required FAS 2.1 document archive artifacts.
 - `verify-db.ps1`: validates migration file naming.
 - `new-migration.ps1`: creates timestamped migration file in `packages/db/migrations`.
 - `dev-up.ps1`: starts docker infra.

@@ -469,7 +469,7 @@ Ingen delfas är klar förrän följande finns:
   - [x] 1.2 Inloggning, sessioner och stark autentisering
   - [x] 1.3 Bolagssetup och onboarding wizard
 - [ ] **FAS 2 — Dokumentmotor, företagsinbox och OCR**
-  - [ ] 2.1 Dokumentarkiv och metadata
+  - [x] 2.1 Dokumentarkiv och metadata
   - [ ] 2.2 Företagsinbox och mail ingestion
   - [ ] 2.3 OCR, klassificering och granskningskö
 - [ ] **FAS 3 — Huvudbok, kontomodell, journaler och avstämningsgrund**
@@ -623,15 +623,15 @@ Bygg beviskedjan för hela systemet: dokument, råmejl, bilagor, hashning, klass
 ### 2.1 Dokumentarkiv och metadata
 
 **Bygg detta**
-- [ ] Immutable storage
-- [ ] Dokumentversioner
-- [ ] Document-links
-- [ ] Hash- och statusmodell
+- [x] Immutable storage
+- [x] Dokumentversioner
+- [x] Document-links
+- [x] Hash- och statusmodell
 
 **Verifiera detta innan nästa delfas**
-- [ ] Original och derivat skiljs åt
-- [ ] Export av dokumentkedja fungerar
-- [ ] Duplikat upptäcks
+- [x] Original och derivat skiljs åt
+- [x] Export av dokumentkedja fungerar
+- [x] Duplikat upptäcks
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P2-01`.
 

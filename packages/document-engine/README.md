@@ -1,11 +1,12 @@
 # @swedish-erp/document-engine
 
-Phase 0 document contracts for immutable originals, versioned derivatives and links to business objects.
+Phase 2.1 document archive engine for immutable originals, versioned derivatives, duplicate detection and exportable audit chains.
 
 ## Scope
 
 - Immutable original files.
-- Versioned document variants.
+- Versioned document variants and derivation chains.
 - Business object linking metadata.
-- Review queue trigger metadata.
+- Hash-based duplicate detection.
+- Exportable document chain with audit trail.
 

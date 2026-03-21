@@ -118,10 +118,10 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 - [ ] Rollback eller disable-strategi finns om fasen påverkar produktion
 
 ### 2.1 Dokumentarkiv och metadata
-- [ ] Original och derivat skiljs åt
-- [ ] Export av dokumentkedja fungerar
-- [ ] Duplikat upptäcks
-- [ ] Prompt `P2-01` är körd och resultat dokumenterat
+- [x] Original och derivat skiljs åt
+- [x] Export av dokumentkedja fungerar
+- [x] Duplikat upptäcks
+- [x] Prompt `P2-01` är körd och resultat dokumenterat
 
 ### 2.2 Företagsinbox och mail ingestion
 - [ ] Flera bilagor hanteras korrekt
