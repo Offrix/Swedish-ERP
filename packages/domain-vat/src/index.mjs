@@ -77,7 +77,13 @@ const REQUIRED_DECISION_FIELDS = Object.freeze([
   "report_box_code"
 ]);
 
-const OPTIONAL_DECISION_FIELDS = Object.freeze(["credit_note_flag", "original_vat_decision_id", "deduction_ratio"]);
+const OPTIONAL_DECISION_FIELDS = Object.freeze([
+  "credit_note_flag",
+  "original_vat_decision_id",
+  "deduction_ratio",
+  "ecb_exchange_rate_to_eur",
+  "consignment_value_eur"
+]);
 const DOMESTIC_OUTPUT_BOX_BY_RATE = Object.freeze({
   "25.00": "10",
   "12.00": "11",
@@ -104,6 +110,7 @@ const VAT_CODE_DEFINITIONS = Object.freeze([
   createVatCodeDefinition("VAT_SE_EU_GOODS_B2B", "EU goods B2B sale", 0, ["35"], "vat_se_eu_goods_b2b"),
   createVatCodeDefinition("VAT_SE_EU_SERVICES_B2B", "EU services B2B sale", 0, ["39"], "vat_se_eu_services_b2b"),
   createVatCodeDefinition("VAT_SE_EU_B2C_OSS", "EU B2C OSS", 25, ["OSS"], "vat_se_eu_b2c_oss"),
+  createVatCodeDefinition("VAT_SE_EU_B2C_IOSS", "EU B2C IOSS", 25, ["IOSS"], "vat_se_eu_b2c_ioss"),
   createVatCodeDefinition("VAT_SE_EXPORT_GOODS_0", "Export goods", 0, ["36"], "vat_se_export_goods_0"),
   createVatCodeDefinition("VAT_SE_EXPORT_SERVICE_0", "Export service", 0, ["40"], "vat_se_export_service_0"),
   createVatCodeDefinition("VAT_SE_IMPORT_GOODS", "Import goods", 25, ["50", "60", "48"], "vat_se_import_goods"),
@@ -135,14 +142,14 @@ const VAT_CODE_DEFINITIONS = Object.freeze([
 
 const SEEDED_RULE_PACKS = Object.freeze([
   {
-    rulePackId: "vat-se-2025.5",
+    rulePackId: "vat-se-2025.6",
     domain: "vat",
     jurisdiction: "SE",
     effectiveFrom: "2025-01-01",
     effectiveTo: "2025-12-31",
-    version: "2025.5",
+    version: "2025.6",
     sourceSnapshotDate: "2026-03-21",
-    semanticChangeSummary: "Expanded 2025 VAT rule execution for domestic, EU, import, export and reverse charge flows.",
+    semanticChangeSummary: "Expanded 2025 VAT reporting for OSS/IOSS, periodic statements and declaration snapshots.",
     machineReadableRules: {
       requiredFields: REQUIRED_DECISION_FIELDS,
       optionalFields: OPTIONAL_DECISION_FIELDS,
@@ -155,19 +162,20 @@ const SEEDED_RULE_PACKS = Object.freeze([
     ],
     testVectors: [
       { vectorId: "vat-2025-import", decisionCode: "VAT_SE_IMPORT_GOODS" },
-      { vectorId: "vat-2025-build-sell", decisionCode: "VAT_SE_RC_BUILD_SELL" }
+      { vectorId: "vat-2025-build-sell", decisionCode: "VAT_SE_RC_BUILD_SELL" },
+      { vectorId: "vat-2025-oss", decisionCode: "VAT_SE_EU_B2C_OSS" }
     ],
-    migrationNotes: ["4.2 expands historical replay to detailed declaration boxes and reverse-charge VAT postings."]
+    migrationNotes: ["4.3 extends historical replay to OSS/IOSS and declaration reporting artifacts."]
   },
   {
-    rulePackId: "vat-se-2026.2",
+    rulePackId: "vat-se-2026.3",
     domain: "vat",
     jurisdiction: "SE",
     effectiveFrom: "2026-01-01",
     effectiveTo: null,
-    version: "2026.2",
+    version: "2026.3",
     sourceSnapshotDate: "2026-03-21",
-    semanticChangeSummary: "Expanded VAT scenario engine with declaration-box amounts, credit-note mirroring and reverse-charge double booking.",
+    semanticChangeSummary: "Expanded VAT scenario engine with OSS/IOSS classification, periodic statements and declaration reporting.",
     machineReadableRules: {
       requiredFields: REQUIRED_DECISION_FIELDS,
       optionalFields: OPTIONAL_DECISION_FIELDS,
@@ -181,9 +189,11 @@ const SEEDED_RULE_PACKS = Object.freeze([
     testVectors: [
       { vectorId: "vat-2026-domestic-12", decisionCode: "VAT_SE_DOMESTIC_12" },
       { vectorId: "vat-2026-eu-purchase-rc", decisionCode: "VAT_SE_EU_SERVICES_PURCHASE_RC" },
-      { vectorId: "vat-2026-credit-note", decisionCode: "VAT_SE_DOMESTIC_25" }
+      { vectorId: "vat-2026-credit-note", decisionCode: "VAT_SE_DOMESTIC_25" },
+      { vectorId: "vat-2026-oss", decisionCode: "VAT_SE_EU_B2C_OSS" },
+      { vectorId: "vat-2026-ioss", decisionCode: "VAT_SE_EU_B2C_IOSS" }
     ],
-    migrationNotes: ["4.2 adds executable scenario rules while preserving older rule packs for replay."]
+    migrationNotes: ["4.3 adds reporting artifacts while preserving earlier packs for replay."]
   }
 ]);
 
@@ -198,11 +208,12 @@ export function createVatPlatform(options = {}) {
   return createVatEngine(options);
 }
 
-export function createVatEngine({ clock = () => new Date(), seedDemo = true } = {}) {
+export function createVatEngine({ clock = () => new Date(), seedDemo = true, ledgerPlatform = null } = {}) {
   const ruleRegistry = createRulePackRegistry({
     clock,
     seedRulePacks: SEEDED_RULE_PACKS
   });
+  const ledger = ledgerPlatform || null;
   const state = {
     vatCodes: new Map(),
     vatCodeIdsByCompany: new Map(),
@@ -211,6 +222,10 @@ export function createVatEngine({ clock = () => new Date(), seedDemo = true } = 
     vatDecisionIdsByReplayKey: new Map(),
     vatReviewQueueItems: new Map(),
     vatReviewQueueIdsByCompany: new Map(),
+    vatDeclarationRuns: new Map(),
+    vatDeclarationRunIdsByCompany: new Map(),
+    vatPeriodicStatementRuns: new Map(),
+    vatPeriodicStatementRunIdsByCompany: new Map(),
     auditEvents: []
   };
 
@@ -228,6 +243,10 @@ export function createVatEngine({ clock = () => new Date(), seedDemo = true } = 
     evaluateVatDecision,
     getVatDecision,
     listVatReviewQueue,
+    createVatDeclarationRun,
+    getVatDeclarationRun,
+    createVatPeriodicStatementRun,
+    getVatPeriodicStatementRun,
     summarizeVatDeclarationBoxes,
     snapshotVat
   };
@@ -299,6 +318,7 @@ export function createVatEngine({ clock = () => new Date(), seedDemo = true } = 
       sourceSnapshotDate: rulePack.sourceSnapshotDate,
       inputsHash: classification.decision.inputsHash,
       effectiveDate: classification.decision.effectiveDate,
+      transactionLine: copy(normalizedLine),
       status: classification.decision.needsManualReview ? "review_required" : "decided",
       declarationBoxCodes: classification.outputs.declarationBoxCodes,
       declarationBoxAmounts: classification.outputs.declarationBoxAmounts,
@@ -381,6 +401,151 @@ export function createVatEngine({ clock = () => new Date(), seedDemo = true } = 
       .map(copy);
   }
 
+  function createVatDeclarationRun({
+    companyId,
+    fromDate,
+    toDate,
+    actorId = "system",
+    correlationId = crypto.randomUUID(),
+    previousSubmissionId = null,
+    correctionReason = null,
+    signer = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedFromDate = normalizeDate(fromDate, "from_date_invalid");
+    const resolvedToDate = normalizeDate(toDate, "to_date_invalid");
+    assertDateRange(resolvedFromDate, resolvedToDate, "vat_declaration_run_date_range_invalid");
+    const decisions = collectDecidedVatDecisions({
+      state,
+      companyId: resolvedCompanyId,
+      fromDate: resolvedFromDate,
+      toDate: resolvedToDate
+    });
+    const regularDecisions = decisions.filter((decision) => decision.outputs.reportingChannel === "regular_vat_return");
+    const ossDecisions = decisions.filter((decision) => decision.outputs.reportingChannel === "oss");
+    const iossDecisions = decisions.filter((decision) => decision.outputs.reportingChannel === "ioss");
+    const declarationBoxSummary = summarizeDecisionBoxAmounts(regularDecisions);
+    const previousRun = previousSubmissionId
+      ? requireVatDeclarationRunForCompany({
+          companyId: resolvedCompanyId,
+          vatDeclarationRunId: previousSubmissionId
+        })
+      : null;
+    const changes = previousRun
+      ? diffDeclarationBoxSummaries(previousRun.declarationBoxSummary || [], declarationBoxSummary)
+      : { changedBoxes: [], changedAmounts: [] };
+    const run = {
+      vatDeclarationRunId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      fromDate: resolvedFromDate,
+      toDate: resolvedToDate,
+      declarationBoxSummary,
+      ossSummary: summarizeOssIossDecisions(ossDecisions, "oss"),
+      iossSummary: summarizeOssIossDecisions(iossDecisions, "ioss"),
+      ledgerComparison: compareDeclarationWithLedger({ ledger, companyId: resolvedCompanyId, decisions: regularDecisions }),
+      previousSubmissionId: previousRun?.vatDeclarationRunId || null,
+      correctionReason,
+      changedBoxes: changes.changedBoxes,
+      changedAmounts: changes.changedAmounts,
+      signer: requireText(signer || actorId, "signer_required"),
+      submittedAt: nowIso(),
+      sourceSnapshotHash: hashObject({
+        companyId: resolvedCompanyId,
+        fromDate: resolvedFromDate,
+        toDate: resolvedToDate,
+        vatDecisionIds: decisions.map((decision) => decision.vatDecisionId)
+      })
+    };
+    state.vatDeclarationRuns.set(run.vatDeclarationRunId, run);
+    ensureCollection(state.vatDeclarationRunIdsByCompany, resolvedCompanyId).push(run.vatDeclarationRunId);
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId,
+      correlationId,
+      action: "vat.declaration_run.materialized",
+      entityType: "vat_declaration_run",
+      entityId: run.vatDeclarationRunId,
+      explanation: `Materialized VAT declaration run for ${resolvedFromDate}..${resolvedToDate}.`
+    });
+    return copy(run);
+  }
+
+  function getVatDeclarationRun({ companyId, vatDeclarationRunId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const run = state.vatDeclarationRuns.get(requireText(vatDeclarationRunId, "vat_declaration_run_id_required"));
+    if (!run || run.companyId !== resolvedCompanyId) {
+      throw createError(404, "vat_declaration_run_not_found", "VAT declaration run was not found.");
+    }
+    return copy(run);
+  }
+
+  function createVatPeriodicStatementRun({
+    companyId,
+    fromDate,
+    toDate,
+    actorId = "system",
+    correlationId = crypto.randomUUID(),
+    previousSubmissionId = null,
+    correctionReason = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedFromDate = normalizeDate(fromDate, "from_date_invalid");
+    const resolvedToDate = normalizeDate(toDate, "to_date_invalid");
+    assertDateRange(resolvedFromDate, resolvedToDate, "vat_periodic_statement_run_date_range_invalid");
+    const decisions = collectDecidedVatDecisions({
+      state,
+      companyId: resolvedCompanyId,
+      fromDate: resolvedFromDate,
+      toDate: resolvedToDate
+    }).filter((decision) => decision.outputs.euListEligible === true);
+    const lines = buildPeriodicStatementLines(decisions);
+    const previousRun = previousSubmissionId
+      ? requireVatPeriodicStatementRunForCompany({
+          companyId: resolvedCompanyId,
+          vatPeriodicStatementRunId: previousSubmissionId
+        })
+      : null;
+    const run = {
+      vatPeriodicStatementRunId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      fromDate: resolvedFromDate,
+      toDate: resolvedToDate,
+      lineCount: lines.length,
+      lines,
+      previousSubmissionId: previousRun?.vatPeriodicStatementRunId || null,
+      correctionReason,
+      sourceSnapshotHash: hashObject({
+        companyId: resolvedCompanyId,
+        fromDate: resolvedFromDate,
+        toDate: resolvedToDate,
+        lines
+      }),
+      generatedAt: nowIso(),
+      generatedByActorId: actorId
+    };
+    state.vatPeriodicStatementRuns.set(run.vatPeriodicStatementRunId, run);
+    ensureCollection(state.vatPeriodicStatementRunIdsByCompany, resolvedCompanyId).push(run.vatPeriodicStatementRunId);
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId,
+      correlationId,
+      action: "vat.periodic_statement.materialized",
+      entityType: "vat_periodic_statement_run",
+      entityId: run.vatPeriodicStatementRunId,
+      explanation: `Materialized periodic statement for ${resolvedFromDate}..${resolvedToDate}.`
+    });
+    return copy(run);
+  }
+
+  function getVatPeriodicStatementRun({ companyId, vatPeriodicStatementRunId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const run = state.vatPeriodicStatementRuns.get(requireText(vatPeriodicStatementRunId, "vat_periodic_statement_run_id_required"));
+    if (!run || run.companyId !== resolvedCompanyId) {
+      throw createError(404, "vat_periodic_statement_run_not_found", "VAT periodic statement run was not found.");
+    }
+    return copy(run);
+  }
+
   function summarizeVatDeclarationBoxes({ companyId = null, vatDecisionIds = null } = {}) {
     const decisions = companyId
       ? (state.vatDecisionIdsByCompany.get(companyId) || []).map((decisionId) => state.vatDecisions.get(decisionId)).filter(Boolean)
@@ -396,6 +561,8 @@ export function createVatEngine({ clock = () => new Date(), seedDemo = true } = 
       vatCodes: [...state.vatCodes.values()],
       vatDecisions: [...state.vatDecisions.values()],
       vatReviewQueueItems: [...state.vatReviewQueueItems.values()],
+      vatDeclarationRuns: [...state.vatDeclarationRuns.values()],
+      vatPeriodicStatementRuns: [...state.vatPeriodicStatementRuns.values()],
       vatRulePacks: ruleRegistry.listRulePacks({ domain: "vat", jurisdiction: "SE" }),
       declarationBoxSummary: summarizeDecisionBoxAmounts([...state.vatDecisions.values()]),
       auditEvents: state.auditEvents
@@ -414,6 +581,24 @@ export function createVatEngine({ clock = () => new Date(), seedDemo = true } = 
       explanation,
       recordedAt: nowIso()
     });
+  }
+
+  function requireVatDeclarationRunForCompany({ companyId, vatDeclarationRunId }) {
+    const run = state.vatDeclarationRuns.get(requireText(vatDeclarationRunId, "vat_declaration_run_id_required"));
+    if (!run || run.companyId !== companyId) {
+      throw createError(404, "vat_declaration_run_not_found", "VAT declaration run was not found.");
+    }
+    return run;
+  }
+
+  function requireVatPeriodicStatementRunForCompany({ companyId, vatPeriodicStatementRunId }) {
+    const run = state.vatPeriodicStatementRuns.get(
+      requireText(vatPeriodicStatementRunId, "vat_periodic_statement_run_id_required")
+    );
+    if (!run || run.companyId !== companyId) {
+      throw createError(404, "vat_periodic_statement_run_not_found", "VAT periodic statement run was not found.");
+    }
+    return run;
   }
 
   function nowIso() {
@@ -679,6 +864,8 @@ function normalizeTransactionLine(transactionLine) {
   normalized.original_vat_decision_id =
     typeof candidate.original_vat_decision_id === "string" ? candidate.original_vat_decision_id.trim() : null;
   normalized.deduction_ratio = normalizeOptionalNumber(candidate.deduction_ratio);
+  normalized.ecb_exchange_rate_to_eur = normalizeOptionalNumber(candidate.ecb_exchange_rate_to_eur);
+  normalized.consignment_value_eur = normalizeOptionalNumber(candidate.consignment_value_eur);
   normalized.line_uom = typeof candidate.line_uom === "string" ? candidate.line_uom.trim() : candidate.line_uom;
   normalized.region = deriveRegion(normalized.buyer_country);
   return normalized;
@@ -758,10 +945,24 @@ function deriveScenario(normalizedLine) {
       );
     }
     if (region === "EU" && normalizedLine.buyer_is_taxable_person === false) {
+      if (normalizedLine.ioss_flag === true) {
+        const consignmentValueEur = resolveConsignmentValueEur(normalizedLine);
+        if (consignmentValueEur === null || consignmentValueEur > 150) {
+          return reviewScenario("ioss_not_eligible", "IOSS requires a consignment value in euro at or below 150.");
+        }
+        return acceptScenario("VAT_SE_EU_B2C_IOSS", "eu_b2c_ioss_sale");
+      }
       if (normalizedLine.oss_flag === true) {
         return acceptScenario("VAT_SE_EU_B2C_OSS", "eu_b2c_oss_sale");
       }
-      return reviewScenario("eu_b2c_requires_oss_classification", "EU B2C sales require OSS classification in a later subphase.");
+      if (normalizedLine.buyer_country !== "SE") {
+        const domesticCode = domesticCodeFromRate(normalizedLine);
+        if (!domesticCode) {
+          return reviewScenario("unsupported_eu_b2c_rate", "EU B2C threshold-below sales must resolve to 25, 12, 6 or exempt.");
+        }
+        return acceptScenario(domesticCode, "eu_b2c_threshold_below");
+      }
+      return reviewScenario("eu_b2c_requires_oss_classification", "EU B2C sales require OSS or domestic threshold classification.");
     }
     return reviewScenario("unsupported_sale_scenario", "Could not derive a supported VAT scenario for the sale.");
   }
@@ -851,6 +1052,28 @@ function buildScenarioOutputs(normalizedLine, scenario) {
       ];
       break;
     }
+    case "eu_b2c_ioss_sale": {
+      const outputVat = calculateVat(baseAmount, rate);
+      declarationBoxAmounts = [createBoxAmount("IOSS", baseAmount, "taxable_base")];
+      postingEntries = [
+        createPostingEntry("net_sale", "credit", baseAmount, "taxable_base"),
+        createPostingEntry("output_vat", "credit", outputVat, "output_vat")
+      ];
+      break;
+    }
+    case "eu_b2c_threshold_below": {
+      const outputBox = requireBox(DOMESTIC_OUTPUT_BOX_BY_RATE, rate, "unsupported_eu_b2c_rate");
+      const outputVat = calculateVat(baseAmount, rate);
+      declarationBoxAmounts = [
+        createBoxAmount("05", baseAmount, "taxable_base"),
+        createBoxAmount(outputBox, outputVat, "output_vat")
+      ];
+      postingEntries = [
+        createPostingEntry("net_sale", "credit", baseAmount, "taxable_base"),
+        createPostingEntry("output_vat", "credit", outputVat, "output_vat")
+      ];
+      break;
+    }
     case "export_goods_sale":
       declarationBoxAmounts = [createBoxAmount("36", baseAmount, "taxable_base")];
       postingEntries = [createPostingEntry("net_sale", "credit", baseAmount, "taxable_base")];
@@ -897,6 +1120,16 @@ function buildScenarioOutputs(normalizedLine, scenario) {
     postingEntries,
     bookingTemplateCode: definition.bookingTemplateCode,
     invoiceTextRequirements,
+    reportingChannel: resolveReportingChannel(scenario.decisionCategory),
+    euListEligible: scenario.decisionCategory === "eu_goods_b2b_sale" || scenario.decisionCategory === "eu_services_b2b_sale",
+    ossRecord:
+      scenario.decisionCategory === "eu_b2c_oss_sale"
+        ? buildSpecialSchemeRecord("oss", normalizedLine, baseAmount, rate)
+        : null,
+    iossRecord:
+      scenario.decisionCategory === "eu_b2c_ioss_sale"
+        ? buildSpecialSchemeRecord("ioss", normalizedLine, baseAmount, rate)
+        : null,
     vatRate: rate,
     rateType: definition.rateType
   };
@@ -923,6 +1156,10 @@ function buildReverseChargePurchaseOutputs(baseBox, baseAmount, rate, deductionR
     postingEntries,
     bookingTemplateCode: definition.bookingTemplateCode,
     invoiceTextRequirements: [],
+    reportingChannel: "regular_vat_return",
+    euListEligible: false,
+    ossRecord: null,
+    iossRecord: null,
     vatRate: rate,
     rateType: definition.rateType
   };
@@ -1029,6 +1266,249 @@ function requireBox(mapping, rate, code) {
   return box;
 }
 
+function resolveReportingChannel(decisionCategory) {
+  if (decisionCategory === "eu_b2c_oss_sale") {
+    return "oss";
+  }
+  if (decisionCategory === "eu_b2c_ioss_sale") {
+    return "ioss";
+  }
+  return "regular_vat_return";
+}
+
+function buildSpecialSchemeRecord(scheme, normalizedLine, baseAmount, rate) {
+  const exchangeRate = resolveEcbExchangeRate(normalizedLine);
+  return {
+    scheme,
+    identifierState: "SE",
+    orderType: scheme === "oss" ? "union" : "import",
+    buyerCountry: normalizedLine.buyer_country,
+    vatRate: rate,
+    euroBaseAmount: roundMoney(baseAmount * exchangeRate),
+    euroVatAmount: roundMoney(calculateVat(baseAmount, rate) * exchangeRate),
+    originalCurrency: normalizedLine.currency,
+    exchangeRateToEur: exchangeRate,
+    consignmentValueEur: scheme === "ioss" ? resolveConsignmentValueEur(normalizedLine) : null
+  };
+}
+
+function summarizeOssIossDecisions(decisions, scheme) {
+  const rows = new Map();
+  for (const decision of decisions) {
+    const record = scheme === "oss" ? decision.outputs.ossRecord : decision.outputs.iossRecord;
+    if (!record) {
+      continue;
+    }
+    const key = `${record.buyerCountry}:${record.vatRate}`;
+    if (!rows.has(key)) {
+      rows.set(key, {
+        scheme,
+        identifierState: record.identifierState,
+        orderType: record.orderType,
+        buyerCountry: record.buyerCountry,
+        vatRate: record.vatRate,
+        euroBaseAmount: 0,
+        euroVatAmount: 0,
+        originalCurrencies: new Set(),
+        exchangeRatesToEur: new Set()
+      });
+    }
+    const current = rows.get(key);
+    current.euroBaseAmount = roundMoney(current.euroBaseAmount + record.euroBaseAmount);
+    current.euroVatAmount = roundMoney(current.euroVatAmount + record.euroVatAmount);
+    current.originalCurrencies.add(record.originalCurrency);
+    current.exchangeRatesToEur.add(record.exchangeRateToEur);
+  }
+  return [...rows.values()].map((row) => ({
+    scheme: row.scheme,
+    identifierState: row.identifierState,
+    orderType: row.orderType,
+    buyerCountry: row.buyerCountry,
+    vatRate: row.vatRate,
+    euroBaseAmount: row.euroBaseAmount,
+    euroVatAmount: row.euroVatAmount,
+    originalCurrencies: [...row.originalCurrencies].sort(),
+    exchangeRatesToEur: [...row.exchangeRatesToEur].sort((left, right) => left - right)
+  }));
+}
+
+function buildPeriodicStatementLines(decisions) {
+  const grouped = new Map();
+  for (const decision of decisions) {
+    const goodsOrServices = decision.transactionLine.goods_or_services === "goods" ? "goods" : "services";
+    const customerVatNumber = decision.transactionLine.buyer_vat_number;
+    const customerCountry = decision.transactionLine.buyer_country;
+    const key = `${customerCountry}:${customerVatNumber}:${goodsOrServices}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        customerCountry,
+        customerVatNumber,
+        buyerVatNumberStatus: decision.transactionLine.buyer_vat_number_status,
+        goodsOrServices,
+        taxableAmount: 0,
+        decisionIds: []
+      });
+    }
+    const current = grouped.get(key);
+    current.taxableAmount = roundMoney(
+      current.taxableAmount + Number(decision.transactionLine.line_amount_ex_vat || 0) - Number(decision.transactionLine.line_discount || 0)
+    );
+    current.decisionIds.push(decision.vatDecisionId);
+  }
+  return [...grouped.values()]
+    .map((row) => ({
+      customerCountry: row.customerCountry,
+      customerVatNumber: row.customerVatNumber,
+      buyerVatNumberStatus: row.buyerVatNumberStatus,
+      goodsOrServices: row.goodsOrServices,
+      taxableAmount: row.taxableAmount,
+      decisionIds: row.decisionIds.sort()
+    }))
+    .sort((left, right) =>
+      `${left.customerCountry}:${left.customerVatNumber}:${left.goodsOrServices}`.localeCompare(
+        `${right.customerCountry}:${right.customerVatNumber}:${right.goodsOrServices}`
+      )
+    );
+}
+
+function diffDeclarationBoxSummaries(previousSummary, currentSummary) {
+  const previousMap = new Map(previousSummary.map((row) => [`${row.boxCode}:${row.amountType}`, row.amount]));
+  const currentMap = new Map(currentSummary.map((row) => [`${row.boxCode}:${row.amountType}`, row.amount]));
+  const keys = [...new Set([...previousMap.keys(), ...currentMap.keys()])].sort();
+  const changedBoxes = [];
+  const changedAmounts = [];
+  for (const key of keys) {
+    const previousAmount = previousMap.get(key) || 0;
+    const currentAmount = currentMap.get(key) || 0;
+    if (roundMoney(previousAmount) !== roundMoney(currentAmount)) {
+      const [boxCode, amountType] = key.split(":");
+      changedBoxes.push(boxCode);
+      changedAmounts.push({
+        boxCode,
+        amountType,
+        previousAmount: roundMoney(previousAmount),
+        currentAmount: roundMoney(currentAmount)
+      });
+    }
+  }
+  return {
+    changedBoxes: [...new Set(changedBoxes)],
+    changedAmounts
+  };
+}
+
+function compareDeclarationWithLedger({ ledger, companyId, decisions }) {
+  const expectedDebit = roundMoney(sumPostingDirection(decisions, "debit"));
+  const expectedCredit = roundMoney(sumPostingDirection(decisions, "credit"));
+  if (!ledger || typeof ledger.snapshotLedger !== "function") {
+    return {
+      matched: false,
+      reason: "ledger_not_available",
+      expectedDebit,
+      expectedCredit,
+      actualDebit: 0,
+      actualCredit: 0
+    };
+  }
+  const sourceKeys = new Set(decisions.map((decision) => `${decision.sourceType}:${decision.sourceId}`));
+  const snapshot = ledger.snapshotLedger();
+  const matchedEntries = snapshot.journalEntries.filter(
+    (entry) => entry.companyId === companyId && sourceKeys.has(`${entry.sourceType}:${entry.sourceId}`)
+  );
+  const remainingActualLines = matchedEntries.flatMap((entry) =>
+    entry.lines
+      .map((line) => {
+        if (Number(line.debitAmount || 0) > 0) {
+          return { direction: "debit", amount: roundMoney(line.debitAmount) };
+        }
+        if (Number(line.creditAmount || 0) > 0) {
+          return { direction: "credit", amount: roundMoney(line.creditAmount) };
+        }
+        return null;
+      })
+      .filter(Boolean)
+  );
+  let actualDebit = 0;
+  let actualCredit = 0;
+  let unmatchedExpectedLineCount = 0;
+  for (const decision of decisions) {
+    for (const postingEntry of decision.postingEntries || []) {
+      const index = remainingActualLines.findIndex(
+        (line) => line.direction === postingEntry.direction && line.amount === roundMoney(postingEntry.amount)
+      );
+      if (index === -1) {
+        unmatchedExpectedLineCount += 1;
+        continue;
+      }
+      const [matchedLine] = remainingActualLines.splice(index, 1);
+      if (matchedLine.direction === "debit") {
+        actualDebit = roundMoney(actualDebit + matchedLine.amount);
+      } else {
+        actualCredit = roundMoney(actualCredit + matchedLine.amount);
+      }
+    }
+  }
+  return {
+    matched: unmatchedExpectedLineCount === 0 && expectedDebit === actualDebit && expectedCredit === actualCredit,
+    reason:
+      unmatchedExpectedLineCount === 0 && expectedDebit === actualDebit && expectedCredit === actualCredit
+        ? null
+        : "ledger_totals_do_not_match",
+    expectedDebit,
+    expectedCredit,
+    actualDebit,
+    actualCredit,
+    matchedEntryCount: matchedEntries.length,
+    unmatchedExpectedLineCount
+  };
+}
+
+function collectDecidedVatDecisions({ state, companyId, fromDate, toDate }) {
+  return (state.vatDecisionIdsByCompany.get(companyId) || [])
+    .map((decisionId) => state.vatDecisions.get(decisionId))
+    .filter(Boolean)
+    .filter((decision) => decision.status === "decided")
+    .filter((decision) => decision.effectiveDate >= fromDate && decision.effectiveDate <= toDate)
+    .map(copy);
+}
+
+function sumPostingDirection(decisions, direction) {
+  return decisions.reduce(
+    (sum, decision) =>
+      sum +
+      (decision.postingEntries || []).reduce(
+        (entrySum, entry) => entrySum + (entry.direction === direction ? Number(entry.amount || 0) : 0),
+        0
+      ),
+    0
+  );
+}
+
+function resolveEcbExchangeRate(normalizedLine) {
+  if (normalizedLine.currency === "EUR") {
+    return 1;
+  }
+  if (normalizedLine.ecb_exchange_rate_to_eur === null) {
+    throw createError(
+      400,
+      "ecb_exchange_rate_required",
+      "OSS/IOSS evaluation requires ecb_exchange_rate_to_eur when the transaction currency is not EUR."
+    );
+  }
+  return roundMoney(normalizedLine.ecb_exchange_rate_to_eur);
+}
+
+function resolveConsignmentValueEur(normalizedLine) {
+  if (normalizedLine.consignment_value_eur !== null) {
+    return roundMoney(normalizedLine.consignment_value_eur);
+  }
+  try {
+    return roundMoney((normalizedLine.line_amount_ex_vat || 0) * resolveEcbExchangeRate(normalizedLine));
+  } catch {
+    return null;
+  }
+}
+
 function deriveRegion(countryCode) {
   if (!countryCode) {
     return null;
@@ -1115,6 +1595,12 @@ function normalizeDate(value, code) {
     throw createError(400, code, `${code} must be an ISO date.`);
   }
   return value.trim();
+}
+
+function assertDateRange(fromDate, toDate, code) {
+  if (fromDate > toDate) {
+    throw createError(400, code, `${code} requires fromDate to be on or before toDate.`);
+  }
 }
 
 function requireText(value, code) {

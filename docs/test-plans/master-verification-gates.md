@@ -182,10 +182,10 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 - [x] Prompt `P4-02` är körd och resultat dokumenterat
 
 ### 4.3 OSS, IOSS, periodisk sammanställning och rapportering
-- [ ] B2C-distansförsäljning landas rätt
-- [ ] EU-lista kan skapas om och om igen
-- [ ] Momsrapport stämmer mot ledgern
-- [ ] Prompt `P4-03` är körd och resultat dokumenterat
+- [x] B2C-distansförsäljning landas rätt
+- [x] EU-lista kan skapas om och om igen
+- [x] Momsrapport stämmer mot ledgern
+- [x] Prompt `P4-03` är körd och resultat dokumenterat
 
 ## Gate for FAS 5 — Försäljning, kundreskontra och kundfakturor
 

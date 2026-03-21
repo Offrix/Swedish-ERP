@@ -21,7 +21,7 @@ test("Phase 4.2 derives declaration-box amounts for domestic, import and reverse
       line_amount_ex_vat: 800
     })
   });
-  assert.equal(domestic.vatDecision.rulePackId, "vat-se-2026.2");
+  assert.equal(domestic.vatDecision.rulePackId, "vat-se-2026.3");
   assert.equal(domestic.vatDecision.decisionCategory, "domestic_standard_sale");
   assert.deepEqual(domestic.vatDecision.declarationBoxAmounts, [
     { boxCode: "05", amount: 800, amountType: "taxable_base" },

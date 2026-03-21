@@ -50,6 +50,7 @@
     "verify:phase3:ledger:rules": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase3-ledger-rules.ps1",
     "verify:phase3:reporting": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase3-reporting.ps1",
     "verify:phase4:vat": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase4-vat.ps1",
-    "verify:phase4:vat:rules": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase4-vat-rules.ps1"
+    "verify:phase4:vat:rules": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase4-vat-rules.ps1",
+    "verify:phase4:vat:reporting": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase4-vat-reporting.ps1"
   }
 }

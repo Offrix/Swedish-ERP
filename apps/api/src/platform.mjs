@@ -13,7 +13,10 @@ export function createApiPlatform(options = {}) {
     ledgerPlatform,
     documentPlatform: documentArchivePlatform
   });
-  const vatPlatform = createVatPlatform(options);
+  const vatPlatform = createVatPlatform({
+    ...options,
+    ledgerPlatform
+  });
 
   return {
     ...orgAuthPlatform,

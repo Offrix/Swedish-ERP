@@ -15,6 +15,8 @@ Database foundation with migration framework, seed files and baseline governance
 - Phase 3.2 ledger dimension catalogs, period-lock metadata and correction links live in the same monotonic stream.
 - Phase 3.3 reporting definitions, report snapshots and reconciliation sign-off objects live in the same monotonic stream.
 - Phase 4.1 adds VAT masterdata, dated rule packs, traceable VAT decisions and manual review queue objects in the same monotonic stream.
+- Phase 4.2 adds declaration-box amounts, posting entries and credit-note traceability for VAT execution in the same monotonic stream.
+- Phase 4.3 adds VAT declaration runs, OSS/IOSS reporting artifacts and periodic statement runs in the same monotonic stream.
 
 ## Usage
 

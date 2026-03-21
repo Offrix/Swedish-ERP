@@ -79,7 +79,11 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/vat/rule-packs",
               "/v1/vat/decisions",
               "/v1/vat/decisions/:vatDecisionId",
-              "/v1/vat/review-queue"
+              "/v1/vat/review-queue",
+              "/v1/vat/declaration-runs",
+              "/v1/vat/declaration-runs/:vatDeclarationRunId",
+              "/v1/vat/periodic-statements",
+              "/v1/vat/periodic-statements/:vatPeriodicStatementRunId"
             ]
           }
         : { status: "ok" }
@@ -1420,6 +1424,113 @@ async function handleRequest({ req, res, platform, flags }) {
         status: url.searchParams.get("status") || null
       })
     });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/vat/declaration-runs") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "vat_decision",
+      scopeCode: "vat"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createVatDeclarationRun({
+        companyId,
+        fromDate: body.fromDate,
+        toDate: body.toDate,
+        previousSubmissionId: body.previousSubmissionId || null,
+        correctionReason: body.correctionReason || null,
+        signer: body.signer || principal.userId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const vatDeclarationRunMatch = matchPath(path, "/v1/vat/declaration-runs/:vatDeclarationRunId");
+  if (vatDeclarationRunMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "vat_decision",
+      scopeCode: "vat"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getVatDeclarationRun({
+        companyId,
+        vatDeclarationRunId: vatDeclarationRunMatch.vatDeclarationRunId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/vat/periodic-statements") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "vat_decision",
+      scopeCode: "vat"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createVatPeriodicStatementRun({
+        companyId,
+        fromDate: body.fromDate,
+        toDate: body.toDate,
+        previousSubmissionId: body.previousSubmissionId || null,
+        correctionReason: body.correctionReason || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const vatPeriodicStatementRunMatch = matchPath(path, "/v1/vat/periodic-statements/:vatPeriodicStatementRunId");
+  if (vatPeriodicStatementRunMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "vat_decision",
+      scopeCode: "vat"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getVatPeriodicStatementRun({
+        companyId,
+        vatPeriodicStatementRunId: vatPeriodicStatementRunMatch.vatPeriodicStatementRunId
+      })
+    );
     return;
   }
 

@@ -20,10 +20,10 @@ test("Phase 4.1 returns traceable VAT decisions and replays historical rule pack
       tax_date: "2025-11-15"
     })
   });
-  assert.equal(historical.vatDecision.rulePackId, "vat-se-2025.5");
+  assert.equal(historical.vatDecision.rulePackId, "vat-se-2025.6");
   assert.equal(historical.vatDecision.status, "decided");
   assert.ok(historical.vatDecision.inputsHash);
-  assert.match(historical.vatDecision.explanation.join(" "), /rule_pack_id=vat-se-2025\.5/);
+  assert.match(historical.vatDecision.explanation.join(" "), /rule_pack_id=vat-se-2025\.6/);
 
   const current = vat.evaluateVatDecision({
     companyId: COMPANY_ID,
@@ -35,7 +35,7 @@ test("Phase 4.1 returns traceable VAT decisions and replays historical rule pack
       tax_date: "2026-03-21"
     })
   });
-  assert.equal(current.vatDecision.rulePackId, "vat-se-2026.2");
+  assert.equal(current.vatDecision.rulePackId, "vat-se-2026.3");
   assert.deepEqual(current.vatDecision.declarationBoxCodes, ["05", "10"]);
   assert.equal(current.vatDecision.bookingTemplateCode, "vat_se_domestic_25");
 

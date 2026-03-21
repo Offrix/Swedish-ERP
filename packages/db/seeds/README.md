@@ -14,3 +14,5 @@ Seed execution policy:
 - Phase 3.2 adds dimension catalogs, next-period correction baseline data and demo reversals/corrections for ledger verification
 - Phase 3.3 adds report definitions plus demo report snapshots and signed reconciliation evidence for reporting verification
 - Phase 4.1 adds VAT rule-pack seed data, VAT code masterdata and demo VAT decisions with review queue evidence
+- Phase 4.2 adds VAT execution seed data for declaration-box amounts, posting entries and credit-note mirroring
+- Phase 4.3 adds VAT declaration-run, OSS/IOSS and periodic-statement demo artifacts for reporting verification

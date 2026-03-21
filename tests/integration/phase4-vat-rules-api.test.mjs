@@ -75,7 +75,7 @@ test("Phase 4.2 API returns derived declaration-box amounts and mirrored credit 
         })
       }
     });
-    assert.equal(decision.vatDecision.rulePackId, "vat-se-2026.2");
+    assert.equal(decision.vatDecision.rulePackId, "vat-se-2026.3");
     assert.deepEqual(decision.vatDecision.declarationBoxAmounts, [
       { boxCode: "50", amount: 2400, amountType: "taxable_base" },
       { boxCode: "60", amount: 600, amountType: "output_vat" },

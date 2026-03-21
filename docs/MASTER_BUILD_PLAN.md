@@ -479,7 +479,7 @@ Ingen delfas är klar förrän följande finns:
 - [ ] **FAS 4 — Momsmotor**
   - [ ] 4.1 Momsmasterdata och beslutsträd
   - [x] 4.2 Sverige, EU, import, export och omvänd moms
-  - [ ] 4.3 OSS, IOSS, periodisk sammanställning och rapportering
+  - [x] 4.3 OSS, IOSS, periodisk sammanställning och rapportering
 - [ ] **FAS 5 — Försäljning, kundreskontra och kundfakturor**
   - [ ] 5.1 Kundregister, artiklar, offerter och avtal
   - [ ] 5.2 Kundfakturor och leveranskanaler
@@ -747,14 +747,14 @@ Bygg ett explicit beslutsträd för svensk moms, EU, import, export, reverse cha
 ### 4.3 OSS, IOSS, periodisk sammanställning och rapportering
 
 **Bygg detta**
-- [ ] OSS/IOSS classification
-- [ ] Periodisk sammanställning
-- [ ] Momsdeklarationsunderlag
+- [x] OSS/IOSS classification
+- [x] Periodisk sammanställning
+- [x] Momsdeklarationsunderlag
 
 **Verifiera detta innan nästa delfas**
-- [ ] B2C-distansförsäljning landas rätt
-- [ ] EU-lista kan skapas om och om igen
-- [ ] Momsrapport stämmer mot ledgern
+- [x] B2C-distansförsäljning landas rätt
+- [x] EU-lista kan skapas om och om igen
+- [x] Momsrapport stämmer mot ledgern
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P4-03`.
 

@@ -40,6 +40,7 @@ export interface VatDecisionRecord {
   readonly sourceSnapshotDate: string;
   readonly inputsHash: string;
   readonly effectiveDate: string;
+  readonly transactionLine: VatTransactionLine;
   readonly status: string;
   readonly declarationBoxCodes: readonly string[];
   readonly declarationBoxAmounts: readonly VatDecisionBoxAmount[];
@@ -79,6 +80,10 @@ export interface VatDecisionOutputs {
   readonly postingEntries: readonly VatDecisionPostingEntry[];
   readonly bookingTemplateCode: string;
   readonly invoiceTextRequirements: readonly string[];
+  readonly reportingChannel: "regular_vat_return" | "oss" | "ioss";
+  readonly euListEligible: boolean;
+  readonly ossRecord: VatSpecialSchemeRecord | null;
+  readonly iossRecord: VatSpecialSchemeRecord | null;
   readonly vatRate: number;
   readonly rateType: string;
 }
@@ -105,4 +110,134 @@ export interface VatReviewQueueItem {
   readonly explanation: readonly string[];
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+export interface VatTransactionLine {
+  readonly seller_country: string | null;
+  readonly seller_vat_registration_country: string | null;
+  readonly buyer_country: string | null;
+  readonly buyer_type: string | null;
+  readonly buyer_vat_no: string | null;
+  readonly supply_type: string | null;
+  readonly goods_or_services: string | null;
+  readonly invoice_date: string | null;
+  readonly delivery_date: string | null;
+  readonly currency: string | null;
+  readonly line_amount_ex_vat: number | null;
+  readonly vat_rate: number | null;
+  readonly vat_code_candidate: string | null;
+  readonly project_id: string | null;
+  readonly source_type: string | null;
+  readonly source_id: string | null;
+  readonly buyer_is_taxable_person: boolean | null;
+  readonly buyer_vat_number: string | null;
+  readonly buyer_vat_number_status: string | null;
+  readonly supply_subtype: string | null;
+  readonly property_related_flag: boolean | null;
+  readonly construction_service_flag: boolean | null;
+  readonly transport_end_country: string | null;
+  readonly import_flag: boolean | null;
+  readonly export_flag: boolean | null;
+  readonly reverse_charge_flag: boolean | null;
+  readonly oss_flag: boolean | null;
+  readonly ioss_flag: boolean | null;
+  readonly tax_date: string | null;
+  readonly prepayment_date: string | null;
+  readonly line_discount: number | null;
+  readonly line_quantity: number | null;
+  readonly line_uom: string | null;
+  readonly tax_rate_candidate: number | null;
+  readonly exemption_reason: string | null;
+  readonly invoice_text_code: string | null;
+  readonly report_box_code: string | null;
+  readonly credit_note_flag: boolean | null;
+  readonly original_vat_decision_id: string | null;
+  readonly deduction_ratio: number | null;
+  readonly ecb_exchange_rate_to_eur: number | null;
+  readonly consignment_value_eur: number | null;
+  readonly region: "SE" | "EU" | "NON_EU" | null;
+}
+
+export interface VatSpecialSchemeRecord {
+  readonly scheme: "oss" | "ioss";
+  readonly identifierState: string;
+  readonly orderType: string;
+  readonly buyerCountry: string;
+  readonly vatRate: number;
+  readonly euroBaseAmount: number;
+  readonly euroVatAmount: number;
+  readonly originalCurrency: string | null;
+  readonly exchangeRateToEur: number;
+  readonly consignmentValueEur: number | null;
+}
+
+export interface VatSpecialSchemeSummaryRow {
+  readonly scheme: "oss" | "ioss";
+  readonly identifierState: string;
+  readonly orderType: string;
+  readonly buyerCountry: string;
+  readonly vatRate: number;
+  readonly euroBaseAmount: number;
+  readonly euroVatAmount: number;
+  readonly originalCurrencies: readonly string[];
+  readonly exchangeRatesToEur: readonly number[];
+}
+
+export interface VatDeclarationAmountChange {
+  readonly boxCode: string;
+  readonly amountType: "taxable_base" | "output_vat" | "input_vat";
+  readonly previousAmount: number;
+  readonly currentAmount: number;
+}
+
+export interface VatDeclarationLedgerComparison {
+  readonly matched: boolean;
+  readonly reason: string | null;
+  readonly expectedDebit: number;
+  readonly expectedCredit: number;
+  readonly actualDebit: number;
+  readonly actualCredit: number;
+  readonly matchedEntryCount?: number;
+  readonly unmatchedExpectedLineCount?: number;
+}
+
+export interface VatDeclarationRun {
+  readonly vatDeclarationRunId: string;
+  readonly companyId: string;
+  readonly fromDate: string;
+  readonly toDate: string;
+  readonly declarationBoxSummary: readonly VatDeclarationBoxSummary[];
+  readonly ossSummary: readonly VatSpecialSchemeSummaryRow[];
+  readonly iossSummary: readonly VatSpecialSchemeSummaryRow[];
+  readonly ledgerComparison: VatDeclarationLedgerComparison;
+  readonly previousSubmissionId: string | null;
+  readonly correctionReason: string | null;
+  readonly changedBoxes: readonly string[];
+  readonly changedAmounts: readonly VatDeclarationAmountChange[];
+  readonly signer: string;
+  readonly submittedAt: string;
+  readonly sourceSnapshotHash: string;
+}
+
+export interface VatPeriodicStatementLine {
+  readonly customerCountry: string;
+  readonly customerVatNumber: string;
+  readonly buyerVatNumberStatus: string | null;
+  readonly goodsOrServices: "goods" | "services";
+  readonly taxableAmount: number;
+  readonly decisionIds: readonly string[];
+}
+
+export interface VatPeriodicStatementRun {
+  readonly vatPeriodicStatementRunId: string;
+  readonly companyId: string;
+  readonly fromDate: string;
+  readonly toDate: string;
+  readonly lineCount: number;
+  readonly lines: readonly VatPeriodicStatementLine[];
+  readonly previousSubmissionId: string | null;
+  readonly correctionReason: string | null;
+  readonly sourceSnapshotHash: string;
+  readonly generatedAt: string;
+  readonly generatedByActorId: string;
 }

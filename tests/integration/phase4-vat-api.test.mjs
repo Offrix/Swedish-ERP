@@ -56,7 +56,7 @@ test("Phase 4.1 API exposes VAT masterdata, dated rule packs, explainable decisi
       token: adminSession.sessionToken
     });
     assert.equal(packs2025.items.length, 1);
-    assert.equal(packs2025.items[0].rulePackId, "vat-se-2025.5");
+    assert.equal(packs2025.items[0].rulePackId, "vat-se-2025.6");
 
     const decision2025 = await requestJson(`${baseUrl}/v1/vat/decisions`, {
       method: "POST",
@@ -72,7 +72,7 @@ test("Phase 4.1 API exposes VAT masterdata, dated rule packs, explainable decisi
         })
       }
     });
-    assert.equal(decision2025.vatDecision.rulePackId, "vat-se-2025.5");
+    assert.equal(decision2025.vatDecision.rulePackId, "vat-se-2025.6");
 
     const review = await requestJson(`${baseUrl}/v1/vat/decisions`, {
       method: "POST",
@@ -102,7 +102,7 @@ test("Phase 4.1 API exposes VAT masterdata, dated rule packs, explainable decisi
     });
     assert.equal(decision.vatDecision.status, "decided");
     assert.ok(decision.vatDecision.inputsHash);
-    assert.equal(decision.vatDecision.rulePackId, "vat-se-2026.2");
+    assert.equal(decision.vatDecision.rulePackId, "vat-se-2026.3");
 
     const fetched = await requestJson(
       `${baseUrl}/v1/vat/decisions/${decision.vatDecision.vatDecisionId}?companyId=${COMPANY_ID}`,
