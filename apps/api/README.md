@@ -102,6 +102,12 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/ar/contracts`
 - `GET /v1/ar/contracts/:contractId?companyId=...`
 - `POST /v1/ar/contracts/:contractId/status`
+- `GET /v1/ar/invoices?companyId=...`
+- `POST /v1/ar/invoices`
+- `GET /v1/ar/invoices/:customerInvoiceId?companyId=...`
+- `POST /v1/ar/invoices/:customerInvoiceId/issue`
+- `POST /v1/ar/invoices/:customerInvoiceId/deliver`
+- `POST /v1/ar/invoices/:customerInvoiceId/payment-links`
 
 ## Disable strategy
 
@@ -117,4 +123,4 @@ Set `PHASE3_LEDGER_ENABLED=false` to return `503` for FAS 3.1, 3.2 and 3.3 ledge
 
 Set `PHASE4_VAT_ENABLED=false` to return `503` for FAS 4.1, 4.2 and 4.3 VAT routes while keeping the rest of the API process alive.
 
-Set `PHASE5_AR_ENABLED=false` to return `503` for FAS 5.1 AR masterdata routes while keeping the rest of the API process alive.
+Set `PHASE5_AR_ENABLED=false` to return `503` for FAS 5 AR routes while keeping the rest of the API process alive.

@@ -25,6 +25,7 @@ Helper scripts for local setup, structure verification and phased rollout checks
 - `verify-phase4-vat-rules.ps1`: validates required FAS 4.2 VAT rule-execution, box-amount and credit-note artifacts.
 - `verify-phase4-vat-reporting.ps1`: validates required FAS 4.3 OSS/IOSS, periodic statement and VAT declaration reporting artifacts.
 - `verify-phase5-ar-masterdata.ps1`: validates required FAS 5.1 customer, item, quote, contract and import artifacts.
+- `verify-phase5-ar-invoicing.ps1`: validates required FAS 5.2 invoice, credit-note, delivery and payment-link artifacts.
 - `verify-db.ps1`: validates migration file naming.
 - `new-migration.ps1`: creates timestamped migration file in `packages/db/migrations`.
 - `dev-up.ps1`: starts docker infra.

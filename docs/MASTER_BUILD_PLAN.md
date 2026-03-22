@@ -482,7 +482,7 @@ Ingen delfas är klar förrän följande finns:
   - [x] 4.3 OSS, IOSS, periodisk sammanställning och rapportering
 - [ ] **FAS 5 — Försäljning, kundreskontra och kundfakturor**
   - [x] 5.1 Kundregister, artiklar, offerter och avtal
-  - [ ] 5.2 Kundfakturor och leveranskanaler
+  - [x] 5.2 Kundfakturor och leveranskanaler
   - [ ] 5.3 Kundreskontra, påminnelser och inbetalningsmatchning
 - [ ] **FAS 6 — Leverantörsfakturor, inköp, bank och betalningar**
   - [ ] 6.1 Leverantörsregister, PO och mottagning
@@ -780,14 +780,14 @@ Ta kunden från offert eller order till bokförd faktura och inbetalning.
 ### 5.2 Kundfakturor och leveranskanaler
 
 **Bygg detta**
-- [ ] Standard/kredit/del/abonnemangsfakturor
-- [ ] PDF/e-faktura/Peppol
-- [ ] Betallänkar
+- [x] Standard/kredit/del/abonnemangsfakturor
+- [x] PDF/e-faktura/Peppol
+- [x] Betallänkar
 
 **Verifiera detta innan nästa delfas**
-- [ ] Faktura bokförs bara en gång
-- [ ] Kreditfaktura stänger rätt poster
-- [ ] Peppol-export validerar
+- [x] Faktura bokförs bara en gång
+- [x] Kreditfaktura stänger rätt poster
+- [x] Peppol-export validerar
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P5-02`.
 

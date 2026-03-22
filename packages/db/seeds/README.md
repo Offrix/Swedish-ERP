@@ -17,3 +17,4 @@ Seed execution policy:
 - Phase 4.2 adds VAT execution seed data for declaration-box amounts, posting entries and credit-note mirroring
 - Phase 4.3 adds VAT declaration-run, OSS/IOSS and periodic-statement demo artifacts for reporting verification
 - Phase 5.1 adds AR customer masterdata, contacts, items, price lists, quote versions, contracts, invoice plans and import-batch demo artifacts
+- Phase 5.2 adds AR invoice-number series, invoice lines, credit-link, delivery and payment-link demo artifacts

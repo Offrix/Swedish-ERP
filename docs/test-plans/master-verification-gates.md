@@ -202,10 +202,10 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 - [x] Prompt `P5-01` är körd och resultat dokumenterat
 
 ### 5.2 Kundfakturor och leveranskanaler
-- [ ] Faktura bokförs bara en gång
-- [ ] Kreditfaktura stänger rätt poster
-- [ ] Peppol-export validerar
-- [ ] Prompt `P5-02` är körd och resultat dokumenterat
+- [x] Faktura bokförs bara en gång
+- [x] Kreditfaktura stänger rätt poster
+- [x] Peppol-export validerar
+- [x] Prompt `P5-02` är körd och resultat dokumenterat
 
 ### 5.3 Kundreskontra, påminnelser och inbetalningsmatchning
 - [ ] Delbetalningar hanteras

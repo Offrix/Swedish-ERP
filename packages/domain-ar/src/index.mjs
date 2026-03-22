@@ -5,14 +5,65 @@ export const AR_PRICE_LIST_STATUSES = Object.freeze(["draft", "active", "inactiv
 export const AR_QUOTE_STATUSES = Object.freeze(["draft", "sent", "accepted", "rejected", "expired", "converted"]);
 export const AR_CONTRACT_STATUSES = Object.freeze(["draft", "pending_approval", "active", "paused", "terminated", "expired"]);
 export const AR_INVOICE_FREQUENCIES = Object.freeze(["monthly", "quarterly", "annual", "one_time"]);
+export const AR_INVOICE_TYPES = Object.freeze(["standard", "credit_note", "partial", "subscription"]);
+export const AR_INVOICE_STATUSES = Object.freeze([
+  "draft",
+  "validated",
+  "approved",
+  "issued",
+  "delivered",
+  "delivery_failed",
+  "partially_paid",
+  "paid",
+  "overdue",
+  "disputed",
+  "credited",
+  "written_off",
+  "reversed"
+]);
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const EU_COUNTRY_CODES = new Set([
+  "AT",
+  "BE",
+  "BG",
+  "CY",
+  "CZ",
+  "DE",
+  "DK",
+  "EE",
+  "EL",
+  "ES",
+  "FI",
+  "FR",
+  "HR",
+  "HU",
+  "IE",
+  "IT",
+  "LT",
+  "LU",
+  "LV",
+  "MT",
+  "NL",
+  "PL",
+  "PT",
+  "RO",
+  "SE",
+  "SI",
+  "SK"
+]);
 
 export function createArPlatform(options = {}) {
   return createArEngine(options);
 }
 
-export function createArEngine({ clock = () => new Date(), seedDemo = true, vatPlatform = null } = {}) {
+export function createArEngine({
+  clock = () => new Date(),
+  seedDemo = true,
+  vatPlatform = null,
+  ledgerPlatform = null,
+  integrationPlatform = null
+} = {}) {
   const state = {
     customers: new Map(),
     customerIdsByCompany: new Map(),
@@ -32,6 +83,12 @@ export function createArEngine({ clock = () => new Date(), seedDemo = true, vatP
     contracts: new Map(),
     contractIdsByCompany: new Map(),
     contractIdsByCompanyNo: new Map(),
+    invoices: new Map(),
+    invoiceIdsByCompany: new Map(),
+    invoiceIdsByCompanyNo: new Map(),
+    invoiceIdsByCompanyGenerationKey: new Map(),
+    paymentLinks: new Map(),
+    paymentLinkIdsByInvoice: new Map(),
     customerImportBatches: new Map(),
     customerImportBatchIdsByCompanyKey: new Map(),
     countersByCompany: new Map(),
@@ -47,6 +104,8 @@ export function createArEngine({ clock = () => new Date(), seedDemo = true, vatP
     priceListStatuses: AR_PRICE_LIST_STATUSES,
     quoteStatuses: AR_QUOTE_STATUSES,
     contractStatuses: AR_CONTRACT_STATUSES,
+    invoiceTypes: AR_INVOICE_TYPES,
+    invoiceStatuses: AR_INVOICE_STATUSES,
     invoiceFrequencies: AR_INVOICE_FREQUENCIES,
     listCustomers,
     getCustomer,
@@ -68,6 +127,12 @@ export function createArEngine({ clock = () => new Date(), seedDemo = true, vatP
     getContract,
     createContract,
     transitionContractStatus,
+    listInvoices,
+    getInvoice,
+    createInvoice,
+    issueInvoice,
+    deliverInvoice,
+    createInvoicePaymentLink,
     importCustomers,
     getCustomerImportBatch,
     snapshotAr
@@ -104,6 +169,11 @@ export function createArEngine({ clock = () => new Date(), seedDemo = true, vatP
     billingAddress,
     deliveryAddress,
     customerStatus = "active",
+    allowReminderFee = true,
+    allowInterest = true,
+    allowPartialDelivery = true,
+    blockedForInvoicing = false,
+    blockedForDelivery = false,
     importSourceKey = null,
     actorId = "system",
     correlationId = crypto.randomUUID()
@@ -150,6 +220,11 @@ export function createArEngine({ clock = () => new Date(), seedDemo = true, vatP
       billingAddress: normalizeAddress(billingAddress, "billing_address_invalid"),
       deliveryAddress: normalizeAddress(deliveryAddress || billingAddress, "delivery_address_invalid"),
       customerStatus: assertAllowed(customerStatus, AR_CUSTOMER_STATUSES, "customer_status_invalid"),
+      allowReminderFee: allowReminderFee === true,
+      allowInterest: allowInterest === true,
+      allowPartialDelivery: allowPartialDelivery === true,
+      blockedForInvoicing: blockedForInvoicing === true,
+      blockedForDelivery: blockedForDelivery === true,
       importSourceKey: normalizedImportSourceKey,
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
@@ -643,6 +718,358 @@ export function createArEngine({ clock = () => new Date(), seedDemo = true, vatP
     return copy(contract);
   }
 
+  function listInvoices({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.invoiceIdsByCompany.get(resolvedCompanyId) || [])
+      .map((invoiceId) => state.invoices.get(invoiceId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function getInvoice({ companyId, customerInvoiceId } = {}) {
+    return copy(requireInvoiceRecord(state, companyId, customerInvoiceId));
+  }
+
+  function createInvoice({
+    companyId,
+    customerId,
+    sourceContractId = null,
+    sourceQuoteId = null,
+    originalInvoiceId = null,
+    invoiceType = "standard",
+    deliveryChannel = "pdf_email",
+    issueDate,
+    dueDate,
+    currencyCode = null,
+    lines = null,
+    buyerReference = null,
+    purchaseOrderReference = null,
+    recipientEmails = [],
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const customer = requireCustomerRecord(state, resolvedCompanyId, customerId);
+    if (customer.customerStatus === "blocked" || customer.blockedForInvoicing === true) {
+      throw createError(409, "invoice_validation_failed", "Blocked customers cannot be invoiced.");
+    }
+    const contract = sourceContractId ? requireContractRecord(state, resolvedCompanyId, sourceContractId) : null;
+    if (contract && contract.status !== "active") {
+      throw createError(409, "contract_not_active", "Only active contracts may create invoice proposals in FAS 5.2.");
+    }
+    const originalInvoice = originalInvoiceId ? requireInvoiceRecord(state, resolvedCompanyId, originalInvoiceId) : null;
+    const resolvedInvoiceType = assertAllowed(invoiceType, AR_INVOICE_TYPES, "customer_invoice_type_invalid");
+    if (resolvedInvoiceType === "credit_note" && !originalInvoice) {
+      throw createError(409, "credit_link_missing", "Credit invoices require a valid original invoice.");
+    }
+    if (resolvedInvoiceType === "subscription" && !contract) {
+      throw createError(409, "subscription_contract_required", "Subscription invoices require an active contract.");
+    }
+    if (resolvedInvoiceType === "partial" && customer.allowPartialDelivery === false) {
+      throw createError(409, "partial_delivery_not_allowed", "Customer does not allow partial delivery invoicing.");
+    }
+    const resolvedIssueDate = normalizeDate(issueDate, "invoice_issue_date_invalid");
+    const resolvedDueDate = normalizeDate(dueDate, "invoice_due_date_invalid");
+    assertDateRange(resolvedIssueDate, resolvedDueDate, "invoice_due_date_invalid");
+    const resolvedCurrencyCode = normalizeUpperCode(currencyCode || contract?.currencyCode || customer.currencyCode, "currency_code_required", 3);
+    const invoiceLines = normalizeCommercialLines({
+      state,
+      vatPlatform,
+      companyId: resolvedCompanyId,
+      currencyCode: resolvedCurrencyCode,
+      referenceDate: resolvedIssueDate,
+      priceListId: null,
+      lines: lines || contract?.lines
+    });
+    if (invoiceLines.length === 0) {
+      throw createError(400, "invoice_lines_required", "Invoices require at least one line.");
+    }
+    const totals = calculateInvoiceTotals({
+      vatPlatform,
+      companyId: resolvedCompanyId,
+      lines: invoiceLines
+    });
+    if (resolvedInvoiceType === "credit_note" && totals.grossAmount > originalInvoice.remainingAmount) {
+      throw createError(409, "credit_amount_exceeds_original", "Credit note exceeds the remaining creditable amount.");
+    }
+    const sourceDescriptor = resolveInvoiceSourceDescriptor({
+      customer,
+      contract,
+      sourceQuoteId,
+      originalInvoice,
+      invoiceType: resolvedInvoiceType,
+      issueDate: resolvedIssueDate
+    });
+    const invoiceGenerationKey = hashObject({
+      companyId: resolvedCompanyId,
+      sourceType: sourceDescriptor.sourceType,
+      sourceId: sourceDescriptor.sourceId,
+      sourceVersion: sourceDescriptor.sourceVersion,
+      customerId: customer.customerId,
+      invoiceType: resolvedInvoiceType,
+      issueDate: resolvedIssueDate,
+      dueDate: resolvedDueDate,
+      currencyCode: resolvedCurrencyCode,
+      deliveryChannel,
+      buyerReference: normalizeOptionalText(buyerReference),
+      purchaseOrderReference: normalizeOptionalText(purchaseOrderReference),
+      lines: invoiceLines
+    });
+    const existingInvoiceId = state.invoiceIdsByCompanyGenerationKey.get(toCompanyScopedKey(resolvedCompanyId, invoiceGenerationKey));
+    if (existingInvoiceId) {
+      const existingInvoice = state.invoices.get(existingInvoiceId);
+      if (existingInvoice) {
+        return copy(existingInvoice);
+      }
+    }
+    const record = {
+      customerInvoiceId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      customerId: customer.customerId,
+      sourceContractId: contract?.contractId || null,
+      sourceQuoteId: normalizeOptionalText(sourceQuoteId),
+      originalInvoiceId: originalInvoice?.customerInvoiceId || null,
+      sourceType: sourceDescriptor.sourceType,
+      sourceId: sourceDescriptor.sourceId,
+      sourceVersion: sourceDescriptor.sourceVersion,
+      invoiceType: resolvedInvoiceType,
+      status: "draft",
+      deliveryChannel: requireText(deliveryChannel, "invoice_delivery_channel_required"),
+      invoiceNumber: null,
+      invoiceSeriesCode: null,
+      invoiceSequenceNumber: null,
+      issueIdempotencyKey: null,
+      issueDate: resolvedIssueDate,
+      dueDate: resolvedDueDate,
+      currencyCode: resolvedCurrencyCode,
+      lines: invoiceLines,
+      totals,
+      buyerReference: normalizeOptionalText(buyerReference),
+      purchaseOrderReference: normalizeOptionalText(purchaseOrderReference),
+      recipientEmails: uniqueTexts(recipientEmails),
+      journalEntryId: null,
+      issuedAt: null,
+      validatedAt: null,
+      approvedAt: null,
+      deliveredAt: null,
+      deliveries: [],
+      paymentLinks: [],
+      creditedAmount: 0,
+      remainingAmount: totals.grossAmount,
+      paymentReference: null,
+      invoiceGenerationKey,
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.invoices.set(record.customerInvoiceId, record);
+    ensureCollection(state.invoiceIdsByCompany, resolvedCompanyId).push(record.customerInvoiceId);
+    state.invoiceIdsByCompanyGenerationKey.set(toCompanyScopedKey(resolvedCompanyId, invoiceGenerationKey), record.customerInvoiceId);
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId,
+      correlationId,
+      action: "ar.invoice.created",
+      entityType: "ar_invoice",
+      entityId: record.customerInvoiceId,
+      explanation: `Created ${resolvedInvoiceType} invoice draft for customer ${customer.customerNo}.`
+    });
+    return copy(record);
+  }
+
+  function issueInvoice({ companyId, customerInvoiceId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+    const invoice = requireInvoiceRecord(state, companyId, customerInvoiceId);
+    if (invoice.journalEntryId) {
+      return copy(invoice);
+    }
+    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+      throw createError(500, "ledger_platform_missing", "Ledger platform is required to issue invoices.");
+    }
+    const customer = requireCustomerRecord(state, invoice.companyId, invoice.customerId);
+    if (customer.customerStatus === "blocked" || customer.blockedForInvoicing === true) {
+      throw createError(409, "invoice_validation_failed", "Blocked customers cannot be invoiced.");
+    }
+    invoice.validatedAt = invoice.validatedAt || nowIso(clock);
+    invoice.approvedAt = invoice.approvedAt || nowIso(clock);
+    invoice.status = "approved";
+    const series = resolveInvoiceSeries(invoice.invoiceType);
+    if (!invoice.invoiceNumber) {
+      const sequenceNumber = nextInvoiceSeriesNumber(state, invoice.companyId, series.seriesCode);
+      invoice.invoiceSeriesCode = series.seriesCode;
+      invoice.invoiceSequenceNumber = sequenceNumber;
+      invoice.invoiceNumber = `${series.prefix}${String(sequenceNumber).padStart(5, "0")}`;
+      state.invoiceIdsByCompanyNo.set(toCompanyScopedKey(invoice.companyId, invoice.invoiceNumber), invoice.customerInvoiceId);
+    }
+    invoice.issueIdempotencyKey = invoice.issueIdempotencyKey || `invoice.issue:${invoice.invoiceGenerationKey}`;
+    invoice.paymentReference = invoice.paymentReference || String(invoice.invoiceSequenceNumber || 0).padStart(10, "0");
+
+    const journalLines = buildInvoiceJournalLines({
+      vatPlatform,
+      companyId: invoice.companyId,
+      invoice,
+      customer
+    });
+    const created = ledgerPlatform.createJournalEntry({
+      companyId: invoice.companyId,
+      journalDate: invoice.issueDate,
+      voucherSeriesCode: series.seriesCode,
+      sourceType: resolveInvoiceSourceType(invoice.invoiceType),
+      sourceId: invoice.customerInvoiceId,
+      actorId,
+      idempotencyKey: invoice.issueIdempotencyKey,
+      description: `${invoice.invoiceType} ${invoice.invoiceNumber}`,
+      lines: journalLines
+    });
+    ledgerPlatform.validateJournalEntry({
+      companyId: invoice.companyId,
+      journalEntryId: created.journalEntry.journalEntryId,
+      actorId
+    });
+    const posted = ledgerPlatform.postJournalEntry({
+      companyId: invoice.companyId,
+      journalEntryId: created.journalEntry.journalEntryId,
+      actorId
+    });
+
+    invoice.status = "issued";
+    invoice.journalEntryId = posted.journalEntry.journalEntryId;
+    invoice.issuedAt = nowIso(clock);
+    invoice.updatedAt = nowIso(clock);
+
+    if (invoice.invoiceType === "credit_note" && invoice.originalInvoiceId) {
+      const originalInvoice = requireInvoiceRecord(state, invoice.companyId, invoice.originalInvoiceId);
+      originalInvoice.creditedAmount = roundMoney(originalInvoice.creditedAmount + invoice.totals.grossAmount);
+      originalInvoice.remainingAmount = roundMoney(Math.max(0, originalInvoice.remainingAmount - invoice.totals.grossAmount));
+      if (originalInvoice.remainingAmount === 0) {
+        originalInvoice.status = "credited";
+      }
+      originalInvoice.updatedAt = nowIso(clock);
+    }
+
+    pushAudit(state, clock, {
+      companyId: invoice.companyId,
+      actorId,
+      correlationId,
+      action: "ar.invoice.issued",
+      entityType: "ar_invoice",
+      entityId: invoice.customerInvoiceId,
+      explanation: `Issued invoice ${invoice.invoiceNumber} and posted journal ${invoice.journalEntryId}.`
+    });
+    return copy(invoice);
+  }
+
+  function deliverInvoice({
+    companyId,
+    customerInvoiceId,
+    deliveryChannel = null,
+    recipientEmails = null,
+    buyerReference = null,
+    purchaseOrderReference = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const invoice = requireInvoiceRecord(state, companyId, customerInvoiceId);
+    if (!invoice.journalEntryId) {
+      throw createError(409, "invoice_not_issued", "Invoices must be issued before delivery.");
+    }
+    if (!integrationPlatform || typeof integrationPlatform.prepareInvoiceDelivery !== "function") {
+      throw createError(500, "integration_platform_missing", "Integration platform is required for invoice delivery.");
+    }
+    const customer = requireCustomerRecord(state, invoice.companyId, invoice.customerId);
+    if (customer.blockedForDelivery === true) {
+      throw createError(409, "delivery_failed", "Customer is blocked for delivery.");
+    }
+    const contactEmails =
+      recipientEmails && recipientEmails.length > 0
+        ? recipientEmails
+        : (state.contactIdsByCustomer.get(customer.customerId) || [])
+            .map((contactId) => state.contacts.get(contactId))
+            .filter((contact) => contact?.defaultBilling || contact?.roleCode === "billing")
+            .map((contact) => contact.email);
+    let preparedDelivery;
+    try {
+      preparedDelivery = integrationPlatform.prepareInvoiceDelivery({
+        companyId: invoice.companyId,
+        invoice,
+        customer,
+        deliveryChannel: deliveryChannel || invoice.deliveryChannel,
+        recipientEmails: contactEmails,
+        buyerReference: buyerReference || invoice.buyerReference,
+        purchaseOrderReference: purchaseOrderReference || invoice.purchaseOrderReference
+      });
+    } catch (error) {
+      invoice.status = "delivery_failed";
+      invoice.updatedAt = nowIso(clock);
+      pushAudit(state, clock, {
+        companyId: invoice.companyId,
+        actorId,
+        correlationId,
+        action: "ar.invoice.delivery_failed",
+        entityType: "ar_invoice",
+        entityId: invoice.customerInvoiceId,
+        explanation: `Delivery validation failed for invoice ${invoice.invoiceNumber}: ${error.code || "delivery_failed"}.`
+      });
+      throw error;
+    }
+    invoice.deliveries.push(preparedDelivery);
+    invoice.status = "delivered";
+    invoice.deliveredAt = nowIso(clock);
+    invoice.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: invoice.companyId,
+      actorId,
+      correlationId,
+      action: "ar.invoice.delivered",
+      entityType: "ar_invoice",
+      entityId: invoice.customerInvoiceId,
+      explanation: `Prepared ${preparedDelivery.channel} delivery for invoice ${invoice.invoiceNumber}.`
+    });
+    return copy(preparedDelivery);
+  }
+
+  function createInvoicePaymentLink({
+    companyId,
+    customerInvoiceId,
+    amount = null,
+    expiresAt = null,
+    providerCode = "internal_mock",
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const invoice = requireInvoiceRecord(state, companyId, customerInvoiceId);
+    if (!integrationPlatform || typeof integrationPlatform.createPaymentLink !== "function") {
+      throw createError(500, "integration_platform_missing", "Integration platform is required for payment links.");
+    }
+    if (!invoice.journalEntryId) {
+      throw createError(409, "invoice_not_issued", "Payment links require an issued invoice.");
+    }
+    if (invoice.invoiceType === "credit_note") {
+      throw createError(409, "payment_link_not_allowed_for_credit_note", "Credit notes may not expose payment links.");
+    }
+    const paymentLink = integrationPlatform.createPaymentLink({
+      companyId: invoice.companyId,
+      invoiceId: invoice.customerInvoiceId,
+      amount: amount ?? invoice.remainingAmount,
+      currencyCode: invoice.currencyCode,
+      providerCode,
+      expiresAt
+    });
+    state.paymentLinks.set(paymentLink.paymentLinkId, paymentLink);
+    ensureCollection(state.paymentLinkIdsByInvoice, invoice.customerInvoiceId).push(paymentLink.paymentLinkId);
+    invoice.paymentLinks.push(paymentLink);
+    invoice.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: invoice.companyId,
+      actorId,
+      correlationId,
+      action: "ar.invoice.payment_link_created",
+      entityType: "ar_invoice",
+      entityId: invoice.customerInvoiceId,
+      explanation: `Created payment link ${paymentLink.paymentLinkId} for invoice ${invoice.invoiceNumber}.`
+    });
+    return copy(paymentLink);
+  }
+
   function importCustomers({
     companyId,
     batchKey,
@@ -735,6 +1162,8 @@ export function createArEngine({ clock = () => new Date(), seedDemo = true, vatP
       priceLists: [...state.priceLists.values()],
       quotes: [...state.quotes.values()],
       contracts: [...state.contracts.values()],
+      invoices: [...state.invoices.values()],
+      paymentLinks: [...state.paymentLinks.values()],
       customerImportBatches: [...state.customerImportBatches.values()],
       auditEvents: state.auditEvents
     });
@@ -877,6 +1306,14 @@ function requireContractRecord(state, companyId, contractId) {
     throw createError(404, "ar_contract_not_found", "AR contract was not found.");
   }
   return contract;
+}
+
+function requireInvoiceRecord(state, companyId, customerInvoiceId) {
+  const invoice = state.invoices.get(requireText(customerInvoiceId, "customer_invoice_id_required"));
+  if (!invoice || invoice.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "customer_invoice_not_found", "Customer invoice was not found.");
+  }
+  return invoice;
 }
 
 function requireCurrentQuoteVersion(quote) {
@@ -1111,6 +1548,171 @@ function assertInvoicePlanIntegrity(rows) {
   }
 }
 
+function calculateInvoiceTotals({ vatPlatform, companyId, lines }) {
+  const netAmount = roundMoney(lines.reduce((sum, line) => sum + Number(line.lineAmount || 0), 0));
+  const vatAmount = roundMoney(
+    lines.reduce((sum, line) => sum + calculateVatAmount(resolveVatRate(vatPlatform, companyId, line.vatCode), line.lineAmount), 0)
+  );
+  return {
+    netAmount,
+    vatAmount,
+    grossAmount: roundMoney(netAmount + vatAmount)
+  };
+}
+
+function resolveVatRate(vatPlatform, companyId, vatCode) {
+  if (!vatPlatform || typeof vatPlatform.listVatCodes !== "function") {
+    return 0;
+  }
+  const vatCodeDefinition = vatPlatform.listVatCodes({ companyId }).find((candidate) => candidate.vatCode === vatCode);
+  return Number(vatCodeDefinition?.vatRate || 0);
+}
+
+function calculateVatAmount(vatRate, netAmount) {
+  if (!vatRate) {
+    return 0;
+  }
+  return roundMoney(Number(netAmount || 0) * (vatRate / 100));
+}
+
+function buildInvoiceJournalLines({ vatPlatform, companyId, invoice, customer }) {
+  const sourceType = resolveInvoiceSourceType(invoice.invoiceType);
+  const receivableAccountNumber = resolveCustomerReceivableAccount(customer);
+  const journalLines = [];
+  let lineNumber = 1;
+  let totalDebit = 0;
+  let totalCredit = 0;
+
+  for (const line of invoice.lines) {
+    const vatRate = resolveVatRate(vatPlatform, companyId, line.vatCode);
+    const vatAmount = calculateVatAmount(vatRate, line.lineAmount);
+    const vatAccountNumber = resolveOutputVatAccountNumber(vatRate);
+    if (invoice.invoiceType === "credit_note") {
+      journalLines.push(createJournalLine(line.revenueAccountNumber, lineNumber, line.lineAmount, 0, sourceType, invoice.customerInvoiceId));
+      totalDebit += line.lineAmount;
+      lineNumber += 1;
+      if (vatAmount > 0 && vatAccountNumber) {
+        journalLines.push(createJournalLine(vatAccountNumber, lineNumber, vatAmount, 0, sourceType, invoice.customerInvoiceId));
+        totalDebit += vatAmount;
+        lineNumber += 1;
+      }
+      continue;
+    }
+
+    journalLines.push(createJournalLine(line.revenueAccountNumber, lineNumber, 0, line.lineAmount, sourceType, invoice.customerInvoiceId));
+    totalCredit += line.lineAmount;
+    lineNumber += 1;
+    if (vatAmount > 0 && vatAccountNumber) {
+      journalLines.push(createJournalLine(vatAccountNumber, lineNumber, 0, vatAmount, sourceType, invoice.customerInvoiceId));
+      totalCredit += vatAmount;
+      lineNumber += 1;
+    }
+  }
+
+  const receivableAmount = roundMoney(Math.abs(totalCredit - totalDebit));
+  if (invoice.invoiceType === "credit_note") {
+    journalLines.unshift(createJournalLine(receivableAccountNumber, 0, 0, receivableAmount, sourceType, invoice.customerInvoiceId));
+  } else {
+    journalLines.unshift(createJournalLine(receivableAccountNumber, 0, receivableAmount, 0, sourceType, invoice.customerInvoiceId));
+  }
+  return journalLines.map((line, index) => ({
+    ...line,
+    lineNumber: index + 1
+  }));
+}
+
+function createJournalLine(accountNumber, lineNumber, debitAmount, creditAmount, sourceType, sourceId) {
+  return {
+    accountNumber,
+    debitAmount: roundMoney(debitAmount),
+    creditAmount: roundMoney(creditAmount),
+    sourceType,
+    sourceId,
+    lineNumber
+  };
+}
+
+function resolveInvoiceSourceType(invoiceType) {
+  return invoiceType === "credit_note" ? "AR_CREDIT_NOTE" : "AR_INVOICE";
+}
+
+function resolveInvoiceSeries(invoiceType) {
+  if (invoiceType === "credit_note") {
+    return {
+      seriesCode: "C",
+      prefix: "CRN-"
+    };
+  }
+  return {
+    seriesCode: "B",
+    prefix: "INV-"
+  };
+}
+
+function nextInvoiceSeriesNumber(state, companyId, seriesCode) {
+  if (!state.countersByCompany.has(companyId)) {
+    state.countersByCompany.set(companyId, {});
+  }
+  const counters = state.countersByCompany.get(companyId);
+  const counterKey = `invoice_series_${seriesCode}`;
+  counters[counterKey] = (counters[counterKey] || 0) + 1;
+  return counters[counterKey];
+}
+
+function resolveInvoiceSourceDescriptor({ customer, contract, sourceQuoteId, originalInvoice, invoiceType, issueDate }) {
+  if (originalInvoice) {
+    return {
+      sourceType: "AR_CREDIT_ORIGINAL",
+      sourceId: originalInvoice.customerInvoiceId,
+      sourceVersion: originalInvoice.issuedAt || originalInvoice.createdAt
+    };
+  }
+  if (contract) {
+    return {
+      sourceType: invoiceType === "subscription" ? "CONTRACT_PLAN" : "CONTRACT",
+      sourceId: contract.contractId,
+      sourceVersion: contract.updatedAt
+    };
+  }
+  if (sourceQuoteId) {
+    return {
+      sourceType: "QUOTE",
+      sourceId: requireText(sourceQuoteId, "source_quote_id_required"),
+      sourceVersion: issueDate
+    };
+  }
+  return {
+    sourceType: invoiceType === "partial" ? "MANUAL_PARTIAL" : "MANUAL",
+    sourceId: customer.customerId,
+    sourceVersion: issueDate
+  };
+}
+
+function resolveCustomerReceivableAccount(customer) {
+  const countryCode = normalizeOptionalText(customer?.countryCode)?.toUpperCase() || "SE";
+  if (countryCode === "SE") {
+    return "1210";
+  }
+  if (EU_COUNTRY_CODES.has(countryCode)) {
+    return "1220";
+  }
+  return "1230";
+}
+
+function resolveOutputVatAccountNumber(vatRate) {
+  const formattedRate = Number(vatRate || 0).toFixed(2);
+  if (formattedRate === "25.00") {
+    return "2610";
+  }
+  if (formattedRate === "12.00") {
+    return "2620";
+  }
+  if (formattedRate === "6.00") {
+    return "2630";
+  }
+  return null;
+}
+
 function upsertImportedCustomer({ state, clock, vatPlatform, companyId, row, batchKey, actorId, correlationId }) {
   if (!row || typeof row !== "object") {
     throw createError(400, "customer_import_row_invalid", "Each import row must be an object.");
@@ -1164,6 +1766,11 @@ function upsertImportedCustomer({ state, clock, vatPlatform, companyId, row, bat
     billingAddress: normalizeAddress(row.billingAddress || customer.billingAddress, "billing_address_invalid"),
     deliveryAddress: normalizeAddress(row.deliveryAddress || customer.deliveryAddress, "delivery_address_invalid"),
     customerStatus: assertAllowed(row.customerStatus || customer.customerStatus, AR_CUSTOMER_STATUSES, "customer_status_invalid"),
+    allowReminderFee: row.allowReminderFee == null ? customer.allowReminderFee : row.allowReminderFee === true,
+    allowInterest: row.allowInterest == null ? customer.allowInterest : row.allowInterest === true,
+    allowPartialDelivery: row.allowPartialDelivery == null ? customer.allowPartialDelivery : row.allowPartialDelivery === true,
+    blockedForInvoicing: row.blockedForInvoicing == null ? customer.blockedForInvoicing : row.blockedForInvoicing === true,
+    blockedForDelivery: row.blockedForDelivery == null ? customer.blockedForDelivery : row.blockedForDelivery === true,
     importSourceKey: normalizedImportSourceKey || customer.importSourceKey,
     updatedAt: nowIso(clock)
   });
@@ -1236,6 +1843,11 @@ function createImportedCustomer(state, clock, companyId, batchKey, actorId, corr
     billingAddress: normalizeAddress(row.billingAddress || {}, "billing_address_invalid"),
     deliveryAddress: normalizeAddress(row.deliveryAddress || row.billingAddress || {}, "delivery_address_invalid"),
     customerStatus: assertAllowed(row.customerStatus || "active", AR_CUSTOMER_STATUSES, "customer_status_invalid"),
+    allowReminderFee: row.allowReminderFee !== false,
+    allowInterest: row.allowInterest !== false,
+    allowPartialDelivery: row.allowPartialDelivery !== false,
+    blockedForInvoicing: row.blockedForInvoicing === true,
+    blockedForDelivery: row.blockedForDelivery === true,
     importSourceKey: normalizedImportSourceKey,
     importedFromBatchId: batchKey,
     createdAt: nowIso(clock),
@@ -1424,6 +2036,10 @@ function ensureCollection(map, key) {
     map.set(key, []);
   }
   return map.get(key);
+}
+
+function uniqueTexts(values) {
+  return [...new Set((Array.isArray(values) ? values : []).map((value) => requireText(value, "text_value_required")))];
 }
 
 function normalizeAddress(address, code) {

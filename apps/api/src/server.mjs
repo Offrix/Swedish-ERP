@@ -100,7 +100,12 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/ar/quotes/:quoteId/revise",
               "/v1/ar/contracts",
               "/v1/ar/contracts/:contractId",
-              "/v1/ar/contracts/:contractId/status"
+              "/v1/ar/contracts/:contractId/status",
+              "/v1/ar/invoices",
+              "/v1/ar/invoices/:customerInvoiceId",
+              "/v1/ar/invoices/:customerInvoiceId/issue",
+              "/v1/ar/invoices/:customerInvoiceId/deliver",
+              "/v1/ar/invoices/:customerInvoiceId/payment-links"
             ]
           }
         : { status: "ok" }
@@ -159,7 +164,7 @@ async function handleRequest({ req, res, platform, flags }) {
   if (!flags.phase5ArEnabled && isPhase5Route(path)) {
     writeJson(res, 503, {
       error: "feature_disabled",
-      message: "FAS 5.1 AR masterdata routes are disabled by configuration."
+      message: "FAS 5 AR routes are disabled by configuration."
     });
     return;
   }
@@ -2081,6 +2086,158 @@ async function handleRequest({ req, res, platform, flags }) {
         contractId: arContractStatusMatch.contractId,
         targetStatus: body.targetStatus,
         resolvedEndDate: body.resolvedEndDate || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ar/invoices") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_invoice",
+      scopeCode: "ar"
+    });
+    writeJson(res, 200, {
+      items: platform.listInvoices({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ar/invoices") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_invoice",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createInvoice({
+        ...body,
+        companyId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arInvoiceMatch = matchPath(path, "/v1/ar/invoices/:customerInvoiceId");
+  if (arInvoiceMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_invoice",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getInvoice({
+        companyId,
+        customerInvoiceId: arInvoiceMatch.customerInvoiceId
+      })
+    );
+    return;
+  }
+
+  const arInvoiceIssueMatch = matchPath(path, "/v1/ar/invoices/:customerInvoiceId/issue");
+  if (arInvoiceIssueMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_invoice",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.issueInvoice({
+        companyId,
+        customerInvoiceId: arInvoiceIssueMatch.customerInvoiceId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arInvoiceDeliverMatch = matchPath(path, "/v1/ar/invoices/:customerInvoiceId/deliver");
+  if (arInvoiceDeliverMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_invoice",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.deliverInvoice({
+        companyId,
+        customerInvoiceId: arInvoiceDeliverMatch.customerInvoiceId,
+        deliveryChannel: body.deliveryChannel || null,
+        recipientEmails: Array.isArray(body.recipientEmails) ? body.recipientEmails : null,
+        buyerReference: body.buyerReference || null,
+        purchaseOrderReference: body.purchaseOrderReference || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arInvoicePaymentLinksMatch = matchPath(path, "/v1/ar/invoices/:customerInvoiceId/payment-links");
+  if (arInvoicePaymentLinksMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_invoice",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createInvoicePaymentLink({
+        companyId,
+        customerInvoiceId: arInvoicePaymentLinksMatch.customerInvoiceId,
+        amount: body.amount ?? null,
+        expiresAt: body.expiresAt || null,
+        providerCode: body.providerCode || "internal_mock",
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })

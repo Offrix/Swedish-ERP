@@ -3,6 +3,23 @@ export type ArPriceListStatus = "draft" | "active" | "inactive";
 export type ArQuoteStatus = "draft" | "sent" | "accepted" | "rejected" | "expired" | "converted";
 export type ArContractStatus = "draft" | "pending_approval" | "active" | "paused" | "terminated" | "expired";
 export type ArInvoiceFrequency = "monthly" | "quarterly" | "annual" | "one_time";
+export type ArInvoiceType = "standard" | "credit_note" | "partial" | "subscription";
+export type ArInvoiceStatus =
+  | "draft"
+  | "validated"
+  | "approved"
+  | "issued"
+  | "delivered"
+  | "delivery_failed"
+  | "partially_paid"
+  | "paid"
+  | "overdue"
+  | "disputed"
+  | "credited"
+  | "written_off"
+  | "reversed";
+export type ArInvoiceDeliveryChannel = "pdf_email" | "peppol";
+export type ArPaymentLinkStatus = "active" | "consumed" | "expired" | "cancelled";
 
 export interface ArAddress {
   readonly line1: string;
@@ -31,6 +48,11 @@ export interface ArCustomer {
   readonly billingAddress: ArAddress;
   readonly deliveryAddress: ArAddress;
   readonly customerStatus: ArCustomerStatus;
+  readonly allowReminderFee: boolean;
+  readonly allowInterest: boolean;
+  readonly allowPartialDelivery: boolean;
+  readonly blockedForInvoicing: boolean;
+  readonly blockedForDelivery: boolean;
   readonly importSourceKey?: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -199,6 +221,83 @@ export interface ArAuditEvent {
   readonly recordedAt: string;
 }
 
+export interface ArInvoiceTotals {
+  readonly netAmount: number;
+  readonly vatAmount: number;
+  readonly grossAmount: number;
+}
+
+export interface ArInvoiceDelivery {
+  readonly deliveryId: string;
+  readonly companyId: string;
+  readonly invoiceId: string;
+  readonly invoiceNumber: string;
+  readonly channel: ArInvoiceDeliveryChannel;
+  readonly documentType: "invoice" | "credit_note";
+  readonly payloadType: string;
+  readonly payloadVersion: string;
+  readonly payloadHash: string;
+  readonly status: string;
+  readonly recipient: string;
+  readonly buyerReference: string | null;
+  readonly purchaseOrderReference: string | null;
+  readonly payload: Record<string, unknown>;
+  readonly createdAt: string;
+}
+
+export interface ArInvoicePaymentLink {
+  readonly paymentLinkId: string;
+  readonly companyId: string;
+  readonly invoiceId: string;
+  readonly providerCode: string;
+  readonly status: ArPaymentLinkStatus;
+  readonly amount: number;
+  readonly currencyCode: string;
+  readonly url: string;
+  readonly expiresAt: string;
+  readonly createdAt: string;
+}
+
+export interface ArInvoice {
+  readonly customerInvoiceId: string;
+  readonly companyId: string;
+  readonly customerId: string;
+  readonly sourceContractId: string | null;
+  readonly sourceQuoteId: string | null;
+  readonly originalInvoiceId: string | null;
+  readonly sourceType: string;
+  readonly sourceId: string;
+  readonly sourceVersion: string;
+  readonly invoiceType: ArInvoiceType;
+  readonly status: ArInvoiceStatus;
+  readonly deliveryChannel: ArInvoiceDeliveryChannel;
+  readonly invoiceNumber: string | null;
+  readonly invoiceSeriesCode: string | null;
+  readonly invoiceSequenceNumber: number | null;
+  readonly issueIdempotencyKey: string | null;
+  readonly issueDate: string;
+  readonly dueDate: string;
+  readonly currencyCode: string;
+  readonly lines: readonly ArCommercialLine[];
+  readonly totals: ArInvoiceTotals;
+  readonly buyerReference: string | null;
+  readonly purchaseOrderReference: string | null;
+  readonly recipientEmails: readonly string[];
+  readonly journalEntryId: string | null;
+  readonly issuedAt: string | null;
+  readonly validatedAt: string | null;
+  readonly approvedAt: string | null;
+  readonly deliveredAt: string | null;
+  readonly deliveries: readonly ArInvoiceDelivery[];
+  readonly paymentLinks: readonly ArInvoicePaymentLink[];
+  readonly creditedAmount: number;
+  readonly remainingAmount: number;
+  readonly paymentReference: string | null;
+  readonly invoiceGenerationKey: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface AccountsReceivableSnapshot {
   readonly customers: readonly ArCustomer[];
   readonly contacts: readonly ArCustomerContact[];
@@ -206,6 +305,8 @@ export interface AccountsReceivableSnapshot {
   readonly priceLists: readonly ArPriceList[];
   readonly quotes: readonly ArQuote[];
   readonly contracts: readonly ArContract[];
+  readonly invoices: readonly ArInvoice[];
+  readonly paymentLinks: readonly ArInvoicePaymentLink[];
   readonly customerImportBatches: readonly ArCustomerImportBatch[];
   readonly auditEvents: readonly ArAuditEvent[];
 }
