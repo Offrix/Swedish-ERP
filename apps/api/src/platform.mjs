@@ -3,6 +3,7 @@ import { createDocumentArchivePlatform } from "../../../packages/domain-document
 import { createLedgerPlatform } from "../../../packages/domain-ledger/src/index.mjs";
 import { createReportingPlatform } from "../../../packages/domain-reporting/src/index.mjs";
 import { createVatPlatform } from "../../../packages/domain-vat/src/index.mjs";
+import { createArPlatform } from "../../../packages/domain-ar/src/index.mjs";
 
 export function createApiPlatform(options = {}) {
   const orgAuthPlatform = createOrgAuthPlatform(options);
@@ -17,13 +18,18 @@ export function createApiPlatform(options = {}) {
     ...options,
     ledgerPlatform
   });
+  const arPlatform = createArPlatform({
+    ...options,
+    vatPlatform
+  });
 
   return {
     ...orgAuthPlatform,
     ...documentArchivePlatform,
     ...ledgerPlatform,
     ...reportingPlatform,
-    ...vatPlatform
+    ...vatPlatform,
+    ...arPlatform
   };
 }
 

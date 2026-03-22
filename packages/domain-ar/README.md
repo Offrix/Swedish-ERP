@@ -1,3 +1,3 @@
 # @swedish-erp/domain-ar
 
-Accounts receivable boundary for customers, quotes, invoices, open items and posting intents.
+Accounts receivable boundary for customers, contacts, items, price lists, versioned quotes, contracts, invoice plans and customer import batches.

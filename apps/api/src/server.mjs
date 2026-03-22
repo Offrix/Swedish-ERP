@@ -47,6 +47,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase2OcrReviewEnabled: flags.phase2OcrReviewEnabled,
             phase3LedgerEnabled: flags.phase3LedgerEnabled,
             phase4VatEnabled: flags.phase4VatEnabled,
+            phase5ArEnabled: flags.phase5ArEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -83,7 +84,23 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/vat/declaration-runs",
               "/v1/vat/declaration-runs/:vatDeclarationRunId",
               "/v1/vat/periodic-statements",
-              "/v1/vat/periodic-statements/:vatPeriodicStatementRunId"
+              "/v1/vat/periodic-statements/:vatPeriodicStatementRunId",
+              "/v1/ar/customers",
+              "/v1/ar/customers/:customerId",
+              "/v1/ar/customers/:customerId/contacts",
+              "/v1/ar/customers/imports",
+              "/v1/ar/customers/imports/:customerImportBatchId",
+              "/v1/ar/items",
+              "/v1/ar/items/:itemId",
+              "/v1/ar/price-lists",
+              "/v1/ar/price-lists/:priceListId",
+              "/v1/ar/quotes",
+              "/v1/ar/quotes/:quoteId",
+              "/v1/ar/quotes/:quoteId/status",
+              "/v1/ar/quotes/:quoteId/revise",
+              "/v1/ar/contracts",
+              "/v1/ar/contracts/:contractId",
+              "/v1/ar/contracts/:contractId/status"
             ]
           }
         : { status: "ok" }
@@ -135,6 +152,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 4 VAT routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase5ArEnabled && isPhase5Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 5.1 AR masterdata routes are disabled by configuration."
     });
     return;
   }
@@ -1534,6 +1559,535 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/ar/customers") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_customer",
+      scopeCode: "ar"
+    });
+    writeJson(res, 200, {
+      items: platform.listCustomers({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ar/customers") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_customer",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createCustomer({
+        ...body,
+        companyId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arCustomerMatch = matchPath(path, "/v1/ar/customers/:customerId");
+  if (arCustomerMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_customer",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getCustomer({
+        companyId,
+        customerId: arCustomerMatch.customerId
+      })
+    );
+    return;
+  }
+
+  const arCustomerContactsMatch = matchPath(path, "/v1/ar/customers/:customerId/contacts");
+  if (arCustomerContactsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_customer",
+      scopeCode: "ar"
+    });
+    writeJson(res, 200, {
+      items: platform.listCustomerContacts({
+        companyId,
+        customerId: arCustomerContactsMatch.customerId
+      })
+    });
+    return;
+  }
+
+  if (arCustomerContactsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_customer",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createCustomerContact({
+        ...body,
+        companyId,
+        customerId: arCustomerContactsMatch.customerId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ar/customers/imports") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_customer_import",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.importCustomers({
+        companyId,
+        batchKey: body.batchKey,
+        rows: Array.isArray(body.rows) ? body.rows : [],
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arCustomerImportBatchMatch = matchPath(path, "/v1/ar/customers/imports/:customerImportBatchId");
+  if (arCustomerImportBatchMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_customer_import",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getCustomerImportBatch({
+        companyId,
+        customerImportBatchId: arCustomerImportBatchMatch.customerImportBatchId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ar/items") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_item",
+      scopeCode: "ar"
+    });
+    writeJson(res, 200, {
+      items: platform.listItems({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ar/items") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_item",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createItem({
+        ...body,
+        companyId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arItemMatch = matchPath(path, "/v1/ar/items/:itemId");
+  if (arItemMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_item",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getItem({
+        companyId,
+        itemId: arItemMatch.itemId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ar/price-lists") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_price_list",
+      scopeCode: "ar"
+    });
+    writeJson(res, 200, {
+      items: platform.listPriceLists({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ar/price-lists") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_price_list",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createPriceList({
+        ...body,
+        companyId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arPriceListMatch = matchPath(path, "/v1/ar/price-lists/:priceListId");
+  if (arPriceListMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_price_list",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getPriceList({
+        companyId,
+        priceListId: arPriceListMatch.priceListId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ar/quotes") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_quote",
+      scopeCode: "ar"
+    });
+    writeJson(res, 200, {
+      items: platform.listQuotes({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ar/quotes") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_quote",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createQuote({
+        ...body,
+        companyId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arQuoteMatch = matchPath(path, "/v1/ar/quotes/:quoteId");
+  if (arQuoteMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_quote",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getQuote({
+        companyId,
+        quoteId: arQuoteMatch.quoteId
+      })
+    );
+    return;
+  }
+
+  const arQuoteStatusMatch = matchPath(path, "/v1/ar/quotes/:quoteId/status");
+  if (arQuoteStatusMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_quote",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.transitionQuote({
+        companyId,
+        quoteId: arQuoteStatusMatch.quoteId,
+        targetStatus: body.targetStatus,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arQuoteReviseMatch = matchPath(path, "/v1/ar/quotes/:quoteId/revise");
+  if (arQuoteReviseMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_quote",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.reviseQuote({
+        ...body,
+        companyId,
+        quoteId: arQuoteReviseMatch.quoteId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ar/contracts") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_contract",
+      scopeCode: "ar"
+    });
+    writeJson(res, 200, {
+      items: platform.listContracts({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ar/contracts") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_contract",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createContract({
+        ...body,
+        companyId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arContractMatch = matchPath(path, "/v1/ar/contracts/:contractId");
+  if (arContractMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_contract",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getContract({
+        companyId,
+        contractId: arContractMatch.contractId
+      })
+    );
+    return;
+  }
+
+  const arContractStatusMatch = matchPath(path, "/v1/ar/contracts/:contractId/status");
+  if (arContractStatusMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_contract",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.transitionContractStatus({
+        companyId,
+        contractId: arContractStatusMatch.contractId,
+        targetStatus: body.targetStatus,
+        resolvedEndDate: body.resolvedEndDate || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   writeJson(res, 404, { error: "not_found" });
 }
 
@@ -1611,6 +2165,10 @@ function isPhase4Route(path) {
   return path.startsWith("/v1/vat");
 }
 
+function isPhase5Route(path) {
+  return path.startsWith("/v1/ar");
+}
+
 async function readJsonBody(req, allowEmpty = false) {
   const chunks = [];
   for await (const chunk of req) {
@@ -1675,7 +2233,8 @@ function readFeatureFlags(env) {
     phase2CompanyInboxEnabled: String(env.PHASE2_COMPANY_INBOX_ENABLED || "true").toLowerCase() !== "false",
     phase2OcrReviewEnabled: String(env.PHASE2_OCR_REVIEW_ENABLED || "true").toLowerCase() !== "false",
     phase3LedgerEnabled: String(env.PHASE3_LEDGER_ENABLED || "true").toLowerCase() !== "false",
-    phase4VatEnabled: String(env.PHASE4_VAT_ENABLED || "true").toLowerCase() !== "false"
+    phase4VatEnabled: String(env.PHASE4_VAT_ENABLED || "true").toLowerCase() !== "false",
+    phase5ArEnabled: String(env.PHASE5_AR_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

@@ -190,16 +190,16 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 ## Gate for FAS 5 — Försäljning, kundreskontra och kundfakturor
 
 ### Allmänt krav
-- [ ] Kod, tester och docs är uppdaterade i samma förändring
-- [ ] Demo kan köras på seed-data
+- [x] Kod, tester och docs är uppdaterade i samma förändring
+- [x] Demo kan köras på seed-data
 - [ ] Ingen kritisk eller hög bug står öppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen påverkar produktion
+- [x] Rollback eller disable-strategi finns om fasen påverkar produktion
 
 ### 5.1 Kundregister, artiklar, offerter och avtal
-- [ ] Offerter versionshanteras
-- [ ] Avtal genererar korrekt fakturaplan
-- [ ] Kunddata kan importeras
-- [ ] Prompt `P5-01` är körd och resultat dokumenterat
+- [x] Offerter versionshanteras
+- [x] Avtal genererar korrekt fakturaplan
+- [x] Kunddata kan importeras
+- [x] Prompt `P5-01` är körd och resultat dokumenterat
 
 ### 5.2 Kundfakturor och leveranskanaler
 - [ ] Faktura bokförs bara en gång

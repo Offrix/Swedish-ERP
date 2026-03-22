@@ -17,6 +17,7 @@ Database foundation with migration framework, seed files and baseline governance
 - Phase 4.1 adds VAT masterdata, dated rule packs, traceable VAT decisions and manual review queue objects in the same monotonic stream.
 - Phase 4.2 adds declaration-box amounts, posting entries and credit-note traceability for VAT execution in the same monotonic stream.
 - Phase 4.3 adds VAT declaration runs, OSS/IOSS reporting artifacts and periodic statement runs in the same monotonic stream.
+- Phase 5.1 adds customer masterdata, contacts, items, price lists, quote versions, contracts, invoice plans and import batches in the same monotonic stream.
 
 ## Usage
 

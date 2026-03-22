@@ -29,6 +29,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - message-id dedupe och bilagestatus
 - OCR-klassificering för faktura, kvitto och avtal
 - review-task-statusar, manuell korrigering och confidence-beslut
+- offertversionering, fakturaplan och kundimport-idempotens i AR
 - search ranking och permissions trimming-beslut
 - retry/backoff-beräkningar och jobbstate
 - feature flag-upplösning och kill-switch-beslut
@@ -68,6 +69,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - OCR pipeline
 - OCR-rerun och nya derivatversioner utan mutation
 - review queue och manuella korrigeringar per bolag
+- kundregister, artiklar, prislistor, offertrevision och avtalsplaner i AR
 - Peppol adapter
 - myndighetsadaptrar
 - sökindex och projektioner
@@ -81,6 +83,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - mobilflöden för check-in, tid, resa och signatur
 - disable-flagga och återläsning av företagets inboxflöden
 - disable-flagga och reviewdriven OCR-korrigering med rerun-historik
+- disable-flagga och AR-masterdataflöde med offertrevision och aktivt avtal
 
 ### 8. Performance tests
 - load på dokumentingest
@@ -198,6 +201,14 @@ En fas är inte klar förrän:
 - kreditnota spegelvänder originalets boxbelopp och bokföringspåverkan
 - importmoms och omvänd moms ger både utgående och ingående moms enligt avdragsrätt
 - rättelse gör om hela deklarationen
+
+#### Kundreskontra och kundmasterdata
+- kundnummer är unika per bolag
+- kundimport med samma batchKey och payload är idempotent
+- ny kundimportbatch kan uppdatera befintlig kund utan dublettskapning
+- skickad offert bevaras som historisk version när ny offertversion skapas
+- endast accepterad offert kan konverteras till avtal
+- aktivt avtal genererar fakturaplan utan luckor eller overlap
 
 #### Lön
 - AGI kan genereras utan manuell redigering

@@ -1,5 +1,13 @@
-INSERT INTO customers (customer_id, company_id, customer_code, display_name, status)
-VALUES ('00000000-0000-4000-8000-000000000201', '00000000-0000-4000-8000-000000000001', 'C-100', 'Demo Kund AB', 'active')
+INSERT INTO customers (customer_id, company_id, customer_code, customer_no, display_name, legal_name, status)
+VALUES (
+  '00000000-0000-4000-8000-000000000201',
+  '00000000-0000-4000-8000-000000000001',
+  'C-100',
+  'C-100',
+  'Demo Kund AB',
+  'Demo Kund AB',
+  'active'
+)
 ON CONFLICT (customer_id) DO NOTHING;
 
 INSERT INTO suppliers (supplier_id, company_id, supplier_code, display_name, status)

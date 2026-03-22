@@ -80,6 +80,28 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/vat/declaration-runs/:vatDeclarationRunId?companyId=...`
 - `POST /v1/vat/periodic-statements`
 - `GET /v1/vat/periodic-statements/:vatPeriodicStatementRunId?companyId=...`
+- `GET /v1/ar/customers?companyId=...`
+- `POST /v1/ar/customers`
+- `GET /v1/ar/customers/:customerId?companyId=...`
+- `GET /v1/ar/customers/:customerId/contacts?companyId=...`
+- `POST /v1/ar/customers/:customerId/contacts`
+- `POST /v1/ar/customers/imports`
+- `GET /v1/ar/customers/imports/:customerImportBatchId?companyId=...`
+- `GET /v1/ar/items?companyId=...`
+- `POST /v1/ar/items`
+- `GET /v1/ar/items/:itemId?companyId=...`
+- `GET /v1/ar/price-lists?companyId=...`
+- `POST /v1/ar/price-lists`
+- `GET /v1/ar/price-lists/:priceListId?companyId=...`
+- `GET /v1/ar/quotes?companyId=...`
+- `POST /v1/ar/quotes`
+- `GET /v1/ar/quotes/:quoteId?companyId=...`
+- `POST /v1/ar/quotes/:quoteId/status`
+- `POST /v1/ar/quotes/:quoteId/revise`
+- `GET /v1/ar/contracts?companyId=...`
+- `POST /v1/ar/contracts`
+- `GET /v1/ar/contracts/:contractId?companyId=...`
+- `POST /v1/ar/contracts/:contractId/status`
 
 ## Disable strategy
 
@@ -94,3 +116,5 @@ Set `PHASE2_OCR_REVIEW_ENABLED=false` to return `503` for FAS 2.3 OCR and review
 Set `PHASE3_LEDGER_ENABLED=false` to return `503` for FAS 3.1, 3.2 and 3.3 ledger/reporting routes while keeping the rest of the API process alive.
 
 Set `PHASE4_VAT_ENABLED=false` to return `503` for FAS 4.1, 4.2 and 4.3 VAT routes while keeping the rest of the API process alive.
+
+Set `PHASE5_AR_ENABLED=false` to return `503` for FAS 5.1 AR masterdata routes while keeping the rest of the API process alive.

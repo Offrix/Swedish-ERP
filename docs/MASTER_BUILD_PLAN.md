@@ -481,7 +481,7 @@ Ingen delfas är klar förrän följande finns:
   - [x] 4.2 Sverige, EU, import, export och omvänd moms
   - [x] 4.3 OSS, IOSS, periodisk sammanställning och rapportering
 - [ ] **FAS 5 — Försäljning, kundreskontra och kundfakturor**
-  - [ ] 5.1 Kundregister, artiklar, offerter och avtal
+  - [x] 5.1 Kundregister, artiklar, offerter och avtal
   - [ ] 5.2 Kundfakturor och leveranskanaler
   - [ ] 5.3 Kundreskontra, påminnelser och inbetalningsmatchning
 - [ ] **FAS 6 — Leverantörsfakturor, inköp, bank och betalningar**
@@ -765,15 +765,15 @@ Ta kunden från offert eller order till bokförd faktura och inbetalning.
 ### 5.1 Kundregister, artiklar, offerter och avtal
 
 **Bygg detta**
-- [ ] Kundregister
-- [ ] Kontaktpersoner
-- [ ] Artiklar och prislistor
-- [ ] Offert/avtal
+- [x] Kundregister
+- [x] Kontaktpersoner
+- [x] Artiklar och prislistor
+- [x] Offert/avtal
 
 **Verifiera detta innan nästa delfas**
-- [ ] Offerter versionshanteras
-- [ ] Avtal genererar korrekt fakturaplan
-- [ ] Kunddata kan importeras
+- [x] Offerter versionshanteras
+- [x] Avtal genererar korrekt fakturaplan
+- [x] Kunddata kan importeras
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P5-01`.
 
