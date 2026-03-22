@@ -374,16 +374,16 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 ## Gate for FAS 12 â€” Ã…rsredovisning, deklaration och myndighetskopplingar
 
 ### AllmÃ¤nt krav
-- [ ] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [ ] Demo kan kÃ¶ras pÃ¥ seed-data
+- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
+- [x] Demo kan kÃ¶ras pÃ¥ seed-data
 - [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
+- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
 
 ### 12.1 Ã…rsredovisningsmotor
-- [ ] Ã…rspaket lÃ¥ser underlag
-- [ ] Signaturkedja spÃ¥ras
-- [ ] RÃ¤ttelse skapar ny version
-- [ ] Prompt `P12-01` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Ã…rspaket lÃ¥ser underlag
+- [x] Signaturkedja spÃ¥ras
+- [x] RÃ¤ttelse skapar ny version
+- [x] Prompt `P12-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 12.2 Skatt, deklarationsunderlag och myndighetsfiler
 - [ ] Filer matchar interna siffror

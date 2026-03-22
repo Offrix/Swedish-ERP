@@ -37,3 +37,4 @@ Seed execution policy:
 - Phase 11.1 adds reporting metric-catalog baseline data, custom report-definition seed data and demo cashflow/export-job artifacts
 - Phase 11.2 seeds bureau-delivery settings plus demo portfolio, client request, approval package, work-item, comment and mass-action artifacts
 - Phase 11.3 seeds close deadline settings plus demo close checklist, checklist-step, blocker and close work-item artifacts
+- Phase 12.1 seeds a signed K2 annual-report package, signatory chain, submission event and derived tax-package artifact for annual-reporting verification

@@ -38,6 +38,7 @@ Database foundation with migration framework, seed files and baseline governance
 - Phase 11.1 adds metric-catalog tables, report-definition metadata, report-export jobs and demo report artifacts in the same monotonic stream.
 - Phase 11.2 adds bureau portfolio memberships, tracked client requests, approval packages, work items, comments and mass-action persistence in the same monotonic stream.
 - Phase 11.3 adds close checklist versions, checklist steps, blockers, sign-off records and reopen requests in the same monotonic stream.
+- Phase 12.1 adds annual-report packages, annual-report versions, signatories, submission events and tax-declaration package tables in the same monotonic stream.
 
 ## Usage
 

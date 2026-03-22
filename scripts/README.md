@@ -45,6 +45,7 @@ Helper scripts for local setup, structure verification and phased rollout checks
 - `verify-phase11-reporting.ps1`: validates required FAS 11.1 report definitions, metric catalog, drilldown and export-job artifacts.
 - `verify-phase11-bureau.ps1`: validates required FAS 11.2 bureau portfolio, deadlines, client request, approval, work-item and collaboration artifacts.
 - `verify-phase11-close.ps1`: validates required FAS 11.3 close workbench, checklist, blocker, sign-off and reopen artifacts.
+- `verify-phase12-annual-reporting.ps1`: validates required FAS 12.1 K2/K3 package, versioning, signatory and demo-seed artifacts.
 - `verify-db.ps1`: validates migration file naming.
 - `new-migration.ps1`: creates timestamped migration file in `packages/db/migrations`.
 - `dev-up.ps1`: starts docker infra.

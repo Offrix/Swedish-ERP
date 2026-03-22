@@ -1,6 +1,6 @@
 # API
 
-HTTP baseline plus phased domain routes through FAS 11.2.
+HTTP baseline plus phased domain routes through FAS 12.1.
 
 ## Start
 
@@ -99,6 +99,13 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/close/blockers/:blockerId/override`
 - `POST /v1/close/checklists/:checklistId/signoff`
 - `POST /v1/close/checklists/:checklistId/reopen`
+- `GET /v1/annual-reporting/packages?companyId=...`
+- `POST /v1/annual-reporting/packages`
+- `GET /v1/annual-reporting/packages/:packageId?companyId=...`
+- `POST /v1/annual-reporting/packages/:packageId/versions`
+- `GET /v1/annual-reporting/packages/:packageId/versions/:versionId/diff?companyId=...&leftVersionId=...`
+- `POST /v1/annual-reporting/packages/:packageId/versions/:versionId/signatories`
+- `POST /v1/annual-reporting/packages/:packageId/versions/:versionId/sign`
 - `GET /v1/collaboration/comments?bureauOrgId=...&objectType=...&objectId=...`
   - `POST /v1/collaboration/comments`
 - `GET /v1/vat/codes?companyId=...`

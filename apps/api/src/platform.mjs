@@ -18,6 +18,7 @@ import { createHusPlatform } from "../../../packages/domain-hus/src/index.mjs";
 import { createPersonalliggarePlatform } from "../../../packages/domain-personalliggare/src/index.mjs";
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
 import { createCorePlatform } from "../../../packages/domain-core/src/index.mjs";
+import { createAnnualReportingPlatform } from "../../../packages/domain-annual-reporting/src/index.mjs";
 
 export function createApiPlatform(options = {}) {
   const orgAuthPlatform = createOrgAuthPlatform(options);
@@ -101,6 +102,12 @@ export function createApiPlatform(options = {}) {
     reportingPlatform,
     ledgerPlatform
   });
+  const annualReportingPlatform = createAnnualReportingPlatform({
+    ...options,
+    ledgerPlatform,
+    reportingPlatform,
+    orgAuthPlatform
+  });
   const husPlatform = createHusPlatform({
     ...options,
     arPlatform,
@@ -124,6 +131,7 @@ export function createApiPlatform(options = {}) {
     ...ledgerPlatform,
     ...reportingPlatform,
     ...corePlatform,
+    ...annualReportingPlatform,
     ...vatPlatform,
     ...integrationPlatform,
     ...arPlatform,

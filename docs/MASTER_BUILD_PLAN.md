@@ -509,7 +509,7 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 11.2 ByrÃ¥lÃ¤ge och portfÃ¶ljhantering
   - [x] 11.3 MÃ¥nadsstÃ¤ngning och bokslutschecklistor
 - [ ] **FAS 12 â€” Ã…rsredovisning, deklaration och myndighetskopplingar**
-  - [ ] 12.1 Ã…rsredovisningsmotor
+  - [x] 12.1 Ã…rsredovisningsmotor
   - [ ] 12.2 Skatt, deklarationsunderlag och myndighetsfiler
 - [ ] **FAS 13 â€” API, integrationer, AI och automation**
   - [ ] 13.1 Publikt API och webhooks
@@ -1100,14 +1100,14 @@ Bygg Ã¥rsflÃ¶den, digital inlÃ¤mning och deklarationsunderlag ovanpÃ¥ st
 ### 12.1 Ã…rsredovisningsmotor
 
 **Bygg detta**
-- [ ] K2/K3-spÃ¥r
-- [ ] Ã¥rsredovisningspaket
-- [ ] versioner och signeringsunderlag
+- [x] K2/K3-spÃ¥r
+- [x] Ã¥rsredovisningspaket
+- [x] versioner och signeringsunderlag
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] Ã…rspaket lÃ¥ser underlag
-- [ ] Signaturkedja spÃ¥ras
-- [ ] RÃ¤ttelse skapar ny version
+- [x] Ã…rspaket lÃ¥ser underlag
+- [x] Signaturkedja spÃ¥ras
+- [x] RÃ¤ttelse skapar ny version
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P12-01`.
 

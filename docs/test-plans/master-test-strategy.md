@@ -199,6 +199,8 @@ Skapa golden-data för minst följande domäner:
 - PEPPOL_OUTBOUND_STANDARD
 - PEPPOL_INBOUND_CREDIT_NOTE
 - ANNUAL_REPORT_K2
+- ANNUAL_REPORT_K3
+- ANNUAL_REPORT_REOPENED_PERIOD_NEW_VERSION
 - ANNUAL_REPORT_DIGITAL_SUBMISSION_PACKAGE
 
 ### 36.3 Vad som räknas som perfekt verifiering i varje fas
@@ -396,6 +398,15 @@ När en fas använder någon av dessa förmågor ska respektive testplan läsas 
 - sign-off chain ska testas fÃ¶r ordning, snapshot-bindning, dual control och hard close
 - reopen ska testas fÃ¶r ny checklistversion, superseded sign-off och bevarad historik
 - rapport som kÃ¶rs om efter close ska ge samma line metrics fÃ¶r samma period och underlag
+
+## FAS 12.1 minimum coverage
+
+- annual-reporting-testerna ska tÃ¤cka bÃ¥de `k2` och `k3` med separata text- och notsektioner
+- Ã¥rspaket ska bara kunna byggas mot `hard_closed` period och ska binda till exakt balans- och resultatrapportsnapshot
+- paketversioner ska ge deterministisk checksumma, source fingerprint och tax-package outputs fÃ¶r samma underlag
+- signatory chain ska testas fÃ¶r invitation, signering, package-status och bevarad historik per version
+- ofÃ¶rÃ¤ndrat bokfÃ¶ringsunderlag ska inte skapa ny version och Ã¤ndrat underlag efter reopen ska skapa superseding version med diff
+- versiondiff ska visa fÃ¶rÃ¤ndringar i rapportsnapshot, textsektioner eller notsektioner utan att tidigare version muteras
 
 ## Testdata policy
 
