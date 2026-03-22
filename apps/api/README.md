@@ -63,10 +63,16 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/ledger/journal-entries/:journalEntryId/reverse`
 - `POST /v1/ledger/journal-entries/:journalEntryId/correct`
 - `GET /v1/reporting/report-definitions?companyId=...`
+- `POST /v1/reporting/report-definitions`
+- `GET /v1/reporting/metric-definitions?companyId=...`
 - `POST /v1/reporting/report-snapshots`
 - `GET /v1/reporting/report-snapshots/:reportSnapshotId?companyId=...`
 - `GET /v1/reporting/report-snapshots/:reportSnapshotId/drilldown?companyId=...&lineKey=...`
 - `GET /v1/reporting/journal-search?companyId=...`
+- `POST /v1/reporting/export-jobs`
+- `GET /v1/reporting/export-jobs?companyId=...`
+- `GET /v1/reporting/export-jobs/:reportExportJobId?companyId=...`
+- `POST /v1/reporting/export-jobs/:reportExportJobId/retry`
 - `GET /v1/reporting/reconciliations?companyId=...`
 - `POST /v1/reporting/reconciliations`
 - `GET /v1/reporting/reconciliations/:reconciliationRunId?companyId=...`

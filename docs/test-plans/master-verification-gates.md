@@ -354,10 +354,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [ ] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
 
 ### 11.1 Rapporter och drilldown
-- [ ] Rapporter Ã¤r historiskt reproducerbara
-- [ ] Belopp kan spÃ¥ras till kÃ¤lldokument
-- [ ] Export till Excel/PDF fungerar
-- [ ] Prompt `P11-01` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Rapporter Ã¤r historiskt reproducerbara
+- [x] Belopp kan spÃ¥ras till kÃ¤lldokument
+- [x] Export till Excel/PDF fungerar
+- [x] Prompt `P11-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 11.2 ByrÃ¥lÃ¤ge och portfÃ¶ljhantering
 - [ ] ByrÃ¥n ser bara klienter i scope

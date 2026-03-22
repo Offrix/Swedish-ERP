@@ -80,9 +80,13 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/ledger/journal-entries/:journalEntryId/reverse",
               "/v1/ledger/journal-entries/:journalEntryId/correct",
               "/v1/reporting/report-definitions",
+              "/v1/reporting/metric-definitions",
               "/v1/reporting/report-snapshots",
               "/v1/reporting/report-snapshots/:reportSnapshotId",
               "/v1/reporting/report-snapshots/:reportSnapshotId/drilldown",
+              "/v1/reporting/export-jobs",
+              "/v1/reporting/export-jobs/:reportExportJobId",
+              "/v1/reporting/export-jobs/:reportExportJobId/retry",
               "/v1/reporting/journal-search",
               "/v1/reporting/reconciliations",
               "/v1/reporting/reconciliations/:reconciliationRunId",
@@ -1359,6 +1363,58 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "POST" && path === "/v1/reporting/report-definitions") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createReportDefinition({
+        companyId,
+        baseReportCode: body.baseReportCode,
+        reportCode: body.reportCode || null,
+        name: body.name,
+        purpose: body.purpose || null,
+        metricCodes: Array.isArray(body.metricCodes) ? body.metricCodes : [],
+        defaultFilters: body.defaultFilters || {},
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/reporting/metric-definitions") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(res, 200, {
+      items: platform.listMetricDefinitions({
+        companyId,
+        reportCode: url.searchParams.get("reportCode") || null
+      })
+    });
+    return;
+  }
+
   if (req.method === "POST" && path === "/v1/reporting/report-snapshots") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
@@ -1437,6 +1493,107 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         reportSnapshotId: reportDrilldownMatch.reportSnapshotId,
         lineKey: requireText(url.searchParams.get("lineKey"), "line_key_required", "lineKey query parameter is required.")
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/reporting/export-jobs") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(
+      res,
+      201,
+      platform.requestReportExportJob({
+        companyId,
+        reportSnapshotId: body.reportSnapshotId,
+        format: body.format,
+        watermarkMode: body.watermarkMode || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/reporting/export-jobs") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(res, 200, {
+      items: platform.listReportExportJobs({
+        companyId,
+        reportSnapshotId: url.searchParams.get("reportSnapshotId") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  const reportExportMatch = matchPath(path, "/v1/reporting/export-jobs/:reportExportJobId");
+  if (reportExportMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getReportExportJob({
+        companyId,
+        reportExportJobId: reportExportMatch.reportExportJobId
+      })
+    );
+    return;
+  }
+
+  const reportExportRetryMatch = matchPath(path, "/v1/reporting/export-jobs/:reportExportJobId/retry");
+  if (reportExportRetryMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "reporting",
+      scopeCode: "reporting"
+    });
+    writeJson(
+      res,
+      200,
+      platform.retryReportExportJob({
+        companyId,
+        reportExportJobId: reportExportRetryMatch.reportExportJobId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
       })
     );
     return;

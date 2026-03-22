@@ -1397,7 +1397,16 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/accounting-foundation.md, docs/domain/search-indexing-and-global-search.md, docs/domain/saved-views-dashboards-and-personalization.md, docs/domain/reporting-metric-catalog-and-export-jobs.md, docs/adr/ADR-0013-search-and-indexing-strategy.md, docs/adr/ADR-0019-reporting-exports-and-metric-governance-strategy.md, docs/test-plans/search-relevance-and-permission-trimming-tests.md, docs/test-plans/report-reproducibility-and-export-integrity-tests.md, docs/ui/ENTERPRISE_UI_PLAN.md
+- docs/compliance/se/accounting-foundation.md
+- docs/domain/search-indexing-and-global-search.md
+- docs/domain/saved-views-dashboards-and-personalization.md
+- docs/domain/reporting-metric-catalog-and-export-jobs.md
+- docs/adr/ADR-0013-search-and-indexing-strategy.md
+- docs/adr/ADR-0019-reporting-exports-and-metric-governance-strategy.md
+- docs/test-plans/search-relevance-and-permission-trimming-tests.md
+- docs/test-plans/report-reproducibility-and-export-integrity-tests.md
+- docs/runbooks/fas-11-reporting-verification.md
+- docs/ui/ENTERPRISE_UI_PLAN.md
 
 Implement exactly this scope:
 - P&L, balans, cashflow, reskontra, projekt

@@ -371,6 +371,13 @@ Följande testplaner är obligatoriska när scope berör området och ska behand
 
 När en fas använder någon av dessa förmågor ska respektive testplan läsas tillsammans med relevanta ADR:er, policies och runbooks innan implementation startar.
 
+## FAS 11.1 minimum coverage
+
+- rapporttesterna ska täcka `trial_balance`, `income_statement`, `balance_sheet`, `cashflow`, `ar_open_items`, `ap_open_items` och `project_portfolio`
+- drilldown ska verifiera journal, dokumentlänk eller stödjande snapshot beroende på rapportkälla
+- metric catalog och custom report definitions ska testas för versionsstyrning, stabila koder och deterministiska filtersammanslagningar
+- exportjobb ska testas för Excel/PDF, watermark-läge, snapshot-bindning, supersede-logik och reproducerbar artefaktmetadata
+
 ## Testdata policy
 
 - All testdata ska vara syntetisk eller avidentifierad.

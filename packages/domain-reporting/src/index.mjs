@@ -1,9 +1,28 @@
 import crypto from "node:crypto";
-import { createLedgerEngine } from "../../domain-ledger/src/index.mjs";
+import { createLedgerEngine, REQUIRED_ENGINE_ACCOUNTS } from "../../domain-ledger/src/index.mjs";
 import { createDocumentArchiveEngine } from "../../document-engine/src/index.mjs";
 
-export const REPORT_CODES = Object.freeze(["trial_balance", "income_statement", "balance_sheet"]);
+export const REPORT_CODES = Object.freeze([
+  "trial_balance",
+  "income_statement",
+  "balance_sheet",
+  "cashflow",
+  "ar_open_items",
+  "ap_open_items",
+  "project_portfolio"
+]);
 export const REPORT_VIEW_MODES = Object.freeze(["transactions", "period", "rolling_12", "fiscal_year"]);
+export const REPORT_EXPORT_FORMATS = Object.freeze(["excel", "pdf"]);
+export const REPORT_EXPORT_JOB_STATES = Object.freeze([
+  "queued",
+  "running",
+  "materialized",
+  "delivered",
+  "failed",
+  "retry_pending",
+  "superseded"
+]);
+export const REPORT_WATERMARK_MODES = Object.freeze(["none", "preliminary", "superseded"]);
 export const RECONCILIATION_RUN_STATES = Object.freeze([
   "draft",
   "in_progress",
@@ -33,21 +52,56 @@ export const RECONCILIATION_AREA_CODES = Object.freeze([
   "suspense"
 ]);
 
+const REPORT_DEFINITION_KINDS = Object.freeze(["official", "light_builder"]);
+const REPORT_SOURCE_TYPES = Object.freeze(["ledger", "cashflow", "ar_open_items", "ap_open_items", "project_portfolio"]);
+const CASHFLOW_BUCKET_CODES = Object.freeze(["operating", "investing", "financing", "unclassified"]);
+const CASHFLOW_BUCKET_LABELS = Object.freeze({
+  operating: "Operating cashflow",
+  investing: "Investing cashflow",
+  financing: "Financing cashflow",
+  unclassified: "Unclassified cashflow"
+});
+
+const REPORT_METRIC_DEFINITIONS = Object.freeze([
+  createMetricDefinition("total_debit", "Total debit", "finance_manager", "journal_entry", "sum(journal_line.debit_amount)", ["ledger"]),
+  createMetricDefinition("total_credit", "Total credit", "finance_manager", "journal_entry", "sum(journal_line.credit_amount)", ["ledger"]),
+  createMetricDefinition("balance_amount", "Balance amount", "finance_manager", "journal_entry", "sum(debit-credit)", ["ledger"]),
+  createMetricDefinition("pl_debit", "P&L debit", "finance_manager", "journal_entry", "sum(pl_account.debit_amount)", ["ledger"]),
+  createMetricDefinition("pl_credit", "P&L credit", "finance_manager", "journal_entry", "sum(pl_account.credit_amount)", ["ledger"]),
+  createMetricDefinition("pl_net_amount", "P&L net amount", "finance_manager", "journal_entry", "sum(pl_debit-pl_credit)", ["ledger"]),
+  createMetricDefinition("bs_debit", "Balance sheet debit", "finance_manager", "journal_entry", "sum(bs_account.debit_amount)", ["ledger"]),
+  createMetricDefinition("bs_credit", "Balance sheet credit", "finance_manager", "journal_entry", "sum(bs_account.credit_amount)", ["ledger"]),
+  createMetricDefinition("bs_net_amount", "Balance sheet net amount", "finance_manager", "journal_entry", "sum(bs_debit-bs_credit)", ["ledger"]),
+  createMetricDefinition("cash_inflow_amount", "Cash inflow", "finance_manager", "journal_entry", "sum(positive_cash_movements)", ["ledger"]),
+  createMetricDefinition("cash_outflow_amount", "Cash outflow", "finance_manager", "journal_entry", "sum(abs(negative_cash_movements))", ["ledger"]),
+  createMetricDefinition("net_cash_movement_amount", "Net cash movement", "finance_manager", "journal_entry", "sum(cash_inflow-cash_outflow)", ["ledger"]),
+  createMetricDefinition("ar_open_amount", "AR open amount", "finance_manager", "ar_open_item", "sum(ar_open_item.open_amount)", ["ar"]),
+  createMetricDefinition("ar_overdue_amount", "AR overdue amount", "finance_manager", "ar_open_item", "sum(ar_open_item.open_amount where due_on < cutoff)", ["ar"]),
+  createMetricDefinition("ar_invoice_count", "AR invoice count", "finance_manager", "ar_open_item", "count(distinct ar_open_item.customer_invoice_id)", ["ar"]),
+  createMetricDefinition("ap_open_amount", "AP open amount", "finance_manager", "ap_open_item", "sum(ap_open_item.open_amount)", ["ap"]),
+  createMetricDefinition("ap_overdue_amount", "AP overdue amount", "finance_manager", "ap_open_item", "sum(ap_open_item.open_amount where due_on < cutoff)", ["ap"]),
+  createMetricDefinition("ap_invoice_count", "AP invoice count", "finance_manager", "ap_open_item", "count(distinct ap_open_item.supplier_invoice_id)", ["ap"]),
+  createMetricDefinition("project_actual_cost_amount", "Project actual cost", "project_controller", "project_snapshot", "project_cost_snapshot.actual_cost_amount", ["projects"]),
+  createMetricDefinition("project_billed_revenue_amount", "Project billed revenue", "project_controller", "project_snapshot", "project_cost_snapshot.billed_revenue_amount", ["projects", "ar"]),
+  createMetricDefinition("project_wip_amount", "Project WIP", "project_controller", "project_snapshot", "project_wip_snapshot.wip_amount", ["projects"]),
+  createMetricDefinition("project_forecast_margin_amount", "Project forecast margin", "project_controller", "project_snapshot", "project_forecast_snapshot.forecast_margin_amount", ["projects"])
+]);
+
 const REPORT_DEFINITIONS = Object.freeze([
   {
     reportCode: "trial_balance",
     name: "Trial balance",
     purpose: "Account-level debit, credit and balance movements with report-to-journal-to-document drilldown.",
     versionNo: 1,
+    definitionKind: "official",
+    reportSourceType: "ledger",
+    rowDimensionCode: "account",
     defaultViewMode: "period",
     allowedViewModes: ["transactions", "period", "rolling_12", "fiscal_year"],
     classFilter: ["1", "2", "3", "4", "5", "6", "7", "8"],
     drilldownMode: "journal_to_document",
-    metricCatalog: [
-      { metricCode: "total_debit", name: "Total debit", ownerRoleCode: "finance_manager", versionNo: 1, drilldownLevel: "journal_entry" },
-      { metricCode: "total_credit", name: "Total credit", ownerRoleCode: "finance_manager", versionNo: 1, drilldownLevel: "journal_entry" },
-      { metricCode: "balance_amount", name: "Balance amount", ownerRoleCode: "finance_manager", versionNo: 1, drilldownLevel: "journal_entry" }
-    ],
+    defaultFilters: {},
+    metricCatalog: metricCatalog(["total_debit", "total_credit", "balance_amount"]),
     status: "active"
   },
   {
@@ -55,15 +109,15 @@ const REPORT_DEFINITIONS = Object.freeze([
     name: "Income statement",
     purpose: "Baseline revenue and cost report grouped by P&L accounts with deterministic drilldown.",
     versionNo: 1,
+    definitionKind: "official",
+    reportSourceType: "ledger",
+    rowDimensionCode: "account",
     defaultViewMode: "period",
     allowedViewModes: ["transactions", "period", "rolling_12", "fiscal_year"],
     classFilter: ["3", "4", "5", "6", "7", "8"],
     drilldownMode: "journal_to_document",
-    metricCatalog: [
-      { metricCode: "pl_debit", name: "P&L debit", ownerRoleCode: "finance_manager", versionNo: 1, drilldownLevel: "journal_entry" },
-      { metricCode: "pl_credit", name: "P&L credit", ownerRoleCode: "finance_manager", versionNo: 1, drilldownLevel: "journal_entry" },
-      { metricCode: "pl_net_amount", name: "P&L net amount", ownerRoleCode: "finance_manager", versionNo: 1, drilldownLevel: "journal_entry" }
-    ],
+    defaultFilters: {},
+    metricCatalog: metricCatalog(["pl_debit", "pl_credit", "pl_net_amount"]),
     status: "active"
   },
   {
@@ -71,15 +125,84 @@ const REPORT_DEFINITIONS = Object.freeze([
     name: "Balance sheet",
     purpose: "Baseline balance sheet accounts with reproducible drilldown to voucher and document evidence.",
     versionNo: 1,
+    definitionKind: "official",
+    reportSourceType: "ledger",
+    rowDimensionCode: "account",
     defaultViewMode: "period",
     allowedViewModes: ["transactions", "period", "rolling_12", "fiscal_year"],
     classFilter: ["1", "2"],
     drilldownMode: "journal_to_document",
-    metricCatalog: [
-      { metricCode: "bs_debit", name: "Balance sheet debit", ownerRoleCode: "finance_manager", versionNo: 1, drilldownLevel: "journal_entry" },
-      { metricCode: "bs_credit", name: "Balance sheet credit", ownerRoleCode: "finance_manager", versionNo: 1, drilldownLevel: "journal_entry" },
-      { metricCode: "bs_net_amount", name: "Balance sheet net amount", ownerRoleCode: "finance_manager", versionNo: 1, drilldownLevel: "journal_entry" }
-    ],
+    defaultFilters: {},
+    metricCatalog: metricCatalog(["bs_debit", "bs_credit", "bs_net_amount"]),
+    status: "active"
+  },
+  {
+    reportCode: "cashflow",
+    name: "Cashflow",
+    purpose: "Deterministic cash movement report grouped by cashflow bucket with journal and document drilldown.",
+    versionNo: 1,
+    definitionKind: "official",
+    reportSourceType: "cashflow",
+    rowDimensionCode: "cashflow_bucket",
+    defaultViewMode: "period",
+    allowedViewModes: ["transactions", "period", "rolling_12", "fiscal_year"],
+    classFilter: [],
+    drilldownMode: "journal_to_document",
+    defaultFilters: {},
+    metricCatalog: metricCatalog(["cash_inflow_amount", "cash_outflow_amount", "net_cash_movement_amount"]),
+    status: "active"
+  },
+  {
+    reportCode: "ar_open_items",
+    name: "AR open items",
+    purpose: "Customer receivables report grouped by customer with deterministic open-amount and overdue drilldown.",
+    versionNo: 1,
+    definitionKind: "official",
+    reportSourceType: "ar_open_items",
+    rowDimensionCode: "customer",
+    defaultViewMode: "period",
+    allowedViewModes: ["transactions", "period", "rolling_12", "fiscal_year"],
+    classFilter: [],
+    drilldownMode: "journal_to_document",
+    defaultFilters: {},
+    metricCatalog: metricCatalog(["ar_open_amount", "ar_overdue_amount", "ar_invoice_count"]),
+    status: "active"
+  },
+  {
+    reportCode: "ap_open_items",
+    name: "AP open items",
+    purpose: "Supplier payables report grouped by supplier with deterministic open-amount and overdue drilldown.",
+    versionNo: 1,
+    definitionKind: "official",
+    reportSourceType: "ap_open_items",
+    rowDimensionCode: "supplier",
+    defaultViewMode: "period",
+    allowedViewModes: ["transactions", "period", "rolling_12", "fiscal_year"],
+    classFilter: [],
+    drilldownMode: "journal_to_document",
+    defaultFilters: {},
+    metricCatalog: metricCatalog(["ap_open_amount", "ap_overdue_amount", "ap_invoice_count"]),
+    status: "active"
+  },
+  {
+    reportCode: "project_portfolio",
+    name: "Project portfolio",
+    purpose: "Project-level cost, billed revenue, WIP and forecast margin report with snapshot drilldown.",
+    versionNo: 1,
+    definitionKind: "official",
+    reportSourceType: "project_portfolio",
+    rowDimensionCode: "project",
+    defaultViewMode: "period",
+    allowedViewModes: ["transactions", "period", "rolling_12", "fiscal_year"],
+    classFilter: [],
+    drilldownMode: "project_snapshot",
+    defaultFilters: {},
+    metricCatalog: metricCatalog([
+      "project_actual_cost_amount",
+      "project_billed_revenue_amount",
+      "project_wip_amount",
+      "project_forecast_margin_amount"
+    ]),
     status: "active"
   }
 ]);
@@ -92,13 +215,20 @@ export function createReportingEngine({
   clock = () => new Date(),
   ledgerPlatform = null,
   documentPlatform = null,
-  documentArchivePlatform = null
+  documentArchivePlatform = null,
+  arPlatform = null,
+  apPlatform = null,
+  projectsPlatform = null
 } = {}) {
   const ledger = ledgerPlatform || createLedgerEngine({ clock });
   const documents = documentPlatform || documentArchivePlatform || createDocumentArchiveEngine({ clock });
   const state = {
+    reportDefinitions: new Map(),
+    reportDefinitionIdsByCompany: new Map(),
     reportSnapshots: new Map(),
     reportSnapshotIdsByCompany: new Map(),
+    reportExportJobs: new Map(),
+    reportExportJobIdsByCompany: new Map(),
     reconciliationRuns: new Map(),
     reconciliationRunIdsByCompany: new Map(),
     reconciliationVersionCounters: new Map(),
@@ -108,13 +238,22 @@ export function createReportingEngine({
   return {
     reportCodes: REPORT_CODES,
     reportViewModes: REPORT_VIEW_MODES,
+    reportExportFormats: REPORT_EXPORT_FORMATS,
+    reportExportJobStates: REPORT_EXPORT_JOB_STATES,
+    reportWatermarkModes: REPORT_WATERMARK_MODES,
     reconciliationAreaCodes: RECONCILIATION_AREA_CODES,
     reconciliationRunStates: RECONCILIATION_RUN_STATES,
     differenceItemStates: DIFFERENCE_ITEM_STATES,
+    listMetricDefinitions,
     listReportDefinitions,
+    createReportDefinition,
     runReportSnapshot,
     getReportSnapshot,
     getReportLineDrilldown,
+    requestReportExportJob,
+    listReportExportJobs,
+    getReportExportJob,
+    retryReportExportJob,
     searchJournalEntries,
     createReconciliationRun,
     listReconciliationRuns,
@@ -123,12 +262,98 @@ export function createReportingEngine({
     snapshotReporting
   };
 
-  function listReportDefinitions({ companyId } = {}) {
+  function listMetricDefinitions({ companyId, reportCode = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
-    return REPORT_DEFINITIONS.map((definition) => ({
+    if (reportCode) {
+      return copy(requireReportDefinition(resolvedCompanyId, reportCode).metricCatalog);
+    }
+    return REPORT_METRIC_DEFINITIONS.map((definition) => ({
       companyId: resolvedCompanyId,
       ...copy(definition)
     }));
+  }
+
+  function listReportDefinitions({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return listAllReportDefinitions(resolvedCompanyId).map(copy);
+  }
+
+  function createReportDefinition({
+    companyId,
+    baseReportCode,
+    reportCode = null,
+    name,
+    purpose = null,
+    metricCodes = [],
+    defaultFilters = {},
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const baseDefinition = requireReportDefinition(resolvedCompanyId, baseReportCode);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    if (baseDefinition.definitionKind !== "official") {
+      throw httpError(409, "light_builder_base_invalid", "Light report builder must start from an official report.");
+    }
+
+    const selectedMetricCodes = dedupeStringValues(
+      metricCodes.length > 0 ? metricCodes : baseDefinition.metricCatalog.map((metric) => metric.metricCode)
+    );
+    for (const metricCode of selectedMetricCodes) {
+      if (!baseDefinition.metricCatalog.some((metric) => metric.metricCode === metricCode)) {
+        throw httpError(400, "report_metric_not_allowed", `Metric ${metricCode} is not allowed for ${baseDefinition.reportCode}.`);
+      }
+    }
+
+    const resolvedReportCode = normalizeReportCode(reportCode || `custom-${slugify(name)}`);
+    const existingDefinitions = listAllReportDefinitions(resolvedCompanyId).filter(
+      (candidate) => candidate.reportCode === resolvedReportCode
+    );
+    const versionNo = (existingDefinitions[existingDefinitions.length - 1]?.versionNo || 0) + 1;
+    for (const definition of state.reportDefinitions.values()) {
+      if (definition.companyId === resolvedCompanyId && definition.reportCode === resolvedReportCode && definition.status === "active") {
+        definition.status = "superseded";
+        definition.updatedAt = nowIso();
+      }
+    }
+
+    const createdAt = nowIso();
+    const definition = {
+      reportDefinitionId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      reportCode: resolvedReportCode,
+      baseReportCode: baseDefinition.reportCode,
+      name: requireText(name, "report_name_required"),
+      purpose: normalizeOptionalText(purpose) || `Light report built from ${baseDefinition.name}.`,
+      versionNo,
+      definitionKind: "light_builder",
+      reportSourceType: baseDefinition.reportSourceType,
+      rowDimensionCode: baseDefinition.rowDimensionCode,
+      defaultViewMode: baseDefinition.defaultViewMode,
+      allowedViewModes: copy(baseDefinition.allowedViewModes),
+      classFilter: copy(baseDefinition.classFilter || []),
+      drilldownMode: baseDefinition.drilldownMode,
+      defaultFilters: copy(normalizePlainObject(defaultFilters, "report_default_filters_invalid")),
+      metricCatalog: metricCatalog(selectedMetricCodes),
+      status: "active",
+      createdByActorId: resolvedActorId,
+      createdAt,
+      updatedAt: createdAt
+    };
+
+    state.reportDefinitions.set(definition.reportDefinitionId, definition);
+    ensureCompanyCollection(state.reportDefinitionIdsByCompany, resolvedCompanyId).push(definition.reportDefinitionId);
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "reporting.report_definition.created",
+      entityType: "report_definition",
+      entityId: definition.reportDefinitionId,
+      explanation: `Created light report definition ${definition.reportCode} version ${definition.versionNo}.`
+    });
+
+    return copy(definition);
   }
 
   function runReportSnapshot({
@@ -144,7 +369,7 @@ export function createReportingEngine({
     correlationId = crypto.randomUUID()
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
-    const definition = requireReportDefinition(reportCode);
+    const definition = requireReportDefinition(resolvedCompanyId, reportCode);
     const resolvedActorId = requireText(actorId, "actor_id_required");
     const ledgerSnapshot = ledger.snapshotLedger();
     const documentSnapshot =
@@ -170,41 +395,30 @@ export function createReportingEngine({
       companyId: resolvedCompanyId,
       documentSnapshot
     });
-    const { lines, totals } = buildReportLines({
+    const resolvedFilters = mergeFilterObjects(definition.defaultFilters || {}, filters);
+    const { lines, totals, sourceSnapshotPayload } = buildReportLines({
+      companyId: resolvedCompanyId,
       definition,
       accounts: ledgerSnapshot.accounts,
       entries,
       linkedDocuments,
-      filters
+      filters: resolvedFilters,
+      window,
+      actorId: resolvedActorId,
+      ledgerSnapshot
     });
     const now = nowIso();
-    const sourceSnapshotHash = hashObject({
-      companyId: resolvedCompanyId,
-      reportCode: definition.reportCode,
-      fromDate: window.fromDate,
-      toDate: window.toDate,
-      journalEntries: entries.map((entry) => ({
-        journalEntryId: entry.journalEntryId,
-        status: entry.status,
-        journalDate: entry.journalDate,
-        voucherSeriesCode: entry.voucherSeriesCode,
-        voucherNumber: entry.voucherNumber,
-        sourceType: entry.sourceType,
-        sourceId: entry.sourceId,
-        lines: entry.lines.map((line) => ({
-          accountNumber: line.accountNumber,
-          debitAmount: roundMoney(line.debitAmount),
-          creditAmount: roundMoney(line.creditAmount)
-        }))
-      })),
-      linkedDocuments: flattenLinkedDocuments(linkedDocuments)
-    });
+    const sourceSnapshotHash = hashObject(sourceSnapshotPayload);
     const snapshot = {
       reportSnapshotId: crypto.randomUUID(),
       companyId: resolvedCompanyId,
+      reportDefinitionId: definition.reportDefinitionId || null,
       reportCode: definition.reportCode,
       reportName: definition.name,
       reportVersionNo: definition.versionNo,
+      reportDefinitionKind: definition.definitionKind,
+      reportSourceType: definition.reportSourceType,
+      rowDimensionCode: definition.rowDimensionCode,
       reportDefinition: copy(definition),
       metricCatalog: copy(definition.metricCatalog),
       viewMode: window.viewMode,
@@ -212,7 +426,7 @@ export function createReportingEngine({
       fromDate: window.fromDate,
       toDate: window.toDate,
       periodStatus: window.periodStatus,
-      filters: copy(filters),
+      filters: copy(resolvedFilters),
       drilldownMode: definition.drilldownMode,
       lineCount: lines.length,
       sourceSnapshotHash,
@@ -223,6 +437,7 @@ export function createReportingEngine({
         viewMode: window.viewMode,
         lineSummary: lines.map((line) => ({
           lineKey: line.lineKey,
+          metricValues: line.metricValues,
           totalDebit: line.totalDebit,
           totalCredit: line.totalCredit,
           balanceAmount: line.balanceAmount,
@@ -267,6 +482,112 @@ export function createReportingEngine({
       reportCode: snapshot.reportCode,
       line
     });
+  }
+
+  function requestReportExportJob({
+    companyId,
+    reportSnapshotId,
+    format,
+    watermarkMode = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const snapshot = requireReportSnapshot(resolvedCompanyId, reportSnapshotId);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedFormat = assertAllowedValue(format, REPORT_EXPORT_FORMATS, "report_export_format_invalid");
+    const resolvedWatermarkMode = resolveWatermarkMode(snapshot, watermarkMode);
+    const createdAt = nowIso();
+    const job = {
+      reportExportJobId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      reportSnapshotId: snapshot.reportSnapshotId,
+      reportCode: snapshot.reportCode,
+      reportVersionNo: snapshot.reportVersionNo,
+      format: resolvedFormat,
+      watermarkMode: resolvedWatermarkMode,
+      requestedByActorId: resolvedActorId,
+      status: "queued",
+      artifactRef: null,
+      artifactName: null,
+      artifactContentType: null,
+      artifactContent: null,
+      contentHash: null,
+      supersededByExportJobId: null,
+      createdAt,
+      updatedAt: createdAt,
+      completedAt: null,
+      failedAt: null,
+      statusHistory: [createStatusTransition({ toStatus: "queued", actorId: resolvedActorId, reasonCode: "export_requested", changedAt: createdAt })]
+    };
+    state.reportExportJobs.set(job.reportExportJobId, job);
+    ensureCompanyCollection(state.reportExportJobIdsByCompany, resolvedCompanyId).push(job.reportExportJobId);
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "reporting.export_job.requested",
+      entityType: "report_export_job",
+      entityId: job.reportExportJobId,
+      explanation: `Requested ${resolvedFormat} export for snapshot ${snapshot.reportSnapshotId}.`
+    });
+
+    processQueuedReportExportJobs({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      onlyJobId: job.reportExportJobId
+    });
+    return copy(state.reportExportJobs.get(job.reportExportJobId));
+  }
+
+  function listReportExportJobs({ companyId, reportSnapshotId = null, status = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = normalizeOptionalText(status);
+    return (state.reportExportJobIdsByCompany.get(resolvedCompanyId) || [])
+      .map((reportExportJobId) => state.reportExportJobs.get(reportExportJobId))
+      .filter(Boolean)
+      .filter((job) => (reportSnapshotId ? job.reportSnapshotId === reportSnapshotId : true))
+      .filter((job) => (resolvedStatus ? job.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.reportExportJobId.localeCompare(right.reportExportJobId))
+      .map(copy);
+  }
+
+  function getReportExportJob({ companyId, reportExportJobId } = {}) {
+    return copy(requireReportExportJob(requireText(companyId, "company_id_required"), reportExportJobId));
+  }
+
+  function retryReportExportJob({
+    companyId,
+    reportExportJobId,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const job = requireReportExportJob(requireText(companyId, "company_id_required"), reportExportJobId);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    if (!["failed", "retry_pending"].includes(job.status)) {
+      throw httpError(409, "report_export_retry_invalid", "Only failed export jobs can be retried.");
+    }
+    const changedAt = nowIso();
+    job.status = "retry_pending";
+    job.updatedAt = changedAt;
+    job.failedAt = null;
+    job.statusHistory.push(
+      createStatusTransition({
+        fromStatus: "failed",
+        toStatus: "retry_pending",
+        actorId: resolvedActorId,
+        reasonCode: "retry_requested",
+        changedAt
+      })
+    );
+    processQueuedReportExportJobs({
+      companyId: job.companyId,
+      actorId: resolvedActorId,
+      correlationId,
+      onlyJobId: job.reportExportJobId
+    });
+    return copy(job);
   }
 
   function searchJournalEntries({
@@ -565,7 +886,10 @@ export function createReportingEngine({
 
   function snapshotReporting() {
     return copy({
+      reportDefinitions: [...state.reportDefinitions.values()],
       reportSnapshots: [...state.reportSnapshots.values()],
+      reportExportJobs: [...state.reportExportJobs.values()],
+      metricDefinitions: REPORT_METRIC_DEFINITIONS,
       reconciliationRuns: [...state.reconciliationRuns.values()],
       auditEvents: state.auditEvents
     });
@@ -585,6 +909,14 @@ export function createReportingEngine({
       throw httpError(404, "reconciliation_run_not_found", "Reconciliation run was not found.");
     }
     return run;
+  }
+
+  function requireReportExportJob(companyId, reportExportJobId) {
+    const job = state.reportExportJobs.get(requireText(reportExportJobId, "report_export_job_id_required"));
+    if (!job || job.companyId !== companyId) {
+      throw httpError(404, "report_export_job_not_found", "Report export job was not found.");
+    }
+    return job;
   }
 
   function refreshReconciliationStatus(run, actorId, changedAt) {
@@ -645,9 +977,37 @@ export function createReportingEngine({
     return accountingPeriod;
   }
 
-  function requireReportDefinition(reportCode) {
+  function listAllReportDefinitions(companyId) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const officialDefinitions = REPORT_DEFINITIONS.map((definition) => ({
+      companyId: resolvedCompanyId,
+      reportDefinitionId: null,
+      baseReportCode: definition.baseReportCode || null,
+      createdByActorId: "system",
+      createdAt: null,
+      updatedAt: null,
+      ...copy(definition)
+    }));
+    const customDefinitions = (state.reportDefinitionIdsByCompany.get(resolvedCompanyId) || [])
+      .map((reportDefinitionId) => state.reportDefinitions.get(reportDefinitionId))
+      .filter(Boolean)
+      .map(copy);
+    return [...officialDefinitions, ...customDefinitions].sort(
+      (left, right) =>
+        left.reportCode.localeCompare(right.reportCode) ||
+        Number(left.versionNo || 0) - Number(right.versionNo || 0)
+    );
+  }
+
+  function requireReportDefinition(companyId, reportCode) {
     const resolvedReportCode = requireText(reportCode, "report_code_required");
-    const definition = REPORT_DEFINITIONS.find((candidate) => candidate.reportCode === resolvedReportCode);
+    const definition = listAllReportDefinitions(companyId)
+      .filter((candidate) => candidate.reportCode === resolvedReportCode)
+      .sort((left, right) => Number(right.versionNo || 0) - Number(left.versionNo || 0))
+      .find((candidate) => candidate.status === "active")
+      || listAllReportDefinitions(companyId)
+        .filter((candidate) => candidate.reportCode === resolvedReportCode)
+        .sort((left, right) => Number(right.versionNo || 0) - Number(left.versionNo || 0))[0];
     if (!definition) {
       throw httpError(404, "report_definition_not_found", `Report definition ${resolvedReportCode} was not found.`);
     }
@@ -713,7 +1073,46 @@ export function createReportingEngine({
     };
   }
 
-  function buildReportLines({ definition, accounts, entries, linkedDocuments, filters }) {
+  function buildReportLines({ companyId, definition, accounts, entries, linkedDocuments, filters, window, actorId, ledgerSnapshot }) {
+    if (definition.reportSourceType === "ledger") {
+      return buildLedgerReportLines({ definition, accounts, entries, linkedDocuments, filters });
+    }
+    if (definition.reportSourceType === "cashflow") {
+      return buildCashflowReportLines({ definition, accounts, entries, linkedDocuments, filters });
+    }
+    if (definition.reportSourceType === "ar_open_items") {
+      return buildArReportLines({
+        companyId,
+        definition,
+        filters,
+        window,
+        linkedDocuments,
+        ledgerSnapshot
+      });
+    }
+    if (definition.reportSourceType === "ap_open_items") {
+      return buildApReportLines({
+        companyId,
+        definition,
+        filters,
+        window,
+        linkedDocuments,
+        ledgerSnapshot
+      });
+    }
+    if (definition.reportSourceType === "project_portfolio") {
+      return buildProjectReportLines({
+        companyId,
+        definition,
+        filters,
+        window,
+        actorId
+      });
+    }
+    throw httpError(500, "report_source_type_invalid", `Unsupported report source ${definition.reportSourceType}.`);
+  }
+
+  function buildLedgerReportLines({ definition, accounts, entries, linkedDocuments, filters }) {
     const accountMap = new Map((accounts || []).map((account) => [account.accountNumber, account]));
     const requestedAccountNumbers = new Set(
       Array.isArray(filters.accountNumbers) ? filters.accountNumbers.map((value) => String(value)) : []
@@ -745,51 +1144,486 @@ export function createReportingEngine({
         }
         const key = account.accountNumber;
         if (!grouped.has(key)) {
-          grouped.set(key, {
+          grouped.set(key, createReportLineBucket({
             lineKey: key,
+            lineType: "ledger_account",
             accountNumber: account.accountNumber,
             accountName: account.accountName,
             accountClass: account.accountClass,
-            totalDebit: 0,
-            totalCredit: 0,
-            balanceAmount: 0,
-            journalEntryCount: 0,
-            sourceDocumentCount: 0,
-            drilldownEntries: [],
-            sourceDocumentRefs: []
-          });
+            displayName: `${account.accountNumber} ${account.accountName}`,
+            sectionCode: definition.reportCode
+          }));
         }
         const bucket = grouped.get(key);
         bucket.totalDebit = roundMoney(bucket.totalDebit + Number(line.debitAmount || 0));
         bucket.totalCredit = roundMoney(bucket.totalCredit + Number(line.creditAmount || 0));
         bucket.balanceAmount = roundMoney(bucket.totalDebit - bucket.totalCredit);
-        if (!bucket.drilldownEntries.some((candidate) => candidate.journalEntryId === drilldownEntry.journalEntryId)) {
-          bucket.drilldownEntries.push(copy(drilldownEntry));
-        }
+        bucket.metricValues = {
+          total_debit: bucket.totalDebit,
+          total_credit: bucket.totalCredit,
+          balance_amount: bucket.balanceAmount,
+          ...(definition.reportCode === "income_statement"
+            ? {
+                pl_debit: bucket.totalDebit,
+                pl_credit: bucket.totalCredit,
+                pl_net_amount: bucket.balanceAmount
+              }
+            : {}),
+          ...(definition.reportCode === "balance_sheet"
+            ? {
+                bs_debit: bucket.totalDebit,
+                bs_credit: bucket.totalCredit,
+                bs_net_amount: bucket.balanceAmount
+              }
+            : {})
+        };
+        pushUniqueDrilldownEntry(bucket, drilldownEntry);
       }
     }
 
-    const lines = [...grouped.values()]
-      .sort((left, right) => left.accountNumber.localeCompare(right.accountNumber))
-      .map((line) => {
-        const sourceDocumentRefs = dedupeByKey(
-          line.drilldownEntries.flatMap((entry) => entry.linkedDocuments),
-          (item) => `${item.documentId}:${item.targetType}:${item.targetId}`
-        );
-        return {
-          ...line,
-          journalEntryCount: line.drilldownEntries.length,
-          sourceDocumentCount: sourceDocumentRefs.length,
-          sourceDocumentRefs
-        };
-      });
-
+    const lines = finalizeReportLines({
+      lines: [...grouped.values()],
+      sortKeySelector: (line) => `${line.accountNumber || ""}:${line.lineKey}`
+    });
     return {
       lines,
-      totals: {
-        totalDebit: roundMoney(lines.reduce((sum, line) => sum + Number(line.totalDebit || 0), 0)),
-        totalCredit: roundMoney(lines.reduce((sum, line) => sum + Number(line.totalCredit || 0), 0)),
-        balanceAmount: roundMoney(lines.reduce((sum, line) => sum + Number(line.balanceAmount || 0), 0))
+      totals: buildReportTotals(lines),
+      sourceSnapshotPayload: {
+        sourceType: "ledger",
+        reportCode: definition.reportCode,
+        filters,
+        journalEntries: entries.map((entry) => ({
+          journalEntryId: entry.journalEntryId,
+          status: entry.status,
+          journalDate: entry.journalDate,
+          voucherSeriesCode: entry.voucherSeriesCode,
+          voucherNumber: entry.voucherNumber,
+          sourceType: entry.sourceType,
+          sourceId: entry.sourceId,
+          lines: entry.lines.map((line) => ({
+            accountNumber: line.accountNumber,
+            debitAmount: roundMoney(line.debitAmount),
+            creditAmount: roundMoney(line.creditAmount)
+          }))
+        })),
+        linkedDocuments: flattenLinkedDocuments(linkedDocuments)
+      }
+    };
+  }
+
+  function buildCashflowReportLines({ definition, accounts, entries, linkedDocuments, filters }) {
+    const accountMap = new Map((accounts || []).map((account) => [account.accountNumber, account]));
+    const bankAccountNumbers = new Set(REQUIRED_ENGINE_ACCOUNTS.bank.map((accountNumber) => String(accountNumber)));
+    const grouped = new Map();
+
+    for (const entry of entries) {
+      const cashDelta = roundMoney(
+        entry.lines
+          .filter((line) => bankAccountNumbers.has(String(line.accountNumber)))
+          .reduce((sum, line) => sum + Number(line.debitAmount || 0) - Number(line.creditAmount || 0), 0)
+      );
+      if (cashDelta === 0) {
+        continue;
+      }
+      const bucketCode = classifyCashflowBucket({ entry, accountMap, bankAccountNumbers });
+      if (Array.isArray(filters.bucketCodes) && filters.bucketCodes.length > 0 && !filters.bucketCodes.includes(bucketCode)) {
+        continue;
+      }
+      if (!grouped.has(bucketCode)) {
+        grouped.set(
+          bucketCode,
+          createReportLineBucket({
+            lineKey: bucketCode,
+            lineType: "cashflow_bucket",
+            accountNumber: bucketCode,
+            accountName: CASHFLOW_BUCKET_LABELS[bucketCode],
+            accountClass: "cashflow",
+            displayName: CASHFLOW_BUCKET_LABELS[bucketCode],
+            sectionCode: definition.reportCode
+          })
+        );
+      }
+      const bucket = grouped.get(bucketCode);
+      const inflow = cashDelta > 0 ? cashDelta : 0;
+      const outflow = cashDelta < 0 ? Math.abs(cashDelta) : 0;
+      bucket.totalDebit = roundMoney(bucket.totalDebit + inflow);
+      bucket.totalCredit = roundMoney(bucket.totalCredit + outflow);
+      bucket.balanceAmount = roundMoney(bucket.totalDebit - bucket.totalCredit);
+      bucket.metricValues = {
+        cash_inflow_amount: bucket.totalDebit,
+        cash_outflow_amount: bucket.totalCredit,
+        net_cash_movement_amount: bucket.balanceAmount
+      };
+      pushUniqueDrilldownEntry(
+        bucket,
+        buildJournalDrilldownEntry({
+          entry,
+          linkedDocuments: findLinkedDocumentsForJournalEntry(entry, linkedDocuments)
+        })
+      );
+    }
+
+    const lines = finalizeReportLines({
+      lines: [...grouped.values()],
+      sortKeySelector: (line) => `${CASHFLOW_BUCKET_CODES.indexOf(line.lineKey)}:${line.lineKey}`
+    });
+    return {
+      lines,
+      totals: buildReportTotals(lines),
+      sourceSnapshotPayload: {
+        sourceType: "cashflow",
+        filters,
+        entryIds: entries.map((entry) => entry.journalEntryId),
+        bankAccountNumbers: [...bankAccountNumbers]
+      }
+    };
+  }
+
+  function buildArReportLines({ companyId, definition, filters, window, linkedDocuments, ledgerSnapshot }) {
+    if (!arPlatform || typeof arPlatform.snapshotAr !== "function") {
+      throw httpError(500, "ar_platform_missing", "AR platform is required for AR reporting.");
+    }
+    const arSnapshot = arPlatform.snapshotAr();
+    const customerMap = new Map(
+      (arSnapshot.customers || [])
+        .filter((customer) => customer.companyId === companyId)
+        .map((customer) => [customer.customerId, customer])
+    );
+    const invoiceMap = new Map(
+      (arSnapshot.invoices || [])
+        .filter((invoice) => invoice.companyId === companyId)
+        .map((invoice) => [invoice.customerInvoiceId, invoice])
+    );
+    const journalEntryMap = new Map(
+      (ledgerSnapshot?.journalEntries || [])
+        .filter((entry) => entry.companyId === companyId)
+        .map((entry) => [entry.journalEntryId, entry])
+    );
+    const grouped = new Map();
+    for (const openItem of (arSnapshot.openItems || []).filter((item) => item.companyId === companyId)) {
+      if ((openItem.openedOn || "0000-00-00") > window.toDate) {
+        continue;
+      }
+      if (Number(openItem.openAmount || 0) <= 0 || openItem.status === "reversed") {
+        continue;
+      }
+      if (Array.isArray(filters.customerIds) && filters.customerIds.length > 0 && !filters.customerIds.includes(openItem.customerId)) {
+        continue;
+      }
+      const customer = customerMap.get(openItem.customerId);
+      const invoice = invoiceMap.get(openItem.customerInvoiceId);
+      const lineKey = customer?.customerNo || openItem.customerId;
+      if (!grouped.has(lineKey)) {
+        grouped.set(
+          lineKey,
+          createReportLineBucket({
+            lineKey,
+            lineType: "customer_open_item",
+            accountNumber: customer?.customerNo || openItem.customerId,
+            accountName: customer?.legalName || `Customer ${openItem.customerId}`,
+            accountClass: "ar",
+            displayName: customer?.legalName || `Customer ${openItem.customerId}`,
+            sectionCode: definition.reportCode
+          })
+        );
+      }
+      const bucket = grouped.get(lineKey);
+      const openAmount = roundMoney(openItem.openAmount);
+      const overdueAmount = openItem.dueOn && openItem.dueOn < window.toDate ? openAmount : 0;
+      bucket.totalDebit = roundMoney(bucket.totalDebit + openAmount);
+      bucket.balanceAmount = roundMoney(bucket.balanceAmount + openAmount);
+      bucket.metricValues = {
+        ar_open_amount: bucket.balanceAmount,
+        ar_overdue_amount: roundMoney(Number(bucket.metricValues.ar_overdue_amount || 0) + overdueAmount),
+        ar_invoice_count: Number(bucket.metricValues.ar_invoice_count || 0) + 1
+      };
+      const linkedForInvoice = invoice
+        ? dedupeByKey(
+            [
+              ...(linkedDocuments.bySourceObjectKey.get(`ar_invoice:${invoice.customerInvoiceId}`) || []),
+              ...(linkedDocuments.bySourceObjectKey.get(`customer_invoice:${invoice.customerInvoiceId}`) || [])
+            ],
+            (item) => `${item.documentId}:${item.targetType}:${item.targetId}`
+          )
+        : [];
+      const journalEntry = invoice?.journalEntryId ? journalEntryMap.get(invoice.journalEntryId) : null;
+      const drilldownEntry = journalEntry
+        ? buildJournalDrilldownEntry({
+            entry: journalEntry,
+            linkedDocuments: dedupeByKey(
+              [...findLinkedDocumentsForJournalEntry(journalEntry, linkedDocuments), ...linkedForInvoice],
+              (item) => `${item.documentId}:${item.targetType}:${item.targetId}`
+            )
+          })
+        : createSyntheticDrilldownEntry({
+            journalEntryId: `ar-open-item:${openItem.arOpenItemId}`,
+            journalDate: invoice?.issueDate || openItem.openedOn || window.toDate,
+            sourceType: "AR_OPEN_ITEM",
+            sourceId: openItem.arOpenItemId,
+            description: invoice?.invoiceNumber || openItem.arOpenItemId,
+            totalDebit: openAmount,
+            totalCredit: 0,
+            linkedDocuments: linkedForInvoice
+          });
+      pushUniqueDrilldownEntry(bucket, drilldownEntry);
+    }
+
+    const lines = finalizeReportLines({
+      lines: [...grouped.values()],
+      sortKeySelector: (line) => `${line.accountNumber || ""}:${line.lineKey}`
+    });
+    return {
+      lines,
+      totals: buildReportTotals(lines),
+      sourceSnapshotPayload: {
+        sourceType: "ar_open_items",
+        filters,
+        openItems: (arSnapshot.openItems || [])
+          .filter((item) => item.companyId === companyId)
+          .map((item) => ({
+            arOpenItemId: item.arOpenItemId,
+            customerId: item.customerId,
+            customerInvoiceId: item.customerInvoiceId,
+            openAmount: item.openAmount,
+            dueOn: item.dueOn,
+            updatedAt: item.updatedAt
+          }))
+      }
+    };
+  }
+
+  function buildApReportLines({ companyId, definition, filters, window, linkedDocuments, ledgerSnapshot }) {
+    if (!apPlatform || typeof apPlatform.snapshotAp !== "function") {
+      throw httpError(500, "ap_platform_missing", "AP platform is required for AP reporting.");
+    }
+    const apSnapshot = apPlatform.snapshotAp();
+    const supplierMap = new Map(
+      (apSnapshot.suppliers || [])
+        .filter((supplier) => supplier.companyId === companyId)
+        .map((supplier) => [supplier.supplierId, supplier])
+    );
+    const invoiceMap = new Map(
+      (apSnapshot.supplierInvoices || [])
+        .filter((invoice) => invoice.companyId === companyId)
+        .map((invoice) => [invoice.supplierInvoiceId, invoice])
+    );
+    const journalEntryMap = new Map(
+      (ledgerSnapshot?.journalEntries || [])
+        .filter((entry) => entry.companyId === companyId)
+        .map((entry) => [entry.journalEntryId, entry])
+    );
+    const grouped = new Map();
+    for (const openItem of (apSnapshot.apOpenItems || []).filter((item) => item.companyId === companyId)) {
+      if (Number(openItem.openAmount || 0) <= 0) {
+        continue;
+      }
+      const invoice = invoiceMap.get(openItem.supplierInvoiceId);
+      const supplier = invoice ? supplierMap.get(invoice.supplierId) : null;
+      if (Array.isArray(filters.supplierIds) && filters.supplierIds.length > 0 && (!supplier || !filters.supplierIds.includes(supplier.supplierId))) {
+        continue;
+      }
+      const lineKey = supplier?.supplierNo || openItem.supplierInvoiceId;
+      if (!grouped.has(lineKey)) {
+        grouped.set(
+          lineKey,
+          createReportLineBucket({
+            lineKey,
+            lineType: "supplier_open_item",
+            accountNumber: supplier?.supplierNo || openItem.supplierInvoiceId,
+            accountName: supplier?.legalName || `Supplier ${openItem.supplierInvoiceId}`,
+            accountClass: "ap",
+            displayName: supplier?.legalName || `Supplier ${openItem.supplierInvoiceId}`,
+            sectionCode: definition.reportCode
+          })
+        );
+      }
+      const bucket = grouped.get(lineKey);
+      const openAmount = roundMoney(openItem.openAmount);
+      const overdueAmount = openItem.dueOn && openItem.dueOn < window.toDate ? openAmount : 0;
+      bucket.totalDebit = roundMoney(bucket.totalDebit + openAmount);
+      bucket.balanceAmount = roundMoney(bucket.balanceAmount + openAmount);
+      bucket.metricValues = {
+        ap_open_amount: bucket.balanceAmount,
+        ap_overdue_amount: roundMoney(Number(bucket.metricValues.ap_overdue_amount || 0) + overdueAmount),
+        ap_invoice_count: Number(bucket.metricValues.ap_invoice_count || 0) + 1
+      };
+      const linkedForInvoice = invoice?.documentId
+        ? dedupeByKey(
+            [
+              ...(linkedDocuments.bySourceObjectKey.get(`ap_supplier_invoice:${invoice.supplierInvoiceId}`) || []),
+              ...(linkedDocuments.bySourceObjectKey.get(`document:${invoice.documentId}`) || [])
+            ],
+            (item) => `${item.documentId}:${item.targetType}:${item.targetId}`
+          )
+        : dedupeByKey(
+            linkedDocuments.bySourceObjectKey.get(`ap_supplier_invoice:${openItem.supplierInvoiceId}`) || [],
+            (item) => `${item.documentId}:${item.targetType}:${item.targetId}`
+          );
+      const journalEntry = openItem.journalEntryId ? journalEntryMap.get(openItem.journalEntryId) : null;
+      const drilldownEntry = journalEntry
+        ? buildJournalDrilldownEntry({
+            entry: journalEntry,
+            linkedDocuments: dedupeByKey(
+              [...findLinkedDocumentsForJournalEntry(journalEntry, linkedDocuments), ...linkedForInvoice],
+              (item) => `${item.documentId}:${item.targetType}:${item.targetId}`
+            )
+          })
+        : createSyntheticDrilldownEntry({
+            journalEntryId: `ap-open-item:${openItem.apOpenItemId}`,
+            journalDate: invoice?.invoiceDate || openItem.dueOn || window.toDate,
+            sourceType: "AP_OPEN_ITEM",
+            sourceId: openItem.apOpenItemId,
+            description: invoice?.externalInvoiceRef || openItem.apOpenItemId,
+            totalDebit: openAmount,
+            totalCredit: 0,
+            linkedDocuments: linkedForInvoice
+          });
+      pushUniqueDrilldownEntry(bucket, drilldownEntry);
+    }
+
+    const lines = finalizeReportLines({
+      lines: [...grouped.values()],
+      sortKeySelector: (line) => `${line.accountNumber || ""}:${line.lineKey}`
+    });
+    return {
+      lines,
+      totals: buildReportTotals(lines),
+      sourceSnapshotPayload: {
+        sourceType: "ap_open_items",
+        filters,
+        openItems: (apSnapshot.apOpenItems || [])
+          .filter((item) => item.companyId === companyId)
+          .map((item) => ({
+            apOpenItemId: item.apOpenItemId,
+            supplierInvoiceId: item.supplierInvoiceId,
+            openAmount: item.openAmount,
+            dueOn: item.dueOn,
+            updatedAt: item.updatedAt
+          }))
+      }
+    };
+  }
+
+  function buildProjectReportLines({ companyId, definition, filters, window, actorId }) {
+    if (!projectsPlatform) {
+      throw httpError(500, "projects_platform_missing", "Projects platform is required for project reporting.");
+    }
+    const projects = projectsPlatform.listProjects({ companyId }).filter((project) => project.status !== "archived");
+    const requestedProjectIds = new Set(Array.isArray(filters.projectIds) ? filters.projectIds : []);
+    const lines = [];
+
+    for (const project of projects) {
+      if (requestedProjectIds.size > 0 && !requestedProjectIds.has(project.projectId)) {
+        continue;
+      }
+      const costSnapshot = projectsPlatform.materializeProjectCostSnapshot({
+        companyId,
+        projectId: project.projectId,
+        cutoffDate: window.toDate,
+        actorId
+      });
+      const wipSnapshot = projectsPlatform.materializeProjectWipSnapshot({
+        companyId,
+        projectId: project.projectId,
+        cutoffDate: window.toDate,
+        actorId
+      });
+      const forecastSnapshot = projectsPlatform.materializeProjectForecastSnapshot({
+        companyId,
+        projectId: project.projectId,
+        cutoffDate: window.toDate,
+        actorId
+      });
+      lines.push(
+        finalizeReportLine(
+          {
+            ...createReportLineBucket({
+              lineKey: project.projectCode,
+              lineType: "project_snapshot",
+              accountNumber: project.projectCode,
+              accountName: project.projectName,
+              accountClass: "project",
+              displayName: `${project.projectCode} ${project.projectName}`,
+              sectionCode: definition.reportCode
+            }),
+            totalDebit: roundMoney(costSnapshot.actualCostAmount || 0),
+            totalCredit: roundMoney(costSnapshot.billedRevenueAmount || 0),
+            balanceAmount: roundMoney(Number(costSnapshot.billedRevenueAmount || 0) - Number(costSnapshot.actualCostAmount || 0)),
+            metricValues: {
+              project_actual_cost_amount: roundMoney(costSnapshot.actualCostAmount || 0),
+              project_billed_revenue_amount: roundMoney(costSnapshot.billedRevenueAmount || 0),
+              project_wip_amount: roundMoney(wipSnapshot.wipAmount || 0),
+              project_forecast_margin_amount: roundMoney(forecastSnapshot.forecastMarginAmount || 0)
+            },
+            supportingSnapshots: [
+              {
+                snapshotType: "project_cost_snapshot",
+                snapshotId: costSnapshot.projectCostSnapshotId,
+                snapshotHash: costSnapshot.snapshotHash
+              },
+              {
+                snapshotType: "project_wip_snapshot",
+                snapshotId: wipSnapshot.projectWipSnapshotId,
+                snapshotHash: wipSnapshot.snapshotHash
+              },
+              {
+                snapshotType: "project_forecast_snapshot",
+                snapshotId: forecastSnapshot.projectForecastSnapshotId,
+                snapshotHash: forecastSnapshot.snapshotHash
+              }
+            ]
+          },
+          [
+            createSyntheticDrilldownEntry({
+              journalEntryId: `project-cost:${costSnapshot.projectCostSnapshotId}`,
+              journalDate: costSnapshot.cutoffDate,
+              sourceType: "PROJECT_COST_SNAPSHOT",
+              sourceId: costSnapshot.projectCostSnapshotId,
+              description: `${project.projectCode} cost snapshot`,
+              totalDebit: costSnapshot.actualCostAmount,
+              totalCredit: 0,
+              linkedDocuments: []
+            }),
+            createSyntheticDrilldownEntry({
+              journalEntryId: `project-wip:${wipSnapshot.projectWipSnapshotId}`,
+              journalDate: wipSnapshot.cutoffDate,
+              sourceType: "PROJECT_WIP_SNAPSHOT",
+              sourceId: wipSnapshot.projectWipSnapshotId,
+              description: `${project.projectCode} WIP snapshot`,
+              totalDebit: wipSnapshot.approvedValueAmount,
+              totalCredit: wipSnapshot.billedAmount,
+              linkedDocuments: []
+            }),
+            createSyntheticDrilldownEntry({
+              journalEntryId: `project-forecast:${forecastSnapshot.projectForecastSnapshotId}`,
+              journalDate: forecastSnapshot.cutoffDate,
+              sourceType: "PROJECT_FORECAST_SNAPSHOT",
+              sourceId: forecastSnapshot.projectForecastSnapshotId,
+              description: `${project.projectCode} forecast snapshot`,
+              totalDebit: forecastSnapshot.forecastRevenueAtCompletionAmount,
+              totalCredit: forecastSnapshot.forecastCostAtCompletionAmount,
+              linkedDocuments: []
+            })
+          ]
+        )
+      );
+    }
+
+    const finalizedLines = finalizeReportLines({
+      lines,
+      sortKeySelector: (line) => `${line.accountNumber || ""}:${line.lineKey}`
+    });
+    return {
+      lines: finalizedLines,
+      totals: buildReportTotals(finalizedLines),
+      sourceSnapshotPayload: {
+        sourceType: "project_portfolio",
+        filters,
+        projects: finalizedLines.map((line) => ({
+          lineKey: line.lineKey,
+          metricValues: line.metricValues,
+          supportingSnapshots: line.supportingSnapshots
+        }))
       }
     };
   }
@@ -947,6 +1781,213 @@ export function createReportingEngine({
     return Number(left.voucherNumber) - Number(right.voucherNumber);
   }
 
+  function processQueuedReportExportJobs({ companyId = null, actorId = "system", correlationId = crypto.randomUUID(), onlyJobId = null } = {}) {
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const jobs = [...state.reportExportJobs.values()]
+      .filter((job) => (companyId ? job.companyId === companyId : true))
+      .filter((job) => (onlyJobId ? job.reportExportJobId === onlyJobId : true))
+      .filter((job) => job.status === "queued" || job.status === "retry_pending")
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+
+    for (const job of jobs) {
+      try {
+        transitionExportJob(job, "running", resolvedActorId, "export_worker_started");
+        const snapshot = requireReportSnapshot(job.companyId, job.reportSnapshotId);
+        const artifact = renderReportExportArtifact(snapshot, job.format, job.watermarkMode);
+        markSupersededExports(job, snapshot, resolvedActorId, correlationId);
+        job.status = "materialized";
+        job.artifactRef = artifact.artifactRef;
+        job.artifactName = artifact.artifactName;
+        job.artifactContentType = artifact.artifactContentType;
+        job.artifactContent = artifact.artifactContent;
+        job.contentHash = artifact.contentHash;
+        job.updatedAt = nowIso();
+        job.statusHistory.push(
+          createStatusTransition({
+            fromStatus: "running",
+            toStatus: "materialized",
+            actorId: resolvedActorId,
+            reasonCode: "artifact_materialized",
+            changedAt: job.updatedAt
+          })
+        );
+        job.status = "delivered";
+        job.completedAt = nowIso();
+        job.updatedAt = job.completedAt;
+        job.statusHistory.push(
+          createStatusTransition({
+            fromStatus: "materialized",
+            toStatus: "delivered",
+            actorId: resolvedActorId,
+            reasonCode: "artifact_delivered",
+            changedAt: job.completedAt
+          })
+        );
+        pushAudit({
+          companyId: job.companyId,
+          actorId: resolvedActorId,
+          correlationId,
+          action: "reporting.export_job.completed",
+          entityType: "report_export_job",
+          entityId: job.reportExportJobId,
+          explanation: `Materialized ${job.format} export for snapshot ${job.reportSnapshotId}.`
+        });
+      } catch (error) {
+        job.status = "failed";
+        job.failedAt = nowIso();
+        job.updatedAt = job.failedAt;
+        job.statusHistory.push(
+          createStatusTransition({
+            fromStatus: "running",
+            toStatus: "failed",
+            actorId: resolvedActorId,
+            reasonCode: error.code || "export_failed",
+            changedAt: job.failedAt
+          })
+        );
+        pushAudit({
+          companyId: job.companyId,
+          actorId: resolvedActorId,
+          correlationId,
+          action: "reporting.export_job.failed",
+          entityType: "report_export_job",
+          entityId: job.reportExportJobId,
+          explanation: `Export ${job.reportExportJobId} failed: ${error.message}`
+        });
+      }
+    }
+  }
+
+  function transitionExportJob(job, nextStatus, actorId, reasonCode) {
+    const changedAt = nowIso();
+    const previousStatus = job.status;
+    job.status = nextStatus;
+    job.updatedAt = changedAt;
+    job.statusHistory.push(
+      createStatusTransition({
+        fromStatus: previousStatus,
+        toStatus: nextStatus,
+        actorId,
+        reasonCode,
+        changedAt
+      })
+    );
+  }
+
+  function markSupersededExports(job, snapshot, actorId, correlationId) {
+    for (const candidate of state.reportExportJobs.values()) {
+      if (candidate.reportExportJobId === job.reportExportJobId) {
+        continue;
+      }
+      if (candidate.companyId !== job.companyId || candidate.format !== job.format) {
+        continue;
+      }
+      if (!["materialized", "delivered"].includes(candidate.status)) {
+        continue;
+      }
+      const candidateSnapshot = state.reportSnapshots.get(candidate.reportSnapshotId);
+      if (!candidateSnapshot || candidateSnapshot.reportCode !== snapshot.reportCode) {
+        continue;
+      }
+      if (candidateSnapshot.contentHash === snapshot.contentHash) {
+        continue;
+      }
+      const previousStatus = candidate.status;
+      candidate.status = "superseded";
+      candidate.watermarkMode = "superseded";
+      candidate.supersededByExportJobId = job.reportExportJobId;
+      candidate.updatedAt = nowIso();
+      candidate.statusHistory.push(
+        createStatusTransition({
+          fromStatus: previousStatus,
+          toStatus: "superseded",
+          actorId,
+          reasonCode: "newer_snapshot_exported",
+          changedAt: candidate.updatedAt
+        })
+      );
+      pushAudit({
+        companyId: candidate.companyId,
+        actorId,
+        correlationId,
+        action: "reporting.export_job.superseded",
+        entityType: "report_export_job",
+        entityId: candidate.reportExportJobId,
+        explanation: `Export ${candidate.reportExportJobId} was superseded by ${job.reportExportJobId}.`
+      });
+    }
+  }
+
+  function renderReportExportArtifact(snapshot, format, watermarkMode) {
+    const extension = format === "excel" ? "xlsx" : "pdf";
+    const artifactName = `${snapshot.reportCode}_${snapshot.fromDate}_${snapshot.toDate}.${extension}`;
+    const headerLines = [
+      `reportCode=${snapshot.reportCode}`,
+      `reportVersionNo=${snapshot.reportVersionNo}`,
+      `snapshotId=${snapshot.reportSnapshotId}`,
+      `generatedAt=${snapshot.generatedAt}`,
+      `watermarkMode=${watermarkMode}`
+    ];
+    const metricColumns = snapshot.metricCatalog.map((metric) => metric.metricCode);
+    const lineRows = snapshot.lines.map((line) =>
+      [
+        line.lineKey,
+        line.displayName || line.accountName || line.lineKey,
+        ...metricColumns.map((metricCode) => String(line.metricValues?.[metricCode] ?? ""))
+      ].join("\t")
+    );
+    const artifactContent = [
+      format === "pdf" ? "%PDF-FAKE-1.0" : "XLSX-FAKE-1.0",
+      ...headerLines,
+      ["lineKey", "displayName", ...metricColumns].join("\t"),
+      ...lineRows
+    ].join("\n");
+    return {
+      artifactRef: `memory://report-exports/${snapshot.reportSnapshotId}/${artifactName}`,
+      artifactName,
+      artifactContentType:
+        format === "excel"
+          ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          : "application/pdf",
+      artifactContent,
+      contentHash: hashObject({
+        format,
+        watermarkMode,
+        reportSnapshotId: snapshot.reportSnapshotId,
+        content: artifactContent
+      })
+    };
+  }
+
+  function resolveWatermarkMode(snapshot, watermarkMode) {
+    if (watermarkMode) {
+      return assertAllowedValue(watermarkMode, REPORT_WATERMARK_MODES, "report_watermark_mode_invalid");
+    }
+    return snapshot.periodStatus === "hard_closed" ? "none" : "preliminary";
+  }
+
+  function classifyCashflowBucket({ entry, accountMap, bankAccountNumbers }) {
+    const sourceType = normalizeOptionalText(entry.sourceType) || "MANUAL_JOURNAL";
+    if (["AR_PAYMENT", "AP_PAYMENT", "PAYROLL_RUN", "PAYROLL_CORRECTION", "BENEFIT_EVENT", "TRAVEL_CLAIM", "VAT_SETTLEMENT", "ROT_RUT_CLAIM", "PENSION_REPORT", "BANK_IMPORT"].includes(sourceType)) {
+      return "operating";
+    }
+    const counterpartClasses = dedupeStringValues(
+      entry.lines
+        .filter((line) => !bankAccountNumbers.has(String(line.accountNumber)))
+        .map((line) => accountMap.get(line.accountNumber)?.accountClass || String(line.accountNumber).slice(0, 1))
+    );
+    if (counterpartClasses.some((accountClass) => accountClass === "1")) {
+      return "investing";
+    }
+    if (counterpartClasses.some((accountClass) => accountClass === "2")) {
+      return "financing";
+    }
+    if (counterpartClasses.some((accountClass) => ["3", "4", "5", "6", "7", "8"].includes(accountClass))) {
+      return "operating";
+    }
+    return "unclassified";
+  }
+
   function pushAudit({ companyId, actorId, correlationId, action, entityType, entityId, explanation }) {
     state.auditEvents.push({
       auditEventId: crypto.randomUUID(),
@@ -964,6 +2005,119 @@ export function createReportingEngine({
   function nowIso() {
     return new Date(clock()).toISOString();
   }
+}
+
+function createMetricDefinition(metricCode, name, ownerRoleCode, drilldownLevel, formulaRef, sourceDomains) {
+  return {
+    metricCode,
+    name,
+    ownerRoleCode,
+    versionNo: 1,
+    drilldownLevel,
+    formulaRef,
+    sourceDomains,
+    status: "active"
+  };
+}
+
+function metricCatalog(metricCodes) {
+  return metricCodes.map((metricCode) => copy(requireMetricDefinitionFromCatalog(metricCode)));
+}
+
+function requireMetricDefinitionFromCatalog(metricCode) {
+  const resolvedMetricCode = requireText(metricCode, "metric_code_required");
+  const definition = REPORT_METRIC_DEFINITIONS.find((candidate) => candidate.metricCode === resolvedMetricCode);
+  if (!definition) {
+    throw httpError(404, "metric_definition_not_found", `Metric definition ${resolvedMetricCode} was not found.`);
+  }
+  return definition;
+}
+
+function createReportLineBucket({ lineKey, lineType, accountNumber, accountName, accountClass, displayName, sectionCode }) {
+  return {
+    lineKey,
+    lineType,
+    accountNumber,
+    accountName,
+    accountClass,
+    displayName,
+    sectionCode,
+    totalDebit: 0,
+    totalCredit: 0,
+    balanceAmount: 0,
+    metricValues: {},
+    journalEntryCount: 0,
+    sourceDocumentCount: 0,
+    drilldownEntries: [],
+    sourceDocumentRefs: [],
+    supportingSnapshots: []
+  };
+}
+
+function finalizeReportLine(line, drilldownEntries = line.drilldownEntries || []) {
+  const sourceDocumentRefs = dedupeByKey(
+    drilldownEntries.flatMap((entry) => entry.linkedDocuments || []),
+    (item) => `${item.documentId}:${item.targetType}:${item.targetId}`
+  );
+  return {
+    ...line,
+    drilldownEntries: copy(drilldownEntries),
+    journalEntryCount: drilldownEntries.length,
+    sourceDocumentCount: sourceDocumentRefs.length,
+    sourceDocumentRefs
+  };
+}
+
+function finalizeReportLines({ lines, sortKeySelector }) {
+  return lines
+    .map((line) => finalizeReportLine(line))
+    .sort((left, right) => sortKeySelector(left).localeCompare(sortKeySelector(right)));
+}
+
+function buildReportTotals(lines) {
+  const metricTotals = {};
+  for (const line of lines) {
+    for (const [metricCode, value] of Object.entries(line.metricValues || {})) {
+      metricTotals[metricCode] = roundMoney(Number(metricTotals[metricCode] || 0) + Number(value || 0));
+    }
+  }
+  return {
+    totalDebit: roundMoney(lines.reduce((sum, line) => sum + Number(line.totalDebit || 0), 0)),
+    totalCredit: roundMoney(lines.reduce((sum, line) => sum + Number(line.totalCredit || 0), 0)),
+    balanceAmount: roundMoney(lines.reduce((sum, line) => sum + Number(line.balanceAmount || 0), 0)),
+    metricTotals
+  };
+}
+
+function pushUniqueDrilldownEntry(bucket, drilldownEntry) {
+  if (!bucket.drilldownEntries.some((candidate) => candidate.journalEntryId === drilldownEntry.journalEntryId)) {
+    bucket.drilldownEntries.push(copy(drilldownEntry));
+  }
+}
+
+function createSyntheticDrilldownEntry({
+  journalEntryId,
+  journalDate,
+  sourceType,
+  sourceId,
+  description = null,
+  totalDebit = 0,
+  totalCredit = 0,
+  linkedDocuments = []
+}) {
+  return {
+    journalEntryId,
+    journalDate,
+    voucherSeriesCode: "SYN",
+    voucherNumber: 0,
+    status: "materialized",
+    sourceType,
+    sourceId,
+    description,
+    totalDebit: roundMoney(totalDebit),
+    totalCredit: roundMoney(totalCredit),
+    linkedDocuments: copy(linkedDocuments)
+  };
 }
 
 function ensureCompanyCollection(map, companyId) {
@@ -1037,11 +2191,57 @@ function roundMoney(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
+function dedupeStringValues(values) {
+  return [...new Set((values || []).map((value) => String(value)))];
+}
+
 function requireText(value, code) {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw httpError(400, code, `${code} is required.`);
   }
   return value.trim();
+}
+
+function normalizeOptionalText(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizePlainObject(value, code) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw httpError(400, code, `${code} must be an object.`);
+  }
+  return value;
+}
+
+function slugify(value) {
+  const resolvedValue = requireText(value, "slug_value_required");
+  return resolvedValue
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+function normalizeReportCode(value) {
+  const resolvedValue = requireText(value, "report_code_required")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (resolvedValue.length < 3) {
+    throw httpError(400, "report_code_invalid", "Report code must contain at least three characters.");
+  }
+  return resolvedValue;
+}
+
+function mergeFilterObjects(defaultFilters, requestedFilters) {
+  return {
+    ...copy(defaultFilters || {}),
+    ...copy(requestedFilters || {})
+  };
 }
 
 function httpError(status, code, message) {

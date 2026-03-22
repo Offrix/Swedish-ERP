@@ -22,11 +22,6 @@ export function createApiPlatform(options = {}) {
   const orgAuthPlatform = createOrgAuthPlatform(options);
   const documentArchivePlatform = createDocumentArchivePlatform(options);
   const ledgerPlatform = createLedgerPlatform(options);
-  const reportingPlatform = createReportingPlatform({
-    ...options,
-    ledgerPlatform,
-    documentPlatform: documentArchivePlatform
-  });
   const vatPlatform = createVatPlatform({
     ...options,
     ledgerPlatform
@@ -90,6 +85,14 @@ export function createApiPlatform(options = {}) {
     timePlatform,
     payrollPlatform,
     vatPlatform
+  });
+  const reportingPlatform = createReportingPlatform({
+    ...options,
+    ledgerPlatform,
+    documentPlatform: documentArchivePlatform,
+    arPlatform,
+    apPlatform,
+    projectsPlatform
   });
   const husPlatform = createHusPlatform({
     ...options,

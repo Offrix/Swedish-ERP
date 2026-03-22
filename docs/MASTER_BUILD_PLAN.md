@@ -505,7 +505,7 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 10.2 Arbetsorder, serviceorder, fÃ¤ltapp och lager
   - [x] 10.3 Byggspecifika regler: Ã„TA, HUS, omvÃ¤nd moms, personalliggare
 - [ ] **FAS 11 â€” Rapporter, byrÃ¥lÃ¤ge, mÃ¥nadsstÃ¤ngning och bokslut**
-  - [ ] 11.1 Rapporter och drilldown
+  - [x] 11.1 Rapporter och drilldown
   - [ ] 11.2 ByrÃ¥lÃ¤ge och portfÃ¶ljhantering
   - [ ] 11.3 MÃ¥nadsstÃ¤ngning och bokslutschecklistor
 - [ ] **FAS 12 â€” Ã…rsredovisning, deklaration och myndighetskopplingar**
@@ -1050,14 +1050,14 @@ GÃ¶r systemet anvÃ¤ndbart fÃ¶r byrÃ¥er, controllers och periodstÃ¤ngni
 ### 11.1 Rapporter och drilldown
 
 **Bygg detta**
-- [ ] P&L, balans, cashflow, reskontra, projekt
-- [ ] drilldown
-- [ ] rapportbyggare light
+- [x] P&L, balans, cashflow, reskontra, projekt
+- [x] drilldown
+- [x] rapportbyggare light
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] Rapporter Ã¤r historiskt reproducerbara
-- [ ] Belopp kan spÃ¥ras till kÃ¤lldokument
-- [ ] Export till Excel/PDF fungerar
+- [x] Rapporter Ã¤r historiskt reproducerbara
+- [x] Belopp kan spÃ¥ras till kÃ¤lldokument
+- [x] Export till Excel/PDF fungerar
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P11-01`.
 

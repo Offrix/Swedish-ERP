@@ -4,20 +4,32 @@ export interface ReportingMetricDefinition {
   readonly ownerRoleCode: string;
   readonly versionNo: number;
   readonly drilldownLevel: string;
+  readonly formulaRef?: string;
+  readonly sourceDomains?: readonly string[];
+  readonly status?: string;
 }
 
 export interface ReportDefinition {
   readonly companyId: string;
+  readonly reportDefinitionId?: string | null;
+  readonly baseReportCode?: string | null;
   readonly reportCode: string;
   readonly name: string;
   readonly purpose: string;
   readonly versionNo: number;
+  readonly definitionKind?: string;
+  readonly reportSourceType?: string;
+  readonly rowDimensionCode?: string;
   readonly defaultViewMode: string;
   readonly allowedViewModes: readonly string[];
   readonly classFilter: readonly string[];
   readonly drilldownMode: string;
+  readonly defaultFilters?: Record<string, unknown>;
   readonly metricCatalog: readonly ReportingMetricDefinition[];
   readonly status: string;
+  readonly createdByActorId?: string;
+  readonly createdAt?: string | null;
+  readonly updatedAt?: string | null;
 }
 
 export interface ReportDrilldownDocumentRef {
@@ -44,26 +56,41 @@ export interface ReportDrilldownEntry {
   readonly linkedDocuments: readonly ReportDrilldownDocumentRef[];
 }
 
+export interface ReportSupportingSnapshotRef {
+  readonly snapshotType: string;
+  readonly snapshotId: string;
+  readonly snapshotHash: string;
+}
+
 export interface ReportSnapshotLine {
   readonly lineKey: string;
+  readonly lineType?: string;
   readonly accountNumber: string;
   readonly accountName: string;
   readonly accountClass: string;
+  readonly displayName?: string;
+  readonly sectionCode?: string;
   readonly totalDebit: number;
   readonly totalCredit: number;
   readonly balanceAmount: number;
+  readonly metricValues?: Record<string, number>;
   readonly journalEntryCount: number;
   readonly sourceDocumentCount: number;
   readonly drilldownEntries: readonly ReportDrilldownEntry[];
   readonly sourceDocumentRefs: readonly ReportDrilldownDocumentRef[];
+  readonly supportingSnapshots?: readonly ReportSupportingSnapshotRef[];
 }
 
 export interface ReportSnapshot {
   readonly reportSnapshotId: string;
   readonly companyId: string;
+  readonly reportDefinitionId?: string | null;
   readonly reportCode: string;
   readonly reportName: string;
   readonly reportVersionNo: number;
+  readonly reportDefinitionKind?: string;
+  readonly reportSourceType?: string;
+  readonly rowDimensionCode?: string;
   readonly reportDefinition: ReportDefinition;
   readonly metricCatalog: readonly ReportingMetricDefinition[];
   readonly viewMode: string;
@@ -81,9 +108,39 @@ export interface ReportSnapshot {
     readonly totalDebit: number;
     readonly totalCredit: number;
     readonly balanceAmount: number;
+    readonly metricTotals?: Record<string, number>;
   };
   readonly generatedAt: string;
   readonly generatedByActorId: string;
+}
+
+export interface ReportExportJob {
+  readonly reportExportJobId: string;
+  readonly companyId: string;
+  readonly reportSnapshotId: string;
+  readonly reportCode: string;
+  readonly reportVersionNo: number;
+  readonly format: string;
+  readonly watermarkMode: string;
+  readonly requestedByActorId: string;
+  readonly status: string;
+  readonly artifactRef: string | null;
+  readonly artifactName: string | null;
+  readonly artifactContentType: string | null;
+  readonly artifactContent: string | null;
+  readonly contentHash: string | null;
+  readonly supersededByExportJobId: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly completedAt: string | null;
+  readonly failedAt: string | null;
+  readonly statusHistory: readonly {
+    readonly fromStatus: string | null;
+    readonly toStatus: string;
+    readonly actorId: string;
+    readonly reasonCode: string;
+    readonly changedAt: string;
+  }[];
 }
 
 export interface JournalSearchResult {
