@@ -36,3 +36,4 @@ Seed execution policy:
 - Phase 10.3 seeds HUS baseline and recovery flows, ATA/build-VAT decisions and personalliggare threshold, correction and control-chain export artifacts
 - Phase 11.1 adds reporting metric-catalog baseline data, custom report-definition seed data and demo cashflow/export-job artifacts
 - Phase 11.2 seeds bureau-delivery settings plus demo portfolio, client request, approval package, work-item, comment and mass-action artifacts
+- Phase 11.3 seeds close deadline settings plus demo close checklist, checklist-step, blocker and close work-item artifacts

@@ -37,6 +37,7 @@ Database foundation with migration framework, seed files and baseline governance
 - Phase 10.3 adds HUS case/claim lifecycle tables, project ATA and build-VAT assessment tables, construction-site registration, attendance, correction, export and attendance-audit tables in the same monotonic stream.
 - Phase 11.1 adds metric-catalog tables, report-definition metadata, report-export jobs and demo report artifacts in the same monotonic stream.
 - Phase 11.2 adds bureau portfolio memberships, tracked client requests, approval packages, work items, comments and mass-action persistence in the same monotonic stream.
+- Phase 11.3 adds close checklist versions, checklist steps, blockers, sign-off records and reopen requests in the same monotonic stream.
 
 ## Usage
 

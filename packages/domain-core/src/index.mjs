@@ -1,4 +1,12 @@
 import crypto from "node:crypto";
+import {
+  CLOSE_BLOCKER_SEVERITIES,
+  CLOSE_BLOCKER_STATUSES,
+  CLOSE_CHECKLIST_STATUSES,
+  CLOSE_STEP_STATUSES,
+  PERIOD_CLOSE_STATES,
+  createCloseModule
+} from "./close.mjs";
 
 export const PORTFOLIO_STATUS_CODES = Object.freeze(["active", "waiting_for_client", "in_review", "ready_for_close", "blocked"]);
 export const CLIENT_REQUEST_STATUSES = Object.freeze(["draft", "sent", "acknowledged", "in_progress", "delivered", "accepted", "closed", "overdue", "escalated", "reopened"]);
@@ -6,18 +14,23 @@ export const APPROVAL_PACKAGE_STATUSES = Object.freeze(["prepared", "sent_for_ap
 export const WORK_ITEM_STATUSES = Object.freeze(["open", "acknowledged", "waiting_external", "snoozed", "resolved", "escalated", "blocked", "closed"]);
 export const COMMENT_VISIBILITY_CODES = Object.freeze(["internal", "external_shared", "restricted_internal"]);
 export const MASS_ACTION_TYPES = Object.freeze(["send_reminder", "reassign_owner"]);
+export { CLOSE_CHECKLIST_STATUSES, CLOSE_STEP_STATUSES, CLOSE_BLOCKER_SEVERITIES, CLOSE_BLOCKER_STATUSES, PERIOD_CLOSE_STATES };
 
 export function createCorePlatform(options = {}) {
   return createCoreEngine(options);
 }
 
-export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = null, clock = () => new Date() } = {}) {
+export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = null, ledgerPlatform = null, clock = () => new Date() } = {}) {
   const state = {
     portfolios: new Map(),
     requests: new Map(),
     approvals: new Map(),
     workItems: new Map(),
     comments: new Map(),
+    closeChecklists: new Map(),
+    closeBlockers: new Map(),
+    closeSignoffs: new Map(),
+    closeReopenRequests: new Map(),
     auditEvents: []
   };
 
@@ -95,15 +108,47 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     }
   }
 
+  function findActivePortfolioForClient(bureauOrgId, clientCompanyId) {
+    const portfolio = [...state.portfolios.values()].find(
+      (candidate) => candidate.bureauOrgId === bureauOrgId
+        && candidate.clientCompanyId === clientCompanyId
+        && isActivePortfolioMembership(candidate, clock())
+    );
+    if (!portfolio) {
+      throw error(404, "portfolio_membership_not_found", "An active bureau portfolio membership was not found for the client.");
+    }
+    return portfolio;
+  }
+
+  const closeModule = createCloseModule({
+    state,
+    authorize,
+    assertVisible,
+    requireCompany,
+    requireBureauUser,
+    findActivePortfolioForClient,
+    upsertWorkItem,
+    reportingPlatform,
+    ledgerPlatform,
+    now,
+    audit,
+    error
+  });
+
   return {
     portfolioStatusCodes: PORTFOLIO_STATUS_CODES,
     clientRequestStatuses: CLIENT_REQUEST_STATUSES,
     approvalPackageStatuses: APPROVAL_PACKAGE_STATUSES,
-    workItemStatuses: WORK_ITEM_STATUSES,
-    commentVisibilityCodes: COMMENT_VISIBILITY_CODES,
-    massActionTypes: MASS_ACTION_TYPES,
-    createPortfolioMembership,
-    listPortfolioMemberships,
+      workItemStatuses: WORK_ITEM_STATUSES,
+      commentVisibilityCodes: COMMENT_VISIBILITY_CODES,
+      massActionTypes: MASS_ACTION_TYPES,
+      closeChecklistStatuses: CLOSE_CHECKLIST_STATUSES,
+      closeStepStatuses: CLOSE_STEP_STATUSES,
+      closeBlockerSeverities: CLOSE_BLOCKER_SEVERITIES,
+      closeBlockerStatuses: CLOSE_BLOCKER_STATUSES,
+      periodCloseStates: PERIOD_CLOSE_STATES,
+      createPortfolioMembership,
+      listPortfolioMemberships,
     createClientRequest,
     listClientRequests,
     sendClientRequest,
@@ -115,12 +160,21 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     recordApprovalResponse,
     runPortfolioMassAction,
     listWorkItems,
-    createComment,
-    listComments,
-    runClientRequestReminderJob,
-    runClientRequestEscalationJob,
-    runPortfolioStatusRecomputeJob,
-    snapshotCore: snapshot
+      createComment,
+      listComments,
+      instantiateCloseChecklist: closeModule.instantiateCloseChecklist,
+      listCloseWorkbenches: closeModule.listCloseWorkbenches,
+      getCloseWorkbench: closeModule.getCloseWorkbench,
+      completeCloseChecklistStep: closeModule.completeCloseChecklistStep,
+      openCloseBlocker: closeModule.openCloseBlocker,
+      resolveCloseBlocker: closeModule.resolveCloseBlocker,
+      approveCloseOverride: closeModule.approveCloseOverride,
+      signOffCloseChecklist: closeModule.signOffCloseChecklist,
+      requestCloseReopen: closeModule.requestCloseReopen,
+      runClientRequestReminderJob,
+      runClientRequestEscalationJob,
+      runPortfolioStatusRecomputeJob,
+      snapshotCore: snapshot
   };
 
   function createPortfolioMembership({
@@ -606,12 +660,24 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     if (resolvedType === "bureau_client_request") {
       return requireRequest(objectId).portfolioId;
     }
-    if (resolvedType === "bureau_approval_package") {
-      return requireApproval(objectId).portfolioId;
-    }
-    if (resolvedType === "core_work_item") {
-      return requireWorkItem(objectId).portfolioId;
-    }
+      if (resolvedType === "bureau_approval_package") {
+        return requireApproval(objectId).portfolioId;
+      }
+      if (resolvedType === "close_checklist") {
+        return requireCloseChecklist(objectId).portfolioId;
+      }
+      if (resolvedType === "close_checklist_step") {
+        return requireCloseChecklist(requireCloseStep(objectId).checklistId).portfolioId;
+      }
+      if (resolvedType === "close_blocker") {
+        return requireCloseChecklist(requireCloseBlocker(objectId).checklistId).portfolioId;
+      }
+      if (resolvedType === "close_reopen_request") {
+        return requireCloseChecklist(requireCloseReopenRequest(objectId).checklistId).portfolioId;
+      }
+      if (resolvedType === "core_work_item") {
+        return requireWorkItem(objectId).portfolioId;
+      }
     throw error(400, "comment_object_type_invalid", "Comment object type is not supported.");
   }
 
@@ -623,12 +689,24 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     if (resolvedType === "bureau_client_request") {
       return requireRequest(objectId).clientCompanyId;
     }
-    if (resolvedType === "bureau_approval_package") {
-      return requireApproval(objectId).clientCompanyId;
-    }
-    if (resolvedType === "core_work_item") {
-      return requireWorkItem(objectId).clientCompanyId;
-    }
+      if (resolvedType === "bureau_approval_package") {
+        return requireApproval(objectId).clientCompanyId;
+      }
+      if (resolvedType === "close_checklist") {
+        return requireCloseChecklist(objectId).clientCompanyId;
+      }
+      if (resolvedType === "close_checklist_step") {
+        return requireCloseChecklist(requireCloseStep(objectId).checklistId).clientCompanyId;
+      }
+      if (resolvedType === "close_blocker") {
+        return requireCloseChecklist(requireCloseBlocker(objectId).checklistId).clientCompanyId;
+      }
+      if (resolvedType === "close_reopen_request") {
+        return requireCloseChecklist(requireCloseReopenRequest(objectId).checklistId).clientCompanyId;
+      }
+      if (resolvedType === "core_work_item") {
+        return requireWorkItem(objectId).clientCompanyId;
+      }
     throw error(400, "comment_object_type_invalid", "Comment object type is not supported.");
   }
 
@@ -648,13 +726,47 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     return approval;
   }
 
-  function requireWorkItem(workItemId) {
-    const workItem = state.workItems.get(workItemId);
+    function requireWorkItem(workItemId) {
+      const workItem = state.workItems.get(workItemId);
     if (!workItem) {
       throw error(404, "work_item_not_found", "Work item was not found.");
     }
-    return workItem;
-  }
+      return workItem;
+    }
+
+    function requireCloseChecklist(checklistId) {
+      const checklist = state.closeChecklists.get(checklistId);
+      if (!checklist) {
+        throw error(404, "close_checklist_not_found", "Close checklist was not found.");
+      }
+      return checklist;
+    }
+
+    function requireCloseStep(stepId) {
+      for (const checklist of state.closeChecklists.values()) {
+        const step = (checklist.steps || []).find((candidate) => candidate.stepId === stepId);
+        if (step) {
+          return step;
+        }
+      }
+      throw error(404, "close_step_not_found", "Close checklist step was not found.");
+    }
+
+    function requireCloseBlocker(blockerId) {
+      const blocker = state.closeBlockers.get(blockerId);
+      if (!blocker) {
+        throw error(404, "close_blocker_not_found", "Close blocker was not found.");
+      }
+      return blocker;
+    }
+
+    function requireCloseReopenRequest(reopenRequestId) {
+      const reopenRequest = state.closeReopenRequests.get(reopenRequestId);
+      if (!reopenRequest) {
+        throw error(404, "close_reopen_request_not_found", "Close reopen request was not found.");
+      }
+      return reopenRequest;
+    }
 
   function validateSnapshotRef(snapshotRef, clientCompanyId) {
     if (!reportingPlatform || snapshotRef.snapshotType !== "report_snapshot") {
@@ -667,11 +779,15 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     return clone({
       portfolios: [...state.portfolios.values()],
       requests: [...state.requests.values()],
-      approvals: [...state.approvals.values()],
-      workItems: [...state.workItems.values()],
-      comments: [...state.comments.values()],
-      auditEvents: [...state.auditEvents]
-    });
+        approvals: [...state.approvals.values()],
+        workItems: [...state.workItems.values()],
+        comments: [...state.comments.values()],
+        closeChecklists: [...state.closeChecklists.values()],
+        closeBlockers: [...state.closeBlockers.values()],
+        closeSignoffs: [...state.closeSignoffs.values()],
+        closeReopenRequests: [...state.closeReopenRequests.values()],
+        auditEvents: [...state.auditEvents]
+      });
   }
 }
 

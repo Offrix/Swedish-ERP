@@ -98,7 +98,8 @@ export function createApiPlatform(options = {}) {
   const corePlatform = createCorePlatform({
     ...options,
     orgAuthPlatform,
-    reportingPlatform
+    reportingPlatform,
+    ledgerPlatform
   });
   const husPlatform = createHusPlatform({
     ...options,

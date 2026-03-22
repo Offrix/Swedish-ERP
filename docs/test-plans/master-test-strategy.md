@@ -387,6 +387,16 @@ När en fas använder någon av dessa förmågor ska respektive testplan läsas 
 - massÃ¥tgÃ¤rder ska testas fÃ¶r selektiv kÃ¶rning, delvis fel och per-klient-resultat
 - work items och kommentarer ska testas fÃ¶r assignment, statushistorik och auditdrivet samarbete
 
+## FAS 11.3 minimum coverage
+
+- close checklist ska testas fÃ¶r skapande, deadlinehÃ¤rledning och versionskedja per klient och period
+- signed reconciliation runs ska bindas till bank, AR, AP och VAT-steg med period- och area-validering
+- `hard_stop` och `critical` blockers ska stoppa sign-off tills de Ã¤r lÃ¶sta eller giltigt waivade
+- waiver och override ska testas fÃ¶r senior finance-roll, audit och Ã¥terstÃ¤lld checklist-readiness
+- sign-off chain ska testas fÃ¶r ordning, snapshot-bindning, dual control och hard close
+- reopen ska testas fÃ¶r ny checklistversion, superseded sign-off och bevarad historik
+- rapport som kÃ¶rs om efter close ska ge samma line metrics fÃ¶r samma period och underlag
+
 ## Testdata policy
 
 - All testdata ska vara syntetisk eller avidentifierad.

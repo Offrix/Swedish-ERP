@@ -102,6 +102,15 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/bureau/approval-packages/:approvalPackageId/respond",
               "/v1/bureau/mass-actions",
               "/v1/bureau/work-items",
+              "/v1/close/workbench",
+              "/v1/close/workbench/:checklistId",
+              "/v1/close/checklists",
+              "/v1/close/checklists/:checklistId/steps/:stepCode/complete",
+              "/v1/close/checklists/:checklistId/blockers",
+              "/v1/close/blockers/:blockerId/resolve",
+              "/v1/close/blockers/:blockerId/override",
+              "/v1/close/checklists/:checklistId/signoff",
+              "/v1/close/checklists/:checklistId/reopen",
               "/v1/collaboration/comments",
               "/v1/vat/codes",
               "/v1/vat/rule-packs",
@@ -2002,6 +2011,146 @@ async function handleRequest({ req, res, platform, flags }) {
         status: url.searchParams.get("status")
       })
     });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/close/workbench") {
+    const bureauOrgId = requireText(
+      url.searchParams.get("bureauOrgId"),
+      "bureau_org_id_required",
+      "bureauOrgId query parameter is required."
+    );
+    writeJson(res, 200, {
+      items: platform.listCloseWorkbenches({
+        sessionToken: readSessionToken(req),
+        bureauOrgId,
+        clientCompanyId: url.searchParams.get("clientCompanyId"),
+        accountingPeriodId: url.searchParams.get("accountingPeriodId"),
+        status: url.searchParams.get("status")
+      })
+    });
+    return;
+  }
+
+  const closeWorkbenchMatch = matchPath(path, "/v1/close/workbench/:checklistId");
+  if (closeWorkbenchMatch && req.method === "GET") {
+    const bureauOrgId = requireText(
+      url.searchParams.get("bureauOrgId"),
+      "bureau_org_id_required",
+      "bureauOrgId query parameter is required."
+    );
+    writeJson(res, 200, platform.getCloseWorkbench({
+      sessionToken: readSessionToken(req),
+      bureauOrgId,
+      checklistId: closeWorkbenchMatch.checklistId
+    }));
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/close/checklists") {
+    const body = await readJsonBody(req);
+    writeJson(res, 201, platform.instantiateCloseChecklist({
+      sessionToken: readSessionToken(req, body),
+      bureauOrgId: body.bureauOrgId,
+      clientCompanyId: body.clientCompanyId,
+      accountingPeriodId: body.accountingPeriodId,
+      targetCloseDate: body.targetCloseDate || null,
+      ownerCompanyUserId: body.ownerCompanyUserId || null,
+      signoffChain: Array.isArray(body.signoffChain) ? body.signoffChain : [],
+      reportSnapshotId: body.reportSnapshotId || null,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const closeStepCompleteMatch = matchPath(path, "/v1/close/checklists/:checklistId/steps/:stepCode/complete");
+  if (closeStepCompleteMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(res, 200, platform.completeCloseChecklistStep({
+      sessionToken: readSessionToken(req, body),
+      bureauOrgId: body.bureauOrgId,
+      checklistId: closeStepCompleteMatch.checklistId,
+      stepCode: closeStepCompleteMatch.stepCode,
+      reconciliationRunId: body.reconciliationRunId || null,
+      evidenceRefs: Array.isArray(body.evidenceRefs) ? body.evidenceRefs : [],
+      comment: body.comment || null,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const closeBlockerCreateMatch = matchPath(path, "/v1/close/checklists/:checklistId/blockers");
+  if (closeBlockerCreateMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(res, 201, platform.openCloseBlocker({
+      sessionToken: readSessionToken(req, body),
+      bureauOrgId: body.bureauOrgId,
+      checklistId: closeBlockerCreateMatch.checklistId,
+      stepCode: body.stepCode,
+      severity: body.severity,
+      reasonCode: body.reasonCode,
+      ownerCompanyUserId: body.ownerCompanyUserId || null,
+      comment: body.comment || null,
+      waiverUntil: body.waiverUntil || null,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const closeBlockerResolveMatch = matchPath(path, "/v1/close/blockers/:blockerId/resolve");
+  if (closeBlockerResolveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(res, 200, platform.resolveCloseBlocker({
+      sessionToken: readSessionToken(req, body),
+      bureauOrgId: body.bureauOrgId,
+      blockerId: closeBlockerResolveMatch.blockerId,
+      resolutionType: body.resolutionType || "resolved",
+      comment: body.comment || null,
+      waiverUntil: body.waiverUntil || null,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const closeBlockerOverrideMatch = matchPath(path, "/v1/close/blockers/:blockerId/override");
+  if (closeBlockerOverrideMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(res, 200, platform.approveCloseOverride({
+      sessionToken: readSessionToken(req, body),
+      bureauOrgId: body.bureauOrgId,
+      blockerId: closeBlockerOverrideMatch.blockerId,
+      waiverUntil: body.waiverUntil,
+      comment: body.comment || null,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const closeSignoffMatch = matchPath(path, "/v1/close/checklists/:checklistId/signoff");
+  if (closeSignoffMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(res, 200, platform.signOffCloseChecklist({
+      sessionToken: readSessionToken(req, body),
+      bureauOrgId: body.bureauOrgId,
+      checklistId: closeSignoffMatch.checklistId,
+      comment: body.comment || null,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const closeReopenMatch = matchPath(path, "/v1/close/checklists/:checklistId/reopen");
+  if (closeReopenMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(res, 200, platform.requestCloseReopen({
+      sessionToken: readSessionToken(req, body),
+      bureauOrgId: body.bureauOrgId,
+      checklistId: closeReopenMatch.checklistId,
+      reasonCode: body.reasonCode,
+      impactSummary: body.impactSummary,
+      approvedByCompanyUserId: body.approvedByCompanyUserId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
     return;
   }
 

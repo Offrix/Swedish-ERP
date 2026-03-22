@@ -90,8 +90,17 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/bureau/approval-packages/:approvalPackageId/respond`
 - `POST /v1/bureau/mass-actions`
 - `GET /v1/bureau/work-items?bureauOrgId=...`
+- `GET /v1/close/workbench?bureauOrgId=...`
+- `GET /v1/close/workbench/:checklistId?bureauOrgId=...`
+- `POST /v1/close/checklists`
+- `POST /v1/close/checklists/:checklistId/steps/:stepCode/complete`
+- `POST /v1/close/checklists/:checklistId/blockers`
+- `POST /v1/close/blockers/:blockerId/resolve`
+- `POST /v1/close/blockers/:blockerId/override`
+- `POST /v1/close/checklists/:checklistId/signoff`
+- `POST /v1/close/checklists/:checklistId/reopen`
 - `GET /v1/collaboration/comments?bureauOrgId=...&objectType=...&objectId=...`
-- `POST /v1/collaboration/comments`
+  - `POST /v1/collaboration/comments`
 - `GET /v1/vat/codes?companyId=...`
 - `GET /v1/vat/rule-packs?companyId=...&effectiveDate=...`
 - `POST /v1/vat/decisions`

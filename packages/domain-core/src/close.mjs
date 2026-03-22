@@ -1,0 +1,928 @@
+import crypto from "node:crypto";
+
+export const CLOSE_CHECKLIST_STATUSES = Object.freeze(["created", "in_progress", "review_ready", "signoff_pending", "signed_off", "closed", "reopened"]);
+export const CLOSE_STEP_STATUSES = Object.freeze(["not_started", "in_progress", "awaiting_review", "complete", "blocked", "reopened"]);
+export const CLOSE_BLOCKER_SEVERITIES = Object.freeze(["informational", "warning", "hard_stop", "critical"]);
+export const CLOSE_BLOCKER_STATUSES = Object.freeze(["open", "waived", "resolved", "closed"]);
+export const PERIOD_CLOSE_STATES = Object.freeze(["open", "subledger_locked", "vat_locked", "ledger_locked", "signed_off", "hard_closed", "reopened"]);
+
+const DEFAULT_STEP_BLUEPRINTS = Object.freeze([
+  { stepCode: "bank_reconciliation", title: "Bank reconciliation", mandatory: true, evidenceType: "reconciliation_run", reconciliationAreaCode: "bank" },
+  { stepCode: "ar_reconciliation", title: "AR reconciliation", mandatory: true, evidenceType: "reconciliation_run", reconciliationAreaCode: "ar" },
+  { stepCode: "ap_reconciliation", title: "AP reconciliation", mandatory: true, evidenceType: "reconciliation_run", reconciliationAreaCode: "ap" },
+  { stepCode: "vat_reconciliation", title: "VAT reconciliation", mandatory: true, evidenceType: "reconciliation_run", reconciliationAreaCode: "vat" },
+  { stepCode: "suspense_followup", title: "Suspense follow-up", mandatory: true, evidenceType: "manual_evidence", reconciliationAreaCode: null },
+  { stepCode: "manual_journal_review", title: "Manual journal review", mandatory: true, evidenceType: "manual_evidence", reconciliationAreaCode: null },
+  { stepCode: "document_queue_review", title: "Document queue review", mandatory: true, evidenceType: "manual_evidence", reconciliationAreaCode: null },
+  { stepCode: "report_backup", title: "Report backup", mandatory: true, evidenceType: "report_snapshot", reconciliationAreaCode: null }
+]);
+
+export function createCloseModule(context) {
+  return createCloseEngine(context);
+}
+
+function createCloseEngine({
+  state,
+  authorize,
+  assertVisible,
+  requireCompany,
+  requireBureauUser,
+  findActivePortfolioForClient,
+  upsertWorkItem,
+  reportingPlatform = null,
+  ledgerPlatform = null,
+  now,
+  audit,
+  error
+}) {
+  const helpers = {
+    state,
+    authorize,
+    assertVisible,
+    requireCompany,
+    requireBureauUser,
+    findActivePortfolioForClient,
+    upsertWorkItem,
+    reportingPlatform,
+    ledgerPlatform,
+    now,
+    audit,
+    error
+  };
+
+  return {
+    closeChecklistStatuses: CLOSE_CHECKLIST_STATUSES,
+    closeStepStatuses: CLOSE_STEP_STATUSES,
+    closeBlockerSeverities: CLOSE_BLOCKER_SEVERITIES,
+    closeBlockerStatuses: CLOSE_BLOCKER_STATUSES,
+    periodCloseStates: PERIOD_CLOSE_STATES,
+    instantiateCloseChecklist(input) {
+      return instantiateCloseChecklist(helpers, input);
+    },
+    listCloseWorkbenches(input) {
+      return listCloseWorkbenches(helpers, input);
+    },
+    getCloseWorkbench(input) {
+      return getCloseWorkbench(helpers, input);
+    },
+    completeCloseChecklistStep(input) {
+      return completeCloseChecklistStep(helpers, input);
+    },
+    openCloseBlocker(input) {
+      return openCloseBlocker(helpers, input);
+    },
+    resolveCloseBlocker(input) {
+      return resolveCloseBlocker(helpers, input);
+    },
+    approveCloseOverride(input) {
+      return approveCloseOverride(helpers, input);
+    },
+    signOffCloseChecklist(input) {
+      return signOffCloseChecklist(helpers, input);
+    },
+    requestCloseReopen(input) {
+      return requestCloseReopen(helpers, input);
+    },
+    snapshotClose(snapshotState = state) {
+      return snapshotClose(snapshotState);
+    }
+  };
+}
+
+function instantiateCloseChecklist(
+  helpers,
+  {
+    sessionToken,
+    bureauOrgId,
+    clientCompanyId,
+    accountingPeriodId,
+    targetCloseDate = null,
+    ownerCompanyUserId = null,
+    signoffChain,
+    reportSnapshotId = null,
+    correlationId = crypto.randomUUID()
+  } = {}
+) {
+  const principal = helpers.authorize(sessionToken, bureauOrgId, "company.read");
+  const portfolio = helpers.findActivePortfolioForClient(bureauOrgId, text(clientCompanyId, "client_company_id_required"));
+  helpers.assertVisible(principal, portfolio.portfolioId);
+  const accountingPeriod = requireAccountingPeriod(helpers, clientCompanyId, accountingPeriodId);
+  const owner = ownerCompanyUserId ? helpers.requireBureauUser(bureauOrgId, ownerCompanyUserId) : helpers.requireBureauUser(bureauOrgId, principal.companyUserId);
+  const resolvedSignoffChain = normalizeSignoffChain(helpers, bureauOrgId, signoffChain);
+  const deadline = deriveCloseDeadline(helpers, clientCompanyId, targetCloseDate || accountingPeriod.endsOn);
+  const createdAt = helpers.now();
+  const checklistId = crypto.randomUUID();
+  const checklist = {
+    checklistId,
+    bureauOrgId,
+    portfolioId: portfolio.portfolioId,
+    clientCompanyId,
+    accountingPeriodId: accountingPeriod.accountingPeriodId,
+    periodCode: accountingPeriod.label || accountingPeriod.periodCode || accountingPeriod.accountingPeriodId,
+    checklistTemplateCode: "monthly_standard",
+    checklistVersion: nextChecklistVersion(helpers.state, clientCompanyId, accountingPeriod.accountingPeriodId),
+    status: "created",
+    ownerCompanyUserId: owner.companyUserId,
+    createdByUserId: principal.userId,
+    targetCloseDate: targetCloseDate || accountingPeriod.endsOn,
+    deadlineAt: deadline.deadlineAt,
+    deadlineBasis: deadline.deadlineBasis,
+    closeState: accountingPeriod.status === "hard_closed" ? "hard_closed" : "open",
+    reportSnapshotId: norm(reportSnapshotId),
+    signoffChain: resolvedSignoffChain,
+    steps: createDefaultSteps({
+      bureauOrgId,
+      ownerCompanyUserId: owner.companyUserId,
+      deadlineAt: deadline.deadlineAt,
+      accountingPeriodId: accountingPeriod.accountingPeriodId,
+      reportSnapshotId,
+      nowIso: createdAt
+    }),
+    createdAt,
+    updatedAt: createdAt,
+    signedOffAt: null,
+    closedAt: null,
+    supersededByChecklistId: null,
+    supersedesChecklistId: null
+  };
+  helpers.state.closeChecklists.set(checklist.checklistId, checklist);
+  helpers.upsertWorkItem({
+    bureauOrgId,
+    portfolioId: portfolio.portfolioId,
+    clientCompanyId,
+    sourceType: "close_checklist",
+    sourceId: checklist.checklistId,
+    ownerCompanyUserId: owner.companyUserId,
+    deadlineAt: checklist.deadlineAt,
+    blockerScope: "close",
+    status: "open",
+    actorId: principal.userId,
+    correlationId,
+    reasonCode: "close_checklist_created"
+  });
+  helpers.audit({
+    companyId: bureauOrgId,
+    actorId: principal.userId,
+    correlationId,
+    action: "core.close_checklist.created",
+    entityType: "close_checklist",
+    entityId: checklist.checklistId,
+    explanation: `Created close checklist ${checklist.checklistId} for accounting period ${accountingPeriod.accountingPeriodId}.`
+  });
+  return materializeChecklist(helpers, checklist);
+}
+
+function listCloseWorkbenches(
+  helpers,
+  { sessionToken, bureauOrgId, clientCompanyId = null, accountingPeriodId = null, status = null } = {}
+) {
+  const principal = helpers.authorize(sessionToken, bureauOrgId, "company.read");
+  return [...helpers.state.closeChecklists.values()]
+    .filter((checklist) => checklist.bureauOrgId === bureauOrgId)
+    .filter((checklist) => !clientCompanyId || checklist.clientCompanyId === clientCompanyId)
+    .filter((checklist) => !accountingPeriodId || checklist.accountingPeriodId === accountingPeriodId)
+    .filter((checklist) => !status || checklist.status === status)
+    .filter((checklist) => canReadChecklist(helpers, principal, checklist))
+    .sort((left, right) => left.targetCloseDate.localeCompare(right.targetCloseDate))
+    .map((checklist) => materializeChecklist(helpers, checklist));
+}
+
+function getCloseWorkbench(helpers, { sessionToken, bureauOrgId, checklistId } = {}) {
+  const principal = helpers.authorize(sessionToken, bureauOrgId, "company.read");
+  const checklist = requireChecklist(helpers, checklistId);
+  if (checklist.bureauOrgId !== bureauOrgId) {
+    throw helpers.error(404, "close_checklist_not_found", "Close checklist was not found.");
+  }
+  helpers.assertVisible(principal, checklist.portfolioId);
+  return materializeChecklist(helpers, checklist);
+}
+
+function completeCloseChecklistStep(
+  helpers,
+  {
+    sessionToken,
+    bureauOrgId,
+    checklistId,
+    stepCode,
+    reconciliationRunId = null,
+    evidenceRefs = [],
+    comment = null,
+    correlationId = crypto.randomUUID()
+  } = {}
+) {
+  const { principal, checklist } = requireChecklistAccess(helpers, sessionToken, bureauOrgId, checklistId);
+  const step = requireChecklistStep(checklist, stepCode);
+  if (["signed_off", "closed"].includes(checklist.status)) {
+    throw helpers.error(400, "close_checklist_immutable", "Signed or closed close checklist cannot be changed.");
+  }
+  if (step.reconciliationAreaCode) {
+    const run = requireSignedReconciliationRun(helpers, checklist, step, reconciliationRunId);
+    step.reconciliationRunId = run.reconciliationRunId;
+    step.evidenceRefs = [{
+      evidenceType: "reconciliation_run",
+      reconciliationRunId: run.reconciliationRunId,
+      snapshotHash: run.snapshotHash,
+      areaCode: run.areaCode
+    }];
+  } else if (step.evidenceType === "report_snapshot") {
+    const reportSnapshotId = norm(reconciliationRunId) || checklist.reportSnapshotId || evidenceRefs[0]?.reportSnapshotId;
+    if (!reportSnapshotId) {
+      throw helpers.error(400, "close_report_snapshot_required", "Report backup step requires a report snapshot.");
+    }
+    step.evidenceRefs = [{ evidenceType: "report_snapshot", reportSnapshotId }];
+  } else {
+    step.evidenceRefs = normalizeEvidenceRefs(evidenceRefs, step.evidenceType);
+  }
+  step.status = "complete";
+  step.comment = norm(comment);
+  step.completedAt = helpers.now();
+  step.completedByUserId = principal.userId;
+  step.updatedAt = helpers.now();
+  checklist.updatedAt = helpers.now();
+  if (checklist.status === "created") {
+    checklist.status = "in_progress";
+  }
+  refreshChecklistReadiness(helpers, checklist, principal, correlationId);
+  helpers.audit({
+    companyId: bureauOrgId,
+    actorId: principal.userId,
+    correlationId,
+    action: "core.close_step.completed",
+    entityType: "close_checklist_step",
+    entityId: step.stepId,
+    explanation: `Completed close checklist step ${step.stepCode} on checklist ${checklist.checklistId}.`
+  });
+  return materializeChecklist(helpers, checklist);
+}
+
+function openCloseBlocker(
+  helpers,
+  {
+    sessionToken,
+    bureauOrgId,
+    checklistId,
+    stepCode,
+    severity,
+    reasonCode,
+    ownerCompanyUserId = null,
+    comment = null,
+    waiverUntil = null,
+    correlationId = crypto.randomUUID()
+  } = {}
+) {
+  const { principal, checklist } = requireChecklistAccess(helpers, sessionToken, bureauOrgId, checklistId);
+  const step = requireChecklistStep(checklist, stepCode);
+  const resolvedSeverity = text(severity, "close_blocker_severity_required");
+  if (!CLOSE_BLOCKER_SEVERITIES.includes(resolvedSeverity)) {
+    throw helpers.error(400, "close_blocker_severity_invalid", "Close blocker severity is not supported.");
+  }
+  const owner = ownerCompanyUserId ? helpers.requireBureauUser(bureauOrgId, ownerCompanyUserId) : helpers.requireBureauUser(bureauOrgId, checklist.ownerCompanyUserId);
+  const blocker = {
+    blockerId: crypto.randomUUID(),
+    bureauOrgId,
+    checklistId: checklist.checklistId,
+    stepId: step.stepId,
+    severity: resolvedSeverity,
+    reasonCode: text(reasonCode, "close_blocker_reason_code_required"),
+    ownerCompanyUserId: owner.companyUserId,
+    openedByUserId: principal.userId,
+    comment: norm(comment),
+    status: "open",
+    overrideState: "not_requested",
+    waiverUntil: norm(waiverUntil),
+    approvedByUserId: null,
+    approvedByRoleCode: null,
+    resolvedAt: null,
+    resolvedByUserId: null,
+    createdAt: helpers.now(),
+    updatedAt: helpers.now()
+  };
+  helpers.state.closeBlockers.set(blocker.blockerId, blocker);
+  step.status = "blocked";
+  step.blockerIds = [...new Set([...(step.blockerIds || []), blocker.blockerId])];
+  step.updatedAt = helpers.now();
+  checklist.status = "in_progress";
+  checklist.updatedAt = helpers.now();
+  helpers.upsertWorkItem({
+    bureauOrgId,
+    portfolioId: checklist.portfolioId,
+    clientCompanyId: checklist.clientCompanyId,
+    sourceType: "close_blocker",
+    sourceId: blocker.blockerId,
+    ownerCompanyUserId: owner.companyUserId,
+    deadlineAt: checklist.deadlineAt,
+    blockerScope: "close",
+    status: resolvedSeverity === "critical" ? "blocked" : "open",
+    actorId: principal.userId,
+    correlationId,
+    reasonCode: "close_blocker_opened"
+  });
+  helpers.audit({
+    companyId: bureauOrgId,
+    actorId: principal.userId,
+    correlationId,
+    action: "core.close_blocker.opened",
+    entityType: "close_blocker",
+    entityId: blocker.blockerId,
+    explanation: `Opened ${resolvedSeverity} blocker ${blocker.blockerId} on checklist ${checklist.checklistId}.`
+  });
+  return clone(blocker);
+}
+
+function resolveCloseBlocker(
+  helpers,
+  {
+    sessionToken,
+    bureauOrgId,
+    blockerId,
+    resolutionType = "resolved",
+    comment = null,
+    waiverUntil = null,
+    correlationId = crypto.randomUUID()
+  } = {}
+) {
+  const blocker = requireBlocker(helpers, blockerId);
+  const { principal, checklist } = requireChecklistAccess(helpers, sessionToken, bureauOrgId, blocker.checklistId);
+  const step = checklist.steps.find((candidate) => candidate.stepId === blocker.stepId);
+  const resolvedType = text(resolutionType, "close_blocker_resolution_type_required");
+  if (!["resolved", "closed"].includes(resolvedType)) {
+    throw helpers.error(400, "close_blocker_resolution_type_invalid", "Close blocker resolution type is not supported.");
+  }
+  blocker.status = resolvedType;
+  blocker.comment = norm(comment) || blocker.comment;
+  blocker.waiverUntil = norm(waiverUntil) || blocker.waiverUntil;
+  blocker.resolvedAt = helpers.now();
+  blocker.resolvedByUserId = principal.userId;
+  blocker.updatedAt = helpers.now();
+  if (step) {
+    step.status = step.completedAt ? "complete" : "in_progress";
+    step.updatedAt = helpers.now();
+  }
+  checklist.updatedAt = helpers.now();
+  refreshChecklistReadiness(helpers, checklist, principal, correlationId);
+  helpers.audit({
+    companyId: bureauOrgId,
+    actorId: principal.userId,
+    correlationId,
+    action: "core.close_blocker.resolved",
+    entityType: "close_blocker",
+    entityId: blocker.blockerId,
+    explanation: `Resolved blocker ${blocker.blockerId} with status ${resolvedType}.`
+  });
+  return clone(blocker);
+}
+
+function approveCloseOverride(
+  helpers,
+  {
+    sessionToken,
+    bureauOrgId,
+    blockerId,
+    waiverUntil,
+    comment = null,
+    correlationId = crypto.randomUUID()
+  } = {}
+) {
+  const blocker = requireBlocker(helpers, blockerId);
+  const { principal, checklist } = requireChecklistAccess(helpers, sessionToken, bureauOrgId, blocker.checklistId);
+  const step = checklist.steps.find((candidate) => candidate.stepId === blocker.stepId);
+  const approver = helpers.requireBureauUser(bureauOrgId, principal.companyUserId);
+  if (!["close_signatory", "finance_manager", "company_admin"].includes(String(approver.roleCode || "").toLowerCase())) {
+    throw helpers.error(403, "override_not_authorized", "Override requires a senior finance role.");
+  }
+  blocker.status = "waived";
+  blocker.overrideState = "approved";
+  blocker.waiverUntil = dateOnly(waiverUntil, "close_blocker_waiver_until_required");
+  blocker.approvedByUserId = principal.userId;
+  blocker.approvedByRoleCode = String(approver.roleCode || "").toLowerCase();
+  blocker.comment = norm(comment) || blocker.comment;
+  blocker.updatedAt = helpers.now();
+  if (step) {
+    step.status = step.completedAt ? "complete" : "in_progress";
+    step.updatedAt = helpers.now();
+  }
+  checklist.updatedAt = helpers.now();
+  refreshChecklistReadiness(helpers, checklist, principal, correlationId);
+  helpers.audit({
+    companyId: bureauOrgId,
+    actorId: principal.userId,
+    correlationId,
+    action: "core.close_blocker.override_approved",
+    entityType: "close_blocker",
+    entityId: blocker.blockerId,
+    explanation: `Approved override for blocker ${blocker.blockerId}.`
+  });
+  return clone(blocker);
+}
+
+function signOffCloseChecklist(
+  helpers,
+  {
+    sessionToken,
+    bureauOrgId,
+    checklistId,
+    comment = null,
+    correlationId = crypto.randomUUID()
+  } = {}
+) {
+  const { principal, checklist } = requireChecklistAccess(helpers, sessionToken, bureauOrgId, checklistId);
+  const companyUser = helpers.requireBureauUser(bureauOrgId, principal.companyUserId);
+  refreshChecklistReadiness(helpers, checklist, principal, correlationId);
+  assertChecklistSignoffReady(helpers, checklist);
+  const pendingSignatory = nextPendingSignatory(helpers, checklist);
+  if (!pendingSignatory) {
+    throw helpers.error(400, "close_signoff_complete", "Close checklist already has a complete sign-off chain.");
+  }
+  if (pendingSignatory.companyUserId !== principal.companyUserId) {
+    throw helpers.error(403, "close_signatory_mismatch", "The current principal is not the expected signatory for this step.");
+  }
+  if ((hasAnyWaivers(helpers, checklist) || hasMaterialDifferences(helpers, checklist)) && checklist.signoffChain.length < 2) {
+    throw helpers.error(400, "close_dual_control_required", "Checklist requires at least two signatories because it contains waivers or material differences.");
+  }
+  checklist.status = "signoff_pending";
+  checklist.updatedAt = helpers.now();
+  const workbench = materializeChecklist(helpers, checklist);
+  const signoff = {
+    signoffId: crypto.randomUUID(),
+    bureauOrgId,
+    checklistId: checklist.checklistId,
+    sequence: pendingSignatory.sequence,
+    signatoryRole: pendingSignatory.roleCode,
+    signatoryCompanyUserId: pendingSignatory.companyUserId,
+    signatoryUserId: principal.userId,
+    decision: "approved",
+    decisionAt: helpers.now(),
+    evidenceSnapshotRef: workbench.evidenceSnapshotRef,
+    comment: norm(comment),
+    supersededAt: null
+  };
+  helpers.state.closeSignoffs.set(signoff.signoffId, signoff);
+  if (!nextPendingSignatory(helpers, checklist)) {
+    hardCloseChecklist(helpers, checklist, companyUser, principal, correlationId);
+  }
+  helpers.audit({
+    companyId: bureauOrgId,
+    actorId: principal.userId,
+    correlationId,
+    action: "core.close_checklist.signed_off",
+    entityType: "close_signoff_record",
+    entityId: signoff.signoffId,
+    explanation: `Recorded close sign-off sequence ${signoff.sequence} for checklist ${checklist.checklistId}.`
+  });
+  return materializeChecklist(helpers, checklist);
+}
+
+function requestCloseReopen(
+  helpers,
+  {
+    sessionToken,
+    bureauOrgId,
+    checklistId,
+    reasonCode,
+    impactSummary,
+    approvedByCompanyUserId,
+    correlationId = crypto.randomUUID()
+  } = {}
+) {
+  const { principal, checklist } = requireChecklistAccess(helpers, sessionToken, bureauOrgId, checklistId);
+  if (!["signed_off", "closed", "reopened"].includes(checklist.status)) {
+    throw helpers.error(400, "close_reopen_state_invalid", "Only signed or closed checklists can be reopened.");
+  }
+  const approver = helpers.requireBureauUser(bureauOrgId, text(approvedByCompanyUserId, "approved_by_company_user_id_required"));
+  if (approver.companyUserId === principal.companyUserId) {
+    throw helpers.error(400, "dual_control_required", "Requester and approver must be different users.");
+  }
+  if (!["close_signatory", "finance_manager", "company_admin"].includes(String(approver.roleCode || "").toLowerCase())) {
+    throw helpers.error(400, "senior_finance_role_required", "Reopen requires a senior finance approver.");
+  }
+  helpers.ledgerPlatform?.reopenAccountingPeriod?.({
+    companyId: checklist.clientCompanyId,
+    accountingPeriodId: checklist.accountingPeriodId,
+    actorId: principal.userId,
+    reasonCode: text(reasonCode, "reopen_reason_code_required"),
+    approvedByActorId: approver.userId,
+    approvedByRoleCode: String(approver.roleCode || "").toLowerCase(),
+    correlationId
+  });
+  checklist.status = "reopened";
+  checklist.closeState = "reopened";
+  checklist.updatedAt = helpers.now();
+  for (const signoff of helpers.state.closeSignoffs.values()) {
+    if (signoff.checklistId === checklist.checklistId && !signoff.supersededAt) {
+      signoff.supersededAt = helpers.now();
+    }
+  }
+  const successor = clone(checklist);
+  successor.checklistId = crypto.randomUUID();
+  successor.checklistVersion = nextChecklistVersion(helpers.state, checklist.clientCompanyId, checklist.accountingPeriodId);
+  successor.status = "in_progress";
+  successor.closeState = "open";
+  successor.createdAt = helpers.now();
+  successor.updatedAt = helpers.now();
+  successor.closedAt = null;
+  successor.signedOffAt = null;
+  successor.supersedesChecklistId = checklist.checklistId;
+  successor.supersededByChecklistId = null;
+  successor.steps = checklist.steps.map((step) => ({
+    ...clone(step),
+    stepId: crypto.randomUUID(),
+    status: step.mandatory ? "reopened" : "not_started",
+    completedAt: null,
+    completedByUserId: null,
+    blockerIds: [],
+    updatedAt: helpers.now()
+  }));
+  checklist.supersededByChecklistId = successor.checklistId;
+  helpers.state.closeChecklists.set(successor.checklistId, successor);
+  const reopenRequest = {
+    reopenRequestId: crypto.randomUUID(),
+    bureauOrgId,
+    checklistId: checklist.checklistId,
+    successorChecklistId: successor.checklistId,
+    requestedByUserId: principal.userId,
+    approvedByUserId: approver.userId,
+    approvedByRoleCode: String(approver.roleCode || "").toLowerCase(),
+    reasonCode: text(reasonCode, "reopen_reason_code_required"),
+    impactSummary: text(impactSummary, "reopen_impact_summary_required"),
+    createdAt: helpers.now()
+  };
+  helpers.state.closeReopenRequests.set(reopenRequest.reopenRequestId, reopenRequest);
+  helpers.upsertWorkItem({
+    bureauOrgId,
+    portfolioId: successor.portfolioId,
+    clientCompanyId: successor.clientCompanyId,
+    sourceType: "close_reopen_request",
+    sourceId: reopenRequest.reopenRequestId,
+    ownerCompanyUserId: successor.ownerCompanyUserId,
+    deadlineAt: successor.deadlineAt,
+    blockerScope: "close",
+    status: "open",
+    actorId: principal.userId,
+    correlationId,
+    reasonCode: "close_reopened"
+  });
+  helpers.audit({
+    companyId: bureauOrgId,
+    actorId: principal.userId,
+    correlationId,
+    action: "core.close_checklist.reopened",
+    entityType: "close_reopen_request",
+    entityId: reopenRequest.reopenRequestId,
+    explanation: `Reopened close checklist ${checklist.checklistId} into successor ${successor.checklistId}.`
+  });
+  return {
+    reopenRequest: clone(reopenRequest),
+    successorChecklist: materializeChecklist(helpers, successor),
+    supersededChecklist: materializeChecklist(helpers, checklist)
+  };
+}
+
+function snapshotClose(state) {
+  return clone({
+    closeChecklists: [...state.closeChecklists.values()],
+    closeBlockers: [...state.closeBlockers.values()],
+    closeSignoffs: [...state.closeSignoffs.values()],
+    closeReopenRequests: [...state.closeReopenRequests.values()]
+  });
+}
+
+function materializeChecklist(helpers, checklist) {
+  const blockers = [...helpers.state.closeBlockers.values()]
+    .filter((candidate) => candidate.checklistId === checklist.checklistId)
+    .map(clone);
+  const signoffs = [...helpers.state.closeSignoffs.values()]
+    .filter((candidate) => candidate.checklistId === checklist.checklistId)
+    .sort((left, right) => left.sequence - right.sequence)
+    .map(clone);
+  const requiredOpenBlockers = blockers.filter((candidate) => candidate.status === "open" && ["hard_stop", "critical"].includes(candidate.severity));
+  const period = getAccountingPeriod(helpers, checklist.clientCompanyId, checklist.accountingPeriodId);
+  const evidenceSnapshotHash = hashSnapshot({
+    checklistId: checklist.checklistId,
+    checklistVersion: checklist.checklistVersion,
+    accountingPeriodId: checklist.accountingPeriodId,
+    steps: checklist.steps.map((step) => ({
+      stepCode: step.stepCode,
+      status: step.status,
+      reconciliationRunId: step.reconciliationRunId,
+      evidenceRefs: step.evidenceRefs
+    })),
+    blockers: blockers.map((blocker) => ({
+      blockerId: blocker.blockerId,
+      severity: blocker.severity,
+      status: blocker.status,
+      overrideState: blocker.overrideState
+    }))
+  });
+  return clone({
+    ...checklist,
+    accountingPeriod: period,
+    blockers,
+    signoffs,
+    openHardStopBlockerCount: requiredOpenBlockers.length,
+    evidenceSnapshotRef: {
+      snapshotType: "close_workbench",
+      snapshotHash: evidenceSnapshotHash,
+      accountingPeriodId: checklist.accountingPeriodId,
+      checklistId: checklist.checklistId,
+      checklistVersion: checklist.checklistVersion
+    }
+  });
+}
+
+function refreshChecklistReadiness(helpers, checklist, principal, correlationId) {
+  const mandatorySteps = checklist.steps.filter((step) => step.mandatory);
+  const incompleteMandatoryStep = mandatorySteps.find((step) => !["complete"].includes(step.status));
+  const openBlockingBlockers = [...helpers.state.closeBlockers.values()].filter(
+    (candidate) => candidate.checklistId === checklist.checklistId
+      && candidate.status === "open"
+      && ["hard_stop", "critical"].includes(candidate.severity)
+  );
+  if (openBlockingBlockers.length === 0 && !incompleteMandatoryStep) {
+    checklist.status = "review_ready";
+    if (helpers.ledgerPlatform?.lockAccountingPeriod) {
+      const period = getAccountingPeriod(helpers, checklist.clientCompanyId, checklist.accountingPeriodId);
+      if (period && period.status === "open") {
+        helpers.ledgerPlatform.lockAccountingPeriod({
+          companyId: checklist.clientCompanyId,
+          accountingPeriodId: checklist.accountingPeriodId,
+          status: "soft_locked",
+          actorId: principal.userId,
+          reasonCode: "close_review_ready",
+          correlationId
+        });
+      }
+      checklist.closeState = "subledger_locked";
+    }
+  } else if (checklist.status !== "reopened") {
+    checklist.status = mandatorySteps.some((step) => step.status === "complete") ? "in_progress" : checklist.status;
+  }
+  checklist.updatedAt = helpers.now();
+}
+
+function assertChecklistSignoffReady(helpers, checklist) {
+  const openBlockingBlockers = [...helpers.state.closeBlockers.values()].filter(
+    (candidate) => candidate.checklistId === checklist.checklistId
+      && candidate.status === "open"
+      && ["hard_stop", "critical"].includes(candidate.severity)
+  );
+  if (openBlockingBlockers.length > 0) {
+    throw helpers.error(400, "close_blocker_open", "Open hard-stop or critical blockers prevent sign-off.");
+  }
+  const incompleteMandatoryStep = checklist.steps.find((step) => step.mandatory && step.status !== "complete");
+  if (incompleteMandatoryStep) {
+    throw helpers.error(400, "close_checklist_incomplete", "All mandatory close checklist steps must be complete before sign-off.");
+  }
+}
+
+function nextPendingSignatory(helpers, checklist) {
+  const completedSequences = new Set(
+    [...helpers.state.closeSignoffs.values()]
+      .filter((candidate) => candidate.checklistId === checklist.checklistId && !candidate.supersededAt)
+      .map((candidate) => candidate.sequence)
+  );
+  return checklist.signoffChain.find((candidate) => !completedSequences.has(candidate.sequence)) || null;
+}
+
+function hardCloseChecklist(helpers, checklist, companyUser, principal, correlationId) {
+  if (!["close_signatory", "finance_manager", "company_admin"].includes(String(companyUser.roleCode || "").toLowerCase())) {
+    throw helpers.error(403, "close_signatory_role_required", "Final close sign-off requires a senior finance role.");
+  }
+  helpers.ledgerPlatform?.lockAccountingPeriod?.({
+    companyId: checklist.clientCompanyId,
+    accountingPeriodId: checklist.accountingPeriodId,
+    status: "hard_closed",
+    actorId: checklist.createdByUserId,
+    reasonCode: "close_signoff",
+    approvedByActorId: principal.userId,
+    approvedByRoleCode: String(companyUser.roleCode || "").toLowerCase(),
+    correlationId
+  });
+  checklist.status = "closed";
+  checklist.closeState = "hard_closed";
+  checklist.signedOffAt = helpers.now();
+  checklist.closedAt = helpers.now();
+  checklist.updatedAt = helpers.now();
+}
+
+function hasAnyWaivers(helpers, checklist) {
+  return [...helpers.state.closeBlockers.values()].some(
+    (candidate) => candidate.checklistId === checklist.checklistId && candidate.status === "waived"
+  );
+}
+
+function hasMaterialDifferences(helpers, checklist) {
+  return checklist.steps.some((step) => {
+    if (!step.reconciliationRunId || !helpers.reportingPlatform?.getReconciliationRun) {
+      return false;
+    }
+    const run = helpers.reportingPlatform.getReconciliationRun({
+      companyId: checklist.clientCompanyId,
+      reconciliationRunId: step.reconciliationRunId
+    });
+    return Number(run.totalDifferenceAmount || 0) !== 0
+      || (run.differenceItems || []).some((item) => ["waived", "open", "investigating", "proposed_adjustment"].includes(item.state));
+  });
+}
+
+function requireSignedReconciliationRun(helpers, checklist, step, reconciliationRunId) {
+  if (!helpers.reportingPlatform?.getReconciliationRun) {
+    throw helpers.error(500, "reporting_platform_required", "Reporting platform is required for reconciliation steps.");
+  }
+  const run = helpers.reportingPlatform.getReconciliationRun({
+    companyId: checklist.clientCompanyId,
+    reconciliationRunId: text(reconciliationRunId, "reconciliation_run_id_required")
+  });
+  if (run.accountingPeriodId !== checklist.accountingPeriodId) {
+    throw helpers.error(400, "reconciliation_period_mismatch", "Reconciliation run period does not match the close checklist.");
+  }
+  if (step.reconciliationAreaCode && run.areaCode !== step.reconciliationAreaCode) {
+    throw helpers.error(400, "reconciliation_area_mismatch", "Reconciliation run area does not match the close checklist step.");
+  }
+  if (!["signed", "closed"].includes(run.status)) {
+    throw helpers.error(400, "reconciliation_not_ready", "Reconciliation run must be signed or closed before the step can be completed.");
+  }
+  return run;
+}
+
+function normalizeEvidenceRefs(value, evidenceType) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw errorWithStatus(400, "close_evidence_required", "Close checklist step requires evidence.");
+  }
+  return value.map((item, index) => ({
+    evidenceRefId: norm(item?.evidenceRefId) || crypto.randomUUID(),
+    evidenceType: norm(item?.evidenceType) || evidenceType || "manual_evidence",
+    documentId: norm(item?.documentId),
+    reportSnapshotId: norm(item?.reportSnapshotId),
+    note: norm(item?.note) || `evidence_${index + 1}`
+  }));
+}
+
+function createDefaultSteps({ bureauOrgId, ownerCompanyUserId, deadlineAt, accountingPeriodId, reportSnapshotId, nowIso }) {
+  return DEFAULT_STEP_BLUEPRINTS.map((blueprint, index) => ({
+    stepId: crypto.randomUUID(),
+    stepCode: blueprint.stepCode,
+    title: blueprint.title,
+    mandatory: blueprint.mandatory,
+    sequence: index + 1,
+    status: "not_started",
+    ownerCompanyUserId,
+    deadlineAt,
+    accountingPeriodId,
+    evidenceType: blueprint.evidenceType,
+    reconciliationAreaCode: blueprint.reconciliationAreaCode,
+    reconciliationRunId: null,
+    evidenceRefs: blueprint.stepCode === "report_backup" && reportSnapshotId
+      ? [{ evidenceType: "report_snapshot", reportSnapshotId }]
+      : [],
+    comment: null,
+    completedAt: null,
+    completedByUserId: null,
+    blockerIds: [],
+    createdAt: nowIso,
+    updatedAt: nowIso
+  }));
+}
+
+function normalizeSignoffChain(helpers, bureauOrgId, value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw helpers.error(400, "close_signoff_chain_required", "A sign-off chain is required.");
+  }
+  return value.map((item, index) => {
+    const companyUser = helpers.requireBureauUser(bureauOrgId, text(item?.companyUserId, "close_signoff_company_user_id_required"));
+    return {
+      sequence: Number.isInteger(item?.sequence) ? item.sequence : index + 1,
+      companyUserId: companyUser.companyUserId,
+      userId: companyUser.userId,
+      roleCode: text(item?.roleCode || companyUser.roleCode, "close_signoff_role_code_required").toLowerCase(),
+      label: norm(item?.label) || companyUser.user?.displayName || companyUser.userId
+    };
+  }).sort((left, right) => left.sequence - right.sequence);
+}
+
+function nextChecklistVersion(state, clientCompanyId, accountingPeriodId) {
+  return [...state.closeChecklists.values()]
+    .filter((candidate) => candidate.clientCompanyId === clientCompanyId && candidate.accountingPeriodId === accountingPeriodId)
+    .reduce((highest, candidate) => Math.max(highest, Number(candidate.checklistVersion) || 0), 0) + 1;
+}
+
+function canReadChecklist(helpers, principal, checklist) {
+  try {
+    helpers.assertVisible(principal, checklist.portfolioId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function requireChecklist(helpers, checklistId) {
+  const checklist = helpers.state.closeChecklists.get(text(checklistId, "close_checklist_id_required"));
+  if (!checklist) {
+    throw helpers.error(404, "close_checklist_not_found", "Close checklist was not found.");
+  }
+  return checklist;
+}
+
+function requireChecklistAccess(helpers, sessionToken, bureauOrgId, checklistId, action = "company.read") {
+  const principal = helpers.authorize(sessionToken, bureauOrgId, action);
+  const checklist = requireChecklist(helpers, checklistId);
+  if (checklist.bureauOrgId !== bureauOrgId) {
+    throw helpers.error(404, "close_checklist_not_found", "Close checklist was not found.");
+  }
+  helpers.assertVisible(principal, checklist.portfolioId);
+  return { principal, checklist };
+}
+
+function requireChecklistStep(checklist, stepCode) {
+  const step = checklist.steps.find((candidate) => candidate.stepCode === text(stepCode, "close_step_code_required"));
+  if (!step) {
+    throw errorWithStatus(404, "close_step_not_found", "Close checklist step was not found.");
+  }
+  return step;
+}
+
+function requireBlocker(helpers, blockerId) {
+  const blocker = helpers.state.closeBlockers.get(text(blockerId, "close_blocker_id_required"));
+  if (!blocker) {
+    throw helpers.error(404, "close_blocker_not_found", "Close blocker was not found.");
+  }
+  return blocker;
+}
+
+function requireAccountingPeriod(helpers, clientCompanyId, accountingPeriodId) {
+  const period = getAccountingPeriod(helpers, clientCompanyId, accountingPeriodId);
+  if (!period) {
+    throw helpers.error(404, "accounting_period_not_found", "Accounting period was not found.");
+  }
+  return period;
+}
+
+function getAccountingPeriod(helpers, clientCompanyId, accountingPeriodId) {
+  if (!helpers.ledgerPlatform?.listAccountingPeriods) {
+    return null;
+  }
+  return helpers.ledgerPlatform.listAccountingPeriods({ companyId: clientCompanyId })
+    .find((candidate) => candidate.accountingPeriodId === accountingPeriodId) || null;
+}
+
+function deriveCloseDeadline(helpers, clientCompanyId, targetDate) {
+  const settings = helpers.requireCompany(clientCompanyId).settingsJson?.bureauDelivery || {};
+  const leadDays = Number(settings.closeLeadBusinessDays);
+  if (!Number.isInteger(leadDays) || leadDays <= 0) {
+    throw helpers.error(400, "client_deadline_settings_missing", "Company settings are missing a positive closeLeadBusinessDays value.");
+  }
+  const target = dateOnly(targetDate, "close_target_date_required");
+  return {
+    deadlineAt: `${subtractBusinessDays(target, leadDays)}T09:00:00.000Z`,
+    deadlineBasis: {
+      basisType: "closeLeadBusinessDays",
+      basisValue: target,
+      bufferBusinessDays: leadDays
+    }
+  };
+}
+
+function hashSnapshot(value) {
+  return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function clone(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function text(value, code) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw errorWithStatus(400, code, `${code} is required.`);
+  }
+  return value.trim();
+}
+
+function norm(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function dateOnly(value, code) {
+  const resolved = text(value, code);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(resolved)) {
+    throw errorWithStatus(400, code, `${code} must be in YYYY-MM-DD format.`);
+  }
+  return resolved;
+}
+
+function subtractBusinessDays(value, amount) {
+  const date = new Date(`${String(value).slice(0, 10)}T09:00:00.000Z`);
+  let remaining = amount;
+  while (remaining > 0) {
+    date.setUTCDate(date.getUTCDate() - 1);
+    if (![0, 6].includes(date.getUTCDay())) {
+      remaining -= 1;
+    }
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+function errorWithStatus(status, code, message) {
+  const instance = new Error(message);
+  instance.status = status;
+  instance.code = code;
+  return instance;
+}

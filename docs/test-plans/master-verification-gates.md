@@ -348,10 +348,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 ## Gate for FAS 11 â€” Rapporter, byrÃ¥lÃ¤ge, mÃ¥nadsstÃ¤ngning och bokslut
 
 ### AllmÃ¤nt krav
-- [ ] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [ ] Demo kan kÃ¶ras pÃ¥ seed-data
+- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
+- [x] Demo kan kÃ¶ras pÃ¥ seed-data
 - [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
+- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
 
 ### 11.1 Rapporter och drilldown
 - [x] Rapporter Ã¤r historiskt reproducerbara
@@ -366,10 +366,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [x] Prompt `P11-02` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 11.3 MÃ¥nadsstÃ¤ngning och bokslutschecklistor
-- [ ] MÃ¥nad kan stÃ¤ngas med komplett checklista
-- [ ] Ã–ppna avvikelser blockerar sign-off dÃ¤r policy krÃ¤ver
-- [ ] Ã…terskapad period ger samma rapport
-- [ ] Prompt `P11-03` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] MÃ¥nad kan stÃ¤ngas med komplett checklista
+- [x] Ã–ppna avvikelser blockerar sign-off dÃ¤r policy krÃ¤ver
+- [x] Ã…terskapad period ger samma rapport
+- [x] Prompt `P11-03` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ## Gate for FAS 12 â€” Ã…rsredovisning, deklaration och myndighetskopplingar
 

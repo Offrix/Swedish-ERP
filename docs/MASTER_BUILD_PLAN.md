@@ -504,10 +504,10 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 10.1 Projekt, budget och uppfÃ¶ljning
   - [x] 10.2 Arbetsorder, serviceorder, fÃ¤ltapp och lager
   - [x] 10.3 Byggspecifika regler: Ã„TA, HUS, omvÃ¤nd moms, personalliggare
-- [ ] **FAS 11 â€” Rapporter, byrÃ¥lÃ¤ge, mÃ¥nadsstÃ¤ngning och bokslut**
+- [x] **FAS 11 â€” Rapporter, byrÃ¥lÃ¤ge, mÃ¥nadsstÃ¤ngning och bokslut**
   - [x] 11.1 Rapporter och drilldown
   - [x] 11.2 ByrÃ¥lÃ¤ge och portfÃ¶ljhantering
-  - [ ] 11.3 MÃ¥nadsstÃ¤ngning och bokslutschecklistor
+  - [x] 11.3 MÃ¥nadsstÃ¤ngning och bokslutschecklistor
 - [ ] **FAS 12 â€” Ã…rsredovisning, deklaration och myndighetskopplingar**
   - [ ] 12.1 Ã…rsredovisningsmotor
   - [ ] 12.2 Skatt, deklarationsunderlag och myndighetsfiler
@@ -1082,14 +1082,14 @@ GÃ¶r systemet anvÃ¤ndbart fÃ¶r byrÃ¥er, controllers och periodstÃ¤ngni
 ### 11.3 MÃ¥nadsstÃ¤ngning och bokslutschecklistor
 
 **Bygg detta**
-- [ ] Close workbench
-- [ ] avstÃ¤mningslistor
-- [ ] sign-off
+- [x] Close workbench
+- [x] avstÃ¤mningslistor
+- [x] sign-off
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] MÃ¥nad kan stÃ¤ngas med komplett checklista
-- [ ] Ã–ppna avvikelser blockerar sign-off dÃ¤r policy krÃ¤ver
-- [ ] Ã…terskapad period ger samma rapport
+- [x] MÃ¥nad kan stÃ¤ngas med komplett checklista
+- [x] Ã–ppna avvikelser blockerar sign-off dÃ¤r policy krÃ¤ver
+- [x] Ã…terskapad period ger samma rapport
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P11-03`.
 
