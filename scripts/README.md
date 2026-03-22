@@ -32,6 +32,7 @@ Helper scripts for local setup, structure verification and phased rollout checks
 - `verify-phase6-ap-payments.ps1`: validates required FAS 6.3 approval-chain, payment-proposal, payout-booking and bank-return artifacts.
 - `verify-phase7-hr-master.ps1`: validates required FAS 7.1 employee, employment, contract-history, bank-account and audit artifacts.
 - `verify-phase7-time-reporting.ps1`: validates required FAS 7.2 time entry, schedule, balance and period-lock artifacts.
+- `verify-phase7-absence-portal.ps1`: validates required FAS 7.3 leave types, employee portal, manager approval, leave signals and AGI lock artifacts.
 - `verify-db.ps1`: validates migration file naming.
 - `new-migration.ps1`: creates timestamped migration file in `packages/db/migrations`.
 - `dev-up.ps1`: starts docker infra.

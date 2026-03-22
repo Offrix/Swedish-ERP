@@ -1,6 +1,6 @@
 # API
 
-HTTP baseline plus phased domain routes through FAS 7.2.
+HTTP baseline plus phased domain routes through FAS 7.3.
 
 ## Start
 
@@ -169,6 +169,21 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/time/balances?companyId=...&employmentId=...&cutoffDate=...`
 - `GET /v1/time/period-locks?companyId=...`
 - `POST /v1/time/period-locks`
+- `GET /v1/hr/leave-types?companyId=...`
+- `POST /v1/hr/leave-types`
+- `GET /v1/hr/leave-entries?companyId=...`
+- `GET /v1/hr/leave-entries/:leaveEntryId?companyId=...`
+- `POST /v1/hr/leave-entries/:leaveEntryId/approve`
+- `POST /v1/hr/leave-entries/:leaveEntryId/reject`
+- `GET /v1/hr/leave-signals?companyId=...`
+- `GET /v1/hr/leave-signal-locks?companyId=...`
+- `POST /v1/hr/leave-signal-locks`
+- `GET /v1/hr/employee-portal/me?companyId=...`
+- `GET /v1/hr/employee-portal/me/leave-entries?companyId=...`
+- `POST /v1/hr/employee-portal/me/leave-entries`
+- `GET /v1/hr/employee-portal/me/leave-entries/:leaveEntryId?companyId=...`
+- `PATCH /v1/hr/employee-portal/me/leave-entries/:leaveEntryId`
+- `POST /v1/hr/employee-portal/me/leave-entries/:leaveEntryId/submit`
 - `GET /v1/hr/employees?companyId=...`
 - `POST /v1/hr/employees`
 - `GET /v1/hr/employees/:employeeId?companyId=...`
@@ -205,3 +220,5 @@ Set `PHASE6_AP_ENABLED=false` to return `503` for FAS 6.1, 6.2 and 6.3 AP and ba
 Set `PHASE7_HR_ENABLED=false` to return `503` for FAS 7.1 HR masterdata routes while keeping the rest of the API process alive.
 
 Set `PHASE7_TIME_ENABLED=false` to return `503` for FAS 7.2 time reporting routes while keeping the rest of the API process alive.
+
+Set `PHASE7_ABSENCE_ENABLED=false` to return `503` for FAS 7.3 leave, approval and employee-portal routes while keeping the rest of the API process alive.

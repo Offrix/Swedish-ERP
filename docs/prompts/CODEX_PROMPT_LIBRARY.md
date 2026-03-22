@@ -874,7 +874,9 @@ Read first:
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
 - docs/compliance/se/payroll-engine.md
+- docs/compliance/se/agi-engine.md
 - docs/domain/ubiquitous-language.md
+- docs/ui/ENTERPRISE_UI_PLAN.md
 - docs/runbooks/fas-7-time-reporting-verification.md
 - docs/runbooks/fas-7-hr-master-verification.md
 

@@ -37,6 +37,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - flerstegsattest, betalningsförslag, 2450-reservation, bankbokning och returreplay i AP
 - flera anställningar per person, avtalsversioner, chefsträd, payoutmaskning och känslig HR-audit
 - clock events, schemaassignments, premiumminuter, periodlås och reproducerbara tidsaldon
+- frånvarotyper, chefsgodkännande, signal-komplettering, AGI-lås och historik i anställdportalen
 - search ranking och permissions trimming-beslut
 - retry/backoff-beräkningar och jobbstate
 - feature flag-upplösning och kill-switch-beslut
@@ -82,6 +83,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - leverantörsregister, leverantörskontakter, PO-rader, mottagningsobjekt, importbatcher och invoice-receipt-links i AP
 - leverantörsfaktura-drafts, match runs, variansobjekt, AP-open-items och dokumentdrivna invoice-links i AP
 - tidschema, schematilldelningar, clock events, enriched time entries, balans-transaktioner och periodlås
+- leave types, leave entry events, leave signals, leave signal locks och employee-portal-projektioner
 - Peppol adapter
 - myndighetsadaptrar
 - sökindex och projektioner
@@ -103,6 +105,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - disable-flagga och AP-betalflöde med attest, export, bankbokning och idempotent retur
 - disable-flagga och HR-masterflöde med flera anställningar, avtalsversioner, dokumentlänk och känslig audit
 - disable-flagga och tidsflöde med schema, stämpling, projektaktivitet, saldo och periodlås
+- disable-flagga och frånvaroflöde med employee portal, chefsgodkännande, historik och AGI-lås
 
 ### 8. Performance tests
 - load på dokumentingest
@@ -273,6 +276,15 @@ En fas är inte klar förrän:
 - saldo för flex, komp och övertid är reproducerbart för samma cutoffdatum
 - periodlås blockerar både nya stämplingar och nya tidposter inom låst intervall
 - seed visar schema, stämpling, tidpost, saldo och periodlås både i baseline och demo
+
+#### Frånvaro, attest och anställdportal
+- frånvarotyp bär signaltyp, managerkrav och dokumentkrav utan att regler läggs i UI
+- aktiv manager assignment styr vem som får godkänna eller avslå frånvaro
+- anställdportalen får bara se och mutera den inloggade personens egna frånvarorader
+- rejected och approved leave entries bevarar events, orsaker och tidsstämplar i historiken
+- AGI-känslig frånvaro kräver reportingPeriod och komplett dagextent innan submit
+- leave signal locks i `ready_for_sign`, `signed` eller `submitted` blockerar sena ändringar i samma period
+- seed visar godkänd frånvaro med signaler och demo-seed visar avslag, korrigerad portalhistorik och signeringslås
 
 #### Lön
 - AGI kan genereras utan manuell redigering

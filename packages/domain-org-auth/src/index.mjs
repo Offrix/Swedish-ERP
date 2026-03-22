@@ -168,6 +168,25 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     };
 
     state.companyUsers.set(companyUser.companyUserId, companyUser);
+    const enrollment = generateTotpEnrollment({
+      label: `${company.companyId}:${user.email}`
+    });
+    const factorId = crypto.randomUUID();
+    state.authFactors.set(factorId, {
+      factorId,
+      companyUserId: companyUser.companyUserId,
+      userId: user.userId,
+      factorType: "totp",
+      status: "active",
+      secret: enrollment.secret,
+      credentialId: null,
+      publicKey: null,
+      providerSubject: null,
+      deviceName: "Provisioned authenticator",
+      verifiedAt: now,
+      createdAt: now,
+      updatedAt: now
+    });
     pushAudit({
       companyId,
       actorId: auth.principal.userId,
@@ -981,12 +1000,15 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     }
 
     const companyUser = requireCompanyUser(session.companyUserId);
+    const user = state.users.get(session.userId);
     const principal = {
       userId: session.userId,
       companyId: session.companyId,
       companyUserId: session.companyUserId,
       roles: [companyUser.roleCode],
-      permissions: [...permissionsForRoles([companyUser.roleCode])]
+      permissions: [...permissionsForRoles([companyUser.roleCode])],
+      email: user?.email || null,
+      displayName: user?.displayName || null
     };
     session.lastUsedAt = nowIso();
     return {

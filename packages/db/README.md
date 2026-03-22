@@ -25,6 +25,7 @@ Database foundation with migration framework, seed files and baseline governance
 - Phase 6.3 adds AP invoice approval steps, bank accounts, payment proposals, payment orders, bank payment events and return-aware AP open-item linkage in the same monotonic stream.
 - Phase 7.1 adds employees, employments, employment contract history, manager assignments and employee payout accounts in the same monotonic stream.
 - Phase 7.2 adds time schedule templates, assignments, clock events, enriched time entries, balance transactions and period locks in the same monotonic stream.
+- Phase 7.3 adds leave types, leave-entry history, absence signals, manager approval state and AGI-sensitive signal locks in the same monotonic stream.
 
 ## Usage
 

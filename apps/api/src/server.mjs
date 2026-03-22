@@ -51,6 +51,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase6ApEnabled: flags.phase6ApEnabled,
             phase7HrEnabled: flags.phase7HrEnabled,
             phase7TimeEnabled: flags.phase7TimeEnabled,
+            phase7AbsenceEnabled: flags.phase7AbsenceEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -157,6 +158,17 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/time/schedule-assignments",
               "/v1/time/period-locks",
               "/v1/time/balances",
+              "/v1/hr/leave-types",
+              "/v1/hr/leave-entries",
+              "/v1/hr/leave-entries/:leaveEntryId",
+              "/v1/hr/leave-entries/:leaveEntryId/approve",
+              "/v1/hr/leave-entries/:leaveEntryId/reject",
+              "/v1/hr/leave-signals",
+              "/v1/hr/leave-signal-locks",
+              "/v1/hr/employee-portal/me",
+              "/v1/hr/employee-portal/me/leave-entries",
+              "/v1/hr/employee-portal/me/leave-entries/:leaveEntryId",
+              "/v1/hr/employee-portal/me/leave-entries/:leaveEntryId/submit",
               "/v1/hr/employees",
               "/v1/hr/employees/:employeeId",
               "/v1/hr/employees/:employeeId/employments",
@@ -248,6 +260,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 7.2 time reporting routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase7AbsenceEnabled && isPhase73Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 7.3 leave and employee portal routes are disabled by configuration."
     });
     return;
   }
@@ -3902,6 +3922,467 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/hr/leave-types") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "leave_type",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listLeaveTypes({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/hr/leave-types") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "leave_type",
+      scopeCode: "hr"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createLeaveType({
+        companyId,
+        leaveTypeCode: body.leaveTypeCode || null,
+        displayName: body.displayName,
+        signalType: body.signalType || "none",
+        requiresManagerApproval: body.requiresManagerApproval !== false,
+        requiresSupportingDocument: body.requiresSupportingDocument === true,
+        active: body.active !== false,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/hr/leave-entries") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "leave_entry",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listLeaveEntries({
+        companyId,
+        employeeId: url.searchParams.get("employeeId") || null,
+        employmentId: url.searchParams.get("employmentId") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  const leaveEntryMatch = matchPath(path, "/v1/hr/leave-entries/:leaveEntryId");
+  if (leaveEntryMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "leave_entry",
+      scopeCode: "hr"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getLeaveEntry({
+        companyId,
+        leaveEntryId: leaveEntryMatch.leaveEntryId
+      })
+    );
+    return;
+  }
+
+  const leaveEntryApproveMatch = matchPath(path, "/v1/hr/leave-entries/:leaveEntryId/approve");
+  if (leaveEntryApproveMatch && req.method === "POST") {
+    const body = await readJsonBody(req, true);
+    const companyId = requireText(body.companyId || url.searchParams.get("companyId"), "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "leave_entry",
+      scopeCode: "hr"
+    });
+    const leaveEntry = platform.getLeaveEntry({
+      companyId,
+      leaveEntryId: leaveEntryApproveMatch.leaveEntryId
+    });
+    assertPrincipalCanApproveLeaveEntry({
+      platform,
+      principal,
+      companyId,
+      leaveEntry
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveLeaveEntry({
+        companyId,
+        leaveEntryId: leaveEntry.leaveEntryId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const leaveEntryRejectMatch = matchPath(path, "/v1/hr/leave-entries/:leaveEntryId/reject");
+  if (leaveEntryRejectMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId || url.searchParams.get("companyId"), "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "leave_entry",
+      scopeCode: "hr"
+    });
+    const leaveEntry = platform.getLeaveEntry({
+      companyId,
+      leaveEntryId: leaveEntryRejectMatch.leaveEntryId
+    });
+    assertPrincipalCanApproveLeaveEntry({
+      platform,
+      principal,
+      companyId,
+      leaveEntry
+    });
+    writeJson(
+      res,
+      200,
+      platform.rejectLeaveEntry({
+        companyId,
+        leaveEntryId: leaveEntry.leaveEntryId,
+        reason: body.reason,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/hr/leave-signals") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "leave_signal",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listLeaveSignals({
+        companyId,
+        employeeId: url.searchParams.get("employeeId") || null,
+        employmentId: url.searchParams.get("employmentId") || null,
+        reportingPeriod: url.searchParams.get("reportingPeriod") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/hr/leave-signal-locks") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "leave_signal_lock",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listLeaveSignalLocks({
+        companyId,
+        employmentId: url.searchParams.get("employmentId") || null,
+        reportingPeriod: url.searchParams.get("reportingPeriod") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/hr/leave-signal-locks") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "leave_signal_lock",
+      scopeCode: "hr"
+    });
+    writeJson(
+      res,
+      201,
+      platform.lockLeaveSignals({
+        companyId,
+        employmentId: body.employmentId || null,
+        reportingPeriod: body.reportingPeriod,
+        lockState: body.lockState || "signed",
+        note: body.note || null,
+        sourceReference: body.sourceReference || null,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/hr/employee-portal/me") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employee_portal",
+      scopeCode: "hr"
+    });
+    const employee = resolvePortalEmployee({
+      platform,
+      companyId,
+      email: principal.email
+    });
+    const employments = platform.listEmployments({
+      companyId,
+      employeeId: employee.employeeId
+    });
+    writeJson(res, 200, {
+      employee,
+      employments,
+      leaveEntries: platform.listLeaveEntries({
+        companyId,
+        employeeId: employee.employeeId
+      }),
+      leaveSignals: platform.listLeaveSignals({
+        companyId,
+        employeeId: employee.employeeId
+      }),
+      timeBalances: employments.map((employment) =>
+        platform.listTimeBalances({
+          companyId,
+          employmentId: employment.employmentId,
+          cutoffDate: url.searchParams.get("cutoffDate") || null
+        })
+      )
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/hr/employee-portal/me/leave-entries") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employee_portal",
+      scopeCode: "hr"
+    });
+    const employee = resolvePortalEmployee({
+      platform,
+      companyId,
+      email: principal.email
+    });
+    writeJson(res, 200, {
+      items: platform.listLeaveEntries({
+        companyId,
+        employeeId: employee.employeeId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/hr/employee-portal/me/leave-entries") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employee_portal",
+      scopeCode: "hr"
+    });
+    const employee = resolvePortalEmployee({
+      platform,
+      companyId,
+      email: principal.email
+    });
+    platform.getEmployment({
+      companyId,
+      employeeId: employee.employeeId,
+      employmentId: body.employmentId
+    });
+    writeJson(
+      res,
+      201,
+      platform.createLeaveEntry({
+        companyId,
+        employmentId: body.employmentId,
+        leaveTypeId: body.leaveTypeId,
+        reportingPeriod: body.reportingPeriod || null,
+        days: body.days,
+        startDate: body.startDate || null,
+        endDate: body.endDate || null,
+        note: body.note || null,
+        supportingDocumentId: body.supportingDocumentId || null,
+        sourceChannel: "employee_portal",
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const portalLeaveEntryMatch = matchPath(path, "/v1/hr/employee-portal/me/leave-entries/:leaveEntryId");
+  if (portalLeaveEntryMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employee_portal",
+      scopeCode: "hr"
+    });
+    const employee = resolvePortalEmployee({
+      platform,
+      companyId,
+      email: principal.email
+    });
+    const leaveEntry = platform.getLeaveEntry({
+      companyId,
+      leaveEntryId: portalLeaveEntryMatch.leaveEntryId
+    });
+    assertPortalEmployeeOwnsLeaveEntry(employee, leaveEntry);
+    writeJson(res, 200, leaveEntry);
+    return;
+  }
+
+  if (portalLeaveEntryMatch && req.method === "PATCH") {
+    const body = await readJsonBody(req, true);
+    const companyId = requireText(body.companyId || url.searchParams.get("companyId"), "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employee_portal",
+      scopeCode: "hr"
+    });
+    const employee = resolvePortalEmployee({
+      platform,
+      companyId,
+      email: principal.email
+    });
+    const leaveEntry = platform.getLeaveEntry({
+      companyId,
+      leaveEntryId: portalLeaveEntryMatch.leaveEntryId
+    });
+    assertPortalEmployeeOwnsLeaveEntry(employee, leaveEntry);
+    writeJson(
+      res,
+      200,
+      platform.updateLeaveEntry({
+        companyId,
+        leaveEntryId: leaveEntry.leaveEntryId,
+        reportingPeriod: body.reportingPeriod,
+        days: body.days,
+        startDate: body.startDate,
+        endDate: body.endDate,
+        note: body.note,
+        supportingDocumentId: body.supportingDocumentId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const portalLeaveEntrySubmitMatch = matchPath(path, "/v1/hr/employee-portal/me/leave-entries/:leaveEntryId/submit");
+  if (portalLeaveEntrySubmitMatch && req.method === "POST") {
+    const body = await readJsonBody(req, true);
+    const companyId = requireText(body.companyId || url.searchParams.get("companyId"), "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employee_portal",
+      scopeCode: "hr"
+    });
+    const employee = resolvePortalEmployee({
+      platform,
+      companyId,
+      email: principal.email
+    });
+    const leaveEntry = platform.getLeaveEntry({
+      companyId,
+      leaveEntryId: portalLeaveEntrySubmitMatch.leaveEntryId
+    });
+    assertPortalEmployeeOwnsLeaveEntry(employee, leaveEntry);
+    writeJson(
+      res,
+      200,
+      platform.submitLeaveEntry({
+        companyId,
+        leaveEntryId: leaveEntry.leaveEntryId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/hr/employees") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -4326,6 +4807,45 @@ function authorizeCompanyAccess({ platform, sessionToken, companyId, permissionC
   return principal;
 }
 
+function resolvePortalEmployee({ platform, companyId, email }) {
+  const employee = platform.findEmployeeByEmail({
+    companyId,
+    email
+  });
+  if (!employee) {
+    throw createHttpError(404, "employee_portal_employee_not_found", "No employee profile matched the signed-in company user.");
+  }
+  return employee;
+}
+
+function assertPortalEmployeeOwnsLeaveEntry(employee, leaveEntry) {
+  if (leaveEntry.employeeId !== employee.employeeId) {
+    throw createHttpError(403, "employee_portal_scope_denied", "Employee portal cannot access another employee's leave entry.");
+  }
+}
+
+function assertPrincipalCanApproveLeaveEntry({ platform, principal, companyId, leaveEntry }) {
+  if (principal.roles.includes("company_admin")) {
+    return;
+  }
+  const managerEmployee = principal.email
+    ? platform.findEmployeeByEmail({
+        companyId,
+        email: principal.email
+      })
+    : null;
+  if (!managerEmployee) {
+    throw createHttpError(403, "leave_approval_denied", "The signed-in user is not linked to the manager approval chain.");
+  }
+  const managerEmployments = platform.listEmployments({
+    companyId,
+    employeeId: managerEmployee.employeeId
+  });
+  if (!managerEmployments.some((employment) => employment.employmentId === leaveEntry.managerEmploymentId)) {
+    throw createHttpError(403, "leave_approval_denied", "The signed-in user is not the active manager for this leave entry.");
+  }
+}
+
 function matchPath(actualPath, template) {
   const actualParts = actualPath.split("/").filter(Boolean);
   const templateParts = template.split("/").filter(Boolean);
@@ -4386,6 +4906,10 @@ function isPhase7Route(path) {
 
 function isPhase72Route(path) {
   return path.startsWith("/v1/time");
+}
+
+function isPhase73Route(path) {
+  return path.startsWith("/v1/hr/leave") || path.startsWith("/v1/hr/employee-portal");
 }
 
 async function readJsonBody(req, allowEmpty = false) {
@@ -4456,7 +4980,8 @@ function readFeatureFlags(env) {
     phase5ArEnabled: String(env.PHASE5_AR_ENABLED || "true").toLowerCase() !== "false",
     phase6ApEnabled: String(env.PHASE6_AP_ENABLED || "true").toLowerCase() !== "false",
     phase7HrEnabled: String(env.PHASE7_HR_ENABLED || "true").toLowerCase() !== "false",
-    phase7TimeEnabled: String(env.PHASE7_TIME_ENABLED || "true").toLowerCase() !== "false"
+    phase7TimeEnabled: String(env.PHASE7_TIME_ENABLED || "true").toLowerCase() !== "false",
+    phase7AbsenceEnabled: String(env.PHASE7_ABSENCE_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

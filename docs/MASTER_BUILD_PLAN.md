@@ -488,10 +488,10 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 6.1 LeverantÃ¶rsregister, PO och mottagning
   - [x] 6.2 LeverantÃ¶rsfaktura in, tolkning och matchning
   - [x] 6.3 Attest, bankintegration och utbetalning
-- [ ] **FAS 7 â€” Tidportal, HR-bas och anstÃ¤lldportal**
+- [x] **FAS 7 â€” Tidportal, HR-bas och anstÃ¤lldportal**
   - [x] 7.1 AnstÃ¤lldregister och HR-master
   - [x] 7.2 Tidrapportering, schema och saldon
-  - [ ] 7.3 FrÃ¥nvaro, attest och anstÃ¤lldportal
+  - [x] 7.3 FrÃ¥nvaro, attest och anstÃ¤lldportal
 - [ ] **FAS 8 â€” LÃ¶n och AGI**
   - [ ] 8.1 LÃ¶nearter, lÃ¶nekalender och lÃ¶nekÃ¶rning
   - [ ] 8.2 Skatt, arbetsgivaravgifter, SINK och AGI
@@ -887,14 +887,14 @@ Skapa masterdata fÃ¶r anstÃ¤llda och samla tid, frÃ¥nvaro, saldon och atte
 ### 7.3 FrÃ¥nvaro, attest och anstÃ¤lldportal
 
 **Bygg detta**
-- [ ] FrÃ¥nvarotyper
-- [ ] ChefsgodkÃ¤nnande
-- [ ] AnstÃ¤lldportal
+- [x] FrÃ¥nvarotyper
+- [x] ChefsgodkÃ¤nnande
+- [x] AnstÃ¤lldportal
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] FrÃ¥nvaro kan inte Ã¤ndras efter AGI-signering
-- [ ] Historik visas fÃ¶r anstÃ¤lld och admin
-- [ ] Uppgifter fÃ¶r frÃ¥nvarosignaler Ã¤r kompletta
+- [x] FrÃ¥nvaro kan inte Ã¤ndras efter AGI-signering
+- [x] Historik visas fÃ¶r anstÃ¤lld och admin
+- [x] Uppgifter fÃ¶r frÃ¥nvarosignaler Ã¤r kompletta
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P7-03`.
 

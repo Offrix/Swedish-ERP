@@ -260,10 +260,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [x] Prompt `P7-02` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 7.3 FrÃ¥nvaro, attest och anstÃ¤lldportal
-- [ ] FrÃ¥nvaro kan inte Ã¤ndras efter AGI-signering
-- [ ] Historik visas fÃ¶r anstÃ¤lld och admin
-- [ ] Uppgifter fÃ¶r frÃ¥nvarosignaler Ã¤r kompletta
-- [ ] Prompt `P7-03` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] FrÃ¥nvaro kan inte Ã¤ndras efter AGI-signering
+- [x] Historik visas fÃ¶r anstÃ¤lld och admin
+- [x] Uppgifter fÃ¶r frÃ¥nvarosignaler Ã¤r kompletta
+- [x] Prompt `P7-03` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ## Gate for FAS 8 â€” LÃ¶n och AGI
 

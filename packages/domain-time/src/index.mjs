@@ -3,12 +3,15 @@ import crypto from "node:crypto";
 export const TIME_CLOCK_EVENT_TYPES = Object.freeze(["clock_in", "clock_out"]);
 export const TIME_BALANCE_TYPES = Object.freeze(["flex_minutes", "comp_minutes", "overtime_minutes"]);
 export const TIME_ENTRY_SOURCE_TYPES = Object.freeze(["manual", "clock", "import"]);
+export const LEAVE_SIGNAL_TYPES = Object.freeze(["none", "parental_benefit", "temporary_parental_benefit"]);
+export const LEAVE_ENTRY_STATUSES = Object.freeze(["draft", "submitted", "approved", "rejected"]);
+export const LEAVE_SIGNAL_LOCK_STATES = Object.freeze(["ready_for_sign", "signed", "submitted"]);
 
 export function createTimePlatform(options = {}) {
   return createTimeEngine(options);
 }
 
-export function createTimeEngine({ clock = () => new Date(), hrPlatform = null } = {}) {
+export function createTimeEngine({ clock = () => new Date(), hrPlatform = null, documentPlatform = null } = {}) {
   const state = {
     scheduleTemplates: new Map(),
     scheduleTemplateIdsByCompany: new Map(),
@@ -23,6 +26,20 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null }
     balanceTransactionIdsByEmployment: new Map(),
     periodLocks: new Map(),
     periodLockIdsByEmployment: new Map(),
+    leaveTypes: new Map(),
+    leaveTypeIdsByCompany: new Map(),
+    leaveTypeIdsByCode: new Map(),
+    leaveEntries: new Map(),
+    leaveEntryIdsByCompany: new Map(),
+    leaveEntryIdsByEmployee: new Map(),
+    leaveEntryIdsByEmployment: new Map(),
+    leaveEntryEvents: new Map(),
+    leaveEntryEventIdsByEntry: new Map(),
+    leaveSignals: new Map(),
+    leaveSignalIdsByEntry: new Map(),
+    leaveSignalIdsByEmployee: new Map(),
+    leaveSignalLocks: new Map(),
+    leaveSignalLockIdsByEmployment: new Map(),
     countersByCompany: new Map()
   };
 
@@ -30,6 +47,9 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null }
     clockEventTypes: TIME_CLOCK_EVENT_TYPES,
     balanceTypes: TIME_BALANCE_TYPES,
     entrySourceTypes: TIME_ENTRY_SOURCE_TYPES,
+    leaveSignalTypes: LEAVE_SIGNAL_TYPES,
+    leaveEntryStatuses: LEAVE_ENTRY_STATUSES,
+    leaveSignalLockStates: LEAVE_SIGNAL_LOCK_STATES,
     listScheduleTemplates,
     createScheduleTemplate,
     listScheduleAssignments,
@@ -41,7 +61,19 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null }
     createTimeEntry,
     listTimeBalances,
     listTimePeriodLocks,
-    lockTimePeriod
+    lockTimePeriod,
+    listLeaveTypes,
+    createLeaveType,
+    listLeaveEntries,
+    getLeaveEntry,
+    createLeaveEntry,
+    updateLeaveEntry,
+    submitLeaveEntry,
+    approveLeaveEntry,
+    rejectLeaveEntry,
+    listLeaveSignals,
+    listLeaveSignalLocks,
+    lockLeaveSignals
   };
 
   function listScheduleTemplates({ companyId } = {}) {
@@ -406,6 +438,458 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null }
     return copy(lock);
   }
 
+  function listLeaveTypes({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.leaveTypeIdsByCompany.get(resolvedCompanyId) || [])
+      .map((leaveTypeId) => state.leaveTypes.get(leaveTypeId))
+      .filter(Boolean)
+      .sort((left, right) => left.leaveTypeCode.localeCompare(right.leaveTypeCode))
+      .map(copy);
+  }
+
+  function createLeaveType({
+    companyId,
+    leaveTypeCode = null,
+    displayName,
+    signalType = "none",
+    requiresManagerApproval = true,
+    requiresSupportingDocument = false,
+    active = true,
+    actorId = "system"
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedCode = resolveSequenceOrValue({
+      state,
+      companyId: resolvedCompanyId,
+      sequenceKey: "leave_type",
+      prefix: "LEAVE",
+      value: leaveTypeCode,
+      requiredCode: "leave_type_code_required"
+    });
+    ensureUniqueCode(state.leaveTypeIdsByCode, resolvedCompanyId, resolvedCode, "leave_type_code_exists");
+
+    const leaveType = {
+      leaveTypeId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      leaveTypeCode: resolvedCode,
+      displayName: requireText(displayName, "leave_type_display_name_required"),
+      signalType: assertAllowed(signalType || "none", LEAVE_SIGNAL_TYPES, "leave_signal_type_invalid"),
+      requiresManagerApproval: requiresManagerApproval !== false,
+      requiresSupportingDocument: requiresSupportingDocument === true,
+      active: active !== false,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+
+    state.leaveTypes.set(leaveType.leaveTypeId, leaveType);
+    appendToIndex(state.leaveTypeIdsByCompany, resolvedCompanyId, leaveType.leaveTypeId);
+    setIndexValue(state.leaveTypeIdsByCode, resolvedCompanyId, resolvedCode, leaveType.leaveTypeId);
+    return copy(leaveType);
+  }
+
+  function listLeaveEntries({ companyId, employeeId = null, employmentId = null, status = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    if (employeeId) {
+      requireEmployeeRecord(resolvedCompanyId, employeeId, hrPlatform);
+    }
+    if (employmentId) {
+      requireEmployment(resolvedCompanyId, employmentId, hrPlatform);
+    }
+
+    return (state.leaveEntryIdsByCompany.get(resolvedCompanyId) || [])
+      .map((leaveEntryId) => state.leaveEntries.get(leaveEntryId))
+      .filter(Boolean)
+      .filter((candidate) => !employeeId || candidate.employeeId === employeeId)
+      .filter((candidate) => !employmentId || candidate.employmentId === employmentId)
+      .filter((candidate) => !status || candidate.status === status)
+      .sort((left, right) => left.startDate.localeCompare(right.startDate) || left.createdAt.localeCompare(right.createdAt))
+      .map((candidate) => enrichLeaveEntry(state, candidate));
+  }
+
+  function getLeaveEntry({ companyId, leaveEntryId } = {}) {
+    const entry = requireLeaveEntry(companyId, leaveEntryId, state);
+    return enrichLeaveEntry(state, entry);
+  }
+
+  function createLeaveEntry({
+    companyId,
+    employmentId,
+    leaveTypeId,
+    reportingPeriod = null,
+    days,
+    startDate = null,
+    endDate = null,
+    note = null,
+    supportingDocumentId = null,
+    sourceChannel = "employee_portal",
+    actorId = "system"
+  } = {}) {
+    const employment = requireEmployment(companyId, employmentId, hrPlatform);
+    const leaveType = requireLeaveType(employment.companyId, leaveTypeId, state);
+    const normalizedDays = normalizeLeaveDays(days);
+    const { resolvedStartDate, resolvedEndDate } = resolveLeaveDateWindow({
+      days: normalizedDays,
+      startDate,
+      endDate
+    });
+    const resolvedReportingPeriod = normalizeOptionalReportingPeriod(reportingPeriod, "leave_reporting_period_invalid");
+
+    assertLeaveSignalsOpen({
+      state,
+      companyId: employment.companyId,
+      employmentId: employment.employmentId,
+      reportingPeriod: resolvedReportingPeriod
+    });
+
+    const entry = {
+      leaveEntryId: crypto.randomUUID(),
+      companyId: employment.companyId,
+      employeeId: employment.employeeId,
+      employmentId: employment.employmentId,
+      leaveTypeId: leaveType.leaveTypeId,
+      leaveTypeCode: leaveType.leaveTypeCode,
+      status: "draft",
+      startDate: resolvedStartDate,
+      endDate: resolvedEndDate,
+      reportingPeriod: resolvedReportingPeriod,
+      days: normalizedDays,
+      note: normalizeOptionalText(note),
+      supportingDocumentId: resolveSupportingDocumentId({
+        companyId: employment.companyId,
+        supportingDocumentId,
+        documentPlatform
+      }),
+      sourceChannel: requireText(sourceChannel, "leave_source_channel_required"),
+      signalCompleteness: buildLeaveSignalCompleteness({
+        leaveType,
+        reportingPeriod: resolvedReportingPeriod,
+        days: normalizedDays
+      }),
+      managerEmploymentId: null,
+      submittedAt: null,
+      approvedAt: null,
+      rejectedAt: null,
+      rejectedReason: null,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+
+    if (leaveType.requiresSupportingDocument && !entry.supportingDocumentId) {
+      throw createError(400, "leave_supporting_document_required", "The chosen leave type requires a supporting document.");
+    }
+
+    state.leaveEntries.set(entry.leaveEntryId, entry);
+    appendToIndex(state.leaveEntryIdsByCompany, employment.companyId, entry.leaveEntryId);
+    appendToIndex(state.leaveEntryIdsByEmployee, employment.employeeId, entry.leaveEntryId);
+    appendToIndex(state.leaveEntryIdsByEmployment, employment.employmentId, entry.leaveEntryId);
+    replaceLeaveSignalsForEntry({ state, entry, leaveType, clock });
+    appendLeaveEntryEvent({
+      state,
+      entry,
+      eventType: "created",
+      status: entry.status,
+      note: "Leave entry created.",
+      actorId
+    });
+    return enrichLeaveEntry(state, entry);
+  }
+
+  function updateLeaveEntry({
+    companyId,
+    leaveEntryId,
+    reportingPeriod = undefined,
+    days = undefined,
+    startDate = undefined,
+    endDate = undefined,
+    note = undefined,
+    supportingDocumentId = undefined,
+    actorId = "system"
+  } = {}) {
+    const entry = requireLeaveEntry(companyId, leaveEntryId, state);
+    if (entry.status !== "draft") {
+      throw createError(409, "leave_entry_not_editable", "Only draft leave entries can be edited.");
+    }
+    const leaveType = requireLeaveType(entry.companyId, entry.leaveTypeId, state);
+    const nextReportingPeriod =
+      reportingPeriod === undefined
+        ? entry.reportingPeriod
+        : normalizeOptionalReportingPeriod(reportingPeriod, "leave_reporting_period_invalid");
+    assertLeaveSignalsOpen({
+      state,
+      companyId: entry.companyId,
+      employmentId: entry.employmentId,
+      reportingPeriod: nextReportingPeriod
+    });
+
+    const nextDays = days === undefined ? entry.days : normalizeLeaveDays(days);
+    const { resolvedStartDate, resolvedEndDate } = resolveLeaveDateWindow({
+      days: nextDays,
+      startDate: startDate === undefined ? entry.startDate : startDate,
+      endDate: endDate === undefined ? entry.endDate : endDate
+    });
+
+    entry.reportingPeriod = nextReportingPeriod;
+    entry.days = nextDays;
+    entry.startDate = resolvedStartDate;
+    entry.endDate = resolvedEndDate;
+    if (note !== undefined) {
+      entry.note = normalizeOptionalText(note);
+    }
+    if (supportingDocumentId !== undefined) {
+      entry.supportingDocumentId = resolveSupportingDocumentId({
+        companyId: entry.companyId,
+        supportingDocumentId,
+        documentPlatform
+      });
+    }
+    if (leaveType.requiresSupportingDocument && !entry.supportingDocumentId) {
+      throw createError(400, "leave_supporting_document_required", "The chosen leave type requires a supporting document.");
+    }
+    entry.signalCompleteness = buildLeaveSignalCompleteness({
+      leaveType,
+      reportingPeriod: entry.reportingPeriod,
+      days: entry.days
+    });
+    entry.updatedAt = nowIso(clock);
+    replaceLeaveSignalsForEntry({ state, entry, leaveType, clock });
+    appendLeaveEntryEvent({
+      state,
+      entry,
+      eventType: "updated",
+      status: entry.status,
+      note: "Leave entry updated.",
+      actorId
+    });
+    return enrichLeaveEntry(state, entry);
+  }
+
+  function submitLeaveEntry({ companyId, leaveEntryId, actorId = "system" } = {}) {
+    const entry = requireLeaveEntry(companyId, leaveEntryId, state);
+    if (entry.status !== "draft") {
+      throw createError(409, "leave_entry_submit_invalid", "Only draft leave entries can be submitted.");
+    }
+    const leaveType = requireLeaveType(entry.companyId, entry.leaveTypeId, state);
+    assertLeaveSignalsOpen({
+      state,
+      companyId: entry.companyId,
+      employmentId: entry.employmentId,
+      reportingPeriod: entry.reportingPeriod
+    });
+    if (leaveType.requiresSupportingDocument && !entry.supportingDocumentId) {
+      throw createError(400, "leave_supporting_document_required", "The chosen leave type requires a supporting document.");
+    }
+    if (!entry.signalCompleteness.complete) {
+      throw createError(409, "leave_signals_incomplete", "Leave signals are incomplete for AGI-sensitive absence.");
+    }
+
+    const managerAssignment = leaveType.requiresManagerApproval
+      ? resolveActiveManagerAssignment({
+          companyId: entry.companyId,
+          employeeId: entry.employeeId,
+          employmentId: entry.employmentId,
+          effectiveDate: entry.startDate,
+          hrPlatform
+        })
+      : null;
+    if (leaveType.requiresManagerApproval && !managerAssignment) {
+      throw createError(409, "leave_manager_approval_missing", "No active manager assignment covers this leave entry.");
+    }
+
+    entry.managerEmploymentId = managerAssignment ? managerAssignment.managerEmploymentId : null;
+    entry.submittedAt = nowIso(clock);
+    entry.updatedAt = entry.submittedAt;
+
+    if (leaveType.requiresManagerApproval) {
+      entry.status = "submitted";
+      appendLeaveEntryEvent({
+        state,
+        entry,
+        eventType: "submitted",
+        status: entry.status,
+        note: "Leave entry submitted for manager approval.",
+        actorId
+      });
+    } else {
+      entry.status = "approved";
+      entry.approvedAt = entry.submittedAt;
+      appendLeaveEntryEvent({
+        state,
+        entry,
+        eventType: "submitted",
+        status: "submitted",
+        note: "Leave entry submitted.",
+        actorId
+      });
+      appendLeaveEntryEvent({
+        state,
+        entry,
+        eventType: "approved",
+        status: entry.status,
+        note: "Leave entry auto-approved because the leave type does not require manager approval.",
+        actorId
+      });
+    }
+
+    return enrichLeaveEntry(state, entry);
+  }
+
+  function approveLeaveEntry({ companyId, leaveEntryId, actorId = "system" } = {}) {
+    const entry = requireLeaveEntry(companyId, leaveEntryId, state);
+    if (entry.status !== "submitted") {
+      throw createError(409, "leave_entry_approval_invalid", "Only submitted leave entries can be approved.");
+    }
+    assertLeaveSignalsOpen({
+      state,
+      companyId: entry.companyId,
+      employmentId: entry.employmentId,
+      reportingPeriod: entry.reportingPeriod
+    });
+
+    entry.status = "approved";
+    entry.approvedAt = nowIso(clock);
+    entry.updatedAt = entry.approvedAt;
+    appendLeaveEntryEvent({
+      state,
+      entry,
+      eventType: "approved",
+      status: entry.status,
+      note: "Leave entry approved.",
+      actorId
+    });
+    return enrichLeaveEntry(state, entry);
+  }
+
+  function rejectLeaveEntry({ companyId, leaveEntryId, reason, actorId = "system" } = {}) {
+    const entry = requireLeaveEntry(companyId, leaveEntryId, state);
+    if (entry.status !== "submitted") {
+      throw createError(409, "leave_entry_rejection_invalid", "Only submitted leave entries can be rejected.");
+    }
+    assertLeaveSignalsOpen({
+      state,
+      companyId: entry.companyId,
+      employmentId: entry.employmentId,
+      reportingPeriod: entry.reportingPeriod
+    });
+
+    entry.status = "rejected";
+    entry.rejectedAt = nowIso(clock);
+    entry.updatedAt = entry.rejectedAt;
+    entry.rejectedReason = requireText(reason, "leave_rejection_reason_required");
+    replaceLeaveSignalsForEntry({
+      state,
+      entry: {
+        ...entry,
+        reportingPeriod: null
+      },
+      leaveType: requireLeaveType(entry.companyId, entry.leaveTypeId, state),
+      clock
+    });
+    appendLeaveEntryEvent({
+      state,
+      entry,
+      eventType: "rejected",
+      status: entry.status,
+      note: entry.rejectedReason,
+      actorId
+    });
+    return enrichLeaveEntry(state, entry);
+  }
+
+  function listLeaveSignals({ companyId, employeeId = null, employmentId = null, reportingPeriod = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    if (employeeId) {
+      requireEmployeeRecord(resolvedCompanyId, employeeId, hrPlatform);
+    }
+    if (employmentId) {
+      requireEmployment(resolvedCompanyId, employmentId, hrPlatform);
+    }
+    const ids =
+      employeeId != null
+        ? state.leaveSignalIdsByEmployee.get(employeeId) || []
+        : Array.from(state.leaveSignals.keys());
+
+    return ids
+      .map((leaveSignalId) => state.leaveSignals.get(leaveSignalId))
+      .filter(Boolean)
+      .filter((candidate) => candidate.companyId === resolvedCompanyId)
+      .filter((candidate) => !employmentId || candidate.employmentId === employmentId)
+      .filter((candidate) => !reportingPeriod || candidate.reportingPeriod === reportingPeriod)
+      .sort(
+        (left, right) =>
+          left.reportingPeriod.localeCompare(right.reportingPeriod) ||
+          left.workDate.localeCompare(right.workDate) ||
+          left.specificationNo - right.specificationNo
+      )
+      .map(copy);
+  }
+
+  function listLeaveSignalLocks({ companyId, employmentId = null, reportingPeriod = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const keys = employmentId ? [employmentId] : Array.from(state.leaveSignalLockIdsByEmployment.keys());
+    const seen = new Set();
+    const items = [];
+
+    for (const key of keys) {
+      for (const leaveSignalLockId of state.leaveSignalLockIdsByEmployment.get(key) || []) {
+        if (seen.has(leaveSignalLockId)) {
+          continue;
+        }
+        const lock = state.leaveSignalLocks.get(leaveSignalLockId);
+        if (!lock || lock.companyId !== resolvedCompanyId) {
+          continue;
+        }
+        if (reportingPeriod && lock.reportingPeriod !== reportingPeriod) {
+          continue;
+        }
+        seen.add(leaveSignalLockId);
+        items.push(copy(lock));
+      }
+    }
+
+    return items.sort((left, right) => left.reportingPeriod.localeCompare(right.reportingPeriod));
+  }
+
+  function lockLeaveSignals({
+    companyId,
+    employmentId = null,
+    reportingPeriod,
+    lockState = "signed",
+    note = null,
+    sourceReference = null,
+    actorId = "system"
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedEmployment = employmentId ? requireEmployment(resolvedCompanyId, employmentId, hrPlatform) : null;
+    const resolvedReportingPeriod = normalizeRequiredReportingPeriod(reportingPeriod, "leave_reporting_period_required");
+    const resolvedLockState = assertAllowed(lockState, LEAVE_SIGNAL_LOCK_STATES, "leave_signal_lock_state_invalid");
+    const existing = listLeaveSignalLocks({
+      companyId: resolvedCompanyId,
+      employmentId: resolvedEmployment ? resolvedEmployment.employmentId : null,
+      reportingPeriod: resolvedReportingPeriod
+    }).find((candidate) => candidate.lockState === resolvedLockState);
+    if (existing) {
+      return existing;
+    }
+
+    const lock = {
+      leaveSignalLockId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      employmentId: resolvedEmployment ? resolvedEmployment.employmentId : null,
+      reportingPeriod: resolvedReportingPeriod,
+      lockState: resolvedLockState,
+      note: normalizeOptionalText(note),
+      sourceReference: normalizeOptionalText(sourceReference),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock)
+    };
+
+    state.leaveSignalLocks.set(lock.leaveSignalLockId, lock);
+    appendToIndex(state.leaveSignalLockIdsByEmployment, resolvedEmployment ? resolvedEmployment.employmentId : "*", lock.leaveSignalLockId);
+    return copy(lock);
+  }
+
   function createBalanceTransactionsForEntry(entry) {
     const definitions = [
       {
@@ -472,12 +956,43 @@ function requireEmployment(companyId, employmentId, hrPlatform = null) {
   throw createError(404, "employment_not_found", "Employment was not found.");
 }
 
+function requireEmployeeRecord(companyId, employeeId, hrPlatform = null) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const resolvedEmployeeId = requireText(employeeId, "employee_id_required");
+  if (!hrPlatform) {
+    return {
+      companyId: resolvedCompanyId,
+      employeeId: resolvedEmployeeId
+    };
+  }
+  return hrPlatform.getEmployee({
+    companyId: resolvedCompanyId,
+    employeeId: resolvedEmployeeId
+  });
+}
+
 function requireScheduleTemplate(companyId, scheduleTemplateId, state) {
   const template = state.scheduleTemplates.get(requireText(scheduleTemplateId, "schedule_template_id_required"));
   if (!template || template.companyId !== companyId) {
     throw createError(404, "schedule_template_not_found", "Schedule template was not found.");
   }
   return template;
+}
+
+function requireLeaveType(companyId, leaveTypeId, state) {
+  const leaveType = state.leaveTypes.get(requireText(leaveTypeId, "leave_type_id_required"));
+  if (!leaveType || leaveType.companyId !== companyId) {
+    throw createError(404, "leave_type_not_found", "Leave type was not found.");
+  }
+  return leaveType;
+}
+
+function requireLeaveEntry(companyId, leaveEntryId, state) {
+  const entry = state.leaveEntries.get(requireText(leaveEntryId, "leave_entry_id_required"));
+  if (!entry || entry.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "leave_entry_not_found", "Leave entry was not found.");
+  }
+  return entry;
 }
 
 function resolveActiveScheduleAssignment({ state, companyId, employmentId, workDate }) {
@@ -500,6 +1015,23 @@ function resolveActiveScheduleAssignment({ state, companyId, employmentId, workD
     ...assignment,
     template: state.scheduleTemplates.get(assignment.scheduleTemplateId) || null
   };
+}
+
+function resolveActiveManagerAssignment({ companyId, employeeId, employmentId, effectiveDate, hrPlatform = null }) {
+  if (!hrPlatform) {
+    return null;
+  }
+  return hrPlatform
+    .listManagerAssignments({
+      companyId,
+      employeeId,
+      employmentId
+    })
+    .filter(
+      (candidate) =>
+        candidate.validFrom <= effectiveDate && (!candidate.validTo || candidate.validTo >= effectiveDate)
+    )
+    .sort((left, right) => right.validFrom.localeCompare(left.validFrom))[0] || null;
 }
 
 function getScheduleDayForDate(template, workDate) {
@@ -537,6 +1069,70 @@ function normalizeScheduleDays(days) {
   });
 }
 
+function normalizeLeaveDays(days) {
+  if (!Array.isArray(days) || days.length === 0) {
+    throw createError(400, "leave_days_required", "Leave entry days must be a non-empty array.");
+  }
+  const seen = new Set();
+  return days
+    .map((candidate) => {
+      const date = normalizeRequiredDate(candidate?.date, "leave_day_date_required");
+      if (seen.has(date)) {
+        throw createError(409, "leave_day_duplicate", "Each leave day can only appear once per leave entry.");
+      }
+      seen.add(date);
+      const extentPercent = normalizeOptionalBoundedNumber(candidate?.extentPercent, "leave_day_extent_percent_invalid", {
+        min: 0,
+        max: 100
+      });
+      const extentHours = normalizeOptionalBoundedNumber(candidate?.extentHours, "leave_day_extent_hours_invalid", {
+        min: 0
+      });
+      if (extentPercent == null && extentHours == null) {
+        throw createError(400, "leave_day_extent_required", "Each leave day must carry extent in percent or hours.");
+      }
+      return {
+        date,
+        extentPercent,
+        extentHours,
+        note: normalizeOptionalText(candidate?.note)
+      };
+    })
+    .sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function resolveLeaveDateWindow({ days, startDate = null, endDate = null }) {
+  const resolvedStartDate = days[0].date;
+  const resolvedEndDate = days[days.length - 1].date;
+  if (startDate != null && normalizeRequiredDate(startDate, "leave_start_date_invalid") !== resolvedStartDate) {
+    throw createError(400, "leave_start_date_mismatch", "Explicit start date must match the first leave day.");
+  }
+  if (endDate != null && normalizeRequiredDate(endDate, "leave_end_date_invalid") !== resolvedEndDate) {
+    throw createError(400, "leave_end_date_mismatch", "Explicit end date must match the last leave day.");
+  }
+  return {
+    resolvedStartDate,
+    resolvedEndDate
+  };
+}
+
+function buildLeaveSignalCompleteness({ leaveType, reportingPeriod, days }) {
+  const missingFields = [];
+  const resolvedReportingPeriod = normalizeOptionalReportingPeriod(reportingPeriod, "leave_reporting_period_invalid");
+  if (leaveType.signalType !== "none" && !resolvedReportingPeriod) {
+    missingFields.push("reportingPeriod");
+  }
+  for (const day of days) {
+    if (leaveType.signalType !== "none" && day.extentPercent == null && day.extentHours == null) {
+      missingFields.push(`extent:${day.date}`);
+    }
+  }
+  return {
+    complete: missingFields.length === 0,
+    missingFields
+  };
+}
+
 function normalizeSourceClockEventIds({ state, companyId, employmentId, sourceClockEventIds }) {
   if (!Array.isArray(sourceClockEventIds)) {
     throw createError(400, "time_entry_source_clock_events_invalid", "sourceClockEventIds must be an array.");
@@ -549,6 +1145,75 @@ function normalizeSourceClockEventIds({ state, companyId, employmentId, sourceCl
     }
     return resolvedId;
   });
+}
+
+function replaceLeaveSignalsForEntry({ state, entry, leaveType, clock }) {
+  for (const leaveSignalId of state.leaveSignalIdsByEntry.get(entry.leaveEntryId) || []) {
+    const signal = state.leaveSignals.get(leaveSignalId);
+    if (signal) {
+      removeFromIndex(state.leaveSignalIdsByEmployee, signal.employeeId, leaveSignalId);
+    }
+    state.leaveSignals.delete(leaveSignalId);
+  }
+  state.leaveSignalIdsByEntry.set(entry.leaveEntryId, []);
+
+  if (leaveType.signalType === "none") {
+    return;
+  }
+
+  const reportingPeriod = normalizeOptionalReportingPeriod(entry.reportingPeriod, "leave_reporting_period_invalid");
+  if (!reportingPeriod) {
+    return;
+  }
+  entry.days.forEach((day, index) => {
+    const signal = {
+      leaveSignalId: crypto.randomUUID(),
+      companyId: entry.companyId,
+      employeeId: entry.employeeId,
+      employmentId: entry.employmentId,
+      leaveEntryId: entry.leaveEntryId,
+      reportingPeriod,
+      workDate: day.date,
+      specificationNo: index + 1,
+      signalType: leaveType.signalType,
+      extentPercent: day.extentPercent,
+      extentHours: day.extentHours,
+      complete: day.extentPercent != null || day.extentHours != null,
+      createdAt: nowIso(clock)
+    };
+    state.leaveSignals.set(signal.leaveSignalId, signal);
+    appendToIndex(state.leaveSignalIdsByEntry, entry.leaveEntryId, signal.leaveSignalId);
+    appendToIndex(state.leaveSignalIdsByEmployee, entry.employeeId, signal.leaveSignalId);
+  });
+}
+
+function appendLeaveEntryEvent({ state, entry, eventType, status, note, actorId }) {
+  const event = {
+    leaveEntryEventId: crypto.randomUUID(),
+    companyId: entry.companyId,
+    leaveEntryId: entry.leaveEntryId,
+    eventType: requireText(eventType, "leave_event_type_required"),
+    status: requireText(status, "leave_event_status_required"),
+    note: normalizeOptionalText(note),
+    actorId: requireText(actorId, "actor_id_required"),
+    recordedAt: entry.updatedAt || entry.createdAt
+  };
+  state.leaveEntryEvents.set(event.leaveEntryEventId, event);
+  appendToIndex(state.leaveEntryEventIdsByEntry, entry.leaveEntryId, event.leaveEntryEventId);
+}
+
+function enrichLeaveEntry(state, entry) {
+  return {
+    ...copy(entry),
+    events: (state.leaveEntryEventIdsByEntry.get(entry.leaveEntryId) || [])
+      .map((eventId) => state.leaveEntryEvents.get(eventId))
+      .filter(Boolean)
+      .map(copy),
+    signals: (state.leaveSignalIdsByEntry.get(entry.leaveEntryId) || [])
+      .map((signalId) => state.leaveSignals.get(signalId))
+      .filter(Boolean)
+      .map(copy)
+  };
 }
 
 function assertPeriodOpen({ state, companyId, employmentId, workDate }) {
@@ -564,6 +1229,25 @@ function assertPeriodOpen({ state, companyId, employmentId, workDate }) {
     if (lock.startsOn <= workDate && lock.endsOn >= workDate) {
       throw createError(409, "time_period_locked", "The requested work date falls inside a locked time period.");
     }
+  }
+}
+
+function assertLeaveSignalsOpen({ state, companyId, employmentId, reportingPeriod = null }) {
+  const resolvedReportingPeriod = normalizeOptionalReportingPeriod(reportingPeriod, "leave_reporting_period_invalid");
+  if (!resolvedReportingPeriod) {
+    return;
+  }
+
+  const relevantLocks = [
+    ...(state.leaveSignalLockIdsByEmployment.get("*") || []),
+    ...(state.leaveSignalLockIdsByEmployment.get(employmentId) || [])
+  ]
+    .map((leaveSignalLockId) => state.leaveSignalLocks.get(leaveSignalLockId))
+    .filter(Boolean)
+    .filter((candidate) => candidate.companyId === companyId && candidate.reportingPeriod === resolvedReportingPeriod);
+
+  if (relevantLocks.length > 0) {
+    throw createError(409, "leave_signals_locked", "Leave signals are locked because AGI signing has already started or completed.");
   }
 }
 
@@ -626,6 +1310,30 @@ function appendToIndex(index, key, value) {
   index.get(key).push(value);
 }
 
+function removeFromIndex(index, key, value) {
+  if (!index.has(key)) {
+    return;
+  }
+  index.set(
+    key,
+    index.get(key).filter((candidate) => candidate !== value)
+  );
+}
+
+function resolveSupportingDocumentId({ companyId, supportingDocumentId, documentPlatform = null }) {
+  const resolvedDocumentId = normalizeOptionalText(supportingDocumentId);
+  if (!resolvedDocumentId) {
+    return null;
+  }
+  if (documentPlatform) {
+    documentPlatform.getDocumentRecord({
+      companyId,
+      documentId: resolvedDocumentId
+    });
+  }
+  return resolvedDocumentId;
+}
+
 function nowIso(clock) {
   return clock().toISOString();
 }
@@ -686,6 +1394,21 @@ function normalizeOptionalTime(value, code) {
   return resolvedValue;
 }
 
+function normalizeRequiredReportingPeriod(value, code) {
+  const resolvedValue = requireText(value, code);
+  if (!/^\d{6}$/.test(resolvedValue)) {
+    throw createError(400, code, "Reporting period must be in YYYYMM format.");
+  }
+  return resolvedValue;
+}
+
+function normalizeOptionalReportingPeriod(value, code) {
+  if (value == null || value === "") {
+    return null;
+  }
+  return normalizeRequiredReportingPeriod(String(value), code);
+}
+
 function normalizeInteger(value, code) {
   if (typeof value !== "number" || !Number.isInteger(value)) {
     throw createError(400, code, "Value must be an integer.");
@@ -699,6 +1422,22 @@ function normalizeNonNegativeInteger(value, code) {
     throw createError(400, code, "Value cannot be negative.");
   }
   return integer;
+}
+
+function normalizeOptionalBoundedNumber(value, code, { min = null, max = null } = {}) {
+  if (value == null || value === "") {
+    return null;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw createError(400, code, "Value must be numeric.");
+  }
+  if (min != null && value < min) {
+    throw createError(400, code, "Value is below the allowed minimum.");
+  }
+  if (max != null && value > max) {
+    throw createError(400, code, "Value is above the allowed maximum.");
+  }
+  return value;
 }
 
 function assertAllowed(value, allowedValues, code) {

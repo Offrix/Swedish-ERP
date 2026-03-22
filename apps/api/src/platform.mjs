@@ -47,7 +47,8 @@ export function createApiPlatform(options = {}) {
   });
   const timePlatform = createTimePlatform({
     ...options,
-    hrPlatform
+    hrPlatform,
+    documentPlatform: documentArchivePlatform
   });
 
   return {

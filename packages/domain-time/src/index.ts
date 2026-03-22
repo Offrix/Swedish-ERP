@@ -1,6 +1,9 @@
 export type TimeClockEventType = "clock_in" | "clock_out";
 export type TimeBalanceType = "flex_minutes" | "comp_minutes" | "overtime_minutes";
 export type TimeEntrySourceType = "manual" | "clock" | "import";
+export type LeaveSignalType = "none" | "parental_benefit" | "temporary_parental_benefit";
+export type LeaveEntryStatus = "draft" | "submitted" | "approved" | "rejected";
+export type LeaveSignalLockState = "ready_for_sign" | "signed" | "submitted";
 
 export interface TimeScheduleTemplateDay {
   readonly weekday: number;
@@ -108,6 +111,99 @@ export interface TimePeriodLock {
   readonly endsOn: string;
   readonly reasonCode: string;
   readonly note: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+}
+
+export interface LeaveType {
+  readonly leaveTypeId: string;
+  readonly companyId: string;
+  readonly leaveTypeCode: string;
+  readonly displayName: string;
+  readonly signalType: LeaveSignalType;
+  readonly requiresManagerApproval: boolean;
+  readonly requiresSupportingDocument: boolean;
+  readonly active: boolean;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface LeaveDay {
+  readonly date: string;
+  readonly extentPercent: number | null;
+  readonly extentHours: number | null;
+  readonly note: string | null;
+}
+
+export interface LeaveSignalCompleteness {
+  readonly complete: boolean;
+  readonly missingFields: readonly string[];
+}
+
+export interface LeaveEntryEvent {
+  readonly leaveEntryEventId: string;
+  readonly companyId: string;
+  readonly leaveEntryId: string;
+  readonly eventType: string;
+  readonly status: string;
+  readonly note: string | null;
+  readonly actorId: string;
+  readonly recordedAt: string;
+}
+
+export interface LeaveSignal {
+  readonly leaveSignalId: string;
+  readonly companyId: string;
+  readonly employeeId: string;
+  readonly employmentId: string;
+  readonly leaveEntryId: string;
+  readonly reportingPeriod: string;
+  readonly workDate: string;
+  readonly specificationNo: number;
+  readonly signalType: LeaveSignalType;
+  readonly extentPercent: number | null;
+  readonly extentHours: number | null;
+  readonly complete: boolean;
+  readonly createdAt: string;
+}
+
+export interface LeaveEntry {
+  readonly leaveEntryId: string;
+  readonly companyId: string;
+  readonly employeeId: string;
+  readonly employmentId: string;
+  readonly leaveTypeId: string;
+  readonly leaveTypeCode: string;
+  readonly status: LeaveEntryStatus;
+  readonly startDate: string;
+  readonly endDate: string;
+  readonly reportingPeriod: string | null;
+  readonly days: readonly LeaveDay[];
+  readonly note: string | null;
+  readonly supportingDocumentId: string | null;
+  readonly sourceChannel: string;
+  readonly signalCompleteness: LeaveSignalCompleteness;
+  readonly managerEmploymentId: string | null;
+  readonly submittedAt: string | null;
+  readonly approvedAt: string | null;
+  readonly rejectedAt: string | null;
+  readonly rejectedReason: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly events: readonly LeaveEntryEvent[];
+  readonly signals: readonly LeaveSignal[];
+}
+
+export interface LeaveSignalLock {
+  readonly leaveSignalLockId: string;
+  readonly companyId: string;
+  readonly employmentId: string | null;
+  readonly reportingPeriod: string;
+  readonly lockState: LeaveSignalLockState;
+  readonly note: string | null;
+  readonly sourceReference: string | null;
   readonly createdByActorId: string;
   readonly createdAt: string;
 }
