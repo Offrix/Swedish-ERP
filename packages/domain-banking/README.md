@@ -1,3 +1,3 @@
 # @swedish-erp/domain-banking
 
-Banking boundary for bank events, reconciliation flows, clearing accounts and payment initiation intents.
+Banking boundary for bank accounts, payment proposals, payment orders, bank events and return-aware supplier-payment lifecycles.

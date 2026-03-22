@@ -56,6 +56,7 @@
     "verify:phase5:ar:invoicing": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase5-ar-invoicing.ps1",
     "verify:phase5:ar:receivables": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase5-ar-receivables.ps1",
     "verify:phase6:ap:masterdata": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase6-ap-masterdata.ps1",
-    "verify:phase6:ap:invoice-matching": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase6-ap-invoice-matching.ps1"
+    "verify:phase6:ap:invoice-matching": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase6-ap-invoice-matching.ps1",
+    "verify:phase6:ap:payments": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase6-ap-payments.ps1"
   }
 }

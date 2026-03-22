@@ -828,7 +828,11 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/accounting-foundation.md, docs/compliance/se/einvoice-peppol-engine.md
+- docs/compliance/se/ap-supplier-invoice-engine.md
+- docs/compliance/se/bank-and-payments-engine.md
+- docs/compliance/se/accounting-foundation.md
+- docs/adr/ADR-0010-banking-and-money-movement-strategy.md
+- docs/runbooks/fas-6-ap-payments-verification.md
 
 Implement exactly this scope:
 - Flerstegsattest

@@ -133,8 +133,22 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/ap/invoices",
               "/v1/ap/invoices/ingest",
               "/v1/ap/invoices/:supplierInvoiceId",
+              "/v1/ap/invoices/:supplierInvoiceId/approve",
               "/v1/ap/invoices/:supplierInvoiceId/match",
-              "/v1/ap/invoices/:supplierInvoiceId/post"
+              "/v1/ap/invoices/:supplierInvoiceId/post",
+              "/v1/ap/open-items",
+              "/v1/ap/open-items/:apOpenItemId",
+              "/v1/banking/accounts",
+              "/v1/banking/accounts/:bankAccountId",
+              "/v1/banking/payment-proposals",
+              "/v1/banking/payment-proposals/:paymentProposalId",
+              "/v1/banking/payment-proposals/:paymentProposalId/approve",
+              "/v1/banking/payment-proposals/:paymentProposalId/export",
+              "/v1/banking/payment-proposals/:paymentProposalId/submit",
+              "/v1/banking/payment-proposals/:paymentProposalId/accept",
+              "/v1/banking/payment-orders/:paymentOrderId/book",
+              "/v1/banking/payment-orders/:paymentOrderId/reject",
+              "/v1/banking/payment-orders/:paymentOrderId/return"
             ]
           }
         : { status: "ok" }
@@ -3099,6 +3113,33 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  const apInvoiceApprove = matchPath(path, "/v1/ap/invoices/:supplierInvoiceId/approve");
+  if (apInvoiceApprove && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_supplier_invoice",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveSupplierInvoice({
+        companyId,
+        supplierInvoiceId: apInvoiceApprove.supplierInvoiceId,
+        actorId: principal.userId,
+        actorCompanyUserId: principal.companyUserId,
+        actorRoleCodes: principal.roles,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   const apInvoiceMatchRun = matchPath(path, "/v1/ap/invoices/:supplierInvoiceId/match");
   if (apInvoiceMatchRun && req.method === "POST") {
     const body = await readJsonBody(req);
@@ -3142,6 +3183,382 @@ async function handleRequest({ req, res, platform, flags }) {
       platform.postSupplierInvoice({
         companyId,
         supplierInvoiceId: apInvoicePost.supplierInvoiceId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ap/open-items") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_open_item",
+      scopeCode: "ap"
+    });
+    writeJson(res, 200, {
+      items: platform.listApOpenItems({
+        companyId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  const apOpenItemMatch = matchPath(path, "/v1/ap/open-items/:apOpenItemId");
+  if (apOpenItemMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_open_item",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getApOpenItem({
+        companyId,
+        apOpenItemId: apOpenItemMatch.apOpenItemId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/banking/accounts") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "bank_account",
+      scopeCode: "bank"
+    });
+    writeJson(res, 200, {
+      items: platform.listBankAccounts({
+        companyId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/banking/accounts") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "bank_account",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createBankAccount({
+        ...body,
+        companyId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const bankAccountMatch = matchPath(path, "/v1/banking/accounts/:bankAccountId");
+  if (bankAccountMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "bank_account",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getBankAccount({
+        companyId,
+        bankAccountId: bankAccountMatch.bankAccountId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/banking/payment-proposals") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payment_proposal",
+      scopeCode: "bank"
+    });
+    writeJson(res, 200, {
+      items: platform.listPaymentProposals({
+        companyId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/banking/payment-proposals") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payment_proposal",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createPaymentProposal({
+        ...body,
+        companyId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const paymentProposalMatch = matchPath(path, "/v1/banking/payment-proposals/:paymentProposalId");
+  if (paymentProposalMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payment_proposal",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getPaymentProposal({
+        companyId,
+        paymentProposalId: paymentProposalMatch.paymentProposalId
+      })
+    );
+    return;
+  }
+
+  const paymentProposalApprove = matchPath(path, "/v1/banking/payment-proposals/:paymentProposalId/approve");
+  if (paymentProposalApprove && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payment_proposal",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approvePaymentProposal({
+        companyId,
+        paymentProposalId: paymentProposalApprove.paymentProposalId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const paymentProposalExport = matchPath(path, "/v1/banking/payment-proposals/:paymentProposalId/export");
+  if (paymentProposalExport && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payment_proposal",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      200,
+      platform.exportPaymentProposal({
+        companyId,
+        paymentProposalId: paymentProposalExport.paymentProposalId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const paymentProposalSubmit = matchPath(path, "/v1/banking/payment-proposals/:paymentProposalId/submit");
+  if (paymentProposalSubmit && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payment_proposal",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      200,
+      platform.submitPaymentProposal({
+        companyId,
+        paymentProposalId: paymentProposalSubmit.paymentProposalId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const paymentProposalAccept = matchPath(path, "/v1/banking/payment-proposals/:paymentProposalId/accept");
+  if (paymentProposalAccept && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payment_proposal",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      200,
+      platform.acceptPaymentProposal({
+        companyId,
+        paymentProposalId: paymentProposalAccept.paymentProposalId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const paymentOrderBook = matchPath(path, "/v1/banking/payment-orders/:paymentOrderId/book");
+  if (paymentOrderBook && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payment_order",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      200,
+      platform.bookPaymentOrder({
+        companyId,
+        paymentOrderId: paymentOrderBook.paymentOrderId,
+        bankEventId: body.bankEventId,
+        bookedOn: body.bookedOn || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const paymentOrderReject = matchPath(path, "/v1/banking/payment-orders/:paymentOrderId/reject");
+  if (paymentOrderReject && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payment_order",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      200,
+      platform.rejectPaymentOrder({
+        companyId,
+        paymentOrderId: paymentOrderReject.paymentOrderId,
+        bankEventId: body.bankEventId,
+        reasonCode: body.reasonCode || "payment_rejected",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const paymentOrderReturn = matchPath(path, "/v1/banking/payment-orders/:paymentOrderId/return");
+  if (paymentOrderReturn && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payment_order",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      200,
+      platform.returnPaymentOrder({
+        companyId,
+        paymentOrderId: paymentOrderReturn.paymentOrderId,
+        bankEventId: body.bankEventId,
+        returnedOn: body.returnedOn || null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
@@ -3231,7 +3648,7 @@ function isPhase5Route(path) {
 }
 
 function isPhase6Route(path) {
-  return path.startsWith("/v1/ap");
+  return path.startsWith("/v1/ap") || path.startsWith("/v1/banking");
 }
 
 async function readJsonBody(req, allowEmpty = false) {

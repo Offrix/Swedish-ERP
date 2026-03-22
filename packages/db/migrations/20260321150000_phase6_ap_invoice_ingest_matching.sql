@@ -35,7 +35,19 @@ BEGIN
   ) THEN
     ALTER TABLE supplier_invoices
       ADD CONSTRAINT ck_supplier_invoices_phase6_2_status
-      CHECK (status IN ('draft', 'matching', 'pending_approval', 'approved', 'posted', 'credited', 'voided'));
+      CHECK (
+        status IN (
+          'draft',
+          'matching',
+          'pending_approval',
+          'approved',
+          'posted',
+          'scheduled_for_payment',
+          'paid',
+          'credited',
+          'voided'
+        )
+      );
   END IF;
 END $$;
 

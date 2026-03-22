@@ -17,6 +17,8 @@ export const AP_SUPPLIER_INVOICE_STATUSES = Object.freeze([
   "pending_approval",
   "approved",
   "posted",
+  "scheduled_for_payment",
+  "paid",
   "credited",
   "voided"
 ]);
@@ -94,7 +96,8 @@ export function createApEngine({
   seedDemo = false,
   vatPlatform = null,
   ledgerPlatform = null,
-  documentPlatform = null
+  documentPlatform = null,
+  orgAuthPlatform = null
 } = {}) {
   const state = {
     suppliers: new Map(),
@@ -155,9 +158,16 @@ export function createApEngine({
     createReceipt,
     listSupplierInvoices,
     getSupplierInvoice,
+    listApOpenItems,
+    getApOpenItem,
     ingestSupplierInvoice,
     runSupplierInvoiceMatch,
+    approveSupplierInvoice,
     postSupplierInvoice,
+    reserveApOpenItem,
+    releaseApOpenItemReservation,
+    settleApOpenItem,
+    reopenApOpenItem,
     snapshotAp
   };
 
@@ -802,6 +812,20 @@ export function createApEngine({
     return presentSupplierInvoice(state, invoice);
   }
 
+  function listApOpenItems({ companyId, status = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.apOpenItemIdsByCompany.get(resolvedCompanyId) || [])
+      .map((apOpenItemId) => state.apOpenItems.get(apOpenItemId))
+      .filter(Boolean)
+      .filter((openItem) => (status ? openItem.status === status : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function getApOpenItem({ companyId, apOpenItemId } = {}) {
+    return copy(requireApOpenItemRecord(state, companyId, apOpenItemId));
+  }
+
   function ingestSupplierInvoice({
     companyId,
     supplierId = null,
@@ -915,6 +939,13 @@ export function createApEngine({
       ...(nearDuplicate ? ["duplicate_suspect"] : [])
     ]);
     const reviewRequired = reviewQueueCodes.length > 0;
+    const approvalSteps = buildInvoiceApprovalSteps({
+      orgAuthPlatform,
+      supplier,
+      actorId,
+      clock
+    });
+    const paymentHoldReasonCodes = supplier.paymentBlocked === true ? ["payment_hold"] : [];
 
     const invoice = {
       supplierInvoiceId: crypto.randomUUID(),
@@ -942,6 +973,11 @@ export function createApEngine({
       status: reviewRequired ? "pending_approval" : "draft",
       reviewRequired,
       reviewQueueCodes,
+      approvalChainId: supplier.attestChainId || null,
+      approvalStatus: approvalSteps.length > 0 ? "pending" : "not_required",
+      approvalSteps,
+      paymentHold: paymentHoldReasonCodes.length > 0,
+      paymentHoldReasonCodes,
       lines: normalizedLines,
       latestMatchRunId: null,
       journalEntryId: null,
@@ -951,7 +987,8 @@ export function createApEngine({
       updatedAt: nowIso(clock),
       approvedAt: null,
       approvedByActorId: null,
-      postedAt: null
+      postedAt: null,
+      paidAt: null
     };
 
     state.supplierInvoices.set(invoice.supplierInvoiceId, invoice);
@@ -1147,9 +1184,13 @@ export function createApEngine({
     invoice.matchMode = matchMode;
     invoice.reviewRequired = reviewRequired;
     invoice.reviewQueueCodes = reviewQueueCodes;
-    invoice.status = reviewRequired ? "pending_approval" : "approved";
-    invoice.approvedAt = reviewRequired ? null : nowIso(clock);
-    invoice.approvedByActorId = reviewRequired ? null : actorId;
+    invoice.approvalStatus = hasPendingInvoiceApprovalSteps(invoice) ? "pending" : invoice.approvalStatus;
+    invoice.status = resolveInvoiceApprovalStatus({
+      invoice,
+      reviewRequired
+    });
+    invoice.approvedAt = invoice.status === "approved" ? nowIso(clock) : null;
+    invoice.approvedByActorId = invoice.status === "approved" ? actorId : null;
     invoice.updatedAt = nowIso(clock);
 
     pushAudit(state, clock, {
@@ -1167,6 +1208,61 @@ export function createApEngine({
       invoice: presentSupplierInvoice(state, invoice),
       matchRun: copy(matchRun)
     };
+  }
+
+  function approveSupplierInvoice({
+    companyId,
+    supplierInvoiceId,
+    actorId = "system",
+    actorCompanyUserId = null,
+    actorRoleCodes = [],
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const invoice = requireSupplierInvoiceRecord(state, companyId, supplierInvoiceId);
+    if (invoice.reviewRequired) {
+      throw createError(409, "supplier_invoice_review_required", "Supplier invoice still has open review requirements.");
+    }
+    if (invoice.status === "approved") {
+      return presentSupplierInvoice(state, invoice);
+    }
+
+    const nextStep = getNextPendingInvoiceApprovalStep(invoice);
+    if (!nextStep) {
+      invoice.status = "approved";
+      invoice.approvalStatus = invoice.approvalSteps.length > 0 ? "approved" : "not_required";
+      invoice.approvedAt = invoice.approvedAt || nowIso(clock);
+      invoice.approvedByActorId = invoice.approvedByActorId || actorId;
+      invoice.updatedAt = nowIso(clock);
+      return presentSupplierInvoice(state, invoice);
+    }
+
+    if (!canActorApproveStep({ step: nextStep, actorCompanyUserId, actorRoleCodes })) {
+      throw createError(403, "approval_step_not_assigned", "Current user is not assigned to the active approval step.");
+    }
+
+    nextStep.status = "approved";
+    nextStep.actedAt = nowIso(clock);
+    nextStep.actedByActorId = actorId;
+    nextStep.actedByCompanyUserId = normalizeOptionalText(actorCompanyUserId);
+    nextStep.actedByRoleCode = resolveActedByRoleCode(nextStep, actorRoleCodes);
+    invoice.approvalStatus = hasPendingInvoiceApprovalSteps(invoice) ? "pending" : "approved";
+    invoice.status = hasPendingInvoiceApprovalSteps(invoice) ? "pending_approval" : "approved";
+    if (invoice.status === "approved") {
+      invoice.approvedAt = nowIso(clock);
+      invoice.approvedByActorId = actorId;
+    }
+    invoice.updatedAt = nowIso(clock);
+
+    pushAudit(state, clock, {
+      companyId: invoice.companyId,
+      actorId,
+      correlationId,
+      action: "ap.supplier_invoice.approved",
+      entityType: "ap_supplier_invoice",
+      entityId: invoice.supplierInvoiceId,
+      explanation: `Approved supplier invoice ${invoice.externalInvoiceRef} at step ${nextStep.stepOrder}.`
+    });
+    return presentSupplierInvoice(state, invoice);
   }
 
   function postSupplierInvoice({
@@ -1223,13 +1319,30 @@ export function createApEngine({
       apOpenItemId: crypto.randomUUID(),
       companyId: invoice.companyId,
       supplierInvoiceId: invoice.supplierInvoiceId,
+      originalAmount: invoice.grossAmount,
       openAmount: invoice.grossAmount,
+      reservedAmount: 0,
+      paidAmount: 0,
       dueOn: invoice.dueDate,
       status: "open",
+      paymentHold: supplier.paymentBlocked === true || invoice.paymentHold === true,
+      paymentHoldReasonCodes: uniqueStrings([
+        ...(invoice.paymentHoldReasonCodes || []),
+        ...(supplier.paymentBlocked === true ? ["payment_hold"] : [])
+      ]),
+      paymentProposalId: null,
+      paymentOrderId: null,
+      lastPaymentOrderId: null,
+      lastBankEventId: null,
+      lastReservationJournalEntryId: null,
+      lastSettlementJournalEntryId: null,
+      lastReturnJournalEntryId: null,
+      lastRejectionJournalEntryId: null,
       journalEntryId: posted.journalEntry.journalEntryId,
       currencyCode: invoice.currencyCode,
       createdAt: nowIso(clock),
-      updatedAt: nowIso(clock)
+      updatedAt: nowIso(clock),
+      closedAt: null
     };
     state.apOpenItems.set(openItem.apOpenItemId, openItem);
     ensureCollection(state.apOpenItemIdsByCompany, invoice.companyId).push(openItem.apOpenItemId);
@@ -1264,6 +1377,348 @@ export function createApEngine({
       explanation: `Posted supplier invoice ${invoice.externalInvoiceRef}.`
     });
     return presentSupplierInvoice(state, invoice);
+  }
+
+  function reserveApOpenItem({
+    companyId,
+    apOpenItemId,
+    paymentProposalId = null,
+    paymentOrderId,
+    bankAccountNumber = "1110",
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const openItem = requireApOpenItemRecord(state, companyId, apOpenItemId);
+    if (openItem.status === "reserved" && openItem.paymentOrderId === requireText(paymentOrderId, "payment_order_id_required")) {
+      return {
+        openItem: copy(openItem),
+        invoice: presentSupplierInvoice(state, requireSupplierInvoiceRecord(state, companyId, openItem.supplierInvoiceId)),
+        journalEntryId: openItem.lastReservationJournalEntryId,
+        idempotentReplay: true
+      };
+    }
+    if (openItem.status !== "open") {
+      throw createError(409, "ap_open_item_not_open", "Only open AP items can be reserved for payment.");
+    }
+    const invoice = requireSupplierInvoiceRecord(state, companyId, openItem.supplierInvoiceId);
+    const supplier = requireSupplierRecord(state, companyId, invoice.supplierId);
+    if (invoice.status !== "posted") {
+      throw createError(409, "supplier_invoice_not_posted", "Only posted supplier invoices can enter payment proposals.");
+    }
+    if (invoice.reviewRequired || supplier.paymentBlocked === true || invoice.paymentHold === true) {
+      throw createError(409, "payment_hold_active", "Supplier invoice is blocked from payment until risk or review is cleared.");
+    }
+    ensureSupplierPaymentDetails(supplier);
+
+    const journalEntry = postApLifecycleJournal({
+      ledgerPlatform,
+      companyId: openItem.companyId,
+      journalDate: openItem.dueOn,
+      actorId,
+      sourceId: `${paymentOrderId}:reserve`,
+      idempotencyKey: `ap_payment_reserve:${openItem.apOpenItemId}:${paymentOrderId}`,
+      description: `AP payment reserve ${invoice.externalInvoiceRef}`,
+      metadataJson: {
+        pipelineStage: "ap_payment_reserve",
+        apOpenItemId: openItem.apOpenItemId,
+        paymentOrderId,
+        paymentProposalId
+      },
+      lines: mergeJournalLines([
+        {
+          accountNumber: resolveLiabilityAccountNumber(supplier),
+          debitAmount: openItem.openAmount,
+          creditAmount: 0,
+          dimensionJson: {}
+        },
+        {
+          accountNumber: "2450",
+          debitAmount: 0,
+          creditAmount: openItem.openAmount,
+          dimensionJson: {}
+        }
+      ])
+    });
+
+    openItem.status = "reserved";
+    openItem.reservedAmount = openItem.openAmount;
+    openItem.paymentProposalId = normalizeOptionalText(paymentProposalId);
+    openItem.paymentOrderId = requireText(paymentOrderId, "payment_order_id_required");
+    openItem.lastPaymentOrderId = openItem.paymentOrderId;
+    openItem.lastReservationJournalEntryId = journalEntry.journalEntryId;
+    openItem.updatedAt = nowIso(clock);
+
+    invoice.status = "scheduled_for_payment";
+    invoice.updatedAt = nowIso(clock);
+
+    pushAudit(state, clock, {
+      companyId: openItem.companyId,
+      actorId,
+      correlationId,
+      action: "ap.open_item.reserved",
+      entityType: "ap_open_item",
+      entityId: openItem.apOpenItemId,
+      explanation: `Reserved AP item ${openItem.apOpenItemId} into payment order ${paymentOrderId}.`
+    });
+
+    return {
+      openItem: copy(openItem),
+      invoice: presentSupplierInvoice(state, invoice),
+      journalEntryId: journalEntry.journalEntryId,
+      idempotentReplay: false
+    };
+  }
+
+  function releaseApOpenItemReservation({
+    companyId,
+    apOpenItemId,
+    paymentOrderId,
+    actorId = "system",
+    correlationId = crypto.randomUUID(),
+    reasonCode = "payment_rejected"
+  } = {}) {
+    const openItem = requireApOpenItemRecord(state, companyId, apOpenItemId);
+    if (openItem.status !== "reserved") {
+      throw createError(409, "ap_open_item_not_reserved", "Only reserved AP items can be released from payment.");
+    }
+    if (paymentOrderId && openItem.paymentOrderId !== paymentOrderId) {
+      throw createError(409, "payment_order_scope_mismatch", "Reservation belongs to another payment order.");
+    }
+    const invoice = requireSupplierInvoiceRecord(state, companyId, openItem.supplierInvoiceId);
+    const supplier = requireSupplierRecord(state, companyId, invoice.supplierId);
+    const resolvedPaymentOrderId = openItem.paymentOrderId || requireText(paymentOrderId, "payment_order_id_required");
+
+    const journalEntry = postApLifecycleJournal({
+      ledgerPlatform,
+      companyId: openItem.companyId,
+      journalDate: nowIso(clock).slice(0, 10),
+      actorId,
+      sourceId: `${resolvedPaymentOrderId}:reject`,
+      idempotencyKey: `ap_payment_release:${openItem.apOpenItemId}:${resolvedPaymentOrderId}:${reasonCode}`,
+      description: `AP payment release ${invoice.externalInvoiceRef}`,
+      metadataJson: {
+        pipelineStage: "ap_payment_release",
+        apOpenItemId: openItem.apOpenItemId,
+        paymentOrderId: resolvedPaymentOrderId,
+        reasonCode
+      },
+      lines: mergeJournalLines([
+        {
+          accountNumber: "2450",
+          debitAmount: openItem.reservedAmount || openItem.openAmount,
+          creditAmount: 0,
+          dimensionJson: {}
+        },
+        {
+          accountNumber: resolveLiabilityAccountNumber(supplier),
+          debitAmount: 0,
+          creditAmount: openItem.reservedAmount || openItem.openAmount,
+          dimensionJson: {}
+        }
+      ])
+    });
+
+    openItem.status = "open";
+    openItem.reservedAmount = 0;
+    openItem.paymentProposalId = null;
+    openItem.paymentOrderId = null;
+    openItem.lastRejectionJournalEntryId = journalEntry.journalEntryId;
+    openItem.updatedAt = nowIso(clock);
+
+    invoice.status = "posted";
+    invoice.updatedAt = nowIso(clock);
+
+    pushAudit(state, clock, {
+      companyId: openItem.companyId,
+      actorId,
+      correlationId,
+      action: "ap.open_item.reservation_released",
+      entityType: "ap_open_item",
+      entityId: openItem.apOpenItemId,
+      explanation: `Released payment reservation ${resolvedPaymentOrderId} for AP item ${openItem.apOpenItemId}.`
+    });
+
+    return {
+      openItem: copy(openItem),
+      invoice: presentSupplierInvoice(state, invoice),
+      journalEntryId: journalEntry.journalEntryId
+    };
+  }
+
+  function settleApOpenItem({
+    companyId,
+    apOpenItemId,
+    paymentOrderId,
+    bankAccountNumber,
+    bankEventId = null,
+    bookedOn = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const openItem = requireApOpenItemRecord(state, companyId, apOpenItemId);
+    if (openItem.status === "paid" && bankEventId && openItem.lastBankEventId === bankEventId) {
+      return {
+        openItem: copy(openItem),
+        invoice: presentSupplierInvoice(state, requireSupplierInvoiceRecord(state, companyId, openItem.supplierInvoiceId)),
+        journalEntryId: openItem.lastSettlementJournalEntryId,
+        idempotentReplay: true
+      };
+    }
+    if (openItem.status !== "reserved") {
+      throw createError(409, "ap_open_item_not_reserved", "Only reserved AP items can be settled from bank booking.");
+    }
+    if (paymentOrderId && openItem.paymentOrderId !== paymentOrderId) {
+      throw createError(409, "payment_order_scope_mismatch", "Reserved AP item belongs to another payment order.");
+    }
+    const invoice = requireSupplierInvoiceRecord(state, companyId, openItem.supplierInvoiceId);
+    const resolvedBookedOn = normalizeDate(bookedOn || nowIso(clock).slice(0, 10), "payment_booked_date_invalid");
+    const journalEntry = postApLifecycleJournal({
+      ledgerPlatform,
+      companyId: openItem.companyId,
+      journalDate: resolvedBookedOn,
+      actorId,
+      sourceId: `${openItem.paymentOrderId || paymentOrderId}:book`,
+      idempotencyKey: `ap_payment_settle:${openItem.apOpenItemId}:${openItem.paymentOrderId || paymentOrderId}:${resolvedBookedOn}`,
+      description: `AP payment settled ${invoice.externalInvoiceRef}`,
+      metadataJson: {
+        pipelineStage: "ap_payment_settlement",
+        apOpenItemId: openItem.apOpenItemId,
+        paymentOrderId: openItem.paymentOrderId || paymentOrderId,
+        bankEventId
+      },
+      lines: mergeJournalLines([
+        {
+          accountNumber: "2450",
+          debitAmount: openItem.reservedAmount || openItem.openAmount,
+          creditAmount: 0,
+          dimensionJson: {}
+        },
+        {
+          accountNumber: requireText(bankAccountNumber, "bank_account_number_required"),
+          debitAmount: 0,
+          creditAmount: openItem.reservedAmount || openItem.openAmount,
+          dimensionJson: {}
+        }
+      ])
+    });
+
+    openItem.paidAmount = roundMoney(openItem.paidAmount + openItem.openAmount);
+    openItem.openAmount = 0;
+    openItem.reservedAmount = 0;
+    openItem.status = "paid";
+    openItem.closedAt = `${resolvedBookedOn}T00:00:00.000Z`;
+    openItem.lastBankEventId = normalizeOptionalText(bankEventId);
+    openItem.lastSettlementJournalEntryId = journalEntry.journalEntryId;
+    openItem.updatedAt = nowIso(clock);
+
+    invoice.status = "paid";
+    invoice.paidAt = nowIso(clock);
+    invoice.updatedAt = nowIso(clock);
+
+    pushAudit(state, clock, {
+      companyId: openItem.companyId,
+      actorId,
+      correlationId,
+      action: "ap.open_item.settled",
+      entityType: "ap_open_item",
+      entityId: openItem.apOpenItemId,
+      explanation: `Settled AP item ${openItem.apOpenItemId} from bank booking ${bankEventId || "manual"}.`
+    });
+
+    return {
+      openItem: copy(openItem),
+      invoice: presentSupplierInvoice(state, invoice),
+      journalEntryId: journalEntry.journalEntryId,
+      idempotentReplay: false
+    };
+  }
+
+  function reopenApOpenItem({
+    companyId,
+    apOpenItemId,
+    paymentOrderId = null,
+    bankAccountNumber,
+    bankEventId,
+    returnedOn = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const openItem = requireApOpenItemRecord(state, companyId, apOpenItemId);
+    if (openItem.status === "open" && bankEventId && openItem.lastBankEventId === bankEventId) {
+      return {
+        openItem: copy(openItem),
+        invoice: presentSupplierInvoice(state, requireSupplierInvoiceRecord(state, companyId, openItem.supplierInvoiceId)),
+        journalEntryId: openItem.lastReturnJournalEntryId,
+        idempotentReplay: true
+      };
+    }
+    if (openItem.status !== "paid") {
+      throw createError(409, "ap_open_item_not_paid", "Only paid AP items can be reopened from a bank return.");
+    }
+    const invoice = requireSupplierInvoiceRecord(state, companyId, openItem.supplierInvoiceId);
+    const supplier = requireSupplierRecord(state, companyId, invoice.supplierId);
+    const resolvedReturnedOn = normalizeDate(returnedOn || nowIso(clock).slice(0, 10), "payment_return_date_invalid");
+    const journalEntry = postApLifecycleJournal({
+      ledgerPlatform,
+      companyId: openItem.companyId,
+      journalDate: resolvedReturnedOn,
+      actorId,
+      sourceId: `${openItem.lastPaymentOrderId || openItem.paymentOrderId || paymentOrderId}:return`,
+      idempotencyKey: `ap_payment_return:${openItem.apOpenItemId}:${bankEventId || openItem.lastPaymentOrderId || paymentOrderId}`,
+      description: `AP payment returned ${invoice.externalInvoiceRef}`,
+      metadataJson: {
+        pipelineStage: "ap_payment_return",
+        apOpenItemId: openItem.apOpenItemId,
+        paymentOrderId: openItem.lastPaymentOrderId || openItem.paymentOrderId || paymentOrderId,
+        bankEventId
+      },
+      lines: mergeJournalLines([
+        {
+          accountNumber: requireText(bankAccountNumber, "bank_account_number_required"),
+          debitAmount: openItem.originalAmount || invoice.grossAmount,
+          creditAmount: 0,
+          dimensionJson: {}
+        },
+        {
+          accountNumber: resolveLiabilityAccountNumber(supplier),
+          debitAmount: 0,
+          creditAmount: openItem.originalAmount || invoice.grossAmount,
+          dimensionJson: {}
+        }
+      ])
+    });
+
+    openItem.openAmount = openItem.originalAmount || invoice.grossAmount;
+    openItem.paidAmount = 0;
+    openItem.reservedAmount = 0;
+    openItem.status = "open";
+    openItem.paymentProposalId = null;
+    openItem.paymentOrderId = null;
+    openItem.closedAt = null;
+    openItem.lastBankEventId = requireText(bankEventId, "bank_event_id_required");
+    openItem.lastReturnJournalEntryId = journalEntry.journalEntryId;
+    openItem.updatedAt = nowIso(clock);
+
+    invoice.status = "posted";
+    invoice.paidAt = null;
+    invoice.updatedAt = nowIso(clock);
+
+    pushAudit(state, clock, {
+      companyId: openItem.companyId,
+      actorId,
+      correlationId,
+      action: "ap.open_item.reopened",
+      entityType: "ap_open_item",
+      entityId: openItem.apOpenItemId,
+      explanation: `Reopened AP item ${openItem.apOpenItemId} from returned payment ${bankEventId}.`
+    });
+
+    return {
+      openItem: copy(openItem),
+      invoice: presentSupplierInvoice(state, invoice),
+      journalEntryId: journalEntry.journalEntryId,
+      idempotentReplay: false
+    };
   }
 
   function snapshotAp() {
@@ -1322,6 +1777,15 @@ function requireSupplierInvoiceRecord(state, companyId, supplierInvoiceId) {
   return invoice;
 }
 
+function requireApOpenItemRecord(state, companyId, apOpenItemId) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const openItem = state.apOpenItems.get(requireText(apOpenItemId, "ap_open_item_id_required"));
+  if (!openItem || openItem.companyId !== resolvedCompanyId) {
+    throw createError(404, "ap_open_item_not_found", "AP open item was not found.");
+  }
+  return openItem;
+}
+
 function presentSupplierInvoice(state, invoice) {
   const varianceIds = state.supplierInvoiceVarianceIdsByInvoice.get(invoice.supplierInvoiceId) || [];
   const variances = varianceIds
@@ -1334,6 +1798,71 @@ function presentSupplierInvoice(state, invoice) {
     variances,
     matchRun
   });
+}
+
+function buildInvoiceApprovalSteps({ orgAuthPlatform, supplier, actorId = "system", clock = () => new Date() }) {
+  if (!supplier?.attestChainId || !orgAuthPlatform || typeof orgAuthPlatform.getApprovalChain !== "function") {
+    return [];
+  }
+  const chain = orgAuthPlatform.getApprovalChain({
+    approvalChainId: supplier.attestChainId
+  });
+  return (chain.steps || []).map((step) => ({
+    approvalChainStepId: step.approvalChainStepId,
+    stepOrder: step.stepOrder,
+    approverRoleCode: step.approverRoleCode || null,
+    approverCompanyUserId: step.approverCompanyUserId || null,
+    delegationAllowed: step.delegationAllowed !== false,
+    label: step.metadataJson?.label || `step_${step.stepOrder}`,
+    status: "pending",
+    actedAt: null,
+    actedByActorId: null,
+    actedByCompanyUserId: null,
+    actedByRoleCode: null,
+    createdByActorId: actorId,
+    createdAt: nowIso(clock),
+    updatedAt: nowIso(clock)
+  }));
+}
+
+function hasPendingInvoiceApprovalSteps(invoice) {
+  return (invoice.approvalSteps || []).some((step) => step.status === "pending");
+}
+
+function getNextPendingInvoiceApprovalStep(invoice) {
+  return [...(invoice.approvalSteps || [])]
+    .sort((left, right) => Number(left.stepOrder || 0) - Number(right.stepOrder || 0))
+    .find((step) => step.status === "pending") || null;
+}
+
+function canActorApproveStep({ step, actorCompanyUserId = null, actorRoleCodes = [] }) {
+  const resolvedActorCompanyUserId = normalizeOptionalText(actorCompanyUserId);
+  const roleCodes = Array.isArray(actorRoleCodes) ? actorRoleCodes.map((value) => normalizeOptionalText(value)).filter(Boolean) : [];
+  if (step.approverCompanyUserId && resolvedActorCompanyUserId === step.approverCompanyUserId) {
+    return true;
+  }
+  if (step.approverRoleCode && roleCodes.includes(step.approverRoleCode)) {
+    return true;
+  }
+  return false;
+}
+
+function resolveActedByRoleCode(step, actorRoleCodes = []) {
+  const roleCodes = Array.isArray(actorRoleCodes) ? actorRoleCodes.map((value) => normalizeOptionalText(value)).filter(Boolean) : [];
+  if (step.approverRoleCode && roleCodes.includes(step.approverRoleCode)) {
+    return step.approverRoleCode;
+  }
+  return roleCodes[0] || null;
+}
+
+function resolveInvoiceApprovalStatus({ invoice, reviewRequired }) {
+  if (reviewRequired) {
+    return "pending_approval";
+  }
+  if (hasPendingInvoiceApprovalSteps(invoice)) {
+    return "pending_approval";
+  }
+  return "approved";
 }
 
 function resolveSupplierForInvoiceIngest({ state, companyId, supplierId = null, supplierNo = null, ocrFields = {} }) {
@@ -1800,6 +2329,54 @@ function resolveLiabilityAccountNumber(supplier) {
     return DEFAULT_LIABILITY_ACCOUNT_BY_REGION.EU;
   }
   return DEFAULT_LIABILITY_ACCOUNT_BY_REGION.NON_EU;
+}
+
+function ensureSupplierPaymentDetails(supplier) {
+  if (!supplier.bankgiro && !supplier.plusgiro && !supplier.iban) {
+    throw createError(409, "supplier_payment_details_missing", "Supplier is missing payment details required for bank export.");
+  }
+}
+
+function postApLifecycleJournal({
+  ledgerPlatform,
+  companyId,
+  journalDate,
+  actorId,
+  sourceId,
+  idempotencyKey,
+  description,
+  metadataJson = {},
+  lines
+}) {
+  if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+    throw createError(500, "ledger_platform_missing", "Ledger platform is required for AP payment lifecycle postings.");
+  }
+  const created = ledgerPlatform.createJournalEntry({
+    companyId,
+    journalDate,
+    voucherSeriesCode: "E",
+    sourceType: "AP_PAYMENT",
+    sourceId: requireText(sourceId, "source_id_required"),
+    actorId,
+    idempotencyKey: requireText(idempotencyKey, "idempotency_key_required"),
+    description: requireText(description, "journal_description_required"),
+    metadataJson: {
+      ...copy(metadataJson),
+      pipelineArea: "ap_payment"
+    },
+    lines
+  });
+  ledgerPlatform.validateJournalEntry({
+    companyId,
+    journalEntryId: created.journalEntry.journalEntryId,
+    actorId
+  });
+  const posted = ledgerPlatform.postJournalEntry({
+    companyId,
+    journalEntryId: created.journalEntry.journalEntryId,
+    actorId
+  });
+  return posted.journalEntry;
 }
 
 function buildSupplierInvoiceFingerprint({

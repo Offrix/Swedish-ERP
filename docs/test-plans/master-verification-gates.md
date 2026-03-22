@@ -164,10 +164,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 ## Gate for FAS 4 â€” Momsmotor
 
 ### AllmÃ¤nt krav
-- [ ] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [ ] Demo kan kÃ¶ras pÃ¥ seed-data
+- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
+- [x] Demo kan kÃ¶ras pÃ¥ seed-data
 - [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
+- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
 
 ### 4.1 Momsmasterdata och beslutstrÃ¤d
 - [x] Alla transaktionstyper fÃ¥r ett spÃ¥rbart momsbeslut
@@ -234,10 +234,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [x] Prompt `P6-02` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 6.3 Attest, bankintegration och utbetalning
-- [ ] ObehÃ¶riga kan inte betala
-- [ ] Utbetalningar bokfÃ¶rs korrekt
-- [ ] Returer kan Ã¥terimporteras
-- [ ] Prompt `P6-03` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] ObehÃ¶riga kan inte betala
+- [x] Utbetalningar bokfÃ¶rs korrekt
+- [x] Returer kan Ã¥terimporteras
+- [x] Prompt `P6-03` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ## Gate for FAS 7 â€” Tidportal, HR-bas och anstÃ¤lldportal
 

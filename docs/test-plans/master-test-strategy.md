@@ -34,6 +34,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - öppna poster, delbetalningar, dunningavgifter, bankmatchning och aging-buckets i kundreskontra
 - leverantörsimport-idempotens, bankdetaljspärrar, PO-defaults och mottagningsdubbletter i AP
 - OCR-baserad leverantörsfakturaingest, fler-rads-kodning, momsförslag och 2-vägs-/3-vägsmatchning i AP
+- flerstegsattest, betalningsförslag, 2450-reservation, bankbokning och returreplay i AP
 - search ranking och permissions trimming-beslut
 - retry/backoff-beräkningar och jobbstate
 - feature flag-upplösning och kill-switch-beslut
@@ -96,6 +97,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - disable-flagga och AR-reskontraflöde med delbetalning, felmatchningsreversal, dunning hold och aging snapshot
 - disable-flagga och AP-masterdataflöde med leverantör, PO, mottagning och receipt-dubblettskydd
 - disable-flagga och AP-invoiceflöde med OCR-ingest, fler-rads-postning och variansblockerad postning
+- disable-flagga och AP-betalflöde med attest, export, bankbokning och idempotent retur
 
 ### 8. Performance tests
 - load på dokumentingest
@@ -239,6 +241,15 @@ En fas är inte klar förrän:
 - mottagningsdubbletter återanvänder samma receipt vid identisk extern referens eller identisk payload
 - kumulativ mottagen kvantitet kan inte passera tillåten överleveranstolerans
 - invoice-receipt-link går att reproducera från seed och demo-seed
+
+#### Leverantörsfakturor, attest och betalningar
+- minst två atteststeg kan stoppa postning mellan steg ett och steg två
+- endast rätt atteststeg kan godkänna nästa steg i kedjan
+- betalningsförslag kan inte exporteras utan föregående godkännande
+- reservation bokar AP-skuld mot 2450 utan att minska bankkontot
+- bankbokning flyttar saldo från 2450 till valt bankkonto
+- retur återöppnar AP-post och nollställer paid-status utan dubbla journaler vid replay
+- seed visar bokad utbetalning och demo-seed visar returnerad betalning
 
 #### Lön
 - AGI kan genereras utan manuell redigering

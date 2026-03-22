@@ -29,6 +29,7 @@ Helper scripts for local setup, structure verification and phased rollout checks
 - `verify-phase5-ar-receivables.ps1`: validates required FAS 5.3 open-item, allocation, dunning, writeoff and aging artifacts.
 - `verify-phase6-ap-masterdata.ps1`: validates required FAS 6.1 supplier, purchase-order, receipt and import artifacts.
 - `verify-phase6-ap-invoice-matching.ps1`: validates required FAS 6.2 supplier-invoice ingest, OCR line extraction, matching and variance artifacts.
+- `verify-phase6-ap-payments.ps1`: validates required FAS 6.3 approval-chain, payment-proposal, payout-booking and bank-return artifacts.
 - `verify-db.ps1`: validates migration file naming.
 - `new-migration.ps1`: creates timestamped migration file in `packages/db/migrations`.
 - `dev-up.ps1`: starts docker infra.

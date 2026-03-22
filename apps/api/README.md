@@ -140,8 +140,24 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/ap/invoices?companyId=...`
 - `POST /v1/ap/invoices/ingest`
 - `GET /v1/ap/invoices/:supplierInvoiceId?companyId=...`
+- `POST /v1/ap/invoices/:supplierInvoiceId/approve`
 - `POST /v1/ap/invoices/:supplierInvoiceId/match`
 - `POST /v1/ap/invoices/:supplierInvoiceId/post`
+- `GET /v1/ap/open-items?companyId=...`
+- `GET /v1/ap/open-items/:apOpenItemId?companyId=...`
+- `GET /v1/banking/accounts?companyId=...`
+- `POST /v1/banking/accounts`
+- `GET /v1/banking/accounts/:bankAccountId?companyId=...`
+- `GET /v1/banking/payment-proposals?companyId=...`
+- `POST /v1/banking/payment-proposals`
+- `GET /v1/banking/payment-proposals/:paymentProposalId?companyId=...`
+- `POST /v1/banking/payment-proposals/:paymentProposalId/approve`
+- `POST /v1/banking/payment-proposals/:paymentProposalId/export`
+- `POST /v1/banking/payment-proposals/:paymentProposalId/submit`
+- `POST /v1/banking/payment-proposals/:paymentProposalId/accept`
+- `POST /v1/banking/payment-orders/:paymentOrderId/book`
+- `POST /v1/banking/payment-orders/:paymentOrderId/reject`
+- `POST /v1/banking/payment-orders/:paymentOrderId/return`
 
 ## Disable strategy
 
@@ -159,4 +175,4 @@ Set `PHASE4_VAT_ENABLED=false` to return `503` for FAS 4.1, 4.2 and 4.3 VAT rout
 
 Set `PHASE5_AR_ENABLED=false` to return `503` for FAS 5 AR routes while keeping the rest of the API process alive.
 
-Set `PHASE6_AP_ENABLED=false` to return `503` for FAS 6.1 and 6.2 AP routes while keeping the rest of the API process alive.
+Set `PHASE6_AP_ENABLED=false` to return `503` for FAS 6.1, 6.2 and 6.3 AP and banking routes while keeping the rest of the API process alive.

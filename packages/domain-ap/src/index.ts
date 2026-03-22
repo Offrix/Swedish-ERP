@@ -14,11 +14,14 @@ export type ApSupplierInvoiceStatus =
   | "pending_approval"
   | "approved"
   | "posted"
+  | "scheduled_for_payment"
+  | "paid"
   | "credited"
   | "voided";
 export type ApDuplicateStatus = "not_checked" | "exact_duplicate" | "suspect_duplicate" | "cleared";
 export type ApMatchMode = "none" | "two_way" | "three_way";
 export type ApMatchVarianceStatus = "open" | "accepted" | "corrected" | "closed";
+export type ApInvoiceApprovalStatus = "not_required" | "pending" | "approved";
 
 export interface ApSupplier {
   readonly supplierId: string;
@@ -207,17 +210,48 @@ export interface ApSupplierInvoiceMatchRun {
   readonly createdAt: string;
 }
 
+export interface ApSupplierInvoiceApprovalStep {
+  readonly approvalChainStepId: string;
+  readonly stepOrder: number;
+  readonly approverRoleCode: string | null;
+  readonly approverCompanyUserId: string | null;
+  readonly delegationAllowed: boolean;
+  readonly label: string;
+  readonly status: "pending" | "approved" | "rejected";
+  readonly actedAt: string | null;
+  readonly actedByActorId: string | null;
+  readonly actedByCompanyUserId: string | null;
+  readonly actedByRoleCode: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface ApOpenItem {
   readonly apOpenItemId: string;
   readonly companyId: string;
   readonly supplierInvoiceId: string;
+  readonly originalAmount: number;
   readonly openAmount: number;
+  readonly reservedAmount: number;
+  readonly paidAmount: number;
   readonly dueOn: string;
   readonly status: string;
+  readonly paymentHold: boolean;
+  readonly paymentHoldReasonCodes: readonly string[];
+  readonly paymentProposalId: string | null;
+  readonly paymentOrderId: string | null;
+  readonly lastPaymentOrderId: string | null;
+  readonly lastBankEventId: string | null;
+  readonly lastReservationJournalEntryId: string | null;
+  readonly lastSettlementJournalEntryId: string | null;
+  readonly lastReturnJournalEntryId: string | null;
+  readonly lastRejectionJournalEntryId: string | null;
   readonly journalEntryId: string;
   readonly currencyCode: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly closedAt: string | null;
 }
 
 export interface ApSupplierInvoice {
@@ -246,6 +280,11 @@ export interface ApSupplierInvoice {
   readonly status: ApSupplierInvoiceStatus;
   readonly reviewRequired: boolean;
   readonly reviewQueueCodes: readonly string[];
+  readonly approvalChainId: string | null;
+  readonly approvalStatus: ApInvoiceApprovalStatus;
+  readonly approvalSteps: readonly ApSupplierInvoiceApprovalStep[];
+  readonly paymentHold: boolean;
+  readonly paymentHoldReasonCodes: readonly string[];
   readonly lines: readonly ApSupplierInvoiceLine[];
   readonly latestMatchRunId: string | null;
   readonly journalEntryId: string | null;
@@ -256,6 +295,7 @@ export interface ApSupplierInvoice {
   readonly approvedAt: string | null;
   readonly approvedByActorId: string | null;
   readonly postedAt: string | null;
+  readonly paidAt: string | null;
   readonly variances?: readonly ApSupplierInvoiceVariance[];
   readonly matchRun?: ApSupplierInvoiceMatchRun | null;
 }
