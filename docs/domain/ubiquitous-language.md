@@ -572,6 +572,30 @@ Asynkront jobb som materialiserar rapport- eller objektdata till filformat som E
 ### Watermark
 Tydlig markering i export eller preview som anger att underlaget är preliminärt, omöjligt att signera eller ersatt av nyare version.
 
+### Projektbudget / Project Budget
+Versionerad plan fÃ¶r projektets framtida kostnader och intÃ¤kter uppdelad per period, kategori och vid behov resurs eller aktivitet.
+
+### Budgetversion / Budget Version
+GodkÃ¤nd och immutabel version av projektbudget som gÃ¤ller frÃ¥n ett visst datum och anvÃ¤nds i forecast och uppfÃ¶ljning.
+
+### ResursbelÃ¤ggning / Resource Allocation
+Planerad kapacitet fÃ¶r en viss anstÃ¤llning eller resurs i ett projekt fÃ¶r en period, inklusive planerade minuter, bill rate och cost rate.
+
+### GodkÃ¤nt vÃ¤rde / Approved Value
+Det vÃ¤rde som fÃ¥r anvÃ¤ndas fÃ¶r WIP-berÃ¤kning vid cutoffdatum baserat pÃ¥ fakturerbar tid eller godkÃ¤nd intÃ¤ktsbudget enligt projektets modell.
+
+### WIP-snapshot
+Materialiserad och hashad bild av projektets work in progress fÃ¶r ett givet cutoffdatum med approved value, fakturerat belopp och fÃ¶rklaringskoder.
+
+### Uppskjuten projektintÃ¤kt / Deferred Revenue in Projects
+Den del av redan fakturerat projektbelopp som Ã¤nnu inte fÃ¥r redovisas som intÃ¤kt enligt projektets aktuella modell.
+
+### Forecast at Completion
+BerÃ¤knat slututfall fÃ¶r projektets totala kostnad, intÃ¤kt och marginal givet faktiskt utfall till cutoffdatum och Ã¥terstÃ¥ende budget.
+
+### Resurslast / Resource Load
+Andel faktiskt arbetad eller bokad kapacitet mot planerad kapacitet fÃ¶r resurs eller projekt under en period, uttryckt i procent.
+
 ## Kommentarer och samarbete
 
 ### Kommentar

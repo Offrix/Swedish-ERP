@@ -129,6 +129,7 @@ export interface ArCommercialLine {
   readonly lineNumber: number;
   readonly itemId: string | null;
   readonly itemCode: string | null;
+  readonly projectId: string | null;
   readonly description: string;
   readonly quantity: number;
   readonly unitCode: string;

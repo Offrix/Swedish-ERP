@@ -501,7 +501,7 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 9.2 Resor, traktamente, kÃ¶rjournal och utlÃ¤gg
   - [x] 9.3 Pension, extra pension och lÃ¶nevÃ¤xling
 - [ ] **FAS 10 â€” Projekt, bygg, fÃ¤lt, lager och personalliggare**
-  - [ ] 10.1 Projekt, budget och uppfÃ¶ljning
+  - [x] 10.1 Projekt, budget och uppfÃ¶ljning
   - [ ] 10.2 Arbetsorder, serviceorder, fÃ¤ltapp och lager
   - [ ] 10.3 Byggspecifika regler: Ã„TA, HUS, omvÃ¤nd moms, personalliggare
 - [ ] **FAS 11 â€” Rapporter, byrÃ¥lÃ¤ge, mÃ¥nadsstÃ¤ngning och bokslut**
@@ -1001,15 +1001,15 @@ Ta systemet ut pÃ¥ arbetsplatsen med arbetsorder, material, Ã„TA, HUS, bygg
 ### 10.1 Projekt, budget och uppfÃ¶ljning
 
 **Bygg detta**
-- [ ] Projektbudget
-- [ ] WIP
-- [ ] projektmarginal
-- [ ] resursbelÃ¤ggning
+- [x] Projektbudget
+- [x] WIP
+- [x] projektmarginal
+- [x] resursbelÃ¤ggning
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] Projektkostnad inkluderar lÃ¶n, fÃ¶rmÃ¥ner, pension och resor
-- [ ] WIP kan stÃ¤mmas av mot fakturering
-- [ ] Forecast at completion fungerar
+- [x] Projektkostnad inkluderar lÃ¶n, fÃ¶rmÃ¥ner, pension och resor
+- [x] WIP kan stÃ¤mmas av mot fakturering
+- [x] Forecast at completion fungerar
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P10-01`.
 

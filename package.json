@@ -66,6 +66,7 @@
     "verify:phase8:payroll:posting": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase8-payroll-posting.ps1",
     "verify:phase9:benefits": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase9-benefits.ps1",
     "verify:phase9:travel": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase9-travel.ps1",
-    "verify:phase9:pension": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase9-pension.ps1"
+    "verify:phase9:pension": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase9-pension.ps1",
+    "verify:phase10:projects": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase10-projects.ps1"
   }
 }

@@ -114,6 +114,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - disable-flagga och benefitsflöde med förmånsregistrering, benefit-only warning, AGI-mappning och audit trail
 
 - disable-flagga och travelflode med traktamente, multilandregel, milersattning, utlagg, payrollkoppling och audit trail
+- disable-flagga och projektflÃ¶de med projektsetup, budgetversion, resursbelÃ¤ggning, payroll-backed actuals, AR-kopplad WIP och forecast snapshot
 ### 8. Performance tests
 - load på dokumentingest
 - load på AR/AP
@@ -323,6 +324,13 @@ En fas är inte klar förrän:
 - ITP1 månadsunderlag, ITP2 pensionsmedförande årslön och Fora-månadsrapport skiljs åt deterministiskt
 - extra pension och särskild löneskatt bokförs separat från grundpremie
 - providergruppering och due dates för Collectum och Fora är reproducerbara för samma period
+
+#### Projekt, budget och uppfÃ¶ljning
+- projektbudgeter versionshanteras med spÃ¥rbar auditkedja
+- projektkostnad inkluderar lÃ¶n, fÃ¶rmÃ¥ner, pension och resor med bÃ¥de explicit projektdimension och tidsbaserad fÃ¶rdelning
+- WIP kan Ã¥terskapas fÃ¶r samma cutoff och stÃ¤mmas av mot fakturering
+- forecast at completion och resource load Ã¤r reproducerbara fÃ¶r samma underlag
+- disable-flagga blockerar alla projekt-rutter utan att pÃ¥verka andra faser
 
 #### ROT/RUT
 - arbetskostnad skiljs från material/resa/admin

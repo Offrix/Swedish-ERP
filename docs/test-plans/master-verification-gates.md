@@ -320,16 +320,16 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 ## Gate for FAS 10 â€” Projekt, bygg, fÃ¤lt, lager och personalliggare
 
 ### AllmÃ¤nt krav
-- [ ] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [ ] Demo kan kÃ¶ras pÃ¥ seed-data
+- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
+- [x] Demo kan kÃ¶ras pÃ¥ seed-data
 - [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
+- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
 
 ### 10.1 Projekt, budget och uppfÃ¶ljning
-- [ ] Projektkostnad inkluderar lÃ¶n, fÃ¶rmÃ¥ner, pension och resor
-- [ ] WIP kan stÃ¤mmas av mot fakturering
-- [ ] Forecast at completion fungerar
-- [ ] Prompt `P10-01` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Projektkostnad inkluderar lÃ¶n, fÃ¶rmÃ¥ner, pension och resor
+- [x] WIP kan stÃ¤mmas av mot fakturering
+- [x] Forecast at completion fungerar
+- [x] Prompt `P10-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 10.2 Arbetsorder, serviceorder, fÃ¤ltapp och lager
 - [ ] Offline-sync tÃ¥l nÃ¤tavbrott

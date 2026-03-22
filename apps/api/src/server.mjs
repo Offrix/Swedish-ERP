@@ -56,6 +56,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase9BenefitsEnabled: flags.phase9BenefitsEnabled,
             phase9TravelEnabled: flags.phase9TravelEnabled,
             phase9PensionEnabled: flags.phase9PensionEnabled,
+            phase10ProjectsEnabled: flags.phase10ProjectsEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -198,6 +199,14 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/pension/reports",
               "/v1/pension/reconciliations",
               "/v1/pension/audit-events",
+              "/v1/projects",
+              "/v1/projects/:projectId",
+              "/v1/projects/:projectId/budgets",
+              "/v1/projects/:projectId/resource-allocations",
+              "/v1/projects/:projectId/cost-snapshots",
+              "/v1/projects/:projectId/wip-snapshots",
+              "/v1/projects/:projectId/forecast-snapshots",
+              "/v1/projects/:projectId/audit-events",
               "/v1/payroll/rule-packs",
               "/v1/payroll/statutory-profiles",
               "/v1/payroll/pay-items",
@@ -345,6 +354,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 9.3 pension routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase10ProjectsEnabled && isPhase101Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 10.1 project routes are disabled by configuration."
     });
     return;
   }
@@ -5537,6 +5554,372 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/projects") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listProjects({
+        companyId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/projects") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProject({
+        companyId,
+        projectId: body.projectId ?? null,
+        projectCode: body.projectCode ?? null,
+        projectReferenceCode: body.projectReferenceCode ?? null,
+        displayName: body.displayName,
+        customerId: body.customerId ?? null,
+        projectManagerEmployeeId: body.projectManagerEmployeeId ?? null,
+        startsOn: body.startsOn,
+        endsOn: body.endsOn ?? null,
+        currencyCode: body.currencyCode ?? "SEK",
+        status: body.status ?? "draft",
+        billingModelCode: body.billingModelCode ?? null,
+        revenueRecognitionModelCode: body.revenueRecognitionModelCode ?? null,
+        contractValueAmount: body.contractValueAmount ?? 0,
+        dimensionJson: body.dimensionJson || {},
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectMatch = matchPath(path, "/v1/projects/:projectId");
+  if (projectMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getProject({
+        companyId,
+        projectId: projectMatch.projectId
+      })
+    );
+    return;
+  }
+
+  const projectBudgetsMatch = matchPath(path, "/v1/projects/:projectId/budgets");
+  if (projectBudgetsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_budget_version",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listProjectBudgetVersions({
+        companyId,
+        projectId: projectBudgetsMatch.projectId
+      })
+    });
+    return;
+  }
+
+  if (projectBudgetsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_budget_version",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectBudgetVersion({
+        companyId,
+        projectId: projectBudgetsMatch.projectId,
+        budgetName: body.budgetName,
+        validFrom: body.validFrom,
+        lines: body.lines || [],
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectResourceAllocationsMatch = matchPath(path, "/v1/projects/:projectId/resource-allocations");
+  if (projectResourceAllocationsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_resource_allocation",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listProjectResourceAllocations({
+        companyId,
+        projectId: projectResourceAllocationsMatch.projectId,
+        reportingPeriod: url.searchParams.get("reportingPeriod") || null,
+        employmentId: url.searchParams.get("employmentId") || null
+      })
+    });
+    return;
+  }
+
+  if (projectResourceAllocationsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_resource_allocation",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectResourceAllocation({
+        companyId,
+        projectId: projectResourceAllocationsMatch.projectId,
+        employmentId: body.employmentId,
+        reportingPeriod: body.reportingPeriod,
+        plannedMinutes: body.plannedMinutes,
+        billableMinutes: body.billableMinutes ?? null,
+        billRateAmount: body.billRateAmount,
+        costRateAmount: body.costRateAmount,
+        activityCode: body.activityCode ?? null,
+        status: body.status ?? "planned",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectCostSnapshotsMatch = matchPath(path, "/v1/projects/:projectId/cost-snapshots");
+  if (projectCostSnapshotsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_cost_snapshot",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listProjectCostSnapshots({
+        companyId,
+        projectId: projectCostSnapshotsMatch.projectId
+      })
+    });
+    return;
+  }
+
+  if (projectCostSnapshotsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_cost_snapshot",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.materializeProjectCostSnapshot({
+        companyId,
+        projectId: projectCostSnapshotsMatch.projectId,
+        cutoffDate: body.cutoffDate,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectWipSnapshotsMatch = matchPath(path, "/v1/projects/:projectId/wip-snapshots");
+  if (projectWipSnapshotsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_wip_snapshot",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listProjectWipSnapshots({
+        companyId,
+        projectId: projectWipSnapshotsMatch.projectId
+      })
+    });
+    return;
+  }
+
+  if (projectWipSnapshotsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_wip_snapshot",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.materializeProjectWipSnapshot({
+        companyId,
+        projectId: projectWipSnapshotsMatch.projectId,
+        cutoffDate: body.cutoffDate,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectForecastSnapshotsMatch = matchPath(path, "/v1/projects/:projectId/forecast-snapshots");
+  if (projectForecastSnapshotsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_forecast_snapshot",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listProjectForecastSnapshots({
+        companyId,
+        projectId: projectForecastSnapshotsMatch.projectId
+      })
+    });
+    return;
+  }
+
+  if (projectForecastSnapshotsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_forecast_snapshot",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.materializeProjectForecastSnapshot({
+        companyId,
+        projectId: projectForecastSnapshotsMatch.projectId,
+        cutoffDate: body.cutoffDate,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectAuditEventsMatch = matchPath(path, "/v1/projects/:projectId/audit-events");
+  if (projectAuditEventsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listProjectAuditEvents({
+        companyId,
+        projectId: projectAuditEventsMatch.projectId
+      })
+    });
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/payroll/pay-items") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -6408,6 +6791,10 @@ function isPhase93Route(path) {
   return path.startsWith("/v1/pension");
 }
 
+function isPhase101Route(path) {
+  return path.startsWith("/v1/projects");
+}
+
 async function readJsonBody(req, allowEmpty = false) {
   const chunks = [];
   for await (const chunk of req) {
@@ -6478,12 +6865,13 @@ function readFeatureFlags(env) {
     phase7HrEnabled: String(env.PHASE7_HR_ENABLED || "true").toLowerCase() !== "false",
     phase7TimeEnabled: String(env.PHASE7_TIME_ENABLED || "true").toLowerCase() !== "false",
     phase7AbsenceEnabled: String(env.PHASE7_ABSENCE_ENABLED || "true").toLowerCase() !== "false",
-    phase8PayrollEnabled: String(env.PHASE8_PAYROLL_ENABLED || "true").toLowerCase() !== "false",
-    phase9BenefitsEnabled: String(env.PHASE9_BENEFITS_ENABLED || "true").toLowerCase() !== "false",
-    phase9TravelEnabled: String(env.PHASE9_TRAVEL_ENABLED || "true").toLowerCase() !== "false",
-    phase9PensionEnabled: String(env.PHASE9_PENSION_ENABLED || "true").toLowerCase() !== "false"
-  };
-}
+      phase8PayrollEnabled: String(env.PHASE8_PAYROLL_ENABLED || "true").toLowerCase() !== "false",
+      phase9BenefitsEnabled: String(env.PHASE9_BENEFITS_ENABLED || "true").toLowerCase() !== "false",
+      phase9TravelEnabled: String(env.PHASE9_TRAVEL_ENABLED || "true").toLowerCase() !== "false",
+      phase9PensionEnabled: String(env.PHASE9_PENSION_ENABLED || "true").toLowerCase() !== "false",
+      phase10ProjectsEnabled: String(env.PHASE10_PROJECTS_ENABLED || "true").toLowerCase() !== "false"
+    };
+  }
 
 if (isMainModule(import.meta.url)) {
   const runtime = await startApiServer();

@@ -2879,16 +2879,17 @@ function normalizeCommercialLine({ state, vatPlatform, companyId, currencyCode, 
   const description = requireText(line.description || item?.description || `Line ${lineNumber}`, "commercial_line_description_required");
   const revenueAccountNumber = normalizeAccountNumber(line.revenueAccountNumber || item?.revenueAccountNumber);
   const vatCode = ensureVatCodeExists(vatPlatform, companyId, line.vatCode || item?.vatCode);
-  return {
-    lineId: crypto.randomUUID(),
-    lineNumber,
-    itemId: item?.arItemId || null,
-    itemCode: item?.itemCode || normalizeOptionalText(line.itemCode),
-    description,
-    quantity,
-    unitCode: requireText(line.unitCode || item?.unitCode || "ea", "commercial_line_unit_required"),
-    unitPrice,
-    lineAmount: roundMoney(quantity * unitPrice),
+    return {
+      lineId: crypto.randomUUID(),
+      lineNumber,
+      itemId: item?.arItemId || null,
+      itemCode: item?.itemCode || normalizeOptionalText(line.itemCode),
+      projectId: normalizeOptionalText(line.projectId),
+      description,
+      quantity,
+      unitCode: requireText(line.unitCode || item?.unitCode || "ea", "commercial_line_unit_required"),
+      unitPrice,
+      lineAmount: roundMoney(quantity * unitPrice),
     revenueAccountNumber,
     vatCode,
     recurringFlag: line.recurringFlag === true || item?.recurringFlag === true,
