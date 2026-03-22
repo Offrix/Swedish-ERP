@@ -1,6 +1,6 @@
 # API
 
-HTTP baseline plus phased domain routes through FAS 9.2.
+HTTP baseline plus phased domain routes through FAS 9.3.
 
 ## Start
 
@@ -208,6 +208,19 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/travel/claims`
 - `GET /v1/travel/claims/:travelClaimId?companyId=...`
 - `GET /v1/travel/audit-events?companyId=...&travelClaimId=...`
+- `GET /v1/pension/plans?companyId=...`
+- `GET /v1/pension/enrollments?companyId=...&employmentId=...`
+- `POST /v1/pension/enrollments`
+- `POST /v1/pension/salary-exchange/simulations`
+- `GET /v1/pension/salary-exchange-agreements?companyId=...&employmentId=...`
+- `POST /v1/pension/salary-exchange-agreements`
+- `GET /v1/pension/events?companyId=...&reportingPeriod=...&employmentId=...`
+- `GET /v1/pension/events/:pensionEventId?companyId=...`
+- `GET /v1/pension/reports?companyId=...&reportingPeriod=...&providerCode=...`
+- `POST /v1/pension/reports`
+- `GET /v1/pension/reconciliations?companyId=...&reportingPeriod=...&providerCode=...`
+- `POST /v1/pension/reconciliations`
+- `GET /v1/pension/audit-events?companyId=...&employmentId=...`
 - `GET /v1/payroll/rule-packs?companyId=...&effectiveDate=...`
 - `GET /v1/payroll/statutory-profiles?companyId=...`
 - `POST /v1/payroll/statutory-profiles`
@@ -269,3 +282,4 @@ Set `PHASE8_PAYROLL_ENABLED=false` to return `503` for FAS 8 payroll routes whil
 
 Set `PHASE9_BENEFITS_ENABLED=false` to return `503` for FAS 9.1 benefits routes while keeping the rest of the API process alive.
 Set `PHASE9_TRAVEL_ENABLED=false` to return `503` for FAS 9.2 travel routes while keeping the rest of the API process alive.
+Set `PHASE9_PENSION_ENABLED=false` to return `503` for FAS 9.3 pension routes while keeping the rest of the API process alive.

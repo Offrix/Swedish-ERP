@@ -496,10 +496,10 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 8.1 LÃ¶nearter, lÃ¶nekalender och lÃ¶nekÃ¶rning
   - [x] 8.2 Skatt, arbetsgivaravgifter, SINK och AGI
   - [x] 8.3 LÃ¶nebokfÃ¶ring och utbetalning
-- [ ] **FAS 9 â€” FÃ¶rmÃ¥ner, resor, traktamente, pension och lÃ¶nevÃ¤xling**
+- [x] **FAS 9 â€” FÃ¶rmÃ¥ner, resor, traktamente, pension och lÃ¶nevÃ¤xling**
   - [x] 9.1 FÃ¶rmÃ¥nsmotor
   - [x] 9.2 Resor, traktamente, kÃ¶rjournal och utlÃ¤gg
-  - [ ] 9.3 Pension, extra pension och lÃ¶nevÃ¤xling
+  - [x] 9.3 Pension, extra pension och lÃ¶nevÃ¤xling
 - [ ] **FAS 10 â€” Projekt, bygg, fÃ¤lt, lager och personalliggare**
   - [ ] 10.1 Projekt, budget och uppfÃ¶ljning
   - [ ] 10.2 Arbetsorder, serviceorder, fÃ¤ltapp och lager
@@ -982,15 +982,15 @@ Bygg de mest regelstyrda HR-ekonomiflÃ¶dena ovanpÃ¥ stabil lÃ¶nekÃ¤rna.
 ### 9.3 Pension, extra pension och lÃ¶nevÃ¤xling
 
 **Bygg detta**
-- [ ] ITP/Fora-stÃ¶d
-- [ ] Extra pension
-- [ ] LÃ¶nevÃ¤xling
-- [ ] Pensionsrapportering
+- [x] ITP/Fora-stÃ¶d
+- [x] Extra pension
+- [x] LÃ¶nevÃ¤xling
+- [x] Pensionsrapportering
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] Rapportunderlag per kollektivavtal stÃ¤mmer
-- [ ] LÃ¶nevÃ¤xling varnar under trÃ¶skel
-- [ ] Pension bokfÃ¶rs och avstÃ¤ms
+- [x] Rapportunderlag per kollektivavtal stÃ¤mmer
+- [x] LÃ¶nevÃ¤xling varnar under trÃ¶skel
+- [x] Pension bokfÃ¶rs och avstÃ¤ms
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P9-03`.
 

@@ -1,0 +1,103 @@
+INSERT INTO employee_pension_enrollments (
+  pension_enrollment_id,
+  company_id,
+  employee_id,
+  employment_id,
+  pension_plan_id,
+  plan_code,
+  provider_code,
+  collective_agreement_code,
+  contribution_mode,
+  contribution_rate_percent,
+  fixed_contribution_amount,
+  contribution_basis_code,
+  starts_on,
+  status,
+  dimension_json
+) VALUES
+(
+  '00000000-0000-4000-8000-000000009331',
+  '00000000-0000-4000-8000-000000000001',
+  '00000000-0000-4000-8000-000000000712',
+  '00000000-0000-4000-8000-000000000723',
+  '00000000-0000-4000-8000-000000009302',
+  'ITP2',
+  'collectum',
+  'itp2',
+  'rate_percent',
+  6.20,
+  NULL,
+  'annual_pensionable_salary',
+  '2025-01-01',
+  'active',
+  jsonb_build_object('seedSource','phase9_3_demo')
+),
+(
+  '00000000-0000-4000-8000-000000009332',
+  '00000000-0000-4000-8000-000000000001',
+  '00000000-0000-4000-8000-000000000711',
+  '00000000-0000-4000-8000-000000000721',
+  '00000000-0000-4000-8000-000000009303',
+  'FORA',
+  'fora',
+  'fora',
+  'rate_percent',
+  4.20,
+  NULL,
+  'monthly_pensionable_salary',
+  '2025-01-01',
+  'active',
+  jsonb_build_object('seedSource','phase9_3_demo')
+),
+(
+  '00000000-0000-4000-8000-000000009333',
+  '00000000-0000-4000-8000-000000000001',
+  '00000000-0000-4000-8000-000000000712',
+  '00000000-0000-4000-8000-000000000723',
+  '00000000-0000-4000-8000-000000009304',
+  'EXTRA_PENSION',
+  'custom',
+  'supplementary',
+  'fixed_amount',
+  NULL,
+  1500.00,
+  'monthly_pensionable_salary',
+  '2026-01-01',
+  'active',
+  jsonb_build_object('seedSource','phase9_3_demo','purpose','extra_pension')
+)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO salary_exchange_agreements (
+  salary_exchange_agreement_id,
+  company_id,
+  employee_id,
+  employment_id,
+  provider_code,
+  starts_on,
+  status,
+  exchange_mode,
+  exchange_value,
+  employer_markup_percent,
+  threshold_amount,
+  basis_treatment_code,
+  preview_json
+) VALUES (
+  '00000000-0000-4000-8000-000000009341',
+  '00000000-0000-4000-8000-000000000001',
+  '00000000-0000-4000-8000-000000000712',
+  '00000000-0000-4000-8000-000000000723',
+  'collectum',
+  '2026-01-01',
+  'active',
+  'percent_of_gross',
+  5.00,
+  5.80,
+  56087.00,
+  'maintain_pre_exchange',
+  jsonb_build_object(
+    'exampleReportProviders', jsonb_build_array('collectum','fora'),
+    'warningCode', 'salary_exchange_threshold_warning',
+    'reconciliationStatus', 'difference_detected'
+  )
+) ON CONFLICT DO NOTHING;

@@ -134,6 +134,9 @@ const PAY_ITEM_TEMPLATES = Object.freeze([
   createPayItemTemplate("EXPENSE_REIMBURSEMENT", "expense_reimbursement", "Utlag", "manual_amount", "amount", "gross_addition", false, false),
   createPayItemTemplate("BENEFIT", "benefit", "Forman", "manual_amount", "amount", "reporting_only", false, false),
   createPayItemTemplate("PENSION_PREMIUM", "pension_premium", "Pensionspremie", "manual_amount", "amount", "reporting_only", false, false),
+  createPayItemTemplate("FORA_PREMIUM", "fora_premium", "Fora-premie", "manual_amount", "amount", "reporting_only", false, false),
+  createPayItemTemplate("EXTRA_PENSION_PREMIUM", "extra_pension_premium", "Extra pension", "manual_amount", "amount", "reporting_only", false, false),
+  createPayItemTemplate("PENSION_SPECIAL_PAYROLL_TAX", "pension_special_payroll_tax", "Sarskild loneskatt pension", "manual_amount", "amount", "reporting_only", false, false),
   createPayItemTemplate("SALARY_EXCHANGE_GROSS_DEDUCTION", "salary_exchange_gross_deduction", "Lonevaxling bruttoloneavdrag", "manual_amount", "amount", "gross_deduction", false, false),
   createPayItemTemplate("NET_DEDUCTION", "net_deduction", "Nettoloneavdrag", "manual_amount", "amount", "net_deduction", false, false),
   createPayItemTemplate("GARNISHMENT", "garnishment", "Utmatning", "manual_amount", "amount", "net_deduction", false, false),
@@ -155,6 +158,7 @@ export function createPayrollEngine({
   timePlatform = null,
   benefitsPlatform = null,
   travelPlatform = null,
+  pensionPlatform = null,
   ledgerPlatform = null,
   bankingPlatform = null,
   ruleRegistry = null
@@ -623,13 +627,14 @@ export function createPayrollEngine({
         retroAdjustments: normalizedRetroAdjustments.filter((item) => item.employmentId === employment.employmentId),
         finalPayAdjustments: normalizedFinalPayAdjustments.filter((item) => item.employmentId === employment.employmentId),
         leavePayItemMappings: normalizedLeaveMappings,
-        statutoryProfile: normalizedStatutoryProfiles.get(employment.employmentId) || null,
-        hrPlatform,
-        timePlatform,
-        benefitsPlatform,
-        travelPlatform,
-        clock
-      });
+          statutoryProfile: normalizedStatutoryProfiles.get(employment.employmentId) || null,
+          hrPlatform,
+          timePlatform,
+          benefitsPlatform,
+          travelPlatform,
+          pensionPlatform,
+          clock
+        });
       employmentResults.push(result);
       warnings.push(...result.warnings);
       sourceSnapshot[employment.employmentId] = result.sourceSnapshot;
@@ -1329,17 +1334,25 @@ function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
       });
       continue;
     }
-    journalLines.push({
-      accountNumber: line.ledgerAccountCode,
-      debitAmount: amount,
-      creditAmount: 0,
-      dimensionJson: dimensions
-    });
-    if (line.reportingOnly === true && line.agiMappingCode === "taxable_benefit") {
       journalLines.push({
-        accountNumber: "2790",
-        debitAmount: 0,
-        creditAmount: amount,
+        accountNumber: line.ledgerAccountCode,
+        debitAmount: amount,
+        creditAmount: 0,
+        dimensionJson: dimensions
+      });
+      const reportingLiabilityAccount = resolveReportingOnlyLiabilityAccount(line);
+      if (reportingLiabilityAccount) {
+        journalLines.push({
+          accountNumber: reportingLiabilityAccount,
+          debitAmount: 0,
+          creditAmount: amount,
+          dimensionJson: dimensions
+        });
+      } else if (line.reportingOnly === true && line.agiMappingCode === "taxable_benefit") {
+        journalLines.push({
+          accountNumber: "2790",
+          debitAmount: 0,
+          creditAmount: amount,
         dimensionJson: dimensions
       });
     }
@@ -2465,6 +2478,7 @@ function calculateEmploymentRun({
   timePlatform,
   benefitsPlatform,
   travelPlatform,
+  pensionPlatform,
   clock
 }) {
   const employee = resolveEmployeeSnapshot({ employment, hrPlatform });
@@ -2506,6 +2520,7 @@ function calculateEmploymentRun({
         reportingPeriod: period.reportingPeriod
       })
     : { claims: [], payLinePayloads: [], warnings: [] };
+  let pensionPayloadBundle = { enrollments: [], activeAgreements: [], basisSnapshots: [], events: [], payLinePayloads: [], warnings: [] };
 
   const sourceSnapshot = {
     employee,
@@ -2531,7 +2546,11 @@ function calculateEmploymentRun({
       taxableMileage: claim.valuation?.taxableMileage || 0,
       expenseReimbursementAmount: claim.valuation?.expenseReimbursementAmount || 0,
       advanceNetDeductionAmount: claim.valuation?.advanceNetDeductionAmount || 0
-    }))
+    })),
+    pensionEnrollments: [],
+    salaryExchangeAgreements: [],
+    pensionEvents: [],
+    pensionBasisSnapshots: []
   };
 
   const warnings = (benefitPayloadBundle.warnings || []).map((warningCode) =>
@@ -2635,7 +2654,69 @@ function calculateEmploymentRun({
     ...summarizeLineStep(travelLines),
     travelClaimCount: (travelPayloadBundle.claims || []).length
   });
+
+  const grossCompensationBeforeDeductions = roundMoney(
+    lines
+      .filter((line) => line.compensationBucket === "gross_addition")
+      .reduce((sum, line) => sum + directionalAmount(line), 0)
+  );
+  const pensionableBaseBeforeExchange = roundMoney(
+    lines
+      .filter((line) => line.affectsPensionBasis)
+      .reduce((sum, line) => sum + directionalAmount(line), 0)
+  );
+  pensionPayloadBundle = pensionPlatform?.listPayrollPensionPayloads
+    ? pensionPlatform.listPayrollPensionPayloads({
+        companyId: employment.companyId,
+        employeeId: employment.employeeId,
+        employmentId: employment.employmentId,
+        reportingPeriod: period.reportingPeriod,
+        periodStartsOn: period.startsOn,
+        periodEndsOn: period.endsOn,
+        contractMonthlySalary: contract?.monthlySalary ?? null,
+        grossCompensationBeforeDeductions,
+        pensionableBaseBeforeExchange,
+        actorId: "payroll-engine"
+      })
+    : { enrollments: [], activeAgreements: [], basisSnapshots: [], events: [], payLinePayloads: [], warnings: [] };
+  sourceSnapshot.pensionEnrollments = (pensionPayloadBundle.enrollments || []).map((enrollment) => ({
+    pensionEnrollmentId: enrollment.pensionEnrollmentId,
+    planCode: enrollment.planCode,
+    providerCode: enrollment.providerCode,
+    contributionMode: enrollment.contributionMode
+  }));
+  sourceSnapshot.salaryExchangeAgreements = (pensionPayloadBundle.activeAgreements || []).map((agreement) => ({
+    salaryExchangeAgreementId: agreement.salaryExchangeAgreementId,
+    status: agreement.status,
+    exchangeMode: agreement.exchangeMode,
+    exchangeValue: agreement.exchangeValue,
+    thresholdAmount: agreement.thresholdAmount
+  }));
+  sourceSnapshot.pensionBasisSnapshots = (pensionPayloadBundle.basisSnapshots || []).map((snapshot) => ({
+    pensionBasisSnapshotId: snapshot.pensionBasisSnapshotId,
+    salaryExchangeAmount: snapshot.salaryExchangeAmount,
+    pensionableBaseAfterExchange: snapshot.pensionableBaseAfterExchange,
+    totalPensionPremiumAmount: snapshot.totalPensionPremiumAmount,
+    specialPayrollTaxAmount: snapshot.specialPayrollTaxAmount
+  }));
+  sourceSnapshot.pensionEvents = (pensionPayloadBundle.events || []).map((event) => ({
+    pensionEventId: event.pensionEventId,
+    planCode: event.planCode,
+    providerCode: event.providerCode,
+    contributionAmount: event.contributionAmount,
+    salaryExchangeFlag: event.salaryExchangeFlag,
+    extraPensionFlag: event.extraPensionFlag
+  }));
+  warnings.push(
+    ...(pensionPayloadBundle.warnings || []).map((warningCode) => createWarning(warningCode, `Pension engine warning: ${warningCode}.`))
+  );
   const grossDeductionLines = [
+    ...createStepLinesFromPayloads({
+      processingStep: 8,
+      employment,
+      payloads: pensionPayloadBundle.payLinePayloads || [],
+      state
+    }),
     ...createStepLinesFromManualInputs({
       processingStep: 8,
       employment,
@@ -2652,8 +2733,18 @@ function calculateEmploymentRun({
       .filter((line) => line.affectsPensionBasis)
       .reduce((sum, line) => sum + directionalAmount(line), 0)
   );
+  const pensionLines = createStepLinesFromPayloads({
+    processingStep: 9,
+    employment,
+    payloads: pensionPayloadBundle.payLinePayloads || [],
+    state
+  });
+  lines.push(...pensionLines);
   steps[9] = createCompletedStep(9, {
-    pensionableBase
+    ...summarizeLineStep(pensionLines),
+    pensionableBase,
+    pensionEventCount: (pensionPayloadBundle.events || []).length,
+    salaryExchangeAgreementCount: (pensionPayloadBundle.activeAgreements || []).length
   });
 
   const taxableBase = roundMoney(
@@ -2702,6 +2793,12 @@ function calculateEmploymentRun({
       payloads: travelPayloadBundle.payLinePayloads || [],
       state
     }),
+    ...createStepLinesFromPayloads({
+      processingStep: 13,
+      employment,
+      payloads: pensionPayloadBundle.payLinePayloads || [],
+      state
+    }),
     ...createStepLinesFromManualInputs({
       processingStep: 13,
       employment,
@@ -2733,6 +2830,21 @@ function calculateEmploymentRun({
       .filter((line) => line.payItemCode === "EXPENSE_REIMBURSEMENT")
       .reduce((sum, line) => sum + Math.abs(line.amount || 0), 0)
   );
+  const pensionPremiumAmount = roundMoney(
+    lines
+      .filter((line) => ["PENSION_PREMIUM", "FORA_PREMIUM", "EXTRA_PENSION_PREMIUM"].includes(line.payItemCode))
+      .reduce((sum, line) => sum + Math.abs(line.amount || 0), 0)
+  );
+  const salaryExchangeGrossDeductionAmount = roundMoney(
+    lines
+      .filter((line) => line.payItemCode === "SALARY_EXCHANGE_GROSS_DEDUCTION")
+      .reduce((sum, line) => sum + Math.abs(line.amount || 0), 0)
+  );
+  const pensionSpecialPayrollTaxAmount = roundMoney(
+    lines
+      .filter((line) => line.payItemCode === "PENSION_SPECIAL_PAYROLL_TAX")
+      .reduce((sum, line) => sum + Math.abs(line.amount || 0), 0)
+  );
   if (taxableBenefitAmount > 0 && lineTotals.grossAfterDeductions <= 0) {
     warnings.push(
       createWarning(
@@ -2748,7 +2860,10 @@ function calculateEmploymentRun({
     netPay: lineTotals.netPay,
     taxableBenefitAmount,
     taxFreeAllowanceAmount,
-    expenseReimbursementAmount
+    expenseReimbursementAmount,
+    pensionPremiumAmount,
+    salaryExchangeGrossDeductionAmount,
+    pensionSpecialPayrollTaxAmount
   });
 
   const payslipRenderPayload = {
@@ -2762,6 +2877,7 @@ function calculateEmploymentRun({
     lines,
     benefitEvents: benefitPayloadBundle.events || [],
     travelClaims: travelPayloadBundle.claims || [],
+    pensionEvents: pensionPayloadBundle.events || [],
     totals: {
       ...lineTotals,
       pensionableBase,
@@ -2775,7 +2891,10 @@ function calculateEmploymentRun({
       employerContributionDecision: employerContributionPreview.decisionObject,
       taxableBenefitAmount,
       taxFreeAllowanceAmount,
-      expenseReimbursementAmount
+      expenseReimbursementAmount,
+      pensionPremiumAmount,
+      salaryExchangeGrossDeductionAmount,
+      pensionSpecialPayrollTaxAmount
     },
     balances: balances.balances || balances,
     warnings
@@ -4006,15 +4125,21 @@ function createPayItemTemplate(
   compensationBucket,
   affectsVacationBasis,
   affectsPensionBasis
-) {
-  const taxTreatmentCode =
-    payItemCode.startsWith("TAX_FREE_") || ["NET_DEDUCTION", "GARNISHMENT", "ADVANCE", "RECLAIM", "PENSION_PREMIUM"].includes(payItemCode)
-      ? "non_taxable"
-      : "taxable";
-  const employerContributionTreatmentCode =
-    payItemCode.startsWith("TAX_FREE_") || ["NET_DEDUCTION", "GARNISHMENT", "ADVANCE", "RECLAIM"].includes(payItemCode)
-      ? "excluded"
-      : "included";
+  ) {
+    const taxTreatmentCode =
+      payItemCode.startsWith("TAX_FREE_") ||
+      ["NET_DEDUCTION", "GARNISHMENT", "ADVANCE", "RECLAIM", "PENSION_PREMIUM", "FORA_PREMIUM", "EXTRA_PENSION_PREMIUM", "PENSION_SPECIAL_PAYROLL_TAX"].includes(
+        payItemCode
+      )
+        ? "non_taxable"
+        : "taxable";
+    const employerContributionTreatmentCode =
+      payItemCode.startsWith("TAX_FREE_") ||
+      ["NET_DEDUCTION", "GARNISHMENT", "ADVANCE", "RECLAIM", "PENSION_PREMIUM", "FORA_PREMIUM", "EXTRA_PENSION_PREMIUM", "PENSION_SPECIAL_PAYROLL_TAX"].includes(
+        payItemCode
+      )
+        ? "excluded"
+        : "included";
   return Object.freeze({
     payItemCode,
     payItemType,
@@ -4041,8 +4166,11 @@ function resolveDefaultAgiMappingCode(payItemCode) {
   if (["EXPENSE_REIMBURSEMENT"].includes(resolvedCode)) {
     return "not_reported";
   }
-  if (["PENSION_PREMIUM"].includes(resolvedCode)) {
+  if (["PENSION_PREMIUM", "FORA_PREMIUM", "EXTRA_PENSION_PREMIUM"].includes(resolvedCode)) {
     return "pension_premium";
+  }
+  if (["PENSION_SPECIAL_PAYROLL_TAX"].includes(resolvedCode)) {
+    return "not_reported";
   }
   if (["TAX_FREE_TRAVEL_ALLOWANCE", "TAX_FREE_MILEAGE"].includes(resolvedCode)) {
     return "tax_free_allowance";
@@ -4091,19 +4219,38 @@ function resolveDefaultLedgerAccountCode(payItemCode) {
     case "TAXABLE_TRAVEL_ALLOWANCE":
       return "7310";
     case "TAX_FREE_MILEAGE":
-    case "TAXABLE_MILEAGE":
-      return "7320";
-    case "EXPENSE_REIMBURSEMENT":
-      return "7330";
-    case "PENSION_PREMIUM":
-      return "7130";
-    case "NET_DEDUCTION":
-    case "GARNISHMENT":
-    case "ADVANCE":
-    case "RECLAIM":
-      return "2750";
+      case "TAXABLE_MILEAGE":
+        return "7320";
+      case "EXPENSE_REIMBURSEMENT":
+        return "7330";
+      case "PENSION_PREMIUM":
+        return "7130";
+      case "FORA_PREMIUM":
+        return "7150";
+      case "EXTRA_PENSION_PREMIUM":
+        return "7140";
+      case "PENSION_SPECIAL_PAYROLL_TAX":
+        return "7120";
+      case "NET_DEDUCTION":
+      case "GARNISHMENT":
+      case "ADVANCE":
+      case "RECLAIM":
+        return "2750";
     default:
       return "7090";
+  }
+}
+
+function resolveReportingOnlyLiabilityAccount(line) {
+  switch (line.payItemCode) {
+    case "PENSION_PREMIUM":
+    case "FORA_PREMIUM":
+    case "EXTRA_PENSION_PREMIUM":
+      return "2740";
+    case "PENSION_SPECIAL_PAYROLL_TAX":
+      return "2550";
+    default:
+      return null;
   }
 }
 

@@ -320,6 +320,9 @@ En fas är inte klar förrän:
 - rapportunderlag kan stämmas av mot leverantörsfaktura
 - salary exchange warnings triggar rätt
 - pause/resume ger rätt lön och pension
+- ITP1 månadsunderlag, ITP2 pensionsmedförande årslön och Fora-månadsrapport skiljs åt deterministiskt
+- extra pension och särskild löneskatt bokförs separat från grundpremie
+- providergruppering och due dates för Collectum och Fora är reproducerbara för samma period
 
 #### ROT/RUT
 - arbetskostnad skiljs från material/resa/admin

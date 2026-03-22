@@ -31,6 +31,7 @@ Database foundation with migration framework, seed files and baseline governance
 - Phase 8.3 adds payroll postings, posting lines, payout batches, payout lines, pay-run posting state and vacation liability snapshots in the same monotonic stream.
 - Phase 9.1 adds benefit catalog, benefit events, valuations, deductions, posting intents and AGI mappings in the same monotonic stream.
 - Phase 9.2 adds foreign allowance tables, travel claims, travel days, country segments, meal events, mileage logs, expense receipts, advances, valuations and payroll intents in the same monotonic stream.
+- Phase 9.3 adds pension plans, enrollments, salary exchange agreements, pension basis snapshots, provider reports, report lines and reconciliation objects in the same monotonic stream.
 
 ## Usage
 

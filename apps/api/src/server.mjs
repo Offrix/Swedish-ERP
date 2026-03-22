@@ -55,6 +55,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase8PayrollEnabled: flags.phase8PayrollEnabled,
             phase9BenefitsEnabled: flags.phase9BenefitsEnabled,
             phase9TravelEnabled: flags.phase9TravelEnabled,
+            phase9PensionEnabled: flags.phase9PensionEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -188,6 +189,15 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/travel/claims",
               "/v1/travel/claims/:travelClaimId",
               "/v1/travel/audit-events",
+              "/v1/pension/plans",
+              "/v1/pension/enrollments",
+              "/v1/pension/salary-exchange/simulations",
+              "/v1/pension/salary-exchange-agreements",
+              "/v1/pension/events",
+              "/v1/pension/events/:pensionEventId",
+              "/v1/pension/reports",
+              "/v1/pension/reconciliations",
+              "/v1/pension/audit-events",
               "/v1/payroll/rule-packs",
               "/v1/payroll/statutory-profiles",
               "/v1/payroll/pay-items",
@@ -327,6 +337,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 9.2 travel routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase9PensionEnabled && isPhase93Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 9.3 pension routes are disabled by configuration."
     });
     return;
   }
@@ -5180,6 +5198,345 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/pension/plans") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "pension_plan",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listPensionPlans({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/pension/enrollments") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "pension_enrollment",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listPensionEnrollments({
+        companyId,
+        employmentId: url.searchParams.get("employmentId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/pension/enrollments") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "pension_enrollment",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createPensionEnrollment({
+        companyId,
+        employeeId: body.employeeId,
+        employmentId: body.employmentId,
+        planCode: body.planCode,
+        startsOn: body.startsOn,
+        endsOn: body.endsOn ?? null,
+        contributionMode: body.contributionMode ?? "rate_percent",
+        contributionRatePercent: body.contributionRatePercent ?? null,
+        fixedContributionAmount: body.fixedContributionAmount ?? null,
+        contributionBasisCode: body.contributionBasisCode ?? null,
+        providerCode: body.providerCode ?? null,
+        status: body.status ?? "active",
+        dimensionJson: body.dimensionJson || {},
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/pension/salary-exchange/simulations") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "salary_exchange_agreement",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.simulateSalaryExchangeAgreement({
+        companyId,
+        employeeId: body.employeeId ?? null,
+        employmentId: body.employmentId ?? null,
+        monthlyGrossSalary: body.monthlyGrossSalary,
+        exchangeMode: body.exchangeMode ?? "fixed_amount",
+        exchangeValue: body.exchangeValue,
+        employerMarkupPercent: body.employerMarkupPercent ?? null,
+        thresholdAmount: body.thresholdAmount ?? null,
+        exceptionDecisionReference: body.exceptionDecisionReference ?? null
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/pension/salary-exchange-agreements") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "salary_exchange_agreement",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listSalaryExchangeAgreements({
+        companyId,
+        employmentId: url.searchParams.get("employmentId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/pension/salary-exchange-agreements") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "salary_exchange_agreement",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createSalaryExchangeAgreement({
+        companyId,
+        employeeId: body.employeeId,
+        employmentId: body.employmentId,
+        startsOn: body.startsOn,
+        endsOn: body.endsOn ?? null,
+        exchangeMode: body.exchangeMode ?? "fixed_amount",
+        exchangeValue: body.exchangeValue,
+        employerMarkupPercent: body.employerMarkupPercent ?? null,
+        thresholdAmount: body.thresholdAmount ?? null,
+        basisTreatmentCode: body.basisTreatmentCode ?? "maintain_pre_exchange",
+        providerCode: body.providerCode ?? null,
+        status: body.status ?? "active",
+        exceptionDecisionReference: body.exceptionDecisionReference ?? null,
+        dimensionJson: body.dimensionJson || {},
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/pension/events") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "pension_event",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listPensionEvents({
+        companyId,
+        reportingPeriod: url.searchParams.get("reportingPeriod") || null,
+        employmentId: url.searchParams.get("employmentId") || null
+      })
+    });
+    return;
+  }
+
+  const pensionEventMatch = matchPath(path, "/v1/pension/events/:pensionEventId");
+  if (pensionEventMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "pension_event",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getPensionEvent({
+        companyId,
+        pensionEventId: pensionEventMatch.pensionEventId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/pension/reports") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "pension_report",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listPensionReports({
+        companyId,
+        reportingPeriod: url.searchParams.get("reportingPeriod") || null,
+        providerCode: url.searchParams.get("providerCode") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/pension/reports") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "pension_report",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createPensionReport({
+        companyId,
+        reportingPeriod: body.reportingPeriod,
+        providerCode: body.providerCode,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/pension/reconciliations") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "pension_reconciliation",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listPensionReconciliations({
+        companyId,
+        reportingPeriod: url.searchParams.get("reportingPeriod") || null,
+        providerCode: url.searchParams.get("providerCode") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/pension/reconciliations") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "pension_reconciliation",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createPensionReconciliation({
+        companyId,
+        reportingPeriod: body.reportingPeriod,
+        providerCode: body.providerCode,
+        invoicedAmount: body.invoicedAmount,
+        invoiceDocumentId: body.invoiceDocumentId ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/pension/audit-events") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "pension_event",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listPensionAuditEvents({
+        companyId,
+        employmentId: url.searchParams.get("employmentId") || null
+      })
+    });
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/payroll/pay-items") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -6047,6 +6404,10 @@ function isPhase92Route(path) {
   return path.startsWith("/v1/travel");
 }
 
+function isPhase93Route(path) {
+  return path.startsWith("/v1/pension");
+}
+
 async function readJsonBody(req, allowEmpty = false) {
   const chunks = [];
   for await (const chunk of req) {
@@ -6119,7 +6480,8 @@ function readFeatureFlags(env) {
     phase7AbsenceEnabled: String(env.PHASE7_ABSENCE_ENABLED || "true").toLowerCase() !== "false",
     phase8PayrollEnabled: String(env.PHASE8_PAYROLL_ENABLED || "true").toLowerCase() !== "false",
     phase9BenefitsEnabled: String(env.PHASE9_BENEFITS_ENABLED || "true").toLowerCase() !== "false",
-    phase9TravelEnabled: String(env.PHASE9_TRAVEL_ENABLED || "true").toLowerCase() !== "false"
+    phase9TravelEnabled: String(env.PHASE9_TRAVEL_ENABLED || "true").toLowerCase() !== "false",
+    phase9PensionEnabled: String(env.PHASE9_PENSION_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

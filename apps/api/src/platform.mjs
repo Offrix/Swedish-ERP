@@ -11,6 +11,7 @@ import { createTimePlatform } from "../../../packages/domain-time/src/index.mjs"
 import { createPayrollPlatform } from "../../../packages/domain-payroll/src/index.mjs";
 import { createBenefitsPlatform } from "../../../packages/domain-benefits/src/index.mjs";
 import { createTravelPlatform } from "../../../packages/domain-travel/src/index.mjs";
+import { createPensionPlatform } from "../../../packages/domain-pension/src/index.mjs";
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
 
 export function createApiPlatform(options = {}) {
@@ -63,6 +64,10 @@ export function createApiPlatform(options = {}) {
     hrPlatform,
     documentPlatform: documentArchivePlatform
   });
+  const pensionPlatform = createPensionPlatform({
+    ...options,
+    hrPlatform
+  });
   const payrollPlatform = createPayrollPlatform({
     ...options,
     orgAuthPlatform,
@@ -70,6 +75,7 @@ export function createApiPlatform(options = {}) {
     timePlatform,
     benefitsPlatform,
     travelPlatform,
+    pensionPlatform,
     ledgerPlatform,
     bankingPlatform
   });
@@ -88,6 +94,7 @@ export function createApiPlatform(options = {}) {
     ...timePlatform,
     ...benefitsPlatform,
     ...travelPlatform,
+    ...pensionPlatform,
     ...payrollPlatform
   };
 }

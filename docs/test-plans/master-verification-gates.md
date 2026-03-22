@@ -312,10 +312,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [x] Prompt `P9-02` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 9.3 Pension, extra pension och lÃ¶nevÃ¤xling
-- [ ] Rapportunderlag per kollektivavtal stÃ¤mmer
-- [ ] LÃ¶nevÃ¤xling varnar under trÃ¶skel
-- [ ] Pension bokfÃ¶rs och avstÃ¤ms
-- [ ] Prompt `P9-03` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Rapportunderlag per kollektivavtal stÃ¤mmer
+- [x] LÃ¶nevÃ¤xling varnar under trÃ¶skel
+- [x] Pension bokfÃ¶rs och avstÃ¤ms
+- [x] Prompt `P9-03` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ## Gate for FAS 10 â€” Projekt, bygg, fÃ¤lt, lager och personalliggare
 
