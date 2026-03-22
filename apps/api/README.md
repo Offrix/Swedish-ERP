@@ -1,6 +1,6 @@
 # API
 
-HTTP baseline plus phased domain routes through FAS 8.2.
+HTTP baseline plus phased domain routes through FAS 8.3.
 
 ## Start
 
@@ -221,6 +221,15 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/payroll/agi-submissions/:agiSubmissionId/ready-for-sign`
 - `POST /v1/payroll/agi-submissions/:agiSubmissionId/submit`
 - `POST /v1/payroll/agi-submissions/:agiSubmissionId/correction`
+- `GET /v1/payroll/postings?companyId=...`
+- `POST /v1/payroll/postings`
+- `GET /v1/payroll/postings/:payrollPostingId?companyId=...`
+- `GET /v1/payroll/payout-batches?companyId=...`
+- `POST /v1/payroll/payout-batches`
+- `GET /v1/payroll/payout-batches/:payrollPayoutBatchId?companyId=...`
+- `POST /v1/payroll/payout-batches/:payrollPayoutBatchId/match-bank`
+- `GET /v1/payroll/vacation-liability-snapshots?companyId=...`
+- `POST /v1/payroll/vacation-liability-snapshots`
 
 ## Disable strategy
 

@@ -53,6 +53,7 @@ export function createHrEngine({ clock = () => new Date(), seedDemo = false, doc
     listManagerAssignments,
     assignEmploymentManager,
     listEmployeeBankAccounts,
+    getEmployeeBankAccountDetails,
     addEmployeeBankAccount,
     listEmployeeDocuments,
     attachEmployeeDocument,
@@ -419,6 +420,32 @@ export function createHrEngine({ clock = () => new Date(), seedDemo = false, doc
       .filter(Boolean)
       .sort((left, right) => Number(right.primaryAccount) - Number(left.primaryAccount) || left.createdAt.localeCompare(right.createdAt))
       .map(copy);
+  }
+
+  function getEmployeeBankAccountDetails({ companyId, employeeId, employeeBankAccountId = null } = {}) {
+    requireEmployeeRecord(state, companyId, employeeId);
+    const selected =
+      (employeeBankAccountId
+        ? listEmployeeBankAccounts({ companyId, employeeId }).find(
+            (candidate) => candidate.employeeBankAccountId === requireText(employeeBankAccountId, "employee_bank_account_id_required")
+          ) || null
+        : listEmployeeBankAccounts({ companyId, employeeId }).find((candidate) => candidate.primaryAccount && candidate.active !== false) ||
+          listEmployeeBankAccounts({ companyId, employeeId }).find((candidate) => candidate.active !== false) ||
+          null);
+    if (!selected) {
+      return null;
+    }
+    const secret = state.bankAccountSecrets.get(selected.employeeBankAccountId) || {};
+    return {
+      ...copy(selected),
+      clearingNumber: normalizeOptionalText(secret.clearingNumber) || selected.clearingNumber || null,
+      accountNumber: normalizeOptionalText(secret.accountNumber) || null,
+      bankgiro: normalizeOptionalText(secret.bankgiro) || null,
+      plusgiro: normalizeOptionalText(secret.plusgiro) || null,
+      iban: normalizeOptionalText(secret.iban) || null,
+      bic: normalizeOptionalText(secret.bic) || selected.bic || null,
+      bankName: normalizeOptionalText(secret.bankName) || selected.bankName || null
+    };
   }
 
   function addEmployeeBankAccount({

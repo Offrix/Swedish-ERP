@@ -875,6 +875,8 @@ Read first:
 - docs/test-plans/master-verification-gates.md
 - docs/compliance/se/payroll-engine.md
 - docs/compliance/se/agi-engine.md
+- docs/compliance/se/bank-and-payments-engine.md
+- docs/compliance/se/accounting-foundation.md
 - docs/domain/ubiquitous-language.md
 - docs/ui/ENTERPRISE_UI_PLAN.md
 - docs/runbooks/fas-7-time-reporting-verification.md
@@ -1082,6 +1084,8 @@ Read first:
 - docs/test-plans/master-verification-gates.md
 - docs/compliance/se/payroll-engine.md
 - docs/compliance/se/agi-engine.md
+- docs/compliance/se/bank-and-payments-engine.md
+- docs/compliance/se/accounting-foundation.md
 
 Implement exactly this scope:
 - Löneverifikationer

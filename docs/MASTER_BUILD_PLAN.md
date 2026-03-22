@@ -492,10 +492,10 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 7.1 AnstÃ¤lldregister och HR-master
   - [x] 7.2 Tidrapportering, schema och saldon
   - [x] 7.3 FrÃ¥nvaro, attest och anstÃ¤lldportal
-- [ ] **FAS 8 â€” LÃ¶n och AGI**
+- [x] **FAS 8 â€” LÃ¶n och AGI**
   - [x] 8.1 LÃ¶nearter, lÃ¶nekalender och lÃ¶nekÃ¶rning
   - [x] 8.2 Skatt, arbetsgivaravgifter, SINK och AGI
-  - [ ] 8.3 LÃ¶nebokfÃ¶ring och utbetalning
+  - [x] 8.3 LÃ¶nebokfÃ¶ring och utbetalning
 - [ ] **FAS 9 â€” FÃ¶rmÃ¥ner, resor, traktamente, pension och lÃ¶nevÃ¤xling**
   - [ ] 9.1 FÃ¶rmÃ¥nsmotor
   - [ ] 9.2 Resor, traktamente, kÃ¶rjournal och utlÃ¤gg
@@ -935,14 +935,14 @@ Omvandla tid, frÃ¥nvaro, fÃ¶rmÃ¥ner och avtal till korrekt lÃ¶n, utbetal
 ### 8.3 LÃ¶nebokfÃ¶ring och utbetalning
 
 **Bygg detta**
-- [ ] LÃ¶neverifikationer
-- [ ] Bankbetalningsunderlag
-- [ ] KostnadsfÃ¶rdelning
+- [x] LÃ¶neverifikationer
+- [x] Bankbetalningsunderlag
+- [x] KostnadsfÃ¶rdelning
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] BokfÃ¶ring per projekt/kostnadsstÃ¤lle fungerar
-- [ ] Utbetalningar matchas mot bank
-- [ ] Semesterskuld kan Ã¥terskapas
+- [x] BokfÃ¶ring per projekt/kostnadsstÃ¤lle fungerar
+- [x] Utbetalningar matchas mot bank
+- [x] Semesterskuld kan Ã¥terskapas
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P8-03`.
 
@@ -1226,7 +1226,7 @@ Stresstesta systemet, kÃ¶r verklig migrering och gÃ¥ live kontrollerat.
 - FAS 5 â†’ `docs/compliance/se/ar-customer-invoicing-engine.md` och `docs/compliance/se/einvoice-peppol-engine.md`
 - FAS 6 â†’ `docs/compliance/se/ap-supplier-invoice-engine.md`, `docs/compliance/se/document-inbox-and-ocr-engine.md`, `docs/compliance/se/accounting-foundation.md`, `docs/compliance/se/bank-and-payments-engine.md`, `docs/compliance/se/einvoice-peppol-engine.md`, `docs/runbooks/fas-6-ap-masterdata-verification.md`, `docs/runbooks/fas-6-ap-invoice-matching-verification.md` och `docs/runbooks/fas-6-ap-payments-verification.md`
 - FAS 7 â†’ `docs/compliance/se/payroll-engine.md`, `docs/domain/ubiquitous-language.md`, `docs/runbooks/fas-7-hr-master-verification.md` och `docs/runbooks/fas-7-time-reporting-verification.md`
-- FAS 8 â†’ `docs/compliance/se/payroll-engine.md` och `docs/compliance/se/agi-engine.md`
+- FAS 8 â†’ `docs/compliance/se/payroll-engine.md`, `docs/compliance/se/agi-engine.md`, `docs/compliance/se/bank-and-payments-engine.md`, `docs/compliance/se/accounting-foundation.md`, `docs/runbooks/fas-8-payroll-core-verification.md`, `docs/runbooks/fas-8-payroll-tax-agi-verification.md` och `docs/runbooks/fas-8-payroll-posting-verification.md`
 - FAS 9 â†’ `docs/compliance/se/benefits-engine.md`, `docs/compliance/se/travel-and-traktamente-engine.md`, `docs/compliance/se/pension-and-salary-exchange-engine.md`, `docs/compliance/se/cash-card-and-clearing-engine.md` och `docs/compliance/se/collections-writeoff-and-bad-debt-engine.md`
 - FAS 10 â†’ `docs/compliance/se/rot-rut-engine.md`, `docs/compliance/se/personalliggare-engine.md`, `docs/compliance/se/project-billing-and-revenue-recognition-engine.md` och `docs/domain/offline-sync-and-conflict-resolution.md`
 - FAS 11 â†’ `docs/compliance/se/reconciliation-and-close-engine.md`, `docs/domain/work-items-deadlines-notifications.md`, `docs/domain/search-indexing-and-global-search.md`, `docs/domain/saved-views-dashboards-and-personalization.md`, `docs/domain/bureau-portfolio-client-requests-and-approvals.md`, `docs/domain/close-checklists-blockers-and-signoff.md`, `docs/domain/reporting-metric-catalog-and-export-jobs.md` och `docs/domain/comments-mentions-and-collaboration.md`

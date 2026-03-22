@@ -286,10 +286,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [x] Prompt `P8-02` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 8.3 LÃ¶nebokfÃ¶ring och utbetalning
-- [ ] BokfÃ¶ring per projekt/kostnadsstÃ¤lle fungerar
-- [ ] Utbetalningar matchas mot bank
-- [ ] Semesterskuld kan Ã¥terskapas
-- [ ] Prompt `P8-03` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] BokfÃ¶ring per projekt/kostnadsstÃ¤lle fungerar
+- [x] Utbetalningar matchas mot bank
+- [x] Semesterskuld kan Ã¥terskapas
+- [x] Prompt `P8-03` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ## Gate for FAS 9 â€” FÃ¶rmÃ¥ner, resor, traktamente, pension och lÃ¶nevÃ¤xling
 

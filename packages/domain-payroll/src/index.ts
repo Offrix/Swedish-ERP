@@ -80,6 +80,79 @@ export interface PayRunLine {
   readonly sourceLineId: string | null;
   readonly calculationStatus: string;
   readonly note: string | null;
+  readonly dimensionJson: Record<string, unknown>;
+}
+
+export interface PayrollPostingLine {
+  readonly accountNumber: string;
+  readonly debitAmount: number;
+  readonly creditAmount: number;
+  readonly dimensionJson: Record<string, unknown>;
+}
+
+export interface PayrollPosting {
+  readonly payrollPostingId: string;
+  readonly companyId: string;
+  readonly payRunId: string;
+  readonly reportingPeriod: string;
+  readonly runType: string;
+  readonly status: string;
+  readonly journalEntryId: string;
+  readonly payloadHash: string;
+  readonly sourceSnapshotHash: string;
+  readonly totals: Record<string, unknown>;
+  readonly journalLines: readonly PayrollPostingLine[];
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface PayrollPayoutBatchLine {
+  readonly payrollPayoutLineId: string;
+  readonly employmentId: string;
+  readonly employeeId: string;
+  readonly employeeNumber: string | null;
+  readonly payeeName: string;
+  readonly payoutMethod: string | null;
+  readonly accountTarget: string | null;
+  readonly employeeBankAccountId: string | null;
+  readonly amount: number;
+  readonly currencyCode: string;
+  readonly paymentReference: string;
+}
+
+export interface PayrollPayoutBatch {
+  readonly payrollPayoutBatchId: string;
+  readonly companyId: string;
+  readonly payRunId: string;
+  readonly reportingPeriod: string;
+  readonly bankAccountId: string;
+  readonly status: string;
+  readonly totalAmount: number;
+  readonly paymentDate: string;
+  readonly exportFileName: string;
+  readonly exportPayload: string;
+  readonly exportPayloadHash: string;
+  readonly lines: readonly PayrollPayoutBatchLine[];
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly matchedAt: string | null;
+  readonly matchedByActorId: string | null;
+  readonly matchedJournalEntryId: string | null;
+  readonly bankEventId: string | null;
+}
+
+export interface VacationLiabilitySnapshot {
+  readonly vacationLiabilitySnapshotId: string;
+  readonly companyId: string;
+  readonly reportingPeriod: string;
+  readonly payRunIds: readonly string[];
+  readonly totals: Record<string, unknown>;
+  readonly employeeSnapshots: readonly Record<string, unknown>[];
+  readonly snapshotHash: string;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
 }
 
 export interface AgiEmployeeLine {

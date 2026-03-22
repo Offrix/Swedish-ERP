@@ -62,6 +62,7 @@
     "verify:phase7:time": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase7-time-reporting.ps1",
     "verify:phase7:absence": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase7-absence-portal.ps1",
     "verify:phase8:payroll": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase8-payroll-core.ps1",
-    "verify:phase8:payroll:tax-agi": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase8-payroll-tax-agi.ps1"
+    "verify:phase8:payroll:tax-agi": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase8-payroll-tax-agi.ps1",
+    "verify:phase8:payroll:posting": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase8-payroll-posting.ps1"
   }
 }

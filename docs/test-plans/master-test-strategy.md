@@ -84,7 +84,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - leverantörsfaktura-drafts, match runs, variansobjekt, AP-open-items och dokumentdrivna invoice-links i AP
 - tidschema, schematilldelningar, clock events, enriched time entries, balans-transaktioner och periodlås
 - leave types, leave entry events, leave signals, leave signal locks och employee-portal-projektioner
-- löneartskatalog, lönekalendrar, lönekörningar, statutory profiles, skatt/SINK, AGI-versioner, receipts och persistenta lönebesked i payroll
+- löneartskatalog, lönekalendrar, lönekörningar, statutory profiles, skatt/SINK, AGI-versioner, payroll postings, payout batches, vacation liability snapshots, receipts och persistenta lönebesked i payroll
 - Peppol adapter
 - myndighetsadaptrar
 - sökindex och projektioner
@@ -107,7 +107,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - disable-flagga och HR-masterflöde med flera anställningar, avtalsversioner, dokumentlänk och känslig audit
 - disable-flagga och tidsflöde med schema, stämpling, projektaktivitet, saldo och periodlås
 - disable-flagga och frånvaroflöde med employee portal, chefsgodkännande, historik och AGI-lås
-- disable-flagga och payrollflöde med lönekalender, ordnad lönekedja, skatt/SINK, AGI-signering, retrospårning, slutlön och regenererat lönebesked
+- disable-flagga och payrollflöde med lönekalender, ordnad lönekedja, skatt/SINK, AGI-signering, payroll posting, payout export, bankmatchning, semesterskuld, retrospårning, slutlön och regenererat lönebesked
 
 ### 8. Performance tests
 - load på dokumentingest
@@ -297,6 +297,9 @@ En fas är inte klar förrän:
 - frånvarodata blockeras efter `ready_for_sign`, `signed` och `submitted`
 - correction version bevarar receipt trail och changed-employee traceability
 - lönebesked matchar bokföring
+- payroll posting bevarar projekt-, kostnadsställe- och affärsområdesdimensioner till journalrader
+- payout batch export är deterministisk och kan matchas mot bank utan dubbelbokning
+- semesterskuldssnapshot kan återskapas oförändrat för samma period och underlag
 
 #### Förmåner
 - förmånsvärde matchar regelpaket

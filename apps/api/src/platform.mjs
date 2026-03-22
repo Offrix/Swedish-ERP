@@ -55,7 +55,9 @@ export function createApiPlatform(options = {}) {
     ...options,
     orgAuthPlatform,
     hrPlatform,
-    timePlatform
+    timePlatform,
+    ledgerPlatform,
+    bankingPlatform
   });
 
   return {

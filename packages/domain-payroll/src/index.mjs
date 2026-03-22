@@ -17,6 +17,8 @@ export const AGI_SUBMISSION_STATES = Object.freeze([
   "rejected",
   "superseded"
 ]);
+export const PAYROLL_POSTING_STATUSES = Object.freeze(["draft", "posted"]);
+export const PAYROLL_PAYOUT_BATCH_STATUSES = Object.freeze(["exported", "matched"]);
 export const PAYROLL_COMPENSATION_BUCKETS = Object.freeze([
   "gross_addition",
   "gross_deduction",
@@ -150,6 +152,8 @@ export function createPayrollEngine({
   orgAuthPlatform = null,
   hrPlatform = null,
   timePlatform = null,
+  ledgerPlatform = null,
+  bankingPlatform = null,
   ruleRegistry = null
 } = {}) {
   const rules = ruleRegistry || createRulePackRegistry({ clock, seedRulePacks: EMPLOYER_CONTRIBUTION_RULE_PACKS });
@@ -190,7 +194,15 @@ export function createPayrollEngine({
     agiErrors: new Map(),
     agiErrorIdsByVersion: new Map(),
     agiSignatures: new Map(),
-    agiSignatureIdsByVersion: new Map()
+    agiSignatureIdsByVersion: new Map(),
+    payrollPostings: new Map(),
+    payrollPostingIdsByCompany: new Map(),
+    payrollPostingIdByRun: new Map(),
+    payrollPayoutBatches: new Map(),
+    payrollPayoutBatchIdsByCompany: new Map(),
+    payrollPayoutBatchIdByRun: new Map(),
+    vacationLiabilitySnapshots: new Map(),
+    vacationLiabilitySnapshotIdsByCompany: new Map()
   };
 
   if (seedDemo) {
@@ -224,7 +236,16 @@ export function createPayrollEngine({
     validateAgiSubmission,
     markAgiSubmissionReadyForSign,
     submitAgiSubmission,
-    createAgiCorrectionVersion
+    createAgiCorrectionVersion,
+    listPayrollPostings,
+    getPayrollPosting,
+    createPayrollPosting,
+    listPayrollPayoutBatches,
+    getPayrollPayoutBatch,
+    createPayrollPayoutBatch,
+    matchPayrollPayoutBatch,
+    listVacationLiabilitySnapshots,
+    createVacationLiabilitySnapshot
   };
 
   function listEmployerContributionRulePacks({ effectiveDate = null } = {}) {
@@ -275,13 +296,13 @@ export function createPayrollEngine({
     calculationBasis,
     unitCode,
     compensationBucket,
-    defaultUnitAmount = null,
-    defaultRateFactor = null,
-    taxTreatmentCode = "phase8_2_pending",
-    employerContributionTreatmentCode = "phase8_2_pending",
-    agiMappingCode = null,
-    ledgerAccountCode = "phase8_3_pending",
-    defaultDimensions = {},
+  defaultUnitAmount = null,
+  defaultRateFactor = null,
+  taxTreatmentCode = "phase8_2_pending",
+  employerContributionTreatmentCode = "phase8_2_pending",
+  agiMappingCode = null,
+  ledgerAccountCode = null,
+  defaultDimensions = {},
     affectsVacationBasis = false,
     affectsPensionBasis = false,
     includedInNetPay = true,
@@ -309,7 +330,10 @@ export function createPayrollEngine({
         "pay_item_contribution_treatment_required"
       ),
       agiMappingCode: requireText(String(agiMappingCode || resolveDefaultAgiMappingCode(resolvedCode)), "pay_item_agi_mapping_required"),
-      ledgerAccountCode: requireText(String(ledgerAccountCode), "pay_item_ledger_account_required"),
+      ledgerAccountCode: requireText(
+        String(ledgerAccountCode || resolveDefaultLedgerAccountCode(resolvedCode)),
+        "pay_item_ledger_account_required"
+      ),
       defaultDimensions: copy(defaultDimensions || {}),
       affectsVacationBasis: affectsVacationBasis === true,
       affectsPensionBasis: affectsPensionBasis === true,
@@ -564,7 +588,11 @@ export function createPayrollEngine({
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock),
-      calculationSteps: []
+      calculationSteps: [],
+      postingStatus: null,
+      postingJournalEntryId: null,
+      payoutBatchStatus: null,
+      payoutBatchId: null
     };
 
     const employmentResults = [];
@@ -908,7 +936,689 @@ export function createPayrollEngine({
     submission.updatedAt = nowIso(clock);
     return enrichAgiSubmission(state, submission);
   }
+
+  function listPayrollPostings({ companyId, payRunId = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.payrollPostingIdsByCompany.get(resolvedCompanyId) || [])
+      .map((payrollPostingId) => state.payrollPostings.get(payrollPostingId))
+      .filter(Boolean)
+      .filter((candidate) => (payRunId ? candidate.payRunId === payRunId : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map((record) => presentPayrollPosting(state, record));
+  }
+
+  function getPayrollPosting({ companyId, payrollPostingId } = {}) {
+    return presentPayrollPosting(state, requirePayrollPosting(state, companyId, payrollPostingId));
+  }
+
+  function createPayrollPosting({ companyId, payRunId, actorId = "system" } = {}) {
+    const payRun = requireApprovedPayRun(state, companyId, payRunId);
+    const existingPostingId = state.payrollPostingIdByRun.get(payRun.payRunId);
+    if (existingPostingId) {
+      return presentPayrollPosting(state, state.payrollPostings.get(existingPostingId));
+    }
+    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+      throw createError(500, "ledger_platform_missing", "Ledger platform is required to create payroll postings.");
+    }
+
+    const postingModel = buildPayrollPostingModel({
+      state,
+      payRun,
+      ledgerPlatform
+    });
+
+    const created = ledgerPlatform.createJournalEntry({
+      companyId: payRun.companyId,
+      journalDate: payRun.payDate,
+      voucherSeriesCode: "H",
+      sourceType: payRun.runType === "correction" ? "PAYROLL_CORRECTION" : "PAYROLL_RUN",
+      sourceId: payRun.payRunId,
+      actorId,
+      idempotencyKey: `payroll_post:${payRun.payRunId}:${postingModel.payloadHash}`,
+      description: `Payroll ${payRun.reportingPeriod} ${payRun.runType}`,
+      metadataJson: {
+        pipelineStage: "payroll_posting",
+        payRunId: payRun.payRunId,
+        reportingPeriod: payRun.reportingPeriod,
+        runType: payRun.runType
+      },
+      lines: postingModel.journalLines
+    });
+    ledgerPlatform.validateJournalEntry({
+      companyId: payRun.companyId,
+      journalEntryId: created.journalEntry.journalEntryId,
+      actorId
+    });
+    const posted = ledgerPlatform.postJournalEntry({
+      companyId: payRun.companyId,
+      journalEntryId: created.journalEntry.journalEntryId,
+      actorId
+    });
+
+    const now = nowIso(clock);
+    const record = {
+      payrollPostingId: crypto.randomUUID(),
+      companyId: payRun.companyId,
+      payRunId: payRun.payRunId,
+      reportingPeriod: payRun.reportingPeriod,
+      runType: payRun.runType,
+      status: "posted",
+      journalEntryId: posted.journalEntry.journalEntryId,
+      payloadHash: postingModel.payloadHash,
+      sourceSnapshotHash: postingModel.sourceSnapshotHash,
+      totals: postingModel.totals,
+      journalLines: postingModel.journalLines.map(copy),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: now,
+      updatedAt: now
+    };
+    state.payrollPostings.set(record.payrollPostingId, record);
+    appendToIndex(state.payrollPostingIdsByCompany, record.companyId, record.payrollPostingId);
+    state.payrollPostingIdByRun.set(record.payRunId, record.payrollPostingId);
+    payRun.updatedAt = now;
+    payRun.postingStatus = record.status;
+    payRun.postingJournalEntryId = record.journalEntryId;
+    appendRunEvent(state, {
+      payRunId: payRun.payRunId,
+      companyId: payRun.companyId,
+      eventType: "posted",
+      actorId,
+      note: `Posted payroll journal ${posted.journalEntry.voucherSeriesCode}${posted.journalEntry.voucherNumber}.`,
+      recordedAt: now
+    });
+    return presentPayrollPosting(state, record);
+  }
+
+  function listPayrollPayoutBatches({ companyId, payRunId = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.payrollPayoutBatchIdsByCompany.get(resolvedCompanyId) || [])
+      .map((payrollPayoutBatchId) => state.payrollPayoutBatches.get(payrollPayoutBatchId))
+      .filter(Boolean)
+      .filter((candidate) => (payRunId ? candidate.payRunId === payRunId : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map((record) => presentPayrollPayoutBatch(state, record));
+  }
+
+  function getPayrollPayoutBatch({ companyId, payrollPayoutBatchId } = {}) {
+    return presentPayrollPayoutBatch(state, requirePayrollPayoutBatch(state, companyId, payrollPayoutBatchId));
+  }
+
+  function createPayrollPayoutBatch({ companyId, payRunId, bankAccountId = null, actorId = "system" } = {}) {
+    const payRun = requireApprovedPayRun(state, companyId, payRunId);
+    const existingBatchId = state.payrollPayoutBatchIdByRun.get(payRun.payRunId);
+    if (existingBatchId) {
+      return presentPayrollPayoutBatch(state, state.payrollPayoutBatches.get(existingBatchId));
+    }
+    const posting = state.payrollPostingIdByRun.get(payRun.payRunId)
+      ? state.payrollPostings.get(state.payrollPostingIdByRun.get(payRun.payRunId))
+      : null;
+    if (!posting) {
+      throw createError(409, "payroll_posting_required", "Payroll posting must exist before payout export.");
+    }
+
+    const companyBankAccount = resolvePayrollCompanyBankAccount({
+      companyId: payRun.companyId,
+      bankAccountId,
+      bankingPlatform
+    });
+    const batchModel = buildPayrollPayoutBatchModel({
+      state,
+      payRun,
+      companyBankAccount,
+      hrPlatform
+    });
+    const now = nowIso(clock);
+    const record = {
+      payrollPayoutBatchId: crypto.randomUUID(),
+      companyId: payRun.companyId,
+      payRunId: payRun.payRunId,
+      reportingPeriod: payRun.reportingPeriod,
+      bankAccountId: companyBankAccount.bankAccountId,
+      status: "exported",
+      totalAmount: batchModel.totalAmount,
+      paymentDate: payRun.payDate,
+      exportFileName: `PAYROLL-${payRun.reportingPeriod}-${payRun.payRunId.slice(0, 8)}.csv`,
+      exportPayload: batchModel.exportPayload,
+      exportPayloadHash: batchModel.payloadHash,
+      lines: batchModel.lines.map(copy),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: now,
+      updatedAt: now,
+      matchedAt: null,
+      matchedByActorId: null,
+      matchedJournalEntryId: null,
+      bankEventId: null
+    };
+    state.payrollPayoutBatches.set(record.payrollPayoutBatchId, record);
+    appendToIndex(state.payrollPayoutBatchIdsByCompany, record.companyId, record.payrollPayoutBatchId);
+    state.payrollPayoutBatchIdByRun.set(record.payRunId, record.payrollPayoutBatchId);
+    payRun.updatedAt = now;
+    payRun.payoutBatchStatus = record.status;
+    payRun.payoutBatchId = record.payrollPayoutBatchId;
+    appendRunEvent(state, {
+      payRunId: payRun.payRunId,
+      companyId: payRun.companyId,
+      eventType: "payout_exported",
+      actorId,
+      note: `Exported payroll payout batch ${record.payrollPayoutBatchId}.`,
+      recordedAt: now
+    });
+    return presentPayrollPayoutBatch(state, record);
+  }
+
+  function matchPayrollPayoutBatch({ companyId, payrollPayoutBatchId, bankEventId, matchedOn = null, actorId = "system" } = {}) {
+    const batch = requirePayrollPayoutBatch(state, companyId, payrollPayoutBatchId);
+    if (batch.status === "matched") {
+      return presentPayrollPayoutBatch(state, batch);
+    }
+    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+      throw createError(500, "ledger_platform_missing", "Ledger platform is required to match payroll payouts to bank.");
+    }
+    const payRun = requireApprovedPayRun(state, batch.companyId, batch.payRunId);
+    const companyBankAccount = resolvePayrollCompanyBankAccount({
+      companyId: batch.companyId,
+      bankAccountId: batch.bankAccountId,
+      bankingPlatform
+    });
+    const matchedDate = matchedOn ? normalizeRequiredDate(matchedOn, "payroll_payout_matched_on_invalid") : payRun.payDate;
+    if (roundMoney(batch.totalAmount) > 0) {
+      const created = ledgerPlatform.createJournalEntry({
+        companyId: batch.companyId,
+        journalDate: matchedDate,
+        voucherSeriesCode: "H",
+        sourceType: "PAYROLL_RUN",
+        sourceId: `${payRun.payRunId}:bank_match`,
+        actorId,
+        idempotencyKey: `payroll_payout_match:${batch.payrollPayoutBatchId}:${requireText(bankEventId, "bank_event_id_required")}`,
+        description: `Payroll payout match ${payRun.reportingPeriod}`,
+        metadataJson: {
+          pipelineStage: "payroll_payout_match",
+          payRunId: payRun.payRunId,
+          payrollPayoutBatchId: batch.payrollPayoutBatchId
+        },
+        lines: mergePayrollJournalLines([
+          {
+            accountNumber: "2790",
+            debitAmount: roundMoney(batch.totalAmount),
+            creditAmount: 0,
+            dimensionJson: {}
+          },
+          {
+            accountNumber: requireText(companyBankAccount.ledgerAccountNumber, "bank_account_ledger_number_required"),
+            debitAmount: 0,
+            creditAmount: roundMoney(batch.totalAmount),
+            dimensionJson: {}
+          }
+        ])
+      });
+      ledgerPlatform.validateJournalEntry({
+        companyId: batch.companyId,
+        journalEntryId: created.journalEntry.journalEntryId,
+        actorId
+      });
+      const posted = ledgerPlatform.postJournalEntry({
+        companyId: batch.companyId,
+        journalEntryId: created.journalEntry.journalEntryId,
+        actorId
+      });
+      batch.matchedJournalEntryId = posted.journalEntry.journalEntryId;
+    }
+    batch.status = "matched";
+    batch.bankEventId = requireText(bankEventId, "bank_event_id_required");
+    batch.matchedAt = nowIso(clock);
+    batch.matchedByActorId = requireText(actorId, "actor_id_required");
+    batch.updatedAt = batch.matchedAt;
+    payRun.updatedAt = batch.updatedAt;
+    payRun.payoutBatchStatus = batch.status;
+    appendRunEvent(state, {
+      payRunId: payRun.payRunId,
+      companyId: payRun.companyId,
+      eventType: "payout_matched",
+      actorId,
+      note: `Matched payroll payout batch ${batch.payrollPayoutBatchId} to bank event ${batch.bankEventId}.`,
+      recordedAt: batch.updatedAt
+    });
+    return presentPayrollPayoutBatch(state, batch);
+  }
+
+  function listVacationLiabilitySnapshots({ companyId, reportingPeriod = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.vacationLiabilitySnapshotIdsByCompany.get(resolvedCompanyId) || [])
+      .map((snapshotId) => state.vacationLiabilitySnapshots.get(snapshotId))
+      .filter(Boolean)
+      .filter((candidate) => (reportingPeriod ? candidate.reportingPeriod === reportingPeriod : true))
+      .sort((left, right) => left.reportingPeriod.localeCompare(right.reportingPeriod) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function createVacationLiabilitySnapshot({ companyId, reportingPeriod, actorId = "system" } = {}) {
+    const model = buildVacationLiabilitySnapshotModel({
+      state,
+      companyId,
+      reportingPeriod,
+      clock
+    });
+    const existing = listVacationLiabilitySnapshots({ companyId, reportingPeriod: model.reportingPeriod })
+      .find((candidate) => candidate.snapshotHash === model.snapshotHash);
+    if (existing) {
+      return existing;
+    }
+    const record = {
+      vacationLiabilitySnapshotId: crypto.randomUUID(),
+      companyId: model.companyId,
+      reportingPeriod: model.reportingPeriod,
+      payRunIds: model.payRunIds,
+      totals: model.totals,
+      employeeSnapshots: model.employeeSnapshots,
+      snapshotHash: model.snapshotHash,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock)
+    };
+    state.vacationLiabilitySnapshots.set(record.vacationLiabilitySnapshotId, record);
+    appendToIndex(state.vacationLiabilitySnapshotIdsByCompany, record.companyId, record.vacationLiabilitySnapshotId);
+    return copy(record);
+  }
 }
+
+function requireApprovedPayRun(state, companyId, payRunId) {
+  const payRun = requirePayRun(state, companyId, payRunId);
+  if (payRun.status !== "approved") {
+    throw createError(409, "pay_run_not_approved", "Payroll run must be approved before payroll posting or payout.");
+  }
+  return payRun;
+}
+
+function requirePayrollPosting(state, companyId, payrollPostingId) {
+  const record = state.payrollPostings.get(requireText(payrollPostingId, "payroll_posting_id_required"));
+  if (!record || record.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "payroll_posting_not_found", "Payroll posting was not found.");
+  }
+  return record;
+}
+
+function presentPayrollPosting(state, record) {
+  if (!record) {
+    return null;
+  }
+  const payRun = state.payRuns.get(record.payRunId) || null;
+  const journalEntry = record.journalEntryId ? copy(record.journalEntryId) : null;
+  return {
+    ...copy(record),
+    payRun: payRun ? enrichPayRun(state, payRun) : null,
+    journalEntryId: journalEntry
+  };
+}
+
+function requirePayrollPayoutBatch(state, companyId, payrollPayoutBatchId) {
+  const record = state.payrollPayoutBatches.get(requireText(payrollPayoutBatchId, "payroll_payout_batch_id_required"));
+  if (!record || record.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "payroll_payout_batch_not_found", "Payroll payout batch was not found.");
+  }
+  return record;
+}
+
+function presentPayrollPayoutBatch(state, record) {
+  if (!record) {
+    return null;
+  }
+  const payRun = state.payRuns.get(record.payRunId) || null;
+  return {
+    ...copy(record),
+    payRun: payRun ? enrichPayRun(state, payRun) : null
+  };
+}
+
+function resolvePayrollCompanyBankAccount({ companyId, bankAccountId = null, bankingPlatform = null }) {
+  if (!bankingPlatform) {
+    throw createError(500, "banking_platform_missing", "Banking platform is required for payroll payout export.");
+  }
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  if (bankAccountId) {
+    return bankingPlatform.getBankAccount({
+      companyId: resolvedCompanyId,
+      bankAccountId
+    });
+  }
+  const accounts = bankingPlatform.listBankAccounts({
+    companyId: resolvedCompanyId,
+    activeOnly: true
+  });
+  const selected = accounts.find((candidate) => candidate.isDefault) || accounts[0] || null;
+  if (!selected) {
+    throw createError(409, "company_bank_account_required", "An active company bank account is required for payroll payout export.");
+  }
+  return selected;
+}
+
+function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
+  const lines = (state.payRunLineIdsByRun.get(payRun.payRunId) || [])
+    .map((payRunLineId) => state.payRunLines.get(payRunLineId))
+    .filter(Boolean);
+  const payslips = (state.payslipIdsByRun.get(payRun.payRunId) || [])
+    .map((payslipId) => state.payslips.get(payslipId))
+    .filter(Boolean)
+    .map(enrichPayslip);
+
+  const journalLines = [];
+  for (const line of lines) {
+    const amount = roundMoney(Math.abs(directionalAmount(line)));
+    if (!amount) {
+      continue;
+    }
+    const dimensions = normalizePayrollDimensions(line.dimensionJson || {});
+    if (line.compensationBucket === "gross_deduction") {
+      journalLines.push({
+        accountNumber: line.ledgerAccountCode,
+        debitAmount: 0,
+        creditAmount: amount,
+        dimensionJson: dimensions
+      });
+      continue;
+    }
+    if (line.compensationBucket === "net_deduction") {
+      journalLines.push({
+        accountNumber: "2750",
+        debitAmount: 0,
+        creditAmount: amount,
+        dimensionJson: dimensions
+      });
+      continue;
+    }
+    journalLines.push({
+      accountNumber: line.ledgerAccountCode,
+      debitAmount: amount,
+      creditAmount: 0,
+      dimensionJson: dimensions
+    });
+  }
+
+  const preliminaryTaxAmount = roundMoney(
+    payslips.reduce((sum, payslip) => sum + Number(payslip.totals.preliminaryTax || 0), 0)
+  );
+  const employerContributionAmount = roundMoney(
+    payslips.reduce((sum, payslip) => sum + Number(payslip.totals.employerContributionPreviewAmount || 0), 0)
+  );
+  const netPayAmount = roundMoney(
+    payslips.reduce((sum, payslip) => sum + Math.max(0, Number(payslip.totals.netPay || 0)), 0)
+  );
+
+  if (preliminaryTaxAmount > 0) {
+    journalLines.push({
+      accountNumber: "2710",
+      debitAmount: 0,
+      creditAmount: preliminaryTaxAmount,
+      dimensionJson: {}
+    });
+  }
+  if (employerContributionAmount > 0) {
+    journalLines.push({
+      accountNumber: "7110",
+      debitAmount: employerContributionAmount,
+      creditAmount: 0,
+      dimensionJson: {}
+    });
+    journalLines.push({
+      accountNumber: "2540",
+      debitAmount: 0,
+      creditAmount: employerContributionAmount,
+      dimensionJson: {}
+    });
+  }
+
+  const currentVacationSnapshot = buildVacationLiabilitySnapshotModel({
+    state,
+    companyId: payRun.companyId,
+    reportingPeriod: payRun.reportingPeriod,
+    clock: { now: payRun.payDate }
+  });
+  const previousVacationSnapshot = findLatestVacationLiabilitySnapshotBeforePeriod(state, payRun.companyId, payRun.reportingPeriod);
+  const vacationLiabilityDeltaAmount = roundMoney(
+    Number(currentVacationSnapshot.totals.liabilityAmount || 0) - Number(previousVacationSnapshot?.totals?.liabilityAmount || 0)
+  );
+  if (vacationLiabilityDeltaAmount !== 0) {
+    if (vacationLiabilityDeltaAmount > 0) {
+      journalLines.push({
+        accountNumber: "7780",
+        debitAmount: vacationLiabilityDeltaAmount,
+        creditAmount: 0,
+        dimensionJson: {}
+      });
+      journalLines.push({
+        accountNumber: "2730",
+        debitAmount: 0,
+        creditAmount: vacationLiabilityDeltaAmount,
+        dimensionJson: {}
+      });
+    } else {
+      journalLines.push({
+        accountNumber: "2730",
+        debitAmount: Math.abs(vacationLiabilityDeltaAmount),
+        creditAmount: 0,
+        dimensionJson: {}
+      });
+      journalLines.push({
+        accountNumber: "7780",
+        debitAmount: 0,
+        creditAmount: Math.abs(vacationLiabilityDeltaAmount),
+        dimensionJson: {}
+      });
+    }
+  }
+
+  if (netPayAmount > 0) {
+    journalLines.push({
+      accountNumber: "2790",
+      debitAmount: 0,
+      creditAmount: netPayAmount,
+      dimensionJson: {}
+    });
+  }
+
+  const mergedLines = mergePayrollJournalLines(journalLines);
+  if (ledgerPlatform?.validateLedgerDimensions) {
+    for (const line of mergedLines) {
+      ledgerPlatform.validateLedgerDimensions({
+        companyId: payRun.companyId,
+        dimensions: line.dimensionJson || {}
+      });
+    }
+  }
+  const payloadHash = buildSnapshotHash({
+    payRunId: payRun.payRunId,
+    journalLines: mergedLines,
+    preliminaryTaxAmount,
+    employerContributionAmount,
+    netPayAmount,
+    vacationLiabilityAmount: currentVacationSnapshot.totals.liabilityAmount,
+    vacationLiabilityDeltaAmount
+  });
+  return {
+    sourceSnapshotHash: buildSnapshotHash({
+      payRunId: payRun.payRunId,
+      lineIds: lines.map((line) => line.payRunLineId),
+      payslipIds: payslips.map((payslip) => payslip.payslipId)
+    }),
+    payloadHash,
+    journalLines: mergedLines,
+    totals: {
+      preliminaryTaxAmount,
+      employerContributionAmount,
+      netPayAmount,
+      vacationLiabilityAmount: currentVacationSnapshot.totals.liabilityAmount,
+      vacationLiabilityDeltaAmount
+    }
+  };
+}
+
+function buildPayrollPayoutBatchModel({ state, payRun, companyBankAccount, hrPlatform }) {
+  const payslips = (state.payslipIdsByRun.get(payRun.payRunId) || [])
+    .map((payslipId) => state.payslips.get(payslipId))
+    .filter(Boolean)
+    .map(enrichPayslip);
+  const lines = payslips
+    .map((payslip) => {
+      const netPayAmount = roundMoney(Math.max(0, Number(payslip.totals.netPay || 0)));
+      if (!netPayAmount) {
+        return null;
+      }
+      const bankAccount =
+        hrPlatform?.getEmployeeBankAccountDetails?.({
+          companyId: payRun.companyId,
+          employeeId: payslip.employee.employeeId
+        }) ||
+        payslip.bankAccount ||
+        null;
+      if (!bankAccount) {
+        throw createError(409, "employee_bank_account_missing", `Employee ${payslip.employee.employeeId} is missing a payout account.`);
+      }
+      return {
+        payrollPayoutLineId: crypto.randomUUID(),
+        employmentId: payslip.employment.employmentId,
+        employeeId: payslip.employee.employeeId,
+        employeeNumber: payslip.employee.employeeNumber || null,
+        payeeName: payslip.employee.displayName,
+        payoutMethod: bankAccount.payoutMethod || null,
+        accountTarget:
+          bankAccount.iban ||
+          bankAccount.bankgiro ||
+          bankAccount.plusgiro ||
+          [bankAccount.clearingNumber, bankAccount.accountNumber].filter(Boolean).join(":") ||
+          bankAccount.maskedAccountDisplay,
+        employeeBankAccountId: bankAccount.employeeBankAccountId || null,
+        amount: netPayAmount,
+        currencyCode: "SEK",
+        paymentReference: `LON ${payRun.reportingPeriod} ${payslip.employee.employeeNumber || payslip.employee.employeeId.slice(0, 8)}`
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.employeeId.localeCompare(right.employeeId));
+  const exportRows = lines.map((line) =>
+    [line.employeeNumber || "", line.payeeName, line.accountTarget, line.amount.toFixed(2), line.currencyCode, line.paymentReference].join(";")
+  );
+  const exportPayload = ["employee_no;payee;account;amount;currency;reference", ...exportRows].join("\n");
+  return {
+    lines,
+    totalAmount: roundMoney(lines.reduce((sum, line) => sum + Number(line.amount || 0), 0)),
+    exportPayload,
+    payloadHash: buildSnapshotHash({
+      payRunId: payRun.payRunId,
+      bankAccountId: companyBankAccount.bankAccountId,
+      exportPayload
+    })
+  };
+}
+
+function buildVacationLiabilitySnapshotModel({ state, companyId, reportingPeriod } = {}) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const resolvedReportingPeriod = normalizeReportingPeriod(reportingPeriod, "reporting_period_required");
+  const approvedRuns = (state.payRunIdsByCompany.get(resolvedCompanyId) || [])
+    .map((payRunId) => state.payRuns.get(payRunId))
+    .filter(Boolean)
+    .filter((payRun) => payRun.status === "approved" && payRun.reportingPeriod <= resolvedReportingPeriod)
+    .sort((left, right) => left.reportingPeriod.localeCompare(right.reportingPeriod) || left.createdAt.localeCompare(right.createdAt));
+
+  const employeeMap = new Map();
+  for (const payRun of approvedRuns) {
+    for (const lineId of state.payRunLineIdsByRun.get(payRun.payRunId) || []) {
+      const line = state.payRunLines.get(lineId);
+      if (!line) {
+        continue;
+      }
+      const key = `${line.employmentId}:${line.employeeId}`;
+      const current = employeeMap.get(key) || {
+        employmentId: line.employmentId,
+        employeeId: line.employeeId,
+        vacationBasisAmount: 0,
+        vacationSettlementAmount: 0
+      };
+      if (line.affectsVacationBasis) {
+        current.vacationBasisAmount = roundMoney(current.vacationBasisAmount + Math.max(0, directionalAmount(line)));
+      }
+      if (VACATION_LIABILITY_SETTLEMENT_CODES.has(line.payItemCode)) {
+        current.vacationSettlementAmount = roundMoney(current.vacationSettlementAmount + Math.abs(directionalAmount(line)));
+      }
+      employeeMap.set(key, current);
+    }
+  }
+
+  const employeeSnapshots = [...employeeMap.values()]
+    .map((entry) => ({
+      ...entry,
+      liabilityAmount: roundMoney(Math.max(0, entry.vacationBasisAmount - entry.vacationSettlementAmount))
+    }))
+    .sort((left, right) => left.employeeId.localeCompare(right.employeeId));
+
+  const totals = {
+    vacationBasisAmount: roundMoney(employeeSnapshots.reduce((sum, entry) => sum + Number(entry.vacationBasisAmount || 0), 0)),
+    vacationSettlementAmount: roundMoney(employeeSnapshots.reduce((sum, entry) => sum + Number(entry.vacationSettlementAmount || 0), 0)),
+    liabilityAmount: roundMoney(employeeSnapshots.reduce((sum, entry) => sum + Number(entry.liabilityAmount || 0), 0))
+  };
+
+  return {
+    companyId: resolvedCompanyId,
+    reportingPeriod: resolvedReportingPeriod,
+    payRunIds: approvedRuns.map((payRun) => payRun.payRunId),
+    employeeSnapshots,
+    totals,
+    snapshotHash: buildSnapshotHash({
+      companyId: resolvedCompanyId,
+      reportingPeriod: resolvedReportingPeriod,
+      employeeSnapshots,
+      totals
+    })
+  };
+}
+
+function findLatestVacationLiabilitySnapshotBeforePeriod(state, companyId, reportingPeriod) {
+  return (state.vacationLiabilitySnapshotIdsByCompany.get(companyId) || [])
+    .map((snapshotId) => state.vacationLiabilitySnapshots.get(snapshotId))
+    .filter(Boolean)
+    .filter((snapshot) => snapshot.reportingPeriod < reportingPeriod)
+    .sort((left, right) => left.reportingPeriod.localeCompare(right.reportingPeriod) || left.createdAt.localeCompare(right.createdAt))
+    .pop() || null;
+}
+
+function mergePayrollJournalLines(lines) {
+  const grouped = new Map();
+  for (const line of lines) {
+    const key = stableStringify({
+      accountNumber: line.accountNumber,
+      dimensionJson: line.dimensionJson || {}
+    });
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.debitAmount = roundMoney(existing.debitAmount + Number(line.debitAmount || 0));
+      existing.creditAmount = roundMoney(existing.creditAmount + Number(line.creditAmount || 0));
+      continue;
+    }
+    grouped.set(key, {
+      accountNumber: requireText(String(line.accountNumber), "ledger_account_code_required"),
+      debitAmount: roundMoney(Number(line.debitAmount || 0)),
+      creditAmount: roundMoney(Number(line.creditAmount || 0)),
+      dimensionJson: normalizePayrollDimensions(line.dimensionJson || {})
+    });
+  }
+  return [...grouped.values()].filter((line) => line.debitAmount > 0 || line.creditAmount > 0);
+}
+
+function normalizePayrollDimensions(dimensions = {}) {
+  const normalized = {};
+  const projectId = normalizeOptionalText(dimensions.projectId);
+  const costCenterCode = normalizeOptionalText(dimensions.costCenterCode);
+  const businessAreaCode = normalizeOptionalText(dimensions.businessAreaCode);
+  if (projectId) {
+    normalized.projectId = projectId;
+  }
+  if (costCenterCode) {
+    normalized.costCenterCode = costCenterCode;
+  }
+  if (businessAreaCode) {
+    normalized.businessAreaCode = businessAreaCode;
+  }
+  return normalized;
+}
+
+const VACATION_LIABILITY_SETTLEMENT_CODES = new Set(["VACATION_PAY", "VACATION_SUPPLEMENT", "VACATION_DEDUCTION"]);
 
 function findAgiSubmissionByPeriod(state, companyId, reportingPeriod) {
   return (state.agiSubmissionIdsByCompany.get(companyId) || [])
@@ -1615,6 +2325,7 @@ function buildAgiPreview({ companyId, period, employee, employment, lines, leave
   };
   if (invalidMappings.length > 0 || !taxPreview.taxFieldCode) {
     return {
+      payload: previewPayload,
       step: createPendingStep(16, {
         status: "validation_required",
         ...details
@@ -1622,7 +2333,72 @@ function buildAgiPreview({ companyId, period, employee, employment, lines, leave
     };
   }
   return {
+    payload: previewPayload,
     step: createCompletedStep(16, details)
+  };
+}
+
+function buildPayrollPostingIntentPreview({
+  reportingPeriod,
+  employment,
+  lines,
+  preliminaryTaxAmount,
+  employerContributionAmount,
+  netPayAmount
+}) {
+  const dimensionKeys = [...new Set(lines.map((line) => stableStringify(normalizePayrollDimensions(line.dimensionJson || {}))))].sort();
+  const payload = {
+    employmentId: employment.employmentId,
+    reportingPeriod,
+    sourceLineCount: lines.length,
+    grossLineCount: lines.filter((line) => line.compensationBucket === "gross_addition").length,
+    grossDeductionLineCount: lines.filter((line) => line.compensationBucket === "gross_deduction").length,
+    netDeductionLineCount: lines.filter((line) => line.compensationBucket === "net_deduction").length,
+    preliminaryTaxAmount: roundMoney(preliminaryTaxAmount || 0),
+    employerContributionAmount: roundMoney(employerContributionAmount || 0),
+    netPayAmount: netPayAmount == null ? null : roundMoney(netPayAmount),
+    dimensions: dimensionKeys.map((serialized) => JSON.parse(serialized))
+  };
+  return {
+    payload,
+    step: createCompletedStep(17, {
+      payloadHash: buildSnapshotHash(payload),
+      previewItemCount: payload.sourceLineCount,
+      dimensionCount: payload.dimensions.length,
+      preliminaryTaxAmount: payload.preliminaryTaxAmount,
+      employerContributionAmount: payload.employerContributionAmount,
+      netPayAmount: payload.netPayAmount
+    })
+  };
+}
+
+function buildPayrollBankPaymentPreview({ reportingPeriod, payDate, employee, employment, primaryBankAccount, netPayAmount }) {
+  const normalizedNetPayAmount = netPayAmount == null ? null : roundMoney(netPayAmount);
+  const requiresBankPayout = normalizedNetPayAmount != null && normalizedNetPayAmount > 0;
+  const payload = {
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    reportingPeriod,
+    payDate,
+    netPayAmount: normalizedNetPayAmount,
+    requiresBankPayout,
+    payoutReady: requiresBankPayout ? primaryBankAccount != null : true,
+    accountTarget:
+      primaryBankAccount?.iban ||
+      primaryBankAccount?.bankgiro ||
+      primaryBankAccount?.plusgiro ||
+      primaryBankAccount?.maskedAccountDisplay ||
+      null
+  };
+  return {
+    payload,
+    step: createCompletedStep(18, {
+      payloadHash: buildSnapshotHash(payload),
+      bankAccountPresent: primaryBankAccount != null,
+      requiresBankPayout,
+      payoutReady: payload.payoutReady,
+      netPayAmount: normalizedNetPayAmount
+    })
   };
 }
 
@@ -1906,14 +2682,27 @@ function calculateEmploymentRun({
     warnings
   });
   steps[16] = agiPreview.step;
-  steps[17] = createPendingStep(17, {
-    status: "phase8_3_pending",
-    previewItemCount: 0
+  const postingIntentPreview = buildPayrollPostingIntentPreview({
+    reportingPeriod: period.reportingPeriod,
+    employment,
+    lines,
+    preliminaryTaxAmount: taxPreview.amount,
+    employerContributionAmount: employerContributionPreview.amount,
+    netPayAmount: lineTotals.netPay
   });
-  steps[18] = createPendingStep(18, {
-    status: lineTotals.netPay == null ? "phase8_2_pending_tax" : "phase8_3_pending_payout",
-    bankAccountPresent: primaryBankAccount != null
+  steps[17] = postingIntentPreview.step;
+  const bankPaymentPreview = buildPayrollBankPaymentPreview({
+    reportingPeriod: period.reportingPeriod,
+    payDate: period.payDate,
+    employee,
+    employment,
+    primaryBankAccount,
+    netPayAmount: lineTotals.netPay
   });
+  steps[18] = bankPaymentPreview.step;
+  payslipRenderPayload.agiPreview = agiPreview.payload;
+  payslipRenderPayload.postingIntentPreview = postingIntentPreview.payload;
+  payslipRenderPayload.bankPaymentPreview = bankPaymentPreview.payload;
 
   return {
     employee,
@@ -1955,16 +2744,17 @@ function createBaseSalaryLines({ companyId, employment, contract, runType, state
 function createVariableLines({ companyId, employment, contract, timeEntries, leaveEntries, leavePayItemMappings, manualInputs, state, warnings }) {
   const lines = [];
   const hourlyRate = contract?.hourlyRate ?? null;
-  const overtimeHours = roundQuantity(timeEntries.reduce((sum, entry) => sum + (entry.overtimeMinutes || 0), 0) / 60);
-  const obHours = roundQuantity(timeEntries.reduce((sum, entry) => sum + (entry.obMinutes || 0), 0) / 60);
-  const jourHours = roundQuantity(timeEntries.reduce((sum, entry) => sum + (entry.jourMinutes || 0), 0) / 60);
-  const standbyHours = roundQuantity(timeEntries.reduce((sum, entry) => sum + (entry.standbyMinutes || 0), 0) / 60);
-  const workedHours = roundQuantity(timeEntries.reduce((sum, entry) => sum + (entry.workedMinutes || 0), 0) / 60);
+  const groupedTimeEntries = aggregateTimeEntriesByDimensions(timeEntries);
 
-  if (contract?.salaryModelCode === "hourly_salary" && hourlyRate != null && workedHours > 0) {
+  if (contract?.salaryModelCode === "hourly_salary" && hourlyRate != null) {
     const payItem = getRequiredPayItemByCode(state, companyId, "HOURLY_SALARY");
-    const baseHours = roundQuantity(Math.max(0, workedHours - overtimeHours));
-    if (baseHours > 0) {
+    for (const group of groupedTimeEntries) {
+      const workedHours = roundQuantity(group.workedMinutes / 60);
+      const overtimeHours = roundQuantity(group.overtimeMinutes / 60);
+      const baseHours = roundQuantity(Math.max(0, workedHours - overtimeHours));
+      if (baseHours <= 0) {
+        continue;
+      }
       lines.push(
         createPayLine({
           payItem,
@@ -1973,33 +2763,37 @@ function createVariableLines({ companyId, employment, contract, timeEntries, lea
           unitRate: hourlyRate,
           amount: roundMoney(baseHours * hourlyRate),
           sourceType: "time_entry",
-          sourceId: buildSourceSummaryId(timeEntries.map((entry) => entry.timeEntryId))
+          sourceId: buildSourceSummaryId(group.timeEntryIds),
+          dimensionJson: group.dimensionJson
         })
       );
     }
   }
 
-  for (const definition of [
-    { code: "OVERTIME", quantity: overtimeHours },
-    { code: "OB", quantity: obHours },
-    { code: "JOUR", quantity: jourHours },
-    { code: "STANDBY", quantity: standbyHours }
-  ]) {
-    if (!definition.quantity) {
-      continue;
-    }
-    const payItem = getRequiredPayItemByCode(state, companyId, definition.code);
-    const configured = buildConfiguredQuantityLine({
-      payItem,
-      employment,
-      contract,
-      quantity: definition.quantity,
-      sourceType: "time_entry",
-      sourceId: buildSourceSummaryId(timeEntries.map((entry) => entry.timeEntryId)),
-      warnings
-    });
-    if (configured) {
-      lines.push(configured);
+  for (const group of groupedTimeEntries) {
+    for (const definition of [
+      { code: "OVERTIME", quantity: roundQuantity(group.overtimeMinutes / 60) },
+      { code: "OB", quantity: roundQuantity(group.obMinutes / 60) },
+      { code: "JOUR", quantity: roundQuantity(group.jourMinutes / 60) },
+      { code: "STANDBY", quantity: roundQuantity(group.standbyMinutes / 60) }
+    ]) {
+      if (!definition.quantity) {
+        continue;
+      }
+      const payItem = getRequiredPayItemByCode(state, companyId, definition.code);
+      const configured = buildConfiguredQuantityLine({
+        payItem,
+        employment,
+        contract,
+        quantity: definition.quantity,
+        sourceType: "time_entry",
+        sourceId: buildSourceSummaryId(group.timeEntryIds),
+        dimensionJson: group.dimensionJson,
+        warnings
+      });
+      if (configured) {
+        lines.push(configured);
+      }
     }
   }
 
@@ -2048,7 +2842,8 @@ function createVariableLines({ companyId, employment, contract, timeEntries, lea
         sourceType: manualInput.sourceType,
         sourceId: manualInput.sourceId,
         sourcePeriod: manualInput.sourcePeriod,
-        note: manualInput.note
+        note: manualInput.note,
+        dimensionJson: manualInput.dimensionJson
       })
     );
   }
@@ -2072,7 +2867,8 @@ function createRetroCorrectionLines({ companyId, employment, retroAdjustments, s
         sourcePeriod: adjustment.originalPeriod,
         sourcePayRunId: adjustment.sourcePayRunId,
         sourceLineId: adjustment.sourceLineId,
-        note: adjustment.note || `Retro correction for ${adjustment.originalPeriod}.`
+        note: adjustment.note || `Retro correction for ${adjustment.originalPeriod}.`,
+        dimensionJson: adjustment.dimensionJson
       })
     );
   }
@@ -2094,7 +2890,8 @@ function createFinalPayLines({ companyId, employment, finalPayAdjustments, state
           amount: adjustment.finalSettlementAmount,
           sourceType: "final_pay",
           sourceId: adjustment.terminationDate,
-          note: adjustment.note || "Final pay settlement."
+          note: adjustment.note || "Final pay settlement.",
+          dimensionJson: adjustment.dimensionJson
         })
       );
     }
@@ -2108,7 +2905,8 @@ function createFinalPayLines({ companyId, employment, finalPayAdjustments, state
           amount: adjustment.remainingVacationSettlementAmount,
           sourceType: "final_pay",
           sourceId: adjustment.terminationDate,
-          note: "Remaining vacation settlement."
+          note: "Remaining vacation settlement.",
+          dimensionJson: adjustment.dimensionJson
         })
       );
     }
@@ -2125,7 +2923,8 @@ function createFinalPayLines({ companyId, employment, finalPayAdjustments, state
           amount: adjustment.advanceVacationRecoveryAmount,
           sourceType: "final_pay",
           sourceId: adjustment.terminationDate,
-          note: "Advance vacation recovery."
+          note: "Advance vacation recovery.",
+          dimensionJson: adjustment.dimensionJson
         })
       );
     }
@@ -2147,7 +2946,8 @@ function createStepLinesFromManualInputs({ processingStep, employment, inputs, s
         sourceType: input.sourceType,
         sourceId: input.sourceId,
         sourcePeriod: input.sourcePeriod,
-        note: input.note
+        note: input.note,
+        dimensionJson: input.dimensionJson
       });
     });
 }
@@ -2448,7 +3248,7 @@ function seedPayItem(state, template) {
     taxTreatmentCode: template.taxTreatmentCode ?? "phase8_2_pending",
     employerContributionTreatmentCode: template.employerContributionTreatmentCode ?? "phase8_2_pending",
     agiMappingCode: template.agiMappingCode ?? resolveDefaultAgiMappingCode(template.payItemCode),
-    ledgerAccountCode: template.ledgerAccountCode ?? "phase8_3_pending",
+    ledgerAccountCode: template.ledgerAccountCode ?? resolveDefaultLedgerAccountCode(template.payItemCode),
     defaultDimensions: copy(template.defaultDimensions || {}),
     affectsVacationBasis: template.affectsVacationBasis === true,
     affectsPensionBasis: template.affectsPensionBasis === true,
@@ -2682,7 +3482,45 @@ function aggregateLeaveEntries(leaveEntries) {
   return [...groups.values()];
 }
 
-function buildConfiguredQuantityLine({ payItem, employment, contract, quantity, unitRate = null, rateFactor = null, sourceType, sourceId, warnings }) {
+function aggregateTimeEntriesByDimensions(timeEntries) {
+  const groups = new Map();
+  for (const entry of Array.isArray(timeEntries) ? timeEntries : []) {
+    const dimensionJson = normalizePayrollDimensions({
+      projectId: entry.projectId
+    });
+    const key = stableStringify(dimensionJson);
+    const current = groups.get(key) || {
+      dimensionJson,
+      timeEntryIds: [],
+      workedMinutes: 0,
+      overtimeMinutes: 0,
+      obMinutes: 0,
+      jourMinutes: 0,
+      standbyMinutes: 0
+    };
+    current.timeEntryIds.push(entry.timeEntryId);
+    current.workedMinutes += Number(entry.workedMinutes || 0);
+    current.overtimeMinutes += Number(entry.overtimeMinutes || 0);
+    current.obMinutes += Number(entry.obMinutes || 0);
+    current.jourMinutes += Number(entry.jourMinutes || 0);
+    current.standbyMinutes += Number(entry.standbyMinutes || 0);
+    groups.set(key, current);
+  }
+  return [...groups.values()].sort((left, right) => stableStringify(left.dimensionJson).localeCompare(stableStringify(right.dimensionJson)));
+}
+
+function buildConfiguredQuantityLine({
+  payItem,
+  employment,
+  contract,
+  quantity,
+  unitRate = null,
+  rateFactor = null,
+  sourceType,
+  sourceId,
+  dimensionJson = null,
+  warnings
+}) {
   const resolvedQuantity = roundQuantity(quantity || 0);
   if (!resolvedQuantity) {
     return null;
@@ -2700,7 +3538,8 @@ function buildConfiguredQuantityLine({ payItem, employment, contract, quantity, 
         unitRate: null,
         sourceType,
         sourceId,
-        calculationStatus: "rate_required"
+        calculationStatus: "rate_required",
+        dimensionJson
       });
     }
     const effectiveRate = roundMoney(contract.hourlyRate * resolvedRateFactor);
@@ -2711,7 +3550,8 @@ function buildConfiguredQuantityLine({ payItem, employment, contract, quantity, 
       unitRate: effectiveRate,
       amount: roundMoney(resolvedQuantity * effectiveRate),
       sourceType,
-      sourceId
+      sourceId,
+      dimensionJson
     });
   }
 
@@ -2731,7 +3571,8 @@ function buildConfiguredQuantityLine({ payItem, employment, contract, quantity, 
       unitRate: null,
       sourceType,
       sourceId,
-      calculationStatus: "rate_required"
+      calculationStatus: "rate_required",
+      dimensionJson
     });
   }
 
@@ -2742,7 +3583,8 @@ function buildConfiguredQuantityLine({ payItem, employment, contract, quantity, 
     unitRate: effectiveUnitRate,
     amount: payItem.calculationBasis === "reporting_only" ? 0 : roundMoney(resolvedQuantity * effectiveUnitRate * resolvedRateFactor),
     sourceType,
-    sourceId
+    sourceId,
+    dimensionJson
   });
 }
 
@@ -2758,7 +3600,8 @@ function createPayLine({
   sourcePayRunId = null,
   sourceLineId = null,
   note = null,
-  calculationStatus = "calculated"
+  calculationStatus = "calculated",
+  dimensionJson = null
 }) {
   return {
     employmentId: employment.employmentId,
@@ -2786,7 +3629,11 @@ function createPayLine({
     sourceLineId: normalizeOptionalText(sourceLineId),
     calculationStatus,
     note: normalizeOptionalText(note),
-    displayOrder: payItemDisplayOrder(payItem.payItemCode)
+    displayOrder: payItemDisplayOrder(payItem.payItemCode),
+    dimensionJson: normalizePayrollDimensions({
+      ...(payItem.defaultDimensions || {}),
+      ...(dimensionJson || {})
+    })
   };
 }
 
@@ -2809,7 +3656,13 @@ function normalizeManualInputs({ companyId, manualInputs, state }) {
       sourceId: normalizeOptionalText(input.sourceId),
       sourcePeriod: normalizeOptionalReportingPeriod(input.sourcePeriod),
       note: normalizeOptionalText(input.note),
-      processingStep
+      processingStep,
+      dimensionJson: normalizePayrollDimensions({
+        ...(input.dimensionJson || {}),
+        projectId: input.projectId ?? input.dimensionJson?.projectId,
+        costCenterCode: input.costCenterCode ?? input.dimensionJson?.costCenterCode,
+        businessAreaCode: input.businessAreaCode ?? input.dimensionJson?.businessAreaCode
+      })
     };
   });
 }
@@ -2830,7 +3683,13 @@ function normalizeRetroAdjustments({ companyId, retroAdjustments, state }) {
       originalPeriod: normalizeReportingPeriod(adjustment.originalPeriod, "retro_original_period_required"),
       sourcePayRunId: normalizeOptionalText(adjustment.sourcePayRunId),
       sourceLineId: normalizeOptionalText(adjustment.sourceLineId),
-      note: normalizeOptionalText(adjustment.note)
+      note: normalizeOptionalText(adjustment.note),
+      dimensionJson: normalizePayrollDimensions({
+        ...(adjustment.dimensionJson || {}),
+        projectId: adjustment.projectId ?? adjustment.dimensionJson?.projectId,
+        costCenterCode: adjustment.costCenterCode ?? adjustment.dimensionJson?.costCenterCode,
+        businessAreaCode: adjustment.businessAreaCode ?? adjustment.dimensionJson?.businessAreaCode
+      })
     };
   });
 }
@@ -2852,7 +3711,13 @@ function normalizeFinalPayAdjustments(finalPayAdjustments) {
       adjustment.advanceVacationRecoveryAmount,
       "final_pay_advance_recovery_invalid"
     ),
-    note: normalizeOptionalText(adjustment.note)
+    note: normalizeOptionalText(adjustment.note),
+    dimensionJson: normalizePayrollDimensions({
+      ...(adjustment.dimensionJson || {}),
+      projectId: adjustment.projectId ?? adjustment.dimensionJson?.projectId,
+      costCenterCode: adjustment.costCenterCode ?? adjustment.dimensionJson?.costCenterCode,
+      businessAreaCode: adjustment.businessAreaCode ?? adjustment.dimensionJson?.businessAreaCode
+    })
   }));
 }
 
@@ -3022,7 +3887,7 @@ function createPayItemTemplate(
     taxTreatmentCode,
     employerContributionTreatmentCode,
     agiMappingCode: resolveDefaultAgiMappingCode(payItemCode),
-    ledgerAccountCode: "phase8_3_pending",
+    ledgerAccountCode: resolveDefaultLedgerAccountCode(payItemCode),
     affectsVacationBasis,
     affectsPensionBasis,
     includedInNetPay: compensationBucket !== "reporting_only",
@@ -3045,6 +3910,58 @@ function resolveDefaultAgiMappingCode(payItemCode) {
     return "not_reported";
   }
   return "cash_compensation";
+}
+
+function resolveDefaultLedgerAccountCode(payItemCode) {
+  const resolvedCode = normalizeCode(payItemCode, "pay_item_code_required");
+  switch (resolvedCode) {
+    case "MONTHLY_SALARY":
+      return "7010";
+    case "HOURLY_SALARY":
+      return "7020";
+    case "OVERTIME":
+    case "ADDITIONAL_TIME":
+      return "7030";
+    case "OB":
+      return "7040";
+    case "JOUR":
+    case "STANDBY":
+      return "7050";
+    case "BONUS":
+    case "COMMISSION":
+      return "7060";
+    case "VACATION_PAY":
+    case "VACATION_SUPPLEMENT":
+    case "VACATION_DEDUCTION":
+      return "7070";
+    case "SICK_PAY":
+      return "7080";
+    case "QUALIFYING_DEDUCTION":
+    case "CARE_OF_CHILD":
+    case "PARENTAL_LEAVE":
+    case "LEAVE_WITHOUT_PAY":
+    case "FINAL_PAY":
+    case "CORRECTION":
+    case "SALARY_EXCHANGE_GROSS_DEDUCTION":
+      return "7090";
+    case "BENEFIT":
+      return "7290";
+    case "TAX_FREE_TRAVEL_ALLOWANCE":
+    case "TAXABLE_TRAVEL_ALLOWANCE":
+      return "7310";
+    case "TAX_FREE_MILEAGE":
+    case "TAXABLE_MILEAGE":
+      return "7320";
+    case "PENSION_PREMIUM":
+      return "7130";
+    case "NET_DEDUCTION":
+    case "GARNISHMENT":
+    case "ADVANCE":
+    case "RECLAIM":
+      return "2750";
+    default:
+      return "7090";
+  }
 }
 
 function createCompletedStep(stepNo, details) {

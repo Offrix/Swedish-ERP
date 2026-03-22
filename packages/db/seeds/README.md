@@ -27,3 +27,4 @@ Seed execution policy:
 - Phase 7.3 adds leave types, employee-portal absence history, manager approvals, AGI-sensitive leave signals and signed lock artifacts
 - Phase 8.1 adds payroll rule-pack previews, pay item catalog seed data, payroll calendars and regular/extra/correction/final pay-run demo artifacts
 - Phase 8.2 adds statutory payroll profiles, tax/SINK rule-pack seed data, AGI submissions, correction versions, receipts and absence-payload demo artifacts
+- Phase 8.3 adds payroll posting, dimension-aware journal lines, payout export, bank-match and vacation-liability demo artifacts
