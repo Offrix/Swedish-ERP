@@ -254,10 +254,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [x] Prompt `P7-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 7.2 Tidrapportering, schema och saldon
-- [ ] LÃ¥sning av period fungerar
-- [ ] Tid kan kopplas till projekt och aktivitet
-- [ ] BerÃ¤kning av saldon Ã¤r reproducerbar
-- [ ] Prompt `P7-02` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] LÃ¥sning av period fungerar
+- [x] Tid kan kopplas till projekt och aktivitet
+- [x] BerÃ¤kning av saldon Ã¤r reproducerbar
+- [x] Prompt `P7-02` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 7.3 FrÃ¥nvaro, attest och anstÃ¤lldportal
 - [ ] FrÃ¥nvaro kan inte Ã¤ndras efter AGI-signering

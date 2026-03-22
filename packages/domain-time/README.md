@@ -1,3 +1,3 @@
 # @swedish-erp/domain-time
 
-Time boundary for work logs, leave, balances, schedules and period locking before payroll.
+Time boundary for clock events, schedules, time entries, balances and period locking before payroll.

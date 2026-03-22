@@ -58,6 +58,7 @@
     "verify:phase6:ap:masterdata": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase6-ap-masterdata.ps1",
     "verify:phase6:ap:invoice-matching": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase6-ap-invoice-matching.ps1",
     "verify:phase6:ap:payments": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase6-ap-payments.ps1",
-    "verify:phase7:hr:master": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase7-hr-master.ps1"
+    "verify:phase7:hr:master": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase7-hr-master.ps1",
+    "verify:phase7:time": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase7-time-reporting.ps1"
   }
 }

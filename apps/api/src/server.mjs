@@ -50,6 +50,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase5ArEnabled: flags.phase5ArEnabled,
             phase6ApEnabled: flags.phase6ApEnabled,
             phase7HrEnabled: flags.phase7HrEnabled,
+            phase7TimeEnabled: flags.phase7TimeEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -150,6 +151,12 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/banking/payment-orders/:paymentOrderId/book",
               "/v1/banking/payment-orders/:paymentOrderId/reject",
               "/v1/banking/payment-orders/:paymentOrderId/return",
+              "/v1/time/clock-events",
+              "/v1/time/entries",
+              "/v1/time/schedule-templates",
+              "/v1/time/schedule-assignments",
+              "/v1/time/period-locks",
+              "/v1/time/balances",
               "/v1/hr/employees",
               "/v1/hr/employees/:employeeId",
               "/v1/hr/employees/:employeeId/employments",
@@ -233,6 +240,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 7.1 HR masterdata routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase7TimeEnabled && isPhase72Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 7.2 time reporting routes are disabled by configuration."
     });
     return;
   }
@@ -3583,6 +3598,310 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/time/schedule-templates") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "time_schedule",
+      scopeCode: "time"
+    });
+    writeJson(res, 200, {
+      items: platform.listScheduleTemplates({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/time/schedule-templates") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "time_schedule",
+      scopeCode: "time"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createScheduleTemplate({
+        companyId,
+        scheduleTemplateCode: body.scheduleTemplateCode || null,
+        displayName: body.displayName,
+        timezone: body.timezone || "Europe/Stockholm",
+        active: body.active !== false,
+        days: body.days || [],
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/time/schedule-assignments") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const employmentId = requireText(
+      url.searchParams.get("employmentId"),
+      "employment_id_required",
+      "employmentId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "time_schedule",
+      scopeCode: "time"
+    });
+    writeJson(res, 200, {
+      items: platform.listScheduleAssignments({
+        companyId,
+        employmentId
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/time/schedule-assignments") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "time_schedule",
+      scopeCode: "time"
+    });
+    writeJson(
+      res,
+      201,
+      platform.assignScheduleTemplate({
+        companyId,
+        employmentId: body.employmentId,
+        scheduleTemplateId: body.scheduleTemplateId,
+        validFrom: body.validFrom,
+        validTo: body.validTo || null,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/time/clock-events") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const employmentId = requireText(
+      url.searchParams.get("employmentId"),
+      "employment_id_required",
+      "employmentId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "time_entry",
+      scopeCode: "time"
+    });
+    writeJson(res, 200, {
+      items: platform.listClockEvents({
+        companyId,
+        employmentId
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/time/clock-events") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "time_entry",
+      scopeCode: "time"
+    });
+    writeJson(
+      res,
+      201,
+      platform.recordClockEvent({
+        companyId,
+        employmentId: body.employmentId,
+        eventType: body.eventType,
+        occurredAt: body.occurredAt,
+        sourceChannel: body.sourceChannel || "field_mobile",
+        projectId: body.projectId || null,
+        activityCode: body.activityCode || null,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/time/entries") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const employmentId = requireText(
+      url.searchParams.get("employmentId"),
+      "employment_id_required",
+      "employmentId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "time_entry",
+      scopeCode: "time"
+    });
+    writeJson(res, 200, {
+      items: platform.listTimeEntries({
+        companyId,
+        employmentId
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/time/entries") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "time_entry",
+      scopeCode: "time"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createTimeEntry({
+        companyId,
+        employmentId: body.employmentId,
+        workDate: body.workDate,
+        projectId: body.projectId || null,
+        activityCode: body.activityCode || null,
+        sourceType: body.sourceType || "manual",
+        startsAt: body.startsAt || null,
+        endsAt: body.endsAt || null,
+        breakMinutes: body.breakMinutes ?? 0,
+        workedMinutes: body.workedMinutes ?? null,
+        overtimeMinutes: body.overtimeMinutes ?? 0,
+        obMinutes: body.obMinutes ?? 0,
+        jourMinutes: body.jourMinutes ?? 0,
+        standbyMinutes: body.standbyMinutes ?? 0,
+        flexDeltaMinutes: body.flexDeltaMinutes ?? null,
+        compDeltaMinutes: body.compDeltaMinutes ?? 0,
+        sourceClockEventIds: body.sourceClockEventIds || [],
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/time/balances") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const employmentId = requireText(
+      url.searchParams.get("employmentId"),
+      "employment_id_required",
+      "employmentId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "time_balance",
+      scopeCode: "time"
+    });
+    writeJson(
+      res,
+      200,
+      platform.listTimeBalances({
+        companyId,
+        employmentId,
+        cutoffDate: url.searchParams.get("cutoffDate") || null
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/time/period-locks") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "time_period_lock",
+      scopeCode: "time"
+    });
+    writeJson(res, 200, {
+      items: platform.listTimePeriodLocks({
+        companyId,
+        employmentId: url.searchParams.get("employmentId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/time/period-locks") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "time_period_lock",
+      scopeCode: "time"
+    });
+    writeJson(
+      res,
+      201,
+      platform.lockTimePeriod({
+        companyId,
+        employmentId: body.employmentId || null,
+        startsOn: body.startsOn,
+        endsOn: body.endsOn,
+        reasonCode: body.reasonCode,
+        note: body.note || null,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/hr/employees") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -4065,6 +4384,10 @@ function isPhase7Route(path) {
   return path.startsWith("/v1/hr");
 }
 
+function isPhase72Route(path) {
+  return path.startsWith("/v1/time");
+}
+
 async function readJsonBody(req, allowEmpty = false) {
   const chunks = [];
   for await (const chunk of req) {
@@ -4132,7 +4455,8 @@ function readFeatureFlags(env) {
     phase4VatEnabled: String(env.PHASE4_VAT_ENABLED || "true").toLowerCase() !== "false",
     phase5ArEnabled: String(env.PHASE5_AR_ENABLED || "true").toLowerCase() !== "false",
     phase6ApEnabled: String(env.PHASE6_AP_ENABLED || "true").toLowerCase() !== "false",
-    phase7HrEnabled: String(env.PHASE7_HR_ENABLED || "true").toLowerCase() !== "false"
+    phase7HrEnabled: String(env.PHASE7_HR_ENABLED || "true").toLowerCase() !== "false",
+    phase7TimeEnabled: String(env.PHASE7_TIME_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

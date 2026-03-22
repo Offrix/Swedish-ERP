@@ -23,3 +23,4 @@ Seed execution policy:
 - Phase 6.2 adds AP supplier-invoice ingest, match-run, variance and multi-line posting demo artifacts
 - Phase 6.3 adds AP approval-chain, payment-proposal, payout-booking and returned-payment demo artifacts
 - Phase 7.1 adds employee masterdata, multiple employments, contract-history, manager-tree, payout-account and sensitive-audit demo artifacts
+- Phase 7.2 adds schedule templates, assignments, clock-event history, time-entry balances and locked payroll periods

@@ -1,6 +1,6 @@
 # API
 
-HTTP baseline plus phased domain routes through FAS 7.1.
+HTTP baseline plus phased domain routes through FAS 7.2.
 
 ## Start
 
@@ -158,6 +158,17 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/banking/payment-orders/:paymentOrderId/book`
 - `POST /v1/banking/payment-orders/:paymentOrderId/reject`
 - `POST /v1/banking/payment-orders/:paymentOrderId/return`
+- `GET /v1/time/schedule-templates?companyId=...`
+- `POST /v1/time/schedule-templates`
+- `GET /v1/time/schedule-assignments?companyId=...&employmentId=...`
+- `POST /v1/time/schedule-assignments`
+- `GET /v1/time/clock-events?companyId=...&employmentId=...`
+- `POST /v1/time/clock-events`
+- `GET /v1/time/entries?companyId=...&employmentId=...`
+- `POST /v1/time/entries`
+- `GET /v1/time/balances?companyId=...&employmentId=...&cutoffDate=...`
+- `GET /v1/time/period-locks?companyId=...`
+- `POST /v1/time/period-locks`
 - `GET /v1/hr/employees?companyId=...`
 - `POST /v1/hr/employees`
 - `GET /v1/hr/employees/:employeeId?companyId=...`
@@ -192,3 +203,5 @@ Set `PHASE5_AR_ENABLED=false` to return `503` for FAS 5 AR routes while keeping 
 Set `PHASE6_AP_ENABLED=false` to return `503` for FAS 6.1, 6.2 and 6.3 AP and banking routes while keeping the rest of the API process alive.
 
 Set `PHASE7_HR_ENABLED=false` to return `503` for FAS 7.1 HR masterdata routes while keeping the rest of the API process alive.
+
+Set `PHASE7_TIME_ENABLED=false` to return `503` for FAS 7.2 time reporting routes while keeping the rest of the API process alive.

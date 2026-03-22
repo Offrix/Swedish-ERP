@@ -875,6 +875,7 @@ Read first:
 - docs/test-plans/master-verification-gates.md
 - docs/compliance/se/payroll-engine.md
 - docs/domain/ubiquitous-language.md
+- docs/runbooks/fas-7-time-reporting-verification.md
 - docs/runbooks/fas-7-hr-master-verification.md
 
 Implement exactly this scope:

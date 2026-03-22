@@ -36,6 +36,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - OCR-baserad leverantörsfakturaingest, fler-rads-kodning, momsförslag och 2-vägs-/3-vägsmatchning i AP
 - flerstegsattest, betalningsförslag, 2450-reservation, bankbokning och returreplay i AP
 - flera anställningar per person, avtalsversioner, chefsträd, payoutmaskning och känslig HR-audit
+- clock events, schemaassignments, premiumminuter, periodlås och reproducerbara tidsaldon
 - search ranking och permissions trimming-beslut
 - retry/backoff-beräkningar och jobbstate
 - feature flag-upplösning och kill-switch-beslut
@@ -80,6 +81,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - öppna poster, allocations, unmatched receipts, dunning runs, writeoffs och aging snapshots i AR
 - leverantörsregister, leverantörskontakter, PO-rader, mottagningsobjekt, importbatcher och invoice-receipt-links i AP
 - leverantörsfaktura-drafts, match runs, variansobjekt, AP-open-items och dokumentdrivna invoice-links i AP
+- tidschema, schematilldelningar, clock events, enriched time entries, balans-transaktioner och periodlås
 - Peppol adapter
 - myndighetsadaptrar
 - sökindex och projektioner
@@ -100,6 +102,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - disable-flagga och AP-invoiceflöde med OCR-ingest, fler-rads-postning och variansblockerad postning
 - disable-flagga och AP-betalflöde med attest, export, bankbokning och idempotent retur
 - disable-flagga och HR-masterflöde med flera anställningar, avtalsversioner, dokumentlänk och känslig audit
+- disable-flagga och tidsflöde med schema, stämpling, projektaktivitet, saldo och periodlås
 
 ### 8. Performance tests
 - load på dokumentingest
@@ -261,6 +264,15 @@ En fas är inte klar förrän:
 - dokument kan länkas till anställd via dokumentmotorn
 - känsliga fält skapar auditspår för identitet, skyddad identitet och utbetalningsuppgifter
 - seed visar flera anställningar och demo-seed visar skyddad identitet, chefsbyte och utländskt bankkonto
+
+#### Tid, schema och saldon
+- clock events lagras som separata in- och utstämplingar per anställning
+- aktivt schema kan tilldelas anställning med giltighetsintervall
+- tidpost kan bära både projectId och activityCode utan att tappa schemareferens
+- premiumminuter för OB, jour och beredskap bevaras på tidposten
+- saldo för flex, komp och övertid är reproducerbart för samma cutoffdatum
+- periodlås blockerar både nya stämplingar och nya tidposter inom låst intervall
+- seed visar schema, stämpling, tidpost, saldo och periodlås både i baseline och demo
 
 #### Lön
 - AGI kan genereras utan manuell redigering
