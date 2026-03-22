@@ -500,10 +500,10 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 9.1 FÃ¶rmÃ¥nsmotor
   - [x] 9.2 Resor, traktamente, kÃ¶rjournal och utlÃ¤gg
   - [x] 9.3 Pension, extra pension och lÃ¶nevÃ¤xling
-- [ ] **FAS 10 â€” Projekt, bygg, fÃ¤lt, lager och personalliggare**
+- [x] **FAS 10 â€” Projekt, bygg, fÃ¤lt, lager och personalliggare**
   - [x] 10.1 Projekt, budget och uppfÃ¶ljning
   - [x] 10.2 Arbetsorder, serviceorder, fÃ¤ltapp och lager
-  - [ ] 10.3 Byggspecifika regler: Ã„TA, HUS, omvÃ¤nd moms, personalliggare
+  - [x] 10.3 Byggspecifika regler: Ã„TA, HUS, omvÃ¤nd moms, personalliggare
 - [ ] **FAS 11 â€” Rapporter, byrÃ¥lÃ¤ge, mÃ¥nadsstÃ¤ngning och bokslut**
   - [ ] 11.1 Rapporter och drilldown
   - [ ] 11.2 ByrÃ¥lÃ¤ge och portfÃ¶ljhantering
@@ -1031,15 +1031,15 @@ Ta systemet ut pÃ¥ arbetsplatsen med arbetsorder, material, Ã„TA, HUS, bygg
 ### 10.3 Byggspecifika regler: Ã„TA, HUS, omvÃ¤nd moms, personalliggare
 
 **Bygg detta**
-- [ ] Ã„TA
-- [ ] ROT/RUT/HUS
-- [ ] byggmoms
-- [ ] personalliggare
+- [x] Ã„TA
+- [x] ROT/RUT/HUS
+- [x] byggmoms
+- [x] personalliggare
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] HUS-kundandel och ansÃ¶kan stÃ¤mmer
-- [ ] Byggmoms triggas korrekt
-- [ ] Personalliggare exporterar kontrollbar kedja
+- [x] HUS-kundandel och ansÃ¶kan stÃ¤mmer
+- [x] Byggmoms triggas korrekt
+- [x] Personalliggare exporterar kontrollbar kedja
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P10-03`.
 

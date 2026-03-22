@@ -1348,7 +1348,14 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/rot-rut-engine.md, docs/compliance/se/personalliggare-engine.md
+- docs/compliance/se/rot-rut-engine.md
+- docs/compliance/se/personalliggare-engine.md
+- docs/compliance/se/vat-engine.md
+- docs/compliance/se/project-billing-and-revenue-recognition-engine.md
+- docs/domain/field-work-order-service-order-and-material-flow.md
+- docs/domain/projects-budget-wip-and-profitability.md
+- docs/domain/ubiquitous-language.md
+- docs/runbooks/fas-10-build-verification.md
 
 Implement exactly this scope:
 - ÄTA

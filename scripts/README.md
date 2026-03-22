@@ -41,6 +41,7 @@ Helper scripts for local setup, structure verification and phased rollout checks
 - `verify-phase9-pension.ps1`: validates required FAS 9.3 pension enrollment, salary exchange, reporting, reconciliation and documentation artifacts.
 - `verify-phase10-projects.ps1`: validates required FAS 10.1 project budget, WIP, profitability and documentation artifacts.
 - `verify-phase10-field.ps1`: validates required FAS 10.2 work-order, dispatch, inventory, mobile and sync artifacts.
+- `verify-phase10-build.ps1`: validates required FAS 10.3 ATA, HUS, build-VAT and personalliggare artifacts.
 - `verify-db.ps1`: validates migration file naming.
 - `new-migration.ps1`: creates timestamped migration file in `packages/db/migrations`.
 - `dev-up.ps1`: starts docker infra.

@@ -14,6 +14,8 @@ import { createTravelPlatform } from "../../../packages/domain-travel/src/index.
 import { createPensionPlatform } from "../../../packages/domain-pension/src/index.mjs";
 import { createProjectsPlatform } from "../../../packages/domain-projects/src/index.mjs";
 import { createFieldPlatform } from "../../../packages/domain-field/src/index.mjs";
+import { createHusPlatform } from "../../../packages/domain-hus/src/index.mjs";
+import { createPersonalliggarePlatform } from "../../../packages/domain-personalliggare/src/index.mjs";
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
 
 export function createApiPlatform(options = {}) {
@@ -86,7 +88,18 @@ export function createApiPlatform(options = {}) {
     arPlatform,
     hrPlatform,
     timePlatform,
-    payrollPlatform
+    payrollPlatform,
+    vatPlatform
+  });
+  const husPlatform = createHusPlatform({
+    ...options,
+    arPlatform,
+    projectsPlatform
+  });
+  const personalliggarePlatform = createPersonalliggarePlatform({
+    ...options,
+    hrPlatform,
+    projectsPlatform
   });
   const fieldPlatform = createFieldPlatform({
     ...options,
@@ -111,6 +124,8 @@ export function createApiPlatform(options = {}) {
     ...travelPlatform,
     ...pensionPlatform,
     ...projectsPlatform,
+    ...husPlatform,
+    ...personalliggarePlatform,
     ...fieldPlatform,
     ...payrollPlatform
   };

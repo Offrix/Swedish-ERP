@@ -22,6 +22,8 @@ export const PROJECT_BUDGET_CATEGORY_CODES = Object.freeze([
 ]);
 export const PROJECT_RESOURCE_ALLOCATION_STATUSES = Object.freeze(["planned", "confirmed", "released"]);
 export const PROJECT_SNAPSHOT_STATUSES = Object.freeze(["materialized", "review_required"]);
+export const PROJECT_CHANGE_ORDER_STATUSES = Object.freeze(["draft", "quoted", "approved", "rejected", "cancelled", "invoiced"]);
+export const PROJECT_CHANGE_ORDER_SCOPE_CODES = Object.freeze(["change", "addition", "deduction"]);
 
 export function createProjectsPlatform(options = {}) {
   return createProjectEngine(options);
@@ -33,7 +35,8 @@ export function createProjectEngine({
   arPlatform = null,
   hrPlatform = null,
   timePlatform = null,
-  payrollPlatform = null
+  payrollPlatform = null,
+  vatPlatform = null
 } = {}) {
   const state = {
     projects: new Map(),
@@ -64,6 +67,8 @@ export function createProjectEngine({
     projectBudgetCategoryCodes: PROJECT_BUDGET_CATEGORY_CODES,
     projectResourceAllocationStatuses: PROJECT_RESOURCE_ALLOCATION_STATUSES,
     projectSnapshotStatuses: PROJECT_SNAPSHOT_STATUSES,
+    projectChangeOrderStatuses: PROJECT_CHANGE_ORDER_STATUSES,
+    projectChangeOrderScopeCodes: PROJECT_CHANGE_ORDER_SCOPE_CODES,
     listProjects,
     getProject,
     createProject,
@@ -77,6 +82,11 @@ export function createProjectEngine({
     materializeProjectWipSnapshot,
     listProjectForecastSnapshots,
     materializeProjectForecastSnapshot,
+    listProjectChangeOrders,
+    createProjectChangeOrder,
+    transitionProjectChangeOrderStatus,
+    listProjectBuildVatAssessments,
+    createProjectBuildVatAssessment,
     listProjectAuditEvents
   };
 
@@ -177,6 +187,8 @@ export function createProjectEngine({
       revenueRecognitionModelCode: resolvedRevenueRecognitionModelCode,
       contractValueAmount: normalizeMoney(contractValueAmount, "project_contract_value_invalid"),
       dimensionJson: normalizeDimensions(dimensionJson),
+      changeOrders: [],
+      buildVatAssessments: [],
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
@@ -508,6 +520,243 @@ export function createProjectEngine({
       entityId: record.projectForecastSnapshotId,
       projectId: project.projectId,
       explanation: `Materialized forecast snapshot for ${project.projectCode} at ${record.cutoffDate}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectChangeOrders({ companyId, projectId, status = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    return project.changeOrders
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function createProjectChangeOrder({
+    companyId,
+    projectId,
+    projectChangeOrderId = null,
+    scopeCode,
+    title,
+    description = null,
+    linkedWorkOrderId = null,
+    revenueImpactAmount = 0,
+    costImpactAmount = 0,
+    scheduleImpactMinutes = 0,
+    customerApprovalRequiredFlag = true,
+    quoteReference = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const record = {
+      projectChangeOrderId: normalizeOptionalText(projectChangeOrderId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      scopeCode: assertAllowed(scopeCode, PROJECT_CHANGE_ORDER_SCOPE_CODES, "project_change_order_scope_invalid"),
+      title: requireText(title, "project_change_order_title_required"),
+      description: normalizeOptionalText(description),
+      linkedWorkOrderId: normalizeOptionalText(linkedWorkOrderId),
+      revenueImpactAmount: normalizeMoney(revenueImpactAmount, "project_change_order_revenue_invalid"),
+      costImpactAmount: normalizeMoney(costImpactAmount, "project_change_order_cost_invalid"),
+      scheduleImpactMinutes: normalizeWholeNumber(scheduleImpactMinutes, "project_change_order_schedule_invalid"),
+      customerApprovalRequiredFlag: customerApprovalRequiredFlag === true,
+      customerApprovedAt: null,
+      status: "draft",
+      quoteReference: normalizeOptionalText(quoteReference),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    project.changeOrders.push(record);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: project.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.change_order.created",
+      entityType: "project_change_order",
+      entityId: record.projectChangeOrderId,
+      projectId: project.projectId,
+      explanation: `Created ${record.scopeCode} change order ${record.projectChangeOrderId} for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function transitionProjectChangeOrderStatus({
+    companyId,
+    projectId,
+    projectChangeOrderId,
+    nextStatus,
+    customerApprovedAt = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const record = requireProjectChangeOrder(project, projectChangeOrderId);
+    const resolvedNextStatus = assertAllowed(nextStatus, PROJECT_CHANGE_ORDER_STATUSES, "project_change_order_status_invalid");
+    assertProjectChangeOrderTransition(record.status, resolvedNextStatus);
+    if (resolvedNextStatus === "approved" && record.customerApprovalRequiredFlag) {
+      record.customerApprovedAt = normalizeRequiredDate(
+        customerApprovedAt || new Date(clock()).toISOString().slice(0, 10),
+        "project_change_order_customer_approval_required"
+      );
+    }
+    record.status = resolvedNextStatus;
+    record.updatedAt = nowIso(clock);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: project.companyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "project.change_order.status_changed",
+      entityType: "project_change_order",
+      entityId: record.projectChangeOrderId,
+      projectId: project.projectId,
+      explanation: `Project change order ${record.projectChangeOrderId} moved to ${record.status}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectBuildVatAssessments({ companyId, projectId } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    return project.buildVatAssessments
+      .slice()
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function createProjectBuildVatAssessment({
+    companyId,
+    projectId,
+    projectBuildVatAssessmentId = null,
+    sourceDocumentId = null,
+    sourceDocumentType = "project_change_order",
+    description,
+    invoiceDate,
+    deliveryDate = null,
+    buyerCountry = "SE",
+    buyerType = "company",
+    buyerVatNo = null,
+    buyerVatNumber = null,
+    buyerVatNumberStatus = "valid",
+    buyerIsTaxablePerson = true,
+    buyerBuildSectorFlag = false,
+    buyerResellsConstructionServicesFlag = false,
+    lineAmountExVat,
+    vatRate = 25,
+    goodsOrServices = "services",
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    if (!vatPlatform?.evaluateVatDecision) {
+      throw createError(503, "vat_platform_unavailable", "VAT platform is not available.");
+    }
+    const resolvedSourceType = requireText(sourceDocumentType, "project_build_vat_source_type_required");
+    const resolvedSourceId = normalizeOptionalText(sourceDocumentId) || crypto.randomUUID();
+    const reverseChargeFlag = buyerBuildSectorFlag === true || buyerResellsConstructionServicesFlag === true;
+    const resolvedVatRate = normalizeMoney(vatRate, "project_build_vat_rate_invalid");
+    const vatCodeCandidate = resolveProjectBuildVatCodeCandidate({
+      reverseChargeFlag,
+      vatRate: resolvedVatRate
+    });
+    const transactionLine = {
+      seller_country: "SE",
+      buyer_country: requireText(buyerCountry, "project_build_vat_buyer_country_required").toUpperCase(),
+      buyer_type: requireText(buyerType, "project_build_vat_buyer_type_required").toLowerCase(),
+      buyer_vat_no: normalizeOptionalText(buyerVatNo) || normalizeOptionalText(buyerVatNumber),
+      supply_type: "sale",
+      goods_or_services: requireText(goodsOrServices, "project_build_vat_goods_or_services_required").toLowerCase(),
+      invoice_date: normalizeRequiredDate(invoiceDate, "project_build_vat_invoice_date_required"),
+      delivery_date: normalizeRequiredDate(
+        deliveryDate || invoiceDate,
+        "project_build_vat_delivery_date_invalid"
+      ),
+      currency: project.currencyCode,
+      line_amount_ex_vat: normalizeMoney(lineAmountExVat, "project_build_vat_amount_invalid"),
+      vat_rate: resolvedVatRate,
+      vat_code_candidate: vatCodeCandidate,
+      project_id: project.projectId,
+      source_type: resolvedSourceType.toUpperCase(),
+      source_id: resolvedSourceId,
+      seller_vat_registration_country: "SE",
+      buyer_is_taxable_person: buyerIsTaxablePerson === true,
+      buyer_vat_number: normalizeOptionalText(buyerVatNumber) || normalizeOptionalText(buyerVatNo),
+      buyer_vat_number_status: requireText(buyerVatNumberStatus, "project_build_vat_number_status_required").toLowerCase(),
+      supply_subtype: "construction_service",
+      property_related_flag: true,
+      construction_service_flag: true,
+      transport_end_country: requireText(buyerCountry, "project_build_vat_buyer_country_required").toUpperCase(),
+      import_flag: false,
+      export_flag: false,
+      reverse_charge_flag: reverseChargeFlag,
+      oss_flag: false,
+      ioss_flag: false,
+      tax_date: normalizeRequiredDate(invoiceDate, "project_build_vat_tax_date_required"),
+      prepayment_date: normalizeRequiredDate(invoiceDate, "project_build_vat_prepayment_date_required"),
+      line_discount: 0,
+      line_quantity: 1,
+      line_uom: "unit",
+      tax_rate_candidate: resolvedVatRate,
+      exemption_reason: "not_applicable",
+      invoice_text_code: reverseChargeFlag ? "reverse_charge_invoice_text_required" : null,
+      report_box_code: resolveProjectVatReportBoxCode(vatCodeCandidate)
+    };
+    const evaluation = vatPlatform.evaluateVatDecision({
+      companyId: project.companyId,
+      transactionLine,
+      actorId,
+      correlationId
+    });
+    const vatDecision = evaluation.vatDecision;
+    const record = {
+      projectBuildVatAssessmentId: normalizeOptionalText(projectBuildVatAssessmentId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      sourceDocumentId: resolvedSourceId,
+      sourceDocumentType: resolvedSourceType,
+      description: requireText(description, "project_build_vat_description_required"),
+      buyerCountry: transactionLine.buyer_country,
+      buyerType: transactionLine.buyer_type,
+      buyerVatNo: transactionLine.buyer_vat_no,
+      buyerVatNumber: transactionLine.buyer_vat_number,
+      buyerVatNumberStatus: transactionLine.buyer_vat_number_status,
+      buyerIsTaxablePerson: transactionLine.buyer_is_taxable_person,
+      buyerBuildSectorFlag: buyerBuildSectorFlag === true,
+      buyerResellsConstructionServicesFlag: buyerResellsConstructionServicesFlag === true,
+      reverseChargeFlag,
+      invoiceDate: transactionLine.invoice_date,
+      deliveryDate: transactionLine.delivery_date,
+      lineAmountExVat: transactionLine.line_amount_ex_vat,
+      vatRate: transactionLine.vat_rate,
+      vatCodeCandidate,
+      vatDecisionId: vatDecision.vatDecisionId,
+      vatCode: vatDecision.vatCode,
+      decisionCategory: vatDecision.decisionCategory,
+      bookingTemplateCode: vatDecision.bookingTemplateCode,
+      declarationBoxCodes: copy(vatDecision.declarationBoxCodes || []),
+      invoiceTextRequirements: copy(vatDecision.invoiceTextRequirements || []),
+      explanation: vatDecision.explanation,
+      warnings: copy(vatDecision.warnings || []),
+      reviewQueueItemId: vatDecision.reviewQueueItemId || null,
+      reviewRequiredFlag: vatDecision.status === "review_required",
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    project.buildVatAssessments.push(record);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: project.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.build_vat_assessment.created",
+      entityType: "project_build_vat_assessment",
+      entityId: record.projectBuildVatAssessmentId,
+      projectId: project.projectId,
+      explanation: `Evaluated build VAT ${record.vatCode} for ${project.projectCode}.`
     });
     return copy(record);
   }
@@ -1127,6 +1376,74 @@ function requireProject(state, companyId, projectId) {
     throw createError(404, "project_not_found", "Project was not found.");
   }
   return record;
+}
+
+function requireProjectChangeOrder(project, projectChangeOrderId) {
+  const resolvedProjectChangeOrderId = requireText(projectChangeOrderId, "project_change_order_id_required");
+  const record = (project.changeOrders || []).find((candidate) => candidate.projectChangeOrderId === resolvedProjectChangeOrderId);
+  if (!record) {
+    throw createError(404, "project_change_order_not_found", "Project change order was not found.");
+  }
+  return record;
+}
+
+function assertProjectChangeOrderTransition(currentStatus, nextStatus) {
+  const allowed = {
+    draft: new Set(["quoted", "cancelled"]),
+    quoted: new Set(["approved", "rejected", "cancelled"]),
+    approved: new Set(["invoiced", "cancelled"]),
+    rejected: new Set(),
+    cancelled: new Set(),
+    invoiced: new Set()
+  };
+  if (currentStatus === nextStatus) {
+    return;
+  }
+  if (!allowed[currentStatus]?.has(nextStatus)) {
+    throw createError(
+      409,
+      "project_change_order_transition_invalid",
+      `Project change order cannot move from ${currentStatus} to ${nextStatus}.`
+    );
+  }
+}
+
+function resolveProjectBuildVatCodeCandidate({ reverseChargeFlag, vatRate }) {
+  if (reverseChargeFlag) {
+    return "VAT_SE_RC_BUILD_SELL";
+  }
+  if (roundMoney(vatRate) === 25) {
+    return "VAT_SE_DOMESTIC_25";
+  }
+  if (roundMoney(vatRate) === 12) {
+    return "VAT_SE_DOMESTIC_12";
+  }
+  if (roundMoney(vatRate) === 6) {
+    return "VAT_SE_DOMESTIC_6";
+  }
+  if (roundMoney(vatRate) === 0) {
+    return "VAT_SE_EXEMPT";
+  }
+  throw createError(400, "project_build_vat_rate_unsupported", "Unsupported VAT rate for project build VAT.");
+}
+
+function resolveProjectVatReportBoxCode(vatCodeCandidate) {
+  if (vatCodeCandidate === "VAT_SE_RC_BUILD_SELL") {
+    return "41";
+  }
+  if (vatCodeCandidate === "VAT_SE_DOMESTIC_25") {
+    return "10";
+  }
+  if (vatCodeCandidate === "VAT_SE_DOMESTIC_12") {
+    return "11";
+  }
+  if (vatCodeCandidate === "VAT_SE_DOMESTIC_6") {
+    return "12";
+  }
+  if (vatCodeCandidate === "VAT_SE_EXEMPT") {
+    return "42";
+  }
+  return "manual_review";
 }
 
 function ensureUniqueAlias(state, companyId, alias) {

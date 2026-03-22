@@ -34,6 +34,7 @@ Database foundation with migration framework, seed files and baseline governance
 - Phase 9.3 adds pension plans, enrollments, salary exchange agreements, pension basis snapshots, provider reports, report lines and reconciliation objects in the same monotonic stream.
 - Phase 10.1 adds project profile hardening, budget versions, budget lines, resource allocations, actual-cost snapshots, WIP snapshots and forecast snapshots in the same monotonic stream.
 - Phase 10.2 extends `work_orders` and adds inventory locations, inventory items, stock balances, dispatch assignments, material withdrawals, customer signatures and offline sync envelopes for field execution.
+- Phase 10.3 adds HUS case/claim lifecycle tables, project ATA and build-VAT assessment tables, construction-site registration, attendance, correction, export and attendance-audit tables in the same monotonic stream.
 
 ## Usage
 

@@ -33,3 +33,4 @@ Seed execution policy:
 - Phase 9.3 adds Collectum, Fora, extra-pension and salary-exchange demo artifacts plus provider report and reconciliation evidence
 - Phase 10.1 adds project baseline profiles, budget versions, resource allocations and forecast-revision demo artifacts for project follow-up verification
 - Phase 10.2 seeds field warehouse and truck stock, a dispatchable work order, demo signatures and sync-envelope artifacts for mobile and material verification
+- Phase 10.3 seeds HUS baseline and recovery flows, ATA/build-VAT decisions and personalliggare threshold, correction and control-chain export artifacts

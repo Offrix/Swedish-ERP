@@ -58,6 +58,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase9PensionEnabled: flags.phase9PensionEnabled,
             phase10ProjectsEnabled: flags.phase10ProjectsEnabled,
             phase10FieldEnabled: flags.phase10FieldEnabled,
+            phase10BuildEnabled: flags.phase10BuildEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -207,7 +208,31 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/projects/:projectId/cost-snapshots",
               "/v1/projects/:projectId/wip-snapshots",
               "/v1/projects/:projectId/forecast-snapshots",
+              "/v1/projects/:projectId/change-orders",
+              "/v1/projects/:projectId/change-orders/:projectChangeOrderId/status",
+              "/v1/projects/:projectId/build-vat-decisions",
               "/v1/projects/:projectId/audit-events",
+              "/v1/hus/cases",
+              "/v1/hus/cases/:husCaseId",
+              "/v1/hus/cases/:husCaseId/classify",
+              "/v1/hus/cases/:husCaseId/invoice",
+              "/v1/hus/cases/:husCaseId/payments",
+              "/v1/hus/cases/:husCaseId/claims",
+              "/v1/hus/claims/:husClaimId",
+              "/v1/hus/claims/:husClaimId/submit",
+              "/v1/hus/claims/:husClaimId/decisions",
+              "/v1/hus/claims/:husClaimId/payouts",
+              "/v1/hus/cases/:husCaseId/credit-adjustments",
+              "/v1/hus/cases/:husCaseId/recoveries",
+              "/v1/hus/audit-events",
+              "/v1/personalliggare/sites",
+              "/v1/personalliggare/sites/:constructionSiteId",
+              "/v1/personalliggare/sites/:constructionSiteId/registrations",
+              "/v1/personalliggare/sites/:constructionSiteId/attendance-events",
+              "/v1/personalliggare/attendance-events/:attendanceEventId/corrections",
+              "/v1/personalliggare/sites/:constructionSiteId/kiosk-devices",
+              "/v1/personalliggare/sites/:constructionSiteId/exports",
+              "/v1/personalliggare/audit-events",
               "/v1/field/inventory/locations",
               "/v1/field/inventory/items",
               "/v1/field/inventory/balances",
@@ -386,6 +411,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 10.2 field routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase10BuildEnabled && isPhase103Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 10.3 build routes are disabled by configuration."
     });
     return;
   }
@@ -5920,6 +5953,158 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  const projectChangeOrdersMatch = matchPath(path, "/v1/projects/:projectId/change-orders");
+  if (projectChangeOrdersMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_change_order",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listProjectChangeOrders({
+        companyId,
+        projectId: projectChangeOrdersMatch.projectId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (projectChangeOrdersMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_change_order",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectChangeOrder({
+        companyId,
+        projectId: projectChangeOrdersMatch.projectId,
+        projectChangeOrderId: body.projectChangeOrderId ?? null,
+        scopeCode: body.scopeCode,
+        title: body.title,
+        description: body.description ?? null,
+        linkedWorkOrderId: body.linkedWorkOrderId ?? null,
+        revenueImpactAmount: body.revenueImpactAmount ?? 0,
+        costImpactAmount: body.costImpactAmount ?? 0,
+        scheduleImpactMinutes: body.scheduleImpactMinutes ?? 0,
+        customerApprovalRequiredFlag: body.customerApprovalRequiredFlag ?? true,
+        quoteReference: body.quoteReference ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectChangeOrderStatusMatch = matchPath(path, "/v1/projects/:projectId/change-orders/:projectChangeOrderId/status");
+  if (projectChangeOrderStatusMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_change_order",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.transitionProjectChangeOrderStatus({
+        companyId,
+        projectId: projectChangeOrderStatusMatch.projectId,
+        projectChangeOrderId: projectChangeOrderStatusMatch.projectChangeOrderId,
+        nextStatus: body.nextStatus,
+        customerApprovedAt: body.customerApprovedAt ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectBuildVatDecisionsMatch = matchPath(path, "/v1/projects/:projectId/build-vat-decisions");
+  if (projectBuildVatDecisionsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_build_vat_assessment",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listProjectBuildVatAssessments({
+        companyId,
+        projectId: projectBuildVatDecisionsMatch.projectId
+      })
+    });
+    return;
+  }
+
+  if (projectBuildVatDecisionsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_build_vat_assessment",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectBuildVatAssessment({
+        companyId,
+        projectId: projectBuildVatDecisionsMatch.projectId,
+        projectBuildVatAssessmentId: body.projectBuildVatAssessmentId ?? null,
+        sourceDocumentId: body.sourceDocumentId ?? null,
+        sourceDocumentType: body.sourceDocumentType ?? "project_change_order",
+        description: body.description,
+        invoiceDate: body.invoiceDate,
+        deliveryDate: body.deliveryDate ?? null,
+        buyerCountry: body.buyerCountry ?? "SE",
+        buyerType: body.buyerType ?? "company",
+        buyerVatNo: body.buyerVatNo ?? null,
+        buyerVatNumber: body.buyerVatNumber ?? null,
+        buyerVatNumberStatus: body.buyerVatNumberStatus ?? "valid",
+        buyerIsTaxablePerson: body.buyerIsTaxablePerson ?? true,
+        buyerBuildSectorFlag: body.buyerBuildSectorFlag ?? false,
+        buyerResellsConstructionServicesFlag: body.buyerResellsConstructionServicesFlag ?? false,
+        lineAmountExVat: body.lineAmountExVat,
+        vatRate: body.vatRate ?? 25,
+        goodsOrServices: body.goodsOrServices ?? "services",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   const projectAuditEventsMatch = matchPath(path, "/v1/projects/:projectId/audit-events");
   if (projectAuditEventsMatch && req.method === "GET") {
     const companyId = requireText(
@@ -5939,6 +6124,755 @@ async function handleRequest({ req, res, platform, flags }) {
       items: platform.listProjectAuditEvents({
         companyId,
         projectId: projectAuditEventsMatch.projectId
+      })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/hus/cases") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "hus_case",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listHusCases({
+        companyId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/hus/cases") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "hus_case",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createHusCase({
+        companyId,
+        husCaseId: body.husCaseId ?? null,
+        caseReference: body.caseReference ?? null,
+        customerId: body.customerId ?? null,
+        projectId: body.projectId ?? null,
+        customerInvoiceId: body.customerInvoiceId ?? null,
+        serviceTypeCode: body.serviceTypeCode ?? "rot",
+        workCompletedOn: body.workCompletedOn,
+        currencyCode: body.currencyCode ?? "SEK",
+        ruleYear: body.ruleYear ?? 2026,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const husCaseMatch = matchPath(path, "/v1/hus/cases/:husCaseId");
+  if (husCaseMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "hus_case",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getHusCase({
+        companyId,
+        husCaseId: husCaseMatch.husCaseId
+      })
+    );
+    return;
+  }
+
+  const husClassifyMatch = matchPath(path, "/v1/hus/cases/:husCaseId/classify");
+  if (husClassifyMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "hus_case",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.classifyHusCase({
+        companyId,
+        husCaseId: husClassifyMatch.husCaseId,
+        serviceLines: body.serviceLines || [],
+        buyers: body.buyers || [],
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const husInvoiceMatch = matchPath(path, "/v1/hus/cases/:husCaseId/invoice");
+  if (husInvoiceMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "hus_case",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.markHusCaseInvoiced({
+        companyId,
+        husCaseId: husInvoiceMatch.husCaseId,
+        customerInvoiceId: body.customerInvoiceId ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const husPaymentsMatch = matchPath(path, "/v1/hus/cases/:husCaseId/payments");
+  if (husPaymentsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "hus_case",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.recordHusCustomerPayment({
+        companyId,
+        husCaseId: husPaymentsMatch.husCaseId,
+        paidAmount: body.paidAmount,
+        paidOn: body.paidOn,
+        paymentChannel: body.paymentChannel,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const husCaseClaimsMatch = matchPath(path, "/v1/hus/cases/:husCaseId/claims");
+  if (husCaseClaimsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "hus_claim",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listHusClaims({
+        companyId,
+        husCaseId: husCaseClaimsMatch.husCaseId
+      })
+    });
+    return;
+  }
+
+  if (husCaseClaimsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "hus_claim",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createHusClaim({
+        companyId,
+        husCaseId: husCaseClaimsMatch.husCaseId,
+        requestedAmount: body.requestedAmount ?? null,
+        transportType: body.transportType ?? "json",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const husClaimMatch = matchPath(path, "/v1/hus/claims/:husClaimId");
+  if (husClaimMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "hus_claim",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getHusClaim({
+        companyId,
+        husClaimId: husClaimMatch.husClaimId
+      })
+    );
+    return;
+  }
+
+  const husClaimSubmitMatch = matchPath(path, "/v1/hus/claims/:husClaimId/submit");
+  if (husClaimSubmitMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "hus_claim",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.submitHusClaim({
+        companyId,
+        husClaimId: husClaimSubmitMatch.husClaimId,
+        submittedOn: body.submittedOn ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const husClaimDecisionsMatch = matchPath(path, "/v1/hus/claims/:husClaimId/decisions");
+  if (husClaimDecisionsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "hus_claim",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.recordHusDecision({
+        companyId,
+        husClaimId: husClaimDecisionsMatch.husClaimId,
+        decisionDate: body.decisionDate,
+        approvedAmount: body.approvedAmount,
+        rejectedAmount: body.rejectedAmount ?? null,
+        reasonCode: body.reasonCode,
+        rejectedOutcomeCode: body.rejectedOutcomeCode ?? "customer_reinvoice",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const husClaimPayoutsMatch = matchPath(path, "/v1/hus/claims/:husClaimId/payouts");
+  if (husClaimPayoutsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "hus_claim",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.recordHusPayout({
+        companyId,
+        husClaimId: husClaimPayoutsMatch.husClaimId,
+        payoutAmount: body.payoutAmount,
+        payoutDate: body.payoutDate,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const husCreditAdjustmentsMatch = matchPath(path, "/v1/hus/cases/:husCaseId/credit-adjustments");
+  if (husCreditAdjustmentsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "hus_case",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.registerHusCreditAdjustment({
+        companyId,
+        husCaseId: husCreditAdjustmentsMatch.husCaseId,
+        adjustmentAmount: body.adjustmentAmount,
+        adjustmentDate: body.adjustmentDate,
+        reasonCode: body.reasonCode,
+        afterPayoutFlag: body.afterPayoutFlag ?? false,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const husRecoveriesMatch = matchPath(path, "/v1/hus/cases/:husCaseId/recoveries");
+  if (husRecoveriesMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "hus_case",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.recordHusRecovery({
+        companyId,
+        husCaseId: husRecoveriesMatch.husCaseId,
+        recoveryDate: body.recoveryDate,
+        recoveryAmount: body.recoveryAmount,
+        reasonCode: body.reasonCode,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/hus/audit-events") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "hus_case",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listHusAuditEvents({
+        companyId,
+        husCaseId: url.searchParams.get("husCaseId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/personalliggare/sites") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "construction_site",
+      scopeCode: "project"
+    });
+    const thresholdRequired = url.searchParams.has("thresholdRequired")
+      ? String(url.searchParams.get("thresholdRequired")).toLowerCase() === "true"
+      : null;
+    writeJson(res, 200, {
+      items: platform.listConstructionSites({
+        companyId,
+        thresholdRequired
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/personalliggare/sites") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "construction_site",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createConstructionSite({
+        companyId,
+        constructionSiteId: body.constructionSiteId ?? null,
+        siteCode: body.siteCode,
+        siteName: body.siteName,
+        siteAddress: body.siteAddress,
+        builderOrgNo: body.builderOrgNo,
+        estimatedTotalCostExVat: body.estimatedTotalCostExVat,
+        startDate: body.startDate,
+        endDate: body.endDate ?? null,
+        projectId: body.projectId ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const personalliggareSiteMatch = matchPath(path, "/v1/personalliggare/sites/:constructionSiteId");
+  if (personalliggareSiteMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "construction_site",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getConstructionSite({
+        companyId,
+        constructionSiteId: personalliggareSiteMatch.constructionSiteId
+      })
+    );
+    return;
+  }
+
+  const personalliggareRegistrationsMatch = matchPath(path, "/v1/personalliggare/sites/:constructionSiteId/registrations");
+  if (personalliggareRegistrationsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "construction_site_registration",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listConstructionSiteRegistrations({
+        companyId,
+        constructionSiteId: personalliggareRegistrationsMatch.constructionSiteId
+      })
+    });
+    return;
+  }
+
+  if (personalliggareRegistrationsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "construction_site_registration",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createConstructionSiteRegistration({
+        companyId,
+        constructionSiteId: personalliggareRegistrationsMatch.constructionSiteId,
+        registrationReference: body.registrationReference,
+        status: body.status ?? "registered",
+        checklistItems: body.checklistItems || [],
+        registeredOn: body.registeredOn ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const personalliggareAttendanceMatch = matchPath(path, "/v1/personalliggare/sites/:constructionSiteId/attendance-events");
+  if (personalliggareAttendanceMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "attendance_event",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listAttendanceEvents({
+        companyId,
+        constructionSiteId: personalliggareAttendanceMatch.constructionSiteId,
+        workerIdentityValue: url.searchParams.get("workerIdentityValue") || null
+      })
+    });
+    return;
+  }
+
+  if (personalliggareAttendanceMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "attendance_event",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.recordAttendanceEvent({
+        companyId,
+        constructionSiteId: personalliggareAttendanceMatch.constructionSiteId,
+        employmentId: body.employmentId ?? null,
+        workerIdentityType: body.workerIdentityType ?? "personnummer",
+        workerIdentityValue: body.workerIdentityValue,
+        fullNameSnapshot: body.fullNameSnapshot,
+        employerOrgNo: body.employerOrgNo,
+        contractorOrgNo: body.contractorOrgNo,
+        eventType: body.eventType,
+        eventTimestamp: body.eventTimestamp,
+        sourceChannel: body.sourceChannel,
+        deviceId: body.deviceId ?? null,
+        offlineFlag: body.offlineFlag ?? false,
+        geoContext: body.geoContext || {},
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const personalliggareCorrectionsMatch = matchPath(path, "/v1/personalliggare/attendance-events/:attendanceEventId/corrections");
+  if (personalliggareCorrectionsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "attendance_correction",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.correctAttendanceEvent({
+        companyId,
+        attendanceEventId: personalliggareCorrectionsMatch.attendanceEventId,
+        correctedTimestamp: body.correctedTimestamp ?? null,
+        correctedEventType: body.correctedEventType ?? null,
+        correctionReason: body.correctionReason,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const personalliggareKioskMatch = matchPath(path, "/v1/personalliggare/sites/:constructionSiteId/kiosk-devices");
+  if (personalliggareKioskMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "kiosk_device",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listKioskDevices({
+        companyId,
+        constructionSiteId: personalliggareKioskMatch.constructionSiteId
+      })
+    });
+    return;
+  }
+
+  if (personalliggareKioskMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "kiosk_device",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createKioskDevice({
+        companyId,
+        constructionSiteId: personalliggareKioskMatch.constructionSiteId,
+        deviceCode: body.deviceCode,
+        displayName: body.displayName,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const personalliggareExportsMatch = matchPath(path, "/v1/personalliggare/sites/:constructionSiteId/exports");
+  if (personalliggareExportsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "attendance_export",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listAttendanceExports({
+        companyId,
+        constructionSiteId: personalliggareExportsMatch.constructionSiteId
+      })
+    });
+    return;
+  }
+
+  if (personalliggareExportsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "attendance_export",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.exportAttendanceControlChain({
+        companyId,
+        constructionSiteId: personalliggareExportsMatch.constructionSiteId,
+        exportType: body.exportType,
+        exportDate: body.exportDate ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/personalliggare/audit-events") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "construction_site",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listAttendanceAuditEvents({
+        companyId,
+        constructionSiteId: url.searchParams.get("constructionSiteId") || null
       })
     });
     return;
@@ -7360,6 +8294,15 @@ function isPhase102Route(path) {
   return path.startsWith("/v1/field");
 }
 
+function isPhase103Route(path) {
+  return (
+    path.startsWith("/v1/hus") ||
+    path.startsWith("/v1/personalliggare") ||
+    path.includes("/change-orders") ||
+    path.includes("/build-vat-decisions")
+  );
+}
+
 async function readJsonBody(req, allowEmpty = false) {
   const chunks = [];
   for await (const chunk of req) {
@@ -7435,7 +8378,8 @@ function readFeatureFlags(env) {
     phase9TravelEnabled: String(env.PHASE9_TRAVEL_ENABLED || "true").toLowerCase() !== "false",
     phase9PensionEnabled: String(env.PHASE9_PENSION_ENABLED || "true").toLowerCase() !== "false",
     phase10ProjectsEnabled: String(env.PHASE10_PROJECTS_ENABLED || "true").toLowerCase() !== "false",
-    phase10FieldEnabled: String(env.PHASE10_FIELD_ENABLED || "true").toLowerCase() !== "false"
+    phase10FieldEnabled: String(env.PHASE10_FIELD_ENABLED || "true").toLowerCase() !== "false",
+    phase10BuildEnabled: String(env.PHASE10_BUILD_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

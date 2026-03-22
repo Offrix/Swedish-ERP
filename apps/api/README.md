@@ -1,6 +1,6 @@
 # API
 
-HTTP baseline plus phased domain routes through FAS 10.1.
+HTTP baseline plus phased domain routes through FAS 10.3.
 
 ## Start
 
@@ -234,7 +234,40 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/projects/:projectId/wip-snapshots`
 - `GET /v1/projects/:projectId/forecast-snapshots?companyId=...`
 - `POST /v1/projects/:projectId/forecast-snapshots`
+- `GET /v1/projects/:projectId/change-orders?companyId=...`
+- `POST /v1/projects/:projectId/change-orders`
+- `POST /v1/projects/:projectId/change-orders/:projectChangeOrderId/status`
+- `GET /v1/projects/:projectId/build-vat-decisions?companyId=...`
+- `POST /v1/projects/:projectId/build-vat-decisions`
 - `GET /v1/projects/:projectId/audit-events?companyId=...`
+- `GET /v1/hus/cases?companyId=...`
+- `POST /v1/hus/cases`
+- `GET /v1/hus/cases/:husCaseId?companyId=...`
+- `POST /v1/hus/cases/:husCaseId/classify`
+- `POST /v1/hus/cases/:husCaseId/invoice`
+- `POST /v1/hus/cases/:husCaseId/payments`
+- `GET /v1/hus/cases/:husCaseId/claims?companyId=...`
+- `POST /v1/hus/cases/:husCaseId/claims`
+- `GET /v1/hus/claims/:husClaimId?companyId=...`
+- `POST /v1/hus/claims/:husClaimId/submit`
+- `POST /v1/hus/claims/:husClaimId/decisions`
+- `POST /v1/hus/claims/:husClaimId/payouts`
+- `POST /v1/hus/cases/:husCaseId/credit-adjustments`
+- `POST /v1/hus/cases/:husCaseId/recoveries`
+- `GET /v1/hus/audit-events?companyId=...`
+- `GET /v1/personalliggare/sites?companyId=...`
+- `POST /v1/personalliggare/sites`
+- `GET /v1/personalliggare/sites/:constructionSiteId?companyId=...`
+- `GET /v1/personalliggare/sites/:constructionSiteId/registrations?companyId=...`
+- `POST /v1/personalliggare/sites/:constructionSiteId/registrations`
+- `GET /v1/personalliggare/sites/:constructionSiteId/attendance-events?companyId=...`
+- `POST /v1/personalliggare/sites/:constructionSiteId/attendance-events`
+- `POST /v1/personalliggare/attendance-events/:attendanceEventId/corrections`
+- `GET /v1/personalliggare/sites/:constructionSiteId/kiosk-devices?companyId=...`
+- `POST /v1/personalliggare/sites/:constructionSiteId/kiosk-devices`
+- `GET /v1/personalliggare/sites/:constructionSiteId/exports?companyId=...`
+- `POST /v1/personalliggare/sites/:constructionSiteId/exports`
+- `GET /v1/personalliggare/audit-events?companyId=...`
 - `GET /v1/field/inventory/locations?companyId=...`
 - `POST /v1/field/inventory/locations`
 - `GET /v1/field/inventory/items?companyId=...`
@@ -292,7 +325,7 @@ pnpm --filter @swedish-erp/api start
 
 ## Disable strategy
 
-Set `PHASE1_AUTH_ONBOARDING_ENABLED=false` to return `503` for FAS 1 routes without touching the rest of the API process. Set `PHASE10_PROJECTS_ENABLED=false` to disable FAS 10.1 project routes in the same way, and set `PHASE10_FIELD_ENABLED=false` to disable FAS 10.2 field, dispatch, inventory and mobile sync routes.
+Set `PHASE1_AUTH_ONBOARDING_ENABLED=false` to return `503` for FAS 1 routes without touching the rest of the API process. Set `PHASE10_PROJECTS_ENABLED=false` to disable FAS 10.1 project routes in the same way, set `PHASE10_FIELD_ENABLED=false` to disable FAS 10.2 field, dispatch, inventory and mobile sync routes, and set `PHASE10_BUILD_ENABLED=false` to disable FAS 10.3 HUS, personalliggare, ATA and build-VAT routes.
 
 Set `PHASE2_DOCUMENT_ARCHIVE_ENABLED=false` to return `503` for FAS 2.1 document archive routes while keeping the rest of the API process alive.
 

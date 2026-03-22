@@ -13,13 +13,14 @@ export function createFieldMobileServer() {
         body: renderMobileChrome({
           surface: "field-mobile",
           headline: "Idag i faltet",
-          subtitle: "Dispatch, material, signatur och syncstatus i tumvanligt format.",
+          subtitle: "Dispatch, personalliggare, ROT/RUT, ATA, material, signatur och syncstatus i tumvanligt format.",
           syncBadge: "Offline-first aktivt for tillatna faltfloden",
-          tabs: ["Idag", "Jobb", "Tid", "Resor/Utlagg", "Check-in", "Material", "Signatur", "Profil"],
+          tabs: ["Idag", "Jobb", "Tid", "Personalliggare", "ROT/RUT", "ATA", "Material", "Signatur", "Profil"],
           quickActions: [
             { label: "Check in", tone: "primary" },
             { label: "Materialuttag", tone: "secondary" },
-            { label: "Kundsignatur", tone: "secondary" }
+            { label: "Kundsignatur", tone: "secondary" },
+            { label: "Personalliggare", tone: "secondary" }
           ],
           todayItems: [
             {
@@ -35,6 +36,13 @@ export function createFieldMobileServer() {
               detail: "Snabbvy over trucklager och materialavvikelser for dagens jobb.",
               statusLabel: "Synkad",
               statusTone: "success"
+            },
+            {
+              title: "SITE-ALPHA-01",
+              meta: "Personalliggare aktiv - kontrollkedja redo",
+              detail: "Check-in, offlinekorrigeringar och export till kontrollkedja hanteras i samma bakre API.",
+              statusLabel: "Personalliggare",
+              statusTone: "info"
             }
           ],
           infoCards: [
@@ -45,6 +53,10 @@ export function createFieldMobileServer() {
             {
               title: "Bottom actions",
               body: "Snabbknappar for check-in, material och signatur sitter nara tummen."
+            },
+            {
+              title: "ROT/RUT och ATA",
+              body: "Mobilen visar styrda ingangar for HUS-underlag, ATA-referenser och personalliggare, men backend bar hela regelverket."
             }
           ],
           footerNote: "Desktop-web bar hela domanlogiken. Mobilen ar en styrd faltvy ovanpa samma backend."

@@ -339,10 +339,11 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [x] Runbook `docs/runbooks/fas-10-field-verification.md` Ã¤r uppdaterad
 
 ### 10.3 Byggspecifika regler: Ã„TA, HUS, omvÃ¤nd moms, personalliggare
-- [ ] HUS-kundandel och ansÃ¶kan stÃ¤mmer
-- [ ] Byggmoms triggas korrekt
-- [ ] Personalliggare exporterar kontrollbar kedja
-- [ ] Prompt `P10-03` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] HUS-kundandel och ansÃ¶kan stÃ¤mmer
+- [x] Byggmoms triggas korrekt
+- [x] Personalliggare exporterar kontrollbar kedja
+- [x] Prompt `P10-03` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Runbook `docs/runbooks/fas-10-build-verification.md` Ã¤r uppdaterad
 
 ## Gate for FAS 11 â€” Rapporter, byrÃ¥lÃ¤ge, mÃ¥nadsstÃ¤ngning och bokslut
 
