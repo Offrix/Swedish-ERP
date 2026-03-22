@@ -152,6 +152,7 @@ export function createPayrollEngine({
   orgAuthPlatform = null,
   hrPlatform = null,
   timePlatform = null,
+  benefitsPlatform = null,
   ledgerPlatform = null,
   bankingPlatform = null,
   ruleRegistry = null
@@ -623,6 +624,7 @@ export function createPayrollEngine({
         statutoryProfile: normalizedStatutoryProfiles.get(employment.employmentId) || null,
         hrPlatform,
         timePlatform,
+        benefitsPlatform,
         clock
       });
       employmentResults.push(result);
@@ -1330,6 +1332,14 @@ function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
       creditAmount: 0,
       dimensionJson: dimensions
     });
+    if (line.reportingOnly === true && line.agiMappingCode === "taxable_benefit") {
+      journalLines.push({
+        accountNumber: "2790",
+        debitAmount: 0,
+        creditAmount: amount,
+        dimensionJson: dimensions
+      });
+    }
   }
 
   const preliminaryTaxAmount = roundMoney(
@@ -2450,6 +2460,7 @@ function calculateEmploymentRun({
   statutoryProfile,
   hrPlatform,
   timePlatform,
+  benefitsPlatform,
   clock
 }) {
   const employee = resolveEmployeeSnapshot({ employment, hrPlatform });
@@ -2477,6 +2488,13 @@ function calculateEmploymentRun({
           overtime_minutes: 0
         }
       };
+  const benefitPayloadBundle = benefitsPlatform?.listPayrollBenefitPayloads
+    ? benefitsPlatform.listPayrollBenefitPayloads({
+        companyId: employment.companyId,
+        employmentId: employment.employmentId,
+        reportingPeriod: period.reportingPeriod
+      })
+    : { events: [], payLinePayloads: [], warnings: [] };
 
   const sourceSnapshot = {
     employee,
@@ -2485,10 +2503,18 @@ function calculateEmploymentRun({
     primaryBankAccount,
     timeEntries,
     leaveEntries,
-    balances
+    balances,
+    benefitEvents: (benefitPayloadBundle.events || []).map((event) => ({
+      benefitEventId: event.benefitEventId,
+      benefitCode: event.benefitCode,
+      taxableValue: event.valuation?.taxableValue || 0,
+      netDeductionValue: event.valuation?.netDeductionValue || 0
+    }))
   };
 
-  const warnings = [];
+  const warnings = (benefitPayloadBundle.warnings || []).map((warningCode) =>
+    createWarning(warningCode, `Benefit engine warning: ${warningCode}.`)
+  );
   const lines = [];
   const steps = {};
 
@@ -2545,14 +2571,25 @@ function calculateEmploymentRun({
   lines.push(...retroLines);
   steps[5] = createCompletedStep(5, summarizeLineStep(retroLines));
 
-  const benefitLines = createStepLinesFromManualInputs({
-    processingStep: 6,
-    employment,
-    inputs: manualInputs,
-    state
-  });
+  const benefitLines = [
+    ...createStepLinesFromBenefitPayloads({
+      processingStep: 6,
+      employment,
+      payloads: benefitPayloadBundle.payLinePayloads || [],
+      state
+    }),
+    ...createStepLinesFromManualInputs({
+      processingStep: 6,
+      employment,
+      inputs: manualInputs,
+      state
+    })
+  ];
   lines.push(...benefitLines);
-  steps[6] = createCompletedStep(6, summarizeLineStep(benefitLines));
+  steps[6] = createCompletedStep(6, {
+    ...summarizeLineStep(benefitLines),
+    benefitEventCount: (benefitPayloadBundle.events || []).length
+  });
 
   const travelLines = createStepLinesFromManualInputs({
     processingStep: 7,
@@ -2617,6 +2654,12 @@ function calculateEmploymentRun({
   steps[12] = employerContributionPreview.step;
 
   const netDeductionLines = [
+    ...createStepLinesFromBenefitPayloads({
+      processingStep: 13,
+      employment,
+      payloads: benefitPayloadBundle.payLinePayloads || [],
+      state
+    }),
     ...createStepLinesFromManualInputs({
       processingStep: 13,
       employment,
@@ -2633,11 +2676,25 @@ function calculateEmploymentRun({
     preliminaryTax: taxPreview.amount,
     employerContributionPreviewAmount: employerContributionPreview.amount
   });
+  const taxableBenefitAmount = roundMoney(
+    lines
+      .filter((line) => line.agiMappingCode === "taxable_benefit")
+      .reduce((sum, line) => sum + Math.abs(line.amount || 0), 0)
+  );
+  if (taxableBenefitAmount > 0 && lineTotals.grossAfterDeductions <= 0) {
+    warnings.push(
+      createWarning(
+        "benefit_without_cash_salary",
+        "Taxable benefit exists without cash salary. Ordinary withholding cannot be completed through the payroll cash flow."
+      )
+    );
+  }
   steps[14] = createCompletedStep(14, {
     grossEarnings: lineTotals.grossEarnings,
     grossDeductions: lineTotals.grossDeductions,
     netDeductions: lineTotals.netDeductions,
-    netPay: lineTotals.netPay
+    netPay: lineTotals.netPay,
+    taxableBenefitAmount
   });
 
   const payslipRenderPayload = {
@@ -2649,6 +2706,7 @@ function calculateEmploymentRun({
     contract,
     bankAccount: primaryBankAccount,
     lines,
+    benefitEvents: benefitPayloadBundle.events || [],
     totals: {
       ...lineTotals,
       pensionableBase,
@@ -2659,7 +2717,8 @@ function calculateEmploymentRun({
       taxDecision: taxPreview.decisionObject,
       employerContributionPreviewAmount: employerContributionPreview.amount,
       employerContributionPreviewStatus: employerContributionPreview.status,
-      employerContributionDecision: employerContributionPreview.decisionObject
+      employerContributionDecision: employerContributionPreview.decisionObject,
+      taxableBenefitAmount
     },
     balances: balances.balances || balances,
     warnings
@@ -3601,27 +3660,29 @@ function createPayLine({
   sourceLineId = null,
   note = null,
   calculationStatus = "calculated",
-  dimensionJson = null
+  dimensionJson = null,
+  overrides = {}
 }) {
   return {
     employmentId: employment.employmentId,
     employeeId: employment.employeeId,
     payItemCode: payItem.payItemCode,
     payItemType: payItem.payItemType,
-    displayName: payItem.displayName,
+    displayName: normalizeOptionalText(overrides.displayName) || payItem.displayName,
     compensationBucket: payItem.compensationBucket,
     quantity: quantity == null ? null : roundQuantity(quantity),
     unitCode: payItem.unitCode,
     unitRate: unitRate == null ? null : roundMoney(unitRate),
     amount: roundMoney(amount),
-    taxTreatmentCode: payItem.taxTreatmentCode,
-    employerContributionTreatmentCode: payItem.employerContributionTreatmentCode,
-    agiMappingCode: payItem.agiMappingCode,
-    ledgerAccountCode: payItem.ledgerAccountCode,
-    affectsVacationBasis: payItem.affectsVacationBasis,
-    affectsPensionBasis: payItem.affectsPensionBasis,
-    includedInNetPay: payItem.includedInNetPay,
-    reportingOnly: payItem.reportingOnly,
+    taxTreatmentCode: normalizeOptionalText(overrides.taxTreatmentCode) || payItem.taxTreatmentCode,
+    employerContributionTreatmentCode:
+      normalizeOptionalText(overrides.employerContributionTreatmentCode) || payItem.employerContributionTreatmentCode,
+    agiMappingCode: normalizeOptionalText(overrides.agiMappingCode) || payItem.agiMappingCode,
+    ledgerAccountCode: normalizeOptionalText(overrides.ledgerAccountCode) || payItem.ledgerAccountCode,
+    affectsVacationBasis: overrides.affectsVacationBasis == null ? payItem.affectsVacationBasis : overrides.affectsVacationBasis === true,
+    affectsPensionBasis: overrides.affectsPensionBasis == null ? payItem.affectsPensionBasis : overrides.affectsPensionBasis === true,
+    includedInNetPay: overrides.includedInNetPay == null ? payItem.includedInNetPay : overrides.includedInNetPay !== false,
+    reportingOnly: overrides.reportingOnly == null ? payItem.reportingOnly : overrides.reportingOnly === true,
     sourceType: requireText(String(sourceType || "manual"), "pay_line_source_type_required"),
     sourceId: normalizeOptionalText(sourceId),
     sourcePeriod: normalizeOptionalReportingPeriod(sourcePeriod),
@@ -3635,6 +3696,26 @@ function createPayLine({
       ...(dimensionJson || {})
     })
   };
+}
+
+function createStepLinesFromBenefitPayloads({ processingStep, employment, payloads, state }) {
+  return (Array.isArray(payloads) ? payloads : [])
+    .filter((payload) => Number(payload.processingStep) === Number(processingStep))
+    .map((payload) => {
+      const payItem = requirePayItemByCode(state, employment.companyId, normalizeCode(payload.payItemCode, "payroll_benefit_pay_item_code_required"));
+      return createPayLine({
+        payItem,
+        employment,
+        quantity: payload.quantity ?? null,
+        unitRate: payload.unitRate ?? null,
+        amount: payload.amount,
+        sourceType: payload.sourceType || "benefit_event",
+        sourceId: payload.sourceId || null,
+        note: payload.note || null,
+        dimensionJson: payload.dimensionJson || {},
+        overrides: payload.overrides || {}
+      });
+    });
 }
 
 function normalizeManualInputs({ companyId, manualInputs, state }) {

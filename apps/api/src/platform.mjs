@@ -9,6 +9,7 @@ import { createBankingPlatform } from "../../../packages/domain-banking/src/inde
 import { createHrPlatform } from "../../../packages/domain-hr/src/index.mjs";
 import { createTimePlatform } from "../../../packages/domain-time/src/index.mjs";
 import { createPayrollPlatform } from "../../../packages/domain-payroll/src/index.mjs";
+import { createBenefitsPlatform } from "../../../packages/domain-benefits/src/index.mjs";
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
 
 export function createApiPlatform(options = {}) {
@@ -51,11 +52,17 @@ export function createApiPlatform(options = {}) {
     hrPlatform,
     documentPlatform: documentArchivePlatform
   });
+  const benefitsPlatform = createBenefitsPlatform({
+    ...options,
+    hrPlatform,
+    documentPlatform: documentArchivePlatform
+  });
   const payrollPlatform = createPayrollPlatform({
     ...options,
     orgAuthPlatform,
     hrPlatform,
     timePlatform,
+    benefitsPlatform,
     ledgerPlatform,
     bankingPlatform
   });
@@ -72,6 +79,7 @@ export function createApiPlatform(options = {}) {
     ...bankingPlatform,
     ...hrPlatform,
     ...timePlatform,
+    ...benefitsPlatform,
     ...payrollPlatform
   };
 }

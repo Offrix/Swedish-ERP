@@ -53,6 +53,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase7TimeEnabled: flags.phase7TimeEnabled,
             phase7AbsenceEnabled: flags.phase7AbsenceEnabled,
             phase8PayrollEnabled: flags.phase8PayrollEnabled,
+            phase9BenefitsEnabled: flags.phase9BenefitsEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -178,6 +179,10 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/hr/employees/:employeeId/bank-accounts",
               "/v1/hr/employees/:employeeId/documents",
               "/v1/hr/employees/:employeeId/audit-events",
+              "/v1/benefits/catalog",
+              "/v1/benefits/events",
+              "/v1/benefits/events/:benefitEventId",
+              "/v1/benefits/audit-events",
               "/v1/payroll/rule-packs",
               "/v1/payroll/statutory-profiles",
               "/v1/payroll/pay-items",
@@ -301,6 +306,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 8 payroll routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase9BenefitsEnabled && isPhase9Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 9.1 benefits routes are disabled by configuration."
     });
     return;
   }
@@ -4888,6 +4901,139 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/benefits/catalog") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "benefit_catalog",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listBenefitCatalog({
+        companyId
+      })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/benefits/events") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "benefit_event",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listBenefitEvents({
+        companyId,
+        reportingPeriod: url.searchParams.get("reportingPeriod") || null,
+        employeeId: url.searchParams.get("employeeId") || null,
+        employmentId: url.searchParams.get("employmentId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/benefits/events") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "benefit_event",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createBenefitEvent({
+        companyId,
+        employeeId: body.employeeId,
+        employmentId: body.employmentId,
+        benefitCode: body.benefitCode,
+        reportingPeriod: body.reportingPeriod ?? null,
+        occurredOn: body.occurredOn ?? null,
+        startDate: body.startDate ?? null,
+        endDate: body.endDate ?? null,
+        sourceType: body.sourceType ?? "manual_entry",
+        sourceId: body.sourceId ?? null,
+        sourcePayload: body.sourcePayload || {},
+        employeePaidValue: body.employeePaidValue ?? 0,
+        netDeductionValue: body.netDeductionValue ?? 0,
+        supportingDocumentId: body.supportingDocumentId ?? null,
+        dimensionJson: body.dimensionJson || {},
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const benefitEventMatch = matchPath(path, "/v1/benefits/events/:benefitEventId");
+  if (benefitEventMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "benefit_event",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getBenefitEvent({
+        companyId,
+        benefitEventId: benefitEventMatch.benefitEventId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/benefits/audit-events") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "benefit_event",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listBenefitAuditEvents({
+        companyId,
+        benefitEventId: url.searchParams.get("benefitEventId") || null
+      })
+    });
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/payroll/pay-items") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -5747,6 +5893,10 @@ function isPhase8Route(path) {
   return path.startsWith("/v1/payroll");
 }
 
+function isPhase9Route(path) {
+  return path.startsWith("/v1/benefits");
+}
+
 async function readJsonBody(req, allowEmpty = false) {
   const chunks = [];
   for await (const chunk of req) {
@@ -5817,7 +5967,8 @@ function readFeatureFlags(env) {
     phase7HrEnabled: String(env.PHASE7_HR_ENABLED || "true").toLowerCase() !== "false",
     phase7TimeEnabled: String(env.PHASE7_TIME_ENABLED || "true").toLowerCase() !== "false",
     phase7AbsenceEnabled: String(env.PHASE7_ABSENCE_ENABLED || "true").toLowerCase() !== "false",
-    phase8PayrollEnabled: String(env.PHASE8_PAYROLL_ENABLED || "true").toLowerCase() !== "false"
+    phase8PayrollEnabled: String(env.PHASE8_PAYROLL_ENABLED || "true").toLowerCase() !== "false",
+    phase9BenefitsEnabled: String(env.PHASE9_BENEFITS_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

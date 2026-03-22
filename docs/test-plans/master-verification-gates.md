@@ -294,16 +294,16 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 ## Gate for FAS 9 â€” FÃ¶rmÃ¥ner, resor, traktamente, pension och lÃ¶nevÃ¤xling
 
 ### AllmÃ¤nt krav
-- [ ] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [ ] Demo kan kÃ¶ras pÃ¥ seed-data
+- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
+- [x] Demo kan kÃ¶ras pÃ¥ seed-data
 - [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
+- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
 
 ### 9.1 FÃ¶rmÃ¥nsmotor
-- [ ] FÃ¶rmÃ¥ner med och utan kontant lÃ¶n hanteras
-- [ ] BilfÃ¶rmÃ¥n start/stopp per mÃ¥nad fungerar
-- [ ] AGI-mappning och bokfÃ¶ring Ã¤r korrekt
-- [ ] Prompt `P9-01` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] FÃ¶rmÃ¥ner med och utan kontant lÃ¶n hanteras
+- [x] BilfÃ¶rmÃ¥n start/stopp per mÃ¥nad fungerar
+- [x] AGI-mappning och bokfÃ¶ring Ã¤r korrekt
+- [x] Prompt `P9-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 9.2 Resor, traktamente, kÃ¶rjournal och utlÃ¤gg
 - [ ] 50 km-krav och Ã¶vernattning styr korrekt

@@ -1126,7 +1126,13 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/benefits-engine.md, docs/compliance/se/travel-and-traktamente-engine.md, docs/compliance/se/pension-and-salary-exchange-engine.md
+- docs/compliance/se/benefits-engine.md
+- docs/compliance/se/payroll-engine.md
+- docs/compliance/se/agi-engine.md
+- docs/compliance/se/accounting-foundation.md
+- docs/compliance/se/travel-and-traktamente-engine.md
+- docs/compliance/se/pension-and-salary-exchange-engine.md
+- docs/policies/benefits-pension-travel-company-policy.md
 
 Implement exactly this scope:
 - Förmånskatalog

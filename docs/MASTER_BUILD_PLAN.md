@@ -497,7 +497,7 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 8.2 Skatt, arbetsgivaravgifter, SINK och AGI
   - [x] 8.3 LÃ¶nebokfÃ¶ring och utbetalning
 - [ ] **FAS 9 â€” FÃ¶rmÃ¥ner, resor, traktamente, pension och lÃ¶nevÃ¤xling**
-  - [ ] 9.1 FÃ¶rmÃ¥nsmotor
+  - [x] 9.1 FÃ¶rmÃ¥nsmotor
   - [ ] 9.2 Resor, traktamente, kÃ¶rjournal och utlÃ¤gg
   - [ ] 9.3 Pension, extra pension och lÃ¶nevÃ¤xling
 - [ ] **FAS 10 â€” Projekt, bygg, fÃ¤lt, lager och personalliggare**
@@ -953,14 +953,14 @@ Bygg de mest regelstyrda HR-ekonomiflÃ¶dena ovanpÃ¥ stabil lÃ¶nekÃ¤rna.
 ### 9.1 FÃ¶rmÃ¥nsmotor
 
 **Bygg detta**
-- [ ] FÃ¶rmÃ¥nskatalog
-- [ ] Skattepliktig/skattefri logik
-- [ ] Bil, drivmedel, friskvÃ¥rd, gÃ¥vor, kost, sjukvÃ¥rd
+- [x] FÃ¶rmÃ¥nskatalog
+- [x] Skattepliktig/skattefri logik
+- [x] Bil, drivmedel, friskvÃ¥rd, gÃ¥vor, kost, sjukvÃ¥rd
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] FÃ¶rmÃ¥ner med och utan kontant lÃ¶n hanteras
-- [ ] BilfÃ¶rmÃ¥n start/stopp per mÃ¥nad fungerar
-- [ ] AGI-mappning och bokfÃ¶ring Ã¤r korrekt
+- [x] FÃ¶rmÃ¥ner med och utan kontant lÃ¶n hanteras
+- [x] BilfÃ¶rmÃ¥n start/stopp per mÃ¥nad fungerar
+- [x] AGI-mappning och bokfÃ¶ring Ã¤r korrekt
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P9-01`.
 

@@ -38,6 +38,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - flera anställningar per person, avtalsversioner, chefsträd, payoutmaskning och känslig HR-audit
 - clock events, schemaassignments, premiumminuter, periodlås och reproducerbara tidsaldon
 - frånvarotyper, chefsgodkännande, signal-komplettering, AGI-lås och historik i anställdportalen
+- förmånsvärdering för bil, drivmedel, friskvård, gåvor, kost, sjukvårdsförsäkring och nettolöneavdrag
 - search ranking och permissions trimming-beslut
 - retry/backoff-beräkningar och jobbstate
 - feature flag-upplösning och kill-switch-beslut
@@ -85,6 +86,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - tidschema, schematilldelningar, clock events, enriched time entries, balans-transaktioner och periodlås
 - leave types, leave entry events, leave signals, leave signal locks och employee-portal-projektioner
 - löneartskatalog, lönekalendrar, lönekörningar, statutory profiles, skatt/SINK, AGI-versioner, payroll postings, payout batches, vacation liability snapshots, receipts och persistenta lönebesked i payroll
+- förmånskatalog, benefit events, AGI-mappning, payroll posting och audit trail i benefits
 - Peppol adapter
 - myndighetsadaptrar
 - sökindex och projektioner
@@ -108,6 +110,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - disable-flagga och tidsflöde med schema, stämpling, projektaktivitet, saldo och periodlås
 - disable-flagga och frånvaroflöde med employee portal, chefsgodkännande, historik och AGI-lås
 - disable-flagga och payrollflöde med lönekalender, ordnad lönekedja, skatt/SINK, AGI-signering, payroll posting, payout export, bankmatchning, semesterskuld, retrospårning, slutlön och regenererat lönebesked
+- disable-flagga och benefitsflöde med förmånsregistrering, benefit-only warning, AGI-mappning och audit trail
 
 ### 8. Performance tests
 - load på dokumentingest

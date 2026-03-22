@@ -1,0 +1,425 @@
+INSERT INTO benefit_events (
+  benefit_event_id,
+  company_id,
+  employee_id,
+  employment_id,
+  benefit_catalog_id,
+  benefit_code,
+  reporting_period,
+  tax_year,
+  occurred_on,
+  start_date,
+  end_date,
+  source_type,
+  source_id,
+  payroll_run_id,
+  supporting_document_id,
+  dimension_json,
+  payload_json,
+  created_by_actor_id,
+  created_at,
+  updated_at
+)
+VALUES
+  (
+    '00000000-0000-4000-8000-000000009211',
+    '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000781',
+    '00000000-0000-4000-8000-000000000791',
+    '00000000-0000-4000-8000-000000009101',
+    'CAR_BENEFIT',
+    '202603',
+    '2026',
+    '2026-03-14',
+    '2026-03-14',
+    NULL,
+    'manual_entry',
+    'phase9-demo-car-202603',
+    '00000000-0000-4000-8000-000000008301',
+    '00000000-0000-4000-8000-000000000831',
+    '{"projectId":"project-demo-beta","costCenterCode":"CC-300"}'::jsonb,
+    '{"newCarPrice":420000.00,"extraEquipmentValue":20000.00,"vehicleTaxAnnual":9000.00,"privateUseOccurrences":12,"privateUseKm":540.00,"hasMileageLog":false}'::jsonb,
+    'demo',
+    NOW(),
+    NOW()
+  ),
+  (
+    '00000000-0000-4000-8000-000000009212',
+    '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000781',
+    '00000000-0000-4000-8000-000000000791',
+    '00000000-0000-4000-8000-000000009102',
+    'FUEL_BENEFIT',
+    '202603',
+    '2026',
+    '2026-03-20',
+    NULL,
+    NULL,
+    'manual_entry',
+    'phase9-demo-fuel-202603',
+    '00000000-0000-4000-8000-000000008301',
+    '00000000-0000-4000-8000-000000000831',
+    '{"projectId":"project-demo-beta","costCenterCode":"CC-300"}'::jsonb,
+    '{"vehicleContext":"benefit_car","fuelType":"liquid_fuel","marketValuePrivateFuel":2000.00}'::jsonb,
+    'demo',
+    NOW(),
+    NOW()
+  ),
+  (
+    '00000000-0000-4000-8000-000000009213',
+    '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000711',
+    '00000000-0000-4000-8000-000000000721',
+    '00000000-0000-4000-8000-000000009106',
+    'WELLNESS_ALLOWANCE',
+    '202603',
+    '2026',
+    '2026-03-11',
+    NULL,
+    NULL,
+    'manual_entry',
+    'phase9-demo-wellness-202603',
+    NULL,
+    '00000000-0000-4000-8000-000000000761',
+    '{"costCenterCode":"CC-100"}'::jsonb,
+    '{"reimbursementAmount":2500.00,"calendarYearGrantedBeforeEvent":0.00,"equalTermsOffered":true,"activityType":"yoga","activityDate":"2026-03-10","vendorName":"Demo Wellness Studio"}'::jsonb,
+    'demo',
+    NOW(),
+    NOW()
+  )
+ON CONFLICT (benefit_event_id) DO NOTHING;
+
+INSERT INTO benefit_valuations (
+  benefit_valuation_id,
+  benefit_event_id,
+  company_id,
+  benefit_code,
+  reporting_period,
+  tax_year,
+  valuation_method,
+  employer_paid_value,
+  market_value,
+  taxable_value_before_offsets,
+  taxable_value,
+  tax_free_value,
+  employee_paid_value,
+  net_deduction_value,
+  agi_mapping_code,
+  ledger_account_code,
+  taxability,
+  cash_salary_required_for_withholding,
+  decision_json,
+  created_at
+)
+VALUES
+  (
+    '00000000-0000-4000-8000-000000009221',
+    '00000000-0000-4000-8000-000000009211',
+    '00000000-0000-4000-8000-000000000001',
+    'CAR_BENEFIT',
+    '202603',
+    '2026',
+    'car_formula_2026',
+    7968.50,
+    7968.50,
+    7968.50,
+    7968.50,
+    0.00,
+    0.00,
+    0.00,
+    'taxable_benefit',
+    '7210',
+    'taxable',
+    TRUE,
+    '{
+      "decisionCode":"BENEFIT_CAR_FORMULA_2026",
+      "ruleVersion":"benefits-se-2026.1",
+      "outputs":{
+        "newCarPrice":420000.00,
+        "extraEquipmentValue":20000.00,
+        "vehicleTaxAnnual":9000.00,
+        "annualValue":95622.00,
+        "monthlyValue":7968.50,
+        "fullMonthApplied":true
+      },
+      "warnings":["benefit_car_missing_mileage_log"]
+    }'::jsonb,
+    NOW()
+  ),
+  (
+    '00000000-0000-4000-8000-000000009222',
+    '00000000-0000-4000-8000-000000009212',
+    '00000000-0000-4000-8000-000000000001',
+    'FUEL_BENEFIT',
+    '202603',
+    '2026',
+    'fuel_formula_2026',
+    2000.00,
+    2000.00,
+    2400.00,
+    2000.00,
+    0.00,
+    0.00,
+    400.00,
+    'taxable_benefit',
+    '7220',
+    'taxable',
+    TRUE,
+    '{
+      "decisionCode":"BENEFIT_FUEL_BENEFIT_CAR",
+      "ruleVersion":"benefits-se-2026.1",
+      "outputs":{
+        "marketValuePrivateFuel":2000.00,
+        "multiplier":1.2,
+        "employeePaidValue":0.00,
+        "netDeductionValue":400.00,
+        "taxableValue":2000.00
+      }
+    }'::jsonb,
+    NOW()
+  ),
+  (
+    '00000000-0000-4000-8000-000000009223',
+    '00000000-0000-4000-8000-000000009213',
+    '00000000-0000-4000-8000-000000000001',
+    'WELLNESS_ALLOWANCE',
+    '202603',
+    '2026',
+    'wellness_policy_2026',
+    2500.00,
+    2500.00,
+    0.00,
+    0.00,
+    2500.00,
+    0.00,
+    0.00,
+    'not_reported',
+    '7270',
+    'tax_free',
+    FALSE,
+    '{
+      "decisionCode":"BENEFIT_WELLNESS_TAX_FREE",
+      "ruleVersion":"benefits-se-2026.1",
+      "outputs":{
+        "reimbursementAmount":2500.00,
+        "totalForYear":2500.00,
+        "hasRequiredReceiptFacts":true
+      }
+    }'::jsonb,
+    NOW()
+  )
+ON CONFLICT (benefit_valuation_id) DO NOTHING;
+
+INSERT INTO benefit_deductions (
+  benefit_deduction_id,
+  benefit_event_id,
+  company_id,
+  deduction_type,
+  amount,
+  note,
+  created_at
+)
+VALUES (
+  '00000000-0000-4000-8000-000000009231',
+  '00000000-0000-4000-8000-000000009212',
+  '00000000-0000-4000-8000-000000000001',
+  'net_deduction',
+  400.00,
+  'Nettoloneavdrag applied to private fuel portion.',
+  NOW()
+)
+ON CONFLICT (benefit_deduction_id) DO NOTHING;
+
+INSERT INTO benefit_documents (
+  benefit_document_id,
+  benefit_event_id,
+  company_id,
+  document_id,
+  linked_by_actor_id,
+  linked_at
+)
+VALUES
+  (
+    '00000000-0000-4000-8000-000000009241',
+    '00000000-0000-4000-8000-000000009211',
+    '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000831',
+    'demo',
+    NOW()
+  ),
+  (
+    '00000000-0000-4000-8000-000000009242',
+    '00000000-0000-4000-8000-000000009212',
+    '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000831',
+    'demo',
+    NOW()
+  )
+ON CONFLICT (benefit_event_id, document_id) DO NOTHING;
+
+INSERT INTO benefit_posting_intents (
+  benefit_posting_intent_id,
+  benefit_event_id,
+  company_id,
+  processing_step,
+  intent_type,
+  ledger_account_code,
+  amount,
+  payroll_line_payload_json,
+  created_at
+)
+VALUES
+  (
+    '00000000-0000-4000-8000-000000009251',
+    '00000000-0000-4000-8000-000000009211',
+    '00000000-0000-4000-8000-000000000001',
+    6,
+    'benefit_taxable_value',
+    '7210',
+    7968.50,
+    '{
+      "processingStep":6,
+      "payItemCode":"BENEFIT",
+      "amount":7968.50,
+      "sourceType":"benefit_event",
+      "sourceId":"00000000-0000-4000-8000-000000009211",
+      "note":"Bilforman 202603",
+      "dimensionJson":{"projectId":"project-demo-beta","costCenterCode":"CC-300"},
+      "overrides":{
+        "displayName":"Bilforman",
+        "ledgerAccountCode":"7210",
+        "agiMappingCode":"taxable_benefit",
+        "taxTreatmentCode":"taxable",
+        "employerContributionTreatmentCode":"included",
+        "includedInNetPay":false,
+        "reportingOnly":true
+      }
+    }'::jsonb,
+    NOW()
+  ),
+  (
+    '00000000-0000-4000-8000-000000009252',
+    '00000000-0000-4000-8000-000000009212',
+    '00000000-0000-4000-8000-000000000001',
+    6,
+    'benefit_taxable_value',
+    '7220',
+    2000.00,
+    '{
+      "processingStep":6,
+      "payItemCode":"BENEFIT",
+      "amount":2000.00,
+      "sourceType":"benefit_event",
+      "sourceId":"00000000-0000-4000-8000-000000009212",
+      "note":"Drivmedelsforman 202603",
+      "dimensionJson":{"projectId":"project-demo-beta","costCenterCode":"CC-300"},
+      "overrides":{
+        "displayName":"Drivmedelsforman",
+        "ledgerAccountCode":"7220",
+        "agiMappingCode":"taxable_benefit",
+        "taxTreatmentCode":"taxable",
+        "employerContributionTreatmentCode":"included",
+        "includedInNetPay":false,
+        "reportingOnly":true
+      }
+    }'::jsonb,
+    NOW()
+  ),
+  (
+    '00000000-0000-4000-8000-000000009253',
+    '00000000-0000-4000-8000-000000009212',
+    '00000000-0000-4000-8000-000000000001',
+    13,
+    'benefit_net_deduction',
+    '2750',
+    400.00,
+    '{
+      "processingStep":13,
+      "payItemCode":"NET_DEDUCTION",
+      "amount":400.00,
+      "sourceType":"benefit_net_deduction",
+      "sourceId":"00000000-0000-4000-8000-000000009212",
+      "note":"Nettoloneavdrag drivmedelsforman",
+      "dimensionJson":{"projectId":"project-demo-beta","costCenterCode":"CC-300"},
+      "overrides":{
+        "displayName":"Nettoloneavdrag drivmedelsforman",
+        "ledgerAccountCode":"2750",
+        "agiMappingCode":"not_reported",
+        "taxTreatmentCode":"non_taxable",
+        "employerContributionTreatmentCode":"excluded",
+        "includedInNetPay":true,
+        "reportingOnly":false
+      }
+    }'::jsonb,
+    NOW()
+  )
+ON CONFLICT (benefit_posting_intent_id) DO NOTHING;
+
+INSERT INTO benefit_agi_mappings (
+  benefit_agi_mapping_id,
+  benefit_event_id,
+  company_id,
+  reporting_period,
+  agi_mapping_code,
+  reportable_amount,
+  created_at
+)
+VALUES
+  (
+    '00000000-0000-4000-8000-000000009261',
+    '00000000-0000-4000-8000-000000009211',
+    '00000000-0000-4000-8000-000000000001',
+    '202603',
+    'taxable_benefit',
+    7968.50,
+    NOW()
+  ),
+  (
+    '00000000-0000-4000-8000-000000009262',
+    '00000000-0000-4000-8000-000000009212',
+    '00000000-0000-4000-8000-000000000001',
+    '202603',
+    'taxable_benefit',
+    2000.00,
+    NOW()
+  )
+ON CONFLICT (benefit_agi_mapping_id) DO NOTHING;
+
+INSERT INTO audit_events (
+  audit_id,
+  company_id,
+  actor_id,
+  action,
+  result,
+  entity_type,
+  entity_id,
+  explanation,
+  correlation_id,
+  recorded_at
+)
+VALUES
+  (
+    '00000000-0000-4000-8000-000000009271',
+    '00000000-0000-4000-8000-000000000001',
+    'demo',
+    'benefit.event.seeded',
+    'success',
+    'benefit_event',
+    '00000000-0000-4000-8000-000000009211',
+    'Seeded car benefit with full-month valuation despite mid-month start.',
+    'phase9-demo-car-202603',
+    NOW()
+  ),
+  (
+    '00000000-0000-4000-8000-000000009272',
+    '00000000-0000-4000-8000-000000000001',
+    'demo',
+    'benefit.event.seeded',
+    'success',
+    'benefit_event',
+    '00000000-0000-4000-8000-000000009212',
+    'Seeded fuel benefit with nettoloneavdrag to cover deduction handling.',
+    'phase9-demo-fuel-202603',
+    NOW()
+  )
+ON CONFLICT (audit_id) DO NOTHING;
