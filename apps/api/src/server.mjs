@@ -179,6 +179,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/hr/employees/:employeeId/documents",
               "/v1/hr/employees/:employeeId/audit-events",
               "/v1/payroll/rule-packs",
+              "/v1/payroll/statutory-profiles",
               "/v1/payroll/pay-items",
               "/v1/payroll/pay-items/:payItemId",
               "/v1/payroll/pay-calendars",
@@ -188,7 +189,13 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/payroll/pay-runs/:payRunId/approve",
               "/v1/payroll/pay-runs/:payRunId/payslips",
               "/v1/payroll/pay-runs/:payRunId/payslips/:employmentId",
-              "/v1/payroll/pay-runs/:payRunId/payslips/:employmentId/regenerate"
+              "/v1/payroll/pay-runs/:payRunId/payslips/:employmentId/regenerate",
+              "/v1/payroll/agi-submissions",
+              "/v1/payroll/agi-submissions/:agiSubmissionId",
+              "/v1/payroll/agi-submissions/:agiSubmissionId/validate",
+              "/v1/payroll/agi-submissions/:agiSubmissionId/ready-for-sign",
+              "/v1/payroll/agi-submissions/:agiSubmissionId/submit",
+              "/v1/payroll/agi-submissions/:agiSubmissionId/correction"
             ]
           }
         : { status: "ok" }
@@ -287,7 +294,7 @@ async function handleRequest({ req, res, platform, flags }) {
   if (!flags.phase8PayrollEnabled && isPhase8Route(path)) {
     writeJson(res, 503, {
       error: "feature_disabled",
-      message: "FAS 8.1 payroll core routes are disabled by configuration."
+      message: "FAS 8 payroll routes are disabled by configuration."
     });
     return;
   }
@@ -4811,10 +4818,67 @@ async function handleRequest({ req, res, platform, flags }) {
       scopeCode: "payroll"
     });
     writeJson(res, 200, {
-      items: platform.listEmployerContributionRulePacks({
+      items: platform.listPayrollRulePacks({
         effectiveDate: url.searchParams.get("effectiveDate") || null
       })
     });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/payroll/statutory-profiles") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listEmploymentStatutoryProfiles({
+        companyId,
+        employmentId: url.searchParams.get("employmentId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/payroll/statutory-profiles") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.upsertEmploymentStatutoryProfile({
+        companyId,
+        employmentId: body.employmentId,
+        taxMode: body.taxMode ?? "pending",
+        taxRatePercent: body.taxRatePercent ?? null,
+        contributionClassCode: body.contributionClassCode ?? null,
+        sinkDecisionType: body.sinkDecisionType ?? null,
+        sinkValidFrom: body.sinkValidFrom ?? null,
+        sinkValidTo: body.sinkValidTo ?? null,
+        sinkRatePercent: body.sinkRatePercent ?? null,
+        sinkSeaIncome: body.sinkSeaIncome === true,
+        sinkDecisionDocumentId: body.sinkDecisionDocumentId ?? null,
+        fallbackTaxMode: body.fallbackTaxMode ?? null,
+        fallbackTaxRatePercent: body.fallbackTaxRatePercent ?? null,
+        actorId: principal.userId
+      })
+    );
     return;
   }
 
@@ -4867,7 +4931,7 @@ async function handleRequest({ req, res, platform, flags }) {
         defaultRateFactor: body.defaultRateFactor ?? null,
         taxTreatmentCode: body.taxTreatmentCode || "phase8_2_pending",
         employerContributionTreatmentCode: body.employerContributionTreatmentCode || "phase8_2_pending",
-        agiMappingCode: body.agiMappingCode || "phase8_2_pending",
+        agiMappingCode: body.agiMappingCode ?? null,
         ledgerAccountCode: body.ledgerAccountCode || "phase8_3_pending",
         defaultDimensions: body.defaultDimensions || {},
         affectsVacationBasis: body.affectsVacationBasis === true,
@@ -5142,6 +5206,178 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         payRunId: payslipRegenerateMatch.payRunId,
         employmentId: payslipRegenerateMatch.employmentId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/payroll/agi-submissions") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listAgiSubmissions({
+        companyId,
+        reportingPeriod: url.searchParams.get("reportingPeriod") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/payroll/agi-submissions") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createAgiSubmission({
+        companyId,
+        reportingPeriod: body.reportingPeriod,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const agiSubmissionMatch = matchPath(path, "/v1/payroll/agi-submissions/:agiSubmissionId");
+  if (agiSubmissionMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getAgiSubmission({
+        companyId,
+        agiSubmissionId: agiSubmissionMatch.agiSubmissionId
+      })
+    );
+    return;
+  }
+
+  const agiSubmissionValidateMatch = matchPath(path, "/v1/payroll/agi-submissions/:agiSubmissionId/validate");
+  if (agiSubmissionValidateMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.validateAgiSubmission({
+        companyId,
+        agiSubmissionId: agiSubmissionValidateMatch.agiSubmissionId
+      })
+    );
+    return;
+  }
+
+  const agiSubmissionReadyMatch = matchPath(path, "/v1/payroll/agi-submissions/:agiSubmissionId/ready-for-sign");
+  if (agiSubmissionReadyMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.markAgiSubmissionReadyForSign({
+        companyId,
+        agiSubmissionId: agiSubmissionReadyMatch.agiSubmissionId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const agiSubmissionSubmitMatch = matchPath(path, "/v1/payroll/agi-submissions/:agiSubmissionId/submit");
+  if (agiSubmissionSubmitMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.submitAgiSubmission({
+        companyId,
+        agiSubmissionId: agiSubmissionSubmitMatch.agiSubmissionId,
+        actorId: principal.userId,
+        mode: body.mode || "test",
+        simulatedOutcome: body.simulatedOutcome || "accepted",
+        receiptMessage: body.receiptMessage ?? null,
+        receiptErrors: Array.isArray(body.receiptErrors) ? body.receiptErrors : []
+      })
+    );
+    return;
+  }
+
+  const agiSubmissionCorrectionMatch = matchPath(path, "/v1/payroll/agi-submissions/:agiSubmissionId/correction");
+  if (agiSubmissionCorrectionMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createAgiCorrectionVersion({
+        companyId,
+        agiSubmissionId: agiSubmissionCorrectionMatch.agiSubmissionId,
+        correctionReason: body.correctionReason,
         actorId: principal.userId
       })
     );

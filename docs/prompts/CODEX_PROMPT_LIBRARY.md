@@ -1039,7 +1039,9 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/payroll-engine.md, docs/compliance/se/agi-engine.md
+- docs/compliance/se/payroll-engine.md
+- docs/compliance/se/agi-engine.md
+- docs/runbooks/fas-8-payroll-tax-agi-verification.md
 
 Implement exactly this scope:
 - Skattelogik
@@ -1078,7 +1080,8 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/payroll-engine.md, docs/compliance/se/agi-engine.md
+- docs/compliance/se/payroll-engine.md
+- docs/compliance/se/agi-engine.md
 
 Implement exactly this scope:
 - Löneverifikationer

@@ -1,6 +1,6 @@
 # API
 
-HTTP baseline plus phased domain routes through FAS 8.1.
+HTTP baseline plus phased domain routes through FAS 8.2.
 
 ## Start
 
@@ -199,6 +199,8 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/hr/employees/:employeeId/documents`
 - `GET /v1/hr/employees/:employeeId/audit-events?companyId=...`
 - `GET /v1/payroll/rule-packs?companyId=...&effectiveDate=...`
+- `GET /v1/payroll/statutory-profiles?companyId=...`
+- `POST /v1/payroll/statutory-profiles`
 - `GET /v1/payroll/pay-items?companyId=...`
 - `POST /v1/payroll/pay-items`
 - `GET /v1/payroll/pay-items/:payItemId?companyId=...`
@@ -212,6 +214,13 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/payroll/pay-runs/:payRunId/payslips?companyId=...`
 - `GET /v1/payroll/pay-runs/:payRunId/payslips/:employmentId?companyId=...`
 - `POST /v1/payroll/pay-runs/:payRunId/payslips/:employmentId/regenerate`
+- `GET /v1/payroll/agi-submissions?companyId=...`
+- `POST /v1/payroll/agi-submissions`
+- `GET /v1/payroll/agi-submissions/:agiSubmissionId?companyId=...`
+- `POST /v1/payroll/agi-submissions/:agiSubmissionId/validate`
+- `POST /v1/payroll/agi-submissions/:agiSubmissionId/ready-for-sign`
+- `POST /v1/payroll/agi-submissions/:agiSubmissionId/submit`
+- `POST /v1/payroll/agi-submissions/:agiSubmissionId/correction`
 
 ## Disable strategy
 
@@ -237,4 +246,4 @@ Set `PHASE7_TIME_ENABLED=false` to return `503` for FAS 7.2 time reporting route
 
 Set `PHASE7_ABSENCE_ENABLED=false` to return `503` for FAS 7.3 leave, approval and employee-portal routes while keeping the rest of the API process alive.
 
-Set `PHASE8_PAYROLL_ENABLED=false` to return `503` for FAS 8.1 payroll core routes while keeping the rest of the API process alive.
+Set `PHASE8_PAYROLL_ENABLED=false` to return `503` for FAS 8 payroll routes while keeping the rest of the API process alive.

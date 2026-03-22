@@ -1,10 +1,22 @@
 import crypto from "node:crypto";
+import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
 export const PAY_RUN_TYPES = Object.freeze(["regular", "extra", "correction", "final"]);
 export const PAY_RUN_STATUSES = Object.freeze(["calculated", "approved"]);
 export const PAYROLL_FREQUENCY_CODES = Object.freeze(["monthly"]);
+export const PAYROLL_TAX_MODES = Object.freeze(["pending", "manual_rate", "sink"]);
+export const AGI_SUBMISSION_STATES = Object.freeze([
+  "draft",
+  "validated",
+  "ready_for_sign",
+  "submitted",
+  "accepted",
+  "partially_rejected",
+  "rejected",
+  "superseded"
+]);
 export const PAYROLL_COMPENSATION_BUCKETS = Object.freeze([
   "gross_addition",
   "gross_deduction",
@@ -50,7 +62,7 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
     version: "2026.1",
     checksum: "phase8-payroll-employer-contribution-se-2026-1",
     sourceSnapshotDate: "2026-03-22",
-    semanticChangeSummary: "Phase 8.1 preview pack for 2026 employer contribution classes.",
+    semanticChangeSummary: "Phase 8.2 payroll rule pack for 2026 employer contribution classes.",
     machineReadableRules: {
       contributionClasses: {
         full: { ratePercent: 31.42 },
@@ -59,11 +71,39 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
       }
     },
     humanReadableExplanation: [
-      "Phase 8.1 uses preview employer contribution classes to keep pay-run outputs deterministic before full AGI implementation.",
-      "Class selection stays explicit through run input so the platform does not guess reduced-rate eligibility."
+      "Employer contribution outcome is driven by rule pack, payout date and the resolved statutory profile.",
+      "Reduced-rate eligibility remains explicit so the platform stays deterministic and auditable."
     ],
     testVectors: [{ vectorId: "payroll-full-2026" }, { vectorId: "payroll-reduced-2026" }, { vectorId: "payroll-none-2026" }],
-    migrationNotes: ["Phase 8.2 extends the payroll rule packs with tax and AGI mapping."]
+    migrationNotes: ["Phase 8.2 adds AGI submissions and SINK support on top of this contribution pack."]
+  },
+  {
+    rulePackId: "payroll-tax-se-2026.1",
+    domain: "payroll",
+    jurisdiction: "SE",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    version: "2026.1",
+    checksum: "phase8-payroll-tax-se-2026-1",
+    sourceSnapshotDate: "2026-03-22",
+    semanticChangeSummary: "Phase 8.2 payroll tax pack for manual-rate ordinary tax and SINK.",
+    machineReadableRules: {
+      ordinaryTaxModes: {
+        manual_rate: {
+          requiresExplicitRate: true
+        }
+      },
+      sink: {
+        standardRatePercent: 22.5,
+        seaIncomeRatePercent: 15
+      }
+    },
+    humanReadableExplanation: [
+      "Ordinary tax remains explicit through a configured rate until later tax-table phases.",
+      "SINK is versioned through the rule pack with standard and sea-income rates."
+    ],
+    testVectors: [{ vectorId: "payroll-manual-rate-2026" }, { vectorId: "payroll-sink-2026" }, { vectorId: "payroll-sink-sea-2026" }],
+    migrationNotes: ["Phase 8.2 uses this tax pack for AGI-ready payroll tax decisions."]
   }
 ]);
 
@@ -107,11 +147,12 @@ export function createPayrollPlatform(options = {}) {
 export function createPayrollEngine({
   clock = () => new Date(),
   seedDemo = true,
+  orgAuthPlatform = null,
   hrPlatform = null,
   timePlatform = null,
   ruleRegistry = null
 } = {}) {
-  const rules = ruleRegistry || createInternalRuleRegistry({ seedRulePacks: EMPLOYER_CONTRIBUTION_RULE_PACKS });
+  const rules = ruleRegistry || createRulePackRegistry({ clock, seedRulePacks: EMPLOYER_CONTRIBUTION_RULE_PACKS });
   const state = {
     payItems: new Map(),
     payItemIdsByCompany: new Map(),
@@ -128,7 +169,28 @@ export function createPayrollEngine({
     payRunLineIdsByEmployment: new Map(),
     payslips: new Map(),
     payslipIdsByRun: new Map(),
-    payslipIdsByRunEmployment: new Map()
+    payslipIdsByRunEmployment: new Map(),
+    employmentStatutoryProfiles: new Map(),
+    employmentStatutoryProfileIdByEmployment: new Map(),
+    employmentStatutoryProfileIdsByCompany: new Map(),
+    agiPeriods: new Map(),
+    agiPeriodIdByCompanyPeriod: new Map(),
+    agiSubmissionIdsByCompany: new Map(),
+    agiSubmissions: new Map(),
+    agiSubmissionVersions: new Map(),
+    agiSubmissionVersionIdsBySubmission: new Map(),
+    agiEmployees: new Map(),
+    agiEmployeeIdsByVersion: new Map(),
+    agiEmployeeLines: new Map(),
+    agiEmployeeLineIdsByEmployee: new Map(),
+    agiAbsencePayloads: new Map(),
+    agiAbsencePayloadIdsByVersion: new Map(),
+    agiReceipts: new Map(),
+    agiReceiptIdsByVersion: new Map(),
+    agiErrors: new Map(),
+    agiErrorIdsByVersion: new Map(),
+    agiSignatures: new Map(),
+    agiSignatureIdsByVersion: new Map()
   };
 
   if (seedDemo) {
@@ -140,22 +202,38 @@ export function createPayrollEngine({
     payRunStatuses: PAY_RUN_STATUSES,
     payrollStepDefinitions: PAYROLL_STEP_DEFINITIONS.map(copy),
     listEmployerContributionRulePacks,
+    listPayrollRulePacks,
     listPayItems,
     getPayItem,
     createPayItem,
     listPayCalendars,
     getPayCalendar,
     createPayCalendar,
+    listEmploymentStatutoryProfiles,
+    upsertEmploymentStatutoryProfile,
     listPayRuns,
     getPayRun,
     createPayRun,
     approvePayRun,
     listPaySlips,
     getPaySlip,
-    regeneratePaySlip
+    regeneratePaySlip,
+    listAgiSubmissions,
+    getAgiSubmission,
+    createAgiSubmission,
+    validateAgiSubmission,
+    markAgiSubmissionReadyForSign,
+    submitAgiSubmission,
+    createAgiCorrectionVersion
   };
 
   function listEmployerContributionRulePacks({ effectiveDate = null } = {}) {
+    return listPayrollRulePacks({ effectiveDate }).filter(
+      (candidate) => candidate.machineReadableRules?.contributionClasses != null
+    );
+  }
+
+  function listPayrollRulePacks({ effectiveDate = null } = {}) {
     return rules
       .listRulePacks({ domain: "payroll", jurisdiction: "SE" })
       .filter((candidate) => !effectiveDate || candidate.effectiveFrom <= effectiveDate)
@@ -201,7 +279,7 @@ export function createPayrollEngine({
     defaultRateFactor = null,
     taxTreatmentCode = "phase8_2_pending",
     employerContributionTreatmentCode = "phase8_2_pending",
-    agiMappingCode = "phase8_2_pending",
+    agiMappingCode = null,
     ledgerAccountCode = "phase8_3_pending",
     defaultDimensions = {},
     affectsVacationBasis = false,
@@ -230,7 +308,7 @@ export function createPayrollEngine({
         String(employerContributionTreatmentCode),
         "pay_item_contribution_treatment_required"
       ),
-      agiMappingCode: requireText(String(agiMappingCode), "pay_item_agi_mapping_required"),
+      agiMappingCode: requireText(String(agiMappingCode || resolveDefaultAgiMappingCode(resolvedCode)), "pay_item_agi_mapping_required"),
       ledgerAccountCode: requireText(String(ledgerAccountCode), "pay_item_ledger_account_required"),
       defaultDimensions: copy(defaultDimensions || {}),
       affectsVacationBasis: affectsVacationBasis === true,
@@ -312,6 +390,80 @@ export function createPayrollEngine({
     return copy(record);
   }
 
+  function listEmploymentStatutoryProfiles({ companyId, employmentId = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const ids = employmentId
+      ? [state.employmentStatutoryProfileIdByEmployment.get(requireText(employmentId, "employment_id_required"))].filter(Boolean)
+      : state.employmentStatutoryProfileIdsByCompany.get(resolvedCompanyId) || [];
+    return ids
+      .map((employmentStatutoryProfileId) => state.employmentStatutoryProfiles.get(employmentStatutoryProfileId))
+      .filter(Boolean)
+      .filter((candidate) => candidate.companyId === resolvedCompanyId)
+      .sort((left, right) => left.employmentId.localeCompare(right.employmentId))
+      .map(copy);
+  }
+
+  function upsertEmploymentStatutoryProfile({
+    companyId,
+    employmentId,
+    taxMode = "pending",
+    taxRatePercent = null,
+    contributionClassCode = null,
+    sinkDecisionType = null,
+    sinkValidFrom = null,
+    sinkValidTo = null,
+    sinkRatePercent = null,
+    sinkSeaIncome = false,
+    sinkDecisionDocumentId = null,
+    fallbackTaxMode = null,
+    fallbackTaxRatePercent = null,
+    actorId = "system"
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedEmploymentId = requireText(employmentId, "employment_id_required");
+    if (hrPlatform) {
+      const matches = resolveEmploymentScope({
+        companyId: resolvedCompanyId,
+        employmentIds: [resolvedEmploymentId],
+        period: { startsOn: "1900-01-01", endsOn: "2999-12-31" },
+        hrPlatform
+      });
+      if (matches.length !== 1) {
+        throw createError(404, "employment_not_found", "Employment was not found for statutory profile.");
+      }
+    }
+    const normalized = normalizeStatutoryProfile({
+      employmentId: resolvedEmploymentId,
+      taxMode,
+      taxRatePercent,
+      contributionClassCode,
+      sinkDecisionType,
+      sinkValidFrom,
+      sinkValidTo,
+      sinkRatePercent,
+      sinkSeaIncome,
+      sinkDecisionDocumentId,
+      fallbackTaxMode,
+      fallbackTaxRatePercent
+    });
+    const existingId = state.employmentStatutoryProfileIdByEmployment.get(resolvedEmploymentId);
+    const existing = existingId ? state.employmentStatutoryProfiles.get(existingId) : null;
+    const record = {
+      employmentStatutoryProfileId: existing?.employmentStatutoryProfileId || crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      ...normalized,
+      createdByActorId: existing?.createdByActorId || requireText(actorId, "actor_id_required"),
+      createdAt: existing?.createdAt || nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.employmentStatutoryProfiles.set(record.employmentStatutoryProfileId, record);
+    if (!existing) {
+      appendToIndex(state.employmentStatutoryProfileIdsByCompany, resolvedCompanyId, record.employmentStatutoryProfileId);
+    }
+    state.employmentStatutoryProfileIdByEmployment.set(resolvedEmploymentId, record.employmentStatutoryProfileId);
+    return copy(record);
+  }
+
   function listPayRuns({ companyId, reportingPeriod = null, runType = null, employmentId = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return (state.payRunIdsByCompany.get(resolvedCompanyId) || [])
@@ -388,7 +540,10 @@ export function createPayrollEngine({
     });
     const normalizedFinalPayAdjustments = normalizeFinalPayAdjustments(finalPayAdjustments);
     const normalizedLeaveMappings = normalizeLeaveMappings(leavePayItemMappings);
-    const normalizedStatutoryProfiles = normalizeStatutoryProfiles(statutoryProfiles);
+    const normalizedStatutoryProfiles = mergeStatutoryProfileMaps({
+      baseProfiles: listEmploymentStatutoryProfiles({ companyId: resolvedCompanyId }),
+      overrideProfiles: statutoryProfiles
+    });
 
     const run = {
       payRunId: crypto.randomUUID(),
@@ -547,6 +702,963 @@ export function createPayrollEngine({
     });
     return enrichPayslip(payslip);
   }
+
+  function listAgiSubmissions({ companyId, reportingPeriod = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedReportingPeriod = reportingPeriod ? normalizeReportingPeriod(reportingPeriod, "agi_reporting_period_invalid") : null;
+    return (state.agiSubmissionIdsByCompany.get(resolvedCompanyId) || [])
+      .map((agiSubmissionId) => state.agiSubmissions.get(agiSubmissionId))
+      .filter(Boolean)
+      .filter((candidate) => (resolvedReportingPeriod ? candidate.reportingPeriod === resolvedReportingPeriod : true))
+      .sort((left, right) => left.reportingPeriod.localeCompare(right.reportingPeriod) || left.createdAt.localeCompare(right.createdAt))
+      .map((candidate) => enrichAgiSubmission(state, candidate));
+  }
+
+  function getAgiSubmission({ companyId, agiSubmissionId } = {}) {
+    return enrichAgiSubmission(state, requireAgiSubmission(state, companyId, agiSubmissionId));
+  }
+
+  function createAgiSubmission({ companyId, reportingPeriod, actorId = "system" } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedReportingPeriod = normalizeReportingPeriod(reportingPeriod, "agi_reporting_period_required");
+    const existing = findAgiSubmissionByPeriod(state, resolvedCompanyId, resolvedReportingPeriod);
+    if (existing) {
+      throw createError(409, "agi_submission_exists", "AGI submission already exists for the selected period.");
+    }
+    const periodRecord = ensureAgiPeriodRecord(state, resolvedCompanyId, resolvedReportingPeriod, clock);
+    const submission = {
+      agiSubmissionId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      agiPeriodId: periodRecord.agiPeriodId,
+      reportingPeriod: resolvedReportingPeriod,
+      currentVersionId: null,
+      latestSubmittedVersionId: null,
+      status: "draft",
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.agiSubmissions.set(submission.agiSubmissionId, submission);
+    appendToIndex(state.agiSubmissionIdsByCompany, resolvedCompanyId, submission.agiSubmissionId);
+
+    const materialized = materializeAgiSubmissionVersion({
+      state,
+      companyId: resolvedCompanyId,
+      reportingPeriod: resolvedReportingPeriod,
+      submissionId: submission.agiSubmissionId,
+      previousVersion: null,
+      correctionReason: null,
+      clock,
+      orgAuthPlatform,
+      hrPlatform,
+      timePlatform
+    });
+    persistAgiMaterialization(state, materialized);
+    submission.currentVersionId = materialized.version.agiSubmissionVersionId;
+    submission.status = materialized.version.state;
+    submission.updatedAt = nowIso(clock);
+    return getAgiSubmission({
+      companyId: resolvedCompanyId,
+      agiSubmissionId: submission.agiSubmissionId
+    });
+  }
+
+  function validateAgiSubmission({ companyId, agiSubmissionId } = {}) {
+    const submission = requireAgiSubmission(state, companyId, agiSubmissionId);
+    const version = requireAgiSubmissionVersion(state, submission.currentVersionId);
+    const validation = evaluateAgiValidation({
+      state,
+      submission,
+      version,
+      orgAuthPlatform,
+      timePlatform
+    });
+    version.validationErrors = validation.errors;
+    version.validationWarnings = validation.warnings;
+    version.totalsMatch = validation.totalsMatch;
+    version.validatedAt = nowIso(clock);
+    version.state = validation.errors.length === 0 ? "validated" : "draft";
+    version.updatedAt = version.validatedAt;
+    submission.status = version.state;
+    submission.updatedAt = version.validatedAt;
+    return enrichAgiSubmission(state, submission);
+  }
+
+  function markAgiSubmissionReadyForSign({ companyId, agiSubmissionId, actorId = "system" } = {}) {
+    const submission = requireAgiSubmission(state, companyId, agiSubmissionId);
+    validateAgiSubmission({ companyId, agiSubmissionId });
+    const version = requireAgiSubmissionVersion(state, submission.currentVersionId);
+    if ((version.validationErrors || []).length > 0) {
+      throw createError(409, "agi_submission_validation_failed", "AGI submission has blocking validation errors.");
+    }
+    if (version.state !== "validated") {
+      throw createError(409, "agi_submission_not_validated", "AGI submission must be validated before sign preparation.");
+    }
+    version.state = "ready_for_sign";
+    version.readyForSignAt = nowIso(clock);
+    version.readyForSignByActorId = requireText(actorId, "actor_id_required");
+    version.updatedAt = version.readyForSignAt;
+    lockAgiLeaveSignals({
+      version,
+      timePlatform,
+      actorId,
+      lockState: "ready_for_sign"
+    });
+    submission.status = version.state;
+    submission.updatedAt = version.readyForSignAt;
+    return enrichAgiSubmission(state, submission);
+  }
+
+  function submitAgiSubmission({
+    companyId,
+    agiSubmissionId,
+    actorId = "system",
+    mode = "test",
+    simulatedOutcome = "accepted",
+    receiptMessage = null,
+    receiptErrors = []
+  } = {}) {
+    const submission = requireAgiSubmission(state, companyId, agiSubmissionId);
+    const version = requireAgiSubmissionVersion(state, submission.currentVersionId);
+    if (version.state !== "ready_for_sign") {
+      throw createError(409, "agi_submission_not_ready_for_sign", "AGI submission must be ready_for_sign before submit.");
+    }
+
+    appendAgiSignature(state, {
+      version,
+      actorId,
+      clock
+    });
+    lockAgiLeaveSignals({
+      version,
+      timePlatform,
+      actorId,
+      lockState: "signed"
+    });
+
+    version.state = "submitted";
+    version.submittedAt = nowIso(clock);
+    version.submittedByActorId = requireText(actorId, "actor_id_required");
+    version.submissionMode = requireText(mode, "agi_submission_mode_required");
+    version.updatedAt = version.submittedAt;
+    submission.status = version.state;
+    submission.updatedAt = version.submittedAt;
+
+    lockAgiLeaveSignals({
+      version,
+      timePlatform,
+      actorId,
+      lockState: "submitted"
+    });
+
+    const receipt = appendAgiReceipt(state, {
+      version,
+      simulatedOutcome,
+      message: receiptMessage,
+      actorId,
+      clock
+    });
+    const normalizedReceiptErrors = normalizeAgiReceiptErrors(receiptErrors);
+    if (normalizedReceiptErrors.length > 0) {
+      appendAgiErrors(state, {
+        version,
+        receiptId: receipt.agiReceiptId,
+        errors: normalizedReceiptErrors,
+        clock
+      });
+    }
+
+    version.state = resolveReceiptOutcomeState(receipt.receiptStatus);
+    version.updatedAt = nowIso(clock);
+    submission.latestSubmittedVersionId = version.agiSubmissionVersionId;
+    submission.status = version.state;
+    submission.updatedAt = version.updatedAt;
+    if (version.previousSubmittedVersionId && ["accepted", "partially_rejected"].includes(version.state)) {
+      const previousVersion = requireAgiSubmissionVersion(state, version.previousSubmittedVersionId);
+      previousVersion.state = "superseded";
+      previousVersion.supersededAt = version.updatedAt;
+      previousVersion.updatedAt = version.updatedAt;
+    }
+    return enrichAgiSubmission(state, submission);
+  }
+
+  function createAgiCorrectionVersion({ companyId, agiSubmissionId, correctionReason, actorId = "system" } = {}) {
+    const submission = requireAgiSubmission(state, companyId, agiSubmissionId);
+    const previousSubmittedVersion = submission.latestSubmittedVersionId
+      ? requireAgiSubmissionVersion(state, submission.latestSubmittedVersionId)
+      : null;
+    if (!previousSubmittedVersion) {
+      throw createError(409, "agi_correction_requires_submitted_version", "A correction version requires a previously submitted AGI version.");
+    }
+    const materialized = materializeAgiSubmissionVersion({
+      state,
+      companyId: submission.companyId,
+      reportingPeriod: submission.reportingPeriod,
+      submissionId: submission.agiSubmissionId,
+      previousVersion: previousSubmittedVersion,
+      correctionReason: requireText(correctionReason, "agi_correction_reason_required"),
+      clock,
+      orgAuthPlatform,
+      hrPlatform,
+      timePlatform
+    });
+    persistAgiMaterialization(state, materialized);
+    submission.currentVersionId = materialized.version.agiSubmissionVersionId;
+    submission.status = materialized.version.state;
+    submission.updatedAt = nowIso(clock);
+    return enrichAgiSubmission(state, submission);
+  }
+}
+
+function findAgiSubmissionByPeriod(state, companyId, reportingPeriod) {
+  return (state.agiSubmissionIdsByCompany.get(companyId) || [])
+    .map((agiSubmissionId) => state.agiSubmissions.get(agiSubmissionId))
+    .filter(Boolean)
+    .find((candidate) => candidate.reportingPeriod === reportingPeriod) || null;
+}
+
+function ensureAgiPeriodRecord(state, companyId, reportingPeriod, clock) {
+  const key = `${companyId}:${reportingPeriod}`;
+  const existingId = state.agiPeriodIdByCompanyPeriod.get(key);
+  if (existingId) {
+    return copy(state.agiPeriods.get(existingId));
+  }
+  const record = {
+    agiPeriodId: crypto.randomUUID(),
+    companyId,
+    reportingPeriod,
+    startsOn: `${reportingPeriod.slice(0, 4)}-${reportingPeriod.slice(4, 6)}-01`,
+    endsOn: endOfMonth(Number(reportingPeriod.slice(0, 4)), Number(reportingPeriod.slice(4, 6))),
+    createdAt: nowIso(clock)
+  };
+  state.agiPeriods.set(record.agiPeriodId, record);
+  state.agiPeriodIdByCompanyPeriod.set(key, record.agiPeriodId);
+  return copy(record);
+}
+
+function requireAgiSubmission(state, companyId, agiSubmissionId) {
+  const submission = state.agiSubmissions.get(requireText(agiSubmissionId, "agi_submission_id_required"));
+  if (!submission || submission.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "agi_submission_not_found", "AGI submission was not found.");
+  }
+  return submission;
+}
+
+function requireAgiSubmissionVersion(state, agiSubmissionVersionId) {
+  const version = state.agiSubmissionVersions.get(requireText(agiSubmissionVersionId, "agi_submission_version_id_required"));
+  if (!version) {
+    throw createError(404, "agi_submission_version_not_found", "AGI submission version was not found.");
+  }
+  return version;
+}
+
+function enrichAgiSubmission(state, submission) {
+  const currentVersion = submission.currentVersionId ? state.agiSubmissionVersions.get(submission.currentVersionId) || null : null;
+  const versions = (state.agiSubmissionVersionIdsBySubmission.get(submission.agiSubmissionId) || [])
+    .map((agiSubmissionVersionId) => state.agiSubmissionVersions.get(agiSubmissionVersionId))
+    .filter(Boolean)
+    .sort((left, right) => left.versionNo - right.versionNo)
+    .map((version) => ({
+      ...copy(version),
+      employees: (state.agiEmployeeIdsByVersion.get(version.agiSubmissionVersionId) || [])
+        .map((agiEmployeeId) => state.agiEmployees.get(agiEmployeeId))
+        .filter(Boolean)
+        .map((employee) => ({
+          ...copy(employee),
+          lines: (state.agiEmployeeLineIdsByEmployee.get(employee.agiEmployeeId) || [])
+            .map((agiEmployeeLineId) => state.agiEmployeeLines.get(agiEmployeeLineId))
+            .filter(Boolean)
+            .map(copy)
+        })),
+      absencePayloads: (state.agiAbsencePayloadIdsByVersion.get(version.agiSubmissionVersionId) || [])
+        .map((agiAbsencePayloadId) => state.agiAbsencePayloads.get(agiAbsencePayloadId))
+        .filter(Boolean)
+        .map(copy),
+      receipts: (state.agiReceiptIdsByVersion.get(version.agiSubmissionVersionId) || [])
+        .map((agiReceiptId) => state.agiReceipts.get(agiReceiptId))
+        .filter(Boolean)
+        .map(copy),
+      errors: (state.agiErrorIdsByVersion.get(version.agiSubmissionVersionId) || [])
+        .map((agiErrorId) => state.agiErrors.get(agiErrorId))
+        .filter(Boolean)
+        .map(copy),
+      signatures: (state.agiSignatureIdsByVersion.get(version.agiSubmissionVersionId) || [])
+        .map((agiSignatureId) => state.agiSignatures.get(agiSignatureId))
+        .filter(Boolean)
+        .map(copy)
+    }));
+  return {
+    ...copy(submission),
+    currentVersion: currentVersion ? versions.find((candidate) => candidate.agiSubmissionVersionId === currentVersion.agiSubmissionVersionId) || null : null,
+    versions
+  };
+}
+
+function persistAgiMaterialization(state, materialized) {
+  const version = copy(materialized.version);
+  state.agiSubmissionVersions.set(version.agiSubmissionVersionId, version);
+  appendToIndex(state.agiSubmissionVersionIdsBySubmission, version.agiSubmissionId, version.agiSubmissionVersionId);
+
+  for (const employee of materialized.employees) {
+    const record = {
+      ...copy(employee),
+      agiSubmissionVersionId: version.agiSubmissionVersionId
+    };
+    state.agiEmployees.set(record.agiEmployeeId, record);
+    appendToIndex(state.agiEmployeeIdsByVersion, version.agiSubmissionVersionId, record.agiEmployeeId);
+  }
+  for (const line of materialized.employeeLines) {
+    const record = {
+      ...copy(line),
+      agiSubmissionVersionId: version.agiSubmissionVersionId
+    };
+    state.agiEmployeeLines.set(record.agiEmployeeLineId, record);
+    appendToIndex(state.agiEmployeeLineIdsByEmployee, record.agiEmployeeId, record.agiEmployeeLineId);
+  }
+  for (const absencePayload of materialized.absencePayloads) {
+    const record = {
+      ...copy(absencePayload),
+      agiSubmissionVersionId: version.agiSubmissionVersionId
+    };
+    state.agiAbsencePayloads.set(record.agiAbsencePayloadId, record);
+    appendToIndex(state.agiAbsencePayloadIdsByVersion, version.agiSubmissionVersionId, record.agiAbsencePayloadId);
+  }
+}
+
+function materializeAgiSubmissionVersion({
+  state,
+  companyId,
+  reportingPeriod,
+  submissionId,
+  previousVersion = null,
+  correctionReason = null,
+  clock,
+  orgAuthPlatform,
+  hrPlatform,
+  timePlatform
+}) {
+  const approvedRuns = collectApprovedPayRunsForPeriod(state, companyId, reportingPeriod);
+  const sourceSnapshotHash = buildAgiSourceSnapshotHash(approvedRuns);
+  const companyContext = resolveCompanyComplianceContext(orgAuthPlatform, companyId);
+  const materializedAt = nowIso(clock);
+  const employeeGroups = buildAgiEmployeeGroups({
+    state,
+    companyId,
+    reportingPeriod,
+    approvedRuns,
+    hrPlatform,
+    timePlatform
+  });
+  const employees = [];
+  const employeeLines = [];
+  const absencePayloads = [];
+  const validationWarnings = [];
+  const lockEmploymentIds = new Set();
+
+  for (const group of employeeGroups) {
+    const materializedEmployee = materializeAgiEmployeeGroup({
+      companyId,
+      reportingPeriod,
+      group,
+      createdAt: materializedAt
+    });
+    employees.push(materializedEmployee.employee);
+    employeeLines.push(...materializedEmployee.lines);
+    absencePayloads.push(...materializedEmployee.absencePayloads);
+    validationWarnings.push(...materializedEmployee.warnings);
+    for (const employmentId of materializedEmployee.lockEmploymentIds) {
+      lockEmploymentIds.add(employmentId);
+    }
+  }
+
+  const payload = {
+    employer: {
+      companyId,
+      legalName: companyContext.legalName,
+      orgNumber: companyContext.orgNumber,
+      employerRegistrationValue: companyContext.employerRegistrationValue
+    },
+    reportingPeriod,
+    sourcePayRunIds: approvedRuns.map((run) => run.payRunId),
+    totals: summarizeAgiEmployeeTotals(employees),
+    employees: employees.map((employee) => copy(employee.payloadJson)),
+    generatedAt: materializedAt,
+    correctionReason: correctionReason || null,
+    previousSubmittedVersionId: previousVersion?.agiSubmissionVersionId || null
+  };
+  const changedEmployeeIds = previousVersion ? diffAgiEmployees(previousVersion.payloadJson?.employees || [], payload.employees) : [];
+  const version = {
+    agiSubmissionVersionId: crypto.randomUUID(),
+    agiSubmissionId: submissionId,
+    companyId,
+    reportingPeriod,
+    versionNo: previousVersion ? previousVersion.versionNo + 1 : 1,
+    state: "draft",
+    previousVersionId: previousVersion?.agiSubmissionVersionId || null,
+    previousSubmittedVersionId: previousVersion?.agiSubmissionVersionId || null,
+    correctionReason: correctionReason || null,
+    sourcePayRunIds: approvedRuns.map((run) => run.payRunId),
+    sourceSnapshotHash,
+    payloadHash: buildSnapshotHash(payload),
+    payloadJson: payload,
+    adapterPayloadJson: {
+      mode: "test",
+      payloadVersion: "agi-json-v1",
+      payload
+    },
+    changedEmployeeIds,
+    lockEmploymentIds: [...lockEmploymentIds].sort(),
+    validationErrors: [],
+    validationWarnings,
+    totalsMatch: true,
+    createdAt: materializedAt,
+    updatedAt: materializedAt
+  };
+  return {
+    version,
+    employees,
+    employeeLines,
+    absencePayloads
+  };
+}
+
+function collectApprovedPayRunsForPeriod(state, companyId, reportingPeriod) {
+  return (state.payRunIdsByCompany.get(companyId) || [])
+    .map((payRunId) => state.payRuns.get(payRunId))
+    .filter(Boolean)
+    .filter((payRun) => payRun.reportingPeriod === reportingPeriod)
+    .filter((payRun) => payRun.status === "approved")
+    .sort((left, right) => left.payDate.localeCompare(right.payDate) || left.createdAt.localeCompare(right.createdAt));
+}
+
+function buildAgiSourceSnapshotHash(payRuns) {
+  return buildSnapshotHash(
+    (payRuns || []).map((payRun) => ({
+      payRunId: payRun.payRunId,
+      reportingPeriod: payRun.reportingPeriod,
+      payDate: payRun.payDate,
+      runType: payRun.runType,
+      status: payRun.status,
+      sourceSnapshotHash: payRun.sourceSnapshotHash
+    }))
+  );
+}
+
+function buildAgiEmployeeGroups({ state, companyId, reportingPeriod, approvedRuns, hrPlatform, timePlatform }) {
+  const groups = new Map();
+  for (const payRun of approvedRuns) {
+    const payslips = (state.payslipIdsByRun.get(payRun.payRunId) || [])
+      .map((payslipId) => state.payslips.get(payslipId))
+      .filter(Boolean);
+    for (const payslip of payslips) {
+      const employeeId = payslip.employeeId;
+      const employee = resolveEmployeeComplianceSnapshot({ companyId, employeeId, hrPlatform });
+      const current = groups.get(employeeId) || {
+        employee,
+        lines: [],
+        payslips: [],
+        leaveSignals: [],
+        leaveEntries: [],
+        employmentIds: new Set()
+      };
+      current.payslips.push(copy(payslip));
+      current.employmentIds.add(payslip.employmentId);
+      groups.set(employeeId, current);
+    }
+    const lines = (state.payRunLineIdsByRun.get(payRun.payRunId) || [])
+      .map((payRunLineId) => state.payRunLines.get(payRunLineId))
+      .filter(Boolean);
+    for (const line of lines) {
+      const employee = resolveEmployeeComplianceSnapshot({ companyId, employeeId: line.employeeId, hrPlatform });
+      const current = groups.get(line.employeeId) || {
+        employee,
+        lines: [],
+        payslips: [],
+        leaveSignals: [],
+        leaveEntries: [],
+        employmentIds: new Set()
+      };
+      current.lines.push(copy(line));
+      current.employmentIds.add(line.employmentId);
+      groups.set(line.employeeId, current);
+    }
+  }
+
+  if (timePlatform?.listLeaveSignals || timePlatform?.listLeaveEntries) {
+    for (const group of groups.values()) {
+      for (const employmentId of group.employmentIds) {
+        if (timePlatform?.listLeaveSignals) {
+          group.leaveSignals.push(
+            ...timePlatform.listLeaveSignals({
+              companyId,
+              employmentId,
+              reportingPeriod
+            })
+          );
+        }
+        if (timePlatform?.listLeaveEntries) {
+          group.leaveEntries.push(
+            ...timePlatform
+              .listLeaveEntries({
+                companyId,
+                employmentId
+              })
+              .filter((entry) => entry.reportingPeriod === reportingPeriod)
+          );
+        }
+      }
+    }
+  }
+
+  return [...groups.values()].sort((left, right) => left.employee.employeeId.localeCompare(right.employee.employeeId));
+}
+
+function materializeAgiEmployeeGroup({ companyId, reportingPeriod, group, createdAt }) {
+  const fieldTotals = {
+    cashCompensationAmount: 0,
+    taxableBenefitAmount: 0,
+    taxFreeAllowanceAmount: 0,
+    pensionPremiumAmount: 0
+  };
+  const mappingIssues = [];
+  const agiEmployeeId = crypto.randomUUID();
+  const lineRecords = group.lines.map((line) => {
+    const effectiveAmount = directionalAmount(line);
+    if (line.agiMappingCode === "cash_compensation") {
+      fieldTotals.cashCompensationAmount = roundMoney(fieldTotals.cashCompensationAmount + effectiveAmount);
+    } else if (line.agiMappingCode === "taxable_benefit") {
+      fieldTotals.taxableBenefitAmount = roundMoney(fieldTotals.taxableBenefitAmount + Math.abs(line.amount || 0));
+    } else if (line.agiMappingCode === "tax_free_allowance") {
+      fieldTotals.taxFreeAllowanceAmount = roundMoney(fieldTotals.taxFreeAllowanceAmount + Math.abs(line.amount || 0));
+    } else if (line.agiMappingCode === "pension_premium") {
+      fieldTotals.pensionPremiumAmount = roundMoney(fieldTotals.pensionPremiumAmount + Math.abs(line.amount || 0));
+    } else if (line.agiMappingCode !== "not_reported") {
+      mappingIssues.push({
+        code: "agi_mapping_invalid",
+        payItemCode: line.payItemCode,
+        agiMappingCode: line.agiMappingCode
+      });
+    }
+    return {
+      agiEmployeeLineId: crypto.randomUUID(),
+      agiEmployeeId,
+      agiSubmissionVersionId: null,
+      companyId,
+      employeeId: group.employee.employeeId,
+      sourcePayRunId: line.payRunId,
+      sourcePayRunLineId: line.payRunLineId,
+      payItemCode: line.payItemCode,
+      agiMappingCode: line.agiMappingCode,
+      amount: roundMoney(line.amount || 0),
+      directionalAmount: effectiveAmount,
+      payloadJson: copy(line)
+    };
+  });
+
+  const taxFieldCodes = new Set(
+    group.payslips
+      .map((payslip) => payslip.renderPayload?.totals?.taxDecision?.outputs?.taxFieldCode || null)
+      .filter(Boolean)
+  );
+  const preliminaryTaxAmount = roundMoney(
+    group.payslips
+      .filter((payslip) => payslip.renderPayload?.totals?.taxDecision?.outputs?.taxFieldCode === "preliminary_tax")
+      .reduce((sum, payslip) => sum + Number(payslip.renderPayload?.totals?.preliminaryTax || 0), 0)
+  );
+  const sinkTaxAmount = roundMoney(
+    group.payslips
+      .filter((payslip) => payslip.renderPayload?.totals?.taxDecision?.outputs?.taxFieldCode === "sink_tax")
+      .reduce((sum, payslip) => sum + Number(payslip.renderPayload?.totals?.preliminaryTax || 0), 0)
+  );
+
+  const absencePayloads = group.leaveSignals.map((signal) => ({
+    agiAbsencePayloadId: crypto.randomUUID(),
+    agiSubmissionVersionId: null,
+    agiEmployeeId,
+    companyId,
+    employeeId: group.employee.employeeId,
+    employmentId: signal.employmentId,
+    signalType: signal.signalType,
+    reportingPeriod: signal.reportingPeriod,
+    workDate: signal.workDate,
+    extentPercent: signal.extentPercent ?? null,
+    extentHours: signal.extentHours ?? null,
+    payloadJson: copy(signal)
+  }));
+
+  const reportableLeaveEntries = group.leaveEntries.filter((entry) => (entry.signals || []).length > 0);
+  const incompleteAbsence = reportableLeaveEntries.some(
+    (entry) => entry.signalCompleteness?.complete === false || (entry.signals || []).some((signal) => signal.complete !== true)
+  );
+  const unapprovedAbsenceCount = reportableLeaveEntries.filter((entry) => entry.status !== "approved").length;
+  const employeePayload = {
+    employeeId: group.employee.employeeId,
+    personIdentifierType: normalizeOptionalText(group.employee.identityType) || "other",
+    personIdentifier: normalizeOptionalText(group.employee.identityValue) || normalizeOptionalText(group.employee.identityValueMasked),
+    protectedIdentity: group.employee.protectedIdentity === true,
+    countryCode: group.employee.countryCode || null,
+    compensationFields: fieldTotals,
+    taxFields: {
+      preliminaryTax: taxFieldCodes.has("preliminary_tax") ? preliminaryTaxAmount : null,
+      sinkTax: taxFieldCodes.has("sink_tax") ? sinkTaxAmount : null
+    },
+    taxFieldCount: taxFieldCodes.size,
+    sourcePayRunIds: [...new Set(group.lines.map((line) => line.payRunId).filter(Boolean))].sort(),
+    sourcePayRunLineIds: [...new Set(group.lines.map((line) => line.payRunLineId).filter(Boolean))].sort(),
+    sourceEmploymentIds: [...group.employmentIds].sort(),
+    mappingIssues,
+    absence: {
+      signalCount: absencePayloads.length,
+      incomplete: incompleteAbsence,
+      unapprovedEntryCount: unapprovedAbsenceCount
+    }
+  };
+  const employeeRecord = {
+    agiEmployeeId,
+    agiSubmissionVersionId: null,
+    companyId,
+    employeeId: group.employee.employeeId,
+    personIdentifierType: employeePayload.personIdentifierType,
+    personIdentifier: employeePayload.personIdentifier,
+    protectedIdentity: employeePayload.protectedIdentity,
+    payloadHash: buildSnapshotHash(employeePayload),
+    payloadJson: employeePayload,
+    createdAt
+  };
+
+  const warnings = [];
+  if (mappingIssues.length > 0) {
+    warnings.push(createWarning("agi_mapping_invalid", `Employee ${group.employee.employeeId} has invalid AGI mappings.`));
+  }
+
+  return {
+    employee: employeeRecord,
+    lines: lineRecords,
+    absencePayloads,
+    warnings,
+    lockEmploymentIds: reportableLeaveEntries.map((entry) => entry.employmentId)
+  };
+}
+
+function summarizeAgiEmployeeTotals(employees) {
+  return employees.reduce(
+    (summary, employee) => {
+      const payload = employee.payloadJson;
+      summary.employeeCount += 1;
+      summary.cashCompensationAmount = roundMoney(summary.cashCompensationAmount + Number(payload.compensationFields.cashCompensationAmount || 0));
+      summary.taxableBenefitAmount = roundMoney(summary.taxableBenefitAmount + Number(payload.compensationFields.taxableBenefitAmount || 0));
+      summary.taxFreeAllowanceAmount = roundMoney(summary.taxFreeAllowanceAmount + Number(payload.compensationFields.taxFreeAllowanceAmount || 0));
+      summary.pensionPremiumAmount = roundMoney(summary.pensionPremiumAmount + Number(payload.compensationFields.pensionPremiumAmount || 0));
+      summary.preliminaryTaxAmount = roundMoney(summary.preliminaryTaxAmount + Number(payload.taxFields.preliminaryTax || 0));
+      summary.sinkTaxAmount = roundMoney(summary.sinkTaxAmount + Number(payload.taxFields.sinkTax || 0));
+      return summary;
+    },
+    {
+      employeeCount: 0,
+      cashCompensationAmount: 0,
+      taxableBenefitAmount: 0,
+      taxFreeAllowanceAmount: 0,
+      pensionPremiumAmount: 0,
+      preliminaryTaxAmount: 0,
+      sinkTaxAmount: 0
+    }
+  );
+}
+
+function diffAgiEmployees(previousEmployees, currentEmployees) {
+  const previousByEmployee = new Map((previousEmployees || []).map((employee) => [employee.employeeId, buildSnapshotHash(employee)]));
+  const currentByEmployee = new Map((currentEmployees || []).map((employee) => [employee.employeeId, buildSnapshotHash(employee)]));
+  return [...new Set([...previousByEmployee.keys(), ...currentByEmployee.keys()])]
+    .filter((employeeId) => previousByEmployee.get(employeeId) !== currentByEmployee.get(employeeId))
+    .sort();
+}
+
+function evaluateAgiValidation({ state, submission, version, orgAuthPlatform, timePlatform }) {
+  const errors = [];
+  const warnings = [...(version.validationWarnings || [])];
+  const companyContext = resolveCompanyComplianceContext(orgAuthPlatform, submission.companyId);
+  if (!companyContext.employerRegistered) {
+    errors.push(createAgiValidationError("company_employer_registration_missing", "Company is not employer-registered."));
+  }
+  if (!companyContext.orgNumber) {
+    errors.push(createAgiValidationError("company_org_number_missing", "Company org number is required for AGI submission."));
+  }
+
+  const currentSourceSnapshotHash = buildAgiSourceSnapshotHash(collectApprovedPayRunsForPeriod(state, submission.companyId, submission.reportingPeriod));
+  if (currentSourceSnapshotHash !== version.sourceSnapshotHash) {
+    errors.push(createAgiValidationError("agi_source_changed_since_build", "Approved payroll runs changed after the AGI draft was built."));
+  }
+
+  const payload = version.payloadJson || {};
+  const employees = Array.isArray(payload.employees) ? payload.employees : [];
+  if (employees.length === 0) {
+    errors.push(createAgiValidationError("agi_employee_payload_missing", "AGI submission requires at least one employee payload."));
+  }
+  for (const employee of employees) {
+    if (!employee.personIdentifier || employee.personIdentifierType === "other") {
+      errors.push(createAgiValidationError("agi_employee_identity_incomplete", `Employee ${employee.employeeId} is missing a compliant identifier.`));
+    }
+    if (employee.taxFieldCount !== 1) {
+      errors.push(createAgiValidationError("agi_tax_field_invalid", `Employee ${employee.employeeId} must populate exactly one tax field.`));
+    }
+    if (Array.isArray(employee.mappingIssues) && employee.mappingIssues.length > 0) {
+      errors.push(createAgiValidationError("agi_mapping_missing", `Employee ${employee.employeeId} has AGI mapping gaps.`));
+    }
+    if (employee.absence?.incomplete === true || Number(employee.absence?.unapprovedEntryCount || 0) > 0) {
+      errors.push(createAgiValidationError("agi_absence_incomplete", `Employee ${employee.employeeId} has incomplete or unattested AGI-related absence.`));
+    }
+  }
+
+  if (version.previousSubmittedVersionId && (version.changedEmployeeIds || []).length > 0 && !version.correctionReason) {
+    errors.push(createAgiValidationError("agi_correction_reason_required", "Changed employees require a correction reason."));
+  }
+
+  const totals = summarizeAgiEmployeeTotals(
+    (state.agiEmployeeIdsByVersion.get(version.agiSubmissionVersionId) || [])
+      .map((agiEmployeeId) => state.agiEmployees.get(agiEmployeeId))
+      .filter(Boolean)
+  );
+  const expectedTotals = payload.totals || {};
+  const totalsMatch =
+    roundMoney(totals.cashCompensationAmount) === roundMoney(expectedTotals.cashCompensationAmount || 0) &&
+    roundMoney(totals.taxableBenefitAmount) === roundMoney(expectedTotals.taxableBenefitAmount || 0) &&
+    roundMoney(totals.preliminaryTaxAmount) === roundMoney(expectedTotals.preliminaryTaxAmount || 0) &&
+    roundMoney(totals.sinkTaxAmount) === roundMoney(expectedTotals.sinkTaxAmount || 0) &&
+    totals.employeeCount === Number(expectedTotals.employeeCount || 0);
+  if (!totalsMatch) {
+    errors.push(createAgiValidationError("agi_totals_mismatch", "AGI totals do not match the employee payloads."));
+  }
+
+  const leaveLocksExist =
+    timePlatform?.listLeaveSignalLocks &&
+    (version.lockEmploymentIds || []).some(
+      (employmentId) =>
+        timePlatform.listLeaveSignalLocks({
+          companyId: submission.companyId,
+          employmentId,
+          reportingPeriod: submission.reportingPeriod
+        }).length > 0
+    );
+  if (leaveLocksExist) {
+    warnings.push(createWarning("agi_leave_signals_locked", "Leave signal locks already exist for this version chain."));
+  }
+  return {
+    errors,
+    warnings,
+    totalsMatch
+  };
+}
+
+function createAgiValidationError(code, message) {
+  return {
+    code,
+    message
+  };
+}
+
+function lockAgiLeaveSignals({ version, timePlatform, actorId, lockState }) {
+  if (!timePlatform?.lockLeaveSignals) {
+    return;
+  }
+  for (const employmentId of version.lockEmploymentIds || []) {
+    timePlatform.lockLeaveSignals({
+      companyId: version.companyId,
+      employmentId,
+      reportingPeriod: version.reportingPeriod,
+      lockState,
+      sourceReference: `agi:${version.agiSubmissionVersionId}`,
+      actorId
+    });
+  }
+}
+
+function appendAgiSignature(state, { version, actorId, clock }) {
+  const existing = (state.agiSignatureIdsByVersion.get(version.agiSubmissionVersionId) || []).length > 0;
+  if (existing) {
+    return;
+  }
+  const signature = {
+    agiSignatureId: crypto.randomUUID(),
+    agiSubmissionVersionId: version.agiSubmissionVersionId,
+    companyId: version.companyId,
+    signedByActorId: requireText(actorId, "actor_id_required"),
+    signedAt: nowIso(clock),
+    signatureRef: `test-signature:${version.agiSubmissionVersionId}`
+  };
+  state.agiSignatures.set(signature.agiSignatureId, signature);
+  appendToIndex(state.agiSignatureIdsByVersion, version.agiSubmissionVersionId, signature.agiSignatureId);
+}
+
+function appendAgiReceipt(state, { version, simulatedOutcome, message, actorId, clock }) {
+  const receipt = {
+    agiReceiptId: crypto.randomUUID(),
+    agiSubmissionVersionId: version.agiSubmissionVersionId,
+    companyId: version.companyId,
+    receiptStatus: assertAllowed(simulatedOutcome, ["accepted", "partially_rejected", "rejected"], "agi_receipt_status_invalid"),
+    receiptCode: `test:${simulatedOutcome}`,
+    message: normalizeOptionalText(message) || `Test-mode AGI receipt: ${simulatedOutcome}.`,
+    receivedByActorId: requireText(actorId, "actor_id_required"),
+    receivedAt: nowIso(clock),
+    payloadJson: {
+      mode: "test",
+      outcome: simulatedOutcome
+    }
+  };
+  state.agiReceipts.set(receipt.agiReceiptId, receipt);
+  appendToIndex(state.agiReceiptIdsByVersion, version.agiSubmissionVersionId, receipt.agiReceiptId);
+  return receipt;
+}
+
+function appendAgiErrors(state, { version, receiptId, errors, clock }) {
+  for (const error of errors) {
+    const record = {
+      agiErrorId: crypto.randomUUID(),
+      agiSubmissionVersionId: version.agiSubmissionVersionId,
+      companyId: version.companyId,
+      agiReceiptId: receiptId,
+      errorCode: requireText(error.errorCode, "agi_error_code_required"),
+      message: requireText(error.message, "agi_error_message_required"),
+      severity: requireText(error.severity || "error", "agi_error_severity_required"),
+      payloadJson: copy(error.payload || {}),
+      createdAt: nowIso(clock)
+    };
+    state.agiErrors.set(record.agiErrorId, record);
+    appendToIndex(state.agiErrorIdsByVersion, version.agiSubmissionVersionId, record.agiErrorId);
+  }
+}
+
+function normalizeAgiReceiptErrors(receiptErrors) {
+  if (!Array.isArray(receiptErrors)) {
+    return [];
+  }
+  return receiptErrors.map((error) => ({
+    errorCode: requireText(error.errorCode || error.code, "agi_error_code_required"),
+    message: requireText(error.message, "agi_error_message_required"),
+    severity: normalizeOptionalText(error.severity) || "error",
+    payload: copy(error.payload || {})
+  }));
+}
+
+function resolveReceiptOutcomeState(receiptStatus) {
+  if (receiptStatus === "accepted") {
+    return "accepted";
+  }
+  if (receiptStatus === "partially_rejected") {
+    return "partially_rejected";
+  }
+  return "rejected";
+}
+
+function resolveCompanyComplianceContext(orgAuthPlatform, companyId) {
+  const company = orgAuthPlatform?.getCompanyProfile ? orgAuthPlatform.getCompanyProfile({ companyId }) : null;
+  const registrations = orgAuthPlatform?.listCompanyRegistrations ? orgAuthPlatform.listCompanyRegistrations({ companyId }) : [];
+  const employerRegistration = registrations.find(
+    (registration) => registration.registrationType === "employer" && registration.status === "configured"
+  );
+  return {
+    legalName: company?.legalName || null,
+    orgNumber: company?.orgNumber || null,
+    employerRegistered: employerRegistration != null,
+    employerRegistrationValue: employerRegistration?.registrationValue || null
+  };
+}
+
+function resolveEmployeeComplianceSnapshot({ companyId, employeeId, hrPlatform }) {
+  if (hrPlatform?.getEmployeeComplianceSnapshot) {
+    return hrPlatform.getEmployeeComplianceSnapshot({ companyId, employeeId });
+  }
+  if (hrPlatform?.getEmployee) {
+    return hrPlatform.getEmployee({ companyId, employeeId });
+  }
+  return {
+    employeeId,
+    identityType: "other",
+    identityValue: null,
+    identityValueMasked: null,
+    protectedIdentity: false,
+    countryCode: "SE"
+  };
+}
+
+function buildAgiPreview({ companyId, period, employee, employment, lines, leaveEntries, timePlatform, taxPreview, payslipTotals, warnings }) {
+  const leaveSignals = timePlatform?.listLeaveSignals
+    ? timePlatform.listLeaveSignals({
+        companyId,
+        employmentId: employment.employmentId,
+        reportingPeriod: period.reportingPeriod
+      })
+    : [];
+  const mappingSummary = {
+    cashCompensationLineCount: lines.filter((line) => line.agiMappingCode === "cash_compensation").length,
+    taxableBenefitLineCount: lines.filter((line) => line.agiMappingCode === "taxable_benefit").length,
+    taxFreeAllowanceLineCount: lines.filter((line) => line.agiMappingCode === "tax_free_allowance").length,
+    pensionPremiumLineCount: lines.filter((line) => line.agiMappingCode === "pension_premium").length
+  };
+  const invalidMappings = lines.filter(
+    (line) => !["cash_compensation", "taxable_benefit", "tax_free_allowance", "pension_premium", "not_reported"].includes(line.agiMappingCode)
+  );
+  if (invalidMappings.length > 0) {
+    warnings.push(createWarning("agi_mapping_invalid", `Payroll run has invalid AGI mapping codes for employment ${employment.employmentNo}.`));
+  }
+  const previewPayload = {
+    employeeId: employee.employeeId,
+    reportingPeriod: period.reportingPeriod,
+    taxFieldCode: taxPreview.taxFieldCode,
+    preliminaryTax: taxPreview.amount,
+    leaveSignalCount: leaveSignals.length,
+    reportableLeaveEntryCount: leaveEntries.filter((entry) => (entry.signals || []).length > 0).length,
+    mappingSummary
+  };
+  const details = {
+    payloadHash: buildSnapshotHash(previewPayload),
+    ...previewPayload
+  };
+  if (invalidMappings.length > 0 || !taxPreview.taxFieldCode) {
+    return {
+      step: createPendingStep(16, {
+        status: "validation_required",
+        ...details
+      })
+    };
+  }
+  return {
+    step: createCompletedStep(16, details)
+  };
+}
+
+function resolveEffectiveTaxProfile({ statutoryProfile, effectiveDate, rulePack }) {
+  if (!statutoryProfile) {
+    return null;
+  }
+  if (statutoryProfile.taxMode === "sink") {
+    const insideInterval =
+      (!statutoryProfile.sinkValidFrom || statutoryProfile.sinkValidFrom <= effectiveDate) &&
+      (!statutoryProfile.sinkValidTo || statutoryProfile.sinkValidTo >= effectiveDate);
+    if (insideInterval) {
+      const sinkDefaults = rulePack.machineReadableRules?.sink || {};
+      return {
+        ...copy(statutoryProfile),
+        taxMode: "sink",
+        sinkRatePercent:
+          statutoryProfile.sinkRatePercent ??
+          (statutoryProfile.sinkSeaIncome === true ? sinkDefaults.seaIncomeRatePercent : sinkDefaults.standardRatePercent)
+      };
+    }
+    if (statutoryProfile.fallbackTaxMode) {
+      return {
+        ...copy(statutoryProfile),
+        taxMode: statutoryProfile.fallbackTaxMode,
+        taxRatePercent: statutoryProfile.fallbackTaxRatePercent ?? statutoryProfile.taxRatePercent ?? null,
+        fallbackApplied: true
+      };
+    }
+    return {
+      ...copy(statutoryProfile),
+      taxMode: "pending",
+      fallbackApplied: false
+    };
+  }
+  return copy(statutoryProfile);
 }
 
 function calculateEmploymentRun({
@@ -700,12 +1812,20 @@ function calculateEmploymentRun({
       .filter((line) => line.taxTreatmentCode === "taxable")
       .reduce((sum, line) => sum + directionalAmount(line), 0)
   );
+  const employerContributionBase = roundMoney(
+    lines
+      .filter((line) => line.employerContributionTreatmentCode === "included")
+      .reduce((sum, line) => sum + directionalAmount(line), 0)
+  );
   steps[10] = createCompletedStep(10, {
     taxableBase
   });
 
   const taxPreview = buildTaxPreview({
+    rules,
     taxableBase,
+    payDate: period.payDate,
+    employee,
     statutoryProfile,
     warnings
   });
@@ -713,10 +1833,10 @@ function calculateEmploymentRun({
 
   const employerContributionPreview = buildEmployerContributionPreview({
     rules,
-    taxableBase,
+    contributionBase: employerContributionBase,
     employee,
     statutoryProfile,
-    clock
+    payDate: period.payDate
   });
   steps[12] = employerContributionPreview.step;
 
@@ -757,10 +1877,13 @@ function calculateEmploymentRun({
       ...lineTotals,
       pensionableBase,
       taxableBase,
+      employerContributionBase,
       preliminaryTax: taxPreview.amount,
       preliminaryTaxStatus: taxPreview.status,
+      taxDecision: taxPreview.decisionObject,
       employerContributionPreviewAmount: employerContributionPreview.amount,
-      employerContributionPreviewStatus: employerContributionPreview.status
+      employerContributionPreviewStatus: employerContributionPreview.status,
+      employerContributionDecision: employerContributionPreview.decisionObject
     },
     balances: balances.balances || balances,
     warnings
@@ -770,12 +1893,19 @@ function calculateEmploymentRun({
     warningCount: warnings.length
   });
 
-  steps[16] = createPendingStep(16, {
-    status: "phase8_2_pending",
-    reportingPeriod: period.reportingPeriod,
-    taxableBase,
-    leaveSignalCount: leaveEntries.reduce((count, leaveEntry) => count + (leaveEntry.signals?.length || 0), 0)
+  const agiPreview = buildAgiPreview({
+    companyId: employment.companyId,
+    period,
+    employee,
+    employment,
+    lines,
+    leaveEntries,
+    timePlatform,
+    taxPreview,
+    payslipTotals: payslipRenderPayload.totals,
+    warnings
   });
+  steps[16] = agiPreview.step;
   steps[17] = createPendingStep(17, {
     status: "phase8_3_pending",
     previewItemCount: 0
@@ -1022,94 +2152,193 @@ function createStepLinesFromManualInputs({ processingStep, employment, inputs, s
     });
 }
 
-function buildTaxPreview({ taxableBase, statutoryProfile, warnings }) {
+function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfile, warnings }) {
+  const resolvedPayDate = normalizeRequiredDate(payDate, "pay_run_pay_date_invalid");
+  const rulePack = rules.resolveRulePack({
+    domain: "payroll",
+    jurisdiction: "SE",
+    effectiveDate: resolvedPayDate
+  });
+  const normalizedTaxableBase = roundMoney(Math.max(0, taxableBase || 0));
+  const effectiveProfile = resolveEffectiveTaxProfile({
+    statutoryProfile,
+    effectiveDate: resolvedPayDate,
+    rulePack
+  });
   const decisionObjectBase = {
     inputs_hash: buildSnapshotHash({
-      taxableBase,
-      statutoryProfile: statutoryProfile || null
+      taxableBase: normalizedTaxableBase,
+      payDate: resolvedPayDate,
+      employeeId: employee?.employeeId || null,
+      statutoryProfile: statutoryProfile || null,
+      effectiveProfile
     }),
-    rule_pack_id: null,
-    effective_date: null,
+    rule_pack_id: rulePack.rulePackId,
+    effective_date: resolvedPayDate,
     warnings: [],
     outputs: {
-      taxableBase
+      taxableBase: normalizedTaxableBase
     }
   };
-  if (!statutoryProfile || statutoryProfile.taxMode === "pending") {
-    warnings.push(createWarning("payroll_tax_pending_phase8_2", "Preliminary tax stays pending until FAS 8.2 or an explicit preview rate is supplied."));
+
+  if (!effectiveProfile || effectiveProfile.taxMode === "pending") {
+    warnings.push(createWarning("payroll_tax_profile_missing", "Preliminary tax requires a complete statutory profile or SINK decision."));
+    const decisionObject = {
+      ...decisionObjectBase,
+      decision_code: "PAYROLL_TAX_PROFILE_MISSING",
+      outputs: {
+        ...decisionObjectBase.outputs,
+        preliminaryTax: null,
+        taxFieldCode: null,
+        status: "pending"
+      },
+      warnings: ["payroll_tax_profile_missing"],
+      explanation: ["No effective tax mode could be resolved for the pay date."]
+    };
     return {
       amount: null,
-      status: "phase8_2_pending",
+      status: "pending",
+      taxFieldCode: null,
+      decisionObject,
       step: createPendingStep(11, {
-        status: "phase8_2_pending",
-        taxableBase,
-        decisionObject: {
-          ...decisionObjectBase,
-          decision_code: "PAYROLL_TAX_PENDING_PHASE8_2",
-          outputs: {
-            ...decisionObjectBase.outputs,
-            preliminaryTax: null,
-            status: "phase8_2_pending"
-          },
-          warnings: ["phase8_2_pending"],
-          explanation: ["taxMode is not configured for this employment."]
-        }
+        status: "pending",
+        taxableBase: normalizedTaxableBase,
+        decisionObject
       })
     };
   }
-  if (statutoryProfile.taxMode === "manual_rate") {
-    const amount = roundMoney(taxableBase * ((statutoryProfile.taxRatePercent || 0) / 100));
-    return {
-      amount,
-      status: "preview_manual_rate",
-      step: createCompletedStep(11, {
-        taxMode: statutoryProfile.taxMode,
-        taxRatePercent: statutoryProfile.taxRatePercent,
-        preliminaryTax: amount,
-        decisionObject: {
-          ...decisionObjectBase,
-          decision_code: "PAYROLL_TAX_PREVIEW_MANUAL_RATE",
-          outputs: {
-            ...decisionObjectBase.outputs,
-            taxMode: statutoryProfile.taxMode,
-            taxRatePercent: statutoryProfile.taxRatePercent,
-            preliminaryTax: amount
-          },
-          explanation: [
-            `taxMode=${statutoryProfile.taxMode}`,
-            `taxRatePercent=${statutoryProfile.taxRatePercent}`,
-            `taxableBase=${taxableBase}`
-          ]
-        }
-      })
-    };
-  }
-  return {
-    amount: null,
-    status: "phase8_2_pending",
-    step: createPendingStep(11, {
-      status: "phase8_2_pending",
-      taxableBase,
-      decisionObject: {
+
+  if (effectiveProfile.taxMode === "manual_rate") {
+    const taxRatePercent = effectiveProfile.taxRatePercent;
+    if (taxRatePercent == null) {
+      warnings.push(createWarning("payroll_tax_rate_missing", "Manual-rate tax mode requires taxRatePercent."));
+      const decisionObject = {
         ...decisionObjectBase,
-        decision_code: "PAYROLL_TAX_PENDING_PHASE8_2",
+        decision_code: "PAYROLL_TAX_RATE_MISSING",
         outputs: {
           ...decisionObjectBase.outputs,
           preliminaryTax: null,
-          status: "phase8_2_pending"
+          taxFieldCode: "preliminary_tax",
+          status: "pending"
         },
-        warnings: ["phase8_2_pending"],
-        explanation: ["Only manual_rate preview is available before FAS 8.2."]
-      }
+        warnings: ["payroll_tax_rate_missing"],
+        explanation: ["taxMode=manual_rate but taxRatePercent was not configured."]
+      };
+      return {
+        amount: null,
+        status: "pending",
+        taxFieldCode: "preliminary_tax",
+        decisionObject,
+        step: createPendingStep(11, {
+          status: "pending",
+          taxableBase: normalizedTaxableBase,
+          decisionObject
+        })
+      };
+    }
+    const amount = roundMoney(normalizedTaxableBase * (taxRatePercent / 100));
+    const decisionObject = {
+      ...decisionObjectBase,
+      decision_code: "PAYROLL_TAX_MANUAL_RATE",
+      outputs: {
+        ...decisionObjectBase.outputs,
+        taxMode: effectiveProfile.taxMode,
+        taxRatePercent,
+        taxFieldCode: "preliminary_tax",
+        preliminaryTax: amount
+      },
+      explanation: [
+        `taxMode=${effectiveProfile.taxMode}`,
+        `taxRatePercent=${taxRatePercent}`,
+        `taxableBase=${normalizedTaxableBase}`
+      ]
+    };
+    return {
+      amount,
+      status: effectiveProfile.fallbackApplied ? "resolved_fallback_manual_rate" : "resolved_manual_rate",
+      taxFieldCode: "preliminary_tax",
+      decisionObject,
+      step: createCompletedStep(11, {
+        taxMode: effectiveProfile.taxMode,
+        taxRatePercent,
+        preliminaryTax: amount,
+        taxFieldCode: "preliminary_tax",
+        fallbackApplied: effectiveProfile.fallbackApplied === true,
+        decisionObject
+      })
+    };
+  }
+
+  if (effectiveProfile.taxMode === "sink") {
+    const sinkRatePercent = effectiveProfile.sinkRatePercent;
+    const amount = roundMoney(normalizedTaxableBase * (sinkRatePercent / 100));
+    const decisionObject = {
+      ...decisionObjectBase,
+      decision_code: effectiveProfile.sinkSeaIncome ? "PAYROLL_TAX_SINK_SEA_INCOME" : "PAYROLL_TAX_SINK",
+      outputs: {
+        ...decisionObjectBase.outputs,
+        taxMode: "sink",
+        taxFieldCode: "sink_tax",
+        sinkRatePercent,
+        sinkSeaIncome: effectiveProfile.sinkSeaIncome,
+        sinkDecisionType: effectiveProfile.sinkDecisionType,
+        preliminaryTax: amount
+      },
+      explanation: [
+        `taxMode=sink`,
+        `sinkRatePercent=${sinkRatePercent}`,
+        `sinkSeaIncome=${effectiveProfile.sinkSeaIncome === true}`,
+        `taxableBase=${normalizedTaxableBase}`
+      ]
+    };
+    return {
+      amount,
+      status: effectiveProfile.sinkSeaIncome ? "resolved_sink_sea_income" : "resolved_sink",
+      taxFieldCode: "sink_tax",
+      decisionObject,
+      step: createCompletedStep(11, {
+        taxMode: "sink",
+        sinkRatePercent,
+        sinkSeaIncome: effectiveProfile.sinkSeaIncome === true,
+        preliminaryTax: amount,
+        taxFieldCode: "sink_tax",
+        fallbackApplied: effectiveProfile.fallbackApplied === true,
+        decisionObject
+      })
+    };
+  }
+
+  warnings.push(createWarning("payroll_tax_mode_invalid", `Unsupported tax mode ${effectiveProfile.taxMode}.`));
+  const decisionObject = {
+    ...decisionObjectBase,
+    decision_code: "PAYROLL_TAX_MODE_INVALID",
+    outputs: {
+      ...decisionObjectBase.outputs,
+      preliminaryTax: null,
+      taxFieldCode: null,
+      status: "pending"
+    },
+    warnings: ["payroll_tax_mode_invalid"],
+    explanation: [`Unsupported tax mode ${effectiveProfile.taxMode}.`]
+  };
+  return {
+    amount: null,
+    status: "pending",
+    taxFieldCode: null,
+    decisionObject,
+    step: createPendingStep(11, {
+      status: "pending",
+      taxableBase: normalizedTaxableBase,
+      decisionObject
     })
   };
 }
 
-function buildEmployerContributionPreview({ rules, taxableBase, employee, statutoryProfile, clock }) {
+function buildEmployerContributionPreview({ rules, contributionBase, employee, statutoryProfile, payDate }) {
   const rulePack = rules.resolveRulePack({
     domain: "payroll",
     jurisdiction: "SE",
-    effectiveDate: new Date(clock()).toISOString().slice(0, 10)
+    effectiveDate: normalizeRequiredDate(payDate, "pay_run_pay_date_invalid")
   });
   const machineRules = rulePack.machineReadableRules.contributionClasses || {};
   const birthYear = employee?.dateOfBirth ? Number(String(employee.dateOfBirth).slice(0, 4)) : null;
@@ -1118,41 +2347,45 @@ function buildEmployerContributionPreview({ rules, taxableBase, employee, statut
       ? "no_contribution"
       : statutoryProfile?.contributionClassCode || "full";
   const classDefinition = machineRules[contributionClassCode] || machineRules.full;
-  const amount = roundMoney(taxableBase * ((classDefinition?.ratePercent || 0) / 100));
+  const normalizedContributionBase = roundMoney(Math.max(0, contributionBase || 0));
+  const amount = roundMoney(normalizedContributionBase * ((classDefinition?.ratePercent || 0) / 100));
+  const decisionObject = {
+    decision_code: "PAYROLL_EMPLOYER_CONTRIBUTION",
+    inputs_hash: buildSnapshotHash({
+      contributionBase: normalizedContributionBase,
+      employeeId: employee?.employeeId || null,
+      contributionClassCode,
+      statutoryProfile: statutoryProfile || null
+    }),
+    rule_pack_id: rulePack.rulePackId,
+    effective_date: normalizeRequiredDate(payDate, "pay_run_pay_date_invalid"),
+    outputs: {
+      contributionBase: normalizedContributionBase,
+      contributionClassCode,
+      ratePercent: classDefinition?.ratePercent || 0,
+      employerContributionPreviewAmount: amount
+    },
+    warnings: [],
+    explanation: [
+      `rulePackId=${rulePack.rulePackId}`,
+      `rulePackChecksum=${rulePack.checksum}`,
+      `contributionClassCode=${contributionClassCode}`,
+      `ratePercent=${classDefinition?.ratePercent || 0}`,
+      `contributionBase=${normalizedContributionBase}`
+    ]
+  };
   return {
     amount,
-    status: "preview_rule_pack",
+    status: "resolved_rule_pack",
+    decisionObject,
     step: createCompletedStep(12, {
       rulePackId: rulePack.rulePackId,
       rulePackChecksum: rulePack.checksum,
       contributionClassCode,
       ratePercent: classDefinition?.ratePercent || 0,
+      contributionBase: normalizedContributionBase,
       employerContributionPreviewAmount: amount,
-      decisionObject: {
-        decision_code: "PAYROLL_EMPLOYER_CONTRIBUTION_PREVIEW",
-        inputs_hash: buildSnapshotHash({
-          taxableBase,
-          employeeId: employee?.employeeId || null,
-          contributionClassCode,
-          statutoryProfile: statutoryProfile || null
-        }),
-        rule_pack_id: rulePack.rulePackId,
-        effective_date: new Date(clock()).toISOString().slice(0, 10),
-        outputs: {
-          taxableBase,
-          contributionClassCode,
-          ratePercent: classDefinition?.ratePercent || 0,
-          employerContributionPreviewAmount: amount
-        },
-        warnings: [],
-        explanation: [
-          `rulePackId=${rulePack.rulePackId}`,
-          `rulePackChecksum=${rulePack.checksum}`,
-          `contributionClassCode=${contributionClassCode}`,
-          `ratePercent=${classDefinition?.ratePercent || 0}`,
-          `taxableBase=${taxableBase}`
-        ]
-      }
+      decisionObject
     })
   };
 }
@@ -1214,7 +2447,7 @@ function seedPayItem(state, template) {
     defaultRateFactor: template.defaultRateFactor ?? null,
     taxTreatmentCode: template.taxTreatmentCode ?? "phase8_2_pending",
     employerContributionTreatmentCode: template.employerContributionTreatmentCode ?? "phase8_2_pending",
-    agiMappingCode: template.agiMappingCode ?? "phase8_2_pending",
+    agiMappingCode: template.agiMappingCode ?? resolveDefaultAgiMappingCode(template.payItemCode),
     ledgerAccountCode: template.ledgerAccountCode ?? "phase8_3_pending",
     defaultDimensions: copy(template.defaultDimensions || {}),
     affectsVacationBasis: template.affectsVacationBasis === true,
@@ -1642,14 +2875,48 @@ function normalizeStatutoryProfiles(statutoryProfiles) {
     return map;
   }
   for (const profile of statutoryProfiles) {
-    map.set(requireText(profile.employmentId, "statutory_profile_employment_id_required"), {
-      employmentId: requireText(profile.employmentId, "statutory_profile_employment_id_required"),
-      taxMode: normalizeOptionalText(profile.taxMode) || "pending",
-      taxRatePercent: normalizeOptionalNumber(profile.taxRatePercent, "statutory_profile_tax_rate_invalid"),
-      contributionClassCode: normalizeOptionalText(profile.contributionClassCode)
-    });
+    const normalized = normalizeStatutoryProfile(profile);
+    map.set(normalized.employmentId, normalized);
   }
   return map;
+}
+
+function normalizeStatutoryProfile(profile = {}) {
+  const taxMode = assertAllowed(normalizeOptionalText(profile.taxMode) || "pending", PAYROLL_TAX_MODES, "statutory_profile_tax_mode_invalid");
+  const sinkValidFrom = normalizeOptionalDate(profile.sinkValidFrom, "statutory_profile_sink_valid_from_invalid");
+  const sinkValidTo = normalizeOptionalDate(profile.sinkValidTo, "statutory_profile_sink_valid_to_invalid");
+  if (sinkValidFrom && sinkValidTo && sinkValidTo < sinkValidFrom) {
+    throw createError(400, "statutory_profile_sink_interval_invalid", "SINK validity interval is invalid.");
+  }
+  const fallbackTaxMode = normalizeOptionalText(profile.fallbackTaxMode)
+    ? assertAllowed(profile.fallbackTaxMode, PAYROLL_TAX_MODES, "statutory_profile_fallback_tax_mode_invalid")
+    : null;
+  return {
+    employmentId: requireText(profile.employmentId, "statutory_profile_employment_id_required"),
+    taxMode,
+    taxRatePercent: normalizeOptionalNumber(profile.taxRatePercent, "statutory_profile_tax_rate_invalid"),
+    contributionClassCode: normalizeOptionalText(profile.contributionClassCode),
+    sinkDecisionType: normalizeOptionalText(profile.sinkDecisionType),
+    sinkValidFrom,
+    sinkValidTo,
+    sinkRatePercent: normalizeOptionalNumber(profile.sinkRatePercent, "statutory_profile_sink_rate_invalid"),
+    sinkSeaIncome: profile.sinkSeaIncome === true,
+    sinkDecisionDocumentId: normalizeOptionalText(profile.sinkDecisionDocumentId),
+    fallbackTaxMode,
+    fallbackTaxRatePercent: normalizeOptionalNumber(profile.fallbackTaxRatePercent, "statutory_profile_fallback_tax_rate_invalid")
+  };
+}
+
+function mergeStatutoryProfileMaps({ baseProfiles = [], overrideProfiles = [] } = {}) {
+  const merged = new Map();
+  for (const profile of Array.isArray(baseProfiles) ? baseProfiles : []) {
+    const normalized = normalizeStatutoryProfile(profile);
+    merged.set(normalized.employmentId, normalized);
+  }
+  for (const [employmentId, profile] of normalizeStatutoryProfiles(overrideProfiles)) {
+    merged.set(employmentId, profile);
+  }
+  return merged;
 }
 
 function normalizeProcessingStep(processingStep, compensationBucket) {
@@ -1754,13 +3021,30 @@ function createPayItemTemplate(
     compensationBucket,
     taxTreatmentCode,
     employerContributionTreatmentCode,
-    agiMappingCode: "phase8_2_pending",
+    agiMappingCode: resolveDefaultAgiMappingCode(payItemCode),
     ledgerAccountCode: "phase8_3_pending",
     affectsVacationBasis,
     affectsPensionBasis,
     includedInNetPay: compensationBucket !== "reporting_only",
     reportingOnly: compensationBucket === "reporting_only"
   });
+}
+
+function resolveDefaultAgiMappingCode(payItemCode) {
+  const resolvedCode = normalizeCode(payItemCode, "pay_item_code_required");
+  if (["BENEFIT"].includes(resolvedCode)) {
+    return "taxable_benefit";
+  }
+  if (["PENSION_PREMIUM"].includes(resolvedCode)) {
+    return "pension_premium";
+  }
+  if (["TAX_FREE_TRAVEL_ALLOWANCE", "TAX_FREE_MILEAGE"].includes(resolvedCode)) {
+    return "tax_free_allowance";
+  }
+  if (["NET_DEDUCTION", "GARNISHMENT", "ADVANCE", "RECLAIM"].includes(resolvedCode)) {
+    return "not_reported";
+  }
+  return "cash_compensation";
 }
 
 function createCompletedStep(stepNo, details) {
@@ -1828,6 +3112,13 @@ function directionalAmount(line) {
 function buildSourceSummaryId(ids) {
   const filtered = (ids || []).filter(Boolean);
   return filtered.length === 0 ? null : buildSnapshotHash(filtered.sort());
+}
+
+function normalizeOptionalDate(value, code) {
+  if (value == null || value === "") {
+    return null;
+  }
+  return normalizeRequiredDate(value, code);
 }
 
 function buildPayDate(year, month, payDay) {

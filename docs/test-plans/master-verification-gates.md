@@ -280,10 +280,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [x] Prompt `P8-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 8.2 Skatt, arbetsgivaravgifter, SINK och AGI
-- [ ] AGI innehÃ¥ller rÃ¤tt fÃ¤lt per individ
-- [ ] FrÃ¥nvarouppgifter lÃ¥ses i tid
-- [ ] RÃ¤ttelseversioner kan skapas
-- [ ] Prompt `P8-02` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] AGI innehÃ¥ller rÃ¤tt fÃ¤lt per individ
+- [x] FrÃ¥nvarouppgifter lÃ¥ses i tid
+- [x] RÃ¤ttelseversioner kan skapas
+- [x] Prompt `P8-02` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 8.3 LÃ¶nebokfÃ¶ring och utbetalning
 - [ ] BokfÃ¶ring per projekt/kostnadsstÃ¤lle fungerar

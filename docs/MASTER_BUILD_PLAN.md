@@ -494,7 +494,7 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 7.3 FrÃ¥nvaro, attest och anstÃ¤lldportal
 - [ ] **FAS 8 â€” LÃ¶n och AGI**
   - [x] 8.1 LÃ¶nearter, lÃ¶nekalender och lÃ¶nekÃ¶rning
-  - [ ] 8.2 Skatt, arbetsgivaravgifter, SINK och AGI
+  - [x] 8.2 Skatt, arbetsgivaravgifter, SINK och AGI
   - [ ] 8.3 LÃ¶nebokfÃ¶ring och utbetalning
 - [ ] **FAS 9 â€” FÃ¶rmÃ¥ner, resor, traktamente, pension och lÃ¶nevÃ¤xling**
   - [ ] 9.1 FÃ¶rmÃ¥nsmotor
@@ -920,15 +920,15 @@ Omvandla tid, frÃ¥nvaro, fÃ¶rmÃ¥ner och avtal till korrekt lÃ¶n, utbetal
 ### 8.2 Skatt, arbetsgivaravgifter, SINK och AGI
 
 **Bygg detta**
-- [ ] Skattelogik
-- [ ] avgiftsregler
-- [ ] SINK
-- [ ] AGI-underlag och submission
+- [x] Skattelogik
+- [x] avgiftsregler
+- [x] SINK
+- [x] AGI-underlag och submission
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] AGI innehÃ¥ller rÃ¤tt fÃ¤lt per individ
-- [ ] FrÃ¥nvarouppgifter lÃ¥ses i tid
-- [ ] RÃ¤ttelseversioner kan skapas
+- [x] AGI innehÃ¥ller rÃ¤tt fÃ¤lt per individ
+- [x] FrÃ¥nvarouppgifter lÃ¥ses i tid
+- [x] RÃ¤ttelseversioner kan skapas
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P8-02`.
 

@@ -90,8 +90,10 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     actions: ACTIONS,
     onboardingStepCodes: ONBOARDING_STEP_CODES,
     createCompany,
+    getCompanyProfile,
     createCompanyUser,
     listCompanyUsers,
+    listCompanyRegistrations,
     createDelegation,
     createObjectGrant,
     createApprovalChain,
@@ -129,6 +131,10 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     };
     state.companies.set(company.companyId, company);
     return copy(company);
+  }
+
+  function getCompanyProfile({ companyId } = {}) {
+    return copy(requireCompany(assertNonEmpty(companyId, "company_id_required")));
   }
 
   function createCompanyUser({
@@ -211,6 +217,17 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     return [...state.companyUsers.values()]
       .filter((companyUser) => companyUser.companyId === companyId)
       .map((companyUser) => decorateCompanyUser(companyUser));
+  }
+
+  function listCompanyRegistrations({ companyId, registrationType = null } = {}) {
+    const resolvedCompanyId = assertNonEmpty(companyId, "company_id_required");
+    const resolvedRegistrationType =
+      typeof registrationType === "string" && registrationType.trim().length > 0 ? registrationType.trim() : null;
+    return [...state.companyRegistrations.values()]
+      .filter((registration) => registration.companyId === resolvedCompanyId)
+      .filter((registration) => (resolvedRegistrationType ? registration.registrationType === resolvedRegistrationType : true))
+      .sort((left, right) => left.registrationType.localeCompare(right.registrationType))
+      .map(copy);
   }
 
   function createDelegation({

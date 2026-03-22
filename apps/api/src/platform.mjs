@@ -53,6 +53,7 @@ export function createApiPlatform(options = {}) {
   });
   const payrollPlatform = createPayrollPlatform({
     ...options,
+    orgAuthPlatform,
     hrPlatform,
     timePlatform
   });

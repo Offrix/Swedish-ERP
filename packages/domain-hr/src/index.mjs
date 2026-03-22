@@ -42,6 +42,7 @@ export function createHrEngine({ clock = () => new Date(), seedDemo = false, doc
     bankPayoutMethods: HR_BANK_PAYOUT_METHODS,
     listEmployees,
     getEmployee,
+    getEmployeeComplianceSnapshot,
     findEmployeeByEmail,
     createEmployee,
     listEmployments,
@@ -70,6 +71,15 @@ export function createHrEngine({ clock = () => new Date(), seedDemo = false, doc
   function getEmployee({ companyId, employeeId } = {}) {
     const employee = requireEmployeeRecord(state, companyId, employeeId);
     return enrichEmployee(employee);
+  }
+
+  function getEmployeeComplianceSnapshot({ companyId, employeeId } = {}) {
+    const employee = requireEmployeeRecord(state, companyId, employeeId);
+    const secret = state.employeeSecrets.get(employee.employeeId) || null;
+    return {
+      ...copy(employee),
+      identityValue: secret?.identityValue || null
+    };
   }
 
   function findEmployeeByEmail({ companyId, email } = {}) {
