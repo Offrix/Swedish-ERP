@@ -1,3 +1,3 @@
 # @swedish-erp/domain-hr
 
-HR boundary for employees, employments, manager trees and sensitive personnel metadata.
+HR boundary for employee masterdata, multiple employments, contract history, manager trees, payout accounts and sensitive personnel audit.

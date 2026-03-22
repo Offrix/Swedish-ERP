@@ -472,12 +472,12 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 2.1 Dokumentarkiv och metadata
   - [x] 2.2 FÃ¶retagsinbox och mail ingestion
   - [x] 2.3 OCR, klassificering och granskningskÃ¶
-- [ ] **FAS 3 â€” Huvudbok, kontomodell, journaler och avstÃ¤mningsgrund**
+- [x] **FAS 3 â€” Huvudbok, kontomodell, journaler och avstÃ¤mningsgrund**
   - [x] 3.1 Ledger-schema och verifikationsmotor
   - [x] 3.2 Dimensioner, perioder och bokfÃ¶ringsregler
-  - [ ] 3.3 AvstÃ¤mningscenter och rapportgrund
-- [ ] **FAS 4 â€” Momsmotor**
-  - [ ] 4.1 Momsmasterdata och beslutstrÃ¤d
+  - [x] 3.3 AvstÃ¤mningscenter och rapportgrund
+- [x] **FAS 4 â€” Momsmotor**
+  - [x] 4.1 Momsmasterdata och beslutstrÃ¤d
   - [x] 4.2 Sverige, EU, import, export och omvÃ¤nd moms
   - [x] 4.3 OSS, IOSS, periodisk sammanstÃ¤llning och rapportering
 - [x] **FAS 5 â€” FÃ¶rsÃ¤ljning, kundreskontra och kundfakturor**
@@ -487,9 +487,9 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
 - [x] **FAS 6 â€” LeverantÃ¶rsfakturor, inkÃ¶p, bank och betalningar**
   - [x] 6.1 LeverantÃ¶rsregister, PO och mottagning
   - [x] 6.2 LeverantÃ¶rsfaktura in, tolkning och matchning
-  - [ ] 6.3 Attest, bankintegration och utbetalning
+  - [x] 6.3 Attest, bankintegration och utbetalning
 - [ ] **FAS 7 â€” Tidportal, HR-bas och anstÃ¤lldportal**
-  - [ ] 7.1 AnstÃ¤lldregister och HR-master
+  - [x] 7.1 AnstÃ¤lldregister och HR-master
   - [ ] 7.2 Tidrapportering, schema och saldon
   - [ ] 7.3 FrÃ¥nvaro, attest och anstÃ¤lldportal
 - [ ] **FAS 8 â€” LÃ¶n och AGI**
@@ -859,14 +859,14 @@ Skapa masterdata fÃ¶r anstÃ¤llda och samla tid, frÃ¥nvaro, saldon och atte
 ### 7.1 AnstÃ¤lldregister och HR-master
 
 **Bygg detta**
-- [ ] AnstÃ¤llningar
-- [ ] avtal och chefstrÃ¤d
-- [ ] bankkonton och dokument
+- [x] AnstÃ¤llningar
+- [x] avtal och chefstrÃ¤d
+- [x] bankkonton och dokument
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] Samma person kan ha flera anstÃ¤llningar
-- [ ] AnstÃ¤llningshistorik bevaras
-- [ ] KÃ¤nsliga fÃ¤lt loggas
+- [x] Samma person kan ha flera anstÃ¤llningar
+- [x] AnstÃ¤llningshistorik bevaras
+- [x] KÃ¤nsliga fÃ¤lt loggas
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P7-01`.
 
@@ -1225,6 +1225,7 @@ Stresstesta systemet, kÃ¶r verklig migrering och gÃ¥ live kontrollerat.
 - FAS 4 â†’ `docs/compliance/se/vat-engine.md`
 - FAS 5 â†’ `docs/compliance/se/ar-customer-invoicing-engine.md` och `docs/compliance/se/einvoice-peppol-engine.md`
 - FAS 6 â†’ `docs/compliance/se/ap-supplier-invoice-engine.md`, `docs/compliance/se/document-inbox-and-ocr-engine.md`, `docs/compliance/se/accounting-foundation.md`, `docs/compliance/se/bank-and-payments-engine.md`, `docs/compliance/se/einvoice-peppol-engine.md`, `docs/runbooks/fas-6-ap-masterdata-verification.md`, `docs/runbooks/fas-6-ap-invoice-matching-verification.md` och `docs/runbooks/fas-6-ap-payments-verification.md`
+- FAS 7 â†’ `docs/compliance/se/payroll-engine.md`, `docs/domain/ubiquitous-language.md` och `docs/runbooks/fas-7-hr-master-verification.md`
 - FAS 8 â†’ `docs/compliance/se/payroll-engine.md` och `docs/compliance/se/agi-engine.md`
 - FAS 9 â†’ `docs/compliance/se/benefits-engine.md`, `docs/compliance/se/travel-and-traktamente-engine.md`, `docs/compliance/se/pension-and-salary-exchange-engine.md`, `docs/compliance/se/cash-card-and-clearing-engine.md` och `docs/compliance/se/collections-writeoff-and-bad-debt-engine.md`
 - FAS 10 â†’ `docs/compliance/se/rot-rut-engine.md`, `docs/compliance/se/personalliggare-engine.md`, `docs/compliance/se/project-billing-and-revenue-recognition-engine.md` och `docs/domain/offline-sync-and-conflict-resolution.md`

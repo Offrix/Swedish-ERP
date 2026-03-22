@@ -22,3 +22,4 @@ Seed execution policy:
 - Phase 6.1 adds AP supplier masterdata, contacts, tolerance profiles, PO lines, receipt lines, import-batch results and invoice-receipt link demo artifacts
 - Phase 6.2 adds AP supplier-invoice ingest, match-run, variance and multi-line posting demo artifacts
 - Phase 6.3 adds AP approval-chain, payment-proposal, payout-booking and returned-payment demo artifacts
+- Phase 7.1 adds employee masterdata, multiple employments, contract-history, manager-tree, payout-account and sensitive-audit demo artifacts

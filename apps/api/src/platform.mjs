@@ -6,6 +6,7 @@ import { createVatPlatform } from "../../../packages/domain-vat/src/index.mjs";
 import { createArPlatform } from "../../../packages/domain-ar/src/index.mjs";
 import { createApPlatform } from "../../../packages/domain-ap/src/index.mjs";
 import { createBankingPlatform } from "../../../packages/domain-banking/src/index.mjs";
+import { createHrPlatform } from "../../../packages/domain-hr/src/index.mjs";
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
 
 export function createApiPlatform(options = {}) {
@@ -39,6 +40,10 @@ export function createApiPlatform(options = {}) {
     ...options,
     apPlatform
   });
+  const hrPlatform = createHrPlatform({
+    ...options,
+    documentPlatform: documentArchivePlatform
+  });
 
   return {
     ...orgAuthPlatform,
@@ -49,7 +54,8 @@ export function createApiPlatform(options = {}) {
     ...integrationPlatform,
     ...arPlatform,
     ...apPlatform,
-    ...bankingPlatform
+    ...bankingPlatform,
+    ...hrPlatform
   };
 }
 

@@ -23,6 +23,7 @@ Database foundation with migration framework, seed files and baseline governance
 - Phase 6.1 adds supplier masterdata hardening, contacts, tolerance profiles, purchase-order lines, receipt objects, AP import batches and invoice-receipt links in the same monotonic stream.
 - Phase 6.2 adds supplier-invoice ingest metadata, invoice coding lines, match runs, variances and AP posting linkage in the same monotonic stream.
 - Phase 6.3 adds AP invoice approval steps, bank accounts, payment proposals, payment orders, bank payment events and return-aware AP open-item linkage in the same monotonic stream.
+- Phase 7.1 adds employees, employments, employment contract history, manager assignments and employee payout accounts in the same monotonic stream.
 
 ## Usage
 

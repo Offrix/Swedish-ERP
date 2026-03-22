@@ -35,6 +35,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - leverantörsimport-idempotens, bankdetaljspärrar, PO-defaults och mottagningsdubbletter i AP
 - OCR-baserad leverantörsfakturaingest, fler-rads-kodning, momsförslag och 2-vägs-/3-vägsmatchning i AP
 - flerstegsattest, betalningsförslag, 2450-reservation, bankbokning och returreplay i AP
+- flera anställningar per person, avtalsversioner, chefsträd, payoutmaskning och känslig HR-audit
 - search ranking och permissions trimming-beslut
 - retry/backoff-beräkningar och jobbstate
 - feature flag-upplösning och kill-switch-beslut
@@ -98,6 +99,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - disable-flagga och AP-masterdataflöde med leverantör, PO, mottagning och receipt-dubblettskydd
 - disable-flagga och AP-invoiceflöde med OCR-ingest, fler-rads-postning och variansblockerad postning
 - disable-flagga och AP-betalflöde med attest, export, bankbokning och idempotent retur
+- disable-flagga och HR-masterflöde med flera anställningar, avtalsversioner, dokumentlänk och känslig audit
 
 ### 8. Performance tests
 - load på dokumentingest
@@ -250,6 +252,15 @@ En fas är inte klar förrän:
 - bankbokning flyttar saldo från 2450 till valt bankkonto
 - retur återöppnar AP-post och nollställer paid-status utan dubbla journaler vid replay
 - seed visar bokad utbetalning och demo-seed visar returnerad betalning
+
+#### HR-master
+- samma person kan ha flera anställningar utan dubbla personobjekt
+- ny avtalsversion bevarar tidigare avtalsversion oförändrad
+- chefsträd blockerar självreferens och uppenbar cykel
+- bankkonton maskas i API-svar
+- dokument kan länkas till anställd via dokumentmotorn
+- känsliga fält skapar auditspår för identitet, skyddad identitet och utbetalningsuppgifter
+- seed visar flera anställningar och demo-seed visar skyddad identitet, chefsbyte och utländskt bankkonto
 
 #### Lön
 - AGI kan genereras utan manuell redigering

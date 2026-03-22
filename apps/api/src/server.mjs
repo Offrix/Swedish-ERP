@@ -49,6 +49,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase4VatEnabled: flags.phase4VatEnabled,
             phase5ArEnabled: flags.phase5ArEnabled,
             phase6ApEnabled: flags.phase6ApEnabled,
+            phase7HrEnabled: flags.phase7HrEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -148,7 +149,15 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/banking/payment-proposals/:paymentProposalId/accept",
               "/v1/banking/payment-orders/:paymentOrderId/book",
               "/v1/banking/payment-orders/:paymentOrderId/reject",
-              "/v1/banking/payment-orders/:paymentOrderId/return"
+              "/v1/banking/payment-orders/:paymentOrderId/return",
+              "/v1/hr/employees",
+              "/v1/hr/employees/:employeeId",
+              "/v1/hr/employees/:employeeId/employments",
+              "/v1/hr/employees/:employeeId/contracts",
+              "/v1/hr/employees/:employeeId/manager-assignments",
+              "/v1/hr/employees/:employeeId/bank-accounts",
+              "/v1/hr/employees/:employeeId/documents",
+              "/v1/hr/employees/:employeeId/audit-events"
             ]
           }
         : { status: "ok" }
@@ -216,6 +225,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 6 AP routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase7HrEnabled && isPhase7Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 7.1 HR masterdata routes are disabled by configuration."
     });
     return;
   }
@@ -3566,6 +3583,399 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/hr/employees") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employee",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listEmployees({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/hr/employees") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "employee",
+      scopeCode: "hr"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createEmployee({
+        companyId,
+        employeeNo: body.employeeNo || null,
+        givenName: body.givenName,
+        familyName: body.familyName,
+        preferredName: body.preferredName || null,
+        dateOfBirth: body.dateOfBirth || null,
+        identityType: body.identityType || "other",
+        identityValue: body.identityValue || null,
+        protectedIdentity: body.protectedIdentity === true,
+        workEmail: body.workEmail || null,
+        privateEmail: body.privateEmail || null,
+        phone: body.phone || null,
+        countryCode: body.countryCode || "SE",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const hrEmployeeMatch = matchPath(path, "/v1/hr/employees/:employeeId");
+  if (hrEmployeeMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employee",
+      scopeCode: "hr"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getEmployee({
+        companyId,
+        employeeId: hrEmployeeMatch.employeeId
+      })
+    );
+    return;
+  }
+
+  const hrEmploymentsMatch = matchPath(path, "/v1/hr/employees/:employeeId/employments");
+  if (hrEmploymentsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employee",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listEmployments({
+        companyId,
+        employeeId: hrEmploymentsMatch.employeeId
+      })
+    });
+    return;
+  }
+
+  if (hrEmploymentsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "employee",
+      scopeCode: "hr"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createEmployment({
+        companyId,
+        employeeId: hrEmploymentsMatch.employeeId,
+        employmentNo: body.employmentNo || null,
+        employmentTypeCode: body.employmentTypeCode,
+        jobTitle: body.jobTitle,
+        departmentCode: body.departmentCode || null,
+        payModelCode: body.payModelCode,
+        scheduleTemplateCode: body.scheduleTemplateCode || null,
+        startDate: body.startDate,
+        endDate: body.endDate || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const hrContractsMatch = matchPath(path, "/v1/hr/employees/:employeeId/contracts");
+  if (hrContractsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const employmentId = requireText(
+      url.searchParams.get("employmentId"),
+      "employment_id_required",
+      "employmentId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employment",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listEmploymentContracts({
+        companyId,
+        employeeId: hrContractsMatch.employeeId,
+        employmentId
+      })
+    });
+    return;
+  }
+
+  if (hrContractsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "employment",
+      scopeCode: "hr"
+    });
+    writeJson(
+      res,
+      201,
+      platform.addEmploymentContract({
+        companyId,
+        employeeId: hrContractsMatch.employeeId,
+        employmentId: body.employmentId,
+        validFrom: body.validFrom,
+        validTo: body.validTo || null,
+        salaryModelCode: body.salaryModelCode,
+        monthlySalary: body.monthlySalary ?? null,
+        hourlyRate: body.hourlyRate ?? null,
+        currencyCode: body.currencyCode || "SEK",
+        collectiveAgreementCode: body.collectiveAgreementCode || null,
+        salaryRevisionReason: body.salaryRevisionReason || null,
+        termsDocumentId: body.termsDocumentId || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const hrManagerAssignmentsMatch = matchPath(path, "/v1/hr/employees/:employeeId/manager-assignments");
+  if (hrManagerAssignmentsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const employmentId = requireText(
+      url.searchParams.get("employmentId"),
+      "employment_id_required",
+      "employmentId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employment",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listManagerAssignments({
+        companyId,
+        employeeId: hrManagerAssignmentsMatch.employeeId,
+        employmentId
+      })
+    });
+    return;
+  }
+
+  if (hrManagerAssignmentsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "employment",
+      scopeCode: "hr"
+    });
+    writeJson(
+      res,
+      201,
+      platform.assignEmploymentManager({
+        companyId,
+        employeeId: hrManagerAssignmentsMatch.employeeId,
+        employmentId: body.employmentId,
+        managerEmploymentId: body.managerEmploymentId,
+        validFrom: body.validFrom,
+        validTo: body.validTo || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const hrBankAccountsMatch = matchPath(path, "/v1/hr/employees/:employeeId/bank-accounts");
+  if (hrBankAccountsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employee",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listEmployeeBankAccounts({
+        companyId,
+        employeeId: hrBankAccountsMatch.employeeId
+      })
+    });
+    return;
+  }
+
+  if (hrBankAccountsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "employee",
+      scopeCode: "hr"
+    });
+    writeJson(
+      res,
+      201,
+      platform.addEmployeeBankAccount({
+        companyId,
+        employeeId: hrBankAccountsMatch.employeeId,
+        payoutMethod: body.payoutMethod,
+        accountHolderName: body.accountHolderName,
+        countryCode: body.countryCode || "SE",
+        clearingNumber: body.clearingNumber || null,
+        accountNumber: body.accountNumber || null,
+        bankgiro: body.bankgiro || null,
+        plusgiro: body.plusgiro || null,
+        iban: body.iban || null,
+        bic: body.bic || null,
+        bankName: body.bankName || null,
+        primaryAccount: body.primaryAccount !== false,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const hrDocumentsMatch = matchPath(path, "/v1/hr/employees/:employeeId/documents");
+  if (hrDocumentsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employee",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listEmployeeDocuments({
+        companyId,
+        employeeId: hrDocumentsMatch.employeeId
+      })
+    });
+    return;
+  }
+
+  if (hrDocumentsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "employee",
+      scopeCode: "hr"
+    });
+    writeJson(
+      res,
+      201,
+      platform.attachEmployeeDocument({
+        companyId,
+        employeeId: hrDocumentsMatch.employeeId,
+        documentId: body.documentId,
+        documentType: body.documentType || "employment_document",
+        relationType: body.relationType || "employee_masterdata",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const hrAuditMatch = matchPath(path, "/v1/hr/employees/:employeeId/audit-events");
+  if (hrAuditMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employee",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listEmployeeAuditEvents({
+        companyId,
+        employeeId: hrAuditMatch.employeeId
+      })
+    });
+    return;
+  }
+
   writeJson(res, 404, { error: "not_found" });
 }
 
@@ -3651,6 +4061,10 @@ function isPhase6Route(path) {
   return path.startsWith("/v1/ap") || path.startsWith("/v1/banking");
 }
 
+function isPhase7Route(path) {
+  return path.startsWith("/v1/hr");
+}
+
 async function readJsonBody(req, allowEmpty = false) {
   const chunks = [];
   for await (const chunk of req) {
@@ -3717,7 +4131,8 @@ function readFeatureFlags(env) {
     phase3LedgerEnabled: String(env.PHASE3_LEDGER_ENABLED || "true").toLowerCase() !== "false",
     phase4VatEnabled: String(env.PHASE4_VAT_ENABLED || "true").toLowerCase() !== "false",
     phase5ArEnabled: String(env.PHASE5_AR_ENABLED || "true").toLowerCase() !== "false",
-    phase6ApEnabled: String(env.PHASE6_AP_ENABLED || "true").toLowerCase() !== "false"
+    phase6ApEnabled: String(env.PHASE6_AP_ENABLED || "true").toLowerCase() !== "false",
+    phase7HrEnabled: String(env.PHASE7_HR_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

@@ -1,6 +1,6 @@
 # API
 
-HTTP baseline plus phased domain routes through FAS 6.2.
+HTTP baseline plus phased domain routes through FAS 7.1.
 
 ## Start
 
@@ -158,6 +158,20 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/banking/payment-orders/:paymentOrderId/book`
 - `POST /v1/banking/payment-orders/:paymentOrderId/reject`
 - `POST /v1/banking/payment-orders/:paymentOrderId/return`
+- `GET /v1/hr/employees?companyId=...`
+- `POST /v1/hr/employees`
+- `GET /v1/hr/employees/:employeeId?companyId=...`
+- `GET /v1/hr/employees/:employeeId/employments?companyId=...`
+- `POST /v1/hr/employees/:employeeId/employments`
+- `GET /v1/hr/employees/:employeeId/contracts?companyId=...&employmentId=...`
+- `POST /v1/hr/employees/:employeeId/contracts`
+- `GET /v1/hr/employees/:employeeId/manager-assignments?companyId=...&employmentId=...`
+- `POST /v1/hr/employees/:employeeId/manager-assignments`
+- `GET /v1/hr/employees/:employeeId/bank-accounts?companyId=...`
+- `POST /v1/hr/employees/:employeeId/bank-accounts`
+- `GET /v1/hr/employees/:employeeId/documents?companyId=...`
+- `POST /v1/hr/employees/:employeeId/documents`
+- `GET /v1/hr/employees/:employeeId/audit-events?companyId=...`
 
 ## Disable strategy
 
@@ -176,3 +190,5 @@ Set `PHASE4_VAT_ENABLED=false` to return `503` for FAS 4.1, 4.2 and 4.3 VAT rout
 Set `PHASE5_AR_ENABLED=false` to return `503` for FAS 5 AR routes while keeping the rest of the API process alive.
 
 Set `PHASE6_AP_ENABLED=false` to return `503` for FAS 6.1, 6.2 and 6.3 AP and banking routes while keeping the rest of the API process alive.
+
+Set `PHASE7_HR_ENABLED=false` to return `503` for FAS 7.1 HR masterdata routes while keeping the rest of the API process alive.

@@ -216,10 +216,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 ## Gate for FAS 6 â€” LeverantÃ¶rsfakturor, inkÃ¶p, bank och betalningar
 
 ### AllmÃ¤nt krav
-- [ ] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [ ] Demo kan kÃ¶ras pÃ¥ seed-data
+- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
+- [x] Demo kan kÃ¶ras pÃ¥ seed-data
 - [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
+- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
 
 ### 6.1 LeverantÃ¶rsregister, PO och mottagning
 - [x] LeverantÃ¶rer och PO kan importeras
@@ -242,16 +242,16 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 ## Gate for FAS 7 â€” Tidportal, HR-bas och anstÃ¤lldportal
 
 ### AllmÃ¤nt krav
-- [ ] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [ ] Demo kan kÃ¶ras pÃ¥ seed-data
+- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
+- [x] Demo kan kÃ¶ras pÃ¥ seed-data
 - [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
+- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
 
 ### 7.1 AnstÃ¤lldregister och HR-master
-- [ ] Samma person kan ha flera anstÃ¤llningar
-- [ ] AnstÃ¤llningshistorik bevaras
-- [ ] KÃ¤nsliga fÃ¤lt loggas
-- [ ] Prompt `P7-01` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Samma person kan ha flera anstÃ¤llningar
+- [x] AnstÃ¤llningshistorik bevaras
+- [x] KÃ¤nsliga fÃ¤lt loggas
+- [x] Prompt `P7-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 7.2 Tidrapportering, schema och saldon
 - [ ] LÃ¥sning av period fungerar
