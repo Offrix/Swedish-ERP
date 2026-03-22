@@ -228,10 +228,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [x] Prompt `P6-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 6.2 LeverantÃ¶rsfaktura in, tolkning och matchning
-- [ ] Flera kostnadsrader bokas rÃ¤tt
-- [ ] MomsfÃ¶rslag kan fÃ¶rklaras
-- [ ] Avvikelser krÃ¤ver granskning
-- [ ] Prompt `P6-02` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Flera kostnadsrader bokas rÃ¤tt
+- [x] MomsfÃ¶rslag kan fÃ¶rklaras
+- [x] Avvikelser krÃ¤ver granskning
+- [x] Prompt `P6-02` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 6.3 Attest, bankintegration och utbetalning
 - [ ] ObehÃ¶riga kan inte betala

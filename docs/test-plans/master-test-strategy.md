@@ -33,6 +33,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - issue-idempotens, kreditstängning, leveransvalidering och betallänkar i AR-fakturering
 - öppna poster, delbetalningar, dunningavgifter, bankmatchning och aging-buckets i kundreskontra
 - leverantörsimport-idempotens, bankdetaljspärrar, PO-defaults och mottagningsdubbletter i AP
+- OCR-baserad leverantörsfakturaingest, fler-rads-kodning, momsförslag och 2-vägs-/3-vägsmatchning i AP
 - search ranking och permissions trimming-beslut
 - retry/backoff-beräkningar och jobbstate
 - feature flag-upplösning och kill-switch-beslut
@@ -76,6 +77,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - issued kundfakturor, kreditkopplingar, Peppol/PDF-leveranser och payment-link-persistens i AR
 - öppna poster, allocations, unmatched receipts, dunning runs, writeoffs och aging snapshots i AR
 - leverantörsregister, leverantörskontakter, PO-rader, mottagningsobjekt, importbatcher och invoice-receipt-links i AP
+- leverantörsfaktura-drafts, match runs, variansobjekt, AP-open-items och dokumentdrivna invoice-links i AP
 - Peppol adapter
 - myndighetsadaptrar
 - sökindex och projektioner
@@ -93,6 +95,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - disable-flagga och AR-faktureringsflöde med issue, kredit, leverans och payment-link
 - disable-flagga och AR-reskontraflöde med delbetalning, felmatchningsreversal, dunning hold och aging snapshot
 - disable-flagga och AP-masterdataflöde med leverantör, PO, mottagning och receipt-dubblettskydd
+- disable-flagga och AP-invoiceflöde med OCR-ingest, fler-rads-postning och variansblockerad postning
 
 ### 8. Performance tests
 - load på dokumentingest

@@ -8,6 +8,17 @@ export type ApPurchaseOrderStatus =
   | "closed"
   | "cancelled";
 export type ApReceiptTargetType = "expense" | "asset" | "inventory" | "project_material";
+export type ApSupplierInvoiceStatus =
+  | "draft"
+  | "matching"
+  | "pending_approval"
+  | "approved"
+  | "posted"
+  | "credited"
+  | "voided";
+export type ApDuplicateStatus = "not_checked" | "exact_duplicate" | "suspect_duplicate" | "cleared";
+export type ApMatchMode = "none" | "two_way" | "three_way";
+export type ApMatchVarianceStatus = "open" | "accepted" | "corrected" | "closed";
 
 export interface ApSupplier {
   readonly supplierId: string;
@@ -117,6 +128,138 @@ export interface ApReceipt {
   readonly updatedAt: string;
 }
 
+export interface ApSupplierInvoiceLineVatProposal {
+  readonly vatCode: string;
+  readonly vatRate: number;
+  readonly vatAmount: number;
+  readonly explanation: string;
+  readonly decisionCategory: string;
+  readonly declarationBoxCodes: readonly string[];
+  readonly postingEntries: readonly Record<string, unknown>[];
+  readonly reviewRequired: boolean;
+  readonly reviewQueueCodes: readonly string[];
+  readonly vatDecisionId: string | null;
+  readonly vatReviewQueueItemId: string | null;
+}
+
+export interface ApSupplierInvoiceLine {
+  readonly supplierInvoiceLineId: string;
+  readonly lineNo: number;
+  readonly description: string;
+  readonly quantity: number;
+  readonly unitPrice: number;
+  readonly netAmount: number;
+  readonly expenseAccountNumber: string | null;
+  readonly dimensionsJson: Record<string, string>;
+  readonly goodsOrServices: "goods" | "services";
+  readonly reverseChargeFlag: boolean;
+  readonly constructionServiceFlag: boolean;
+  readonly deductionRatio: number;
+  readonly vatCode: string;
+  readonly vatRate: number;
+  readonly vatAmount: number;
+  readonly grossAmount: number;
+  readonly vatProposal: ApSupplierInvoiceLineVatProposal;
+  readonly receiptRequired: boolean;
+  readonly purchaseOrderLineId: string | null;
+  readonly purchaseOrderLineReference: string | null;
+  readonly purchaseOrderMatchedLineId: string | null;
+  readonly toleranceProfileCode: string;
+  readonly reviewRequired: boolean;
+  readonly reviewQueueCodes: readonly string[];
+}
+
+export interface ApSupplierInvoiceVariance {
+  readonly supplierInvoiceVarianceId: string;
+  readonly companyId: string;
+  readonly supplierInvoiceId: string;
+  readonly supplierInvoiceLineId: string;
+  readonly varianceCode: string;
+  readonly reviewQueueCode: string;
+  readonly severity: string;
+  readonly status: ApMatchVarianceStatus;
+  readonly message: string;
+  readonly expectedValue: unknown;
+  readonly actualValue: unknown;
+  readonly toleranceValue: unknown;
+  readonly createdAt: string;
+}
+
+export interface ApSupplierInvoiceMatchRunLineResult {
+  readonly supplierInvoiceLineId: string;
+  readonly lineNo: number;
+  readonly matchMode: ApMatchMode;
+  readonly matchedPurchaseOrderLineId: string | null;
+  readonly matchedReceiptQuantity: number;
+  readonly variances: readonly ApSupplierInvoiceVariance[];
+}
+
+export interface ApSupplierInvoiceMatchRun {
+  readonly supplierInvoiceMatchRunId: string;
+  readonly companyId: string;
+  readonly supplierInvoiceId: string;
+  readonly matchMode: ApMatchMode;
+  readonly status: "matched" | "review_required";
+  readonly varianceCount: number;
+  readonly reviewRequired: boolean;
+  readonly lineResults: readonly ApSupplierInvoiceMatchRunLineResult[];
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+}
+
+export interface ApOpenItem {
+  readonly apOpenItemId: string;
+  readonly companyId: string;
+  readonly supplierInvoiceId: string;
+  readonly openAmount: number;
+  readonly dueOn: string;
+  readonly status: string;
+  readonly journalEntryId: string;
+  readonly currencyCode: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ApSupplierInvoice {
+  readonly supplierInvoiceId: string;
+  readonly companyId: string;
+  readonly supplierInvoiceNo: string;
+  readonly supplierId: string;
+  readonly purchaseOrderId: string | null;
+  readonly purchaseOrderNo: string | null;
+  readonly documentId: string | null;
+  readonly documentVersionId: string | null;
+  readonly sourceChannel: string;
+  readonly externalInvoiceRef: string;
+  readonly invoiceDate: string;
+  readonly dueDate: string;
+  readonly currencyCode: string;
+  readonly netAmount: number;
+  readonly vatAmount: number;
+  readonly grossAmount: number;
+  readonly paymentReference: string | null;
+  readonly documentHash: string;
+  readonly duplicateCheckStatus: ApDuplicateStatus;
+  readonly duplicateFingerprintHash: string;
+  readonly duplicateOfSupplierInvoiceId: string | null;
+  readonly matchMode: ApMatchMode;
+  readonly status: ApSupplierInvoiceStatus;
+  readonly reviewRequired: boolean;
+  readonly reviewQueueCodes: readonly string[];
+  readonly lines: readonly ApSupplierInvoiceLine[];
+  readonly latestMatchRunId: string | null;
+  readonly journalEntryId: string | null;
+  readonly apOpenItemId: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly approvedAt: string | null;
+  readonly approvedByActorId: string | null;
+  readonly postedAt: string | null;
+  readonly variances?: readonly ApSupplierInvoiceVariance[];
+  readonly matchRun?: ApSupplierInvoiceMatchRun | null;
+}
+
 export interface ApImportBatchItem {
   readonly result: "created" | "updated";
 }
@@ -177,6 +320,10 @@ export interface AccountsPayableSnapshot {
   readonly suppliers: readonly ApSupplier[];
   readonly purchaseOrders: readonly ApPurchaseOrder[];
   readonly receipts: readonly ApReceipt[];
+  readonly supplierInvoices: readonly ApSupplierInvoice[];
+  readonly supplierInvoiceMatchRuns: readonly ApSupplierInvoiceMatchRun[];
+  readonly supplierInvoiceVariances: readonly ApSupplierInvoiceVariance[];
+  readonly apOpenItems: readonly ApOpenItem[];
   readonly supplierImportBatches: readonly ApSupplierImportBatch[];
   readonly purchaseOrderImportBatches: readonly ApPurchaseOrderImportBatch[];
   readonly auditEvents: readonly ApAuditEvent[];

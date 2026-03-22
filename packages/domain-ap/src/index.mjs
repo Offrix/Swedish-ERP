@@ -11,15 +11,91 @@ export const AP_PURCHASE_ORDER_STATUSES = Object.freeze([
   "cancelled"
 ]);
 export const AP_RECEIPT_TARGET_TYPES = Object.freeze(["expense", "asset", "inventory", "project_material"]);
+export const AP_SUPPLIER_INVOICE_STATUSES = Object.freeze([
+  "draft",
+  "matching",
+  "pending_approval",
+  "approved",
+  "posted",
+  "credited",
+  "voided"
+]);
+export const AP_SUPPLIER_INVOICE_DUPLICATE_STATUSES = Object.freeze([
+  "not_checked",
+  "exact_duplicate",
+  "suspect_duplicate",
+  "cleared"
+]);
+export const AP_MATCH_VARIANCE_STATUSES = Object.freeze(["open", "accepted", "corrected", "closed"]);
+export const AP_MATCH_MODES = Object.freeze(["none", "two_way", "three_way"]);
 
 const DEFAULT_PURCHASE_ORDER_PREFIX = "PO";
 const DEFAULT_SUPPLIER_PREFIX = "SUP";
+const DEFAULT_INVOICE_PREFIX = "APINV";
+const DEFAULT_LIABILITY_ACCOUNT_BY_REGION = Object.freeze({
+  SE: "2410",
+  EU: "2420",
+  NON_EU: "2430"
+});
+const DEFAULT_VAT_ACCOUNT_BY_EFFECT = Object.freeze({
+  input_vat: "2640",
+  output_vat: "2650"
+});
+const DEFAULT_TOLERANCE_PROFILES = Object.freeze({
+  standard: {
+    priceTolerancePercent: 2,
+    quantityTolerancePercent: 2,
+    totalToleranceAmount: 50,
+    autoAcceptWithinTolerance: true
+  },
+  strict: {
+    priceTolerancePercent: 0,
+    quantityTolerancePercent: 0,
+    totalToleranceAmount: 0,
+    autoAcceptWithinTolerance: false
+  }
+});
+const EU_COUNTRY_CODES = new Set([
+  "AT",
+  "BE",
+  "BG",
+  "HR",
+  "CY",
+  "CZ",
+  "DK",
+  "EE",
+  "FI",
+  "FR",
+  "DE",
+  "GR",
+  "HU",
+  "IE",
+  "IT",
+  "LV",
+  "LT",
+  "LU",
+  "MT",
+  "NL",
+  "PL",
+  "PT",
+  "RO",
+  "SK",
+  "SI",
+  "ES",
+  "SE"
+]);
 
 export function createApPlatform(options = {}) {
   return createApEngine(options);
 }
 
-export function createApEngine({ clock = () => new Date(), seedDemo = false, vatPlatform = null } = {}) {
+export function createApEngine({
+  clock = () => new Date(),
+  seedDemo = false,
+  vatPlatform = null,
+  ledgerPlatform = null,
+  documentPlatform = null
+} = {}) {
   const state = {
     suppliers: new Map(),
     supplierIdsByCompany: new Map(),
@@ -36,6 +112,17 @@ export function createApEngine({ clock = () => new Date(), seedDemo = false, vat
     supplierImportBatchIdsByCompanyKey: new Map(),
     purchaseOrderImportBatches: new Map(),
     purchaseOrderImportBatchIdsByCompanyKey: new Map(),
+    supplierInvoices: new Map(),
+    supplierInvoiceIdsByCompany: new Map(),
+    supplierInvoiceIdsByCompanyRef: new Map(),
+    supplierInvoiceIdsByCompanyDocument: new Map(),
+    supplierInvoiceIdsByCompanyFingerprint: new Map(),
+    supplierInvoiceMatchRuns: new Map(),
+    supplierInvoiceMatchRunIdsByCompany: new Map(),
+    supplierInvoiceVarianceIdsByInvoice: new Map(),
+    supplierInvoiceVariances: new Map(),
+    apOpenItems: new Map(),
+    apOpenItemIdsByCompany: new Map(),
     countersByCompany: new Map(),
     auditEvents: []
   };
@@ -48,6 +135,9 @@ export function createApEngine({ clock = () => new Date(), seedDemo = false, vat
     supplierStatuses: AP_SUPPLIER_STATUSES,
     purchaseOrderStatuses: AP_PURCHASE_ORDER_STATUSES,
     receiptTargetTypes: AP_RECEIPT_TARGET_TYPES,
+    supplierInvoiceStatuses: AP_SUPPLIER_INVOICE_STATUSES,
+    duplicateStatuses: AP_SUPPLIER_INVOICE_DUPLICATE_STATUSES,
+    matchModes: AP_MATCH_MODES,
     listSuppliers,
     getSupplier,
     createSupplier,
@@ -63,6 +153,11 @@ export function createApEngine({ clock = () => new Date(), seedDemo = false, vat
     listReceipts,
     getReceipt,
     createReceipt,
+    listSupplierInvoices,
+    getSupplierInvoice,
+    ingestSupplierInvoice,
+    runSupplierInvoiceMatch,
+    postSupplierInvoice,
     snapshotAp
   };
 
@@ -691,11 +786,495 @@ export function createApEngine({ clock = () => new Date(), seedDemo = false, vat
     return copy(receipt);
   }
 
+  function listSupplierInvoices({ companyId, status = null, reviewRequired = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.supplierInvoiceIdsByCompany.get(resolvedCompanyId) || [])
+      .map((supplierInvoiceId) => state.supplierInvoices.get(supplierInvoiceId))
+      .filter(Boolean)
+      .filter((invoice) => (status ? invoice.status === status : true))
+      .filter((invoice) => (reviewRequired === null ? true : invoice.reviewRequired === (reviewRequired === true)))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function getSupplierInvoice({ companyId, supplierInvoiceId } = {}) {
+    const invoice = requireSupplierInvoiceRecord(state, companyId, supplierInvoiceId);
+    return presentSupplierInvoice(state, invoice);
+  }
+
+  function ingestSupplierInvoice({
+    companyId,
+    supplierId = null,
+    supplierNo = null,
+    purchaseOrderId = null,
+    purchaseOrderNo = null,
+    documentId = null,
+    sourceChannel = "manual",
+    externalInvoiceRef = null,
+    invoiceDate = null,
+    dueDate = null,
+    currencyCode = null,
+    paymentReference = null,
+    lines = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const documentContext = documentId
+      ? resolveDocumentInvoiceContext({ documentPlatform, companyId: resolvedCompanyId, documentId })
+      : null;
+    const supplier = resolveSupplierForInvoiceIngest({
+      state,
+      companyId: resolvedCompanyId,
+      supplierId,
+      supplierNo,
+      ocrFields: documentContext?.ocrFields || {}
+    });
+    if (["blocked", "archived"].includes(supplier.status) || supplier.bookingBlocked === true) {
+      throw createError(409, "supplier_missing_or_blocked", "Supplier is blocked for AP invoice ingest.");
+    }
+
+    const linkedPurchaseOrder = resolvePurchaseOrderForInvoice({
+      state,
+      companyId: resolvedCompanyId,
+      purchaseOrderId,
+      purchaseOrderNo: purchaseOrderNo || documentContext?.purchaseOrderReference || null
+    });
+    const normalizedExternalInvoiceRef = requireText(
+      externalInvoiceRef || documentContext?.externalInvoiceRef || documentContext?.invoiceNumber,
+      "supplier_invoice_external_ref_required"
+    );
+    const resolvedInvoiceDate = normalizeDate(
+      invoiceDate || documentContext?.invoiceDate || nowIso(clock).slice(0, 10),
+      "supplier_invoice_date_invalid"
+    );
+    const resolvedDueDate = normalizeDate(
+      dueDate || documentContext?.dueDate || resolvedInvoiceDate,
+      "supplier_invoice_due_date_invalid"
+    );
+    const resolvedCurrencyCode = normalizeUpperCode(
+      currencyCode || documentContext?.currencyCode || supplier.currencyCode,
+      "currency_code_required",
+      3
+    );
+    const normalizedLines = normalizeSupplierInvoiceLines({
+      lines,
+      documentContext,
+      supplier,
+      purchaseOrder: linkedPurchaseOrder,
+      companyId: resolvedCompanyId,
+      vatPlatform,
+      actorId,
+      correlationId
+    });
+    if (normalizedLines.length === 0) {
+      throw createError(409, "supplier_invoice_lines_required", "Supplier invoice requires at least one coding line.");
+    }
+
+    const netAmount = roundMoney(normalizedLines.reduce((sum, line) => sum + line.netAmount, 0));
+    const vatAmount = roundMoney(normalizedLines.reduce((sum, line) => sum + line.vatAmount, 0));
+    const grossAmount = roundMoney(netAmount + vatAmount);
+    const documentHash = buildInvoiceDocumentHash({
+      documentContext,
+      fallbackValue: {
+        supplierId: supplier.supplierId,
+        externalInvoiceRef: normalizedExternalInvoiceRef,
+        invoiceDate: resolvedInvoiceDate,
+        grossAmount
+      }
+    });
+    const fingerprintHash = buildSupplierInvoiceFingerprint({
+      supplierId: supplier.supplierId,
+      externalInvoiceRef: normalizedExternalInvoiceRef,
+      invoiceDate: resolvedInvoiceDate,
+      grossAmount,
+      currencyCode: resolvedCurrencyCode,
+      documentHash,
+      paymentReference: paymentReference || documentContext?.paymentReference || documentContext?.reference || null
+    });
+    const existingExactId = state.supplierInvoiceIdsByCompanyFingerprint.get(
+      toCompanyScopedKey(resolvedCompanyId, fingerprintHash)
+    );
+    if (existingExactId) {
+      return presentSupplierInvoice(state, state.supplierInvoices.get(existingExactId));
+    }
+
+    const nearDuplicate = findNearDuplicateSupplierInvoice({
+      state,
+      companyId: resolvedCompanyId,
+      supplierId: supplier.supplierId,
+      externalInvoiceRef: normalizedExternalInvoiceRef,
+      invoiceDate: resolvedInvoiceDate,
+      grossAmount,
+      currencyCode: resolvedCurrencyCode,
+      documentHash
+    });
+    const reviewQueueCodes = uniqueStrings([
+      ...normalizedLines.flatMap((line) => (line.reviewRequired ? line.reviewQueueCodes : [])),
+      ...(documentContext?.reviewRequired ? ["ocr_low_confidence"] : []),
+      ...(nearDuplicate ? ["duplicate_suspect"] : [])
+    ]);
+    const reviewRequired = reviewQueueCodes.length > 0;
+
+    const invoice = {
+      supplierInvoiceId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      supplierInvoiceNo: nextScopedSequence(state, resolvedCompanyId, "supplierInvoice", DEFAULT_INVOICE_PREFIX),
+      supplierId: supplier.supplierId,
+      purchaseOrderId: linkedPurchaseOrder?.purchaseOrderId || null,
+      purchaseOrderNo: linkedPurchaseOrder?.poNo || null,
+      documentId: documentContext?.documentId || null,
+      documentVersionId: documentContext?.documentVersionId || null,
+      sourceChannel: assertAllowed(sourceChannel, ["manual", "email", "api", "peppol", "integration"], "ap_source_channel_invalid"),
+      externalInvoiceRef: normalizedExternalInvoiceRef,
+      invoiceDate: resolvedInvoiceDate,
+      dueDate: resolvedDueDate,
+      currencyCode: resolvedCurrencyCode,
+      netAmount,
+      vatAmount,
+      grossAmount,
+      paymentReference: normalizeOptionalText(paymentReference || documentContext?.paymentReference || documentContext?.reference),
+      documentHash,
+      duplicateCheckStatus: nearDuplicate ? "suspect_duplicate" : "cleared",
+      duplicateFingerprintHash: fingerprintHash,
+      duplicateOfSupplierInvoiceId: nearDuplicate?.supplierInvoiceId || null,
+      matchMode: linkedPurchaseOrder ? (supplier.requiresReceipt ? "three_way" : "two_way") : "none",
+      status: reviewRequired ? "pending_approval" : "draft",
+      reviewRequired,
+      reviewQueueCodes,
+      lines: normalizedLines,
+      latestMatchRunId: null,
+      journalEntryId: null,
+      apOpenItemId: null,
+      createdByActorId: actorId,
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock),
+      approvedAt: null,
+      approvedByActorId: null,
+      postedAt: null
+    };
+
+    state.supplierInvoices.set(invoice.supplierInvoiceId, invoice);
+    ensureCollection(state.supplierInvoiceIdsByCompany, resolvedCompanyId).push(invoice.supplierInvoiceId);
+    state.supplierInvoiceIdsByCompanyRef.set(
+      toCompanyScopedKey(resolvedCompanyId, `${supplier.supplierId}:${normalizedExternalInvoiceRef}`),
+      invoice.supplierInvoiceId
+    );
+    state.supplierInvoiceIdsByCompanyFingerprint.set(
+      toCompanyScopedKey(resolvedCompanyId, fingerprintHash),
+      invoice.supplierInvoiceId
+    );
+    if (invoice.documentId) {
+      state.supplierInvoiceIdsByCompanyDocument.set(
+        toCompanyScopedKey(resolvedCompanyId, invoice.documentId),
+        invoice.supplierInvoiceId
+      );
+      if (documentPlatform && typeof documentPlatform.linkDocumentRecord === "function") {
+        documentPlatform.linkDocumentRecord({
+          companyId: resolvedCompanyId,
+          documentId: invoice.documentId,
+          targetType: "ap_supplier_invoice",
+          targetId: invoice.supplierInvoiceId,
+          metadataJson: {
+            relationType: "source_document"
+          },
+          actorId,
+          correlationId
+        });
+      }
+    }
+
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId,
+      correlationId,
+      action: "ap.supplier_invoice.ingested",
+      entityType: "ap_supplier_invoice",
+      entityId: invoice.supplierInvoiceId,
+      explanation: `Ingested supplier invoice ${normalizedExternalInvoiceRef}.`
+    });
+    return presentSupplierInvoice(state, invoice);
+  }
+
+  function runSupplierInvoiceMatch({
+    companyId,
+    supplierInvoiceId,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const invoice = requireSupplierInvoiceRecord(state, companyId, supplierInvoiceId);
+    const supplier = requireSupplierRecord(state, invoice.companyId, invoice.supplierId);
+    const purchaseOrder = invoice.purchaseOrderId
+      ? requirePurchaseOrderRecord(state, invoice.companyId, invoice.purchaseOrderId)
+      : null;
+    const varianceIds = [];
+    const lineResults = [];
+    let matchMode = invoice.purchaseOrderId ? (supplier.requiresReceipt ? "three_way" : "two_way") : "none";
+
+    for (const line of invoice.lines) {
+      const result = {
+        supplierInvoiceLineId: line.supplierInvoiceLineId,
+        lineNo: line.lineNo,
+        matchMode: purchaseOrder ? (line.receiptRequired ? "three_way" : "two_way") : "none",
+        matchedPurchaseOrderLineId: null,
+        matchedReceiptQuantity: 0,
+        variances: []
+      };
+      const currentVariances = [];
+      if (purchaseOrder) {
+        const purchaseOrderLine = resolvePurchaseOrderLineForInvoice(purchaseOrder, line);
+        if (!purchaseOrderLine) {
+          currentVariances.push(
+            createInvoiceVariance({
+              invoice,
+              line,
+              varianceCode: "purchase_order_line_missing",
+              severity: "error",
+              message: "Invoice line could not be matched to a purchase-order line.",
+              expectedValue: null,
+              actualValue: line.description
+            })
+          );
+        } else {
+          result.matchedPurchaseOrderLineId = purchaseOrderLine.purchaseOrderLineId;
+          const tolerance = resolveToleranceProfile(
+            line.toleranceProfileCode || purchaseOrderLine.toleranceProfileCode || purchaseOrder.toleranceProfileCode
+          );
+          const expectedUnitPrice = purchaseOrderLine.unitPrice;
+          const expectedNetAmount = roundMoney(expectedUnitPrice * line.quantity);
+          const priceVariancePercent =
+            expectedUnitPrice > 0 ? Math.abs(((line.unitPrice - expectedUnitPrice) / expectedUnitPrice) * 100) : 0;
+          const totalVarianceAmount = Math.abs(line.netAmount - expectedNetAmount);
+          if (
+            priceVariancePercent > tolerance.priceTolerancePercent ||
+            totalVarianceAmount > tolerance.totalToleranceAmount
+          ) {
+            currentVariances.push(
+              createInvoiceVariance({
+                invoice,
+                line,
+                varianceCode: "price_variance",
+                severity: "error",
+                message: "Invoice price exceeds purchase-order tolerance.",
+                expectedValue: expectedUnitPrice,
+                actualValue: line.unitPrice,
+                toleranceValue: tolerance.priceTolerancePercent
+              })
+            );
+          }
+          if (line.receiptRequired) {
+            const matchedReceiptQuantity = summarizeReceiptQuantity(state, purchaseOrder.purchaseOrderId, purchaseOrderLine.purchaseOrderLineId);
+            result.matchedReceiptQuantity = matchedReceiptQuantity;
+            if (roundQuantity(matchedReceiptQuantity) + 0.0001 < roundQuantity(line.quantity)) {
+              currentVariances.push(
+                createInvoiceVariance({
+                  invoice,
+                  line,
+                  varianceCode: "receipt_variance",
+                  severity: "error",
+                  message: "Received quantity is lower than invoiced quantity.",
+                  expectedValue: line.quantity,
+                  actualValue: matchedReceiptQuantity,
+                  toleranceValue: tolerance.quantityTolerancePercent
+                })
+              );
+            }
+          }
+        }
+      } else if (supplier.requiresPo) {
+        currentVariances.push(
+          createInvoiceVariance({
+            invoice,
+            line,
+            varianceCode: "po_required_missing",
+            severity: "error",
+            message: "Supplier requires a purchase order before matching can pass.",
+            expectedValue: "purchase_order",
+            actualValue: null
+          })
+        );
+      }
+
+      if (line.reviewRequired) {
+        currentVariances.push(
+          createInvoiceVariance({
+            invoice,
+            line,
+            varianceCode: "tax_review_required",
+            severity: "warning",
+            message: "VAT proposal requires review before posting.",
+            expectedValue: null,
+            actualValue: line.vatProposal?.vatCode || null
+          })
+        );
+      }
+
+      for (const variance of currentVariances) {
+        state.supplierInvoiceVariances.set(variance.supplierInvoiceVarianceId, variance);
+        varianceIds.push(variance.supplierInvoiceVarianceId);
+        result.variances.push(copy(variance));
+      }
+      lineResults.push(result);
+    }
+
+    state.supplierInvoiceVarianceIdsByInvoice.set(invoice.supplierInvoiceId, varianceIds);
+    const blockingVariances = varianceIds
+      .map((varianceId) => state.supplierInvoiceVariances.get(varianceId))
+      .filter(Boolean)
+      .filter((variance) => variance.status === "open");
+    const reviewQueueCodes = uniqueStrings([
+      ...invoice.reviewQueueCodes,
+      ...blockingVariances.map((variance) => variance.reviewQueueCode)
+    ]);
+    const reviewRequired = blockingVariances.length > 0 || reviewQueueCodes.length > 0;
+
+    const matchRun = {
+      supplierInvoiceMatchRunId: crypto.randomUUID(),
+      companyId: invoice.companyId,
+      supplierInvoiceId: invoice.supplierInvoiceId,
+      matchMode,
+      status: reviewRequired ? "review_required" : "matched",
+      varianceCount: blockingVariances.length,
+      reviewRequired,
+      lineResults,
+      createdByActorId: actorId,
+      createdAt: nowIso(clock)
+    };
+    state.supplierInvoiceMatchRuns.set(matchRun.supplierInvoiceMatchRunId, matchRun);
+    ensureCollection(state.supplierInvoiceMatchRunIdsByCompany, invoice.companyId).push(matchRun.supplierInvoiceMatchRunId);
+
+    invoice.latestMatchRunId = matchRun.supplierInvoiceMatchRunId;
+    invoice.matchMode = matchMode;
+    invoice.reviewRequired = reviewRequired;
+    invoice.reviewQueueCodes = reviewQueueCodes;
+    invoice.status = reviewRequired ? "pending_approval" : "approved";
+    invoice.approvedAt = reviewRequired ? null : nowIso(clock);
+    invoice.approvedByActorId = reviewRequired ? null : actorId;
+    invoice.updatedAt = nowIso(clock);
+
+    pushAudit(state, clock, {
+      companyId: invoice.companyId,
+      actorId,
+      correlationId,
+      action: "ap.supplier_invoice.matched",
+      entityType: "ap_supplier_invoice",
+      entityId: invoice.supplierInvoiceId,
+      explanation: reviewRequired
+        ? `Supplier invoice ${invoice.externalInvoiceRef} requires review after matching.`
+        : `Supplier invoice ${invoice.externalInvoiceRef} matched successfully.`
+    });
+    return {
+      invoice: presentSupplierInvoice(state, invoice),
+      matchRun: copy(matchRun)
+    };
+  }
+
+  function postSupplierInvoice({
+    companyId,
+    supplierInvoiceId,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const invoice = requireSupplierInvoiceRecord(state, companyId, supplierInvoiceId);
+    if (invoice.status === "posted") {
+      return presentSupplierInvoice(state, invoice);
+    }
+    if (invoice.reviewRequired || invoice.status !== "approved") {
+      throw createError(409, "supplier_invoice_review_required", "Supplier invoice must be approved without open variances before posting.");
+    }
+    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+      throw createError(500, "ledger_platform_missing", "Ledger platform is required to post AP invoices.");
+    }
+
+    const supplier = requireSupplierRecord(state, invoice.companyId, invoice.supplierId);
+    const journalLines = buildSupplierInvoiceJournalLines({
+      invoice,
+      supplier
+    });
+    const groupedJournalLines = mergeJournalLines(journalLines);
+    const created = ledgerPlatform.createJournalEntry({
+      companyId: invoice.companyId,
+      journalDate: invoice.invoiceDate,
+      voucherSeriesCode: "E",
+      sourceType: "AP_INVOICE",
+      sourceId: invoice.supplierInvoiceId,
+      actorId,
+      idempotencyKey: `ap_invoice_post:${invoice.supplierInvoiceId}:${invoice.duplicateFingerprintHash}`,
+      description: `Supplier invoice ${invoice.externalInvoiceRef}`,
+      metadataJson: {
+        pipelineStage: "ap_supplier_invoice_posting",
+        documentId: invoice.documentId,
+        supplierInvoiceNo: invoice.supplierInvoiceNo
+      },
+      lines: groupedJournalLines
+    });
+    ledgerPlatform.validateJournalEntry({
+      companyId: invoice.companyId,
+      journalEntryId: created.journalEntry.journalEntryId,
+      actorId
+    });
+    const posted = ledgerPlatform.postJournalEntry({
+      companyId: invoice.companyId,
+      journalEntryId: created.journalEntry.journalEntryId,
+      actorId
+    });
+
+    const openItem = {
+      apOpenItemId: crypto.randomUUID(),
+      companyId: invoice.companyId,
+      supplierInvoiceId: invoice.supplierInvoiceId,
+      openAmount: invoice.grossAmount,
+      dueOn: invoice.dueDate,
+      status: "open",
+      journalEntryId: posted.journalEntry.journalEntryId,
+      currencyCode: invoice.currencyCode,
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.apOpenItems.set(openItem.apOpenItemId, openItem);
+    ensureCollection(state.apOpenItemIdsByCompany, invoice.companyId).push(openItem.apOpenItemId);
+
+    const purchaseOrder = invoice.purchaseOrderId
+      ? requirePurchaseOrderRecord(state, invoice.companyId, invoice.purchaseOrderId)
+      : null;
+    if (purchaseOrder) {
+      for (const line of invoice.lines) {
+        if (!line.purchaseOrderMatchedLineId) {
+          continue;
+        }
+        const purchaseOrderLine = requirePurchaseOrderLine(purchaseOrder, line.purchaseOrderMatchedLineId);
+        purchaseOrderLine.invoicedQuantity = roundQuantity(purchaseOrderLine.invoicedQuantity + line.quantity);
+      }
+      purchaseOrder.updatedAt = nowIso(clock);
+    }
+
+    invoice.status = "posted";
+    invoice.journalEntryId = posted.journalEntry.journalEntryId;
+    invoice.apOpenItemId = openItem.apOpenItemId;
+    invoice.postedAt = nowIso(clock);
+    invoice.updatedAt = nowIso(clock);
+
+    pushAudit(state, clock, {
+      companyId: invoice.companyId,
+      actorId,
+      correlationId,
+      action: "ap.supplier_invoice.posted",
+      entityType: "ap_supplier_invoice",
+      entityId: invoice.supplierInvoiceId,
+      explanation: `Posted supplier invoice ${invoice.externalInvoiceRef}.`
+    });
+    return presentSupplierInvoice(state, invoice);
+  }
+
   function snapshotAp() {
     return {
       suppliers: Array.from(state.suppliers.values()).map(copy),
       purchaseOrders: Array.from(state.purchaseOrders.values()).map(copy),
       receipts: Array.from(state.receipts.values()).map(copy),
+      supplierInvoices: Array.from(state.supplierInvoices.values()).map(copy),
+      supplierInvoiceMatchRuns: Array.from(state.supplierInvoiceMatchRuns.values()).map(copy),
+      supplierInvoiceVariances: Array.from(state.supplierInvoiceVariances.values()).map(copy),
+      apOpenItems: Array.from(state.apOpenItems.values()).map(copy),
       supplierImportBatches: Array.from(state.supplierImportBatches.values()).map(copy),
       purchaseOrderImportBatches: Array.from(state.purchaseOrderImportBatches.values()).map(copy),
       auditEvents: state.auditEvents.map(copy)
@@ -732,6 +1311,620 @@ function requirePurchaseOrderLine(purchaseOrder, purchaseOrderLineId) {
     throw createError(404, "purchase_order_line_not_found", "Purchase-order line was not found.");
   }
   return line;
+}
+
+function requireSupplierInvoiceRecord(state, companyId, supplierInvoiceId) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const invoice = state.supplierInvoices.get(requireText(supplierInvoiceId, "supplier_invoice_id_required"));
+  if (!invoice || invoice.companyId !== resolvedCompanyId) {
+    throw createError(404, "supplier_invoice_not_found", "Supplier invoice was not found.");
+  }
+  return invoice;
+}
+
+function presentSupplierInvoice(state, invoice) {
+  const varianceIds = state.supplierInvoiceVarianceIdsByInvoice.get(invoice.supplierInvoiceId) || [];
+  const variances = varianceIds
+    .map((varianceId) => state.supplierInvoiceVariances.get(varianceId))
+    .filter(Boolean)
+    .map(copy);
+  const matchRun = invoice.latestMatchRunId ? copy(state.supplierInvoiceMatchRuns.get(invoice.latestMatchRunId)) : null;
+  return copy({
+    ...invoice,
+    variances,
+    matchRun
+  });
+}
+
+function resolveSupplierForInvoiceIngest({ state, companyId, supplierId = null, supplierNo = null, ocrFields = {} }) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  if (supplierId) {
+    return requireSupplierRecord(state, resolvedCompanyId, supplierId);
+  }
+  const normalizedSupplierNo = normalizeOptionalText(supplierNo);
+  if (normalizedSupplierNo) {
+    const resolvedSupplierId = state.supplierIdsByCompanyNo.get(
+      toCompanyScopedKey(resolvedCompanyId, normalizedSupplierNo.toUpperCase())
+    );
+    if (!resolvedSupplierId) {
+      throw createError(404, "supplier_not_found", "Supplier number was not found.");
+    }
+    return requireSupplierRecord(state, resolvedCompanyId, resolvedSupplierId);
+  }
+  const counterparty = readOcrFieldValue(ocrFields.counterparty);
+  if (!counterparty) {
+    throw createError(409, "supplier_missing_or_blocked", "Supplier could not be resolved from OCR.");
+  }
+  const normalizedCounterparty = normalizePartyLabel(counterparty);
+  const candidates = (state.supplierIdsByCompany.get(resolvedCompanyId) || [])
+    .map((candidateSupplierId) => state.suppliers.get(candidateSupplierId))
+    .filter(Boolean);
+  const exact = candidates.find((candidate) => normalizePartyLabel(candidate.legalName) === normalizedCounterparty);
+  if (exact) {
+    return exact;
+  }
+  const fuzzy = candidates.find((candidate) => normalizePartyLabel(candidate.legalName).includes(normalizedCounterparty));
+  if (fuzzy) {
+    return fuzzy;
+  }
+  throw createError(409, "supplier_missing_or_blocked", "Supplier could not be matched from OCR counterparty.");
+}
+
+function resolveDocumentInvoiceContext({ documentPlatform, companyId, documentId }) {
+  if (!documentPlatform || typeof documentPlatform.getDocumentOcrRuns !== "function") {
+    throw createError(500, "document_platform_missing", "Document platform is required for document-based AP ingest.");
+  }
+  const documentState = documentPlatform.getDocumentOcrRuns({
+    companyId,
+    documentId
+  });
+  const latestRun = [...(documentState.ocrRuns || [])]
+    .sort((left, right) => (left.completedAt || left.createdAt).localeCompare(right.completedAt || right.createdAt))
+    .at(-1);
+  if (!latestRun) {
+    throw createError(409, "document_ocr_required", "Document OCR must be completed before AP ingest.");
+  }
+  const approvedCorrection = [...(documentState.reviewTasks || [])]
+    .filter((task) => task.ocrRunId === latestRun.ocrRunId && task.status === "approved")
+    .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
+    .at(-1);
+  const ocrFields = mergeOcrFieldMaps(latestRun.extractedFieldsJson || {}, approvedCorrection?.correctedFieldsJson || {});
+  return {
+    documentId: documentState.document.documentId,
+    documentVersionId: latestRun.ocrDocumentVersionId || latestRun.sourceDocumentVersionId || null,
+    externalInvoiceRef: readOcrFieldValue(ocrFields.invoiceNumber),
+    invoiceNumber: readOcrFieldValue(ocrFields.invoiceNumber),
+    invoiceDate: readOcrFieldValue(ocrFields.invoiceDate),
+    dueDate: readOcrFieldValue(ocrFields.dueDate),
+    currencyCode: readOcrFieldValue(ocrFields.currencyCode),
+    paymentReference: readOcrFieldValue(ocrFields.reference),
+    purchaseOrderReference: readOcrFieldValue(ocrFields.purchaseOrderReference),
+    ocrFields,
+    lineItems: Array.isArray(readOcrFieldValue(ocrFields.lineItems)) ? readOcrFieldValue(ocrFields.lineItems) : [],
+    reviewRequired: latestRun.reviewRequired === true,
+    extractedText: latestRun.extractedText || "",
+    documentHash: hashObject({
+      documentId: documentState.document.documentId,
+      ocrRunId: latestRun.ocrRunId,
+      extractedFieldsJson: ocrFields,
+      extractedText: latestRun.extractedText || ""
+    })
+  };
+}
+
+function normalizeSupplierInvoiceLines({
+  lines,
+  documentContext,
+  supplier,
+  purchaseOrder,
+  companyId,
+  vatPlatform,
+  actorId,
+  correlationId
+}) {
+  const documentLines = documentContext?.lineItems || [];
+  const sourceLines =
+    Array.isArray(lines) && lines.length > 0
+      ? lines
+      : documentLines.length > 0
+        ? documentLines
+        : [
+            {
+              description: `Invoice ${documentContext?.externalInvoiceRef || "summary"}`,
+              quantity: 1,
+              unitPrice: readMoneyField(documentContext?.ocrFields?.netAmount) || readMoneyField(documentContext?.ocrFields?.totalAmount),
+              netAmount: readMoneyField(documentContext?.ocrFields?.netAmount) || readMoneyField(documentContext?.ocrFields?.totalAmount),
+              vatCode: supplier.defaultVatCode,
+              expenseAccountNumber: supplier.defaultExpenseAccountNumber
+            }
+          ];
+
+  return sourceLines.map((line, index) => {
+    const purchaseOrderLine = purchaseOrder ? resolvePurchaseOrderLineForInvoice(purchaseOrder, { ...line, lineNo: index + 1 }) : null;
+    const quantity = roundQuantity(
+      normalizePositiveNumber(
+        line.quantity ?? 1,
+        "supplier_invoice_line_quantity_invalid"
+      )
+    );
+    const unitPrice = normalizeMoney(
+      line.unitPrice ??
+        (line.netAmount != null ? Number(line.netAmount) / quantity : purchaseOrderLine?.unitPrice ?? supplier.defaultUnitPrice ?? 0),
+      "supplier_invoice_line_unit_price_invalid"
+    );
+    if (unitPrice <= 0) {
+      throw createError(409, "supplier_invoice_line_unit_price_invalid", "Supplier invoice line unit price must be positive.");
+    }
+    const netAmount = normalizeMoney(
+      line.netAmount != null ? line.netAmount : roundMoney(quantity * unitPrice),
+      "supplier_invoice_line_net_amount_invalid"
+    );
+    const expenseAccountNumber =
+      normalizeOptionalAccountNumber(line.expenseAccountNumber) ||
+      purchaseOrderLine?.expenseAccountNumber ||
+      purchaseOrder?.defaultExpenseAccountNumber ||
+      supplier.defaultExpenseAccountNumber ||
+      null;
+    const dimensionsJson = mergeDimensions(
+      supplier.defaultDimensionsJson,
+      mergeDimensions(purchaseOrder?.defaultDimensionsJson, line.dimensionsJson || {})
+    );
+    const vatProposal = buildApVatProposal({
+      companyId,
+      supplier,
+      line,
+      netAmount,
+      quantity,
+      purchaseOrderLine,
+      vatPlatform,
+      actorId,
+      correlationId
+    });
+    const reviewQueueCodes = uniqueStrings([
+      ...(expenseAccountNumber ? [] : ["coding_required"]),
+      ...(vatProposal.reviewRequired ? vatProposal.reviewQueueCodes : [])
+    ]);
+
+    return {
+      supplierInvoiceLineId: crypto.randomUUID(),
+      lineNo: index + 1,
+      description: requireText(line.description || `Invoice line ${index + 1}`, "supplier_invoice_line_description_required"),
+      quantity,
+      unitPrice,
+      netAmount,
+      expenseAccountNumber,
+      dimensionsJson,
+      goodsOrServices: normalizeOptionalText(line.goodsOrServices)?.toLowerCase() === "goods" ? "goods" : "services",
+      reverseChargeFlag: line.reverseChargeFlag === true || supplier.reverseChargeDefault === true,
+      constructionServiceFlag: line.constructionServiceFlag === true,
+      deductionRatio: line.deductionRatio == null ? 1 : normalizeNonNegativeNumber(line.deductionRatio, "supplier_invoice_line_deduction_ratio_invalid"),
+      vatCode: vatProposal.vatCode,
+      vatRate: vatProposal.vatRate,
+      vatAmount: vatProposal.vatAmount,
+      grossAmount: roundMoney(netAmount + vatProposal.vatAmount),
+      vatProposal,
+      receiptRequired: line.receiptRequired === true || supplier.requiresReceipt === true,
+      purchaseOrderLineId: normalizeOptionalText(line.purchaseOrderLineId),
+      purchaseOrderLineReference: normalizeOptionalText(line.purchaseOrderLineReference),
+      purchaseOrderMatchedLineId: purchaseOrderLine?.purchaseOrderLineId || null,
+      toleranceProfileCode: purchaseOrderLine?.toleranceProfileCode || purchaseOrder?.toleranceProfileCode || "standard",
+      reviewRequired: reviewQueueCodes.length > 0,
+      reviewQueueCodes
+    };
+  });
+}
+
+function buildApVatProposal({
+  companyId,
+  supplier,
+  line,
+  netAmount,
+  quantity,
+  purchaseOrderLine,
+  vatPlatform,
+  actorId,
+  correlationId
+}) {
+  const vatCodeCandidate =
+    normalizeOptionalText(line.vatCode) ||
+    purchaseOrderLine?.vatCode ||
+    supplier.defaultVatCode ||
+    deriveDomesticPurchaseVatCode(line.vatRate);
+  const goodsOrServices = normalizeOptionalText(line.goodsOrServices)?.toLowerCase() === "goods" ? "goods" : "services";
+  const reverseChargeFlag = line.reverseChargeFlag === true || supplier.reverseChargeDefault === true;
+  if (supplier.countryCode === "SE" && reverseChargeFlag !== true) {
+    return buildDomesticPurchaseVatProposal({
+      vatCodeCandidate,
+      vatRate: line.vatRate,
+      netAmount
+    });
+  }
+  if (!vatPlatform || typeof vatPlatform.evaluateVatDecision !== "function") {
+    return buildReviewVatProposal("tax_review_required", "VAT platform is missing for non-domestic or reverse-charge purchases.");
+  }
+  const vatEvaluation = vatPlatform.evaluateVatDecision({
+    companyId,
+    actorId,
+    correlationId,
+    transactionLine: {
+      source_type: "AP_INVOICE",
+      source_id: `${supplier.supplierId}:${line.description}:${quantity}`,
+      supply_type: "purchase",
+      seller_country: supplier.countryCode,
+      buyer_country: "SE",
+      goods_or_services: goodsOrServices,
+      line_amount_ex_vat: netAmount,
+      vat_rate: line.vatRate ?? deriveVatRateFromCode(vatCodeCandidate) ?? 25,
+      reverse_charge_flag: reverseChargeFlag,
+      import_flag: supplier.countryCode !== "SE" && !EU_COUNTRY_CODES.has(supplier.countryCode) && goodsOrServices === "goods",
+      buyer_is_taxable_person: true,
+      construction_service_flag: line.constructionServiceFlag === true,
+      vat_code_candidate: vatCodeCandidate,
+      deduction_ratio: line.deductionRatio == null ? 1 : line.deductionRatio
+    }
+  });
+  const vatDecision = vatEvaluation.vatDecision;
+  const postingEntries = vatDecision.outputs?.postingEntries || vatDecision.postingEntries || [];
+  const vatAmount = roundMoney(
+    postingEntries.reduce((sum, entry) => {
+      if (entry.vatEffect === "input_vat" || entry.vatEffect === "output_vat") {
+        return sum + Math.abs(Number(entry.amount || 0));
+      }
+      return sum;
+    }, 0)
+  );
+  const reviewRequired = vatDecision.status === "review_required" || Boolean(vatEvaluation.reviewQueueItem);
+  return {
+    vatCode: vatDecision.vatCode,
+    vatRate: Number(vatDecision.outputs?.vatRate ?? vatDecision.vatRate ?? deriveVatRateFromCode(vatDecision.vatCode) ?? 0),
+    vatAmount,
+    explanation: vatDecision.explanation,
+    decisionCategory: vatDecision.outputs?.decisionCategory || vatDecision.decisionCategory || "review_required",
+    declarationBoxCodes: copy(vatDecision.declarationBoxCodes || vatDecision.outputs?.declarationBoxCodes || []),
+    postingEntries: copy(postingEntries),
+    reviewRequired,
+    reviewQueueCodes: reviewRequired
+      ? [vatDecision.reviewQueueCode || vatEvaluation.reviewQueueItem?.reviewQueueCode || "tax_review_required"]
+      : [],
+    vatDecisionId: vatDecision.vatDecisionId || null,
+    vatReviewQueueItemId: vatEvaluation.reviewQueueItem?.vatReviewQueueItemId || null
+  };
+}
+
+function buildDomesticPurchaseVatProposal({ vatCodeCandidate, vatRate, netAmount }) {
+  const resolvedVatCode = vatCodeCandidate || deriveDomesticPurchaseVatCode(vatRate);
+  const resolvedVatRate = deriveVatRateFromCode(resolvedVatCode) ?? normalizeOptionalNumber(vatRate) ?? 0;
+  if (resolvedVatCode === null) {
+    return buildReviewVatProposal("tax_review_required", "Domestic supplier-charged VAT code could not be derived.");
+  }
+  const vatAmount = roundMoney(netAmount * (resolvedVatRate / 100));
+  return {
+    vatCode: resolvedVatCode,
+    vatRate: resolvedVatRate,
+    vatAmount,
+    explanation:
+      resolvedVatRate > 0
+        ? `Leverantören är svensk och raden använder ingående moms ${resolvedVatRate} %. Beloppet förs till konto 2640 och box 48.`
+        : "Leverantören är svensk men raden är momsfri eller undantagen och ger därför ingen ingående moms.",
+    decisionCategory: "domestic_supplier_charged_purchase",
+    declarationBoxCodes: resolvedVatRate > 0 ? ["48"] : [],
+    postingEntries:
+      resolvedVatRate > 0
+        ? [
+            {
+              entryCode: "input_vat_supplier_charged",
+              direction: "debit",
+              amount: vatAmount,
+              vatEffect: "input_vat"
+            }
+          ]
+        : [],
+    reviewRequired: false,
+    reviewQueueCodes: [],
+    vatDecisionId: null,
+    vatReviewQueueItemId: null
+  };
+}
+
+function buildReviewVatProposal(reviewQueueCode, explanation) {
+  return {
+    vatCode: "VAT_REVIEW_REQUIRED",
+    vatRate: 0,
+    vatAmount: 0,
+    explanation,
+    decisionCategory: "review_required",
+    declarationBoxCodes: [],
+    postingEntries: [],
+    reviewRequired: true,
+    reviewQueueCodes: [reviewQueueCode],
+    vatDecisionId: null,
+    vatReviewQueueItemId: null
+  };
+}
+
+function resolvePurchaseOrderForInvoice({ state, companyId, purchaseOrderId = null, purchaseOrderNo = null }) {
+  if (purchaseOrderId) {
+    return requirePurchaseOrderRecord(state, companyId, purchaseOrderId);
+  }
+  const normalizedPurchaseOrderNo = normalizeOptionalText(purchaseOrderNo);
+  if (!normalizedPurchaseOrderNo) {
+    return null;
+  }
+  const resolvedPurchaseOrderId = state.purchaseOrderIdsByCompanyNo.get(
+    toCompanyScopedKey(companyId, normalizedPurchaseOrderNo.toUpperCase())
+  );
+  return resolvedPurchaseOrderId ? requirePurchaseOrderRecord(state, companyId, resolvedPurchaseOrderId) : null;
+}
+
+function resolvePurchaseOrderLineForInvoice(purchaseOrder, line) {
+  const purchaseOrderLineId = normalizeOptionalText(line.purchaseOrderMatchedLineId || line.purchaseOrderLineId);
+  if (purchaseOrderLineId) {
+    return purchaseOrder.lines.find((candidate) => candidate.purchaseOrderLineId === purchaseOrderLineId) || null;
+  }
+  const purchaseOrderLineReference = normalizeOptionalText(line.purchaseOrderLineReference);
+  if (purchaseOrderLineReference) {
+    return (
+      purchaseOrder.lines.find(
+        (candidate) => String(candidate.lineNo) === purchaseOrderLineReference || candidate.description === purchaseOrderLineReference
+      ) || null
+    );
+  }
+  if (purchaseOrder.lines.length === 1) {
+    return purchaseOrder.lines[0];
+  }
+  return purchaseOrder.lines.find((candidate) => candidate.lineNo === line.lineNo) || null;
+}
+
+function createInvoiceVariance({
+  invoice,
+  line,
+  varianceCode,
+  severity,
+  message,
+  expectedValue,
+  actualValue,
+  toleranceValue = null
+}) {
+  return {
+    supplierInvoiceVarianceId: crypto.randomUUID(),
+    companyId: invoice.companyId,
+    supplierInvoiceId: invoice.supplierInvoiceId,
+    supplierInvoiceLineId: line.supplierInvoiceLineId,
+    varianceCode,
+    reviewQueueCode: varianceCode === "tax_review_required" ? "tax_review_required" : "match_variance",
+    severity,
+    status: "open",
+    message,
+    expectedValue,
+    actualValue,
+    toleranceValue,
+    createdAt: invoice.updatedAt
+  };
+}
+
+function summarizeReceiptQuantity(state, purchaseOrderId, purchaseOrderLineId) {
+  const purchaseOrder = state.purchaseOrders.get(purchaseOrderId);
+  if (!purchaseOrder) {
+    return 0;
+  }
+  return roundQuantity(
+    (state.receiptIdsByCompany.get(purchaseOrder.companyId) || [])
+      .map((receiptId) => state.receipts.get(receiptId))
+      .filter(Boolean)
+      .filter((receipt) => receipt.purchaseOrderId === purchaseOrderId)
+      .flatMap((receipt) => receipt.lines)
+      .filter((line) => line.purchaseOrderLineId === purchaseOrderLineId)
+      .reduce((sum, line) => sum + Number(line.receivedQuantity || 0), 0)
+  );
+}
+
+function resolveToleranceProfile(toleranceProfileCode) {
+  const normalized = normalizeOptionalText(toleranceProfileCode);
+  return copy(DEFAULT_TOLERANCE_PROFILES[normalized] || DEFAULT_TOLERANCE_PROFILES.standard);
+}
+
+function buildSupplierInvoiceJournalLines({ invoice, supplier }) {
+  const lines = [];
+  for (const invoiceLine of invoice.lines) {
+    if (!invoiceLine.expenseAccountNumber) {
+      throw createError(409, "supplier_invoice_line_account_required", "Supplier invoice line account is required before posting.");
+    }
+    lines.push({
+      accountNumber: invoiceLine.expenseAccountNumber,
+      debitAmount: invoiceLine.netAmount,
+      creditAmount: 0,
+      dimensionJson: copy(invoiceLine.dimensionsJson || {})
+    });
+    for (const vatPostingEntry of invoiceLine.vatProposal.postingEntries || []) {
+      lines.push({
+        accountNumber: resolveVatAccountNumber(vatPostingEntry, invoiceLine.vatProposal),
+        debitAmount: vatPostingEntry.direction === "debit" ? Number(vatPostingEntry.amount || 0) : 0,
+        creditAmount: vatPostingEntry.direction === "credit" ? Number(vatPostingEntry.amount || 0) : 0,
+        dimensionJson: copy(invoiceLine.dimensionsJson || {})
+      });
+    }
+  }
+  lines.push({
+    accountNumber: resolveLiabilityAccountNumber(supplier),
+    debitAmount: 0,
+    creditAmount: invoice.grossAmount,
+    dimensionJson: {}
+  });
+  return lines;
+}
+
+function mergeJournalLines(lines) {
+  const grouped = new Map();
+  for (const line of lines) {
+    const key = stableStringify({
+      accountNumber: line.accountNumber,
+      dimensionJson: line.dimensionJson || {}
+    });
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.debitAmount = roundMoney(existing.debitAmount + Number(line.debitAmount || 0));
+      existing.creditAmount = roundMoney(existing.creditAmount + Number(line.creditAmount || 0));
+      continue;
+    }
+    grouped.set(key, {
+      accountNumber: line.accountNumber,
+      debitAmount: roundMoney(Number(line.debitAmount || 0)),
+      creditAmount: roundMoney(Number(line.creditAmount || 0)),
+      dimensionJson: copy(line.dimensionJson || {})
+    });
+  }
+  return [...grouped.values()].filter((line) => line.debitAmount > 0 || line.creditAmount > 0);
+}
+
+function resolveVatAccountNumber(vatPostingEntry, vatProposal) {
+  if (vatPostingEntry.vatEffect === "input_vat") {
+    return DEFAULT_VAT_ACCOUNT_BY_EFFECT.input_vat;
+  }
+  if (vatProposal.decisionCategory?.includes("eu_")) {
+    return "2660";
+  }
+  if (vatProposal.decisionCategory?.includes("construction")) {
+    return "2670";
+  }
+  if (vatProposal.decisionCategory?.includes("import")) {
+    return "2680";
+  }
+  return DEFAULT_VAT_ACCOUNT_BY_EFFECT.output_vat;
+}
+
+function resolveLiabilityAccountNumber(supplier) {
+  if (supplier.countryCode === "SE") {
+    return DEFAULT_LIABILITY_ACCOUNT_BY_REGION.SE;
+  }
+  if (EU_COUNTRY_CODES.has(supplier.countryCode)) {
+    return DEFAULT_LIABILITY_ACCOUNT_BY_REGION.EU;
+  }
+  return DEFAULT_LIABILITY_ACCOUNT_BY_REGION.NON_EU;
+}
+
+function buildSupplierInvoiceFingerprint({
+  supplierId,
+  externalInvoiceRef,
+  invoiceDate,
+  grossAmount,
+  currencyCode,
+  documentHash,
+  paymentReference = null
+}) {
+  return hashObject({
+    supplierId,
+    externalInvoiceRef: requireText(externalInvoiceRef, "supplier_invoice_external_ref_required").toUpperCase(),
+    invoiceDate,
+    grossAmount: roundMoney(grossAmount),
+    currencyCode: normalizeUpperCode(currencyCode, "currency_code_required", 3),
+    documentHash: requireText(documentHash, "document_hash_required"),
+    paymentReference: normalizeOptionalText(paymentReference)
+  });
+}
+
+function findNearDuplicateSupplierInvoice({
+  state,
+  companyId,
+  supplierId,
+  externalInvoiceRef,
+  invoiceDate,
+  grossAmount,
+  currencyCode,
+  documentHash
+}) {
+  return (state.supplierInvoiceIdsByCompany.get(companyId) || [])
+    .map((supplierInvoiceId) => state.supplierInvoices.get(supplierInvoiceId))
+    .filter(Boolean)
+    .find(
+      (candidate) =>
+        candidate.supplierId === supplierId &&
+        candidate.externalInvoiceRef === externalInvoiceRef &&
+        candidate.invoiceDate === invoiceDate &&
+        candidate.currencyCode === currencyCode &&
+        roundMoney(candidate.grossAmount) === roundMoney(grossAmount) &&
+        candidate.documentHash !== documentHash
+    );
+}
+
+function buildInvoiceDocumentHash({ documentContext, fallbackValue }) {
+  if (documentContext?.documentHash) {
+    return documentContext.documentHash;
+  }
+  return hashObject(fallbackValue);
+}
+
+function readOcrFieldValue(field) {
+  if (field && typeof field === "object" && "value" in field) {
+    return field.value;
+  }
+  return field ?? null;
+}
+
+function readMoneyField(field) {
+  const raw = readOcrFieldValue(field);
+  if (raw === null || raw === undefined || raw === "") {
+    return null;
+  }
+  const numeric = Number(String(raw).replace(",", "."));
+  return Number.isFinite(numeric) ? roundMoney(numeric) : null;
+}
+
+function mergeOcrFieldMaps(extractedFields, correctedFields) {
+  const merged = copy(extractedFields || {});
+  for (const [key, value] of Object.entries(correctedFields || {})) {
+    merged[key] = value;
+  }
+  return merged;
+}
+
+function normalizePartyLabel(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function deriveDomesticPurchaseVatCode(vatRate) {
+  const resolvedVatRate = normalizeOptionalNumber(vatRate);
+  if (resolvedVatRate === 25) {
+    return "VAT_SE_DOMESTIC_25";
+  }
+  if (resolvedVatRate === 12) {
+    return "VAT_SE_DOMESTIC_12";
+  }
+  if (resolvedVatRate === 6) {
+    return "VAT_SE_DOMESTIC_6";
+  }
+  if (resolvedVatRate === 0) {
+    return "VAT_SE_EXEMPT";
+  }
+  return null;
+}
+
+function deriveVatRateFromCode(vatCode) {
+  switch ((normalizeOptionalText(vatCode) || "").toUpperCase()) {
+    case "VAT_SE_DOMESTIC_25":
+    case "VAT_SE_RC_BUILD_PURCHASE":
+    case "VAT_SE_EU_GOODS_PURCHASE_RC":
+    case "VAT_SE_EU_SERVICES_PURCHASE_RC":
+    case "VAT_SE_NON_EU_SERVICE_PURCHASE_RC":
+    case "VAT_SE_DOMESTIC_GOODS_PURCHASE_RC":
+    case "VAT_SE_DOMESTIC_SERVICES_PURCHASE_RC":
+      return 25;
+    case "VAT_SE_DOMESTIC_12":
+      return 12;
+    case "VAT_SE_DOMESTIC_6":
+      return 6;
+    case "VAT_SE_EXEMPT":
+      return 0;
+    default:
+      return null;
+  }
+}
+
+function uniqueStrings(values) {
+  return [...new Set((values || []).filter(Boolean))];
 }
 
 function resolveSupplierForImport(state, companyId, incoming) {
@@ -1258,6 +2451,14 @@ function normalizeNonNegativeNumber(value, code) {
     throw createError(409, code, `${code.replaceAll("_", " ")}.`);
   }
   return numeric;
+}
+
+function normalizeOptionalNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function normalizeOptionalMoney(value, code) {

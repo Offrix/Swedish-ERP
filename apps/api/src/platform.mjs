@@ -29,7 +29,9 @@ export function createApiPlatform(options = {}) {
   });
   const apPlatform = createApPlatform({
     ...options,
-    vatPlatform
+    vatPlatform,
+    ledgerPlatform,
+    documentPlatform: documentArchivePlatform
   });
 
   return {

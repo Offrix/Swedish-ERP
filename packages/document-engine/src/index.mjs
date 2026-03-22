@@ -663,8 +663,13 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       sourceText,
       suggestedDocumentType: classification.suggestedDocumentType
     });
-    const reviewDecision = evaluateReviewRequirement({
+    const resolvedClassification = refineClassification({
       classification,
+      extractedFields,
+      thresholds
+    });
+    const reviewDecision = evaluateReviewRequirement({
+      classification: resolvedClassification,
       extractedFields,
       thresholds
     });
@@ -690,9 +695,9 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     });
 
     const classificationPayload = {
-      suggestedDocumentType: classification.suggestedDocumentType,
-      confidence: classification.confidence,
-      candidates: classification.candidates,
+      suggestedDocumentType: resolvedClassification.suggestedDocumentType,
+      confidence: resolvedClassification.confidence,
+      candidates: resolvedClassification.candidates,
       extractedFields,
       reviewRequired: reviewDecision.reviewRequired
     };
@@ -707,9 +712,9 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       derivesFromDocumentVersionId: ocrVersion.version.documentVersionId,
       metadataJson: {
         ocrRunId: run.ocrRunId,
-        suggestedDocumentType: classification.suggestedDocumentType,
-        confidence: classification.confidence,
-        candidates: classification.candidates,
+        suggestedDocumentType: resolvedClassification.suggestedDocumentType,
+        confidence: resolvedClassification.confidence,
+        candidates: resolvedClassification.candidates,
         extractedFields,
         reviewRequired: reviewDecision.reviewRequired
       },
@@ -719,9 +724,9 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
 
     run.status = "completed";
     run.reviewRequired = reviewDecision.reviewRequired;
-    run.suggestedDocumentType = classification.suggestedDocumentType;
-    run.classificationConfidence = classification.confidence;
-    run.classificationCandidatesJson = classification.candidates;
+    run.suggestedDocumentType = resolvedClassification.suggestedDocumentType;
+    run.classificationConfidence = resolvedClassification.confidence;
+    run.classificationCandidatesJson = resolvedClassification.candidates;
     run.extractedText = sourceText;
     run.extractedFieldsJson = extractedFields;
     run.ocrDocumentVersionId = ocrVersion.version.documentVersionId;
@@ -735,8 +740,8 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     document.status = "classified";
     document.updatedAt = nowIso();
     document.metadataJson.latestOcrRunId = run.ocrRunId;
-    document.metadataJson.lastSuggestedDocumentType = classification.suggestedDocumentType;
-    document.metadataJson.lastClassificationConfidence = classification.confidence;
+    document.metadataJson.lastSuggestedDocumentType = resolvedClassification.suggestedDocumentType;
+    document.metadataJson.lastClassificationConfidence = resolvedClassification.confidence;
 
     let reviewTask = null;
     if (reviewDecision.reviewRequired) {
@@ -749,7 +754,7 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
         correlationId
       });
     } else {
-      document.documentType = classification.suggestedDocumentType;
+      document.documentType = resolvedClassification.suggestedDocumentType;
     }
 
     pushAudit({
@@ -759,7 +764,7 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       result: reviewDecision.reviewRequired ? "warning" : "success",
       entityType: "ocr_run",
       entityId: run.ocrRunId,
-      explanation: `OCR run completed with suggestion ${classification.suggestedDocumentType} at confidence ${classification.confidence.toFixed(2)}.`,
+      explanation: `OCR run completed with suggestion ${resolvedClassification.suggestedDocumentType} at confidence ${resolvedClassification.confidence.toFixed(2)}.`,
       correlationId
     });
 
@@ -1458,6 +1463,92 @@ function addClassificationScore(scoreMap, documentType, haystack, patterns) {
   scoreMap.set(documentType, score);
 }
 
+function refineClassification({ classification, extractedFields, thresholds }) {
+  const adjustedConfidence = boostClassificationConfidence({
+    classification,
+    extractedFields,
+    thresholds
+  });
+  if (adjustedConfidence === classification.confidence) {
+    return classification;
+  }
+
+  const candidates = classification.candidates
+    .map((candidate) =>
+      candidate.documentType === classification.suggestedDocumentType
+        ? {
+            ...candidate,
+            confidence: adjustedConfidence
+          }
+        : candidate
+    )
+    .sort((left, right) => right.confidence - left.confidence);
+
+  return {
+    ...classification,
+    confidence: adjustedConfidence,
+    candidates
+  };
+}
+
+function boostClassificationConfidence({ classification, extractedFields, thresholds }) {
+  if (classification.suggestedDocumentType !== "supplier_invoice") {
+    return classification.confidence;
+  }
+
+  const fieldThreshold = thresholds.fieldConfidenceThreshold;
+  const hasStrongRequiredFields = ["counterparty", "invoiceNumber", "totalAmount"].every((fieldName) =>
+    hasFieldConfidence(extractedFields[fieldName], fieldThreshold)
+  );
+
+  if (!hasStrongRequiredFields) {
+    return classification.confidence;
+  }
+
+  let bonus = 0.08;
+  if (hasFieldConfidence(extractedFields.invoiceDate, fieldThreshold)) {
+    bonus += 0.03;
+  }
+  if (hasFieldConfidence(extractedFields.dueDate, fieldThreshold)) {
+    bonus += 0.03;
+  }
+  if (hasFieldConfidence(extractedFields.currencyCode, fieldThreshold)) {
+    bonus += 0.01;
+  }
+  if (hasFieldConfidence(extractedFields.netAmount, fieldThreshold)) {
+    bonus += 0.01;
+  }
+  if (hasFieldConfidence(extractedFields.vatAmount, fieldThreshold)) {
+    bonus += 0.01;
+  }
+
+  const lineItems = Array.isArray(extractedFields.lineItems?.value) ? extractedFields.lineItems.value : [];
+  if (lineItems.length > 0 && extractedFields.lineItems.confidence >= fieldThreshold) {
+    bonus += 0.04;
+    const declaredNetAmount = parseMoneyField(extractedFields.netAmount);
+    if (declaredNetAmount !== null) {
+      const extractedNetAmount = roundMoney(lineItems.reduce((total, lineItem) => total + Number(lineItem.netAmount || 0), 0));
+      if (Math.abs(extractedNetAmount - declaredNetAmount) <= 0.01) {
+        bonus += 0.02;
+      }
+    }
+  }
+
+  return clampConfidence(classification.confidence + bonus);
+}
+
+function hasFieldConfidence(field, threshold) {
+  return Boolean(field?.value) && typeof field.confidence === "number" && field.confidence >= threshold;
+}
+
+function parseMoneyField(field) {
+  if (!field?.value) {
+    return null;
+  }
+  const parsed = Number(String(field.value).replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function extractOcrFields({ sourceText, suggestedDocumentType }) {
   const normalized = sourceText.replace(/\r/g, "");
   const fields = {};
@@ -1465,8 +1556,15 @@ function extractOcrFields({ sourceText, suggestedDocumentType }) {
   if (suggestedDocumentType === "supplier_invoice") {
     fields.counterparty = extractField(normalized, [/(?:supplier|leverantor)\s*[:#-]?\s*([^\n]+)/i]);
     fields.invoiceNumber = extractField(normalized, [/(?:invoice|faktura)\s*(?:number|nr)?\s*[:#-]?\s*([A-Z0-9-]+)/i]);
+    fields.invoiceDate = extractField(normalized, [/(?:invoice date|fakturadatum|datum)\s*[:#-]?\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/i]);
+    fields.dueDate = extractField(normalized, [/(?:due date|forfallodatum|forfaller)\s*[:#-]?\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/i]);
+    fields.currencyCode = extractField(normalized, [/(?:currency|valuta)\s*[:#-]?\s*([A-Z]{3})/i]);
+    fields.netAmount = extractField(normalized, [/(?:net|netto)\s*[:#-]?\s*([0-9]+(?:[.,][0-9]{2})?)/i]);
+    fields.vatAmount = extractField(normalized, [/(?:vat|moms)\s*[:#-]?\s*([0-9]+(?:[.,][0-9]{2})?)/i]);
     fields.totalAmount = extractField(normalized, [/(?:total|summa|brutto)\s*[:#-]?\s*([0-9]+(?:[.,][0-9]{2})?)/i]);
     fields.reference = extractField(normalized, [/(?:ocr|reference|referens|order)\s*[:#-]?\s*([A-Z0-9-]+)/i]);
+    fields.purchaseOrderReference = extractField(normalized, [/(?:po|purchase order|inkopsorder|orderref|order reference)\s*[:#-]?\s*([A-Z0-9-]+)/i]);
+    fields.lineItems = extractInvoiceLineItems(normalized);
     return fields;
   }
 
@@ -1487,6 +1585,48 @@ function extractOcrFields({ sourceText, suggestedDocumentType }) {
   return {};
 }
 
+function extractInvoiceLineItems(sourceText) {
+  const candidateLines = sourceText
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const lineItems = [];
+
+  for (const line of candidateLines) {
+    if (!/(?:line|rad)\b/i.test(line) && !/(?:qty|quantity|antal)\b/i.test(line)) {
+      continue;
+    }
+    const descriptionMatch = line.match(/(?:line|rad)\s*\d*\s*[:#-]?\s*(.+?)(?=\s+(?:qty|quantity|antal|unit|pris|net|amount|belopp|vat|moms|account|konto)\b|$)/i);
+    const quantity = extractNumericToken(line, [/(?:qty|quantity|antal)\s*[:#-]?\s*([0-9]+(?:[.,][0-9]+)?)/i]);
+    const unitPrice = extractNumericToken(line, [/(?:unit(?:\s*price)?|pris)\s*[:#-]?\s*([0-9]+(?:[.,][0-9]{2})?)/i]);
+    const netAmount =
+      extractNumericToken(line, [/(?:net|amount|belopp)\s*[:#-]?\s*([0-9]+(?:[.,][0-9]{2})?)/i]) ??
+      (quantity !== null && unitPrice !== null ? roundMoney(quantity * unitPrice) : null);
+    const vatCodeMatch = line.match(/(?:vat|moms)\s*[:#-]?\s*([A-Z0-9_%-]+)/i);
+    const accountMatch = line.match(/(?:account|konto)\s*[:#-]?\s*([0-9]{4})/i);
+    const poLineRefMatch = line.match(/(?:po\s*line|order\s*line|porad)\s*[:#-]?\s*([A-Z0-9-]+)/i);
+
+    if (!descriptionMatch && quantity === null && unitPrice === null && netAmount === null) {
+      continue;
+    }
+
+    lineItems.push({
+      description: descriptionMatch ? descriptionMatch[1].trim() : "OCR line",
+      quantity,
+      unitPrice,
+      netAmount,
+      vatCode: vatCodeMatch ? vatCodeMatch[1].trim().toUpperCase() : null,
+      expenseAccountNumber: accountMatch ? accountMatch[1].trim() : null,
+      purchaseOrderLineReference: poLineRefMatch ? poLineRefMatch[1].trim() : null
+    });
+  }
+
+  return {
+    value: lineItems,
+    confidence: lineItems.length > 0 ? 0.96 : 0
+  };
+}
+
 function extractField(sourceText, patterns) {
   for (const pattern of patterns) {
     const match = sourceText.match(pattern);
@@ -1502,6 +1642,23 @@ function extractField(sourceText, patterns) {
     value: null,
     confidence: 0
   };
+}
+
+function extractNumericToken(sourceText, patterns) {
+  for (const pattern of patterns) {
+    const match = sourceText.match(pattern);
+    if (match?.[1]) {
+      const value = Number(String(match[1]).replace(",", "."));
+      if (Number.isFinite(value)) {
+        return value;
+      }
+    }
+  }
+  return null;
+}
+
+function roundMoney(value) {
+  return Math.round(Number(value) * 100) / 100;
 }
 
 function guessFieldConfidence(value) {

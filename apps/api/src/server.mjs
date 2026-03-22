@@ -129,7 +129,12 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/ap/purchase-orders/imports",
               "/v1/ap/purchase-orders/imports/:purchaseOrderImportBatchId",
               "/v1/ap/receipts",
-              "/v1/ap/receipts/:apReceiptId"
+              "/v1/ap/receipts/:apReceiptId",
+              "/v1/ap/invoices",
+              "/v1/ap/invoices/ingest",
+              "/v1/ap/invoices/:supplierInvoiceId",
+              "/v1/ap/invoices/:supplierInvoiceId/match",
+              "/v1/ap/invoices/:supplierInvoiceId/post"
             ]
           }
         : { status: "ok" }
@@ -3019,6 +3024,131 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/ap/invoices") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_supplier_invoice",
+      scopeCode: "ap"
+    });
+    const reviewRequired = url.searchParams.get("reviewRequired");
+    writeJson(res, 200, {
+      items: platform.listSupplierInvoices({
+        companyId,
+        status: url.searchParams.get("status") || null,
+        reviewRequired: reviewRequired === null ? null : reviewRequired === "true"
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ap/invoices/ingest") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ap_supplier_invoice",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      201,
+      platform.ingestSupplierInvoice({
+        ...body,
+        companyId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const apInvoiceMatch = matchPath(path, "/v1/ap/invoices/:supplierInvoiceId");
+  if (apInvoiceMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_supplier_invoice",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getSupplierInvoice({
+        companyId,
+        supplierInvoiceId: apInvoiceMatch.supplierInvoiceId
+      })
+    );
+    return;
+  }
+
+  const apInvoiceMatchRun = matchPath(path, "/v1/ap/invoices/:supplierInvoiceId/match");
+  if (apInvoiceMatchRun && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ap_supplier_invoice",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.runSupplierInvoiceMatch({
+        companyId,
+        supplierInvoiceId: apInvoiceMatchRun.supplierInvoiceId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const apInvoicePost = matchPath(path, "/v1/ap/invoices/:supplierInvoiceId/post");
+  if (apInvoicePost && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ap_supplier_invoice",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.postSupplierInvoice({
+        companyId,
+        supplierInvoiceId: apInvoicePost.supplierInvoiceId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   writeJson(res, 404, { error: "not_found" });
 }
 
@@ -3144,7 +3274,7 @@ function writeJson(res, statusCode, payload) {
 }
 
 function writeError(res, error) {
-  writeJson(res, error.status || 500, {
+  writeJson(res, error.status || error.statusCode || 500, {
     error: error.code || "internal_error",
     message: error.message || "Unexpected error"
   });

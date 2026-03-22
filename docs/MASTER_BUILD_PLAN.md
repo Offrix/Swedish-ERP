@@ -485,8 +485,8 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 5.2 Kundfakturor och leveranskanaler
   - [x] 5.3 Kundreskontra, pÃ¥minnelser och inbetalningsmatchning
 - [ ] **FAS 6 â€” LeverantÃ¶rsfakturor, inkÃ¶p, bank och betalningar**
-  - [ ] 6.1 LeverantÃ¶rsregister, PO och mottagning
-  - [ ] 6.2 LeverantÃ¶rsfaktura in, tolkning och matchning
+  - [x] 6.1 LeverantÃ¶rsregister, PO och mottagning
+  - [x] 6.2 LeverantÃ¶rsfaktura in, tolkning och matchning
   - [ ] 6.3 Attest, bankintegration och utbetalning
 - [ ] **FAS 7 â€” Tidportal, HR-bas och anstÃ¤lldportal**
   - [ ] 7.1 AnstÃ¤lldregister och HR-master
@@ -827,14 +827,14 @@ Bygg AP-motorn, attestkedjor, betalningsfÃ¶rslag och bankavstÃ¤mning.
 ### 6.2 LeverantÃ¶rsfaktura in, tolkning och matchning
 
 **Bygg detta**
-- [ ] AP-ingest
-- [ ] OCR/radnivÃ¥
-- [ ] 2-vÃ¤gs- och 3-vÃ¤gsmatchning
+- [x] AP-ingest
+- [x] OCR/radnivÃ¥
+- [x] 2-vÃ¤gs- och 3-vÃ¤gsmatchning
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] Flera kostnadsrader bokas rÃ¤tt
-- [ ] MomsfÃ¶rslag kan fÃ¶rklaras
-- [ ] Avvikelser krÃ¤ver granskning
+- [x] Flera kostnadsrader bokas rÃ¤tt
+- [x] MomsfÃ¶rslag kan fÃ¶rklaras
+- [x] Avvikelser krÃ¤ver granskning
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P6-02`.
 
@@ -1224,7 +1224,7 @@ Stresstesta systemet, kÃ¶r verklig migrering och gÃ¥ live kontrollerat.
 - FAS 3 â†’ `docs/compliance/se/accounting-foundation.md`
 - FAS 4 â†’ `docs/compliance/se/vat-engine.md`
 - FAS 5 â†’ `docs/compliance/se/ar-customer-invoicing-engine.md` och `docs/compliance/se/einvoice-peppol-engine.md`
-- FAS 6 â†’ `docs/compliance/se/ap-supplier-invoice-engine.md`, `docs/compliance/se/bank-and-payments-engine.md` och `docs/compliance/se/einvoice-peppol-engine.md`
+- FAS 6 â†’ `docs/compliance/se/ap-supplier-invoice-engine.md`, `docs/compliance/se/document-inbox-and-ocr-engine.md`, `docs/compliance/se/accounting-foundation.md`, `docs/compliance/se/bank-and-payments-engine.md`, `docs/compliance/se/einvoice-peppol-engine.md`, `docs/runbooks/fas-6-ap-masterdata-verification.md` och `docs/runbooks/fas-6-ap-invoice-matching-verification.md`
 - FAS 8 â†’ `docs/compliance/se/payroll-engine.md` och `docs/compliance/se/agi-engine.md`
 - FAS 9 â†’ `docs/compliance/se/benefits-engine.md`, `docs/compliance/se/travel-and-traktamente-engine.md`, `docs/compliance/se/pension-and-salary-exchange-engine.md`, `docs/compliance/se/cash-card-and-clearing-engine.md` och `docs/compliance/se/collections-writeoff-and-bad-debt-engine.md`
 - FAS 10 â†’ `docs/compliance/se/rot-rut-engine.md`, `docs/compliance/se/personalliggare-engine.md`, `docs/compliance/se/project-billing-and-revenue-recognition-engine.md` och `docs/domain/offline-sync-and-conflict-resolution.md`
