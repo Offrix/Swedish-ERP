@@ -9,6 +9,8 @@ Annual reporting boundary for K2/K3 package generation, version locking, signato
 - version text sections, note sections and derived tax-package outputs
 - invite and track signatories per package version
 - create superseding versions when accounting evidence changes after reopen
+- derive INK/NE/SRU underlag plus VAT, AGI, HUS and SLP audit overviews from the locked annual-report version
+- expose deterministic authority-overview fingerprints and reusable tax-declaration packages for later submission flows
 
 ## Guarantees
 
@@ -16,3 +18,4 @@ Annual reporting boundary for K2/K3 package generation, version locking, signato
 - unchanged source fingerprints reuse the current package version instead of mutating history
 - changed bookkeeping creates a new superseding version with preserved diff
 - signatory status is tracked per version and package status moves through draft, ready-for-signature and signed
+- tax-package exports carry internal checks bound to report snapshot hashes and underlag totals

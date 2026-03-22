@@ -408,6 +408,16 @@ När en fas använder någon av dessa förmågor ska respektive testplan läsas 
 - ofÃ¶rÃ¤ndrat bokfÃ¶ringsunderlag ska inte skapa ny version och Ã¤ndrat underlag efter reopen ska skapa superseding version med diff
 - versiondiff ska visa fÃ¶rÃ¤ndringar i rapportsnapshot, textsektioner eller notsektioner utan att tidigare version muteras
 
+## FAS 12.2 minimum coverage
+
+- deklarationsunderlag ska testas för `INK`, `NE` och `SRU` med interna checks bundna till samma låsta rapportsnapshots som årsrapportspaketet
+- moms-, AGI-, HUS- och särskild löneskatt-översikter ska härledas till respektive källa utan att underlaget muteras
+- tax declaration packages ska återanvända samma paket vid oförändrat source fingerprint och skapa nytt först när årsunderlaget ändras
+- submission tests ska särskilja `received`, `accepted`, `finalized`, `transport_failed` och `domain_rejected`
+- receiptkedjan ska vara append-only och identiska receipts ska vara idempotenta
+- action queue ska få rätt owner queue och rätt recommended action för transportfel respektive domänfel
+- retry ska skapa ny attempt utan att skriva över tidigare payload eller receipts
+
 ## Testdata policy
 
 - All testdata ska vara syntetisk eller avidentifierad.

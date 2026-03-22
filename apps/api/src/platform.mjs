@@ -102,12 +102,6 @@ export function createApiPlatform(options = {}) {
     reportingPlatform,
     ledgerPlatform
   });
-  const annualReportingPlatform = createAnnualReportingPlatform({
-    ...options,
-    ledgerPlatform,
-    reportingPlatform,
-    orgAuthPlatform
-  });
   const husPlatform = createHusPlatform({
     ...options,
     arPlatform,
@@ -123,6 +117,16 @@ export function createApiPlatform(options = {}) {
     arPlatform,
     hrPlatform,
     projectsPlatform
+  });
+  const annualReportingPlatform = createAnnualReportingPlatform({
+    ...options,
+    ledgerPlatform,
+    reportingPlatform,
+    orgAuthPlatform,
+    vatPlatform,
+    payrollPlatform,
+    husPlatform,
+    pensionPlatform
   });
 
   return {

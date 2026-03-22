@@ -1,6 +1,6 @@
 # API
 
-HTTP baseline plus phased domain routes through FAS 12.1.
+HTTP baseline plus phased domain routes through FAS 12.2.
 
 ## Start
 
@@ -350,6 +350,19 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/payroll/agi-submissions/:agiSubmissionId/ready-for-sign`
 - `POST /v1/payroll/agi-submissions/:agiSubmissionId/submit`
 - `POST /v1/payroll/agi-submissions/:agiSubmissionId/correction`
+- `GET /v1/annual-reporting/packages/:packageId/authority-overview?companyId=...`
+- `GET /v1/annual-reporting/packages/:packageId/tax-declarations?companyId=...`
+- `POST /v1/annual-reporting/packages/:packageId/tax-declarations`
+- `GET /v1/annual-reporting/packages/:packageId/tax-declarations/:taxDeclarationPackageId?companyId=...`
+- `GET /v1/submissions?companyId=...`
+- `POST /v1/submissions`
+- `GET /v1/submissions/:submissionId?companyId=...`
+- `POST /v1/submissions/:submissionId/sign`
+- `POST /v1/submissions/:submissionId/submit`
+- `POST /v1/submissions/:submissionId/receipts`
+- `POST /v1/submissions/:submissionId/retry`
+- `GET /v1/submissions/action-queue?companyId=...`
+- `POST /v1/submissions/action-queue/:queueItemId/resolve`
 - `GET /v1/payroll/postings?companyId=...`
 - `POST /v1/payroll/postings`
 - `GET /v1/payroll/postings/:payrollPostingId?companyId=...`

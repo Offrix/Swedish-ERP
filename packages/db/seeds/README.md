@@ -38,3 +38,4 @@ Seed execution policy:
 - Phase 11.2 seeds bureau-delivery settings plus demo portfolio, client request, approval package, work-item, comment and mass-action artifacts
 - Phase 11.3 seeds close deadline settings plus demo close checklist, checklist-step, blocker and close work-item artifacts
 - Phase 12.1 seeds a signed K2 annual-report package, signatory chain, submission event and derived tax-package artifact for annual-reporting verification
+- Phase 12.2 seeds annual-tax package metadata plus demo submission envelope, receipt chain and action-queue artifacts for declaration and operator verification

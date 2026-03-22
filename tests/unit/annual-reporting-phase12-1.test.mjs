@@ -1,16 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
-import { DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 
 test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions changed books", () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-22T14:15:00Z")
   });
-  const company = platform.createCompany({
+  const onboarding = platform.createOnboardingRun({
     legalName: "Annual Unit Client AB",
-    orgNumber: "559900-5401"
+    orgNumber: "559900-5401",
+    adminEmail: "annual.unit@example.com",
+    adminDisplayName: "Annual Unit Admin",
+    accountingYear: "2026"
   });
+  const company = platform.getCompanyProfile({
+    companyId: onboarding.companyId
+  });
+  const snapshot = platform.snapshot();
+  const adminUser = snapshot.users.find((candidate) => candidate.email === "annual.unit@example.com");
+  const adminCompanyUser = snapshot.companyUsers.find(
+    (candidate) => candidate.companyId === company.companyId && candidate.userId === adminUser?.userId
+  );
   platform.installLedgerCatalog({
     companyId: company.companyId,
     actorId: "phase12-1-unit"
@@ -27,7 +37,7 @@ test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions 
     companyId: company.companyId,
     accountingPeriodId: period.accountingPeriodId,
     profileCode: "k2",
-    actorId: DEMO_IDS.userId,
+    actorId: adminUser.userId,
     textSections: {
       management_report: "Stable annual report",
       accounting_policies: "K2 policy baseline"
@@ -45,7 +55,7 @@ test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions 
     companyId: company.companyId,
     packageId: annualPackage.packageId,
     versionId: annualPackage.currentVersion.versionId,
-    companyUserId: DEMO_IDS.companyUserId,
+    companyUserId: adminCompanyUser.companyUserId,
     signatoryRole: "ceo"
   });
   assert.equal(signatory.status, "invited");
@@ -54,7 +64,7 @@ test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions 
     companyId: company.companyId,
     packageId: annualPackage.packageId,
     versionId: annualPackage.currentVersion.versionId,
-    actorId: DEMO_IDS.userId,
+    actorId: adminUser.userId,
     comment: "Signed annual report."
   });
   assert.equal(signed.status, "signed");
@@ -65,7 +75,7 @@ test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions 
     accountingPeriodId: period.accountingPeriodId,
     actorId: "phase12-1-reopen-requester",
     reasonCode: "material_annual_adjustment",
-    approvedByActorId: DEMO_IDS.userId,
+    approvedByActorId: adminUser.userId,
     approvedByRoleCode: "company_admin"
   });
   postJournal(platform, company.companyId, "phase12-1-unit-income-2", 1200);
@@ -74,7 +84,7 @@ test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions 
   const revised = platform.createAnnualReportVersion({
     companyId: company.companyId,
     packageId: annualPackage.packageId,
-    actorId: DEMO_IDS.userId,
+    actorId: adminUser.userId,
     textSections: {
       management_report: "Stable annual report with adjustment",
       accounting_policies: "K2 policy baseline"
@@ -123,13 +133,15 @@ function postJournal(platform, companyId, sourceId, amount) {
 }
 
 function hardCloseYear(platform, companyId, accountingPeriodId) {
+  const snapshot = platform.snapshot();
+  const companyAdmin = snapshot.companyUsers.find((candidate) => candidate.companyId === companyId && candidate.roleCode === "company_admin");
   platform.lockAccountingPeriod({
     companyId,
     accountingPeriodId,
     status: "hard_closed",
     actorId: "phase12-1-close-requester",
     reasonCode: "annual_reporting_ready",
-    approvedByActorId: DEMO_IDS.userId,
+    approvedByActorId: companyAdmin.userId,
     approvedByRoleCode: "company_admin"
   });
 }

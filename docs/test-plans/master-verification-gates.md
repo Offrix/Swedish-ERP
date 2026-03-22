@@ -386,10 +386,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [x] Prompt `P12-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 12.2 Skatt, deklarationsunderlag och myndighetsfiler
-- [ ] Filer matchar interna siffror
-- [ ] Submission loggas med kvittens
-- [ ] Fel gÃ¥r till Ã¥tgÃ¤rdskÃ¶
-- [ ] Prompt `P12-02` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Filer matchar interna siffror
+- [x] Submission loggas med kvittens
+- [x] Fel gÃ¥r till Ã¥tgÃ¤rdskÃ¶
+- [x] Prompt `P12-02` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ## Gate for FAS 13 â€” API, integrationer, AI och automation
 

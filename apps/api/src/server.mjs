@@ -117,6 +117,17 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/annual-reporting/packages/:packageId/versions/:versionId/diff",
               "/v1/annual-reporting/packages/:packageId/versions/:versionId/signatories",
               "/v1/annual-reporting/packages/:packageId/versions/:versionId/sign",
+              "/v1/annual-reporting/packages/:packageId/authority-overview",
+              "/v1/annual-reporting/packages/:packageId/tax-declarations",
+              "/v1/annual-reporting/packages/:packageId/tax-declarations/:taxDeclarationPackageId",
+              "/v1/submissions",
+              "/v1/submissions/:submissionId",
+              "/v1/submissions/:submissionId/sign",
+              "/v1/submissions/:submissionId/submit",
+              "/v1/submissions/:submissionId/receipts",
+              "/v1/submissions/:submissionId/retry",
+              "/v1/submissions/action-queue",
+              "/v1/submissions/action-queue/:queueItemId/resolve",
               "/v1/collaboration/comments",
               "/v1/vat/codes",
               "/v1/vat/rule-packs",
@@ -2315,6 +2326,356 @@ async function handleRequest({ req, res, platform, flags }) {
       actorId: principal.userId,
       comment: body.comment || null
     }));
+    return;
+  }
+
+  const annualAuthorityOverviewMatch = matchPath(path, "/v1/annual-reporting/packages/:packageId/authority-overview");
+  if (annualAuthorityOverviewMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "annual_report_package",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getAnnualAuthorityOverview({
+        companyId,
+        packageId: annualAuthorityOverviewMatch.packageId,
+        versionId: url.searchParams.get("versionId") || null
+      })
+    );
+    return;
+  }
+
+  const annualTaxPackageMatch = matchPath(path, "/v1/annual-reporting/packages/:packageId/tax-declarations");
+  if (annualTaxPackageMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "annual_report_package",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(res, 200, {
+      items: platform.listTaxDeclarationPackages({
+        companyId,
+        packageId: annualTaxPackageMatch.packageId
+      })
+    });
+    return;
+  }
+
+  if (annualTaxPackageMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "annual_report_package",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createTaxDeclarationPackage({
+        companyId,
+        packageId: annualTaxPackageMatch.packageId,
+        versionId: body.versionId ?? null,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const annualTaxPackageRecordMatch = matchPath(path, "/v1/annual-reporting/packages/:packageId/tax-declarations/:taxDeclarationPackageId");
+  if (annualTaxPackageRecordMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "annual_report_package",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getTaxDeclarationPackage({
+        companyId,
+        taxDeclarationPackageId: annualTaxPackageRecordMatch.taxDeclarationPackageId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/submissions") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(res, 200, {
+      items: platform.listAuthoritySubmissions({
+        companyId,
+        submissionType: url.searchParams.get("submissionType") || null,
+        sourceObjectType: url.searchParams.get("sourceObjectType") || null,
+        sourceObjectId: url.searchParams.get("sourceObjectId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/submissions") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(
+      res,
+      201,
+      platform.prepareAuthoritySubmission({
+        companyId,
+        submissionType: body.submissionType,
+        periodId: body.periodId ?? null,
+        sourceObjectType: body.sourceObjectType,
+        sourceObjectId: body.sourceObjectId,
+        payloadVersion: body.payloadVersion || "phase12.2",
+        providerKey: body.providerKey,
+        recipientId: body.recipientId,
+        payload: body.payload ?? buildSubmissionPayloadFromSource({
+          platform,
+          companyId,
+          sourceObjectType: body.sourceObjectType,
+          sourceObjectId: body.sourceObjectId
+        }),
+        signedState: body.signedState || "pending",
+        signatoryRoleRequired: body.signatoryRoleRequired ?? null,
+        priority: body.priority || "normal",
+        retryClass: body.retryClass || "manual_only",
+        actorId: principal.userId,
+        idempotencyKey: body.idempotencyKey ?? null,
+        correlationId: body.correlationId ?? null
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/submissions/action-queue") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(res, 200, {
+      items: platform.listSubmissionActionQueue({
+        companyId,
+        status: url.searchParams.get("status") || null,
+        ownerQueue: url.searchParams.get("ownerQueue") || null
+      })
+    });
+    return;
+  }
+
+  const submissionMatch = matchPath(path, "/v1/submissions/:submissionId");
+  if (submissionMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getAuthoritySubmission({
+        companyId,
+        submissionId: submissionMatch.submissionId
+      })
+    );
+    return;
+  }
+
+  const submissionSignMatch = matchPath(path, "/v1/submissions/:submissionId/sign");
+  if (submissionSignMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(
+      res,
+      200,
+      platform.signAuthoritySubmission({
+        companyId,
+        submissionId: submissionSignMatch.submissionId,
+        actorId: principal.userId,
+        signatureReference: body.signatureReference ?? null
+      })
+    );
+    return;
+  }
+
+  const submissionSubmitMatch = matchPath(path, "/v1/submissions/:submissionId/submit");
+  if (submissionSubmitMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(
+      res,
+      200,
+      platform.submitAuthoritySubmission({
+        companyId,
+        submissionId: submissionSubmitMatch.submissionId,
+        actorId: principal.userId,
+        mode: body.mode || "test",
+        simulatedTransportOutcome: body.simulatedTransportOutcome || "technical_ack",
+        providerReference: body.providerReference ?? null,
+        message: body.message ?? null
+      })
+    );
+    return;
+  }
+
+  const submissionReceiptMatch = matchPath(path, "/v1/submissions/:submissionId/receipts");
+  if (submissionReceiptMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(
+      res,
+      201,
+      platform.registerSubmissionReceipt({
+        companyId,
+        submissionId: submissionReceiptMatch.submissionId,
+        receiptType: body.receiptType,
+        providerStatus: body.providerStatus ?? null,
+        rawReference: body.rawReference ?? null,
+        message: body.message ?? null,
+        isFinal: body.isFinal ?? null,
+        requiredInput: Array.isArray(body.requiredInput) ? body.requiredInput : [],
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const submissionRetryMatch = matchPath(path, "/v1/submissions/:submissionId/retry");
+  if (submissionRetryMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(
+      res,
+      200,
+      platform.retryAuthoritySubmission({
+        companyId,
+        submissionId: submissionRetryMatch.submissionId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const submissionQueueResolveMatch = matchPath(path, "/v1/submissions/action-queue/:queueItemId/resolve");
+  if (submissionQueueResolveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(
+      res,
+      200,
+      platform.resolveSubmissionQueueItem({
+        companyId,
+        queueItemId: submissionQueueResolveMatch.queueItemId,
+        resolutionCode: body.resolutionCode,
+        actorId: principal.userId,
+        ownerUserId: body.ownerUserId ?? null
+      })
+    );
     return;
   }
 
@@ -8963,6 +9324,46 @@ function assertPrincipalCanApproveLeaveEntry({ platform, principal, companyId, l
   if (!managerEmployments.some((employment) => employment.employmentId === leaveEntry.managerEmploymentId)) {
     throw createHttpError(403, "leave_approval_denied", "The signed-in user is not the active manager for this leave entry.");
   }
+}
+
+function buildSubmissionPayloadFromSource({ platform, companyId, sourceObjectType, sourceObjectId }) {
+  const resolvedSourceType = requireText(sourceObjectType, "submission_source_object_type_required", "sourceObjectType is required.");
+  const resolvedSourceId = requireText(sourceObjectId, "submission_source_object_id_required", "sourceObjectId is required.");
+  if (resolvedSourceType === "tax_declaration_package") {
+    const taxPackage = platform.getTaxDeclarationPackage({
+      companyId,
+      taxDeclarationPackageId: resolvedSourceId
+    });
+    return {
+      sourceObjectType: resolvedSourceType,
+      sourceObjectId: resolvedSourceId,
+      taxDeclarationPackageId: taxPackage.taxDeclarationPackageId,
+      annualReportPackageId: taxPackage.annualReportPackageId,
+      annualReportVersionId: taxPackage.annualReportVersionId,
+      packageCode: taxPackage.packageCode,
+      fiscalYear: taxPackage.fiscalYear,
+      outputChecksum: taxPackage.outputChecksum,
+      authorityOverview: taxPackage.authorityOverview,
+      exports: taxPackage.exports
+    };
+  }
+  if (resolvedSourceType === "annual_report_package") {
+    const annualPackage = platform.getAnnualReportPackage({
+      companyId,
+      packageId: resolvedSourceId
+    });
+    return {
+      sourceObjectType: resolvedSourceType,
+      sourceObjectId: resolvedSourceId,
+      packageId: annualPackage.packageId,
+      fiscalYear: annualPackage.fiscalYear,
+      profileCode: annualPackage.profileCode,
+      status: annualPackage.status,
+      currentVersionId: annualPackage.currentVersion?.versionId || null,
+      checksum: annualPackage.currentVersion?.checksum || null
+    };
+  }
+  throw createHttpError(400, "submission_source_object_unsupported", "Automatic payload building is only supported for annual-reporting source objects.");
 }
 
 function matchPath(actualPath, template) {

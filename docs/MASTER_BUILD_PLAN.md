@@ -508,9 +508,9 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 11.1 Rapporter och drilldown
   - [x] 11.2 ByrÃ¥lÃ¤ge och portfÃ¶ljhantering
   - [x] 11.3 MÃ¥nadsstÃ¤ngning och bokslutschecklistor
-- [ ] **FAS 12 â€” Ã…rsredovisning, deklaration och myndighetskopplingar**
+- [x] **FAS 12 â€” Ã…rsredovisning, deklaration och myndighetskopplingar**
   - [x] 12.1 Ã…rsredovisningsmotor
-  - [ ] 12.2 Skatt, deklarationsunderlag och myndighetsfiler
+  - [x] 12.2 Skatt, deklarationsunderlag och myndighetsfiler
 - [ ] **FAS 13 â€” API, integrationer, AI och automation**
   - [ ] 13.1 Publikt API och webhooks
   - [ ] 13.2 Partnerintegrationer och marknadsplats
@@ -1114,14 +1114,14 @@ Bygg Ã¥rsflÃ¶den, digital inlÃ¤mning och deklarationsunderlag ovanpÃ¥ st
 ### 12.2 Skatt, deklarationsunderlag och myndighetsfiler
 
 **Bygg detta**
-- [ ] INK/NE/SRU-underlag
-- [ ] moms/AGI/HUS-Ã¶versikter
-- [ ] myndighetsadapterlager
+- [x] INK/NE/SRU-underlag
+- [x] moms/AGI/HUS-Ã¶versikter
+- [x] myndighetsadapterlager
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] Filer matchar interna siffror
-- [ ] Submission loggas med kvittens
-- [ ] Fel gÃ¥r till Ã¥tgÃ¤rdskÃ¶
+- [x] Filer matchar interna siffror
+- [x] Submission loggas med kvittens
+- [x] Fel gÃ¥r till Ã¥tgÃ¤rdskÃ¶
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P12-02`.
 
