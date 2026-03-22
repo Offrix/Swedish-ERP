@@ -115,6 +115,8 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 
 - disable-flagga och travelflode med traktamente, multilandregel, milersattning, utlagg, payrollkoppling och audit trail
 - disable-flagga och projektflÃ¶de med projektsetup, budgetversion, resursbelÃ¤ggning, payroll-backed actuals, AR-kopplad WIP och forecast snapshot
+- mobilfloden for dispatch, materialuttag, arbetsorderslut och arbetsorderfakturering
+
 ### 8. Performance tests
 - load på dokumentingest
 - load på AR/AP

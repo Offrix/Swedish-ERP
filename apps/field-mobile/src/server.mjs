@@ -12,8 +12,42 @@ export function createFieldMobileServer() {
         title: "Swedish ERP - Field Mobile",
         body: renderMobileChrome({
           surface: "field-mobile",
-          headline: "Field-mobile baseline",
-          subtitle: "Thumb-friendly surface for work on site."
+          headline: "Idag i faltet",
+          subtitle: "Dispatch, material, signatur och syncstatus i tumvanligt format.",
+          syncBadge: "Offline-first aktivt for tillatna faltfloden",
+          tabs: ["Idag", "Jobb", "Tid", "Resor/Utlagg", "Check-in", "Material", "Signatur", "Profil"],
+          quickActions: [
+            { label: "Check in", tone: "primary" },
+            { label: "Materialuttag", tone: "secondary" },
+            { label: "Kundsignatur", tone: "secondary" }
+          ],
+          todayItems: [
+            {
+              title: "WO-2026-0001",
+              meta: "07:00-11:00 - dispatch planerad",
+              detail: "Install site equipment - Projekt P-ALPHA - signatur kravs",
+              statusLabel: "Pending signatur",
+              statusTone: "warning"
+            },
+            {
+              title: "Truck-01 lager",
+              meta: "12 artiklar redo pa bilen",
+              detail: "Snabbvy over trucklager och materialavvikelser for dagens jobb.",
+              statusLabel: "Synkad",
+              statusTone: "success"
+            }
+          ],
+          infoCards: [
+            {
+              title: "Offline state badges",
+              body: "Pending, synced och conflict visas tydligt i mobilen innan nasta api-koppling."
+            },
+            {
+              title: "Bottom actions",
+              body: "Snabbknappar for check-in, material och signatur sitter nara tummen."
+            }
+          ],
+          footerNote: "Desktop-web bar hela domanlogiken. Mobilen ar en styrd faltvy ovanpa samma backend."
         })
       });
 

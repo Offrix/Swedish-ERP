@@ -33,6 +33,7 @@ Database foundation with migration framework, seed files and baseline governance
 - Phase 9.2 adds foreign allowance tables, travel claims, travel days, country segments, meal events, mileage logs, expense receipts, advances, valuations and payroll intents in the same monotonic stream.
 - Phase 9.3 adds pension plans, enrollments, salary exchange agreements, pension basis snapshots, provider reports, report lines and reconciliation objects in the same monotonic stream.
 - Phase 10.1 adds project profile hardening, budget versions, budget lines, resource allocations, actual-cost snapshots, WIP snapshots and forecast snapshots in the same monotonic stream.
+- Phase 10.2 extends `work_orders` and adds inventory locations, inventory items, stock balances, dispatch assignments, material withdrawals, customer signatures and offline sync envelopes for field execution.
 
 ## Usage
 

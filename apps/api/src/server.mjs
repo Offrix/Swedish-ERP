@@ -57,6 +57,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase9TravelEnabled: flags.phase9TravelEnabled,
             phase9PensionEnabled: flags.phase9PensionEnabled,
             phase10ProjectsEnabled: flags.phase10ProjectsEnabled,
+            phase10FieldEnabled: flags.phase10FieldEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -207,6 +208,21 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/projects/:projectId/wip-snapshots",
               "/v1/projects/:projectId/forecast-snapshots",
               "/v1/projects/:projectId/audit-events",
+              "/v1/field/inventory/locations",
+              "/v1/field/inventory/items",
+              "/v1/field/inventory/balances",
+              "/v1/field/work-orders",
+              "/v1/field/work-orders/:workOrderId",
+              "/v1/field/work-orders/:workOrderId/dispatches",
+              "/v1/field/work-orders/:workOrderId/dispatches/:dispatchAssignmentId/en-route",
+              "/v1/field/work-orders/:workOrderId/dispatches/:dispatchAssignmentId/on-site",
+              "/v1/field/work-orders/:workOrderId/material-withdrawals",
+              "/v1/field/work-orders/:workOrderId/customer-signatures",
+              "/v1/field/work-orders/:workOrderId/complete",
+              "/v1/field/work-orders/:workOrderId/invoice",
+              "/v1/field/mobile/today",
+              "/v1/field/sync/envelopes",
+              "/v1/field/audit-events",
               "/v1/payroll/rule-packs",
               "/v1/payroll/statutory-profiles",
               "/v1/payroll/pay-items",
@@ -362,6 +378,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 10.1 project routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase10FieldEnabled && isPhase102Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 10.2 field routes are disabled by configuration."
     });
     return;
   }
@@ -5920,6 +5944,543 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/field/inventory/locations") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "inventory_location",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listInventoryLocations({
+        companyId,
+        locationType: url.searchParams.get("locationType") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/field/inventory/locations") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "inventory_location",
+      scopeCode: "project"
+    });
+    writeJson(res, 201, platform.createInventoryLocation({
+      companyId,
+      inventoryLocationId: body.inventoryLocationId ?? null,
+      locationCode: body.locationCode,
+      displayName: body.displayName,
+      locationType: body.locationType ?? "warehouse",
+      projectId: body.projectId ?? null,
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/field/inventory/items") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "inventory_item",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listInventoryItems({
+        companyId,
+        inventoryLocationId: url.searchParams.get("inventoryLocationId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/field/inventory/items") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "inventory_item",
+      scopeCode: "project"
+    });
+    writeJson(res, 201, platform.createInventoryItem({
+      companyId,
+      inventoryItemId: body.inventoryItemId ?? null,
+      itemCode: body.itemCode,
+      displayName: body.displayName,
+      unitCode: body.unitCode ?? "ea",
+      arItemId: body.arItemId ?? null,
+      salesUnitPriceAmount: body.salesUnitPriceAmount ?? 0,
+      locationBalances: body.locationBalances || [],
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/field/inventory/balances") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "inventory_balance",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listInventoryBalances({
+        companyId,
+        inventoryItemId: url.searchParams.get("inventoryItemId") || null,
+        inventoryLocationId: url.searchParams.get("inventoryLocationId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/field/inventory/balances") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "inventory_balance",
+      scopeCode: "project"
+    });
+    writeJson(res, 201, platform.createOrReplaceInventoryBalance({
+      companyId,
+      inventoryItemId: body.inventoryItemId,
+      inventoryLocationId: body.inventoryLocationId,
+      onHandQuantity: body.onHandQuantity ?? 0,
+      reservedQuantity: body.reservedQuantity ?? 0,
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/field/work-orders") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "field_work_order",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listWorkOrders({
+        companyId,
+        status: url.searchParams.get("status") || null,
+        employmentId: url.searchParams.get("employmentId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/field/work-orders") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "field_work_order",
+      scopeCode: "project"
+    });
+    writeJson(res, 201, platform.createWorkOrder({
+      companyId,
+      workOrderId: body.workOrderId ?? null,
+      workOrderNo: body.workOrderNo ?? null,
+      projectId: body.projectId,
+      customerId: body.customerId ?? null,
+      displayName: body.displayName,
+      description: body.description ?? null,
+      serviceTypeCode: body.serviceTypeCode ?? "service",
+      priorityCode: body.priorityCode ?? "normal",
+      scheduledStartAt: body.scheduledStartAt ?? null,
+      scheduledEndAt: body.scheduledEndAt ?? null,
+      laborItemId: body.laborItemId ?? null,
+      laborRateAmount: body.laborRateAmount ?? 0,
+      signatureRequired: body.signatureRequired !== false,
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const fieldWorkOrderMatch = matchPath(path, "/v1/field/work-orders/:workOrderId");
+  if (fieldWorkOrderMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "field_work_order",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, platform.getWorkOrder({
+      companyId,
+      workOrderId: fieldWorkOrderMatch.workOrderId
+    }));
+    return;
+  }
+
+  const fieldDispatchesMatch = matchPath(path, "/v1/field/work-orders/:workOrderId/dispatches");
+  if (fieldDispatchesMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "field_dispatch_assignment",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listDispatchAssignments({
+        companyId,
+        workOrderId: fieldDispatchesMatch.workOrderId
+      })
+    });
+    return;
+  }
+
+  if (fieldDispatchesMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "field_dispatch_assignment",
+      scopeCode: "project"
+    });
+    writeJson(res, 201, platform.createDispatchAssignment({
+      companyId,
+      workOrderId: fieldDispatchesMatch.workOrderId,
+      employmentId: body.employmentId,
+      startsAt: body.startsAt,
+      endsAt: body.endsAt,
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const fieldDispatchEnRouteMatch = matchPath(
+    path,
+    "/v1/field/work-orders/:workOrderId/dispatches/:dispatchAssignmentId/en-route"
+  );
+  if (fieldDispatchEnRouteMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "field_dispatch_assignment",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, platform.markDispatchEnRoute({
+      companyId,
+      workOrderId: fieldDispatchEnRouteMatch.workOrderId,
+      dispatchAssignmentId: fieldDispatchEnRouteMatch.dispatchAssignmentId,
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const fieldDispatchOnSiteMatch = matchPath(
+    path,
+    "/v1/field/work-orders/:workOrderId/dispatches/:dispatchAssignmentId/on-site"
+  );
+  if (fieldDispatchOnSiteMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "field_dispatch_assignment",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, platform.markDispatchOnSite({
+      companyId,
+      workOrderId: fieldDispatchOnSiteMatch.workOrderId,
+      dispatchAssignmentId: fieldDispatchOnSiteMatch.dispatchAssignmentId,
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const fieldMaterialWithdrawalsMatch = matchPath(path, "/v1/field/work-orders/:workOrderId/material-withdrawals");
+  if (fieldMaterialWithdrawalsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "field_material_withdrawal",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listMaterialWithdrawals({
+        companyId,
+        workOrderId: fieldMaterialWithdrawalsMatch.workOrderId
+      })
+    });
+    return;
+  }
+
+  if (fieldMaterialWithdrawalsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "field_material_withdrawal",
+      scopeCode: "project"
+    });
+    writeJson(res, 201, platform.createMaterialWithdrawal({
+      companyId,
+      workOrderId: fieldMaterialWithdrawalsMatch.workOrderId,
+      inventoryItemId: body.inventoryItemId,
+      inventoryLocationId: body.inventoryLocationId,
+      quantity: body.quantity,
+      sourceChannel: body.sourceChannel ?? "api",
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const fieldSignaturesMatch = matchPath(path, "/v1/field/work-orders/:workOrderId/customer-signatures");
+  if (fieldSignaturesMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "field_customer_signature",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listCustomerSignatures({
+        companyId,
+        workOrderId: fieldSignaturesMatch.workOrderId
+      })
+    });
+    return;
+  }
+
+  if (fieldSignaturesMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "field_customer_signature",
+      scopeCode: "project"
+    });
+    writeJson(res, 201, platform.captureCustomerSignature({
+      companyId,
+      workOrderId: fieldSignaturesMatch.workOrderId,
+      signerName: body.signerName,
+      signedAt: body.signedAt ?? null,
+      signatureText: body.signatureText,
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const fieldCompleteMatch = matchPath(path, "/v1/field/work-orders/:workOrderId/complete");
+  if (fieldCompleteMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "field_work_order",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, platform.completeWorkOrder({
+      companyId,
+      workOrderId: fieldCompleteMatch.workOrderId,
+      completedAt: body.completedAt ?? null,
+      laborMinutes: body.laborMinutes,
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const fieldInvoiceMatch = matchPath(path, "/v1/field/work-orders/:workOrderId/invoice");
+  if (fieldInvoiceMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "field_work_order",
+      scopeCode: "project"
+    });
+    writeJson(res, 201, platform.createWorkOrderInvoice({
+      companyId,
+      workOrderId: fieldInvoiceMatch.workOrderId,
+      issueDate: body.issueDate,
+      dueDate: body.dueDate,
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/field/mobile/today") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const employmentId = requireText(
+      url.searchParams.get("employmentId"),
+      "employment_id_required",
+      "employmentId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "field_work_order",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, platform.listMobileToday({
+      companyId,
+      employmentId
+    }));
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/field/sync/envelopes") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "field_sync_envelope",
+      scopeCode: "project"
+    });
+    writeJson(res, 201, platform.syncOfflineEnvelope({
+      companyId,
+      clientMutationId: body.clientMutationId,
+      clientDeviceId: body.clientDeviceId,
+      clientUserId: body.clientUserId ?? principal.userId,
+      objectType: body.objectType,
+      localObjectId: body.localObjectId ?? null,
+      serverObjectId: body.serverObjectId ?? null,
+      mutationType: body.mutationType,
+      baseServerVersion: body.baseServerVersion ?? null,
+      payload: body.payload || {},
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/field/audit-events") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "field_work_order",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listFieldAuditEvents({
+        companyId,
+        projectId: url.searchParams.get("projectId") || null,
+        workOrderId: url.searchParams.get("workOrderId") || null
+      })
+    });
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/payroll/pay-items") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -6795,6 +7356,10 @@ function isPhase101Route(path) {
   return path.startsWith("/v1/projects");
 }
 
+function isPhase102Route(path) {
+  return path.startsWith("/v1/field");
+}
+
 async function readJsonBody(req, allowEmpty = false) {
   const chunks = [];
   for await (const chunk of req) {
@@ -6865,13 +7430,14 @@ function readFeatureFlags(env) {
     phase7HrEnabled: String(env.PHASE7_HR_ENABLED || "true").toLowerCase() !== "false",
     phase7TimeEnabled: String(env.PHASE7_TIME_ENABLED || "true").toLowerCase() !== "false",
     phase7AbsenceEnabled: String(env.PHASE7_ABSENCE_ENABLED || "true").toLowerCase() !== "false",
-      phase8PayrollEnabled: String(env.PHASE8_PAYROLL_ENABLED || "true").toLowerCase() !== "false",
-      phase9BenefitsEnabled: String(env.PHASE9_BENEFITS_ENABLED || "true").toLowerCase() !== "false",
-      phase9TravelEnabled: String(env.PHASE9_TRAVEL_ENABLED || "true").toLowerCase() !== "false",
-      phase9PensionEnabled: String(env.PHASE9_PENSION_ENABLED || "true").toLowerCase() !== "false",
-      phase10ProjectsEnabled: String(env.PHASE10_PROJECTS_ENABLED || "true").toLowerCase() !== "false"
-    };
-  }
+    phase8PayrollEnabled: String(env.PHASE8_PAYROLL_ENABLED || "true").toLowerCase() !== "false",
+    phase9BenefitsEnabled: String(env.PHASE9_BENEFITS_ENABLED || "true").toLowerCase() !== "false",
+    phase9TravelEnabled: String(env.PHASE9_TRAVEL_ENABLED || "true").toLowerCase() !== "false",
+    phase9PensionEnabled: String(env.PHASE9_PENSION_ENABLED || "true").toLowerCase() !== "false",
+    phase10ProjectsEnabled: String(env.PHASE10_PROJECTS_ENABLED || "true").toLowerCase() !== "false",
+    phase10FieldEnabled: String(env.PHASE10_FIELD_ENABLED || "true").toLowerCase() !== "false"
+  };
+}
 
 if (isMainModule(import.meta.url)) {
   const runtime = await startApiServer();

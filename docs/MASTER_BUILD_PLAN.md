@@ -502,7 +502,7 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 9.3 Pension, extra pension och lÃ¶nevÃ¤xling
 - [ ] **FAS 10 â€” Projekt, bygg, fÃ¤lt, lager och personalliggare**
   - [x] 10.1 Projekt, budget och uppfÃ¶ljning
-  - [ ] 10.2 Arbetsorder, serviceorder, fÃ¤ltapp och lager
+  - [x] 10.2 Arbetsorder, serviceorder, fÃ¤ltapp och lager
   - [ ] 10.3 Byggspecifika regler: Ã„TA, HUS, omvÃ¤nd moms, personalliggare
 - [ ] **FAS 11 â€” Rapporter, byrÃ¥lÃ¤ge, mÃ¥nadsstÃ¤ngning och bokslut**
   - [ ] 11.1 Rapporter och drilldown
@@ -1016,15 +1016,15 @@ Ta systemet ut pÃ¥ arbetsplatsen med arbetsorder, material, Ã„TA, HUS, bygg
 ### 10.2 Arbetsorder, serviceorder, fÃ¤ltapp och lager
 
 **Bygg detta**
-- [ ] Dispatch
-- [ ] fÃ¤ltmobil
-- [ ] material och lager
-- [ ] kundsignatur
+- [x] Dispatch
+- [x] fÃ¤ltmobil
+- [x] material och lager
+- [x] kundsignatur
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] Offline-sync tÃ¥l nÃ¤tavbrott
-- [ ] Materialuttag gÃ¥r till projekt
-- [ ] Arbetsorder kan faktureras
+- [x] Offline-sync tÃ¥l nÃ¤tavbrott
+- [x] Materialuttag gÃ¥r till projekt
+- [x] Arbetsorder kan faktureras
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P10-02`.
 
@@ -1228,7 +1228,7 @@ Stresstesta systemet, kÃ¶r verklig migrering och gÃ¥ live kontrollerat.
 - FAS 7 â†’ `docs/compliance/se/payroll-engine.md`, `docs/domain/ubiquitous-language.md`, `docs/runbooks/fas-7-hr-master-verification.md` och `docs/runbooks/fas-7-time-reporting-verification.md`
 - FAS 8 â†’ `docs/compliance/se/payroll-engine.md`, `docs/compliance/se/agi-engine.md`, `docs/compliance/se/bank-and-payments-engine.md`, `docs/compliance/se/accounting-foundation.md`, `docs/runbooks/fas-8-payroll-core-verification.md`, `docs/runbooks/fas-8-payroll-tax-agi-verification.md` och `docs/runbooks/fas-8-payroll-posting-verification.md`
 - FAS 9 â†’ `docs/compliance/se/benefits-engine.md`, `docs/compliance/se/travel-and-traktamente-engine.md`, `docs/compliance/se/pension-and-salary-exchange-engine.md`, `docs/compliance/se/cash-card-and-clearing-engine.md` och `docs/compliance/se/collections-writeoff-and-bad-debt-engine.md`
-- FAS 10 â†’ `docs/compliance/se/rot-rut-engine.md`, `docs/compliance/se/personalliggare-engine.md`, `docs/compliance/se/project-billing-and-revenue-recognition-engine.md` och `docs/domain/offline-sync-and-conflict-resolution.md`
+- FAS 10 â†’ `docs/compliance/se/rot-rut-engine.md`, `docs/compliance/se/personalliggare-engine.md`, `docs/compliance/se/project-billing-and-revenue-recognition-engine.md`, `docs/domain/field-work-order-service-order-and-material-flow.md`, `docs/domain/offline-sync-and-conflict-resolution.md` och `docs/runbooks/fas-10-field-verification.md`
 - FAS 11 â†’ `docs/compliance/se/reconciliation-and-close-engine.md`, `docs/domain/work-items-deadlines-notifications.md`, `docs/domain/search-indexing-and-global-search.md`, `docs/domain/saved-views-dashboards-and-personalization.md`, `docs/domain/bureau-portfolio-client-requests-and-approvals.md`, `docs/domain/close-checklists-blockers-and-signoff.md`, `docs/domain/reporting-metric-catalog-and-export-jobs.md` och `docs/domain/comments-mentions-and-collaboration.md`
 - FAS 12 â†’ `docs/compliance/se/annual-reporting-engine.md` och `docs/domain/submission-receipts-and-action-queue.md`
 - FAS 13 â†’ `docs/domain/async-jobs-retry-replay-and-dead-letter.md`

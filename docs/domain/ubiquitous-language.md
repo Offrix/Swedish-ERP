@@ -293,6 +293,27 @@ Förbrukning av lager eller inköpt material till projekt eller arbetsorder.
 ### Personalliggare
 Tidsstämplad närvarologg för personer verksamma på byggarbetsplats eller annan reglerad plats.
 
+### Dispatch assignment
+Planerad eller aktiv tilldelning av arbetsorder till en specifik anstallning.
+
+### Lagerplats
+Fysisk plats for material, till exempel huvudlager, servicebil eller projektsite.
+
+### Lagerartikel
+Fakturerbar eller intern artikel som kan uttas i faltflode och kopplas till arbetsorder.
+
+### Lagerbalans
+Summering av tillganglig, reserverad och uttagen kvantitet per artikel och lagerplats.
+
+### Kundsignatur
+Kundens explicita godkannande av utfort arbetsmoment innan avslut och fakturering.
+
+### Field sync envelope
+Versionsmedveten offline-mutation med idempotensnyckel, basversion och synkstatus.
+
+### Synkstatus
+Status for offline envelope, till exempel `pending`, `synced`, `conflicted` eller `failed_terminal`.
+
 ## HUS / ROT / RUT
 
 ### HUS

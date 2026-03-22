@@ -1300,7 +1300,15 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/rot-rut-engine.md, docs/compliance/se/personalliggare-engine.md, docs/domain/offline-sync-and-conflict-resolution.md, docs/adr/ADR-0018-offline-sync-and-conflict-resolution-strategy.md, docs/runbooks/mobile-offline-conflict-repair.md, docs/test-plans/mobile-offline-sync-tests.md
+- docs/compliance/se/project-billing-and-revenue-recognition-engine.md
+- docs/compliance/se/rot-rut-engine.md
+- docs/compliance/se/personalliggare-engine.md
+- docs/domain/field-work-order-service-order-and-material-flow.md
+- docs/domain/offline-sync-and-conflict-resolution.md
+- docs/adr/ADR-0018-offline-sync-and-conflict-resolution-strategy.md
+- docs/runbooks/mobile-offline-conflict-repair.md
+- docs/test-plans/mobile-offline-sync-tests.md
+- docs/ui/ENTERPRISE_UI_PLAN.md
 
 Implement exactly this scope:
 - Dispatch

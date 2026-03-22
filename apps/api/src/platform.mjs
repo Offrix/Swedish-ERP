@@ -13,6 +13,7 @@ import { createBenefitsPlatform } from "../../../packages/domain-benefits/src/in
 import { createTravelPlatform } from "../../../packages/domain-travel/src/index.mjs";
 import { createPensionPlatform } from "../../../packages/domain-pension/src/index.mjs";
 import { createProjectsPlatform } from "../../../packages/domain-projects/src/index.mjs";
+import { createFieldPlatform } from "../../../packages/domain-field/src/index.mjs";
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
 
 export function createApiPlatform(options = {}) {
@@ -87,6 +88,12 @@ export function createApiPlatform(options = {}) {
     timePlatform,
     payrollPlatform
   });
+  const fieldPlatform = createFieldPlatform({
+    ...options,
+    arPlatform,
+    hrPlatform,
+    projectsPlatform
+  });
 
   return {
     ...orgAuthPlatform,
@@ -104,6 +111,7 @@ export function createApiPlatform(options = {}) {
     ...travelPlatform,
     ...pensionPlatform,
     ...projectsPlatform,
+    ...fieldPlatform,
     ...payrollPlatform
   };
 }

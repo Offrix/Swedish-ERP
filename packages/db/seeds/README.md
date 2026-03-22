@@ -32,3 +32,4 @@ Seed execution policy:
 - Phase 9.2 adds official 2026 foreign allowance reference data plus domestic and foreign travel claim demo artifacts with traktamente, mileage, expenses and travel advances
 - Phase 9.3 adds Collectum, Fora, extra-pension and salary-exchange demo artifacts plus provider report and reconciliation evidence
 - Phase 10.1 adds project baseline profiles, budget versions, resource allocations and forecast-revision demo artifacts for project follow-up verification
+- Phase 10.2 seeds field warehouse and truck stock, a dispatchable work order, demo signatures and sync-envelope artifacts for mobile and material verification

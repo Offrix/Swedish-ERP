@@ -235,6 +235,28 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/projects/:projectId/forecast-snapshots?companyId=...`
 - `POST /v1/projects/:projectId/forecast-snapshots`
 - `GET /v1/projects/:projectId/audit-events?companyId=...`
+- `GET /v1/field/inventory/locations?companyId=...`
+- `POST /v1/field/inventory/locations`
+- `GET /v1/field/inventory/items?companyId=...`
+- `POST /v1/field/inventory/items`
+- `GET /v1/field/inventory/balances?companyId=...`
+- `POST /v1/field/inventory/balances`
+- `GET /v1/field/work-orders?companyId=...`
+- `POST /v1/field/work-orders`
+- `GET /v1/field/work-orders/:workOrderId?companyId=...`
+- `GET /v1/field/work-orders/:workOrderId/dispatches?companyId=...`
+- `POST /v1/field/work-orders/:workOrderId/dispatches`
+- `POST /v1/field/work-orders/:workOrderId/dispatches/:dispatchAssignmentId/en-route`
+- `POST /v1/field/work-orders/:workOrderId/dispatches/:dispatchAssignmentId/on-site`
+- `GET /v1/field/work-orders/:workOrderId/material-withdrawals?companyId=...`
+- `POST /v1/field/work-orders/:workOrderId/material-withdrawals`
+- `GET /v1/field/work-orders/:workOrderId/customer-signatures?companyId=...`
+- `POST /v1/field/work-orders/:workOrderId/customer-signatures`
+- `POST /v1/field/work-orders/:workOrderId/complete`
+- `POST /v1/field/work-orders/:workOrderId/invoice`
+- `GET /v1/field/mobile/today?companyId=...&employmentId=...`
+- `POST /v1/field/sync/envelopes`
+- `GET /v1/field/audit-events?companyId=...`
 - `GET /v1/payroll/rule-packs?companyId=...&effectiveDate=...`
 - `GET /v1/payroll/statutory-profiles?companyId=...`
 - `POST /v1/payroll/statutory-profiles`
@@ -270,7 +292,7 @@ pnpm --filter @swedish-erp/api start
 
 ## Disable strategy
 
-Set `PHASE1_AUTH_ONBOARDING_ENABLED=false` to return `503` for FAS 1 routes without touching the rest of the API process. Set `PHASE10_PROJECTS_ENABLED=false` to disable FAS 10.1 project routes in the same way.
+Set `PHASE1_AUTH_ONBOARDING_ENABLED=false` to return `503` for FAS 1 routes without touching the rest of the API process. Set `PHASE10_PROJECTS_ENABLED=false` to disable FAS 10.1 project routes in the same way, and set `PHASE10_FIELD_ENABLED=false` to disable FAS 10.2 field, dispatch, inventory and mobile sync routes.
 
 Set `PHASE2_DOCUMENT_ARCHIVE_ENABLED=false` to return `503` for FAS 2.1 document archive routes while keeping the rest of the API process alive.
 

@@ -332,10 +332,11 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [x] Prompt `P10-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 10.2 Arbetsorder, serviceorder, fÃ¤ltapp och lager
-- [ ] Offline-sync tÃ¥l nÃ¤tavbrott
-- [ ] Materialuttag gÃ¥r till projekt
-- [ ] Arbetsorder kan faktureras
-- [ ] Prompt `P10-02` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Offline-sync tÃ¥l nÃ¤tavbrott
+- [x] Materialuttag gÃ¥r till projekt
+- [x] Arbetsorder kan faktureras
+- [x] Prompt `P10-02` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Runbook `docs/runbooks/fas-10-field-verification.md` Ã¤r uppdaterad
 
 ### 10.3 Byggspecifika regler: Ã„TA, HUS, omvÃ¤nd moms, personalliggare
 - [ ] HUS-kundandel och ansÃ¶kan stÃ¤mmer
