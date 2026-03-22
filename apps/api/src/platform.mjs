@@ -8,6 +8,7 @@ import { createApPlatform } from "../../../packages/domain-ap/src/index.mjs";
 import { createBankingPlatform } from "../../../packages/domain-banking/src/index.mjs";
 import { createHrPlatform } from "../../../packages/domain-hr/src/index.mjs";
 import { createTimePlatform } from "../../../packages/domain-time/src/index.mjs";
+import { createPayrollPlatform } from "../../../packages/domain-payroll/src/index.mjs";
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
 
 export function createApiPlatform(options = {}) {
@@ -50,6 +51,11 @@ export function createApiPlatform(options = {}) {
     hrPlatform,
     documentPlatform: documentArchivePlatform
   });
+  const payrollPlatform = createPayrollPlatform({
+    ...options,
+    hrPlatform,
+    timePlatform
+  });
 
   return {
     ...orgAuthPlatform,
@@ -62,7 +68,8 @@ export function createApiPlatform(options = {}) {
     ...apPlatform,
     ...bankingPlatform,
     ...hrPlatform,
-    ...timePlatform
+    ...timePlatform,
+    ...payrollPlatform
   };
 }
 

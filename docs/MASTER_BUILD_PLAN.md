@@ -493,7 +493,7 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 7.2 Tidrapportering, schema och saldon
   - [x] 7.3 FrÃ¥nvaro, attest och anstÃ¤lldportal
 - [ ] **FAS 8 â€” LÃ¶n och AGI**
-  - [ ] 8.1 LÃ¶nearter, lÃ¶nekalender och lÃ¶nekÃ¶rning
+  - [x] 8.1 LÃ¶nearter, lÃ¶nekalender och lÃ¶nekÃ¶rning
   - [ ] 8.2 Skatt, arbetsgivaravgifter, SINK och AGI
   - [ ] 8.3 LÃ¶nebokfÃ¶ring och utbetalning
 - [ ] **FAS 9 â€” FÃ¶rmÃ¥ner, resor, traktamente, pension och lÃ¶nevÃ¤xling**
@@ -905,15 +905,15 @@ Omvandla tid, frÃ¥nvaro, fÃ¶rmÃ¥ner och avtal till korrekt lÃ¶n, utbetal
 ### 8.1 LÃ¶nearter, lÃ¶nekalender och lÃ¶nekÃ¶rning
 
 **Bygg detta**
-- [ ] LÃ¶nearter
-- [ ] LÃ¶nekÃ¶rning
-- [ ] Retro och korrigering
-- [ ] SlutlÃ¶n
+- [x] LÃ¶nearter
+- [x] LÃ¶nekÃ¶rning
+- [x] Retro och korrigering
+- [x] SlutlÃ¶n
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] LÃ¶nekedjan fÃ¶ljer definierad ordning
-- [ ] Retrofall Ã¤r spÃ¥rbara
-- [ ] LÃ¶nebesked kan regenereras
+- [x] LÃ¶nekedjan fÃ¶ljer definierad ordning
+- [x] Retrofall Ã¤r spÃ¥rbara
+- [x] LÃ¶nebesked kan regenereras
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P8-01`.
 

@@ -25,3 +25,4 @@ Seed execution policy:
 - Phase 7.1 adds employee masterdata, multiple employments, contract-history, manager-tree, payout-account and sensitive-audit demo artifacts
 - Phase 7.2 adds schedule templates, assignments, clock-event history, time-entry balances and locked payroll periods
 - Phase 7.3 adds leave types, employee-portal absence history, manager approvals, AGI-sensitive leave signals and signed lock artifacts
+- Phase 8.1 adds payroll rule-pack previews, pay item catalog seed data, payroll calendars and regular/extra/correction/final pay-run demo artifacts

@@ -997,7 +997,9 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/payroll-engine.md, docs/compliance/se/agi-engine.md
+- docs/compliance/se/payroll-engine.md
+- docs/compliance/se/agi-engine.md
+- docs/runbooks/fas-8-payroll-core-verification.md
 
 Implement exactly this scope:
 - Lönearter
@@ -1023,6 +1025,7 @@ Return:
 1) changed files
 2) migrations created
 3) tests run and results
+4) verification notes for docs/runbooks/fas-8-payroll-core-verification.md
 4) follow-up tasks
 5) any blockers requiring human action
 ```

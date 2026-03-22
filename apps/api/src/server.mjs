@@ -52,6 +52,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase7HrEnabled: flags.phase7HrEnabled,
             phase7TimeEnabled: flags.phase7TimeEnabled,
             phase7AbsenceEnabled: flags.phase7AbsenceEnabled,
+            phase8PayrollEnabled: flags.phase8PayrollEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -176,7 +177,18 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/hr/employees/:employeeId/manager-assignments",
               "/v1/hr/employees/:employeeId/bank-accounts",
               "/v1/hr/employees/:employeeId/documents",
-              "/v1/hr/employees/:employeeId/audit-events"
+              "/v1/hr/employees/:employeeId/audit-events",
+              "/v1/payroll/rule-packs",
+              "/v1/payroll/pay-items",
+              "/v1/payroll/pay-items/:payItemId",
+              "/v1/payroll/pay-calendars",
+              "/v1/payroll/pay-calendars/:payCalendarId",
+              "/v1/payroll/pay-runs",
+              "/v1/payroll/pay-runs/:payRunId",
+              "/v1/payroll/pay-runs/:payRunId/approve",
+              "/v1/payroll/pay-runs/:payRunId/payslips",
+              "/v1/payroll/pay-runs/:payRunId/payslips/:employmentId",
+              "/v1/payroll/pay-runs/:payRunId/payslips/:employmentId/regenerate"
             ]
           }
         : { status: "ok" }
@@ -268,6 +280,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 7.3 leave and employee portal routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase8PayrollEnabled && isPhase8Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 8.1 payroll core routes are disabled by configuration."
     });
     return;
   }
@@ -4776,6 +4796,358 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/payroll/rule-packs") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listEmployerContributionRulePacks({
+        effectiveDate: url.searchParams.get("effectiveDate") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/payroll/pay-items") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "pay_item",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listPayItems({
+        companyId,
+        activeOnly: url.searchParams.get("activeOnly") === "true"
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/payroll/pay-items") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "pay_item",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createPayItem({
+        companyId,
+        payItemCode: body.payItemCode,
+        payItemType: body.payItemType,
+        displayName: body.displayName,
+        calculationBasis: body.calculationBasis,
+        unitCode: body.unitCode,
+        compensationBucket: body.compensationBucket,
+        defaultUnitAmount: body.defaultUnitAmount ?? null,
+        defaultRateFactor: body.defaultRateFactor ?? null,
+        taxTreatmentCode: body.taxTreatmentCode || "phase8_2_pending",
+        employerContributionTreatmentCode: body.employerContributionTreatmentCode || "phase8_2_pending",
+        agiMappingCode: body.agiMappingCode || "phase8_2_pending",
+        ledgerAccountCode: body.ledgerAccountCode || "phase8_3_pending",
+        defaultDimensions: body.defaultDimensions || {},
+        affectsVacationBasis: body.affectsVacationBasis === true,
+        affectsPensionBasis: body.affectsPensionBasis === true,
+        includedInNetPay: body.includedInNetPay !== false,
+        reportingOnly: body.reportingOnly === true,
+        active: body.active !== false,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const payItemMatch = matchPath(path, "/v1/payroll/pay-items/:payItemId");
+  if (payItemMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "pay_item",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, platform.getPayItem({ companyId, payItemId: payItemMatch.payItemId }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/payroll/pay-calendars") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "pay_calendar",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listPayCalendars({
+        companyId,
+        activeOnly: url.searchParams.get("activeOnly") === "true"
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/payroll/pay-calendars") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "pay_calendar",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createPayCalendar({
+        companyId,
+        payCalendarCode: body.payCalendarCode,
+        displayName: body.displayName,
+        frequencyCode: body.frequencyCode || "monthly",
+        cutoffDay: body.cutoffDay ?? 5,
+        payDay: body.payDay ?? 25,
+        timezone: body.timezone || "Europe/Stockholm",
+        defaultCurrencyCode: body.defaultCurrencyCode || "SEK",
+        active: body.active !== false,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const payCalendarMatch = matchPath(path, "/v1/payroll/pay-calendars/:payCalendarId");
+  if (payCalendarMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "pay_calendar",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, platform.getPayCalendar({ companyId, payCalendarId: payCalendarMatch.payCalendarId }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/payroll/pay-runs") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll_run",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listPayRuns({
+        companyId,
+        reportingPeriod: url.searchParams.get("reportingPeriod") || null,
+        runType: url.searchParams.get("runType") || null,
+        employmentId: url.searchParams.get("employmentId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/payroll/pay-runs") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll_run",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createPayRun({
+        companyId,
+        payCalendarId: body.payCalendarId,
+        reportingPeriod: body.reportingPeriod,
+        payDate: body.payDate || null,
+        runType: body.runType || "regular",
+        employmentIds: Array.isArray(body.employmentIds) ? body.employmentIds : null,
+        manualInputs: Array.isArray(body.manualInputs) ? body.manualInputs : [],
+        retroAdjustments: Array.isArray(body.retroAdjustments) ? body.retroAdjustments : [],
+        finalPayAdjustments: Array.isArray(body.finalPayAdjustments) ? body.finalPayAdjustments : [],
+        leavePayItemMappings: Array.isArray(body.leavePayItemMappings) ? body.leavePayItemMappings : [],
+        statutoryProfiles: Array.isArray(body.statutoryProfiles) ? body.statutoryProfiles : [],
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const payRunMatch = matchPath(path, "/v1/payroll/pay-runs/:payRunId");
+  if (payRunMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll_run",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, platform.getPayRun({ companyId, payRunId: payRunMatch.payRunId }));
+    return;
+  }
+
+  const payRunApproveMatch = matchPath(path, "/v1/payroll/pay-runs/:payRunId/approve");
+  if (payRunApproveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll_run",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approvePayRun({
+        companyId,
+        payRunId: payRunApproveMatch.payRunId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const payRunPayslipsMatch = matchPath(path, "/v1/payroll/pay-runs/:payRunId/payslips");
+  if (payRunPayslipsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll_run",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listPaySlips({
+        companyId,
+        payRunId: payRunPayslipsMatch.payRunId
+      })
+    });
+    return;
+  }
+
+  const payRunPayslipMatch = matchPath(path, "/v1/payroll/pay-runs/:payRunId/payslips/:employmentId");
+  if (payRunPayslipMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll_run",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getPaySlip({
+        companyId,
+        payRunId: payRunPayslipMatch.payRunId,
+        employmentId: payRunPayslipMatch.employmentId
+      })
+    );
+    return;
+  }
+
+  const payslipRegenerateMatch = matchPath(path, "/v1/payroll/pay-runs/:payRunId/payslips/:employmentId/regenerate");
+  if (payslipRegenerateMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll_run",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.regeneratePaySlip({
+        companyId,
+        payRunId: payslipRegenerateMatch.payRunId,
+        employmentId: payslipRegenerateMatch.employmentId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
   writeJson(res, 404, { error: "not_found" });
 }
 
@@ -4912,6 +5284,10 @@ function isPhase73Route(path) {
   return path.startsWith("/v1/hr/leave") || path.startsWith("/v1/hr/employee-portal");
 }
 
+function isPhase8Route(path) {
+  return path.startsWith("/v1/payroll");
+}
+
 async function readJsonBody(req, allowEmpty = false) {
   const chunks = [];
   for await (const chunk of req) {
@@ -4981,7 +5357,8 @@ function readFeatureFlags(env) {
     phase6ApEnabled: String(env.PHASE6_AP_ENABLED || "true").toLowerCase() !== "false",
     phase7HrEnabled: String(env.PHASE7_HR_ENABLED || "true").toLowerCase() !== "false",
     phase7TimeEnabled: String(env.PHASE7_TIME_ENABLED || "true").toLowerCase() !== "false",
-    phase7AbsenceEnabled: String(env.PHASE7_ABSENCE_ENABLED || "true").toLowerCase() !== "false"
+    phase7AbsenceEnabled: String(env.PHASE7_ABSENCE_ENABLED || "true").toLowerCase() !== "false",
+    phase8PayrollEnabled: String(env.PHASE8_PAYROLL_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

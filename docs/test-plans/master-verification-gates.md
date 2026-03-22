@@ -268,16 +268,16 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 ## Gate for FAS 8 â€” LÃ¶n och AGI
 
 ### AllmÃ¤nt krav
-- [ ] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [ ] Demo kan kÃ¶ras pÃ¥ seed-data
+- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
+- [x] Demo kan kÃ¶ras pÃ¥ seed-data
 - [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
+- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
 
 ### 8.1 LÃ¶nearter, lÃ¶nekalender och lÃ¶nekÃ¶rning
-- [ ] LÃ¶nekedjan fÃ¶ljer definierad ordning
-- [ ] Retrofall Ã¤r spÃ¥rbara
-- [ ] LÃ¶nebesked kan regenereras
-- [ ] Prompt `P8-01` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] LÃ¶nekedjan fÃ¶ljer definierad ordning
+- [x] Retrofall Ã¤r spÃ¥rbara
+- [x] LÃ¶nebesked kan regenereras
+- [x] Prompt `P8-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 8.2 Skatt, arbetsgivaravgifter, SINK och AGI
 - [ ] AGI innehÃ¥ller rÃ¤tt fÃ¤lt per individ
