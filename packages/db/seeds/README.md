@@ -29,3 +29,4 @@ Seed execution policy:
 - Phase 8.2 adds statutory payroll profiles, tax/SINK rule-pack seed data, AGI submissions, correction versions, receipts and absence-payload demo artifacts
 - Phase 8.3 adds payroll posting, dimension-aware journal lines, payout export, bank-match and vacation-liability demo artifacts
 - Phase 9.1 adds benefits catalog baseline data plus health-insurance, car-benefit, fuel-benefit and wellness demo artifacts
+- Phase 9.2 adds official 2026 foreign allowance reference data plus domestic and foreign travel claim demo artifacts with traktamente, mileage, expenses and travel advances

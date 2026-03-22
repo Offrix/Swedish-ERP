@@ -54,6 +54,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase7AbsenceEnabled: flags.phase7AbsenceEnabled,
             phase8PayrollEnabled: flags.phase8PayrollEnabled,
             phase9BenefitsEnabled: flags.phase9BenefitsEnabled,
+            phase9TravelEnabled: flags.phase9TravelEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -183,6 +184,10 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/benefits/events",
               "/v1/benefits/events/:benefitEventId",
               "/v1/benefits/audit-events",
+              "/v1/travel/foreign-allowances",
+              "/v1/travel/claims",
+              "/v1/travel/claims/:travelClaimId",
+              "/v1/travel/audit-events",
               "/v1/payroll/rule-packs",
               "/v1/payroll/statutory-profiles",
               "/v1/payroll/pay-items",
@@ -310,10 +315,18 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
-  if (!flags.phase9BenefitsEnabled && isPhase9Route(path)) {
+  if (!flags.phase9BenefitsEnabled && isPhase91Route(path)) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 9.1 benefits routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase9TravelEnabled && isPhase92Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 9.2 travel routes are disabled by configuration."
     });
     return;
   }
@@ -5034,6 +5047,139 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/travel/foreign-allowances") {
+    writeJson(res, 200, {
+      items: platform.listForeignNormalAmounts({
+        taxYear: url.searchParams.get("taxYear") || "2026"
+      })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/travel/claims") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "travel_claim",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listTravelClaims({
+        companyId,
+        reportingPeriod: url.searchParams.get("reportingPeriod") || null,
+        employeeId: url.searchParams.get("employeeId") || null,
+        employmentId: url.searchParams.get("employmentId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/travel/claims") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "travel_claim",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createTravelClaim({
+        companyId,
+        employeeId: body.employeeId,
+        employmentId: body.employmentId,
+        purpose: body.purpose,
+        startAt: body.startAt,
+        endAt: body.endAt,
+        reportingPeriod: body.reportingPeriod ?? null,
+        homeLocation: body.homeLocation ?? null,
+        regularWorkLocation: body.regularWorkLocation ?? null,
+        firstDestination: body.firstDestination ?? null,
+        distanceFromHomeKm: body.distanceFromHomeKm ?? 0,
+        distanceFromRegularWorkKm: body.distanceFromRegularWorkKm ?? 0,
+        countryCode: body.countryCode ?? null,
+        countryName: body.countryName ?? null,
+        countrySegments: body.countrySegments || [],
+        mealEvents: body.mealEvents || [],
+        mileageLogs: body.mileageLogs || [],
+        expenseReceipts: body.expenseReceipts || [],
+        travelAdvances: body.travelAdvances || [],
+        requestedAllowanceAmount: body.requestedAllowanceAmount ?? null,
+        sameLocationDaysBeforeStart: body.sameLocationDaysBeforeStart ?? 0,
+        sameLocationKey: body.sameLocationKey ?? null,
+        lodgingPaidByEmployer: body.lodgingPaidByEmployer === true,
+        preApproved: body.preApproved === true,
+        approvalStatus: body.approvalStatus ?? "approved",
+        sourceType: body.sourceType ?? "manual_entry",
+        sourceId: body.sourceId ?? null,
+        dimensionJson: body.dimensionJson || {},
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const travelClaimMatch = matchPath(path, "/v1/travel/claims/:travelClaimId");
+  if (travelClaimMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "travel_claim",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getTravelClaim({
+        companyId,
+        travelClaimId: travelClaimMatch.travelClaimId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/travel/audit-events") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "travel_claim",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listTravelAuditEvents({
+        companyId,
+        travelClaimId: url.searchParams.get("travelClaimId") || null
+      })
+    });
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/payroll/pay-items") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -5893,8 +6039,12 @@ function isPhase8Route(path) {
   return path.startsWith("/v1/payroll");
 }
 
-function isPhase9Route(path) {
+function isPhase91Route(path) {
   return path.startsWith("/v1/benefits");
+}
+
+function isPhase92Route(path) {
+  return path.startsWith("/v1/travel");
 }
 
 async function readJsonBody(req, allowEmpty = false) {
@@ -5968,7 +6118,8 @@ function readFeatureFlags(env) {
     phase7TimeEnabled: String(env.PHASE7_TIME_ENABLED || "true").toLowerCase() !== "false",
     phase7AbsenceEnabled: String(env.PHASE7_ABSENCE_ENABLED || "true").toLowerCase() !== "false",
     phase8PayrollEnabled: String(env.PHASE8_PAYROLL_ENABLED || "true").toLowerCase() !== "false",
-    phase9BenefitsEnabled: String(env.PHASE9_BENEFITS_ENABLED || "true").toLowerCase() !== "false"
+    phase9BenefitsEnabled: String(env.PHASE9_BENEFITS_ENABLED || "true").toLowerCase() !== "false",
+    phase9TravelEnabled: String(env.PHASE9_TRAVEL_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

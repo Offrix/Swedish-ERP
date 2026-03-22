@@ -498,7 +498,7 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 8.3 LÃ¶nebokfÃ¶ring och utbetalning
 - [ ] **FAS 9 â€” FÃ¶rmÃ¥ner, resor, traktamente, pension och lÃ¶nevÃ¤xling**
   - [x] 9.1 FÃ¶rmÃ¥nsmotor
-  - [ ] 9.2 Resor, traktamente, kÃ¶rjournal och utlÃ¤gg
+  - [x] 9.2 Resor, traktamente, kÃ¶rjournal och utlÃ¤gg
   - [ ] 9.3 Pension, extra pension och lÃ¶nevÃ¤xling
 - [ ] **FAS 10 â€” Projekt, bygg, fÃ¤lt, lager och personalliggare**
   - [ ] 10.1 Projekt, budget och uppfÃ¶ljning
@@ -967,15 +967,15 @@ Bygg de mest regelstyrda HR-ekonomiflÃ¶dena ovanpÃ¥ stabil lÃ¶nekÃ¤rna.
 ### 9.2 Resor, traktamente, kÃ¶rjournal och utlÃ¤gg
 
 **Bygg detta**
-- [ ] TjÃ¤nsteresa som objekt
-- [ ] Inrikes/utlandstraktamente
-- [ ] BilersÃ¤ttning
-- [ ] KÃ¶rjournal
+- [x] TjÃ¤nsteresa som objekt
+- [x] Inrikes/utlandstraktamente
+- [x] BilersÃ¤ttning
+- [x] KÃ¶rjournal
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] 50 km-krav och Ã¶vernattning styr korrekt
-- [ ] MÃ¥ltidsreduktion minskar rÃ¤tt
-- [ ] Ã–verskjutande del blir lÃ¶n
+- [x] 50 km-krav och Ã¶vernattning styr korrekt
+- [x] MÃ¥ltidsreduktion minskar rÃ¤tt
+- [x] Ã–verskjutande del blir lÃ¶n
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P9-02`.
 

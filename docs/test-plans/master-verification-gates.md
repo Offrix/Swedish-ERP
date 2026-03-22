@@ -306,10 +306,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [x] Prompt `P9-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 9.2 Resor, traktamente, kÃ¶rjournal och utlÃ¤gg
-- [ ] 50 km-krav och Ã¶vernattning styr korrekt
-- [ ] MÃ¥ltidsreduktion minskar rÃ¤tt
-- [ ] Ã–verskjutande del blir lÃ¶n
-- [ ] Prompt `P9-02` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] 50 km-krav och Ã¶vernattning styr korrekt
+- [x] MÃ¥ltidsreduktion minskar rÃ¤tt
+- [x] Ã–verskjutande del blir lÃ¶n
+- [x] Prompt `P9-02` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 9.3 Pension, extra pension och lÃ¶nevÃ¤xling
 - [ ] Rapportunderlag per kollektivavtal stÃ¤mmer

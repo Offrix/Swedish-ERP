@@ -127,10 +127,11 @@ const PAY_ITEM_TEMPLATES = Object.freeze([
   createPayItemTemplate("CARE_OF_CHILD", "care_of_child", "VAB", "configured_unit_rate", "day", "gross_deduction", false, false),
   createPayItemTemplate("PARENTAL_LEAVE", "parental_leave", "Foraldraledighet", "configured_unit_rate", "day", "gross_deduction", false, false),
   createPayItemTemplate("LEAVE_WITHOUT_PAY", "leave_without_pay", "Tjanstledighet", "configured_unit_rate", "day", "gross_deduction", false, false),
-  createPayItemTemplate("TAX_FREE_TRAVEL_ALLOWANCE", "tax_free_travel_allowance", "Traktamente skattefritt", "manual_amount", "amount", "reporting_only", false, false),
+  createPayItemTemplate("TAX_FREE_TRAVEL_ALLOWANCE", "tax_free_travel_allowance", "Traktamente skattefritt", "manual_amount", "amount", "gross_addition", false, false),
   createPayItemTemplate("TAXABLE_TRAVEL_ALLOWANCE", "taxable_travel_allowance", "Traktamente skattepliktigt", "manual_amount", "amount", "gross_addition", false, false),
-  createPayItemTemplate("TAX_FREE_MILEAGE", "tax_free_mileage", "Milersattning skattefri", "manual_amount", "amount", "reporting_only", false, false),
+  createPayItemTemplate("TAX_FREE_MILEAGE", "tax_free_mileage", "Milersattning skattefri", "manual_amount", "amount", "gross_addition", false, false),
   createPayItemTemplate("TAXABLE_MILEAGE", "taxable_mileage", "Milersattning skattepliktig", "manual_amount", "amount", "gross_addition", false, false),
+  createPayItemTemplate("EXPENSE_REIMBURSEMENT", "expense_reimbursement", "Utlag", "manual_amount", "amount", "gross_addition", false, false),
   createPayItemTemplate("BENEFIT", "benefit", "Forman", "manual_amount", "amount", "reporting_only", false, false),
   createPayItemTemplate("PENSION_PREMIUM", "pension_premium", "Pensionspremie", "manual_amount", "amount", "reporting_only", false, false),
   createPayItemTemplate("SALARY_EXCHANGE_GROSS_DEDUCTION", "salary_exchange_gross_deduction", "Lonevaxling bruttoloneavdrag", "manual_amount", "amount", "gross_deduction", false, false),
@@ -153,6 +154,7 @@ export function createPayrollEngine({
   hrPlatform = null,
   timePlatform = null,
   benefitsPlatform = null,
+  travelPlatform = null,
   ledgerPlatform = null,
   bankingPlatform = null,
   ruleRegistry = null
@@ -625,6 +627,7 @@ export function createPayrollEngine({
         hrPlatform,
         timePlatform,
         benefitsPlatform,
+        travelPlatform,
         clock
       });
       employmentResults.push(result);
@@ -2461,6 +2464,7 @@ function calculateEmploymentRun({
   hrPlatform,
   timePlatform,
   benefitsPlatform,
+  travelPlatform,
   clock
 }) {
   const employee = resolveEmployeeSnapshot({ employment, hrPlatform });
@@ -2495,6 +2499,13 @@ function calculateEmploymentRun({
         reportingPeriod: period.reportingPeriod
       })
     : { events: [], payLinePayloads: [], warnings: [] };
+  const travelPayloadBundle = travelPlatform?.listPayrollTravelPayloads
+    ? travelPlatform.listPayrollTravelPayloads({
+        companyId: employment.companyId,
+        employmentId: employment.employmentId,
+        reportingPeriod: period.reportingPeriod
+      })
+    : { claims: [], payLinePayloads: [], warnings: [] };
 
   const sourceSnapshot = {
     employee,
@@ -2509,11 +2520,25 @@ function calculateEmploymentRun({
       benefitCode: event.benefitCode,
       taxableValue: event.valuation?.taxableValue || 0,
       netDeductionValue: event.valuation?.netDeductionValue || 0
+    })),
+    travelClaims: (travelPayloadBundle.claims || []).map((claim) => ({
+      travelClaimId: claim.travelClaimId,
+      reportingPeriod: claim.reportingPeriod,
+      approvalStatus: claim.approvalStatus,
+      taxFreeTravelAllowance: claim.valuation?.taxFreeTravelAllowance || 0,
+      taxableTravelAllowance: claim.valuation?.taxableTravelAllowance || 0,
+      taxFreeMileage: claim.valuation?.taxFreeMileage || 0,
+      taxableMileage: claim.valuation?.taxableMileage || 0,
+      expenseReimbursementAmount: claim.valuation?.expenseReimbursementAmount || 0,
+      advanceNetDeductionAmount: claim.valuation?.advanceNetDeductionAmount || 0
     }))
   };
 
   const warnings = (benefitPayloadBundle.warnings || []).map((warningCode) =>
     createWarning(warningCode, `Benefit engine warning: ${warningCode}.`)
+  );
+  warnings.push(
+    ...(travelPayloadBundle.warnings || []).map((warningCode) => createWarning(warningCode, `Travel engine warning: ${warningCode}.`))
   );
   const lines = [];
   const steps = {};
@@ -2572,7 +2597,7 @@ function calculateEmploymentRun({
   steps[5] = createCompletedStep(5, summarizeLineStep(retroLines));
 
   const benefitLines = [
-    ...createStepLinesFromBenefitPayloads({
+    ...createStepLinesFromPayloads({
       processingStep: 6,
       employment,
       payloads: benefitPayloadBundle.payLinePayloads || [],
@@ -2591,14 +2616,25 @@ function calculateEmploymentRun({
     benefitEventCount: (benefitPayloadBundle.events || []).length
   });
 
-  const travelLines = createStepLinesFromManualInputs({
-    processingStep: 7,
-    employment,
-    inputs: manualInputs,
-    state
-  });
+  const travelLines = [
+    ...createStepLinesFromPayloads({
+      processingStep: 7,
+      employment,
+      payloads: travelPayloadBundle.payLinePayloads || [],
+      state
+    }),
+    ...createStepLinesFromManualInputs({
+      processingStep: 7,
+      employment,
+      inputs: manualInputs,
+      state
+    })
+  ];
   lines.push(...travelLines);
-  steps[7] = createCompletedStep(7, summarizeLineStep(travelLines));
+  steps[7] = createCompletedStep(7, {
+    ...summarizeLineStep(travelLines),
+    travelClaimCount: (travelPayloadBundle.claims || []).length
+  });
   const grossDeductionLines = [
     ...createStepLinesFromManualInputs({
       processingStep: 8,
@@ -2654,10 +2690,16 @@ function calculateEmploymentRun({
   steps[12] = employerContributionPreview.step;
 
   const netDeductionLines = [
-    ...createStepLinesFromBenefitPayloads({
+    ...createStepLinesFromPayloads({
       processingStep: 13,
       employment,
       payloads: benefitPayloadBundle.payLinePayloads || [],
+      state
+    }),
+    ...createStepLinesFromPayloads({
+      processingStep: 13,
+      employment,
+      payloads: travelPayloadBundle.payLinePayloads || [],
       state
     }),
     ...createStepLinesFromManualInputs({
@@ -2681,6 +2723,16 @@ function calculateEmploymentRun({
       .filter((line) => line.agiMappingCode === "taxable_benefit")
       .reduce((sum, line) => sum + Math.abs(line.amount || 0), 0)
   );
+  const taxFreeAllowanceAmount = roundMoney(
+    lines
+      .filter((line) => line.agiMappingCode === "tax_free_allowance")
+      .reduce((sum, line) => sum + Math.abs(line.amount || 0), 0)
+  );
+  const expenseReimbursementAmount = roundMoney(
+    lines
+      .filter((line) => line.payItemCode === "EXPENSE_REIMBURSEMENT")
+      .reduce((sum, line) => sum + Math.abs(line.amount || 0), 0)
+  );
   if (taxableBenefitAmount > 0 && lineTotals.grossAfterDeductions <= 0) {
     warnings.push(
       createWarning(
@@ -2694,7 +2746,9 @@ function calculateEmploymentRun({
     grossDeductions: lineTotals.grossDeductions,
     netDeductions: lineTotals.netDeductions,
     netPay: lineTotals.netPay,
-    taxableBenefitAmount
+    taxableBenefitAmount,
+    taxFreeAllowanceAmount,
+    expenseReimbursementAmount
   });
 
   const payslipRenderPayload = {
@@ -2707,6 +2761,7 @@ function calculateEmploymentRun({
     bankAccount: primaryBankAccount,
     lines,
     benefitEvents: benefitPayloadBundle.events || [],
+    travelClaims: travelPayloadBundle.claims || [],
     totals: {
       ...lineTotals,
       pensionableBase,
@@ -2718,7 +2773,9 @@ function calculateEmploymentRun({
       employerContributionPreviewAmount: employerContributionPreview.amount,
       employerContributionPreviewStatus: employerContributionPreview.status,
       employerContributionDecision: employerContributionPreview.decisionObject,
-      taxableBenefitAmount
+      taxableBenefitAmount,
+      taxFreeAllowanceAmount,
+      expenseReimbursementAmount
     },
     balances: balances.balances || balances,
     warnings
@@ -3698,11 +3755,11 @@ function createPayLine({
   };
 }
 
-function createStepLinesFromBenefitPayloads({ processingStep, employment, payloads, state }) {
+function createStepLinesFromPayloads({ processingStep, employment, payloads, state }) {
   return (Array.isArray(payloads) ? payloads : [])
     .filter((payload) => Number(payload.processingStep) === Number(processingStep))
     .map((payload) => {
-      const payItem = requirePayItemByCode(state, employment.companyId, normalizeCode(payload.payItemCode, "payroll_benefit_pay_item_code_required"));
+      const payItem = requirePayItemByCode(state, employment.companyId, normalizeCode(payload.payItemCode, "payroll_payload_pay_item_code_required"));
       return createPayLine({
         payItem,
         employment,
@@ -3981,6 +4038,9 @@ function resolveDefaultAgiMappingCode(payItemCode) {
   if (["BENEFIT"].includes(resolvedCode)) {
     return "taxable_benefit";
   }
+  if (["EXPENSE_REIMBURSEMENT"].includes(resolvedCode)) {
+    return "not_reported";
+  }
   if (["PENSION_PREMIUM"].includes(resolvedCode)) {
     return "pension_premium";
   }
@@ -4033,6 +4093,8 @@ function resolveDefaultLedgerAccountCode(payItemCode) {
     case "TAX_FREE_MILEAGE":
     case "TAXABLE_MILEAGE":
       return "7320";
+    case "EXPENSE_REIMBURSEMENT":
+      return "7330";
     case "PENSION_PREMIUM":
       return "7130";
     case "NET_DEDUCTION":

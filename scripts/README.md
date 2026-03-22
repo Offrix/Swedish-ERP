@@ -37,6 +37,7 @@ Helper scripts for local setup, structure verification and phased rollout checks
 - `verify-phase8-payroll-tax-agi.ps1`: validates required FAS 8.2 statutory profile, tax, SINK, AGI submission and correction artifacts.
 - `verify-phase8-payroll-posting.ps1`: validates required FAS 8.3 payroll posting, payout export, bank-match and vacation-liability artifacts.
 - `verify-phase9-benefits.ps1`: validates required FAS 9.1 benefits catalog, valuation, payroll, AGI and posting artifacts.
+- `verify-phase9-travel.ps1`: validates required FAS 9.2 travel allowance, mileage, expense, payroll and documentation artifacts.
 - `verify-db.ps1`: validates migration file naming.
 - `new-migration.ps1`: creates timestamped migration file in `packages/db/migrations`.
 - `dev-up.ps1`: starts docker infra.

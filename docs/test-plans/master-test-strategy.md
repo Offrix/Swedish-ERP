@@ -87,6 +87,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - leave types, leave entry events, leave signals, leave signal locks och employee-portal-projektioner
 - löneartskatalog, lönekalendrar, lönekörningar, statutory profiles, skatt/SINK, AGI-versioner, payroll postings, payout batches, vacation liability snapshots, receipts och persistenta lönebesked i payroll
 - förmånskatalog, benefit events, AGI-mappning, payroll posting och audit trail i benefits
+- travel claims, foreign allowance tables, travel day valuations, mileage logs, expense receipts, advances och payroll intents i travel
 - Peppol adapter
 - myndighetsadaptrar
 - sökindex och projektioner
@@ -112,6 +113,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - disable-flagga och payrollflöde med lönekalender, ordnad lönekedja, skatt/SINK, AGI-signering, payroll posting, payout export, bankmatchning, semesterskuld, retrospårning, slutlön och regenererat lönebesked
 - disable-flagga och benefitsflöde med förmånsregistrering, benefit-only warning, AGI-mappning och audit trail
 
+- disable-flagga och travelflode med traktamente, multilandregel, milersattning, utlagg, payrollkoppling och audit trail
 ### 8. Performance tests
 - load på dokumentingest
 - load på AR/AP
