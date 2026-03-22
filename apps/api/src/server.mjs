@@ -105,7 +105,18 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/ar/invoices/:customerInvoiceId",
               "/v1/ar/invoices/:customerInvoiceId/issue",
               "/v1/ar/invoices/:customerInvoiceId/deliver",
-              "/v1/ar/invoices/:customerInvoiceId/payment-links"
+              "/v1/ar/invoices/:customerInvoiceId/payment-links",
+              "/v1/ar/open-items",
+              "/v1/ar/open-items/:arOpenItemId",
+              "/v1/ar/open-items/:arOpenItemId/collection-state",
+              "/v1/ar/open-items/:arOpenItemId/allocations",
+              "/v1/ar/open-items/:arOpenItemId/writeoffs",
+              "/v1/ar/allocations/:arAllocationId/reverse",
+              "/v1/ar/payment-matching-runs",
+              "/v1/ar/payment-matching-runs/:arPaymentMatchingRunId",
+              "/v1/ar/dunning-runs",
+              "/v1/ar/dunning-runs/:arDunningRunId",
+              "/v1/ar/aging-snapshots"
             ]
           }
         : { status: "ok" }
@@ -2238,6 +2249,373 @@ async function handleRequest({ req, res, platform, flags }) {
         amount: body.amount ?? null,
         expiresAt: body.expiresAt || null,
         providerCode: body.providerCode || "internal_mock",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ar/open-items") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_open_item",
+      scopeCode: "ar"
+    });
+    writeJson(res, 200, {
+      items: platform.listOpenItems({
+        companyId,
+        customerId: url.searchParams.get("customerId") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  const arOpenItemMatch = matchPath(path, "/v1/ar/open-items/:arOpenItemId");
+  if (arOpenItemMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_open_item",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getOpenItem({
+        companyId,
+        arOpenItemId: arOpenItemMatch.arOpenItemId
+      })
+    );
+    return;
+  }
+
+  const arOpenItemCollectionMatch = matchPath(path, "/v1/ar/open-items/:arOpenItemId/collection-state");
+  if (arOpenItemCollectionMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_open_item",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.updateOpenItemCollectionState({
+        companyId,
+        arOpenItemId: arOpenItemCollectionMatch.arOpenItemId,
+        collectionStageCode: body.collectionStageCode || null,
+        disputeFlag: body.disputeFlag,
+        dunningHoldFlag: body.dunningHoldFlag,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arOpenItemAllocationMatch = matchPath(path, "/v1/ar/open-items/:arOpenItemId/allocations");
+  if (arOpenItemAllocationMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_open_item",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createOpenItemAllocation({
+        companyId,
+        arOpenItemId: arOpenItemAllocationMatch.arOpenItemId,
+        allocationAmount: body.allocationAmount,
+        allocatedOn: body.allocatedOn || null,
+        allocationType: body.allocationType || "payment",
+        sourceChannel: body.sourceChannel || "manual",
+        bankTransactionUid: body.bankTransactionUid || null,
+        statementLineHash: body.statementLineHash || null,
+        externalEventRef: body.externalEventRef || null,
+        arPaymentMatchingRunId: body.arPaymentMatchingRunId || null,
+        unmatchedBankReceiptId: body.unmatchedBankReceiptId || null,
+        receiptAmount: body.receiptAmount ?? null,
+        currencyCode: body.currencyCode || null,
+        reasonCode: body.reasonCode || "manual_allocation",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arOpenItemWriteoffMatch = matchPath(path, "/v1/ar/open-items/:arOpenItemId/writeoffs");
+  if (arOpenItemWriteoffMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_open_item",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createWriteoff({
+        companyId,
+        arOpenItemId: arOpenItemWriteoffMatch.arOpenItemId,
+        writeoffAmount: body.writeoffAmount,
+        writeoffDate: body.writeoffDate,
+        reasonCode: body.reasonCode,
+        policyLimitAmount: body.policyLimitAmount ?? undefined,
+        approvedByActorId: body.approvedByActorId || null,
+        ledgerAccountNumber: body.ledgerAccountNumber ?? undefined,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arAllocationReverseMatch = matchPath(path, "/v1/ar/allocations/:arAllocationId/reverse");
+  if (arAllocationReverseMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_allocation",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.reverseOpenItemAllocation({
+        companyId,
+        arAllocationId: arAllocationReverseMatch.arAllocationId,
+        reversedOn: body.reversedOn || null,
+        reasonCode: body.reasonCode,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ar/payment-matching-runs") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_payment_matching_run",
+      scopeCode: "ar"
+    });
+    writeJson(res, 200, {
+      items: platform.listPaymentMatchingRuns({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ar/payment-matching-runs") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_payment_matching_run",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createPaymentMatchingRun({
+        companyId,
+        sourceChannel: body.sourceChannel,
+        externalBatchRef: body.externalBatchRef || null,
+        idempotencyKey: body.idempotencyKey || null,
+        transactions: Array.isArray(body.transactions) ? body.transactions : [],
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arPaymentMatchingRunMatch = matchPath(path, "/v1/ar/payment-matching-runs/:arPaymentMatchingRunId");
+  if (arPaymentMatchingRunMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_payment_matching_run",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getPaymentMatchingRun({
+        companyId,
+        arPaymentMatchingRunId: arPaymentMatchingRunMatch.arPaymentMatchingRunId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ar/dunning-runs") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_dunning_run",
+      scopeCode: "ar"
+    });
+    writeJson(res, 200, {
+      items: platform.listDunningRuns({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ar/dunning-runs") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_dunning_run",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createDunningRun({
+        companyId,
+        runDate: body.runDate,
+        stageCode: body.stageCode,
+        annualInterestRatePercent: body.annualInterestRatePercent ?? undefined,
+        reminderFeeAmount: body.reminderFeeAmount ?? undefined,
+        idempotencyKey: body.idempotencyKey || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const arDunningRunMatch = matchPath(path, "/v1/ar/dunning-runs/:arDunningRunId");
+  if (arDunningRunMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_dunning_run",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getDunningRun({
+        companyId,
+        arDunningRunId: arDunningRunMatch.arDunningRunId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ar/aging-snapshots") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_aging_snapshot",
+      scopeCode: "ar"
+    });
+    writeJson(res, 200, {
+      items: platform.listAgingSnapshots({
+        companyId,
+        cutoffDate: url.searchParams.get("cutoffDate") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ar/aging-snapshots") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_aging_snapshot",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.captureAgingSnapshot({
+        companyId,
+        cutoffDate: body.cutoffDate,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })

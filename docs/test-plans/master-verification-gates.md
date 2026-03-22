@@ -208,10 +208,10 @@ Detta dokument definierar de grindar som måste passeras innan en fas eller rele
 - [x] Prompt `P5-02` är körd och resultat dokumenterat
 
 ### 5.3 Kundreskontra, påminnelser och inbetalningsmatchning
-- [ ] Delbetalningar hanteras
-- [ ] Felmatchningar kan backas
-- [ ] Åldersanalys är korrekt
-- [ ] Prompt `P5-03` är körd och resultat dokumenterat
+- [x] Delbetalningar hanteras
+- [x] Felmatchningar kan backas
+- [x] Åldersanalys är korrekt
+- [x] Prompt `P5-03` är körd och resultat dokumenterat
 
 ## Gate for FAS 6 — Leverantörsfakturor, inköp, bank och betalningar
 

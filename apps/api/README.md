@@ -108,6 +108,20 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/ar/invoices/:customerInvoiceId/issue`
 - `POST /v1/ar/invoices/:customerInvoiceId/deliver`
 - `POST /v1/ar/invoices/:customerInvoiceId/payment-links`
+- `GET /v1/ar/open-items?companyId=...`
+- `GET /v1/ar/open-items/:arOpenItemId?companyId=...`
+- `POST /v1/ar/open-items/:arOpenItemId/collection-state`
+- `POST /v1/ar/open-items/:arOpenItemId/allocations`
+- `POST /v1/ar/open-items/:arOpenItemId/writeoffs`
+- `POST /v1/ar/allocations/:arAllocationId/reverse`
+- `GET /v1/ar/payment-matching-runs?companyId=...`
+- `POST /v1/ar/payment-matching-runs`
+- `GET /v1/ar/payment-matching-runs/:arPaymentMatchingRunId?companyId=...`
+- `GET /v1/ar/dunning-runs?companyId=...`
+- `POST /v1/ar/dunning-runs`
+- `GET /v1/ar/dunning-runs/:arDunningRunId?companyId=...`
+- `GET /v1/ar/aging-snapshots?companyId=...`
+- `POST /v1/ar/aging-snapshots`
 
 ## Disable strategy
 

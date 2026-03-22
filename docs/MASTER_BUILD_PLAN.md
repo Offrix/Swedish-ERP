@@ -480,10 +480,10 @@ Ingen delfas är klar förrän följande finns:
   - [ ] 4.1 Momsmasterdata och beslutsträd
   - [x] 4.2 Sverige, EU, import, export och omvänd moms
   - [x] 4.3 OSS, IOSS, periodisk sammanställning och rapportering
-- [ ] **FAS 5 — Försäljning, kundreskontra och kundfakturor**
+- [x] **FAS 5 — Försäljning, kundreskontra och kundfakturor**
   - [x] 5.1 Kundregister, artiklar, offerter och avtal
   - [x] 5.2 Kundfakturor och leveranskanaler
-  - [ ] 5.3 Kundreskontra, påminnelser och inbetalningsmatchning
+  - [x] 5.3 Kundreskontra, påminnelser och inbetalningsmatchning
 - [ ] **FAS 6 — Leverantörsfakturor, inköp, bank och betalningar**
   - [ ] 6.1 Leverantörsregister, PO och mottagning
   - [ ] 6.2 Leverantörsfaktura in, tolkning och matchning
@@ -794,14 +794,14 @@ Ta kunden från offert eller order till bokförd faktura och inbetalning.
 ### 5.3 Kundreskontra, påminnelser och inbetalningsmatchning
 
 **Bygg detta**
-- [ ] Öppna poster
-- [ ] Påminnelseflöde
-- [ ] Matchning mot bank
+- [x] Öppna poster
+- [x] Påminnelseflöde
+- [x] Matchning mot bank
 
 **Verifiera detta innan nästa delfas**
-- [ ] Delbetalningar hanteras
-- [ ] Felmatchningar kan backas
-- [ ] Åldersanalys är korrekt
+- [x] Delbetalningar hanteras
+- [x] Felmatchningar kan backas
+- [x] Åldersanalys är korrekt
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` → `P5-03`.
 

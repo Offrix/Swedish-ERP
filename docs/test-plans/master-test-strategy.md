@@ -31,6 +31,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - review-task-statusar, manuell korrigering och confidence-beslut
 - offertversionering, fakturaplan och kundimport-idempotens i AR
 - issue-idempotens, kreditstängning, leveransvalidering och betallänkar i AR-fakturering
+- öppna poster, delbetalningar, dunningavgifter, bankmatchning och aging-buckets i kundreskontra
 - search ranking och permissions trimming-beslut
 - retry/backoff-beräkningar och jobbstate
 - feature flag-upplösning och kill-switch-beslut
@@ -72,6 +73,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - review queue och manuella korrigeringar per bolag
 - kundregister, artiklar, prislistor, offertrevision och avtalsplaner i AR
 - issued kundfakturor, kreditkopplingar, Peppol/PDF-leveranser och payment-link-persistens i AR
+- öppna poster, allocations, unmatched receipts, dunning runs, writeoffs och aging snapshots i AR
 - Peppol adapter
 - myndighetsadaptrar
 - sökindex och projektioner
@@ -87,6 +89,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - disable-flagga och reviewdriven OCR-korrigering med rerun-historik
 - disable-flagga och AR-masterdataflöde med offertrevision och aktivt avtal
 - disable-flagga och AR-faktureringsflöde med issue, kredit, leverans och payment-link
+- disable-flagga och AR-reskontraflöde med delbetalning, felmatchningsreversal, dunning hold och aging snapshot
 
 ### 8. Performance tests
 - load på dokumentingest
@@ -215,6 +218,10 @@ En fas är inte klar förrän:
 - samma issue-forsok skapar inte en andra journal eller ett nytt fakturanummer
 - kreditfaktura använder serie C och stänger korrekt kvarvarande krediterbart belopp
 - Peppol-leverans kräver strukturerad mottagare och validerade referenser
+- delbetalning minskar rest utan att tappa tidigare allocation-historik
+- felmatchning kan reverseras utan att förlora unmatched receipt trail
+- tvistade eller hold-markerade poster går inte automatiskt till påminnelse eller writeoff
+- aging snapshots är reproducerbara för samma cutoff och underlag
 
 #### Lön
 - AGI kan genereras utan manuell redigering

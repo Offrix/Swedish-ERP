@@ -19,6 +19,7 @@ Database foundation with migration framework, seed files and baseline governance
 - Phase 4.3 adds VAT declaration runs, OSS/IOSS reporting artifacts and periodic statement runs in the same monotonic stream.
 - Phase 5.1 adds customer masterdata, contacts, items, price lists, quote versions, contracts, invoice plans and import batches in the same monotonic stream.
 - Phase 5.2 adds invoice number series, invoice lines, credit links, issue events, delivery events and payment-link persistence in the same monotonic stream.
+- Phase 5.3 adds open items, allocation events, payment-matching runs, unmatched receipts, dunning runs, writeoffs and aging snapshots in the same monotonic stream.
 
 ## Usage
 

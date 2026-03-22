@@ -20,6 +20,17 @@ export type ArInvoiceStatus =
   | "reversed";
 export type ArInvoiceDeliveryChannel = "pdf_email" | "peppol";
 export type ArPaymentLinkStatus = "active" | "consumed" | "expired" | "cancelled";
+export type ArOpenItemStatus = "open" | "partially_settled" | "settled" | "disputed" | "written_off" | "reversed";
+export type ArCollectionStage = "none" | "stage_1" | "stage_2" | "escalated" | "hold" | "closed";
+export type ArAllocationType = "payment" | "credit_note" | "prepayment" | "writeoff_adjustment";
+export type ArAllocationStatus = "proposed" | "confirmed" | "reversed";
+export type ArPaymentMatchRunStatus = "received" | "matched" | "review_required" | "completed" | "failed";
+export type ArPaymentMatchSourceChannel = "bank_feed" | "bank_file" | "webhook" | "manual";
+export type ArPaymentMatchCandidateStatus = "proposed" | "confirmed" | "rejected" | "reversed";
+export type ArUnmatchedReceiptStatus = "unmatched" | "partially_allocated" | "allocated" | "reversed";
+export type ArDunningRunStatus = "draft" | "executed" | "reversed" | "cancelled";
+export type ArDunningItemActionStatus = "proposed" | "booked" | "skipped" | "reversed";
+export type ArAgingBucketCode = "current" | "1_30" | "31_60" | "61_90" | "91_plus";
 
 export interface ArAddress {
   readonly line1: string;
@@ -298,6 +309,215 @@ export interface ArInvoice {
   readonly updatedAt: string;
 }
 
+export interface ArOpenItem {
+  readonly arOpenItemId: string;
+  readonly companyId: string;
+  readonly customerId: string;
+  readonly customerCountryCode: string;
+  readonly customerInvoiceId: string | null;
+  readonly originalCustomerInvoiceId: string | null;
+  readonly sourceType: string;
+  readonly sourceId: string;
+  readonly sourceVersion: string;
+  readonly idempotencyKey: string;
+  readonly currencyCode: string;
+  readonly functionalCurrencyCode: string;
+  readonly originalAmount: number;
+  readonly openAmount: number;
+  readonly paidAmount: number;
+  readonly creditedAmount: number;
+  readonly writeoffAmount: number;
+  readonly disputedAmount: number;
+  readonly dueOn: string | null;
+  readonly openedOn: string;
+  readonly closedOn: string | null;
+  readonly lastActivityAt: string | null;
+  readonly agingBucketCode: ArAgingBucketCode;
+  readonly collectionStageCode: ArCollectionStage;
+  readonly disputeFlag: boolean;
+  readonly dunningHoldFlag: boolean;
+  readonly status: ArOpenItemStatus;
+  readonly metadataJson: Record<string, unknown>;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ArOpenItemEvent {
+  readonly arOpenItemEventId: string;
+  readonly arOpenItemId: string;
+  readonly companyId: string;
+  readonly eventCode: string;
+  readonly eventReasonCode: string | null;
+  readonly eventSourceType: string;
+  readonly eventSourceId: string;
+  readonly amountDelta: number;
+  readonly openAmountBefore: number;
+  readonly openAmountAfter: number;
+  readonly snapshotJson: Record<string, unknown>;
+  readonly occurredAt: string;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+}
+
+export interface ArAllocation {
+  readonly arAllocationId: string;
+  readonly companyId: string;
+  readonly arOpenItemId: string;
+  readonly customerInvoiceId: string | null;
+  readonly allocationType: ArAllocationType;
+  readonly sourceChannel: ArPaymentMatchSourceChannel | "system";
+  readonly status: ArAllocationStatus;
+  readonly allocatedAmount: number;
+  readonly currencyCode: string;
+  readonly functionalAmount: number;
+  readonly allocatedOn: string;
+  readonly bankTransactionUid: string | null;
+  readonly statementLineHash: string | null;
+  readonly externalEventRef: string;
+  readonly arPaymentMatchingRunId: string | null;
+  readonly reversalOfAllocationId: string | null;
+  readonly reasonCode: string;
+  readonly unmatchedBankReceiptId: string | null;
+  readonly suspenseAmount: number;
+  readonly journalEntryId: string | null;
+  readonly reversalJournalEntryId: string | null;
+  readonly metadataJson: Record<string, unknown>;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ArUnmatchedBankReceipt {
+  readonly arUnmatchedBankReceiptId: string;
+  readonly companyId: string;
+  readonly bankTransactionUid: string;
+  readonly statementLineHash: string;
+  readonly valueDate: string;
+  readonly amount: number;
+  readonly remainingAmount: number;
+  readonly currencyCode: string;
+  readonly payerReference: string | null;
+  readonly customerHint: string | null;
+  readonly status: ArUnmatchedReceiptStatus;
+  readonly linkedArAllocationId: string | null;
+  readonly payloadJson: Record<string, unknown>;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ArPaymentMatchCandidate {
+  readonly arPaymentMatchCandidateId: string;
+  readonly arPaymentMatchingRunId: string | null;
+  readonly companyId: string;
+  readonly arOpenItemId: string | null;
+  readonly customerId: string | null;
+  readonly bankTransactionUid: string;
+  readonly statementLineHash: string;
+  readonly payerReference: string | null;
+  readonly amount: number;
+  readonly currencyCode: string;
+  readonly valueDate: string;
+  readonly matchScore: number;
+  readonly status: ArPaymentMatchCandidateStatus;
+  readonly reasonCode: string;
+  readonly payloadJson: Record<string, unknown>;
+  readonly createdAt: string;
+}
+
+export interface ArPaymentMatchingRun {
+  readonly arPaymentMatchingRunId: string;
+  readonly companyId: string;
+  readonly sourceChannel: ArPaymentMatchSourceChannel;
+  readonly externalBatchRef: string | null;
+  readonly idempotencyKey: string;
+  readonly status: ArPaymentMatchRunStatus;
+  readonly runStartedAt: string;
+  readonly runCompletedAt: string | null;
+  readonly stats: {
+    readonly processed: number;
+    readonly matched: number;
+    readonly reviewRequired: number;
+  };
+  readonly candidates: readonly ArPaymentMatchCandidate[];
+  readonly allocations: readonly ArAllocation[];
+  readonly unmatchedReceipts: readonly ArUnmatchedBankReceipt[];
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+}
+
+export interface ArDunningRunItem {
+  readonly arDunningRunItemId: string;
+  readonly arDunningRunId: string;
+  readonly companyId: string;
+  readonly arOpenItemId: string;
+  readonly customerInvoiceId: string | null;
+  readonly stageCode: Exclude<ArCollectionStage, "none" | "hold" | "closed">;
+  readonly feeAmount: number;
+  readonly interestAmount: number;
+  readonly lateCompensationAmount: number;
+  readonly actionStatus: ArDunningItemActionStatus;
+  readonly skipReasonCode: string | null;
+  readonly journalEntryIds: readonly string[];
+  readonly payloadJson: Record<string, unknown>;
+  readonly createdAt: string;
+}
+
+export interface ArDunningRun {
+  readonly arDunningRunId: string;
+  readonly companyId: string;
+  readonly runDate: string;
+  readonly stageCode: Exclude<ArCollectionStage, "none" | "hold" | "closed">;
+  readonly status: ArDunningRunStatus;
+  readonly calculationWindowStart: string;
+  readonly calculationWindowEnd: string;
+  readonly idempotencyKey: string;
+  readonly summary: {
+    readonly items: number;
+    readonly feesGenerated: number;
+    readonly interestGenerated: number;
+    readonly skipped: number;
+  };
+  readonly items: readonly ArDunningRunItem[];
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+}
+
+export interface ArWriteoff {
+  readonly arWriteoffId: string;
+  readonly companyId: string;
+  readonly arOpenItemId: string;
+  readonly customerInvoiceId: string | null;
+  readonly arAllocationId: string | null;
+  readonly status: "proposed" | "approved" | "posted" | "reversed";
+  readonly reasonCode: string;
+  readonly policyLimitAmount: number;
+  readonly requiresApproval: boolean;
+  readonly approvedByActorId: string | null;
+  readonly writeoffAmount: number;
+  readonly currencyCode: string;
+  readonly functionalAmount: number;
+  readonly ledgerAccountNumber: string;
+  readonly writeoffDate: string;
+  readonly reversalOfWriteoffId: string | null;
+  readonly journalEntryId: string | null;
+  readonly metadataJson: Record<string, unknown>;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+}
+
+export interface ArAgingSnapshot {
+  readonly arAgingSnapshotId: string;
+  readonly companyId: string;
+  readonly cutoffDate: string;
+  readonly sourceHash: string;
+  readonly openItemCount: number;
+  readonly bucketTotalsJson: Record<ArAgingBucketCode, number>;
+  readonly customerTotalsJson: Record<string, number>;
+  readonly generatedByActorId: string;
+  readonly generatedAt: string;
+}
+
 export interface AccountsReceivableSnapshot {
   readonly customers: readonly ArCustomer[];
   readonly contacts: readonly ArCustomerContact[];
@@ -307,6 +527,15 @@ export interface AccountsReceivableSnapshot {
   readonly contracts: readonly ArContract[];
   readonly invoices: readonly ArInvoice[];
   readonly paymentLinks: readonly ArInvoicePaymentLink[];
+  readonly openItems: readonly ArOpenItem[];
+  readonly openItemEvents: readonly ArOpenItemEvent[];
+  readonly paymentMatchingRuns: readonly ArPaymentMatchingRun[];
+  readonly paymentMatchCandidates: readonly ArPaymentMatchCandidate[];
+  readonly allocations: readonly ArAllocation[];
+  readonly unmatchedBankReceipts: readonly ArUnmatchedBankReceipt[];
+  readonly dunningRuns: readonly ArDunningRun[];
+  readonly writeoffs: readonly ArWriteoff[];
+  readonly agingSnapshots: readonly ArAgingSnapshot[];
   readonly customerImportBatches: readonly ArCustomerImportBatch[];
   readonly auditEvents: readonly ArAuditEvent[];
 }

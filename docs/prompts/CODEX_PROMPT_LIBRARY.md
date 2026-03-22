@@ -623,7 +623,8 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/vat-engine.md, docs/compliance/se/einvoice-peppol-engine.md
+- docs/compliance/se/ar-customer-invoicing-engine.md
+- docs/compliance/se/accounting-foundation.md
 
 Implement exactly this scope:
 - Kundregister
@@ -662,7 +663,10 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/vat-engine.md, docs/compliance/se/einvoice-peppol-engine.md
+- docs/compliance/se/ar-customer-invoicing-engine.md
+- docs/compliance/se/vat-engine.md
+- docs/compliance/se/einvoice-peppol-engine.md
+- docs/compliance/se/accounting-foundation.md
 
 Implement exactly this scope:
 - Standard/kredit/del/abonnemangsfakturor
@@ -700,7 +704,10 @@ Read first:
 - docs/MASTER_BUILD_PLAN.md
 - docs/test-plans/master-test-strategy.md
 - docs/test-plans/master-verification-gates.md
-docs/compliance/se/vat-engine.md, docs/compliance/se/einvoice-peppol-engine.md
+- docs/compliance/se/ar-customer-invoicing-engine.md
+- docs/compliance/se/bank-and-payments-engine.md
+- docs/compliance/se/accounting-foundation.md
+- docs/compliance/se/collections-writeoff-and-bad-debt-engine.md
 
 Implement exactly this scope:
 - Öppna poster

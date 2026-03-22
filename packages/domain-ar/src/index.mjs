@@ -21,8 +21,33 @@ export const AR_INVOICE_STATUSES = Object.freeze([
   "written_off",
   "reversed"
 ]);
+export const AR_OPEN_ITEM_STATUSES = Object.freeze([
+  "open",
+  "partially_settled",
+  "settled",
+  "disputed",
+  "written_off",
+  "reversed"
+]);
+export const AR_COLLECTION_STAGES = Object.freeze(["none", "stage_1", "stage_2", "escalated", "hold", "closed"]);
+export const AR_ALLOCATION_TYPES = Object.freeze(["payment", "credit_note", "prepayment", "writeoff_adjustment"]);
+export const AR_ALLOCATION_STATUSES = Object.freeze(["proposed", "confirmed", "reversed"]);
+export const AR_PAYMENT_MATCHING_RUN_STATUSES = Object.freeze(["received", "matched", "review_required", "completed", "failed"]);
+export const AR_PAYMENT_MATCH_SOURCE_CHANNELS = Object.freeze(["bank_feed", "bank_file", "webhook", "manual"]);
+export const AR_PAYMENT_MATCH_CANDIDATE_STATUSES = Object.freeze(["proposed", "confirmed", "rejected", "reversed"]);
+export const AR_UNMATCHED_RECEIPT_STATUSES = Object.freeze(["unmatched", "partially_allocated", "allocated", "reversed"]);
+export const AR_DUNNING_RUN_STATUSES = Object.freeze(["draft", "executed", "reversed", "cancelled"]);
+export const AR_DUNNING_ITEM_ACTION_STATUSES = Object.freeze(["proposed", "booked", "skipped", "reversed"]);
+export const AR_AGING_BUCKET_CODES = Object.freeze(["current", "1_30", "31_60", "61_90", "91_plus"]);
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const DEFAULT_BANK_ACCOUNT_NUMBER = "1110";
+const DEFAULT_UNALLOCATED_RECEIPT_ACCOUNT_NUMBER = "2950";
+const DEFAULT_CUSTOMER_PREPAYMENT_ACCOUNT_NUMBER = "2940";
+const DEFAULT_SMALL_DIFFERENCE_ACCOUNT_NUMBER = "6900";
+const DEFAULT_SMALL_DIFFERENCE_POLICY_LIMIT = 100;
+const DEFAULT_REMINDER_FEE_AMOUNT = 60;
+const DEFAULT_STATUTORY_INTEREST_PERCENT = 8;
 const EU_COUNTRY_CODES = new Set([
   "AT",
   "BE",
@@ -89,6 +114,30 @@ export function createArEngine({
     invoiceIdsByCompanyGenerationKey: new Map(),
     paymentLinks: new Map(),
     paymentLinkIdsByInvoice: new Map(),
+    openItems: new Map(),
+    openItemIdsByCompany: new Map(),
+    openItemIdByInvoice: new Map(),
+    openItemEvents: [],
+    paymentMatchingRuns: new Map(),
+    paymentMatchingRunIdsByCompany: new Map(),
+    paymentMatchingRunIdsByKey: new Map(),
+    paymentMatchCandidates: new Map(),
+    paymentMatchCandidateIdsByRun: new Map(),
+    allocations: new Map(),
+    allocationIdsByCompany: new Map(),
+    allocationIdsByOpenItem: new Map(),
+    allocationIdsByKey: new Map(),
+    unmatchedBankReceipts: new Map(),
+    unmatchedReceiptIdsByCompany: new Map(),
+    unmatchedReceiptIdsByKey: new Map(),
+    dunningRuns: new Map(),
+    dunningRunIdsByCompany: new Map(),
+    dunningRunIdsByKey: new Map(),
+    writeoffs: new Map(),
+    writeoffIdsByCompany: new Map(),
+    agingSnapshots: new Map(),
+    agingSnapshotIdsByCompany: new Map(),
+    agingSnapshotIdsByKey: new Map(),
     customerImportBatches: new Map(),
     customerImportBatchIdsByCompanyKey: new Map(),
     countersByCompany: new Map(),
@@ -107,6 +156,10 @@ export function createArEngine({
     invoiceTypes: AR_INVOICE_TYPES,
     invoiceStatuses: AR_INVOICE_STATUSES,
     invoiceFrequencies: AR_INVOICE_FREQUENCIES,
+    openItemStatuses: AR_OPEN_ITEM_STATUSES,
+    collectionStages: AR_COLLECTION_STAGES,
+    allocationTypes: AR_ALLOCATION_TYPES,
+    allocationStatuses: AR_ALLOCATION_STATUSES,
     listCustomers,
     getCustomer,
     createCustomer,
@@ -133,6 +186,20 @@ export function createArEngine({
     issueInvoice,
     deliverInvoice,
     createInvoicePaymentLink,
+    listOpenItems,
+    getOpenItem,
+    updateOpenItemCollectionState,
+    createOpenItemAllocation,
+    reverseOpenItemAllocation,
+    listPaymentMatchingRuns,
+    getPaymentMatchingRun,
+    createPaymentMatchingRun,
+    listDunningRuns,
+    getDunningRun,
+    createDunningRun,
+    createWriteoff,
+    listAgingSnapshots,
+    captureAgingSnapshot,
     importCustomers,
     getCustomerImportBatch,
     snapshotAr
@@ -880,6 +947,9 @@ export function createArEngine({
   function issueInvoice({ companyId, customerInvoiceId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
     const invoice = requireInvoiceRecord(state, companyId, customerInvoiceId);
     if (invoice.journalEntryId) {
+      if (invoice.invoiceType !== "credit_note") {
+        ensureOpenItemForInvoice({ state, clock, invoice, customer: requireCustomerRecord(state, invoice.companyId, invoice.customerId) });
+      }
       return copy(invoice);
     }
     if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
@@ -936,6 +1006,17 @@ export function createArEngine({
     invoice.issuedAt = nowIso(clock);
     invoice.updatedAt = nowIso(clock);
 
+    if (invoice.invoiceType !== "credit_note") {
+      ensureOpenItemForInvoice({
+        state,
+        clock,
+        invoice,
+        customer,
+        actorId,
+        correlationId
+      });
+    }
+
     if (invoice.invoiceType === "credit_note" && invoice.originalInvoiceId) {
       const originalInvoice = requireInvoiceRecord(state, invoice.companyId, invoice.originalInvoiceId);
       originalInvoice.creditedAmount = roundMoney(originalInvoice.creditedAmount + invoice.totals.grossAmount);
@@ -944,6 +1025,14 @@ export function createArEngine({
         originalInvoice.status = "credited";
       }
       originalInvoice.updatedAt = nowIso(clock);
+      applyCreditToOpenItem({
+        state,
+        clock,
+        originalInvoice,
+        creditInvoice: invoice,
+        actorId,
+        correlationId
+      });
     }
 
     pushAudit(state, clock, {
@@ -1070,6 +1159,801 @@ export function createArEngine({
     return copy(paymentLink);
   }
 
+  function listOpenItems({ companyId, customerId = null, status = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = status ? assertAllowed(status, AR_OPEN_ITEM_STATUSES, "ar_open_item_status_invalid") : null;
+    const resolvedCustomerId = normalizeOptionalText(customerId);
+    return (state.openItemIdsByCompany.get(resolvedCompanyId) || [])
+      .map((arOpenItemId) => state.openItems.get(arOpenItemId))
+      .filter(Boolean)
+      .filter((openItem) => (resolvedCustomerId ? openItem.customerId === resolvedCustomerId : true))
+      .filter((openItem) => (resolvedStatus ? openItem.status === resolvedStatus : true))
+      .sort((left, right) => `${left.dueOn || ""}${left.arOpenItemId}`.localeCompare(`${right.dueOn || ""}${right.arOpenItemId}`))
+      .map(copy);
+  }
+
+  function getOpenItem({ companyId, arOpenItemId } = {}) {
+    return copy(requireOpenItemRecord(state, companyId, arOpenItemId));
+  }
+
+  function updateOpenItemCollectionState({
+    companyId,
+    arOpenItemId,
+    collectionStageCode = null,
+    disputeFlag = null,
+    dunningHoldFlag = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const openItem = requireOpenItemRecord(state, companyId, arOpenItemId);
+    if (disputeFlag != null) {
+      openItem.disputeFlag = disputeFlag === true;
+    }
+    if (dunningHoldFlag != null) {
+      openItem.dunningHoldFlag = dunningHoldFlag === true;
+    }
+    if (collectionStageCode) {
+      openItem.collectionStageCode = assertAllowed(
+        collectionStageCode,
+        AR_COLLECTION_STAGES,
+        "ar_collection_stage_invalid"
+      );
+    }
+    if (openItem.disputeFlag || openItem.dunningHoldFlag) {
+      openItem.collectionStageCode = "hold";
+    } else if (openItem.openAmount === 0) {
+      openItem.collectionStageCode = "closed";
+    }
+    openItem.status = resolveOpenItemStatus(openItem);
+    refreshOpenItemAging(openItem, nowIso(clock).slice(0, 10));
+    touchOpenItem(openItem);
+    syncInvoiceFromOpenItem(state, clock, openItem);
+    pushAudit(state, clock, {
+      companyId: openItem.companyId,
+      actorId,
+      correlationId,
+      action: "ar.open_item.collection_state_updated",
+      entityType: "ar_open_item",
+      entityId: openItem.arOpenItemId,
+      explanation: `Updated collection state for open item ${openItem.arOpenItemId}.`
+    });
+    return copy(openItem);
+  }
+
+  function createOpenItemAllocation({
+    companyId,
+    arOpenItemId,
+    allocationAmount,
+    allocatedOn,
+    allocationType = "payment",
+    sourceChannel = "manual",
+    bankTransactionUid = null,
+    statementLineHash = null,
+    externalEventRef = null,
+    arPaymentMatchingRunId = null,
+    unmatchedBankReceiptId = null,
+    receiptAmount = null,
+    currencyCode = null,
+    reasonCode = "manual_allocation",
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const openItem = requireOpenItemRecord(state, companyId, arOpenItemId);
+    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+      throw createError(500, "ledger_platform_missing", "Ledger platform is required for AR allocations.");
+    }
+    const resolvedAllocationType = assertAllowed(allocationType, AR_ALLOCATION_TYPES, "ar_allocation_type_invalid");
+    const resolvedSourceChannel = assertAllowed(
+      sourceChannel,
+      [...AR_PAYMENT_MATCH_SOURCE_CHANNELS, "system"],
+      "ar_payment_source_channel_invalid"
+    );
+    const resolvedAllocatedOn = normalizeDate(allocatedOn || nowIso(clock).slice(0, 10), "ar_allocation_date_invalid");
+    const resolvedCurrencyCode = normalizeUpperCode(currencyCode || openItem.currencyCode, "currency_code_required", 3);
+    const resolvedAllocatedAmount = normalizePositiveNumber(allocationAmount, "ar_allocation_amount_invalid");
+    if (resolvedAllocatedAmount > openItem.openAmount) {
+      throw createError(409, "allocation_exceeds_open_amount", "Allocation amount exceeds the remaining open amount.");
+    }
+
+    const unmatchedReceipt = unmatchedBankReceiptId
+      ? requireUnmatchedReceiptRecord(state, openItem.companyId, unmatchedBankReceiptId)
+      : null;
+    if (unmatchedReceipt && resolvedAllocatedAmount > unmatchedReceipt.remainingAmount) {
+      throw createError(409, "allocation_exceeds_unmatched_receipt", "Allocation exceeds the unmatched receipt remainder.");
+    }
+
+    const allocationKeySource =
+      normalizeOptionalText(externalEventRef) ||
+      `${normalizeOptionalText(bankTransactionUid) || "manual"}:${openItem.arOpenItemId}:${resolvedAllocatedOn}:${resolvedAllocatedAmount}`;
+    const scopedAllocationKey = toCompanyScopedKey(openItem.companyId, allocationKeySource);
+    const existingAllocationId = state.allocationIdsByKey.get(scopedAllocationKey);
+    if (existingAllocationId) {
+      return copy(state.allocations.get(existingAllocationId));
+    }
+
+    const resolvedReceiptAmount = normalizePositiveNumber(
+      receiptAmount ?? (unmatchedReceipt ? resolvedAllocatedAmount : resolvedAllocatedAmount),
+      "ar_receipt_amount_invalid"
+    );
+    const suspenseAmount = unmatchedReceipt ? 0 : roundMoney(Math.max(0, resolvedReceiptAmount - resolvedAllocatedAmount));
+    const matchingRun = arPaymentMatchingRunId
+      ? requirePaymentMatchingRunRecord(state, openItem.companyId, arPaymentMatchingRunId)
+      : null;
+    const allocation = {
+      arAllocationId: crypto.randomUUID(),
+      companyId: openItem.companyId,
+      arOpenItemId: openItem.arOpenItemId,
+      customerInvoiceId: openItem.customerInvoiceId,
+      allocationType: resolvedAllocationType,
+      sourceChannel: resolvedSourceChannel,
+      status: "confirmed",
+      allocatedAmount: resolvedAllocatedAmount,
+      currencyCode: resolvedCurrencyCode,
+      functionalAmount: resolvedAllocatedAmount,
+      allocatedOn: resolvedAllocatedOn,
+      bankTransactionUid: normalizeOptionalText(bankTransactionUid) || unmatchedReceipt?.bankTransactionUid || null,
+      statementLineHash:
+        normalizeOptionalText(statementLineHash) ||
+        unmatchedReceipt?.statementLineHash ||
+        buildStatementLineHash({
+          bankTransactionUid,
+          amount: resolvedReceiptAmount,
+          currencyCode: resolvedCurrencyCode,
+          valueDate: resolvedAllocatedOn
+        }),
+      externalEventRef: normalizeOptionalText(externalEventRef) || allocationKeySource,
+      arPaymentMatchingRunId: matchingRun?.arPaymentMatchingRunId || null,
+      reversalOfAllocationId: null,
+      reasonCode: requireText(reasonCode, "ar_allocation_reason_required"),
+      unmatchedBankReceiptId: unmatchedReceipt?.arUnmatchedBankReceiptId || null,
+      suspenseAmount,
+      journalEntryId: null,
+      reversalJournalEntryId: null,
+      metadataJson: {},
+      createdByActorId: actorId,
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+
+    const journal = postArJournal({
+      ledgerPlatform,
+      companyId: openItem.companyId,
+      journalDate: resolvedAllocatedOn,
+      voucherSeriesCode: "D",
+      sourceType: "AR_PAYMENT",
+      sourceId: allocation.arAllocationId,
+      actorId,
+      idempotencyKey: `ar_allocation:${allocation.externalEventRef}:${resolvedAllocationType}`,
+      description: `AR allocation ${allocation.arAllocationId}`,
+      lines: buildAllocationJournalLines({
+        openItem,
+        allocation,
+        receiptAmount: resolvedReceiptAmount,
+        unmatchedReceipt
+      })
+    });
+    allocation.journalEntryId = journal.journalEntryId;
+
+    state.allocations.set(allocation.arAllocationId, allocation);
+    ensureCollection(state.allocationIdsByCompany, openItem.companyId).push(allocation.arAllocationId);
+    ensureCollection(state.allocationIdsByOpenItem, openItem.arOpenItemId).push(allocation.arAllocationId);
+    state.allocationIdsByKey.set(scopedAllocationKey, allocation.arAllocationId);
+
+    applyAllocationToOpenItem({
+      state,
+      clock,
+      openItem,
+      allocation,
+      actorId
+    });
+
+    if (unmatchedReceipt) {
+      unmatchedReceipt.remainingAmount = roundMoney(unmatchedReceipt.remainingAmount - resolvedAllocatedAmount);
+      unmatchedReceipt.status = resolveUnmatchedReceiptStatus(unmatchedReceipt);
+      unmatchedReceipt.linkedArAllocationId = allocation.arAllocationId;
+      unmatchedReceipt.updatedAt = nowIso(clock);
+    } else if (suspenseAmount > 0) {
+      createOrReuseUnmatchedReceipt({
+        state,
+        clock,
+        companyId: openItem.companyId,
+        bankTransactionUid: allocation.bankTransactionUid || `bank:${allocation.arAllocationId}`,
+        statementLineHash: allocation.statementLineHash,
+        valueDate: resolvedAllocatedOn,
+        amount: suspenseAmount,
+        currencyCode: resolvedCurrencyCode,
+        payerReference: null,
+        customerHint: null,
+        linkedArAllocationId: allocation.arAllocationId,
+        actorId,
+        payloadJson: {
+          reasonCode: "overpayment_remainder",
+          allocationId: allocation.arAllocationId
+        }
+      });
+    }
+
+    pushAudit(state, clock, {
+      companyId: allocation.companyId,
+      actorId,
+      correlationId,
+      action: "ar.allocation.confirmed",
+      entityType: "ar_allocation",
+      entityId: allocation.arAllocationId,
+      explanation: `Confirmed allocation ${allocation.arAllocationId} for open item ${openItem.arOpenItemId}.`
+    });
+    return copy(allocation);
+  }
+
+  function reverseOpenItemAllocation({
+    companyId,
+    arAllocationId,
+    reversedOn = null,
+    reasonCode,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const allocation = requireAllocationRecord(state, companyId, arAllocationId);
+    if (allocation.status === "reversed") {
+      return copy(allocation);
+    }
+    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+      throw createError(500, "ledger_platform_missing", "Ledger platform is required to reverse AR allocations.");
+    }
+    const openItem = requireOpenItemRecord(state, allocation.companyId, allocation.arOpenItemId);
+    const resolvedReversedOn = normalizeDate(reversedOn || nowIso(clock).slice(0, 10), "ar_allocation_reverse_date_invalid");
+    const receivableAccountNumber = resolveOpenItemReceivableAccount(openItem);
+    const suspenseAccountNumber =
+      allocation.allocationType === "prepayment" ? DEFAULT_CUSTOMER_PREPAYMENT_ACCOUNT_NUMBER : DEFAULT_UNALLOCATED_RECEIPT_ACCOUNT_NUMBER;
+    const reversalJournal = postArJournal({
+      ledgerPlatform,
+      companyId: allocation.companyId,
+      journalDate: resolvedReversedOn,
+      voucherSeriesCode: "D",
+      sourceType: "AR_PAYMENT",
+      sourceId: `reversal:${allocation.arAllocationId}`,
+      actorId,
+      idempotencyKey: `ar_allocation_reversal:${allocation.arAllocationId}`,
+      description: `AR allocation reversal ${allocation.arAllocationId}`,
+      lines: [
+        createJournalLine(receivableAccountNumber, 1, allocation.allocatedAmount, 0, "AR_PAYMENT", allocation.arAllocationId),
+        createJournalLine(suspenseAccountNumber, 2, 0, allocation.allocatedAmount, "AR_PAYMENT", allocation.arAllocationId)
+      ]
+    });
+    allocation.status = "reversed";
+    allocation.reversalJournalEntryId = reversalJournal.journalEntryId;
+    allocation.updatedAt = nowIso(clock);
+
+    const previousOpenAmount = openItem.openAmount;
+    openItem.openAmount = roundMoney(openItem.openAmount + allocation.allocatedAmount);
+    openItem.paidAmount = roundMoney(Math.max(0, openItem.paidAmount - allocation.allocatedAmount));
+    openItem.closedOn = null;
+    openItem.collectionStageCode = openItem.disputeFlag || openItem.dunningHoldFlag ? "hold" : "none";
+    openItem.status = resolveOpenItemStatus(openItem);
+    refreshOpenItemAging(openItem, resolvedReversedOn);
+    touchOpenItem(openItem);
+    appendOpenItemEvent(state, clock, {
+      openItem,
+      eventCode: "allocation_reversed",
+      eventReasonCode: requireText(reasonCode, "ar_allocation_reverse_reason_required"),
+      eventSourceType: "MANUAL_REVIEW",
+      eventSourceId: allocation.arAllocationId,
+      amountDelta: allocation.allocatedAmount,
+      openAmountBefore: previousOpenAmount,
+      openAmountAfter: openItem.openAmount,
+      snapshotJson: {
+        reversalJournalEntryId: allocation.reversalJournalEntryId
+      },
+      actorId
+    });
+    syncInvoiceFromOpenItem(state, clock, openItem);
+    createOrReuseUnmatchedReceipt({
+      state,
+      clock,
+      companyId: allocation.companyId,
+      bankTransactionUid: allocation.bankTransactionUid || `reversal:${allocation.arAllocationId}`,
+      statementLineHash: allocation.statementLineHash || buildStatementLineHash({
+        bankTransactionUid: allocation.bankTransactionUid || allocation.arAllocationId,
+        amount: allocation.allocatedAmount,
+        currencyCode: allocation.currencyCode,
+        valueDate: resolvedReversedOn
+      }),
+      valueDate: resolvedReversedOn,
+      amount: allocation.allocatedAmount,
+      currencyCode: allocation.currencyCode,
+      payerReference: null,
+      customerHint: null,
+      linkedArAllocationId: allocation.arAllocationId,
+      actorId,
+      payloadJson: {
+        reasonCode: requireText(reasonCode, "ar_allocation_reverse_reason_required"),
+        reversalOfAllocationId: allocation.arAllocationId
+      }
+    });
+    pushAudit(state, clock, {
+      companyId: allocation.companyId,
+      actorId,
+      correlationId,
+      action: "ar.allocation.reversed",
+      entityType: "ar_allocation",
+      entityId: allocation.arAllocationId,
+      explanation: `Reversed allocation ${allocation.arAllocationId}.`
+    });
+    return copy(allocation);
+  }
+
+  function listPaymentMatchingRuns({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.paymentMatchingRunIdsByCompany.get(resolvedCompanyId) || [])
+      .map((runId) => state.paymentMatchingRuns.get(runId))
+      .filter(Boolean)
+      .sort((left, right) => right.runStartedAt.localeCompare(left.runStartedAt))
+      .map(copy);
+  }
+
+  function getPaymentMatchingRun({ companyId, arPaymentMatchingRunId } = {}) {
+    return copy(requirePaymentMatchingRunRecord(state, companyId, arPaymentMatchingRunId));
+  }
+
+  function createPaymentMatchingRun({
+    companyId,
+    sourceChannel,
+    externalBatchRef = null,
+    idempotencyKey = null,
+    transactions,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedSourceChannel = assertAllowed(sourceChannel, AR_PAYMENT_MATCH_SOURCE_CHANNELS, "ar_payment_source_channel_invalid");
+    if (!Array.isArray(transactions) || transactions.length === 0) {
+      throw createError(400, "ar_payment_transactions_required", "Payment matching requires at least one transaction.");
+    }
+    const resolvedIdempotencyKey =
+      normalizeOptionalText(idempotencyKey) ||
+      hashObject({
+        companyId: resolvedCompanyId,
+        sourceChannel: resolvedSourceChannel,
+        externalBatchRef: normalizeOptionalText(externalBatchRef),
+        transactions
+      });
+    const scopedRunKey = toCompanyScopedKey(resolvedCompanyId, resolvedIdempotencyKey);
+    const existingRunId = state.paymentMatchingRunIdsByKey.get(scopedRunKey);
+    if (existingRunId) {
+      return copy(state.paymentMatchingRuns.get(existingRunId));
+    }
+
+    const run = {
+      arPaymentMatchingRunId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      sourceChannel: resolvedSourceChannel,
+      externalBatchRef: normalizeOptionalText(externalBatchRef),
+      idempotencyKey: resolvedIdempotencyKey,
+      status: "received",
+      runStartedAt: nowIso(clock),
+      runCompletedAt: null,
+      stats: {
+        processed: transactions.length,
+        matched: 0,
+        reviewRequired: 0
+      },
+      candidates: [],
+      allocations: [],
+      unmatchedReceipts: [],
+      createdByActorId: actorId,
+      createdAt: nowIso(clock)
+    };
+    state.paymentMatchingRuns.set(run.arPaymentMatchingRunId, run);
+    ensureCollection(state.paymentMatchingRunIdsByCompany, resolvedCompanyId).push(run.arPaymentMatchingRunId);
+    state.paymentMatchingRunIdsByKey.set(scopedRunKey, run.arPaymentMatchingRunId);
+
+    for (const transaction of transactions) {
+      const candidate = buildPaymentMatchCandidate({ state, transaction, companyId: resolvedCompanyId });
+      candidate.arPaymentMatchingRunId = run.arPaymentMatchingRunId;
+      state.paymentMatchCandidates.set(candidate.arPaymentMatchCandidateId, candidate);
+      ensureCollection(state.paymentMatchCandidateIdsByRun, run.arPaymentMatchingRunId).push(candidate.arPaymentMatchCandidateId);
+      run.candidates.push(candidate);
+
+      if (candidate.status === "rejected" || !candidate.arOpenItemId) {
+        const unmatchedReceipt = createOrReuseUnmatchedReceipt({
+          state,
+          clock,
+          companyId: resolvedCompanyId,
+          bankTransactionUid: candidate.bankTransactionUid,
+          statementLineHash: candidate.statementLineHash,
+          valueDate: candidate.valueDate,
+          amount: candidate.amount,
+          currencyCode: candidate.currencyCode,
+          payerReference: candidate.payerReference,
+          customerHint: normalizeOptionalText(transaction.customerHint),
+          linkedArAllocationId: null,
+          actorId,
+          payloadJson: candidate.payloadJson
+        });
+        run.unmatchedReceipts.push(unmatchedReceipt);
+        run.stats.reviewRequired += 1;
+        continue;
+      }
+
+      const openItem = requireOpenItemRecord(state, resolvedCompanyId, candidate.arOpenItemId);
+      const allocatedAmount = roundMoney(Math.min(candidate.amount, openItem.openAmount));
+      const allocation = createOpenItemAllocation({
+        companyId: resolvedCompanyId,
+        arOpenItemId: candidate.arOpenItemId,
+        allocationAmount: allocatedAmount,
+        allocatedOn: candidate.valueDate,
+        sourceChannel: resolvedSourceChannel,
+        allocationType: "payment",
+        bankTransactionUid: candidate.bankTransactionUid,
+        statementLineHash: candidate.statementLineHash,
+        externalEventRef: `payment_match:${candidate.bankTransactionUid}:${candidate.arOpenItemId}`,
+        arPaymentMatchingRunId: run.arPaymentMatchingRunId,
+        receiptAmount: candidate.amount,
+        currencyCode: candidate.currencyCode,
+        reasonCode: candidate.reasonCode,
+        actorId,
+        correlationId
+      });
+      candidate.status = "confirmed";
+      candidate.payloadJson = {
+        ...candidate.payloadJson,
+        allocationId: allocation.arAllocationId
+      };
+      run.allocations.push(allocation);
+      run.stats.matched += 1;
+      if (candidate.amount > allocatedAmount) {
+        run.stats.reviewRequired += 1;
+      }
+    }
+
+    run.status = run.stats.reviewRequired > 0 ? "review_required" : "completed";
+    run.runCompletedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId,
+      correlationId,
+      action: "ar.payment_matching_run.completed",
+      entityType: "ar_payment_matching_run",
+      entityId: run.arPaymentMatchingRunId,
+      explanation: `Completed payment matching run ${run.arPaymentMatchingRunId}.`
+    });
+    return copy(run);
+  }
+
+  function listDunningRuns({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.dunningRunIdsByCompany.get(resolvedCompanyId) || [])
+      .map((runId) => state.dunningRuns.get(runId))
+      .filter(Boolean)
+      .sort((left, right) => right.runDate.localeCompare(left.runDate))
+      .map(copy);
+  }
+
+  function getDunningRun({ companyId, arDunningRunId } = {}) {
+    return copy(requireDunningRunRecord(state, companyId, arDunningRunId));
+  }
+
+  function createDunningRun({
+    companyId,
+    runDate,
+    stageCode,
+    annualInterestRatePercent = DEFAULT_STATUTORY_INTEREST_PERCENT,
+    reminderFeeAmount = DEFAULT_REMINDER_FEE_AMOUNT,
+    idempotencyKey = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedRunDate = normalizeDate(runDate, "ar_dunning_run_date_invalid");
+    const resolvedStageCode = assertAllowed(stageCode, ["stage_1", "stage_2", "escalated"], "ar_dunning_stage_invalid");
+    const calculationWindowStart = firstDayOfMonthIso(resolvedRunDate);
+    const calculationWindowEnd = resolvedRunDate;
+    const resolvedIdempotencyKey =
+      normalizeOptionalText(idempotencyKey) || `${resolvedCompanyId}:${resolvedStageCode}:${calculationWindowStart}:${calculationWindowEnd}`;
+    const scopedRunKey = toCompanyScopedKey(resolvedCompanyId, resolvedIdempotencyKey);
+    const existingRunId = state.dunningRunIdsByKey.get(scopedRunKey);
+    if (existingRunId) {
+      return copy(state.dunningRuns.get(existingRunId));
+    }
+
+    const run = {
+      arDunningRunId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      runDate: resolvedRunDate,
+      stageCode: resolvedStageCode,
+      status: "draft",
+      calculationWindowStart,
+      calculationWindowEnd,
+      idempotencyKey: resolvedIdempotencyKey,
+      summary: {
+        items: 0,
+        feesGenerated: 0,
+        interestGenerated: 0,
+        skipped: 0
+      },
+      items: [],
+      createdByActorId: actorId,
+      createdAt: nowIso(clock)
+    };
+    state.dunningRuns.set(run.arDunningRunId, run);
+    ensureCollection(state.dunningRunIdsByCompany, resolvedCompanyId).push(run.arDunningRunId);
+    state.dunningRunIdsByKey.set(scopedRunKey, run.arDunningRunId);
+
+    for (const openItem of listEligibleOpenItemsForDunning(state, resolvedCompanyId, resolvedRunDate)) {
+      const customer = requireCustomerRecord(state, resolvedCompanyId, openItem.customerId);
+      const item = {
+        arDunningRunItemId: crypto.randomUUID(),
+        arDunningRunId: run.arDunningRunId,
+        companyId: resolvedCompanyId,
+        arOpenItemId: openItem.arOpenItemId,
+        customerInvoiceId: openItem.customerInvoiceId,
+        stageCode: resolvedStageCode,
+        feeAmount: 0,
+        interestAmount: 0,
+        lateCompensationAmount: 0,
+        actionStatus: "proposed",
+        skipReasonCode: null,
+        journalEntryIds: [],
+        payloadJson: {},
+        createdAt: nowIso(clock)
+      };
+      if (openItem.disputeFlag || openItem.dunningHoldFlag || openItem.collectionStageCode === "hold") {
+        item.actionStatus = "skipped";
+        item.skipReasonCode = "dunning_hold";
+        run.summary.skipped += 1;
+        run.items.push(item);
+        continue;
+      }
+      if (!isDunningStageEligible(openItem.collectionStageCode, resolvedStageCode)) {
+        continue;
+      }
+
+      item.feeAmount = customer.allowReminderFee && resolvedStageCode === "stage_1" ? roundMoney(reminderFeeAmount) : 0;
+      item.interestAmount = customer.allowInterest
+        ? calculateLateInterestAmount(openItem.openAmount, openItem.dueOn, resolvedRunDate, annualInterestRatePercent)
+        : 0;
+
+      if (item.feeAmount > 0 || item.interestAmount > 0) {
+        const journal = postArJournal({
+          ledgerPlatform,
+          companyId: resolvedCompanyId,
+          journalDate: resolvedRunDate,
+          voucherSeriesCode: "B",
+          sourceType: "AR_INVOICE",
+          sourceId: `${openItem.arOpenItemId}:${resolvedStageCode}`,
+          actorId,
+          idempotencyKey: `ar_dunning:${openItem.arOpenItemId}:${resolvedStageCode}:${calculationWindowEnd}`,
+          description: `AR dunning ${resolvedStageCode} ${openItem.arOpenItemId}`,
+          lines: buildDunningJournalLines({
+            openItem,
+            feeAmount: item.feeAmount,
+            interestAmount: item.interestAmount
+          })
+        });
+        item.journalEntryIds.push(journal.journalEntryId);
+        const beforeAmount = openItem.openAmount;
+        openItem.originalAmount = roundMoney(openItem.originalAmount + item.feeAmount + item.interestAmount);
+        openItem.openAmount = roundMoney(openItem.openAmount + item.feeAmount + item.interestAmount);
+        appendOpenItemEvent(state, clock, {
+          openItem,
+          eventCode: "dunning_charge_booked",
+          eventReasonCode: resolvedStageCode,
+          eventSourceType: "DUNNING",
+          eventSourceId: item.arDunningRunItemId,
+          amountDelta: roundMoney(item.feeAmount + item.interestAmount),
+          openAmountBefore: beforeAmount,
+          openAmountAfter: openItem.openAmount,
+          snapshotJson: {
+            journalEntryIds: item.journalEntryIds,
+            feeAmount: item.feeAmount,
+            interestAmount: item.interestAmount
+          },
+          actorId
+        });
+        run.summary.feesGenerated += item.feeAmount > 0 ? 1 : 0;
+        run.summary.interestGenerated += item.interestAmount > 0 ? 1 : 0;
+      }
+
+      openItem.collectionStageCode = resolvedStageCode;
+      refreshOpenItemAging(openItem, resolvedRunDate);
+      touchOpenItem(openItem);
+      item.actionStatus = "booked";
+      run.summary.items += 1;
+      syncInvoiceFromOpenItem(state, clock, openItem);
+      run.items.push(item);
+    }
+
+    run.status = "executed";
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId,
+      correlationId,
+      action: "ar.dunning_run.executed",
+      entityType: "ar_dunning_run",
+      entityId: run.arDunningRunId,
+      explanation: `Executed dunning run ${run.arDunningRunId} for ${resolvedStageCode}.`
+    });
+    return copy(run);
+  }
+
+  function createWriteoff({
+    companyId,
+    arOpenItemId,
+    writeoffAmount,
+    writeoffDate,
+    reasonCode,
+    policyLimitAmount = DEFAULT_SMALL_DIFFERENCE_POLICY_LIMIT,
+    approvedByActorId = null,
+    ledgerAccountNumber = DEFAULT_SMALL_DIFFERENCE_ACCOUNT_NUMBER,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const openItem = requireOpenItemRecord(state, companyId, arOpenItemId);
+    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+      throw createError(500, "ledger_platform_missing", "Ledger platform is required for AR write-offs.");
+    }
+    if (openItem.disputeFlag || openItem.dunningHoldFlag) {
+      throw createError(409, "writeoff_dispute_blocked", "Disputed or held items cannot be written off automatically.");
+    }
+    const resolvedWriteoffAmount = normalizePositiveNumber(writeoffAmount, "ar_writeoff_amount_invalid");
+    if (resolvedWriteoffAmount > openItem.openAmount) {
+      throw createError(409, "writeoff_exceeds_open_amount", "Write-off amount exceeds the open amount.");
+    }
+    const resolvedWriteoffDate = normalizeDate(writeoffDate, "ar_writeoff_date_invalid");
+    const resolvedPolicyLimitAmount = normalizePositiveNumber(policyLimitAmount, "ar_writeoff_policy_limit_invalid");
+    const requiresApproval = resolvedWriteoffAmount > resolvedPolicyLimitAmount;
+    if (requiresApproval && !normalizeOptionalText(approvedByActorId)) {
+      throw createError(409, "writeoff_approval_required", "Write-off exceeds the configured automatic policy limit.");
+    }
+
+    const writeoff = {
+      arWriteoffId: crypto.randomUUID(),
+      companyId: openItem.companyId,
+      arOpenItemId: openItem.arOpenItemId,
+      customerInvoiceId: openItem.customerInvoiceId,
+      arAllocationId: null,
+      status: "posted",
+      reasonCode: requireText(reasonCode, "ar_writeoff_reason_required"),
+      policyLimitAmount: resolvedPolicyLimitAmount,
+      requiresApproval,
+      approvedByActorId: normalizeOptionalText(approvedByActorId),
+      writeoffAmount: resolvedWriteoffAmount,
+      currencyCode: openItem.currencyCode,
+      functionalAmount: resolvedWriteoffAmount,
+      ledgerAccountNumber: requireText(ledgerAccountNumber, "ar_writeoff_account_required"),
+      writeoffDate: resolvedWriteoffDate,
+      reversalOfWriteoffId: null,
+      journalEntryId: null,
+      metadataJson: {},
+      createdByActorId: actorId,
+      createdAt: nowIso(clock)
+    };
+    const journal = postArJournal({
+      ledgerPlatform,
+      companyId: openItem.companyId,
+      journalDate: resolvedWriteoffDate,
+      voucherSeriesCode: "V",
+      sourceType: "MANUAL_JOURNAL",
+      sourceId: `writeoff:${writeoff.arWriteoffId}`,
+      actorId,
+      idempotencyKey: `ar_writeoff:${openItem.arOpenItemId}:${resolvedWriteoffDate}:${resolvedWriteoffAmount}`,
+      description: `AR writeoff ${writeoff.arWriteoffId}`,
+      lines: buildWriteoffJournalLines({
+        openItem,
+        ledgerAccountNumber: writeoff.ledgerAccountNumber,
+        writeoffAmount: resolvedWriteoffAmount
+      })
+    });
+    writeoff.journalEntryId = journal.journalEntryId;
+    state.writeoffs.set(writeoff.arWriteoffId, writeoff);
+    ensureCollection(state.writeoffIdsByCompany, openItem.companyId).push(writeoff.arWriteoffId);
+
+    const beforeAmount = openItem.openAmount;
+    openItem.openAmount = roundMoney(openItem.openAmount - resolvedWriteoffAmount);
+    openItem.writeoffAmount = roundMoney(openItem.writeoffAmount + resolvedWriteoffAmount);
+    openItem.status = resolveOpenItemStatus(openItem);
+    if (openItem.openAmount === 0) {
+      openItem.closedOn = resolvedWriteoffDate;
+      openItem.collectionStageCode = "closed";
+    }
+    refreshOpenItemAging(openItem, resolvedWriteoffDate);
+    touchOpenItem(openItem);
+    appendOpenItemEvent(state, clock, {
+      openItem,
+      eventCode: "writeoff_posted",
+      eventReasonCode: writeoff.reasonCode,
+      eventSourceType: "WRITE_OFF",
+      eventSourceId: writeoff.arWriteoffId,
+      amountDelta: -resolvedWriteoffAmount,
+      openAmountBefore: beforeAmount,
+      openAmountAfter: openItem.openAmount,
+      snapshotJson: {
+        journalEntryId: writeoff.journalEntryId
+      },
+      actorId
+    });
+    syncInvoiceFromOpenItem(state, clock, openItem);
+    pushAudit(state, clock, {
+      companyId: openItem.companyId,
+      actorId,
+      correlationId,
+      action: "ar.writeoff.posted",
+      entityType: "ar_writeoff",
+      entityId: writeoff.arWriteoffId,
+      explanation: `Posted write-off ${writeoff.arWriteoffId} for open item ${openItem.arOpenItemId}.`
+    });
+    return copy(writeoff);
+  }
+
+  function listAgingSnapshots({ companyId, cutoffDate = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedCutoffDate = cutoffDate ? normalizeDate(cutoffDate, "ar_aging_cutoff_date_invalid") : null;
+    return (state.agingSnapshotIdsByCompany.get(resolvedCompanyId) || [])
+      .map((agingSnapshotId) => state.agingSnapshots.get(agingSnapshotId))
+      .filter(Boolean)
+      .filter((snapshot) => (resolvedCutoffDate ? snapshot.cutoffDate === resolvedCutoffDate : true))
+      .sort((left, right) => right.cutoffDate.localeCompare(left.cutoffDate))
+      .map(copy);
+  }
+
+  function captureAgingSnapshot({ companyId, cutoffDate, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedCutoffDate = normalizeDate(cutoffDate, "ar_aging_cutoff_date_invalid");
+    const openItems = (state.openItemIdsByCompany.get(resolvedCompanyId) || [])
+      .map((arOpenItemId) => state.openItems.get(arOpenItemId))
+      .filter(Boolean)
+      .filter((openItem) => openItem.status !== "reversed" && openItem.openAmount > 0);
+    const sourceHash = hashObject(
+      openItems.map((openItem) => ({
+        arOpenItemId: openItem.arOpenItemId,
+        customerId: openItem.customerId,
+        dueOn: openItem.dueOn,
+        openAmount: openItem.openAmount,
+        status: openItem.status,
+        updatedAt: openItem.updatedAt
+      }))
+    );
+    const scopedSnapshotKey = toCompanyScopedKey(resolvedCompanyId, `${resolvedCutoffDate}:${sourceHash}`);
+    const existingSnapshotId = state.agingSnapshotIdsByKey.get(scopedSnapshotKey);
+    if (existingSnapshotId) {
+      return copy(state.agingSnapshots.get(existingSnapshotId));
+    }
+
+    const bucketTotals = Object.fromEntries(AR_AGING_BUCKET_CODES.map((bucket) => [bucket, 0]));
+    const customerTotals = {};
+    for (const openItem of openItems) {
+      const bucket = computeAgingBucket(openItem.dueOn, resolvedCutoffDate);
+      bucketTotals[bucket] = roundMoney((bucketTotals[bucket] || 0) + openItem.openAmount);
+      customerTotals[openItem.customerId] = roundMoney((customerTotals[openItem.customerId] || 0) + openItem.openAmount);
+      openItem.agingBucketCode = bucket;
+    }
+
+    const snapshot = {
+      arAgingSnapshotId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      cutoffDate: resolvedCutoffDate,
+      sourceHash,
+      openItemCount: openItems.length,
+      bucketTotalsJson: bucketTotals,
+      customerTotalsJson: customerTotals,
+      generatedByActorId: actorId,
+      generatedAt: nowIso(clock)
+    };
+    state.agingSnapshots.set(snapshot.arAgingSnapshotId, snapshot);
+    ensureCollection(state.agingSnapshotIdsByCompany, resolvedCompanyId).push(snapshot.arAgingSnapshotId);
+    state.agingSnapshotIdsByKey.set(scopedSnapshotKey, snapshot.arAgingSnapshotId);
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId,
+      correlationId,
+      action: "ar.aging_snapshot.generated",
+      entityType: "ar_aging_snapshot",
+      entityId: snapshot.arAgingSnapshotId,
+      explanation: `Captured AR aging snapshot for ${resolvedCutoffDate}.`
+    });
+    return copy(snapshot);
+  }
+
   function importCustomers({
     companyId,
     batchKey,
@@ -1164,6 +2048,15 @@ export function createArEngine({
       contracts: [...state.contracts.values()],
       invoices: [...state.invoices.values()],
       paymentLinks: [...state.paymentLinks.values()],
+      openItems: [...state.openItems.values()],
+      openItemEvents: state.openItemEvents,
+      paymentMatchingRuns: [...state.paymentMatchingRuns.values()],
+      paymentMatchCandidates: [...state.paymentMatchCandidates.values()],
+      allocations: [...state.allocations.values()],
+      unmatchedBankReceipts: [...state.unmatchedBankReceipts.values()],
+      dunningRuns: [...state.dunningRuns.values()],
+      writeoffs: [...state.writeoffs.values()],
+      agingSnapshots: [...state.agingSnapshots.values()],
       customerImportBatches: [...state.customerImportBatches.values()],
       auditEvents: state.auditEvents
     });
@@ -1243,6 +2136,584 @@ export function createArEngine({
       targetStatus: "sent"
     });
   }
+}
+
+function requireOpenItemRecord(state, companyId, arOpenItemId) {
+  const openItem = state.openItems.get(requireText(arOpenItemId, "ar_open_item_id_required"));
+  if (!openItem || openItem.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "ar_open_item_not_found", "AR open item was not found.");
+  }
+  return openItem;
+}
+
+function requireAllocationRecord(state, companyId, arAllocationId) {
+  const allocation = state.allocations.get(requireText(arAllocationId, "ar_allocation_id_required"));
+  if (!allocation || allocation.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "ar_allocation_not_found", "AR allocation was not found.");
+  }
+  return allocation;
+}
+
+function requirePaymentMatchingRunRecord(state, companyId, arPaymentMatchingRunId) {
+  const run = state.paymentMatchingRuns.get(requireText(arPaymentMatchingRunId, "ar_payment_matching_run_id_required"));
+  if (!run || run.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "ar_payment_matching_run_not_found", "AR payment matching run was not found.");
+  }
+  return run;
+}
+
+function requireDunningRunRecord(state, companyId, arDunningRunId) {
+  const run = state.dunningRuns.get(requireText(arDunningRunId, "ar_dunning_run_id_required"));
+  if (!run || run.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "ar_dunning_run_not_found", "AR dunning run was not found.");
+  }
+  return run;
+}
+
+function requireUnmatchedReceiptRecord(state, companyId, unmatchedBankReceiptId) {
+  const receipt = state.unmatchedBankReceipts.get(requireText(unmatchedBankReceiptId, "ar_unmatched_bank_receipt_id_required"));
+  if (!receipt || receipt.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "ar_unmatched_bank_receipt_not_found", "AR unmatched bank receipt was not found.");
+  }
+  return receipt;
+}
+
+function ensureOpenItemForInvoice({ state, clock, invoice, customer, actorId = "system", correlationId = crypto.randomUUID() }) {
+  if (!invoice || invoice.invoiceType === "credit_note") {
+    return null;
+  }
+  const scopedKey = toCompanyScopedKey(invoice.companyId, invoice.customerInvoiceId);
+  const existingOpenItemId = state.openItemIdByInvoice.get(scopedKey);
+  if (existingOpenItemId) {
+    const openItem = state.openItems.get(existingOpenItemId);
+    if (openItem) {
+      openItem.originalAmount = invoice.totals.grossAmount;
+      openItem.openAmount = invoice.remainingAmount;
+      openItem.dueOn = invoice.dueDate;
+      openItem.status = resolveOpenItemStatus(openItem);
+      refreshOpenItemAging(openItem, invoice.issueDate);
+      touchOpenItem(openItem);
+      return openItem;
+    }
+  }
+  const openItem = {
+    arOpenItemId: crypto.randomUUID(),
+    companyId: invoice.companyId,
+    customerId: customer.customerId,
+    customerCountryCode: customer.countryCode,
+    customerInvoiceId: invoice.customerInvoiceId,
+    originalCustomerInvoiceId: invoice.customerInvoiceId,
+    sourceType: invoice.sourceType,
+    sourceId: invoice.sourceId,
+    sourceVersion: invoice.sourceVersion,
+    idempotencyKey: `open_item:${invoice.customerInvoiceId}`,
+    currencyCode: invoice.currencyCode,
+    functionalCurrencyCode: invoice.currencyCode,
+    originalAmount: invoice.totals.grossAmount,
+    openAmount: invoice.remainingAmount,
+    paidAmount: 0,
+    creditedAmount: 0,
+    writeoffAmount: 0,
+    disputedAmount: 0,
+    dueOn: invoice.dueDate,
+    openedOn: invoice.issueDate,
+    closedOn: null,
+    lastActivityAt: invoice.issuedAt || nowIso(clock),
+    agingBucketCode: computeAgingBucket(invoice.dueDate, invoice.issueDate),
+    collectionStageCode: "none",
+    disputeFlag: false,
+    dunningHoldFlag: false,
+    status: "open",
+    metadataJson: {
+      invoiceNumber: invoice.invoiceNumber
+    },
+    createdAt: nowIso(clock),
+    updatedAt: nowIso(clock)
+  };
+  state.openItems.set(openItem.arOpenItemId, openItem);
+  ensureCollection(state.openItemIdsByCompany, openItem.companyId).push(openItem.arOpenItemId);
+  state.openItemIdByInvoice.set(scopedKey, openItem.arOpenItemId);
+  appendOpenItemEvent(state, clock, {
+    openItem,
+    eventCode: "open_item_created",
+    eventReasonCode: invoice.invoiceType,
+    eventSourceType: "AR_INVOICE",
+    eventSourceId: invoice.customerInvoiceId,
+    amountDelta: invoice.totals.grossAmount,
+    openAmountBefore: 0,
+    openAmountAfter: openItem.openAmount,
+    snapshotJson: {
+      invoiceNumber: invoice.invoiceNumber
+    },
+    actorId
+  });
+  pushAudit(state, clock, {
+    companyId: openItem.companyId,
+    actorId,
+    correlationId,
+    action: "ar.open_item.created",
+    entityType: "ar_open_item",
+    entityId: openItem.arOpenItemId,
+    explanation: `Created AR open item ${openItem.arOpenItemId} for invoice ${invoice.customerInvoiceId}.`
+  });
+  return openItem;
+}
+
+function applyCreditToOpenItem({ state, clock, originalInvoice, creditInvoice, actorId = "system" }) {
+  const scopedKey = toCompanyScopedKey(originalInvoice.companyId, originalInvoice.customerInvoiceId);
+  const openItemId = state.openItemIdByInvoice.get(scopedKey);
+  if (!openItemId) {
+    return;
+  }
+  const openItem = state.openItems.get(openItemId);
+  if (!openItem) {
+    return;
+  }
+  const previousOpenAmount = openItem.openAmount;
+  openItem.creditedAmount = roundMoney(openItem.creditedAmount + creditInvoice.totals.grossAmount);
+  openItem.openAmount = roundMoney(Math.max(0, openItem.openAmount - creditInvoice.totals.grossAmount));
+  if (openItem.openAmount === 0) {
+    openItem.closedOn = creditInvoice.issueDate;
+    openItem.collectionStageCode = "closed";
+  }
+  openItem.status = resolveOpenItemStatus(openItem);
+  refreshOpenItemAging(openItem, creditInvoice.issueDate);
+  touchOpenItem(openItem);
+  appendOpenItemEvent(state, clock, {
+    openItem,
+    eventCode: "credit_applied",
+    eventReasonCode: creditInvoice.customerInvoiceId,
+    eventSourceType: "AR_CREDIT_NOTE",
+    eventSourceId: creditInvoice.customerInvoiceId,
+    amountDelta: -creditInvoice.totals.grossAmount,
+    openAmountBefore: previousOpenAmount,
+    openAmountAfter: openItem.openAmount,
+    snapshotJson: {
+      creditInvoiceId: creditInvoice.customerInvoiceId
+    },
+    actorId
+  });
+}
+
+function applyAllocationToOpenItem({ state, clock, openItem, allocation, actorId = "system" }) {
+  const previousOpenAmount = openItem.openAmount;
+  if (allocation.allocationType === "credit_note") {
+    openItem.creditedAmount = roundMoney(openItem.creditedAmount + allocation.allocatedAmount);
+  } else if (allocation.allocationType === "writeoff_adjustment") {
+    openItem.writeoffAmount = roundMoney(openItem.writeoffAmount + allocation.allocatedAmount);
+  } else {
+    openItem.paidAmount = roundMoney(openItem.paidAmount + allocation.allocatedAmount);
+  }
+  openItem.openAmount = roundMoney(openItem.openAmount - allocation.allocatedAmount);
+  if (openItem.openAmount === 0) {
+    openItem.closedOn = allocation.allocatedOn;
+    openItem.collectionStageCode = "closed";
+  }
+  openItem.status = resolveOpenItemStatus(openItem);
+  refreshOpenItemAging(openItem, allocation.allocatedOn);
+  touchOpenItem(openItem);
+  appendOpenItemEvent(state, clock, {
+    openItem,
+    eventCode: "payment_allocation_confirmed",
+    eventReasonCode: allocation.reasonCode,
+    eventSourceType: "BANK_MATCH",
+    eventSourceId: allocation.arAllocationId,
+    amountDelta: -allocation.allocatedAmount,
+    openAmountBefore: previousOpenAmount,
+    openAmountAfter: openItem.openAmount,
+    snapshotJson: {
+      journalEntryId: allocation.journalEntryId
+    },
+    actorId
+  });
+  syncInvoiceFromOpenItem(state, clock, openItem);
+}
+
+function syncInvoiceFromOpenItem(state, clock, openItem) {
+  if (!openItem.customerInvoiceId) {
+    return;
+  }
+  const invoice = state.invoices.get(openItem.customerInvoiceId);
+  if (!invoice) {
+    return;
+  }
+  invoice.remainingAmount = openItem.openAmount;
+  if (openItem.disputeFlag || openItem.dunningHoldFlag) {
+    invoice.status = "disputed";
+  } else if (openItem.status === "written_off" && openItem.openAmount === 0) {
+    invoice.status = "written_off";
+  } else if (openItem.openAmount === 0) {
+    invoice.status = invoice.creditedAmount > 0 ? "credited" : "paid";
+  } else if (openItem.paidAmount > 0 || openItem.creditedAmount > 0 || openItem.writeoffAmount > 0) {
+    invoice.status = "partially_paid";
+  } else if (invoice.dueDate < nowIso(clock).slice(0, 10)) {
+    invoice.status = "overdue";
+  }
+  invoice.updatedAt = nowIso(clock);
+}
+
+function resolveOpenItemStatus(openItem) {
+  if (openItem.disputeFlag || openItem.dunningHoldFlag) {
+    return "disputed";
+  }
+  if (openItem.openAmount === 0 && openItem.writeoffAmount > 0) {
+    return "written_off";
+  }
+  if (openItem.openAmount === 0) {
+    return "settled";
+  }
+  if (openItem.paidAmount > 0 || openItem.creditedAmount > 0 || openItem.writeoffAmount > 0) {
+    return "partially_settled";
+  }
+  return "open";
+}
+
+function refreshOpenItemAging(openItem, cutoffDate) {
+  openItem.agingBucketCode = computeAgingBucket(openItem.dueOn, cutoffDate);
+}
+
+function computeAgingBucket(dueOn, cutoffDate) {
+  if (!dueOn || !cutoffDate) {
+    return "current";
+  }
+  const overdueDays = diffDays(cutoffDate, dueOn);
+  if (overdueDays <= 0) {
+    return "current";
+  }
+  if (overdueDays <= 30) {
+    return "1_30";
+  }
+  if (overdueDays <= 60) {
+    return "31_60";
+  }
+  if (overdueDays <= 90) {
+    return "61_90";
+  }
+  return "91_plus";
+}
+
+function touchOpenItem(openItem) {
+  openItem.lastActivityAt = nowIso();
+  openItem.updatedAt = openItem.lastActivityAt;
+}
+
+function appendOpenItemEvent(
+  state,
+  clock,
+  {
+    openItem,
+    eventCode,
+    eventReasonCode = null,
+    eventSourceType,
+    eventSourceId,
+    amountDelta,
+    openAmountBefore,
+    openAmountAfter,
+    snapshotJson = {},
+    actorId = "system"
+  }
+) {
+  state.openItemEvents.push({
+    arOpenItemEventId: crypto.randomUUID(),
+    arOpenItemId: openItem.arOpenItemId,
+    companyId: openItem.companyId,
+    eventCode,
+    eventReasonCode: normalizeOptionalText(eventReasonCode),
+    eventSourceType,
+    eventSourceId,
+    amountDelta: roundMoney(amountDelta),
+    openAmountBefore: roundMoney(openAmountBefore),
+    openAmountAfter: roundMoney(openAmountAfter),
+    snapshotJson: copy(snapshotJson),
+    occurredAt: nowIso(clock),
+    createdByActorId: actorId,
+    createdAt: nowIso(clock)
+  });
+}
+
+function createOrReuseUnmatchedReceipt({
+  state,
+  clock,
+  companyId,
+  bankTransactionUid,
+  statementLineHash,
+  valueDate,
+  amount,
+  currencyCode,
+  payerReference = null,
+  customerHint = null,
+  linkedArAllocationId = null,
+  actorId = "system",
+  payloadJson = {}
+}) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const resolvedTransactionUid = requireText(bankTransactionUid, "bank_transaction_uid_required");
+  const resolvedStatementLineHash =
+    normalizeOptionalText(statementLineHash) ||
+    buildStatementLineHash({ bankTransactionUid: resolvedTransactionUid, amount, currencyCode, valueDate });
+  const key = toCompanyScopedKey(resolvedCompanyId, `${resolvedTransactionUid}:${resolvedStatementLineHash}`);
+  const existingId = state.unmatchedReceiptIdsByKey.get(key);
+  if (existingId) {
+    const existingReceipt = state.unmatchedBankReceipts.get(existingId);
+    existingReceipt.updatedAt = nowIso(clock);
+    return existingReceipt;
+  }
+  const receipt = {
+    arUnmatchedBankReceiptId: crypto.randomUUID(),
+    companyId: resolvedCompanyId,
+    bankTransactionUid: resolvedTransactionUid,
+    statementLineHash: resolvedStatementLineHash,
+    valueDate: normalizeDate(valueDate, "ar_unmatched_receipt_value_date_invalid"),
+    amount: roundMoney(amount),
+    remainingAmount: roundMoney(amount),
+    currencyCode: normalizeUpperCode(currencyCode, "currency_code_required", 3),
+    payerReference: normalizeOptionalText(payerReference),
+    customerHint: normalizeOptionalText(customerHint),
+    status: "unmatched",
+    linkedArAllocationId: linkedArAllocationId ? requireText(linkedArAllocationId, "ar_allocation_id_required") : null,
+    payloadJson: copy(payloadJson),
+    createdByActorId: actorId,
+    createdAt: nowIso(clock),
+    updatedAt: nowIso(clock)
+  };
+  state.unmatchedBankReceipts.set(receipt.arUnmatchedBankReceiptId, receipt);
+  ensureCollection(state.unmatchedReceiptIdsByCompany, resolvedCompanyId).push(receipt.arUnmatchedBankReceiptId);
+  state.unmatchedReceiptIdsByKey.set(key, receipt.arUnmatchedBankReceiptId);
+  return receipt;
+}
+
+function resolveUnmatchedReceiptStatus(receipt) {
+  if (receipt.remainingAmount <= 0) {
+    return "allocated";
+  }
+  if (receipt.remainingAmount < receipt.amount) {
+    return "partially_allocated";
+  }
+  return "unmatched";
+}
+
+function buildStatementLineHash({ bankTransactionUid, amount, currencyCode, valueDate }) {
+  return hashObject({
+    bankTransactionUid: normalizeOptionalText(bankTransactionUid),
+    amount: roundMoney(amount),
+    currencyCode: normalizeOptionalText(currencyCode)?.toUpperCase() || "SEK",
+    valueDate: normalizeOptionalText(valueDate)
+  });
+}
+
+function buildPaymentMatchCandidate({ state, transaction, companyId }) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const amount = normalizePositiveNumber(transaction.amount, "ar_payment_transaction_amount_invalid");
+  const currencyCode = normalizeUpperCode(transaction.currencyCode || "SEK", "currency_code_required", 3);
+  const valueDate = normalizeDate(transaction.valueDate, "ar_payment_transaction_value_date_invalid");
+  const bankTransactionUid = requireText(
+    transaction.bankTransactionUid || transaction.externalTransactionUid,
+    "bank_transaction_uid_required"
+  );
+  const statementLineHash =
+    normalizeOptionalText(transaction.statementLineHash) ||
+    buildStatementLineHash({ bankTransactionUid, amount, currencyCode, valueDate });
+  const payerReference = normalizeOptionalText(transaction.payerReference || transaction.paymentReference);
+
+  let candidateOpenItem = null;
+  if (transaction.arOpenItemId) {
+    candidateOpenItem = requireOpenItemRecord(state, resolvedCompanyId, transaction.arOpenItemId);
+  } else if (transaction.customerInvoiceId) {
+    const openItemId = state.openItemIdByInvoice.get(toCompanyScopedKey(resolvedCompanyId, transaction.customerInvoiceId)) || null;
+    candidateOpenItem = openItemId ? state.openItems.get(openItemId) : null;
+  } else if (payerReference) {
+    candidateOpenItem = findOpenItemByPaymentReference(state, resolvedCompanyId, payerReference);
+  }
+
+  const matchReason = candidateOpenItem ? resolveMatchReason(candidateOpenItem, amount) : "no_confident_match";
+  return {
+    arPaymentMatchCandidateId: crypto.randomUUID(),
+    arPaymentMatchingRunId: null,
+    companyId: resolvedCompanyId,
+    arOpenItemId: candidateOpenItem?.arOpenItemId || null,
+    customerId: candidateOpenItem?.customerId || null,
+    bankTransactionUid,
+    statementLineHash,
+    payerReference,
+    amount,
+    currencyCode,
+    valueDate,
+    matchScore: candidateOpenItem ? resolveMatchScore(candidateOpenItem, amount) : 0.2,
+    status: candidateOpenItem ? "proposed" : "rejected",
+    reasonCode: matchReason,
+    payloadJson: {
+      paymentReference: payerReference,
+      customerHint: normalizeOptionalText(transaction.customerHint)
+    },
+    createdAt: nowIso()
+  };
+}
+
+function resolveMatchReason(openItem, amount) {
+  if (!openItem) {
+    return "no_confident_match";
+  }
+  if (amount > openItem.openAmount) {
+    return "overpayment_reference_match";
+  }
+  if (amount < openItem.openAmount) {
+    return "partial_reference_match";
+  }
+  return "exact_reference_and_amount";
+}
+
+function resolveMatchScore(openItem, amount) {
+  if (!openItem) {
+    return 0;
+  }
+  if (amount === openItem.openAmount) {
+    return 0.99;
+  }
+  if (amount < openItem.openAmount) {
+    return 0.95;
+  }
+  return 0.93;
+}
+
+function findOpenItemByPaymentReference(state, companyId, payerReference) {
+  const resolvedReference = requireText(payerReference, "payment_reference_required");
+  const openItems = (state.openItemIdsByCompany.get(companyId) || [])
+    .map((arOpenItemId) => state.openItems.get(arOpenItemId))
+    .filter(Boolean)
+    .filter((openItem) => openItem.openAmount > 0);
+  return (
+    openItems.find((openItem) => {
+      const invoice = state.invoices.get(openItem.customerInvoiceId);
+      return invoice && (invoice.paymentReference === resolvedReference || invoice.invoiceNumber === resolvedReference);
+    }) || null
+  );
+}
+
+function resolveOpenItemReceivableAccount(openItem) {
+  if (!openItem?.customerId) {
+    return "1210";
+  }
+  return resolveCustomerReceivableAccount({ countryCode: openItem.customerCountryCode || "SE" });
+}
+
+function buildAllocationJournalLines({ openItem, allocation, receiptAmount, unmatchedReceipt }) {
+  const receivableAccountNumber = resolveOpenItemReceivableAccount(openItem);
+  if (unmatchedReceipt) {
+    return [
+      createJournalLine(DEFAULT_UNALLOCATED_RECEIPT_ACCOUNT_NUMBER, 1, allocation.allocatedAmount, 0, "AR_PAYMENT", allocation.arAllocationId),
+      createJournalLine(receivableAccountNumber, 2, 0, allocation.allocatedAmount, "AR_PAYMENT", allocation.arAllocationId)
+    ];
+  }
+  if (allocation.allocationType === "prepayment") {
+    return [
+      createJournalLine(DEFAULT_CUSTOMER_PREPAYMENT_ACCOUNT_NUMBER, 1, allocation.allocatedAmount, 0, "AR_PAYMENT", allocation.arAllocationId),
+      createJournalLine(receivableAccountNumber, 2, 0, allocation.allocatedAmount, "AR_PAYMENT", allocation.arAllocationId)
+    ];
+  }
+  const lines = [
+    createJournalLine(DEFAULT_BANK_ACCOUNT_NUMBER, 1, receiptAmount, 0, "AR_PAYMENT", allocation.arAllocationId),
+    createJournalLine(receivableAccountNumber, 2, 0, allocation.allocatedAmount, "AR_PAYMENT", allocation.arAllocationId)
+  ];
+  if (allocation.suspenseAmount > 0) {
+    lines.push(
+      createJournalLine(
+        DEFAULT_UNALLOCATED_RECEIPT_ACCOUNT_NUMBER,
+        3,
+        0,
+        allocation.suspenseAmount,
+        "AR_PAYMENT",
+        allocation.arAllocationId
+      )
+    );
+  }
+  return lines;
+}
+
+function buildDunningJournalLines({ openItem, feeAmount, interestAmount }) {
+  const receivableAccountNumber = resolveOpenItemReceivableAccount(openItem);
+  const totalAmount = roundMoney(feeAmount + interestAmount);
+  const lines = [createJournalLine(receivableAccountNumber, 1, totalAmount, 0, "AR_INVOICE", openItem.arOpenItemId)];
+  let lineNumber = 2;
+  if (feeAmount > 0) {
+    lines.push(createJournalLine("3520", lineNumber, 0, feeAmount, "AR_INVOICE", openItem.arOpenItemId));
+    lineNumber += 1;
+  }
+  if (interestAmount > 0) {
+    lines.push(createJournalLine("3530", lineNumber, 0, interestAmount, "AR_INVOICE", openItem.arOpenItemId));
+  }
+  return lines;
+}
+
+function buildWriteoffJournalLines({ openItem, ledgerAccountNumber, writeoffAmount }) {
+  return [
+    createJournalLine(ledgerAccountNumber, 1, writeoffAmount, 0, "MANUAL_JOURNAL", openItem.arOpenItemId),
+    createJournalLine(resolveOpenItemReceivableAccount(openItem), 2, 0, writeoffAmount, "MANUAL_JOURNAL", openItem.arOpenItemId)
+  ];
+}
+
+function postArJournal({ ledgerPlatform, companyId, journalDate, voucherSeriesCode, sourceType, sourceId, actorId, idempotencyKey, description, lines }) {
+  const created = ledgerPlatform.createJournalEntry({
+    companyId,
+    journalDate,
+    voucherSeriesCode,
+    sourceType,
+    sourceId,
+    actorId,
+    idempotencyKey,
+    description,
+    lines
+  });
+  ledgerPlatform.validateJournalEntry({
+    companyId,
+    journalEntryId: created.journalEntry.journalEntryId,
+    actorId
+  });
+  const posted = ledgerPlatform.postJournalEntry({
+    companyId,
+    journalEntryId: created.journalEntry.journalEntryId,
+    actorId
+  });
+  return posted.journalEntry;
+}
+
+function listEligibleOpenItemsForDunning(state, companyId, runDate) {
+  return (state.openItemIdsByCompany.get(companyId) || [])
+    .map((arOpenItemId) => state.openItems.get(arOpenItemId))
+    .filter(Boolean)
+    .filter((openItem) => openItem.openAmount > 0 && openItem.dueOn && openItem.dueOn < runDate)
+    .sort((left, right) => left.dueOn.localeCompare(right.dueOn));
+}
+
+function isDunningStageEligible(currentStageCode, nextStageCode) {
+  if (nextStageCode === "stage_1") {
+    return currentStageCode === "none";
+  }
+  if (nextStageCode === "stage_2") {
+    return currentStageCode === "stage_1";
+  }
+  if (nextStageCode === "escalated") {
+    return currentStageCode === "stage_2";
+  }
+  return false;
+}
+
+function calculateLateInterestAmount(openAmount, dueOn, runDate, annualInterestRatePercent) {
+  const overdueDays = Math.max(0, diffDays(runDate, dueOn));
+  if (overdueDays <= 0) {
+    return 0;
+  }
+  return roundMoney((roundMoney(openAmount) * Number(annualInterestRatePercent || 0) * overdueDays) / 36500);
+}
+
+function firstDayOfMonthIso(date) {
+  const [year, month] = normalizeDate(date, "month_date_invalid").split("-").map(Number);
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+}
+
+function diffDays(leftDate, rightDate) {
+  const left = new Date(`${normalizeDate(leftDate, "left_date_invalid")}T00:00:00.000Z`);
+  const right = new Date(`${normalizeDate(rightDate, "right_date_invalid")}T00:00:00.000Z`);
+  return Math.floor((left.getTime() - right.getTime()) / 86400000);
 }
 
 function ensureCustomerNoUnique(state, companyId, customerNo) {

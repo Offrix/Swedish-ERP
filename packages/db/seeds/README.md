@@ -18,3 +18,4 @@ Seed execution policy:
 - Phase 4.3 adds VAT declaration-run, OSS/IOSS and periodic-statement demo artifacts for reporting verification
 - Phase 5.1 adds AR customer masterdata, contacts, items, price lists, quote versions, contracts, invoice plans and import-batch demo artifacts
 - Phase 5.2 adds AR invoice-number series, invoice lines, credit-link, delivery and payment-link demo artifacts
+- Phase 5.3 adds AR open-item, allocation, bank-match, unmatched-receipt, dunning, writeoff and aging demo artifacts
