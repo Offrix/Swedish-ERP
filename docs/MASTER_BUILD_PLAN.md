@@ -506,7 +506,7 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
   - [x] 10.3 Byggspecifika regler: Ã„TA, HUS, omvÃ¤nd moms, personalliggare
 - [ ] **FAS 11 â€” Rapporter, byrÃ¥lÃ¤ge, mÃ¥nadsstÃ¤ngning och bokslut**
   - [x] 11.1 Rapporter och drilldown
-  - [ ] 11.2 ByrÃ¥lÃ¤ge och portfÃ¶ljhantering
+  - [x] 11.2 ByrÃ¥lÃ¤ge och portfÃ¶ljhantering
   - [ ] 11.3 MÃ¥nadsstÃ¤ngning och bokslutschecklistor
 - [ ] **FAS 12 â€” Ã…rsredovisning, deklaration och myndighetskopplingar**
   - [ ] 12.1 Ã…rsredovisningsmotor
@@ -1064,15 +1064,18 @@ GÃ¶r systemet anvÃ¤ndbart fÃ¶r byrÃ¥er, controllers och periodstÃ¤ngni
 ### 11.2 ByrÃ¥lÃ¤ge och portfÃ¶ljhantering
 
 **Bygg detta**
-- [ ] ByrÃ¥portfÃ¶lj
-- [ ] deadlines
-- [ ] klientstatus
-- [ ] massÃ¥tgÃ¤rder
+- [x] ByrÃ¥portfÃ¶lj
+- [x] deadlines
+- [x] klientstatus
+- [x] massÃ¥tgÃ¤rder
+- [x] klientrequester och approvals
+- [x] work items och samarbetskommentarer
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] ByrÃ¥n ser bara klienter i scope
-- [ ] Deadlines hÃ¤rleds frÃ¥n bolagsinstÃ¤llningar
-- [ ] Klientdokument kan begÃ¤ras och spÃ¥ras
+- [x] ByrÃ¥n ser bara klienter i scope
+- [x] Deadlines hÃ¤rleds frÃ¥n bolagsinstÃ¤llningar
+- [x] Klientdokument kan begÃ¤ras och spÃ¥ras
+- [x] Approval packages, massÃ¥tgÃ¤rder och kommentarer Ã¤r spÃ¥rbara per klient
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P11-02`.
 

@@ -91,6 +91,18 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/reporting/reconciliations",
               "/v1/reporting/reconciliations/:reconciliationRunId",
               "/v1/reporting/reconciliations/:reconciliationRunId/signoff",
+              "/v1/bureau/portfolio",
+              "/v1/bureau/portfolio/memberships",
+              "/v1/bureau/client-requests",
+              "/v1/bureau/client-requests/:requestId/send",
+              "/v1/bureau/client-requests/:requestId/respond",
+              "/v1/bureau/client-requests/:requestId/accept",
+              "/v1/bureau/approval-packages",
+              "/v1/bureau/approval-packages/:approvalPackageId/send",
+              "/v1/bureau/approval-packages/:approvalPackageId/respond",
+              "/v1/bureau/mass-actions",
+              "/v1/bureau/work-items",
+              "/v1/collaboration/comments",
               "/v1/vat/codes",
               "/v1/vat/rule-packs",
               "/v1/vat/decisions",
@@ -1745,6 +1757,285 @@ async function handleRequest({ req, res, platform, flags }) {
         signatoryRole: body.signatoryRole || "close_signatory",
         comment: body.comment || null,
         evidenceRefs: Array.isArray(body.evidenceRefs) ? body.evidenceRefs : [],
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/bureau/portfolio") {
+    const bureauOrgId = requireText(
+      url.searchParams.get("bureauOrgId"),
+      "bureau_org_id_required",
+      "bureauOrgId query parameter is required."
+    );
+    writeJson(res, 200, {
+      items: platform.listPortfolioMemberships({
+        sessionToken: readSessionToken(req),
+        bureauOrgId,
+        search: url.searchParams.get("search")
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/bureau/portfolio/memberships") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      platform.createPortfolioMembership({
+        sessionToken: readSessionToken(req, body),
+        bureauOrgId: body.bureauOrgId,
+        clientCompanyId: body.clientCompanyId,
+        responsibleConsultantId: body.responsibleConsultantId,
+        backupConsultantId: body.backupConsultantId || null,
+        statusProfile: body.statusProfile || "standard",
+        criticality: body.criticality || "standard",
+        activeFrom: body.activeFrom,
+        activeTo: body.activeTo || null,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/bureau/client-requests") {
+    const bureauOrgId = requireText(
+      url.searchParams.get("bureauOrgId"),
+      "bureau_org_id_required",
+      "bureauOrgId query parameter is required."
+    );
+    writeJson(res, 200, {
+      items: platform.listClientRequests({
+        sessionToken: readSessionToken(req),
+        bureauOrgId,
+        clientCompanyId: url.searchParams.get("clientCompanyId"),
+        status: url.searchParams.get("status")
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/bureau/client-requests") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      platform.createClientRequest({
+        sessionToken: readSessionToken(req, body),
+        bureauOrgId: body.bureauOrgId,
+        clientCompanyId: body.clientCompanyId,
+        periodId: body.periodId || null,
+        sourceObjectType: body.sourceObjectType,
+        sourceObjectId: body.sourceObjectId,
+        requestType: body.requestType || "document_request",
+        requestedFromContactId: body.requestedFromContactId,
+        requestedFromContact: body.requestedFromContact || null,
+        blockerScope: body.blockerScope || "none",
+        targetDate: body.targetDate || null,
+        deadlineAt: body.deadlineAt || null,
+        requestedPayload: body.requestedPayload || {},
+        reminderProfile: body.reminderProfile || null,
+        ownerConsultantId: body.ownerConsultantId || null,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const bureauRequestSendMatch = matchPath(path, "/v1/bureau/client-requests/:requestId/send");
+  if (bureauRequestSendMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      platform.sendClientRequest({
+        sessionToken: readSessionToken(req, body),
+        bureauOrgId: body.bureauOrgId,
+        requestId: bureauRequestSendMatch.requestId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const bureauRequestRespondMatch = matchPath(path, "/v1/bureau/client-requests/:requestId/respond");
+  if (bureauRequestRespondMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      platform.submitClientResponse({
+        requestId: bureauRequestRespondMatch.requestId,
+        responseAccessCode: body.responseAccessCode,
+        respondedByContactId: body.respondedByContactId,
+        responseType: body.responseType || "documents_delivered",
+        comment: body.comment || null,
+        attachments: Array.isArray(body.attachments) ? body.attachments : []
+      })
+    );
+    return;
+  }
+
+  const bureauRequestAcceptMatch = matchPath(path, "/v1/bureau/client-requests/:requestId/accept");
+  if (bureauRequestAcceptMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      platform.acceptClientRequest({
+        sessionToken: readSessionToken(req, body),
+        bureauOrgId: body.bureauOrgId,
+        requestId: bureauRequestAcceptMatch.requestId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/bureau/approval-packages") {
+    const bureauOrgId = requireText(
+      url.searchParams.get("bureauOrgId"),
+      "bureau_org_id_required",
+      "bureauOrgId query parameter is required."
+    );
+    writeJson(res, 200, {
+      items: platform.listApprovalPackages({
+        sessionToken: readSessionToken(req),
+        bureauOrgId,
+        clientCompanyId: url.searchParams.get("clientCompanyId"),
+        status: url.searchParams.get("status")
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/bureau/approval-packages") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      platform.createApprovalPackage({
+        sessionToken: readSessionToken(req, body),
+        bureauOrgId: body.bureauOrgId,
+        clientCompanyId: body.clientCompanyId,
+        periodId: body.periodId || null,
+        approvalType: body.approvalType || "period_close",
+        snapshotRef: body.snapshotRef,
+        targetDate: body.targetDate || null,
+        approvalDeadlineAt: body.approvalDeadlineAt || null,
+        namedApproverContactId: body.namedApproverContactId,
+        namedApproverContact: body.namedApproverContact || null,
+        requiresNamedApprover: body.requiresNamedApprover !== false,
+        attachments: Array.isArray(body.attachments) ? body.attachments : [],
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const bureauApprovalSendMatch = matchPath(path, "/v1/bureau/approval-packages/:approvalPackageId/send");
+  if (bureauApprovalSendMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      platform.sendApprovalPackage({
+        sessionToken: readSessionToken(req, body),
+        bureauOrgId: body.bureauOrgId,
+        approvalPackageId: bureauApprovalSendMatch.approvalPackageId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const bureauApprovalRespondMatch = matchPath(path, "/v1/bureau/approval-packages/:approvalPackageId/respond");
+  if (bureauApprovalRespondMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      platform.recordApprovalResponse({
+        approvalPackageId: bureauApprovalRespondMatch.approvalPackageId,
+        responseAccessCode: body.responseAccessCode,
+        respondedByContactId: body.respondedByContactId,
+        responseType: body.responseType,
+        comment: body.comment || null,
+        attachments: Array.isArray(body.attachments) ? body.attachments : [],
+        delegatedFromContactId: body.delegatedFromContactId || null
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/bureau/mass-actions") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      platform.runPortfolioMassAction({
+        sessionToken: readSessionToken(req, body),
+        bureauOrgId: body.bureauOrgId,
+        actionType: body.actionType,
+        clientCompanyIds: Array.isArray(body.clientCompanyIds) ? body.clientCompanyIds : [],
+        newResponsibleConsultantId: body.newResponsibleConsultantId || null,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/bureau/work-items") {
+    const bureauOrgId = requireText(
+      url.searchParams.get("bureauOrgId"),
+      "bureau_org_id_required",
+      "bureauOrgId query parameter is required."
+    );
+    writeJson(res, 200, {
+      items: platform.listWorkItems({
+        sessionToken: readSessionToken(req),
+        bureauOrgId,
+        clientCompanyId: url.searchParams.get("clientCompanyId"),
+        ownerCompanyUserId: url.searchParams.get("ownerCompanyUserId"),
+        status: url.searchParams.get("status")
+      })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/collaboration/comments") {
+    const bureauOrgId = requireText(
+      url.searchParams.get("bureauOrgId"),
+      "bureau_org_id_required",
+      "bureauOrgId query parameter is required."
+    );
+    writeJson(res, 200, {
+      items: platform.listComments({
+        sessionToken: readSessionToken(req),
+        bureauOrgId,
+        objectType: requireText(url.searchParams.get("objectType"), "comment_object_type_required", "objectType query parameter is required."),
+        objectId: requireText(url.searchParams.get("objectId"), "comment_object_id_required", "objectId query parameter is required.")
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/collaboration/comments") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      platform.createComment({
+        sessionToken: readSessionToken(req, body),
+        bureauOrgId: body.bureauOrgId,
+        objectType: body.objectType,
+        objectId: body.objectId,
+        visibility: body.visibility || "internal",
+        body: body.body,
+        mentionCompanyUserIds: Array.isArray(body.mentionCompanyUserIds) ? body.mentionCompanyUserIds : [],
+        createAssignment: body.createAssignment === true,
         correlationId: body.correlationId || createCorrelationId()
       })
     );

@@ -17,6 +17,7 @@ import { createFieldPlatform } from "../../../packages/domain-field/src/index.mj
 import { createHusPlatform } from "../../../packages/domain-hus/src/index.mjs";
 import { createPersonalliggarePlatform } from "../../../packages/domain-personalliggare/src/index.mjs";
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
+import { createCorePlatform } from "../../../packages/domain-core/src/index.mjs";
 
 export function createApiPlatform(options = {}) {
   const orgAuthPlatform = createOrgAuthPlatform(options);
@@ -94,6 +95,11 @@ export function createApiPlatform(options = {}) {
     apPlatform,
     projectsPlatform
   });
+  const corePlatform = createCorePlatform({
+    ...options,
+    orgAuthPlatform,
+    reportingPlatform
+  });
   const husPlatform = createHusPlatform({
     ...options,
     arPlatform,
@@ -116,6 +122,7 @@ export function createApiPlatform(options = {}) {
     ...documentArchivePlatform,
     ...ledgerPlatform,
     ...reportingPlatform,
+    ...corePlatform,
     ...vatPlatform,
     ...integrationPlatform,
     ...arPlatform,

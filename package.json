@@ -70,6 +70,7 @@
     "verify:phase10:projects": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase10-projects.ps1",
     "verify:phase10:field": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase10-field.ps1",
     "verify:phase10:build": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase10-build.ps1",
-    "verify:phase11:reporting": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase11-reporting.ps1"
+    "verify:phase11:reporting": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase11-reporting.ps1",
+    "verify:phase11:bureau": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase11-bureau.ps1"
   }
 }

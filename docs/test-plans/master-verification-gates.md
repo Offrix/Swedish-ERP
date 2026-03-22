@@ -360,10 +360,10 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - [x] Prompt `P11-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 11.2 ByrÃ¥lÃ¤ge och portfÃ¶ljhantering
-- [ ] ByrÃ¥n ser bara klienter i scope
-- [ ] Deadlines hÃ¤rleds frÃ¥n bolagsinstÃ¤llningar
-- [ ] Klientdokument kan begÃ¤ras och spÃ¥ras
-- [ ] Prompt `P11-02` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] ByrÃ¥n ser bara klienter i scope
+- [x] Deadlines hÃ¤rleds frÃ¥n bolagsinstÃ¤llningar
+- [x] Klientdokument kan begÃ¤ras och spÃ¥ras
+- [x] Prompt `P11-02` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 11.3 MÃ¥nadsstÃ¤ngning och bokslutschecklistor
 - [ ] MÃ¥nad kan stÃ¤ngas med komplett checklista

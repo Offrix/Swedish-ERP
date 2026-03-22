@@ -35,3 +35,4 @@ Seed execution policy:
 - Phase 10.2 seeds field warehouse and truck stock, a dispatchable work order, demo signatures and sync-envelope artifacts for mobile and material verification
 - Phase 10.3 seeds HUS baseline and recovery flows, ATA/build-VAT decisions and personalliggare threshold, correction and control-chain export artifacts
 - Phase 11.1 adds reporting metric-catalog baseline data, custom report-definition seed data and demo cashflow/export-job artifacts
+- Phase 11.2 seeds bureau-delivery settings plus demo portfolio, client request, approval package, work-item, comment and mass-action artifacts

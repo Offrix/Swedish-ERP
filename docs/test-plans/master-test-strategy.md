@@ -378,6 +378,15 @@ När en fas använder någon av dessa förmågor ska respektive testplan läsas 
 - metric catalog och custom report definitions ska testas för versionsstyrning, stabila koder och deterministiska filtersammanslagningar
 - exportjobb ska testas för Excel/PDF, watermark-läge, snapshot-bindning, supersede-logik och reproducerbar artefaktmetadata
 
+## FAS 11.2 minimum coverage
+
+- portfÃ¶ljtesterna ska verifiera att endast ansvarig konsult, backup-konsult eller administrativ byrÃ¥roll ser klienten
+- deadlinehÃ¤rledning ska testas mot `closeLeadBusinessDays`, `reportingLeadBusinessDays`, `submissionLeadBusinessDays`, `generalLeadBusinessDays` och `approvalLeadBusinessDays`
+- client requests ska testas fÃ¶r `draft -> sent -> delivered -> accepted` samt fÃ¶rsenings- och scopefel
+- approval packages ska testas fÃ¶r named-approver-regel, snapshotref, supersede-beteende och klientrespons
+- massÃ¥tgÃ¤rder ska testas fÃ¶r selektiv kÃ¶rning, delvis fel och per-klient-resultat
+- work items och kommentarer ska testas fÃ¶r assignment, statushistorik och auditdrivet samarbete
+
 ## Testdata policy
 
 - All testdata ska vara syntetisk eller avidentifierad.

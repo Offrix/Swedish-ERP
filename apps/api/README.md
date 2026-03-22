@@ -1,6 +1,6 @@
 # API
 
-HTTP baseline plus phased domain routes through FAS 10.3.
+HTTP baseline plus phased domain routes through FAS 11.2.
 
 ## Start
 
@@ -77,6 +77,21 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/reporting/reconciliations`
 - `GET /v1/reporting/reconciliations/:reconciliationRunId?companyId=...`
 - `POST /v1/reporting/reconciliations/:reconciliationRunId/signoff`
+- `GET /v1/bureau/portfolio?bureauOrgId=...`
+- `POST /v1/bureau/portfolio/memberships`
+- `GET /v1/bureau/client-requests?bureauOrgId=...`
+- `POST /v1/bureau/client-requests`
+- `POST /v1/bureau/client-requests/:requestId/send`
+- `POST /v1/bureau/client-requests/:requestId/respond`
+- `POST /v1/bureau/client-requests/:requestId/accept`
+- `GET /v1/bureau/approval-packages?bureauOrgId=...`
+- `POST /v1/bureau/approval-packages`
+- `POST /v1/bureau/approval-packages/:approvalPackageId/send`
+- `POST /v1/bureau/approval-packages/:approvalPackageId/respond`
+- `POST /v1/bureau/mass-actions`
+- `GET /v1/bureau/work-items?bureauOrgId=...`
+- `GET /v1/collaboration/comments?bureauOrgId=...&objectType=...&objectId=...`
+- `POST /v1/collaboration/comments`
 - `GET /v1/vat/codes?companyId=...`
 - `GET /v1/vat/rule-packs?companyId=...&effectiveDate=...`
 - `POST /v1/vat/decisions`

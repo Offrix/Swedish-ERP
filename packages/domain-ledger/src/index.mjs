@@ -1641,6 +1641,7 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     postingSourceTypes: POSTING_SOURCE_TYPES,
     defaultChartTemplateId: DEFAULT_CHART_TEMPLATE_ID,
     installLedgerCatalog,
+    ensureAccountingYearPeriod,
     listLedgerAccounts,
     listVoucherSeries,
     listAccountingPeriods,
@@ -1755,6 +1756,58 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
       .filter((period) => period.companyId === resolvedCompanyId)
       .sort((left, right) => left.startsOn.localeCompare(right.startsOn))
       .map(copy);
+  }
+
+  function ensureAccountingYearPeriod({
+    companyId,
+    fiscalYear = new Date(clock()).getUTCFullYear(),
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedFiscalYear = String(fiscalYear);
+    if (!/^\d{4}$/.test(resolvedFiscalYear)) {
+      throw httpError(400, "fiscal_year_invalid", "Fiscal year must be a four-digit year.");
+    }
+    const startsOn = `${resolvedFiscalYear}-01-01`;
+    const endsOn = `${resolvedFiscalYear}-12-31`;
+    const existing = [...state.accountingPeriods.values()].find(
+      (period) =>
+        period.companyId === resolvedCompanyId
+        && period.startsOn === startsOn
+        && period.endsOn === endsOn
+    );
+    if (existing) {
+      return copy(existing);
+    }
+
+    const accountingPeriod = {
+      accountingPeriodId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      startsOn,
+      endsOn,
+      status: "open",
+      lockReasonCode: null,
+      lockedByActorId: null,
+      lockedAt: null,
+      reopenedByActorId: null,
+      reopenedAt: null,
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    };
+    state.accountingPeriods.set(accountingPeriod.accountingPeriodId, accountingPeriod);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId,
+      correlationId,
+      action: "ledger.accounting_period.seeded",
+      entityType: "accounting_period",
+      entityId: accountingPeriod.accountingPeriodId,
+      explanation: `Ensured accounting period ${startsOn}..${endsOn}.`
+    });
+
+    return copy(accountingPeriod);
   }
 
   function listLedgerDimensions({ companyId } = {}) {
