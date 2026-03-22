@@ -10,12 +10,34 @@ VALUES (
 )
 ON CONFLICT (customer_id) DO NOTHING;
 
-INSERT INTO suppliers (supplier_id, company_id, supplier_code, display_name, status)
-VALUES ('00000000-0000-4000-8000-000000000202', '00000000-0000-4000-8000-000000000001', 'S-100', 'Demo Leverantör AB', 'active')
+INSERT INTO suppliers (
+  supplier_id,
+  company_id,
+  supplier_code,
+  supplier_no,
+  display_name,
+  legal_name,
+  status,
+  country_code,
+  base_currency_code,
+  payment_terms_code
+)
+VALUES (
+  '00000000-0000-4000-8000-000000000202',
+  '00000000-0000-4000-8000-000000000001',
+  'S-100',
+  'S-100',
+  'Demo Leverantor AB',
+  'Demo Leverantor AB',
+  'active',
+  'SE',
+  'SEK',
+  'net_30'
+)
 ON CONFLICT (supplier_id) DO NOTHING;
 
 INSERT INTO employees (employee_id, company_id, employee_number, display_name, status)
-VALUES ('00000000-0000-4000-8000-000000000203', '00000000-0000-4000-8000-000000000001', 'E-100', 'Demo Anställd', 'active')
+VALUES ('00000000-0000-4000-8000-000000000203', '00000000-0000-4000-8000-000000000001', 'E-100', 'Demo Anstalld', 'active')
 ON CONFLICT (employee_id) DO NOTHING;
 
 INSERT INTO employments (employment_id, company_id, employee_id, status, starts_on)

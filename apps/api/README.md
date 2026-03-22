@@ -1,6 +1,6 @@
 # API
 
-HTTP baseline plus FAS 1 organization, auth and onboarding routes.
+HTTP baseline plus phased domain routes through FAS 6.1.
 
 ## Start
 
@@ -122,6 +122,21 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/ar/dunning-runs/:arDunningRunId?companyId=...`
 - `GET /v1/ar/aging-snapshots?companyId=...`
 - `POST /v1/ar/aging-snapshots`
+- `GET /v1/ap/suppliers?companyId=...`
+- `POST /v1/ap/suppliers`
+- `GET /v1/ap/suppliers/:supplierId?companyId=...`
+- `POST /v1/ap/suppliers/:supplierId/status`
+- `POST /v1/ap/suppliers/imports`
+- `GET /v1/ap/suppliers/imports/:supplierImportBatchId?companyId=...`
+- `GET /v1/ap/purchase-orders?companyId=...`
+- `POST /v1/ap/purchase-orders`
+- `GET /v1/ap/purchase-orders/:purchaseOrderId?companyId=...`
+- `POST /v1/ap/purchase-orders/:purchaseOrderId/status`
+- `POST /v1/ap/purchase-orders/imports`
+- `GET /v1/ap/purchase-orders/imports/:purchaseOrderImportBatchId?companyId=...`
+- `GET /v1/ap/receipts?companyId=...`
+- `POST /v1/ap/receipts`
+- `GET /v1/ap/receipts/:apReceiptId?companyId=...`
 
 ## Disable strategy
 
@@ -138,3 +153,5 @@ Set `PHASE3_LEDGER_ENABLED=false` to return `503` for FAS 3.1, 3.2 and 3.3 ledge
 Set `PHASE4_VAT_ENABLED=false` to return `503` for FAS 4.1, 4.2 and 4.3 VAT routes while keeping the rest of the API process alive.
 
 Set `PHASE5_AR_ENABLED=false` to return `503` for FAS 5 AR routes while keeping the rest of the API process alive.
+
+Set `PHASE6_AP_ENABLED=false` to return `503` for FAS 6.1 AP routes while keeping the rest of the API process alive.

@@ -54,6 +54,7 @@
     "verify:phase4:vat:reporting": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase4-vat-reporting.ps1",
     "verify:phase5:ar:masterdata": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase5-ar-masterdata.ps1",
     "verify:phase5:ar:invoicing": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase5-ar-invoicing.ps1",
-    "verify:phase5:ar:receivables": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase5-ar-receivables.ps1"
+    "verify:phase5:ar:receivables": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase5-ar-receivables.ps1",
+    "verify:phase6:ap:masterdata": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase6-ap-masterdata.ps1"
   }
 }

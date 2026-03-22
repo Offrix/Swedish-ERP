@@ -19,3 +19,4 @@ Seed execution policy:
 - Phase 5.1 adds AR customer masterdata, contacts, items, price lists, quote versions, contracts, invoice plans and import-batch demo artifacts
 - Phase 5.2 adds AR invoice-number series, invoice lines, credit-link, delivery and payment-link demo artifacts
 - Phase 5.3 adds AR open-item, allocation, bank-match, unmatched-receipt, dunning, writeoff and aging demo artifacts
+- Phase 6.1 adds AP supplier masterdata, contacts, tolerance profiles, PO lines, receipt lines, import-batch results and invoice-receipt link demo artifacts

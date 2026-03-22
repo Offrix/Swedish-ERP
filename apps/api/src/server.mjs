@@ -48,6 +48,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase3LedgerEnabled: flags.phase3LedgerEnabled,
             phase4VatEnabled: flags.phase4VatEnabled,
             phase5ArEnabled: flags.phase5ArEnabled,
+            phase6ApEnabled: flags.phase6ApEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -116,7 +117,19 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/ar/payment-matching-runs/:arPaymentMatchingRunId",
               "/v1/ar/dunning-runs",
               "/v1/ar/dunning-runs/:arDunningRunId",
-              "/v1/ar/aging-snapshots"
+              "/v1/ar/aging-snapshots",
+              "/v1/ap/suppliers",
+              "/v1/ap/suppliers/:supplierId",
+              "/v1/ap/suppliers/:supplierId/status",
+              "/v1/ap/suppliers/imports",
+              "/v1/ap/suppliers/imports/:supplierImportBatchId",
+              "/v1/ap/purchase-orders",
+              "/v1/ap/purchase-orders/:purchaseOrderId",
+              "/v1/ap/purchase-orders/:purchaseOrderId/status",
+              "/v1/ap/purchase-orders/imports",
+              "/v1/ap/purchase-orders/imports/:purchaseOrderImportBatchId",
+              "/v1/ap/receipts",
+              "/v1/ap/receipts/:apReceiptId"
             ]
           }
         : { status: "ok" }
@@ -176,6 +189,14 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 503, {
       error: "feature_disabled",
       message: "FAS 5 AR routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase6ApEnabled && isPhase6Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 6 AP routes are disabled by configuration."
     });
     return;
   }
@@ -2623,6 +2644,381 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/ap/suppliers") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_supplier",
+      scopeCode: "ap"
+    });
+    writeJson(res, 200, {
+      items: platform.listSuppliers({
+        companyId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ap/suppliers") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ap_supplier",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createSupplier({
+        ...body,
+        companyId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const apSupplierMatch = matchPath(path, "/v1/ap/suppliers/:supplierId");
+  if (apSupplierMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_supplier",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getSupplier({
+        companyId,
+        supplierId: apSupplierMatch.supplierId
+      })
+    );
+    return;
+  }
+
+  const apSupplierStatusMatch = matchPath(path, "/v1/ap/suppliers/:supplierId/status");
+  if (apSupplierStatusMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ap_supplier",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.transitionSupplierStatus({
+        companyId,
+        supplierId: apSupplierStatusMatch.supplierId,
+        targetStatus: body.targetStatus,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ap/suppliers/imports") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ap_supplier_import_batch",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      201,
+      platform.importSuppliers({
+        companyId,
+        batchKey: body.batchKey,
+        suppliers: Array.isArray(body.suppliers) ? body.suppliers : [],
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const apSupplierImportMatch = matchPath(path, "/v1/ap/suppliers/imports/:supplierImportBatchId");
+  if (apSupplierImportMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_supplier_import_batch",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getSupplierImportBatch({
+        companyId,
+        supplierImportBatchId: apSupplierImportMatch.supplierImportBatchId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ap/purchase-orders") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_purchase_order",
+      scopeCode: "ap"
+    });
+    writeJson(res, 200, {
+      items: platform.listPurchaseOrders({
+        companyId,
+        supplierId: url.searchParams.get("supplierId") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ap/purchase-orders") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ap_purchase_order",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createPurchaseOrder({
+        ...body,
+        companyId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const apPurchaseOrderMatch = matchPath(path, "/v1/ap/purchase-orders/:purchaseOrderId");
+  if (apPurchaseOrderMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_purchase_order",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getPurchaseOrder({
+        companyId,
+        purchaseOrderId: apPurchaseOrderMatch.purchaseOrderId
+      })
+    );
+    return;
+  }
+
+  const apPurchaseOrderStatusMatch = matchPath(path, "/v1/ap/purchase-orders/:purchaseOrderId/status");
+  if (apPurchaseOrderStatusMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ap_purchase_order",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.transitionPurchaseOrderStatus({
+        companyId,
+        purchaseOrderId: apPurchaseOrderStatusMatch.purchaseOrderId,
+        targetStatus: body.targetStatus,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ap/purchase-orders/imports") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ap_purchase_order_import_batch",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      201,
+      platform.importPurchaseOrders({
+        companyId,
+        batchKey: body.batchKey,
+        purchaseOrders: Array.isArray(body.purchaseOrders) ? body.purchaseOrders : [],
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const apPurchaseOrderImportMatch = matchPath(path, "/v1/ap/purchase-orders/imports/:purchaseOrderImportBatchId");
+  if (apPurchaseOrderImportMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_purchase_order_import_batch",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getPurchaseOrderImportBatch({
+        companyId,
+        purchaseOrderImportBatchId: apPurchaseOrderImportMatch.purchaseOrderImportBatchId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ap/receipts") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_receipt",
+      scopeCode: "ap"
+    });
+    writeJson(res, 200, {
+      items: platform.listReceipts({
+        companyId,
+        purchaseOrderId: url.searchParams.get("purchaseOrderId") || null,
+        supplierInvoiceReference: url.searchParams.get("supplierInvoiceReference") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ap/receipts") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ap_receipt",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createReceipt({
+        ...body,
+        companyId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const apReceiptMatch = matchPath(path, "/v1/ap/receipts/:apReceiptId");
+  if (apReceiptMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_receipt",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getReceipt({
+        companyId,
+        apReceiptId: apReceiptMatch.apReceiptId
+      })
+    );
+    return;
+  }
+
   writeJson(res, 404, { error: "not_found" });
 }
 
@@ -2704,6 +3100,10 @@ function isPhase5Route(path) {
   return path.startsWith("/v1/ar");
 }
 
+function isPhase6Route(path) {
+  return path.startsWith("/v1/ap");
+}
+
 async function readJsonBody(req, allowEmpty = false) {
   const chunks = [];
   for await (const chunk of req) {
@@ -2769,7 +3169,8 @@ function readFeatureFlags(env) {
     phase2OcrReviewEnabled: String(env.PHASE2_OCR_REVIEW_ENABLED || "true").toLowerCase() !== "false",
     phase3LedgerEnabled: String(env.PHASE3_LEDGER_ENABLED || "true").toLowerCase() !== "false",
     phase4VatEnabled: String(env.PHASE4_VAT_ENABLED || "true").toLowerCase() !== "false",
-    phase5ArEnabled: String(env.PHASE5_AR_ENABLED || "true").toLowerCase() !== "false"
+    phase5ArEnabled: String(env.PHASE5_AR_ENABLED || "true").toLowerCase() !== "false",
+    phase6ApEnabled: String(env.PHASE6_AP_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

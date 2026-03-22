@@ -32,6 +32,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - offertversionering, fakturaplan och kundimport-idempotens i AR
 - issue-idempotens, kreditstängning, leveransvalidering och betallänkar i AR-fakturering
 - öppna poster, delbetalningar, dunningavgifter, bankmatchning och aging-buckets i kundreskontra
+- leverantörsimport-idempotens, bankdetaljspärrar, PO-defaults och mottagningsdubbletter i AP
 - search ranking och permissions trimming-beslut
 - retry/backoff-beräkningar och jobbstate
 - feature flag-upplösning och kill-switch-beslut
@@ -74,6 +75,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - kundregister, artiklar, prislistor, offertrevision och avtalsplaner i AR
 - issued kundfakturor, kreditkopplingar, Peppol/PDF-leveranser och payment-link-persistens i AR
 - öppna poster, allocations, unmatched receipts, dunning runs, writeoffs och aging snapshots i AR
+- leverantörsregister, leverantörskontakter, PO-rader, mottagningsobjekt, importbatcher och invoice-receipt-links i AP
 - Peppol adapter
 - myndighetsadaptrar
 - sökindex och projektioner
@@ -90,6 +92,7 @@ Detta dokument definierar hur hela systemet ska testas från bootstrap till pilo
 - disable-flagga och AR-masterdataflöde med offertrevision och aktivt avtal
 - disable-flagga och AR-faktureringsflöde med issue, kredit, leverans och payment-link
 - disable-flagga och AR-reskontraflöde med delbetalning, felmatchningsreversal, dunning hold och aging snapshot
+- disable-flagga och AP-masterdataflöde med leverantör, PO, mottagning och receipt-dubblettskydd
 
 ### 8. Performance tests
 - load på dokumentingest
@@ -222,6 +225,17 @@ En fas är inte klar förrän:
 - felmatchning kan reverseras utan att förlora unmatched receipt trail
 - tvistade eller hold-markerade poster går inte automatiskt till påminnelse eller writeoff
 - aging snapshots är reproducerbara för samma cutoff och underlag
+
+#### Leverantörsregister, PO och mottagning
+- leverantörsnummer är unika per bolag
+- leverantörsimport med samma batchKey och payload är idempotent
+- bankdetaljändring från import sätter betalningsspärr och audit trail
+- PO-rader ärver konto-, moms- och prisdefaults deterministiskt
+- PO kan inte gå från draft direkt till sent
+- mottagning kan bara registreras mot godkänd eller skickad PO
+- mottagningsdubbletter återanvänder samma receipt vid identisk extern referens eller identisk payload
+- kumulativ mottagen kvantitet kan inte passera tillåten överleveranstolerans
+- invoice-receipt-link går att reproducera från seed och demo-seed
 
 #### Lön
 - AGI kan genereras utan manuell redigering
