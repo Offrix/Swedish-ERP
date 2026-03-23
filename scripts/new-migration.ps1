@@ -23,7 +23,7 @@ $content = @"
 
 BEGIN;
 
--- TODO: add migration SQL here.
+-- Add migration SQL here.
 
 INSERT INTO schema_migrations (migration_id)
 VALUES ('${timestamp}_${name}')

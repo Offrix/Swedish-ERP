@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import http from "node:http";
 import { defaultApiPlatform } from "./platform.mjs";
+import { tryHandlePhase13Route } from "./phase13-routes.mjs";
+import { tryHandlePhase14Route } from "./phase14-routes.mjs";
 import { isMainModule, stopServer } from "../../../scripts/lib/repo.mjs";
 
 export function createApiServer({ platform = defaultApiPlatform, flags = readFeatureFlags(process.env) } = {}) {
@@ -59,6 +61,12 @@ async function handleRequest({ req, res, platform, flags }) {
             phase10ProjectsEnabled: flags.phase10ProjectsEnabled,
             phase10FieldEnabled: flags.phase10FieldEnabled,
             phase10BuildEnabled: flags.phase10BuildEnabled,
+            phase13PublicApiEnabled: flags.phase13PublicApiEnabled,
+            phase13PartnerEnabled: flags.phase13PartnerEnabled,
+            phase13AutomationEnabled: flags.phase13AutomationEnabled,
+            phase14SecurityEnabled: flags.phase14SecurityEnabled,
+            phase14ResilienceEnabled: flags.phase14ResilienceEnabled,
+            phase14MigrationEnabled: flags.phase14MigrationEnabled,
             routes: [
               "/healthz",
               "/readyz",
@@ -313,7 +321,70 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/payroll/payout-batches",
               "/v1/payroll/payout-batches/:payrollPayoutBatchId",
               "/v1/payroll/payout-batches/:payrollPayoutBatchId/match-bank",
-              "/v1/payroll/vacation-liability-snapshots"
+              "/v1/payroll/vacation-liability-snapshots",
+              "/v1/public/spec",
+              "/v1/public/oauth/token",
+              "/v1/public/sandbox/catalog",
+              "/v1/public/report-snapshots",
+              "/v1/public/submissions",
+              "/v1/public-api/clients",
+              "/v1/public-api/tokens",
+              "/v1/public-api/compatibility-baselines",
+              "/v1/public-api/webhooks",
+              "/v1/public-api/webhook-events",
+              "/v1/public-api/webhook-deliveries",
+              "/v1/partners/connections",
+              "/v1/partners/connections/:connectionId/health",
+              "/v1/partners/connections/:connectionId/contract-tests",
+              "/v1/partners/contract-tests",
+              "/v1/partners/operations",
+              "/v1/jobs",
+              "/v1/jobs/:jobId",
+              "/v1/jobs/:jobId/claim",
+              "/v1/jobs/:jobId/complete",
+              "/v1/jobs/:jobId/fail",
+              "/v1/jobs/:jobId/replay-plan",
+              "/v1/jobs/:jobId/replay",
+              "/v1/jobs/mass-retry",
+              "/v1/automation/rule-packs",
+              "/v1/automation/posting-suggestions",
+              "/v1/automation/classifications",
+              "/v1/automation/anomalies",
+              "/v1/automation/decisions",
+              "/v1/automation/decisions/:decisionId",
+              "/v1/automation/decisions/:decisionId/override",
+              "/v1/backoffice/support-cases",
+              "/v1/backoffice/support-cases/:supportCaseId/diagnostics",
+              "/v1/backoffice/audit-events",
+              "/v1/backoffice/impersonations",
+              "/v1/backoffice/impersonations/:sessionId/approve",
+              "/v1/backoffice/impersonations/:sessionId/end",
+              "/v1/backoffice/access-reviews",
+              "/v1/backoffice/access-reviews/:reviewBatchId/findings/:findingId",
+              "/v1/backoffice/break-glass",
+              "/v1/backoffice/break-glass/:breakGlassId/approve",
+              "/v1/backoffice/break-glass/:breakGlassId/close",
+              "/v1/ops/feature-flags",
+              "/v1/ops/emergency-disables",
+              "/v1/ops/load-profiles",
+              "/v1/ops/restore-drills",
+              "/v1/ops/chaos-scenarios",
+              "/v1/migration/mapping-sets",
+              "/v1/migration/mapping-sets/:mappingSetId/approve",
+              "/v1/migration/import-batches",
+              "/v1/migration/import-batches/:importBatchId/run",
+              "/v1/migration/import-batches/:importBatchId/corrections",
+              "/v1/migration/diff-reports",
+              "/v1/migration/diff-reports/:diffReportId/items/:itemId",
+              "/v1/migration/cutover-plans",
+              "/v1/migration/cutover-plans/:cutoverPlanId/start",
+              "/v1/migration/cutover-plans/:cutoverPlanId/final-extract",
+              "/v1/migration/cutover-plans/:cutoverPlanId/validate",
+              "/v1/migration/cutover-plans/:cutoverPlanId/switch",
+              "/v1/migration/cutover-plans/:cutoverPlanId/stabilize",
+              "/v1/migration/cutover-plans/:cutoverPlanId/rollback",
+              "/v1/migration/cutover-plans/:cutoverPlanId/rollback/complete",
+              "/v1/migration/cockpit"
             ]
           }
         : { status: "ok" }
@@ -462,6 +533,62 @@ async function handleRequest({ req, res, platform, flags }) {
       error: "feature_disabled",
       message: "FAS 10.3 build routes are disabled by configuration."
     });
+    return;
+  }
+
+  if (!flags.phase13PublicApiEnabled && isPhase131Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 13.1 public API routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase13PartnerEnabled && isPhase132Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 13.2 partner integration routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase13AutomationEnabled && isPhase133Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 13.3 automation routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase14SecurityEnabled && isPhase141Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 14.1 security and backoffice routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase14ResilienceEnabled && isPhase142Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 14.2 resilience routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (!flags.phase14MigrationEnabled && isPhase143Route(path)) {
+    writeJson(res, 503, {
+      error: "feature_disabled",
+      message: "FAS 14.3 migration routes are disabled by configuration."
+    });
+    return;
+  }
+
+  if (await tryHandlePhase13Route({ req, res, url, path, platform })) {
+    return;
+  }
+
+  if (await tryHandlePhase14Route({ req, res, url, path, platform })) {
     return;
   }
 
@@ -9465,6 +9592,30 @@ function isPhase103Route(path) {
   );
 }
 
+function isPhase131Route(path) {
+  return path.startsWith("/v1/public") || path.startsWith("/v1/public-api");
+}
+
+function isPhase132Route(path) {
+  return path.startsWith("/v1/partners") || path.startsWith("/v1/jobs");
+}
+
+function isPhase133Route(path) {
+  return path.startsWith("/v1/automation");
+}
+
+function isPhase141Route(path) {
+  return path.startsWith("/v1/backoffice");
+}
+
+function isPhase142Route(path) {
+  return path.startsWith("/v1/ops");
+}
+
+function isPhase143Route(path) {
+  return path.startsWith("/v1/migration");
+}
+
 async function readJsonBody(req, allowEmpty = false) {
   const chunks = [];
   for await (const chunk of req) {
@@ -9541,7 +9692,13 @@ function readFeatureFlags(env) {
     phase9PensionEnabled: String(env.PHASE9_PENSION_ENABLED || "true").toLowerCase() !== "false",
     phase10ProjectsEnabled: String(env.PHASE10_PROJECTS_ENABLED || "true").toLowerCase() !== "false",
     phase10FieldEnabled: String(env.PHASE10_FIELD_ENABLED || "true").toLowerCase() !== "false",
-    phase10BuildEnabled: String(env.PHASE10_BUILD_ENABLED || "true").toLowerCase() !== "false"
+    phase10BuildEnabled: String(env.PHASE10_BUILD_ENABLED || "true").toLowerCase() !== "false",
+    phase13PublicApiEnabled: String(env.PHASE13_PUBLIC_API_ENABLED || "true").toLowerCase() !== "false",
+    phase13PartnerEnabled: String(env.PHASE13_PARTNER_ENABLED || "true").toLowerCase() !== "false",
+    phase13AutomationEnabled: String(env.PHASE13_AUTOMATION_ENABLED || "true").toLowerCase() !== "false",
+    phase14SecurityEnabled: String(env.PHASE14_SECURITY_ENABLED || "true").toLowerCase() !== "false",
+    phase14ResilienceEnabled: String(env.PHASE14_RESILIENCE_ENABLED || "true").toLowerCase() !== "false",
+    phase14MigrationEnabled: String(env.PHASE14_MIGRATION_ENABLED || "true").toLowerCase() !== "false"
   };
 }
 

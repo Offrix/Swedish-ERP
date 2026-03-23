@@ -418,6 +418,48 @@ När en fas använder någon av dessa förmågor ska respektive testplan läsas 
 - action queue ska få rätt owner queue och rätt recommended action för transportfel respektive domänfel
 - retry ska skapa ny attempt utan att skriva över tidigare payload eller receipts
 
+## FAS 13.1 minimum coverage
+
+- publika routes ska testa spec-version, OAuth client credentials, sandbox-mode och scope-trimning per bolag
+- publika read-routes ska aldrig exponera mer än tokenens scopes och mode tillåter
+- compatibility baselines ska versionslåsa route-hash och bevara historik per bolag
+- webhook tests ska täcka subscription, event, delivery, duplicate eventKey och append-only historik
+
+## FAS 13.2 minimum coverage
+
+- partner connections ska testas för connectionType, partnerCode, mode, fallbackMode och rate-limit-profiler
+- contract tests ska vara reproducerbara per adapter och inte skriva över tidigare runs
+- partner operations ska täcka success, fallback, rate_limited och webhook-signalering
+- async jobs ska testas för claim, complete, fail, replay-plan, replay och mass-retry utan historikmutation
+
+## FAS 13.3 minimum coverage
+
+- automation rule packs ska testas för version, effectiveDate, checksum och no-code-villkor
+- posting suggestions, classifications och anomalies ska alltid ge confidence, explanation och rule-pack binding eller tydlig fallback
+- automation decisions ska vara `proposed` tills människa gör override eller godkänner fortsatt körning
+- override ska bevara original outputs, reason code, actor och override timestamp
+
+## FAS 14.1 minimum coverage
+
+- support cases ska testa policyScope, approvedActions, diagnostics och audit trail
+- impersonation ska kräva korrekt godkännande, tillåten mode och spårbar termination
+- access reviews ska skapa findings, få SoD-beslut och bevara remediation notes
+- break-glass ska kräva dual control, ordnad state machine och eftergranskning före stängning
+
+## FAS 14.2 minimum coverage
+
+- feature flags ska testas för scope, owner, riskClass, sunset, runtime-resolution och emergency disable
+- load profiles ska bära target, observerad latens och recovery-mått utan att tappa historik
+- restore drills ska testa RTO/RPO, evidens och statusklassning
+- chaos scenarios ska testa queue recovery, failureMode och impactSummary som spårbart driftsbevis
+
+## FAS 14.3 minimum coverage
+
+- mapping sets ska testas för versionskedja, godkännande och scope per källsystem
+- import batches ska testas för registrering, körning, manuell correction och append-only historik
+- diff reports ska testa differenceClasses, per-item-beslut och parallellkörningsunderlag
+- cutover-planer ska testa staged go-live, cockpitvy, rollback-start och rollback-complete utan evidensförlust
+
 ## Testdata policy
 
 - All testdata ska vara syntetisk eller avidentifierad.

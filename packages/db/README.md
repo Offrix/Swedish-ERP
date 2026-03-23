@@ -40,6 +40,12 @@ Database foundation with migration framework, seed files and baseline governance
 - Phase 11.3 adds close checklist versions, checklist steps, blockers, sign-off records and reopen requests in the same monotonic stream.
 - Phase 12.1 adds annual-report packages, annual-report versions, signatories, submission events and tax-declaration package tables in the same monotonic stream.
 - Phase 12.2 extends tax-declaration packages with authority-overview metadata and adds generic submission envelopes, receipts and action-queue persistence in the same monotonic stream.
+- Phase 13.1 adds public API clients, issued tokens, compatibility baselines, webhook subscriptions, events and deliveries in the same monotonic stream.
+- Phase 13.2 adds partner connections, contract-test runs, partner operations, async jobs, replay plans and attempts in the same monotonic stream.
+- Phase 13.3 adds automation rule-pack metadata, automation decisions and override persistence in the same monotonic stream.
+- Phase 14.1 adds support cases, diagnostics, impersonation sessions, access reviews, SoD findings and break-glass persistence in the same monotonic stream.
+- Phase 14.2 adds feature flags, emergency disables, load profiles, restore drills and chaos scenario persistence in the same monotonic stream.
+- Phase 14.3 adds mapping sets, import batches, migration corrections, diff reports, cutover plans and cockpit evidence in the same monotonic stream.
 
 ## Usage
 

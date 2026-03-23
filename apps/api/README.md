@@ -1,6 +1,6 @@
 # API
 
-HTTP baseline plus phased domain routes through FAS 12.2.
+HTTP baseline plus phased domain routes through FAS 14.3.
 
 ## Start
 
@@ -372,6 +372,90 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/payroll/payout-batches/:payrollPayoutBatchId/match-bank`
 - `GET /v1/payroll/vacation-liability-snapshots?companyId=...`
 - `POST /v1/payroll/vacation-liability-snapshots`
+- `GET /v1/public/spec`
+- `POST /v1/public/oauth/token`
+- `GET /v1/public/sandbox/catalog?companyId=...`
+- `GET /v1/public/report-snapshots?companyId=...`
+- `GET /v1/public/submissions?companyId=...`
+- `GET /v1/public-api/clients?companyId=...`
+- `POST /v1/public-api/clients`
+- `POST /v1/public-api/tokens`
+- `GET /v1/public-api/compatibility-baselines?companyId=...`
+- `POST /v1/public-api/compatibility-baselines`
+- `GET /v1/public-api/webhooks?companyId=...`
+- `POST /v1/public-api/webhooks`
+- `GET /v1/public-api/webhook-events?companyId=...`
+- `POST /v1/public-api/webhook-events`
+- `GET /v1/public-api/webhook-deliveries?companyId=...`
+- `GET /v1/partners/connections?companyId=...`
+- `POST /v1/partners/connections`
+- `POST /v1/partners/connections/:connectionId/health`
+- `POST /v1/partners/connections/:connectionId/contract-tests`
+- `GET /v1/partners/contract-tests?companyId=...`
+- `GET /v1/partners/operations?companyId=...`
+- `POST /v1/partners/operations`
+- `GET /v1/jobs?companyId=...`
+- `POST /v1/jobs`
+- `GET /v1/jobs/:jobId?companyId=...`
+- `POST /v1/jobs/:jobId/claim`
+- `POST /v1/jobs/:jobId/complete`
+- `POST /v1/jobs/:jobId/fail`
+- `POST /v1/jobs/:jobId/replay-plan`
+- `POST /v1/jobs/:jobId/replay`
+- `POST /v1/jobs/mass-retry`
+- `GET /v1/automation/rule-packs?companyId=...`
+- `POST /v1/automation/rule-packs`
+- `POST /v1/automation/posting-suggestions`
+- `POST /v1/automation/classifications`
+- `POST /v1/automation/anomalies`
+- `GET /v1/automation/decisions?companyId=...`
+- `GET /v1/automation/decisions/:decisionId?companyId=...`
+- `POST /v1/automation/decisions/:decisionId/override`
+- `GET /v1/backoffice/support-cases?companyId=...`
+- `POST /v1/backoffice/support-cases`
+- `POST /v1/backoffice/support-cases/:supportCaseId/diagnostics`
+- `GET /v1/backoffice/audit-events?companyId=...`
+- `GET /v1/backoffice/impersonations?companyId=...`
+- `POST /v1/backoffice/impersonations`
+- `POST /v1/backoffice/impersonations/:sessionId/approve`
+- `POST /v1/backoffice/impersonations/:sessionId/end`
+- `GET /v1/backoffice/access-reviews?companyId=...`
+- `POST /v1/backoffice/access-reviews`
+- `POST /v1/backoffice/access-reviews/:reviewBatchId/findings/:findingId`
+- `GET /v1/backoffice/break-glass?companyId=...`
+- `POST /v1/backoffice/break-glass`
+- `POST /v1/backoffice/break-glass/:breakGlassId/approve`
+- `POST /v1/backoffice/break-glass/:breakGlassId/close`
+- `GET /v1/ops/feature-flags?companyId=...`
+- `POST /v1/ops/feature-flags`
+- `GET /v1/ops/emergency-disables?companyId=...`
+- `POST /v1/ops/emergency-disables`
+- `GET /v1/ops/load-profiles?companyId=...`
+- `POST /v1/ops/load-profiles`
+- `GET /v1/ops/restore-drills?companyId=...`
+- `POST /v1/ops/restore-drills`
+- `GET /v1/ops/chaos-scenarios?companyId=...`
+- `POST /v1/ops/chaos-scenarios`
+- `GET /v1/migration/mapping-sets?companyId=...`
+- `POST /v1/migration/mapping-sets`
+- `POST /v1/migration/mapping-sets/:mappingSetId/approve`
+- `GET /v1/migration/import-batches?companyId=...`
+- `POST /v1/migration/import-batches`
+- `POST /v1/migration/import-batches/:importBatchId/run`
+- `POST /v1/migration/import-batches/:importBatchId/corrections`
+- `GET /v1/migration/diff-reports?companyId=...`
+- `POST /v1/migration/diff-reports`
+- `POST /v1/migration/diff-reports/:diffReportId/items/:itemId`
+- `GET /v1/migration/cutover-plans?companyId=...`
+- `POST /v1/migration/cutover-plans`
+- `POST /v1/migration/cutover-plans/:cutoverPlanId/start`
+- `POST /v1/migration/cutover-plans/:cutoverPlanId/final-extract`
+- `POST /v1/migration/cutover-plans/:cutoverPlanId/validate`
+- `POST /v1/migration/cutover-plans/:cutoverPlanId/switch`
+- `POST /v1/migration/cutover-plans/:cutoverPlanId/stabilize`
+- `POST /v1/migration/cutover-plans/:cutoverPlanId/rollback`
+- `POST /v1/migration/cutover-plans/:cutoverPlanId/rollback/complete`
+- `GET /v1/migration/cockpit?companyId=...`
 
 ## Disable strategy
 
@@ -402,3 +486,9 @@ Set `PHASE8_PAYROLL_ENABLED=false` to return `503` for FAS 8 payroll routes whil
 Set `PHASE9_BENEFITS_ENABLED=false` to return `503` for FAS 9.1 benefits routes while keeping the rest of the API process alive.
 Set `PHASE9_TRAVEL_ENABLED=false` to return `503` for FAS 9.2 travel routes while keeping the rest of the API process alive.
 Set `PHASE9_PENSION_ENABLED=false` to return `503` for FAS 9.3 pension routes while keeping the rest of the API process alive.
+Set `PHASE13_PUBLIC_API_ENABLED=false` to return `503` for FAS 13.1 public API, OAuth, sandbox and webhook routes while keeping the rest of the API process alive.
+Set `PHASE13_PARTNER_ENABLED=false` to return `503` for FAS 13.2 partner, adapter and async job routes while keeping the rest of the API process alive.
+Set `PHASE13_AUTOMATION_ENABLED=false` to return `503` for FAS 13.3 automation and no-code rule routes while keeping the rest of the API process alive.
+Set `PHASE14_SECURITY_ENABLED=false` to return `503` for FAS 14.1 backoffice, audit, impersonation, access review and break-glass routes while keeping the rest of the API process alive.
+Set `PHASE14_RESILIENCE_ENABLED=false` to return `503` for FAS 14.2 feature-flag, emergency-disable, load-profile, restore-drill and chaos routes while keeping the rest of the API process alive.
+Set `PHASE14_MIGRATION_ENABLED=false` to return `503` for FAS 14.3 migration, cutover and cockpit routes while keeping the rest of the API process alive.

@@ -39,3 +39,9 @@ Seed execution policy:
 - Phase 11.3 seeds close deadline settings plus demo close checklist, checklist-step, blocker and close work-item artifacts
 - Phase 12.1 seeds a signed K2 annual-report package, signatory chain, submission event and derived tax-package artifact for annual-reporting verification
 - Phase 12.2 seeds annual-tax package metadata plus demo submission envelope, receipt chain and action-queue artifacts for declaration and operator verification
+- Phase 13.1 seeds public API client, compatibility baseline, sandbox token, webhook subscription and delivery demo artifacts
+- Phase 13.2 seeds partner connections, contract-test results, fallback operations, async jobs and replay-plan demo artifacts
+- Phase 13.3 seeds automation rule-pack metadata plus posting, classification, anomaly and override demo artifacts
+- Phase 14.1 seeds support case, diagnostic, impersonation, access review, SoD finding and break-glass demo artifacts
+- Phase 14.2 seeds feature flags, emergency disables, load profiles, restore drills and chaos-scenario demo artifacts
+- Phase 14.3 seeds mapping sets, import batches, diff reports, cutover-plan stages and rollback demo artifacts

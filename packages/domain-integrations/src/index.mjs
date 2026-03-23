@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { createPartnerModule } from "./partners.mjs";
+import { createPublicApiModule } from "./public-api.mjs";
 
 export const INVOICE_DELIVERY_CHANNELS = Object.freeze(["pdf_email", "peppol"]);
 export const PAYMENT_LINK_STATUSES = Object.freeze(["active", "consumed", "expired", "cancelled"]);
@@ -34,10 +36,26 @@ export function createIntegrationEngine({ clock = () => new Date(), paymentBaseU
     receiptIdsBySubmission: new Map(),
     queueItems: new Map(),
     queueItemIdsByCompany: new Map(),
-    queueItemIdsBySubmission: new Map()
+    queueItemIdsBySubmission: new Map(),
+    publicApiCompatibilityBaselines: new Map(),
+    publicApiClients: new Map(),
+    publicApiTokens: new Map(),
+    webhookSubscriptions: new Map(),
+    webhookEvents: new Map(),
+    webhookDeliveries: new Map(),
+    partnerConnections: new Map(),
+    partnerContractResults: new Map(),
+    partnerOperations: new Map(),
+    partnerRateLimitCounters: new Map(),
+    asyncJobs: new Map(),
+    asyncDeadLetters: new Map()
   };
+  const publicApiModule = createPublicApiModule({ state, clock });
+  const partnerModule = createPartnerModule({ state, clock });
 
   return {
+    ...publicApiModule,
+    ...partnerModule,
     deliveryChannels: INVOICE_DELIVERY_CHANNELS,
     paymentLinkStatuses: PAYMENT_LINK_STATUSES,
     submissionStatuses: SUBMISSION_STATUSES,
@@ -79,7 +97,18 @@ export function createIntegrationEngine({ clock = () => new Date(), paymentBaseU
       return clone({
         submissions: [...state.submissions.values()].map((submission) => enrichSubmission(state, submission)),
         receipts: [...state.receipts.values()],
-        actionQueueItems: [...state.queueItems.values()]
+        actionQueueItems: [...state.queueItems.values()],
+        publicApiCompatibilityBaselines: [...state.publicApiCompatibilityBaselines.values()],
+        publicApiClients: [...state.publicApiClients.values()],
+        publicApiTokens: [...state.publicApiTokens.values()],
+        webhookSubscriptions: [...state.webhookSubscriptions.values()],
+        webhookEvents: [...state.webhookEvents.values()],
+        webhookDeliveries: [...state.webhookDeliveries.values()],
+        partnerConnections: [...state.partnerConnections.values()],
+        partnerContractResults: [...state.partnerContractResults.values()],
+        partnerOperations: [...state.partnerOperations.values()],
+        asyncJobs: [...state.asyncJobs.values()],
+        asyncDeadLetters: [...state.asyncDeadLetters.values()]
       });
     }
   };

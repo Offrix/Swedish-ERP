@@ -1,13 +1,15 @@
 # Swedish ERP
 
-FAS 0 repo-skelett för en modulär monolit med:
+Svenskt enterprise-system för ekonomi, dokument, HR, lön, projekt, bygg, myndighetsflöden, integrationer och go-live-härdning byggt som en modulär monolit enligt `docs/MASTER_BUILD_PLAN.md`.
 
-- `apps/desktop-web`
-- `apps/field-mobile`
-- `apps/api`
-- `apps/worker`
+Repo:t innehåller:
 
-Monorepot följer `docs/MASTER_BUILD_PLAN.md` med en enda desktop-yta, en separat fältyta för mobil, ett API och en worker-runtime för asynkrona jobb.
+- `apps/desktop-web` som enda fullständiga desktop-yta för alla roller
+- `apps/field-mobile` som separat tumvänlig stöd-yta
+- `apps/api` som gemensamt API- och integrationslager
+- `apps/worker` som runtime för asynkrona jobb, automation och batchflöden
+
+Byggstatus i repo:t omfattar FAS `0` till `14.3`, inklusive dokumentarkiv, ledger, moms, AR, AP, HR, lön, pension, projekt, byråläge, myndighetsfiler, publikt API, partnerintegrationer, automation, säkerhetsgranskning, resilience och migration cockpit.
 
 ## Bootstrap
 
@@ -55,4 +57,4 @@ pnpm run security
 pnpm run runtime-log
 ```
 
-FAS 0-verifiering och promptresultat finns i `docs/runbooks/fas-0-bootstrap-verification.md`.
+Fasvisa verifieringsrunbooks finns under `docs/runbooks/` och mastergrindarna i `docs/test-plans/master-verification-gates.md`.

@@ -116,3 +116,49 @@ export interface CloseReopenRequest {
   readonly impactSummary: string;
   readonly createdAt: string;
 }
+
+export interface SupportCase {
+  readonly supportCaseId: string;
+  readonly companyId: string;
+  readonly category: string;
+  readonly severity: string;
+  readonly status: string;
+  readonly policyScope: string;
+  readonly approvedActions: readonly string[];
+}
+
+export interface AccessReviewBatch {
+  readonly reviewBatchId: string;
+  readonly companyId: string;
+  readonly scopeType: string;
+  readonly status: string;
+  readonly generatedAt: string;
+  readonly dueAt: string;
+}
+
+export interface FeatureFlagRecord {
+  readonly featureFlagId: string;
+  readonly companyId: string;
+  readonly flagKey: string;
+  readonly description: string;
+  readonly flagType: string;
+  readonly scopeType: string;
+  readonly scopeRef: string | null;
+  readonly defaultEnabled: boolean;
+  readonly enabled: boolean;
+  readonly ownerUserId: string;
+  readonly riskClass: string;
+  readonly sunsetAt: string;
+  readonly emergencyDisabled: boolean;
+  readonly emergencyReasonCode: string | null;
+  readonly changedByUserId?: string | null;
+}
+
+export interface MigrationImportBatch {
+  readonly importBatchId: string;
+  readonly companyId: string;
+  readonly sourceSystem: string;
+  readonly batchType: string;
+  readonly status: string;
+  readonly recordCount: number;
+}

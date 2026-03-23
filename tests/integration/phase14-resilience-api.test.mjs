@@ -1,0 +1,185 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createApiServer } from "../../apps/api/src/server.mjs";
+import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import { stopServer } from "../../scripts/lib/repo.mjs";
+import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
+
+test("Phase 14.2 API records feature-flag metadata, emergency disables and recovery evidence", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-22T21:40:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const featureFlag = await requestJson(baseUrl, "/v1/ops/feature-flags", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        flagKey: "payments.kill_switch",
+        description: "Stops outgoing payment exports.",
+        flagType: "kill_switch",
+        scopeType: "company",
+        scopeRef: DEMO_IDS.companyId,
+        defaultEnabled: false,
+        enabled: true,
+        ownerUserId: DEMO_IDS.userId,
+        riskClass: "high",
+        sunsetAt: "2026-12-31"
+      }
+    });
+    assert.equal(featureFlag.flagType, "kill_switch");
+    await requestJson(baseUrl, "/v1/ops/feature-flags", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        flagKey: "payments.kill_switch",
+        description: "Global default.",
+        flagType: "kill_switch",
+        scopeType: "global",
+        defaultEnabled: false,
+        enabled: false,
+        ownerUserId: DEMO_IDS.userId,
+        riskClass: "high",
+        sunsetAt: "2026-12-31"
+      }
+    });
+    await requestJson(baseUrl, "/v1/ops/feature-flags", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        flagKey: "payments.kill_switch",
+        description: "User override.",
+        flagType: "kill_switch",
+        scopeType: "company_user",
+        scopeRef: DEMO_IDS.companyUserId,
+        defaultEnabled: false,
+        enabled: false,
+        ownerUserId: DEMO_IDS.userId,
+        riskClass: "high",
+        sunsetAt: "2026-12-31"
+      }
+    });
+
+    const beforeDisable = await requestJson(baseUrl, `/v1/ops/feature-flags?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(beforeDisable.resolved[featureFlag.flagKey], true);
+    const userScopedView = await requestJson(baseUrl, `/v1/ops/feature-flags?companyId=${DEMO_IDS.companyId}&companyUserId=${DEMO_IDS.companyUserId}`, {
+      token: adminToken
+    });
+    assert.equal(userScopedView.resolved[featureFlag.flagKey], false);
+
+    const ambiguousDisable = await requestJson(baseUrl, "/v1/ops/emergency-disables", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        flagKey: featureFlag.flagKey,
+        reasonCode: "incident_lockdown",
+        expiresInMinutes: 30
+      }
+    });
+    assert.equal(ambiguousDisable.error, "feature_flag_scope_required");
+
+    const disable = await requestJson(baseUrl, "/v1/ops/emergency-disables", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        flagKey: featureFlag.flagKey,
+        scopeType: "company",
+        scopeRef: DEMO_IDS.companyId,
+        reasonCode: "incident_lockdown",
+        expiresInMinutes: 30
+      }
+    });
+    assert.equal(disable.featureFlag.emergencyDisabled, true);
+
+    const afterDisable = await requestJson(baseUrl, `/v1/ops/feature-flags?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(afterDisable.resolved[featureFlag.flagKey], false);
+
+    await requestJson(baseUrl, "/v1/ops/load-profiles", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        profileCode: "pilot_target",
+        targetThroughputPerMinute: 1200,
+        observedP95Ms: 180,
+        queueRecoverySeconds: 45,
+        status: "passed"
+      }
+    });
+    await requestJson(baseUrl, "/v1/ops/restore-drills", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        drillCode: "nightly_restore",
+        targetRtoMinutes: 60,
+        targetRpoMinutes: 15,
+        actualRtoMinutes: 42,
+        actualRpoMinutes: 10,
+        status: "passed",
+        evidence: { restorePoint: "snapshot://phase14-2" }
+      }
+    });
+    await requestJson(baseUrl, "/v1/ops/chaos-scenarios", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        scenarioCode: "worker_restart",
+        failureMode: "worker_process_crash",
+        queueRecoverySeconds: 35,
+        impactSummary: "Recovered within target window.",
+        status: "executed",
+        evidence: { deadLetterBacklog: 0 }
+      }
+    });
+
+    const disables = await requestJson(baseUrl, `/v1/ops/emergency-disables?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    const loadProfiles = await requestJson(baseUrl, `/v1/ops/load-profiles?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    const restoreDrills = await requestJson(baseUrl, `/v1/ops/restore-drills?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    const chaosScenarios = await requestJson(baseUrl, `/v1/ops/chaos-scenarios?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+
+    assert.equal(disables.items.length, 1);
+    assert.equal(loadProfiles.items[0].status, "passed");
+    assert.equal(restoreDrills.items[0].actualRtoMinutes <= restoreDrills.items[0].targetRtoMinutes, true);
+    assert.equal(chaosScenarios.items[0].queueRecoverySeconds <= 35, true);
+  } finally {
+    await stopServer(server);
+  }
+});

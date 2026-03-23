@@ -1,0 +1,70 @@
+# FAS 14.3 verification
+
+## Syfte
+
+Verifiera att migration cockpit, diff reports, cutover, rollback och go-live-ritualen fungerar enligt FAS 14.3.
+
+## När den används
+
+- efter implementation av FAS 14.3
+- före markering av 14.3 som klar i styrdokumenten
+- vid regressionskontroll efter ändringar i migrering, parallellkörning eller rollback-flöden
+
+## Förkrav
+
+- repo är bootstrapat
+- test- och verifieringskommandon kan köras lokalt
+- databasmigreringar och seeds för FAS 14.3 finns i repo
+
+## Steg för steg
+
+1. Kör `node scripts/lint.mjs`.
+2. Kör `node scripts/typecheck.mjs`.
+3. Kör `node scripts/build.mjs`.
+4. Kör `node scripts/run-tests.mjs all`.
+5. Kör `node scripts/security-scan.mjs`.
+6. Kör `powershell -ExecutionPolicy Bypass -File .\scripts\verify-phase14-migration-go-live.ps1`.
+7. Kör `node scripts/db-migrate.mjs --dry-run`.
+8. Kör `node scripts/db-seed.mjs --dry-run`.
+9. Kör `node scripts/db-seed.mjs --demo --dry-run`.
+10. Kör `node scripts/db-migrate.mjs`.
+11. Kör `node scripts/db-seed.mjs`.
+12. Kör `node scripts/db-seed.mjs --demo`.
+
+## Verifiering
+
+- mapping sets kan skapas, listas och godkännas per källsystem
+- import batches registreras, körs och kan korrigeras manuellt utan att batchhistorik muteras
+- diff reports producerar difference items med beslut per item
+- cutover-plan följer ordningen start, final extract, validate, sign-off, checklista, switch och stabilize
+- rollback går från planerad till påbörjad och fullföljd utan att cockpit-evidens tappas
+
+## Vanliga fel
+
+- `mapping_set_not_found`: batch eller approval pekar på okänd mapping set
+- `diff_report_not_found`: beslut försöker skriva på okänd diff report
+- `cutover_validation_required`: switch eller stabilisering får inte ske innan validering är godkänd
+- `cutover_signoff_incomplete`: sign-off-kedjan är inte komplett innan switch
+- `cutover_checklist_incomplete`: obligatoriska checklistpunkter är inte klara innan switch
+- `cutover_blocking_differences`: blockerande differenser måste hanteras innan switch
+- `cutover_rollback_not_started`: rollback kan inte fullföljas innan den startats
+
+## Återställning
+
+- starta om lokal testmiljö och kör om seeds om migreringsdata behöver återställas
+- skapa ny batch, ny diff report eller ny cutover-plan i stället för att skriva över tidigare evidens
+
+## Rollback
+
+- rulla tillbaka commit som introducerade FAS 14.3 om regressionen är i kod
+- radera inte cutover- eller rollback-historik; använd rollback-flödet och ny version av planen
+
+## Ansvarig
+
+- huvudagenten som levererar FAS 14.3
+
+## Exit gate
+
+- alla steg ovan gröna
+- migration cockpit, diff reports, cutover och rollback verifierade
+- FAS 14.3 kan markeras klar i plan och verifieringsgrindar

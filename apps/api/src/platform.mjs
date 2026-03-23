@@ -19,6 +19,7 @@ import { createPersonalliggarePlatform } from "../../../packages/domain-personal
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
 import { createCorePlatform } from "../../../packages/domain-core/src/index.mjs";
 import { createAnnualReportingPlatform } from "../../../packages/domain-annual-reporting/src/index.mjs";
+import { createAutomationAiEngine } from "../../../packages/rule-engine/src/index.mjs";
 
 export function createApiPlatform(options = {}) {
   const orgAuthPlatform = createOrgAuthPlatform(options);
@@ -29,6 +30,7 @@ export function createApiPlatform(options = {}) {
     ledgerPlatform
   });
   const integrationPlatform = createIntegrationPlatform(options);
+  const automationPlatform = createAutomationAiEngine(options);
   const arPlatform = createArPlatform({
     ...options,
     vatPlatform,
@@ -100,7 +102,8 @@ export function createApiPlatform(options = {}) {
     ...options,
     orgAuthPlatform,
     reportingPlatform,
-    ledgerPlatform
+    ledgerPlatform,
+    integrationPlatform
   });
   const husPlatform = createHusPlatform({
     ...options,
@@ -134,6 +137,7 @@ export function createApiPlatform(options = {}) {
     ...documentArchivePlatform,
     ...ledgerPlatform,
     ...reportingPlatform,
+    ...automationPlatform,
     ...corePlatform,
     ...annualReportingPlatform,
     ...vatPlatform,

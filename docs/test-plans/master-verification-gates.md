@@ -394,54 +394,54 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 ## Gate for FAS 13 â€” API, integrationer, AI och automation
 
 ### AllmÃ¤nt krav
-- [ ] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [ ] Demo kan kÃ¶ras pÃ¥ seed-data
+- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
+- [x] Demo kan kÃ¶ras pÃ¥ seed-data
 - [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
+- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
 
 ### 13.1 Publikt API och webhooks
-- [ ] Scopes begrÃ¤nsar rÃ¤tt data
-- [ ] Webhook events Ã¤r idempotenta
-- [ ] Backward compatibility bevakas
-- [ ] Prompt `P13-01` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Scopes begrÃ¤nsar rÃ¤tt data
+- [x] Webhook events Ã¤r idempotenta
+- [x] Backward compatibility bevakas
+- [x] Prompt `P13-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 13.2 Partnerintegrationer och marknadsplats
-- [ ] Varje adapter har kontraktstest
-- [ ] Fallback finns vid extern driftstÃ¶rning
-- [ ] Rate limits respekteras
-- [ ] Prompt `P13-02` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Varje adapter har kontraktstest
+- [x] Fallback finns vid extern driftstÃ¶rning
+- [x] Rate limits respekteras
+- [x] Prompt `P13-02` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 13.3 AI, automation och no-code-regler
-- [ ] Alla AI-beslut har confidence och fÃ¶rklaring
-- [ ] Human-in-the-loop kan Ã¶verstyra
-- [ ] Felaktiga AI-fÃ¶rslag pÃ¥verkar inte ledger utan granskning
-- [ ] Prompt `P13-03` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Alla AI-beslut har confidence och fÃ¶rklaring
+- [x] Human-in-the-loop kan Ã¶verstyra
+- [x] Felaktiga AI-fÃ¶rslag pÃ¥verkar inte ledger utan granskning
+- [x] Prompt `P13-03` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ## Gate for FAS 14 â€” HÃ¤rdning, pilot, prestanda, sÃ¤kerhet och go-live
 
 ### AllmÃ¤nt krav
-- [ ] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [ ] Demo kan kÃ¶ras pÃ¥ seed-data
+- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
+- [x] Demo kan kÃ¶ras pÃ¥ seed-data
 - [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [ ] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
+- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
 
 ### 14.1 SÃ¤kerhet och behÃ¶righetsgranskning
 - [ ] Kritiska findings Ã¤r Ã¥tgÃ¤rdade
 - [ ] Admin-spÃ¥r granskas
-- [ ] Secrets-hantering Ã¤r verifierad
-- [ ] Prompt `P14-01` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Secrets-hantering Ã¤r verifierad
+- [x] Prompt `P14-01` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 14.2 Prestanda, Ã¥terlÃ¤sning och chaos-test
 - [ ] Systemet klarar mÃ¥llast
 - [ ] RTO/RPO uppfylls
 - [ ] KÃ¶er Ã¥terhÃ¤mtar sig efter fel
-- [ ] Prompt `P14-02` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Prompt `P14-02` Ã¤r kÃ¶rd och resultat dokumenterat
 
 ### 14.3 Pilotkunder, datamigrering och go-live-ritual
 - [ ] ParallellkÃ¶rning stÃ¤mmer
 - [ ] Kunddata migreras utan differenser
 - [ ] Support-runbook Ã¤r bemannad
-- [ ] Prompt `P14-03` Ã¤r kÃ¶rd och resultat dokumenterat
+- [x] Prompt `P14-03` Ã¤r kÃ¶rd och resultat dokumenterat
 
 
 ## Bevis som ska bifogas varje gate

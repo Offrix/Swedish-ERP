@@ -1,6 +1,6 @@
 {
   "name": "@swedish-erp/monorepo",
-  "version": "0.0.0-phase1",
+  "version": "0.0.0-phase14.3",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.12.4",
@@ -74,6 +74,12 @@
     "verify:phase11:bureau": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase11-bureau.ps1",
     "verify:phase11:close": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase11-close.ps1",
     "verify:phase12:annual": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase12-annual-reporting.ps1",
-    "verify:phase12:tax": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase12-tax-submissions.ps1"
+    "verify:phase12:tax": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase12-tax-submissions.ps1",
+    "verify:phase13:public-api": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase13-public-api.ps1",
+    "verify:phase13:partners": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase13-partner-integrations.ps1",
+    "verify:phase13:automation": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase13-ai-automation.ps1",
+    "verify:phase14:security": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase14-security-review.ps1",
+    "verify:phase14:resilience": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase14-resilience.ps1",
+    "verify:phase14:migration": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase14-migration-go-live.ps1"
   }
 }

@@ -46,3 +46,15 @@ export interface RulePackDefinition {
   readonly testVectors: readonly Record<string, unknown>[];
   readonly migrationNotes: readonly string[];
 }
+
+export type AutomationDecisionType = "posting_suggestion" | "classification" | "anomaly_detection";
+export type AutomationDecisionState = "proposed" | "manual_override" | "accepted";
+
+export interface AutomationDecision<TDecision> extends RuleDecision<TDecision> {
+  readonly decisionId: string;
+  readonly companyId: string;
+  readonly decisionType: AutomationDecisionType;
+  readonly state: AutomationDecisionState;
+  readonly actorId: string;
+  readonly confidence: number;
+}

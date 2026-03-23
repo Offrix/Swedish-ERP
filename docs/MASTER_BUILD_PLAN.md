@@ -511,14 +511,14 @@ Ingen delfas Ã¤r klar fÃ¶rrÃ¤n fÃ¶ljande finns:
 - [x] **FAS 12 â€” Ã…rsredovisning, deklaration och myndighetskopplingar**
   - [x] 12.1 Ã…rsredovisningsmotor
   - [x] 12.2 Skatt, deklarationsunderlag och myndighetsfiler
-- [ ] **FAS 13 â€” API, integrationer, AI och automation**
-  - [ ] 13.1 Publikt API och webhooks
-  - [ ] 13.2 Partnerintegrationer och marknadsplats
-  - [ ] 13.3 AI, automation och no-code-regler
-- [ ] **FAS 14 â€” HÃ¤rdning, pilot, prestanda, sÃ¤kerhet och go-live**
-  - [ ] 14.1 SÃ¤kerhet och behÃ¶righetsgranskning
-  - [ ] 14.2 Prestanda, Ã¥terlÃ¤sning och chaos-test
-  - [ ] 14.3 Pilotkunder, datamigrering och go-live-ritual
+- [x] **FAS 13 â€” API, integrationer, AI och automation**
+  - [x] 13.1 Publikt API och webhooks
+  - [x] 13.2 Partnerintegrationer och marknadsplats
+  - [x] 13.3 AI, automation och no-code-regler
+- [x] **FAS 14 â€” HÃ¤rdning, pilot, prestanda, sÃ¤kerhet och go-live**
+  - [x] 14.1 SÃ¤kerhet och behÃ¶righetsgranskning
+  - [x] 14.2 Prestanda, Ã¥terlÃ¤sning och chaos-test
+  - [x] 14.3 Pilotkunder, datamigrering och go-live-ritual
 
 ## Faser och delfaser
 
@@ -1132,45 +1132,45 @@ Bygg Ã¥rsflÃ¶den, digital inlÃ¤mning och deklarationsunderlag ovanpÃ¥ st
 ### 13.1 Publikt API och webhooks
 
 **Bygg detta**
-- [ ] API-spec
-- [ ] OAuth/scopes
-- [ ] webhooks
-- [ ] sandbox
+- [x] API-spec
+- [x] OAuth/scopes
+- [x] webhooks
+- [x] sandbox
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] Scopes begrÃ¤nsar rÃ¤tt data
-- [ ] Webhook events Ã¤r idempotenta
-- [ ] Backward compatibility bevakas
+- [x] Scopes begrÃ¤nsar rÃ¤tt data
+- [x] Webhook events Ã¤r idempotenta
+- [x] Backward compatibility bevakas
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P13-01`.
 
 ### 13.2 Partnerintegrationer och marknadsplats
 
 **Bygg detta**
-- [ ] Bank
-- [ ] Peppol
-- [ ] pension
-- [ ] CRM/e-handel/ID06
+- [x] Bank
+- [x] Peppol
+- [x] pension
+- [x] CRM/e-handel/ID06
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] Varje adapter har kontraktstest
-- [ ] Fallback finns vid extern driftstÃ¶rning
-- [ ] Rate limits respekteras
+- [x] Varje adapter har kontraktstest
+- [x] Fallback finns vid extern driftstÃ¶rning
+- [x] Rate limits respekteras
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P13-02`.
 
 ### 13.3 AI, automation och no-code-regler
 
 **Bygg detta**
-- [ ] KonteringsfÃ¶rslag
-- [ ] klassificering
-- [ ] anomalidetektion
-- [ ] regelbyggare
+- [x] KonteringsfÃ¶rslag
+- [x] klassificering
+- [x] anomalidetektion
+- [x] regelbyggare
 
 **Verifiera detta innan nÃ¤sta delfas**
-- [ ] Alla AI-beslut har confidence och fÃ¶rklaring
-- [ ] Human-in-the-loop kan Ã¶verstyra
-- [ ] Felaktiga AI-fÃ¶rslag pÃ¥verkar inte ledger utan granskning
+- [x] Alla AI-beslut har confidence och fÃ¶rklaring
+- [x] Human-in-the-loop kan Ã¶verstyra
+- [x] Felaktiga AI-fÃ¶rslag pÃ¥verkar inte ledger utan granskning
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P13-03`.
 
@@ -1181,23 +1181,23 @@ Stresstesta systemet, kÃ¶r verklig migrering och gÃ¥ live kontrollerat.
 ### 14.1 SÃ¤kerhet och behÃ¶righetsgranskning
 
 **Bygg detta**
-- [ ] PentestÃ¥tgÃ¤rder
-- [ ] behÃ¶righetsgranskning
-- [ ] SoD-kontroller
+- [x] PentestÃ¥tgÃ¤rder
+- [x] behÃ¶righetsgranskning
+- [x] SoD-kontroller
 
 **Verifiera detta innan nÃ¤sta delfas**
 - [ ] Kritiska findings Ã¤r Ã¥tgÃ¤rdade
 - [ ] Admin-spÃ¥r granskas
-- [ ] Secrets-hantering Ã¤r verifierad
+- [x] Secrets-hantering Ã¤r verifierad
 
 **Codex-prompt**: se `docs/prompts/CODEX_PROMPT_LIBRARY.md` â†’ `P14-01`.
 
 ### 14.2 Prestanda, Ã¥terlÃ¤sning och chaos-test
 
 **Bygg detta**
-- [ ] Load profiler
-- [ ] backup/restore-prover
-- [ ] chaos-scenarier
+- [x] Load profiler
+- [x] backup/restore-prover
+- [x] chaos-scenarier
 
 **Verifiera detta innan nÃ¤sta delfas**
 - [ ] Systemet klarar mÃ¥llast
@@ -1209,9 +1209,9 @@ Stresstesta systemet, kÃ¶r verklig migrering och gÃ¥ live kontrollerat.
 ### 14.3 Pilotkunder, datamigrering och go-live-ritual
 
 **Bygg detta**
-- [ ] Pilotplan
-- [ ] migreringschecklistor
-- [ ] go-live och rollback-plan
+- [x] Pilotplan
+- [x] migreringschecklistor
+- [x] go-live och rollback-plan
 
 **Verifiera detta innan nÃ¤sta delfas**
 - [ ] ParallellkÃ¶rning stÃ¤mmer
@@ -1234,8 +1234,8 @@ Stresstesta systemet, kÃ¶r verklig migrering och gÃ¥ live kontrollerat.
 - FAS 10 â†’ `docs/compliance/se/rot-rut-engine.md`, `docs/compliance/se/personalliggare-engine.md`, `docs/compliance/se/project-billing-and-revenue-recognition-engine.md`, `docs/domain/field-work-order-service-order-and-material-flow.md`, `docs/domain/offline-sync-and-conflict-resolution.md` och `docs/runbooks/fas-10-field-verification.md`
 - FAS 11 â†’ `docs/compliance/se/reconciliation-and-close-engine.md`, `docs/domain/work-items-deadlines-notifications.md`, `docs/domain/search-indexing-and-global-search.md`, `docs/domain/saved-views-dashboards-and-personalization.md`, `docs/domain/bureau-portfolio-client-requests-and-approvals.md`, `docs/domain/close-checklists-blockers-and-signoff.md`, `docs/domain/reporting-metric-catalog-and-export-jobs.md` och `docs/domain/comments-mentions-and-collaboration.md`
 - FAS 12 â†’ `docs/compliance/se/annual-reporting-engine.md` och `docs/domain/submission-receipts-and-action-queue.md`
-- FAS 13 â†’ `docs/domain/async-jobs-retry-replay-and-dead-letter.md`
-- FAS 14 â†’ `docs/domain/audit-review-support-and-admin-backoffice.md` och `docs/domain/migration-cockpit-parallel-run-and-cutover.md`
+- FAS 13 â†’ `docs/domain/submission-receipts-and-action-queue.md`, `docs/domain/async-jobs-retry-replay-and-dead-letter.md`, `docs/adr/ADR-0015-async-jobs-queues-and-replay-strategy.md`, `docs/runbooks/fas-13-public-api-verification.md`, `docs/runbooks/fas-13-partner-integrations-verification.md` och `docs/runbooks/fas-13-ai-automation-verification.md`
+- FAS 14 â†’ `docs/domain/audit-review-support-and-admin-backoffice.md`, `docs/domain/migration-cockpit-parallel-run-and-cutover.md`, `docs/policies/feature-flag-and-emergency-disable-policy.md`, `docs/policies/support-access-and-impersonation-policy.md`, `docs/runbooks/fas-14-security-review-verification.md`, `docs/runbooks/fas-14-resilience-verification.md`, `docs/runbooks/fas-14-migration-go-live-verification.md`, `docs/runbooks/support-backoffice-and-audit-review.md`, `docs/runbooks/feature-flag-rollout-and-emergency-disable.md` och `docs/runbooks/pilot-migration-and-cutover.md`
 
 ## TvÃ¤rgÃ¥ende ADR:er, policies, runbooks och testplaner
 

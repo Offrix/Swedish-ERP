@@ -7,6 +7,33 @@ import {
   PERIOD_CLOSE_STATES,
   createCloseModule
 } from "./close.mjs";
+import {
+  ACCESS_REVIEW_STATUSES,
+  ADMIN_DIAGNOSTIC_TYPES,
+  BREAK_GLASS_STATES,
+  IMPERSONATION_MODES,
+  IMPERSONATION_STATES,
+  SUPPORT_CASE_SEVERITIES,
+  SUPPORT_CASE_STATUSES,
+  createBackofficeModule
+} from "./backoffice.mjs";
+import {
+  CHAOS_SCENARIO_STATUSES,
+  FEATURE_FLAG_SCOPE_TYPES,
+  FEATURE_FLAG_TYPES,
+  FEATURE_FLAG_RISK_CLASSES,
+  LOAD_PROFILE_STATUSES,
+  RESTORE_DRILL_STATUSES,
+  createResilienceModule
+} from "./resilience.mjs";
+import {
+  CUTOVER_PLAN_STATUSES,
+  DIFFERENCE_CLASSES,
+  DIFF_REPORT_STATUSES,
+  IMPORT_BATCH_STATUSES,
+  MAPPING_SET_STATUSES,
+  createMigrationModule
+} from "./migration.mjs";
 
 export const PORTFOLIO_STATUS_CODES = Object.freeze(["active", "waiting_for_client", "in_review", "ready_for_close", "blocked"]);
 export const CLIENT_REQUEST_STATUSES = Object.freeze(["draft", "sent", "acknowledged", "in_progress", "delivered", "accepted", "closed", "overdue", "escalated", "reopened"]);
@@ -14,13 +41,37 @@ export const APPROVAL_PACKAGE_STATUSES = Object.freeze(["prepared", "sent_for_ap
 export const WORK_ITEM_STATUSES = Object.freeze(["open", "acknowledged", "waiting_external", "snoozed", "resolved", "escalated", "blocked", "closed"]);
 export const COMMENT_VISIBILITY_CODES = Object.freeze(["internal", "external_shared", "restricted_internal"]);
 export const MASS_ACTION_TYPES = Object.freeze(["send_reminder", "reassign_owner"]);
-export { CLOSE_CHECKLIST_STATUSES, CLOSE_STEP_STATUSES, CLOSE_BLOCKER_SEVERITIES, CLOSE_BLOCKER_STATUSES, PERIOD_CLOSE_STATES };
+export {
+  CLOSE_CHECKLIST_STATUSES,
+  CLOSE_STEP_STATUSES,
+  CLOSE_BLOCKER_SEVERITIES,
+  CLOSE_BLOCKER_STATUSES,
+  PERIOD_CLOSE_STATES,
+  SUPPORT_CASE_STATUSES,
+  SUPPORT_CASE_SEVERITIES,
+  IMPERSONATION_MODES,
+  IMPERSONATION_STATES,
+  ACCESS_REVIEW_STATUSES,
+  BREAK_GLASS_STATES,
+  ADMIN_DIAGNOSTIC_TYPES,
+  FEATURE_FLAG_SCOPE_TYPES,
+  FEATURE_FLAG_TYPES,
+  FEATURE_FLAG_RISK_CLASSES,
+  LOAD_PROFILE_STATUSES,
+  RESTORE_DRILL_STATUSES,
+  CHAOS_SCENARIO_STATUSES,
+  IMPORT_BATCH_STATUSES,
+  MAPPING_SET_STATUSES,
+  DIFF_REPORT_STATUSES,
+  DIFFERENCE_CLASSES,
+  CUTOVER_PLAN_STATUSES
+};
 
 export function createCorePlatform(options = {}) {
   return createCoreEngine(options);
 }
 
-export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = null, ledgerPlatform = null, clock = () => new Date() } = {}) {
+export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = null, ledgerPlatform = null, integrationPlatform = null, clock = () => new Date() } = {}) {
   const state = {
     portfolios: new Map(),
     requests: new Map(),
@@ -31,6 +82,21 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     closeBlockers: new Map(),
     closeSignoffs: new Map(),
     closeReopenRequests: new Map(),
+    supportCases: new Map(),
+    impersonationSessions: new Map(),
+    accessReviewBatches: new Map(),
+    adminDiagnostics: new Map(),
+    breakGlassSessions: new Map(),
+    featureFlags: new Map(),
+    emergencyDisables: new Map(),
+    loadProfiles: new Map(),
+    restoreDrills: new Map(),
+    chaosScenarios: new Map(),
+    mappingSets: new Map(),
+    importBatches: new Map(),
+    migrationCorrections: new Map(),
+    diffReports: new Map(),
+    cutoverPlans: new Map(),
     auditEvents: []
   };
 
@@ -134,6 +200,28 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     audit,
     error
   });
+  const backofficeModule = createBackofficeModule({
+    state,
+    clock,
+    orgAuthPlatform,
+    integrationPlatform,
+    audit,
+    error
+  });
+  const resilienceModule = createResilienceModule({
+    state,
+    clock,
+    orgAuthPlatform,
+    audit,
+    error
+  });
+  const migrationModule = createMigrationModule({
+    state,
+    clock,
+    orgAuthPlatform,
+    audit,
+    error
+  });
 
   return {
     portfolioStatusCodes: PORTFOLIO_STATUS_CODES,
@@ -147,6 +235,24 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
       closeBlockerSeverities: CLOSE_BLOCKER_SEVERITIES,
       closeBlockerStatuses: CLOSE_BLOCKER_STATUSES,
       periodCloseStates: PERIOD_CLOSE_STATES,
+      supportCaseStatuses: SUPPORT_CASE_STATUSES,
+      supportCaseSeverities: SUPPORT_CASE_SEVERITIES,
+      impersonationModes: IMPERSONATION_MODES,
+      impersonationStates: IMPERSONATION_STATES,
+      accessReviewStatuses: ACCESS_REVIEW_STATUSES,
+      breakGlassStates: BREAK_GLASS_STATES,
+      adminDiagnosticTypes: ADMIN_DIAGNOSTIC_TYPES,
+      featureFlagScopeTypes: FEATURE_FLAG_SCOPE_TYPES,
+      featureFlagTypes: FEATURE_FLAG_TYPES,
+      featureFlagRiskClasses: FEATURE_FLAG_RISK_CLASSES,
+      loadProfileStatuses: LOAD_PROFILE_STATUSES,
+      restoreDrillStatuses: RESTORE_DRILL_STATUSES,
+      chaosScenarioStatuses: CHAOS_SCENARIO_STATUSES,
+      importBatchStatuses: IMPORT_BATCH_STATUSES,
+      mappingSetStatuses: MAPPING_SET_STATUSES,
+      diffReportStatuses: DIFF_REPORT_STATUSES,
+      differenceClasses: DIFFERENCE_CLASSES,
+      cutoverPlanStatuses: CUTOVER_PLAN_STATUSES,
       createPortfolioMembership,
       listPortfolioMemberships,
     createClientRequest,
@@ -171,6 +277,55 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
       approveCloseOverride: closeModule.approveCloseOverride,
       signOffCloseChecklist: closeModule.signOffCloseChecklist,
       requestCloseReopen: closeModule.requestCloseReopen,
+      createSupportCase: backofficeModule.createSupportCase,
+      listSupportCases: backofficeModule.listSupportCases,
+      approveSupportCaseActions: backofficeModule.approveSupportCaseActions,
+      runAdminDiagnostic: backofficeModule.runAdminDiagnostic,
+      requestImpersonation: backofficeModule.requestImpersonation,
+      listImpersonationSessions: backofficeModule.listImpersonationSessions,
+      approveImpersonation: backofficeModule.approveImpersonation,
+      terminateImpersonation: backofficeModule.terminateImpersonation,
+      generateAccessReview: backofficeModule.generateAccessReview,
+      listAccessReviews: backofficeModule.listAccessReviews,
+      recordAccessReviewDecision: backofficeModule.recordAccessReviewDecision,
+      requestBreakGlass: backofficeModule.requestBreakGlass,
+      listBreakGlassSessions: backofficeModule.listBreakGlassSessions,
+      approveBreakGlass: backofficeModule.approveBreakGlass,
+      closeBreakGlassSession: backofficeModule.closeBreakGlassSession,
+      listAuditTrail: backofficeModule.listAuditTrail,
+      upsertFeatureFlag: resilienceModule.upsertFeatureFlag,
+      listFeatureFlags: resilienceModule.listFeatureFlags,
+      requestEmergencyDisable: resilienceModule.requestEmergencyDisable,
+      listEmergencyDisables: resilienceModule.listEmergencyDisables,
+      recordLoadProfile: resilienceModule.recordLoadProfile,
+      listLoadProfiles: resilienceModule.listLoadProfiles,
+      recordRestoreDrill: resilienceModule.recordRestoreDrill,
+      listRestoreDrills: resilienceModule.listRestoreDrills,
+      recordChaosScenario: resilienceModule.recordChaosScenario,
+      listChaosScenarios: resilienceModule.listChaosScenarios,
+      resolveRuntimeFlags: resilienceModule.resolveRuntimeFlags,
+      createMappingSet: migrationModule.createMappingSet,
+      listMappingSets: migrationModule.listMappingSets,
+      approveMappingSet: migrationModule.approveMappingSet,
+      registerImportBatch: migrationModule.registerImportBatch,
+      listImportBatches: migrationModule.listImportBatches,
+      runImportBatch: migrationModule.runImportBatch,
+      recordManualMigrationCorrection: migrationModule.recordManualMigrationCorrection,
+      generateDiffReport: migrationModule.generateDiffReport,
+      listDiffReports: migrationModule.listDiffReports,
+      recordDifferenceDecision: migrationModule.recordDifferenceDecision,
+      createCutoverPlan: migrationModule.createCutoverPlan,
+      listCutoverPlans: migrationModule.listCutoverPlans,
+      recordCutoverSignoff: migrationModule.recordCutoverSignoff,
+      updateCutoverChecklistItem: migrationModule.updateCutoverChecklistItem,
+      startCutover: migrationModule.startCutover,
+      completeFinalExtract: migrationModule.completeFinalExtract,
+      passCutoverValidation: migrationModule.passCutoverValidation,
+      switchCutover: migrationModule.switchCutover,
+      stabilizeCutover: migrationModule.stabilizeCutover,
+      startRollback: migrationModule.startRollback,
+      completeRollback: migrationModule.completeRollback,
+      getMigrationCockpit: migrationModule.getMigrationCockpit,
       runClientRequestReminderJob,
       runClientRequestEscalationJob,
       runPortfolioStatusRecomputeJob,
@@ -786,6 +941,21 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
         closeBlockers: [...state.closeBlockers.values()],
         closeSignoffs: [...state.closeSignoffs.values()],
         closeReopenRequests: [...state.closeReopenRequests.values()],
+        supportCases: [...state.supportCases.values()],
+        impersonationSessions: [...state.impersonationSessions.values()],
+        accessReviewBatches: [...state.accessReviewBatches.values()],
+        adminDiagnostics: [...state.adminDiagnostics.values()],
+        breakGlassSessions: [...state.breakGlassSessions.values()],
+        featureFlags: [...state.featureFlags.values()],
+        emergencyDisables: [...state.emergencyDisables.values()],
+        loadProfiles: [...state.loadProfiles.values()],
+        restoreDrills: [...state.restoreDrills.values()],
+        chaosScenarios: [...state.chaosScenarios.values()],
+        mappingSets: [...state.mappingSets.values()],
+        importBatches: [...state.importBatches.values()],
+        migrationCorrections: [...state.migrationCorrections.values()],
+        diffReports: [...state.diffReports.values()],
+        cutoverPlans: [...state.cutoverPlans.values()],
         auditEvents: [...state.auditEvents]
       });
   }

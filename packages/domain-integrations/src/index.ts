@@ -49,3 +49,61 @@ export interface AuthoritySubmissionRef {
   readonly signedState: SubmissionSignedState;
   readonly retryClass: SubmissionRetryClass;
 }
+
+export type PublicApiMode = "sandbox" | "production";
+export type PublicApiClientStatus = "active" | "revoked";
+export type PublicApiScopeCode = "api_spec.read" | "reporting.read" | "submission.read" | "webhook.manage" | "partner.read" | "automation.read";
+export type WebhookDeliveryStatus = "queued" | "sent" | "rate_limited" | "suppressed" | "disabled";
+export type PartnerConnectionType = "bank" | "peppol" | "pension" | "crm" | "commerce" | "id06";
+export type PartnerConnectionStatus = "active" | "degraded" | "outage" | "disabled";
+export type PartnerFallbackMode = "queue_retry" | "manual_review" | "disabled";
+export type PartnerOperationStatus = "queued" | "succeeded" | "fallback" | "rate_limited";
+export type AsyncJobStatus = "queued" | "claimed" | "running" | "succeeded" | "failed" | "retry_scheduled" | "dead_lettered" | "replay_planned" | "replayed";
+export type AsyncJobRiskClass = "normal" | "high_risk" | "restricted";
+export type AsyncJobErrorClass = "transient_technical" | "persistent_technical" | "business_input" | "downstream_unknown";
+
+export interface PublicApiClient {
+  readonly clientId: string;
+  readonly companyId: string;
+  readonly displayName: string;
+  readonly mode: PublicApiMode;
+  readonly scopes: readonly PublicApiScopeCode[];
+  readonly status: PublicApiClientStatus;
+}
+
+export interface WebhookSubscription {
+  readonly subscriptionId: string;
+  readonly companyId: string;
+  readonly clientId: string;
+  readonly mode: PublicApiMode;
+  readonly eventTypes: readonly string[];
+  readonly targetUrl: string;
+  readonly status: string;
+}
+
+export interface PartnerConnection {
+  readonly connectionId: string;
+  readonly companyId: string;
+  readonly connectionType: PartnerConnectionType;
+  readonly partnerCode: string;
+  readonly status: PartnerConnectionStatus;
+  readonly fallbackMode: PartnerFallbackMode;
+}
+
+export interface PartnerOperation {
+  readonly operationId: string;
+  readonly companyId: string;
+  readonly connectionId: string;
+  readonly connectionType: PartnerConnectionType;
+  readonly operationCode: string;
+  readonly status: PartnerOperationStatus;
+}
+
+export interface AsyncJobRef {
+  readonly jobId: string;
+  readonly companyId: string;
+  readonly jobType: string;
+  readonly status: AsyncJobStatus;
+  readonly riskClass: AsyncJobRiskClass;
+  readonly lastErrorClass: AsyncJobErrorClass | null;
+}

@@ -47,6 +47,12 @@ Helper scripts for local setup, structure verification and phased rollout checks
 - `verify-phase11-close.ps1`: validates required FAS 11.3 close workbench, checklist, blocker, sign-off and reopen artifacts.
 - `verify-phase12-annual-reporting.ps1`: validates required FAS 12.1 K2/K3 package, versioning, signatory and demo-seed artifacts.
 - `verify-phase12-tax-submissions.ps1`: validates required FAS 12.2 tax-package outputs, authority overviews, submission receipts and action-queue artifacts.
+- `verify-phase13-public-api.ps1`: validates required FAS 13.1 public API, OAuth, sandbox and webhook artifacts.
+- `verify-phase13-partner-integrations.ps1`: validates required FAS 13.2 partner adapters, contract tests, async jobs and replay artifacts.
+- `verify-phase13-ai-automation.ps1`: validates required FAS 13.3 automation rule-pack, decision and override artifacts.
+- `verify-phase14-security-review.ps1`: validates required FAS 14.1 backoffice, audit review, impersonation and break-glass artifacts.
+- `verify-phase14-resilience.ps1`: validates required FAS 14.2 feature-flag, emergency-disable, load-profile, restore-drill and chaos artifacts.
+- `verify-phase14-migration-go-live.ps1`: validates required FAS 14.3 migration cockpit, diff report, cutover and rollback artifacts.
 - `verify-db.ps1`: validates migration file naming.
 - `new-migration.ps1`: creates timestamped migration file in `packages/db/migrations`.
 - `dev-up.ps1`: starts docker infra.
