@@ -1,196 +1,224 @@
-# Benefits engine
+# Master metadata
 
-Detta dokument definierar förmånsmotorn. Den ska kunna värdera, bokföra, rapportera och förklara både skattepliktiga och skattefria förmåner, med stöd för egen betalning, nettolöneavdrag och AGI.
+- Document ID: SE-CMP-017
+- Title: Benefits Engine
+- Status: Binding
+- Owner: Payroll and finance compliance architecture
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/compliance/se/benefits-engine.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-rulepack-register.md`
+  - `docs/master-control/master-golden-scenario-catalog.md`
+  - `docs/master-control/master-build-sequence.md`
+- Related domains:
+  - benefits
+  - documents
+  - payroll
+  - AGI
+- Related code areas:
+  - `packages/domain-benefits/*`
+  - `packages/document-engine/*`
+  - `packages/domain-payroll/*`
+- Related future documents:
+  - `docs/compliance/se/person-linked-document-classification-engine.md`
+  - `docs/policies/benefits-pension-travel-company-policy.md`
 
-## Scope
+# Purpose
 
-Förmånsmotorn ska hantera minst:
-- bilförmån
-- drivmedelsförmån
-- trängselskatt
-- infrastrukturavgifter
-- parkering
+Definiera den bindande motorn för skattepliktiga och skattefria förmåner, egen betalning, nettolöneavdrag och payroll/AGI-handoff.
+
+# Scope
+
+Ingår:
+
+- bilförmån och drivmedelsförmån
 - kostförmån
-- telefon och internet
-- sjukvårdsförsäkring
-- friskvårdsbidrag
+- friskvård
 - gåvor
-- personalrabatter
-- cykelförmån
-- bostadsförmån
-- ränteförmån
 - privata köp på företagskort
+- egen betalning och nettolöneavdrag
 
-## Datamodell
+Ingår inte:
 
-Minst:
-- `benefit_catalog`
-- `benefit_events`
-- `benefit_valuations`
-- `benefit_deductions`
-- `benefit_documents`
-- `benefit_posting_intents`
-- `benefit_agi_mappings`
+- full pensionsprodukt
+- full reseersättningsprodukt utanför benefits bridge
 
-## Grundprinciper
+# Non-negotiable rules
 
-1. En förmånshändelse ska kunna knytas till anställd, period och underlag.
-2. En förmån kan vara:
-   - skattepliktig
-   - skattefri
-   - delvis skattepliktig
-3. Värdering ska kunna baseras på:
-   - schablon
-   - marknadsvärde
-   - särskild specialregel
-4. Egen betalning och nettolöneavdrag ska kunna minska förmånsvärde när reglerna tillåter.
-5. Förmånsvärde ska kunna rapporteras även om ingen kontant lön betalas ut.
-6. Förmån ska kunna börja eller sluta mitt i månad, men värderingsregeln kan ändå ge helt månadsbelopp beroende på förmånstyp.
-7. Alla förmånsbeslut ska kunna förklaras.
+1. Varje förmånshändelse måste kunna knytas till person, period och underlag.
+2. Förmånsvärde får aldrig gissas; värdering ska komma från deterministisk regel eller review.
+3. Egen betalning eller nettolöneavdrag får bara reducera förmånsvärde där regelpaket uttryckligen tillåter det.
+4. Friskvårdsbidrag ska bara behandlas som skattefritt när villkoren för skattefri motion/friskvård är uppfyllda.
+5. Gåvogränser som är allt-eller-inget får inte behandlas proportionellt.
+6. Förmånshändelse som påverkar skatt eller AGI får inte lämna benefits-domänen utan auditbar valuation explanation.
 
-## 28. Förmåner — byggspec
+# Definitions
 
-### 28.1 Allmän modell
-Varje förmånshändelse ska ha:
-- benefit_type
-- valuation_method
-- start_date
-- end_date
-- tax_year
-- market_value
-- taxable_value
-- employer_paid_value
-- employee_paid_value
-- net_deduction_value
-- payroll_run_id
-- agi_mapping_code
-- supporting_document_id
+- `Benefit event`: grundhändelse som beskriver vad den anställda har fått eller nyttjat.
+- `Benefit valuation`: beräknat skattepliktigt eller skattefritt utfall.
+- `Employee contribution`: anställds betalning som kan minska förmånsvärde.
+- `Net deduction`: nettolöneavdrag som kan påverka slutligt skattepliktigt värde.
 
-### 28.2 Förmånstyper som måste stödjas
-- bilförmån
-- drivmedelsförmån
-- trängselskatt
-- infrastrukturavgifter
-- parkering
-- kostförmån
-- telefon
-- internet
-- sjukvårdsförsäkring
-- friskvårdsbidrag
-- gåvor
-- personalrabatt
-- cykelförmån
-- bostadsförmån
-- ränteförmån
-- privata köp på företagskort
+# Object model
 
-### 28.3 Bilförmån
-- privat användning i mer än ringa omfattning ger bilförmån
-- ringa omfattning = högst tio tillfällen och högst 100 mil per år
-- körjournal krävs som bevis om ringa omfattning åberopas
-- arbetsgivaren ska betala arbetsgivaravgifter på förmånsvärdet
-- arbetsgivaren ska göra skatteavdrag på förmånsvärdet och kontant ersättning; om ingen kontant ersättning finns kan inget skatteavdrag göras
-- bilförmån beräknas schablonmässigt utifrån nybilspris, extrautrustning och fordonsskatt samt specialregler
-- förmån några dagar i månaden utlöser normalt förmånsvärde för hela månaden
-- fritt drivmedel, trängselskatt och infrastrukturavgifter ingår inte i bilförmånsvärdet utan hanteras separat
-- omfattande tjänstekörning ska kunna sänka förmånsvärdet när reglerna medger det
-- taxibilar, servicebilar och vissa lätta lastbilar kan ha särskild hantering
+## BenefitEvent
 
-### 28.4 Drivmedelsförmån
-- om arbetsgivaren betalar privat drivmedel ska separat drivmedelsförmån beräknas
-- gäller även el
-- privat och tjänstekörning måste kunna särskiljas via körjournal
-- om anställd med förmånsbil enligt avtal betalar privat drivmedel själv till utomstående ska ingen drivmedelsförmån uppkomma
-- vid laddning på arbetsgivarens bekostnad som inte omfattas av skattefrihet ska skattepliktig drivmedelsförmån kunna uppstå
+Fält:
 
-### 28.5 Kostförmån
-- helt fri kost 2026: 310 kr per dag
-- fri lunch eller middag 2026: 124 kr per dag
-- fri frukost 2026: 62 kr per dag
-- om den anställde betalar själv via nettolöneavdrag eller direktbetalning ska förmånsvärdet minskas med motsvarande belopp
-- intern representation, personalfester och vissa konferenssituationer kan vara skattefria
-- om arbetsgivaren inte betalar någon kontant lön vid sidan av kostförmån kan inget skatteavdrag göras
+- `benefit_event_id`
+- `employee_id`
+- `benefit_type_code`
+- `event_date`
+- `source_document_id`
+- `source_object_type`
+- `source_object_id`
+- `status`
 
-### 28.6 Friskvård
-- friskvårdsbidrag ska erbjudas hela personalen på lika villkor
-- beloppet får inte överstiga 5 000 kr per anställd och år för skattefrihet
-- avser enklare motion och friskvård
-- presentkort som sådant är inte skattefri friskvård
-- bidraget ska avse innevarande år
-- kvitto/underlag ska visa vilken aktivitet som köpts
-- systemet ska blockera carry-over mellan år om policyn kräver skattefri hantering
+## BenefitValuation
 
-### 28.7 Gåvor till anställda
-- huvudregel: gåvor från arbetsgivaren är skattepliktiga
-- undantag: julgåva, jubileumsgåva, minnesgåva under villkor
-- julgåva 2026 skattefri upp till 600 kr inkl moms
-- jubileumsgåva 2026 skattefri upp till 1 800 kr inkl moms
-- minnesgåva skattefri upp till 15 000 kr inkl moms
-- minnesgåva ges till varaktigt anställda i samband med jämna födelsedagar från 50 år, minst 20 års anställning eller när anställning upphör
-- gåvobeloppen är gränsbelopp: överskrids de beskattas hela gåvan från första kronan
-- frakt/administration ska inte ingå i gåvans värde om de hålls separat enligt reglerna
+Fält:
 
-## Ytterligare regler som ska modelleras
+- `benefit_valuation_id`
+- `benefit_event_id`
+- `valuation_method_code`
+- `market_value_amount`
+- `taxable_value_amount`
+- `employee_payment_amount`
+- `net_deduction_amount`
+- `rulepack_version`
+- `status`
 
-### Bilförmån
-- Körjournal krävs för påstådd ringa privat användning.
-- Del av månad kan ändå utlösa helt månadsbelopp.
-- Omfattande tjänstekörning och specialfordon måste kunna flaggas för särskild hantering.
-- Om ingen kontant ersättning betalas ut ska systemet visa att skatteavdrag inte kan göras på vanligt sätt.
+# Required fields
 
-### Friskvård
-- Policy ska kunna kräva lika villkor för hela personalen.
-- Carry-over mellan år ska kunna blockeras.
-- Presentkort ska inte behandlas som skattefri friskvård.
-- Underlag måste visa aktivitet, datum och leverantör.
+- employee identity
+- benefit type
+- event date
+- valuation basis
+- supporting document or source object
+- policy and rulepack version
 
-### Gåvor
-- Gåvotyp måste lagras.
-- Gränsbelopp ska behandlas som “allt eller inget”.
-- Minnesgåva ska bara tillåtas när de materiella villkoren är uppfyllda.
+# State machines
 
-## Output till andra domäner
+## BenefitEvent
 
-Förmånsmotorn ska producera:
-- lönerader eller benefit-to-payroll events
-- AGI-mappning
-- bokföringshändelser
-- kostnadsfördelning per dimension
-- audit trail och beslutsförklaring
+- `draft`
+- `classified`
+- `valued`
+- `approved`
+- `dispatched_to_payroll`
+- `corrected`
+- `closed`
 
-## Golden tests
+## BenefitValuation
 
-- bilförmån hel månad
-- bilförmån start mitt i månad
-- drivmedelsförmån med korrekt körjournal
-- kostförmån med egen betalning
-- friskvård inom gräns
-- friskvård över gräns
-- julgåva under och över gräns
-- privat kortköp på företagskort
-- förmån utan kontant lön
+- `proposed`
+- `approved`
+- `superseded`
 
-## Codex-prompt
+# Validation rules
 
-```text
-Read docs/compliance/se/benefits-engine.md, docs/compliance/se/payroll-engine.md and docs/compliance/se/agi-engine.md.
+1. Privat köp på företagskort får inte skickas som bolagskostnad utan benefit/outlay-beslut.
+2. Friskvård som saknar tydligt underlag eller avser presentkort ska blockeras från skattefri behandling.
+3. För 2026 ska friskvårdsbidrag bara behandlas som skattefritt upp till 5 000 kr per anställd och år när övriga villkor är uppfyllda.
+4. För 2026 ska skattefria gåvor behandlas enligt regelpaketens gränser: julgåva 600 kr, jubileumsgåva 1 800 kr och minnesgåva 15 000 kr; överskrids allt-eller-inget-gränsen blir hela gåvan skattepliktig där regeln kräver det.
+5. För 2026 ska kostförmånsvärde stödja 62 kr för frukost, 124 kr för lunch eller middag och 310 kr för fri kost per dag.
+6. Bilförmån som påstås vara ringa privat användning måste stödjas av korrekt underlag; gränsen behandlas som högst tio tillfällen och högst 100 mil per år.
 
-Implement the benefits engine with:
-- benefit catalog
-- benefit events
-- valuation rules
+# Deterministic decision rules
+
+## Rule BEN-001: Wellness
+
+Friskvård behandlas som skattefri endast om:
+
+- aktiviteten är godkänd i rulepack
+- underlag visar aktivitet och leverantör
+- policy tillämpas lika
+- årsgränsen inte överskrids
+
+## Rule BEN-002: Gifts
+
+Gåvotyp styr om gränsen är skattefri. Om beloppet överskrider tillåten gräns där allt-eller-inget gäller ska hela gåvan bli skattepliktig.
+
+## Rule BEN-003: Employee payment
+
+Egen betalning och nettolöneavdrag får bara minska förmånsvärde om rulepacken för aktuell förmån uttryckligen medger det.
+
+## Rule BEN-004: Document-driven benefit
+
+Dokument med personpåverkan får bara skapa benefit event efter godkänd klassning i person-linked document engine.
+
+# Rulepack dependencies
+
+- `RP-BENEFITS-SE`
+- `RP-WELLNESS-SE`
+- `RP-GIFTS-SE`
+- `RP-MEAL-BENEFITS-SE`
+- `RP-CAR-BENEFITS-SE`
+
+# Posting/accounting impact
+
+- benefits ska skapa payroll handoff, AGI mapping och bokföringsintents för förmånskostnad, motkonto och eventuellt nettolöneavdrag
+
+# Payroll impact where relevant
+
+- benefit valuation blir pay lines eller motsvarande payroll outcomes
+
+# AGI impact where relevant
+
+- skattepliktiga förmåner ska mappas till rätt AGI-box genom payroll
+
+# Review requirements
+
+Review krävs vid:
+
+- blandade dokumentfall
+- oklar gåvotyp
+- osäker friskvårdsaktivitet
+- car-benefit edge cases
+
+# Correction model
+
+- ny valuation version
+- nytt payroll handoff
+- AGI correction via payroll, aldrig overwrite
+
+# Audit requirements
+
+Audit ska visa:
+
+- source document
+- benefit type
+- valuation method
+- employee payment
+- final taxable value
+
+# Golden scenarios covered
+
+- taxable benefit
+- net salary deduction
+- wellness within threshold
+- wellness over threshold
+- private spend on company card
+
+# API implications
+
+- create and approve benefit event
+- recalculate valuation
+- dispatch to payroll
+- correction commands
+
+# Test implications
+
+- wellness threshold
+- gift threshold behavior
+- meal benefit values
 - employee payment offsets
-- payroll integration
-- AGI mapping
-- accounting intents
-- golden tests
 
-Show the explanation object for every valuation.
-```
+# Exit gate
 
-## Exit gate
-
-- [ ] Alla förmånstyper i scope går att registrera.
-- [ ] Värdering kan förklaras per event.
-- [ ] Förmåner mappas korrekt till lön, AGI och bokföring.
-- [ ] Egen betalning och nettolöneavdrag hanteras korrekt.
+- [ ] alla förmånsutfall är spårbara och förklarbara
+- [ ] policy- och rulepackgränser styr skattefritt kontra skattepliktigt utfall
+- [ ] payroll och AGI får bara godkända benefit valuations

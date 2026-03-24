@@ -1,84 +1,106 @@
-# Backup restore and disaster recovery
+# Master metadata
 
-Detta runbook beskriver backupfrekvens, PITR, restore-test, objektlagringsrestore, kö-replay, RTO/RPO och exakt rollback-ordning.
+- Document ID: RB-002
+- Title: Backup, Restore and Disaster Recovery
+- Status: Binding
+- Owner: Platform operations and resilience engineering
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/runbooks/backup-restore-and-disaster-recovery.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-build-sequence.md`
+  - `docs/master-control/master-rebuild-control.md`
+  - `docs/master-control/master-gap-register.md`
+- Related domains:
+  - runtime
+  - persistence
+  - recovery
+- Related code areas:
+  - `packages/db/*`
+  - `apps/api/*`
+  - `apps/worker/*`
+  - `apps/backoffice/*`
+- Related future documents:
+  - `docs/domain/async-jobs-retry-replay-and-dead-letter.md`
+  - `docs/runbooks/incident-response-and-production-hotfix.md`
 
-## Förutsättningar
+# Purpose
 
-- RDS, objektlagring, köer och infrastruktur som kod är i drift
-- backup-policyer är definierade i plattformen
-- isolera återställningsmiljö finns eller kan skapas snabbt
+Beskriva hur databaser, objektlagring, jobb och härledda index återställs kontrollerat efter dataförlust, korruption eller större driftincident.
 
-## Berörda system
+# When to use
 
-- RDS PostgreSQL med PITR
-- S3 med versionshantering
-- köer/outbox
-- ECS eller motsvarande applikationsplattform
-- AWS Backup eller motsvarande backup-orkestrering
+- dataförlust
+- misstänkt datakorruption
+- återställning till tidigare tidpunkt
+- full DR-övning
 
-## Steg för steg
+# Preconditions
 
-### Backupstrategi
+- backup-policyer är definierade
+- PITR eller motsvarande finns där det krävs
+- isolerad återställningsmiljö kan skapas
 
-1. Databas kör kontinuerlig PITR med daglig snapshot.
-2. Objektlagring använder versionshantering och skydd mot oavsiktlig radering.
-3. Konfigurations- och infrastrukturskod ligger i repo och reproduceras via terraform eller motsvarande.
-4. Köer ska i möjligaste mån vara replaybara från outbox eller källdata i stället för att vara enda sanningskälla.
+# Required roles
 
-### Mål för återställning
+- incident lead
+- database operator
+- platform operator
+- relevant domain owner vid reglerade data
 
-1. Standardmål för prod är RTO 4 timmar för kritiska kärnflöden och RPO 15 minuter för databasen.
-2. Objektlagring ska normalt kunna återställas till senaste versionstillstånd utan dataförlust utöver eventuellt osynkat metadatafönster.
-3. Mindre kritiska analyssystem kan ha längre återställningstid.
+# Inputs
 
-### Återställningsordning
+- incident id
+- restore target timestamp
+- scope för data och system
+- godkänd restore plan
 
-1. Frys skrivande trafik och stoppa automationer som annars kan skapa ny driftdata i fel läge.
-2. Återställ databasen till isolerad miljö först och verifiera schema, migrationsnivå och antal poster.
-3. Återställ objektlagring eller peka om till korrekta objektversioner.
-4. Återställ secrets och konfiguration endast om de också förlorats eller komprometterats.
-5. Rebuild indexer, caches och härledda materialiseringar från återställd databas.
-6. Replaya idempotenta köer eller outbox-händelser där det behövs.
-7. Öppna trafik stegvis efter smoke tests.
+# Step-by-step procedure
 
-### Restore-test
+1. Frys skrivande trafik och riskfyllda workers.
+2. Identifiera restore point och vilket datafönster som påverkas.
+3. Återställ först till isolerad miljö.
+4. Verifiera schema, migrationsnivå, datavolymer och kritiska tabeller.
+5. Återställ objektlagring och andra binära underlag.
+6. Rebuild index, caches och read models från återställd källa.
+7. Replaya endast idempotenta jobb eller outbox-händelser som behöver återskapas.
+8. Kör smoke tests innan trafik öppnas.
 
-1. Kör kvartalsvis full restore-test till isolerad miljö.
-2. Verifiera att bank-, AR-, AP-, dokument- och auth-kärndata går att använda efter restore.
-3. Spara restore-protokoll, tidsåtgång, fel och förbättringsåtgärder.
+# Verification
 
-## Verifiering
+- återställd miljö är konsistent
+- kritiska flöden kan läsas och verifieras
+- inga oplanerade dubletter uppstår från replay
 
-- backup finns för databas, objekt och konfigurering
-- PITR fungerar till vald tidpunkt
-- isolerad restore-miljö kan startas
-- quarterly restore-test är dokumenterat
-- RTO och RPO följs upp mot verkligt utfall
+# Retry/replay behavior where relevant
 
-## Rollback och återställning
+- replay efter restore ska ske i kontrollerade batcher
+- jobb med okänt slututfall får inte replayas blint
 
-- om återställd miljö inte är konsistent, stanna kvar i read-only eller maintenance mode och återställ på nytt från annan tidpunkt
-- öppna inte skrivande trafik förrän smoke tests och data-kontroller är gröna
-- om replay ger fel, återställ till senaste goda återställningspunkt och kör om med mindre scope
+# Rollback/recovery
 
-## Vanliga fel och felsökning
+- om restorepunkt visar sig vara fel ska ny restore göras från annan tidpunkt
+- skrivande trafik får förbli blockerad tills konsistens är verifierad
 
-### Databasåterställning
+# Incident threshold
 
-- fel tidsstämpel vald för PITR
-- schema och applikationsversion matchar inte
-- migrationsjobb körs igen av misstag på redan återställd data
+Alla återställningar utanför övningsmiljö ska behandlas som incident eller change av hög prioritet.
 
-### Objekt och köer
+# Audit and receipts
 
-- metadata finns men objekt saknas eller fel version används
-- kö replayas dubbelt utan idempotensskydd
-- sökindex eller cache visar gammal eller partiell data efter restore
+Följande ska sparas:
 
-## Exit gate
+- restorepoint
+- scope
+- operatörer
+- verifieringsprotokoll
+- tid till återställning
 
-- [ ] RTO/RPO är definierade och spårade
-- [ ] restoreordning är känd och övad
-- [ ] backup och versionering täcker både databas och objekt
-- [ ] kö-replay och maintenance mode är testade
-- [ ] restore-protokoll finns för senaste test
+# Exit gate
+
+- [ ] restorepoint är dokumenterad
+- [ ] isolerad verifiering är gjord
+- [ ] smoke tests är gröna
+- [ ] återöppning av trafik är godkänd

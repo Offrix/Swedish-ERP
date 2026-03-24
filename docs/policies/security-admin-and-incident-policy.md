@@ -1,60 +1,114 @@
-# Security admin and incident policy
+# Master metadata
 
-Detta dokument definierar adminkrav, MFA-nivåer, sessionstid, IP/device-riskflaggor, incidentflöde, hotfix i produktion, nyckelrotation och granskningsintervall för auditloggar.
+- Document ID: POL-014
+- Title: Security Admin and Incident Policy
+- Status: Binding
+- Owner: Security governance
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/policies/security-admin-and-incident-policy.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-policy-matrix.md`
+  - `docs/master-control/master-build-sequence.md`
+- Related domains:
+  - auth
+  - backoffice
+  - worker
+  - runtime operations
+- Related code areas:
+  - `packages/domain-org-auth/*`
+  - `apps/backoffice/*`
+  - `apps/worker/*`
+- Related future documents:
+  - `docs/runbooks/incident-response-and-production-hotfix.md`
+  - `docs/runbooks/backup-restore-and-disaster-recovery.md`
 
-## Scope
+# Purpose
 
-- säkerhetsadministration, privilegierade roller, incidenthantering och produktionshotfixar
-- hemligheter, nycklar, sessioner, riskflaggor och auditloggar
+Styra privilegierad säkerhetsadministration, incidenthantering, hotfix, sessionrisk och nyckelrotation.
 
-## Policy
+# Scope
 
-### Admin- och MFA-krav
+Policyn gäller:
 
-- Alla interna och privilegierade konton ska använda stark autentisering. Passkey är förstahandsval; TOTP är fallback där passkey inte är möjligt.
-- Enterprise-SSO-konton ska ha MFA i IdP och step-up i produkten för särskilda högriskactions när policyn kräver det.
-- Generella admins har högst 8 timmars absolut sessionstid och 30 minuters idle timeout. Break-glass har högst 60 minuter absolut och 15 minuter idle.
-- Betalningsfrisläpp, BankID-liknande stark signering, AGI/moms/HUS och vissa security actions kräver färsk stark auth, högst 5 minuter gammal.
+- security admins
+- privilegierade sessioner
+- incidentklassning
+- hotfix i produktion
+- secrets och certifikat
 
-### IP- och device-riskflaggor
+# Why it exists
 
-- Nytt land, ovanlig ASN, TOR/VPN-indikation, omöjlig resa, ny okänd enhet och många misslyckade inloggningar ska ge riskflagga.
-- Riskflagga ska kunna leda till step-up, temporär spärr eller manuell review beroende på actionens känslighet.
+Säkerhetsadministration och incidentarbete är nödvändigt, men får inte ske utan stark autentisering, tydliga roller och bevarat bevismaterial.
 
-### Incidentflöde
+# Non-negotiable rules
 
-- Incidenter klassas minst som Sev1, Sev2, Sev3 eller Sev4.
-- Personuppgiftsincident ska bedömas omedelbart och, när den är anmälningspliktig, anmälas inom 72 timmar från att organisationen fått vetskap.
-- Vid Sev1 eller Sev2 ska deploy freeze införas tills incidentledaren släpper den.
-- Bevis ska säkras före storskaliga databasingrepp eller loggrensning.
+1. Alla privilegierade roller ska använda stark autentisering.
+2. Högriskactions kräver färsk step-up.
+3. Incidenter ska klassas och journalföras.
+4. Hotfix i produktion kräver incident- eller riskärende.
+5. Secrets och certifikat ska roteras enligt fast cadence eller omedelbart vid misstanke om kompromettering.
+6. Bevismaterial får inte förstöras under incidenthantering.
 
-### Prod-hotfix
+# Allowed actions
 
-- Hotfix i produktion får bara ske med incidentnummer eller motsvarande riskärende.
-- Minst en annan kvalificerad person ska granska hotfixen om inte absolut nödläge dokumenteras.
-- Efter hotfix ska smoke tests köras och relevant runbook, test och dokumentation uppdateras.
+- spärra eller begränsa access
+- aktivera emergency disable enligt separat policy
+- initiera hotfix enligt runbook
+- rotera credentials och certifikat
 
-### Nyckelrotation och audit
+# Forbidden actions
 
-- Webhook-hemligheter och externa API-credentials roteras minst kvartalsvis eller omedelbart vid misstanke om kompromettering.
-- Leverantörs- och signeringscertifikat förnyas minst 30 dagar före utgång.
-- Auditloggar för högriskactions granskas veckovis och bredare access-/säkerhetslogg månadsvis.
+- permanent break-glass utan tidsgräns
+- ologgad prod-hotfix
+- borttagning av relevanta loggar före forensisk säkring
 
-## Undantag
+# Approval model
 
-- Nödvändigt prod-ingrepp utan full peer review kräver dokumenterad eftergranskning senast nästa arbetsdag.
-- Tillfälliga undantag från normal rotation får endast beslutas av security owner och tidsbegränsas.
+- standard security admin action: security admin
+- prod-hotfix: incident owner plus reviewer
+- break-glass och emergency disable: enligt respektive policy
 
-## Obligatoriska bevis och loggar
+# Segregation of duties where relevant
 
-- MFA-status per privilegierat konto
-- inloggningsloggar, riskflaggor och step-up-beslut
-- incidentjournal, tidslinje och beslut
-- rotationslogg för hemligheter och certifikat
-- granskningsprotokoll för auditloggar
+- den som utvecklar hotfix ska inte ensam slutgodkänna den i normalfallet
 
-## Review cadence
+# Audit and evidence requirements
 
-- veckovis granskning av högrisk- och break-glass-loggar
-- månatlig granskning av adminroller, sessionmönster och riskhändelser
-- kvartalsvis genomgång av secrets och certifikat
+Spara:
+
+- incident id
+- klassning
+- session logs
+- approvals
+- hotfix reference
+- secret rotation evidence
+
+# Exceptions handling
+
+Nödlägen får tillfälligt förkorta approvals men aldrig eliminera eftergranskning.
+
+# Backoffice/support restrictions where relevant
+
+- support är inte security admin
+- security actions ska ligga i särskilda verktyg och inte i vanliga operatörsytor
+
+# Runtime enforcement expectations
+
+- privilegierade sessioner ska ha kortare timeout
+- riskflaggor ska kunna tvinga step-up eller block
+- hotfix och emergency actions ska lämna tydligt receipt-spår
+
+# Test/control points
+
+- step-up krävs för privilegierad action
+- incidentjournal kan inte kringgås
+- secrets rotation är spårbar
+
+# Exit gate
+
+- [ ] privilegierade security actions är starkt autentiserade och auditbara
+- [ ] incident och hotfix följer tydlig ansvarskedja
+- [ ] rotationskrav och beviskrav är verkställda
