@@ -22,6 +22,7 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.equal(typeof platform.getDomain("collectiveAgreements")?.createAgreementFamily, "function");
   assert.equal(typeof platform.getDomain("documentClassification")?.createClassificationCase, "function");
   assert.equal(typeof platform.getDomain("importCases")?.createImportCase, "function");
+  assert.equal(typeof platform.createPayrollMigrationBatch, "function");
   assert.equal(typeof platform.getDomain("ledger")?.upsertVoucherSeries, "function");
   assert.equal(typeof platform.getDomain("ledger")?.resolveVoucherSeriesForPurpose, "function");
   assert.equal(typeof platform.getDomain("ar")?.upsertInvoiceSeries, "function");
@@ -39,6 +40,7 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.equal(platform.getDomainRegistration("balances")?.buildOrder > platform.getDomainRegistration("time")?.buildOrder, true);
   assert.deepEqual(platform.getDomainRegistration("collectiveAgreements")?.dependsOn, ["hr", "balances"]);
   assert.equal(platform.getDomainRegistration("collectiveAgreements")?.buildOrder > platform.getDomainRegistration("balances")?.buildOrder, true);
+  assert.deepEqual(platform.getDomainRegistration("core")?.dependsOn, ["orgAuth", "reporting", "ledger", "integrations", "hr", "balances", "collectiveAgreements"]);
   assert.deepEqual(platform.getDomainRegistration("documentClassification")?.dependsOn, ["documents", "reviewCenter", "benefits"]);
   assert.equal(platform.getDomainRegistration("documentClassification")?.buildOrder > platform.getDomainRegistration("benefits")?.buildOrder, true);
   assert.deepEqual(platform.getDomainRegistration("importCases")?.dependsOn, ["documents", "reviewCenter", "documentClassification"]);

@@ -37,8 +37,12 @@ import {
   CUTOVER_PLAN_STATUSES,
   DIFFERENCE_CLASSES,
   DIFF_REPORT_STATUSES,
+  EMPLOYEE_MIGRATION_VALIDATION_STATES,
   IMPORT_BATCH_STATUSES,
   MAPPING_SET_STATUSES,
+  PAYROLL_MIGRATION_BATCH_STATUSES,
+  PAYROLL_MIGRATION_DIFF_STATUSES,
+  PAYROLL_MIGRATION_MODES,
   createMigrationModule
 } from "./migration.mjs";
 import {
@@ -90,14 +94,28 @@ export {
   MAPPING_SET_STATUSES,
   DIFF_REPORT_STATUSES,
   DIFFERENCE_CLASSES,
-  CUTOVER_PLAN_STATUSES
+  CUTOVER_PLAN_STATUSES,
+  PAYROLL_MIGRATION_BATCH_STATUSES,
+  PAYROLL_MIGRATION_MODES,
+  EMPLOYEE_MIGRATION_VALIDATION_STATES,
+  PAYROLL_MIGRATION_DIFF_STATUSES
 };
 
 export function createCorePlatform(options = {}) {
   return createCoreEngine(options);
 }
 
-export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = null, ledgerPlatform = null, integrationPlatform = null, asyncJobStore = null, clock = () => new Date() } = {}) {
+export function createCoreEngine({
+  orgAuthPlatform = null,
+  reportingPlatform = null,
+  ledgerPlatform = null,
+  integrationPlatform = null,
+  hrPlatform = null,
+  balancesPlatform = null,
+  collectiveAgreementsPlatform = null,
+  asyncJobStore = null,
+  clock = () => new Date()
+} = {}) {
   const state = {
     portfolios: new Map(),
     requests: new Map(),
@@ -128,6 +146,11 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     migrationCorrections: new Map(),
     diffReports: new Map(),
     cutoverPlans: new Map(),
+    payrollMigrationBatches: new Map(),
+    employeeMigrationRecords: new Map(),
+    balanceBaselines: new Map(),
+    payrollMigrationDiffs: new Map(),
+    payrollMigrationApprovals: new Map(),
     auditEvents: []
   };
 
@@ -271,6 +294,9 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     state,
     clock,
     orgAuthPlatform,
+    hrPlatform,
+    balancesPlatform,
+    collectiveAgreementsPlatform,
     audit,
     error
   });
@@ -415,14 +441,28 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
       startCutover: migrationModule.startCutover,
       completeFinalExtract: migrationModule.completeFinalExtract,
       passCutoverValidation: migrationModule.passCutoverValidation,
-      switchCutover: migrationModule.switchCutover,
-      stabilizeCutover: migrationModule.stabilizeCutover,
-      startRollback: migrationModule.startRollback,
-      completeRollback: migrationModule.completeRollback,
-      getMigrationCockpit: migrationModule.getMigrationCockpit,
-      runClientRequestReminderJob,
-      runClientRequestEscalationJob,
-      runPortfolioStatusRecomputeJob,
+        switchCutover: migrationModule.switchCutover,
+        stabilizeCutover: migrationModule.stabilizeCutover,
+        startRollback: migrationModule.startRollback,
+        completeRollback: migrationModule.completeRollback,
+        getMigrationCockpit: migrationModule.getMigrationCockpit,
+        createPayrollMigrationBatch: migrationModule.createPayrollMigrationBatch,
+        listPayrollMigrationBatches: migrationModule.listPayrollMigrationBatches,
+        getPayrollMigrationBatch: migrationModule.getPayrollMigrationBatch,
+        importEmployeeMigrationRecords: migrationModule.importEmployeeMigrationRecords,
+        registerBalanceBaselines: migrationModule.registerBalanceBaselines,
+        validatePayrollMigrationBatch: migrationModule.validatePayrollMigrationBatch,
+        calculatePayrollMigrationDiff: migrationModule.calculatePayrollMigrationDiff,
+        listPayrollMigrationDiffs: migrationModule.listPayrollMigrationDiffs,
+        decidePayrollMigrationDiff: migrationModule.decidePayrollMigrationDiff,
+        approvePayrollMigrationBatch: migrationModule.approvePayrollMigrationBatch,
+        executePayrollMigrationBatch: migrationModule.executePayrollMigrationBatch,
+        rollbackPayrollMigrationBatch: migrationModule.rollbackPayrollMigrationBatch,
+        getEmployeeMigrationSummary: migrationModule.getEmployeeMigrationSummary,
+        getOpenPayrollMigrationDiffs: migrationModule.getOpenPayrollMigrationDiffs,
+        runClientRequestReminderJob,
+        runClientRequestEscalationJob,
+        runPortfolioStatusRecomputeJob,
       snapshotCore: snapshot
   };
 
@@ -1046,12 +1086,17 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
         restoreDrills: [...state.restoreDrills.values()],
         chaosScenarios: [...state.chaosScenarios.values()],
         mappingSets: [...state.mappingSets.values()],
-        importBatches: [...state.importBatches.values()],
-        migrationCorrections: [...state.migrationCorrections.values()],
-        diffReports: [...state.diffReports.values()],
-        cutoverPlans: [...state.cutoverPlans.values()],
-        auditEvents: [...state.auditEvents]
-      });
+          importBatches: [...state.importBatches.values()],
+          migrationCorrections: [...state.migrationCorrections.values()],
+          diffReports: [...state.diffReports.values()],
+          cutoverPlans: [...state.cutoverPlans.values()],
+          payrollMigrationBatches: [...state.payrollMigrationBatches.values()],
+          employeeMigrationRecords: [...state.employeeMigrationRecords.values()],
+          balanceBaselines: [...state.balanceBaselines.values()],
+          payrollMigrationDiffs: [...state.payrollMigrationDiffs.values()],
+          payrollMigrationApprovals: [...state.payrollMigrationApprovals.values()],
+          auditEvents: [...state.auditEvents]
+        });
   }
 }
 

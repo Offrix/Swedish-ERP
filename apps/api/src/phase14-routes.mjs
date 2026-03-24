@@ -2471,5 +2471,355 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "POST" && path === "/v1/payroll/migrations") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "payroll_migration",
+      objectId: companyId,
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createPayrollMigrationBatch({
+        sessionToken,
+        companyId,
+        sourceSystemCode: body.sourceSystemCode,
+        migrationMode: body.migrationMode || "test",
+        migrationScope: body.migrationScope || "payroll",
+        effectiveCutoverDate: body.effectiveCutoverDate,
+        firstTargetReportingPeriod: body.firstTargetReportingPeriod,
+        mappingSetId: body.mappingSetId || null,
+        cutoverPlanId: body.cutoverPlanId || null,
+        requiredBalanceTypeCodes: body.requiredBalanceTypeCodes || [],
+        requiredApprovalRoleCodes: body.requiredApprovalRoleCodes || ["PAYROLL_OWNER"],
+        sourceSnapshotRef: body.sourceSnapshotRef || {},
+        batchReference: body.batchReference || null,
+        note: body.note || null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/payroll/migrations") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "payroll_migration",
+      objectId: companyId,
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listPayrollMigrationBatches({
+        sessionToken,
+        companyId,
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  const payrollMigrationMatch = matchPath(path, "/v1/payroll/migrations/:payrollMigrationBatchId");
+  if (req.method === "GET" && payrollMigrationMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "payroll_migration",
+      objectId: payrollMigrationMatch.payrollMigrationBatchId,
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getPayrollMigrationBatch({
+        sessionToken,
+        companyId,
+        payrollMigrationBatchId: payrollMigrationMatch.payrollMigrationBatchId
+      })
+    );
+    return true;
+  }
+
+  const payrollMigrationEmployeesMatch = matchPath(path, "/v1/payroll/migrations/:payrollMigrationBatchId/employees");
+  if (req.method === "GET" && payrollMigrationEmployeesMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "payroll_migration",
+      objectId: payrollMigrationEmployeesMatch.payrollMigrationBatchId,
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.getEmployeeMigrationSummary({
+        sessionToken,
+        companyId,
+        payrollMigrationBatchId: payrollMigrationEmployeesMatch.payrollMigrationBatchId
+      })
+    });
+    return true;
+  }
+
+  const payrollMigrationImportMatch = matchPath(path, "/v1/payroll/migrations/:payrollMigrationBatchId/import-records");
+  if (req.method === "POST" && payrollMigrationImportMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "payroll_migration",
+      objectId: payrollMigrationImportMatch.payrollMigrationBatchId,
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.importEmployeeMigrationRecords({
+        sessionToken,
+        companyId,
+        payrollMigrationBatchId: payrollMigrationImportMatch.payrollMigrationBatchId,
+        records: body.records || []
+      })
+    );
+    return true;
+  }
+
+  const payrollMigrationBaselinesMatch = matchPath(path, "/v1/payroll/migrations/:payrollMigrationBatchId/balance-baselines");
+  if (req.method === "POST" && payrollMigrationBaselinesMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "payroll_migration",
+      objectId: payrollMigrationBaselinesMatch.payrollMigrationBatchId,
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.registerBalanceBaselines({
+        sessionToken,
+        companyId,
+        payrollMigrationBatchId: payrollMigrationBaselinesMatch.payrollMigrationBatchId,
+        baselines: body.baselines || []
+      })
+    );
+    return true;
+  }
+
+  const payrollMigrationValidateMatch = matchPath(path, "/v1/payroll/migrations/:payrollMigrationBatchId/validate");
+  if (req.method === "POST" && payrollMigrationValidateMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "payroll_migration",
+      objectId: payrollMigrationValidateMatch.payrollMigrationBatchId,
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.validatePayrollMigrationBatch({
+        sessionToken,
+        companyId,
+        payrollMigrationBatchId: payrollMigrationValidateMatch.payrollMigrationBatchId
+      })
+    );
+    return true;
+  }
+
+  const payrollMigrationDiffsMatch = matchPath(path, "/v1/payroll/migrations/:payrollMigrationBatchId/diffs");
+  if (req.method === "GET" && payrollMigrationDiffsMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "payroll_migration",
+      objectId: payrollMigrationDiffsMatch.payrollMigrationBatchId,
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listPayrollMigrationDiffs({
+        sessionToken,
+        companyId,
+        payrollMigrationBatchId: payrollMigrationDiffsMatch.payrollMigrationBatchId,
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && payrollMigrationDiffsMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "payroll_migration",
+      objectId: payrollMigrationDiffsMatch.payrollMigrationBatchId,
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.calculatePayrollMigrationDiff({
+        sessionToken,
+        companyId,
+        payrollMigrationBatchId: payrollMigrationDiffsMatch.payrollMigrationBatchId,
+        sourceTotals: body.sourceTotals || {},
+        targetTotals: body.targetTotals || {},
+        differenceItems: body.differenceItems || [],
+        toleranceSek: body.toleranceSek ?? 0
+      })
+    );
+    return true;
+  }
+
+  const payrollMigrationDiffDecisionMatch = matchPath(path, "/v1/payroll/migrations/:payrollMigrationBatchId/diffs/:payrollMigrationDiffId/decide");
+  if (req.method === "POST" && payrollMigrationDiffDecisionMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "payroll_migration",
+      objectId: payrollMigrationDiffDecisionMatch.payrollMigrationBatchId,
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.decidePayrollMigrationDiff({
+        sessionToken,
+        companyId,
+        payrollMigrationBatchId: payrollMigrationDiffDecisionMatch.payrollMigrationBatchId,
+        payrollMigrationDiffId: payrollMigrationDiffDecisionMatch.payrollMigrationDiffId,
+        decision: body.decision,
+        explanation: body.explanation
+      })
+    );
+    return true;
+  }
+
+  const payrollMigrationApproveMatch = matchPath(path, "/v1/payroll/migrations/:payrollMigrationBatchId/approve");
+  if (req.method === "POST" && payrollMigrationApproveMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "payroll_migration",
+      objectId: payrollMigrationApproveMatch.payrollMigrationBatchId,
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approvePayrollMigrationBatch({
+        sessionToken,
+        companyId,
+        payrollMigrationBatchId: payrollMigrationApproveMatch.payrollMigrationBatchId,
+        approvalRoleCode: body.approvalRoleCode,
+        note: body.note || null
+      })
+    );
+    return true;
+  }
+
+  const payrollMigrationFinalizeMatch = matchPath(path, "/v1/payroll/migrations/:payrollMigrationBatchId/finalize");
+  if (req.method === "POST" && payrollMigrationFinalizeMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "payroll_migration",
+      objectId: payrollMigrationFinalizeMatch.payrollMigrationBatchId,
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.executePayrollMigrationBatch({
+        sessionToken,
+        companyId,
+        payrollMigrationBatchId: payrollMigrationFinalizeMatch.payrollMigrationBatchId
+      })
+    );
+    return true;
+  }
+
+  const payrollMigrationRollbackMatch = matchPath(path, "/v1/payroll/migrations/:payrollMigrationBatchId/rollback");
+  if (req.method === "POST" && payrollMigrationRollbackMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "payroll_migration",
+      objectId: payrollMigrationRollbackMatch.payrollMigrationBatchId,
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.rollbackPayrollMigrationBatch({
+        sessionToken,
+        companyId,
+        payrollMigrationBatchId: payrollMigrationRollbackMatch.payrollMigrationBatchId,
+        reasonCode: body.reasonCode
+      })
+    );
+    return true;
+  }
+
   return false;
 }

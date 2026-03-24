@@ -162,3 +162,62 @@ export interface MigrationImportBatch {
   readonly status: string;
   readonly recordCount: number;
 }
+
+export interface PayrollMigrationBatch {
+  readonly payrollMigrationBatchId: string;
+  readonly companyId: string;
+  readonly sourceSystemCode: string;
+  readonly migrationMode: "test" | "live";
+  readonly migrationScope: string;
+  readonly status: string;
+  readonly effectiveCutoverDate: string;
+  readonly firstTargetReportingPeriod: string;
+  readonly mappingSetId: string | null;
+  readonly cutoverPlanId: string | null;
+  readonly requiredBalanceTypeCodes: readonly string[];
+  readonly requiredApprovalRoleCodes: readonly string[];
+  readonly approvedForCutover: boolean;
+  readonly approvedForCutoverAt: string | null;
+  readonly approvedForCutoverByUserId: string | null;
+  readonly executedAt: string | null;
+  readonly rolledBackAt: string | null;
+}
+
+export interface PayrollEmployeeMigrationRecord {
+  readonly employeeMigrationRecordId: string;
+  readonly payrollMigrationBatchId: string;
+  readonly companyId: string;
+  readonly personId: string;
+  readonly employeeId: string;
+  readonly employmentId: string;
+  readonly ytdBasis: Record<string, unknown>;
+  readonly priorPayslipSummary: Record<string, unknown>;
+  readonly agiCarryForwardBasis: Record<string, unknown>;
+  readonly validationState: "pending" | "valid" | "blocking";
+}
+
+export interface PayrollMigrationBalanceBaseline {
+  readonly balanceBaselineId: string;
+  readonly payrollMigrationBatchId: string;
+  readonly companyId: string;
+  readonly employeeId: string | null;
+  readonly employmentId: string | null;
+  readonly ownerTypeCode: "company" | "employee" | "employment";
+  readonly balanceTypeCode: string;
+  readonly openingQuantity: number;
+  readonly openingValue: number | null;
+  readonly effectiveDate: string;
+  readonly explicitZeroConfirmation: boolean;
+}
+
+export interface PayrollMigrationDiff {
+  readonly payrollMigrationDiffId: string;
+  readonly payrollMigrationBatchId: string;
+  readonly companyId: string;
+  readonly differenceType: string;
+  readonly sourceValue: number;
+  readonly targetValue: number;
+  readonly differenceAmount: number;
+  readonly status: "open" | "explained" | "accepted" | "blocking" | "resolved";
+  readonly differenceDescription: string;
+}
