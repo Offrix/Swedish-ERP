@@ -43,6 +43,16 @@ async function handleRequest({ req, res, platform, flags }) {
         ? {
             service: "api",
             status: "ok",
+            registeredDomains:
+              typeof platform.listRegisteredDomains === "function"
+                ? platform.listRegisteredDomains().map(({ domainKey, label, dependsOn, capabilityCount }) => ({
+                    domainKey,
+                    label,
+                    dependsOn,
+                    capabilityCount
+                  }))
+                : [],
+            platformContractVersions: platform.platformContractVersions || null,
             phase1AuthOnboardingEnabled: flags.phase1AuthOnboardingEnabled,
             phase2DocumentArchiveEnabled: flags.phase2DocumentArchiveEnabled,
             phase2CompanyInboxEnabled: flags.phase2CompanyInboxEnabled,

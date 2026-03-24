@@ -20,142 +20,458 @@ import { createIntegrationPlatform } from "../../../packages/domain-integrations
 import { createCorePlatform } from "../../../packages/domain-core/src/index.mjs";
 import { createAnnualReportingPlatform } from "../../../packages/domain-annual-reporting/src/index.mjs";
 import { createAutomationAiEngine } from "../../../packages/rule-engine/src/index.mjs";
+import {
+  AUDIT_EVENT_VERSION,
+  EVENT_ENVELOPE_VERSION,
+  createAuditEnvelope,
+  createEventEnvelope
+} from "../../../packages/events/src/index.mjs";
+
+function createDomainDefinition({ key, label, packageName, dependsOn = [], create }) {
+  return Object.freeze({
+    key,
+    label,
+    packageName,
+    dependsOn: Object.freeze([...dependsOn]),
+    create
+  });
+}
+
+export const API_PLATFORM_BUILD_ORDER = Object.freeze([
+  "orgAuth",
+  "documents",
+  "ledger",
+  "vat",
+  "integrations",
+  "automation",
+  "ar",
+  "ap",
+  "banking",
+  "hr",
+  "time",
+  "benefits",
+  "travel",
+  "pension",
+  "payroll",
+  "projects",
+  "reporting",
+  "core",
+  "hus",
+  "personalliggare",
+  "field",
+  "annualReporting"
+]);
+
+export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
+  "orgAuth",
+  "documents",
+  "ledger",
+  "reporting",
+  "automation",
+  "core",
+  "annualReporting",
+  "vat",
+  "integrations",
+  "ar",
+  "ap",
+  "banking",
+  "hr",
+  "time",
+  "benefits",
+  "travel",
+  "pension",
+  "projects",
+  "hus",
+  "personalliggare",
+  "field",
+  "payroll"
+]);
+
+const API_DOMAIN_DEFINITIONS = Object.freeze([
+  createDomainDefinition({
+    key: "orgAuth",
+    label: "Org and auth",
+    packageName: "@swedish-erp/domain-org-auth",
+    create: ({ options }) => createOrgAuthPlatform(options)
+  }),
+  createDomainDefinition({
+    key: "documents",
+    label: "Documents",
+    packageName: "@swedish-erp/domain-documents",
+    create: ({ options }) => createDocumentArchivePlatform(options)
+  }),
+  createDomainDefinition({
+    key: "ledger",
+    label: "Ledger",
+    packageName: "@swedish-erp/domain-ledger",
+    create: ({ options }) => createLedgerPlatform(options)
+  }),
+  createDomainDefinition({
+    key: "vat",
+    label: "VAT",
+    packageName: "@swedish-erp/domain-vat",
+    dependsOn: ["ledger"],
+    create: ({ options, dependencies }) =>
+      createVatPlatform({
+        ...options,
+        ledgerPlatform: dependencies.ledger
+      })
+  }),
+  createDomainDefinition({
+    key: "integrations",
+    label: "Integrations",
+    packageName: "@swedish-erp/domain-integrations",
+    create: ({ options }) => createIntegrationPlatform(options)
+  }),
+  createDomainDefinition({
+    key: "automation",
+    label: "Automation",
+    packageName: "@swedish-erp/rule-engine",
+    create: ({ options }) => createAutomationAiEngine(options)
+  }),
+  createDomainDefinition({
+    key: "ar",
+    label: "Accounts receivable",
+    packageName: "@swedish-erp/domain-ar",
+    dependsOn: ["vat", "ledger", "integrations"],
+    create: ({ options, dependencies }) =>
+      createArPlatform({
+        ...options,
+        vatPlatform: dependencies.vat,
+        ledgerPlatform: dependencies.ledger,
+        integrationPlatform: dependencies.integrations
+      })
+  }),
+  createDomainDefinition({
+    key: "ap",
+    label: "Accounts payable",
+    packageName: "@swedish-erp/domain-ap",
+    dependsOn: ["vat", "ledger", "documents", "orgAuth"],
+    create: ({ options, dependencies }) =>
+      createApPlatform({
+        ...options,
+        vatPlatform: dependencies.vat,
+        ledgerPlatform: dependencies.ledger,
+        documentPlatform: dependencies.documents,
+        orgAuthPlatform: dependencies.orgAuth
+      })
+  }),
+  createDomainDefinition({
+    key: "banking",
+    label: "Banking",
+    packageName: "@swedish-erp/domain-banking",
+    dependsOn: ["ap"],
+    create: ({ options, dependencies }) =>
+      createBankingPlatform({
+        ...options,
+        apPlatform: dependencies.ap
+      })
+  }),
+  createDomainDefinition({
+    key: "hr",
+    label: "HR",
+    packageName: "@swedish-erp/domain-hr",
+    dependsOn: ["documents"],
+    create: ({ options, dependencies }) =>
+      createHrPlatform({
+        ...options,
+        documentPlatform: dependencies.documents
+      })
+  }),
+  createDomainDefinition({
+    key: "time",
+    label: "Time",
+    packageName: "@swedish-erp/domain-time",
+    dependsOn: ["hr", "documents"],
+    create: ({ options, dependencies }) =>
+      createTimePlatform({
+        ...options,
+        hrPlatform: dependencies.hr,
+        documentPlatform: dependencies.documents
+      })
+  }),
+  createDomainDefinition({
+    key: "benefits",
+    label: "Benefits",
+    packageName: "@swedish-erp/domain-benefits",
+    dependsOn: ["hr", "documents"],
+    create: ({ options, dependencies }) =>
+      createBenefitsPlatform({
+        ...options,
+        hrPlatform: dependencies.hr,
+        documentPlatform: dependencies.documents
+      })
+  }),
+  createDomainDefinition({
+    key: "travel",
+    label: "Travel",
+    packageName: "@swedish-erp/domain-travel",
+    dependsOn: ["hr", "documents"],
+    create: ({ options, dependencies }) =>
+      createTravelPlatform({
+        ...options,
+        hrPlatform: dependencies.hr,
+        documentPlatform: dependencies.documents
+      })
+  }),
+  createDomainDefinition({
+    key: "pension",
+    label: "Pension",
+    packageName: "@swedish-erp/domain-pension",
+    dependsOn: ["hr"],
+    create: ({ options, dependencies }) =>
+      createPensionPlatform({
+        ...options,
+        hrPlatform: dependencies.hr
+      })
+  }),
+  createDomainDefinition({
+    key: "payroll",
+    label: "Payroll",
+    packageName: "@swedish-erp/domain-payroll",
+    dependsOn: ["orgAuth", "hr", "time", "benefits", "travel", "pension", "ledger", "banking"],
+    create: ({ options, dependencies }) =>
+      createPayrollPlatform({
+        ...options,
+        orgAuthPlatform: dependencies.orgAuth,
+        hrPlatform: dependencies.hr,
+        timePlatform: dependencies.time,
+        benefitsPlatform: dependencies.benefits,
+        travelPlatform: dependencies.travel,
+        pensionPlatform: dependencies.pension,
+        ledgerPlatform: dependencies.ledger,
+        bankingPlatform: dependencies.banking
+      })
+  }),
+  createDomainDefinition({
+    key: "projects",
+    label: "Projects",
+    packageName: "@swedish-erp/domain-projects",
+    dependsOn: ["ar", "hr", "time", "payroll", "vat"],
+    create: ({ options, dependencies }) =>
+      createProjectsPlatform({
+        ...options,
+        arPlatform: dependencies.ar,
+        hrPlatform: dependencies.hr,
+        timePlatform: dependencies.time,
+        payrollPlatform: dependencies.payroll,
+        vatPlatform: dependencies.vat
+      })
+  }),
+  createDomainDefinition({
+    key: "reporting",
+    label: "Reporting",
+    packageName: "@swedish-erp/domain-reporting",
+    dependsOn: ["ledger", "documents", "ar", "ap", "projects"],
+    create: ({ options, dependencies }) =>
+      createReportingPlatform({
+        ...options,
+        ledgerPlatform: dependencies.ledger,
+        documentPlatform: dependencies.documents,
+        arPlatform: dependencies.ar,
+        apPlatform: dependencies.ap,
+        projectsPlatform: dependencies.projects
+      })
+  }),
+  createDomainDefinition({
+    key: "core",
+    label: "Core operations",
+    packageName: "@swedish-erp/domain-core",
+    dependsOn: ["orgAuth", "reporting", "ledger", "integrations"],
+    create: ({ options, dependencies }) =>
+      createCorePlatform({
+        ...options,
+        orgAuthPlatform: dependencies.orgAuth,
+        reportingPlatform: dependencies.reporting,
+        ledgerPlatform: dependencies.ledger,
+        integrationPlatform: dependencies.integrations
+      })
+  }),
+  createDomainDefinition({
+    key: "hus",
+    label: "HUS",
+    packageName: "@swedish-erp/domain-hus",
+    dependsOn: ["ar", "projects"],
+    create: ({ options, dependencies }) =>
+      createHusPlatform({
+        ...options,
+        arPlatform: dependencies.ar,
+        projectsPlatform: dependencies.projects
+      })
+  }),
+  createDomainDefinition({
+    key: "personalliggare",
+    label: "Personalliggare",
+    packageName: "@swedish-erp/domain-personalliggare",
+    dependsOn: ["hr", "projects"],
+    create: ({ options, dependencies }) =>
+      createPersonalliggarePlatform({
+        ...options,
+        hrPlatform: dependencies.hr,
+        projectsPlatform: dependencies.projects
+      })
+  }),
+  createDomainDefinition({
+    key: "field",
+    label: "Field",
+    packageName: "@swedish-erp/domain-field",
+    dependsOn: ["ar", "hr", "projects"],
+    create: ({ options, dependencies }) =>
+      createFieldPlatform({
+        ...options,
+        arPlatform: dependencies.ar,
+        hrPlatform: dependencies.hr,
+        projectsPlatform: dependencies.projects
+      })
+  }),
+  createDomainDefinition({
+    key: "annualReporting",
+    label: "Annual reporting",
+    packageName: "@swedish-erp/domain-annual-reporting",
+    dependsOn: ["ledger", "reporting", "orgAuth", "vat", "payroll", "hus", "pension"],
+    create: ({ options, dependencies }) =>
+      createAnnualReportingPlatform({
+        ...options,
+        ledgerPlatform: dependencies.ledger,
+        reportingPlatform: dependencies.reporting,
+        orgAuthPlatform: dependencies.orgAuth,
+        vatPlatform: dependencies.vat,
+        payrollPlatform: dependencies.payroll,
+        husPlatform: dependencies.hus,
+        pensionPlatform: dependencies.pension
+      })
+  })
+]);
+
+function requireRegisteredDomain(domains, domainKey, consumerKey) {
+  const domain = domains[domainKey];
+  if (!domain) {
+    throw new Error(`Domain "${domainKey}" must be registered before "${consumerKey}".`);
+  }
+  return domain;
+}
+
+function createDomainRegistration(definition, platform, buildOrder) {
+  if (!platform || typeof platform !== "object") {
+    throw new TypeError(`Domain "${definition.key}" must return an object platform.`);
+  }
+
+  const capabilities = Object.freeze(Object.keys(platform).sort());
+
+  return Object.freeze({
+    domainKey: definition.key,
+    label: definition.label,
+    packageName: definition.packageName,
+    buildOrder,
+    dependsOn: definition.dependsOn,
+    capabilityCount: capabilities.length,
+    capabilities
+  });
+}
+
+function composeFlatPlatform(domains) {
+  return API_PLATFORM_FLAT_MERGE_ORDER.reduce((accumulator, domainKey) => {
+    const platform = domains[domainKey];
+    if (!platform) {
+      throw new Error(`Flat platform merge attempted before "${domainKey}" was registered.`);
+    }
+    return Object.assign(accumulator, platform);
+  }, {});
+}
+
+function buildRuntimeContracts() {
+  return Object.freeze({
+    events: Object.freeze({
+      eventEnvelopeVersion: EVENT_ENVELOPE_VERSION,
+      auditEnvelopeVersion: AUDIT_EVENT_VERSION,
+      createEventEnvelope,
+      createAuditEnvelope
+    })
+  });
+}
 
 export function createApiPlatform(options = {}) {
-  const orgAuthPlatform = createOrgAuthPlatform(options);
-  const documentArchivePlatform = createDocumentArchivePlatform(options);
-  const ledgerPlatform = createLedgerPlatform(options);
-  const vatPlatform = createVatPlatform({
-    ...options,
-    ledgerPlatform
+  const domains = {};
+  const domainRegistry = [];
+  const domainRegistryByKey = {};
+
+  for (const definition of API_DOMAIN_DEFINITIONS) {
+    const dependencies = Object.fromEntries(
+      definition.dependsOn.map((domainKey) => [domainKey, requireRegisteredDomain(domains, domainKey, definition.key)])
+    );
+    const platform = definition.create({
+      options,
+      dependencies: Object.freeze(dependencies),
+      domains: Object.freeze({ ...domains })
+    });
+    domains[definition.key] = platform;
+
+    const registration = createDomainRegistration(definition, platform, domainRegistry.length + 1);
+    domainRegistry.push(registration);
+    domainRegistryByKey[definition.key] = registration;
+  }
+
+  const flatPlatform = composeFlatPlatform(domains);
+  const runtimeContracts = buildRuntimeContracts();
+  const registeredDomains = Object.freeze({ ...domains });
+  const registrations = Object.freeze([...domainRegistry]);
+  const registrationsByKey = Object.freeze({ ...domainRegistryByKey });
+  const contractVersions = Object.freeze({
+    eventEnvelopeVersion: EVENT_ENVELOPE_VERSION,
+    auditEnvelopeVersion: AUDIT_EVENT_VERSION
   });
-  const integrationPlatform = createIntegrationPlatform(options);
-  const automationPlatform = createAutomationAiEngine(options);
-  const arPlatform = createArPlatform({
-    ...options,
-    vatPlatform,
-    ledgerPlatform,
-    integrationPlatform
-  });
-  const apPlatform = createApPlatform({
-    ...options,
-    vatPlatform,
-    ledgerPlatform,
-    documentPlatform: documentArchivePlatform,
-    orgAuthPlatform
-  });
-  const bankingPlatform = createBankingPlatform({
-    ...options,
-    apPlatform
-  });
-  const hrPlatform = createHrPlatform({
-    ...options,
-    documentPlatform: documentArchivePlatform
-  });
-  const timePlatform = createTimePlatform({
-    ...options,
-    hrPlatform,
-    documentPlatform: documentArchivePlatform
-  });
-  const benefitsPlatform = createBenefitsPlatform({
-    ...options,
-    hrPlatform,
-    documentPlatform: documentArchivePlatform
-  });
-  const travelPlatform = createTravelPlatform({
-    ...options,
-    hrPlatform,
-    documentPlatform: documentArchivePlatform
-  });
-  const pensionPlatform = createPensionPlatform({
-    ...options,
-    hrPlatform
-  });
-  const payrollPlatform = createPayrollPlatform({
-    ...options,
-    orgAuthPlatform,
-    hrPlatform,
-    timePlatform,
-    benefitsPlatform,
-    travelPlatform,
-    pensionPlatform,
-    ledgerPlatform,
-    bankingPlatform
-  });
-  const projectsPlatform = createProjectsPlatform({
-    ...options,
-    arPlatform,
-    hrPlatform,
-    timePlatform,
-    payrollPlatform,
-    vatPlatform
-  });
-  const reportingPlatform = createReportingPlatform({
-    ...options,
-    ledgerPlatform,
-    documentPlatform: documentArchivePlatform,
-    arPlatform,
-    apPlatform,
-    projectsPlatform
-  });
-  const corePlatform = createCorePlatform({
-    ...options,
-    orgAuthPlatform,
-    reportingPlatform,
-    ledgerPlatform,
-    integrationPlatform
-  });
-  const husPlatform = createHusPlatform({
-    ...options,
-    arPlatform,
-    projectsPlatform
-  });
-  const personalliggarePlatform = createPersonalliggarePlatform({
-    ...options,
-    hrPlatform,
-    projectsPlatform
-  });
-  const fieldPlatform = createFieldPlatform({
-    ...options,
-    arPlatform,
-    hrPlatform,
-    projectsPlatform
-  });
-  const annualReportingPlatform = createAnnualReportingPlatform({
-    ...options,
-    ledgerPlatform,
-    reportingPlatform,
-    orgAuthPlatform,
-    vatPlatform,
-    payrollPlatform,
-    husPlatform,
-    pensionPlatform
+  const platform = {
+    ...flatPlatform
+  };
+
+  Object.defineProperties(platform, {
+    domains: {
+      value: registeredDomains,
+      enumerable: false
+    },
+    domainRegistry: {
+      value: registrations,
+      enumerable: false
+    },
+    domainRegistryByKey: {
+      value: registrationsByKey,
+      enumerable: false
+    },
+    domainOrder: {
+      value: API_PLATFORM_BUILD_ORDER,
+      enumerable: false
+    },
+    runtimeContracts: {
+      value: runtimeContracts,
+      enumerable: false
+    },
+    platformContractVersions: {
+      value: contractVersions,
+      enumerable: false
+    },
+    getDomain: {
+      value: (domainKey) => registeredDomains[domainKey] || null,
+      enumerable: false
+    },
+    getDomainRegistration: {
+      value: (domainKey) => registrationsByKey[domainKey] || null,
+      enumerable: false
+    },
+    listRegisteredDomains: {
+      value: () => registrations,
+      enumerable: false
+    },
+    createEventEnvelope: {
+      value: (input) => createEventEnvelope(input),
+      enumerable: false
+    },
+    createAuditEnvelope: {
+      value: (input) => createAuditEnvelope(input),
+      enumerable: false
+    }
   });
 
-  return {
-    ...orgAuthPlatform,
-    ...documentArchivePlatform,
-    ...ledgerPlatform,
-    ...reportingPlatform,
-    ...automationPlatform,
-    ...corePlatform,
-    ...annualReportingPlatform,
-    ...vatPlatform,
-    ...integrationPlatform,
-    ...arPlatform,
-    ...apPlatform,
-    ...bankingPlatform,
-    ...hrPlatform,
-    ...timePlatform,
-    ...benefitsPlatform,
-    ...travelPlatform,
-    ...pensionPlatform,
-    ...projectsPlatform,
-    ...husPlatform,
-    ...personalliggarePlatform,
-    ...fieldPlatform,
-    ...payrollPlatform
-  };
+  return platform;
 }
 
 export const defaultApiPlatform = createApiPlatform();
