@@ -232,6 +232,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/ar/contracts/:contractId/status",
               "/v1/ar/invoices",
               "/v1/ar/invoices/:customerInvoiceId",
+              "/v1/ar/invoices/:customerInvoiceId/field-evaluation",
               "/v1/ar/invoices/:customerInvoiceId/issue",
               "/v1/ar/invoices/:customerInvoiceId/deliver",
               "/v1/ar/invoices/:customerInvoiceId/payment-links",
@@ -3833,6 +3834,32 @@ async function handleRequest({ req, res, platform, flags }) {
       platform.getInvoice({
         companyId,
         customerInvoiceId: arInvoiceMatch.customerInvoiceId
+      })
+    );
+    return;
+  }
+
+  const arInvoiceFieldEvaluationMatch = matchPath(path, "/v1/ar/invoices/:customerInvoiceId/field-evaluation");
+  if (arInvoiceFieldEvaluationMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_invoice_field_evaluation",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getInvoiceFieldEvaluation({
+        companyId,
+        customerInvoiceId: arInvoiceFieldEvaluationMatch.customerInvoiceId
       })
     );
     return;

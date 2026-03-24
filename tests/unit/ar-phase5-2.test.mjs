@@ -89,6 +89,7 @@ test("Phase 5.2 full credit note closes the credited invoice and posts a separat
     invoiceType: "credit_note",
     issueDate: "2026-03-23",
     dueDate: "2026-03-23",
+    amendmentReason: "Full kredit av ursprungsfaktura",
     currencyCode: "SEK",
     lines: [{ itemId: item.arItemId, quantity: 1, unitPrice: 1000 }],
     actorId: "user-1"
@@ -231,6 +232,169 @@ test("Phase 5.2 marks invoice delivery as failed when Peppol validation data is 
   assert.equal(failedInvoice.status, "delivery_failed");
 });
 
+test("Step 24 blocks reverse-charge invoices until buyer VAT and legal text are present", () => {
+  const clock = () => new Date("2026-03-24T09:00:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const integrations = createIntegrationEngine({ clock });
+  const ar = createArEngine({
+    clock,
+    seedDemo: false,
+    ledgerPlatform: ledger,
+    integrationPlatform: integrations
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+
+  const customer = createCustomer(ar);
+  const reverseChargeItem = createItem(ar, {
+    vatCode: "VAT_SE_RC_BUILD_SELL"
+  });
+
+  const blocked = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-03-24",
+    dueDate: "2026-04-23",
+    lines: [{ itemId: reverseChargeItem.arItemId, quantity: 1, unitPrice: 1000 }],
+    actorId: "user-1"
+  });
+  const blockedEvaluation = ar.getInvoiceFieldEvaluation({
+    companyId: COMPANY_ID,
+    customerInvoiceId: blocked.customerInvoiceId
+  });
+  assert.equal(blockedEvaluation.scenarioCode, "reverse_charge_invoice");
+  assert.equal(blockedEvaluation.status, "blocked");
+  assert.equal(blockedEvaluation.missingFieldCodes.includes("buyer_vat_number"), true);
+  assert.equal(blockedEvaluation.missingFieldCodes.includes("special_legal_text"), true);
+  assert.throws(
+    () =>
+      ar.issueInvoice({
+        companyId: COMPANY_ID,
+        customerInvoiceId: blocked.customerInvoiceId,
+        actorId: "user-1"
+      }),
+    (error) => error.code === "invoice_issue_blocked"
+  );
+
+  const passable = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-03-24",
+    dueDate: "2026-04-23",
+    buyerVatNumber: "SE556677889901",
+    specialLegalText: "Omvänd betalningsskyldighet",
+    lines: [{ itemId: reverseChargeItem.arItemId, quantity: 1, unitPrice: 1000 }],
+    actorId: "user-1"
+  });
+  const passedEvaluation = ar.getInvoiceFieldEvaluation({
+    companyId: COMPANY_ID,
+    customerInvoiceId: passable.customerInvoiceId
+  });
+  assert.equal(passedEvaluation.status, "passed");
+  const issued = ar.issueInvoice({
+    companyId: COMPANY_ID,
+    customerInvoiceId: passable.customerInvoiceId,
+    actorId: "user-1"
+  });
+  assert.equal(issued.status, "issued");
+});
+
+test("Step 24 blocks export and HUS invoices until legal overlays are complete", () => {
+  const clock = () => new Date("2026-03-24T09:30:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const integrations = createIntegrationEngine({ clock });
+  const ar = createArEngine({
+    clock,
+    seedDemo: false,
+    ledgerPlatform: ledger,
+    integrationPlatform: integrations
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+
+  const exportCustomer = createCustomer(ar, {
+    legalName: "US Customer Inc",
+    organizationNumber: null,
+    countryCode: "US",
+    languageCode: "EN",
+    billingAddress: {
+      line1: "1 Export Road",
+      postalCode: "94016",
+      city: "San Francisco",
+      countryCode: "US"
+    },
+    deliveryAddress: {
+      line1: "1 Export Road",
+      postalCode: "94016",
+      city: "San Francisco",
+      countryCode: "US"
+    }
+  });
+  const exportItem = createItem(ar, {
+    vatCode: "VAT_SE_EXPORT_SERVICE_0"
+  });
+  const blockedExport = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: exportCustomer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-03-24",
+    dueDate: "2026-04-23",
+    lines: [{ itemId: exportItem.arItemId, quantity: 1, unitPrice: 2000 }],
+    actorId: "user-1"
+  });
+  const blockedExportEvaluation = ar.getInvoiceFieldEvaluation({
+    companyId: COMPANY_ID,
+    customerInvoiceId: blockedExport.customerInvoiceId
+  });
+  assert.equal(blockedExportEvaluation.scenarioCode, "export_invoice");
+  assert.equal(blockedExportEvaluation.status, "blocked");
+  assert.equal(blockedExportEvaluation.missingFieldCodes.includes("delivery_date"), true);
+  assert.equal(blockedExportEvaluation.missingFieldCodes.includes("export_evidence_reference"), true);
+
+  const husCustomer = createCustomer(ar, {
+    legalName: "HUS Customer AB",
+    organizationNumber: null
+  });
+  const husItem = createItem(ar);
+  const blockedHus = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: husCustomer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-03-24",
+    dueDate: "2026-04-23",
+    husCaseId: "hus-case-001",
+    lines: [{ itemId: husItem.arItemId, quantity: 1, unitPrice: 5000 }],
+    actorId: "user-1"
+  });
+  const blockedHusEvaluation = ar.getInvoiceFieldEvaluation({
+    companyId: COMPANY_ID,
+    customerInvoiceId: blockedHus.customerInvoiceId
+  });
+  assert.equal(blockedHusEvaluation.scenarioCode, "hus_invoice");
+  assert.equal(blockedHusEvaluation.status, "blocked");
+  assert.equal(blockedHusEvaluation.missingFieldCodes.includes("hus_property_designation"), true);
+  assert.equal(blockedHusEvaluation.missingFieldCodes.includes("hus_buyer_identity_number"), true);
+
+  const passableHus = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: husCustomer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-03-24",
+    dueDate: "2026-04-23",
+    husCaseId: "hus-case-002",
+    husPropertyDesignation: "UPPSALA SUNNERSTA 1:23",
+    husBuyerIdentityNumber: "197001011234",
+    husServiceTypeCode: "rot",
+    lines: [{ itemId: husItem.arItemId, quantity: 1, unitPrice: 5000 }],
+    actorId: "user-1"
+  });
+  const passableHusEvaluation = ar.getInvoiceFieldEvaluation({
+    companyId: COMPANY_ID,
+    customerInvoiceId: passableHus.customerInvoiceId
+  });
+  assert.equal(passableHusEvaluation.status, "passed");
+});
+
 function createCustomer(ar, overrides = {}) {
   return ar.createCustomer({
     companyId: COMPANY_ID,
@@ -258,7 +422,7 @@ function createCustomer(ar, overrides = {}) {
   });
 }
 
-function createItem(ar) {
+function createItem(ar, overrides = {}) {
   return ar.createItem({
     companyId: COMPANY_ID,
     description: "Managed operations",
@@ -267,6 +431,7 @@ function createItem(ar) {
     standardPrice: 1000,
     revenueAccountNumber: "3010",
     vatCode: "VAT_SE_DOMESTIC_25",
-    recurringFlag: true
+    recurringFlag: true,
+    ...overrides
   });
 }

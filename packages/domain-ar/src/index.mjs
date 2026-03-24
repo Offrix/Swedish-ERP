@@ -6,6 +6,7 @@ export const AR_QUOTE_STATUSES = Object.freeze(["draft", "sent", "accepted", "re
 export const AR_CONTRACT_STATUSES = Object.freeze(["draft", "pending_approval", "active", "paused", "terminated", "expired"]);
 export const AR_INVOICE_FREQUENCIES = Object.freeze(["monthly", "quarterly", "annual", "one_time"]);
 export const AR_INVOICE_TYPES = Object.freeze(["standard", "credit_note", "partial", "subscription"]);
+export const AR_INVOICE_FIELD_EVALUATION_STATUSES = Object.freeze(["calculated", "blocked", "passed", "superseded"]);
 export const AR_INVOICE_STATUSES = Object.freeze([
   "draft",
   "validated",
@@ -210,6 +211,7 @@ export function createArEngine({
     reserveImportedInvoiceNumber,
     listInvoices,
     getInvoice,
+    getInvoiceFieldEvaluation,
     createInvoice,
     issueInvoice,
     deliverInvoice,
@@ -955,6 +957,11 @@ export function createArEngine({
     return copy(requireInvoiceRecord(state, companyId, customerInvoiceId));
   }
 
+  function getInvoiceFieldEvaluation({ companyId, customerInvoiceId } = {}) {
+    const invoice = requireInvoiceRecord(state, companyId, customerInvoiceId);
+    return copy(invoice.invoiceFieldEvaluation || null);
+  }
+
   function createInvoice({
     companyId,
     customerId,
@@ -967,8 +974,19 @@ export function createArEngine({
     dueDate,
     currencyCode = null,
     lines = null,
+    supplyDate = null,
+    deliveryDate = null,
     buyerReference = null,
     purchaseOrderReference = null,
+    buyerVatNumber = null,
+    specialLegalText = null,
+    amendmentReason = null,
+    exportEvidenceReference = null,
+    currencyVatAmountSek = null,
+    husCaseId = null,
+    husPropertyDesignation = null,
+    husBuyerIdentityNumber = null,
+    husServiceTypeCode = null,
     recipientEmails = [],
     actorId = "system",
     correlationId = crypto.randomUUID()
@@ -997,6 +1015,8 @@ export function createArEngine({
     const resolvedDueDate = normalizeDate(dueDate, "invoice_due_date_invalid");
     assertDateRange(resolvedIssueDate, resolvedDueDate, "invoice_due_date_invalid");
     const resolvedCurrencyCode = normalizeUpperCode(currencyCode || contract?.currencyCode || customer.currencyCode, "currency_code_required", 3);
+    const resolvedSupplyDate = normalizeDate(supplyDate || resolvedIssueDate, "invoice_supply_date_invalid");
+    const resolvedDeliveryDate = deliveryDate ? normalizeDate(deliveryDate, "invoice_delivery_date_invalid") : null;
     const invoiceLines = normalizeCommercialLines({
       state,
       vatPlatform,
@@ -1035,9 +1055,20 @@ export function createArEngine({
       issueDate: resolvedIssueDate,
       dueDate: resolvedDueDate,
       currencyCode: resolvedCurrencyCode,
+      supplyDate: resolvedSupplyDate,
+      deliveryDate: resolvedDeliveryDate,
       deliveryChannel,
       buyerReference: normalizeOptionalText(buyerReference),
       purchaseOrderReference: normalizeOptionalText(purchaseOrderReference),
+      buyerVatNumber: normalizeOptionalText(buyerVatNumber),
+      specialLegalText: normalizeOptionalText(specialLegalText),
+      amendmentReason: normalizeOptionalText(amendmentReason),
+      exportEvidenceReference: normalizeOptionalText(exportEvidenceReference),
+      currencyVatAmountSek: normalizeOptionalMoney(currencyVatAmountSek, "invoice_currency_vat_amount_sek_invalid"),
+      husCaseId: normalizeOptionalText(husCaseId),
+      husPropertyDesignation: normalizeOptionalText(husPropertyDesignation),
+      husBuyerIdentityNumber: normalizeOptionalText(husBuyerIdentityNumber),
+      husServiceTypeCode: normalizeOptionalText(husServiceTypeCode),
       lines: invoiceLines
     });
     const existingInvoiceId = state.invoiceIdsByCompanyGenerationKey.get(toCompanyScopedKey(resolvedCompanyId, invoiceGenerationKey));
@@ -1069,8 +1100,20 @@ export function createArEngine({
       currencyCode: resolvedCurrencyCode,
       lines: invoiceLines,
       totals,
+      supplyDate: resolvedSupplyDate,
+      deliveryDate: resolvedDeliveryDate,
       buyerReference: normalizeOptionalText(buyerReference),
       purchaseOrderReference: normalizeOptionalText(purchaseOrderReference),
+      buyerVatNumber: normalizeOptionalText(buyerVatNumber),
+      specialLegalText: normalizeOptionalText(specialLegalText),
+      amendmentReason: normalizeOptionalText(amendmentReason),
+      exportEvidenceReference: normalizeOptionalText(exportEvidenceReference),
+      currencyVatAmountSek: normalizeOptionalMoney(currencyVatAmountSek, "invoice_currency_vat_amount_sek_invalid"),
+      husCaseId: normalizeOptionalText(husCaseId),
+      husPropertyDesignation: normalizeOptionalText(husPropertyDesignation),
+      husBuyerIdentityNumber: normalizeOptionalText(husBuyerIdentityNumber),
+      husServiceTypeCode: normalizeOptionalText(husServiceTypeCode),
+      invoiceFieldEvaluation: null,
       recipientEmails: uniqueTexts(recipientEmails),
       journalEntryId: null,
       issuedAt: null,
@@ -1086,6 +1129,15 @@ export function createArEngine({
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
     };
+    record.invoiceFieldEvaluation = evaluateInvoiceFieldRulesSnapshot({
+      state,
+      clock,
+      vatPlatform,
+      invoice: record,
+      customer,
+      originalInvoice,
+      actorId
+    });
     state.invoices.set(record.customerInvoiceId, record);
     ensureCollection(state.invoiceIdsByCompany, resolvedCompanyId).push(record.customerInvoiceId);
     state.invoiceIdsByCompanyGenerationKey.set(toCompanyScopedKey(resolvedCompanyId, invoiceGenerationKey), record.customerInvoiceId);
@@ -1115,6 +1167,26 @@ export function createArEngine({
     const customer = requireCustomerRecord(state, invoice.companyId, invoice.customerId);
     if (customer.customerStatus === "blocked" || customer.blockedForInvoicing === true) {
       throw createError(409, "invoice_validation_failed", "Blocked customers cannot be invoiced.");
+    }
+    const originalInvoice = invoice.originalInvoiceId
+      ? requireInvoiceRecord(state, invoice.companyId, invoice.originalInvoiceId)
+      : null;
+    const fieldEvaluation = evaluateInvoiceFieldRulesSnapshot({
+      state,
+      clock,
+      vatPlatform,
+      invoice,
+      customer,
+      originalInvoice,
+      actorId
+    });
+    invoice.invoiceFieldEvaluation = fieldEvaluation;
+    if (fieldEvaluation.status !== "passed") {
+      throw createError(
+        409,
+        "invoice_issue_blocked",
+        `Invoice cannot be issued before legal field blockers are resolved: ${(fieldEvaluation.missingFieldCodes || []).join(", ")}`
+      );
     }
     ensureDefaultInvoiceSeriesForCompany(state, invoice.companyId, clock);
     invoice.validatedAt = invoice.validatedAt || nowIso(clock);
@@ -1191,7 +1263,6 @@ export function createArEngine({
     }
 
     if (invoice.invoiceType === "credit_note" && invoice.originalInvoiceId) {
-      const originalInvoice = requireInvoiceRecord(state, invoice.companyId, invoice.originalInvoiceId);
       originalInvoice.creditedAmount = roundMoney(originalInvoice.creditedAmount + invoice.totals.grossAmount);
       originalInvoice.remainingAmount = roundMoney(Math.max(0, originalInvoice.remainingAmount - invoice.totals.grossAmount));
       if (originalInvoice.remainingAmount === 0) {
@@ -3291,6 +3362,165 @@ function buildInvoiceJournalLines({ vatPlatform, companyId, invoice, customer })
   }));
 }
 
+function evaluateInvoiceFieldRulesSnapshot({
+  state,
+  clock,
+  vatPlatform,
+  invoice,
+  customer,
+  originalInvoice = null,
+  actorId = "system"
+}) {
+  const scenarioCode = resolveInvoiceLegalScenarioCode({ invoice, customer });
+  const missingFieldCodes = [];
+  const warningCodes = [];
+  const requiredFieldCodes = collectRequiredInvoiceFieldCodes({ scenarioCode, invoice, customer, vatPlatform });
+  const hasPositiveVat = (invoice.lines || []).some(
+    (line) => resolveVatRate(vatPlatform, invoice.companyId, line.vatCode) > 0
+  );
+
+  if (!invoice.issueDate) {
+    missingFieldCodes.push("issue_date");
+  }
+  if (!invoice.dueDate) {
+    missingFieldCodes.push("due_date");
+  }
+  if (!invoice.supplyDate) {
+    missingFieldCodes.push("supply_date");
+  }
+  if (!Array.isArray(invoice.lines) || invoice.lines.length === 0) {
+    missingFieldCodes.push("invoice_lines");
+  }
+  if (!customer?.legalName) {
+    missingFieldCodes.push("buyer_identity");
+  }
+  if (!customer?.billingAddress?.line1 || !customer?.billingAddress?.postalCode || !customer?.billingAddress?.city) {
+    missingFieldCodes.push("buyer_address");
+  }
+  if ((invoice.lines || []).some((line) => !line.vatCode)) {
+    missingFieldCodes.push("line_vat_code");
+  }
+  if (invoice.invoiceType === "credit_note") {
+    if (!invoice.originalInvoiceId || !originalInvoice) {
+      missingFieldCodes.push("original_invoice_reference");
+    }
+    if (!invoice.amendmentReason) {
+      missingFieldCodes.push("amendment_reason");
+    }
+  }
+  if (scenarioCode === "reverse_charge_invoice") {
+    if (!invoice.buyerVatNumber) {
+      missingFieldCodes.push("buyer_vat_number");
+    }
+    if (!invoice.specialLegalText) {
+      missingFieldCodes.push("special_legal_text");
+    }
+  }
+  if (scenarioCode === "export_invoice") {
+    if (!invoice.deliveryDate) {
+      missingFieldCodes.push("delivery_date");
+    }
+    if (!invoice.exportEvidenceReference) {
+      missingFieldCodes.push("export_evidence_reference");
+    }
+    if (!invoice.specialLegalText) {
+      missingFieldCodes.push("special_legal_text");
+    }
+  }
+  if (invoice.husCaseId) {
+    if (!invoice.husPropertyDesignation) {
+      missingFieldCodes.push("hus_property_designation");
+    }
+    if (!invoice.husBuyerIdentityNumber) {
+      missingFieldCodes.push("hus_buyer_identity_number");
+    }
+    if (!invoice.husServiceTypeCode) {
+      missingFieldCodes.push("hus_service_type_code");
+    }
+  }
+  if (invoice.currencyCode !== "SEK" && hasPositiveVat && invoice.currencyVatAmountSek == null) {
+    missingFieldCodes.push("currency_vat_amount_sek");
+  }
+  if (scenarioCode === "eu_cross_border_invoice" && !invoice.buyerVatNumber) {
+    warningCodes.push("buyer_vat_number_missing_review");
+  }
+
+  const dedupedMissingFieldCodes = [...new Set(missingFieldCodes)].sort();
+  const status = dedupedMissingFieldCodes.length > 0 ? "blocked" : "passed";
+  return {
+    invoiceFieldEvaluationId: crypto.randomUUID(),
+    companyId: invoice.companyId,
+    customerInvoiceId: invoice.customerInvoiceId,
+    scenarioCode,
+    rulepackVersion: "RP-INVOICE-FIELD-RULES-SE@2026.1",
+    status,
+    blockingRuleCount: dedupedMissingFieldCodes.length,
+    requiredFieldCodes,
+    missingFieldCodes: dedupedMissingFieldCodes,
+    warningCodes: [...new Set(warningCodes)].sort(),
+    evaluatedByActorId: requireText(actorId, "actor_id_required"),
+    evaluatedAt: nowIso(clock),
+    evidence: {
+      invoiceType: invoice.invoiceType,
+      customerCountryCode: customer.countryCode,
+      invoiceLineVatCodes: (invoice.lines || []).map((line) => line.vatCode),
+      husCaseId: invoice.husCaseId || null,
+      originalInvoiceId: invoice.originalInvoiceId || null
+    }
+  };
+}
+
+function resolveInvoiceLegalScenarioCode({ invoice, customer }) {
+  if (invoice.husCaseId) {
+    return "hus_invoice";
+  }
+  if (invoice.invoiceType === "credit_note") {
+    return "amendment_invoice";
+  }
+  const vatCodes = new Set((invoice.lines || []).map((line) => normalizeOptionalText(line.vatCode)).filter(Boolean));
+  if ([...vatCodes].some((vatCode) => vatCode.includes("_RC_"))) {
+    return "reverse_charge_invoice";
+  }
+  if ([...vatCodes].some((vatCode) => vatCode.includes("EXPORT"))) {
+    return "export_invoice";
+  }
+  if (customer.countryCode !== "SE" && EU_COUNTRY_CODES.has(customer.countryCode)) {
+    return "eu_cross_border_invoice";
+  }
+  return "standard_full_invoice";
+}
+
+function collectRequiredInvoiceFieldCodes({ scenarioCode, invoice, customer, vatPlatform }) {
+  const requiredFieldCodes = [
+    "issue_date",
+    "due_date",
+    "supply_date",
+    "invoice_lines",
+    "buyer_identity",
+    "buyer_address",
+    "line_vat_code"
+  ];
+  if (invoice.invoiceType === "credit_note") {
+    requiredFieldCodes.push("original_invoice_reference", "amendment_reason");
+  }
+  if (scenarioCode === "reverse_charge_invoice") {
+    requiredFieldCodes.push("buyer_vat_number", "special_legal_text");
+  }
+  if (scenarioCode === "export_invoice") {
+    requiredFieldCodes.push("delivery_date", "export_evidence_reference", "special_legal_text");
+  }
+  if (scenarioCode === "hus_invoice") {
+    requiredFieldCodes.push("hus_property_designation", "hus_buyer_identity_number", "hus_service_type_code");
+  }
+  if (invoice.currencyCode !== "SEK" && (invoice.lines || []).some((line) => resolveVatRate(vatPlatform, invoice.companyId, line.vatCode) > 0)) {
+    requiredFieldCodes.push("currency_vat_amount_sek");
+  }
+  if (scenarioCode === "eu_cross_border_invoice" && customer.countryCode !== "SE") {
+    requiredFieldCodes.push("buyer_vat_number");
+  }
+  return [...new Set(requiredFieldCodes)].sort();
+}
+
 function createJournalLine(accountNumber, lineNumber, debitAmount, creditAmount, sourceType, sourceId) {
   return {
     accountNumber,
@@ -3977,6 +4207,13 @@ function normalizeMoney(value, code) {
     throw createError(400, code, `${code} must be a non-negative number.`);
   }
   return roundMoney(number);
+}
+
+function normalizeOptionalMoney(value, code) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  return normalizeMoney(value, code);
 }
 
 function normalizePositiveNumber(value, code) {

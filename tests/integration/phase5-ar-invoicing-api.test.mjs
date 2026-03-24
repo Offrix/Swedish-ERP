@@ -32,6 +32,19 @@ test("Phase 5.2 migration and seeds add invoicing delivery, credit-link and paym
   }
 });
 
+test("Step 24 migration adds invoice legal field evaluation artifacts", async () => {
+  const migration = await readText("packages/db/migrations/20260324210000_phase14_invoice_field_rules.sql");
+  for (const fragment of [
+    "ALTER TABLE customer_invoices",
+    "CREATE TABLE IF NOT EXISTS customer_invoice_field_evaluations",
+    "CREATE TABLE IF NOT EXISTS customer_invoice_field_requirements",
+    "scenario_code TEXT NOT NULL",
+    "blocking_rule_count INTEGER NOT NULL DEFAULT 0"
+  ]) {
+    assert.match(migration, new RegExp(fragment.replaceAll(" ", "\\s+")));
+  }
+});
+
 test("Phase 5.2 API issues invoices idempotently, closes credits, validates Peppol delivery and creates payment links", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-22T14:00:00Z")
@@ -188,6 +201,7 @@ test("Phase 5.2 API issues invoices idempotently, closes credits, validates Pepp
         invoiceType: "credit_note",
         issueDate: "2026-03-23",
         dueDate: "2026-03-23",
+        amendmentReason: "Full kredit av ursprungsfaktura",
         lines: [
           {
             itemId: item.arItemId,
@@ -308,6 +322,171 @@ test("Phase 5.2 API issues invoices idempotently, closes credits, validates Pepp
     });
     assert.equal(paymentLink.status, "active");
     assert.match(paymentLink.url, /payments\.local/);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("Step 24 API exposes invoice field evaluation and blocks reverse-charge issue until required fields exist", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-24T10:00:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true,
+      phase5ArEnabled: true
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const sessionToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    await requestJson(baseUrl, "/v1/ledger/chart/install", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+
+    const root = await requestJson(baseUrl, "/");
+    assert.equal(root.routes.includes("/v1/ar/invoices/:customerInvoiceId/field-evaluation"), true);
+
+    const customer = await requestJson(baseUrl, "/v1/ar/customers", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        legalName: "Invoice Rules Customer AB",
+        organizationNumber: "5566778899",
+        countryCode: "SE",
+        languageCode: "SV",
+        currencyCode: "SEK",
+        paymentTermsCode: "NET30",
+        invoiceDeliveryMethod: "pdf_email",
+        reminderProfileCode: "standard",
+        billingAddress: {
+          line1: "Regelgatan 1",
+          postalCode: "11157",
+          city: "Stockholm",
+          countryCode: "SE"
+        },
+        deliveryAddress: {
+          line1: "Regelgatan 1",
+          postalCode: "11157",
+          city: "Stockholm",
+          countryCode: "SE"
+        }
+      }
+    });
+
+    const reverseChargeItem = await requestJson(baseUrl, "/v1/ar/items", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        itemCode: "API-RC-001",
+        description: "Reverse charge service",
+        itemType: "service",
+        unitCode: "hour",
+        standardPrice: 1000,
+        revenueAccountNumber: "3010",
+        vatCode: "VAT_SE_RC_BUILD_SELL"
+      }
+    });
+
+    const blockedInvoice = await requestJson(baseUrl, "/v1/ar/invoices", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        customerId: customer.customerId,
+        invoiceType: "standard",
+        issueDate: "2026-03-24",
+        dueDate: "2026-04-23",
+        lines: [
+          {
+            itemId: reverseChargeItem.arItemId,
+            quantity: 1,
+            unitPrice: 1000
+          }
+        ]
+      }
+    });
+
+    const blockedEvaluation = await requestJson(
+      baseUrl,
+      `/v1/ar/invoices/${blockedInvoice.customerInvoiceId}/field-evaluation?companyId=${COMPANY_ID}`,
+      {
+        token: sessionToken
+      }
+    );
+    assert.equal(blockedEvaluation.scenarioCode, "reverse_charge_invoice");
+    assert.equal(blockedEvaluation.status, "blocked");
+    assert.equal(blockedEvaluation.missingFieldCodes.includes("buyer_vat_number"), true);
+    assert.equal(blockedEvaluation.missingFieldCodes.includes("special_legal_text"), true);
+
+    const blockedIssue = await fetch(`${baseUrl}/v1/ar/invoices/${blockedInvoice.customerInvoiceId}/issue`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${sessionToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        companyId: COMPANY_ID
+      })
+    });
+    const blockedPayload = await blockedIssue.json();
+    assert.equal(blockedIssue.status, 409);
+    assert.equal(blockedPayload.error, "invoice_issue_blocked");
+
+    const passableInvoice = await requestJson(baseUrl, "/v1/ar/invoices", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        customerId: customer.customerId,
+        invoiceType: "standard",
+        issueDate: "2026-03-24",
+        dueDate: "2026-04-23",
+        buyerVatNumber: "SE556677889901",
+        specialLegalText: "Omvänd betalningsskyldighet",
+        lines: [
+          {
+            itemId: reverseChargeItem.arItemId,
+            quantity: 1,
+            unitPrice: 1000
+          }
+        ]
+      }
+    });
+    const issued = await requestJson(baseUrl, `/v1/ar/invoices/${passableInvoice.customerInvoiceId}/issue`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+    assert.equal(issued.status, "issued");
   } finally {
     await stopServer(server);
   }
