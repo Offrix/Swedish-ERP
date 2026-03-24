@@ -686,9 +686,9 @@ function requireItem(state, companyId, reviewItemId) {
 
 function seedDemoState(state, clock) {
   const demoQueues = [
-    ["DOCUMENT_REVIEW", "Document review", "finance_ops", "high", 8, ["DOCUMENTS", "DOCUMENT_CLASSIFICATION"], ["classification", "generic_review"]],
+    ["DOCUMENT_REVIEW", "Document review", "finance_ops", "high", 8, ["DOCUMENTS", "DOCUMENT_CLASSIFICATION", "AUTOMATION"], ["classification", "generic_review"]],
     ["VAT_REVIEW", "VAT review", "finance_ops", "high", 12, ["VAT", "IMPORT_CASES"], ["vat_treatment", "generic_review"]],
-    ["PAYROLL_REVIEW", "Payroll review", "payroll_ops", "critical", 4, ["PAYROLL", "BENEFITS", "DOCUMENT_CLASSIFICATION"], ["payroll_treatment", "generic_review"]],
+    ["PAYROLL_REVIEW", "Payroll review", "payroll_ops", "critical", 4, ["PAYROLL", "BENEFITS", "DOCUMENT_CLASSIFICATION", "AUTOMATION"], ["payroll_treatment", "generic_review"]],
     ["TAX_ACCOUNT_REVIEW", "Tax account review", "finance_ops", "high", 24, ["TAX_ACCOUNT", "VAT", "PAYROLL", "HUS"], ["tax_reconciliation", "generic_review"]],
     ["HUS_REVIEW", "HUS review", "finance_ops", "critical", 8, ["HUS", "AR"], ["hus_outcome", "generic_review"]]
   ];

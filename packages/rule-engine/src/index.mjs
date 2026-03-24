@@ -5,6 +5,14 @@ export const AUTOMATION_DECISION_STATES = Object.freeze(["proposed", "manual_ove
 export const RULE_PACK_STATUSES = Object.freeze(["draft", "validated", "approved", "published", "retired", "emergency_disabled"]);
 export const RULE_PACK_SELECTION_MODES = Object.freeze(["effective_date", "rollback_override", "exact_version"]);
 export const RULE_PACK_ROLLBACK_STATUSES = Object.freeze(["planned", "activated", "superseded", "cancelled"]);
+export const AUTOMATION_BOUNDARY_POLICY_CODE = "AI_DECISION_BOUNDARY";
+export const AUTOMATION_REVIEW_SOURCE_DOMAIN_CODE = "AUTOMATION";
+export const AUTOMATION_FLAG_KEYS = Object.freeze({
+  global: "automation.ai.enabled",
+  classification: "automation.ai.classification.enabled",
+  postingSuggestion: "automation.ai.posting_suggestions.enabled",
+  anomalyDetection: "automation.ai.anomaly_detection.enabled"
+});
 
 export function createRulePackRegistry({ clock = () => new Date(), seedRulePacks = [] } = {}) {
   const state = {
@@ -324,7 +332,12 @@ export function createRulePackRegistry({ clock = () => new Date(), seedRulePacks
   }
 }
 
-export function createAutomationAiEngine({ clock = () => new Date(), seedRulePacks = [] } = {}) {
+export function createAutomationAiEngine({
+  clock = () => new Date(),
+  seedRulePacks = [],
+  resolveRuntimeFlags = null,
+  getReviewCenterPlatform = null
+} = {}) {
   const registry = createRulePackRegistry({ clock, seedRulePacks });
   const state = {
     decisions: new Map()
@@ -345,6 +358,8 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
     buildRuleDecision: (input) => registry.buildRuleDecision(input),
     automationDecisionTypes: AUTOMATION_DECISION_TYPES,
     automationDecisionStates: AUTOMATION_DECISION_STATES,
+    automationBoundaryPolicyCode: AUTOMATION_BOUNDARY_POLICY_CODE,
+    automationFlagKeys: AUTOMATION_FLAG_KEYS,
     createNoCodeRulePack,
     listNoCodeRulePacks,
     evaluateNoCodeRulePack,
@@ -357,16 +372,18 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
   };
 
   function createNoCodeRulePack(input = {}) {
+    const resolvedDomain = enforceAutomationRulePackDomain(input.domain || "automation");
     return registry.registerRulePack({
+      ...input,
       rulePackId: input.rulePackId || crypto.randomUUID(),
       rulePackCode:
         input.rulePackCode ||
         deriveRulePackCode({
-          domain: input.domain || "automation",
+          domain: resolvedDomain,
           jurisdiction: input.jurisdiction || "SE",
           rulePackId: input.rulePackId || "automation"
         }),
-      domain: input.domain || "automation",
+      domain: resolvedDomain,
       jurisdiction: input.jurisdiction || "SE",
       effectiveFrom: input.effectiveFrom || nowDate(),
       effectiveTo: input.effectiveTo || null,
@@ -379,7 +396,7 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
       approvedBy: input.approvedBy || "system",
       sourceSnapshotDate: input.sourceSnapshotDate || input.effectiveFrom || nowDate(),
       semanticChangeSummary: input.semanticChangeSummary || "Registered no-code automation rule pack.",
-      ...input
+      domain: resolvedDomain
     });
   }
 
@@ -406,6 +423,7 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
 
   function suggestLedgerPosting({
     companyId,
+    companyUserId = null,
     sourceObjectType,
     sourceObjectId,
     candidatePostings = [],
@@ -418,32 +436,52 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
     const candidates = normalizeCandidatePostings(candidatePostings, evidence);
     const topCandidate = candidates[0];
     const confidence = clampNumber(topCandidate.score, 0.35, 0.99);
-    return recordDecision({
+    const inputs = {
+      sourceObjectType,
+      sourceObjectId,
+      candidatePostings: candidates,
+      evidence
+    };
+    const boundary = createAutomationBoundaryProfile({
       companyId,
+      companyUserId,
       decisionType: "posting_suggestion",
-      actorId,
-      effectiveDate,
-      rulePack: resolvedRulePack,
-      inputs: {
-        sourceObjectType,
-        sourceObjectId,
-        candidatePostings: candidates,
-        evidence
-      },
+      confidence,
+      inputs,
       outputs: {
         suggestedLines: topCandidate.lines,
         safeToPost: false,
         postingKey: topCandidate.postingKey
       },
-      explanation: buildPostingExplanation(resolvedRulePack, topCandidate, evidence),
-      warnings: confidence < 0.85 ? [{ code: "manual_review_required", message: "Posting suggestion requires human approval." }] : [],
-      needsManualReview: true,
-      confidence
+      resolveRuntimeFlags,
+      effectiveDate
+    });
+    return recordDecision({
+      companyId,
+      companyUserId,
+      decisionType: "posting_suggestion",
+      actorId,
+      effectiveDate,
+      rulePack: resolvedRulePack,
+      inputs,
+      outputs: boundary.outputs,
+      explanation: [
+        ...buildPostingExplanation(resolvedRulePack, topCandidate, evidence),
+        ...boundary.explanation
+      ],
+      warnings: mergeWarnings(
+        confidence < 0.85 ? [{ code: "manual_review_required", message: "Posting suggestion requires human approval." }] : [],
+        boundary.warnings
+      ),
+      needsManualReview: boundary.needsManualReview,
+      confidence,
+      boundary
     });
   }
 
   function classifyArtifact({
     companyId,
+    companyUserId = null,
     classifierType,
     candidates = [],
     evidence = {},
@@ -455,30 +493,54 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
     const normalizedCandidates = normalizeClassificationCandidates(candidates, evidence);
     const winningCandidate = normalizedCandidates[0];
     const confidence = clampNumber(winningCandidate.score, 0.4, 0.99);
-    return recordDecision({
+    const inputs = {
+      classifierType,
+      candidates: normalizedCandidates,
+      evidence
+    };
+    const boundary = createAutomationBoundaryProfile({
       companyId,
+      companyUserId,
       decisionType: "classification",
-      actorId,
-      effectiveDate,
-      rulePack: resolvedRulePack,
-      inputs: {
-        classifierType,
-        candidates: normalizedCandidates,
-        evidence
-      },
+      confidence,
+      inputs,
       outputs: {
         classifierType: requireText(classifierType, "classifier_type_required"),
         selectedCode: winningCandidate.code
       },
-      explanation: buildClassificationExplanation(resolvedRulePack, winningCandidate, evidence),
-      warnings: confidence < 0.8 ? [{ code: "classification_confidence_low", message: "Classification should be reviewed before automation continues." }] : [],
-      needsManualReview: confidence < 0.95,
-      confidence
+      resolveRuntimeFlags,
+      effectiveDate
+    });
+    return recordDecision({
+      companyId,
+      companyUserId,
+      decisionType: "classification",
+      actorId,
+      effectiveDate,
+      rulePack: resolvedRulePack,
+      inputs,
+      outputs: boundary.outputs,
+      explanation: [
+        ...buildClassificationExplanation(
+          resolvedRulePack,
+          boundary.explanationCandidate || winningCandidate,
+          evidence
+        ),
+        ...boundary.explanation
+      ],
+      warnings: mergeWarnings(
+        confidence < 0.8 ? [{ code: "classification_confidence_low", message: "Classification should be reviewed before automation continues." }] : [],
+        boundary.warnings
+      ),
+      needsManualReview: boundary.needsManualReview,
+      confidence,
+      boundary
     });
   }
 
   function detectAnomaly({
     companyId,
+    companyUserId = null,
     anomalyType,
     actualValue,
     expectedValue,
@@ -500,29 +562,48 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
     const threshold = Number(tolerancePercent);
     const flagged = deviationPercent > threshold;
     const confidence = flagged ? clampNumber(0.6 + deviationPercent / 200, 0.6, 0.99) : 0.55;
-    return recordDecision({
+    const inputs = {
+      anomalyType,
+      actualValue: resolvedActualValue,
+      expectedValue: resolvedExpectedValue,
+      tolerancePercent: threshold,
+      evidence
+    };
+    const boundary = createAutomationBoundaryProfile({
       companyId,
+      companyUserId,
       decisionType: "anomaly_detection",
-      actorId,
-      effectiveDate,
-      rulePack: resolvedRulePack,
-      inputs: {
-        anomalyType,
-        actualValue: resolvedActualValue,
-        expectedValue: resolvedExpectedValue,
-        tolerancePercent: threshold,
-        evidence
-      },
+      confidence,
+      inputs,
       outputs: {
         anomalyType: requireText(anomalyType, "anomaly_type_required"),
         flagged,
         deviationPercent,
         severity: flagged ? (deviationPercent >= threshold * 2 ? "high" : "medium") : "informational"
       },
-      explanation: buildAnomalyExplanation(resolvedRulePack, deviationPercent, threshold, evidence),
-      warnings: flagged ? [{ code: "anomaly_flagged", message: "Anomaly requires review before downstream automation continues." }] : [],
-      needsManualReview: flagged,
-      confidence
+      resolveRuntimeFlags,
+      effectiveDate
+    });
+    return recordDecision({
+      companyId,
+      companyUserId,
+      decisionType: "anomaly_detection",
+      actorId,
+      effectiveDate,
+      rulePack: resolvedRulePack,
+      inputs,
+      outputs: boundary.outputs,
+      explanation: [
+        ...buildAnomalyExplanation(resolvedRulePack, deviationPercent, threshold, evidence),
+        ...boundary.explanation
+      ],
+      warnings: mergeWarnings(
+        flagged ? [{ code: "anomaly_flagged", message: "Anomaly requires review before downstream automation continues." }] : [],
+        boundary.warnings
+      ),
+      needsManualReview: boundary.needsManualReview,
+      confidence,
+      boundary
     });
   }
 
@@ -555,14 +636,25 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
     if (!decision || decision.companyId !== requireText(companyId, "company_id_required")) {
       throw createError(404, "automation_decision_not_found", "Automation decision was not found.");
     }
+    const resolvedOutputs = copy(acceptedOutputs || decision.outputs);
+    assertAcceptedOutputsWithinBoundary(decision, resolvedOutputs);
     decision.state = "manual_override";
     decision.override = {
       overrideId: crypto.randomUUID(),
       actorId: requireText(actorId || "system", "actor_id_required"),
       overrideReasonCode: requireText(overrideReasonCode, "automation_override_reason_required"),
-      acceptedOutputs: copy(acceptedOutputs || decision.outputs),
+      acceptedOutputs: resolvedOutputs,
       overriddenAt: new Date(clock()).toISOString()
     };
+    if (decision.reviewItemId) {
+      settleAutomationReviewItem({
+        reviewCenterPlatform: resolveReviewCenterPlatform(getReviewCenterPlatform),
+        decision,
+        actorId: decision.override.actorId,
+        note: `Manual override recorded for ${decision.decisionType}.`,
+        reasonCode: decision.override.overrideReasonCode
+      });
+    }
     return copy(decision);
   }
 
@@ -570,16 +662,21 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
     if (!rulePackId) {
       return null;
     }
-    return registry.getRulePack({ rulePackId, required: false })
-      || registry.resolveRulePack({
-        domain: "automation",
-        jurisdiction: "SE",
-        effectiveDate
-      });
+    const exactRulePack = registry.getRulePack({ rulePackId, required: false });
+    if (exactRulePack) {
+      enforceAutomationRulePackDomain(exactRulePack.domain);
+      return exactRulePack;
+    }
+    return registry.resolveRulePack({
+      domain: "automation",
+      jurisdiction: "SE",
+      effectiveDate
+    });
   }
 
   function recordDecision({
     companyId,
+    companyUserId,
     decisionType,
     actorId,
     effectiveDate,
@@ -589,7 +686,8 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
     explanation,
     warnings,
     needsManualReview,
-    confidence
+    confidence,
+    boundary
   }) {
     const ruleDecision = rulePack
       ? registry.buildRuleDecision({
@@ -619,15 +717,516 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
     const decision = {
       decisionId: crypto.randomUUID(),
       companyId: requireText(companyId, "company_id_required"),
+      companyUserId: normalizeOptionalText(companyUserId),
       decisionType: assertAllowed(decisionType, AUTOMATION_DECISION_TYPES, "automation_decision_type_invalid"),
       state: "proposed",
       actorId: requireText(actorId || "system", "actor_id_required"),
       confidence: Number(Number(confidence).toFixed(4)),
+      policyCode: AUTOMATION_BOUNDARY_POLICY_CODE,
+      policyState: boundary.policyState,
+      policyHits: copy(boundary.policyHits),
+      reviewReasonCodes: copy(boundary.reviewReasonCodes),
+      reviewRequired: boundary.needsManualReview,
+      reviewQueueCode: boundary.reviewQueueCode,
+      reviewItemId: null,
+      finalizationAllowed: false,
+      submissionAllowed: false,
+      downstreamDispatchAllowed: false,
+      runtimeFlags: copy(boundary.runtimeFlags),
+      aiTrace: extractAiTrace(inputs),
       ...ruleDecision
     };
     state.decisions.set(decision.decisionId, decision);
+    if (boundary.needsManualReview) {
+      decision.reviewItemId = maybeCreateAutomationReviewItem({
+        reviewCenterPlatform: resolveReviewCenterPlatform(getReviewCenterPlatform),
+        decision,
+        inputs,
+        boundary
+      });
+    }
     return copy(decision);
   }
+}
+
+function enforceAutomationRulePackDomain(domain) {
+  const resolvedDomain = requireText(String(domain || "automation"), "automation_rule_pack_domain_required").toLowerCase();
+  if (resolvedDomain !== "automation") {
+    throw createError(409, "automation_rule_pack_domain_forbidden", "Automation rule packs may only be registered for the automation domain.");
+  }
+  return resolvedDomain;
+}
+
+function createAutomationBoundaryProfile({
+  companyId,
+  companyUserId = null,
+  decisionType,
+  confidence,
+  inputs = {},
+  outputs = {},
+  resolveRuntimeFlags = null,
+  effectiveDate = null
+} = {}) {
+  const resolvedDecisionType = assertAllowed(decisionType, AUTOMATION_DECISION_TYPES, "automation_decision_type_invalid");
+  const evidence = copy(inputs?.evidence || {});
+  const runtimeFlags = typeof resolveRuntimeFlags === "function"
+    ? copy(resolveRuntimeFlags({ companyId, companyUserId }) || {})
+    : {};
+  const featureFlagKey = determineAutomationFlagKey(resolvedDecisionType);
+  if (!isRuntimeFlagEnabled(runtimeFlags, AUTOMATION_FLAG_KEYS.global) || !isRuntimeFlagEnabled(runtimeFlags, featureFlagKey)) {
+    throw createError(503, "automation_ai_disabled", "AI automation is disabled for this tenant or module.");
+  }
+
+  assertNoForbiddenAutomationIntent({ decisionType: resolvedDecisionType, inputs, outputs, evidence });
+
+  const reviewReasonCodes = new Set();
+  const policyHits = new Set();
+  const warnings = [];
+  const explanation = [];
+  let adjustedOutputs = copy(outputs || {});
+  let reviewQueueCode = "DOCUMENT_REVIEW";
+  let requiredDecisionType = resolvedDecisionType === "classification" ? "classification" : "generic_review";
+  let reviewRiskClass = resolvedDecisionType === "anomaly_detection" ? "medium" : "high";
+  let explanationCandidate = null;
+
+  const threshold = resolveConfidenceThreshold(resolvedDecisionType, evidence, adjustedOutputs);
+  if (Number(confidence) < threshold) {
+    policyHits.add("confidence_threshold_review");
+    reviewReasonCodes.add("confidence_threshold_review");
+    warnings.push({
+      code: "confidence_threshold_review",
+      message: `Confidence ${Number(confidence).toFixed(2)} is below the ${threshold.toFixed(2)} threshold.`
+    });
+    explanation.push(`Confidence ${Number(confidence).toFixed(2)} triggered mandatory review at threshold ${threshold.toFixed(2)}.`);
+  }
+
+  const deterministicOverride = applyDeterministicOverride({
+    decisionType: resolvedDecisionType,
+    outputs: adjustedOutputs,
+    confidence,
+    evidence
+  });
+  if (deterministicOverride) {
+    adjustedOutputs = deterministicOverride.outputs;
+    explanationCandidate = deterministicOverride.explanationCandidate || null;
+    policyHits.add("deterministic_rulepack_override");
+    reviewReasonCodes.add("deterministic_rulepack_override");
+    warnings.push({
+      code: "deterministic_rulepack_override",
+      message: "Deterministic rulepack evidence overrode the AI suggestion."
+    });
+    explanation.push(deterministicOverride.explanation);
+  }
+
+  if (resolvedDecisionType === "posting_suggestion") {
+    policyHits.add("economic_posting_prohibited");
+    reviewReasonCodes.add("economic_posting_requires_review");
+    explanation.push("Posting suggestions are suggestion-only and may never create final ledger postings directly.");
+    reviewRiskClass = "high";
+  }
+
+  if (resolvedDecisionType === "anomaly_detection" && adjustedOutputs.flagged === true) {
+    policyHits.add("anomaly_requires_review");
+    reviewReasonCodes.add("anomaly_requires_review");
+    explanation.push("Flagged anomalies require review before downstream handling continues.");
+    reviewRiskClass = adjustedOutputs.severity === "high" ? "critical" : "high";
+  }
+
+  if (hasEvidenceFlag(evidence, "personImpact") || hasEvidenceFlag(evidence, "payrollImpact") || hasEvidenceFlag(evidence, "agiImpact")) {
+    policyHits.add("person_or_payroll_impact_requires_review");
+    reviewReasonCodes.add("person_or_payroll_impact_requires_review");
+    reviewQueueCode = "PAYROLL_REVIEW";
+    requiredDecisionType = "payroll_treatment";
+    reviewRiskClass = "critical";
+    explanation.push("Person-, payroll- or AGI-impacting suggestions must be reviewed in payroll review.");
+  }
+
+  for (const [flagKey, policyHit, reviewReason, explanatoryText] of [
+    ["privateSpendCandidate", "private_spend_requires_review", "private_spend_requires_review", "Private-spend candidates may never be finalized by AI."],
+    ["benefitBoundaryCase", "benefit_boundary_requires_review", "benefit_boundary_requires_review", "Benefit boundary cases require human review."],
+    ["wellnessBoundaryCase", "wellness_boundary_requires_review", "wellness_boundary_requires_review", "Wellness threshold cases require human review."],
+    ["vatImpact", "vat_impact_requires_review", "vat_impact_requires_review", "VAT-affecting suggestions require review."],
+    ["husImpact", "hus_impact_requires_review", "hus_impact_requires_review", "HUS-affecting suggestions require review."],
+    ["annualFilingImpact", "annual_filing_requires_review", "annual_filing_requires_review", "Annual filing suggestions require review."],
+    ["submissionIntent", "regulated_submission_prohibited", "regulated_submission_requires_review", "Regulated submissions can never be sent autonomously."]
+  ]) {
+    if (hasEvidenceFlag(evidence, flagKey)) {
+      policyHits.add(policyHit);
+      reviewReasonCodes.add(reviewReason);
+      explanation.push(explanatoryText);
+    }
+  }
+
+  const explicitPolicyHits = Array.isArray(evidence.policyHitCodes) ? evidence.policyHitCodes : [];
+  for (const policyHitCode of explicitPolicyHits) {
+    const resolvedPolicyHit = normalizePolicyCode(policyHitCode);
+    policyHits.add(resolvedPolicyHit);
+    reviewReasonCodes.add(resolvedPolicyHit);
+  }
+
+  if (evidence.aiGenerated === true && !hasModelMetadata(evidence)) {
+    policyHits.add("model_metadata_missing");
+    reviewReasonCodes.add("model_metadata_missing");
+    warnings.push({
+      code: "model_metadata_missing",
+      message: "AI-generated suggestions without model metadata require review."
+    });
+    explanation.push("AI-generated evidence omitted model metadata and was forced into review.");
+  }
+
+  adjustedOutputs = {
+    ...adjustedOutputs,
+    finalizationAllowed: false,
+    submissionAllowed: false,
+    downstreamDispatchAllowed: false
+  };
+  if (resolvedDecisionType === "posting_suggestion") {
+    adjustedOutputs.safeToPost = false;
+  }
+
+  const needsManualReview =
+    resolvedDecisionType === "posting_suggestion"
+    || reviewReasonCodes.size > 0
+    || policyHits.size > 0
+    || Boolean(inputs?.evidence?.requiresManualReview);
+
+  return {
+    outputs: adjustedOutputs,
+    explanation,
+    explanationCandidate,
+    warnings,
+    needsManualReview,
+    reviewQueueCode,
+    requiredDecisionType,
+    reviewRiskClass,
+    policyState: needsManualReview ? "review_required" : "suggestion_only",
+    policyHits: [...policyHits].sort(),
+    reviewReasonCodes: [...reviewReasonCodes].sort(),
+    runtimeFlags
+  };
+}
+
+function applyDeterministicOverride({ decisionType, outputs = {}, confidence, evidence = {} } = {}) {
+  if (decisionType === "classification") {
+    const deterministicSelectedCode = normalizeOptionalText(
+      evidence.deterministicSelectedCode
+      || evidence.rulepackSelectedCode
+      || evidence.deterministicOutcomeCode
+    );
+    if (deterministicSelectedCode && deterministicSelectedCode !== outputs.selectedCode) {
+      return {
+        outputs: {
+          ...outputs,
+          selectedCode: deterministicSelectedCode
+        },
+        explanationCandidate: {
+          code: deterministicSelectedCode,
+          score: confidence
+        },
+        explanation: `Deterministic rulepack output ${deterministicSelectedCode} overrode the AI classification suggestion.`
+      };
+    }
+    return null;
+  }
+
+  if (decisionType === "posting_suggestion") {
+    const deterministicPostingKey = normalizeOptionalText(evidence.deterministicPostingKey || evidence.rulepackPostingKey);
+    const deterministicLines = normalizeOptionalPostingLines(evidence.deterministicSuggestedLines || evidence.rulepackSuggestedLines);
+    const hasKeyOverride = deterministicPostingKey && deterministicPostingKey !== outputs.postingKey;
+    const hasLineOverride = deterministicLines && hashObject(deterministicLines) !== hashObject(outputs.suggestedLines || []);
+    if (hasKeyOverride || hasLineOverride) {
+      return {
+        outputs: {
+          ...outputs,
+          postingKey: deterministicPostingKey || outputs.postingKey,
+          suggestedLines: deterministicLines || outputs.suggestedLines
+        },
+        explanation: "Deterministic rulepack posting guidance overrode the AI posting suggestion."
+      };
+    }
+    return null;
+  }
+
+  if (decisionType === "anomaly_detection") {
+    const deterministicFlagged = normalizeOptionalBoolean(
+      Object.hasOwn(evidence, "deterministicFlagged") ? evidence.deterministicFlagged : evidence.rulepackFlagged
+    );
+    if (deterministicFlagged != null && deterministicFlagged !== outputs.flagged) {
+      return {
+        outputs: {
+          ...outputs,
+          flagged: deterministicFlagged,
+          severity: deterministicFlagged ? outputs.severity || "high" : "informational"
+        },
+        explanation: `Deterministic anomaly policy overrode the AI flagged state to ${deterministicFlagged}.`
+      };
+    }
+  }
+
+  return null;
+}
+
+function maybeCreateAutomationReviewItem({ reviewCenterPlatform, decision, inputs = {}, boundary } = {}) {
+  if (!reviewCenterPlatform || typeof reviewCenterPlatform.createReviewItem !== "function") {
+    throw createError(409, "automation_review_center_required", "Review center platform is required for AI decisions that mandate review.");
+  }
+  const sourceReference = normalizeOptionalText(
+    inputs?.sourceObjectId
+    || inputs?.evidence?.documentId
+    || inputs?.evidence?.sourceObjectId
+    || inputs?.evidence?.sourceReference
+  );
+  const reviewItem = reviewCenterPlatform.createReviewItem({
+    companyId: decision.companyId,
+    queueCode: boundary.reviewQueueCode,
+    reviewTypeCode: mapAutomationReviewType(decision.decisionType),
+    sourceDomainCode: AUTOMATION_REVIEW_SOURCE_DOMAIN_CODE,
+    sourceObjectType: "automation_decision",
+    sourceObjectId: decision.decisionId,
+    sourceReference,
+    sourceObjectLabel: sourceReference ? `Automation ${decision.decisionType} for ${sourceReference}` : `Automation ${decision.decisionType}`,
+    requiredDecisionType: boundary.requiredDecisionType,
+    riskClass: boundary.reviewRiskClass,
+    title: buildAutomationReviewTitle(decision),
+    summary: decision.policyHits.join(", "),
+    requestedPayload: {
+      decisionId: decision.decisionId,
+      decisionType: decision.decisionType,
+      confidence: decision.confidence,
+      policyHits: decision.policyHits,
+      reviewReasonCodes: decision.reviewReasonCodes,
+      outputs: decision.outputs
+    },
+    evidenceRefs: [
+      `automation_decision:${decision.decisionId}`,
+      ...(sourceReference ? [`source_ref:${sourceReference}`] : [])
+    ],
+    policyCode: AUTOMATION_BOUNDARY_POLICY_CODE,
+    actorId: decision.actorId
+  });
+  return reviewItem.reviewItemId;
+}
+
+function settleAutomationReviewItem({ reviewCenterPlatform, decision, actorId, note = null, reasonCode = "manual_override" } = {}) {
+  if (!reviewCenterPlatform || typeof reviewCenterPlatform.getReviewCenterItem !== "function") {
+    return;
+  }
+  const current = reviewCenterPlatform.getReviewCenterItem({
+    companyId: decision.companyId,
+    reviewItemId: decision.reviewItemId
+  });
+  if (["open", "waiting_input", "escalated"].includes(current.status)) {
+    reviewCenterPlatform.claimReviewCenterItem({
+      companyId: decision.companyId,
+      reviewItemId: decision.reviewItemId,
+      actorId
+    });
+  }
+  const claimed = reviewCenterPlatform.getReviewCenterItem({
+    companyId: decision.companyId,
+    reviewItemId: decision.reviewItemId
+  });
+  if (claimed.status === "claimed") {
+    reviewCenterPlatform.startReviewCenterItem({
+      companyId: decision.companyId,
+      reviewItemId: decision.reviewItemId,
+      actorId
+    });
+  }
+  const inReview = reviewCenterPlatform.getReviewCenterItem({
+    companyId: decision.companyId,
+    reviewItemId: decision.reviewItemId
+  });
+  if (["claimed", "in_review", "waiting_input", "escalated"].includes(inReview.status)) {
+    reviewCenterPlatform.decideReviewCenterItem({
+      companyId: decision.companyId,
+      reviewItemId: decision.reviewItemId,
+      decisionCode: "approve",
+      reasonCode: normalizePolicyCode(reasonCode),
+      note: note || `Approved automation decision ${decision.decisionId}.`,
+      decisionPayload: {
+        decisionId: decision.decisionId,
+        decisionType: decision.decisionType,
+        overrideReasonCode: decision.override?.overrideReasonCode || null
+      },
+      actorId
+    });
+  }
+  const approved = reviewCenterPlatform.getReviewCenterItem({
+    companyId: decision.companyId,
+    reviewItemId: decision.reviewItemId
+  });
+  if (["approved", "rejected", "escalated"].includes(approved.status)) {
+    reviewCenterPlatform.closeReviewCenterItem({
+      companyId: decision.companyId,
+      reviewItemId: decision.reviewItemId,
+      actorId,
+      note: note || `Closed after automation override for ${decision.decisionId}.`
+    });
+  }
+}
+
+function determineAutomationFlagKey(decisionType) {
+  if (decisionType === "posting_suggestion") {
+    return AUTOMATION_FLAG_KEYS.postingSuggestion;
+  }
+  if (decisionType === "classification") {
+    return AUTOMATION_FLAG_KEYS.classification;
+  }
+  return AUTOMATION_FLAG_KEYS.anomalyDetection;
+}
+
+function isRuntimeFlagEnabled(runtimeFlags, flagKey) {
+  return runtimeFlags?.[flagKey] !== false;
+}
+
+function assertNoForbiddenAutomationIntent({ decisionType, inputs = {}, outputs = {}, evidence = {} } = {}) {
+  const candidateFlags = [
+    outputs.safeToPost === true,
+    outputs.submissionAllowed === true,
+    outputs.downstreamDispatchAllowed === true,
+    hasEvidenceFlag(evidence, "submissionIntent"),
+    hasEvidenceFlag(evidence, "submitToAuthority"),
+    hasEvidenceFlag(evidence, "postToLedger"),
+    hasEvidenceFlag(evidence, "dispatchFinalOutcome")
+  ];
+  if (candidateFlags.some(Boolean)) {
+    throw createError(409, "automation_finalization_forbidden", `Automation ${decisionType} may not finalize postings or submissions.`);
+  }
+}
+
+function assertAcceptedOutputsWithinBoundary(decision, acceptedOutputs) {
+  if (acceptedOutputs?.safeToPost === true) {
+    throw createError(409, "automation_finalization_forbidden", "Automation overrides may not mark a posting suggestion as safe to post.");
+  }
+  if (
+    acceptedOutputs?.finalizationAllowed === true
+    || acceptedOutputs?.submissionAllowed === true
+    || acceptedOutputs?.downstreamDispatchAllowed === true
+    || acceptedOutputs?.postToLedger === true
+    || acceptedOutputs?.submitToAuthority === true
+  ) {
+    throw createError(409, "automation_finalization_forbidden", "Automation overrides may not finalize economic outcomes or submissions.");
+  }
+  if (decision.decisionType === "classification" && !normalizeOptionalText(acceptedOutputs?.selectedCode)) {
+    throw createError(400, "automation_override_selected_code_required", "Classification overrides must preserve a selected code.");
+  }
+}
+
+function buildAutomationReviewTitle(decision) {
+  if (decision.decisionType === "posting_suggestion") {
+    return `Automation posting suggestion requires review for ${decision.decisionId}`;
+  }
+  if (decision.decisionType === "classification") {
+    return `Automation classification requires review for ${decision.decisionId}`;
+  }
+  return `Automation anomaly requires review for ${decision.decisionId}`;
+}
+
+function mapAutomationReviewType(decisionType) {
+  if (decisionType === "posting_suggestion") {
+    return "AUTOMATION_POSTING_SUGGESTION";
+  }
+  if (decisionType === "classification") {
+    return "AUTOMATION_CLASSIFICATION";
+  }
+  return "AUTOMATION_ANOMALY";
+}
+
+function mergeWarnings(...warningGroups) {
+  const merged = new Map();
+  for (const warning of warningGroups.flat()) {
+    if (!warning || typeof warning !== "object") {
+      continue;
+    }
+    const code = requireText(String(warning.code), "automation_warning_code_required");
+    const message = requireText(String(warning.message), "automation_warning_message_required");
+    merged.set(`${code}:${message}`, { code, message });
+  }
+  return [...merged.values()];
+}
+
+function extractAiTrace(inputs = {}) {
+  const evidence = inputs?.evidence || {};
+  return {
+    aiGenerated: evidence.aiGenerated === true,
+    inputSource: normalizeOptionalText(
+      evidence.inputSource
+      || evidence.source
+      || inputs.sourceObjectType
+      || inputs.classifierType
+      || inputs.anomalyType
+    ),
+    modelProvider: normalizeOptionalText(evidence.modelProvider || evidence.provider),
+    modelName: normalizeOptionalText(evidence.modelName || evidence.model),
+    modelVersion: normalizeOptionalText(evidence.modelVersion),
+    extractionMode: normalizeOptionalText(evidence.extractionMode || evidence.promptMode || evidence.suggestionMode)
+  };
+}
+
+function hasModelMetadata(evidence = {}) {
+  return Boolean(
+    normalizeOptionalText(evidence.modelVersion)
+    || (normalizeOptionalText(evidence.modelProvider || evidence.provider) && normalizeOptionalText(evidence.modelName || evidence.model))
+  );
+}
+
+function hasEvidenceFlag(evidence, key) {
+  return evidence?.[key] === true;
+}
+
+function normalizeOptionalPostingLines(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+  return value.map((line) => ({
+    accountNumber: requireText(line.accountNumber, "posting_line_account_required"),
+    debitAmount: Number(line.debitAmount || 0),
+    creditAmount: Number(line.creditAmount || 0)
+  }));
+}
+
+function normalizeOptionalBoolean(value) {
+  if (value === true || value === false) {
+    return value;
+  }
+  return null;
+}
+
+function normalizePolicyCode(value) {
+  return requireText(String(value), "automation_policy_code_required")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function resolveConfidenceThreshold(decisionType, evidence, outputs) {
+  if (decisionType === "posting_suggestion") {
+    return 1;
+  }
+  if (decisionType === "classification") {
+    if (
+      hasEvidenceFlag(evidence, "personImpact")
+      || hasEvidenceFlag(evidence, "privateSpendCandidate")
+      || hasEvidenceFlag(evidence, "benefitBoundaryCase")
+      || hasEvidenceFlag(evidence, "vatImpact")
+    ) {
+      return 0.98;
+    }
+    return 0.95;
+  }
+  if (decisionType === "anomaly_detection" && outputs?.flagged === true) {
+    return 0.75;
+  }
+  return 0.7;
+}
+
+function resolveReviewCenterPlatform(getReviewCenterPlatform) {
+  if (typeof getReviewCenterPlatform !== "function") {
+    return null;
+  }
+  return getReviewCenterPlatform() || null;
 }
 
 function assertAllowed(value, allowedValues, code) {

@@ -169,7 +169,18 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "automation",
     label: "Automation",
     packageName: "@swedish-erp/rule-engine",
-    create: ({ options }) => createAutomationAiEngine(options)
+    create: ({ options, getDomain }) =>
+      createAutomationAiEngine({
+        ...options,
+        resolveRuntimeFlags: ({ companyId, companyUserId = null } = {}) => {
+          const corePlatform = getDomain("core");
+          if (!corePlatform || typeof corePlatform.resolveRuntimeFlags !== "function") {
+            return {};
+          }
+          return corePlatform.resolveRuntimeFlags({ companyId, companyUserId });
+        },
+        getReviewCenterPlatform: () => getDomain("reviewCenter")
+      })
   }),
   createDomainDefinition({
     key: "ar",
@@ -499,7 +510,8 @@ export function createApiPlatform(options = {}) {
     const platform = definition.create({
       options,
       dependencies: Object.freeze(dependencies),
-      domains: Object.freeze({ ...domains })
+      domains: Object.freeze({ ...domains }),
+      getDomain: (domainKey) => domains[domainKey] || null
     });
     domains[definition.key] = platform;
 

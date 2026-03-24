@@ -106,8 +106,28 @@ export type AutomationDecisionState = "proposed" | "manual_override" | "accepted
 export interface AutomationDecision<TDecision> extends RuleDecision<TDecision> {
   readonly decisionId: string;
   readonly companyId: string;
+  readonly companyUserId: string | null;
   readonly decisionType: AutomationDecisionType;
   readonly state: AutomationDecisionState;
   readonly actorId: string;
   readonly confidence: number;
+  readonly policyCode: string;
+  readonly policyState: "suggestion_only" | "review_required";
+  readonly policyHits: readonly string[];
+  readonly reviewReasonCodes: readonly string[];
+  readonly reviewRequired: boolean;
+  readonly reviewQueueCode: string;
+  readonly reviewItemId: string | null;
+  readonly finalizationAllowed: false;
+  readonly submissionAllowed: false;
+  readonly downstreamDispatchAllowed: false;
+  readonly runtimeFlags: Readonly<Record<string, boolean>>;
+  readonly aiTrace: {
+    readonly aiGenerated: boolean;
+    readonly inputSource: string | null;
+    readonly modelProvider: string | null;
+    readonly modelName: string | null;
+    readonly modelVersion: string | null;
+    readonly extractionMode: string | null;
+  };
 }
