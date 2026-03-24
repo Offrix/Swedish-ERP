@@ -1,0 +1,33 @@
+INSERT INTO document_classification_cases (
+  classification_case_id,
+  company_id,
+  document_id,
+  scenario_code,
+  status,
+  requires_review,
+  review_risk_class,
+  review_reason_codes_json,
+  review_queue_code,
+  total_amount,
+  currency_code,
+  source_document_snapshot_json,
+  extracted_fields_json,
+  created_by_actor_id,
+  metadata_json
+) VALUES (
+  '20260324-6000-4000-8000-000000000001',
+  '00000000-0000-4000-8000-000000000001',
+  '20260324-6000-4000-8000-000000000101',
+  'private_spend',
+  'under_review',
+  TRUE,
+  'high',
+  '["PRIVATE_SPEND_REQUIRES_REVIEW"]'::jsonb,
+  'PAYROLL_REVIEW',
+  1499.00,
+  'SEK',
+  '{"documentType":"expense_receipt","status":"classified"}'::jsonb,
+  '{"merchantName":"Demo Butik AB","totalAmount":1499.00}'::jsonb,
+  'system',
+  '{"rulepackCode":"SE-DOCUMENT-CLASSIFICATION-BOUNDARIES","rulepackVersion":"2026.1"}'::jsonb
+) ON CONFLICT (classification_case_id) DO NOTHING;

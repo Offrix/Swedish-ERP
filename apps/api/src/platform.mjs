@@ -8,10 +8,15 @@ import { createVatPlatform } from "../../../packages/domain-vat/src/index.mjs";
 import { createArPlatform } from "../../../packages/domain-ar/src/index.mjs";
 import { createApPlatform } from "../../../packages/domain-ap/src/index.mjs";
 import { createBankingPlatform } from "../../../packages/domain-banking/src/index.mjs";
+import { createTaxAccountPlatform } from "../../../packages/domain-tax-account/src/index.mjs";
+import { createReviewCenterPlatform } from "../../../packages/domain-review-center/src/index.mjs";
+import { createNotificationsPlatform } from "../../../packages/domain-notifications/src/index.mjs";
+import { createActivityPlatform } from "../../../packages/domain-activity/src/index.mjs";
 import { createHrPlatform } from "../../../packages/domain-hr/src/index.mjs";
 import { createTimePlatform } from "../../../packages/domain-time/src/index.mjs";
 import { createPayrollPlatform } from "../../../packages/domain-payroll/src/index.mjs";
 import { createBenefitsPlatform } from "../../../packages/domain-benefits/src/index.mjs";
+import { createDocumentClassificationPlatform } from "../../../packages/domain-document-classification/src/index.mjs";
 import { createTravelPlatform } from "../../../packages/domain-travel/src/index.mjs";
 import { createPensionPlatform } from "../../../packages/domain-pension/src/index.mjs";
 import { createProjectsPlatform } from "../../../packages/domain-projects/src/index.mjs";
@@ -51,9 +56,14 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "ar",
   "ap",
   "banking",
+  "taxAccount",
+  "reviewCenter",
+  "notifications",
+  "activity",
   "hr",
   "time",
   "benefits",
+  "documentClassification",
   "travel",
   "pension",
   "payroll",
@@ -81,9 +91,14 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "ar",
   "ap",
   "banking",
+  "taxAccount",
+  "reviewCenter",
+  "notifications",
+  "activity",
   "hr",
   "time",
   "benefits",
+  "documentClassification",
   "travel",
   "pension",
   "projects",
@@ -192,6 +207,35 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
       })
   }),
   createDomainDefinition({
+    key: "taxAccount",
+    label: "Tax account",
+    packageName: "@swedish-erp/domain-tax-account",
+    dependsOn: ["banking"],
+    create: ({ options, dependencies }) =>
+      createTaxAccountPlatform({
+        ...options,
+        bankingPlatform: dependencies.banking
+      })
+  }),
+  createDomainDefinition({
+    key: "reviewCenter",
+    label: "Review center",
+    packageName: "@swedish-erp/domain-review-center",
+    create: ({ options }) => createReviewCenterPlatform(options)
+  }),
+  createDomainDefinition({
+    key: "notifications",
+    label: "Notifications",
+    packageName: "@swedish-erp/domain-notifications",
+    create: ({ options }) => createNotificationsPlatform(options)
+  }),
+  createDomainDefinition({
+    key: "activity",
+    label: "Activity",
+    packageName: "@swedish-erp/domain-activity",
+    create: ({ options }) => createActivityPlatform(options)
+  }),
+  createDomainDefinition({
     key: "hr",
     label: "HR",
     packageName: "@swedish-erp/domain-hr",
@@ -224,6 +268,19 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         ...options,
         hrPlatform: dependencies.hr,
         documentPlatform: dependencies.documents
+      })
+  }),
+  createDomainDefinition({
+    key: "documentClassification",
+    label: "Document classification",
+    packageName: "@swedish-erp/domain-document-classification",
+    dependsOn: ["documents", "reviewCenter", "benefits"],
+    create: ({ options, dependencies }) =>
+      createDocumentClassificationPlatform({
+        ...options,
+        documentPlatform: dependencies.documents,
+        reviewCenterPlatform: dependencies.reviewCenter,
+        benefitsPlatform: dependencies.benefits
       })
   }),
   createDomainDefinition({

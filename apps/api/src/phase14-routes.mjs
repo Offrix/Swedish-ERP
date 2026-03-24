@@ -579,6 +579,132 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/tax-account/events") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "tax_account",
+      objectId: companyId,
+      scopeCode: "tax_account"
+    });
+    writeJson(res, 200, {
+      items: platform.listTaxAccountEvents({
+        companyId,
+        eventTypeCode: optionalText(url.searchParams.get("eventTypeCode")),
+        mappingStatus: optionalText(url.searchParams.get("mappingStatus")),
+        reconciliationStatus: optionalText(url.searchParams.get("reconciliationStatus"))
+      }),
+      balance: platform.getTaxAccountBalance({ companyId })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/tax-account/imports") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "tax_account",
+      objectId: companyId,
+      scopeCode: "tax_account"
+    });
+    writeJson(
+      res,
+      201,
+      platform.importTaxAccountEvents({
+        companyId,
+        importSource: body.importSource,
+        statementDate: body.statementDate,
+        importBatchId: body.importBatchId,
+        events: body.events,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/tax-account/reconciliations") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "tax_account",
+      objectId: companyId,
+      scopeCode: "tax_account"
+    });
+    writeJson(res, 200, {
+      items: platform.listTaxAccountReconciliations({ companyId }),
+      openDifferenceCases: platform.listOpenTaxAccountDifferenceCases({ companyId }),
+      balance: platform.getTaxAccountBalance({ companyId })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/tax-account/reconciliations") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "tax_account",
+      objectId: companyId,
+      scopeCode: "tax_account"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createTaxAccountReconciliation({
+        companyId,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/tax-account/offsets") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "tax_account",
+      objectId: companyId,
+      scopeCode: "tax_account"
+    });
+    writeJson(
+      res,
+      201,
+      platform.approveTaxAccountOffset({
+        companyId,
+        taxAccountEventId: body.taxAccountEventId,
+        reconciliationItemId: body.reconciliationItemId,
+        offsetAmount: body.offsetAmount,
+        offsetReasonCode: body.offsetReasonCode,
+        reconciliationRunId: body.reconciliationRunId,
+        approvalNote: body.approvalNote,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
   const fiscalYearMatch = matchPath(path, "/v1/fiscal-years/:fiscalYearId");
   if (req.method === "GET" && fiscalYearMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
@@ -1272,6 +1398,320 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const sessionToken = readSessionToken(req);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_cockpit", objectId: companyId, scopeCode: "migration_cockpit" });
     writeJson(res, 200, platform.getMigrationCockpit({ sessionToken, companyId }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/notifications") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: companyId, scopeCode: "notifications" });
+    writeJson(res, 200, {
+      items: platform.listNotifications({
+        companyId,
+        recipientType: optionalText(url.searchParams.get("recipientType")),
+        recipientId: optionalText(url.searchParams.get("recipientId")),
+        status: optionalText(url.searchParams.get("status")),
+        categoryCode: optionalText(url.searchParams.get("categoryCode")),
+        onlyUnread: url.searchParams.get("onlyUnread") === "true"
+      })
+    });
+    return true;
+  }
+
+  const notificationReadMatch = matchPath(path, "/v1/notifications/:notificationId/read");
+  if (req.method === "POST" && notificationReadMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "notification", objectId: notificationReadMatch.notificationId, scopeCode: "notifications" });
+    writeJson(res, 200, platform.markNotificationRead({
+      companyId,
+      notificationId: notificationReadMatch.notificationId,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
+  const notificationAckMatch = matchPath(path, "/v1/notifications/:notificationId/ack");
+  if (req.method === "POST" && notificationAckMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "notification", objectId: notificationAckMatch.notificationId, scopeCode: "notifications" });
+    writeJson(res, 200, platform.acknowledgeNotification({
+      companyId,
+      notificationId: notificationAckMatch.notificationId,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
+  const notificationSnoozeMatch = matchPath(path, "/v1/notifications/:notificationId/snooze");
+  if (req.method === "POST" && notificationSnoozeMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "notification", objectId: notificationSnoozeMatch.notificationId, scopeCode: "notifications" });
+    writeJson(res, 200, platform.snoozeNotification({
+      companyId,
+      notificationId: notificationSnoozeMatch.notificationId,
+      until: body.until || null,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/activity") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "activity_entry", objectId: companyId, scopeCode: "activity" });
+    writeJson(res, 200, {
+      items: platform.listActivityEntries({
+        companyId,
+        objectType: optionalText(url.searchParams.get("objectType")),
+        objectId: optionalText(url.searchParams.get("objectId")),
+        visibilityScope: optionalText(url.searchParams.get("visibilityScope")),
+        relatedObjectType: optionalText(url.searchParams.get("relatedObjectType")),
+        relatedObjectId: optionalText(url.searchParams.get("relatedObjectId"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/review-center/queues") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_queue", objectId: companyId, scopeCode: "review_center" });
+    writeJson(res, 200, {
+      items: platform.listReviewCenterQueues({
+        companyId,
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/review-center/items") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: companyId, scopeCode: "review_center" });
+    writeJson(res, 200, {
+      items: platform.listReviewCenterItems({
+        companyId,
+        queueCode: optionalText(url.searchParams.get("queueCode")),
+        status: optionalText(url.searchParams.get("status")),
+        assignedUserId: optionalText(url.searchParams.get("assignedUserId")),
+        riskClass: optionalText(url.searchParams.get("riskClass")),
+        sourceDomainCode: optionalText(url.searchParams.get("sourceDomainCode"))
+      })
+    });
+    return true;
+  }
+
+  const reviewCenterItemMatch = matchPath(path, "/v1/review-center/items/:reviewItemId");
+  if (req.method === "GET" && reviewCenterItemMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: reviewCenterItemMatch.reviewItemId, scopeCode: "review_center" });
+    writeJson(res, 200, platform.getReviewCenterItem({
+      companyId,
+      reviewItemId: reviewCenterItemMatch.reviewItemId
+    }));
+    return true;
+  }
+
+  const reviewCenterClaimMatch = matchPath(path, "/v1/review-center/items/:reviewItemId/claim");
+  if (req.method === "POST" && reviewCenterClaimMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "review_item", objectId: reviewCenterClaimMatch.reviewItemId, scopeCode: "review_center" });
+    writeJson(res, 200, platform.claimReviewCenterItem({
+      companyId,
+      reviewItemId: reviewCenterClaimMatch.reviewItemId,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
+  const reviewCenterDecideMatch = matchPath(path, "/v1/review-center/items/:reviewItemId/decide");
+  if (req.method === "POST" && reviewCenterDecideMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "review_item", objectId: reviewCenterDecideMatch.reviewItemId, scopeCode: "review_center" });
+    writeJson(res, 200, platform.decideReviewCenterItem({
+      companyId,
+      reviewItemId: reviewCenterDecideMatch.reviewItemId,
+      decisionCode: body.decisionCode,
+      reasonCode: body.reasonCode,
+      note: body.note || null,
+      decisionPayload: body.decisionPayload || {},
+      evidenceRefs: body.evidenceRefs || [],
+      overrideReasonCode: body.overrideReasonCode || null,
+      resultingCommand: body.resultingCommand || null,
+      targetQueueCode: body.targetQueueCode || null,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
+  const documentClassificationCasesMatch = matchPath(path, "/v1/documents/:documentId/classification-cases");
+  if (req.method === "POST" && documentClassificationCasesMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "classification_case",
+      objectId: documentClassificationCasesMatch.documentId,
+      scopeCode: "document_classification"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createClassificationCase({
+        companyId,
+        documentId: documentClassificationCasesMatch.documentId,
+        sourceOcrRunId: body.sourceOcrRunId || null,
+        extractedFields: body.extractedFields || {},
+        lineInputs: body.lineInputs || [],
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && documentClassificationCasesMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "classification_case",
+      objectId: documentClassificationCasesMatch.documentId,
+      scopeCode: "document_classification"
+    });
+    writeJson(res, 200, {
+      items: platform.listClassificationCases({
+        companyId,
+        documentId: documentClassificationCasesMatch.documentId,
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  const documentClassificationCaseMatch = matchPath(path, "/v1/documents/:documentId/classification-cases/:classificationCaseId");
+  if (req.method === "GET" && documentClassificationCaseMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "classification_case",
+      objectId: documentClassificationCaseMatch.classificationCaseId,
+      scopeCode: "document_classification"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getClassificationCase({
+        companyId,
+        classificationCaseId: documentClassificationCaseMatch.classificationCaseId
+      })
+    );
+    return true;
+  }
+
+  const documentClassificationApproveMatch = matchPath(path, "/v1/documents/:documentId/classification-cases/:classificationCaseId/decide");
+  if (req.method === "POST" && documentClassificationApproveMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "classification_case",
+      objectId: documentClassificationApproveMatch.classificationCaseId,
+      scopeCode: "document_classification"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveClassificationCase({
+        companyId,
+        classificationCaseId: documentClassificationApproveMatch.classificationCaseId,
+        approvalNote: body.approvalNote || null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const documentClassificationDispatchMatch = matchPath(path, "/v1/documents/:documentId/classification-cases/:classificationCaseId/dispatch");
+  if (req.method === "POST" && documentClassificationDispatchMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "classification_case",
+      objectId: documentClassificationDispatchMatch.classificationCaseId,
+      scopeCode: "document_classification"
+    });
+    writeJson(
+      res,
+      200,
+      platform.dispatchTreatmentIntents({
+        companyId,
+        classificationCaseId: documentClassificationDispatchMatch.classificationCaseId,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const documentClassificationCorrectMatch = matchPath(path, "/v1/documents/:documentId/classification-cases/:classificationCaseId/correct");
+  if (req.method === "POST" && documentClassificationCorrectMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "classification_case",
+      objectId: documentClassificationCorrectMatch.classificationCaseId,
+      scopeCode: "document_classification"
+    });
+    writeJson(
+      res,
+      200,
+      platform.correctClassificationCase({
+        companyId,
+        classificationCaseId: documentClassificationCorrectMatch.classificationCaseId,
+        lineInputs: body.lineInputs || [],
+        extractedFields: body.extractedFields || {},
+        sourceOcrRunId: body.sourceOcrRunId || null,
+        reasonCode: body.reasonCode || "correction",
+        reasonNote: body.reasonNote || null,
+        actorId: principal.userId
+      })
+    );
     return true;
   }
 

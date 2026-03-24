@@ -1,0 +1,7 @@
+export const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+export const NOTIFICATION_STATUSES = Object.freeze(["created", "queued", "delivered", "read", "acknowledged", "snoozed", "expired", "cancelled"]);
+export const NOTIFICATION_RECIPIENT_TYPES = Object.freeze(["user", "team"]);
+export const NOTIFICATION_PRIORITY_CODES = Object.freeze(["low", "medium", "high", "critical"]);
+export const NOTIFICATION_CHANNEL_CODES = Object.freeze(["in_app", "email", "push"]);
+export const NOTIFICATION_DELIVERY_STATUSES = Object.freeze(["queued", "delivered", "failed", "cancelled"]);
+export const NOTIFICATION_ACTION_CODES = Object.freeze(["read", "acknowledge", "snooze", "cancel"]);

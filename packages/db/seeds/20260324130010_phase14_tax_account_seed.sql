@@ -1,0 +1,39 @@
+INSERT INTO tax_account_reconciliation_items (
+  reconciliation_item_id,
+  company_id,
+  liability_type_code,
+  source_domain_code,
+  source_object_type,
+  source_object_id,
+  source_reference,
+  period_key,
+  due_date,
+  currency_code,
+  expected_amount,
+  assessed_amount,
+  settled_amount,
+  status,
+  created_by_actor_id,
+  created_at,
+  updated_at
+)
+VALUES (
+  'f3f7c409-67d8-4d50-a8fc-9e5a7a7e1001',
+  '00000000-0000-4000-8000-000000000001',
+  'VAT',
+  'VAT',
+  'vat_declaration_run',
+  'vat_demo_2026_01',
+  'VAT-2026-01',
+  '2026-01',
+  '2026-02-12',
+  'SEK',
+  15000.00,
+  15000.00,
+  10000.00,
+  'partially_offset',
+  'seed',
+  NOW(),
+  NOW()
+)
+ON CONFLICT (reconciliation_item_id) DO NOTHING;
