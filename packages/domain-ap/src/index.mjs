@@ -1291,7 +1291,12 @@ export function createApEngine({
     const created = ledgerPlatform.createJournalEntry({
       companyId: invoice.companyId,
       journalDate: invoice.invoiceDate,
-      voucherSeriesCode: "E",
+      voucherSeriesCode: resolveApVoucherSeriesCode({
+        ledgerPlatform,
+        companyId: invoice.companyId,
+        purposeCode: "AP_INVOICE",
+        fallbackSeriesCode: "E"
+      }),
       sourceType: "AP_INVOICE",
       sourceId: invoice.supplierInvoiceId,
       actorId,
@@ -2354,7 +2359,12 @@ function postApLifecycleJournal({
   const created = ledgerPlatform.createJournalEntry({
     companyId,
     journalDate,
-    voucherSeriesCode: "E",
+    voucherSeriesCode: resolveApVoucherSeriesCode({
+      ledgerPlatform,
+      companyId,
+      purposeCode: "AP_PAYMENT",
+      fallbackSeriesCode: "E"
+    }),
     sourceType: "AP_PAYMENT",
     sourceId: requireText(sourceId, "source_id_required"),
     actorId,
@@ -2377,6 +2387,16 @@ function postApLifecycleJournal({
     actorId
   });
   return posted.journalEntry;
+}
+
+function resolveApVoucherSeriesCode({ ledgerPlatform, companyId, purposeCode, fallbackSeriesCode }) {
+  if (ledgerPlatform && typeof ledgerPlatform.resolveVoucherSeriesForPurpose === "function") {
+    return ledgerPlatform.resolveVoucherSeriesForPurpose({
+      companyId,
+      purposeCode
+    }).seriesCode;
+  }
+  return fallbackSeriesCode;
 }
 
 function buildSupplierInvoiceFingerprint({

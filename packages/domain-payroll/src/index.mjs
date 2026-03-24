@@ -984,7 +984,12 @@ export function createPayrollEngine({
     const created = ledgerPlatform.createJournalEntry({
       companyId: payRun.companyId,
       journalDate: payRun.payDate,
-      voucherSeriesCode: "H",
+      voucherSeriesCode: resolvePayrollVoucherSeriesCode({
+        ledgerPlatform,
+        companyId: payRun.companyId,
+        purposeCode: payRun.runType === "correction" ? "PAYROLL_CORRECTION" : "PAYROLL_RUN",
+        fallbackSeriesCode: "H"
+      }),
       sourceType: payRun.runType === "correction" ? "PAYROLL_CORRECTION" : "PAYROLL_RUN",
       sourceId: payRun.payRunId,
       actorId,
@@ -1139,7 +1144,12 @@ export function createPayrollEngine({
       const created = ledgerPlatform.createJournalEntry({
         companyId: batch.companyId,
         journalDate: matchedDate,
-        voucherSeriesCode: "H",
+        voucherSeriesCode: resolvePayrollVoucherSeriesCode({
+          ledgerPlatform,
+          companyId: batch.companyId,
+          purposeCode: "PAYROLL_PAYOUT_MATCH",
+          fallbackSeriesCode: "H"
+        }),
         sourceType: "PAYROLL_RUN",
         sourceId: `${payRun.payRunId}:bank_match`,
         actorId,
@@ -1478,6 +1488,16 @@ function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
       vacationLiabilityDeltaAmount
     }
   };
+}
+
+function resolvePayrollVoucherSeriesCode({ ledgerPlatform, companyId, purposeCode, fallbackSeriesCode }) {
+  if (ledgerPlatform && typeof ledgerPlatform.resolveVoucherSeriesForPurpose === "function") {
+    return ledgerPlatform.resolveVoucherSeriesForPurpose({
+      companyId,
+      purposeCode
+    }).seriesCode;
+  }
+  return fallbackSeriesCode;
 }
 
 function buildPayrollPayoutBatchModel({ state, payRun, companyBankAccount, hrPlatform }) {

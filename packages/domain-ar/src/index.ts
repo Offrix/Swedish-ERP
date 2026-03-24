@@ -19,6 +19,7 @@ export type ArInvoiceStatus =
   | "written_off"
   | "reversed";
 export type ArInvoiceDeliveryChannel = "pdf_email" | "peppol";
+export type ArInvoiceSeriesStatus = "active" | "paused" | "archived";
 export type ArPaymentLinkStatus = "active" | "consumed" | "expired" | "cancelled";
 export type ArOpenItemStatus = "open" | "partially_settled" | "settled" | "disputed" | "written_off" | "reversed";
 export type ArCollectionStage = "none" | "stage_1" | "stage_2" | "escalated" | "hold" | "closed";
@@ -268,6 +269,21 @@ export interface ArInvoicePaymentLink {
   readonly url: string;
   readonly expiresAt: string;
   readonly createdAt: string;
+}
+
+export interface ArInvoiceSeries {
+  readonly arInvoiceSeriesId: string;
+  readonly companyId: string;
+  readonly seriesCode: string;
+  readonly prefix: string;
+  readonly description: string;
+  readonly nextNumber: number;
+  readonly status: ArInvoiceSeriesStatus;
+  readonly invoiceTypeCodes: readonly ArInvoiceType[];
+  readonly voucherSeriesPurposeCode: string;
+  readonly importedSequencePreservationEnabled: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
 }
 
 export interface ArInvoice {
@@ -526,6 +542,7 @@ export interface AccountsReceivableSnapshot {
   readonly priceLists: readonly ArPriceList[];
   readonly quotes: readonly ArQuote[];
   readonly contracts: readonly ArContract[];
+  readonly invoiceSeries: readonly ArInvoiceSeries[];
   readonly invoices: readonly ArInvoice[];
   readonly paymentLinks: readonly ArInvoicePaymentLink[];
   readonly openItems: readonly ArOpenItem[];

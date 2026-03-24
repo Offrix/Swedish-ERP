@@ -39,6 +39,7 @@ export const AR_UNMATCHED_RECEIPT_STATUSES = Object.freeze(["unmatched", "partia
 export const AR_DUNNING_RUN_STATUSES = Object.freeze(["draft", "executed", "reversed", "cancelled"]);
 export const AR_DUNNING_ITEM_ACTION_STATUSES = Object.freeze(["proposed", "booked", "skipped", "reversed"]);
 export const AR_AGING_BUCKET_CODES = Object.freeze(["current", "1_30", "31_60", "61_90", "91_plus"]);
+export const AR_INVOICE_SERIES_STATUSES = Object.freeze(["active", "paused", "archived"]);
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 const DEFAULT_BANK_ACCOUNT_NUMBER = "1110";
@@ -48,6 +49,28 @@ const DEFAULT_SMALL_DIFFERENCE_ACCOUNT_NUMBER = "6900";
 const DEFAULT_SMALL_DIFFERENCE_POLICY_LIMIT = 100;
 const DEFAULT_REMINDER_FEE_AMOUNT = 60;
 const DEFAULT_STATUTORY_INTEREST_PERCENT = 8;
+const DEFAULT_INVOICE_SERIES_DEFINITIONS = Object.freeze([
+  Object.freeze({
+    seriesCode: "B",
+    description: "Customer invoice numbering",
+    prefix: "INV-",
+    nextNumber: 1,
+    status: "active",
+    invoiceTypeCodes: Object.freeze(["standard", "partial", "subscription"]),
+    voucherSeriesPurposeCode: "AR_INVOICE",
+    importedSequencePreservationEnabled: true
+  }),
+  Object.freeze({
+    seriesCode: "C",
+    description: "Customer credit note numbering",
+    prefix: "CRN-",
+    nextNumber: 1,
+    status: "active",
+    invoiceTypeCodes: Object.freeze(["credit_note"]),
+    voucherSeriesPurposeCode: "AR_CREDIT_NOTE",
+    importedSequencePreservationEnabled: true
+  })
+]);
 const EU_COUNTRY_CODES = new Set([
   "AT",
   "BE",
@@ -109,6 +132,8 @@ export function createArEngine({
     contractIdsByCompany: new Map(),
     contractIdsByCompanyNo: new Map(),
     invoices: new Map(),
+    invoiceSeries: new Map(),
+    invoiceSeriesIdsByCompanyCode: new Map(),
     invoiceIdsByCompany: new Map(),
     invoiceIdsByCompanyNo: new Map(),
     invoiceIdsByCompanyGenerationKey: new Map(),
@@ -180,6 +205,9 @@ export function createArEngine({
     getContract,
     createContract,
     transitionContractStatus,
+    listInvoiceSeries,
+    upsertInvoiceSeries,
+    reserveImportedInvoiceNumber,
     listInvoices,
     getInvoice,
     createInvoice,
@@ -785,6 +813,135 @@ export function createArEngine({
     return copy(contract);
   }
 
+  function listInvoiceSeries({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    ensureDefaultInvoiceSeriesForCompany(state, resolvedCompanyId, clock);
+    return [...state.invoiceSeries.values()]
+      .filter((series) => series.companyId === resolvedCompanyId)
+      .sort((left, right) => left.seriesCode.localeCompare(right.seriesCode))
+      .map(copy);
+  }
+
+  function upsertInvoiceSeries({
+    companyId,
+    seriesCode,
+    prefix = null,
+    description = null,
+    nextNumber = null,
+    status = null,
+    invoiceTypeCodes = null,
+    voucherSeriesPurposeCode = null,
+    importedSequencePreservationEnabled = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    ensureDefaultInvoiceSeriesForCompany(state, resolvedCompanyId, clock);
+    const normalizedSeriesCode = normalizeInvoiceSeriesCode(seriesCode, "ar_invoice_series_code_required");
+    const existing = findInvoiceSeriesRecord(state, resolvedCompanyId, normalizedSeriesCode);
+    const resolvedStatus = normalizeInvoiceSeriesStatus(status ?? existing?.status ?? "active");
+    const resolvedInvoiceTypeCodes = normalizeInvoiceSeriesTypeCodes(
+      invoiceTypeCodes ?? existing?.invoiceTypeCodes ?? defaultInvoiceTypeCodes(normalizedSeriesCode)
+    );
+    const resolvedVoucherSeriesPurposeCode = normalizeInvoiceVoucherPurposeCode(
+      voucherSeriesPurposeCode ?? existing?.voucherSeriesPurposeCode ?? defaultVoucherPurposeForInvoiceTypes(resolvedInvoiceTypeCodes)
+    );
+
+    ensureInvoiceSeriesTypeAvailability({
+      state,
+      companyId: resolvedCompanyId,
+      invoiceTypeCodes: resolvedInvoiceTypeCodes,
+      currentSeriesId: existing?.arInvoiceSeriesId || null,
+      status: resolvedStatus
+    });
+    ensureLedgerPurposeAvailableForInvoiceSeries({
+      ledgerPlatform,
+      companyId: resolvedCompanyId,
+      voucherSeriesPurposeCode: resolvedVoucherSeriesPurposeCode,
+      status: resolvedStatus
+    });
+
+    const now = nowIso(clock);
+    const record = existing || {
+      arInvoiceSeriesId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      seriesCode: normalizedSeriesCode,
+      createdAt: now
+    };
+    record.prefix = normalizeInvoiceSeriesPrefix(prefix ?? existing?.prefix ?? defaultInvoicePrefix(normalizedSeriesCode));
+    record.description = normalizeInvoiceSeriesDescription(
+      description ?? existing?.description ?? defaultInvoiceSeriesDescription(normalizedSeriesCode)
+    );
+    record.nextNumber = normalizePositiveInteger(nextNumber ?? existing?.nextNumber ?? 1, "ar_invoice_series_next_number_invalid");
+    record.status = resolvedStatus;
+    record.invoiceTypeCodes = resolvedInvoiceTypeCodes;
+    record.voucherSeriesPurposeCode = resolvedVoucherSeriesPurposeCode;
+    record.importedSequencePreservationEnabled =
+      importedSequencePreservationEnabled == null
+        ? existing?.importedSequencePreservationEnabled ?? true
+        : Boolean(importedSequencePreservationEnabled);
+    record.updatedAt = now;
+
+    state.invoiceSeries.set(record.arInvoiceSeriesId, record);
+    state.invoiceSeriesIdsByCompanyCode.set(toCompanyScopedKey(resolvedCompanyId, normalizedSeriesCode), record.arInvoiceSeriesId);
+
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId,
+      correlationId,
+      action: existing ? "ar.invoice_series.updated" : "ar.invoice_series.created",
+      entityType: "ar_invoice_series",
+      entityId: record.arInvoiceSeriesId,
+      explanation: `${existing ? "Updated" : "Created"} invoice series ${record.seriesCode}.`
+    });
+
+    return copy(record);
+  }
+
+  function reserveImportedInvoiceNumber({
+    companyId,
+    seriesCode,
+    importedInvoiceSequenceNumber,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    ensureDefaultInvoiceSeriesForCompany(state, resolvedCompanyId, clock);
+    const series = requireInvoiceSeriesRecord(state, resolvedCompanyId, seriesCode);
+    const resolvedSequenceNumber = normalizePositiveInteger(
+      importedInvoiceSequenceNumber,
+      "ar_imported_invoice_sequence_number_invalid"
+    );
+    if (series.importedSequencePreservationEnabled !== true) {
+      throw createError(
+        409,
+        "ar_invoice_series_import_preservation_disabled",
+        `Invoice series ${series.seriesCode} does not allow imported sequence preservation.`
+      );
+    }
+
+    const nextNumberAdjusted = series.nextNumber <= resolvedSequenceNumber;
+    if (nextNumberAdjusted) {
+      series.nextNumber = resolvedSequenceNumber + 1;
+      series.updatedAt = nowIso(clock);
+    }
+
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId,
+      correlationId,
+      action: "ar.invoice_series.imported_number_reserved",
+      entityType: "ar_invoice_series",
+      entityId: series.arInvoiceSeriesId,
+      explanation: `Reserved imported invoice sequence ${resolvedSequenceNumber} in series ${series.seriesCode}.`
+    });
+
+    return {
+      invoiceSeries: copy(series),
+      nextNumberAdjusted
+    };
+  }
+
   function listInvoices({ companyId } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return (state.invoiceIdsByCompany.get(resolvedCompanyId) || [])
@@ -959,19 +1116,35 @@ export function createArEngine({
     if (customer.customerStatus === "blocked" || customer.blockedForInvoicing === true) {
       throw createError(409, "invoice_validation_failed", "Blocked customers cannot be invoiced.");
     }
+    ensureDefaultInvoiceSeriesForCompany(state, invoice.companyId, clock);
     invoice.validatedAt = invoice.validatedAt || nowIso(clock);
     invoice.approvedAt = invoice.approvedAt || nowIso(clock);
     invoice.status = "approved";
-    const series = resolveInvoiceSeries(invoice.invoiceType);
+    const series = resolveConfiguredInvoiceSeries(state, invoice.companyId, invoice.invoiceType, invoice.invoiceSeriesCode || null, clock);
     if (!invoice.invoiceNumber) {
-      const sequenceNumber = nextInvoiceSeriesNumber(state, invoice.companyId, series.seriesCode);
+      const sequenceNumber = nextInvoiceSeriesNumber(series, clock);
       invoice.invoiceSeriesCode = series.seriesCode;
       invoice.invoiceSequenceNumber = sequenceNumber;
       invoice.invoiceNumber = `${series.prefix}${String(sequenceNumber).padStart(5, "0")}`;
       state.invoiceIdsByCompanyNo.set(toCompanyScopedKey(invoice.companyId, invoice.invoiceNumber), invoice.customerInvoiceId);
+    } else if (invoice.invoiceSequenceNumber) {
+      reserveImportedInvoiceNumber({
+        companyId: invoice.companyId,
+        seriesCode: invoice.invoiceSeriesCode || series.seriesCode,
+        importedInvoiceSequenceNumber: invoice.invoiceSequenceNumber,
+        actorId,
+        correlationId
+      });
     }
+    invoice.invoiceSeriesCode = invoice.invoiceSeriesCode || series.seriesCode;
     invoice.issueIdempotencyKey = invoice.issueIdempotencyKey || `invoice.issue:${invoice.invoiceGenerationKey}`;
     invoice.paymentReference = invoice.paymentReference || String(invoice.invoiceSequenceNumber || 0).padStart(10, "0");
+    const voucherSeriesCode = resolveLedgerVoucherSeriesCode({
+      ledgerPlatform,
+      companyId: invoice.companyId,
+      purposeCode: series.voucherSeriesPurposeCode,
+      fallbackSeriesCode: series.seriesCode
+    });
 
     const journalLines = buildInvoiceJournalLines({
       vatPlatform,
@@ -982,7 +1155,7 @@ export function createArEngine({
     const created = ledgerPlatform.createJournalEntry({
       companyId: invoice.companyId,
       journalDate: invoice.issueDate,
-      voucherSeriesCode: series.seriesCode,
+      voucherSeriesCode,
       sourceType: resolveInvoiceSourceType(invoice.invoiceType),
       sourceId: invoice.customerInvoiceId,
       actorId,
@@ -1319,7 +1492,8 @@ export function createArEngine({
       ledgerPlatform,
       companyId: openItem.companyId,
       journalDate: resolvedAllocatedOn,
-      voucherSeriesCode: "D",
+      voucherSeriesPurposeCode: "AR_PAYMENT",
+      fallbackVoucherSeriesCode: "D",
       sourceType: "AR_PAYMENT",
       sourceId: allocation.arAllocationId,
       actorId,
@@ -1409,7 +1583,8 @@ export function createArEngine({
       ledgerPlatform,
       companyId: allocation.companyId,
       journalDate: resolvedReversedOn,
-      voucherSeriesCode: "D",
+      voucherSeriesPurposeCode: "AR_PAYMENT",
+      fallbackVoucherSeriesCode: "D",
       sourceType: "AR_PAYMENT",
       sourceId: `reversal:${allocation.arAllocationId}`,
       actorId,
@@ -1718,7 +1893,8 @@ export function createArEngine({
           ledgerPlatform,
           companyId: resolvedCompanyId,
           journalDate: resolvedRunDate,
-          voucherSeriesCode: "B",
+          voucherSeriesPurposeCode: "AR_DUNNING",
+          fallbackVoucherSeriesCode: "B",
           sourceType: "AR_INVOICE",
           sourceId: `${openItem.arOpenItemId}:${resolvedStageCode}`,
           actorId,
@@ -1832,7 +2008,8 @@ export function createArEngine({
       ledgerPlatform,
       companyId: openItem.companyId,
       journalDate: resolvedWriteoffDate,
-      voucherSeriesCode: "V",
+      voucherSeriesPurposeCode: "AR_WRITEOFF",
+      fallbackVoucherSeriesCode: "V",
       sourceType: "MANUAL_JOURNAL",
       sourceId: `writeoff:${writeoff.arWriteoffId}`,
       actorId,
@@ -2046,6 +2223,7 @@ export function createArEngine({
       priceLists: [...state.priceLists.values()],
       quotes: [...state.quotes.values()],
       contracts: [...state.contracts.values()],
+      invoiceSeries: [...state.invoiceSeries.values()],
       invoices: [...state.invoices.values()],
       paymentLinks: [...state.paymentLinks.values()],
       openItems: [...state.openItems.values()],
@@ -2063,6 +2241,7 @@ export function createArEngine({
   }
 
   function seedDemoState() {
+    ensureDefaultInvoiceSeriesForCompany(state, DEMO_COMPANY_ID, clock);
     const customer = createCustomer({
       companyId: DEMO_COMPANY_ID,
       customerNo: "CUST-1000",
@@ -2651,11 +2830,30 @@ function buildWriteoffJournalLines({ openItem, ledgerAccountNumber, writeoffAmou
   ];
 }
 
-function postArJournal({ ledgerPlatform, companyId, journalDate, voucherSeriesCode, sourceType, sourceId, actorId, idempotencyKey, description, lines }) {
+function postArJournal({
+  ledgerPlatform,
+  companyId,
+  journalDate,
+  voucherSeriesCode = null,
+  voucherSeriesPurposeCode = null,
+  fallbackVoucherSeriesCode = null,
+  sourceType,
+  sourceId,
+  actorId,
+  idempotencyKey,
+  description,
+  lines
+}) {
   const created = ledgerPlatform.createJournalEntry({
     companyId,
     journalDate,
-    voucherSeriesCode,
+    voucherSeriesCode: resolveLedgerVoucherSeriesCode({
+      ledgerPlatform,
+      companyId,
+      explicitSeriesCode: voucherSeriesCode,
+      purposeCode: voucherSeriesPurposeCode,
+      fallbackSeriesCode: fallbackVoucherSeriesCode
+    }),
     sourceType,
     sourceId,
     actorId,
@@ -3108,27 +3306,216 @@ function resolveInvoiceSourceType(invoiceType) {
   return invoiceType === "credit_note" ? "AR_CREDIT_NOTE" : "AR_INVOICE";
 }
 
-function resolveInvoiceSeries(invoiceType) {
-  if (invoiceType === "credit_note") {
-    return {
-      seriesCode: "C",
-      prefix: "CRN-"
+function ensureDefaultInvoiceSeriesForCompany(state, companyId, clock = () => new Date()) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  for (const definition of DEFAULT_INVOICE_SERIES_DEFINITIONS) {
+    if (findInvoiceSeriesRecord(state, resolvedCompanyId, definition.seriesCode)) {
+      continue;
+    }
+    const now = nowIso(clock);
+    const record = {
+      arInvoiceSeriesId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      seriesCode: definition.seriesCode,
+      prefix: definition.prefix,
+      description: definition.description,
+      nextNumber: definition.nextNumber,
+      status: definition.status,
+      invoiceTypeCodes: [...definition.invoiceTypeCodes],
+      voucherSeriesPurposeCode: definition.voucherSeriesPurposeCode,
+      importedSequencePreservationEnabled: definition.importedSequencePreservationEnabled,
+      createdAt: now,
+      updatedAt: now
     };
+    state.invoiceSeries.set(record.arInvoiceSeriesId, record);
+    state.invoiceSeriesIdsByCompanyCode.set(toCompanyScopedKey(resolvedCompanyId, record.seriesCode), record.arInvoiceSeriesId);
   }
-  return {
-    seriesCode: "B",
-    prefix: "INV-"
-  };
 }
 
-function nextInvoiceSeriesNumber(state, companyId, seriesCode) {
-  if (!state.countersByCompany.has(companyId)) {
-    state.countersByCompany.set(companyId, {});
+function findInvoiceSeriesRecord(state, companyId, seriesCode) {
+  const normalizedSeriesCode = normalizeInvoiceSeriesCode(seriesCode, "ar_invoice_series_code_required");
+  const seriesId = state.invoiceSeriesIdsByCompanyCode.get(toCompanyScopedKey(companyId, normalizedSeriesCode));
+  return seriesId ? state.invoiceSeries.get(seriesId) : null;
+}
+
+function requireInvoiceSeriesRecord(state, companyId, seriesCode) {
+  const series = findInvoiceSeriesRecord(state, companyId, seriesCode);
+  if (!series) {
+    const normalizedSeriesCode = normalizeInvoiceSeriesCode(seriesCode, "ar_invoice_series_code_required");
+    throw createError(404, "ar_invoice_series_not_found", `Invoice series ${normalizedSeriesCode} was not found.`);
   }
-  const counters = state.countersByCompany.get(companyId);
-  const counterKey = `invoice_series_${seriesCode}`;
-  counters[counterKey] = (counters[counterKey] || 0) + 1;
-  return counters[counterKey];
+  return series;
+}
+
+function resolveConfiguredInvoiceSeries(state, companyId, invoiceType, preferredSeriesCode = null, clock = () => new Date()) {
+  ensureDefaultInvoiceSeriesForCompany(state, companyId, clock);
+  const resolvedInvoiceType = assertAllowed(invoiceType, AR_INVOICE_TYPES, "ar_invoice_type_invalid");
+  if (preferredSeriesCode) {
+    const preferredSeries = requireInvoiceSeriesRecord(state, companyId, preferredSeriesCode);
+    ensureInvoiceSeriesUsable(preferredSeries);
+    if (!preferredSeries.invoiceTypeCodes.includes(resolvedInvoiceType)) {
+      throw createError(
+        409,
+        "ar_invoice_series_type_mismatch",
+        `Invoice series ${preferredSeries.seriesCode} is not configured for invoice type ${resolvedInvoiceType}.`
+      );
+    }
+    return preferredSeries;
+  }
+
+  const candidates = [...state.invoiceSeries.values()]
+    .filter((series) => series.companyId === companyId)
+    .filter((series) => series.status === "active")
+    .filter((series) => series.invoiceTypeCodes.includes(resolvedInvoiceType))
+    .sort((left, right) => left.seriesCode.localeCompare(right.seriesCode));
+  if (candidates.length === 0) {
+    throw createError(404, "ar_invoice_series_not_configured", `No active invoice series handles invoice type ${resolvedInvoiceType}.`);
+  }
+  if (candidates.length > 1) {
+    throw createError(
+      409,
+      "ar_invoice_series_ambiguous",
+      `Multiple active invoice series handle invoice type ${resolvedInvoiceType}.`
+    );
+  }
+  return candidates[0];
+}
+
+function nextInvoiceSeriesNumber(series, clock = () => new Date()) {
+  ensureInvoiceSeriesUsable(series);
+  const nextNumber = normalizePositiveInteger(series.nextNumber, "ar_invoice_series_next_number_invalid");
+  series.nextNumber = nextNumber + 1;
+  series.updatedAt = nowIso(clock);
+  return nextNumber;
+}
+
+function ensureInvoiceSeriesUsable(series) {
+  if (!series || series.status !== "active") {
+    throw createError(409, "ar_invoice_series_not_usable", "Invoice series is not active.");
+  }
+}
+
+function ensureInvoiceSeriesTypeAvailability({ state, companyId, invoiceTypeCodes, currentSeriesId = null, status }) {
+  if (status !== "active") {
+    return;
+  }
+  for (const invoiceTypeCode of invoiceTypeCodes) {
+    const conflictingSeries = [...state.invoiceSeries.values()]
+      .filter((series) => series.companyId === companyId)
+      .filter((series) => series.status === "active")
+      .filter((series) => series.arInvoiceSeriesId !== currentSeriesId)
+      .find((series) => series.invoiceTypeCodes.includes(invoiceTypeCode));
+    if (conflictingSeries) {
+      throw createError(
+        409,
+        "ar_invoice_series_type_conflict",
+        `Invoice type ${invoiceTypeCode} is already assigned to active series ${conflictingSeries.seriesCode}.`
+      );
+    }
+  }
+}
+
+function ensureLedgerPurposeAvailableForInvoiceSeries({ ledgerPlatform, companyId, voucherSeriesPurposeCode, status }) {
+  if (status !== "active" || !ledgerPlatform || typeof ledgerPlatform.resolveVoucherSeriesForPurpose !== "function") {
+    return;
+  }
+  try {
+    ledgerPlatform.resolveVoucherSeriesForPurpose({
+      companyId,
+      purposeCode: voucherSeriesPurposeCode
+    });
+  } catch (error) {
+    throw createError(
+      error.status || 409,
+      error.code || "ar_invoice_series_voucher_purpose_invalid",
+      `Invoice series requires available ledger purpose ${voucherSeriesPurposeCode}.`
+    );
+  }
+}
+
+function resolveLedgerVoucherSeriesCode({
+  ledgerPlatform,
+  companyId,
+  explicitSeriesCode = null,
+  purposeCode = null,
+  fallbackSeriesCode = null
+}) {
+  if (explicitSeriesCode) {
+    return normalizeInvoiceSeriesCode(explicitSeriesCode, "voucher_series_code_required");
+  }
+  if (purposeCode && ledgerPlatform && typeof ledgerPlatform.resolveVoucherSeriesForPurpose === "function") {
+    return ledgerPlatform.resolveVoucherSeriesForPurpose({
+      companyId,
+      purposeCode
+    }).seriesCode;
+  }
+  return normalizeInvoiceSeriesCode(fallbackSeriesCode, "voucher_series_code_required");
+}
+
+function normalizeInvoiceSeriesCode(value, code) {
+  const normalized = requireText(value, code).toUpperCase();
+  if (!/^[A-Z0-9_-]{1,20}$/.test(normalized)) {
+    throw createError(400, code, "Invoice series code format is invalid.");
+  }
+  return normalized;
+}
+
+function normalizeInvoiceSeriesPrefix(value) {
+  if (value == null) {
+    return "";
+  }
+  const normalized = String(value).trim().toUpperCase();
+  if (normalized.length > 20) {
+    throw createError(400, "ar_invoice_series_prefix_invalid", "Invoice series prefix must be 20 characters or fewer.");
+  }
+  return normalized;
+}
+
+function normalizeInvoiceSeriesDescription(value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    throw createError(400, "ar_invoice_series_description_required", "Invoice series description is required.");
+  }
+  return normalized;
+}
+
+function normalizeInvoiceSeriesStatus(value) {
+  const normalized = requireText(value, "ar_invoice_series_status_required");
+  if (!AR_INVOICE_SERIES_STATUSES.includes(normalized)) {
+    throw createError(400, "ar_invoice_series_status_invalid", `Unsupported invoice series status ${normalized}.`);
+  }
+  return normalized;
+}
+
+function normalizeInvoiceSeriesTypeCodes(values) {
+  if (!Array.isArray(values) || values.length === 0) {
+    throw createError(400, "ar_invoice_series_types_invalid", "Invoice series must include at least one invoice type.");
+  }
+  return [...new Set(values.map((value) => assertAllowed(value, AR_INVOICE_TYPES, "ar_invoice_type_invalid")))].sort();
+}
+
+function normalizeInvoiceVoucherPurposeCode(value) {
+  const normalized = requireText(value, "ar_invoice_series_voucher_purpose_required").toUpperCase();
+  if (!/^[A-Z0-9_:-]{2,64}$/.test(normalized)) {
+    throw createError(400, "ar_invoice_series_voucher_purpose_invalid", "Invoice series voucher purpose code format is invalid.");
+  }
+  return normalized;
+}
+
+function defaultInvoiceSeriesDescription(seriesCode) {
+  return seriesCode === "C" ? "Customer credit note numbering" : "Customer invoice numbering";
+}
+
+function defaultInvoicePrefix(seriesCode) {
+  return seriesCode === "C" ? "CRN-" : "INV-";
+}
+
+function defaultInvoiceTypeCodes(seriesCode) {
+  return seriesCode === "C" ? ["credit_note"] : ["standard", "partial", "subscription"];
+}
+
+function defaultVoucherPurposeForInvoiceTypes(invoiceTypeCodes) {
+  return invoiceTypeCodes.length === 1 && invoiceTypeCodes[0] === "credit_note" ? "AR_CREDIT_NOTE" : "AR_INVOICE";
 }
 
 function resolveInvoiceSourceDescriptor({ customer, contract, sourceQuoteId, originalInvoice, invoiceType, issueDate }) {
@@ -3598,6 +3985,14 @@ function normalizePositiveNumber(value, code) {
     throw createError(400, code, `${code} must be greater than zero.`);
   }
   return roundMoney(number);
+}
+
+function normalizePositiveInteger(value, code) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) {
+    throw createError(400, code, `${code} must be a positive integer.`);
+  }
+  return number;
 }
 
 function addDaysIso(date, days) {

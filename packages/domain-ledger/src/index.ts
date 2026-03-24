@@ -1,31 +1,7 @@
 export type LedgerState = "draft" | "validated" | "posted" | "reversed" | "locked_by_period";
-export type VoucherSeriesCode =
-  | "A"
-  | "B"
-  | "C"
-  | "D"
-  | "E"
-  | "F"
-  | "G"
-  | "H"
-  | "I"
-  | "J"
-  | "K"
-  | "L"
-  | "M"
-  | "N"
-  | "O"
-  | "P"
-  | "Q"
-  | "R"
-  | "S"
-  | "T"
-  | "U"
-  | "V"
-  | "W"
-  | "X"
-  | "Y"
-  | "Z";
+export type VoucherSeriesCode = string;
+export type VoucherSeriesPurposeCode = string;
+export type VoucherSeriesStatus = "active" | "paused" | "archived";
 
 export type PostingSourceType =
   | "AR_INVOICE"
@@ -74,7 +50,9 @@ export interface VoucherSeries {
   readonly seriesCode: VoucherSeriesCode;
   readonly description: string;
   readonly nextNumber: number;
-  readonly status: string;
+  readonly status: VoucherSeriesStatus;
+  readonly purposeCodes: readonly VoucherSeriesPurposeCode[];
+  readonly importedSequencePreservationEnabled: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
 }

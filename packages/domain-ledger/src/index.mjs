@@ -4,6 +4,18 @@ export const LEDGER_STATES = Object.freeze(["draft", "validated", "posted", "rev
 export const DEFAULT_LEDGER_CURRENCY = "SEK";
 export const DEFAULT_CHART_TEMPLATE_ID = "DSAM-2026";
 export const DEFAULT_VOUCHER_SERIES_CODES = Object.freeze("ABCDEFGHIJKLMNOPQRSTUVWXYZ".split(""));
+export const VOUCHER_SERIES_STATUSES = Object.freeze(["active", "paused", "archived"]);
+export const DEFAULT_VOUCHER_SERIES_PURPOSE_MAP = Object.freeze({
+  A: Object.freeze(["LEDGER_MANUAL", "LEDGER_CORRECTION"]),
+  B: Object.freeze(["AR_INVOICE", "AR_DUNNING"]),
+  C: Object.freeze(["AR_CREDIT_NOTE"]),
+  D: Object.freeze(["AR_PAYMENT"]),
+  E: Object.freeze(["AP_INVOICE", "AP_PAYMENT"]),
+  H: Object.freeze(["PAYROLL_RUN", "PAYROLL_CORRECTION", "PAYROLL_PAYOUT_MATCH"]),
+  I: Object.freeze(["VAT_SETTLEMENT"]),
+  V: Object.freeze(["LEDGER_REVERSAL", "AR_WRITEOFF"]),
+  W: Object.freeze(["HISTORICAL_IMPORT"])
+});
 export const POSTING_SOURCE_TYPES = Object.freeze([
   "AR_INVOICE",
   "AR_CREDIT_NOTE",
@@ -1650,6 +1662,10 @@ export function createLedgerEngine({
     ensureAccountingYearPeriod,
     listLedgerAccounts,
     listVoucherSeries,
+    getVoucherSeries,
+    upsertVoucherSeries,
+    reserveImportedVoucherNumber,
+    resolveVoucherSeriesForPurpose,
     listAccountingPeriods,
     listLedgerDimensions,
     lockAccountingPeriod,
@@ -1710,6 +1726,8 @@ export function createLedgerEngine({
         description: defaultSeriesDescription(seriesCode),
         nextNumber: 1,
         status: "active",
+        purposeCodes: defaultSeriesPurposeCodes(seriesCode),
+        importedSequencePreservationEnabled: true,
         createdAt: now,
         updatedAt: now
       };
@@ -1754,6 +1772,163 @@ export function createLedgerEngine({
       .filter((voucherSeries) => voucherSeries.companyId === resolvedCompanyId)
       .sort((left, right) => left.seriesCode.localeCompare(right.seriesCode))
       .map(copy);
+  }
+
+  function getVoucherSeries({ companyId, seriesCode } = {}) {
+    return copy(requireVoucherSeries(requireText(companyId, "company_id_required"), seriesCode));
+  }
+
+  function upsertVoucherSeries({
+    companyId,
+    seriesCode,
+    description = null,
+    nextNumber = null,
+    status = null,
+    purposeCodes = null,
+    importedSequencePreservationEnabled = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedSeriesCode = normalizeSeriesCode(seriesCode, "voucher_series_code_required");
+    const now = nowIso();
+    const existing = findVoucherSeries(state, resolvedCompanyId, resolvedSeriesCode);
+    const resolvedStatus = normalizeVoucherSeriesStatus(status ?? existing?.status ?? "active");
+    const resolvedPurposeCodes = normalizeVoucherSeriesPurposeCodes(
+      purposeCodes ?? existing?.purposeCodes ?? defaultSeriesPurposeCodes(resolvedSeriesCode)
+    );
+
+    ensureVoucherSeriesPurposeAvailability({
+      state,
+      companyId: resolvedCompanyId,
+      purposeCodes: resolvedPurposeCodes,
+      currentVoucherSeriesId: existing?.voucherSeriesId || null,
+      status: resolvedStatus
+    });
+
+    const record = existing || {
+      voucherSeriesId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      seriesCode: resolvedSeriesCode,
+      createdAt: now
+    };
+    record.description = normalizeVoucherSeriesDescription(
+      description ?? existing?.description ?? defaultSeriesDescription(resolvedSeriesCode)
+    );
+    record.nextNumber = normalizePositiveInteger(
+      nextNumber ?? existing?.nextNumber ?? 1,
+      "voucher_series_next_number_invalid"
+    );
+    record.status = resolvedStatus;
+    record.purposeCodes = resolvedPurposeCodes;
+    record.importedSequencePreservationEnabled =
+      importedSequencePreservationEnabled == null
+        ? existing?.importedSequencePreservationEnabled ?? true
+        : Boolean(importedSequencePreservationEnabled);
+    record.updatedAt = now;
+
+    state.voucherSeries.set(record.voucherSeriesId, record);
+    state.voucherSeriesIdsByCompanyCode.set(toCompanyScopedKey(resolvedCompanyId, resolvedSeriesCode), record.voucherSeriesId);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: existing ? "ledger.voucher_series.updated" : "ledger.voucher_series.created",
+      entityType: "voucher_series",
+      entityId: record.voucherSeriesId,
+      explanation: `${existing ? "Updated" : "Created"} voucher series ${record.seriesCode}.`
+    });
+
+    return copy(record);
+  }
+
+  function reserveImportedVoucherNumber({
+    companyId,
+    seriesCode,
+    importedVoucherNumber,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const series = requireVoucherSeries(resolvedCompanyId, seriesCode);
+    const resolvedImportedVoucherNumber = normalizePositiveInteger(
+      importedVoucherNumber,
+      "imported_voucher_number_invalid"
+    );
+    if (series.importedSequencePreservationEnabled !== true) {
+      throw httpError(
+        409,
+        "voucher_series_import_preservation_disabled",
+        `Voucher series ${series.seriesCode} does not allow imported sequence preservation.`
+      );
+    }
+
+    const nextNumberAdjusted = series.nextNumber <= resolvedImportedVoucherNumber;
+    if (nextNumberAdjusted) {
+      series.nextNumber = resolvedImportedVoucherNumber + 1;
+      series.updatedAt = nowIso();
+    }
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "ledger.voucher_series.imported_number_reserved",
+      entityType: "voucher_series",
+      entityId: series.voucherSeriesId,
+      explanation: `Reserved imported voucher number ${resolvedImportedVoucherNumber} in series ${series.seriesCode}.`
+    });
+
+    return {
+      voucherSeries: copy(series),
+      nextNumberAdjusted
+    };
+  }
+
+  function resolveVoucherSeriesForPurpose({
+    companyId,
+    purposeCode,
+    preferredSeriesCode = null,
+    includePaused = false
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedPurposeCode = normalizeVoucherSeriesPurposeCode(purposeCode, "voucher_series_purpose_code_required");
+
+    if (preferredSeriesCode) {
+      const preferredSeries = requireVoucherSeries(resolvedCompanyId, preferredSeriesCode);
+      ensureVoucherSeriesUsable(preferredSeries, includePaused);
+      if (!preferredSeries.purposeCodes.includes(resolvedPurposeCode)) {
+        throw httpError(
+          409,
+          "voucher_series_purpose_mismatch",
+          `Voucher series ${preferredSeries.seriesCode} is not configured for purpose ${resolvedPurposeCode}.`
+        );
+      }
+      return copy(preferredSeries);
+    }
+
+    const candidates = listVoucherSeriesForPurpose({
+      state,
+      companyId: resolvedCompanyId,
+      purposeCode: resolvedPurposeCode,
+      includePaused
+    });
+    if (candidates.length === 0) {
+      throw httpError(
+        404,
+        "voucher_series_purpose_not_configured",
+        `No voucher series is configured for purpose ${resolvedPurposeCode}.`
+      );
+    }
+    if (candidates.length > 1) {
+      throw httpError(
+        409,
+        "voucher_series_purpose_ambiguous",
+        `Multiple voucher series are active for purpose ${resolvedPurposeCode}.`
+      );
+    }
+    return copy(candidates[0]);
   }
 
   function listAccountingPeriods({ companyId } = {}) {
@@ -2139,7 +2314,7 @@ export function createLedgerEngine({
     reasonCode,
     correctionKey,
     journalDate = null,
-    voucherSeriesCode = "V",
+    voucherSeriesCode = null,
     metadataJson = {},
     correlationId = crypto.randomUUID()
   } = {}) {
@@ -2169,10 +2344,16 @@ export function createLedgerEngine({
       originalEntry,
       requestedJournalDate: journalDate
     });
+    const resolvedVoucherSeriesCode = voucherSeriesCode
+      ? normalizeSeriesCode(voucherSeriesCode, "voucher_series_code_required")
+      : resolveVoucherSeriesForPurpose({
+          companyId: originalEntry.companyId,
+          purposeCode: "LEDGER_REVERSAL"
+        }).seriesCode;
     const reversalCreate = createJournalEntry({
       companyId: originalEntry.companyId,
       journalDate: target.journalDate,
-      voucherSeriesCode,
+      voucherSeriesCode: resolvedVoucherSeriesCode,
       sourceType: "MANUAL_JOURNAL",
       sourceId: `reversal:${originalEntry.journalEntryId}:${resolvedCorrectionKey}`,
       description: `Reversal of ${originalEntry.voucherSeriesCode}${originalEntry.voucherNumber}`,
@@ -2238,7 +2419,7 @@ export function createLedgerEngine({
     correctionKey,
     lines,
     journalDate = null,
-    voucherSeriesCode = "A",
+    voucherSeriesCode = null,
     reverseOriginal = false,
     metadataJson = {},
     correlationId = crypto.randomUUID()
@@ -2271,10 +2452,17 @@ export function createLedgerEngine({
       }).reversalJournalEntry;
     }
 
+    const resolvedVoucherSeriesCode = voucherSeriesCode
+      ? normalizeSeriesCode(voucherSeriesCode, "voucher_series_code_required")
+      : resolveVoucherSeriesForPurpose({
+          companyId: originalEntry.companyId,
+          purposeCode: "LEDGER_CORRECTION"
+        }).seriesCode;
+
     const correctionCreate = createJournalEntry({
       companyId: originalEntry.companyId,
       journalDate: target.journalDate,
-      voucherSeriesCode,
+      voucherSeriesCode: resolvedVoucherSeriesCode,
       sourceType: "MANUAL_JOURNAL",
       sourceId: `correction:${originalEntry.journalEntryId}:${resolvedCorrectionKey}`,
       description: `Correction of ${originalEntry.voucherSeriesCode}${originalEntry.voucherNumber}`,
@@ -2341,14 +2529,58 @@ export function createLedgerEngine({
     });
   }
 
+  function findVoucherSeries(runtimeState, companyId, seriesCode) {
+    const normalizedCode = normalizeSeriesCode(seriesCode, "voucher_series_code_required");
+    const voucherSeriesId = runtimeState.voucherSeriesIdsByCompanyCode.get(toCompanyScopedKey(companyId, normalizedCode));
+    return voucherSeriesId ? runtimeState.voucherSeries.get(voucherSeriesId) : null;
+  }
+
   function requireVoucherSeries(companyId, seriesCode) {
-    const normalizedCode = requireText(seriesCode, "voucher_series_code_required").toUpperCase();
-    const key = toCompanyScopedKey(companyId, normalizedCode);
-    const voucherSeriesId = state.voucherSeriesIdsByCompanyCode.get(key);
-    if (!voucherSeriesId) {
+    const voucherSeries = findVoucherSeries(state, companyId, seriesCode);
+    if (!voucherSeries) {
+      const normalizedCode = normalizeSeriesCode(seriesCode, "voucher_series_code_required");
       throw httpError(404, "voucher_series_not_found", `Voucher series ${normalizedCode} was not found for the company.`);
     }
-    return state.voucherSeries.get(voucherSeriesId);
+    return voucherSeries;
+  }
+
+  function ensureVoucherSeriesUsable(voucherSeries, includePaused) {
+    if (!voucherSeries) {
+      throw httpError(404, "voucher_series_not_found", "Voucher series was not found.");
+    }
+    if (voucherSeries.status === "archived" || (!includePaused && voucherSeries.status !== "active")) {
+      throw httpError(409, "voucher_series_not_usable", `Voucher series ${voucherSeries.seriesCode} is not available for posting.`);
+    }
+  }
+
+  function listVoucherSeriesForPurpose({ state: runtimeState, companyId, purposeCode, includePaused = false }) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedPurposeCode = normalizeVoucherSeriesPurposeCode(purposeCode, "voucher_series_purpose_code_required");
+    return [...runtimeState.voucherSeries.values()]
+      .filter((voucherSeries) => voucherSeries.companyId === resolvedCompanyId)
+      .filter((voucherSeries) => Array.isArray(voucherSeries.purposeCodes) && voucherSeries.purposeCodes.includes(resolvedPurposeCode))
+      .filter((voucherSeries) => (includePaused ? voucherSeries.status !== "archived" : voucherSeries.status === "active"))
+      .sort((left, right) => left.seriesCode.localeCompare(right.seriesCode));
+  }
+
+  function ensureVoucherSeriesPurposeAvailability({ state: runtimeState, companyId, purposeCodes, currentVoucherSeriesId = null, status }) {
+    if (status !== "active" || purposeCodes.length === 0) {
+      return;
+    }
+    for (const purposeCode of purposeCodes) {
+      const conflictingSeries = listVoucherSeriesForPurpose({
+        state: runtimeState,
+        companyId,
+        purposeCode
+      }).find((voucherSeries) => voucherSeries.voucherSeriesId !== currentVoucherSeriesId);
+      if (conflictingSeries) {
+        throw httpError(
+          409,
+          "voucher_series_purpose_conflict",
+          `Purpose ${purposeCode} is already assigned to active series ${conflictingSeries.seriesCode}.`
+        );
+      }
+    }
   }
 
   function resolveAccountingContext({ companyId, journalDate } = {}) {
@@ -2784,6 +3016,8 @@ function defaultSeriesDescription(seriesCode) {
   const knownDescriptions = {
     A: "Manual journals",
     B: "Customer invoices",
+    C: "Customer credit notes",
+    D: "Customer payments and allocations",
     E: "Supplier invoices",
     H: "Payroll",
     I: "VAT",
@@ -2794,6 +3028,10 @@ function defaultSeriesDescription(seriesCode) {
     Z: "Blocked reserve series"
   };
   return knownDescriptions[seriesCode] || `Voucher series ${seriesCode}`;
+}
+
+function defaultSeriesPurposeCodes(seriesCode) {
+  return copy(DEFAULT_VOUCHER_SERIES_PURPOSE_MAP[seriesCode] || []);
 }
 
 function assertPostingSourceType(sourceType) {
@@ -2811,6 +3049,53 @@ function normalizeDate(value, code) {
     throw httpError(400, code, "Date is invalid.");
   }
   return normalized.toISOString().slice(0, 10);
+}
+
+function normalizeSeriesCode(value, code) {
+  const normalized = requireText(value, code).toUpperCase();
+  if (!/^[A-Z0-9_-]{1,20}$/.test(normalized)) {
+    throw httpError(400, code, "Series code must be 1-20 characters using A-Z, 0-9, underscore or hyphen.");
+  }
+  return normalized;
+}
+
+function normalizeVoucherSeriesDescription(value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    throw httpError(400, "voucher_series_description_required", "Voucher series description is required.");
+  }
+  return normalized;
+}
+
+function normalizeVoucherSeriesStatus(value) {
+  const normalized = requireText(value, "voucher_series_status_required");
+  if (!VOUCHER_SERIES_STATUSES.includes(normalized)) {
+    throw httpError(400, "voucher_series_status_invalid", `Unsupported voucher series status ${normalized}.`);
+  }
+  return normalized;
+}
+
+function normalizeVoucherSeriesPurposeCode(value, code = "voucher_series_purpose_code_required") {
+  const normalized = requireText(value, code).toUpperCase();
+  if (!/^[A-Z0-9_:-]{2,64}$/.test(normalized)) {
+    throw httpError(400, code, "Voucher series purpose code format is invalid.");
+  }
+  return normalized;
+}
+
+function normalizeVoucherSeriesPurposeCodes(values) {
+  if (!Array.isArray(values)) {
+    throw httpError(400, "voucher_series_purpose_codes_invalid", "Voucher series purpose codes must be an array.");
+  }
+  return [...new Set(values.map((value) => normalizeVoucherSeriesPurposeCode(value)))].sort();
+}
+
+function normalizePositiveInteger(value, code) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) {
+    throw httpError(400, code, "Value must be a positive integer.");
+  }
+  return number;
 }
 
 function normalizeCurrencyCode(value) {
