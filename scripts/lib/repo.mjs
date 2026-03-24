@@ -22,6 +22,7 @@ export const requiredPackages = [
   "packages/domain-documents",
   "packages/domain-ledger",
   "packages/domain-accounting-method",
+  "packages/domain-fiscal-year",
   "packages/domain-vat",
   "packages/domain-ar",
   "packages/domain-ap",

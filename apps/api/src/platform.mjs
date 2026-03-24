@@ -2,6 +2,7 @@ import { createOrgAuthPlatform } from "../../../packages/domain-org-auth/src/ind
 import { createDocumentArchivePlatform } from "../../../packages/domain-documents/src/index.mjs";
 import { createLedgerPlatform } from "../../../packages/domain-ledger/src/index.mjs";
 import { createAccountingMethodPlatform } from "../../../packages/domain-accounting-method/src/index.mjs";
+import { createFiscalYearPlatform } from "../../../packages/domain-fiscal-year/src/index.mjs";
 import { createReportingPlatform } from "../../../packages/domain-reporting/src/index.mjs";
 import { createVatPlatform } from "../../../packages/domain-vat/src/index.mjs";
 import { createArPlatform } from "../../../packages/domain-ar/src/index.mjs";
@@ -43,6 +44,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "documents",
   "ledger",
   "accountingMethod",
+  "fiscalYear",
   "vat",
   "integrations",
   "automation",
@@ -69,6 +71,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "documents",
   "ledger",
   "accountingMethod",
+  "fiscalYear",
   "reporting",
   "automation",
   "core",
@@ -114,6 +117,12 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     label: "Accounting method",
     packageName: "@swedish-erp/domain-accounting-method",
     create: ({ options }) => createAccountingMethodPlatform(options)
+  }),
+  createDomainDefinition({
+    key: "fiscalYear",
+    label: "Fiscal year",
+    packageName: "@swedish-erp/domain-fiscal-year",
+    create: ({ options }) => createFiscalYearPlatform(options)
   }),
   createDomainDefinition({
     key: "vat",
