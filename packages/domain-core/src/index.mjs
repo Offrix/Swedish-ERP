@@ -34,6 +34,14 @@ import {
   MAPPING_SET_STATUSES,
   createMigrationModule
 } from "./migration.mjs";
+import {
+  ASYNC_JOB_ERROR_CLASSES,
+  ASYNC_JOB_OPERATOR_STATES,
+  ASYNC_JOB_REPLAY_STATUSES,
+  ASYNC_JOB_RISK_CLASSES,
+  ASYNC_JOB_STATUSES,
+  createAsyncJobsModule
+} from "./jobs.mjs";
 
 export const PORTFOLIO_STATUS_CODES = Object.freeze(["active", "waiting_for_client", "in_review", "ready_for_close", "blocked"]);
 export const CLIENT_REQUEST_STATUSES = Object.freeze(["draft", "sent", "acknowledged", "in_progress", "delivered", "accepted", "closed", "overdue", "escalated", "reopened"]);
@@ -60,6 +68,11 @@ export {
   LOAD_PROFILE_STATUSES,
   RESTORE_DRILL_STATUSES,
   CHAOS_SCENARIO_STATUSES,
+  ASYNC_JOB_STATUSES,
+  ASYNC_JOB_RISK_CLASSES,
+  ASYNC_JOB_REPLAY_STATUSES,
+  ASYNC_JOB_OPERATOR_STATES,
+  ASYNC_JOB_ERROR_CLASSES,
   IMPORT_BATCH_STATUSES,
   MAPPING_SET_STATUSES,
   DIFF_REPORT_STATUSES,
@@ -71,7 +84,7 @@ export function createCorePlatform(options = {}) {
   return createCoreEngine(options);
 }
 
-export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = null, ledgerPlatform = null, integrationPlatform = null, clock = () => new Date() } = {}) {
+export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = null, ledgerPlatform = null, integrationPlatform = null, asyncJobStore = null, clock = () => new Date() } = {}) {
   const state = {
     portfolios: new Map(),
     requests: new Map(),
@@ -215,6 +228,12 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     audit,
     error
   });
+  const asyncJobsModule = createAsyncJobsModule({
+    clock,
+    audit,
+    error,
+    store: asyncJobStore || undefined
+  });
   const migrationModule = createMigrationModule({
     state,
     clock,
@@ -248,6 +267,11 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
       loadProfileStatuses: LOAD_PROFILE_STATUSES,
       restoreDrillStatuses: RESTORE_DRILL_STATUSES,
       chaosScenarioStatuses: CHAOS_SCENARIO_STATUSES,
+      asyncJobStatuses: ASYNC_JOB_STATUSES,
+      asyncJobRiskClasses: ASYNC_JOB_RISK_CLASSES,
+      asyncJobReplayStatuses: ASYNC_JOB_REPLAY_STATUSES,
+      asyncJobOperatorStates: ASYNC_JOB_OPERATOR_STATES,
+      asyncJobErrorClasses: ASYNC_JOB_ERROR_CLASSES,
       importBatchStatuses: IMPORT_BATCH_STATUSES,
       mappingSetStatuses: MAPPING_SET_STATUSES,
       diffReportStatuses: DIFF_REPORT_STATUSES,
@@ -304,6 +328,21 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
       recordChaosScenario: resilienceModule.recordChaosScenario,
       listChaosScenarios: resilienceModule.listChaosScenarios,
       resolveRuntimeFlags: resilienceModule.resolveRuntimeFlags,
+      enqueueRuntimeJob: asyncJobsModule.enqueueAsyncJob,
+      claimAvailableRuntimeJobs: asyncJobsModule.claimAvailableAsyncJobs,
+      startRuntimeJobAttempt: asyncJobsModule.startAsyncJobAttempt,
+      completeRuntimeJob: asyncJobsModule.completeAsyncJob,
+      failRuntimeJob: asyncJobsModule.failAsyncJob,
+      cancelRuntimeJob: asyncJobsModule.cancelAsyncJob,
+      getRuntimeJob: asyncJobsModule.getAsyncJob,
+      listRuntimeJobs: asyncJobsModule.listAsyncJobs,
+      listRuntimeJobAttempts: asyncJobsModule.listAsyncJobAttempts,
+      listRuntimeDeadLetters: asyncJobsModule.listAsyncDeadLetters,
+      planRuntimeJobReplay: asyncJobsModule.planAsyncJobReplay,
+      approveRuntimeJobReplay: asyncJobsModule.approveAsyncJobReplay,
+      executeRuntimeJobReplay: asyncJobsModule.executeAsyncJobReplay,
+      listRuntimeJobReplayPlans: asyncJobsModule.listAsyncJobReplayPlans,
+      closeRuntimeJobStore: asyncJobsModule.closeAsyncJobStore,
       createMappingSet: migrationModule.createMappingSet,
       listMappingSets: migrationModule.listMappingSets,
       approveMappingSet: migrationModule.approveMappingSet,
