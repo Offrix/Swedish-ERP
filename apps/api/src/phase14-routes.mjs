@@ -1401,5 +1401,83 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/review-center/queues") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_queue", objectId: companyId, scopeCode: "review_center" });
+    writeJson(res, 200, {
+      items: platform.listReviewCenterQueues({
+        companyId,
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/review-center/items") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: companyId, scopeCode: "review_center" });
+    writeJson(res, 200, {
+      items: platform.listReviewCenterItems({
+        companyId,
+        queueCode: optionalText(url.searchParams.get("queueCode")),
+        status: optionalText(url.searchParams.get("status")),
+        assignedUserId: optionalText(url.searchParams.get("assignedUserId")),
+        riskClass: optionalText(url.searchParams.get("riskClass")),
+        sourceDomainCode: optionalText(url.searchParams.get("sourceDomainCode"))
+      })
+    });
+    return true;
+  }
+
+  const reviewCenterItemMatch = matchPath(path, "/v1/review-center/items/:reviewItemId");
+  if (req.method === "GET" && reviewCenterItemMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: reviewCenterItemMatch.reviewItemId, scopeCode: "review_center" });
+    writeJson(res, 200, platform.getReviewCenterItem({
+      companyId,
+      reviewItemId: reviewCenterItemMatch.reviewItemId
+    }));
+    return true;
+  }
+
+  const reviewCenterClaimMatch = matchPath(path, "/v1/review-center/items/:reviewItemId/claim");
+  if (req.method === "POST" && reviewCenterClaimMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "review_item", objectId: reviewCenterClaimMatch.reviewItemId, scopeCode: "review_center" });
+    writeJson(res, 200, platform.claimReviewCenterItem({
+      companyId,
+      reviewItemId: reviewCenterClaimMatch.reviewItemId,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
+  const reviewCenterDecideMatch = matchPath(path, "/v1/review-center/items/:reviewItemId/decide");
+  if (req.method === "POST" && reviewCenterDecideMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "review_item", objectId: reviewCenterDecideMatch.reviewItemId, scopeCode: "review_center" });
+    writeJson(res, 200, platform.decideReviewCenterItem({
+      companyId,
+      reviewItemId: reviewCenterDecideMatch.reviewItemId,
+      decisionCode: body.decisionCode,
+      reasonCode: body.reasonCode,
+      note: body.note || null,
+      decisionPayload: body.decisionPayload || {},
+      evidenceRefs: body.evidenceRefs || [],
+      overrideReasonCode: body.overrideReasonCode || null,
+      resultingCommand: body.resultingCommand || null,
+      targetQueueCode: body.targetQueueCode || null,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
   return false;
 }

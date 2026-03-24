@@ -49,6 +49,11 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/review-tasks/:reviewTaskId/claim`
 - `POST /v1/review-tasks/:reviewTaskId/correct`
 - `POST /v1/review-tasks/:reviewTaskId/approve`
+- `GET /v1/review-center/queues?companyId=...`
+- `GET /v1/review-center/items?companyId=...`
+- `GET /v1/review-center/items/:reviewItemId?companyId=...`
+- `POST /v1/review-center/items/:reviewItemId/claim`
+- `POST /v1/review-center/items/:reviewItemId/decide`
 - `POST /v1/ledger/chart/install`
 - `GET /v1/ledger/accounts?companyId=...`
 - `GET /v1/ledger/accounting-periods?companyId=...`

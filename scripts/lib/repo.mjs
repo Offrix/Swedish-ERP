@@ -28,6 +28,7 @@ export const requiredPackages = [
   "packages/domain-ap",
   "packages/domain-banking",
   "packages/domain-tax-account",
+  "packages/domain-review-center",
   "packages/domain-hr",
   "packages/domain-time",
   "packages/domain-payroll",
