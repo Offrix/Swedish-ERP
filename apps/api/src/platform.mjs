@@ -14,6 +14,7 @@ import { createNotificationsPlatform } from "../../../packages/domain-notificati
 import { createActivityPlatform } from "../../../packages/domain-activity/src/index.mjs";
 import { createHrPlatform } from "../../../packages/domain-hr/src/index.mjs";
 import { createTimePlatform } from "../../../packages/domain-time/src/index.mjs";
+import { createBalancesPlatform } from "../../../packages/domain-balances/src/index.mjs";
 import { createPayrollPlatform } from "../../../packages/domain-payroll/src/index.mjs";
 import { createBenefitsPlatform } from "../../../packages/domain-benefits/src/index.mjs";
 import { createDocumentClassificationPlatform } from "../../../packages/domain-document-classification/src/index.mjs";
@@ -63,6 +64,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "activity",
   "hr",
   "time",
+  "balances",
   "benefits",
   "documentClassification",
   "importCases",
@@ -99,6 +101,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "activity",
   "hr",
   "time",
+  "balances",
   "benefits",
   "documentClassification",
   "importCases",
@@ -270,6 +273,17 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         ...options,
         hrPlatform: dependencies.hr,
         documentPlatform: dependencies.documents
+      })
+  }),
+  createDomainDefinition({
+    key: "balances",
+    label: "Balances",
+    packageName: "@swedish-erp/domain-balances",
+    dependsOn: ["hr"],
+    create: ({ options, dependencies }) =>
+      createBalancesPlatform({
+        ...options,
+        hrPlatform: dependencies.hr
       })
   }),
   createDomainDefinition({
