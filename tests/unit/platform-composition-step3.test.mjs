@@ -20,6 +20,8 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.equal(typeof platform.getDomain("activity")?.projectActivityEntry, "function");
   assert.equal(typeof platform.getDomain("egenkontroll")?.createChecklistTemplate, "function");
   assert.equal(typeof platform.getDomain("kalkyl")?.createEstimateVersion, "function");
+  assert.equal(typeof platform.getDomain("projects")?.getProjectWorkspace, "function");
+  assert.equal(typeof platform.getDomain("field")?.getProjectFieldSummary, "function");
   assert.equal(typeof platform.getDomain("balances")?.createBalanceType, "function");
   assert.equal(typeof platform.getDomain("collectiveAgreements")?.createAgreementFamily, "function");
   assert.equal(typeof platform.getDomain("time")?.getEmploymentTimeBase, "function");

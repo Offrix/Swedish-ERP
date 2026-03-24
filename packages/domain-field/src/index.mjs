@@ -320,15 +320,17 @@ export function createFieldEngine({
     return copy(record);
   }
 
-  function listWorkOrders({ companyId, status = null, employmentId = null } = {}) {
+  function listWorkOrders({ companyId, status = null, employmentId = null, projectId = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedStatus = normalizeOptionalText(status);
     const resolvedEmploymentId = normalizeOptionalText(employmentId);
+    const resolvedProjectId = normalizeOptionalText(projectId);
     return (state.workOrderIdsByCompany.get(resolvedCompanyId) || [])
       .map((workOrderId) => state.workOrders.get(workOrderId))
       .filter(Boolean)
       .map((record) => enrichWorkOrder(state, record))
       .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .filter((record) => (resolvedProjectId ? record.projectId === resolvedProjectId : true))
       .filter((record) =>
         resolvedEmploymentId
           ? record.dispatchAssignments.some((assignment) => assignment.employmentId === resolvedEmploymentId && assignment.status !== "cancelled")
@@ -336,6 +338,64 @@ export function createFieldEngine({
       )
       .sort((left, right) => left.workOrderNo.localeCompare(right.workOrderNo))
       .map(copy);
+  }
+
+  function getProjectFieldSummary({ companyId, projectId } = {}) {
+    const project = requireProject(projectsPlatform, companyId, projectId);
+    const workOrders = listWorkOrders({
+      companyId: project.companyId,
+      projectId: project.projectId
+    });
+    const openStatuses = new Set(["ready_for_dispatch", "dispatched", "in_progress"]);
+    const latestOperationalUpdateAt =
+      workOrders
+        .map((workOrder) => workOrder.updatedAt || workOrder.createdAt || null)
+        .filter(Boolean)
+        .sort()
+        .at(-1) || null;
+    return {
+      projectId: project.projectId,
+      totalWorkOrderCount: workOrders.length,
+      openWorkOrderCount: workOrders.filter((workOrder) => openStatuses.has(workOrder.status)).length,
+      inProgressWorkOrderCount: workOrders.filter((workOrder) => workOrder.status === "in_progress").length,
+      completedUnbilledWorkOrderCount: workOrders.filter((workOrder) => workOrder.status === "completed").length,
+      pendingSignatureCount: workOrders.filter(
+        (workOrder) => workOrder.signatureRequired === true && workOrder.signatureStatus === "pending"
+      ).length,
+      dispatchAssignedCount: workOrders.reduce(
+        (sum, workOrder) =>
+          sum + workOrder.dispatchAssignments.filter((assignment) => assignment.status !== "cancelled").length,
+        0
+      ),
+      materialWithdrawalCount: workOrders.reduce((sum, workOrder) => sum + workOrder.materialWithdrawals.length, 0),
+      materialWithdrawalAmount: roundMoney(
+        workOrders.reduce(
+          (sum, workOrder) =>
+            sum +
+            workOrder.materialWithdrawals.reduce(
+              (workOrderSum, withdrawal) =>
+                workOrderSum + Number(withdrawal.quantity || 0) * Number(withdrawal.salesUnitPriceAmount || 0),
+              0
+            ),
+          0
+        )
+      ),
+      latestOperationalUpdateAt,
+      workOrders: workOrders.map((workOrder) => ({
+        workOrderId: workOrder.workOrderId,
+        workOrderNo: workOrder.workOrderNo,
+        displayName: workOrder.displayName,
+        status: workOrder.status,
+        priorityCode: workOrder.priorityCode,
+        signatureStatus: workOrder.signatureStatus,
+        customerInvoiceId: workOrder.customerInvoiceId,
+        dispatchCount: workOrder.dispatchAssignments.length,
+        materialWithdrawalCount: workOrder.materialWithdrawals.length,
+        actualStartedAt: workOrder.actualStartedAt,
+        actualEndedAt: workOrder.actualEndedAt,
+        updatedAt: workOrder.updatedAt
+      }))
+    };
   }
 
   function getWorkOrder({ companyId, workOrderId } = {}) {
@@ -859,6 +919,7 @@ export function createFieldEngine({
     listInventoryBalances,
     createOrReplaceInventoryBalance,
     listWorkOrders,
+    getProjectFieldSummary,
     getWorkOrder,
     createWorkOrder,
     listDispatchAssignments,

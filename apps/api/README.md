@@ -302,6 +302,11 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/projects?companyId=...`
 - `POST /v1/projects`
 - `GET /v1/projects/:projectId?companyId=...`
+- `GET /v1/projects/:projectId/workspace?companyId=...`
+- `GET /v1/projects/:projectId/deviations?companyId=...`
+- `POST /v1/projects/:projectId/deviations`
+- `POST /v1/projects/:projectId/deviations/:projectDeviationId/assign`
+- `POST /v1/projects/:projectId/deviations/:projectDeviationId/status`
 - `GET /v1/projects/:projectId/budgets?companyId=...`
 - `POST /v1/projects/:projectId/budgets`
 - `GET /v1/projects/:projectId/resource-allocations?companyId=...`
@@ -367,7 +372,7 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/field/inventory/items`
 - `GET /v1/field/inventory/balances?companyId=...`
 - `POST /v1/field/inventory/balances`
-- `GET /v1/field/work-orders?companyId=...`
+- `GET /v1/field/work-orders?companyId=...&projectId=...`
 - `POST /v1/field/work-orders`
 - `GET /v1/field/work-orders/:workOrderId?companyId=...`
 - `GET /v1/field/work-orders/:workOrderId/dispatches?companyId=...`

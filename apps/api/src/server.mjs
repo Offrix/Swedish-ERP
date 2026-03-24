@@ -354,6 +354,10 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/kalkyl/estimates/:estimateVersionId/convert-to-project-budget",
               "/v1/projects",
               "/v1/projects/:projectId",
+              "/v1/projects/:projectId/workspace",
+              "/v1/projects/:projectId/deviations",
+              "/v1/projects/:projectId/deviations/:projectDeviationId/assign",
+              "/v1/projects/:projectId/deviations/:projectDeviationId/status",
               "/v1/projects/:projectId/budgets",
               "/v1/projects/:projectId/resource-allocations",
               "/v1/projects/:projectId/payroll-cost-allocations",
@@ -7733,6 +7737,145 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  const projectWorkspaceMatch = matchPath(path, "/v1/projects/:projectId/workspace");
+  if (projectWorkspaceMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_workspace",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getProjectWorkspace({
+        companyId,
+        projectId: projectWorkspaceMatch.projectId,
+        cutoffDate: url.searchParams.get("cutoffDate") || null
+      })
+    );
+    return;
+  }
+
+  const projectDeviationsMatch = matchPath(path, "/v1/projects/:projectId/deviations");
+  if (projectDeviationsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_deviation",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listProjectDeviations({
+        companyId,
+        projectId: projectDeviationsMatch.projectId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (projectDeviationsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_deviation",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectDeviation({
+        companyId,
+        projectId: projectDeviationsMatch.projectId,
+        projectDeviationId: body.projectDeviationId ?? null,
+        deviationTypeCode: body.deviationTypeCode,
+        severityCode: body.severityCode ?? "major",
+        title: body.title,
+        description: body.description,
+        ownerUserId: body.ownerUserId ?? null,
+        sourceDomainCode: body.sourceDomainCode ?? "projects",
+        sourceObjectId: body.sourceObjectId ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectDeviationAssignMatch = matchPath(path, "/v1/projects/:projectId/deviations/:projectDeviationId/assign");
+  if (projectDeviationAssignMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_deviation",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.assignProjectDeviation({
+        companyId,
+        projectId: projectDeviationAssignMatch.projectId,
+        projectDeviationId: projectDeviationAssignMatch.projectDeviationId,
+        ownerUserId: body.ownerUserId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectDeviationStatusMatch = matchPath(path, "/v1/projects/:projectId/deviations/:projectDeviationId/status");
+  if (projectDeviationStatusMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_deviation",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.transitionProjectDeviationStatus({
+        companyId,
+        projectId: projectDeviationStatusMatch.projectId,
+        projectDeviationId: projectDeviationStatusMatch.projectDeviationId,
+        nextStatus: body.nextStatus,
+        resolutionNote: body.resolutionNote ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   const projectBudgetsMatch = matchPath(path, "/v1/projects/:projectId/budgets");
   if (projectBudgetsMatch && req.method === "GET") {
     const companyId = requireText(
@@ -9745,13 +9888,14 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "field_work_order",
       scopeCode: "project"
     });
-    writeJson(res, 200, {
-      items: platform.listWorkOrders({
-        companyId,
-        status: url.searchParams.get("status") || null,
-        employmentId: url.searchParams.get("employmentId") || null
-      })
-    });
+      writeJson(res, 200, {
+        items: platform.listWorkOrders({
+          companyId,
+          status: url.searchParams.get("status") || null,
+          employmentId: url.searchParams.get("employmentId") || null,
+          projectId: url.searchParams.get("projectId") || null
+        })
+      });
     return;
   }
 

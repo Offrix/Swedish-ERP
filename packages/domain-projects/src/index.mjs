@@ -24,6 +24,8 @@ export const PROJECT_RESOURCE_ALLOCATION_STATUSES = Object.freeze(["planned", "c
 export const PROJECT_SNAPSHOT_STATUSES = Object.freeze(["materialized", "review_required"]);
 export const PROJECT_CHANGE_ORDER_STATUSES = Object.freeze(["draft", "quoted", "approved", "rejected", "cancelled", "invoiced"]);
 export const PROJECT_CHANGE_ORDER_SCOPE_CODES = Object.freeze(["change", "addition", "deduction"]);
+export const PROJECT_DEVIATION_STATUSES = Object.freeze(["open", "acknowledged", "in_progress", "resolved", "closed"]);
+export const PROJECT_DEVIATION_SEVERITY_CODES = Object.freeze(["minor", "major", "critical"]);
 
 export function createProjectsPlatform(options = {}) {
   return createProjectEngine(options);
@@ -36,7 +38,17 @@ export function createProjectEngine({
   hrPlatform = null,
   timePlatform = null,
   payrollPlatform = null,
-  vatPlatform = null
+  vatPlatform = null,
+  fieldPlatform = null,
+  husPlatform = null,
+  personalliggarePlatform = null,
+  egenkontrollPlatform = null,
+  kalkylPlatform = null,
+  getFieldPlatform = null,
+  getHusPlatform = null,
+  getPersonalliggarePlatform = null,
+  getEgenkontrollPlatform = null,
+  getKalkylPlatform = null
 } = {}) {
   const state = {
     projects: new Map(),
@@ -55,6 +67,9 @@ export function createProjectEngine({
     wipSnapshotIdsByProject: new Map(),
     forecastSnapshots: new Map(),
     forecastSnapshotIdsByProject: new Map(),
+    projectDeviations: new Map(),
+    projectDeviationIdsByCompany: new Map(),
+    projectDeviationIdsByProject: new Map(),
     auditEvents: []
   };
 
@@ -72,8 +87,11 @@ export function createProjectEngine({
     projectSnapshotStatuses: PROJECT_SNAPSHOT_STATUSES,
     projectChangeOrderStatuses: PROJECT_CHANGE_ORDER_STATUSES,
     projectChangeOrderScopeCodes: PROJECT_CHANGE_ORDER_SCOPE_CODES,
+    projectDeviationStatuses: PROJECT_DEVIATION_STATUSES,
+    projectDeviationSeverityCodes: PROJECT_DEVIATION_SEVERITY_CODES,
     listProjects,
     getProject,
+    getProjectWorkspace,
     createProject,
     listProjectBudgetVersions,
     createProjectBudgetVersion,
@@ -91,6 +109,10 @@ export function createProjectEngine({
     transitionProjectChangeOrderStatus,
     listProjectBuildVatAssessments,
     createProjectBuildVatAssessment,
+    listProjectDeviations,
+    createProjectDeviation,
+    assignProjectDeviation,
+    transitionProjectDeviationStatus,
     listProjectAuditEvents
   };
 
@@ -107,6 +129,127 @@ export function createProjectEngine({
 
   function getProject({ companyId, projectId } = {}) {
     return copy(requireProject(state, companyId, projectId));
+  }
+
+  function getProjectWorkspace({ companyId, projectId, cutoffDate = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const currentBudgetVersion = findLatestBudgetVersion(state, project.projectId);
+    const currentCostSnapshot = selectWorkspaceSnapshot(listProjectCostSnapshots({ companyId: project.companyId, projectId: project.projectId }), cutoffDate);
+    const currentWipSnapshot = selectWorkspaceSnapshot(listProjectWipSnapshots({ companyId: project.companyId, projectId: project.projectId }), cutoffDate);
+    const currentForecastSnapshot = selectWorkspaceSnapshot(
+      listProjectForecastSnapshots({ companyId: project.companyId, projectId: project.projectId }),
+      cutoffDate
+    );
+    const payrollAllocations = currentCostSnapshot
+      ? listProjectPayrollCostAllocations({
+          companyId: project.companyId,
+          projectId: project.projectId,
+          projectCostSnapshotId: currentCostSnapshot.projectCostSnapshotId
+        })
+      : [];
+    const fieldSummary = summarizeFieldWorkspace({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      fieldPlatform: resolvePlatform(getFieldPlatform, fieldPlatform)
+    });
+    const husSummary = summarizeHusWorkspace({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      husPlatform: resolvePlatform(getHusPlatform, husPlatform)
+    });
+    const personalliggareSummary = summarizePersonalliggareWorkspace({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      personalliggarePlatform: resolvePlatform(getPersonalliggarePlatform, personalliggarePlatform)
+    });
+    const egenkontrollSummary = summarizeEgenkontrollWorkspace({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      egenkontrollPlatform: resolvePlatform(getEgenkontrollPlatform, egenkontrollPlatform)
+    });
+    const kalkylSummary = summarizeKalkylWorkspace({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      kalkylPlatform: resolvePlatform(getKalkylPlatform, kalkylPlatform)
+    });
+    const projectDeviations = listProjectDeviations({
+      companyId: project.companyId,
+      projectId: project.projectId
+    });
+    const openProjectDeviations = projectDeviations.filter((deviation) => !["resolved", "closed"].includes(deviation.status));
+    const warningCodes = [];
+    if (!currentBudgetVersion) {
+      warningCodes.push("budget_missing");
+    }
+    if (!currentCostSnapshot) {
+      warningCodes.push("cost_snapshot_missing");
+    }
+    if (!currentWipSnapshot) {
+      warningCodes.push("wip_snapshot_missing");
+    }
+    if (!currentForecastSnapshot) {
+      warningCodes.push("forecast_snapshot_missing");
+    }
+    if (personalliggareSummary.alertCount > 0) {
+      warningCodes.push("personalliggare_attention_required");
+    }
+    if (egenkontrollSummary.openDeviationCount > 0) {
+      warningCodes.push("egenkontroll_open_deviations");
+    }
+    if (fieldSummary.pendingSignatureCount > 0) {
+      warningCodes.push("field_pending_signatures");
+    }
+    if (husSummary.attentionCount > 0) {
+      warningCodes.push("hus_attention_required");
+    }
+    return {
+      projectId: project.projectId,
+      projectCode: project.projectCode,
+      projectReferenceCode: project.projectReferenceCode,
+      projectStatus: project.status,
+      customerId: project.customerId,
+      projectManagerEmployeeId: project.projectManagerEmployeeId,
+      billingModelCode: project.billingModelCode,
+      revenueRecognitionModelCode: project.revenueRecognitionModelCode,
+      budgetVersionId: currentBudgetVersion?.projectBudgetVersionId || null,
+      currentCostSnapshotId: currentCostSnapshot?.projectCostSnapshotId || null,
+      currentWipSnapshotId: currentWipSnapshot?.projectWipSnapshotId || null,
+      currentForecastSnapshotId: currentForecastSnapshot?.projectForecastSnapshotId || null,
+      latestEstimateVersionId: kalkylSummary.latestEstimateVersionId,
+      latestEstimateStatus: kalkylSummary.latestEstimateStatus,
+      openWorkOrderCount: fieldSummary.openWorkOrderCount,
+      husCaseCount: husSummary.totalCaseCount,
+      personalliggareAlertCount: personalliggareSummary.alertCount,
+      openProjectDeviationCount: openProjectDeviations.length,
+      warningCodes,
+      payrollActuals: {
+        actualCostAmount: currentCostSnapshot?.actualCostAmount || 0,
+        actualMinutes: currentCostSnapshot?.actualMinutes || 0,
+        payrollAllocationCount: payrollAllocations.length
+      },
+      fieldSummary,
+      husSummary,
+      personalliggareSummary,
+      egenkontrollSummary,
+      kalkylSummary,
+      currentBudgetVersion: currentBudgetVersion ? copy(currentBudgetVersion) : null,
+      currentCostSnapshot: currentCostSnapshot ? copy(currentCostSnapshot) : null,
+      currentWipSnapshot: currentWipSnapshot ? copy(currentWipSnapshot) : null,
+      currentForecastSnapshot: currentForecastSnapshot ? copy(currentForecastSnapshot) : null,
+      complianceIndicatorStrip: buildWorkspaceIndicatorStrip({
+        currentBudgetVersion,
+        currentCostSnapshot,
+        currentWipSnapshot,
+        currentForecastSnapshot,
+        fieldSummary,
+        husSummary,
+        personalliggareSummary,
+        egenkontrollSummary,
+        kalkylSummary,
+        openProjectDeviationCount: openProjectDeviations.length
+      }),
+      projectDeviations: openProjectDeviations.map(copy)
+    };
   }
 
   function createProject({
@@ -811,6 +954,121 @@ export function createProjectEngine({
     return copy(record);
   }
 
+  function listProjectDeviations({ companyId, projectId, status = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    return (state.projectDeviationIdsByProject.get(project.projectId) || [])
+      .map((projectDeviationId) => state.projectDeviations.get(projectDeviationId))
+      .filter(Boolean)
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.projectDeviationId.localeCompare(right.projectDeviationId))
+      .map(copy);
+  }
+
+  function createProjectDeviation({
+    companyId,
+    projectId,
+    projectDeviationId = null,
+    deviationTypeCode,
+    severityCode = "major",
+    title,
+    description,
+    ownerUserId = null,
+    sourceDomainCode = "projects",
+    sourceObjectId = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const record = {
+      projectDeviationId: normalizeOptionalText(projectDeviationId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      deviationTypeCode: normalizeCode(deviationTypeCode, "project_deviation_type_required"),
+      severityCode: requireEnum(PROJECT_DEVIATION_SEVERITY_CODES, severityCode, "project_deviation_severity_invalid"),
+      title: requireText(title, "project_deviation_title_required"),
+      description: requireText(description, "project_deviation_description_required"),
+      status: "open",
+      ownerUserId: normalizeOptionalText(ownerUserId),
+      sourceDomainCode: normalizeCode(sourceDomainCode, "project_deviation_source_domain_required"),
+      sourceObjectId: normalizeOptionalText(sourceObjectId),
+      resolutionNote: null,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.projectDeviations.set(record.projectDeviationId, record);
+    appendToIndex(state.projectDeviationIdsByCompany, record.companyId, record.projectDeviationId);
+    appendToIndex(state.projectDeviationIdsByProject, record.projectId, record.projectDeviationId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.deviation.created",
+      entityType: "project_deviation",
+      entityId: record.projectDeviationId,
+      projectId: record.projectId,
+      explanation: `Created project deviation ${record.deviationTypeCode} for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function assignProjectDeviation({
+    companyId,
+    projectId,
+    projectDeviationId,
+    ownerUserId,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const record = requireProjectDeviation(state, project.companyId, project.projectId, projectDeviationId);
+    record.ownerUserId = requireText(ownerUserId, "project_deviation_owner_required");
+    record.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "project.deviation.assigned",
+      entityType: "project_deviation",
+      entityId: record.projectDeviationId,
+      projectId: record.projectId,
+      explanation: `Assigned project deviation ${record.projectDeviationId} to ${record.ownerUserId}.`
+    });
+    return copy(record);
+  }
+
+  function transitionProjectDeviationStatus({
+    companyId,
+    projectId,
+    projectDeviationId,
+    nextStatus,
+    resolutionNote = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const record = requireProjectDeviation(state, project.companyId, project.projectId, projectDeviationId);
+    const resolvedNextStatus = requireEnum(PROJECT_DEVIATION_STATUSES, nextStatus, "project_deviation_status_invalid");
+    assertProjectDeviationTransition(record.status, resolvedNextStatus);
+    if (["resolved", "closed"].includes(resolvedNextStatus)) {
+      record.resolutionNote = requireText(resolutionNote || record.resolutionNote, "project_deviation_resolution_note_required");
+    }
+    record.status = resolvedNextStatus;
+    record.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "project.deviation.status_changed",
+      entityType: "project_deviation",
+      entityId: record.projectDeviationId,
+      projectId: record.projectId,
+      explanation: `Changed project deviation ${record.projectDeviationId} to ${record.status}.`
+    });
+    return copy(record);
+  }
+
   function listProjectAuditEvents({ companyId, projectId = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedProjectId = normalizeOptionalText(projectId);
@@ -820,6 +1078,238 @@ export function createProjectEngine({
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       .map(copy);
   }
+}
+
+function requireProjectDeviation(state, companyId, projectId, projectDeviationId) {
+  const record = state.projectDeviations.get(requireText(projectDeviationId, "project_deviation_id_required"));
+  if (!record || record.companyId !== requireText(companyId, "company_id_required") || record.projectId !== requireText(projectId, "project_id_required")) {
+    throw createError(404, "project_deviation_not_found", "Project deviation was not found.");
+  }
+  return record;
+}
+
+function assertProjectDeviationTransition(currentStatus, nextStatus) {
+  const allowed = {
+    open: ["acknowledged", "in_progress", "resolved", "closed"],
+    acknowledged: ["in_progress", "resolved", "closed"],
+    in_progress: ["resolved", "closed"],
+    resolved: ["closed"],
+    closed: []
+  };
+  if (currentStatus === nextStatus) {
+    return;
+  }
+  if (!allowed[currentStatus]?.includes(nextStatus)) {
+    throw createError(409, "project_deviation_transition_invalid", `Cannot move project deviation from ${currentStatus} to ${nextStatus}.`);
+  }
+}
+
+function resolvePlatform(getter, directPlatform) {
+  return typeof getter === "function" ? getter() || directPlatform || null : directPlatform || null;
+}
+
+function selectWorkspaceSnapshot(records, cutoffDate) {
+  if (!Array.isArray(records) || records.length === 0) {
+    return null;
+  }
+  if (!cutoffDate) {
+    return copy(records[records.length - 1]);
+  }
+  const exact = records.find((record) => record.cutoffDate === cutoffDate);
+  return copy(exact || records[records.length - 1]);
+}
+
+function summarizeFieldWorkspace({ companyId, projectId, fieldPlatform }) {
+  if (!fieldPlatform) {
+    return {
+      projectId,
+      totalWorkOrderCount: 0,
+      openWorkOrderCount: 0,
+      inProgressWorkOrderCount: 0,
+      completedUnbilledWorkOrderCount: 0,
+      pendingSignatureCount: 0,
+      dispatchAssignedCount: 0,
+      materialWithdrawalCount: 0,
+      materialWithdrawalAmount: 0,
+      latestOperationalUpdateAt: null,
+      workOrders: []
+    };
+  }
+  if (typeof fieldPlatform.getProjectFieldSummary === "function") {
+    return fieldPlatform.getProjectFieldSummary({ companyId, projectId });
+  }
+  const workOrders = typeof fieldPlatform.listWorkOrders === "function" ? fieldPlatform.listWorkOrders({ companyId, projectId }) : [];
+  return {
+    projectId,
+    totalWorkOrderCount: workOrders.length,
+    openWorkOrderCount: workOrders.filter((workOrder) => ["ready_for_dispatch", "dispatched", "in_progress"].includes(workOrder.status)).length,
+    inProgressWorkOrderCount: workOrders.filter((workOrder) => workOrder.status === "in_progress").length,
+    completedUnbilledWorkOrderCount: workOrders.filter((workOrder) => workOrder.status === "completed").length,
+    pendingSignatureCount: workOrders.filter((workOrder) => workOrder.signatureRequired && workOrder.signatureStatus === "pending").length,
+    dispatchAssignedCount: workOrders.reduce((sum, workOrder) => sum + (workOrder.dispatchAssignments || []).length, 0),
+    materialWithdrawalCount: workOrders.reduce((sum, workOrder) => sum + (workOrder.materialWithdrawals || []).length, 0),
+    materialWithdrawalAmount: roundMoney(
+      workOrders.reduce(
+        (sum, workOrder) =>
+          sum +
+          (workOrder.materialWithdrawals || []).reduce(
+            (workOrderSum, withdrawal) => workOrderSum + Number(withdrawal.quantity || 0) * Number(withdrawal.salesUnitPriceAmount || 0),
+            0
+          ),
+        0
+      )
+    ),
+    latestOperationalUpdateAt:
+      workOrders
+        .map((workOrder) => workOrder.updatedAt || workOrder.createdAt || null)
+        .filter(Boolean)
+        .sort()
+        .at(-1) || null,
+    workOrders: workOrders.map(copy)
+  };
+}
+
+function summarizeHusWorkspace({ companyId, projectId, husPlatform }) {
+  const cases = husPlatform?.listHusCases ? husPlatform.listHusCases({ companyId }).filter((record) => record.projectId === projectId) : [];
+  const attentionStatuses = new Set(["invoice_blocked", "claim_partially_accepted", "claim_rejected", "recovery_pending"]);
+  return {
+    projectId,
+    totalCaseCount: cases.length,
+    openCaseCount: cases.filter((record) => !["closed", "paid_out"].includes(record.status)).length,
+    attentionCount: cases.filter((record) => attentionStatuses.has(record.status)).length,
+    latestCaseId: cases.at(-1)?.husCaseId || null,
+    cases: cases.map((record) => ({
+      husCaseId: record.husCaseId,
+      caseReference: record.caseReference,
+      status: record.status,
+      claimEligibilityStatus: record.claimEligibilityStatus,
+      claimReadyAmount: record.claimReadyAmount,
+      customerInvoiceId: record.customerInvoiceId
+    }))
+  };
+}
+
+function summarizePersonalliggareWorkspace({ companyId, projectId, personalliggarePlatform }) {
+  const sites = personalliggarePlatform?.listConstructionSites
+    ? personalliggarePlatform.listConstructionSites({ companyId }).filter((record) => record.projectId === projectId)
+    : [];
+  const alertCount = sites.filter(
+    (site) =>
+      site.thresholdRequiredFlag === true &&
+      (
+        !["registered", "active"].includes(site.registrationStatus) ||
+        site.equipmentStatus !== "trusted" ||
+        site.thresholdEvaluationStatus !== "active"
+      )
+  ).length;
+  return {
+    projectId,
+    siteCount: sites.length,
+    alertCount,
+    activeSiteCount: sites.filter((site) => site.thresholdEvaluationStatus === "active").length,
+    sites: sites.map((site) => ({
+      constructionSiteId: site.constructionSiteId,
+      siteCode: site.siteCode,
+      thresholdEvaluationStatus: site.thresholdEvaluationStatus,
+      registrationStatus: site.registrationStatus,
+      equipmentStatus: site.equipmentStatus
+    }))
+  };
+}
+
+function summarizeEgenkontrollWorkspace({ companyId, projectId, egenkontrollPlatform }) {
+  const instances = egenkontrollPlatform?.listChecklistInstances
+    ? egenkontrollPlatform.listChecklistInstances({ companyId, projectId })
+    : [];
+  const deviations = egenkontrollPlatform?.listChecklistDeviations
+    ? egenkontrollPlatform.listChecklistDeviations({ companyId }).filter((record) => record.projectId === projectId)
+    : [];
+  return {
+    projectId,
+    checklistInstanceCount: instances.length,
+    openDeviationCount: deviations.filter((record) => record.status !== "resolved").length,
+    closedChecklistCount: instances.filter((record) => record.status === "closed").length,
+    instances: instances.map((instance) => ({
+      checklistInstanceId: instance.checklistInstanceId,
+      status: instance.status,
+      workOrderId: instance.workOrderId,
+      unresolvedDeviationCount: instance.summary?.unresolvedDeviationCount || 0
+    }))
+  };
+}
+
+function summarizeKalkylWorkspace({ companyId, projectId, kalkylPlatform }) {
+  const estimates = kalkylPlatform?.listEstimateVersions
+    ? kalkylPlatform.listEstimateVersions({ companyId }).filter((record) => record.projectId === projectId)
+    : [];
+  const latestEstimate = [...estimates].sort((left, right) => `${left.updatedAt || left.createdAt}${left.estimateVersionId}`.localeCompare(`${right.updatedAt || right.createdAt}${right.estimateVersionId}`)).pop() || null;
+  return {
+    projectId,
+    estimateCount: estimates.length,
+    latestEstimateVersionId: latestEstimate?.estimateVersionId || null,
+    latestEstimateStatus: latestEstimate?.status || null,
+    latestEstimateTotals: latestEstimate?.totals || null
+  };
+}
+
+function buildWorkspaceIndicatorStrip({
+  currentBudgetVersion,
+  currentCostSnapshot,
+  currentWipSnapshot,
+  currentForecastSnapshot,
+  fieldSummary,
+  husSummary,
+  personalliggareSummary,
+  egenkontrollSummary,
+  kalkylSummary,
+  openProjectDeviationCount
+}) {
+  return [
+    {
+      indicatorCode: "budget",
+      status: currentBudgetVersion ? "ok" : "warning",
+      count: currentBudgetVersion ? 1 : 0
+    },
+    {
+      indicatorCode: "snapshots",
+      status: currentCostSnapshot && currentWipSnapshot && currentForecastSnapshot ? "ok" : "warning",
+      count: [currentCostSnapshot, currentWipSnapshot, currentForecastSnapshot].filter(Boolean).length
+    },
+    {
+      indicatorCode: "field",
+      status: fieldSummary.pendingSignatureCount > 0 || fieldSummary.completedUnbilledWorkOrderCount > 0 ? "warning" : "ok",
+      count: fieldSummary.openWorkOrderCount
+    },
+    {
+      indicatorCode: "hus",
+      status: husSummary.attentionCount > 0 ? "warning" : "ok",
+      count: husSummary.totalCaseCount
+    },
+    {
+      indicatorCode: "personalliggare",
+      status: personalliggareSummary.alertCount > 0 ? "warning" : "ok",
+      count: personalliggareSummary.alertCount
+    },
+    {
+      indicatorCode: "egenkontroll",
+      status: egenkontrollSummary.openDeviationCount > 0 ? "warning" : "ok",
+      count: egenkontrollSummary.openDeviationCount
+    },
+    {
+      indicatorCode: "kalkyl",
+      status: kalkylSummary.latestEstimateStatus && ["approved", "quoted", "converted"].includes(kalkylSummary.latestEstimateStatus) ? "ok" : "warning",
+      count: kalkylSummary.estimateCount
+    },
+    {
+      indicatorCode: "project_deviations",
+      status: openProjectDeviationCount > 0 ? "warning" : "ok",
+      count: openProjectDeviationCount
+    }
+  ];
+}
+
+function buildScopedProjectDeviationKey(companyId, projectId) {
+  return `${companyId}:${projectId}`;
 }
 
 function buildProjectMetricsModel({ state, project, cutoffDate, arPlatform, hrPlatform, timePlatform, payrollPlatform }) {
@@ -1809,6 +2299,18 @@ function normalizeOptionalText(value) {
   }
   const normalized = String(value).trim();
   return normalized ? normalized : null;
+}
+
+function normalizeCode(value, code) {
+  return requireText(value, code).replaceAll("-", "_").replaceAll(" ", "_").toUpperCase();
+}
+
+function requireEnum(allowedValues, value, code) {
+  const normalized = requireText(value, code).replaceAll("-", "_").replaceAll(" ", "_").toLowerCase();
+  if (!allowedValues.includes(normalized)) {
+    throw createError(400, code, `Value ${normalized} is not allowed.`);
+  }
+  return normalized;
 }
 
 function normalizeUpperCode(value, code, length = null) {
