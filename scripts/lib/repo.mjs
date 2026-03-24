@@ -21,6 +21,7 @@ export const requiredPackages = [
   "packages/domain-org-auth",
   "packages/domain-documents",
   "packages/domain-ledger",
+  "packages/domain-accounting-method",
   "packages/domain-vat",
   "packages/domain-ar",
   "packages/domain-ap",

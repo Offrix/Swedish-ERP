@@ -1,6 +1,7 @@
 import { createOrgAuthPlatform } from "../../../packages/domain-org-auth/src/index.mjs";
 import { createDocumentArchivePlatform } from "../../../packages/domain-documents/src/index.mjs";
 import { createLedgerPlatform } from "../../../packages/domain-ledger/src/index.mjs";
+import { createAccountingMethodPlatform } from "../../../packages/domain-accounting-method/src/index.mjs";
 import { createReportingPlatform } from "../../../packages/domain-reporting/src/index.mjs";
 import { createVatPlatform } from "../../../packages/domain-vat/src/index.mjs";
 import { createArPlatform } from "../../../packages/domain-ar/src/index.mjs";
@@ -41,6 +42,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "orgAuth",
   "documents",
   "ledger",
+  "accountingMethod",
   "vat",
   "integrations",
   "automation",
@@ -66,6 +68,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "orgAuth",
   "documents",
   "ledger",
+  "accountingMethod",
   "reporting",
   "automation",
   "core",
@@ -105,6 +108,12 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     label: "Ledger",
     packageName: "@swedish-erp/domain-ledger",
     create: ({ options }) => createLedgerPlatform(options)
+  }),
+  createDomainDefinition({
+    key: "accountingMethod",
+    label: "Accounting method",
+    packageName: "@swedish-erp/domain-accounting-method",
+    create: ({ options }) => createAccountingMethodPlatform(options)
   }),
   createDomainDefinition({
     key: "vat",

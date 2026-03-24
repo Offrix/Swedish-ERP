@@ -11,6 +11,7 @@ test("Step 3 platform composition registers bounded contexts without breaking th
     platform.listRegisteredDomains().map((registration) => registration.domainKey),
     API_PLATFORM_BUILD_ORDER
   );
+  assert.equal(typeof platform.getDomain("accountingMethod")?.getActiveMethodForDate, "function");
   assert.equal(typeof platform.getDomain("ledger")?.createJournalEntry, "function");
   assert.equal(typeof platform.createJournalEntry, "function");
   assert.equal(platform.getDomainRegistration("payroll")?.dependsOn.includes("banking"), true);
