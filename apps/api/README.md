@@ -54,6 +54,11 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/review-center/items/:reviewItemId?companyId=...`
 - `POST /v1/review-center/items/:reviewItemId/claim`
 - `POST /v1/review-center/items/:reviewItemId/decide`
+- `GET /v1/notifications?companyId=...`
+- `POST /v1/notifications/:notificationId/read`
+- `POST /v1/notifications/:notificationId/ack`
+- `POST /v1/notifications/:notificationId/snooze`
+- `GET /v1/activity?companyId=...`
 - `POST /v1/ledger/chart/install`
 - `GET /v1/ledger/accounts?companyId=...`
 - `GET /v1/ledger/accounting-periods?companyId=...`

@@ -10,6 +10,8 @@ import { createApPlatform } from "../../../packages/domain-ap/src/index.mjs";
 import { createBankingPlatform } from "../../../packages/domain-banking/src/index.mjs";
 import { createTaxAccountPlatform } from "../../../packages/domain-tax-account/src/index.mjs";
 import { createReviewCenterPlatform } from "../../../packages/domain-review-center/src/index.mjs";
+import { createNotificationsPlatform } from "../../../packages/domain-notifications/src/index.mjs";
+import { createActivityPlatform } from "../../../packages/domain-activity/src/index.mjs";
 import { createHrPlatform } from "../../../packages/domain-hr/src/index.mjs";
 import { createTimePlatform } from "../../../packages/domain-time/src/index.mjs";
 import { createPayrollPlatform } from "../../../packages/domain-payroll/src/index.mjs";
@@ -55,6 +57,8 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "banking",
   "taxAccount",
   "reviewCenter",
+  "notifications",
+  "activity",
   "hr",
   "time",
   "benefits",
@@ -87,6 +91,8 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "banking",
   "taxAccount",
   "reviewCenter",
+  "notifications",
+  "activity",
   "hr",
   "time",
   "benefits",
@@ -213,6 +219,18 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     label: "Review center",
     packageName: "@swedish-erp/domain-review-center",
     create: ({ options }) => createReviewCenterPlatform(options)
+  }),
+  createDomainDefinition({
+    key: "notifications",
+    label: "Notifications",
+    packageName: "@swedish-erp/domain-notifications",
+    create: ({ options }) => createNotificationsPlatform(options)
+  }),
+  createDomainDefinition({
+    key: "activity",
+    label: "Activity",
+    packageName: "@swedish-erp/domain-activity",
+    create: ({ options }) => createActivityPlatform(options)
   }),
   createDomainDefinition({
     key: "hr",

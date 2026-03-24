@@ -16,6 +16,8 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.equal(typeof platform.getDomain("ledger")?.createJournalEntry, "function");
   assert.equal(typeof platform.getDomain("taxAccount")?.createTaxAccountReconciliation, "function");
   assert.equal(typeof platform.getDomain("reviewCenter")?.createReviewItem, "function");
+  assert.equal(typeof platform.getDomain("notifications")?.createNotification, "function");
+  assert.equal(typeof platform.getDomain("activity")?.projectActivityEntry, "function");
   assert.equal(typeof platform.getDomain("ledger")?.upsertVoucherSeries, "function");
   assert.equal(typeof platform.getDomain("ledger")?.resolveVoucherSeriesForPurpose, "function");
   assert.equal(typeof platform.getDomain("ar")?.upsertInvoiceSeries, "function");
@@ -26,6 +28,9 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.equal(platform.getDomainRegistration("taxAccount")?.buildOrder > platform.getDomainRegistration("banking")?.buildOrder, true);
   assert.deepEqual(platform.getDomainRegistration("reviewCenter")?.dependsOn, []);
   assert.equal(platform.getDomainRegistration("reviewCenter")?.buildOrder > platform.getDomainRegistration("taxAccount")?.buildOrder, true);
+  assert.deepEqual(platform.getDomainRegistration("notifications")?.dependsOn, []);
+  assert.deepEqual(platform.getDomainRegistration("activity")?.dependsOn, []);
+  assert.equal(platform.getDomainRegistration("activity")?.buildOrder > platform.getDomainRegistration("notifications")?.buildOrder, true);
   assert.equal(platform.getDomainRegistration("payroll")?.dependsOn.includes("banking"), true);
   assert.equal(platform.platformContractVersions.eventEnvelopeVersion, 1);
   assert.equal(platform.platformContractVersions.auditEnvelopeVersion, 1);

@@ -1401,6 +1401,83 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/notifications") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: companyId, scopeCode: "notifications" });
+    writeJson(res, 200, {
+      items: platform.listNotifications({
+        companyId,
+        recipientType: optionalText(url.searchParams.get("recipientType")),
+        recipientId: optionalText(url.searchParams.get("recipientId")),
+        status: optionalText(url.searchParams.get("status")),
+        categoryCode: optionalText(url.searchParams.get("categoryCode")),
+        onlyUnread: url.searchParams.get("onlyUnread") === "true"
+      })
+    });
+    return true;
+  }
+
+  const notificationReadMatch = matchPath(path, "/v1/notifications/:notificationId/read");
+  if (req.method === "POST" && notificationReadMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "notification", objectId: notificationReadMatch.notificationId, scopeCode: "notifications" });
+    writeJson(res, 200, platform.markNotificationRead({
+      companyId,
+      notificationId: notificationReadMatch.notificationId,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
+  const notificationAckMatch = matchPath(path, "/v1/notifications/:notificationId/ack");
+  if (req.method === "POST" && notificationAckMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "notification", objectId: notificationAckMatch.notificationId, scopeCode: "notifications" });
+    writeJson(res, 200, platform.acknowledgeNotification({
+      companyId,
+      notificationId: notificationAckMatch.notificationId,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
+  const notificationSnoozeMatch = matchPath(path, "/v1/notifications/:notificationId/snooze");
+  if (req.method === "POST" && notificationSnoozeMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "notification", objectId: notificationSnoozeMatch.notificationId, scopeCode: "notifications" });
+    writeJson(res, 200, platform.snoozeNotification({
+      companyId,
+      notificationId: notificationSnoozeMatch.notificationId,
+      until: body.until || null,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/activity") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "activity_entry", objectId: companyId, scopeCode: "activity" });
+    writeJson(res, 200, {
+      items: platform.listActivityEntries({
+        companyId,
+        objectType: optionalText(url.searchParams.get("objectType")),
+        objectId: optionalText(url.searchParams.get("objectId")),
+        visibilityScope: optionalText(url.searchParams.get("visibilityScope")),
+        relatedObjectType: optionalText(url.searchParams.get("relatedObjectType")),
+        relatedObjectId: optionalText(url.searchParams.get("relatedObjectId"))
+      })
+    });
+    return true;
+  }
+
   if (req.method === "GET" && path === "/v1/review-center/queues") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
