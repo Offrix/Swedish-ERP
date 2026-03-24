@@ -6,6 +6,34 @@ export const FEATURE_FLAG_RISK_CLASSES = Object.freeze(["low", "medium", "high"]
 export const LOAD_PROFILE_STATUSES = Object.freeze(["draft", "passed", "failed"]);
 export const RESTORE_DRILL_STATUSES = Object.freeze(["planned", "passed", "failed"]);
 export const CHAOS_SCENARIO_STATUSES = Object.freeze(["planned", "executed", "failed"]);
+export const INCIDENT_SEVERITIES = Object.freeze(["low", "medium", "high", "critical"]);
+export const INCIDENT_STATUSES = Object.freeze(["open", "mitigating", "monitoring", "resolved", "closed"]);
+export const INCIDENT_SIGNAL_TYPES = Object.freeze([
+  "async_job_retry_scheduled",
+  "async_job_dead_letter",
+  "async_job_replay_planned",
+  "async_job_replay_executed",
+  "restore_drill_failed",
+  "chaos_scenario_failed",
+  "emergency_disable_activated"
+]);
+export const INCIDENT_SIGNAL_STATES = Object.freeze(["open", "acknowledged", "promoted", "closed"]);
+export const INCIDENT_EVENT_TYPES = Object.freeze([
+  "opened",
+  "note_added",
+  "status_changed",
+  "mitigation_started",
+  "monitoring_started",
+  "hotfix_deployed",
+  "kill_switch_activated",
+  "restore_plan_attached",
+  "restore_started",
+  "restore_completed",
+  "replay_executed",
+  "resolved",
+  "closed"
+]);
+export const RUNTIME_RESTORE_PLAN_STATUSES = Object.freeze(["draft", "approved", "executing", "completed", "aborted"]);
 
 export function createResilienceModule({
   state,
@@ -14,6 +42,139 @@ export function createResilienceModule({
   audit,
   error
 } = {}) {
+  const incidentHooks = {
+    onAsyncJobRetryScheduled({ job, attempt, retryAt = null } = {}) {
+      if (!job) {
+        return null;
+      }
+      return recordIncidentSignalInternal({
+        companyId: job.companyId,
+        signalType: "async_job_retry_scheduled",
+        severity: job.riskClass === "high" ? "high" : "medium",
+        summary: `Retry scheduled for async job ${job.jobType}.`,
+        correlationId: job.correlationId,
+        sourceObjectType: "async_job",
+        sourceObjectId: job.jobId,
+        actorId: attempt?.workerId || "system",
+        metadata: {
+          attemptId: attempt?.jobAttemptId || null,
+          attemptNo: attempt?.attemptNo || null,
+          retryAt,
+          errorClass: attempt?.errorClass || job.lastErrorClass || null,
+          errorCode: attempt?.errorCode || job.lastErrorCode || null
+        }
+      });
+    },
+
+    onAsyncJobDeadLetter({ job, attempt, deadLetter } = {}) {
+      if (!job || !deadLetter) {
+        return null;
+      }
+      return recordIncidentSignalInternal({
+        companyId: job.companyId,
+        signalType: "async_job_dead_letter",
+        severity: job.riskClass === "high" ? "critical" : "high",
+        summary: `Async job ${job.jobType} entered dead letter.`,
+        correlationId: job.correlationId,
+        sourceObjectType: "async_job",
+        sourceObjectId: job.jobId,
+        actorId: attempt?.workerId || "system",
+        metadata: {
+          deadLetterId: deadLetter.deadLetterId,
+          attemptId: attempt?.jobAttemptId || null,
+          attemptNo: attempt?.attemptNo || null,
+          errorClass: attempt?.errorClass || job.lastErrorClass || null,
+          errorCode: attempt?.errorCode || job.lastErrorCode || null,
+          terminalReason: deadLetter.terminalReason || null
+        }
+      });
+    },
+
+    onAsyncJobReplayPlanned({ replayPlan, job } = {}) {
+      if (!replayPlan) {
+        return null;
+      }
+      return recordIncidentSignalInternal({
+        companyId: replayPlan.companyId,
+        signalType: "async_job_replay_planned",
+        severity: "medium",
+        summary: `Replay planned for async job ${job?.jobType || replayPlan.jobId}.`,
+        correlationId: job?.correlationId || null,
+        sourceObjectType: "async_job_replay_plan",
+        sourceObjectId: replayPlan.replayPlanId,
+        actorId: replayPlan.plannedByUserId || "system",
+        metadata: {
+          jobId: replayPlan.jobId,
+          plannedPayloadStrategy: replayPlan.plannedPayloadStrategy,
+          reasonCode: replayPlan.reasonCode
+        }
+      });
+    },
+
+    onAsyncJobReplayExecuted({ replayPlan, replayJob, actorId = null } = {}) {
+      if (!replayPlan || !replayJob) {
+        return null;
+      }
+      return recordIncidentSignalInternal({
+        companyId: replayPlan.companyId,
+        signalType: "async_job_replay_executed",
+        severity: "medium",
+        summary: `Replay executed for async job ${replayJob.jobType}.`,
+        correlationId: replayJob.correlationId,
+        sourceObjectType: "async_job_replay_plan",
+        sourceObjectId: replayPlan.replayPlanId,
+        actorId: actorId || replayPlan.approvedByUserId || "system",
+        metadata: {
+          sourceJobId: replayPlan.jobId,
+          replayJobId: replayJob.jobId
+        }
+      });
+    }
+  };
+
+  return {
+    featureFlagScopeTypes: FEATURE_FLAG_SCOPE_TYPES,
+    featureFlagTypes: FEATURE_FLAG_TYPES,
+    featureFlagRiskClasses: FEATURE_FLAG_RISK_CLASSES,
+    loadProfileStatuses: LOAD_PROFILE_STATUSES,
+    restoreDrillStatuses: RESTORE_DRILL_STATUSES,
+    chaosScenarioStatuses: CHAOS_SCENARIO_STATUSES,
+    incidentSeverities: INCIDENT_SEVERITIES,
+    incidentStatuses: INCIDENT_STATUSES,
+    incidentSignalTypes: INCIDENT_SIGNAL_TYPES,
+    incidentSignalStates: INCIDENT_SIGNAL_STATES,
+    incidentEventTypes: INCIDENT_EVENT_TYPES,
+    runtimeRestorePlanStatuses: RUNTIME_RESTORE_PLAN_STATUSES,
+    upsertFeatureFlag,
+    listFeatureFlags,
+    requestEmergencyDisable,
+    listEmergencyDisables,
+    recordLoadProfile,
+    listLoadProfiles,
+    recordRestoreDrill,
+    listRestoreDrills,
+    recordChaosScenario,
+    listChaosScenarios,
+    resolveRuntimeFlags,
+    getRuntimeControlPlaneSummary,
+    listRuntimeAuditCorrelations,
+    getRuntimeAuditCorrelation,
+    listRuntimeIncidentSignals,
+    acknowledgeRuntimeIncidentSignal,
+    openRuntimeIncident,
+    listRuntimeIncidents,
+    listRuntimeIncidentEvents,
+    recordRuntimeIncidentEvent,
+    updateRuntimeIncidentStatus,
+    createRuntimeRestorePlan,
+    listRuntimeRestorePlans,
+    approveRuntimeRestorePlan,
+    startRuntimeRestorePlan,
+    completeRuntimeRestorePlan,
+    abortRuntimeRestorePlan,
+    incidentHooks
+  };
+
   function authorize(sessionToken, companyId, action) {
     if (!orgAuthPlatform?.checkAuthorization) {
       throw error(500, "org_auth_platform_required", "Org/auth platform is required.");
@@ -33,26 +194,6 @@ export function createResilienceModule({
     }
     return principal;
   }
-
-  return {
-    featureFlagScopeTypes: FEATURE_FLAG_SCOPE_TYPES,
-    featureFlagTypes: FEATURE_FLAG_TYPES,
-    featureFlagRiskClasses: FEATURE_FLAG_RISK_CLASSES,
-    loadProfileStatuses: LOAD_PROFILE_STATUSES,
-    restoreDrillStatuses: RESTORE_DRILL_STATUSES,
-    chaosScenarioStatuses: CHAOS_SCENARIO_STATUSES,
-    upsertFeatureFlag,
-    listFeatureFlags,
-    requestEmergencyDisable,
-    listEmergencyDisables,
-    recordLoadProfile,
-    listLoadProfiles,
-    recordRestoreDrill,
-    listRestoreDrills,
-    recordChaosScenario,
-    listChaosScenarios,
-    resolveRuntimeFlags
-  };
 
   function upsertFeatureFlag({
     sessionToken,
@@ -176,6 +317,23 @@ export function createResilienceModule({
       entityId: disable.emergencyDisableId,
       explanation: `Emergency-disabled ${featureFlag.flagKey}.`
     });
+    recordIncidentSignalInternal({
+      companyId,
+      signalType: "emergency_disable_activated",
+      severity: featureFlag.riskClass === "high" || featureFlag.flagType === "kill_switch" ? "critical" : "high",
+      summary: `Emergency disable activated for feature flag ${featureFlag.flagKey}.`,
+      correlationId,
+      sourceObjectType: "emergency_disable",
+      sourceObjectId: disable.emergencyDisableId,
+      actorId: principal.userId,
+      metadata: {
+        flagKey: featureFlag.flagKey,
+        scopeType: featureFlag.scopeType,
+        scopeRef: featureFlag.scopeRef,
+        reasonCode: disable.reasonCode,
+        expiresAt: disable.expiresAt
+      }
+    });
     return {
       featureFlag: clone(featureFlag),
       emergencyDisable: clone(disable)
@@ -242,10 +400,17 @@ export function createResilienceModule({
     actualRtoMinutes,
     actualRpoMinutes,
     status = "passed",
+    restorePlanId = null,
+    verificationSummary = null,
     evidence = {},
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
+    const resolvedRestorePlanId = optionalText(restorePlanId);
+    const restorePlan = resolvedRestorePlanId ? requireRuntimeRestorePlan(companyId, resolvedRestorePlanId) : null;
+    if (restorePlan && restorePlan.status === "draft") {
+      throw error(409, "restore_plan_not_ready", "A restore plan must be approved before it can be referenced by a restore drill.");
+    }
     const drill = {
       restoreDrillId: crypto.randomUUID(),
       companyId,
@@ -255,6 +420,8 @@ export function createResilienceModule({
       actualRtoMinutes: normalizePositiveInteger(actualRtoMinutes, "restore_drill_actual_rto_invalid"),
       actualRpoMinutes: normalizePositiveInteger(actualRpoMinutes, "restore_drill_actual_rpo_invalid"),
       status: assertAllowed(status, RESTORE_DRILL_STATUSES, "restore_drill_status_invalid"),
+      restorePlanId: restorePlan?.restorePlanId || null,
+      verificationSummary: optionalText(verificationSummary),
       evidence: clone(evidence || {}),
       recordedByUserId: principal.userId,
       recordedAt: nowIso(clock)
@@ -269,6 +436,25 @@ export function createResilienceModule({
       entityId: drill.restoreDrillId,
       explanation: `Recorded restore drill ${drill.drillCode}.`
     });
+    if (drill.status === "failed") {
+      recordIncidentSignalInternal({
+        companyId,
+        signalType: "restore_drill_failed",
+        severity: "high",
+        summary: `Restore drill ${drill.drillCode} failed.`,
+        correlationId,
+        sourceObjectType: "restore_drill",
+        sourceObjectId: drill.restoreDrillId,
+        actorId: principal.userId,
+        metadata: {
+          restorePlanId: drill.restorePlanId,
+          actualRtoMinutes: drill.actualRtoMinutes,
+          targetRtoMinutes: drill.targetRtoMinutes,
+          actualRpoMinutes: drill.actualRpoMinutes,
+          targetRpoMinutes: drill.targetRpoMinutes
+        }
+      });
+    }
     return clone(drill);
   }
 
@@ -314,6 +500,22 @@ export function createResilienceModule({
       entityId: scenario.chaosScenarioId,
       explanation: `Recorded chaos scenario ${scenario.scenarioCode}.`
     });
+    if (scenario.status === "failed") {
+      recordIncidentSignalInternal({
+        companyId,
+        signalType: "chaos_scenario_failed",
+        severity: "high",
+        summary: `Chaos scenario ${scenario.scenarioCode} failed recovery expectations.`,
+        correlationId,
+        sourceObjectType: "chaos_scenario",
+        sourceObjectId: scenario.chaosScenarioId,
+        actorId: principal.userId,
+        metadata: {
+          failureMode: scenario.failureMode,
+          queueRecoverySeconds: scenario.queueRecoverySeconds
+        }
+      });
+    }
     return clone(scenario);
   }
 
@@ -347,6 +549,594 @@ export function createResilienceModule({
     );
   }
 
+  function getRuntimeControlPlaneSummary({ sessionToken, companyId } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const signals = listRuntimeIncidentSignalsForCompany(resolvedCompanyId);
+    const incidents = listRuntimeIncidentsForCompany(resolvedCompanyId);
+    const restorePlans = listRuntimeRestorePlansForCompany(resolvedCompanyId);
+    const restoreDrills = [...state.restoreDrills.values()].filter((drill) => drill.companyId === resolvedCompanyId);
+    const activeEmergencyDisableCount = [...state.emergencyDisables.values()].filter(
+      (disable) => disable.companyId === resolvedCompanyId && disable.status === "active"
+    ).length;
+    return {
+      companyId: resolvedCompanyId,
+      activeEmergencyDisableCount,
+      openIncidentSignalCount: signals.filter((signal) => signal.state === "open").length,
+      openIncidentCount: incidents.filter((incident) => !["resolved", "closed"].includes(incident.status)).length,
+      pendingRestorePlanCount: restorePlans.filter((plan) => ["draft", "approved", "executing"].includes(plan.status)).length,
+      failedRestoreDrillCount: restoreDrills.filter((drill) => drill.status === "failed").length,
+      recentIncidentSignals: signals.slice(0, 5).map(clone),
+      recentIncidents: incidents.slice(0, 5).map(clone),
+      recentRestorePlans: restorePlans.slice(0, 5).map(clone)
+    };
+  }
+
+  function listRuntimeAuditCorrelations({
+    sessionToken,
+    companyId,
+    actorId = null,
+    entityType = null
+  } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedActorId = optionalText(actorId);
+    const resolvedEntityType = optionalText(entityType);
+    return [...state.auditCorrelations.values()]
+      .filter((record) => record.companyId === text(companyId, "company_id_required"))
+      .filter((record) => (resolvedActorId ? record.actorIds.includes(resolvedActorId) : true))
+      .filter((record) => (resolvedEntityType ? record.relatedEntities.some((entry) => entry.entityType === resolvedEntityType) : true))
+      .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt))
+      .map(clone);
+  }
+
+  function getRuntimeAuditCorrelation({
+    sessionToken,
+    companyId,
+    correlationId
+  } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const record = state.auditCorrelations.get(buildAuditCorrelationRecordKey(companyId, correlationId));
+    if (!record) {
+      throw error(404, "audit_correlation_not_found", "Audit correlation was not found.");
+    }
+    return clone(record);
+  }
+
+  function listRuntimeIncidentSignals({
+    sessionToken,
+    companyId,
+    signalType = null,
+    signalState = null
+  } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedSignalType = optionalText(signalType);
+    const resolvedSignalState = optionalText(signalState);
+    return listRuntimeIncidentSignalsForCompany(text(companyId, "company_id_required"))
+      .filter((signal) => (resolvedSignalType ? signal.signalType === resolvedSignalType : true))
+      .filter((signal) => (resolvedSignalState ? signal.state === resolvedSignalState : true))
+      .map(clone);
+  }
+
+  function acknowledgeRuntimeIncidentSignal({
+    sessionToken,
+    companyId,
+    incidentSignalId,
+    note = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const signal = requireIncidentSignal(companyId, incidentSignalId);
+    if (signal.state === "closed" || signal.state === "promoted") {
+      return clone(signal);
+    }
+    signal.state = "acknowledged";
+    signal.acknowledgedByUserId = principal.userId;
+    signal.acknowledgedAt = nowIso(clock);
+    signal.updatedAt = signal.acknowledgedAt;
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.incident_signal.acknowledged",
+      entityType: "incident_signal",
+      entityId: signal.incidentSignalId,
+      explanation: note && note.trim().length > 0
+        ? `Acknowledged incident signal ${signal.signalType}: ${note.trim()}.`
+        : `Acknowledged incident signal ${signal.signalType}.`
+    });
+    return clone(signal);
+  }
+
+  function openRuntimeIncident({
+    sessionToken,
+    companyId,
+    title,
+    summary,
+    severity = "high",
+    sourceSignalId = null,
+    linkedCorrelationId = null,
+    relatedObjectRefs = [],
+    commanderUserId = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const signal = sourceSignalId ? requireIncidentSignal(companyId, sourceSignalId) : null;
+    const incident = {
+      incidentId: crypto.randomUUID(),
+      companyId: text(companyId, "company_id_required"),
+      title: text(title, "runtime_incident_title_required"),
+      summary: text(summary, "runtime_incident_summary_required"),
+      severity: assertAllowed(severity, INCIDENT_SEVERITIES, "runtime_incident_severity_invalid"),
+      status: "open",
+      sourceSignalId: signal?.incidentSignalId || null,
+      linkedCorrelationIds: normalizeCorrelationIds([linkedCorrelationId, signal?.correlationId]),
+      relatedObjectRefs: normalizeObjectRefs([
+        ...normalizeObjectRefs(relatedObjectRefs),
+        ...(signal ? [{ objectType: signal.sourceObjectType, objectId: signal.sourceObjectId }] : [])
+      ]),
+      commanderUserId: text(commanderUserId || principal.userId, "runtime_incident_commander_required"),
+      openedByUserId: principal.userId,
+      openedAt: nowIso(clock),
+      resolvedAt: null,
+      closedAt: null,
+      updatedAt: nowIso(clock)
+    };
+    state.runtimeIncidents.set(incident.incidentId, incident);
+    const event = createIncidentEventInternal({
+      incident,
+      eventType: "opened",
+      note: incident.summary,
+      actorId: principal.userId,
+      correlationId,
+      metadata: {
+        sourceSignalId: incident.sourceSignalId
+      }
+    });
+    if (signal) {
+      signal.state = "promoted";
+      signal.promotedIncidentId = incident.incidentId;
+      signal.updatedAt = event.createdAt;
+    }
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.runtime_incident.opened",
+      entityType: "runtime_incident",
+      entityId: incident.incidentId,
+      explanation: `Opened runtime incident ${incident.title}.`
+    });
+    return {
+      incident: clone(incident),
+      event: clone(event)
+    };
+  }
+
+  function listRuntimeIncidents({
+    sessionToken,
+    companyId,
+    status = null,
+    severity = null
+  } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedStatus = optionalText(status);
+    const resolvedSeverity = optionalText(severity);
+    return listRuntimeIncidentsForCompany(text(companyId, "company_id_required"))
+      .filter((incident) => (resolvedStatus ? incident.status === resolvedStatus : true))
+      .filter((incident) => (resolvedSeverity ? incident.severity === resolvedSeverity : true))
+      .map(clone);
+  }
+
+  function listRuntimeIncidentEvents({
+    sessionToken,
+    companyId,
+    incidentId
+  } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    requireRuntimeIncident(companyId, incidentId);
+    return [...state.runtimeIncidentEvents.values()]
+      .filter((eventRecord) => eventRecord.companyId === text(companyId, "company_id_required"))
+      .filter((eventRecord) => eventRecord.incidentId === text(incidentId, "runtime_incident_id_required"))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(clone);
+  }
+
+  function recordRuntimeIncidentEvent({
+    sessionToken,
+    companyId,
+    incidentId,
+    eventType = "note_added",
+    note,
+    relatedObjectRefs = [],
+    linkedCorrelationId = null,
+    metadata = {},
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const incident = requireRuntimeIncident(companyId, incidentId);
+    const event = createIncidentEventInternal({
+      incident,
+      eventType,
+      note,
+      actorId: principal.userId,
+      correlationId,
+      relatedObjectRefs,
+      linkedCorrelationId,
+      metadata
+    });
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.runtime_incident.event_recorded",
+      entityType: "runtime_incident",
+      entityId: incident.incidentId,
+      explanation: `Recorded ${event.eventType} for runtime incident ${incident.title}.`
+    });
+    return {
+      incident: clone(incident),
+      event: clone(event)
+    };
+  }
+
+  function updateRuntimeIncidentStatus({
+    sessionToken,
+    companyId,
+    incidentId,
+    status,
+    note = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const incident = requireRuntimeIncident(companyId, incidentId);
+    const nextStatus = assertAllowed(status, INCIDENT_STATUSES, "runtime_incident_status_invalid");
+    if (incident.status === nextStatus) {
+      return {
+        incident: clone(incident),
+        event: null
+      };
+    }
+    const previousStatus = incident.status;
+    incident.status = nextStatus;
+    incident.updatedAt = nowIso(clock);
+    if (nextStatus === "resolved") {
+      incident.resolvedAt = incident.updatedAt;
+    }
+    if (nextStatus === "closed") {
+      incident.closedAt = incident.updatedAt;
+    }
+    const event = createIncidentEventInternal({
+      incident,
+      eventType: "status_changed",
+      note: note || `Status changed from ${previousStatus} to ${nextStatus}.`,
+      actorId: principal.userId,
+      correlationId,
+      metadata: {
+        previousStatus,
+        nextStatus
+      }
+    });
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.runtime_incident.status_changed",
+      entityType: "runtime_incident",
+      entityId: incident.incidentId,
+      explanation: `Changed runtime incident ${incident.title} status to ${nextStatus}.`
+    });
+    return {
+      incident: clone(incident),
+      event: clone(event)
+    };
+  }
+
+  function createRuntimeRestorePlan({
+    sessionToken,
+    companyId,
+    incidentId = null,
+    restoreScope,
+    targetTimestamp,
+    planSummary,
+    relatedObjectRefs = [],
+    linkedCorrelationId = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const incident = incidentId ? requireRuntimeIncident(companyId, incidentId) : null;
+    const restorePlan = {
+      restorePlanId: crypto.randomUUID(),
+      companyId: text(companyId, "company_id_required"),
+      incidentId: incident?.incidentId || null,
+      restoreScope: text(restoreScope, "runtime_restore_plan_scope_required"),
+      targetTimestamp: normalizeIsoTimestamp(targetTimestamp, "runtime_restore_plan_target_timestamp_invalid"),
+      planSummary: text(planSummary, "runtime_restore_plan_summary_required"),
+      linkedCorrelationIds: normalizeCorrelationIds([linkedCorrelationId, ...(incident?.linkedCorrelationIds || [])]),
+      relatedObjectRefs: normalizeObjectRefs(relatedObjectRefs),
+      status: "draft",
+      createdByUserId: principal.userId,
+      approvedByUserId: null,
+      startedByUserId: null,
+      completedByUserId: null,
+      abortedByUserId: null,
+      createdAt: nowIso(clock),
+      approvedAt: null,
+      startedAt: null,
+      completedAt: null,
+      abortedAt: null,
+      updatedAt: nowIso(clock),
+      verificationSummary: null
+    };
+    state.runtimeRestorePlans.set(restorePlan.restorePlanId, restorePlan);
+    if (incident) {
+      createIncidentEventInternal({
+        incident,
+        eventType: "restore_plan_attached",
+        note: `Attached restore plan ${restorePlan.restorePlanId}.`,
+        actorId: principal.userId,
+        correlationId,
+        relatedObjectRefs: [
+          ...restorePlan.relatedObjectRefs,
+          { objectType: "runtime_restore_plan", objectId: restorePlan.restorePlanId }
+        ]
+      });
+    }
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.runtime_restore_plan.created",
+      entityType: "runtime_restore_plan",
+      entityId: restorePlan.restorePlanId,
+      explanation: `Created runtime restore plan for scope ${restorePlan.restoreScope}.`
+    });
+    return clone(restorePlan);
+  }
+
+  function listRuntimeRestorePlans({
+    sessionToken,
+    companyId,
+    status = null
+  } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedStatus = optionalText(status);
+    return listRuntimeRestorePlansForCompany(text(companyId, "company_id_required"))
+      .filter((plan) => (resolvedStatus ? plan.status === resolvedStatus : true))
+      .map(clone);
+  }
+
+  function approveRuntimeRestorePlan({
+    sessionToken,
+    companyId,
+    restorePlanId,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const restorePlan = requireRuntimeRestorePlan(companyId, restorePlanId);
+    if (restorePlan.status !== "draft") {
+      throw error(409, "runtime_restore_plan_not_draft", "Only draft restore plans can be approved.");
+    }
+    if (restorePlan.createdByUserId === principal.userId) {
+      throw error(409, "runtime_restore_plan_self_approval_forbidden", "Restore plans require a separate approver.");
+    }
+    restorePlan.status = "approved";
+    restorePlan.approvedByUserId = principal.userId;
+    restorePlan.approvedAt = nowIso(clock);
+    restorePlan.updatedAt = restorePlan.approvedAt;
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.runtime_restore_plan.approved",
+      entityType: "runtime_restore_plan",
+      entityId: restorePlan.restorePlanId,
+      explanation: `Approved runtime restore plan ${restorePlan.restorePlanId}.`
+    });
+    return clone(restorePlan);
+  }
+
+  function startRuntimeRestorePlan({
+    sessionToken,
+    companyId,
+    restorePlanId,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const restorePlan = requireRuntimeRestorePlan(companyId, restorePlanId);
+    if (restorePlan.status !== "approved") {
+      throw error(409, "runtime_restore_plan_not_approved", "Only approved restore plans can be started.");
+    }
+    restorePlan.status = "executing";
+    restorePlan.startedByUserId = principal.userId;
+    restorePlan.startedAt = nowIso(clock);
+    restorePlan.updatedAt = restorePlan.startedAt;
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.runtime_restore_plan.started",
+      entityType: "runtime_restore_plan",
+      entityId: restorePlan.restorePlanId,
+      explanation: `Started runtime restore plan ${restorePlan.restorePlanId}.`
+    });
+    return clone(restorePlan);
+  }
+
+  function completeRuntimeRestorePlan({
+    sessionToken,
+    companyId,
+    restorePlanId,
+    verificationSummary,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const restorePlan = requireRuntimeRestorePlan(companyId, restorePlanId);
+    if (restorePlan.status !== "executing") {
+      throw error(409, "runtime_restore_plan_not_executing", "Only executing restore plans can be completed.");
+    }
+    restorePlan.status = "completed";
+    restorePlan.completedByUserId = principal.userId;
+    restorePlan.completedAt = nowIso(clock);
+    restorePlan.updatedAt = restorePlan.completedAt;
+    restorePlan.verificationSummary = text(verificationSummary, "runtime_restore_plan_verification_summary_required");
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.runtime_restore_plan.completed",
+      entityType: "runtime_restore_plan",
+      entityId: restorePlan.restorePlanId,
+      explanation: `Completed runtime restore plan ${restorePlan.restorePlanId}.`
+    });
+    return clone(restorePlan);
+  }
+
+  function abortRuntimeRestorePlan({
+    sessionToken,
+    companyId,
+    restorePlanId,
+    reasonCode,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const restorePlan = requireRuntimeRestorePlan(companyId, restorePlanId);
+    if (["completed", "aborted"].includes(restorePlan.status)) {
+      return clone(restorePlan);
+    }
+    restorePlan.status = "aborted";
+    restorePlan.abortedByUserId = principal.userId;
+    restorePlan.abortedAt = nowIso(clock);
+    restorePlan.updatedAt = restorePlan.abortedAt;
+    restorePlan.abortReasonCode = text(reasonCode, "runtime_restore_plan_abort_reason_required");
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.runtime_restore_plan.aborted",
+      entityType: "runtime_restore_plan",
+      entityId: restorePlan.restorePlanId,
+      explanation: `Aborted runtime restore plan ${restorePlan.restorePlanId}.`
+    });
+    return clone(restorePlan);
+  }
+
+  function listRuntimeIncidentSignalsForCompany(companyId) {
+    return [...state.incidentSignals.values()]
+      .filter((signal) => signal.companyId === companyId)
+      .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt));
+  }
+
+  function listRuntimeIncidentsForCompany(companyId) {
+    return [...state.runtimeIncidents.values()]
+      .filter((incident) => incident.companyId === companyId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  function listRuntimeRestorePlansForCompany(companyId) {
+    return [...state.runtimeRestorePlans.values()]
+      .filter((plan) => plan.companyId === companyId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  function recordIncidentSignalInternal({
+    companyId,
+    signalType,
+    severity = "medium",
+    summary,
+    correlationId = crypto.randomUUID(),
+    sourceObjectType,
+    sourceObjectId,
+    actorId = "system",
+    metadata = {}
+  } = {}) {
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const resolvedSignalType = assertAllowed(signalType, INCIDENT_SIGNAL_TYPES, "runtime_incident_signal_type_invalid");
+    const resolvedSeverity = assertAllowed(severity, INCIDENT_SEVERITIES, "runtime_incident_signal_severity_invalid");
+    const resolvedSourceObjectType = text(sourceObjectType, "runtime_incident_signal_source_object_type_required");
+    const resolvedSourceObjectId = text(sourceObjectId, "runtime_incident_signal_source_object_id_required");
+    const signal = findOpenIncidentSignal({
+      companyId: resolvedCompanyId,
+      signalType: resolvedSignalType,
+      sourceObjectType: resolvedSourceObjectType,
+      sourceObjectId: resolvedSourceObjectId
+    }) || {
+      incidentSignalId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      signalType: resolvedSignalType,
+      severity: resolvedSeverity,
+      summary: text(summary, "runtime_incident_signal_summary_required"),
+      correlationId,
+      sourceObjectType: resolvedSourceObjectType,
+      sourceObjectId: resolvedSourceObjectId,
+      state: "open",
+      occurrenceCount: 0,
+      metadata: {},
+      acknowledgedByUserId: null,
+      acknowledgedAt: null,
+      promotedIncidentId: null,
+      createdAt: nowIso(clock),
+      firstSeenAt: nowIso(clock),
+      lastSeenAt: nowIso(clock),
+      updatedAt: nowIso(clock),
+      closedAt: null
+    };
+    signal.severity = highestSeverity(signal.severity, resolvedSeverity);
+    signal.summary = text(summary || signal.summary, "runtime_incident_signal_summary_required");
+    signal.correlationId = signal.correlationId || correlationId;
+    signal.metadata = clone(metadata || {});
+    signal.occurrenceCount = Number(signal.occurrenceCount || 0) + 1;
+    signal.lastSeenAt = nowIso(clock);
+    signal.updatedAt = signal.lastSeenAt;
+    state.incidentSignals.set(signal.incidentSignalId, signal);
+    audit({
+      companyId: resolvedCompanyId,
+      actorId,
+      correlationId: signal.correlationId,
+      action: "resilience.incident_signal.recorded",
+      entityType: "incident_signal",
+      entityId: signal.incidentSignalId,
+      explanation: `Recorded runtime incident signal ${signal.signalType}.`
+    });
+    return clone(signal);
+  }
+
+  function createIncidentEventInternal({
+    incident,
+    eventType,
+    note,
+    actorId,
+    correlationId,
+    relatedObjectRefs = [],
+    linkedCorrelationId = null,
+    metadata = {}
+  } = {}) {
+    const resolvedEventType = assertAllowed(eventType, INCIDENT_EVENT_TYPES, "runtime_incident_event_type_invalid");
+    const event = {
+      incidentEventId: crypto.randomUUID(),
+      incidentId: incident.incidentId,
+      companyId: incident.companyId,
+      eventType: resolvedEventType,
+      note: text(note, "runtime_incident_event_note_required"),
+      actorId: text(actorId, "runtime_incident_event_actor_required"),
+      correlationId: optionalText(correlationId) || null,
+      linkedCorrelationId: optionalText(linkedCorrelationId) || null,
+      relatedObjectRefs: normalizeObjectRefs(relatedObjectRefs),
+      metadata: clone(metadata || {}),
+      createdAt: nowIso(clock)
+    };
+    state.runtimeIncidentEvents.set(event.incidentEventId, event);
+    incident.updatedAt = event.createdAt;
+    incident.linkedCorrelationIds = normalizeCorrelationIds([
+      ...(incident.linkedCorrelationIds || []),
+      event.correlationId,
+      event.linkedCorrelationId
+    ]);
+    if (event.relatedObjectRefs.length > 0) {
+      incident.relatedObjectRefs = mergeObjectRefs(incident.relatedObjectRefs || [], event.relatedObjectRefs);
+    }
+    return event;
+  }
+
   function requireFeatureFlag(companyId, flagKey, { scopeType = null, scopeRef = null } = {}) {
     const resolvedCompanyId = text(companyId, "company_id_required");
     const resolvedFlagKey = text(flagKey, "feature_flag_key_required");
@@ -372,10 +1162,49 @@ export function createResilienceModule({
     }
     return featureFlag;
   }
+
+  function requireIncidentSignal(companyId, incidentSignalId) {
+    const signal = state.incidentSignals.get(text(incidentSignalId, "runtime_incident_signal_id_required"));
+    if (!signal || signal.companyId !== text(companyId, "company_id_required")) {
+      throw error(404, "runtime_incident_signal_not_found", "Runtime incident signal was not found.");
+    }
+    return signal;
+  }
+
+  function requireRuntimeIncident(companyId, incidentId) {
+    const incident = state.runtimeIncidents.get(text(incidentId, "runtime_incident_id_required"));
+    if (!incident || incident.companyId !== text(companyId, "company_id_required")) {
+      throw error(404, "runtime_incident_not_found", "Runtime incident was not found.");
+    }
+    return incident;
+  }
+
+  function requireRuntimeRestorePlan(companyId, restorePlanId) {
+    const restorePlan = state.runtimeRestorePlans.get(text(restorePlanId, "runtime_restore_plan_id_required"));
+    if (!restorePlan || restorePlan.companyId !== text(companyId, "company_id_required")) {
+      throw error(404, "runtime_restore_plan_not_found", "Runtime restore plan was not found.");
+    }
+    return restorePlan;
+  }
+
+  function findOpenIncidentSignal({ companyId, signalType, sourceObjectType, sourceObjectId } = {}) {
+    return [...state.incidentSignals.values()].find(
+      (signal) =>
+        signal.companyId === companyId
+        && signal.signalType === signalType
+        && signal.sourceObjectType === sourceObjectType
+        && signal.sourceObjectId === sourceObjectId
+        && ["open", "acknowledged"].includes(signal.state)
+    ) || null;
+  }
 }
 
 function buildFeatureFlagRecordKey(companyId, flagKey, scopeType, scopeRef) {
   return `${companyId}:${flagKey}:${scopeType}:${normalizeScopeRef(scopeRef) || "global"}`;
+}
+
+export function buildAuditCorrelationRecordKey(companyId, correlationId) {
+  return `${text(companyId, "company_id_required")}:${text(correlationId, "correlation_id_required")}`;
 }
 
 function normalizeScope(companyId, scopeType, scopeRef) {
@@ -437,6 +1266,14 @@ function dateOnly(value, code) {
   return resolved;
 }
 
+function normalizeIsoTimestamp(value, code) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw createValidationError(code, `${code} must be a valid timestamp.`);
+  }
+  return date.toISOString();
+}
+
 function normalizePositiveInteger(value, code) {
   const resolved = Number(value);
   if (!Number.isInteger(resolved) || resolved <= 0) {
@@ -453,8 +1290,59 @@ function assertAllowed(value, allowedValues, code) {
   return resolved;
 }
 
+function normalizeCorrelationIds(values) {
+  const result = [];
+  for (const value of values || []) {
+    const resolved = optionalText(value);
+    if (resolved && !result.includes(resolved)) {
+      result.push(resolved);
+    }
+  }
+  return result;
+}
+
+function normalizeObjectRefs(values) {
+  const refs = [];
+  for (const entry of values || []) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const objectType = optionalText(entry.objectType);
+    const objectId = optionalText(entry.objectId);
+    if (!objectType || !objectId) {
+      continue;
+    }
+    const key = `${objectType}:${objectId}`;
+    if (!refs.some((ref) => `${ref.objectType}:${ref.objectId}` === key)) {
+      refs.push({
+        objectType,
+        objectId,
+        label: optionalText(entry.label)
+      });
+    }
+  }
+  return refs;
+}
+
+function mergeObjectRefs(left, right) {
+  return normalizeObjectRefs([...(left || []), ...(right || [])]);
+}
+
 function optionalText(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function highestSeverity(currentSeverity, nextSeverity) {
+  const ranking = {
+    low: 1,
+    medium: 2,
+    high: 3,
+    critical: 4
+  };
+  if (!currentSeverity) {
+    return nextSeverity;
+  }
+  return (ranking[nextSeverity] || 0) > (ranking[currentSeverity] || 0) ? nextSeverity : currentSeverity;
 }
 
 function text(value, code) {

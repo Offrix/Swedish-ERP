@@ -1,53 +1,98 @@
-﻿# Master verification gates
+# Master metadata
 
-Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller release anses klar.
+- Document ID: TP-015
+- Title: Master Verification Gates
+- Status: Binding
+- Owner: Delivery verification and release control
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/test-plans/master-verification-gates.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-build-sequence.md`
+  - `docs/master-control/master-rebuild-control.md`
+  - `docs/master-control/master-document-manifest.md`
+  - `docs/master-control/master-golden-scenario-catalog.md`
+- Related domains:
+  - all domains and surfaces
+- Related code areas:
+  - `tests/*`
+  - `apps/*`
+  - `packages/*`
+- Related future documents:
+  - all verification-oriented runbooks and test plans in the manifest
 
-## Ã–vergripande grindar
+# Purpose
 
-### Gate A â€” Intern demo klar
-- repo fungerar
-- docs finns
-- seed-data finns
-- demo-konto finns
-- bootstrap kan kÃ¶ras frÃ¥n tom maskin
+Definiera de bindande grindar som måste passeras innan ett område, en fas, en pilot eller en release får betraktas som klar.
 
-### Gate B â€” Pilot redo
-- ledger
-- moms
-- AR
-- AP
-- dokumentinbox
-- tid
-- lÃ¶n
-- fÃ¶rmÃ¥ner
-- traktamente
-- pension
-- projekt
-- personalliggare/byggspÃ¥r om mÃ¥lsegment krÃ¤ver
+# Scope
 
-### Gate C â€” Extern byrÃ¥ redo
-- portfÃ¶ljvy
-- deadlines
-- klientgodkÃ¤nnanden
-- massÃ¥tgÃ¤rder
-- close checklists
+Omfattar:
 
-### Gate D â€” Offentlig sektor redo
-- Peppol in/ut
-- buyer reference/order reference
-- valideringar
-- kvittenser
-- kreditnota
+- cross-cutting verification packages
+- V1 till V7 checkpoints från master build sequence
+- release evidence
+- gate ownership
 
-### Gate E â€” Ã…rsrapportering redo
-- Ã¥rsredovisningsgenerator
-- versionslÃ¥sning
-- signeringsflÃ¶de
-- inlÃ¤mningsflÃ¶de eller integrerad operatÃ¶rsstrategi
+Omfattar inte:
 
-## Fasgrindar
+- detaljerad implementation av enskilda testfall
 
-### TvÃ¤rgÃ¥ende verifieringspaket som alltid ska passeras nÃ¤r scope berÃ¶r omrÃ¥det
+# Blocking risk
+
+Utan bindande verification gates uppstår:
+
+- otestade steg i byggordningen
+- falsk pilot readiness
+- release utan bevis för replay, restore och rulepack-stabilitet
+
+# Golden scenarios covered
+
+Varje V-gate måste explicit mappa till berörda golden scenarios i `docs/master-control/master-golden-scenario-catalog.md`.
+
+# Fixtures and evidence
+
+Varje gate kräver:
+
+- testresultat
+- build artifact references
+- migrationslista
+- replay/restore-resultat där relevant
+- kända begränsningar
+- rollback- eller correctionplan där relevant
+
+# Unit tests
+
+En gate får inte passera om en blockerande domän saknar gröna unit- och invariantsviter.
+
+# Integration tests
+
+En gate får inte passera om berörda integrationskedjor saknar gröna integrationstester.
+
+# E2E tests
+
+En gate som introducerar eller ändrar operatörsytor måste ha gröna E2E-flöden för berörda roller.
+
+# Property-based tests where relevant
+
+Gäller särskilt V1, V2, V3 och V5 där invariants kring regelval, posting och package-fingerprints är centrala.
+
+# Replay/idempotency tests where relevant
+
+Måste passera för V1, V3, V5 och V7.
+
+# Failure-path tests
+
+Måste passera för varje gate där externa adapters, signoff eller replay är involverade.
+
+# Performance expectations where relevant
+
+V4, V6 och V7 kräver att relevanta performance- och resilience-mål är gröna.
+
+# Verification packages always required when scope applies
+
 - `docs/test-plans/queue-resilience-and-replay-tests.md`
 - `docs/test-plans/search-relevance-and-permission-trimming-tests.md`
 - `docs/test-plans/mobile-offline-sync-tests.md`
@@ -56,407 +101,96 @@ Detta dokument definierar de grindar som mÃ¥ste passeras innan en fas eller re
 - `docs/test-plans/feature-flag-rollback-and-disable-tests.md`
 - `docs/test-plans/report-reproducibility-and-export-integrity-tests.md`
 
+# Verification checkpoints
 
-## Gate for FAS 0 â€” Bootstrap, repo och dokumentgrund
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 0.1 Monorepo och runtime-lÃ¥sning
-- [ ] Ren maskin kan bootstrapa projektet
-- [x] Versioner matchar ADR-0001
-- [x] Health checks svarar grÃ¶nt
-- [x] Prompt `P0-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 0.2 CI, kvalitet och sÃ¤kerhetsbas
-- [ ] Trasig PR blockeras
-- [x] Secrets och sÃ¥rbarheter fÃ¥ngas
-- [x] CI Ã¤r deterministisk
-- [x] Prompt `P0-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 0.3 DomÃ¤nskelett och docskeleton
-- [x] Inga cirkulÃ¤ra beroenden
-- [x] Alla domÃ¤ner har README
-- [x] Alla obligatoriska dokument finns
-- [x] Prompt `P0-03` Ã¤r kÃ¶rd och resultat dokumenterat
-
-## Gate for FAS 1 â€” Identitet, organisation, auth och onboarding
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 1.1 Organisation, roller och accesskontroll
-- [x] Bolag kan inte se varandras data
-- [x] Delegation respekterar datum och scope
-- [x] Servern blockerar otillÃ¥tna actions
-- [x] Prompt `P1-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 1.2 Inloggning, sessioner och stark autentisering
-- [x] Sessioner kan Ã¥terkallas
-- [x] MFA krÃ¤vs fÃ¶r admins
-- [x] Audit log skapas fÃ¶r autentisering
-- [x] Prompt `P1-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 1.3 Bolagssetup och onboarding wizard
-- [x] Onboarding skapar komplett bolagskonfiguration
-- [x] Checklista visar saknade steg
-- [x] Setup kan Ã¥terupptas
-- [x] Prompt `P1-03` Ã¤r kÃ¶rd och resultat dokumenterat
-
-## Gate for FAS 2 â€” Dokumentmotor, fÃ¶retagsinbox och OCR
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 2.1 Dokumentarkiv och metadata
-- [x] Original och derivat skiljs Ã¥t
-- [x] Export av dokumentkedja fungerar
-- [x] Duplikat upptÃ¤cks
-- [x] Prompt `P2-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 2.2 FÃ¶retagsinbox och mail ingestion
-- [x] Flera bilagor hanteras korrekt
-- [x] Message-ids dedupliceras
-- [x] Felaktiga bilagor flaggas
-- [x] Prompt `P2-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 2.3 OCR, klassificering och granskningskÃ¶
-- [x] Fakturor, kvitton och avtal sÃ¤rskiljs
-- [x] MÃ¤nniskan kan korrigera tolkningen
-- [x] OmkÃ¶rning sparar ny derivatversion
-- [x] Prompt `P2-03` Ã¤r kÃ¶rd och resultat dokumenterat
-
-## Gate for FAS 3 â€” Huvudbok, kontomodell, journaler och avstÃ¤mningsgrund
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 3.1 Ledger-schema och verifikationsmotor
-- [x] Debet = kredit i alla tester
-- [x] Verifikationsnummer Ã¤r deterministiska
-- [x] Import markerar kÃ¤lltyp
-- [x] Prompt `P3-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 3.2 Dimensioner, perioder och bokfÃ¶ringsregler
-- [x] LÃ¥sta perioder gÃ¥r inte att mutera
-- [x] RÃ¤ttelser skapar ny verifikation
-- [x] Obligatoriska dimensioner valideras
-- [x] Prompt `P3-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 3.3 AvstÃ¤mningscenter och rapportgrund
-- [x] Rapporter kan Ã¥terskapas historiskt
-- [x] Drilldown fungerar till kÃ¤lldokument
-- [x] AvstÃ¤mning sparar sign-off
-- [x] Prompt `P3-03` Ã¤r kÃ¶rd och resultat dokumenterat
-
-## Gate for FAS 4 â€” Momsmotor
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 4.1 Momsmasterdata och beslutstrÃ¤d
-- [x] Alla transaktionstyper fÃ¥r ett spÃ¥rbart momsbeslut
-- [x] Historiska regler kan Ã¥terspelas
-- [x] Oklara fall gÃ¥r till granskningskÃ¶
-- [x] Prompt `P4-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 4.2 Sverige, EU, import, export och omvÃ¤nd moms
-- [x] Deklarationsboxar summerar rÃ¤tt
-- [x] Kreditnota spegelvÃ¤nder moms korrekt
-- [x] Importmoms och reverse charge dubbelbokas rÃ¤tt
-- [x] Prompt `P4-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 4.3 OSS, IOSS, periodisk sammanstÃ¤llning och rapportering
-- [x] B2C-distansfÃ¶rsÃ¤ljning landas rÃ¤tt
-- [x] EU-lista kan skapas om och om igen
-- [x] Momsrapport stÃ¤mmer mot ledgern
-- [x] Prompt `P4-03` Ã¤r kÃ¶rd och resultat dokumenterat
-
-## Gate for FAS 5 â€” FÃ¶rsÃ¤ljning, kundreskontra och kundfakturor
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 5.1 Kundregister, artiklar, offerter och avtal
-- [x] Offerter versionshanteras
-- [x] Avtal genererar korrekt fakturaplan
-- [x] Kunddata kan importeras
-- [x] Prompt `P5-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 5.2 Kundfakturor och leveranskanaler
-- [x] Faktura bokfÃ¶rs bara en gÃ¥ng
-- [x] Kreditfaktura stÃ¤nger rÃ¤tt poster
-- [x] Peppol-export validerar
-- [x] Prompt `P5-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 5.3 Kundreskontra, pÃ¥minnelser och inbetalningsmatchning
-- [x] Delbetalningar hanteras
-- [x] Felmatchningar kan backas
-- [x] Ã…ldersanalys Ã¤r korrekt
-- [x] Prompt `P5-03` Ã¤r kÃ¶rd och resultat dokumenterat
-
-## Gate for FAS 6 â€” LeverantÃ¶rsfakturor, inkÃ¶p, bank och betalningar
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 6.1 LeverantÃ¶rsregister, PO och mottagning
-- [x] LeverantÃ¶rer och PO kan importeras
-- [x] Mottagning kopplar till faktura
-- [x] Dubblettskydd finns
-- [x] Prompt `P6-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 6.2 LeverantÃ¶rsfaktura in, tolkning och matchning
-- [x] Flera kostnadsrader bokas rÃ¤tt
-- [x] MomsfÃ¶rslag kan fÃ¶rklaras
-- [x] Avvikelser krÃ¤ver granskning
-- [x] Prompt `P6-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 6.3 Attest, bankintegration och utbetalning
-- [x] ObehÃ¶riga kan inte betala
-- [x] Utbetalningar bokfÃ¶rs korrekt
-- [x] Returer kan Ã¥terimporteras
-- [x] Prompt `P6-03` Ã¤r kÃ¶rd och resultat dokumenterat
-
-## Gate for FAS 7 â€” Tidportal, HR-bas och anstÃ¤lldportal
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 7.1 AnstÃ¤lldregister och HR-master
-- [x] Samma person kan ha flera anstÃ¤llningar
-- [x] AnstÃ¤llningshistorik bevaras
-- [x] KÃ¤nsliga fÃ¤lt loggas
-- [x] Prompt `P7-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 7.2 Tidrapportering, schema och saldon
-- [x] LÃ¥sning av period fungerar
-- [x] Tid kan kopplas till projekt och aktivitet
-- [x] BerÃ¤kning av saldon Ã¤r reproducerbar
-- [x] Prompt `P7-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 7.3 FrÃ¥nvaro, attest och anstÃ¤lldportal
-- [x] FrÃ¥nvaro kan inte Ã¤ndras efter AGI-signering
-- [x] Historik visas fÃ¶r anstÃ¤lld och admin
-- [x] Uppgifter fÃ¶r frÃ¥nvarosignaler Ã¤r kompletta
-- [x] Prompt `P7-03` Ã¤r kÃ¶rd och resultat dokumenterat
-
-## Gate for FAS 8 â€” LÃ¶n och AGI
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 8.1 LÃ¶nearter, lÃ¶nekalender och lÃ¶nekÃ¶rning
-- [x] LÃ¶nekedjan fÃ¶ljer definierad ordning
-- [x] Retrofall Ã¤r spÃ¥rbara
-- [x] LÃ¶nebesked kan regenereras
-- [x] Prompt `P8-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 8.2 Skatt, arbetsgivaravgifter, SINK och AGI
-- [x] AGI innehÃ¥ller rÃ¤tt fÃ¤lt per individ
-- [x] FrÃ¥nvarouppgifter lÃ¥ses i tid
-- [x] RÃ¤ttelseversioner kan skapas
-- [x] Prompt `P8-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 8.3 LÃ¶nebokfÃ¶ring och utbetalning
-- [x] BokfÃ¶ring per projekt/kostnadsstÃ¤lle fungerar
-- [x] Utbetalningar matchas mot bank
-- [x] Semesterskuld kan Ã¥terskapas
-- [x] Prompt `P8-03` Ã¤r kÃ¶rd och resultat dokumenterat
-
-## Gate for FAS 9 â€” FÃ¶rmÃ¥ner, resor, traktamente, pension och lÃ¶nevÃ¤xling
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 9.1 FÃ¶rmÃ¥nsmotor
-- [x] FÃ¶rmÃ¥ner med och utan kontant lÃ¶n hanteras
-- [x] BilfÃ¶rmÃ¥n start/stopp per mÃ¥nad fungerar
-- [x] AGI-mappning och bokfÃ¶ring Ã¤r korrekt
-- [x] Prompt `P9-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 9.2 Resor, traktamente, kÃ¶rjournal och utlÃ¤gg
-- [x] 50 km-krav och Ã¶vernattning styr korrekt
-- [x] MÃ¥ltidsreduktion minskar rÃ¤tt
-- [x] Ã–verskjutande del blir lÃ¶n
-- [x] Prompt `P9-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 9.3 Pension, extra pension och lÃ¶nevÃ¤xling
-- [x] Rapportunderlag per kollektivavtal stÃ¤mmer
-- [x] LÃ¶nevÃ¤xling varnar under trÃ¶skel
-- [x] Pension bokfÃ¶rs och avstÃ¤ms
-- [x] Prompt `P9-03` Ã¤r kÃ¶rd och resultat dokumenterat
-
-## Gate for FAS 10 â€” Projekt, bygg, fÃ¤lt, lager och personalliggare
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 10.1 Projekt, budget och uppfÃ¶ljning
-- [x] Projektkostnad inkluderar lÃ¶n, fÃ¶rmÃ¥ner, pension och resor
-- [x] WIP kan stÃ¤mmas av mot fakturering
-- [x] Forecast at completion fungerar
-- [x] Prompt `P10-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 10.2 Arbetsorder, serviceorder, fÃ¤ltapp och lager
-- [x] Offline-sync tÃ¥l nÃ¤tavbrott
-- [x] Materialuttag gÃ¥r till projekt
-- [x] Arbetsorder kan faktureras
-- [x] Prompt `P10-02` Ã¤r kÃ¶rd och resultat dokumenterat
-- [x] Runbook `docs/runbooks/fas-10-field-verification.md` Ã¤r uppdaterad
-
-### 10.3 Byggspecifika regler: Ã„TA, HUS, omvÃ¤nd moms, personalliggare
-- [x] HUS-kundandel och ansÃ¶kan stÃ¤mmer
-- [x] Byggmoms triggas korrekt
-- [x] Personalliggare exporterar kontrollbar kedja
-- [x] Prompt `P10-03` Ã¤r kÃ¶rd och resultat dokumenterat
-- [x] Runbook `docs/runbooks/fas-10-build-verification.md` Ã¤r uppdaterad
-
-## Gate for FAS 11 â€” Rapporter, byrÃ¥lÃ¤ge, mÃ¥nadsstÃ¤ngning och bokslut
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 11.1 Rapporter och drilldown
-- [x] Rapporter Ã¤r historiskt reproducerbara
-- [x] Belopp kan spÃ¥ras till kÃ¤lldokument
-- [x] Export till Excel/PDF fungerar
-- [x] Prompt `P11-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 11.2 ByrÃ¥lÃ¤ge och portfÃ¶ljhantering
-- [x] ByrÃ¥n ser bara klienter i scope
-- [x] Deadlines hÃ¤rleds frÃ¥n bolagsinstÃ¤llningar
-- [x] Klientdokument kan begÃ¤ras och spÃ¥ras
-- [x] Prompt `P11-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 11.3 MÃ¥nadsstÃ¤ngning och bokslutschecklistor
-- [x] MÃ¥nad kan stÃ¤ngas med komplett checklista
-- [x] Ã–ppna avvikelser blockerar sign-off dÃ¤r policy krÃ¤ver
-- [x] Ã…terskapad period ger samma rapport
-- [x] Prompt `P11-03` Ã¤r kÃ¶rd och resultat dokumenterat
-
-## Gate for FAS 12 â€” Ã…rsredovisning, deklaration och myndighetskopplingar
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 12.1 Ã…rsredovisningsmotor
-- [x] Ã…rspaket lÃ¥ser underlag
-- [x] Signaturkedja spÃ¥ras
-- [x] RÃ¤ttelse skapar ny version
-- [x] Prompt `P12-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 12.2 Skatt, deklarationsunderlag och myndighetsfiler
-- [x] Filer matchar interna siffror
-- [x] Submission loggas med kvittens
-- [x] Fel gÃ¥r till Ã¥tgÃ¤rdskÃ¶
-- [x] Prompt `P12-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-## Gate for FAS 13 â€” API, integrationer, AI och automation
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 13.1 Publikt API och webhooks
-- [x] Scopes begrÃ¤nsar rÃ¤tt data
-- [x] Webhook events Ã¤r idempotenta
-- [x] Backward compatibility bevakas
-- [x] Prompt `P13-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 13.2 Partnerintegrationer och marknadsplats
-- [x] Varje adapter har kontraktstest
-- [x] Fallback finns vid extern driftstÃ¶rning
-- [x] Rate limits respekteras
-- [x] Prompt `P13-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 13.3 AI, automation och no-code-regler
-- [x] Alla AI-beslut har confidence och fÃ¶rklaring
-- [x] Human-in-the-loop kan Ã¶verstyra
-- [x] Felaktiga AI-fÃ¶rslag pÃ¥verkar inte ledger utan granskning
-- [x] Prompt `P13-03` Ã¤r kÃ¶rd och resultat dokumenterat
-
-## Gate for FAS 14 â€” HÃ¤rdning, pilot, prestanda, sÃ¤kerhet och go-live
-
-### AllmÃ¤nt krav
-- [x] Kod, tester och docs Ã¤r uppdaterade i samma fÃ¶rÃ¤ndring
-- [x] Demo kan kÃ¶ras pÃ¥ seed-data
-- [ ] Ingen kritisk eller hÃ¶g bug stÃ¥r Ã¶ppen utan signerad accept
-- [x] Rollback eller disable-strategi finns om fasen pÃ¥verkar produktion
-
-### 14.1 SÃ¤kerhet och behÃ¶righetsgranskning
-- [ ] Kritiska findings Ã¤r Ã¥tgÃ¤rdade
-- [ ] Admin-spÃ¥r granskas
-- [x] Secrets-hantering Ã¤r verifierad
-- [x] Prompt `P14-01` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 14.2 Prestanda, Ã¥terlÃ¤sning och chaos-test
-- [ ] Systemet klarar mÃ¥llast
-- [ ] RTO/RPO uppfylls
-- [ ] KÃ¶er Ã¥terhÃ¤mtar sig efter fel
-- [x] Prompt `P14-02` Ã¤r kÃ¶rd och resultat dokumenterat
-
-### 14.3 Pilotkunder, datamigrering och go-live-ritual
-- [ ] ParallellkÃ¶rning stÃ¤mmer
-- [ ] Kunddata migreras utan differenser
-- [ ] Support-runbook Ã¤r bemannad
-- [x] Prompt `P14-03` Ã¤r kÃ¶rd och resultat dokumenterat
-
-
-## Bevis som ska bifogas varje gate
-
-- testkÃ¶rningsresultat
-- demo-video eller demo-notes
-- diff pÃ¥ docs
-- lista Ã¶ver migrationsfiler
-- lista Ã¶ver nya externa beroenden
-- eventuella kÃ¤nda begrÃ¤nsningar
-- rollback-plan
-
-## Exit gate
-
-- [ ] Ingen fas markeras klar utan dokumenterat bevis.
-- [ ] Alla gate-checklistor kan fÃ¶ljas av nÃ¥gon som inte skrivit koden.
-- [ ] Gate-status kan granskas i efterhand.
+## V1 Platform and rulepack verification
 
+Måste visa:
+
+- worker runtime fungerar med persistent jobs
+- replay och dead-letter fungerar
+- rulepack effective dating, pinning och rollback fungerar
+- audit envelope och correlation ids fungerar
+
+## V2 Finance and tax foundation verification
+
+Måste visa:
+
+- accounting method fungerar
+- fiscal year fungerar
+- voucher/invoice series fungerar
+- VAT och tax account foundation fungerar
+- close-readiness inte bryts av nya foundation changes
+
+## V3 Document and payroll chain verification
+
+Måste visa:
+
+- document classification fungerar
+- review boundary fungerar
+- balances, agreements och payroll migration fungerar
+- AGI correction chain fungerar
+- benefit bridge fungerar
+
+## V4 Project, HUS and personalliggare verification
+
+Måste visa:
+
+- HUS accepted/partial/recovery fungerar
+- payroll cost allocation till projekt fungerar
+- personalliggare offline/kiosk fungerar
+- field-mobile conflict handling fungerar
+
+## V5 Annual and filing verification
+
+Måste visa:
+
+- AB annual path fungerar
+- sole-trader annual/declaration path fungerar
+- HB/KB path fungerar
+- EF path fungerar
+- technical vs domain receipts skiljs åt
+
+## V6 Surface and operations verification
+
+Måste visa:
+
+- public site
+- auth
+- desktop shell
+- finance workbenches
+- payroll workbenches
+- projects workspace
+- backoffice
+- field-mobile
+
+## V7 Resilience and emergency verification
+
+Måste visa:
+
+- restore drills
+- replay safety
+- emergency disable
+- support impersonation restrictions
+- queue dead-letter handling
+
+# Gate ownership
+
+- engineering lead äger tekniskt bevis
+- QA lead äger testbevis
+- compliance owner äger reglerat godkännande
+- product owner äger releasebeslut först efter att övriga tre signerat
+
+# Acceptance criteria
+
+- varje gate är mappad till build sequence
+- varje gate har tydliga blockerande kriterier
+- inget område kan hoppa över relevant gate
+- gate evidence kan granskas i efterhand
+
+# Exit gate
+
+- [ ] ingen fas markeras klar utan dokumenterat bevis
+- [ ] V1 till V7 är definierade och användbara
+- [ ] gate-status kan granskas i efterhand
+- [ ] pilot eller release kräver godkända relevanta gates

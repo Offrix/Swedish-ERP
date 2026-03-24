@@ -4,5 +4,8 @@
   "private": true,
   "type": "module",
   "main": "src/index.mjs",
-  "types": "src/index.ts"
+  "types": "src/index.ts",
+  "dependencies": {
+    "postgres": "3.4.8"
+  }
 }

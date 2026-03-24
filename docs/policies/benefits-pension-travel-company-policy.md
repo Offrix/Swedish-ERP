@@ -1,53 +1,108 @@
-# Benefits, pension, travel and company policy
+# Master metadata
 
-Detta dokument definierar bolagets egna policyval där compliance tillåter alternativ, till exempel friskvård, gåvor, löneväxling, pensionsflöden, resepolicy och godkännandekrav.
+- Document ID: POL-015
+- Title: Benefits, Pension, Travel and Company Policy
+- Status: Binding
+- Owner: HR governance and finance governance
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/policies/benefits-pension-travel-company-policy.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-policy-matrix.md`
+  - `docs/master-control/master-rulepack-register.md`
+- Related domains:
+  - benefits
+  - pension
+  - travel
+  - payroll
+- Related code areas:
+  - `packages/domain-benefits/*`
+  - `packages/domain-payroll/*`
+  - `packages/domain-travel/*`
+- Related future documents:
+  - `docs/compliance/se/benefits-engine.md`
+  - `docs/compliance/se/payroll-engine.md`
 
-## Scope
+# Purpose
 
-- företagets policyval för friskvård, gåvor, löneväxling, pension, resor och godkännandekrav
-- ersättningsflöden som produkten ska kunna verkställa utan tolkningsglapp
+Styra bolagets valbara policygränser inom friskvård, gåvor, pension, löneväxling, resor och utlägg där compliance-reglerna tillåter företagsval.
 
-## Policy
+# Scope
 
-### Friskvård och gåvor
+Policyn gäller:
 
-- Bolaget ersätter friskvård upp till 5 000 SEK per anställd och kalenderår, men aldrig över den vid varje tidpunkt skattefria nivån i compliance-regelpaketet.
-- Utrustning med bestående värde ersätts inte som friskvård.
-- Gåvor följer alltid den lägsta av bolagets egen budget och den vid varje tidpunkt skattefria gränsen i regelpaketet. Om bolaget vill överskrida gränsen ska förmånsbeskattning aktiveras i löneflödet.
+- friskvårdsersättning
+- gåvor
+- löneväxling
+- pension
+- resor och utlägg
 
-### Löneväxling och pension
+# Why it exists
 
-- Löneväxling erbjuds endast tillsvidareanställda där kontant lön efter växling fortfarande ligger över bolagets definierade lägstanivå för trygg löne- och socialförsäkringshantering.
-- Minsta löneväxling är 500 SEK per månad och högsta ordinarie nivå är 20 procent av bruttolönen om inte särskilt beslut finns.
-- Bolaget lägger ett pensionspåslag på 5,8 procent på växlat belopp som standard.
-- Ändring av löneväxling får ske högst två gånger per år om inte livshändelse eller särskilt HR-beslut motiverar annat.
+Många ersättningsflöden är delvis regelstyrda och delvis bolagsvalda. Policyn gör de valbara gränserna tekniskt verkställbara.
 
-### Resor och utlägg
+# Non-negotiable rules
 
-- Tågresor och flyg under 5 timmars flygtid ska normalt bokas i ekonomiklass.
-- Premium economy kan godkännas för resor över 5 timmar; business class kräver särskilt direktörs- eller CFO-godkännande.
-- Hotell bokas som standardrum. Riktvärde är högst 2 500 SEK per natt i Sverige eller 300 EUR utomlands om inte marknadsläget motiverar högre pris.
-- Privat bil används bara när det är mer praktiskt eller billigare än rimliga alternativ.
-- Resa med beräknad total kostnad över 5 000 SEK eller resa utanför Norden kräver förhandsgodkännande.
+1. Skattefria tak i regelpaket får aldrig överskridas utan att flödet växlar till skattepliktigt utfall.
+2. Friskvård ska erbjudas på lika villkor inom den grupp som policyn omfattar.
+3. Gåvetyper ska lagras med korrekt kategori och gränslogik.
+4. Löneväxling får inte godkännas om kontantlönen efter växling underskrider bolagets definierade säkerhetsgräns.
+5. Utlägg och resekostnader kräver underlag och attest.
 
-### Godkännandekrav
+# Allowed actions
 
-- Företagskort är förstahandsval för bolagskostnad där det är praktiskt möjligt.
-- Privata utlägg ska lämnas in inom 30 dagar efter kostnaden om inte policy eller projekt kräver kortare tid.
-- Reseutlägg och dyrare förmåner ska godkännas av närmaste chef eller budgetägare före utbetalning.
+- utbetala friskvård inom policytak
+- ge gåva inom tillåten kategori
+- aktivera löneväxling inom bolagets ramar
+- ersätta resa och utlägg enligt attestkedja
 
-## Undantag
+# Forbidden actions
 
-- Undantag från reseklass, friskvårdstak eller löneväxlingsnivå kräver dokumenterat chef- eller CFO-beslut.
-- Extra pensionsavsättning utöver standard kräver separat beslutsdokument och ska kunna särredovisas.
+- ersätta friskvård utan underlag
+- behandla förbjuden gåva som skattefri
+- godkänna löneväxling som bryter minimikrav
 
-## Obligatoriska bevis och loggar
+# Approval model
 
-- kvitto och attest för varje ersättning eller utlägg
-- policybeslut och undantagsgodkännanden
-- versionshistorik för löneväxlingsavtal och pensionspåslag
+- standardersättningar: chef eller budgetägare enligt beloppsgräns
+- undantag från reseklass eller högre förmånsvärde: högre chef eller CFO
 
-## Review cadence
+# Segregation of duties where relevant
 
-- årlig översyn av belopp, resepolicy och pensionspåslag
-- kvartalsvis kontroll av att ersättningar inte överstiger aktivt regelpaket
+- utlägg som gäller närmaste chef eller HR-ägare ska attesteras av annan behörig person
+
+# Audit and evidence requirements
+
+Spara:
+
+- underlag
+- attest
+- policyversion
+- undantagsbeslut
+
+# Exceptions handling
+
+Undantag från policygränser ska vara tidsbundna, dokumenterade och kunna särskiljas från standardutfall.
+
+# Backoffice/support restrictions where relevant
+
+- support får inte skapa eller godkänna ekonomiska policyundantag
+
+# Runtime enforcement expectations
+
+- bolagets policytak ska konfigureras server-side och läsas tillsammans med regelpaket
+- utfall över skattefri gräns ska automatiskt gå till skattepliktig hantering eller review
+
+# Test/control points
+
+- friskvård över tak växlar till review eller skattepliktigt utfall
+- gåvogränser fungerar som allt-eller-inget där regelpaket kräver det
+- löneväxling under säkerhetsgräns blockeras
+
+# Exit gate
+
+- [ ] bolagets policyval är tekniskt verkställbara
+- [ ] utlägg, gåvor och friskvård är auditbara
+- [ ] undantag kräver dokumenterat beslut

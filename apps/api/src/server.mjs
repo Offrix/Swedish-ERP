@@ -43,6 +43,16 @@ async function handleRequest({ req, res, platform, flags }) {
         ? {
             service: "api",
             status: "ok",
+            registeredDomains:
+              typeof platform.listRegisteredDomains === "function"
+                ? platform.listRegisteredDomains().map(({ domainKey, label, dependsOn, capabilityCount }) => ({
+                    domainKey,
+                    label,
+                    dependsOn,
+                    capabilityCount
+                  }))
+                : [],
+            platformContractVersions: platform.platformContractVersions || null,
             phase1AuthOnboardingEnabled: flags.phase1AuthOnboardingEnabled,
             phase2DocumentArchiveEnabled: flags.phase2DocumentArchiveEnabled,
             phase2CompanyInboxEnabled: flags.phase2CompanyInboxEnabled,
@@ -81,6 +91,28 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/ledger/chart/install",
               "/v1/ledger/accounts",
               "/v1/ledger/accounting-periods",
+              "/v1/accounting-method/eligibility-assessments",
+              "/v1/accounting-method/profiles",
+              "/v1/accounting-method/profiles/:methodProfileId",
+              "/v1/accounting-method/profiles/:methodProfileId/activate",
+              "/v1/accounting-method/active",
+              "/v1/accounting-method/history",
+              "/v1/accounting-method/change-requests",
+              "/v1/accounting-method/change-requests/:methodChangeRequestId/approve",
+              "/v1/accounting-method/change-requests/:methodChangeRequestId/reject",
+              "/v1/accounting-method/year-end-catch-up-runs",
+              "/v1/accounting-method/year-end-catch-up-runs/:yearEndCatchUpRunId",
+              "/v1/fiscal-years/profiles",
+              "/v1/fiscal-years/change-requests",
+              "/v1/fiscal-years/change-requests/:changeRequestId/approve",
+              "/v1/fiscal-years",
+              "/v1/fiscal-years/:fiscalYearId",
+              "/v1/fiscal-years/:fiscalYearId/activate",
+              "/v1/fiscal-years/:fiscalYearId/generate-periods",
+              "/v1/fiscal-years/active",
+              "/v1/fiscal-years/periods/lookup",
+              "/v1/fiscal-years/periods/:periodId/reopen",
+              "/v1/fiscal-years/history",
               "/v1/ledger/dimensions",
               "/v1/ledger/voucher-series",
               "/v1/ledger/journal-entries",
@@ -1280,6 +1312,36 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "POST" && path === "/v1/ledger/voucher-series") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.upsertVoucherSeries({
+        companyId,
+        seriesCode: body.seriesCode,
+        description: body.description ?? null,
+        nextNumber: body.nextNumber ?? null,
+        status: body.status ?? null,
+        purposeCodes: Array.isArray(body.purposeCodes) ? body.purposeCodes : null,
+        importedSequencePreservationEnabled:
+          body.importedSequencePreservationEnabled == null ? null : body.importedSequencePreservationEnabled === true,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   if (req.method === "POST" && path === "/v1/ledger/journal-entries") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
@@ -1418,7 +1480,7 @@ async function handleRequest({ req, res, platform, flags }) {
         reasonCode: body.reasonCode,
         correctionKey: body.correctionKey,
         journalDate: body.journalDate || null,
-        voucherSeriesCode: body.voucherSeriesCode || "V",
+        voucherSeriesCode: body.voucherSeriesCode || null,
         metadataJson: body.metadataJson || {},
         correlationId: body.correlationId || createCorrelationId()
       })
@@ -1449,7 +1511,7 @@ async function handleRequest({ req, res, platform, flags }) {
         correctionKey: body.correctionKey,
         lines: body.lines,
         journalDate: body.journalDate || null,
-        voucherSeriesCode: body.voucherSeriesCode || "A",
+        voucherSeriesCode: body.voucherSeriesCode || null,
         reverseOriginal: body.reverseOriginal === true,
         metadataJson: body.metadataJson || {},
         correlationId: body.correlationId || createCorrelationId()
@@ -3613,6 +3675,58 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 200, {
       items: platform.listInvoices({ companyId })
     });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ar/invoice-series") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ar_invoice",
+      scopeCode: "ar"
+    });
+    writeJson(res, 200, {
+      items: platform.listInvoiceSeries({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ar/invoice-series") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ar_invoice",
+      scopeCode: "ar"
+    });
+    writeJson(
+      res,
+      201,
+      platform.upsertInvoiceSeries({
+        companyId,
+        seriesCode: body.seriesCode,
+        prefix: body.prefix ?? null,
+        description: body.description ?? null,
+        nextNumber: body.nextNumber ?? null,
+        status: body.status ?? null,
+        invoiceTypeCodes: Array.isArray(body.invoiceTypeCodes) ? body.invoiceTypeCodes : null,
+        voucherSeriesPurposeCode: body.voucherSeriesPurposeCode ?? null,
+        importedSequencePreservationEnabled:
+          body.importedSequencePreservationEnabled == null ? null : body.importedSequencePreservationEnabled === true,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
     return;
   }
 

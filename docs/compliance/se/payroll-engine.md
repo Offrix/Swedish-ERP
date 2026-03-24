@@ -1,214 +1,258 @@
-# Payroll engine
+# Master metadata
 
-Detta dokument definierar lönekärnan: löneperioder, lönearter, beräkningsordning, skatt, arbetsgivaravgifter, SINK, utbetalning, bokföring och slutlön.
+- Document ID: SE-CMP-016
+- Title: Payroll Engine
+- Status: Binding
+- Owner: Payroll compliance architecture
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/compliance/se/payroll-engine.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-rulepack-register.md`
+  - `docs/master-control/master-build-sequence.md`
+  - `docs/master-control/master-golden-scenario-catalog.md`
+- Related domains:
+  - payroll
+  - balances
+  - agreements
+  - AGI
+  - banking
+- Related code areas:
+  - `packages/domain-payroll/*`
+  - `packages/domain-balances/*`
+  - `packages/domain-collective-agreements/*`
+  - `packages/domain-ledger/*`
+  - `apps/api/*`
+- Related future documents:
+  - `docs/compliance/se/payroll-migration-and-balances-engine.md`
+  - `docs/compliance/se/collective-agreements-engine.md`
+  - `docs/domain/payroll-workbench-and-ops.md`
 
-## Scope
+# Purpose
 
-Lönemotorn ska klara:
-- månadslön
-- timlön
-- rörliga ersättningar
-- frånvaro
-- semester
-- sjuklön och karenslogik
-- övertid, mertid, OB, jour, beredskap
-- bonus och provision
-- förmåner och traktamenten som påverkar lön
-- bruttolöne- och nettolöneavdrag
-- löneväxling
-- pension
-- slutlön
-- extra körningar
-- retroaktiva korrigeringar
+Definiera den bindande lönekärnan för beräkning, pay runs, AGI-underlag, bokföringsintents, nettolön och rättelser.
 
-## Körordning
+# Scope
 
-### 27.1 Beräkningsordning i lönekörning
-Följ exakt denna ordning:
-1. hämta anställning och löneperiod
-2. hämta schema, tid, frånvaro, saldon
-3. skapa grundlön
-4. lägg till rörliga lönearter
-5. lägg till retroaktiva korrigeringar
-6. lägg till förmåner
-7. lägg till traktamente/utlägg som påverkar lön eller AGI
-8. applicera bruttolöneavdrag
-9. räkna pensionsmedförande lön
-10. räkna skattepliktigt underlag
-11. räkna preliminär skatt
-12. räkna arbetsgivaravgifter
-13. applicera nettolöneavdrag
-14. räkna nettolön
-15. skapa lönebesked
-16. skapa AGI-underlag
-17. skapa bokföringsunderlag
-18. skapa betalningsunderlag
+Ingår:
 
-## Löneartsmodell
+- pay calendars and pay periods
+- pay runs and extra runs
+- pay lines and payroll outcomes
+- skatt, SINK och arbetsgivaravgifter
+- balances and agreements handoff
+- AGI constituents
+- payment batches
 
-### 27.2 Obligatoriska löneartstyper
-- månadslön
-- timlön
-- övertid
-- mertid
-- OB
-- jour
-- beredskap
-- bonus
-- provision
-- semesterlön
-- semestertillägg
-- semesteravdrag
-- sjuklön
-- karens
-- VAB
-- föräldraledighet
-- tjänstledighet
-- traktamente skattefritt
-- traktamente skattepliktigt
-- milersättning skattefri
-- milersättning skattepliktig
-- förmån
-- pensionspremie
-- löneväxling bruttolöneavdrag
-- nettolöneavdrag
-- utmätning
-- förskott
-- återkrav
-- slutlön
-- korrigering
+Ingår inte:
 
-Varje löneart ska definiera:
-- beskattning
-- arbetsgivaravgift
-- AGI-mappning
-- bokföringskonto
-- standarddimensioner
-- om beloppet påverkar semestergrundande lön
-- om beloppet påverkar pensionsmedförande lön
-- om beloppet ingår i nettolön eller bara rapporteras
+- generella HR-register
+- pensionsprodukt i detalj utöver payroll impact
+- field/mobile UI
 
-## Arbetsgivaravgifter
+# Non-negotiable rules
 
-Systemet ska ha en tabellstyrd motor för arbetsgivaravgifter. För 2026 gäller minst:
+1. Samma underlag och samma rulepackversion ska ge samma pay-run-resultat.
+2. Alla beräkningssteg ska vara historiskt reproducerbara.
+3. Payroll är enda ägare av AGI constituents.
+4. Balances och agreements ska läsas server-side; UI får inte räkna avtal eller saldon.
+5. Postad pay run får inte muteras tyst; rättelse ska ske via correction pay run eller explicit reversal chain.
+6. Arbetsgivaravgifter ska styras av utbetalningsdatum, personstatus och aktivt rulepack.
+7. För ersättningar under SINK ska särskild källskatt enligt giltigt beslut användas; från inkomstår 2026 är huvudnivån 22,5 procent enligt Skatteverket.
+8. För 2026 ska full arbetsgivaravgift behandlas som 31,42 procent och reducerad nivå som 10,21 procent i de fall regelpaketen anger det.
 
-- full arbetsgivaravgift: **31,42 %**
-- reducerad avgift: **10,21 %** när reglerna för ålderspensionsavgift enbart gäller
-- födda **1937 eller tidigare**: ingen arbetsgivaravgift
-- särskilda nedsättningar ska kunna modelleras som separata regelpaket, inte som hårdkodade undantag
+# Definitions
 
-Reglerna ska vara styrda av:
-- utbetalningsdatum
-- personens födelseår eller annan regelparameter enligt gällande regelpaket
-- eventuell nedsättning eller stöd
-- om ersättningen utgör underlag för arbetsgivaravgift
+- `Pay run`: låst beräkning för viss period och population.
+- `Pay line`: enskilt löneutfall med type, amount och tax treatment.
+- `AGI constituent`: payrollgenererat rapportobjekt till arbetsgivardeklaration.
+- `Correction pay run`: rättelsekörning som bevarar tidigare historik.
+- `Balance snapshot`: låst bild av semester-, komp-, flex- eller andra banker vid körning.
 
-## SINK
+# Object model
 
-### 27.4 SINK
-- särskild inkomstskatt för utomlands bosatta: 22,5 procent från 1 januari 2026, 15 procent för sjöinkomst enligt gällande regler
-- SINK är definitiv skatt
-- systemet ska stödja SINK-beslut, giltighetsperiod och särskild AGI-mappning
-- vid vistelse i Sverige sex månader eller längre ska vanlig beskattning kunna ta över när reglerna kräver det
+## PayRun
 
-Intern representation för SINK ska stödja:
-- beslutstyp
-- giltighetsintervall
-- skattesats
-- sjöinkomstflagga
-- bevis-/beslutsdokument
-- fallback till vanlig beskattning när regelvillkoren inte längre är uppfyllda
+Fält:
 
-## Lönebesked
+- `pay_run_id`
+- `company_id`
+- `pay_period_id`
+- `run_type_code`
+- `status`
+- `rulepack_version_set`
+- `calculated_at`
+- `approved_at`
 
-### 27.7 Lönebesked
-Lönebesked ska visa minst:
-- person och anställning
-- period
-- lönearter
-- timmar/dagar där relevant
-- bruttolön
-- skatt
-- arbetsgivaravgifter visas normalt inte till anställd men ska kunna ses i admin
-- förmåner
-- pension/löneväxling
-- nettolön
-- utbetalningsdatum
-- saldon: semester, flex, komp
+## PayLine
 
-## Slutlön
+Fält:
 
-### 27.8 Slutlön
-Systemet ska hantera:
-- avslutsdatum
-- kvarvarande semester
-- förskottssemesteravräkning
-- återlämning av utrustning påverkar inte lön direkt utan separat process
-- slutlön ska kunna köras som egen typ
-- AGI och bokföring ska märka slutlön
+- `pay_line_id`
+- `pay_run_id`
+- `employee_id`
+- `pay_item_code`
+- `amount`
+- `tax_treatment_code`
+- `employer_contribution_treatment_code`
+- `agi_box_code`
+- `source_object_type`
+- `source_object_id`
 
-## Bokföring
+## AgiConstituent
 
-Lönemotorn ska skapa posting intents för minst:
-- bruttolön
-- preliminärskatt
-- arbetsgivaravgifter
-- semesterlöneskuld och förändring
-- förmåner
-- pensionskostnad
-- särskild löneskatt på pensionskostnader där relevant
-- nettolöneavdrag
-- utbetalning till bank
+Fält:
 
-## Edge cases
+- `agi_constituent_id`
+- `pay_run_id`
+- `employee_id`
+- `income_period`
+- `box_code`
+- `amount`
+- `status`
 
-- ingen kontant nettolön men skattepliktig förmån
-- flera anställningar för samma individ samma period
-- periodöverlapp vid retroaktiv rättelse
-- anställning som slutar mitt i period
-- byte av schema mitt i månad
-- utländskt bankkonto
-- skyddad identitet
-- samordningsnummer
-- SINK som upphör mitt i år
-- ändrad löneväxling i samma period
+# Required fields
 
-## Golden tests
+- employee identity
+- pay period
+- pay item code
+- calculation inputs
+- active rulepack set
+- agreement and balance snapshots when relevant
+- approval metadata before payment
 
-- månadslön med skattetabell
-- timlön med övertid
-- sjukfrånvaro över karens
-- semesteruttag och semestertillägg
-- slutlön med förskottssemesteravräkning
-- bilförmån utan kontant lön
-- SINK 22,5 %
-- person med reducerad arbetsgivaravgift
-- retroaktiv bonus
-- två extra lönekörningar
+# State machines
 
-## Codex-prompt
+## PayRun
 
-```text
-Read docs/compliance/se/payroll-engine.md, docs/compliance/se/agi-engine.md and ADR-0005-rule-engine-philosophy.md.
+- `draft`
+- `calculating`
+- `calculated`
+- `approved`
+- `posted`
+- `payment_prepared`
+- `closed`
+- `corrected`
 
-Implement the payroll core:
-- pay calendars
-- pay runs
-- pay lines
-- pay item catalog
-- employer contribution rule packs
-- SINK support
-- final pay
-- posting intents
-- bank payment payload
-- golden tests
+## AgiConstituent
 
-Do not put tax or contribution logic in UI.
-```
+- `draft`
+- `ready`
+- `submitted`
+- `corrected`
+- `closed`
 
-## Exit gate
+# Validation rules
 
-- [ ] Lön kan köras reproducerbart för samma underlag.
-- [ ] Skatt och avgifter blir rätt enligt regelpaket.
-- [ ] Slutlön, retro och extra körning fungerar.
-- [ ] Bokföring skapas korrekt och spårbart.
+1. `approved` kräver att blockerande payroll exceptions är lösta.
+2. Pay run får inte använda osignerad migration opening state.
+3. Samma employee och pay item får inte dubbelskapas genom replay utan idempotency key.
+4. Negativ nettolön eller otillåtet saldo ska blockera eller skicka till review enligt policy.
+5. SINK, skattetabell eller särskild skatteinställning måste vara låst på pay-run snapshot innan beräkning.
+
+# Deterministic decision rules
+
+## Rule PAY-001: Calculation order
+
+Beräkning ska ske i denna ordning:
+
+1. load employee and period
+2. load balances, agreements and attendance inputs
+3. apply fixed pay items
+4. apply variable items and document-driven benefits
+5. apply gross deductions
+6. calculate taxable income
+7. calculate preliminary tax or SINK
+8. calculate employer contributions
+9. apply net deductions
+10. create AGI constituents
+11. create posting intents
+12. create payment batch
+
+## Rule PAY-002: Contributions
+
+Arbetsgivaravgift ska för 2026 utgå från full nivå 31,42 procent eller reducerad nivå 10,21 procent när rulepacken för personens status medger det.
+
+## Rule PAY-003: SINK
+
+Vid giltigt SINK-beslut ska källskatt beräknas enligt aktivt beslut; från inkomstår 2026 är huvudnivån 22,5 procent.
+
+## Rule PAY-004: Correction
+
+Fel i tidigare pay run rättas genom correction pay run eller AGI-correction chain, aldrig genom att tidigare beräkningsresultat skrivs över.
+
+# Rulepack dependencies
+
+- `RP-PAYROLL-SE`
+- `RP-EMPLOYER-CONTRIBUTIONS-SE`
+- `RP-SINK-SE`
+- `RP-COLLECTIVE-AGREEMENTS-SE`
+- `RP-BALANCES-SE`
+
+# Posting/accounting impact
+
+- pay run ska generera bokföringsintents för bruttolön, skatt, arbetsgivaravgifter, nettolöneavdrag, förmåner, pensionspåverkan och nettolöneskuld
+- payroll cost allocation till projekt ska ske från payroll outcome, inte från UI
+
+# Payroll impact where relevant
+
+- benefits, travel and pension handoffs ska bli pay lines eller separata payroll outcomes genom officiella kommandon
+
+# AGI impact where relevant
+
+- payroll skapar enda källan till individuppgifter och rättelser
+
+# Review requirements
+
+Review krävs vid:
+
+- negativ nettolön
+- saknat eller motsägelsefullt skattebeslut
+- document-driven benefit with ambiguity
+- migration diff over tolerance
+
+# Correction model
+
+- correction pay run
+- AGI correction case
+- reversal or replacement of payment batch when policy tillåter
+
+# Audit requirements
+
+Audit ska visa:
+
+- input snapshots
+- rulepack versions
+- approvals
+- AGI constituent lineage
+- payment batch lineage
+
+# Golden scenarios covered
+
+- taxable benefit
+- net salary deduction
+- payroll migration with balances
+- AGI correction
+- project cost from payroll
+
+# API implications
+
+- pay-run calculate/approve commands
+- exception queries
+- AGI submission prep
+- correction pay-run commands
+
+# Test implications
+
+- deterministic rerun
+- contribution and SINK tests
+- correction chains
+- balance and agreement handoff tests
+
+# Exit gate
+
+- [ ] pay runs är reproducerbara och versionsstyrda
+- [ ] payroll är enda source of truth för AGI constituents
+- [ ] correction, balances och agreements fungerar utan tyst mutation

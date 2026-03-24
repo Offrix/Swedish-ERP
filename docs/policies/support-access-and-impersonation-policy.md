@@ -1,78 +1,116 @@
-# Support access and impersonation policy
+# Master metadata
 
-## Syfte
+- Document ID: POL-013
+- Title: Support Access and Impersonation Policy
+- Status: Binding
+- Owner: Support governance and security governance
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/policies/support-access-and-impersonation-policy.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-policy-matrix.md`
+  - `docs/master-control/master-build-sequence.md`
+  - `docs/master-control/master-domain-map.md`
+- Related domains:
+  - backoffice
+  - auth
+  - support
+  - audit
+- Related code areas:
+  - `packages/domain-org-auth/*`
+  - `packages/domain-core/*`
+  - `apps/backoffice/*`
+- Related future documents:
+  - `docs/domain/audit-review-support-and-admin-backoffice.md`
+  - `docs/policies/security-admin-and-incident-policy.md`
 
-Detta dokument definierar när supportåtkomst, impersonation och break-glass får användas, vilka spärrar som gäller och vilka supportåtgärder som är tillåtna. Policyn ska skydda kunddata, SoD och revisionsspår samtidigt som support kan lösa legitima problem.
+# Purpose
 
-## Gäller för
+Styra när supportåtkomst, impersonation och break-glass får användas och vilka gränser som gäller för att skydda kunddata, SoD och revisionsspår.
 
-- support admins, support leads, security admins, incident command och övriga administratörer
-- alla supportärenden, impersonation-sessioner, break-glass-sessioner och diagnostiska adminåtgärder
-- alla miljöer med särskilt fokus på staging och produktion
+# Scope
 
-## Hårda regler
+Policyn gäller:
 
-1. All supportåtkomst ska vara knuten till ett supportärende med tydligt syfte och scope.
-2. Support får endast använda fördefinierade tillåtna actions och officiella domänkommandon.
-3. Impersonation får vara read-only som standard; skrivande impersonation kräver särskild motivering och högre godkännande.
-4. Break-glass får endast användas vid aktiv incident där ordinarie åtkomst inte räcker.
-5. Support får aldrig använda kundens eller annan användares delade credentials.
-6. Support får inte godkänna betalningar, sign-offs eller submissions i stället för kundens ordinarie beslutsroller.
-7. Alla känsliga supportåtgärder ska vara fullt auditloggade och eftergranskade.
+- supportärenden
+- read-only impersonation
+- write-capable impersonation
+- break-glass
+- supportdiagnostik och replay via officiella verktyg
 
-## Roller och ansvar
+# Why it exists
 
-- **Support admin** hanterar normala supportärenden inom allowlist.
-- **Support lead** godkänner högre riskåtgärder och eskalerade ärenden.
-- **Security admin** godkänner impersonation med write-mode, break-glass och access-relaterad remediation.
-- **Incident commander** initierar break-glass under incident.
-- **Compliance reviewer** granskar i efterhand att policy följts.
+Support behöver ibland se eller reproducera kundproblem, men får inte bli en genväg runt ordinarie behörighet, attest eller domänkommandon.
 
-## Tillåtna actions
+# Non-negotiable rules
 
-- läsa systemstatus, auditspår, jobbhistorik och tekniska fel inom case-scope
-- köra godkända diagnoskommandon
-- initiera teknisk retry eller replay via officiell runbook
-- starta read-only impersonation efter godkännande där policy kräver det
-- avsluta och dokumentera supportärenden
+1. All supportåtkomst måste vara kopplad till ett spårbart ärende.
+2. Read-only är standard; skrivande access är undantag.
+3. Support får inte fatta ekonomiska beslut eller signera reglerade flöden i kundens namn.
+4. Direkt databasändring är förbjuden utanför särskild incidentrunbook.
+5. Break-glass får bara användas vid aktiv incident eller uppenbar driftskada.
+6. Alla supportsessioner, approvals och åtgärder ska auditloggas.
 
-## Förbjudna actions
+# Allowed actions
 
-- direkt databasändring som inte går via styrda procedurer
-- skrivande impersonation utan godkännande
-- användning av supportåtkomst för nyfikenhetsläsning eller generell övervakning
-- att maskera eller radera auditspår
-- att utföra affärsgodkännanden i kundens namn
+- läsa auditspår, jobs, errors och read models inom ärendets scope
+- starta officiell replay eller retry när runbook tillåter det
+- genomföra read-only impersonation enligt approval model
 
-## Undantag
+# Forbidden actions
 
-- break-glass vid incident får temporärt ge utökad åtkomst, men sessionen måste vara tidsbegränsad och eftergranskas
-- i testmiljö kan viss bredare åtkomst tillåtas för felsökning, men produktionens impersonation- och auditkrav ska efterliknas så långt möjligt
+- använda delade credentials
+- utföra kundens affärsgodkännanden
+- maskera eller radera auditspår
+- kringgå server-side policy genom direkt adminskrivning
 
-## Godkännanden
+# Approval model
 
-- vanlig read-only diagnostics: support admin inom case-scope
-- känslig diagnostics eller read-only impersonation: support lead
+- vanlig diagnostics: support admin inom ticket scope
+- read-only impersonation: support lead
 - write-capable impersonation: support lead plus security admin
-- break-glass: incident commander plus separat godkännare enligt policy
+- break-glass: incident commander plus separat godkännare
 
-## Audit
+# Segregation of duties where relevant
 
-- varje supportärende, godkännande, diagnostics-kommando, impersonation-session och break-glass-session ska auditloggas
-- audit ska innehålla syfte, ärende-id, målidentitet, tidsfönster, godkännare och utförda actions
-- eftergranskning ska dokumenteras för alla högriskåtgärder
+- samma person ska inte både godkänna och utföra högrisk-impersonation när separat granskning är möjlig
 
-## Kontrollpunkter
+# Audit and evidence requirements
 
-- daglig genomgång av aktiva impersonation- och break-glass-sessioner
-- veckovis genomgång av högrisk-supportärenden
-- kvartalsvis access review av support- och adminroller
-- stickprovskontroll av att supportärenden har korrekt scope och avslutsnotering
+Audit ska visa:
 
-## Exit gate
+- ärende-id
+- måltenant och målidentitet
+- sessionstyp
+- approvals
+- start/slut
+- utförda actions
 
-- [ ] supportåtkomst kräver spårbart ärende och definierat scope
-- [ ] impersonation och break-glass följer godkännanderegler
-- [ ] förbjudna actions kan inte utföras via vanliga supportverktyg
-- [ ] alla högriskåtgärder eftergranskas
-- [ ] auditkedjan räcker för incident, revision och internkontroll
+# Exceptions handling
+
+Akuta undantag ska vara tidsbegränsade, ha tydlig skälkod och eftergranskas nästa arbetsdag.
+
+# Backoffice/support restrictions where relevant
+
+- support får bara använda officiella backoffice-funktioner
+- break-glass-session ska ha hård timeout och särskild visuell markering
+
+# Runtime enforcement expectations
+
+- impersonation ska vara server-side markerad och sessionbunden
+- write-capable mode ska kräva färsk stark autentisering
+- action allowlist ska verkställas tekniskt
+
+# Test/control points
+
+- read-only session kan inte skriva
+- write-mode kräver dubbelapproval
+- audit finns för varje session
+
+# Exit gate
+
+- [ ] supportåtkomst är ticket-bunden och auditbar
+- [ ] impersonation och break-glass följer tydliga approvals
+- [ ] support kan inte kringgå ordinarie domänkommandon

@@ -1,197 +1,205 @@
-# Field work order, service order and material flow
+# Master metadata
 
-## Syfte
+- Document ID: DOM-012
+- Title: Field Work Order Service Order and Material Flow
+- Status: Binding
+- Owner: Field product architecture
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/domain/field-work-order-service-order-and-material-flow.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-domain-map.md`
+  - `docs/master-control/master-build-sequence.md`
+- Related domains:
+  - field
+  - projects
+  - mobile
+- Related code areas:
+  - `packages/domain-field/*`
+  - `packages/domain-projects/*`
+  - `apps/field-mobile/*`
+  - `apps/desktop-web/*`
+- Related future documents:
+  - `docs/ui/FIELD_MOBILE_SPEC.md`
+  - `docs/domain/offline-sync-and-conflict-resolution.md`
 
-Detta dokument definierar den bindande domanmodellen for FAS 10.2: dispatch, arbetsorder, serviceorder, fältmobil, material/lager och kundsignatur. Syftet ar att sakerstalla att field-floden ar deterministiska, spårbara, versionsstyrda och fakturerbara utan att flytta domanlogik till UI.
+# Purpose
 
-## Scope
+Definiera arbetsorder, serviceorder, dispatch, materialuttag, foton och kundsignatur som sammanhängande field-domän.
 
-### Ingar
+# Scope
 
-- arbetsorder och serviceorder med tydliga statusovergangar
-- dispatch assignment mellan arbetsorder och bemannad anstallning
-- materialuttag fran lagerplats med projektkoppling
-- kundsignatur och signaturkrav per arbetsorder
-- field-mobile today-feed, offline envelope och synkstatus
-- fakturering av avslutad arbetsorder via AR
+Omfattar:
 
-### Ingar inte
+- work orders
+- service orders
+- dispatch assignments
+- material usage
+- photos and notes
+- customer signature
 
-- byggspecifika regler for ATA, HUS, omvand moms och personalliggare (FAS 10.3)
-- fritt offline-stod for reglerade ekonomiobjekt
-- lagerinkop och leverantorsmottagning (AP-doman)
+Omfattar inte:
 
-### Systemgranser
+- AP inventory purchasing
+- personalliggare rules
+- allmän project profitability
 
-- domain-field ager arbetsorder, dispatch, materialuttag, kundsignatur och offline envelope
-- domain-projects ager projektets livscykel, budget, WIP och forecast
-- domain-hr ager anstallning och behorig dispatch-resurs
-- domain-ar ager kundfaktura, issue och leveranslogik
-- API-lagret ager transport, authz och valideringsfel till klient
+# Roles
 
-## Roller
+- dispatcher
+- field worker
+- field lead
+- project manager
 
-- Field user: utfor check-in, materialuttag, kommentar och signaturinsamling
-- Dispatcher: planerar och uppdaterar dispatch assignments
-- Project manager: foljer arbetsorderstatus, materialkostnad och fakturerbarhet
-- Finance operator: granskar och fakturerar avslutade arbetsorder
-- Support: hanterar conflict repair enligt runbook
+# Source of truth
 
-## Begrepp
+`field` äger work orders, dispatch, material usage, signature status och photos/notes inom uppdraget. `projects` äger övergripande projektstatus.
 
-- Work order: operativt utförande med projekt, kund och planerad tid
-- Service order: arbetsorder med servicekaraktar, ofta SLA- eller avtalstyrd
-- Dispatch assignment: tidsbundet uppdrag till anstallning for en arbetsorder
-- Inventory location: fysisk plats for material, till exempel lager eller servicebil
-- Inventory item: artikel med koppling till AR-item for fakturering
-- Material withdrawal: forbrukning av inventarie till arbetsorder/projekt
-- Customer signature: kundens godkannande av utfört arbete
-- Mobile today feed: fältmobil sammanstallning av dagens uppdrag och synkstatus
-- Sync envelope: versionsmedveten offline-mutation med idempotensnyckel
+# Object model
 
-## Objektmodell
+## WorkOrder
 
-### Field work order
-- falt: `work_order_id`, `work_order_no`, `company_id`, `project_id`, `customer_id`, `status`, `priority_code`, `scheduled_start_at`, `scheduled_end_at`, `actual_started_at`, `actual_ended_at`, `labor_minutes`, `labor_item_id`, `labor_rate_amount`, `signature_required`, `signature_status`, `customer_invoice_id`, `version_no`
-- invariant: `project_id` maste tillhora samma bolag
-- invariant: `version_no` maste okas vid varje statusandring eller central mutation
+Fält:
 
-### Dispatch assignment
-- falt: `dispatch_assignment_id`, `company_id`, `work_order_id`, `employment_id`, `starts_at`, `ends_at`, `status`
-- invariant: `employment_id` maste finnas i HR for samma bolag
+- `work_order_id`
+- `project_id`
+- `customer_id`
+- `status`
+- `priority_code`
+- `planned_start_at`
+- `planned_end_at`
+- `actual_start_at`
+- `actual_end_at`
+- `signature_required`
+- `signature_status`
 
-### Inventory model
-- inventory location: `inventory_location_id`, `location_code`, `location_type`, `project_id_optional`
-- inventory item: `inventory_item_id`, `item_code`, `unit_code`, `ar_item_id_optional`, `sales_unit_price_amount`
-- inventory balance: `inventory_balance_id`, `inventory_item_id`, `inventory_location_id`, `on_hand_quantity`, `reserved_quantity`
-- invariant: `reserved_quantity <= on_hand_quantity`
+## DispatchAssignment
 
-### Material withdrawal
-- falt: `material_withdrawal_id`, `company_id`, `work_order_id`, `project_id`, `inventory_item_id`, `inventory_location_id`, `quantity`, `source_channel`
-- invariant: `project_id` arvs fran arbetsorder och far inte ersattas av klient
+Fält:
 
-### Customer signature
-- falt: `field_customer_signature_id`, `company_id`, `work_order_id`, `signer_name`, `signed_at`, `signature_status`, `signature_payload`
-- invariant: en arbetsorder med `signature_required=true` far inte ga till `completed` utan status `captured`
+- `dispatch_assignment_id`
+- `work_order_id`
+- `employment_id`
+- `starts_at`
+- `ends_at`
+- `status`
 
-### Field sync envelope
-- falt: `field_sync_envelope_id`, `company_id`, `client_mutation_id`, `client_device_id`, `client_user_id`, `object_type`, `mutation_type`, `base_server_version`, `payload_hash`, `payload_json`, `sync_status`, `last_error_code`
-- invariant: `(company_id, client_mutation_id)` maste vara unik
+## MaterialUsage
 
-## State machine
+Fält:
 
-### Work order
-- `draft -> ready_for_dispatch`
-- `ready_for_dispatch -> dispatched`
-- `dispatched -> in_progress`
-- `in_progress -> completed`
-- `completed -> invoiced`
-- `draft|ready_for_dispatch|dispatched|in_progress -> cancelled`
+- `material_usage_id`
+- `work_order_id`
+- `inventory_item_id`
+- `quantity`
+- `source_location_id`
+- `status`
 
-### Dispatch assignment
-- `planned -> accepted -> en_route -> on_site -> completed`
-- `planned|accepted|en_route|on_site -> cancelled`
+# State machines
 
-### Signature
-- `pending -> captured`
-- `pending -> voided`
+## WorkOrder
 
-### Sync envelope
-- `pending -> synced`
-- `pending -> conflicted`
-- `pending -> failed_terminal`
+- `draft`
+- `ready_for_dispatch`
+- `dispatched`
+- `in_progress`
+- `completed`
+- `invoiced`
+- `cancelled`
 
-## Anvandarfloden
+## DispatchAssignment
 
-### Dispatch till execution
-1. Arbetsorder skapas med projekt, kund och planerat intervall.
-2. Dispatcher kopplar en anstallning via dispatch assignment.
-3. Faltanvandare ser uppdraget i mobile today-feed.
-4. Uppdraget flyttas stegvis till `on_site` och `in_progress`.
+- `planned`
+- `accepted`
+- `en_route`
+- `on_site`
+- `completed`
+- `cancelled`
 
-### Materialuttag
-1. Faltanvandare valjer arbetsorder och inventarie.
-2. Uttag valideras mot lagerbalans.
-3. Balans reduceras och uttag loggas med projektkoppling.
-4. Uttaget blir del av arbetsorderns faktureringsunderlag.
+# Commands
 
-### Kundsignatur och avslut
-1. Signatur krav kontrolleras mot arbetsorder.
-2. Kundsignatur registreras med signerare och tidsstampel.
-3. Arbetsorder kan avslutas till `completed` nar krav uppfylls.
-4. Fakturering skapar AR-invoice och arbetsorder blir `invoiced`.
+- `create_work_order`
+- `assign_dispatch`
+- `start_work_order`
+- `record_material_usage`
+- `capture_customer_signature`
+- `complete_work_order`
 
-### Offline synk
-1. Klient skapar sync envelope for tillaten mutation.
-2. Server validerar idempotensnyckel och basversion.
-3. Versionkonflikt ger `conflicted`, annars `synced`.
-4. Support anvander conflict runbook vid terminala fel.
+# Events
 
-## Affarsregler
+- `work_order_created`
+- `dispatch_assigned`
+- `work_order_started`
+- `material_usage_recorded`
+- `customer_signature_captured`
+- `work_order_completed`
 
-- Arbetsorder far inte faktureras innan status `completed`.
-- Materialuttag maste ha positiv kvantitet och tillrackligt saldo.
-- Fakturarader byggs av labor-rad och fakturerbara materialuttag.
-- Arbetsorder utan labor-rad och utan fakturerbara materialuttag far inte faktureras.
-- `base_server_version` i offline envelope maste matcha aktuell serverversion for versionskansliga mutationer.
-- Dubblett av `client_mutation_id` maste behandlas idempotent och far inte skapa extra side effects.
+# Cross-domain dependencies
 
-## Behorigheter
+- projects for project linkage
+- offline domain for mobile sync envelopes
+- AR for invoicing handoff
 
-- `field_user`: lasa tilldelade arbetsorder, skapa tillatna falthandelser
-- `dispatcher`: skapa/uppdatera dispatch assignments
-- `project_manager`: lasa samtliga arbetsorder inom projektets scope
-- `finance_operator`: utfora fakturering av avslutade arbetsorder
-- support-atkomst till conflict repair styrs av separat policy
+# Forbidden couplings
 
-## Fel- och konfliktfall
+- mobile får inte besluta om fakturerbarhet eller slutlig invoice issue
+- projects får inte äga dispatchstatus
 
-- `field_work_order_not_found`: arbetsorder saknas eller ligger utom bolagsscope
-- `field_inventory_insufficient_stock`: materialuttag overstiger on hand
-- `field_work_order_signature_required`: avslut nekas utan kundsignatur
-- `field_work_order_invoice_lines_missing`: ingen fakturerbar rad finns
-- `version_conflict`: basversion i offline envelope matchar inte serverversion
-- `unsupported_offline_action`: objekt eller mutation far inte goras offline
+# Search ownership
 
-## Notifieringar
+Search får indexera work orders och service orders men field äger status.
 
-- dispatch tilldelad: notifiering till faltresurs
-- status `in_progress` och `completed`: notifiering till dispatcher/projektansvarig
-- `conflicted` envelope: notifiering till support/operator queue
-- arbetsorder `completed` utan faktura efter policyfonstrer: notifiering till finance operator
+# UI ownership
 
-## Audit trail
+Field-mobile äger executionflöden. Desktop-web äger dispatchöversikt, planering och uppföljning.
 
-- varje statusovergang i arbetsorder och dispatch loggas med actor, correlation id och tidsstampel
-- materialuttag loggas med project_id, inventory_item_id, location och quantity
-- kundsignatur loggas med signer_name, signed_at och hash av payload
-- offline envelope loggar apply-resultat (`synced`, `conflicted`, `failed_terminal`)
-- auditposter far inte overskrivas, endast kompletteras
+# Permissions
 
-## API/events/jobs
+- dispatch kräver desktop-behörighet
+- work order execution kräver tilldelning eller relevant field role
 
-- API ska exponera list/create/get for arbetsorder, dispatch, materialuttag, signatur och sync envelope
-- API ska kunna returnera mobile today-feed med synkstatus
-- events ska finnas for `field.work_order.*`, `field.material_withdrawal.created`, `field.signature.captured`, `field.sync.*`
-- bakgrundsjobb kan anvandas for reminder/sla, men maste vara idempotenta
+# Failure and conflict handling
 
-## UI-krav
+- work order kan inte bli `completed` om signatur krävs men saknas
+- material usage över tillåten balans eller policygräns ska blockeras eller gå till review
+- offline conflicts går genom offline-domänen
 
-- field-mobile ar tumvanlig och forenkad; desktop-web ar fullstandig yta
-- UI visar alltid syncstatus och pending/conflict pa relevanta objekt
-- UI far inte innehalla domanregler for fakturering, lagersaldo eller statusregler
-- konfliktlosning i UI ska bygga pa serverns merge-strategi och konfliktpayload
+# Notifications/activity/work-item interaction
 
-## Testfall
+- nya dispatch assignments skapar notifications
+- completed jobs skapar activity
+- blockerade jobb kan skapa work items
 
-- skapa arbetsorder med dispatch till giltig anstallning
-- materialuttag minskar saldo och kopplas till projekt
-- avslut nekas utan signatur nar signatur ar obligatorisk
-- arbetsorder kan faktureras efter `completed` och far `customer_invoice_id`
-- offline mutation med fel basversion ger `conflicted`
-- samma `client_mutation_id` ger idempotent replay utan dubbla objekt
+# API implications
 
-## Exit gate
+- work-order CRUD
+- dispatch endpoints
+- material usage endpoints
+- signature capture endpoints
 
-Dokumentet ar klart nar hela 10.2-flodet ar definierat med determinstiska regler, tydliga statusovergangar, auditbarhet och testbar verifiering for offline-sync, projektkopplat materialuttag och arbetsorderfakturering.
+# Worker/job implications where relevant
 
+- dispatch reminders
+- stale in-progress detection
+
+# Projection/read-model requirements
+
+- dispatch board
+- today jobs list
+- material usage summary
+- completed-but-unbilled queue
+
+# Test implications
+
+- status transitions
+- signature blocker
+- material usage linkage
+- invoicing handoff
+
+# Exit gate
+
+- [ ] arbetsorder, dispatch och materialflöde är låsta som egen domän
+- [ ] mobile och desktop arbetar mot samma statusmodell
+- [ ] fakturering och signaturkrav kan verkställas utan UI-speciallogik

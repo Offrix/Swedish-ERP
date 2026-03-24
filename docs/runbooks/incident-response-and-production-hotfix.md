@@ -1,84 +1,116 @@
-# Incident response and production hotfix
+# Master metadata
 
-Detta runbook beskriver incidentnummer, ansvar, kommunikationsväg, freeze-regler, databasingrepp, eftertest och dokumentuppdatering efter incident.
+- Document ID: RB-003
+- Title: Incident Response and Production Hotfix
+- Status: Binding
+- Owner: Platform operations and security operations
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/runbooks/incident-response-and-production-hotfix.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-policy-matrix.md`
+  - `docs/master-control/master-build-sequence.md`
+  - `docs/master-control/master-rebuild-control.md`
+- Related domains:
+  - incident management
+  - backoffice
+  - emergency disable
+- Related code areas:
+  - `apps/backoffice/*`
+  - `apps/api/*`
+  - `apps/worker/*`
+- Related future documents:
+  - `docs/policies/emergency-disable-policy.md`
+  - `docs/runbooks/backup-restore-and-disaster-recovery.md`
 
-## Förutsättningar
+# Purpose
 
-- incidentpolicy och kontaktlista är beslutad
-- monitoring, alerting och deploypipeline finns
-- break-glass-rutin finns om ordinarie åtkomst inte räcker
+Beskriva hur incidenter startas, stabiliseras, hotfixas och stängs utan att audit, SoD eller återställningsförmåga förloras.
 
-## Berörda system
+# When to use
 
-- incidentkanal i kommunikationsverktyg
-- observability-stacken
-- deploypipeline
-- produktens databaser och objektlagring
+- produktionsincident
+- säkerhetsincident
+- akut hotfix
+- break-glass-läge
 
-## Steg för steg
+# Preconditions
 
-### Initiera incident
+- incidentkanal och kontaktväg finns
+- observability och deploypipeline är tillgängliga
+- emergency-disable-funktioner är kända
 
-1. Skapa incidentnummer och öppna dedikerad incidentkanal.
-2. Utse incidentledare, tekniskt ansvarig, kommunikationsansvarig och scribe.
-3. Bedöm preliminär severity och om deploy freeze ska aktiveras.
+# Required roles
 
-### Stabilisera
+- incident lead
+- technical lead
+- communications owner
+- scribe
+- domain owner vid reglerade flöden
 
-1. Stoppa eller begränsa felande automationer via feature flag eller maintenance mode.
-2. Samla första fakta: starttid, omfattning, påverkade kunder, datatyper och aktiva fel.
-3. Avgör om det är säkerhetsincident, driftincident eller båda.
+# Inputs
 
-### Hotfix i prod
+- incident id
+- severity
+- initial impact statement
+- systemscope
 
-1. Skapa hotfix-branch med incidentnummer i namnet.
-2. Begränsa ändringen till minsta möjliga fix.
-3. Kör riktade tester och minst en review om inte absolut nödläge dokumenterats.
-4. Deploya till staging om tid finns, annars direkt till prod med explicit incidentgodkännande och tydlig rollback-plan.
+# Step-by-step procedure
 
-### Databasingrepp
+1. Starta incident och tilldela roller.
+2. Samla första fakta: starttid, kundpåverkan, datapåverkan, regulatorisk risk.
+3. Aktivera freeze eller emergency disable vid behov.
+4. Bestäm om hotfix, rollback eller restore är rätt väg.
+5. Om hotfix behövs:
+   - begränsa scope till minsta möjliga fix
+   - kör riktade tester
+   - deploya med tydlig rollback-plan
+6. Om manuellt prod-ingrepp krävs:
+   - logga allt
+   - stoppa konkurrerande workers om data riskerar att bli inkonsistent
+7. Verifiera resultat med smoke tests och observability.
+8. Stäng incident först efter dokumenterad stabilitet och uppföljningsplan.
 
-1. Manuella databasingrepp i prod kräver särskilt godkännande av incidentledare och finance/security owner när ekonomidata påverkas.
-2. All SQL eller manuellt ingrepp ska loggas och sparas i incidentartefakter.
-3. Stäng av konkurrerande workers innan direkta datakorrigeringar görs.
+# Verification
 
-### Eftertest och avslut
+- impact är uppdaterad
+- mitigering eller fix fungerar
+- inga oklara manuella prod-ingrepp finns
+- uppföljning är skapad
 
-1. Kör smoke tests på påverkade flöden och kontrollera metrics, logs, traces och felgrad.
-2. Verifiera om externa rapporter, betalningar eller dokumentflöden påverkats och behöver efterkorrigeras.
-3. När incidenten stängs ska postmortem, regressionstest och dokumentuppdatering planeras eller genomföras.
+# Retry/replay behavior where relevant
 
-## Verifiering
+- replay ska ske först efter att incidentorsaken är åtgärdad
+- submission- eller betalningsreplay kräver särskild kontroll
 
-- incidentnummer och roller är satta
-- freeze-status är tydlig
-- hotfix eller mitigering kan kopplas till observability-data
-- alla manuella prod-ingrepp finns i incidentloggen
-- eftertest och uppföljning är dokumenterade
+# Rollback/recovery
 
-## Rollback och återställning
+- rollback av deploy går före improviserad kodpatch om det snabbare återställer säkert läge
+- dataåterställning följer separat DR-runbook
 
-- rulla tillbaka senaste deploy eller stäng feature flag om hotfixen gör läget sämre
-- om databasingrepp misslyckas, återgå till senaste verifierade tillstånd eller använd definierad datarollback enligt DR-runbook
-- håll maintenance mode aktivt tills användartrafik kan släppas säkert
+# Incident threshold
 
-## Vanliga fel och felsökning
+Incidentnivå ska höjas när:
 
-### Kommunikationsfel
+- pengarisk eller regulatorisk påverkan finns
+- flera tenants påverkas
+- datakvalitet eller auditspår riskeras
 
-- incidentnummer saknas eller blandas ihop mellan ärenden
-- oklar ansvarsfördelning gör att samtidiga fixar körs utan samordning
+# Audit and receipts
 
-### Tekniska fel under hotfix
+Audit ska visa:
 
-- hotfix ändrar för mycket scope och introducerar nya fel
-- rollback-plan är inte förberedd
-- workers kör samtidigt som databasingrepp och skapar nya inkonsistenser
+- incident id
+- aktiverade kill switches
+- hotfix release id
+- manuella prod-åtgärder
+- godkännanden
 
-## Exit gate
+# Exit gate
 
-- [ ] incidentteam och kommunikationsväg kan startas snabbt
-- [ ] freeze och hotfix har tydlig process
-- [ ] manuella prod-ingrepp dokumenteras
-- [ ] eftertest och postmortem är obligatoriska
-- [ ] relevanta docs, runbooks och tester uppdateras efter incident
+- [ ] incident är stabiliserad eller stängd
+- [ ] hotfix eller rollback är verifierad
+- [ ] manuella åtgärder är dokumenterade
+- [ ] efterarbete och dokumentuppdatering är skapad

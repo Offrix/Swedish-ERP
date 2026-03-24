@@ -22,8 +22,15 @@ import {
   FEATURE_FLAG_SCOPE_TYPES,
   FEATURE_FLAG_TYPES,
   FEATURE_FLAG_RISK_CLASSES,
+  INCIDENT_EVENT_TYPES,
+  INCIDENT_SEVERITIES,
+  INCIDENT_SIGNAL_STATES,
+  INCIDENT_SIGNAL_TYPES,
+  INCIDENT_STATUSES,
   LOAD_PROFILE_STATUSES,
+  RUNTIME_RESTORE_PLAN_STATUSES,
   RESTORE_DRILL_STATUSES,
+  buildAuditCorrelationRecordKey,
   createResilienceModule
 } from "./resilience.mjs";
 import {
@@ -34,6 +41,14 @@ import {
   MAPPING_SET_STATUSES,
   createMigrationModule
 } from "./migration.mjs";
+import {
+  ASYNC_JOB_ERROR_CLASSES,
+  ASYNC_JOB_OPERATOR_STATES,
+  ASYNC_JOB_REPLAY_STATUSES,
+  ASYNC_JOB_RISK_CLASSES,
+  ASYNC_JOB_STATUSES,
+  createAsyncJobsModule
+} from "./jobs.mjs";
 
 export const PORTFOLIO_STATUS_CODES = Object.freeze(["active", "waiting_for_client", "in_review", "ready_for_close", "blocked"]);
 export const CLIENT_REQUEST_STATUSES = Object.freeze(["draft", "sent", "acknowledged", "in_progress", "delivered", "accepted", "closed", "overdue", "escalated", "reopened"]);
@@ -60,6 +75,17 @@ export {
   LOAD_PROFILE_STATUSES,
   RESTORE_DRILL_STATUSES,
   CHAOS_SCENARIO_STATUSES,
+  INCIDENT_SEVERITIES,
+  INCIDENT_STATUSES,
+  INCIDENT_SIGNAL_TYPES,
+  INCIDENT_SIGNAL_STATES,
+  INCIDENT_EVENT_TYPES,
+  RUNTIME_RESTORE_PLAN_STATUSES,
+  ASYNC_JOB_STATUSES,
+  ASYNC_JOB_RISK_CLASSES,
+  ASYNC_JOB_REPLAY_STATUSES,
+  ASYNC_JOB_OPERATOR_STATES,
+  ASYNC_JOB_ERROR_CLASSES,
   IMPORT_BATCH_STATUSES,
   MAPPING_SET_STATUSES,
   DIFF_REPORT_STATUSES,
@@ -71,7 +97,7 @@ export function createCorePlatform(options = {}) {
   return createCoreEngine(options);
 }
 
-export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = null, ledgerPlatform = null, integrationPlatform = null, clock = () => new Date() } = {}) {
+export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = null, ledgerPlatform = null, integrationPlatform = null, asyncJobStore = null, clock = () => new Date() } = {}) {
   const state = {
     portfolios: new Map(),
     requests: new Map(),
@@ -92,6 +118,11 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     loadProfiles: new Map(),
     restoreDrills: new Map(),
     chaosScenarios: new Map(),
+    auditCorrelations: new Map(),
+    incidentSignals: new Map(),
+    runtimeIncidents: new Map(),
+    runtimeIncidentEvents: new Map(),
+    runtimeRestorePlans: new Map(),
     mappingSets: new Map(),
     importBatches: new Map(),
     migrationCorrections: new Map(),
@@ -104,8 +135,21 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     return new Date(clock()).toISOString();
   }
 
-  function audit({ companyId, actorId, correlationId, action, entityType, entityId, explanation }) {
-    state.auditEvents.push({ auditEventId: crypto.randomUUID(), companyId, actorId, correlationId, action, entityType, entityId, explanation, recordedAt: now() });
+  function audit({ companyId, actorId, correlationId = crypto.randomUUID(), action, entityType, entityId, explanation }) {
+    const event = {
+      auditEventId: crypto.randomUUID(),
+      companyId,
+      actorId,
+      correlationId,
+      action,
+      entityType,
+      entityId,
+      explanation,
+      recordedAt: now()
+    };
+    state.auditEvents.push(event);
+    recordAuditCorrelationEvent(state, event);
+    return event;
   }
 
   function requireCompany(companyId) {
@@ -215,6 +259,14 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
     audit,
     error
   });
+  const { incidentHooks, ...publicResilienceModule } = resilienceModule;
+  const asyncJobsModule = createAsyncJobsModule({
+    clock,
+    audit,
+    error,
+    store: asyncJobStore || undefined,
+    incidentHooks
+  });
   const migrationModule = createMigrationModule({
     state,
     clock,
@@ -248,6 +300,17 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
       loadProfileStatuses: LOAD_PROFILE_STATUSES,
       restoreDrillStatuses: RESTORE_DRILL_STATUSES,
       chaosScenarioStatuses: CHAOS_SCENARIO_STATUSES,
+      incidentSeverities: INCIDENT_SEVERITIES,
+      incidentStatuses: INCIDENT_STATUSES,
+      incidentSignalTypes: INCIDENT_SIGNAL_TYPES,
+      incidentSignalStates: INCIDENT_SIGNAL_STATES,
+      incidentEventTypes: INCIDENT_EVENT_TYPES,
+      runtimeRestorePlanStatuses: RUNTIME_RESTORE_PLAN_STATUSES,
+      asyncJobStatuses: ASYNC_JOB_STATUSES,
+      asyncJobRiskClasses: ASYNC_JOB_RISK_CLASSES,
+      asyncJobReplayStatuses: ASYNC_JOB_REPLAY_STATUSES,
+      asyncJobOperatorStates: ASYNC_JOB_OPERATOR_STATES,
+      asyncJobErrorClasses: ASYNC_JOB_ERROR_CLASSES,
       importBatchStatuses: IMPORT_BATCH_STATUSES,
       mappingSetStatuses: MAPPING_SET_STATUSES,
       diffReportStatuses: DIFF_REPORT_STATUSES,
@@ -293,17 +356,48 @@ export function createCoreEngine({ orgAuthPlatform = null, reportingPlatform = n
       approveBreakGlass: backofficeModule.approveBreakGlass,
       closeBreakGlassSession: backofficeModule.closeBreakGlassSession,
       listAuditTrail: backofficeModule.listAuditTrail,
-      upsertFeatureFlag: resilienceModule.upsertFeatureFlag,
-      listFeatureFlags: resilienceModule.listFeatureFlags,
-      requestEmergencyDisable: resilienceModule.requestEmergencyDisable,
-      listEmergencyDisables: resilienceModule.listEmergencyDisables,
-      recordLoadProfile: resilienceModule.recordLoadProfile,
-      listLoadProfiles: resilienceModule.listLoadProfiles,
-      recordRestoreDrill: resilienceModule.recordRestoreDrill,
-      listRestoreDrills: resilienceModule.listRestoreDrills,
-      recordChaosScenario: resilienceModule.recordChaosScenario,
-      listChaosScenarios: resilienceModule.listChaosScenarios,
-      resolveRuntimeFlags: resilienceModule.resolveRuntimeFlags,
+      upsertFeatureFlag: publicResilienceModule.upsertFeatureFlag,
+      listFeatureFlags: publicResilienceModule.listFeatureFlags,
+      requestEmergencyDisable: publicResilienceModule.requestEmergencyDisable,
+      listEmergencyDisables: publicResilienceModule.listEmergencyDisables,
+      recordLoadProfile: publicResilienceModule.recordLoadProfile,
+      listLoadProfiles: publicResilienceModule.listLoadProfiles,
+      recordRestoreDrill: publicResilienceModule.recordRestoreDrill,
+      listRestoreDrills: publicResilienceModule.listRestoreDrills,
+      recordChaosScenario: publicResilienceModule.recordChaosScenario,
+      listChaosScenarios: publicResilienceModule.listChaosScenarios,
+      resolveRuntimeFlags: publicResilienceModule.resolveRuntimeFlags,
+      getRuntimeControlPlaneSummary: publicResilienceModule.getRuntimeControlPlaneSummary,
+      listRuntimeAuditCorrelations: publicResilienceModule.listRuntimeAuditCorrelations,
+      getRuntimeAuditCorrelation: publicResilienceModule.getRuntimeAuditCorrelation,
+      listRuntimeIncidentSignals: publicResilienceModule.listRuntimeIncidentSignals,
+      acknowledgeRuntimeIncidentSignal: publicResilienceModule.acknowledgeRuntimeIncidentSignal,
+      openRuntimeIncident: publicResilienceModule.openRuntimeIncident,
+      listRuntimeIncidents: publicResilienceModule.listRuntimeIncidents,
+      listRuntimeIncidentEvents: publicResilienceModule.listRuntimeIncidentEvents,
+      recordRuntimeIncidentEvent: publicResilienceModule.recordRuntimeIncidentEvent,
+      updateRuntimeIncidentStatus: publicResilienceModule.updateRuntimeIncidentStatus,
+      createRuntimeRestorePlan: publicResilienceModule.createRuntimeRestorePlan,
+      listRuntimeRestorePlans: publicResilienceModule.listRuntimeRestorePlans,
+      approveRuntimeRestorePlan: publicResilienceModule.approveRuntimeRestorePlan,
+      startRuntimeRestorePlan: publicResilienceModule.startRuntimeRestorePlan,
+      completeRuntimeRestorePlan: publicResilienceModule.completeRuntimeRestorePlan,
+      abortRuntimeRestorePlan: publicResilienceModule.abortRuntimeRestorePlan,
+      enqueueRuntimeJob: asyncJobsModule.enqueueAsyncJob,
+      claimAvailableRuntimeJobs: asyncJobsModule.claimAvailableAsyncJobs,
+      startRuntimeJobAttempt: asyncJobsModule.startAsyncJobAttempt,
+      completeRuntimeJob: asyncJobsModule.completeAsyncJob,
+      failRuntimeJob: asyncJobsModule.failAsyncJob,
+      cancelRuntimeJob: asyncJobsModule.cancelAsyncJob,
+      getRuntimeJob: asyncJobsModule.getAsyncJob,
+      listRuntimeJobs: asyncJobsModule.listAsyncJobs,
+      listRuntimeJobAttempts: asyncJobsModule.listAsyncJobAttempts,
+      listRuntimeDeadLetters: asyncJobsModule.listAsyncDeadLetters,
+      planRuntimeJobReplay: asyncJobsModule.planAsyncJobReplay,
+      approveRuntimeJobReplay: asyncJobsModule.approveAsyncJobReplay,
+      executeRuntimeJobReplay: asyncJobsModule.executeAsyncJobReplay,
+      listRuntimeJobReplayPlans: asyncJobsModule.listAsyncJobReplayPlans,
+      closeRuntimeJobStore: asyncJobsModule.closeAsyncJobStore,
       createMappingSet: migrationModule.createMappingSet,
       listMappingSets: migrationModule.listMappingSets,
       approveMappingSet: migrationModule.approveMappingSet,
@@ -1110,6 +1204,50 @@ function timestamp(value, code) {
 
 function accessCode() {
   return crypto.randomBytes(12).toString("hex");
+}
+
+function recordAuditCorrelationEvent(state, event) {
+  if (!event?.companyId || !event?.correlationId) {
+    return;
+  }
+  const recordKey = buildAuditCorrelationRecordKey(event.companyId, event.correlationId);
+  const existing = state.auditCorrelations.get(recordKey) || {
+    correlationId: event.correlationId,
+    companyId: event.companyId,
+    firstSeenAt: event.recordedAt,
+    lastSeenAt: event.recordedAt,
+    actionCount: 0,
+    actorIds: [],
+    actions: [],
+    relatedEntities: [],
+    latestAction: null
+  };
+  existing.lastSeenAt = event.recordedAt;
+  existing.actionCount = Number(existing.actionCount || 0) + 1;
+  existing.latestAction = event.action;
+  pushUnique(existing.actorIds, event.actorId);
+  pushUnique(existing.actions, event.action);
+  pushUniqueEntity(existing.relatedEntities, event.entityType, event.entityId);
+  state.auditCorrelations.set(recordKey, existing);
+}
+
+function pushUnique(values, candidate) {
+  if (typeof candidate !== "string" || candidate.trim().length === 0) {
+    return;
+  }
+  if (!values.includes(candidate)) {
+    values.push(candidate);
+  }
+}
+
+function pushUniqueEntity(values, entityType, entityId) {
+  if (typeof entityType !== "string" || entityType.trim().length === 0 || typeof entityId !== "string" || entityId.trim().length === 0) {
+    return;
+  }
+  const key = `${entityType}:${entityId}`;
+  if (!values.some((entry) => `${entry.entityType}:${entry.entityId}` === key)) {
+    values.push({ entityType, entityId });
+  }
 }
 
 function error(status, code, message) {

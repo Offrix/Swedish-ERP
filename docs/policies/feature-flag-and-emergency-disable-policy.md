@@ -1,79 +1,103 @@
-# Feature flag and emergency disable policy
+# Master metadata
 
-## Syfte
+- Document ID: POL-BRIDGE-003
+- Title: Feature Flag and Emergency Disable Policy
+- Status: Superseded compatibility bridge
+- Owner: Platform governance
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior primary `docs/policies/feature-flag-and-emergency-disable-policy.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-document-manifest.md`
+  - `docs/master-control/master-policy-matrix.md`
+  - `docs/master-control/master-rebuild-control.md`
+- Related domains:
+  - feature flags
+  - tenant setup
+  - emergency disable
+  - operations
+- Related code areas:
+  - `packages/domain-core/*`
+  - `apps/backoffice/*`
+  - `apps/worker/*`
+- Related future documents:
+  - `docs/policies/module-activation-and-tenant-setup-policy.md`
+  - `docs/policies/emergency-disable-policy.md`
 
-Detta dokument definierar hur feature flags, rollout-flaggor och nödbrytare får skapas, ändras, godkännas, övervakas och avvecklas. Policyn ska säkerställa att flaggor används som styrd driftmekanism och inte som dold permanent affärslogik.
+# Purpose
 
-## Gäller för
+Denna fil finns kvar endast som kompatibilitetsbrygga mellan äldre samlad feature-flag-policy och de två nya primära policydokumenten.
 
-- alla feature flags, rolloutflaggor, ops-flaggor, entitlement-flaggor och kill switches
-- alla miljöer, men med skärpta krav i staging och produktion
-- alla användare med roller som kan skapa, ändra eller godkänna flaggar
+# Scope
 
-## Hårda regler
+Omfattar:
 
-1. Varje flagga ska ha namngiven ägare, tydligt syfte, scope, riskklass och planerat slutdatum.
-2. Produktionsflaggor får inte ändras utan auditlogg och dokumenterad motivering.
-3. Kill switches för riskfyllda flöden ska finnas för betalningar, submissions, externa integrationer och andra definierade högriskområden.
-4. Feature flags får styra åtkomst till kodväg eller integration men får inte ersätta lagrad affärsregel i data.
-5. Högriskändringar i produktion kräver fyrögonsgodkännande, utom vid aktiv incident där emergency disable får utföras enligt denna policy.
-6. Utgångna eller övergivna flaggor ska städas bort; permanenta affärsbeslut ska föras in i ordinarie konfiguration eller kod.
-7. Flagga får inte aktivera experiment som exponerar känslig data för fel målgrupp.
+- ompekning från gammal samlad policy
+- tydlig separering mellan module activation och emergency disable
 
-## Roller och ansvar
+Omfattar inte:
 
-- **Flag owner** ansvarar för syfte, rolloutplan, avveckling och testbevis.
-- **Product/admin operator** får skapa och ändra låg- och medelriskflaggor inom sitt scope.
-- **Security admin** godkänner högriskflaggor och alla kill switches i produktion.
-- **Incident commander** får aktivera emergency disable under pågående incident.
-- **Reviewer** genomför fyrögonsgranskning när policyn kräver det.
+- ny rollout-governance
+- ny incidentstyrning
 
-## Tillåtna actions
+# Why it exists
 
-- skapa ny flagga med komplett metadata
-- aktivera flagga i dev eller lokal miljö utan extra godkännande
-- stegvis rollout mot definierade bolag, team eller procentandel i icke-reglerade ytor
-- omedelbar avstängning med kill switch enligt runbook när incident eller allvarlig regressionsrisk finns
-- läsa flaggstatus och flagghistorik i admin backoffice
+Repo:t hade tidigare en samlad policy för feature flags och nödbrytare. Efter master-control-omtaget ligger bindande regler i:
 
-## Förbjudna actions
+- `docs/policies/module-activation-and-tenant-setup-policy.md`
+- `docs/policies/emergency-disable-policy.md`
 
-- dold flagga utan ägare eller utgångsdatum
-- tyst ändring i produktion utan auditpost
-- användning av flagga för att kringgå behörighet, sign-off eller bokföringsinvarians
-- evig experimentflagga som aldrig städas
-- massaktivering i produktion av högriskflagga utan förtest eller godkännande
+# Non-negotiable rules
 
-## Undantag
+1. Modulaktivering, tenant setup och feature-flag governance ägs nu av `docs/policies/module-activation-and-tenant-setup-policy.md`.
+2. Kill switches och incidentavstängning ägs nu av `docs/policies/emergency-disable-policy.md`.
+3. Denna fil får inte användas som primär källa för ny implementation.
+4. Historiska referenser ska tolkas genom uppdelningen ovan.
 
-- emergency disable under aktiv incident får göras utan föregående fyrögonsgodkännande, men måste eftergranskas samma dag eller nästa arbetsdag
-- i isolerad sandbox får flagga användas mer fritt, men metadata och städning krävs ändå om flaggan senare ska flyttas till staging eller produktion
+# Allowed actions
 
-## Godkännanden
+- använda filen för att förstå äldre referenser
+- ompeka historiskt språkbruk till rätt ny policy
 
-- låg risk: flag owner
-- medelrisk: flag owner plus reviewer
-- hög risk: flag owner plus security admin
-- kill switch i normaldrift: flag owner plus security admin
-- kill switch under incident: incident commander, med eftergranskning av security admin och flag owner
+# Forbidden actions
 
-## Audit
+- införa nya flaggregler här
+- implementera kill switches direkt från denna fil
+- låta backoffice eller UI använda denna fil som enda policykälla
 
-- skapande, ändring, aktivering, deaktivering, emergency disable och avveckling ska auditloggas
-- auditpost ska innehålla flaggnamn, gammalt och nytt värde, scope, motivering, ärende- eller incident-id och godkännare
-- systemet ska kunna visa vilka bolag eller användare som påverkades av en flaggändring
+# Approval model
 
-## Kontrollpunkter
+Godkännandemodell hämtas från de två nya primära policydokumenten.
 
-- veckovis rapport över högriskflaggor, utgångna flaggor och aktiva kill switches
-- krav på testbevis före rollout i staging och produktion
-- kontroll att rollback- eller disable-runbook finns för varje högriskflagga
-- månadsvis städning av föråldrade flaggor
+# Segregation of duties where relevant
 
-## Exit gate
+SoD för riskfyllda flaggändringar och emergency disable ligger nu i de nya policydokumenten tillsammans med SoD-policyn.
 
-- [ ] alla flaggor har ägare, scope och slutdatum
-- [ ] högriskflaggor och kill switches följer godkännandekedja
-- [ ] emergency disable kan köras snabbt men granskas i efterhand
-- [ ] flagghistorik kan granskas i audit explorer
-- [ ] övergivna flaggor fångas och avvecklas
+# Audit and evidence requirements
+
+- alla nya auditposter ska peka på rätt primärpolicy
+- gamla referenser får finnas kvar som historisk kontext
+
+# Exceptions handling
+
+Inga nya undantag får definieras här.
+
+# Backoffice/support restrictions where relevant
+
+Backoffice får inte kringgå primärpolicydokumenten genom att hänvisa till denna bryggfil.
+
+# Runtime enforcement expectations
+
+Runtime enforcement ska implementeras via module activation-, feature-flag- och emergency-disable-motorerna enligt primärpolicydokumenten.
+
+# Test/control points
+
+- verifiera att nya flagg- och disableflöden använder rätt primärpolicy
+- verifiera att denna fil inte längre används som enda källa i ny dokumentation
+
+# Exit gate
+
+- [ ] denna fil används endast som brygga
+- [ ] ny implementation använder de två primära policydokumenten

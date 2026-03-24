@@ -1,187 +1,171 @@
-# Project billing and revenue recognition engine
+# Master metadata
 
-Detta dokument definierar projektfakturering, löpande/tim, fastpris, milstolpar, WIP, förutbetalda intäkter och intäktsföring för svenska bolag.
+- Document ID: SE-CMP-020
+- Title: Project Billing and Revenue Recognition Engine
+- Status: Binding
+- Owner: Finance compliance architecture
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/compliance/se/project-billing-and-revenue-recognition-engine.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-build-sequence.md`
+  - `docs/master-control/master-golden-scenario-catalog.md`
+- Related domains:
+  - projects
+  - AR
+  - reporting
+- Related code areas:
+  - `packages/domain-projects/*`
+  - `packages/domain-ar/*`
+  - `packages/domain-reporting/*`
+- Related future documents:
+  - `docs/domain/projects-budget-wip-and-profitability.md`
+  - `docs/domain/kalkyl.md`
 
-## Scope
+# Purpose
 
-### Ingår
+Definiera hur projekt kopplar offert, order, budget, deldebitering, slutfakturering och revenue recognition snapshots.
 
-- projektregister, projektavtal, rate cards, budget, intäktstyp och faktureringsmetod
-- löpande fakturering av tid, material, utlägg och övriga billable events
-- fastpris, milstolpsfakturering, förskott, abonnemangsliknande projektplaner och slutfakturor
-- WIP, upplupna intäkter, förutbetalda intäkter och periodisk intäktsföring
-- koppling mellan projekt, kundfaktura, resursunderlag och ledger
+# Scope
 
-### Ingår inte
+Ingår:
 
-- detaljerade tid- och frånvaroregler; de ligger i HR/tid-domänerna
-- övergripande årsredovisningsklassificering; den ligger i annual reporting
+- billing models
+- billing readiness
+- invoice generation from project milestones or T&M
+- recognized revenue handoff
+- WIP/deferred revenue relations
 
-### Systemgränser
+Ingår inte:
 
-- Projektmotorn äger projektkontrakt, billable items, milestone events, revenue schedule och WIP snapshot.
-- AR äger själva kundfakturan men projektmotorn bestämmer vilka projektunderlag som får faktureras och hur de påverkar intäkten.
-- Ledgern bokar endast projektmotorns posting intents.
+- generell AR issue logic
+- general ledger close mechanics
 
-## Hårda regler
+# Non-negotiable rules
 
-1. Fakturering och intäktsföring ska vara separata beslut. En faktura innebär inte automatiskt att all intäkt ska redovisas samma dag och omvänt.
-2. Varje projektkontrakt ska ha en definierad faktureringsmodell och en definierad intäktsföringsmodell.
-3. Samma tidsrad, materialrad eller milstolpe får inte faktureras två gånger.
-4. WIP får inte skapas utan versionslåst underlag och cutoff-datum.
-5. Negativ WIP eller negativ deferred revenue kräver granskningskö eller uttrycklig override.
-6. Kredit av projektfaktura ska spegelvända både reskontra och projektets fakturerings- och intäktsstatistik.
-7. Postade intäktsföringskörningar får inte skrivas över; korrigering sker med reversal eller ny diff-posting.
+1. Projekt får inte fakturera utan definierad billing model.
+2. Revenue recognition snapshot får inte mutera historiska project actuals eller issued invoices.
+3. T&M måste ha spårbara tid- och/eller materialunderlag.
+4. Fastpris och milestone måste ha låst budget- eller leveransgrund innan fakturering.
 
-## Begrepp och entiteter
+# Definitions
 
-- **Billable item** — Godkänt underlag som får faktureras, till exempel tid, material eller utlägg.
-- **Fastpris** — Avtal där fakturering och/eller intäkt inte direkt följer faktisk timsumma.
-- **Milstolpe** — Kontraktsdefinierad händelse som kan trigga fakturering, intäktsföring eller båda.
-- **WIP** — Värde av arbete utfört men ännu inte fakturerat eller slutligt intäktsfört enligt vald modell.
-- **Upplupen intäkt** — Intäkt som redovisas före faktura och därför ligger som tillgång tills faktura kommer.
-- **Förutbetald intäkt** — Fakturerat eller mottaget belopp som ännu inte ska intäktsföras fullt ut.
+- `Billing model`: T&M, fixed price, milestone eller hybrid.
+- `Revenue recognition snapshot`: den periodiserade intäktsbild som projects levererar vidare.
+- `Billing readiness`: server-side bedömning att projektet får skapa invoice proposal.
 
-## State machines
+# Object model
 
-### Projekt
+## ProjectBillingProfile
 
-- `draft -> active -> on_hold -> closed -> archived`
+Fält:
 
-- Endast `active` projekt får generera nya billable items eller revenue runs.
-- `closed` stoppar ny fakturering men påverkar inte historik.
+- `project_billing_profile_id`
+- `project_id`
+- `billing_model_code`
+- `revenue_recognition_model_code`
+- `status`
 
-### Billable item
+## ProjectBillingProposal
 
-- `draft -> approved -> invoiced -> credited -> written_off`
+Fält:
 
-- `approved` kräver att underlaget låsts av ansvarig domän.
-- `invoiced` länkas till specifik kundfakturarad.
+- `project_billing_proposal_id`
+- `project_id`
+- `proposal_type_code`
+- `proposal_amount`
+- `source_snapshot_id`
+- `status`
 
-### Revenue schedule
+# State machines
 
-- `draft -> approved -> posted -> reversed`
+## ProjectBillingProposal
 
-- Samma projekt och period får bara ha en aktiv revenue run per modell och bok.
-- Reversal ska länka till original och skapa ny version.
+- `draft`
+- `ready`
+- `approved`
+- `converted_to_invoice`
+- `cancelled`
 
-## Inputfält och valideringar
+# Validation rules
 
-### Projekt och kontrakt
+1. Project billing proposal måste peka på låst source snapshot eller annan godkänd underlagskedja.
+2. Proposal får inte överstiga tillåtet kvarvarande värde utan review.
+3. Hybridmodell måste bryta ut sina delkomponenter tydligt.
 
-#### Fält
+# Deterministic decision rules
 
-- project_id, kund, projektledare, start/slut, kontraktstyp, valuta, rate card, faktureringsmodell, intäktsföringsmodell, budget och dimensioner
+## Rule PBR-001: T&M
 
-#### Valideringar
+T&M-proposal bygger på godkända timmar och fakturerbara material enligt låst snapshot.
 
-- faktureringsmodell och intäktsföringsmodell måste vara definierade innan projektet aktiveras
-- rate card ska vara giltigt per datum och resurstyp
-- stängt projekt får inte ta emot nya billable items utan reopen
+## Rule PBR-002: Fixed price
 
-### Billable items och milestones
+Fastprisproposal bygger på kontraktslogik och budget-/milstolpsstatus enligt vald modell, inte på fri manuell summa.
 
-#### Fält
+## Rule PBR-003: Revenue recognition
 
-- källa, datum, resurs, kvantitet, enhetspris, mark-up, projekt, kund, momsprofil, godkännandespår
-- milstolpe med trigger, procent eller belopp, uppfyllt datum, attest och avtalad faktureringslogik
+Recognized revenue ska materialiseras i snapshot och användas som kontrollpunkt för WIP/deferred revenue, inte räknas i UI.
 
-#### Valideringar
+# Rulepack dependencies
 
-- samma källrad får inte godkännas två gånger
-- milstolpe får inte överstiga återstående kontraktsvärde utan ändringsorder
-- valuta och kund måste matcha projektkontraktet
+- `RP-VAT-SE`
+- `RP-HUS-SE` where relevant
+- `RP-ACCOUNTING-METHOD-SE`
 
-### WIP och deferred revenue
+# Posting/accounting impact
 
-#### Fält
+- issue sker i AR
+- revenue recognition snapshots används i reporting och close
 
-- period, utfört värde, fakturerat värde, tidigare redovisat värde, återstående kontraktsvärde, WIP-saldo, deferred revenue-saldo
+# VAT impact where relevant
 
-#### Valideringar
+- VAT ligger kvar i AR/VAT-domänerna men project billing måste leverera korrekt scenario och källobjekt
 
-- WIP-run ska bygga på versionslåst tid/material och definierad cutoff
-- deferred revenue får inte släppas snabbare än leverans- eller milstolpemodellen tillåter
-- negativt saldo ska gå till review om det inte förklaras av kredit eller reversal
+# HUS impact where relevant
 
-## Beslutsträd/regler
+- projekt med HUS-kopplade arbeten måste bära HUS references till AR/HUS overlay
 
-### Löpande fakturering
+# Review requirements
 
-- Godkända billable items faktureras till pris enligt gällande rate card och kundavtal.
-- Tid, material och utlägg kan faktureras separat eller i samma samlingsfaktura om kund och valuta matchar.
-- Om projektet använder `billing_equals_revenue` sker ingen separat WIP-posting före faktura.
+- overbilling risk
+- missing milestone evidence
+- inconsistent hybrid profile
 
-### Fastpris och milstolpar
+# Correction model
 
-- Milstolpe kan trigga faktura, intäktsföring eller båda beroende på kontraktsprofil.
-- Förskottsfaktura före prestation ska bokas som förutbetald intäkt tills prestationsvillkoret uppfyllts.
-- Slutfaktura ska jämföra tidigare fakturerat och intäktsfört belopp mot totalkontraktet.
+- ny billing proposal version
+- credit chain i AR
+- ny revenue recognition snapshot
 
-### WIP och intäktsföring
+# Audit requirements
 
-- Om kontraktet använder över-tid-intäktsföring ska utfört värde kunna bokas som upplupen intäkt före faktura.
-- När senare faktura kommer ska tidigare upplupen intäkt reverseras eller kvittas i stället för att dubblera intäkten.
-- Deferred revenue släpps periodiskt eller vid milstolpe enligt kontraktets regelpaket.
-- Kredit av faktura ska också minska eller omklassificera intäktsföringsplanen när så krävs.
+- source snapshot
+- billing profile
+- approvals
+- conversion to invoice
 
-## Posting intents till ledgern
+# Golden scenarios covered
 
-| Händelse | Serie | Debet | Kredit | Kommentar |
-| --- | --- | --- | --- | --- |
-| Löpande fakturering T&M | M | 1210/1220/1230 Kundfordringar | 3420 Projektintäkter eller 3450/3460 för särskilda radtyper, utgående moms | Följer ordinarie AR-fakturalogik men med projektkälla. |
-| Förskottsfaktura före prestation | M | 1210/1220/1230 Kundfordringar | 2860 Förutbetalda projektintäkter, utgående moms | Intäkt släpps senare via revenue run. |
-| Periodisk release av deferred revenue | M | 2860 Förutbetalda projektintäkter | 3410/3430/3420 Projektintäkter | Ingen ny kundfordran uppstår. |
-| Upplupen intäkt före faktura | M | 1540 Upplupna intäkter eller annat definierat WIP-konto | 3410/3420/3430 Projektintäkter | Används när intäkt redovisas över tid före faktura. |
-| Senare kundfaktura som kvittar tidigare upplupen intäkt | M | 1210/1220/1230 Kundfordringar | 1540 Upplupna intäkter, utgående moms | Förhindrar dubbel intäkt. |
-| Kredit av projektfaktura | M | Projektintäktskonto och utgående moms | 1210/1220/1230 Kundfordringar | Om separat deferred/WIP-effekt krävs skapas kompletterande revenue reversal. |
+- project cost from payroll
+- HUS accepted in project context
 
-## Fel- och granskningsköer
+# API implications
 
-- **rate_missing** — Projekt eller resurs saknar giltig rate card.
-- **billable_duplicate** — Samma underlag försöker faktureras igen.
-- **negative_wip_review** — WIP eller deferred revenue blir negativ utan tydlig förklaring.
-- **milestone_conflict** — Milstolpe saknar bevis eller skulle överstiga kontraktsvärde.
-- **revenue_reversal_required** — Faktura kredit eller ändrat projektutfall kräver omkörning av intäktsplan.
+- create billing proposal
+- approve/cancel proposal
+- convert to AR invoice
 
-## Idempotens, spårbarhet och audit
+# Test implications
 
-- Varje billable item ska ha stabil `source_type + source_id + source_version`.
-- Revenue run ska låsas på `project + period + recognition_model`.
-- Fakturering från projektunderlag ska bära `billing_run_key` så att samma urval inte kan skapa dubbla fakturor.
-- Alla ändringar i kontraktsmodell, rate card och milstolpeplan ska versionsspåras.
+- T&M rollup
+- fixed price readiness
+- hybrid model control
 
-## Golden tests
+# Exit gate
 
-1. **Löpande tidfaktura**
-
-- Godkänn tidsrader och skapa faktura.
-- Förväntat utfall: projektintäkt bokas och billable items markeras invoiced.
-
-2. **Förskottsfaktura**
-
-- Fakturera 50 procent före start.
-- Förväntat utfall: 2860 används tills prestation sker.
-
-3. **Release av deferred revenue**
-
-- Kör periodisk intäktsföring.
-- Förväntat utfall: debet 2860, kredit projektintäkt.
-
-4. **WIP före faktura**
-
-- Redovisa intäkt över tid före fakturering.
-- Förväntat utfall: 1540 används och senare faktura kvittar 1540.
-
-5. **Kredit av projektfaktura**
-
-- Kreditera del av tidigare projektfaktura.
-- Förväntat utfall: både reskontra och projektstatistik justeras.
-
-## Exit gate
-
-- [ ] projektkontrakt har definierad fakturerings- och intäktsföringsmodell
-- [ ] billable items och milestones kan inte dubbelräknas
-- [ ] WIP, deferred revenue och fakturering går att följa till ledgern
-- [ ] kredit och reversal påverkar både reskontra och intäktsplan korrekt
-- [ ] close kan tie-outa projektkonton och kontraktsvärden
+- [ ] projektfakturering bygger på låsta underlag
+- [ ] revenue recognition materialiseras server-side
+- [ ] AR och projects har tydlig ansvarsfördelning

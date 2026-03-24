@@ -1,208 +1,179 @@
-# Search indexing and global search
+# Master metadata
 
-## Syfte
+- Document ID: DOM-014
+- Title: Search Indexing and Global Search
+- Status: Binding
+- Owner: Search architecture
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/domain/search-indexing-and-global-search.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-domain-map.md`
+  - `docs/master-control/master-build-sequence.md`
+  - `docs/master-control/master-ui-reset-spec.md`
+- Related domains:
+  - search
+  - all indexed business domains
+- Related code areas:
+  - `packages/domain-search/*`
+  - `apps/desktop-web/*`
+  - `apps/backoffice/*`
+- Related future documents:
+  - `docs/domain/saved-views-dashboards-and-personalization.md`
+  - `docs/ui/DESKTOP_INFORMATION_ARCHITECTURE.md`
 
-Detta dokument definierar hur global sökning, sökindex, saved searches och strukturerad filtrering fungerar över alla objekt som ska vara sökbara i systemet. Modellen ska ge snabba resultat, strikt permissions trimming, reproducerbar reindex och tydlig hantering av stale data, delete/update-semantik och audit av sökningar.
+# Purpose
 
-## Scope
+Definiera global search som read-only index och navigationslager med strikt permission trimming och reproducerbar reindex.
 
-### Ingår
+# Scope
 
-- indexering av affärsobjekt, dokumentmetadata, reskontraposter, checklistor, klientbegäranden, supportärenden, kommentarer och rapportdefinitioner
-- fritextsökning, strukturerad sökning, facets, ranking och saved searches
-- indexuppdatering vid create, update, state change, permission change och delete
-- sökresultat med permission trimming, markerad stale data och begränsad snippetsvisning
-- full reindex, delreindex, tombstones och delete-semantik
-- audit av sökningar, reindex och administrativ diagnostik
+Omfattar:
 
-### Ingår inte
+- indexed search documents
+- query parsing
+- ranking
+- permission trimming
+- reindex and tombstones
 
-- fulltextsökning i rå binärfil; endast extraherad text eller metadata som godkänts för indexering
-- sökning i data som enligt policy aldrig får exponeras i fri text, till exempel hemligheter eller fullständiga identitetsdokument
-- UI-komponenter utanför sökdialog, filterpanel och resultatlistor
+Omfattar inte:
 
-### Systemgränser
+- source of truth för affärsdata
+- fri indexering av förbjudna eller känsliga råfält
 
-- källdomänen äger objektets sakdata och permissionsmodell
-- sökindexet äger endast läsoptimerad projektion och rankingfält
-- global search-tjänsten äger query parsing, resultatranking och redaktion av dolda resultat
-- auditmotorn äger loggning av sökningar och administrativa indexåtgärder
+# Roles
 
-## Roller
+- end user
+- company admin
+- bureau user
+- search operator
 
-- **Slutanvändare** får söka inom sitt bolag och sitt tilldelade objekt- och rollscope.
-- **Bureau user** får söka över de klienter som ingår i portföljscope men inte över andra klienters data.
-- **Company admin** får använda strukturerade filtersökningar och skapa delade saved searches där policy tillåter.
-- **Search operator** får köra diagnostik, delreindex och tombstone-reparation men får inte ändra källdatats innehåll.
-- **Security admin** ansvarar för vilka fält som får indexeras och hur dolda träffar ska redovisas.
-- **Support admin** får endast använda sökdiagnostik i supportbackoffice inom godkänt supportscope.
+# Source of truth
 
-## Begrepp
+Källdomänerna äger sakdata. Search äger endast read-optimized documents och query/resultrendering.
 
-- **Search document** — En indexerad projektion av ett källobjekt med fält för rankning, filter och snippets.
-- **Indexed object type** — Typkod som styr vilka fält, filter och permissionsregler som gäller för objektet.
-- **Permissions trimming** — Efter- eller före-filterssteg som tar bort eller redigerar träffar som användaren inte får se.
-- **Saved search** — Namngiven uppsättning filter, sortering, facets och eventuellt fritextuttryck.
-- **Structured filter** — Fältspecifik sökning som inte tolkar indata som fri text.
-- **Free text query** — Fråga som matchas mot tokeniserade textfält och synonymregister.
-- **Stale index** — Tillstånd där indexets version ligger efter källdomänens senaste publicerade version.
-- **Tombstone** — Markerad indexpost som representerar raderat eller gömt objekt tills full reindex eller cleanup har gått klart.
+# Object model
 
-## Objektmodell
+## SearchDocument
 
-### Sökbara objekt
+Fält:
 
-#### Obligatoriskt indexerade objekt
-- företag, användare i tillåtet scope, kunder, leverantörer, kundfakturor, leverantörsfakturor, betalningar, statement lines, dokumentmetadata, projekt, arbetsorder, work items, close checklist items, submissions, support cases, rapportdefinitioner och saved views
-- varje objekttyp ska ha `object_type`, `object_id`, `company_id`, `display_title`, `status`, `search_text`, `filter_payload`, `permission_scope`, `version_no`, `updated_at`
+- `search_document_id`
+- `object_type`
+- `object_id`
+- `company_id`
+- `display_title`
+- `status`
+- `search_text`
+- `filter_payload`
+- `permission_scope`
+- `source_version`
+- `indexed_version`
 
-#### Exakta sökfält per kategori
-- kund: kundnummer, namn, organisationsnummer, momsnummer, e-post, kundreferens
-- leverantör: leverantörsnummer, namn, organisationsnummer, bankgiro/IBAN-maskad, fakturanummer
-- fakturaobjekt: fakturanummer, motpart, orderreferens, buyer reference, OCR-referens, belopp, valuta, status, period
-- dokument: dokument-id, filnamn, dokumenttyp, fakturanummer, motpart, OCR-nyckelfält, mottagarkanal
-- work items och checklistor: titel, task type, source id, owner, queue, blocker severity, period, deadline
-- rapporter och exportjobb: rapportnamn, metric ids, version, export job id, watermark status
-- kommentarer och supportärenden: rubrik, kommentarstext i tillåten omfattning, mention-targets, case id
+## SavedSearchReference
 
-#### Saved search
-- fält: `saved_search_id`, `owner_scope`, `visibility`, `query_json`, `default_sort`, `pinned_filters`, `created_from_surface`, `version_no`, `is_favorite`
-- invariant: saved search måste vara knuten till en objektyta eller globalt söksområde och får inte referera till icke-tillåtna filterfält
+Fält:
 
-## State machine
+- `saved_search_reference_id`
+- `owner_scope`
+- `query_json`
+- `visibility_code`
+- `status`
 
-### Indexdokument
-- `queued -> indexing -> indexed -> stale -> tombstoned -> purged`
-- `indexed -> stale` när källdomänen publicerar ny version eller permissionsändring som ännu inte materialiserats
-- `tombstoned` används när objektet raderats, soft-deletats eller blivit helt otillgängligt
-- `purged` får endast ske när retention- och auditregler medger full borttagning från indexet
+# State machines
 
-### Reindexjobb
-- `requested -> running -> verifying -> completed`
-- `running -> failed -> retry_pending -> running`
-- `completed -> superseded` när ett nyare reindexjobb tar över samma scope
+## SearchDocument
 
-### Saved search
-- `draft -> active -> broken -> repaired -> archived`
-- `broken` används när refererat filterfält, vy eller objekttyp inte längre finns eller när scope ändrats så att frågan inte kan köras oförändrad
+- `queued`
+- `indexed`
+- `stale`
+- `tombstoned`
+- `purged`
 
-## Användarflöden
+## SavedSearchReference
 
-### Indexuppdatering vid objektändring
-1. Källdomänen skriver sin transaktion och publicerar en outbox-händelse med objekttyp, id, ny version och permissions-hash.
-2. Indexeringsjobbet hämtar aktuell läsmodell och bygger ett search document.
-3. Om objektet inte längre får indexeras skapas tombstone eller delete enligt policy.
-4. När indexversionen matchar källversionen markeras posten som `indexed`.
+- `active`
+- `broken`
+- `archived`
 
-### Global sökning
-1. Användaren anger fri text, strukturerade filter eller båda.
-2. Query parser normaliserar format, språk, datumintervall, nummer och operatorer.
-3. Sökningen körs först mot tillåtna objekttyper och bolagsscope.
-4. Permissions trimming sker innan snippets returneras.
-5. Om objektet finns men inte får visas returneras antingen ingen träff eller en dold platsmarkör beroende på policy för ytan.
+# Commands
 
-### Saved search och reparation
-1. Användaren sparar en fråga från aktuell yta.
-2. Systemet validerar att alla fält får delas eller sparas.
-3. När schema eller filterkatalog ändras görs kompatibilitetskontroll.
-4. Trasig saved search markeras `broken` med reparationsförslag i stället för tyst fallback.
+- `upsert_search_document`
+- `tombstone_search_document`
+- `request_reindex`
+- `repair_saved_search_reference`
 
-## Affärsregler
+# Events
 
-### Ranking
-- exakt träff på primäridentifierare, till exempel fakturanummer, kundnummer eller submission-id, väger högst
-- därefter rankas exakta prefixträffar på titel- och namnfält
-- därefter kombination av fritextrelevans, objekttypens affärsvikt, recency och användarens aktuella ytkontext
-- `critical` work items och blockerande checklistor får boost inom respektive yta men får inte tränga undan exakta id-träffar i andra kategorier
-- rankingen måste vara deterministisk för samma query, samma indexversion och samma permissionssnapshot
+- `search_document_upserted`
+- `search_document_tombstoned`
+- `search_reindex_requested`
+- `saved_search_reference_broken`
 
-### Permissions trimming
-- varje search document ska innehålla materialiserad `permission_scope` samt referens till källdomänens accessmodell
-- resultat ska filtreras både på bolagsscope och objektspecifikt scope
-- snippets får bara byggas från fält som användaren får se; annars ska snippet ersättas med neutral text
-- facets får inte avslöja existensen av otillåtna objekt i små mängder om det skulle kunna deanonymisera data
+# Cross-domain dependencies
 
-### Fritext vs strukturerad sökning
-- fritext får söka över `display_title`, tillåtna aliasfält, söktext och kontrollerade OCR-fält
-- strukturerad sökning använder exakta eller typanpassade operatorer för datum, belopp, status, owner, period och objektkategori
-- fritext och filter kan kombineras; resultat måste då uppfylla alla filter men rankas med fritextpoäng
-- jokertecken och fuzzy-matchning får inte användas på fält som riskerar persondataexponering utan explicit godkänd policy
+- every indexed domain publishes outbox changes
+- desktop and backoffice consume search results
 
-### Stale data-regler
-- indexerade objekt ska bära `source_version` och `indexed_version`
-- om `indexed_version < source_version` ska träffen märkas som `stale` i operatörsläge och kunna trigga delreindex
-- slutanvändarvy ska i första hand visa senaste godkända indexerade version och i andra hand neutral information om att objektet uppdateras
-- close, betalning och sign-off får aldrig läsa beslutsdata direkt från sökindexet
+# Forbidden couplings
 
-### Delete/update-semantik och reindex
-- soft delete i källdomänen ska ge tombstone om audit eller hänvisningsbehov finns
-- hard delete får bara leda till full purge när retentionregler tillåter det
-- permissionsändring ska betraktas som indexuppdatering även om affärsdata är oförändrad
-- full reindex ska kunna köras per bolag, per objekttyp, per tidsfönster eller globalt
-- reindex måste vara idempotent per scope, startversion och jobb-id
+- decisions may not be made from search index alone
+- UI may not infer permissions by hiding results client-side only
 
-## Behörigheter
+# Search ownership
 
-- användare får endast söka på objektkategorier som är aktiverade för rollen och ytan
-- saved search med `shared` eller `default` visibility kräver särskild rättighet
-- search operator får köra reindex och diagnostik men får inte läsa affärsinnehåll utanför sitt supportscope
-- security admin får ändra indexpolicy, synonymer och dolda-fält-lista
-- support admin får se att objekt existerar för felsökning endast när supportpolicy tillåter detta och måste då få redigerad träff utan känslig snippet
+`search` äger query semantics, ranking and trimming. It does not own any business status.
 
-## Fel- och konfliktfall
+# UI ownership
 
-- saknat search document för existerande objekt ska ge `index_missing` och köa delreindex
-- felaktig permissions trimming ska behandlas som säkerhetsincident
-- trasig saved search ska markeras `broken`, inte köras med tyst borttagna filter
-- reindexkollision mellan två jobb på samma scope ska lösas genom versionsjämförelse och `superseded`-state
-- query som innehåller ogiltigt filter, okänd operator eller förbjudet fält ska returnera valideringsfel med tydlig felorsak
-- vid stale index över toleransgräns ska användaren få tydlig markering och operatören få diagnostiksignal
+Desktop-web owns global search UI. Backoffice has scoped diagnostics and support-search.
 
-## Notifieringar
+# Permissions
 
-- användaren kan få in-app-notis när delad saved search ändras eller går sönder
-- search operator får varning när stale rate, indexfel eller tombstone-backlog passerar tröskel
-- company admin får notis när default search eller delad saved search ändras för bolaget
-- support och security får incidentnotis vid permissions trimming-fel eller onormal mängd reindexfel
+- results must be filtered by tenant, role and object scope
+- snippets may only use permitted fields
 
-## Audit trail
+# Failure and conflict handling
 
-- varje sökning ska logga användare, bolagsscope, querytyp, använda filterfält, antal träffar och om dolda träffar fanns
-- full fri text får inte sparas oförändrad när policyn förbjuder det; då lagras hash eller redigerad representation
-- skapande, ändring, delning, reparation och arkivering av saved searches ska auditloggas
-- alla reindexjobb, delreindex, tombstone-purge och indexpolicyändringar ska ha correlation id, ansvarig användare och resultatstatus
-- auditspåret ska kunna visa vilken indexversion ett export- eller drilldownresultat byggde på
+- stale index must be marked, not silently ignored
+- missing document should create reindex signal
+- broken saved search should be explicit, not silently degraded
 
-## API/events/jobs
+# Notifications/activity/work-item interaction
 
-- query-API ska stödja `query_text`, `structured_filters`, `object_types`, `sort`, `page_token`, `search_context`
-- saved search-API: `create_saved_search`, `update_saved_search`, `share_saved_search`, `repair_saved_search`, `archive_saved_search`
-- events: `search_document_upsert_requested`, `search_document_tombstoned`, `search_reindex_requested`, `saved_search_broken`
-- jobb: `search_upsert_worker`, `search_reindex_worker`, `search_tombstone_cleanup`, `saved_search_compatibility_scan`
+- broken saved searches may notify owners
+- reindex incidents may create work items for search operators
 
-## UI-krav
+# API implications
 
-- global search ska visa kategori, titel, sekundär metadata, status och trygg markering för dolda delar
-- när objekt finns men inte får visas ska UI visa neutral text som `träff finns men åtkomst saknas` endast på ytor där sådan platsmarkör är tillåten; annars ska träffen utelämnas helt
-- facets ska kunna filtreras utan att hoppa i ordning mellan sidladdningar
-- saved searches ska visa ägare, synlighet, senast använd och om frågan är `broken`
-- operatörsvy ska kunna visa stale-flagga, indexed_version och senaste indexfel
+- global query endpoint
+- saved search CRUD
+- reindex endpoints
 
-## Testfall
+# Worker/job implications where relevant
 
-1. exakt sökning på fakturanummer ger rätt träff högst upp
-2. användare utan objektåtkomst får ingen snippet eller komplett träff
-3. permissionsändring uppdaterar index trots oförändrad affärsdata
-4. trasig saved search markeras `broken` med reparationsförslag
-5. soft-deletat objekt blir tombstone men kan inte öppnas från standard-UI
-6. full reindex per bolag återskapar samma träffmängd som före purge
-7. stale index över tröskel markeras i operatörsvy men blockerar inte vanlig listning
-8. auditloggen visar querytyp, filter och träffantal utan att exponera otillåten data
+- upsert worker
+- reindex worker
+- tombstone cleanup
 
-## Exit gate
+# Projection/read-model requirements
 
-- [ ] alla definierade objekttyper har exakta indexfält, filter och permissionsregler
-- [ ] global search returnerar deterministiskt rankade och korrekt trimmade resultat
-- [ ] saved searches kan delas, gå sönder, repareras och arkiveras utan dold fallback
-- [ ] reindex och tombstone-semantik är idempotenta och spårbara
-- [ ] användaren får tydligt men säkert beteende när objekt finns men inte får visas
+- search result cards
+- result type grouping
+- stale markers
+- scoped diagnostics
+
+# Test implications
+
+- exact id ranking
+- permission trimming
+- reindex idempotency
+- broken saved search handling
+
+# Exit gate
+
+- [ ] global search is read-only and permission-safe
+- [ ] reindex and tombstone semantics are explicit
+- [ ] desktop and backoffice can consume one stable search domain

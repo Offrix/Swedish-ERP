@@ -2,10 +2,14 @@ import crypto from "node:crypto";
 
 export const AUTOMATION_DECISION_TYPES = Object.freeze(["posting_suggestion", "classification", "anomaly_detection"]);
 export const AUTOMATION_DECISION_STATES = Object.freeze(["proposed", "manual_override", "accepted"]);
+export const RULE_PACK_STATUSES = Object.freeze(["draft", "validated", "approved", "published", "retired", "emergency_disabled"]);
+export const RULE_PACK_SELECTION_MODES = Object.freeze(["effective_date", "rollback_override", "exact_version"]);
+export const RULE_PACK_ROLLBACK_STATUSES = Object.freeze(["planned", "activated", "superseded", "cancelled"]);
 
 export function createRulePackRegistry({ clock = () => new Date(), seedRulePacks = [] } = {}) {
   const state = {
-    rulePacks: new Map()
+    rulePacks: new Map(),
+    rollbacks: new Map()
   };
 
   for (const rulePack of seedRulePacks) {
@@ -13,27 +17,153 @@ export function createRulePackRegistry({ clock = () => new Date(), seedRulePacks
   }
 
   return {
+    rulePackStatuses: RULE_PACK_STATUSES,
+    rulePackSelectionModes: RULE_PACK_SELECTION_MODES,
+    rulePackRollbackStatuses: RULE_PACK_ROLLBACK_STATUSES,
     registerRulePack,
+    createDraftRulePackVersion,
+    validateRulePackVersion,
+    approveRulePackVersion,
+    publishRulePackVersion,
+    retireRulePackVersion,
+    rollbackRulePackVersion,
+    listRulePackRollbacks,
     listRulePacks,
+    getRulePack,
     resolveRulePack,
-    buildRuleDecision
+    buildRuleDecision,
+    snapshotRuleRegistry
   };
 
   function registerRulePack(rulePackInput = {}) {
-    const normalized = normalizeRulePack(rulePackInput);
+    const normalized = normalizeRulePack(rulePackInput, {
+      defaultStatus: normalizeOptionalStatus(rulePackInput.status) || "published",
+      nowIso: nowIso()
+    });
+    assertRulePackIdIsUnique(normalized.rulePackId);
+    if (normalized.status === "published") {
+      assertNoPublishedOverlap(normalized);
+    }
     state.rulePacks.set(normalized.rulePackId, normalized);
     return copy(normalized);
   }
 
-  function listRulePacks({ domain = null, jurisdiction = null } = {}) {
+  function createDraftRulePackVersion(rulePackInput = {}) {
+    const normalized = normalizeRulePack(rulePackInput, {
+      defaultStatus: "draft",
+      nowIso: nowIso()
+    });
+    assertRulePackIdIsUnique(normalized.rulePackId);
+    state.rulePacks.set(normalized.rulePackId, normalized);
+    return copy(normalized);
+  }
+
+  function validateRulePackVersion({ rulePackId, actorId = "system" } = {}) {
+    const rulePack = requireRulePack(rulePackId);
+    assertRulePackStatus(rulePack, ["draft"], "rule_pack_cannot_be_validated");
+    rulePack.status = "validated";
+    rulePack.validatedAt = nowIso();
+    rulePack.updatedAt = rulePack.validatedAt;
+    rulePack.validatedBy = requireText(actorId, "actor_id_required");
+    return copy(rulePack);
+  }
+
+  function approveRulePackVersion({ rulePackId, actorId = "system", approvalRef = null } = {}) {
+    const rulePack = requireRulePack(rulePackId);
+    assertRulePackStatus(rulePack, ["validated", "approved"], "rule_pack_cannot_be_approved");
+    rulePack.status = "approved";
+    rulePack.approvedAt = nowIso();
+    rulePack.updatedAt = rulePack.approvedAt;
+    rulePack.approvedBy = requireText(actorId, "actor_id_required");
+    if (approvalRef != null) {
+      rulePack.approvalRef = requireText(String(approvalRef), "approval_ref_invalid");
+    }
+    return copy(rulePack);
+  }
+
+  function publishRulePackVersion({ rulePackId, actorId = "system", approvalRef = null } = {}) {
+    const rulePack = requireRulePack(rulePackId);
+    assertRulePackStatus(rulePack, ["approved", "published"], "rule_pack_cannot_be_published");
+    if (rulePack.status !== "published") {
+      assertNoPublishedOverlap(rulePack);
+    }
+    rulePack.status = "published";
+    rulePack.approvedAt = rulePack.approvedAt || nowIso();
+    rulePack.approvedBy = rulePack.approvedBy || requireText(actorId, "actor_id_required");
+    rulePack.publishedAt = nowIso();
+    rulePack.updatedAt = rulePack.publishedAt;
+    if (approvalRef != null) {
+      rulePack.approvalRef = requireText(String(approvalRef), "approval_ref_invalid");
+    }
+    return copy(rulePack);
+  }
+
+  function retireRulePackVersion({ rulePackId, actorId = "system", retirementReason = null } = {}) {
+    const rulePack = requireRulePack(rulePackId);
+    assertRulePackStatus(rulePack, ["published", "retired"], "rule_pack_cannot_be_retired");
+    rulePack.status = "retired";
+    rulePack.retiredAt = nowIso();
+    rulePack.updatedAt = rulePack.retiredAt;
+    rulePack.retiredBy = requireText(actorId, "actor_id_required");
+    if (retirementReason != null) {
+      rulePack.retirementReason = requireText(String(retirementReason), "retirement_reason_invalid");
+    }
+    return copy(rulePack);
+  }
+
+  function rollbackRulePackVersion({ rulePackId, effectiveFrom = null, actorId = "system", reasonCode, replayRequired = false } = {}) {
+    const target = requireRulePack(rulePackId);
+    if (!["published", "retired"].includes(target.status)) {
+      throw createError(409, "rule_pack_rollback_target_invalid", "Rollback target must be published or retired.");
+    }
+    const rollbackRecord = {
+      rollbackId: crypto.randomUUID(),
+      rulePackCode: target.rulePackCode,
+      targetRulePackId: target.rulePackId,
+      domain: target.domain,
+      jurisdiction: target.jurisdiction,
+      effectiveFrom: normalizeDate(effectiveFrom || nowDate(), "rule_pack_rollback_effective_from_invalid"),
+      status: "activated",
+      actorId: requireText(actorId, "actor_id_required"),
+      reasonCode: requireText(reasonCode, "rule_pack_rollback_reason_required"),
+      replayRequired: replayRequired === true,
+      createdAt: nowIso()
+    };
+    state.rollbacks.set(rollbackRecord.rollbackId, rollbackRecord);
+    return copy(rollbackRecord);
+  }
+
+  function listRulePackRollbacks({ rulePackCode = null, domain = null, jurisdiction = null, status = null } = {}) {
+    return [...state.rollbacks.values()]
+      .filter((record) => (rulePackCode ? record.rulePackCode === rulePackCode : true))
+      .filter((record) => (domain ? record.domain === domain : true))
+      .filter((record) => (jurisdiction ? record.jurisdiction === jurisdiction : true))
+      .filter((record) => (status ? record.status === status : true))
+      .sort(sortRollbackRecords)
+      .map(copy);
+  }
+
+  function listRulePacks({ domain = null, jurisdiction = null, rulePackCode = null, status = null } = {}) {
     return [...state.rulePacks.values()]
       .filter((rulePack) => (domain ? rulePack.domain === domain : true))
       .filter((rulePack) => (jurisdiction ? rulePack.jurisdiction === jurisdiction : true))
+      .filter((rulePack) => (rulePackCode ? rulePack.rulePackCode === rulePackCode : true))
+      .filter((rulePack) => (status ? rulePack.status === status : true))
       .sort(sortRulePacks)
       .map(copy);
   }
 
+  function getRulePack({ rulePackId, required = true } = {}) {
+    const rulePack = state.rulePacks.get(requireText(rulePackId, "rule_pack_id_required")) || null;
+    if (!rulePack && required) {
+      throw createError(404, "rule_pack_not_found", "Rule pack was not found.");
+    }
+    return rulePack ? copy(rulePack) : null;
+  }
+
   function resolveRulePack({
+    rulePackId = null,
+    rulePackCode = null,
     domain,
     jurisdiction,
     effectiveDate,
@@ -42,42 +172,49 @@ export function createRulePackRegistry({ clock = () => new Date(), seedRulePacks
     groupCode = null,
     specialCaseCode = null
   } = {}) {
+    if (rulePackId) {
+      return attachSelectionMetadata(getRulePack({ rulePackId }), "exact_version", null);
+    }
+
     const resolvedDomain = requireText(domain, "rule_pack_domain_required");
     const resolvedJurisdiction = requireText(jurisdiction, "rule_pack_jurisdiction_required");
     const resolvedEffectiveDate = normalizeDate(effectiveDate || nowDate(), "rule_pack_effective_date_invalid");
+    const selectionInputs = { companyType, registrationCode, groupCode, specialCaseCode };
     const matches = listRulePacks({
       domain: resolvedDomain,
       jurisdiction: resolvedJurisdiction
-    }).filter((rulePack) => {
-      if (rulePack.effectiveFrom > resolvedEffectiveDate) {
-        return false;
-      }
-      if (rulePack.effectiveTo && rulePack.effectiveTo < resolvedEffectiveDate) {
-        return false;
-      }
-      if (rulePack.companyTypes.length > 0 && companyType && !rulePack.companyTypes.includes(companyType)) {
-        return false;
-      }
-      if (rulePack.registrationCodes.length > 0 && registrationCode && !rulePack.registrationCodes.includes(registrationCode)) {
-        return false;
-      }
-      if (rulePack.groupCodes.length > 0 && groupCode && !rulePack.groupCodes.includes(groupCode)) {
-        return false;
-      }
-      if (rulePack.specialCaseCodes.length > 0 && specialCaseCode && !rulePack.specialCaseCodes.includes(specialCaseCode)) {
-        return false;
-      }
-      return true;
-    });
+    })
+      .filter((rulePack) => rulePack.status === "published")
+      .filter((rulePack) => (rulePackCode ? rulePack.rulePackCode === rulePackCode : true))
+      .filter((rulePack) => rulePack.effectiveFrom <= resolvedEffectiveDate)
+      .filter((rulePack) => !rulePack.effectiveTo || rulePack.effectiveTo > resolvedEffectiveDate)
+      .filter((rulePack) => scopeMatches(rulePack, selectionInputs));
 
     if (matches.length === 0) {
-      const error = new Error(`No rule pack matched ${resolvedDomain}/${resolvedJurisdiction} on ${resolvedEffectiveDate}.`);
-      error.status = 404;
-      error.code = "rule_pack_not_found";
-      throw error;
+      throw createError(404, "rule_pack_not_found", `No rule pack matched ${resolvedDomain}/${resolvedJurisdiction} on ${resolvedEffectiveDate}.`);
     }
 
-    return copy(matches[0]);
+    const rollbackOverride = resolveRollbackOverride({
+      domain: resolvedDomain,
+      jurisdiction: resolvedJurisdiction,
+      rulePackCode,
+      effectiveDate: resolvedEffectiveDate,
+      selectionInputs
+    });
+    if (rollbackOverride) {
+      return rollbackOverride;
+    }
+
+    const matchedCodes = [...new Set(matches.map((rulePack) => rulePack.rulePackCode))];
+    if (!rulePackCode && matchedCodes.length > 1) {
+      throw createError(
+        409,
+        "rule_pack_selection_ambiguous",
+        `Multiple rule pack codes matched ${resolvedDomain}/${resolvedJurisdiction} on ${resolvedEffectiveDate}.`
+      );
+    }
+
+    return attachSelectionMetadata(matches[0], "effective_date", null);
   }
 
   function buildRuleDecision({
@@ -99,6 +236,9 @@ export function createRulePackRegistry({ clock = () => new Date(), seedRulePacks
       decisionCode: resolvedDecisionCode,
       inputsHash: hashObject(inputs || {}),
       rulePackId: resolvedRulePack.rulePackId,
+      rulePackCode: resolvedRulePack.rulePackCode,
+      rulePackVersion: resolvedRulePack.version,
+      selectionMode: resolvedRulePack.selectionMode || "effective_date",
       effectiveDate: normalizeDate(effectiveDate || nowDate(), "decision_effective_date_invalid"),
       outputs: copy(outputs || {}),
       warnings: Array.isArray(warnings) ? copy(warnings) : [],
@@ -108,8 +248,79 @@ export function createRulePackRegistry({ clock = () => new Date(), seedRulePacks
     };
   }
 
+  function snapshotRuleRegistry() {
+    const items = listRulePacks();
+    const rollbacks = listRulePackRollbacks();
+    return {
+      statuses: RULE_PACK_STATUSES,
+      selectionModes: RULE_PACK_SELECTION_MODES,
+      rollbackStatuses: RULE_PACK_ROLLBACK_STATUSES,
+      totalRulePackCount: items.length,
+      publishedRulePackCount: items.filter((item) => item.status === "published").length,
+      retiredRulePackCount: items.filter((item) => item.status === "retired").length,
+      totalRollbackCount: rollbacks.length,
+      items,
+      rollbacks
+    };
+  }
+
+  function resolveRollbackOverride({ domain, jurisdiction, rulePackCode, effectiveDate, selectionInputs }) {
+    const rollback = listRulePackRollbacks({ domain, jurisdiction, status: "activated" })
+      .filter((record) => record.effectiveFrom <= effectiveDate)
+      .filter((record) => (rulePackCode ? record.rulePackCode === rulePackCode : true))[0];
+    if (!rollback) {
+      return null;
+    }
+    const target = state.rulePacks.get(rollback.targetRulePackId);
+    if (!target) {
+      throw createError(500, "rule_pack_rollback_target_missing", "Rollback target rule pack is missing.");
+    }
+    if (!scopeMatches(target, selectionInputs)) {
+      return null;
+    }
+    return attachSelectionMetadata(target, "rollback_override", rollback.rollbackId);
+  }
+
+  function requireRulePack(rulePackId) {
+    const stored = state.rulePacks.get(requireText(rulePackId, "rule_pack_id_required"));
+    if (!stored) {
+      throw createError(404, "rule_pack_not_found", "Rule pack was not found.");
+    }
+    return stored;
+  }
+
+  function assertRulePackIdIsUnique(rulePackId) {
+    if (state.rulePacks.has(rulePackId)) {
+      throw createError(409, "rule_pack_id_exists", `Rule pack ${rulePackId} already exists.`);
+    }
+  }
+
+  function assertRulePackStatus(rulePack, allowedStatuses, code) {
+    if (!allowedStatuses.includes(rulePack.status)) {
+      throw createError(409, code, `Rule pack ${rulePack.rulePackId} is ${rulePack.status}.`);
+    }
+  }
+
+  function assertNoPublishedOverlap(candidate) {
+    const overlapping = [...state.rulePacks.values()]
+      .filter((item) => item.rulePackId !== candidate.rulePackId)
+      .filter((item) => item.status === "published")
+      .filter((item) => item.domain === candidate.domain)
+      .filter((item) => item.jurisdiction === candidate.jurisdiction)
+      .filter((item) => item.rulePackCode === candidate.rulePackCode)
+      .filter((item) => buildScopeSignature(item) === buildScopeSignature(candidate))
+      .filter((item) => intervalsOverlap(item, candidate));
+    if (overlapping.length > 0) {
+      throw createError(409, "rule_pack_effective_interval_overlaps", `Rule pack ${candidate.rulePackId} overlaps a published version.`);
+    }
+  }
+
   function nowDate() {
     return new Date(clock()).toISOString().slice(0, 10);
+  }
+
+  function nowIso() {
+    return new Date(clock()).toISOString();
   }
 }
 
@@ -124,7 +335,14 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
   }
 
   return {
-    ...registry,
+    ruleRegistry: registry,
+    rulePackStatuses: RULE_PACK_STATUSES,
+    rulePackSelectionModes: RULE_PACK_SELECTION_MODES,
+    rulePackRollbackStatuses: RULE_PACK_ROLLBACK_STATUSES,
+    registerRulePack: (input) => registry.registerRulePack(input),
+    listRulePacks: (filters) => registry.listRulePacks(filters),
+    resolveRulePack: (filters) => registry.resolveRulePack(filters),
+    buildRuleDecision: (input) => registry.buildRuleDecision(input),
     automationDecisionTypes: AUTOMATION_DECISION_TYPES,
     automationDecisionStates: AUTOMATION_DECISION_STATES,
     createNoCodeRulePack,
@@ -141,7 +359,25 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
   function createNoCodeRulePack(input = {}) {
     return registry.registerRulePack({
       rulePackId: input.rulePackId || crypto.randomUUID(),
-      sourceSnapshotDate: input.sourceSnapshotDate || input.effectiveFrom,
+      rulePackCode:
+        input.rulePackCode ||
+        deriveRulePackCode({
+          domain: input.domain || "automation",
+          jurisdiction: input.jurisdiction || "SE",
+          rulePackId: input.rulePackId || "automation"
+        }),
+      domain: input.domain || "automation",
+      jurisdiction: input.jurisdiction || "SE",
+      effectiveFrom: input.effectiveFrom || nowDate(),
+      effectiveTo: input.effectiveTo || null,
+      version: input.version || "1",
+      status: input.status || "published",
+      approvalRef: input.approvalRef || null,
+      changeReason: input.changeReason || input.semanticChangeSummary || "No-code automation rule pack created via API.",
+      testVectorSetId: input.testVectorSetId || null,
+      createdBy: input.createdBy || "system",
+      approvedBy: input.approvedBy || "system",
+      sourceSnapshotDate: input.sourceSnapshotDate || input.effectiveFrom || nowDate(),
       semanticChangeSummary: input.semanticChangeSummary || "Registered no-code automation rule pack.",
       ...input
     });
@@ -152,10 +388,7 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
   }
 
   function evaluateNoCodeRulePack({ rulePackId, facts = {} } = {}) {
-    const rulePack = registry.listRulePacks().find((candidate) => candidate.rulePackId === requireText(rulePackId, "rule_pack_id_required"));
-    if (!rulePack) {
-      throw createError(404, "rule_pack_not_found", "Rule pack was not found.");
-    }
+    const rulePack = registry.getRulePack({ rulePackId });
     const rules = rulePack.machineReadableRules || {};
     const conditions = Array.isArray(rules.conditions)
       ? rules.conditions
@@ -165,6 +398,7 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
     const matched = conditions.every((condition) => matchesCondition(condition, facts));
     return {
       rulePackId: rulePack.rulePackId,
+      rulePackCode: rulePack.rulePackCode,
       matched,
       outputs: matched ? copy(rules.then || rules.outputs || {}) : {}
     };
@@ -336,7 +570,7 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
     if (!rulePackId) {
       return null;
     }
-    return registry.listRulePacks().find((candidate) => candidate.rulePackId === rulePackId)
+    return registry.getRulePack({ rulePackId, required: false })
       || registry.resolveRulePack({
         domain: "automation",
         jurisdiction: "SE",
@@ -372,6 +606,9 @@ export function createAutomationAiEngine({ clock = () => new Date(), seedRulePac
           decisionCode: decisionType,
           inputsHash: hashObject(inputs || {}),
           rulePackId: null,
+          rulePackCode: null,
+          rulePackVersion: null,
+          selectionMode: null,
           effectiveDate: normalizeDate(effectiveDate || nowDate(), "decision_effective_date_invalid"),
           outputs: copy(outputs || {}),
           warnings: Array.isArray(warnings) ? copy(warnings) : [],
@@ -400,7 +637,7 @@ function assertAllowed(value, allowedValues, code) {
   return value;
 }
 
-function normalizeRulePack(rulePackInput) {
+function normalizeRulePack(rulePackInput, { defaultStatus, nowIso }) {
   const domain = requireText(rulePackInput.domain, "rule_pack_domain_required");
   const jurisdiction = requireText(rulePackInput.jurisdiction, "rule_pack_jurisdiction_required");
   const effectiveFrom = normalizeDate(rulePackInput.effectiveFrom, "rule_pack_effective_from_invalid");
@@ -408,7 +645,16 @@ function normalizeRulePack(rulePackInput) {
     rulePackInput.effectiveTo === null || rulePackInput.effectiveTo === undefined || rulePackInput.effectiveTo === ""
       ? null
       : normalizeDate(rulePackInput.effectiveTo, "rule_pack_effective_to_invalid");
+  if (effectiveTo && effectiveTo <= effectiveFrom) {
+    throw createError(400, "rule_pack_effective_interval_invalid", "effectiveTo must be later than effectiveFrom.");
+  }
   const version = requireText(String(rulePackInput.version), "rule_pack_version_required");
+  const rulePackId = requireText(rulePackInput.rulePackId, "rule_pack_id_required");
+  const rulePackCode = requireText(
+    String(rulePackInput.rulePackCode || deriveRulePackCode({ domain, jurisdiction, rulePackId })),
+    "rule_pack_code_required"
+  ).toUpperCase();
+  const status = normalizeOptionalStatus(rulePackInput.status) || defaultStatus;
   const machineReadableRules = copy(rulePackInput.machineReadableRules || {});
   const humanReadableExplanation = Array.isArray(rulePackInput.humanReadableExplanation)
     ? copy(rulePackInput.humanReadableExplanation)
@@ -425,6 +671,7 @@ function normalizeRulePack(rulePackInput) {
       : hashObject({
           domain,
           jurisdiction,
+          rulePackCode,
           effectiveFrom,
           effectiveTo,
           version,
@@ -435,12 +682,38 @@ function normalizeRulePack(rulePackInput) {
         });
 
   return {
-    rulePackId: requireText(rulePackInput.rulePackId, "rule_pack_id_required"),
+    rulePackId,
+    rulePackCode,
+    immutableVersionId: requireText(rulePackInput.immutableVersionId || rulePackId, "rule_pack_immutable_version_id_required"),
     domain,
     jurisdiction,
+    status,
     effectiveFrom,
     effectiveTo,
     version,
+    payloadSchemaVersion: requireText(String(rulePackInput.payloadSchemaVersion || "1"), "rule_pack_payload_schema_version_required"),
+    approvalRef: normalizeOptionalText(rulePackInput.approvalRef),
+    changeReason: requireText(
+      rulePackInput.changeReason || rulePackInput.semanticChangeSummary || "Initial rule pack registration.",
+      "rule_pack_change_reason_required"
+    ),
+    supersedesVersion: normalizeOptionalText(rulePackInput.supersedesVersion),
+    rollbackPolicy: normalizeOptionalText(rulePackInput.rollbackPolicy) || "publish_successor_or_activate_prior_version",
+    testVectorSetId: normalizeOptionalText(rulePackInput.testVectorSetId),
+    createdBy: requireText(String(rulePackInput.createdBy || "system"), "rule_pack_created_by_required"),
+    approvedBy: normalizeOptionalText(rulePackInput.approvedBy),
+    publishedAt:
+      normalizeOptionalTimestamp(rulePackInput.publishedAt, "rule_pack_published_at_invalid") ||
+      (status === "published" || status === "retired" ? nowIso : null),
+    retiredAt:
+      normalizeOptionalTimestamp(rulePackInput.retiredAt, "rule_pack_retired_at_invalid") ||
+      (status === "retired" ? nowIso : null),
+    validatedAt:
+      normalizeOptionalTimestamp(rulePackInput.validatedAt, "rule_pack_validated_at_invalid") ||
+      (["validated", "approved", "published", "retired"].includes(status) ? nowIso : null),
+    approvedAt:
+      normalizeOptionalTimestamp(rulePackInput.approvedAt, "rule_pack_approved_at_invalid") ||
+      (["approved", "published", "retired"].includes(status) ? nowIso : null),
     checksum,
     sourceSnapshotDate,
     semanticChangeSummary: requireText(
@@ -455,7 +728,9 @@ function normalizeRulePack(rulePackInput) {
     registrationCodes: normalizeOptionalStringArray(rulePackInput.registrationCodes),
     groupCodes: normalizeOptionalStringArray(rulePackInput.groupCodes),
     specialCaseCodes: normalizeOptionalStringArray(rulePackInput.specialCaseCodes),
-    createdAt: rulePackInput.createdAt || new Date().toISOString()
+    createdAt: normalizeOptionalTimestamp(rulePackInput.createdAt, "rule_pack_created_at_invalid") || nowIso,
+    updatedAt: normalizeOptionalTimestamp(rulePackInput.updatedAt, "rule_pack_updated_at_invalid") || nowIso,
+    emergencyDisabledAt: normalizeOptionalTimestamp(rulePackInput.emergencyDisabledAt, "rule_pack_emergency_disabled_at_invalid")
   };
 }
 
@@ -517,7 +792,9 @@ function normalizeClassificationCandidates(values, evidence) {
 
 function buildPostingExplanation(rulePack, candidate, evidence) {
   return [
-    rulePack ? `Rule pack ${rulePack.rulePackId} evaluated for posting suggestion.` : "No matching automation rule pack was supplied; using deterministic fallback heuristics.",
+    rulePack
+      ? `Rule pack ${rulePack.rulePackId} (${rulePack.rulePackCode}) evaluated for posting suggestion.`
+      : "No matching automation rule pack was supplied; using deterministic fallback heuristics.",
     `Top candidate ${candidate.postingKey} scored ${candidate.score.toFixed(2)}.`,
     `Evidence source ${String(evidence.documentType || evidence.sourceObjectType || "unknown")} was used to shape the posting lines.`
   ];
@@ -525,7 +802,9 @@ function buildPostingExplanation(rulePack, candidate, evidence) {
 
 function buildClassificationExplanation(rulePack, candidate, evidence) {
   return [
-    rulePack ? `Rule pack ${rulePack.rulePackId} evaluated classification evidence.` : "Classification fallback logic used evidence completeness and supplied candidates.",
+    rulePack
+      ? `Rule pack ${rulePack.rulePackId} (${rulePack.rulePackCode}) evaluated classification evidence.`
+      : "Classification fallback logic used evidence completeness and supplied candidates.",
     `Selected class ${candidate.code} with score ${candidate.score.toFixed(2)}.`,
     `Evidence fields available: ${Object.keys(evidence || {}).sort().join(", ") || "none"}.`
   ];
@@ -533,7 +812,9 @@ function buildClassificationExplanation(rulePack, candidate, evidence) {
 
 function buildAnomalyExplanation(rulePack, deviationPercent, threshold, evidence) {
   return [
-    rulePack ? `Rule pack ${rulePack.rulePackId} informed anomaly tolerance.` : "Default anomaly tolerance evaluation applied.",
+    rulePack
+      ? `Rule pack ${rulePack.rulePackId} (${rulePack.rulePackCode}) informed anomaly tolerance.`
+      : "Default anomaly tolerance evaluation applied.",
     `Deviation measured ${deviationPercent.toFixed(2)}% against threshold ${Number(threshold).toFixed(2)}%.`,
     `Evidence fields available: ${Object.keys(evidence || {}).sort().join(", ") || "none"}.`
   ];
@@ -571,11 +852,38 @@ function sortRulePacks(left, right) {
   if (jurisdictionComparison !== 0) {
     return jurisdictionComparison;
   }
+  const codeComparison = left.rulePackCode.localeCompare(right.rulePackCode);
+  if (codeComparison !== 0) {
+    return codeComparison;
+  }
   const fromComparison = right.effectiveFrom.localeCompare(left.effectiveFrom);
   if (fromComparison !== 0) {
     return fromComparison;
   }
-  return right.version.localeCompare(left.version);
+  const publishedComparison = String(right.publishedAt || "").localeCompare(String(left.publishedAt || ""));
+  if (publishedComparison !== 0) {
+    return publishedComparison;
+  }
+  const versionComparison = right.version.localeCompare(left.version);
+  if (versionComparison !== 0) {
+    return versionComparison;
+  }
+  return right.rulePackId.localeCompare(left.rulePackId);
+}
+
+function sortRollbackRecords(left, right) {
+  const effectiveComparison = right.effectiveFrom.localeCompare(left.effectiveFrom);
+  if (effectiveComparison !== 0) {
+    return effectiveComparison;
+  }
+  return right.createdAt.localeCompare(left.createdAt);
+}
+
+function normalizeOptionalStatus(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+  return assertAllowed(requireText(String(value), "rule_pack_status_invalid"), RULE_PACK_STATUSES, "rule_pack_status_invalid");
 }
 
 function normalizeOptionalStringArray(value) {
@@ -583,6 +891,75 @@ function normalizeOptionalStringArray(value) {
     return [];
   }
   return [...new Set(value.map((item) => requireText(String(item), "rule_pack_filter_value_invalid")))].sort();
+}
+
+function normalizeOptionalText(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+  return requireText(String(value), "optional_text_invalid");
+}
+
+function normalizeOptionalTimestamp(value, code) {
+  if (value == null || value === "") {
+    return null;
+  }
+  const resolvedValue = requireText(String(value), code);
+  const parsed = Date.parse(resolvedValue);
+  if (Number.isNaN(parsed)) {
+    throw createError(400, code, `${resolvedValue} must be an ISO timestamp.`);
+  }
+  return new Date(parsed).toISOString();
+}
+
+function deriveRulePackCode({ domain, jurisdiction, rulePackId }) {
+  const base = `${jurisdiction}_${domain}_${String(rulePackId || "RULE_PACK")}`;
+  return base
+    .replaceAll(/[^A-Za-z0-9]+/g, "_")
+    .replaceAll(/_+/g, "_")
+    .replace(/^_/, "")
+    .replace(/_$/, "")
+    .toUpperCase();
+}
+
+function scopeMatches(rulePack, selectionInputs = {}) {
+  return (
+    matchesScopedValue(rulePack.companyTypes, selectionInputs.companyType) &&
+    matchesScopedValue(rulePack.registrationCodes, selectionInputs.registrationCode) &&
+    matchesScopedValue(rulePack.groupCodes, selectionInputs.groupCode) &&
+    matchesScopedValue(rulePack.specialCaseCodes, selectionInputs.specialCaseCode)
+  );
+}
+
+function matchesScopedValue(allowedValues, actualValue) {
+  if (!Array.isArray(allowedValues) || allowedValues.length === 0) {
+    return true;
+  }
+  return actualValue != null && allowedValues.includes(requireText(String(actualValue), "rule_pack_scope_value_required"));
+}
+
+function intervalsOverlap(left, right) {
+  const leftEnd = left.effectiveTo || "9999-12-31";
+  const rightEnd = right.effectiveTo || "9999-12-31";
+  return left.effectiveFrom < rightEnd && right.effectiveFrom < leftEnd;
+}
+
+function attachSelectionMetadata(rulePack, selectionMode, rollbackId) {
+  const resolvedRulePack = copy(rulePack);
+  resolvedRulePack.selectionMode = assertAllowed(selectionMode, RULE_PACK_SELECTION_MODES, "rule_pack_selection_mode_invalid");
+  if (rollbackId) {
+    resolvedRulePack.rollbackId = rollbackId;
+  }
+  return resolvedRulePack;
+}
+
+function buildScopeSignature(rulePack) {
+  return JSON.stringify({
+    companyTypes: rulePack.companyTypes || [],
+    registrationCodes: rulePack.registrationCodes || [],
+    groupCodes: rulePack.groupCodes || [],
+    specialCaseCodes: rulePack.specialCaseCodes || []
+  });
 }
 
 function normalizeDate(value, code) {
