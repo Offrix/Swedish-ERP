@@ -99,6 +99,7 @@ const IMPORT_OUTPUT_BOX_BY_RATE = Object.freeze({
   "12.00": "61",
   "6.00": "62"
 });
+const VAT_RULE_PACK_CODE = "SE-VAT-CORE";
 
 const VAT_CODE_DEFINITIONS = Object.freeze([
   createVatCodeDefinition("VAT_SE_DOMESTIC_25", "Domestic 25 %", 25, ["05", "10"], "vat_se_domestic_25"),
@@ -143,10 +144,11 @@ const VAT_CODE_DEFINITIONS = Object.freeze([
 const SEEDED_RULE_PACKS = Object.freeze([
   {
     rulePackId: "vat-se-2025.6",
+    rulePackCode: VAT_RULE_PACK_CODE,
     domain: "vat",
     jurisdiction: "SE",
     effectiveFrom: "2025-01-01",
-    effectiveTo: "2025-12-31",
+    effectiveTo: "2026-01-01",
     version: "2025.6",
     sourceSnapshotDate: "2026-03-21",
     semanticChangeSummary: "Expanded 2025 VAT reporting for OSS/IOSS, periodic statements and declaration snapshots.",
@@ -169,6 +171,7 @@ const SEEDED_RULE_PACKS = Object.freeze([
   },
   {
     rulePackId: "vat-se-2026.3",
+    rulePackCode: VAT_RULE_PACK_CODE,
     domain: "vat",
     jurisdiction: "SE",
     effectiveFrom: "2026-01-01",
@@ -269,7 +272,7 @@ export function createVatEngine({ clock = () => new Date(), seedDemo = true, led
       return packs;
     }
     const resolvedDate = normalizeDate(effectiveDate, "effective_date_invalid");
-    return packs.filter((pack) => pack.effectiveFrom <= resolvedDate && (!pack.effectiveTo || pack.effectiveTo >= resolvedDate));
+    return packs.filter((pack) => pack.effectiveFrom <= resolvedDate && (!pack.effectiveTo || pack.effectiveTo > resolvedDate));
   }
 
   function evaluateVatDecision({
@@ -283,6 +286,7 @@ export function createVatEngine({ clock = () => new Date(), seedDemo = true, led
     const normalizedLine = normalizeTransactionLine(transactionLine);
     const effectiveDate = normalizedLine.tax_date || normalizedLine.invoice_date;
     const rulePack = ruleRegistry.resolveRulePack({
+      rulePackCode: VAT_RULE_PACK_CODE,
       domain: "vat",
       jurisdiction: "SE",
       effectiveDate

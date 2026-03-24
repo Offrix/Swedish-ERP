@@ -32,6 +32,8 @@ export const PAYROLL_CALCULATION_BASES = Object.freeze([
   "manual_amount",
   "reporting_only"
 ]);
+const PAYROLL_EMPLOYER_CONTRIBUTION_RULE_PACK_CODE = "SE-EMPLOYER-CONTRIBUTIONS";
+const PAYROLL_TAX_RULE_PACK_CODE = "SE-PAYROLL-TAX";
 
 export const PAYROLL_STEP_DEFINITIONS = Object.freeze([
   createStepDefinition(1, "employment_and_period", "Fetch employment and payroll period."),
@@ -57,6 +59,7 @@ export const PAYROLL_STEP_DEFINITIONS = Object.freeze([
 const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
   {
     rulePackId: "payroll-employer-contribution-se-2026.1",
+    rulePackCode: PAYROLL_EMPLOYER_CONTRIBUTION_RULE_PACK_CODE,
     domain: "payroll",
     jurisdiction: "SE",
     effectiveFrom: "2026-01-01",
@@ -81,6 +84,7 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
   },
   {
     rulePackId: "payroll-tax-se-2026.1",
+    rulePackCode: PAYROLL_TAX_RULE_PACK_CODE,
     domain: "payroll",
     jurisdiction: "SE",
     effectiveFrom: "2026-01-01",
@@ -264,7 +268,7 @@ export function createPayrollEngine({
   function listPayrollRulePacks({ effectiveDate = null } = {}) {
     return rules
       .listRulePacks({ domain: "payroll", jurisdiction: "SE" })
-      .filter((candidate) => !effectiveDate || candidate.effectiveFrom <= effectiveDate)
+      .filter((candidate) => !effectiveDate || (candidate.effectiveFrom <= effectiveDate && (!candidate.effectiveTo || candidate.effectiveTo > effectiveDate)))
       .map(copy);
   }
 
@@ -3190,6 +3194,7 @@ function createStepLinesFromManualInputs({ processingStep, employment, inputs, s
 function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfile, warnings }) {
   const resolvedPayDate = normalizeRequiredDate(payDate, "pay_run_pay_date_invalid");
   const rulePack = rules.resolveRulePack({
+    rulePackCode: PAYROLL_TAX_RULE_PACK_CODE,
     domain: "payroll",
     jurisdiction: "SE",
     effectiveDate: resolvedPayDate
@@ -3371,6 +3376,7 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
 
 function buildEmployerContributionPreview({ rules, contributionBase, employee, statutoryProfile, payDate }) {
   const rulePack = rules.resolveRulePack({
+    rulePackCode: PAYROLL_EMPLOYER_CONTRIBUTION_RULE_PACK_CODE,
     domain: "payroll",
     jurisdiction: "SE",
     effectiveDate: normalizeRequiredDate(payDate, "pay_run_pay_date_invalid")
@@ -4378,7 +4384,7 @@ function createInternalRuleRegistry({ seedRulePacks }) {
         .filter((candidate) => candidate.domain === domain)
         .filter((candidate) => candidate.jurisdiction === jurisdiction)
         .filter((candidate) => candidate.effectiveFrom <= effectiveDate)
-        .filter((candidate) => !candidate.effectiveTo || candidate.effectiveTo >= effectiveDate)
+        .filter((candidate) => !candidate.effectiveTo || candidate.effectiveTo > effectiveDate)
         .sort((left, right) => right.effectiveFrom.localeCompare(left.effectiveFrom));
       if (matches.length === 0) {
         throw createError(404, "rule_pack_not_found", "Rule pack was not found.");

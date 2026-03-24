@@ -5,6 +5,10 @@ Phase 0 and Phase 13.3 rule engine contracts for VAT, payroll, AGI, HUS, automat
 ## Scope
 
 - Versioned rule packs.
+- Effective-dated selection with inclusive `effectiveFrom` and exclusive `effectiveTo`.
+- Explicit rule-pack codes and immutable version identifiers.
+- Draft, validation, approval, publish and retire transitions.
+- Rollback override records that redirect future evaluations without rewriting historical decisions.
 - Deterministic rule evaluation context.
 - Explainable decision output.
 - Warning/error channel for review queues.
@@ -16,4 +20,6 @@ Phase 0 and Phase 13.3 rule engine contracts for VAT, payroll, AGI, HUS, automat
 
 - Rule packs are data and versioned code, never UI logic.
 - Every decision must include reason and trace fields.
+- Published rule-pack versions are append-only from a business-history perspective.
+- Historical decisions stay pinned to the version that produced them.
 - Automation suggestions can never post directly to ledger without manual review.
