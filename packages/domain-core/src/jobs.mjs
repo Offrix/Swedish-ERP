@@ -387,7 +387,8 @@ export function createAsyncJobsModule({
   clock = () => new Date(),
   audit,
   error,
-  store = createInMemoryAsyncJobStore()
+  store = createInMemoryAsyncJobStore(),
+  incidentHooks = null
 } = {}) {
   return {
     asyncJobStatuses: ASYNC_JOB_STATUSES,
@@ -599,6 +600,19 @@ export function createAsyncJobsModule({
         ? `Scheduled retry for async job ${result.job.jobType}.`
         : `Moved async job ${result.job.jobType} to dead letter.`
     });
+    if (shouldRetry) {
+      incidentHooks?.onAsyncJobRetryScheduled?.({
+        job: result.job,
+        attempt: result.attempt,
+        retryAt: result.attempt?.nextRetryAt || null
+      });
+    } else {
+      incidentHooks?.onAsyncJobDeadLetter?.({
+        job: result.job,
+        attempt: result.attempt,
+        deadLetter: result.deadLetter
+      });
+    }
     return result;
   }
 
@@ -692,6 +706,10 @@ export function createAsyncJobsModule({
       entityId: replayPlan.replayPlanId,
       explanation: `Planned replay for async job ${job.jobType}.`
     });
+    incidentHooks?.onAsyncJobReplayPlanned?.({
+      replayPlan,
+      job
+    });
     return replayPlan;
   }
 
@@ -766,6 +784,11 @@ export function createAsyncJobsModule({
       entityType: "async_job_replay_plan",
       entityId: replayPlan.replayPlanId,
       explanation: `Executed replay for async job ${sourceJob.jobType}.`
+    });
+    incidentHooks?.onAsyncJobReplayExecuted?.({
+      replayPlan: executedPlan,
+      replayJob,
+      actorId: actorId || replayPlan.approvedByUserId
     });
     return {
       replayPlan: executedPlan,
