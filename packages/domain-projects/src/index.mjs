@@ -48,6 +48,9 @@ export function createProjectEngine({
     resourceAllocationIdsByProject: new Map(),
     costSnapshots: new Map(),
     costSnapshotIdsByProject: new Map(),
+    projectPayrollCostAllocations: new Map(),
+    projectPayrollCostAllocationIdsByProject: new Map(),
+    projectPayrollCostAllocationIdsBySnapshot: new Map(),
     wipSnapshots: new Map(),
     wipSnapshotIdsByProject: new Map(),
     forecastSnapshots: new Map(),
@@ -77,6 +80,7 @@ export function createProjectEngine({
     listProjectResourceAllocations,
     createProjectResourceAllocation,
     listProjectCostSnapshots,
+    listProjectPayrollCostAllocations,
     materializeProjectCostSnapshot,
     listProjectWipSnapshots,
     materializeProjectWipSnapshot,
@@ -341,6 +345,41 @@ export function createProjectEngine({
       .map(copy);
   }
 
+  function listProjectPayrollCostAllocations({
+    companyId,
+    projectId,
+    projectCostSnapshotId = null,
+    payRunId = null,
+    employmentId = null
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedSnapshotId = normalizeOptionalText(projectCostSnapshotId);
+    const resolvedPayRunId = normalizeOptionalText(payRunId);
+    const resolvedEmploymentId = normalizeOptionalText(employmentId);
+    if (resolvedSnapshotId) {
+      const snapshot = state.costSnapshots.get(resolvedSnapshotId);
+      if (!snapshot || snapshot.companyId !== project.companyId || snapshot.projectId !== project.projectId) {
+        throw createError(404, "project_cost_snapshot_not_found", "Project cost snapshot was not found.");
+      }
+    }
+    const sourceIds = resolvedSnapshotId
+      ? state.projectPayrollCostAllocationIdsBySnapshot.get(resolvedSnapshotId) || []
+      : state.projectPayrollCostAllocationIdsByProject.get(project.projectId) || [];
+    return sourceIds
+      .map((allocationId) => state.projectPayrollCostAllocations.get(allocationId))
+      .filter(Boolean)
+      .filter((allocation) => (resolvedPayRunId ? allocation.payRunId === resolvedPayRunId : true))
+      .filter((allocation) => (resolvedEmploymentId ? allocation.employmentId === resolvedEmploymentId : true))
+      .sort(
+        (left, right) =>
+          left.reportingPeriod.localeCompare(right.reportingPeriod) ||
+          left.payDate.localeCompare(right.payDate) ||
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.projectPayrollCostAllocationId.localeCompare(right.projectPayrollCostAllocationId)
+      )
+      .map(copy);
+  }
+
   function materializeProjectCostSnapshot({
     companyId,
     projectId,
@@ -362,6 +401,16 @@ export function createProjectEngine({
       (candidate) => candidate.snapshotHash === model.snapshotHash
     );
     if (existing) {
+      if (
+        listProjectPayrollCostAllocations({
+          companyId: project.companyId,
+          projectId: project.projectId,
+          projectCostSnapshotId: existing.projectCostSnapshotId
+        }).length === 0 &&
+        model.payrollAllocations.length > 0
+      ) {
+        persistProjectPayrollCostAllocations(state, existing.projectCostSnapshotId, model.payrollAllocations, clock);
+      }
       return existing;
     }
     const record = {
@@ -382,6 +431,7 @@ export function createProjectEngine({
     };
     state.costSnapshots.set(record.projectCostSnapshotId, record);
     appendToIndex(state.costSnapshotIdsByProject, project.projectId, record.projectCostSnapshotId);
+    persistProjectPayrollCostAllocations(state, record.projectCostSnapshotId, model.payrollAllocations, clock);
     pushAudit(state, clock, {
       companyId: project.companyId,
       actorId: record.createdByActorId,
@@ -846,7 +896,21 @@ function buildProjectMetricsModel({ state, project, cutoffDate, arPlatform, hrPl
     remainingBudgetCostAmount,
     remainingBudgetRevenueAmount,
     resourceLoadPercent,
-    explanationCodes
+    explanationCodes,
+    payrollAllocationHash: hashObject(
+      payrollSummary.payrollAllocations.map((allocation) => ({
+        payRunId: allocation.payRunId,
+        payRunLineId: allocation.payRunLineId,
+        employmentId: allocation.employmentId,
+        allocationBasisCode: allocation.allocationBasisCode,
+        allocationShare: allocation.allocationShare,
+        allocatedAmount: allocation.allocatedAmount,
+        sourceType: allocation.sourceType,
+        sourceId: allocation.sourceId,
+        costBucketCode: allocation.costBucketCode,
+        sourceLineIds: allocation.sourceLineIds
+      }))
+    )
   });
   return {
     companyId: project.companyId,
@@ -868,8 +932,11 @@ function buildProjectMetricsModel({ state, project, cutoffDate, arPlatform, hrPl
     forecastMarginAmount,
     resourceLoadPercent,
     costBreakdown: payrollSummary.costBreakdown,
+    payrollAllocations: payrollSummary.payrollAllocations,
     sourceCounts: {
       payRuns: payrollSummary.payRunCount,
+      payRunLines: payrollSummary.payRunLineCount,
+      payrollAllocations: payrollSummary.payrollAllocationCount,
       timeEntries: timeSummary.entryCount,
       invoices: billingSummary.invoiceCount
     },
@@ -929,14 +996,17 @@ function collectTimeSummary({ companyId, cutoffDate, reportingPeriod, aliases, h
 
 function collectPayrollSummary({ companyId, reportingPeriod, cutoffDate, aliases, project, timeSummary, payrollPlatform }) {
   const payRuns = payrollPlatform?.listPayRuns ? payrollPlatform.listPayRuns({ companyId }) : [];
-  const includedPayRuns = [];
+  const includedPayRuns = new Set();
+  const includedPayRunLines = new Set();
   const costBreakdown = {
     salaryAmount: 0,
     benefitAmount: 0,
     pensionAmount: 0,
     travelAmount: 0,
+    employerContributionAmount: 0,
     otherAmount: 0
   };
+  const payrollAllocations = [];
 
   for (const payRun of payRuns) {
     if (payRun.reportingPeriod > reportingPeriod) {
@@ -945,36 +1015,101 @@ function collectPayrollSummary({ companyId, reportingPeriod, cutoffDate, aliases
     if (payRun.payDate > cutoffDate || payRun.status === "draft") {
       continue;
     }
-    let usedRun = false;
+    const contributionBaseByEmployment = new Map();
+    const projectContributionBaseByEmployment = new Map();
+    const contributionBasisCodeByEmployment = new Map();
+    const contributionLineIdsByEmployment = new Map();
     for (const line of payRun.lines || []) {
       const amount = Number(line.amount || 0);
       if (amount <= 0) {
         continue;
       }
       const explicitMatch = matchesProjectDimension(line.dimensionJson, aliases);
-      const share = explicitMatch ? 1 : resolveImplicitProjectShare(timeSummary, line.employmentId, payRun.reportingPeriod);
-      if (share <= 0) {
+      const shareContext = explicitMatch
+        ? createExplicitProjectShareContext()
+        : resolveImplicitProjectShareContext(timeSummary, line.employmentId, payRun.reportingPeriod);
+      if (shareContext.share <= 0) {
         continue;
       }
-      const allocatedAmount = roundMoney(amount * share);
+      const allocatedAmount = roundMoney(amount * shareContext.share);
       if (allocatedAmount === 0) {
         continue;
       }
-      usedRun = true;
-      if (isPensionLine(line)) {
-        costBreakdown.pensionAmount = roundMoney(costBreakdown.pensionAmount + allocatedAmount);
-      } else if (isBenefitLine(line)) {
-        costBreakdown.benefitAmount = roundMoney(costBreakdown.benefitAmount + allocatedAmount);
-      } else if (isTravelLine(line)) {
-        costBreakdown.travelAmount = roundMoney(costBreakdown.travelAmount + allocatedAmount);
-      } else if (isSalaryLine(line, project)) {
-        costBreakdown.salaryAmount = roundMoney(costBreakdown.salaryAmount + allocatedAmount);
-      } else {
-        costBreakdown.otherAmount = roundMoney(costBreakdown.otherAmount + allocatedAmount);
+      const costBucketCode = resolveProjectCostBucketCode(line);
+      appendCostBreakdownAmount(costBreakdown, costBucketCode, allocatedAmount);
+      includedPayRuns.add(payRun.payRunId);
+      includedPayRunLines.add(line.payRunLineId);
+      payrollAllocations.push(
+        createProjectPayrollAllocationSeed({
+          companyId,
+          projectId: project.projectId,
+          payRun,
+          line,
+          employmentId: line.employmentId,
+          costBucketCode,
+          allocationBasisCode: shareContext.allocationBasisCode,
+          allocationShare: shareContext.share,
+          allocatedAmount,
+          sourceLineAmount: amount,
+          contributionBaseAmount: isEmployerContributionEligibleLine(line) ? amount : null,
+          projectMinutes: shareContext.projectMinutes,
+          totalMinutes: shareContext.totalMinutes,
+          sourceLineIds: [line.payRunLineId]
+        })
+      );
+      if (isEmployerContributionEligibleLine(line)) {
+        addMoneyToMap(contributionBaseByEmployment, line.employmentId, amount);
+        addMoneyToMap(projectContributionBaseByEmployment, line.employmentId, amount * shareContext.share);
+        appendToIndex(contributionLineIdsByEmployment, line.employmentId, line.payRunLineId);
+        if (!contributionBasisCodeByEmployment.has(line.employmentId)) {
+          contributionBasisCodeByEmployment.set(line.employmentId, shareContext.allocationBasisCode);
+        } else if (contributionBasisCodeByEmployment.get(line.employmentId) !== shareContext.allocationBasisCode) {
+          contributionBasisCodeByEmployment.set(line.employmentId, "mixed_project_basis");
+        }
       }
     }
-    if (usedRun) {
-      includedPayRuns.push(payRun.payRunId);
+    for (const payslip of payRun.payslips || []) {
+      const payslipEmploymentId = normalizeOptionalText(payslip.employmentId || payslip.employment?.employmentId);
+      if (!payslipEmploymentId) {
+        continue;
+      }
+      const totalContributionBase = roundMoney(contributionBaseByEmployment.get(payslipEmploymentId) || 0);
+      const projectContributionBase = roundMoney(projectContributionBaseByEmployment.get(payslipEmploymentId) || 0);
+      const employerContributionAmount = roundMoney(Number(payslip.totals?.employerContributionPreviewAmount || 0));
+      if (totalContributionBase <= 0 || projectContributionBase <= 0 || employerContributionAmount <= 0) {
+        continue;
+      }
+      const allocationShare = Math.min(1, roundShare(projectContributionBase / totalContributionBase));
+      const allocatedAmount = roundMoney(employerContributionAmount * allocationShare);
+      if (allocatedAmount === 0) {
+        continue;
+      }
+      costBreakdown.employerContributionAmount = roundMoney(
+        costBreakdown.employerContributionAmount + allocatedAmount
+      );
+      includedPayRuns.add(payRun.payRunId);
+      payrollAllocations.push(
+        createProjectPayrollAllocationSeed({
+          companyId,
+          projectId: project.projectId,
+          payRun,
+          line: null,
+          employmentId: payslipEmploymentId,
+          costBucketCode: "employer_contribution",
+          allocationBasisCode: contributionBasisCodeByEmployment.get(payslipEmploymentId) || "implicit_time_share",
+          allocationShare,
+          allocatedAmount,
+          sourceType: "employer_contribution_preview",
+          sourceId: payslip.payslipId,
+          processingStep: 12,
+          payItemCode: null,
+          sourceLineAmount: employerContributionAmount,
+          contributionBaseAmount: totalContributionBase,
+          projectMinutes: null,
+          totalMinutes: null,
+          sourceLineIds: [...new Set(contributionLineIdsByEmployment.get(payslipEmploymentId) || [])]
+        })
+      );
     }
   }
 
@@ -984,7 +1119,10 @@ function collectPayrollSummary({ companyId, reportingPeriod, cutoffDate, aliases
   return {
     actualCostAmount,
     costBreakdown,
-    payRunCount: includedPayRuns.length
+    payRunCount: includedPayRuns.size,
+    payRunLineCount: includedPayRunLines.size,
+    payrollAllocationCount: payrollAllocations.length,
+    payrollAllocations
   };
 }
 
@@ -1046,6 +1184,35 @@ function resolveImplicitProjectShare(timeSummary, employmentId, reportingPeriod)
     return 0;
   }
   return projectMinutes / totalMinutes;
+}
+
+function resolveImplicitProjectShareContext(timeSummary, employmentId, reportingPeriod) {
+  const totalKey = `${employmentId}:${reportingPeriod}`;
+  const totalMinutes = Number(timeSummary.totalMinutesByEmploymentPeriod.get(totalKey) || 0);
+  const projectMinutes = Number(timeSummary.projectMinutesByEmploymentPeriod.get(totalKey) || 0);
+  if (totalMinutes <= 0 || projectMinutes <= 0) {
+    return {
+      allocationBasisCode: "implicit_time_share",
+      share: 0,
+      projectMinutes: projectMinutes || 0,
+      totalMinutes: totalMinutes || 0
+    };
+  }
+  return {
+    allocationBasisCode: "implicit_time_share",
+    share: roundShare(projectMinutes / totalMinutes),
+    projectMinutes,
+    totalMinutes
+  };
+}
+
+function createExplicitProjectShareContext() {
+  return {
+    allocationBasisCode: "explicit_project_dimension",
+    share: 1,
+    projectMinutes: null,
+    totalMinutes: null
+  };
 }
 
 function resolveResourceAllocation(state, projectId, employmentId, reportingPeriod) {
@@ -1363,6 +1530,137 @@ function isSalaryLine(line) {
   return !line.reportingOnly && line.compensationBucket !== "net_deduction";
 }
 
+function resolveProjectCostBucketCode(line) {
+  if (isPensionLine(line)) {
+    return "pension";
+  }
+  if (isBenefitLine(line)) {
+    return "benefit";
+  }
+  if (isTravelLine(line)) {
+    return "travel";
+  }
+  if (isSalaryLine(line)) {
+    return "salary";
+  }
+  return "other";
+}
+
+function appendCostBreakdownAmount(costBreakdown, costBucketCode, amount) {
+  if (costBucketCode === "salary") {
+    costBreakdown.salaryAmount = roundMoney(costBreakdown.salaryAmount + amount);
+    return;
+  }
+  if (costBucketCode === "benefit") {
+    costBreakdown.benefitAmount = roundMoney(costBreakdown.benefitAmount + amount);
+    return;
+  }
+  if (costBucketCode === "pension") {
+    costBreakdown.pensionAmount = roundMoney(costBreakdown.pensionAmount + amount);
+    return;
+  }
+  if (costBucketCode === "travel") {
+    costBreakdown.travelAmount = roundMoney(costBreakdown.travelAmount + amount);
+    return;
+  }
+  if (costBucketCode === "employer_contribution") {
+    costBreakdown.employerContributionAmount = roundMoney(costBreakdown.employerContributionAmount + amount);
+    return;
+  }
+  costBreakdown.otherAmount = roundMoney(costBreakdown.otherAmount + amount);
+}
+
+function isEmployerContributionEligibleLine(line) {
+  return line?.employerContributionTreatmentCode === "included";
+}
+
+function createProjectPayrollAllocationSeed({
+  companyId,
+  projectId,
+  payRun,
+  line,
+  employmentId,
+  costBucketCode,
+  allocationBasisCode,
+  allocationShare,
+  allocatedAmount,
+  sourceType = null,
+  sourceId = null,
+  processingStep = null,
+  payItemCode = null,
+  sourceLineAmount = null,
+  contributionBaseAmount = null,
+  projectMinutes = null,
+  totalMinutes = null,
+  sourceLineIds = []
+}) {
+  return {
+    companyId,
+    projectId,
+    payRunId: payRun.payRunId,
+    payRunLineId: line?.payRunLineId || null,
+    employmentId: requireText(employmentId, "project_payroll_cost_allocation_employment_required"),
+    reportingPeriod: payRun.reportingPeriod,
+    payDate: payRun.payDate,
+    payItemCode: normalizeOptionalText(payItemCode ?? line?.payItemCode),
+    sourceType: requireText(sourceType || line?.sourceType || "payroll_line", "project_payroll_cost_allocation_source_type_required"),
+    sourceId: normalizeOptionalText(sourceId ?? line?.sourceId),
+    processingStep:
+      processingStep == null
+        ? line?.processingStep == null
+          ? null
+          : Number(line.processingStep)
+        : Number(processingStep),
+    costBucketCode: requireText(costBucketCode, "project_payroll_cost_allocation_bucket_required"),
+    allocationBasisCode: requireText(allocationBasisCode, "project_payroll_cost_allocation_basis_required"),
+    allocationShare: roundShare(allocationShare),
+    allocatedAmount: normalizeMoney(allocatedAmount, "project_payroll_cost_allocation_amount_invalid"),
+    sourceLineAmount: sourceLineAmount == null ? null : normalizeMoney(sourceLineAmount, "project_payroll_cost_source_amount_invalid"),
+    contributionBaseAmount:
+      contributionBaseAmount == null
+        ? null
+        : normalizeMoney(contributionBaseAmount, "project_payroll_cost_contribution_base_invalid"),
+    projectMinutes: projectMinutes == null ? null : normalizeWholeNumber(projectMinutes, "project_payroll_cost_project_minutes_invalid"),
+    totalMinutes: totalMinutes == null ? null : normalizeWholeNumber(totalMinutes, "project_payroll_cost_total_minutes_invalid"),
+    dimensionJson: normalizeDimensions(line?.dimensionJson || {}),
+    sourceLineIds: [...new Set((sourceLineIds || []).filter(Boolean))]
+  };
+}
+
+function persistProjectPayrollCostAllocations(state, projectCostSnapshotId, payrollAllocations, clock) {
+  for (const allocation of payrollAllocations) {
+    const record = {
+      projectPayrollCostAllocationId: crypto.randomUUID(),
+      companyId: allocation.companyId,
+      projectId: allocation.projectId,
+      projectCostSnapshotId,
+      payRunId: allocation.payRunId,
+      payRunLineId: allocation.payRunLineId,
+      employmentId: allocation.employmentId,
+      reportingPeriod: allocation.reportingPeriod,
+      payDate: allocation.payDate,
+      payItemCode: allocation.payItemCode,
+      sourceType: allocation.sourceType,
+      sourceId: allocation.sourceId,
+      processingStep: allocation.processingStep,
+      costBucketCode: allocation.costBucketCode,
+      allocationBasisCode: allocation.allocationBasisCode,
+      allocationShare: allocation.allocationShare,
+      allocatedAmount: allocation.allocatedAmount,
+      sourceLineAmount: allocation.sourceLineAmount,
+      contributionBaseAmount: allocation.contributionBaseAmount,
+      projectMinutes: allocation.projectMinutes,
+      totalMinutes: allocation.totalMinutes,
+      sourceLineIds: copy(allocation.sourceLineIds || []),
+      dimensionJson: normalizeDimensions(allocation.dimensionJson),
+      createdAt: nowIso(clock)
+    };
+    state.projectPayrollCostAllocations.set(record.projectPayrollCostAllocationId, record);
+    appendToIndex(state.projectPayrollCostAllocationIdsByProject, record.projectId, record.projectPayrollCostAllocationId);
+    appendToIndex(state.projectPayrollCostAllocationIdsBySnapshot, record.projectCostSnapshotId, record.projectPayrollCostAllocationId);
+  }
+}
+
 function requireProject(state, companyId, projectId) {
   const resolvedCompanyId = requireText(companyId, "company_id_required");
   const resolvedProjectId = requireText(projectId, "project_id_required");
@@ -1529,6 +1827,10 @@ function normalizeMoney(value, code) {
   return roundMoney(numberValue);
 }
 
+function roundShare(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 1000000) / 1000000;
+}
+
 function normalizeWholeNumber(value, code) {
   const numberValue = Number(value);
   if (!Number.isFinite(numberValue) || numberValue < 0) {
@@ -1572,6 +1874,11 @@ function appendToIndex(map, key, value) {
   const current = map.get(key) || [];
   current.push(value);
   map.set(key, current);
+}
+
+function addMoneyToMap(map, key, amount) {
+  const resolvedKey = requireText(key, "map_key_required");
+  map.set(resolvedKey, roundMoney(Number(map.get(resolvedKey) || 0) + Number(amount || 0)));
 }
 
 function pushAudit(state, clock, entry) {

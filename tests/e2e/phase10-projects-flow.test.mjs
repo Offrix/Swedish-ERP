@@ -32,6 +32,7 @@ test("Phase 10.1 e2e flow covers project setup, payroll-backed actuals, AR tie-o
     assert.equal(root.phase10ProjectsEnabled, true);
     assert.equal(root.routes.includes("/v1/projects/:projectId/wip-snapshots"), true);
     assert.equal(root.routes.includes("/v1/projects/:projectId/forecast-snapshots"), true);
+    assert.equal(root.routes.includes("/v1/projects/:projectId/payroll-cost-allocations"), true);
 
     const disabledAttempt = await fetch(`${disabledBaseUrl}/v1/projects?companyId=${COMPANY_ID}`);
     const disabledPayload = await disabledAttempt.json();
@@ -318,6 +319,13 @@ test("Phase 10.1 e2e flow covers project setup, payroll-backed actuals, AR tie-o
         cutoffDate: "2026-03-31"
       }
     });
+    const payrollCostAllocations = await requestJson(
+      enabledBaseUrl,
+      `/v1/projects/${project.projectId}/payroll-cost-allocations?companyId=${COMPANY_ID}&projectCostSnapshotId=${costSnapshot.projectCostSnapshotId}`,
+      {
+        token: sessionToken
+      }
+    );
     const wipSnapshot = await requestJson(enabledBaseUrl, `/v1/projects/${project.projectId}/wip-snapshots`, {
       method: "POST",
       token: sessionToken,
@@ -365,6 +373,9 @@ test("Phase 10.1 e2e flow covers project setup, payroll-backed actuals, AR tie-o
     assert.equal(costSnapshot.costBreakdown.benefitAmount > 0, true);
     assert.equal(costSnapshot.costBreakdown.pensionAmount > 0, true);
     assert.equal(costSnapshot.costBreakdown.travelAmount > 0, true);
+    assert.equal(costSnapshot.costBreakdown.employerContributionAmount > 0, true);
+    assert.equal(payrollCostAllocations.items.length, costSnapshot.sourceCounts.payrollAllocations);
+    assert.equal(payrollCostAllocations.items.some((item) => item.costBucketCode === "employer_contribution"), true);
     assert.equal(wipSnapshot.approvedValueAmount, 8000);
     assert.equal(wipSnapshot.billedAmount, 3000);
     assert.equal(wipSnapshot.wipAmount, 5000);

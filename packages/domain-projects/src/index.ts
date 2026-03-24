@@ -95,15 +95,45 @@ export interface ProjectCostSnapshotRef {
     readonly benefitAmount: number;
     readonly pensionAmount: number;
     readonly travelAmount: number;
+    readonly employerContributionAmount: number;
     readonly otherAmount: number;
   };
   readonly sourceCounts: {
     readonly payRuns: number;
+    readonly payRunLines: number;
+    readonly payrollAllocations: number;
     readonly timeEntries: number;
     readonly invoices: number;
   };
   readonly snapshotHash: string;
   readonly createdByActorId: string;
+  readonly createdAt: string;
+}
+
+export interface ProjectPayrollCostAllocationRef {
+  readonly projectPayrollCostAllocationId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly projectCostSnapshotId: string;
+  readonly payRunId: string;
+  readonly payRunLineId: string | null;
+  readonly employmentId: string;
+  readonly reportingPeriod: string;
+  readonly payDate: string;
+  readonly payItemCode: string | null;
+  readonly sourceType: string;
+  readonly sourceId: string | null;
+  readonly processingStep: number | null;
+  readonly costBucketCode: string;
+  readonly allocationBasisCode: string;
+  readonly allocationShare: number;
+  readonly allocatedAmount: number;
+  readonly sourceLineAmount: number | null;
+  readonly contributionBaseAmount: number | null;
+  readonly projectMinutes: number | null;
+  readonly totalMinutes: number | null;
+  readonly sourceLineIds: readonly string[];
+  readonly dimensionJson: Record<string, unknown>;
   readonly createdAt: string;
 }
 

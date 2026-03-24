@@ -93,6 +93,11 @@ test("Phase 10.1 combines salary, benefits, pension and travel into project actu
     cutoffDate: "2026-03-31",
     actorId: "unit-test"
   });
+  const payrollAllocations = projectsPlatform.listProjectPayrollCostAllocations({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    projectCostSnapshotId: costSnapshot.projectCostSnapshotId
+  });
   const wipSnapshot = projectsPlatform.materializeProjectWipSnapshot({
     companyId: COMPANY_ID,
     projectId: project.projectId,
@@ -113,7 +118,22 @@ test("Phase 10.1 combines salary, benefits, pension and travel into project actu
   assert.equal(costSnapshot.costBreakdown.benefitAmount > 0, true);
   assert.equal(costSnapshot.costBreakdown.pensionAmount > 0, true);
   assert.equal(costSnapshot.costBreakdown.travelAmount > 0, true);
+  assert.equal(costSnapshot.costBreakdown.employerContributionAmount > 0, true);
   assert.equal(costSnapshot.sourceCounts.payRuns, 1);
+  assert.equal(costSnapshot.sourceCounts.payRunLines > 0, true);
+  assert.equal(costSnapshot.sourceCounts.payrollAllocations, payrollAllocations.length);
+  assert.equal(
+    payrollAllocations.some((allocation) => allocation.costBucketCode === "employer_contribution"),
+    true
+  );
+  assert.equal(
+    payrollAllocations.some((allocation) => allocation.costBucketCode === "salary"),
+    true
+  );
+  assert.equal(
+    payrollAllocations.every((allocation) => allocation.projectCostSnapshotId === costSnapshot.projectCostSnapshotId),
+    true
+  );
 
   assert.equal(wipSnapshot.approvedValueAmount, 8000);
   assert.equal(wipSnapshot.billedAmount, 3000);
@@ -137,10 +157,102 @@ test("Phase 10.1 combines salary, benefits, pension and travel into project actu
     companyId: COMPANY_ID,
     projectId: project.projectId
   });
+  const replaySnapshot = projectsPlatform.materializeProjectCostSnapshot({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    cutoffDate: "2026-03-31",
+    actorId: "unit-test"
+  });
+  const replayAllocations = projectsPlatform.listProjectPayrollCostAllocations({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    projectCostSnapshotId: replaySnapshot.projectCostSnapshotId
+  });
+  assert.equal(replaySnapshot.projectCostSnapshotId, costSnapshot.projectCostSnapshotId);
+  assert.equal(replayAllocations.length, payrollAllocations.length);
   assert.equal(auditEvents.some((event) => event.action === "project.budget.approved"), true);
   assert.equal(auditEvents.some((event) => event.action === "project.cost_snapshot.materialized"), true);
   assert.equal(auditEvents.some((event) => event.action === "project.wip_snapshot.materialized"), true);
   assert.equal(auditEvents.some((event) => event.action === "project.forecast_snapshot.materialized"), true);
+});
+
+test("Phase 10.1 project payroll allocation keeps implicit time-share traceability", () => {
+  const { employment, project, projectsPlatform, payrollPlatform, timePlatform } = createProjectsFixture();
+
+  projectsPlatform.createProjectResourceAllocation({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    employmentId: employment.employmentId,
+    reportingPeriod: "202603",
+    plannedMinutes: 960,
+    billableMinutes: 960,
+    billRateAmount: 1000,
+    costRateAmount: 600,
+    actorId: "unit-test"
+  });
+  const payCalendar = payrollPlatform.listPayCalendars({ companyId: COMPANY_ID })[0];
+
+  timePlatform.createTimeEntry({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    workDate: "2026-03-13",
+    projectId: null,
+    activityCode: "INTERNAL",
+    workedMinutes: 480,
+    actorId: "unit-test"
+  });
+
+  const payRun = payrollPlatform.createPayRun({
+    companyId: COMPANY_ID,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202603",
+    employmentIds: [employment.employmentId],
+    actorId: "unit-test"
+  });
+  payrollPlatform.approvePayRun({
+    companyId: COMPANY_ID,
+    payRunId: payRun.payRunId,
+    actorId: "unit-test"
+  });
+
+  const costSnapshot = projectsPlatform.materializeProjectCostSnapshot({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    cutoffDate: "2026-03-31",
+    actorId: "unit-test"
+  });
+  const implicitAllocations = projectsPlatform
+    .listProjectPayrollCostAllocations({
+      companyId: COMPANY_ID,
+      projectId: project.projectId,
+      projectCostSnapshotId: costSnapshot.projectCostSnapshotId
+    })
+    .filter((allocation) => allocation.allocationBasisCode === "implicit_time_share");
+  const allAllocations = projectsPlatform.listProjectPayrollCostAllocations({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    projectCostSnapshotId: costSnapshot.projectCostSnapshotId
+  });
+
+  assert.equal(implicitAllocations.length > 0, true);
+  assert.equal(implicitAllocations.some((allocation) => allocation.allocationShare === 0.5), true);
+  assert.equal(
+    implicitAllocations.some(
+      (allocation) => allocation.projectMinutes === 480 && allocation.totalMinutes === 960
+    ),
+    true
+  );
+  assert.equal(
+    allAllocations.some(
+      (allocation) =>
+        allocation.costBucketCode === "employer_contribution" &&
+        allocation.allocationBasisCode === "mixed_project_basis" &&
+        allocation.allocationShare > 0.5 &&
+        allocation.allocationShare < 0.51 &&
+        allocation.sourceLineIds.length >= 2
+    ),
+    true
+  );
 });
 
 function createProjectsFixture() {
@@ -374,6 +486,7 @@ function createProjectsFixture() {
     item,
     project,
     projectsPlatform,
-    payrollPlatform
+    payrollPlatform,
+    timePlatform
   };
 }

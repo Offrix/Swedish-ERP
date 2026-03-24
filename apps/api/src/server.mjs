@@ -341,6 +341,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/projects/:projectId",
               "/v1/projects/:projectId/budgets",
               "/v1/projects/:projectId/resource-allocations",
+              "/v1/projects/:projectId/payroll-cost-allocations",
               "/v1/projects/:projectId/cost-snapshots",
               "/v1/projects/:projectId/wip-snapshots",
               "/v1/projects/:projectId/forecast-snapshots",
@@ -7373,6 +7374,33 @@ async function handleRequest({ req, res, platform, flags }) {
   }
 
   const projectCostSnapshotsMatch = matchPath(path, "/v1/projects/:projectId/cost-snapshots");
+  const projectPayrollCostAllocationsMatch = matchPath(path, "/v1/projects/:projectId/payroll-cost-allocations");
+  if (projectPayrollCostAllocationsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_payroll_cost_allocation",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listProjectPayrollCostAllocations({
+        companyId,
+        projectId: projectPayrollCostAllocationsMatch.projectId,
+        projectCostSnapshotId: url.searchParams.get("projectCostSnapshotId"),
+        payRunId: url.searchParams.get("payRunId"),
+        employmentId: url.searchParams.get("employmentId")
+      })
+    });
+    return;
+  }
+
   if (projectCostSnapshotsMatch && req.method === "GET") {
     const companyId = requireText(
       url.searchParams.get("companyId"),

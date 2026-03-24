@@ -37,6 +37,19 @@ test("Phase 10.1 migration and seeds add project budget, allocation and snapshot
   }
 });
 
+test("Step 23 migration adds project payroll cost allocation trace storage", async () => {
+  const migration = await readText("packages/db/migrations/20260324190000_phase14_project_payroll_cost_allocations.sql");
+  for (const fragment of [
+    "CREATE TABLE IF NOT EXISTS project_payroll_cost_allocations",
+    "project_cost_snapshot_id UUID NOT NULL",
+    "allocation_basis_code TEXT NOT NULL",
+    "source_line_ids_json JSONB NOT NULL",
+    "dimension_json JSONB NOT NULL"
+  ]) {
+    assert.match(migration, new RegExp(fragment.replaceAll(" ", "\\s+")));
+  }
+});
+
 test("Phase 10.1 API manages projects, budgets, resource allocations and snapshots", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-22T12:30:00Z")
@@ -310,6 +323,13 @@ test("Phase 10.1 API manages projects, budgets, resource allocations and snapsho
         cutoffDate: "2026-03-31"
       }
     });
+    const payrollCostAllocations = await requestJson(
+      baseUrl,
+      `/v1/projects/${project.projectId}/payroll-cost-allocations?companyId=${COMPANY_ID}&projectCostSnapshotId=${costSnapshot.projectCostSnapshotId}`,
+      {
+        token: sessionToken
+      }
+    );
     const wipSnapshot = await requestJson(baseUrl, `/v1/projects/${project.projectId}/wip-snapshots`, {
       method: "POST",
       token: sessionToken,
@@ -333,6 +353,13 @@ test("Phase 10.1 API manages projects, budgets, resource allocations and snapsho
     assert.equal(costSnapshot.costBreakdown.benefitAmount > 0, true);
     assert.equal(costSnapshot.costBreakdown.pensionAmount > 0, true);
     assert.equal(costSnapshot.costBreakdown.travelAmount > 0, true);
+    assert.equal(costSnapshot.costBreakdown.employerContributionAmount > 0, true);
+    assert.equal(payrollCostAllocations.items.length, costSnapshot.sourceCounts.payrollAllocations);
+    assert.equal(payrollCostAllocations.items.some((item) => item.costBucketCode === "employer_contribution"), true);
+    assert.equal(
+      payrollCostAllocations.items.every((item) => item.projectCostSnapshotId === costSnapshot.projectCostSnapshotId),
+      true
+    );
     assert.equal(wipSnapshot.approvedValueAmount, 8000);
     assert.equal(wipSnapshot.billedAmount, 3000);
     assert.equal(wipSnapshot.wipAmount, 5000);
