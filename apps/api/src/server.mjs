@@ -279,6 +279,10 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/banking/payment-orders/:paymentOrderId/return",
               "/v1/time/clock-events",
               "/v1/time/entries",
+              "/v1/time/entries/:timeEntryId/submit",
+              "/v1/time/entries/:timeEntryId/approve",
+              "/v1/time/entries/:timeEntryId/reject",
+              "/v1/time/employment-base",
               "/v1/time/schedule-templates",
               "/v1/time/schedule-assignments",
               "/v1/time/period-locks",
@@ -310,6 +314,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/hr/employees",
               "/v1/hr/employees/:employeeId",
               "/v1/hr/employees/:employeeId/employments",
+              "/v1/hr/employees/:employeeId/employments/:employmentId/snapshot",
               "/v1/hr/employees/:employeeId/contracts",
               "/v1/hr/employees/:employeeId/manager-assignments",
               "/v1/hr/employees/:employeeId/bank-accounts",
@@ -5360,7 +5365,8 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(res, 200, {
       items: platform.listTimeEntries({
         companyId,
-        employmentId
+        employmentId,
+        status: url.searchParams.get("status") || null
       })
     });
     return;
@@ -5398,7 +5404,121 @@ async function handleRequest({ req, res, platform, flags }) {
         flexDeltaMinutes: body.flexDeltaMinutes ?? null,
         compDeltaMinutes: body.compDeltaMinutes ?? 0,
         sourceClockEventIds: body.sourceClockEventIds || [],
+        approvalMode: body.approvalMode || "auto",
+        managerEmploymentId: body.managerEmploymentId || null,
+        allocationRefs: body.allocationRefs || [],
         actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const timeEntrySubmitMatch = matchPath(path, "/v1/time/entries/:timeEntryId/submit");
+  if (timeEntrySubmitMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const employmentId = requireText(body.employmentId, "employment_id_required", "Employment id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "time_entry",
+      scopeCode: "time"
+    });
+    writeJson(
+      res,
+      200,
+      platform.submitTimeEntry({
+        companyId,
+        employmentId,
+        timeEntryId: timeEntrySubmitMatch.timeEntryId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const timeEntryApproveMatch = matchPath(path, "/v1/time/entries/:timeEntryId/approve");
+  if (timeEntryApproveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const employmentId = requireText(body.employmentId, "employment_id_required", "Employment id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "time_entry",
+      scopeCode: "time"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveTimeEntry({
+        companyId,
+        employmentId,
+        timeEntryId: timeEntryApproveMatch.timeEntryId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const timeEntryRejectMatch = matchPath(path, "/v1/time/entries/:timeEntryId/reject");
+  if (timeEntryRejectMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const employmentId = requireText(body.employmentId, "employment_id_required", "Employment id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "time_entry",
+      scopeCode: "time"
+    });
+    writeJson(
+      res,
+      200,
+      platform.rejectTimeEntry({
+        companyId,
+        employmentId,
+        timeEntryId: timeEntryRejectMatch.timeEntryId,
+        reason: body.reason,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/time/employment-base") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const employmentId = requireText(
+      url.searchParams.get("employmentId"),
+      "employment_id_required",
+      "employmentId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "time_entry",
+      scopeCode: "time"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getEmploymentTimeBase({
+        companyId,
+        employmentId,
+        workDate: url.searchParams.get("workDate") || null,
+        cutoffDate: url.searchParams.get("cutoffDate") || null
       })
     );
     return;
@@ -6073,11 +6193,42 @@ async function handleRequest({ req, res, platform, flags }) {
         jobTitle: body.jobTitle,
         departmentCode: body.departmentCode || null,
         payModelCode: body.payModelCode,
+        workerCategoryCode: body.workerCategoryCode || null,
+        externalContractorRef: body.externalContractorRef || null,
+        payrollMigrationAnchorRef: body.payrollMigrationAnchorRef || null,
         scheduleTemplateCode: body.scheduleTemplateCode || null,
         startDate: body.startDate,
         endDate: body.endDate || null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const hrEmploymentSnapshotMatch = matchPath(path, "/v1/hr/employees/:employeeId/employments/:employmentId/snapshot");
+  if (hrEmploymentSnapshotMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employment",
+      scopeCode: "hr"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getEmploymentSnapshot({
+        companyId,
+        employeeId: hrEmploymentSnapshotMatch.employeeId,
+        employmentId: hrEmploymentSnapshotMatch.employmentId,
+        snapshotDate: url.searchParams.get("snapshotDate") || null
       })
     );
     return;

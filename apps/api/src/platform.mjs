@@ -64,9 +64,9 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "notifications",
   "activity",
   "hr",
-  "time",
   "balances",
   "collectiveAgreements",
+  "time",
   "benefits",
   "documentClassification",
   "importCases",
@@ -102,9 +102,9 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "notifications",
   "activity",
   "hr",
-  "time",
   "balances",
   "collectiveAgreements",
+  "time",
   "benefits",
   "documentClassification",
   "importCases",
@@ -267,18 +267,6 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
       })
   }),
   createDomainDefinition({
-    key: "time",
-    label: "Time",
-    packageName: "@swedish-erp/domain-time",
-    dependsOn: ["hr", "documents"],
-    create: ({ options, dependencies }) =>
-      createTimePlatform({
-        ...options,
-        hrPlatform: dependencies.hr,
-        documentPlatform: dependencies.documents
-      })
-  }),
-  createDomainDefinition({
     key: "balances",
     label: "Balances",
     packageName: "@swedish-erp/domain-balances",
@@ -299,6 +287,20 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         ...options,
         hrPlatform: dependencies.hr,
         balancesPlatform: dependencies.balances
+      })
+  }),
+  createDomainDefinition({
+    key: "time",
+    label: "Time",
+    packageName: "@swedish-erp/domain-time",
+    dependsOn: ["hr", "documents", "balances", "collectiveAgreements"],
+    create: ({ options, dependencies }) =>
+      createTimePlatform({
+        ...options,
+        hrPlatform: dependencies.hr,
+        documentPlatform: dependencies.documents,
+        balancesPlatform: dependencies.balances,
+        collectiveAgreementsPlatform: dependencies.collectiveAgreements
       })
   }),
   createDomainDefinition({

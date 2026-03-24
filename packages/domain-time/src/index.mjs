@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 export const TIME_CLOCK_EVENT_TYPES = Object.freeze(["clock_in", "clock_out"]);
 export const TIME_BALANCE_TYPES = Object.freeze(["flex_minutes", "comp_minutes", "overtime_minutes"]);
 export const TIME_ENTRY_SOURCE_TYPES = Object.freeze(["manual", "clock", "import"]);
+export const TIME_ENTRY_STATUSES = Object.freeze(["draft", "submitted", "approved", "rejected"]);
 export const LEAVE_SIGNAL_TYPES = Object.freeze(["none", "parental_benefit", "temporary_parental_benefit"]);
 export const LEAVE_ENTRY_STATUSES = Object.freeze(["draft", "submitted", "approved", "rejected"]);
 export const LEAVE_SIGNAL_LOCK_STATES = Object.freeze(["ready_for_sign", "signed", "submitted"]);
@@ -11,7 +12,13 @@ export function createTimePlatform(options = {}) {
   return createTimeEngine(options);
 }
 
-export function createTimeEngine({ clock = () => new Date(), hrPlatform = null, documentPlatform = null } = {}) {
+export function createTimeEngine({
+  clock = () => new Date(),
+  hrPlatform = null,
+  documentPlatform = null,
+  balancesPlatform = null,
+  collectiveAgreementsPlatform = null
+} = {}) {
   const state = {
     scheduleTemplates: new Map(),
     scheduleTemplateIdsByCompany: new Map(),
@@ -47,6 +54,7 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null, 
     clockEventTypes: TIME_CLOCK_EVENT_TYPES,
     balanceTypes: TIME_BALANCE_TYPES,
     entrySourceTypes: TIME_ENTRY_SOURCE_TYPES,
+    timeEntryStatuses: TIME_ENTRY_STATUSES,
     leaveSignalTypes: LEAVE_SIGNAL_TYPES,
     leaveEntryStatuses: LEAVE_ENTRY_STATUSES,
     leaveSignalLockStates: LEAVE_SIGNAL_LOCK_STATES,
@@ -59,7 +67,11 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null, 
     listTimeEntries,
     getTimeEntry,
     createTimeEntry,
+    submitTimeEntry,
+    approveTimeEntry,
+    rejectTimeEntry,
     listTimeBalances,
+    getEmploymentTimeBase,
     listTimePeriodLocks,
     lockTimePeriod,
     listLeaveTypes,
@@ -219,13 +231,14 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null, 
     return copy(clockEvent);
   }
 
-  function listTimeEntries({ companyId, employmentId } = {}) {
+  function listTimeEntries({ companyId, employmentId, status = null } = {}) {
     requireEmployment(companyId, employmentId, hrPlatform);
     return (state.timeEntryIdsByEmployment.get(employmentId) || [])
       .map((timeEntryId) => state.timeEntries.get(timeEntryId))
       .filter(Boolean)
+      .filter((entry) => (status ? entry.status === assertAllowed(status, TIME_ENTRY_STATUSES, "time_entry_status_invalid") : true))
       .sort((left, right) => left.workDate.localeCompare(right.workDate) || left.createdAt.localeCompare(right.createdAt))
-      .map(copy);
+      .map(enrichTimeEntry);
   }
 
   function getTimeEntry({ companyId, employmentId, timeEntryId } = {}) {
@@ -234,7 +247,7 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null, 
     if (!entry || entry.companyId !== companyId || entry.employmentId !== employmentId) {
       throw createError(404, "time_entry_not_found", "Time entry was not found.");
     }
-    return copy(entry);
+    return enrichTimeEntry(entry);
   }
 
   function createTimeEntry({
@@ -255,6 +268,9 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null, 
     flexDeltaMinutes = null,
     compDeltaMinutes = 0,
     sourceClockEventIds = [],
+    approvalMode = "auto",
+    managerEmploymentId = null,
+    allocationRefs = [],
     actorId = "system"
   } = {}) {
     const employment = requireEmployment(companyId, employmentId, hrPlatform);
@@ -315,19 +331,32 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null, 
     const resolvedJourMinutes = normalizeNonNegativeInteger(jourMinutes, "time_entry_jour_minutes_invalid");
     const resolvedStandbyMinutes = normalizeNonNegativeInteger(standbyMinutes, "time_entry_standby_minutes_invalid");
     const resolvedCompDeltaMinutes = normalizeInteger(compDeltaMinutes, "time_entry_comp_delta_invalid");
+    const resolvedApprovalMode = assertAllowed(approvalMode || "auto", ["auto", "manual"], "time_entry_approval_mode_invalid");
     const resolvedFlexDeltaMinutes =
       flexDeltaMinutes == null
         ? resolvedWorkedMinutes - scheduledMinutes
         : normalizeInteger(flexDeltaMinutes, "time_entry_flex_delta_invalid");
+    const resolvedManagerEmploymentId = managerEmploymentId ? requireText(managerEmploymentId, "manager_employment_id_required") : null;
+    const resolvedAllocationRefs = normalizeAllocationRefs({
+      allocationRefs,
+      projectId: normalizeOptionalText(projectId),
+      activityCode: normalizeOptionalText(activityCode),
+      workedMinutes: resolvedWorkedMinutes
+    });
 
     const entry = {
       timeEntryId: crypto.randomUUID(),
       companyId: employment.companyId,
       employmentId: employment.employmentId,
+      employeeId: employment.employeeId,
       workDate: resolvedWorkDate,
       projectId: normalizeOptionalText(projectId),
       activityCode: normalizeOptionalText(activityCode),
       sourceType: resolvedSourceType,
+      status: resolvedApprovalMode === "auto" ? "approved" : "draft",
+      approvalMode: resolvedApprovalMode,
+      requiresApproval: resolvedApprovalMode === "manual",
+      managerEmploymentId: resolvedManagerEmploymentId,
       startsAt: resolvedStartsAt,
       endsAt: resolvedEndsAt,
       breakMinutes: resolvedBreakMinutes,
@@ -340,16 +369,107 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null, 
       flexDeltaMinutes: resolvedFlexDeltaMinutes,
       compDeltaMinutes: resolvedCompDeltaMinutes,
       sourceClockEventIds: normalizedSourceClockEventIds,
+      allocationRefs: resolvedAllocationRefs,
       scheduleTemplateId: assignment ? assignment.scheduleTemplateId : null,
       scheduleTemplateCode: assignment ? assignment.scheduleTemplateCode : null,
+      submittedAt: null,
+      approvedAt: resolvedApprovalMode === "auto" ? nowIso(clock) : null,
+      rejectedAt: null,
+      rejectedReason: null,
+      approvalActorId: resolvedApprovalMode === "auto" ? requireText(actorId, "actor_id_required") : null,
       createdByActorId: requireText(actorId, "actor_id_required"),
-      createdAt: nowIso(clock)
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock),
+      events: []
     };
 
     state.timeEntries.set(entry.timeEntryId, entry);
     appendToIndex(state.timeEntryIdsByEmployment, employment.employmentId, entry.timeEntryId);
+    appendTimeEntryEvent({
+      entry,
+      eventType: "created",
+      status: entry.status,
+      note: entry.status === "approved" ? "Time entry created and auto-approved." : "Time entry created in draft state.",
+      actorId
+    });
+    if (entry.status === "approved") {
+      createBalanceTransactionsForEntry(entry);
+    }
+    return enrichTimeEntry(entry);
+  }
+
+  function submitTimeEntry({ companyId, employmentId, timeEntryId, actorId = "system" } = {}) {
+    const entry = requireTimeEntry({ companyId, employmentId, timeEntryId, state });
+    if (entry.status !== "draft") {
+      throw createError(409, "time_entry_submit_invalid", "Only draft time entries can be submitted.");
+    }
+    const managerAssignment =
+      entry.managerEmploymentId != null
+        ? { managerEmploymentId: entry.managerEmploymentId }
+        : resolveActiveManagerAssignment({
+            companyId: entry.companyId,
+            employeeId: entry.employeeId,
+            employmentId: entry.employmentId,
+            effectiveDate: entry.workDate,
+            hrPlatform
+          });
+    if (!managerAssignment) {
+      throw createError(409, "time_entry_manager_approval_missing", "No active manager assignment covers this time entry.");
+    }
+    entry.managerEmploymentId = managerAssignment.managerEmploymentId;
+    entry.status = "submitted";
+    entry.submittedAt = nowIso(clock);
+    entry.updatedAt = entry.submittedAt;
+    appendTimeEntryEvent({
+      entry,
+      eventType: "submitted",
+      status: entry.status,
+      note: "Time entry submitted for approval.",
+      actorId
+    });
+    return enrichTimeEntry(entry);
+  }
+
+  function approveTimeEntry({ companyId, employmentId, timeEntryId, actorId = "system" } = {}) {
+    const entry = requireTimeEntry({ companyId, employmentId, timeEntryId, state });
+    if (!["draft", "submitted"].includes(entry.status)) {
+      throw createError(409, "time_entry_approval_invalid", "Only draft or submitted time entries can be approved.");
+    }
+    if (entry.status === "draft" && entry.requiresApproval) {
+      submitTimeEntry({ companyId, employmentId, timeEntryId, actorId });
+    }
+    entry.status = "approved";
+    entry.approvedAt = nowIso(clock);
+    entry.updatedAt = entry.approvedAt;
+    entry.approvalActorId = requireText(actorId, "actor_id_required");
     createBalanceTransactionsForEntry(entry);
-    return copy(entry);
+    appendTimeEntryEvent({
+      entry,
+      eventType: "approved",
+      status: entry.status,
+      note: "Time entry approved.",
+      actorId
+    });
+    return enrichTimeEntry(entry);
+  }
+
+  function rejectTimeEntry({ companyId, employmentId, timeEntryId, reason, actorId = "system" } = {}) {
+    const entry = requireTimeEntry({ companyId, employmentId, timeEntryId, state });
+    if (!["draft", "submitted"].includes(entry.status)) {
+      throw createError(409, "time_entry_rejection_invalid", "Only draft or submitted time entries can be rejected.");
+    }
+    entry.status = "rejected";
+    entry.rejectedAt = nowIso(clock);
+    entry.updatedAt = entry.rejectedAt;
+    entry.rejectedReason = requireText(reason, "time_entry_rejection_reason_required");
+    appendTimeEntryEvent({
+      entry,
+      eventType: "rejected",
+      status: entry.status,
+      note: entry.rejectedReason,
+      actorId
+    });
+    return enrichTimeEntry(entry);
   }
 
   function listTimeBalances({ companyId, employmentId, cutoffDate = null } = {}) {
@@ -378,6 +498,86 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null, 
       snapshotHash: buildSnapshotHash({ cutoffDate: resolvedCutoffDate, transactions, balances }),
       balances,
       transactions
+    };
+  }
+
+  function getEmploymentTimeBase({ companyId, employmentId, workDate = null, cutoffDate = null } = {}) {
+    const employment = requireEmployment(companyId, employmentId, hrPlatform);
+    const resolvedWorkDate = workDate ? normalizeRequiredDate(workDate, "employment_time_base_work_date_invalid") : nowIso(clock).slice(0, 10);
+    const resolvedCutoffDate = cutoffDate ? normalizeRequiredDate(cutoffDate, "employment_time_base_cutoff_date_invalid") : resolvedWorkDate;
+    const hrSnapshot =
+      hrPlatform && typeof hrPlatform.getEmploymentSnapshot === "function"
+        ? hrPlatform.getEmploymentSnapshot({
+            companyId: employment.companyId,
+            employeeId: employment.employeeId,
+            employmentId: employment.employmentId,
+            snapshotDate: resolvedWorkDate
+          })
+        : {
+            snapshotDate: resolvedWorkDate,
+            employee: null,
+            employment: copy(employment),
+            activeContract: null,
+            activeManagerAssignment: null,
+            primaryBankAccount: null
+          };
+    const activeScheduleAssignment = resolveActiveScheduleAssignment({
+      state,
+      companyId: employment.companyId,
+      employmentId: employment.employmentId,
+      workDate: resolvedWorkDate
+    });
+    const scheduleDay = activeScheduleAssignment ? getScheduleDayForDate(activeScheduleAssignment.template, resolvedWorkDate) : null;
+    const approvedEntries = listTimeEntries({
+      companyId: employment.companyId,
+      employmentId: employment.employmentId
+    }).filter((entry) => entry.status === "approved" && entry.workDate <= resolvedCutoffDate);
+    const pendingApprovals = listTimeEntries({
+      companyId: employment.companyId,
+      employmentId: employment.employmentId
+    }).filter((entry) => ["draft", "submitted"].includes(entry.status));
+    const timeBalances = listTimeBalances({
+      companyId: employment.companyId,
+      employmentId: employment.employmentId,
+      cutoffDate: resolvedCutoffDate
+    });
+    const balanceSnapshots = resolveExternalBalanceSnapshots({
+      companyId: employment.companyId,
+      employeeId: employment.employeeId,
+      employmentId: employment.employmentId,
+      cutoffDate: resolvedCutoffDate,
+      balancesPlatform
+    });
+    const agreementOverlay =
+      collectiveAgreementsPlatform && typeof collectiveAgreementsPlatform.evaluateAgreementOverlay === "function"
+        ? collectiveAgreementsPlatform.evaluateAgreementOverlay({
+            companyId: employment.companyId,
+            employeeId: employment.employeeId,
+            employmentId: employment.employmentId,
+            eventDate: resolvedWorkDate
+          })
+        : null;
+
+    return {
+      companyId: employment.companyId,
+      employeeId: employment.employeeId,
+      employmentId: employment.employmentId,
+      workDate: resolvedWorkDate,
+      cutoffDate: resolvedCutoffDate,
+      hrSnapshot,
+      activeScheduleAssignment: activeScheduleAssignment
+        ? {
+            ...copy(activeScheduleAssignment),
+            scheduleDay
+          }
+        : null,
+      timeBalances,
+      balanceSnapshots,
+      agreementOverlay,
+      approvedTimeEntries: approvedEntries.filter((entry) => entry.workDate === resolvedWorkDate),
+      approvedTimeEntryCount: approvedEntries.length,
+      pendingTimeEntries: pendingApprovals,
+      pendingApprovalCount: pendingApprovals.length
     };
   }
 
@@ -913,6 +1113,14 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null, 
       if (!definition.deltaMinutes) {
         continue;
       }
+      if (hasInternalBalanceTransactionForEntry({
+        employmentId: entry.employmentId,
+        timeEntryId: entry.timeEntryId,
+        balanceType: definition.balanceType,
+        state
+      })) {
+        continue;
+      }
       const transaction = {
         timeBalanceTransactionId: crypto.randomUUID(),
         companyId: entry.companyId,
@@ -928,7 +1136,67 @@ export function createTimeEngine({ clock = () => new Date(), hrPlatform = null, 
       };
       state.balanceTransactions.set(transaction.timeBalanceTransactionId, transaction);
       appendToIndex(state.balanceTransactionIdsByEmployment, entry.employmentId, transaction.timeBalanceTransactionId);
+      syncExternalBalanceTransaction({
+        entry,
+        definition
+      });
     }
+  }
+
+  function syncExternalBalanceTransaction({ entry, definition }) {
+    if (!balancesPlatform || typeof balancesPlatform.listBalanceAccounts !== "function") {
+      return;
+    }
+    if (typeof balancesPlatform.getBalanceType === "function") {
+      try {
+        balancesPlatform.getBalanceType({
+          companyId: entry.companyId,
+          balanceTypeCode: definition.balanceType
+        });
+      } catch (error) {
+        if (error?.code === "balance_type_not_found") {
+          return;
+        }
+        throw error;
+      }
+    }
+    const matchingAccounts = balancesPlatform.listBalanceAccounts({
+      companyId: entry.companyId,
+      ownerTypeCode: "employment",
+      employeeId: entry.employeeId,
+      employmentId: entry.employmentId,
+      balanceTypeCode: definition.balanceType
+    });
+    const targetAccount =
+      matchingAccounts[0] ||
+      (typeof balancesPlatform.openBalanceAccount === "function"
+        ? balancesPlatform.openBalanceAccount({
+            companyId: entry.companyId,
+            balanceTypeCode: definition.balanceType,
+            ownerTypeCode: "employment",
+            employeeId: entry.employeeId,
+            employmentId: entry.employmentId,
+            externalReference: `time:${entry.timeEntryId}`,
+            actorId: entry.approvalActorId || entry.createdByActorId
+          })
+        : null);
+    if (!targetAccount || typeof balancesPlatform.recordBalanceTransaction !== "function") {
+      return;
+    }
+    balancesPlatform.recordBalanceTransaction({
+      companyId: entry.companyId,
+      balanceAccountId: targetAccount.balanceAccountId,
+      effectiveDate: entry.workDate,
+      transactionTypeCode: definition.deltaMinutes > 0 ? "earn" : "spend",
+      quantityDelta: definition.deltaMinutes,
+      sourceDomainCode: "TIME",
+      sourceObjectType: "time_entry",
+      sourceObjectId: entry.timeEntryId,
+      sourceReference: entry.timeEntryId,
+      idempotencyKey: `time-entry:${entry.timeEntryId}:${definition.balanceType}`,
+      explanation: definition.explanation,
+      actorId: entry.approvalActorId || entry.createdByActorId
+    });
   }
 }
 
@@ -954,6 +1222,17 @@ function requireEmployment(companyId, employmentId, hrPlatform = null) {
   }
 
   throw createError(404, "employment_not_found", "Employment was not found.");
+}
+
+function requireTimeEntry({ companyId, employmentId, timeEntryId, state = null }) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const resolvedEmploymentId = requireText(employmentId, "employment_id_required");
+  const resolvedTimeEntryId = requireText(timeEntryId, "time_entry_id_required");
+  const entry = state.timeEntries.get(resolvedTimeEntryId);
+  if (!entry || entry.companyId !== resolvedCompanyId || entry.employmentId !== resolvedEmploymentId) {
+    throw createError(404, "time_entry_not_found", "Time entry was not found.");
+  }
+  return entry;
 }
 
 function requireEmployeeRecord(companyId, employeeId, hrPlatform = null) {
@@ -1253,6 +1532,81 @@ function assertLeaveSignalsOpen({ state, companyId, employmentId, reportingPerio
 
 function buildSnapshotHash(payload) {
   return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function normalizeAllocationRefs({ allocationRefs, projectId, activityCode, workedMinutes }) {
+  const candidateRefs = Array.isArray(allocationRefs) && allocationRefs.length > 0
+    ? allocationRefs
+    : projectId || activityCode
+      ? [
+          {
+            projectId,
+            activityCode,
+            allocationMinutes: workedMinutes
+          }
+        ]
+      : [];
+  const normalized = candidateRefs.map((candidate, index) => ({
+    allocationRefId: normalizeOptionalText(candidate?.allocationRefId) || `ALLOC-${index + 1}`,
+    projectId: normalizeOptionalText(candidate?.projectId),
+    activityCode: normalizeOptionalText(candidate?.activityCode),
+    allocationMinutes: normalizeNonNegativeInteger(candidate?.allocationMinutes ?? 0, "time_entry_allocation_minutes_invalid")
+  }));
+  const totalAllocatedMinutes = normalized.reduce((sum, candidate) => sum + candidate.allocationMinutes, 0);
+  if (normalized.length > 0 && totalAllocatedMinutes !== workedMinutes) {
+    throw createError(
+      409,
+      "time_entry_allocation_minutes_mismatch",
+      "Allocation minutes must sum exactly to worked minutes."
+    );
+  }
+  return normalized;
+}
+
+function appendTimeEntryEvent({ entry, eventType, status, note = null, actorId = "system" }) {
+  entry.events.push({
+    timeEntryEventId: crypto.randomUUID(),
+    eventType: requireText(eventType, "time_entry_event_type_required"),
+    status: requireText(status, "time_entry_event_status_required"),
+    note: normalizeOptionalText(note),
+    actorId: requireText(actorId, "actor_id_required"),
+    recordedAt: entry.updatedAt || entry.createdAt
+  });
+}
+
+function enrichTimeEntry(entry) {
+  return copy(entry);
+}
+
+function hasInternalBalanceTransactionForEntry({ employmentId, timeEntryId, balanceType, state }) {
+  return (state.balanceTransactionIdsByEmployment.get(employmentId) || [])
+    .map((timeBalanceTransactionId) => state.balanceTransactions.get(timeBalanceTransactionId))
+    .filter(Boolean)
+    .some((transaction) => transaction.sourceId === timeEntryId && transaction.balanceType === balanceType);
+}
+
+function resolveExternalBalanceSnapshots({ companyId, employeeId, employmentId, cutoffDate, balancesPlatform = null }) {
+  if (!balancesPlatform || typeof balancesPlatform.listBalanceAccounts !== "function") {
+    return [];
+  }
+  return balancesPlatform
+    .listBalanceAccounts({
+      companyId,
+      ownerTypeCode: "employment",
+      employeeId,
+      employmentId
+    })
+    .map((account) => ({
+      account,
+      snapshot:
+        typeof balancesPlatform.getBalanceSnapshot === "function"
+          ? balancesPlatform.getBalanceSnapshot({
+              companyId,
+              balanceAccountId: account.balanceAccountId,
+              cutoffDate
+            })
+          : null
+    }));
 }
 
 function weekdayFromDate(value) {

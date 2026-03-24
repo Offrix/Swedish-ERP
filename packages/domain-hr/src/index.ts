@@ -36,11 +36,28 @@ export interface HrEmployment {
   readonly jobTitle: string;
   readonly departmentCode: string | null;
   readonly payModelCode: string;
+  readonly workerCategoryCode: string | null;
+  readonly externalContractorRef: string | null;
+  readonly payrollMigrationAnchorRef: string | null;
   readonly scheduleTemplateCode: string | null;
   readonly startDate: string;
   readonly endDate: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+export interface HrEmploymentSnapshot {
+  readonly snapshotDate: string;
+  readonly employee: HrEmployee;
+  readonly employment: HrEmployment & {
+    readonly contracts: readonly HrEmploymentContract[];
+    readonly managerAssignments: readonly HrManagerAssignment[];
+    readonly activeContract: HrEmploymentContract | null;
+    readonly activeManagerAssignment: HrManagerAssignment | null;
+  };
+  readonly activeContract: HrEmploymentContract | null;
+  readonly activeManagerAssignment: HrManagerAssignment | null;
+  readonly primaryBankAccount: HrEmployeeBankAccount | null;
 }
 
 export interface HrEmploymentContract {

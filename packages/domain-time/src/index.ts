@@ -1,6 +1,7 @@
 export type TimeClockEventType = "clock_in" | "clock_out";
 export type TimeBalanceType = "flex_minutes" | "comp_minutes" | "overtime_minutes";
 export type TimeEntrySourceType = "manual" | "clock" | "import";
+export type TimeEntryStatus = "draft" | "submitted" | "approved" | "rejected";
 export type LeaveSignalType = "none" | "parental_benefit" | "temporary_parental_benefit";
 export type LeaveEntryStatus = "draft" | "submitted" | "approved" | "rejected";
 export type LeaveSignalLockState = "ready_for_sign" | "signed" | "submitted";
@@ -58,10 +59,15 @@ export interface TimeEntry {
   readonly timeEntryId: string;
   readonly companyId: string;
   readonly employmentId: string;
+  readonly employeeId: string;
   readonly workDate: string;
   readonly projectId: string | null;
   readonly activityCode: string | null;
   readonly sourceType: TimeEntrySourceType;
+  readonly status: TimeEntryStatus;
+  readonly approvalMode: "auto" | "manual";
+  readonly requiresApproval: boolean;
+  readonly managerEmploymentId: string | null;
   readonly startsAt: string | null;
   readonly endsAt: string | null;
   readonly breakMinutes: number;
@@ -74,10 +80,30 @@ export interface TimeEntry {
   readonly flexDeltaMinutes: number;
   readonly compDeltaMinutes: number;
   readonly sourceClockEventIds: readonly string[];
+  readonly allocationRefs: readonly {
+    allocationRefId: string;
+    projectId: string | null;
+    activityCode: string | null;
+    allocationMinutes: number;
+  }[];
   readonly scheduleTemplateId: string | null;
   readonly scheduleTemplateCode: string | null;
+  readonly submittedAt: string | null;
+  readonly approvedAt: string | null;
+  readonly rejectedAt: string | null;
+  readonly rejectedReason: string | null;
+  readonly approvalActorId: string | null;
   readonly createdByActorId: string;
   readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly events: readonly {
+    timeEntryEventId: string;
+    eventType: string;
+    status: string;
+    note: string | null;
+    actorId: string;
+    recordedAt: string;
+  }[];
 }
 
 export interface TimeBalanceTransaction {
@@ -101,6 +127,26 @@ export interface TimeBalanceSnapshot {
   readonly snapshotHash: string;
   readonly balances: Readonly<Record<TimeBalanceType, number>>;
   readonly transactions: readonly TimeBalanceTransaction[];
+}
+
+export interface EmploymentTimeBase {
+  readonly companyId: string;
+  readonly employeeId: string;
+  readonly employmentId: string;
+  readonly workDate: string;
+  readonly cutoffDate: string;
+  readonly hrSnapshot: Record<string, unknown>;
+  readonly activeScheduleAssignment: (TimeScheduleAssignment & { scheduleDay: TimeScheduleTemplateDay | null; template?: unknown }) | null;
+  readonly timeBalances: TimeBalanceSnapshot;
+  readonly balanceSnapshots: readonly {
+    account: Record<string, unknown>;
+    snapshot: Record<string, unknown> | null;
+  }[];
+  readonly agreementOverlay: Record<string, unknown> | null;
+  readonly approvedTimeEntries: readonly TimeEntry[];
+  readonly approvedTimeEntryCount: number;
+  readonly pendingTimeEntries: readonly TimeEntry[];
+  readonly pendingApprovalCount: number;
 }
 
 export interface TimePeriodLock {

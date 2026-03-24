@@ -43,6 +43,7 @@ export function createHrEngine({ clock = () => new Date(), seedDemo = false, doc
     listEmployees,
     getEmployee,
     getEmployeeComplianceSnapshot,
+    getEmploymentSnapshot,
     findEmployeeByEmail,
     createEmployee,
     listEmployments,
@@ -80,6 +81,41 @@ export function createHrEngine({ clock = () => new Date(), seedDemo = false, doc
     return {
       ...copy(employee),
       identityValue: secret?.identityValue || null
+    };
+  }
+
+  function getEmploymentSnapshot({ companyId, employeeId, employmentId, snapshotDate = null } = {}) {
+    const employment = requireEmploymentRecord(state, companyId, employeeId, employmentId);
+    const resolvedSnapshotDate = snapshotDate
+      ? normalizeRequiredDate(snapshotDate, "employment_snapshot_date_invalid")
+      : nowIso(clock).slice(0, 10);
+    const activeContract = resolveActiveEmploymentContract({
+      companyId: employment.companyId,
+      employeeId: employment.employeeId,
+      employmentId: employment.employmentId,
+      snapshotDate: resolvedSnapshotDate
+    });
+    const activeManagerAssignment = resolveActiveEmploymentManagerAssignment({
+      companyId: employment.companyId,
+      employeeId: employment.employeeId,
+      employmentId: employment.employmentId,
+      snapshotDate: resolvedSnapshotDate
+    });
+    const primaryBankAccount = getEmployeeBankAccountDetails({
+      companyId: employment.companyId,
+      employeeId: employment.employeeId
+    });
+
+    return {
+      snapshotDate: resolvedSnapshotDate,
+      employee: getEmployee({
+        companyId: employment.companyId,
+        employeeId: employment.employeeId
+      }),
+      employment: enrichEmployment(employment),
+      activeContract,
+      activeManagerAssignment,
+      primaryBankAccount
     };
   }
 
@@ -216,6 +252,9 @@ export function createHrEngine({ clock = () => new Date(), seedDemo = false, doc
     jobTitle,
     departmentCode = null,
     payModelCode,
+    workerCategoryCode = null,
+    externalContractorRef = null,
+    payrollMigrationAnchorRef = null,
     scheduleTemplateCode = null,
     startDate,
     endDate = null,
@@ -248,6 +287,9 @@ export function createHrEngine({ clock = () => new Date(), seedDemo = false, doc
       jobTitle: requireText(jobTitle, "employment_job_title_required"),
       departmentCode: normalizeOptionalText(departmentCode),
       payModelCode: requireText(payModelCode, "employment_pay_model_required"),
+      workerCategoryCode: normalizeOptionalText(workerCategoryCode),
+      externalContractorRef: normalizeOptionalText(externalContractorRef),
+      payrollMigrationAnchorRef: normalizeOptionalText(payrollMigrationAnchorRef),
       scheduleTemplateCode: normalizeOptionalText(scheduleTemplateCode),
       startDate: resolvedStartDate,
       endDate: resolvedEndDate,
@@ -637,8 +679,48 @@ export function createHrEngine({ clock = () => new Date(), seedDemo = false, doc
         companyId: employment.companyId,
         employeeId: employment.employeeId,
         employmentId: employment.employmentId
+      }),
+      activeContract: resolveActiveEmploymentContract({
+        companyId: employment.companyId,
+        employeeId: employment.employeeId,
+        employmentId: employment.employmentId,
+        snapshotDate: nowIso(clock).slice(0, 10)
+      }),
+      activeManagerAssignment: resolveActiveEmploymentManagerAssignment({
+        companyId: employment.companyId,
+        employeeId: employment.employeeId,
+        employmentId: employment.employmentId,
+        snapshotDate: nowIso(clock).slice(0, 10)
       })
     };
+  }
+
+  function resolveActiveEmploymentContract({ companyId, employeeId, employmentId, snapshotDate }) {
+    return (
+      listEmploymentContracts({
+        companyId,
+        employeeId,
+        employmentId
+      })
+        .filter((contract) => contract.validFrom <= snapshotDate && (!contract.validTo || contract.validTo >= snapshotDate))
+        .sort(
+          (left, right) =>
+            right.validFrom.localeCompare(left.validFrom) ||
+            right.contractVersion - left.contractVersion
+        )[0] || null
+    );
+  }
+
+  function resolveActiveEmploymentManagerAssignment({ companyId, employeeId, employmentId, snapshotDate }) {
+    return (
+      listManagerAssignments({
+        companyId,
+        employeeId,
+        employmentId
+      })
+        .filter((assignment) => assignment.validFrom <= snapshotDate && (!assignment.validTo || assignment.validTo >= snapshotDate))
+        .sort((left, right) => right.validFrom.localeCompare(left.validFrom))[0] || null
+    );
   }
 }
 
