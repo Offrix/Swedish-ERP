@@ -22,19 +22,24 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "annual_reporting"
     });
-    writeJson(
-      res,
-      201,
-      platform.createLegalFormProfile({
-        companyId,
-        legalFormCode: body.legalFormCode,
-        effectiveFrom: body.effectiveFrom,
-        effectiveTo: body.effectiveTo,
-        filingProfileCode: body.filingProfileCode,
-        signatoryClassCode: body.signatoryClassCode,
-        actorId: principal.userId
-      })
-    );
+    const result = platform.createLegalFormProfile({
+      companyId,
+      legalFormCode: body.legalFormCode,
+      effectiveFrom: body.effectiveFrom,
+      effectiveTo: body.effectiveTo,
+      filingProfileCode: body.filingProfileCode,
+      signatoryClassCode: body.signatoryClassCode,
+      actorId: principal.userId
+    });
+    platform.emitWebhookEvent({
+      companyId,
+      eventType: "legal_form.profile.updated",
+      resourceType: "legal_form_profile",
+      resourceId: result.legalFormProfileId,
+      payload: result,
+      mode: "production"
+    });
+    writeJson(res, 201, result);
     return true;
   }
 
@@ -97,15 +102,20 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: legalFormActivateMatch.legalFormProfileId,
       scopeCode: "annual_reporting"
     });
-    writeJson(
-      res,
-      200,
-      platform.activateLegalFormProfile({
-        companyId,
-        legalFormProfileId: legalFormActivateMatch.legalFormProfileId,
-        actorId: principal.userId
-      })
-    );
+    const result = platform.activateLegalFormProfile({
+      companyId,
+      legalFormProfileId: legalFormActivateMatch.legalFormProfileId,
+      actorId: principal.userId
+    });
+    platform.emitWebhookEvent({
+      companyId,
+      eventType: "legal_form.profile.updated",
+      resourceType: "legal_form_profile",
+      resourceId: result.legalFormProfileId,
+      payload: result,
+      mode: "production"
+    });
+    writeJson(res, 200, result);
     return true;
   }
 
@@ -139,26 +149,31 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "annual_reporting"
     });
-    writeJson(
-      res,
-      201,
-      platform.createReportingObligationProfile({
-        companyId,
-        legalFormProfileId: body.legalFormProfileId,
-        fiscalYearKey: body.fiscalYearKey,
-        fiscalYearId: body.fiscalYearId,
-        accountingPeriodId: body.accountingPeriodId,
-        requiresAnnualReport: body.requiresAnnualReport === true,
-        requiresYearEndAccounts: body.requiresYearEndAccounts === true,
-        allowsSimplifiedYearEnd: body.allowsSimplifiedYearEnd === true,
-        requiresBolagsverketFiling: body.requiresBolagsverketFiling === true,
-        requiresTaxDeclarationPackage: body.requiresTaxDeclarationPackage !== false,
-        declarationProfileCode: body.declarationProfileCode,
-        signatoryClassCode: body.signatoryClassCode,
-        packageFamilyCode: body.packageFamilyCode,
-        actorId: principal.userId
-      })
-    );
+    const result = platform.createReportingObligationProfile({
+      companyId,
+      legalFormProfileId: body.legalFormProfileId,
+      fiscalYearKey: body.fiscalYearKey,
+      fiscalYearId: body.fiscalYearId,
+      accountingPeriodId: body.accountingPeriodId,
+      requiresAnnualReport: body.requiresAnnualReport === true,
+      requiresYearEndAccounts: body.requiresYearEndAccounts === true,
+      allowsSimplifiedYearEnd: body.allowsSimplifiedYearEnd === true,
+      requiresBolagsverketFiling: body.requiresBolagsverketFiling === true,
+      requiresTaxDeclarationPackage: body.requiresTaxDeclarationPackage !== false,
+      declarationProfileCode: body.declarationProfileCode,
+      signatoryClassCode: body.signatoryClassCode,
+      packageFamilyCode: body.packageFamilyCode,
+      actorId: principal.userId
+    });
+    platform.emitWebhookEvent({
+      companyId,
+      eventType: "legal_form.profile.updated",
+      resourceType: "reporting_obligation_profile",
+      resourceId: result.reportingObligationProfileId,
+      payload: result,
+      mode: "production"
+    });
+    writeJson(res, 201, result);
     return true;
   }
 
@@ -221,15 +236,20 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: approveReportingObligationMatch.reportingObligationProfileId,
       scopeCode: "annual_reporting"
     });
-    writeJson(
-      res,
-      200,
-      platform.approveReportingObligationProfile({
-        companyId,
-        reportingObligationProfileId: approveReportingObligationMatch.reportingObligationProfileId,
-        actorId: principal.userId
-      })
-    );
+    const result = platform.approveReportingObligationProfile({
+      companyId,
+      reportingObligationProfileId: approveReportingObligationMatch.reportingObligationProfileId,
+      actorId: principal.userId
+    });
+    platform.emitWebhookEvent({
+      companyId,
+      eventType: "legal_form.profile.updated",
+      resourceType: "reporting_obligation_profile",
+      resourceId: result.reportingObligationProfileId,
+      payload: result,
+      mode: "production"
+    });
+    writeJson(res, 200, result);
     return true;
   }
 
@@ -867,18 +887,27 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "tax_account"
     });
-    writeJson(
-      res,
-      201,
-      platform.importTaxAccountEvents({
-        companyId,
-        importSource: body.importSource,
-        statementDate: body.statementDate,
-        importBatchId: body.importBatchId,
-        events: body.events,
-        actorId: principal.userId
-      })
-    );
+    const result = platform.importTaxAccountEvents({
+      companyId,
+      importSource: body.importSource,
+      statementDate: body.statementDate,
+      importBatchId: body.importBatchId,
+      events: body.events,
+      actorId: principal.userId
+    });
+    platform.emitWebhookEvent({
+      companyId,
+      eventType: "tax_account.reconciliation.updated",
+      resourceType: "tax_account_import_batch",
+      resourceId: result.importBatch.importBatchId,
+      payload: {
+        importBatch: result.importBatch,
+        importedCount: result.items.length,
+        balance: platform.getTaxAccountBalance({ companyId })
+      },
+      mode: "production"
+    });
+    writeJson(res, 201, result);
     return true;
   }
 
@@ -915,14 +944,19 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "tax_account"
     });
-    writeJson(
-      res,
-      201,
-      platform.createTaxAccountReconciliation({
-        companyId,
-        actorId: principal.userId
-      })
-    );
+    const result = platform.createTaxAccountReconciliation({
+      companyId,
+      actorId: principal.userId
+    });
+    platform.emitWebhookEvent({
+      companyId,
+      eventType: "tax_account.reconciliation.updated",
+      resourceType: "tax_account_reconciliation_run",
+      resourceId: result.reconciliationRunId,
+      payload: result,
+      mode: "production"
+    });
+    writeJson(res, 201, result);
     return true;
   }
 
@@ -939,20 +973,28 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "tax_account"
     });
-    writeJson(
-      res,
-      201,
-      platform.approveTaxAccountOffset({
-        companyId,
-        taxAccountEventId: body.taxAccountEventId,
-        reconciliationItemId: body.reconciliationItemId,
-        offsetAmount: body.offsetAmount,
-        offsetReasonCode: body.offsetReasonCode,
-        reconciliationRunId: body.reconciliationRunId,
-        approvalNote: body.approvalNote,
-        actorId: principal.userId
-      })
-    );
+    const result = platform.approveTaxAccountOffset({
+      companyId,
+      taxAccountEventId: body.taxAccountEventId,
+      reconciliationItemId: body.reconciliationItemId,
+      offsetAmount: body.offsetAmount,
+      offsetReasonCode: body.offsetReasonCode,
+      reconciliationRunId: body.reconciliationRunId,
+      approvalNote: body.approvalNote,
+      actorId: principal.userId
+    });
+    platform.emitWebhookEvent({
+      companyId,
+      eventType: "tax_account.reconciliation.updated",
+      resourceType: "tax_account_offset",
+      resourceId: result.taxAccountOffsetId,
+      payload: {
+        offset: result,
+        balance: platform.getTaxAccountBalance({ companyId })
+      },
+      mode: "production"
+    });
+    writeJson(res, 201, result);
     return true;
   }
 

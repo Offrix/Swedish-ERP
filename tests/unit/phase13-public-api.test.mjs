@@ -14,7 +14,7 @@ test("Phase 13.1 public API clients, compatibility baselines and webhook events 
     companyId: DEMO_IDS.companyId,
     displayName: "Unit Public Client",
     mode: "sandbox",
-    scopes: ["api_spec.read", "reporting.read", "webhook.manage"],
+    scopes: ["api_spec.read", "reporting.read", "legal_form.read", "annual_reporting.read", "tax_account.read", "webhook.manage"],
     actorId: "phase13-1-unit"
   });
   const oauthToken = platform.exchangePublicApiClientCredentials({
@@ -101,6 +101,16 @@ test("Phase 13.1 public API clients, compatibility baselines and webhook events 
     subscriptionId: subscription.subscriptionId
   });
   assert.equal(deliveries.length, 1);
-  assert.equal(platform.getPublicApiSpec().auth.scheme, "oauth2_client_credentials");
-  assert.equal(platform.getPublicApiSandboxCatalog({ companyId: DEMO_IDS.companyId }).mode, "sandbox");
+  const spec = platform.getPublicApiSpec();
+  assert.equal(spec.auth.scheme, "oauth2_client_credentials");
+  assert.equal(spec.version, "2026-03-25");
+  assert.equal(spec.endpoints.some((endpoint) => endpoint.path === "/v1/public/legal-forms/declaration-profile"), true);
+  assert.equal(spec.endpoints.some((endpoint) => endpoint.path === "/v1/public/annual-reporting/packages"), true);
+  assert.equal(spec.endpoints.some((endpoint) => endpoint.path === "/v1/public/tax-account/summary"), true);
+  assert.equal(spec.endpoints.some((endpoint) => endpoint.path === "/v1/public/tax-account/reconciliations"), true);
+  assert.equal(spec.webhookEventTypes.includes("annual_reporting.package.updated"), true);
+  assert.equal(spec.webhookEventTypes.includes("tax_account.reconciliation.updated"), true);
+  const sandboxCatalog = platform.getPublicApiSandboxCatalog({ companyId: DEMO_IDS.companyId });
+  assert.equal(sandboxCatalog.mode, "sandbox");
+  assert.equal(sandboxCatalog.exampleResources.length >= 3, true);
 });

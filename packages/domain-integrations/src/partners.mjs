@@ -7,6 +7,44 @@ export const PARTNER_OPERATION_STATUSES = Object.freeze(["queued", "succeeded", 
 export const JOB_STATUSES = Object.freeze(["queued", "claimed", "running", "succeeded", "failed", "retry_scheduled", "dead_lettered", "replay_planned", "replayed"]);
 export const JOB_RISK_CLASSES = Object.freeze(["normal", "high_risk", "restricted"]);
 export const JOB_ERROR_CLASSES = Object.freeze(["transient_technical", "persistent_technical", "business_input", "downstream_unknown"]);
+export const PARTNER_CONNECTION_CATALOG = Object.freeze({
+  bank: Object.freeze({
+    connectionType: "bank",
+    operationCodes: Object.freeze(["payment_export", "statement_sync", "tax_account_sync"]),
+    replaySafe: true,
+    emitsWebhookEventTypes: Object.freeze(["partner.connection.updated", "partner.operation.completed", "partner.operation.failed"])
+  }),
+  peppol: Object.freeze({
+    connectionType: "peppol",
+    operationCodes: Object.freeze(["invoice_send", "credit_note_send", "status_sync", "inbound_document_sync"]),
+    replaySafe: true,
+    emitsWebhookEventTypes: Object.freeze(["partner.connection.updated", "partner.contract_test.completed", "partner.operation.completed", "partner.operation.failed"])
+  }),
+  pension: Object.freeze({
+    connectionType: "pension",
+    operationCodes: Object.freeze(["enrollment_export", "premium_basis_export", "contribution_status_sync"]),
+    replaySafe: true,
+    emitsWebhookEventTypes: Object.freeze(["partner.connection.updated", "partner.operation.completed", "partner.operation.failed"])
+  }),
+  crm: Object.freeze({
+    connectionType: "crm",
+    operationCodes: Object.freeze(["customer_sync", "invoice_sync", "project_sync"]),
+    replaySafe: true,
+    emitsWebhookEventTypes: Object.freeze(["partner.connection.updated", "partner.operation.completed", "partner.operation.failed"])
+  }),
+  commerce: Object.freeze({
+    connectionType: "commerce",
+    operationCodes: Object.freeze(["order_sync", "payout_sync", "stock_sync"]),
+    replaySafe: true,
+    emitsWebhookEventTypes: Object.freeze(["partner.connection.updated", "partner.operation.completed", "partner.operation.failed"])
+  }),
+  id06: Object.freeze({
+    connectionType: "id06",
+    operationCodes: Object.freeze(["attendance_sync", "site_registry_sync", "device_status_sync"]),
+    replaySafe: true,
+    emitsWebhookEventTypes: Object.freeze(["partner.connection.updated", "partner.operation.completed", "partner.operation.failed"])
+  })
+});
 
 export function createPartnerModule({ state, clock = () => new Date() }) {
   return {
@@ -17,6 +55,8 @@ export function createPartnerModule({ state, clock = () => new Date() }) {
     jobStatuses: JOB_STATUSES,
     jobRiskClasses: JOB_RISK_CLASSES,
     jobErrorClasses: JOB_ERROR_CLASSES,
+    listPartnerConnectionCatalog,
+    getPartnerConnectionCapabilities,
     createPartnerConnection,
     listPartnerConnections,
     setPartnerConnectionHealth,
@@ -34,6 +74,25 @@ export function createPartnerModule({ state, clock = () => new Date() }) {
     executeJobReplay,
     massRetryJobs
   };
+
+  function listPartnerConnectionCatalog() {
+    return PARTNER_CONNECTION_TYPES.map((connectionType) => partnerCatalogEntry(connectionType));
+  }
+
+  function getPartnerConnectionCapabilities({ companyId, connectionId } = {}) {
+    const connection = requireConnection(companyId, connectionId);
+    return {
+      ...partnerCatalogEntry(connection.connectionType),
+      connectionId: connection.connectionId,
+      partnerCode: connection.partnerCode,
+      displayName: connection.displayName,
+      mode: connection.mode,
+      status: connection.status,
+      fallbackMode: connection.fallbackMode,
+      rateLimitPerMinute: connection.rateLimitPerMinute,
+      credentialsConfigured: connection.credentialsRef != null
+    };
+  }
 
   function createPartnerConnection({
     companyId,
@@ -90,6 +149,7 @@ export function createPartnerModule({ state, clock = () => new Date() }) {
       connectionId: connection.connectionId,
       connectionType: connection.connectionType,
       partnerCode: connection.partnerCode,
+      mode: connection.mode,
       actorId: text(actorId || "system", "actor_id_required"),
       result: "passed",
       assertions: contractAssertionsFor(connection.connectionType),
@@ -125,6 +185,7 @@ export function createPartnerModule({ state, clock = () => new Date() }) {
       connectionId: connection.connectionId,
       connectionType: connection.connectionType,
       partnerCode: connection.partnerCode,
+      mode: connection.mode,
       operationCode: text(operationCode, "partner_operation_code_required"),
       payloadHash: hashObject(payload),
       payloadJson: clone(payload),
@@ -136,6 +197,9 @@ export function createPartnerModule({ state, clock = () => new Date() }) {
     };
     if (connection.status === "disabled") {
       throw createError(409, "partner_connection_disabled", "Partner connection is disabled.");
+    }
+    if (!partnerCatalogEntry(connection.connectionType).operationCodes.includes(operation.operationCode)) {
+      throw createError(409, "partner_operation_code_not_supported", `Operation ${operation.operationCode} is not supported for ${connection.connectionType}.`);
     }
     if (currentCount >= connection.rateLimitPerMinute) {
       operation.status = "rate_limited";
@@ -460,6 +524,17 @@ export function createPartnerModule({ state, clock = () => new Date() }) {
       deadLetter: state.asyncDeadLetters.get(job.jobId) || null
     });
   }
+}
+
+function partnerCatalogEntry(connectionType) {
+  const catalog = PARTNER_CONNECTION_CATALOG[connectionType];
+  if (!catalog) {
+    throw createError(400, "partner_connection_type_invalid", `${connectionType} is not a supported partner connection type.`);
+  }
+  return clone({
+    ...catalog,
+    contractAssertions: contractAssertionsFor(connectionType)
+  });
 }
 
 function normalizeRetryPolicy(value = {}) {

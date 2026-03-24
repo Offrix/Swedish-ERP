@@ -69,6 +69,53 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/public/legal-forms/declaration-profile") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const asOfDate = requireText(url.searchParams.get("asOfDate"), "as_of_date_required", "asOfDate is required.");
+    authorizePublicAccess({ platform, req, requiredScopes: ["legal_form.read"], companyId });
+    writeJson(
+      res,
+      200,
+      platform.resolveDeclarationProfile({
+        companyId,
+        asOfDate,
+        fiscalYearKey: optionalText(url.searchParams.get("fiscalYearKey")),
+        fiscalYearId: optionalText(url.searchParams.get("fiscalYearId")),
+        accountingPeriodId: optionalText(url.searchParams.get("accountingPeriodId"))
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/public/annual-reporting/packages") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    authorizePublicAccess({ platform, req, requiredScopes: ["annual_reporting.read"], companyId });
+    writeJson(res, 200, {
+      items: platform.listAnnualReportPackages({ companyId }).map(presentPublicAnnualPackage)
+    });
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/public/tax-account/summary") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    authorizePublicAccess({ platform, req, requiredScopes: ["tax_account.read"], companyId });
+    const snapshot = platform.snapshotTaxAccount({ companyId });
+    writeJson(res, 200, presentPublicTaxAccountSummary(snapshot));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/public/tax-account/reconciliations") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    authorizePublicAccess({ platform, req, requiredScopes: ["tax_account.read"], companyId });
+    const snapshot = platform.snapshotTaxAccount({ companyId });
+    writeJson(res, 200, {
+      items: platform.listTaxAccountReconciliations({ companyId }).map(presentPublicTaxAccountReconciliation),
+      balance: snapshot.balance,
+      openDifferenceCaseCount: snapshot.discrepancies.length
+    });
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/public-api/clients") {
     const body = await readJsonBody(req);
     const sessionToken = readSessionToken(req, body);
@@ -338,6 +385,23 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/partners/catalog") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      action: "company.read",
+      objectType: "partner_connection",
+      objectId: companyId,
+      scopeCode: "partner_connection"
+    });
+    writeJson(res, 200, {
+      items: platform.listPartnerConnectionCatalog()
+    });
+    return true;
+  }
+
   if (req.method === "GET" && path === "/v1/partners/connections") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     authorizeCompanyAccess({
@@ -358,6 +422,29 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  const partnerCapabilitiesMatch = matchPath(path, "/v1/partners/connections/:connectionId/capabilities");
+  if (req.method === "GET" && partnerCapabilitiesMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      action: "company.read",
+      objectType: "partner_connection",
+      objectId: partnerCapabilitiesMatch.connectionId,
+      scopeCode: "partner_connection"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getPartnerConnectionCapabilities({
+        companyId,
+        connectionId: partnerCapabilitiesMatch.connectionId
+      })
+    );
+    return true;
+  }
+
   const partnerHealthMatch = matchPath(path, "/v1/partners/connections/:connectionId/health");
   if (req.method === "POST" && partnerHealthMatch) {
     const body = await readJsonBody(req);
@@ -372,15 +459,20 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
       objectId: partnerHealthMatch.connectionId,
       scopeCode: "partner_connection"
     });
-    writeJson(
-      res,
-      200,
-      platform.setPartnerConnectionHealth({
-        companyId,
-        connectionId: partnerHealthMatch.connectionId,
-        status: body.status
-      })
-    );
+    const result = platform.setPartnerConnectionHealth({
+      companyId,
+      connectionId: partnerHealthMatch.connectionId,
+      status: body.status
+    });
+    platform.emitWebhookEvent({
+      companyId,
+      eventType: "partner.connection.updated",
+      resourceType: "partner_connection",
+      resourceId: result.connectionId,
+      payload: result,
+      mode: result.mode
+    });
+    writeJson(res, 200, result);
     return true;
   }
 
@@ -398,15 +490,20 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
       objectId: contractTestMatch.connectionId,
       scopeCode: "partner_contract_test"
     });
-    writeJson(
-      res,
-      201,
-      platform.runAdapterContractTest({
-        companyId,
-        connectionId: contractTestMatch.connectionId,
-        actorId: body.actorId || "session_user"
-      })
-    );
+    const result = platform.runAdapterContractTest({
+      companyId,
+      connectionId: contractTestMatch.connectionId,
+      actorId: body.actorId || "session_user"
+    });
+    platform.emitWebhookEvent({
+      companyId,
+      eventType: "partner.contract_test.completed",
+      resourceType: "partner_contract_test",
+      resourceId: result.contractResultId,
+      payload: result,
+      mode: result.mode
+    });
+    writeJson(res, 201, result);
     return true;
   }
 
@@ -456,7 +553,8 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
         eventType: "partner.operation.completed",
         resourceType: "partner_operation",
         resourceId: operation.operationId,
-        payload: operation
+        payload: operation,
+        mode: operation.mode
       });
     } else if (operation.status === "fallback" || operation.status === "rate_limited") {
       platform.emitWebhookEvent({
@@ -464,7 +562,8 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
         eventType: "partner.operation.failed",
         resourceType: "partner_operation",
         resourceId: operation.operationId,
-        payload: operation
+        payload: operation,
+        mode: operation.mode
       });
     }
     writeJson(res, 201, operation);
@@ -927,4 +1026,52 @@ function stableStringify(value) {
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function presentPublicAnnualPackage(record) {
+  return {
+    packageId: record.packageId,
+    accountingPeriodId: record.accountingPeriodId,
+    fiscalYear: record.fiscalYear,
+    profileCode: record.profileCode,
+    status: record.status,
+    legalFormCode: record.legalFormCode,
+    declarationProfileCode: record.declarationProfileCode,
+    packageFamilyCode: record.packageFamilyCode,
+    currentVersionId: record.currentVersionId,
+    currentEvidencePackId: record.currentEvidencePackId,
+    versionCount: Array.isArray(record.versions) ? record.versions.length : 0,
+    correctionOfPackageId: record.correctionOfPackageId || null,
+    requiresAnnualReport: record.requiresAnnualReport === true,
+    requiresBolagsverketFiling: record.requiresBolagsverketFiling === true,
+    requiresTaxDeclarationPackage: record.requiresTaxDeclarationPackage !== false,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt
+  };
+}
+
+function presentPublicTaxAccountSummary(snapshot) {
+  const latestReconciliation = Array.isArray(snapshot.reconciliations) && snapshot.reconciliations.length > 0
+    ? snapshot.reconciliations[snapshot.reconciliations.length - 1]
+    : null;
+  return {
+    ...snapshot.balance,
+    importedBatchCount: Array.isArray(snapshot.importBatches) ? snapshot.importBatches.length : 0,
+    eventCount: Array.isArray(snapshot.events) ? snapshot.events.length : 0,
+    reconciliationItemCount: Array.isArray(snapshot.reconciliationItems) ? snapshot.reconciliationItems.length : 0,
+    reconciliationRunCount: Array.isArray(snapshot.reconciliations) ? snapshot.reconciliations.length : 0,
+    latestReconciliationRunId: latestReconciliation?.reconciliationRunId || null
+  };
+}
+
+function presentPublicTaxAccountReconciliation(run) {
+  return {
+    reconciliationRunId: run.reconciliationRunId,
+    createdAt: run.createdAt,
+    createdByActorId: run.createdByActorId,
+    summary: run.summary,
+    reviewedEventCount: Array.isArray(run.eventIdsReviewed) ? run.eventIdsReviewed.length : 0,
+    suggestedOffsetCount: Array.isArray(run.suggestedOffsets) ? run.suggestedOffsets.length : 0,
+    discrepancyCaseCount: Array.isArray(run.discrepancyCaseIds) ? run.discrepancyCaseIds.length : 0
+  };
 }

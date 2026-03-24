@@ -23,6 +23,12 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
       email: DEMO_ADMIN_EMAIL
     });
 
+    const catalog = await requestJson(baseUrl, `/v1/partners/catalog?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(catalog.items.length, PARTNER_CONNECTION_TYPES.length);
+    assert.equal(catalog.items.every((item) => item.operationCodes.length > 0), true);
+
     const connections = [];
     for (const connectionType of PARTNER_CONNECTION_TYPES) {
       connections.push(
@@ -49,6 +55,12 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
       token: adminToken
     });
     assert.equal(listed.items.length, PARTNER_CONNECTION_TYPES.length);
+
+    const bankCapabilities = await requestJson(baseUrl, `/v1/partners/connections/${connections.find((connection) => connection.connectionType === "bank").connectionId}/capabilities?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(bankCapabilities.operationCodes.includes("tax_account_sync"), true);
+    assert.equal(bankCapabilities.mode, "sandbox");
 
     for (const connection of connections) {
       await requestJson(baseUrl, `/v1/partners/connections/${connection.connectionId}/contract-tests`, {
@@ -136,6 +148,7 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
       }
     });
     assert.equal(firstCrmOperation.status, "succeeded");
+    assert.equal(firstCrmOperation.mode, "sandbox");
 
     const secondCrmOperation = await requestJson(baseUrl, "/v1/partners/operations", {
       method: "POST",

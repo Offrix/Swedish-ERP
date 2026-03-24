@@ -47,7 +47,7 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
         companyId: DEMO_IDS.companyId,
         displayName: "Phase 13 API Client",
         mode: "sandbox",
-        scopes: ["api_spec.read", "reporting.read", "submission.read", "webhook.manage"]
+        scopes: ["api_spec.read", "reporting.read", "submission.read", "legal_form.read", "annual_reporting.read", "tax_account.read", "webhook.manage"]
       }
     });
     const productionClient = await requestJson(baseUrl, "/v1/public-api/clients", {
@@ -58,7 +58,7 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
         companyId: DEMO_IDS.companyId,
         displayName: "Phase 13 API Prod Client",
         mode: "production",
-        scopes: ["api_spec.read", "reporting.read", "submission.read", "webhook.manage"]
+        scopes: ["api_spec.read", "reporting.read", "submission.read", "legal_form.read", "annual_reporting.read", "tax_account.read", "webhook.manage"]
       }
     });
 
@@ -68,7 +68,7 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
       expectedStatus: 201,
       body: {
         companyId: DEMO_IDS.companyId,
-        version: "2026-03-22",
+        version: "2026-03-25",
         routeHash: "phase13-1-api-routes"
       }
     });
@@ -97,12 +97,13 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
         companyId: DEMO_IDS.companyId,
         clientId: client.clientId,
         clientSecret: client.clientSecret,
-        scopes: ["api_spec.read", "reporting.read", "submission.read"]
+        scopes: ["api_spec.read", "reporting.read", "submission.read", "legal_form.read", "annual_reporting.read", "tax_account.read"]
       }
     });
 
     const spec = await requestJson(baseUrl, "/v1/public/spec");
     assert.equal(spec.auth.scheme, "oauth2_client_credentials");
+    assert.equal(spec.version, "2026-03-25");
 
     const sandbox = await requestJson(baseUrl, `/v1/public/sandbox/catalog?companyId=${DEMO_IDS.companyId}`, {
       token: token.accessToken
@@ -118,6 +119,22 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
       token: token.accessToken
     });
     assert.equal(submissions.items.length, 1);
+
+    const declarationProfile = await requestJson(
+      baseUrl,
+      `/v1/public/legal-forms/declaration-profile?companyId=${DEMO_IDS.companyId}&asOfDate=2026-03-22&fiscalYearKey=2026`,
+      {
+        token: token.accessToken
+      }
+    );
+    assert.equal(declarationProfile.legalFormCode, "AKTIEBOLAG");
+    assert.equal(declarationProfile.declarationProfileCode, "INK2");
+
+    const taxSummary = await requestJson(baseUrl, `/v1/public/tax-account/summary?companyId=${DEMO_IDS.companyId}`, {
+      token: token.accessToken
+    });
+    assert.equal(typeof taxSummary.netBalance, "number");
+    assert.equal(taxSummary.reconciliationItemCount >= 1, true);
 
     const baselines = await requestJson(baseUrl, `/v1/public-api/compatibility-baselines?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
@@ -142,6 +159,19 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
     });
     assert.equal("secret" in listedSubscriptions.items[0], false);
     assert.equal(listedSubscriptions.items[0].secretPresent, true);
+
+    const productionSubscription = await requestJson(baseUrl, "/v1/public-api/webhooks", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        clientId: productionClient.clientId,
+        mode: "production",
+        eventTypes: ["annual_reporting.package.updated", "tax_account.reconciliation.updated"],
+        targetUrl: "https://example.test/phase47-1/webhook"
+      }
+    });
 
     const mismatchedMode = await requestJson(baseUrl, "/v1/public-api/webhooks", {
       method: "POST",
@@ -202,6 +232,56 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
     });
     assert.notEqual(productionEmitted.eventId, emitted.eventId);
 
+    platform.installLedgerCatalog({
+      companyId: DEMO_IDS.companyId,
+      actorId: "phase47-api"
+    });
+    const period = platform.ensureAccountingYearPeriod({
+      companyId: DEMO_IDS.companyId,
+      fiscalYear: 2026,
+      actorId: "phase47-api"
+    });
+    postJournal(platform, "phase47-api-income-1", 7100);
+    hardCloseYear(platform, period.accountingPeriodId);
+
+    const annualPackage = await requestJson(baseUrl, "/v1/annual-reporting/packages", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        accountingPeriodId: period.accountingPeriodId,
+        profileCode: "k2",
+        textSections: {
+          management_report: "Phase 47 annual report"
+        },
+        noteSections: {
+          notes_bundle: "Phase 47 notes"
+        }
+      }
+    });
+    assert.equal(annualPackage.currentVersion.versionNo, 1);
+
+    const publicAnnualPackages = await requestJson(baseUrl, `/v1/public/annual-reporting/packages?companyId=${DEMO_IDS.companyId}`, {
+      token: token.accessToken
+    });
+    assert.equal(publicAnnualPackages.items.some((item) => item.packageId === annualPackage.packageId), true);
+
+    const reconciliation = await requestJson(baseUrl, "/v1/tax-account/reconciliations", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(typeof reconciliation.reconciliationRunId, "string");
+
+    const publicReconciliations = await requestJson(baseUrl, `/v1/public/tax-account/reconciliations?companyId=${DEMO_IDS.companyId}`, {
+      token: token.accessToken
+    });
+    assert.equal(publicReconciliations.items.some((item) => item.reconciliationRunId === reconciliation.reconciliationRunId), true);
+
     const deliveries = await requestJson(
       baseUrl,
       `/v1/public-api/webhook-deliveries?companyId=${DEMO_IDS.companyId}&subscriptionId=${subscription.subscriptionId}`,
@@ -210,7 +290,54 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
       }
     );
     assert.equal(deliveries.items.length, 1);
+
+    const productionDeliveries = await requestJson(
+      baseUrl,
+      `/v1/public-api/webhook-deliveries?companyId=${DEMO_IDS.companyId}&subscriptionId=${productionSubscription.subscriptionId}`,
+      {
+        token: adminToken
+      }
+    );
+    assert.equal(productionDeliveries.items.length >= 2, true);
   } finally {
     await stopServer(server);
   }
 });
+
+function postJournal(platform, sourceId, amount) {
+  const created = platform.createJournalEntry({
+    companyId: DEMO_IDS.companyId,
+    journalDate: "2026-01-16",
+    voucherSeriesCode: "A",
+    sourceType: "MANUAL_JOURNAL",
+    sourceId,
+    actorId: "phase47-api",
+    idempotencyKey: sourceId,
+    lines: [
+      { accountNumber: "1510", debitAmount: amount },
+      { accountNumber: "3010", creditAmount: amount }
+    ]
+  });
+  platform.validateJournalEntry({
+    companyId: DEMO_IDS.companyId,
+    journalEntryId: created.journalEntry.journalEntryId,
+    actorId: "phase47-api"
+  });
+  platform.postJournalEntry({
+    companyId: DEMO_IDS.companyId,
+    journalEntryId: created.journalEntry.journalEntryId,
+    actorId: "phase47-api"
+  });
+}
+
+function hardCloseYear(platform, accountingPeriodId) {
+  platform.lockAccountingPeriod({
+    companyId: DEMO_IDS.companyId,
+    accountingPeriodId,
+    status: "hard_closed",
+    actorId: "phase47-api-close-requester",
+    reasonCode: "annual_reporting_ready",
+    approvedByActorId: DEMO_IDS.userId,
+    approvedByRoleCode: "company_admin"
+  });
+}

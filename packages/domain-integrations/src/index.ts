@@ -52,7 +52,16 @@ export interface AuthoritySubmissionRef {
 
 export type PublicApiMode = "sandbox" | "production";
 export type PublicApiClientStatus = "active" | "revoked";
-export type PublicApiScopeCode = "api_spec.read" | "reporting.read" | "submission.read" | "webhook.manage" | "partner.read" | "automation.read";
+export type PublicApiScopeCode =
+  | "api_spec.read"
+  | "reporting.read"
+  | "submission.read"
+  | "legal_form.read"
+  | "annual_reporting.read"
+  | "tax_account.read"
+  | "webhook.manage"
+  | "partner.read"
+  | "automation.read";
 export type WebhookDeliveryStatus = "queued" | "sent" | "rate_limited" | "suppressed" | "disabled";
 export type PartnerConnectionType = "bank" | "peppol" | "pension" | "crm" | "commerce" | "id06";
 export type PartnerConnectionStatus = "active" | "degraded" | "outage" | "disabled";

@@ -477,13 +477,19 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/public/sandbox/catalog",
               "/v1/public/report-snapshots",
               "/v1/public/submissions",
+              "/v1/public/legal-forms/declaration-profile",
+              "/v1/public/annual-reporting/packages",
+              "/v1/public/tax-account/summary",
+              "/v1/public/tax-account/reconciliations",
               "/v1/public-api/clients",
               "/v1/public-api/tokens",
               "/v1/public-api/compatibility-baselines",
               "/v1/public-api/webhooks",
               "/v1/public-api/webhook-events",
               "/v1/public-api/webhook-deliveries",
+              "/v1/partners/catalog",
               "/v1/partners/connections",
+              "/v1/partners/connections/:connectionId/capabilities",
               "/v1/partners/connections/:connectionId/health",
               "/v1/partners/connections/:connectionId/contract-tests",
               "/v1/partners/contract-tests",
@@ -2882,7 +2888,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
-    writeJson(res, 201, platform.createAnnualReportPackage({
+    const result = platform.createAnnualReportPackage({
       companyId,
       accountingPeriodId: body.accountingPeriodId,
       profileCode: body.profileCode,
@@ -2892,7 +2898,23 @@ async function handleRequest({ req, res, platform, flags }) {
       textSections: body.textSections || {},
       noteSections: body.noteSections || {},
       includeEstablishmentCertificate: body.includeEstablishmentCertificate !== false
-    }));
+    });
+    platform.emitWebhookEvent({
+      companyId,
+      eventType: "annual_reporting.package.updated",
+      resourceType: "annual_report_package",
+      resourceId: result.packageId,
+      payload: {
+        packageId: result.packageId,
+        status: result.status,
+        profileCode: result.profileCode,
+        legalFormCode: result.legalFormCode,
+        declarationProfileCode: result.declarationProfileCode,
+        versionCount: Array.isArray(result.versions) ? result.versions.length : 0
+      },
+      mode: "production"
+    });
+    writeJson(res, 201, result);
     return;
   }
 
@@ -2930,14 +2952,28 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
-    writeJson(res, 201, platform.createAnnualReportVersion({
+    const result = platform.createAnnualReportVersion({
       companyId,
       packageId: annualVersionCreateMatch.packageId,
       actorId: principal.userId,
       textSections: body.textSections || {},
       noteSections: body.noteSections || {},
       includeEstablishmentCertificate: body.includeEstablishmentCertificate !== false
-    }));
+    });
+    platform.emitWebhookEvent({
+      companyId,
+      eventType: "annual_reporting.package.updated",
+      resourceType: "annual_report_package",
+      resourceId: result.packageId,
+      payload: {
+        packageId: result.packageId,
+        status: result.status,
+        currentVersionId: result.currentVersionId,
+        versionCount: Array.isArray(result.versions) ? result.versions.length : 0
+      },
+      mode: "production"
+    });
+    writeJson(res, 201, result);
     return;
   }
 
@@ -4191,7 +4227,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
-    writeJson(res, 201, platform.openAnnualCorrectionPackage({
+    const result = platform.openAnnualCorrectionPackage({
       companyId,
       packageId: annualCorrectionMatch.packageId,
       profileCode: body.profileCode ?? null,
@@ -4199,7 +4235,22 @@ async function handleRequest({ req, res, platform, flags }) {
       textSections: body.textSections || {},
       noteSections: body.noteSections || {},
       includeEstablishmentCertificate: body.includeEstablishmentCertificate !== false
-    }));
+    });
+    platform.emitWebhookEvent({
+      companyId,
+      eventType: "annual_reporting.package.updated",
+      resourceType: "annual_report_package",
+      resourceId: result.packageId,
+      payload: {
+        packageId: result.packageId,
+        correctionOfPackageId: result.correctionOfPackageId || null,
+        status: result.status,
+        currentVersionId: result.currentVersionId,
+        versionCount: Array.isArray(result.versions) ? result.versions.length : 0
+      },
+      mode: "production"
+    });
+    writeJson(res, 201, result);
     return;
   }
 

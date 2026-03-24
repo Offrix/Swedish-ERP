@@ -18,6 +18,8 @@ test("Phase 13.2 flow exposes partner routes and runs fallback plus replay witho
     const root = await requestJson(baseUrl, "/");
     assert.equal(root.routes.includes("/v1/partners/operations"), true);
     assert.equal(root.routes.includes("/v1/jobs/:jobId/replay"), true);
+    assert.equal(root.routes.includes("/v1/partners/catalog"), true);
+    assert.equal(root.routes.includes("/v1/partners/connections/:connectionId/capabilities"), true);
 
     const adminToken = await loginWithStrongAuth({
       baseUrl,
@@ -25,6 +27,11 @@ test("Phase 13.2 flow exposes partner routes and runs fallback plus replay witho
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
     });
+
+    const catalog = await requestJson(baseUrl, `/v1/partners/catalog?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(catalog.items.some((item) => item.connectionType === "peppol"), true);
 
     const connection = await requestJson(baseUrl, "/v1/partners/connections", {
       method: "POST",
@@ -41,6 +48,10 @@ test("Phase 13.2 flow exposes partner routes and runs fallback plus replay witho
         credentialsRef: "secret://peppol"
       }
     });
+    const capabilities = await requestJson(baseUrl, `/v1/partners/connections/${connection.connectionId}/capabilities?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(capabilities.operationCodes.includes("invoice_send"), true);
     await requestJson(baseUrl, `/v1/partners/connections/${connection.connectionId}/contract-tests`, {
       method: "POST",
       token: adminToken,
@@ -65,7 +76,7 @@ test("Phase 13.2 flow exposes partner routes and runs fallback plus replay witho
       body: {
         companyId: DEMO_IDS.companyId,
         connectionId: connection.connectionId,
-        operationCode: "invoice_delivery",
+        operationCode: "invoice_send",
         payload: { invoiceId: "INV-13-E2E" }
       }
     });

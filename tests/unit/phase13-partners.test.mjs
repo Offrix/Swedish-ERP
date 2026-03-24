@@ -22,6 +22,9 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
       actorId: "phase13-2-unit"
     })
   );
+  const catalog = platform.listPartnerConnectionCatalog();
+  assert.equal(catalog.length, platform.partnerConnectionTypes.length);
+  assert.equal(catalog.every((entry) => entry.operationCodes.length > 0), true);
 
   const contractResults = connections.map((connection) =>
     platform.runAdapterContractTest({
@@ -33,8 +36,15 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   assert.equal(contractResults.length, platform.partnerConnectionTypes.length);
   assert.equal(contractResults.every((result) => result.result === "passed"), true);
   assert.equal(contractResults.every((result) => result.assertions.length > 0), true);
+  assert.equal(contractResults.every((result) => result.mode === "sandbox"), true);
 
   const bankConnection = connections.find((connection) => connection.connectionType === "bank");
+  const bankCapabilities = platform.getPartnerConnectionCapabilities({
+    companyId: DEMO_IDS.companyId,
+    connectionId: bankConnection.connectionId
+  });
+  assert.equal(bankCapabilities.operationCodes.includes("tax_account_sync"), true);
+  assert.equal(bankCapabilities.mode, "sandbox");
   const succeeded = platform.dispatchPartnerOperation({
     companyId: DEMO_IDS.companyId,
     connectionId: bankConnection.connectionId,
@@ -43,6 +53,18 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
     actorId: "phase13-2-unit"
   });
   assert.equal(succeeded.status, "succeeded");
+  assert.equal(succeeded.mode, "sandbox");
+  assert.throws(
+    () =>
+      platform.dispatchPartnerOperation({
+        companyId: DEMO_IDS.companyId,
+        connectionId: bankConnection.connectionId,
+        operationCode: "customer_sync",
+        payload: { customerId: "invalid" },
+        actorId: "phase13-2-unit"
+      }),
+    (error) => error?.code === "partner_operation_code_not_supported"
+  );
 
   const rateLimited = platform.dispatchPartnerOperation({
     companyId: DEMO_IDS.companyId,

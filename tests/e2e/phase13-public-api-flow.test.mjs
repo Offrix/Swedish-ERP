@@ -34,6 +34,8 @@ test("Phase 13.1 flow exposes public routes and lets a sandbox client consume sn
     const root = await requestJson(baseUrl, "/");
     assert.equal(root.routes.includes("/v1/public/oauth/token"), true);
     assert.equal(root.routes.includes("/v1/public-api/webhooks"), true);
+    assert.equal(root.routes.includes("/v1/public/legal-forms/declaration-profile"), true);
+    assert.equal(root.routes.includes("/v1/public/tax-account/summary"), true);
 
     const adminToken = await loginWithStrongAuth({
       baseUrl,
@@ -50,7 +52,7 @@ test("Phase 13.1 flow exposes public routes and lets a sandbox client consume sn
         companyId: DEMO_IDS.companyId,
         displayName: "Phase 13 E2E Client",
         mode: "sandbox",
-        scopes: ["api_spec.read", "reporting.read", "submission.read", "webhook.manage"]
+        scopes: ["api_spec.read", "reporting.read", "submission.read", "legal_form.read", "tax_account.read", "webhook.manage"]
       }
     });
     const token = await requestJson(baseUrl, "/v1/public/oauth/token", {
@@ -60,7 +62,7 @@ test("Phase 13.1 flow exposes public routes and lets a sandbox client consume sn
         companyId: DEMO_IDS.companyId,
         clientId: client.clientId,
         clientSecret: client.clientSecret,
-        scopes: ["api_spec.read", "reporting.read", "submission.read"]
+        scopes: ["api_spec.read", "reporting.read", "submission.read", "legal_form.read", "tax_account.read"]
       }
     });
 
@@ -75,8 +77,20 @@ test("Phase 13.1 flow exposes public routes and lets a sandbox client consume sn
     const submissions = await requestJson(baseUrl, `/v1/public/submissions?companyId=${DEMO_IDS.companyId}`, {
       token: token.accessToken
     });
+    const declarationProfile = await requestJson(
+      baseUrl,
+      `/v1/public/legal-forms/declaration-profile?companyId=${DEMO_IDS.companyId}&asOfDate=2026-03-22&fiscalYearKey=2026`,
+      {
+        token: token.accessToken
+      }
+    );
+    const taxSummary = await requestJson(baseUrl, `/v1/public/tax-account/summary?companyId=${DEMO_IDS.companyId}`, {
+      token: token.accessToken
+    });
     assert.equal(snapshots.items.length, 1);
     assert.equal(submissions.items.length, 1);
+    assert.equal(declarationProfile.declarationProfileCode, "INK2");
+    assert.equal(typeof taxSummary.netBalance, "number");
 
     const subscription = await requestJson(baseUrl, "/v1/public-api/webhooks", {
       method: "POST",

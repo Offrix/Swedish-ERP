@@ -475,8 +475,14 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/public-api/webhook-events?companyId=...`
 - `POST /v1/public-api/webhook-events`
 - `GET /v1/public-api/webhook-deliveries?companyId=...`
+- `GET /v1/public/legal-forms/declaration-profile?companyId=...&asOfDate=...`
+- `GET /v1/public/annual-reporting/packages?companyId=...`
+- `GET /v1/public/tax-account/summary?companyId=...`
+- `GET /v1/public/tax-account/reconciliations?companyId=...`
+- `GET /v1/partners/catalog?companyId=...`
 - `GET /v1/partners/connections?companyId=...`
 - `POST /v1/partners/connections`
+- `GET /v1/partners/connections/:connectionId/capabilities?companyId=...`
 - `POST /v1/partners/connections/:connectionId/health`
 - `POST /v1/partners/connections/:connectionId/contract-tests`
 - `GET /v1/partners/contract-tests?companyId=...`

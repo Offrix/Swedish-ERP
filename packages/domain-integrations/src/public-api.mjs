@@ -1,11 +1,16 @@
 import crypto from "node:crypto";
 
+const PUBLIC_API_SPEC_VERSION = "2026-03-25";
+
 export const PUBLIC_API_MODES = Object.freeze(["sandbox", "production"]);
 export const PUBLIC_API_CLIENT_STATUSES = Object.freeze(["active", "revoked"]);
 export const PUBLIC_API_SCOPE_CODES = Object.freeze([
   "api_spec.read",
   "reporting.read",
   "submission.read",
+  "legal_form.read",
+  "annual_reporting.read",
+  "tax_account.read",
   "webhook.manage",
   "partner.read",
   "automation.read"
@@ -14,6 +19,11 @@ export const WEBHOOK_DELIVERY_STATUSES = Object.freeze(["queued", "sent", "rate_
 export const WEBHOOK_EVENT_TYPES = Object.freeze([
   "report.snapshot.ready",
   "submission.updated",
+  "legal_form.profile.updated",
+  "annual_reporting.package.updated",
+  "tax_account.reconciliation.updated",
+  "partner.connection.updated",
+  "partner.contract_test.completed",
   "partner.operation.completed",
   "partner.operation.failed",
   "automation.decision.ready",
@@ -44,7 +54,7 @@ export function createPublicApiModule({ state, clock = () => new Date() }) {
     getPublicApiSandboxCatalog
   };
 
-  function getPublicApiSpec({ version = "2026-03-22" } = {}) {
+  function getPublicApiSpec({ version = PUBLIC_API_SPEC_VERSION } = {}) {
     const resolvedVersion = text(version, "public_api_version_required");
     return clone({
       version: resolvedVersion,
@@ -59,7 +69,11 @@ export function createPublicApiModule({ state, clock = () => new Date() }) {
         { path: "/v1/public/spec", scopes: ["api_spec.read"], stability: "stable" },
         { path: "/v1/public/report-snapshots", scopes: ["reporting.read"], stability: "stable" },
         { path: "/v1/public/submissions", scopes: ["submission.read"], stability: "stable" },
-        { path: "/v1/public/sandbox/catalog", scopes: ["api_spec.read"], stability: "stable" }
+        { path: "/v1/public/sandbox/catalog", scopes: ["api_spec.read"], stability: "stable" },
+        { path: "/v1/public/legal-forms/declaration-profile", scopes: ["legal_form.read"], stability: "stable" },
+        { path: "/v1/public/annual-reporting/packages", scopes: ["annual_reporting.read"], stability: "stable" },
+        { path: "/v1/public/tax-account/summary", scopes: ["tax_account.read"], stability: "stable" },
+        { path: "/v1/public/tax-account/reconciliations", scopes: ["tax_account.read"], stability: "stable" }
       ],
       webhookEventTypes: [...WEBHOOK_EVENT_TYPES]
     });
@@ -361,7 +375,33 @@ export function createPublicApiModule({ state, clock = () => new Date() }) {
     return {
       companyId: text(companyId, "company_id_required"),
       mode: "sandbox",
-      apiSpec: getPublicApiSpec({ version: "2026-03-22" }),
+      apiSpec: getPublicApiSpec({ version: PUBLIC_API_SPEC_VERSION }),
+      exampleResources: [
+        {
+          resourceType: "declaration_profile",
+          payload: {
+            legalFormCode: "AKTIEBOLAG",
+            declarationProfileCode: "INK2",
+            packageFamilyCode: "annual_report_ab"
+          }
+        },
+        {
+          resourceType: "annual_reporting_package",
+          payload: {
+            status: "draft",
+            profileCode: "k2",
+            requiresTaxDeclarationPackage: true
+          }
+        },
+        {
+          resourceType: "tax_account_summary",
+          payload: {
+            netBalance: -5000,
+            openSettlementAmount: 15000,
+            openDifferenceCaseCount: 1
+          }
+        }
+      ],
       exampleWebhookEvents: [
         {
           eventType: "report.snapshot.ready",
@@ -377,6 +417,22 @@ export function createPublicApiModule({ state, clock = () => new Date() }) {
             submissionId: "sandbox-submission",
             status: "accepted",
             receiptCount: 2
+          }
+        },
+        {
+          eventType: "annual_reporting.package.updated",
+          payload: {
+            packageId: "sandbox-annual-package",
+            status: "draft",
+            versionCount: 1
+          }
+        },
+        {
+          eventType: "tax_account.reconciliation.updated",
+          payload: {
+            reconciliationRunId: "sandbox-tax-reconciliation",
+            openDifferenceCaseCount: 1,
+            openSettlementAmount: 15000
           }
         }
       ]
