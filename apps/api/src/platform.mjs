@@ -8,6 +8,7 @@ import { createVatPlatform } from "../../../packages/domain-vat/src/index.mjs";
 import { createArPlatform } from "../../../packages/domain-ar/src/index.mjs";
 import { createApPlatform } from "../../../packages/domain-ap/src/index.mjs";
 import { createBankingPlatform } from "../../../packages/domain-banking/src/index.mjs";
+import { createTaxAccountPlatform } from "../../../packages/domain-tax-account/src/index.mjs";
 import { createHrPlatform } from "../../../packages/domain-hr/src/index.mjs";
 import { createTimePlatform } from "../../../packages/domain-time/src/index.mjs";
 import { createPayrollPlatform } from "../../../packages/domain-payroll/src/index.mjs";
@@ -51,6 +52,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "ar",
   "ap",
   "banking",
+  "taxAccount",
   "hr",
   "time",
   "benefits",
@@ -81,6 +83,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "ar",
   "ap",
   "banking",
+  "taxAccount",
   "hr",
   "time",
   "benefits",
@@ -189,6 +192,17 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
       createBankingPlatform({
         ...options,
         apPlatform: dependencies.ap
+      })
+  }),
+  createDomainDefinition({
+    key: "taxAccount",
+    label: "Tax account",
+    packageName: "@swedish-erp/domain-tax-account",
+    dependsOn: ["banking"],
+    create: ({ options, dependencies }) =>
+      createTaxAccountPlatform({
+        ...options,
+        bankingPlatform: dependencies.banking
       })
   }),
   createDomainDefinition({

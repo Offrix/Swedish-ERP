@@ -579,6 +579,132 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/tax-account/events") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "tax_account",
+      objectId: companyId,
+      scopeCode: "tax_account"
+    });
+    writeJson(res, 200, {
+      items: platform.listTaxAccountEvents({
+        companyId,
+        eventTypeCode: optionalText(url.searchParams.get("eventTypeCode")),
+        mappingStatus: optionalText(url.searchParams.get("mappingStatus")),
+        reconciliationStatus: optionalText(url.searchParams.get("reconciliationStatus"))
+      }),
+      balance: platform.getTaxAccountBalance({ companyId })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/tax-account/imports") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "tax_account",
+      objectId: companyId,
+      scopeCode: "tax_account"
+    });
+    writeJson(
+      res,
+      201,
+      platform.importTaxAccountEvents({
+        companyId,
+        importSource: body.importSource,
+        statementDate: body.statementDate,
+        importBatchId: body.importBatchId,
+        events: body.events,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/tax-account/reconciliations") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "tax_account",
+      objectId: companyId,
+      scopeCode: "tax_account"
+    });
+    writeJson(res, 200, {
+      items: platform.listTaxAccountReconciliations({ companyId }),
+      openDifferenceCases: platform.listOpenTaxAccountDifferenceCases({ companyId }),
+      balance: platform.getTaxAccountBalance({ companyId })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/tax-account/reconciliations") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "tax_account",
+      objectId: companyId,
+      scopeCode: "tax_account"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createTaxAccountReconciliation({
+        companyId,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/tax-account/offsets") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "tax_account",
+      objectId: companyId,
+      scopeCode: "tax_account"
+    });
+    writeJson(
+      res,
+      201,
+      platform.approveTaxAccountOffset({
+        companyId,
+        taxAccountEventId: body.taxAccountEventId,
+        reconciliationItemId: body.reconciliationItemId,
+        offsetAmount: body.offsetAmount,
+        offsetReasonCode: body.offsetReasonCode,
+        reconciliationRunId: body.reconciliationRunId,
+        approvalNote: body.approvalNote,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
   const fiscalYearMatch = matchPath(path, "/v1/fiscal-years/:fiscalYearId");
   if (req.method === "GET" && fiscalYearMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
