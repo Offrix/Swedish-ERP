@@ -1,57 +1,101 @@
-# Accounting close, correction and lock policy
+# Master metadata
 
-Detta dokument definierar hur perioder låses, vem som får öppna eller låsa perioder, när rättelse respektive reversal används, regler för manuella verifikationer och hur close-signoff sker.
+- Document ID: POL-BRIDGE-002
+- Title: Accounting Close Correction and Lock Policy
+- Status: Superseded compatibility bridge
+- Owner: Finance governance
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior primary `docs/policies/accounting-close-correction-and-lock-policy.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-document-manifest.md`
+  - `docs/master-control/master-policy-matrix.md`
+  - `docs/master-control/master-rebuild-control.md`
+- Related domains:
+  - close
+  - ledger
+  - annual reporting
+- Related code areas:
+  - `packages/domain-ledger/*`
+  - `packages/domain-reporting/*`
+  - `apps/backoffice/*`
+- Related future documents:
+  - `docs/policies/close-correction-and-reopen-policy.md`
 
-## Scope
+# Purpose
 
-- periodlåsning, reopen, rättelser, reverseringar och close-signoff
-- alla manuella verifikationer och close-justeringar som påverkar stängda eller på väg att stängas perioder
+Denna fil finns kvar endast som kompatibilitetsbrygga för äldre close-referenser. Den är inte längre primär policykälla.
 
-## Policy
+# Scope
 
-### Periodstatus
+Omfattar:
 
-- `open` innebär att ordinarie bokningar och subledgerflöden är tillåtna.
-- `soft_locked` innebär att operativ bokning stängs för stora delar av verksamheten men att godkända justeringar kan fortsätta.
-- `hard_closed` innebär att inga nya bokningar får göras i perioden utan formell reopen.
+- mappning från äldre close/lock-termer till den nya primära policyn
+- förklaring av hur äldre beskrivningar ska tolkas
 
-### Vem får låsa och öppna
+Omfattar inte:
 
-- soft lock initieras av close_preparer eller finance manager.
-- hard close kräver sign-off av close_signatory och vid behov andra domänsignatärer.
-- reopen kräver minst två personer: den som begär och den som godkänner. Minst en av dem ska vara senior finance-roll.
+- nya close-regler
+- nya reopen-regler
 
-### Rättelse vs reversal
+# Why it exists
 
-- Före hard close används i första hand vanlig korrigering eller reversal inom samma period.
-- Efter hard close används i första hand reversal eller korrigering i nästa öppna period om felet inte kräver ändring av redan externrapporterad period.
-- Reopen används när felet är materiellt, påverkar extern rapportering eller annars gör nästa-period-rättelse olämplig.
+Efter master-control-omtaget ligger den bindande close-regleringen i `docs/policies/close-correction-and-reopen-policy.md`. Den gamla filen måste finnas kvar som spårbar brygga tills alla historiska referenser fasats ut.
 
-### Manuella verifikationer
+# Non-negotiable rules
 
-- Manual journals i close-period kräver reason code, underlag och attest.
-- Journal mot kontrollkonto eller skattekonto kräver högriskgranskning.
-- Alla close-justeringar ska länkas till difference item eller checklist-item i close-paketet.
+1. Den nya bindande policyn för close, correction, reopen och lock är `docs/policies/close-correction-and-reopen-policy.md`.
+2. Denna fil får inte användas som primär källa för ny implementation.
+3. Alla nya lock-, reopen- och correctionflöden ska följa den nya policyn.
+4. Historiska referenser i docs eller kod ska tolkas via den nya policyn.
 
-### Sign-off
+# Allowed actions
 
-- Sign-off får ske först när bank, AR, AP, moms, suspense och close-checklistor är klara eller uttryckligen waivade.
-- Varje sign-off är kopplad till snapshot-version av underlaget.
-- Om perioden reopenas måste berörd sign-off göras om.
+- använda filen för att förstå äldre språkbruk
+- använda filen som ompekning till den nya policyn
 
-## Undantag
+# Forbidden actions
 
-- Akut reopen efter incident kräver incidentnummer och eftergodkännande om beslutsfattare inte kan nås i realtid.
-- Undantag från close-kalender ska dokumenteras i periodens close-paket.
+- definiera nya reopen-regler här
+- skapa runtime enforcement mot denna fil
+- använda denna fil som källa för close workbench eller backoffice-beslut
 
-## Obligatoriska bevis och loggar
+# Approval model
 
-- logg över lås- och öppningshändelser
-- reopen request med orsak, påverkan och godkännare
-- lista över manuella verifikationer i perioden och deras underlag
-- close-signoff med snapshot-hash
+Godkännandekedjor för close och reopen ägs nu av `docs/policies/close-correction-and-reopen-policy.md` och relevant SoD-policy.
 
-## Review cadence
+# Segregation of duties where relevant
 
-- månatlig close-review per bolag
-- kvartalsvis kontroll av reopen-historik och orsaker
+SoD för close-signoff och reopen styrs av:
+
+- `docs/policies/close-correction-and-reopen-policy.md`
+- `docs/policies/signoff-and-segregation-of-duties-policy.md`
+
+# Audit and evidence requirements
+
+- nya auditscheman ska peka på den nya policyn
+- historiska referenser får bevaras för revisionsspår
+
+# Exceptions handling
+
+Inga nya undantag får definieras här.
+
+# Backoffice/support restrictions where relevant
+
+Backoffice får inte skapa egna close-undantag genom att hänvisa till denna fil.
+
+# Runtime enforcement expectations
+
+Runtime enforcement ska ligga i close- och ledgerdomänerna och följa den nya primära policyn.
+
+# Test/control points
+
+- verifiera att close implementation använder ny policy
+- verifiera att reopen-logik inte längre hänvisar till denna fil som primär källa
+
+# Exit gate
+
+- [ ] denna fil används endast som historisk brygga
+- [ ] ny close-logik och nya tester använder primärpolicy

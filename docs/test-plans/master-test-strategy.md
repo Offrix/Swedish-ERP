@@ -1,527 +1,261 @@
-# Master test strategy
+# Master metadata
 
-Detta dokument definierar hur hela systemet ska testas från bootstrap till pilot och produktion.
+- Document ID: TP-014
+- Title: Master Test Strategy
+- Status: Binding
+- Owner: QA architecture and delivery verification
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/test-plans/master-test-strategy.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-build-sequence.md`
+  - `docs/master-control/master-golden-scenario-catalog.md`
+  - `docs/master-control/master-document-manifest.md`
+  - `docs/master-control/master-rulepack-register.md`
+- Related domains:
+  - all regulated domains and surfaces
+- Related code areas:
+  - `tests/*`
+  - `apps/*`
+  - `packages/*`
+- Related future documents:
+  - all specific test plans listed in `docs/master-control/master-document-manifest.md`
 
-## Mål
+# Purpose
 
-- upptäcka fel innan de når bokföring eller myndighetsrapportering
-- säkra att reglerade motorer beter sig identiskt över tid
-- ge Codex och användaren en tydlig modell för vad som ska testas när
-- göra varje regression reproducerbar
+Definiera den bindande teststrategin för hela systemet från plattform till pilot så att varje reglerat beslut, varje domänmotor och varje operatörsyta verifieras reproducerbart.
 
-## Testlager
+# Scope
 
-### 1. Statisk analys
+Omfattar:
+
+- testlager
+- testägarskap
+- golden-data-struktur
+- environments
+- releasekrav
+- obligatoriska tvärgående testplaner
+
+Omfattar inte:
+
+- domänspecifika detaljer som redan ägs av separata testplaner
+
+# Blocking risk
+
+Otillräcklig teststrategi ger:
+
+- regressionsfel i bokföring, moms, lön, AGI, HUS och annual filing
+- falsk driftmognad
+- okontrollerad AI-automation
+- oförklarliga skillnader mellan gamla och nya rulepacks
+
+# Golden scenarios covered
+
+Masterstrategin täcker hela `docs/master-control/master-golden-scenario-catalog.md` genom att tvinga varje scenario till minst ett testlager och minst en golden-data-representation där det är reglerat eller finansiellt riskfyllt.
+
+# Fixtures and golden data
+
+Alla reglerade domäner ska ha:
+
+- syntetiska men realistiska fixtures
+- golden datasets med versionsnummer
+- expected outputs för posting, receipts, review och blockers
+- replaybara migrations- och integrationfixtures där det krävs
+
+# Unit tests
+
+Måste finnas för:
+
+- rena domänfunktioner
+- state-machine transitions
+- deterministic decision rules
+- field validation
+- mapping- och splitlogik
+- formattering endast där formattering påverkar contracts
+
+# Integration tests
+
+Måste finnas för:
+
+- databas, migrations och projections
+- queue/outbox/replay
+- document ingest och OCR-handoff
+- annual-reporting package build
+- submission/receipt persistence
+- bank/payments adapters
+- search indexing
+- mobile sync envelope handling
+
+# E2E tests
+
+Måste finnas för:
+
+- desktop workbench-flöden för finance, payroll, review och annual
+- field-mobile kärnflöden
+- support/backoffice-kärnflöden
+- high-risk close, HUS, AGI och filing flows
+
+# Property-based tests where relevant
+
+Måste finnas där invariants lämpar sig, särskilt för:
+
+- ledger balance
+- rulepack date selection
+- payroll totals
+- VAT mapping completeness
+- idempotency keys
+- package fingerprint consistency
+
+# Replay/idempotency tests where relevant
+
+Måste finnas för:
+
+- worker jobs
+- submissions
+- receipts
+- import batches
+- payment exports
+- annual package submissions
+- mobile sync merges
+
+# Failure-path tests
+
+Måste finnas för:
+
+- invalid state transitions
+- missing required fields
+- external adapter failures
+- transport receipt without domain acceptance
+- review-required branches
+- replay after dead-letter
+
+# Performance expectations where relevant
+
+Prestandatest krävs för:
+
+- dokumentingest
+- AP/AR batchflöden
+- stora lönesatser
+- reporting/export
+- search
+- queue recovery
+- annual package build
+
+# Acceptance criteria
+
+- varje blockerande domän har minst unit, integration och relevant golden coverage
+- varje high-risk user flow har minst ett E2E-scenario
+- varje release till reglerat område kör relevanta golden suites
+- varje produktionsincident i reglerad kärna ger nytt regressionstest
+
+# Test layers
+
+## 1. Static analysis
+
 - lint
 - format
 - typecheck
 - dependency boundary checks
-- security scanning
-- migrationskontroll
+- secrets scanning
+- migration consistency checks
 
-### 2. Unit tests
-- rena funktioner
-- klassificering
-- summeringar
-- formattering
-- parserfunktioner
-- inboxrouting per bolag och kanal
-- message-id dedupe och bilagestatus
-- OCR-klassificering för faktura, kvitto och avtal
-- review-task-statusar, manuell korrigering och confidence-beslut
-- offertversionering, fakturaplan och kundimport-idempotens i AR
-- issue-idempotens, kreditstängning, leveransvalidering och betallänkar i AR-fakturering
-- öppna poster, delbetalningar, dunningavgifter, bankmatchning och aging-buckets i kundreskontra
-- leverantörsimport-idempotens, bankdetaljspärrar, PO-defaults och mottagningsdubbletter i AP
-- OCR-baserad leverantörsfakturaingest, fler-rads-kodning, momsförslag och 2-vägs-/3-vägsmatchning i AP
-- flerstegsattest, betalningsförslag, 2450-reservation, bankbokning och returreplay i AP
-- flera anställningar per person, avtalsversioner, chefsträd, payoutmaskning och känslig HR-audit
-- clock events, schemaassignments, premiumminuter, periodlås och reproducerbara tidsaldon
-- frånvarotyper, chefsgodkännande, signal-komplettering, AGI-lås och historik i anställdportalen
-- förmånsvärdering för bil, drivmedel, friskvård, gåvor, kost, sjukvårdsförsäkring och nettolöneavdrag
-- search ranking och permissions trimming-beslut
-- retry/backoff-beräkningar och jobbstate
-- feature flag-upplösning och kill-switch-beslut
-- offline merge-regler och konfliktdetektion
+## 2. Unit tests
 
-### 3. Property-based tests
-- debit = credit
-- totalsummor = radsummor
-- inga negativa HUS-ansökningsbelopp
-- momsbeslut ger alltid deklarationsmappning eller granskningskö
-- lönekörning ger alltid nettolön enligt definierad formel
-- versionerade regler är deterministiska
+Täcker deterministic rules, field validation, state machines och små rent funktionella komponenter.
 
-### 4. Contract tests
-- REST/GraphQL/JSON API-kontrakt
-- externa adaptergränser
-- XML/JSON-schema
-- webhook-signaturer
-- open banking- och Peppol-adaptrar
-- indexschema, snippets och saved-search payloads
-- receipt- och submissionkontrakt
-- offline sync-kontrakt och konfliktpayloads
-- exportmetadata och metric-versioner
+## 3. Property-based tests
 
-### 5. Golden-data tests
-- hela affärsfall med låsta indata och förväntat utfall
-- samma golden dataset ska kunna spelas upp efter regeluppdateringar
-- diffrapport mellan gammal och ny regelmotor ska produceras
+Täcker invariants, datumgränser, summaregler och replay-/idempotencyegenskaper.
 
-### 6. Integration tests
-- Postgres
-- cache/queue
-- objektlagring
-- inbound email
-- råmailmetadata, bilagesplit och karantän
-- bankhändelser
-- OCR pipeline
-- OCR-rerun och nya derivatversioner utan mutation
-- review queue och manuella korrigeringar per bolag
-- kundregister, artiklar, prislistor, offertrevision och avtalsplaner i AR
-- issued kundfakturor, kreditkopplingar, Peppol/PDF-leveranser och payment-link-persistens i AR
-- öppna poster, allocations, unmatched receipts, dunning runs, writeoffs och aging snapshots i AR
-- leverantörsregister, leverantörskontakter, PO-rader, mottagningsobjekt, importbatcher och invoice-receipt-links i AP
-- leverantörsfaktura-drafts, match runs, variansobjekt, AP-open-items och dokumentdrivna invoice-links i AP
-- tidschema, schematilldelningar, clock events, enriched time entries, balans-transaktioner och periodlås
-- leave types, leave entry events, leave signals, leave signal locks och employee-portal-projektioner
-- löneartskatalog, lönekalendrar, lönekörningar, statutory profiles, skatt/SINK, AGI-versioner, payroll postings, payout batches, vacation liability snapshots, receipts och persistenta lönebesked i payroll
-- förmånskatalog, benefit events, AGI-mappning, payroll posting och audit trail i benefits
-- travel claims, foreign allowance tables, travel day valuations, mileage logs, expense receipts, advances och payroll intents i travel
-- Peppol adapter
-- myndighetsadaptrar
-- sökindex och projektioner
-- support/backoffice och audit explorer
-- exportjobb och filmaterialisering
+## 4. Contract tests
 
-### 7. E2E-tests
-- UI till API till databas till bokföring till rapport
-- operator workbench och guided flows i desktop-web
-- vardagliga faltfloden i field-mobile
-- mobilflöden för check-in, tid, resa och signatur
-- disable-flagga och återläsning av företagets inboxflöden
-- disable-flagga och reviewdriven OCR-korrigering med rerun-historik
-- disable-flagga och AR-masterdataflöde med offertrevision och aktivt avtal
-- disable-flagga och AR-faktureringsflöde med issue, kredit, leverans och payment-link
-- disable-flagga och AR-reskontraflöde med delbetalning, felmatchningsreversal, dunning hold och aging snapshot
-- disable-flagga och AP-masterdataflöde med leverantör, PO, mottagning och receipt-dubblettskydd
-- disable-flagga och AP-invoiceflöde med OCR-ingest, fler-rads-postning och variansblockerad postning
-- disable-flagga och AP-betalflöde med attest, export, bankbokning och idempotent retur
-- disable-flagga och HR-masterflöde med flera anställningar, avtalsversioner, dokumentlänk och känslig audit
-- disable-flagga och tidsflöde med schema, stämpling, projektaktivitet, saldo och periodlås
-- disable-flagga och frånvaroflöde med employee portal, chefsgodkännande, historik och AGI-lås
-- disable-flagga och payrollflöde med lönekalender, ordnad lönekedja, skatt/SINK, AGI-signering, payroll posting, payout export, bankmatchning, semesterskuld, retrospårning, slutlön och regenererat lönebesked
-- disable-flagga och benefitsflöde med förmånsregistrering, benefit-only warning, AGI-mappning och audit trail
+Täcker API-kontrakt, adapters, file formats, submission payloads, webhook events och offline envelopes.
 
-- disable-flagga och travelflode med traktamente, multilandregel, milersattning, utlagg, payrollkoppling och audit trail
-- disable-flagga och projektflÃ¶de med projektsetup, budgetversion, resursbelÃ¤ggning, payroll-backed actuals, AR-kopplad WIP och forecast snapshot
-- mobilfloden for dispatch, materialuttag, arbetsorderslut och arbetsorderfakturering
+## 5. Golden-data tests
 
-### 8. Performance tests
-- load på dokumentingest
-- load på AR/AP
-- lönekörning för många anställda
-- rapportgenerering
-- close workbench
-- samtidiga bankavstämningar
-- global search och permissions trimming under last
-- queue-recovery och replay under incidentåterhämtning
-- stora Excel/PDF-exporter
+Täcker hela affärsfall med låsta indata och förväntat utfall för journaler, reports, receipts, blockers och review.
 
-### 9. Restore and resilience
-- databasåterläsning
-- objektlagringsåterläsning
-- köåterhämtning
-- failoverövning
-- chaos på externa adapterfel
+## 6. Integration tests
 
-## Golden data library
+Täcker verkliga domänkedjor över databas, queue, object storage, adapters och projections.
 
-## 36. Teststrategi — hur varje fas testas till perfektion
+## 7. E2E tests
 
-### 36.1 Testpyramiden
-- unit tests för ren logik
-- property-based tests för gränsvärden och datumregler
-- contract tests för API och integrationer
-- golden-data tests för skatt, moms, lön, pension, traktamente, ROT/RUT, Peppol, årsredovisning
-- component tests för UI-komponenter
-- end-to-end tests för centrala flöden
-- load tests för kritiska transaktionsmönster
-- restore tests för backup/återläsning
-- manual UAT för pilotscenarier
+Täcker UI till API till persistence till regulated outcome för de viktigaste operatörsflödena.
 
-### 36.2 Golden-data krav
-Skapa golden-data för minst följande domäner:
-- VAT_SE_DOMESTIC_STANDARD
-- VAT_SE_MIXED_RATES
-- VAT_EU_B2B_GOODS
-- VAT_EU_B2B_SERVICES
-- VAT_EU_B2C_THRESHOLD_BELOW
-- VAT_EU_B2C_THRESHOLD_CROSSING
-- VAT_OSS_EUR_REPORTING
-- VAT_IOSS_ELIGIBLE_CONSIGNMENT
-- VAT_PERIODIC_STATEMENT_CORRECTION
-- VAT_DECLARATION_LEDGER_RECONCILIATION
-- VAT_EXPORT_OUTSIDE_EU
-- VAT_IMPORT_WITH_SPEDITOR
-- VAT_REVERSE_CHARGE_BUILD
-- VAT_REPRESENTATION_LIMITED_DEDUCTION
-- PAYROLL_STANDARD_MONTHLY
-- PAYROLL_BONUS_AND_OVERTIME
-- PAYROLL_SINK
-- PAYROLL_AGE_67_PLUS
-- PAYROLL_BENEFIT_ONLY
-- PAYROLL_ABSENCE_DATA_BLOCK
-- BENEFIT_CAR
-- BENEFIT_FUEL
-- BENEFIT_HEALTH_INSURANCE
-- FRISKVARD_VALID
-- FRISKVARD_INVALID_GIFTCARD
-- GIFTS_THRESHOLD_PASS
-- GIFTS_THRESHOLD_FAIL
-- TRAVEL_DOMESTIC_HALF_DAY
-- TRAVEL_DOMESTIC_FULL_DAY
-- TRAVEL_3_MONTH_REDUCTION
-- TRAVEL_2_YEAR_REDUCTION
-- TRAVEL_FOREIGN_MULTI_COUNTRY
-- MILEAGE_OWN_CAR
-- MILEAGE_BENEFIT_CAR_PAID_FUEL
-- MILEAGE_BENEFIT_CAR_PARTIAL_FUEL_INVALID
-- PENSION_ITP1
-- PENSION_ITP2
-- PENSION_FORA
-- SALARY_EXCHANGE_STANDARD
-- SALARY_EXCHANGE_PAUSE
-- ROT_STANDARD
-- RUT_STANDARD
-- PERSONALLIGGARE_SITE_THRESHOLD
-- PERSONALLIGGARE_CHECKIN_OFFLINE
-- PEPPOL_OUTBOUND_STANDARD
-- PEPPOL_INBOUND_CREDIT_NOTE
-- ANNUAL_REPORT_K2
-- ANNUAL_REPORT_K3
-- ANNUAL_REPORT_REOPENED_PERIOD_NEW_VERSION
-- ANNUAL_REPORT_DIGITAL_SUBMISSION_PACKAGE
+## 8. Performance and resilience tests
 
-### 36.3 Vad som räknas som perfekt verifiering i varje fas
-En fas är inte klar förrän:
-- alla definierade testfall är gröna
-- inga öppna kritiska eller höga buggar finns
-- inga omarkerade juridiska luckor finns
-- docs för fasen är uppdaterade
-- runbook för fasens driftstöd finns
-- rollback-strategi finns om fasen kan påverka produktion
-- demo av fasen kan köras på seed-data utan manuell databaspatch
+Täcker load, replay, restore, chaos och degraded external dependencies.
 
-### 36.4 Särskilda verifieringar per domän
-#### Ledger
-- varje journal är balanserad
-- verifikationsnummer är deterministiska inom bolag och serie
-- samma idempotency key skapar inte ny verifikation
-- importerad historik är markerad utan att tyst skriva om bokad historik
-- historisk rapport kan återskapas
-- reportsnapshot bevarar samma siffror efter senare bokningar
-- drilldown från rapport till journal till dokumentlänk fungerar
-- låst period kan inte muteras
-- correction och reversal skapar ny immutabel verifikation med länk till original
-- obligatoriska projektdimensioner valideras innan bokning
-- reconciliation sign-off binds till exakt snapshot-hash och evidence-ref
+# Mandatory cross-cutting plans
 
-#### Moms
-- beslutsträd returnerar förklaring
-- historiskt beslut återspelar rätt regelpaket för dåtidens datum
-- saknade eller motsägelsefulla VAT-fakta går till granskningskö
-- rapportboxar stämmer mot golden-data
-- kreditnota spegelvänder originalets boxbelopp och bokföringspåverkan
-- importmoms och omvänd moms ger både utgående och ingående moms enligt avdragsrätt
-- rättelse gör om hela deklarationen
+Följande testplaner är obligatoriska när scopet berör området:
 
-#### Kundreskontra och kundmasterdata
-- kundnummer är unika per bolag
-- kundimport med samma batchKey och payload är idempotent
-- ny kundimportbatch kan uppdatera befintlig kund utan dublettskapning
-- skickad offert bevaras som historisk version när ny offertversion skapas
-- endast accepterad offert kan konverteras till avtal
-- aktivt avtal genererar fakturaplan utan luckor eller overlap
-- samma issue-forsok skapar inte en andra journal eller ett nytt fakturanummer
-- kreditfaktura använder serie C och stänger korrekt kvarvarande krediterbart belopp
-- Peppol-leverans kräver strukturerad mottagare och validerade referenser
-- delbetalning minskar rest utan att tappa tidigare allocation-historik
-- felmatchning kan reverseras utan att förlora unmatched receipt trail
-- tvistade eller hold-markerade poster går inte automatiskt till påminnelse eller writeoff
-- aging snapshots är reproducerbara för samma cutoff och underlag
+- `docs/test-plans/queue-resilience-and-replay-tests.md`
+- `docs/test-plans/search-relevance-and-permission-trimming-tests.md`
+- `docs/test-plans/mobile-offline-sync-tests.md`
+- `docs/test-plans/migration-parallel-run-diff-tests.md`
+- `docs/test-plans/audit-review-and-sod-tests.md`
+- `docs/test-plans/feature-flag-rollback-and-disable-tests.md`
+- `docs/test-plans/report-reproducibility-and-export-integrity-tests.md`
 
-#### Leverantörsregister, PO och mottagning
-- leverantörsnummer är unika per bolag
-- leverantörsimport med samma batchKey och payload är idempotent
-- bankdetaljändring från import sätter betalningsspärr och audit trail
-- PO-rader ärver konto-, moms- och prisdefaults deterministiskt
-- PO kan inte gå från draft direkt till sent
-- mottagning kan bara registreras mot godkänd eller skickad PO
-- mottagningsdubbletter återanvänder samma receipt vid identisk extern referens eller identisk payload
-- kumulativ mottagen kvantitet kan inte passera tillåten överleveranstolerans
-- invoice-receipt-link går att reproducera från seed och demo-seed
+# Test data policy
 
-#### Leverantörsfakturor, attest och betalningar
-- minst två atteststeg kan stoppa postning mellan steg ett och steg två
-- endast rätt atteststeg kan godkänna nästa steg i kedjan
-- betalningsförslag kan inte exporteras utan föregående godkännande
-- reservation bokar AP-skuld mot 2450 utan att minska bankkontot
-- bankbokning flyttar saldo från 2450 till valt bankkonto
-- retur återöppnar AP-post och nollställer paid-status utan dubbla journaler vid replay
-- seed visar bokad utbetalning och demo-seed visar returnerad betalning
+- all testdata ska vara syntetisk eller avidentifierad
+- samma dataset ska kunna användas i local, CI och staging om inte adaptersekretess hindrar det
+- golden datasets ska vara versionsstyrda och append-only
+- nytt reglerat produktionsfel kräver nytt regressionstest eller ny golden vector
 
-#### HR-master
-- samma person kan ha flera anställningar utan dubbla personobjekt
-- ny avtalsversion bevarar tidigare avtalsversion oförändrad
-- chefsträd blockerar självreferens och uppenbar cykel
-- bankkonton maskas i API-svar
-- dokument kan länkas till anställd via dokumentmotorn
-- känsliga fält skapar auditspår för identitet, skyddad identitet och utbetalningsuppgifter
-- seed visar flera anställningar och demo-seed visar skyddad identitet, chefsbyte och utländskt bankkonto
+# Environments
 
-#### Tid, schema och saldon
-- clock events lagras som separata in- och utstämplingar per anställning
-- aktivt schema kan tilldelas anställning med giltighetsintervall
-- tidpost kan bära både projectId och activityCode utan att tappa schemareferens
-- premiumminuter för OB, jour och beredskap bevaras på tidposten
-- saldo för flex, komp och övertid är reproducerbart för samma cutoffdatum
-- periodlås blockerar både nya stämplingar och nya tidposter inom låst intervall
-- seed visar schema, stämpling, tidpost, saldo och periodlås både i baseline och demo
+## local
 
-#### Frånvaro, attest och anställdportal
-- frånvarotyp bär signaltyp, managerkrav och dokumentkrav utan att regler läggs i UI
-- aktiv manager assignment styr vem som får godkänna eller avslå frånvaro
-- anställdportalen får bara se och mutera den inloggade personens egna frånvarorader
-- rejected och approved leave entries bevarar events, orsaker och tidsstämplar i historiken
-- AGI-känslig frånvaro kräver reportingPeriod och komplett dagextent innan submit
-- leave signal locks i `ready_for_sign`, `signed` eller `submitted` blockerar sena ändringar i samma period
-- seed visar godkänd frånvaro med signaler och demo-seed visar avslag, korrigerad portalhistorik och signeringslås
-
-#### Lön
-- lönekedjan följer samma 18 steg för samma underlag
-- retrokorrigering sparar source period, source run och source line
-- slutlön kan innehålla settlement, kvarvarande semester och förskottssemesteråtertag
-- AGI kan genereras utan manuell redigering
-- SINK och vanlig preliminärskatt sätter exakt ett skattefält per individ
-- frånvarodata blockeras efter `ready_for_sign`, `signed` och `submitted`
-- correction version bevarar receipt trail och changed-employee traceability
-- lönebesked matchar bokföring
-- payroll posting bevarar projekt-, kostnadsställe- och affärsområdesdimensioner till journalrader
-- payout batch export är deterministisk och kan matchas mot bank utan dubbelbokning
-- semesterskuldssnapshot kan återskapas oförändrat för samma period och underlag
-
-#### Förmåner
-- förmånsvärde matchar regelpaket
-- nettolöneavdrag reducerar rätt
-- benefit-only scenario loggas korrekt
-
-#### Traktamente
-- avrese-/hemkomsttider fungerar
-- måltidsreduktion fungerar
-- samma ort mer än tre månader fungerar
-
-#### Pension
-- rapportunderlag kan stämmas av mot leverantörsfaktura
-- salary exchange warnings triggar rätt
-- pause/resume ger rätt lön och pension
-- ITP1 månadsunderlag, ITP2 pensionsmedförande årslön och Fora-månadsrapport skiljs åt deterministiskt
-- extra pension och särskild löneskatt bokförs separat från grundpremie
-- providergruppering och due dates för Collectum och Fora är reproducerbara för samma period
-
-#### Projekt, budget och uppfÃ¶ljning
-- projektbudgeter versionshanteras med spÃ¥rbar auditkedja
-- projektkostnad inkluderar lÃ¶n, fÃ¶rmÃ¥ner, pension och resor med bÃ¥de explicit projektdimension och tidsbaserad fÃ¶rdelning
-- WIP kan Ã¥terskapas fÃ¶r samma cutoff och stÃ¤mmas av mot fakturering
-- forecast at completion och resource load Ã¤r reproducerbara fÃ¶r samma underlag
-- disable-flagga blockerar alla projekt-rutter utan att pÃ¥verka andra faser
-
-#### ROT/RUT
-- arbetskostnad skiljs från material/resa/admin
-- flera köpare hanteras
-- utbetalningsbegäran skapas rätt
-
-#### Personalliggare
-- byggplats över tröskel kräver liggare
-- check-in/out sparas
-- export för kontroll kan tas ut
-
-#### Peppol
-- XML/UBL validerar
-- business rules validerar
-- kvittenskedja sparas
-
-### 36.5 Prestandamål som ska gälla innan extern skalning
-- publika sidor: snabb first-contentful paint på desktop
-- fakturainbox: nya dokument ska normalt synas i systemet inom få minuter
-- kundfaktura skapande: interaktiv respons under normal desktopanvändning
-- lönekörning: rimlig tid även för större batcher
-- rapporter: tunga rapporter ska kunna gå async men ge tydlig status
-- sök: global sök ska svara snabbt för vardagliga objekt
-
-## Obligatoriska tvärgående testplaner
-
-Följande testplaner är obligatoriska när scope berör området och ska behandlas som officiell del av masterstrategin:
-
-- `docs/test-plans/queue-resilience-and-replay-tests.md` för köer, retry, replay och dead-letter.
-- `docs/test-plans/search-relevance-and-permission-trimming-tests.md` för search, ranking och behörighetsfiltrering.
-- `docs/test-plans/mobile-offline-sync-tests.md` för offlinekö, konfliktlösning och dubblettskydd i mobil/offline.
-- `docs/test-plans/migration-parallel-run-diff-tests.md` för importbatch, parallellkörning, diff report och cutover.
-- `docs/test-plans/audit-review-and-sod-tests.md` för audit explorer, supportåtkomst, impersonation, break-glass och SoD.
-- `docs/test-plans/feature-flag-rollback-and-disable-tests.md` för rollout, rollback, kill switch och emergency disable.
-- `docs/test-plans/report-reproducibility-and-export-integrity-tests.md` för metric catalog, reproducerbarhet, drilldown och exportjobb.
-
-När en fas använder någon av dessa förmågor ska respektive testplan läsas tillsammans med relevanta ADR:er, policies och runbooks innan implementation startar.
-
-## FAS 11.1 minimum coverage
-
-- rapporttesterna ska täcka `trial_balance`, `income_statement`, `balance_sheet`, `cashflow`, `ar_open_items`, `ap_open_items` och `project_portfolio`
-- drilldown ska verifiera journal, dokumentlänk eller stödjande snapshot beroende på rapportkälla
-- metric catalog och custom report definitions ska testas för versionsstyrning, stabila koder och deterministiska filtersammanslagningar
-- exportjobb ska testas för Excel/PDF, watermark-läge, snapshot-bindning, supersede-logik och reproducerbar artefaktmetadata
-
-## FAS 11.2 minimum coverage
-
-- portfÃ¶ljtesterna ska verifiera att endast ansvarig konsult, backup-konsult eller administrativ byrÃ¥roll ser klienten
-- deadlinehÃ¤rledning ska testas mot `closeLeadBusinessDays`, `reportingLeadBusinessDays`, `submissionLeadBusinessDays`, `generalLeadBusinessDays` och `approvalLeadBusinessDays`
-- client requests ska testas fÃ¶r `draft -> sent -> delivered -> accepted` samt fÃ¶rsenings- och scopefel
-- approval packages ska testas fÃ¶r named-approver-regel, snapshotref, supersede-beteende och klientrespons
-- massÃ¥tgÃ¤rder ska testas fÃ¶r selektiv kÃ¶rning, delvis fel och per-klient-resultat
-- work items och kommentarer ska testas fÃ¶r assignment, statushistorik och auditdrivet samarbete
-
-## FAS 11.3 minimum coverage
-
-- close checklist ska testas fÃ¶r skapande, deadlinehÃ¤rledning och versionskedja per klient och period
-- signed reconciliation runs ska bindas till bank, AR, AP och VAT-steg med period- och area-validering
-- `hard_stop` och `critical` blockers ska stoppa sign-off tills de Ã¤r lÃ¶sta eller giltigt waivade
-- waiver och override ska testas fÃ¶r senior finance-roll, audit och Ã¥terstÃ¤lld checklist-readiness
-- sign-off chain ska testas fÃ¶r ordning, snapshot-bindning, dual control och hard close
-- reopen ska testas fÃ¶r ny checklistversion, superseded sign-off och bevarad historik
-- rapport som kÃ¶rs om efter close ska ge samma line metrics fÃ¶r samma period och underlag
-
-## FAS 12.1 minimum coverage
-
-- annual-reporting-testerna ska tÃ¤cka bÃ¥de `k2` och `k3` med separata text- och notsektioner
-- Ã¥rspaket ska bara kunna byggas mot `hard_closed` period och ska binda till exakt balans- och resultatrapportsnapshot
-- paketversioner ska ge deterministisk checksumma, source fingerprint och tax-package outputs fÃ¶r samma underlag
-- signatory chain ska testas fÃ¶r invitation, signering, package-status och bevarad historik per version
-- ofÃ¶rÃ¤ndrat bokfÃ¶ringsunderlag ska inte skapa ny version och Ã¤ndrat underlag efter reopen ska skapa superseding version med diff
-- versiondiff ska visa fÃ¶rÃ¤ndringar i rapportsnapshot, textsektioner eller notsektioner utan att tidigare version muteras
-
-## FAS 12.2 minimum coverage
-
-- deklarationsunderlag ska testas för `INK`, `NE` och `SRU` med interna checks bundna till samma låsta rapportsnapshots som årsrapportspaketet
-- moms-, AGI-, HUS- och särskild löneskatt-översikter ska härledas till respektive källa utan att underlaget muteras
-- tax declaration packages ska återanvända samma paket vid oförändrat source fingerprint och skapa nytt först när årsunderlaget ändras
-- submission tests ska särskilja `received`, `accepted`, `finalized`, `transport_failed` och `domain_rejected`
-- receiptkedjan ska vara append-only och identiska receipts ska vara idempotenta
-- action queue ska få rätt owner queue och rätt recommended action för transportfel respektive domänfel
-- retry ska skapa ny attempt utan att skriva över tidigare payload eller receipts
-
-## FAS 13.1 minimum coverage
-
-- publika routes ska testa spec-version, OAuth client credentials, sandbox-mode och scope-trimning per bolag
-- publika read-routes ska aldrig exponera mer än tokenens scopes och mode tillåter
-- compatibility baselines ska versionslåsa route-hash och bevara historik per bolag
-- webhook tests ska täcka subscription, event, delivery, duplicate eventKey och append-only historik
-
-## FAS 13.2 minimum coverage
-
-- partner connections ska testas för connectionType, partnerCode, mode, fallbackMode och rate-limit-profiler
-- contract tests ska vara reproducerbara per adapter och inte skriva över tidigare runs
-- partner operations ska täcka success, fallback, rate_limited och webhook-signalering
-- async jobs ska testas för claim, complete, fail, replay-plan, replay och mass-retry utan historikmutation
-
-## FAS 13.3 minimum coverage
-
-- automation rule packs ska testas för version, effectiveDate, checksum och no-code-villkor
-- posting suggestions, classifications och anomalies ska alltid ge confidence, explanation och rule-pack binding eller tydlig fallback
-- automation decisions ska vara `proposed` tills människa gör override eller godkänner fortsatt körning
-- override ska bevara original outputs, reason code, actor och override timestamp
-
-## FAS 14.1 minimum coverage
-
-- support cases ska testa policyScope, approvedActions, diagnostics och audit trail
-- impersonation ska kräva korrekt godkännande, tillåten mode och spårbar termination
-- access reviews ska skapa findings, få SoD-beslut och bevara remediation notes
-- break-glass ska kräva dual control, ordnad state machine och eftergranskning före stängning
-
-## FAS 14.2 minimum coverage
-
-- feature flags ska testas för scope, owner, riskClass, sunset, runtime-resolution och emergency disable
-- load profiles ska bära target, observerad latens och recovery-mått utan att tappa historik
-- restore drills ska testa RTO/RPO, evidens och statusklassning
-- chaos scenarios ska testa queue recovery, failureMode och impactSummary som spårbart driftsbevis
-
-## FAS 14.3 minimum coverage
-
-- mapping sets ska testas för versionskedja, godkännande och scope per källsystem
-- import batches ska testas för registrering, körning, manuell correction och append-only historik
-- diff reports ska testa differenceClasses, per-item-beslut och parallellkörningsunderlag
-- cutover-planer ska testa staged go-live, cockpitvy, rollback-start och rollback-complete utan evidensförlust
-
-## Testdata policy
-
-- All testdata ska vara syntetisk eller avidentifierad.
-- Samma dataset får användas i lokal miljö, CI och staging.
-- Golden datasets ska ha versionsnummer.
-- Varje reglerad incident i produktion ska resultera i nytt golden fall.
-
-## Environments
-
-### local
 - snabb feedback
-- docker compose
 - seed-data
-- lokala stubbar
+- stubbar och lokala emulatorer
 
-### ci
+## ci
+
 - rena containrar
-- full statisk analys
-- unit, property, contract
-- viktiga integrationstester
+- statisk analys
+- unit, property och contract baseline
+- utvalda integrationstester
 
-### staging
-- prod-lik miljö
-- verkliga adapterstubbar eller sandboxar
-- restore-test
-- loadtest innan större release
+## staging
 
-### pilot
-- skarpa eller nära skarpa arbetsflöden
-- extra övervakning
-- daglig avstämning mot manual kontroll
+- produktlik miljö
+- adapter-sandboxar eller säkra stubbar
+- restoretest
+- belastningstest före större release
 
-## Test ownership
+## pilot
 
-- domänutvecklare äger unit och golden tests
-- integrationsägare äger contract tests
-- QA lead äger E2E- och pilottestplaner
-- SRE/DevOps äger load, restore och chaos
-- produktägare signerar UAT
+- nära skarp datamängd
+- daglig differenskontroll
+- explicit incidentspårning och backoffice support
 
-## Release policy
+# Test ownership
 
-- reglerade domäner får inte deployas utan golden-data-körning
-- schemaändringar kräver migrations- och rollback-plan
-- ändringar i submissionformat kräver contract tests och stagingkörning
-- ändringar i sökindex, metricdefinitioner, offlinekontrakt eller köpayloads kräver tillhörande tvärgående testplan
-- kill switches och feature-flag-ändringar i kritiska flöden kräver rollback- och disable-test
+- domänutvecklare äger unit- och integrationstester för sin domän
+- integrationsägare äger adapter- och contracttester
+- QA-ägare äger E2E och golden orchestration
+- SRE/ops äger resilience, restore och chaos
+- produkt- och complianceansvariga signerar acceptance för reglerade flöden
 
-## Verktyg
+# Release policy
 
-- Vitest eller motsvarande för unit/component
-- fast-check eller motsvarande för property tests
-- Playwright för E2E
-- Pact eller motsvarande för kontrakt där det passar
-- k6 eller motsvarande för load
-- pytest för Python-regler och batcher
+- reglerade domäner får inte deployas utan relevanta golden suites
+- schemaändringar kräver migrations- och rollbackplan
+- rulepackändringar kräver effective-dating-, rollback- och replaytester
+- submissionformatändringar kräver contract tests och stagingkörning
+- search, offline, queue och exportändringar kräver sina tvärgående testplaner
 
-## Exit gate för teststrategin
+# Exit gate
 
-- [ ] Testlager finns definierade i repo.
-- [ ] Golden data är versionsstyrd.
-- [ ] Restore-test kan köras.
-- [ ] Alla nya reglerade buggar genererar regressionstest.
-- [ ] Tvärgående testplaner är kopplade till relevanta faser och releases.
-
+- [ ] testlagren finns definierade och används
+- [ ] golden data är versionsstyrd
+- [ ] replay, restore och failure paths testas
+- [ ] alla nya reglerade buggar genererar regressionstest
+- [ ] tvärgående testplaner är kopplade till release- och pilotkrav

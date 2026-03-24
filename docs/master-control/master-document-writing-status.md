@@ -4,7 +4,7 @@
 - Title: Master Document Writing Status
 - Status: Active control tracker
 - Owner: Delivery control and documentation governance
-- Version: 1.1.0
+- Version: 2.0.0
 - Effective from: 2026-03-24
 - Supersedes: Prior `docs/master-control/master-document-writing-status.md`
 - Approved by: User directive in this control phase
@@ -22,11 +22,11 @@
   - `packages/*`
   - `tests/*`
 - Related future documents:
-  - all future document inventory rows in `docs/master-control/master-document-manifest.md`
+  - all manifest rows in `docs/master-control/master-document-manifest.md`
 
 # Purpose
 
-Detta dokument är den operativa skrivtrackern för hela dokumentprogrammet. Manifestet är fortfarande den kanoniska listan över vilka dokument som måste finnas, men denna fil visar faktiskt repo-läge.
+Detta dokument är den operativa statusbilden för dokumentprogrammet. Manifestet är fortfarande den kanoniska inventarielistan, men denna fil visar faktiskt repo-läge och om dokumentfasen är klar nog att implementation får starta.
 
 # Source of truth
 
@@ -66,69 +66,65 @@ Följande dokument utgör den låsta styrbasen:
 - block 2-dokumenten finns i repo:t
 - block 3-dokumenten finns i repo:t
 - block 4-dokumenten finns i repo:t
-- block 5 återstår
-- inga blockerande block-1- eller block-2-dokument lever bara i chatten eller i `Downloads`
+- block 5-dokumenten finns i repo:t
+- alla identifierade legacy replace- och split-replace-bryggor som krävdes av manifestet finns i repo:t
+- inga blockerande dokument lever bara i chatten eller i `Downloads`
 
 ## Document-writing state
 
 - MCP-001 till MCP-011: present in repo
-- Future ADRs: in progress
-- Future compliance docs: in progress
-- Future domain/product specs: in progress
-- Future policies: in progress
-- Future UI specs: in progress
-- Future runbooks: in progress
-- Future test plans: in progress
-- Existing full replacements: in progress
+- Future ADRs: completed
+- Future compliance docs: completed
+- Future domain/product specs: completed
+- Future policies: completed
+- Future UI specs: completed
+- Future runbooks: completed
+- Future test plans: completed
+- Existing full replacements: completed
+- Split-replace bridge files: completed
 
 # Execution rules for documentation phase
 
-1. Alla framtida dokument ska skrivas direkt i repo:t.
-2. Inget framtida dokument är klart om det inte finns som faktisk fil på sin manifestpath.
-3. Ingen implementation får springa före blockerande dokument för sitt område.
-4. Om ett nytt dokumentbehov upptäcks ska manifestet uppdateras först.
-5. Replace betyder full ersättning, inte halvuppdatering.
-6. Split-replace får inte verkställas förrän alla efterträdare finns.
+1. Manifestet är fortfarande den bindande listan över vad som måste finnas.
+2. Ett dokument räknas bara som klart om det finns på sin manifestpath.
+3. Replace betyder full ersättning eller uttrycklig bryggfil när manifestet kräver det.
+4. Split-replace kräver både efterträdardokument och uttrycklig brygga för gamla referenser.
+5. Ny implementation ska nu läsa primärdokumenten, inte historiska bryggfiler.
 
 # Writing control by block
 
 ## Block 1
 
 - Status: completed in repo
-- Block source: binding `Future writing order` in `docs/master-control/master-document-manifest.md`
-- Implementation rule: block 1 är nu låst och får användas som faktisk byggbas
+- Implementation rule: block 1 är låst och får användas som faktisk byggbas
 
 ## Block 2
 
 - Status: completed in repo
-- Block source: binding `Future writing order` in `docs/master-control/master-document-manifest.md`
-- Implementation rule: block 2 är nu låst och får användas som grund för kärnexpansioner
+- Implementation rule: block 2 är låst och får användas som grund för kärnexpansioner
 
 ## Block 3
 
 - Status: completed in repo
-- Block source: binding `Future writing order` in `docs/master-control/master-document-manifest.md`
-- Implementation rule: avancerade finansiella och personrelaterade arbetsytor får nu byggas vidare endast mot de frysta block-3-dokumenten
+- Implementation rule: block 3 är låst och får användas som grund för finansiella och personrelaterade operatörsflöden
 
 ## Block 4
 
 - Status: completed in repo
-- Block source: binding `Future writing order` in `docs/master-control/master-document-manifest.md`
-- Implementation rule: workbenches, mobile-ytor och backoffice-ytor får nu byggas vidare endast mot de frysta block-4-dokumenten
+- Implementation rule: block 4 är låst och får användas som grund för workbenches, mobile och backoffice
 
 ## Block 5
 
-- Status: not started in repo
-- Block source: binding `Future writing order` in `docs/master-control/master-document-manifest.md`
-- Implementation rule: ingen pilot readiness eller annual/close-slutlåsning får ske före blockerande block-5-dokument
+- Status: completed in repo
+- Implementation rule: block 5 är låst och annual/legal-form-dokumenten får användas som grund för close, filing och pilot readiness
 
 # Practical next step
 
 Nästa korrekta steg är:
 
-1. skriva hela block 3
-2. därefter block 4
-3. därefter block 5
+1. verifiera att manifestets paths faktiskt finns på disk
+2. verifiera att replacement- och split-replace-krav är uppfyllda
+3. starta implementation enligt `docs/master-control/master-build-sequence.md`
 
 # Exit gate
 
@@ -136,4 +132,5 @@ Detta dokument är uppfyllt först när:
 
 - varje blockstatus speglar verkliga filer i repo:t
 - inga blockerande dokument bara finns utanför repo:t
-- implementation hålls tillbaka tills respektive block verkligen finns
+- replacement- och split-replace-kraven är uppfyllda
+- implementation kan starta utan att dokumentfasen först måste kompletteras
