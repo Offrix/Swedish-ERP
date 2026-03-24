@@ -65,7 +65,8 @@ Följande dokument utgör den låsta styrbasen:
 - block 1-dokumenten finns i repo:t
 - block 2-dokumenten finns i repo:t
 - block 3-dokumenten finns i repo:t
-- block 4-5 återstår
+- block 4-dokumenten finns i repo:t
+- block 5 återstår
 - inga blockerande block-1- eller block-2-dokument lever bara i chatten eller i `Downloads`
 
 ## Document-writing state
@@ -111,9 +112,9 @@ Följande dokument utgör den låsta styrbasen:
 
 ## Block 4
 
-- Status: not started in repo
+- Status: completed in repo
 - Block source: binding `Future writing order` in `docs/master-control/master-document-manifest.md`
-- Implementation rule: inga workbenches, mobile-ytor eller backoffice-ytor får slutlåses före blockerande block-4-dokument
+- Implementation rule: workbenches, mobile-ytor och backoffice-ytor får nu byggas vidare endast mot de frysta block-4-dokumenten
 
 ## Block 5
 

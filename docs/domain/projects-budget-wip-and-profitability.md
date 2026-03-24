@@ -1,223 +1,201 @@
-# Projects budget, WIP and profitability
+# Master metadata
 
-## Syfte
+- Document ID: DOM-011
+- Title: Projects Budget WIP and Profitability
+- Status: Binding
+- Owner: Project product architecture and finance architecture
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/domain/projects-budget-wip-and-profitability.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-domain-map.md`
+  - `docs/master-control/master-build-sequence.md`
+  - `docs/master-control/master-golden-scenario-catalog.md`
+- Related domains:
+  - projects
+  - payroll
+  - AR
+  - reporting
+- Related code areas:
+  - `packages/domain-projects/*`
+  - `packages/domain-payroll/*`
+  - `packages/domain-ar/*`
+  - `apps/desktop-web/*`
+- Related future documents:
+  - `docs/domain/projects-workspace.md`
+  - `docs/compliance/se/project-billing-and-revenue-recognition-engine.md`
 
-Detta dokument definierar projektbudget, WIP, projektmarginal, resursbelaggning och forecast at completion for projekt i desktop-web. Syftet ar att ge en deterministisk och sparbar modell for hur projektets utfall, fakturering och framtidsprognos raknas fram utan att lagga domanlogik i UI.
+# Purpose
 
-## Scope
+Definiera hur projektbudget, actuals, WIP, forecast och lönedriven projektkostnad materialiseras och följs upp.
 
-### Ingar
+# Scope
 
-- projekt med faktureringsmodell och intaktsforingsmodell
-- versionerade projektbudgetar med kostnads- och intaktsrader
-- resursallokering med planerade minuter, billable minuter, bill rate och cost rate
-- actual cost snapshots byggda pa godkanda lonerelaterade utfall, formaner, pension och resor
-- WIP snapshots som jamfor godkant varde mot fakturerat varde
-- forecast snapshots med remaining budget och forecast at completion
-- projektmarginal, resursbelaggning och audit trail
+Omfattar:
 
-### Ingar inte
+- budgetversioner
+- actual cost snapshots
+- billed vs approved value
+- WIP and deferred revenue
+- forecast at completion
 
-- dispatch, arbetsorder, serviceorder och faltmobil
-- lager, materialreservation och kundsignatur
-- byggspecifika regler for ATA, HUS, omvand moms och personalliggare
+Omfattar inte:
 
-### Systemgranser
+- dispatch och fältlogik
+- generell huvudboksrapportering
 
-- `domain-projects` ager projekt, budgetversion, resursallokering och snapshot-objekt
-- `domain-ar` ager kundfakturan men maste kunna peka fakturarader till projekt via `projectId`
-- `domain-time` ager tidrader och arbetad tid
-- `domain-payroll` ager godkanda lonelinjer och deras dimensioner
-- `domain-benefits`, `domain-travel` och `domain-pension` levererar kostnadsunderlag via payrollkedjan
-- UI visar endast projektioner och drilldown, aldrig egen kalkyl eller regelmotor
+# Roles
 
-## Roller
+- project manager
+- controller
+- finance operator
 
-- **Project manager** ansvarar for projektbudget, resursplan och uppfoljning.
-- **Controller** granskar WIP, forecast och projektmarginal.
-- **Billing operator** ansvarar for att fakturering och AR-koppling ar korrekt.
-- **Payroll operator** ansvarar for att lon, forman, pension och reseunderlag ar godkanda innan projektsnapshot skapas.
-- **Auditor** granskar snapshot-hash, budgetversion och tie-out mot fakturering.
+# Source of truth
 
-## Begrepp
+`projects` äger budget, WIP- och forecastsnapshots. `AR` äger issued invoices. `payroll` äger actual payroll cost. `ledger` äger bokföring.
 
-- **Project budget version** - Versionslast budget for ett projekt med kostnads- och intaktsrader per period.
-- **Budget line** - En kostnads- eller intaktsrad i en budgetversion.
-- **Resource allocation** - Planerad kapacitet och prissattning for en anstallning i en given period.
-- **Actual cost** - Summerad faktisk projektkostnad per cutoffdatum.
-- **Approved value** - Godkant varde for arbete som far raknas i WIP-modellen.
-- **Billed revenue** - Nettofakturerat belopp pa issued eller senare kundfakturor som bar projektkoppling.
-- **WIP** - Godkant varde minus fakturerat varde, aldrig negativt utan separat review- eller overrideflode.
-- **Deferred revenue** - Fakturerat belopp som overstiger redovisat projektvarde enligt vald modell.
-- **Forecast at completion** - Faktiskt utfall till cutoff plus kvarvarande budget efter cutoff.
-- **Resource load** - Faktiskt arbetade minuter dividerat med planerade minuter till och med cutoff-perioden.
+# Object model
 
-## Objektmodell
+## ProjectBudgetVersion
 
-### Project
-- falt: `projectId`, `companyId`, `projectCode`, `projectReferenceCode`, `customerId`, `projectManagerEmployeeId`, `startsOn`, `endsOn`, `billingModelCode`, `revenueRecognitionModelCode`, `contractValueAmount`, `status`
-- invariant: aktivt projekt maste ha bade `billingModelCode` och `revenueRecognitionModelCode`
+Fält:
 
-### Project budget version
-- falt: `projectBudgetVersionId`, `projectId`, `versionNo`, `budgetName`, `validFrom`, `status`, `totals`, `lines`
-- invariant: versionnummer ar monotona per projekt
+- `project_budget_version_id`
+- `project_id`
+- `version_no`
+- `status`
+- `valid_from`
+- `totals`
 
-### Project budget line
-- falt: `projectBudgetLineId`, `lineKind`, `categoryCode`, `reportingPeriod`, `amount`, `employmentId`, `activityCode`, `note`
-- invariant: `lineKind` ar `cost` eller `revenue`
+## ProjectActualCostSnapshot
 
-### Project resource allocation
-- falt: `projectResourceAllocationId`, `projectId`, `employmentId`, `reportingPeriod`, `plannedMinutes`, `billableMinutes`, `billRateAmount`, `costRateAmount`, `activityCode`, `status`
-- invariant: en allokering maste vara knuten till en verklig anstallning i samma bolag
+Fält:
 
-### Project cost snapshot
-- falt: `projectCostSnapshotId`, `projectId`, `cutoffDate`, `reportingPeriod`, `actualCostAmount`, `actualMinutes`, `billedRevenueAmount`, `recognizedRevenueAmount`, `costBreakdown`, `sourceCounts`, `snapshotHash`
-- invariant: samma `projectId + cutoffDate + snapshotHash` far inte skapas flera ganger
+- `project_actual_cost_snapshot_id`
+- `project_id`
+- `cutoff_date`
+- `actual_cost_amount`
+- `actual_minutes`
+- `source_hash`
 
-### Project WIP snapshot
-- falt: `projectWipSnapshotId`, `projectId`, `cutoffDate`, `approvedValueAmount`, `billedAmount`, `wipAmount`, `deferredRevenueAmount`, `status`, `explanationCodes`, `snapshotHash`
-- invariant: negativ WIP far inte auto-materialiseras som vanligt utfall
+## ProjectWipSnapshot
 
-### Project forecast snapshot
-- falt: `projectForecastSnapshotId`, `projectId`, `cutoffDate`, `actualCostAmount`, `remainingBudgetCostAmount`, `forecastCostAtCompletionAmount`, `billedRevenueAmount`, `remainingBudgetRevenueAmount`, `forecastRevenueAtCompletionAmount`, `currentMarginAmount`, `forecastMarginAmount`, `resourceLoadPercent`, `snapshotHash`
-- invariant: forecast bygger alltid pa en definierad budgetversion och ett definierat cutoffdatum
+Fält:
 
-## State machine
+- `project_wip_snapshot_id`
+- `project_id`
+- `cutoff_date`
+- `approved_value_amount`
+- `billed_amount`
+- `wip_amount`
+- `deferred_revenue_amount`
 
-### Project
-- `draft -> active -> on_hold -> closed -> archived`
-- endast `active` projekt far ta emot nya budgetversioner, resursallokeringar och snapshots
-- `closed` stoppar ny fakturering och ny uppfoljning men historik ligger kvar
+## ProjectForecastSnapshot
 
-### Project budget version
-- `draft -> approved -> superseded`
-- ny budgetversion far inte mutera tidigare approved version
+Fält:
 
-### Project snapshot
-- `materialized -> superseded`
-- `materialized -> review_required` om forklaringskoder eller reviewkrav finns
+- `project_forecast_snapshot_id`
+- `project_id`
+- `cutoff_date`
+- `forecast_cost_at_completion_amount`
+- `forecast_revenue_at_completion_amount`
+- `forecast_margin_amount`
 
-## Anvandarfloden
+# State machines
 
-### Skapa projekt och budget
-1. Skapa projekt med kund, faktureringsmodell och intaktsforingsmodell.
-2. Skapa baseline-budget med kostnads- och intaktsrader per rapportperiod.
-3. Lagg till resursallokeringar for anstallda som ska arbeta i projektet.
-4. Publicera ny budgetversion nar forecast eller avtal andras.
+## ProjectBudgetVersion
 
-### Materialisera projektuppfoljning
-1. Godkann tid, lon, forman, pension och reseunderlag i respektive doman.
-2. Skapa projekt-cost snapshot for valt cutoffdatum.
-3. Skapa WIP snapshot for samma cutoffdatum.
-4. Skapa forecast snapshot for samma cutoffdatum.
-5. Visa resultat i dashboard och drilldown till tid, payroll och faktura.
+- `draft`
+- `approved`
+- `superseded`
 
-### Tie-out mot fakturering
-1. Kundfakturor issueas i AR med `projectId` per rad.
-2. Projektmotorn laster endast fakturor i status `issued`, `delivered`, `partially_paid`, `paid` eller `settled`.
-3. Endast nettobelopp pa rader med projektkoppling raknas som `billedRevenueAmount`.
-4. WIP snapshots jamfor `approvedValueAmount` mot `billedAmount`.
+## Project snapshots
 
-## Affarsregler
+- `materialized`
+- `review_required`
+- `superseded`
 
-### Budgetversionering
-- varje projekt har exakt en aktiv eller senast godkand budgetversion som styr forecast
-- nya versioner skapas additivt och supersederar tidigare versioner utan att skriva om historik
-- budgetlinjer efter cutoff-period raknas som `remaining budget`
+# Commands
 
-### Faktisk projektkostnad
-- `actualCostAmount` byggs fran approved payrollutfall till och med cutoffdatum
-- kostnad ska kunna inkludera lon, formaner, pension och resor
-- om en payrollrad har explicit `dimensionJson.projectId` som matchar projektet anvands full andel
-- om payrollrad saknar explicit projektdimension men anstallningen har tid mot projekt i samma rapportperiod anvands implicit andel = projektminuter / total arbetad tid for anstallningen i perioden
-- kostnadskategorier delas upp i `salaryAmount`, `benefitAmount`, `pensionAmount`, `travelAmount` och `otherAmount`
+- `approve_project_budget_version`
+- `materialize_project_actual_cost_snapshot`
+- `materialize_project_wip_snapshot`
+- `materialize_project_forecast_snapshot`
 
-### Approved value
-- for `time_and_material` = summa arbetade minuter per tidrad dividerat med 60 multiplicerat med gallande `billRateAmount` for anstallning och rapportperiod
-- for `fixed_price` och `milestone` = budgetversionens current revenue amount till och med snapshot-perioden
-- saknas resursallokering for T&M-tidrad blir det forklaringskod `rate_missing_review`
+# Events
 
-### Billed revenue
-- bygger pa AR-fakturor med issue-date pa eller fore cutoffdatum
-- endast projektrelaterade rader raknas
-- krediter och andra AR-regler hanteras i AR, projektmotorn laster bara netto `lineAmount` som kvarstar i fakturans radmodell
+- `project_budget_version_approved`
+- `project_actual_cost_snapshot_materialized`
+- `project_wip_snapshot_materialized`
+- `project_forecast_snapshot_materialized`
 
-### WIP och deferred revenue
-- `wipAmount = max(0, approvedValueAmount - billedAmount)`
-- `deferredRevenueAmount = max(0, billedAmount - recognizedRevenueAmount)`
-- for `billing_equals_revenue` ar `recognizedRevenueAmount = billedAmount`
-- for andra intaktsforingsmodeller ar `recognizedRevenueAmount = approvedValueAmount`
-- negativt utfall omklassificeras till `deferredRevenueAmount` eller forklaringskod, inte till negativ WIP
+# Cross-domain dependencies
 
-### Forecast at completion
-- `remainingBudgetCostAmount` = summa kostnadsbudget for perioder efter snapshot-perioden
-- `remainingBudgetRevenueAmount` = summa intaktsbudget for perioder efter snapshot-perioden
-- `forecastCostAtCompletionAmount = actualCostAmount + remainingBudgetCostAmount`
-- `forecastRevenueAtCompletionAmount = recognizedRevenueAmount + remainingBudgetRevenueAmount`
-- `currentMarginAmount = recognizedRevenueAmount - actualCostAmount`
-- `forecastMarginAmount = forecastRevenueAtCompletionAmount - forecastCostAtCompletionAmount`
+- payroll cost allocation
+- AR billed revenue
+- field and projects completion data
+- HUS billed overlays where relevant
 
-### Resursbelaggning
-- `resourceLoadPercent = actualMinutes / plannedMinutesToDate * 100`
-- `plannedMinutesToDate` ar summan av planerade minuter pa resursallokeringar i perioder fram till snapshot-perioden
-- saknas planerade minuter blir `resourceLoadPercent = 0`
+# Forbidden couplings
 
-## Behorigheter
+- desktop får inte räkna WIP eller forecast
+- projects får inte skriva om issued invoice outcomes
+- payroll får inte skriva projektets snapshots direkt utan officiell handoff
 
-- `company.manage` kravs for att skapa projekt, budgetversioner, resursallokeringar och snapshots
-- `company.read` kravs for att lasa projekt, snapshotar och audit events
-- UI far aldrig kringga API-behorighet med lokal kalkyl eller dold fallback
+# Search ownership
 
-## Fel- och konfliktfall
+Search får indexera projektsammanfattningar och snapshots men projects äger state och beräkning.
 
-- projekt i `draft` far inte materialisera snapshots som forutsatter aktiv fakturerings- och intaktsmodell
-- projekt med saknad budgetversion far skapa actual cost snapshot men forecast ska ge noll kvarvarande budget
-- tidrader utan resursallokering skapar forklaringskod `rate_missing_review`
-- WIP-overhang skapar `deferred_revenue_balance`
-- projektalias maste vara unika per bolag over `projectId`, `projectCode` och `projectReferenceCode`
+# UI ownership
 
-## Notifieringar
+Desktop-web projects workspace äger presentation och drilldown.
 
-- controller eller projektledare ska kunna se reviewkrav nar forklaringskoder uppstar
-- nya budgetversioner och snapshot-materialiseringar ska skapa auditbar handelse
-- UI far visa statuskort men inte skapa egna berakningar
+# Permissions
 
-## Audit trail
+- budgetapproval kräver högre roll än vanlig projekttillgång
+- forecast materialization kan vara systemjobb men ska vara tenant- och rollstyrd
 
-- skapa projekt loggar `project.created`
-- budgetversion loggar `project.budget.approved`
-- resursallokering loggar `project.resource_allocation.created`
-- cost snapshot loggar `project.cost_snapshot.materialized`
-- WIP snapshot loggar `project.wip_snapshot.materialized`
-- forecast snapshot loggar `project.forecast_snapshot.materialized`
-- varje audit event ska bara snapshot-hash, actor, correlationId och forklaring
+# Failure and conflict handling
 
-## API/events/jobs
+- saknad budgetversion ger review-required på forecast
+- saknad payroll cost allocation ger warning eller blocker enligt policy
+- negativa WIP-utfall får inte döljas; de ska visas som deferred revenue eller avvikelse
 
-- kommandon: `create_project`, `approve_project_budget_version`, `create_project_resource_allocation`, `materialize_project_cost_snapshot`, `materialize_project_wip_snapshot`, `materialize_project_forecast_snapshot`
-- events: `project.created`, `project.budget.approved`, `project.resource_allocation.created`, `project.cost_snapshot.materialized`, `project.wip_snapshot.materialized`, `project.forecast_snapshot.materialized`
-- jobb: inga egna async-jobb ar obligatoriska i 10.1; materialisering kan koras synkront via API
+# Notifications/activity/work-item interaction
 
-## UI-krav
+- större WIP-avvikelser skapar work items
+- nya snapshotar skapar activity
+- blockerande forecastbrister kan skapa notification till controller
 
-- desktop-web ska kunna visa projektlista, projektdetalj, budgetversioner, resursallokeringar och snapshotar
-- dashboard ska visa `budget vs utfall`, `marginal`, `WIP` och `belaggning`
-- alla siffror ska kunna drilldownas till underlag eller tydligt markeras nar drilldown saknas
-- alla projektmatt ska kunna filtreras pa period, bolag, projekt och kostnadsstalle
-- UI far inte innehalla egen regelkod for WIP, forecast eller kostnadsfordelning
+# API implications
 
-## Testfall
+- budget CRUD and approval
+- snapshot materialization endpoints
+- project financial drilldown endpoints
 
-1. T&M-projekt med tid och bill rate ger approved value utifran arbetade minuter.
-2. Actual cost inkluderar lon, forman, pension och resa i samma snapshot.
-3. AR-faktura med `projectId` minskar WIP och kan tie-outas mot fakturering.
-4. Future budget cost och revenue bygger forecast at completion utan att skriva om actuals.
-5. Tidrader utan rate ger forklaringskod och reviewkrav.
+# Worker/job implications where relevant
 
-## Exit gate
+- scheduled snapshot materialization
+- anomaly detection jobs
 
-- [ ] projektkostnad inkluderar lon, formaner, pension och resor
-- [ ] WIP kan stammas av mot fakturering
-- [ ] forecast at completion fungerar
-- [ ] budgetversioner skriver inte over historik
-- [ ] UI visar bara projektioner och drilldown, aldrig egen domanlogik
+# Projection/read-model requirements
+
+- budget vs actual
+- billed vs approved value
+- current WIP
+- forecast at completion
+
+# Test implications
+
+- payroll cost rollup
+- invoice tie-out
+- WIP and deferred revenue behavior
+- forecast with missing budget
+
+# Exit gate
+
+- [ ] projektbudget, actuals, WIP och forecast materialiseras server-side
+- [ ] payroll cost allocation och AR-tie-out ingår i samma kontrollkedja
+- [ ] workspace kan bygga vidare på låsta snapshots i stället för UI-kalkyl

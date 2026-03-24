@@ -1,87 +1,91 @@
-# Mobile offline conflict repair
+# Master metadata
 
-## Syfte
+- Document ID: RB-011
+- Title: Mobile Offline Conflict Repair
+- Status: Binding
+- Owner: Field operations and support operations
+- Version: 2.0.0
+- Effective from: 2026-03-24
+- Supersedes: Prior `docs/runbooks/mobile-offline-conflict-repair.md`
+- Approved by: User directive and master-control baseline
+- Last reviewed: 2026-03-24
+- Related master docs:
+  - `docs/master-control/master-build-sequence.md`
+  - `docs/master-control/master-golden-scenario-catalog.md`
+- Related domains:
+  - offline
+  - field
+  - personalliggare
+- Related code areas:
+  - `apps/field-mobile/*`
+  - `apps/backoffice/*`
+- Related future documents:
+  - `docs/domain/offline-sync-and-conflict-resolution.md`
+  - `docs/ui/FIELD_MOBILE_SPEC.md`
 
-Detta runbook beskriver hur offlinekö, synkfel, konflikter och dubblettskapande i mobil- eller offline-klient repareras utan att användarens arbete tyst går förlorat.
+# Purpose
 
-## När den används
+Beskriva hur mobile offline-konflikter isoleras, åtgärdas och verifieras utan att förstöra auditkedjan.
 
-- när offline-redigerbart objekt fastnar i `pending_sync`, `sync_failed` eller `conflict`
-- när lokalt skapade objekt inte blir serverobjekt eller skapar dubletter
-- när användare rapporterar att lokal version skiljer sig från serverversion
-- efter app-release som ändrat syncschema eller merge-regler
+# When to use
 
-## Förkrav
+- sync conflict
+- duplicate client mutation
+- corrupted local queue
+- obsolete pending state
 
-1. Support eller operatör ska ha ärende-ID och tillgång till syncdiagnostik.
-2. Berörd klientversion, användare, enhet och tenant ska vara identifierad.
-3. Det ska vara känt om objektstypen är tillåten för offline-redigering.
-4. För reglerade objekt ska det vara klarlagt om klienten endast får spara utkast eller full action.
+# Preconditions
 
-## Steg för steg
+- conflict id eller affected object är identifierat
+- device och user scope är känt
 
-1. Samla in fakta.
-   - klientversion, enhets-id, lokal queue-längd, senaste sync-tid, objekt-id och lokal operation-logg
-   - om möjligt export av lokalt diagnospaket utan att samla onödig persondata
-2. Klassificera problemet.
-   - `local_stuck`: operation ligger kvar utan försök
-   - `retry_loop`: samma operation faller om och om igen
-   - `conflict_detected`: serverversion och lokal version divergerar
-   - `duplicate_created`: samma avsikt skapade flera serverobjekt
-   - `unsupported_offline_action`: klient försökte göra action som aldrig får ske offline
-3. Kontrollera serverstatus.
-   - läs aktuell serverversion och eventuella redan genomförda side effects
-   - kontrollera om idempotensnyckel redan förbrukats
-   - kontrollera om objekt låsts eller stängts sedan lokal ändring gjordes
-4. Välj reparationsspår.
-   - lokal state kan återupptas: trigga ny sync med oförändrad operation
-   - lokal state måste byggas om: töm endast den trasiga operationen och generera ny klientåtgärd från servern
-   - konflikt kräver manuell resolution: öppna konflikt-UI eller supportledd merge
-   - dublettfall: markera felaktig dublett och använd domänspecifik korrigering
-5. Konfliktreparation.
-   - visa serverversion, lokal version och konfliktfält sida vid sida
-   - tillämpa regel: server wins, local wins eller manual resolution enligt objekttyp
-   - skapa ny sammanslagen version med ny klientoperation, inte dold servermanipulation
-6. Rensa lokalkö säkert.
-   - ta aldrig bort lokala operationer innan deras effekt verifierats mot servern
-   - om klientlagret korrupt: exportera diagnos, töm endast efter godkänd återställning och synka om från server
-7. Bekräfta för användaren.
-   - förklara om data vann från server, från lokal ändring eller via manuell merge
-   - be användaren verifiera slutresultatet i objektets historik
+# Required roles
 
-## Verifiering
+- support operator
+- field lead where business choice behövs
+- backoffice operator for scoped repair
 
-- objektet når `synced` eller dokumenterad terminal konfliktstatus
-- ingen otillåten offlineaction finns kvar i kön
-- dubletter är klassificerade och har owner för korrigering
-- audit trail visar lokal operation, konfliktdetektion, vald merge-strategi och operatörsingripande där sådant skett
+# Inputs
 
-## Vanliga fel
+- conflict record
+- sync envelopes
+- server object version
 
-- **Fel:** samma operation återkommer efter lokal rensning.  
-  **Åtgärd:** kontrollera att klienten inte återläser gammal snapshot eller att en annan enhet replayar samma operation.
-- **Fel:** användaren saknar konflikt-UI för objekttypen.  
-  **Åtgärd:** använd supportledd resolution och skapa förbättringsuppgift om objekttypen borde ha UI-stöd.
-- **Fel:** offline skapade objekt som aldrig får skapas offline.  
-  **Åtgärd:** markera operationen `unsupported_offline_action`, skapa blockerande varning och informera användaren att göra om flödet online.
-- **Fel:** lokal diagnostik saknas.  
-  **Åtgärd:** använd serverns auditspår, eventlogg och idempotensnycklar för rekonstruktion.
+# Step-by-step procedure
 
-## Återställning
+1. Verifiera konfliktens typ och vilket objekt som berörs.
+2. Kontrollera om policyn säger server wins, local wins eller manual resolution.
+3. För duplicate envelopes: bekräfta idempotent serverutfall och markera lokalt envelope `obsolete`.
+4. För versionkonflikt: skapa resolution record och välj godkänt utfall enligt policy.
+5. För korrupt lokal kö: isolera skadad post, synka resterande kö och dokumentera separat repair.
+6. Bekräfta för användaren vilket utfall som gäller och vilken data som eventuellt gick förlorad.
 
-- om fel merge tillämpats ska domänens ordinarie korrigeringskedja användas
-- om enhetsdata är korrupt ska användaren få tydlig instruktion för att synka hem serverns senaste sanning efter säker export av diagnos
-- vid utbredd klientbugg ska offlinefunktion för berörd objekttyp disable:as tills fix finns
+# Verification
 
-## Rollback
+- affected object har ett tydligt slutligt serverläge
+- local pending state stämmer med servern
+- auditkedjan visar både konflikt och resolution
 
-- rollback av releaseinducerat syncfel sker genom att stoppa fortsatt rollout, återgå till senaste stabila klientversion där möjligt och låta servern förbli sanningskälla under mellanperioden
-- redan skapade serverobjekt återställs inte via klientcache utan via domänspecifika korrigeringsflöden
+# Retry/replay behavior where relevant
 
-## Ansvarig
+- replay av envelope får bara ske när conflict record tillåter det
 
-Primärt ansvarig är mobil/offline-ansvarig tillsammans med support. Domänägare måste delta när konflikten påverkar reglerade objekt eller ekonomiskt utfall.
+# Rollback/recovery
 
-## Exit gate
+- felaktig resolution kräver ny resolution chain eller correction i källdomän
 
-Runbooken är klar när användarens objekt är åter i verifierat läge, offlinekön inte längre skapar fel och orsaken är dokumenterad för eventuell regressionsuppföljning.
+# Incident threshold
+
+masskonflikt, upprepad queue corruption eller dataförlust är incident
+
+# Audit and receipts
+
+- conflict record
+- repair action
+- final server receipt
+
+# Exit gate
+
+- [ ] varje konflikt får tydlig resolution
+- [ ] lokal och serverbaserad status är synkad efter repair
+- [ ] support kan reparera utan att manipulera rådata osynligt
