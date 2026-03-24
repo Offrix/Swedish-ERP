@@ -134,54 +134,62 @@ test("Phase 10.3 e2e covers field-mobile shell, build routes and deterministic o
       method: "POST",
       token: sessionToken,
       expectedStatus: 201,
-      body: {
-        companyId: COMPANY_ID,
-        caseReference: "HUS-E2E-001",
-        projectId: project.projectId,
-        serviceTypeCode: "rot",
-        workCompletedOn: "2026-03-10"
-      }
-    });
+        body: {
+          companyId: COMPANY_ID,
+          caseReference: "HUS-E2E-001",
+          projectId: project.projectId,
+          serviceTypeCode: "rot",
+          workCompletedOn: "2026-03-10",
+          housingFormCode: "smallhouse",
+          propertyDesignation: "UPPSALA SUNNERSTA 1:23",
+          executorFskattApproved: true,
+          executorFskattValidatedOn: "2026-03-01"
+        }
+      });
     await requestJson(enabledBaseUrl, `/v1/hus/cases/${husCase.husCaseId}/classify`, {
       method: "POST",
       token: sessionToken,
       body: {
         companyId: COMPANY_ID,
         buyers: [
-          {
-            displayName: "Anna Andersson",
-            personalIdentityNumber: "197501019999",
-            allocationPercent: 100
-          }
-        ],
-        serviceLines: [
-          {
-            description: "ROT work",
-            serviceTypeCode: "rot",
-            laborCostAmount: 10000,
-            materialAmount: 5000
-          }
-        ]
-      }
+            {
+              displayName: "Anna Andersson",
+              personalIdentityNumber: "197501019999",
+              allocationPercent: 100
+            }
+          ],
+          serviceLines: [
+            {
+              description: "ROT work",
+              serviceTypeCode: "rot",
+              workedHours: 8,
+              laborCostAmount: 10000,
+              materialAmount: 5000
+            }
+          ]
+        }
     });
-    await requestJson(enabledBaseUrl, `/v1/hus/cases/${husCase.husCaseId}/invoice`, {
-      method: "POST",
-      token: sessionToken,
-      body: {
-        companyId: COMPANY_ID
-      }
-    });
+      await requestJson(enabledBaseUrl, `/v1/hus/cases/${husCase.husCaseId}/invoice`, {
+        method: "POST",
+        token: sessionToken,
+        body: {
+          companyId: COMPANY_ID,
+          invoiceNumber: "HUS-E2E-INV-001",
+          invoiceIssuedOn: "2026-03-11"
+        }
+      });
     await requestJson(enabledBaseUrl, `/v1/hus/cases/${husCase.husCaseId}/payments`, {
       method: "POST",
       token: sessionToken,
       expectedStatus: 201,
-      body: {
-        companyId: COMPANY_ID,
-        paidAmount: 12000,
-        paidOn: "2026-03-15",
-        paymentChannel: "bankgiro"
-      }
-    });
+        body: {
+          companyId: COMPANY_ID,
+          paidAmount: 12000,
+          paidOn: "2026-03-15",
+          paymentChannel: "bankgiro",
+          paymentReference: "BG-E2E-HUS-001"
+        }
+      });
     const claim = await requestJson(enabledBaseUrl, `/v1/hus/cases/${husCase.husCaseId}/claims`, {
       method: "POST",
       token: sessionToken,

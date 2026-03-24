@@ -14,6 +14,10 @@ test("Phase 10.3 HUS classifies, submits, pays out and recovers deterministicall
     caseReference: "HUS-TEST-001",
     serviceTypeCode: "rot",
     workCompletedOn: "2026-03-10",
+    housingFormCode: "smallhouse",
+    propertyDesignation: "UPPSALA SUNNERSTA 1:23",
+    executorFskattApproved: true,
+    executorFskattValidatedOn: "2026-03-01",
     actorId: "unit-test"
   });
 
@@ -31,6 +35,7 @@ test("Phase 10.3 HUS classifies, submits, pays out and recovers deterministicall
       {
         description: "ROT labor and material",
         serviceTypeCode: "rot",
+        workedHours: 8,
         laborCostAmount: 10000,
         materialAmount: 5000
       }
@@ -45,6 +50,8 @@ test("Phase 10.3 HUS classifies, submits, pays out and recovers deterministicall
   const invoiced = husPlatform.markHusCaseInvoiced({
     companyId: COMPANY_ID,
     husCaseId: husCase.husCaseId,
+    invoiceNumber: "HUS-TEST-INV-001",
+    invoiceIssuedOn: "2026-03-11",
     actorId: "unit-test"
   });
   assert.equal(invoiced.status, "invoiced");
@@ -55,6 +62,7 @@ test("Phase 10.3 HUS classifies, submits, pays out and recovers deterministicall
     paidAmount: 5000,
     paidOn: "2026-03-12",
     paymentChannel: "bankgiro",
+    paymentReference: "BG-REF-001",
     actorId: "unit-test"
   });
   assert.equal(partialPayment.status, "customer_partially_paid");
@@ -66,6 +74,7 @@ test("Phase 10.3 HUS classifies, submits, pays out and recovers deterministicall
     paidAmount: 7000,
     paidOn: "2026-03-15",
     paymentChannel: "swish",
+    paymentReference: "SWISH-REF-002",
     actorId: "unit-test"
   });
   assert.equal(paid.status, "customer_paid");

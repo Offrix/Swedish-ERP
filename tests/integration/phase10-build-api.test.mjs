@@ -161,56 +161,64 @@ test("Phase 10.3 API handles change orders, build VAT, HUS and personalliggare f
       method: "POST",
       token: sessionToken,
       expectedStatus: 201,
-      body: {
-        companyId: COMPANY_ID,
-        caseReference: "HUS-API-001",
-        projectId: project.projectId,
-        serviceTypeCode: "rot",
-        workCompletedOn: "2026-03-10"
-      }
-    });
+        body: {
+          companyId: COMPANY_ID,
+          caseReference: "HUS-API-001",
+          projectId: project.projectId,
+          serviceTypeCode: "rot",
+          workCompletedOn: "2026-03-10",
+          housingFormCode: "smallhouse",
+          propertyDesignation: "UPPSALA SUNNERSTA 1:23",
+          executorFskattApproved: true,
+          executorFskattValidatedOn: "2026-03-01"
+        }
+      });
     const classified = await requestJson(baseUrl, `/v1/hus/cases/${husCase.husCaseId}/classify`, {
       method: "POST",
       token: sessionToken,
       body: {
         companyId: COMPANY_ID,
         buyers: [
-          {
-            displayName: "Anna Andersson",
-            personalIdentityNumber: "197501019999",
-            allocationPercent: 100
-          }
-        ],
-        serviceLines: [
-          {
-            description: "ROT labor and material",
-            serviceTypeCode: "rot",
-            laborCostAmount: 10000,
-            materialAmount: 5000
-          }
-        ]
-      }
+            {
+              displayName: "Anna Andersson",
+              personalIdentityNumber: "197501019999",
+              allocationPercent: 100
+            }
+          ],
+          serviceLines: [
+            {
+              description: "ROT labor and material",
+              serviceTypeCode: "rot",
+              workedHours: 8,
+              laborCostAmount: 10000,
+              materialAmount: 5000
+            }
+          ]
+        }
     });
     assert.equal(classified.preliminaryReductionAmount, 3000);
 
-    await requestJson(baseUrl, `/v1/hus/cases/${husCase.husCaseId}/invoice`, {
-      method: "POST",
-      token: sessionToken,
-      body: {
-        companyId: COMPANY_ID
-      }
-    });
+      await requestJson(baseUrl, `/v1/hus/cases/${husCase.husCaseId}/invoice`, {
+        method: "POST",
+        token: sessionToken,
+        body: {
+          companyId: COMPANY_ID,
+          invoiceNumber: "HUS-API-INV-001",
+          invoiceIssuedOn: "2026-03-11"
+        }
+      });
     const paid = await requestJson(baseUrl, `/v1/hus/cases/${husCase.husCaseId}/payments`, {
       method: "POST",
       token: sessionToken,
       expectedStatus: 201,
-      body: {
-        companyId: COMPANY_ID,
-        paidAmount: 12000,
-        paidOn: "2026-03-15",
-        paymentChannel: "bankgiro"
-      }
-    });
+        body: {
+          companyId: COMPANY_ID,
+          paidAmount: 12000,
+          paidOn: "2026-03-15",
+          paymentChannel: "bankgiro",
+          paymentReference: "BG-API-HUS-001"
+        }
+      });
     assert.equal(paid.status, "customer_paid");
 
     const claim = await requestJson(baseUrl, `/v1/hus/cases/${husCase.husCaseId}/claims`, {

@@ -360,11 +360,15 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/hus/cases/:husCaseId",
               "/v1/hus/cases/:husCaseId/classify",
               "/v1/hus/cases/:husCaseId/invoice",
+              "/v1/hus/cases/:husCaseId/readiness",
               "/v1/hus/cases/:husCaseId/payments",
               "/v1/hus/cases/:husCaseId/claims",
+              "/v1/hus/cases/:husCaseId/recovery-candidates",
               "/v1/hus/claims/:husClaimId",
               "/v1/hus/claims/:husClaimId/submit",
               "/v1/hus/claims/:husClaimId/decisions",
+              "/v1/hus/decision-differences",
+              "/v1/hus/decision-differences/:husDecisionDifferenceId/resolve",
               "/v1/hus/claims/:husClaimId/payouts",
               "/v1/hus/cases/:husCaseId/credit-adjustments",
               "/v1/hus/cases/:husCaseId/recoveries",
@@ -7958,8 +7962,19 @@ async function handleRequest({ req, res, platform, flags }) {
         customerInvoiceId: body.customerInvoiceId ?? null,
         serviceTypeCode: body.serviceTypeCode ?? "rot",
         workCompletedOn: body.workCompletedOn,
+        workCompletedFrom: body.workCompletedFrom ?? null,
+        workCompletedTo: body.workCompletedTo ?? null,
         currencyCode: body.currencyCode ?? "SEK",
         ruleYear: body.ruleYear ?? 2026,
+        housingFormCode: body.housingFormCode ?? null,
+        propertyDesignation: body.propertyDesignation ?? null,
+        apartmentDesignation: body.apartmentDesignation ?? null,
+        housingAssociationOrgNumber: body.housingAssociationOrgNumber ?? null,
+        serviceAddressLine1: body.serviceAddressLine1 ?? null,
+        postalCode: body.postalCode ?? null,
+        city: body.city ?? null,
+        executorFskattApproved: body.executorFskattApproved === true,
+        executorFskattValidatedOn: body.executorFskattValidatedOn ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
@@ -8013,6 +8028,13 @@ async function handleRequest({ req, res, platform, flags }) {
         husCaseId: husClassifyMatch.husCaseId,
         serviceLines: body.serviceLines || [],
         buyers: body.buyers || [],
+        housingFormCode: body.housingFormCode ?? null,
+        propertyDesignation: body.propertyDesignation ?? null,
+        apartmentDesignation: body.apartmentDesignation ?? null,
+        housingAssociationOrgNumber: body.housingAssociationOrgNumber ?? null,
+        serviceAddressLine1: body.serviceAddressLine1 ?? null,
+        postalCode: body.postalCode ?? null,
+        city: body.city ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
@@ -8021,7 +8043,7 @@ async function handleRequest({ req, res, platform, flags }) {
   }
 
   const husInvoiceMatch = matchPath(path, "/v1/hus/cases/:husCaseId/invoice");
-  if (husInvoiceMatch && req.method === "POST") {
+    if (husInvoiceMatch && req.method === "POST") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
     const principal = authorizeCompanyAccess({
@@ -8039,14 +8061,54 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         husCaseId: husInvoiceMatch.husCaseId,
         customerInvoiceId: body.customerInvoiceId ?? null,
+        invoiceNumber: body.invoiceNumber ?? null,
+        invoiceIssuedOn: body.invoiceIssuedOn ?? null,
+        invoiceGrossAmount: body.invoiceGrossAmount ?? null,
+        invoiceLaborAmount: body.invoiceLaborAmount ?? null,
+        invoicePreliminaryReductionAmount: body.invoicePreliminaryReductionAmount ?? null,
+        invoiceCustomerShareAmount: body.invoiceCustomerShareAmount ?? null,
+        housingFormCode: body.housingFormCode ?? null,
+        propertyDesignation: body.propertyDesignation ?? null,
+        apartmentDesignation: body.apartmentDesignation ?? null,
+        housingAssociationOrgNumber: body.housingAssociationOrgNumber ?? null,
+        serviceAddressLine1: body.serviceAddressLine1 ?? null,
+        postalCode: body.postalCode ?? null,
+        city: body.city ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
-    );
-    return;
-  }
+      );
+      return;
+    }
 
-  const husPaymentsMatch = matchPath(path, "/v1/hus/cases/:husCaseId/payments");
+    const husReadinessMatch = matchPath(path, "/v1/hus/cases/:husCaseId/readiness");
+    if (husReadinessMatch && req.method === "GET") {
+      const companyId = requireText(
+        url.searchParams.get("companyId"),
+        "company_id_required",
+        "companyId query parameter is required."
+      );
+      authorizeCompanyAccess({
+        platform,
+        sessionToken: readSessionToken(req),
+        companyId,
+        permissionCode: "company.read",
+        objectType: "hus_case",
+        scopeCode: "project"
+      });
+      writeJson(
+        res,
+        200,
+        platform.evaluateHusCaseReadiness({
+          companyId,
+          husCaseId: husReadinessMatch.husCaseId,
+          asOfDate: url.searchParams.get("asOfDate") || null
+        })
+      );
+      return;
+    }
+
+    const husPaymentsMatch = matchPath(path, "/v1/hus/cases/:husCaseId/payments");
   if (husPaymentsMatch && req.method === "POST") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
@@ -8067,6 +8129,8 @@ async function handleRequest({ req, res, platform, flags }) {
         paidAmount: body.paidAmount,
         paidOn: body.paidOn,
         paymentChannel: body.paymentChannel,
+        paymentReference: body.paymentReference ?? null,
+        externalTraceId: body.externalTraceId ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
@@ -8075,7 +8139,7 @@ async function handleRequest({ req, res, platform, flags }) {
   }
 
   const husCaseClaimsMatch = matchPath(path, "/v1/hus/cases/:husCaseId/claims");
-  if (husCaseClaimsMatch && req.method === "GET") {
+    if (husCaseClaimsMatch && req.method === "GET") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
       "company_id_required",
@@ -8094,11 +8158,36 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         husCaseId: husCaseClaimsMatch.husCaseId
       })
-    });
-    return;
-  }
+      });
+      return;
+    }
 
-  if (husCaseClaimsMatch && req.method === "POST") {
+    const husRecoveryCandidatesMatch = matchPath(path, "/v1/hus/cases/:husCaseId/recovery-candidates");
+    if (husRecoveryCandidatesMatch && req.method === "GET") {
+      const companyId = requireText(
+        url.searchParams.get("companyId"),
+        "company_id_required",
+        "companyId query parameter is required."
+      );
+      authorizeCompanyAccess({
+        platform,
+        sessionToken: readSessionToken(req),
+        companyId,
+        permissionCode: "company.read",
+        objectType: "hus_case",
+        scopeCode: "project"
+      });
+      writeJson(res, 200, {
+        items: platform.listHusRecoveryCandidates({
+          companyId,
+          husCaseId: husRecoveryCandidatesMatch.husCaseId,
+          status: url.searchParams.get("status") || null
+        })
+      });
+      return;
+    }
+
+    if (husCaseClaimsMatch && req.method === "POST") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
     const principal = authorizeCompanyAccess({
@@ -8177,7 +8266,7 @@ async function handleRequest({ req, res, platform, flags }) {
   }
 
   const husClaimDecisionsMatch = matchPath(path, "/v1/hus/claims/:husClaimId/decisions");
-  if (husClaimDecisionsMatch && req.method === "POST") {
+    if (husClaimDecisionsMatch && req.method === "POST") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
     const principal = authorizeCompanyAccess({
@@ -8202,11 +8291,62 @@ async function handleRequest({ req, res, platform, flags }) {
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
-    );
-    return;
-  }
+      );
+      return;
+    }
 
-  const husClaimPayoutsMatch = matchPath(path, "/v1/hus/claims/:husClaimId/payouts");
+    if (req.method === "GET" && path === "/v1/hus/decision-differences") {
+      const companyId = requireText(
+        url.searchParams.get("companyId"),
+        "company_id_required",
+        "companyId query parameter is required."
+      );
+      authorizeCompanyAccess({
+        platform,
+        sessionToken: readSessionToken(req),
+        companyId,
+        permissionCode: "company.read",
+        objectType: "hus_case",
+        scopeCode: "project"
+      });
+      writeJson(res, 200, {
+        items: platform.listHusDecisionDifferences({
+          companyId,
+          husCaseId: url.searchParams.get("husCaseId") || null,
+          status: url.searchParams.get("status") || null
+        })
+      });
+      return;
+    }
+
+    const husDecisionDifferenceResolveMatch = matchPath(path, "/v1/hus/decision-differences/:husDecisionDifferenceId/resolve");
+    if (husDecisionDifferenceResolveMatch && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+      const principal = authorizeCompanyAccess({
+        platform,
+        sessionToken: readSessionToken(req, body),
+        companyId,
+        permissionCode: "company.manage",
+        objectType: "hus_case",
+        scopeCode: "project"
+      });
+      writeJson(
+        res,
+        200,
+        platform.resolveHusDecisionDifference({
+          companyId,
+          husDecisionDifferenceId: husDecisionDifferenceResolveMatch.husDecisionDifferenceId,
+          resolutionCode: body.resolutionCode,
+          resolutionNote: body.resolutionNote ?? null,
+          actorId: principal.userId,
+          correlationId: body.correlationId || createCorrelationId()
+        })
+      );
+      return;
+    }
+
+    const husClaimPayoutsMatch = matchPath(path, "/v1/hus/claims/:husClaimId/payouts");
   if (husClaimPayoutsMatch && req.method === "POST") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
@@ -8277,12 +8417,13 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(
       res,
       201,
-      platform.recordHusRecovery({
-        companyId,
-        husCaseId: husRecoveriesMatch.husCaseId,
-        recoveryDate: body.recoveryDate,
-        recoveryAmount: body.recoveryAmount,
-        reasonCode: body.reasonCode,
+        platform.recordHusRecovery({
+          companyId,
+          husCaseId: husRecoveriesMatch.husCaseId,
+          husRecoveryCandidateId: body.husRecoveryCandidateId ?? null,
+          recoveryDate: body.recoveryDate,
+          recoveryAmount: body.recoveryAmount,
+          reasonCode: body.reasonCode,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })

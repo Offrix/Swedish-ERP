@@ -370,6 +370,10 @@ function materializeHusOverview(platform) {
     caseReference: "HUS-12-2-001",
     serviceTypeCode: "rot",
     workCompletedOn: "2026-03-10",
+    housingFormCode: "smallhouse",
+    propertyDesignation: "UPPSALA SUNNERSTA 1:23",
+    executorFskattApproved: true,
+    executorFskattValidatedOn: "2026-03-01",
     actorId: "phase12-2-unit"
   });
   platform.classifyHusCase({
@@ -386,6 +390,7 @@ function materializeHusOverview(platform) {
       {
         description: "ROT labor and material",
         serviceTypeCode: "rot",
+        workedHours: 8,
         laborCostAmount: 10000,
         materialAmount: 5000
       }
@@ -395,6 +400,8 @@ function materializeHusOverview(platform) {
   platform.markHusCaseInvoiced({
     companyId: COMPANY_ID,
     husCaseId: husCase.husCaseId,
+    invoiceNumber: "HUS-12-2-INV-001",
+    invoiceIssuedOn: "2026-03-11",
     actorId: "phase12-2-unit"
   });
   platform.recordHusCustomerPayment({
@@ -403,6 +410,7 @@ function materializeHusOverview(platform) {
     paidAmount: 12000,
     paidOn: "2026-03-15",
     paymentChannel: "bankgiro",
+    paymentReference: "BG-12-2-001",
     actorId: "phase12-2-unit"
   });
   const claim = platform.createHusClaim({
