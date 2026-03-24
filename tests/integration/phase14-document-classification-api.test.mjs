@@ -37,17 +37,45 @@ test("Step 14 API exposes document classification creation, approval and dispatc
       employeeId: employee.employeeId,
       employmentTypeCode: "permanent",
       jobTitle: "Architect",
-      payModelCode: "monthly",
+      payModelCode: "monthly_salary",
       startDate: "2026-01-01",
+      actorId: DEMO_IDS.userId
+    });
+    platform.addEmploymentContract({
+      companyId: DEMO_IDS.companyId,
+      employeeId: employee.employeeId,
+      employmentId: employment.employmentId,
+      validFrom: "2026-01-01",
+      salaryModelCode: "monthly_salary",
+      monthlySalary: 52000,
+      actorId: DEMO_IDS.userId
+    });
+    platform.addEmployeeBankAccount({
+      companyId: DEMO_IDS.companyId,
+      employeeId: employee.employeeId,
+      payoutMethod: "domestic_account",
+      accountHolderName: "Grace Hopper",
+      clearingNumber: "5000",
+      accountNumber: "1234567890",
+      bankName: "Integration Test Bank",
+      primaryAccount: true,
+      actorId: DEMO_IDS.userId
+    });
+    platform.upsertEmploymentStatutoryProfile({
+      companyId: DEMO_IDS.companyId,
+      employmentId: employment.employmentId,
+      taxMode: "manual_rate",
+      taxRatePercent: 30,
+      contributionClassCode: "full",
       actorId: DEMO_IDS.userId
     });
     const document = platform.createDocumentRecord({
       companyId: DEMO_IDS.companyId,
       documentType: "expense_receipt",
-      sourceReference: "api-wellness-001",
+      sourceReference: "api-benefit-001",
       actorId: DEMO_IDS.userId,
       metadataJson: {
-        totalAmount: 4500
+        totalAmount: 1000
       }
     });
 
@@ -59,24 +87,18 @@ test("Step 14 API exposes document classification creation, approval and dispatc
         companyId: DEMO_IDS.companyId,
         lineInputs: [
           {
-            description: "Friskvard",
-            amount: 4500,
-            treatmentCode: "WELLNESS_ALLOWANCE",
+            description: "Sjukvardsforsakring",
+            amount: 1000,
+            treatmentCode: "TAXABLE_BENEFIT",
             person: {
               employeeId: employee.employeeId,
               employmentId: employment.employmentId,
               personRelationCode: "employee"
             },
             factsJson: {
-              benefitCode: "WELLNESS_ALLOWANCE",
-              activityType: "massage",
-              activityDate: "2026-03-24",
-              vendorName: "Wellness Partner AB",
-              equalTermsOffered: true,
-              providedAsGiftCard: false,
-              carryOverFromPriorYear: false,
-              reimbursementAmount: 4500,
-              calendarYearGrantedBeforeEvent: 0
+              benefitCode: "HEALTH_INSURANCE",
+              insurancePremium: 1000,
+              taxablePremiumRatio: 0.6
             }
           }
         ]
@@ -125,6 +147,26 @@ test("Step 14 API exposes document classification creation, approval and dispatc
     });
     assert.equal(benefitEvents.length, 1);
     assert.equal(benefitEvents[0].supportingDocumentId, document.documentId);
+    const payCalendar = platform.listPayCalendars({ companyId: DEMO_IDS.companyId })[0];
+    const payRun = platform.createPayRun({
+      companyId: DEMO_IDS.companyId,
+      payCalendarId: payCalendar.payCalendarId,
+      reportingPeriod: "202603",
+      employmentIds: [employment.employmentId],
+      actorId: DEMO_IDS.userId
+    });
+    platform.approvePayRun({
+      companyId: DEMO_IDS.companyId,
+      payRunId: payRun.payRunId,
+      actorId: DEMO_IDS.userId
+    });
+    const consumedBenefitEvents = platform.listBenefitEvents({
+      companyId: DEMO_IDS.companyId,
+      employmentId: employment.employmentId
+    });
+    assert.equal(consumedBenefitEvents[0].payrollConsumptions.length, 1);
+    assert.equal(consumedBenefitEvents[0].payrollConsumptions[0].payRunId, payRun.payRunId);
+    assert.equal(consumedBenefitEvents[0].payrollConsumptions[0].stage, "approved");
   } finally {
     await stopServer(server);
   }

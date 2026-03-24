@@ -35,6 +35,7 @@ const MILEAGE_RATES_PER_KM_2026 = Object.freeze({
   BENEFIT_CAR: 1.2,
   BENEFIT_CAR_ELECTRIC: 0.95
 });
+const PAYROLL_CONSUMPTION_STAGES = Object.freeze(["calculated", "approved"]);
 
 const NORDIC_COUNTRIES = new Set(["Sverige", "Danmark", "Finland", "Island", "Norge"]);
 const COUNTRY_ALIAS_OVERRIDES = Object.freeze({
@@ -91,6 +92,9 @@ export function createTravelEngine({
     valuationIdByClaim: new Map(),
     postingIntents: new Map(),
     postingIntentIdsByClaim: new Map(),
+    payrollConsumptions: new Map(),
+    payrollConsumptionIdsByClaim: new Map(),
+    payrollConsumptionIdByKey: new Map(),
     auditEvents: []
   };
 
@@ -109,7 +113,8 @@ export function createTravelEngine({
     getTravelClaim,
     createTravelClaim,
     listTravelAuditEvents,
-    listPayrollTravelPayloads
+    listPayrollTravelPayloads,
+    registerTravelPayrollConsumption
   };
 
   function listForeignNormalAmounts({ taxYear = "2026" } = {}) {
@@ -302,6 +307,79 @@ export function createTravelEngine({
       payLinePayloads: claims.flatMap((claim) => claim.postingIntents.map((intent) => copy(intent.payrollLinePayloadJson)).filter(Boolean)),
       warnings: claims.flatMap((claim) => claim.valuation.warnings || [])
     };
+  }
+
+  function registerTravelPayrollConsumption({
+    companyId,
+    travelClaimId,
+    payRunId,
+    payRunLineId,
+    payItemCode,
+    processingStep,
+    sourceType = "travel_claim",
+    amount,
+    sourceSnapshotHash = null,
+    stage = "calculated",
+    actorId = "system"
+  } = {}) {
+    const claim = requireTravelClaim(state, companyId, travelClaimId);
+    const resolvedStage = assertAllowed(stage, PAYROLL_CONSUMPTION_STAGES, "travel_payroll_consumption_stage_invalid");
+    const resolvedPayRunId = requireText(payRunId, "travel_payroll_consumption_pay_run_id_required");
+    const resolvedPayRunLineId = requireText(payRunLineId, "travel_payroll_consumption_pay_run_line_id_required");
+    const resolvedPayItemCode = requireText(payItemCode, "travel_payroll_consumption_pay_item_code_required");
+    const resolvedProcessingStep = normalizeProcessingStep(processingStep, "travel_payroll_consumption_processing_step_invalid");
+    const resolvedAmount = normalizeMoney(amount, "travel_payroll_consumption_amount_invalid");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const now = nowIso(clock);
+    const existingId = state.payrollConsumptionIdByKey.get(resolvedPayRunLineId);
+    const existing = existingId ? state.payrollConsumptions.get(existingId) : null;
+    if (existing) {
+      existing.stage = upgradeConsumptionStage(existing.stage, resolvedStage);
+      existing.amount = resolvedAmount;
+      existing.sourceType = requireText(sourceType, "travel_payroll_consumption_source_type_required");
+      existing.sourceSnapshotHash = normalizeOptionalText(sourceSnapshotHash);
+      existing.updatedAt = now;
+      if (existing.stage === "approved" && !existing.approvedAt) {
+        existing.approvedAt = now;
+        existing.approvedByActorId = resolvedActorId;
+      }
+      state.payrollConsumptions.set(existing.travelPayrollConsumptionId, existing);
+      return copy(existing);
+    }
+
+    const record = {
+      travelPayrollConsumptionId: crypto.randomUUID(),
+      travelClaimId: claim.travelClaimId,
+      companyId: claim.companyId,
+      employeeId: claim.employeeId,
+      employmentId: claim.employmentId,
+      payRunId: resolvedPayRunId,
+      payRunLineId: resolvedPayRunLineId,
+      payItemCode: resolvedPayItemCode,
+      processingStep: resolvedProcessingStep,
+      sourceType: requireText(sourceType, "travel_payroll_consumption_source_type_required"),
+      amount: resolvedAmount,
+      sourceSnapshotHash: normalizeOptionalText(sourceSnapshotHash),
+      stage: resolvedStage,
+      calculatedAt: now,
+      calculatedByActorId: resolvedActorId,
+      approvedAt: resolvedStage === "approved" ? now : null,
+      approvedByActorId: resolvedStage === "approved" ? resolvedActorId : null,
+      updatedAt: now
+    };
+    state.payrollConsumptions.set(record.travelPayrollConsumptionId, record);
+    appendToIndex(state.payrollConsumptionIdsByClaim, claim.travelClaimId, record.travelPayrollConsumptionId);
+    state.payrollConsumptionIdByKey.set(resolvedPayRunLineId, record.travelPayrollConsumptionId);
+    pushAudit(state, clock, {
+      companyId: claim.companyId,
+      actorId: resolvedActorId,
+      correlationId: resolvedPayRunId,
+      action: resolvedStage === "approved" ? "travel.payroll.consumption.approved" : "travel.payroll.consumption.registered",
+      entityType: "travel_claim",
+      entityId: claim.travelClaimId,
+      explanation: `Registered payroll consumption for pay item ${resolvedPayItemCode} in pay run ${resolvedPayRunId}.`
+    });
+    return copy(record);
   }
 }
 
@@ -788,6 +866,7 @@ function presentTravelClaim(state, claim) {
     return null;
   }
   const valuation = state.valuations.get(state.valuationIdByClaim.get(claim.travelClaimId)) || null;
+  const payrollConsumptions = listChildRecords(state.payrollConsumptionIdsByClaim, state.payrollConsumptions, claim.travelClaimId);
   return {
     ...copy(claim),
     travelDays: (state.claimDayIdsByClaim.get(claim.travelClaimId) || [])
@@ -818,8 +897,37 @@ function presentTravelClaim(state, claim) {
       .map((travelPostingIntentId) => state.postingIntents.get(travelPostingIntentId))
       .filter(Boolean)
       .map(copy),
-    valuation: valuation ? copy(valuation) : null
+    valuation: valuation ? copy(valuation) : null,
+    payrollConsumptions,
+    payrollDispatchStatus: summarizePayrollConsumptions(payrollConsumptions)
   };
+}
+
+function summarizePayrollConsumptions(records) {
+  const items = Array.isArray(records) ? records : [];
+  return {
+    totalCount: items.length,
+    calculatedCount: items.filter((record) => record.stage === "calculated").length,
+    approvedCount: items.filter((record) => record.stage === "approved").length,
+    latestStage: items.some((record) => record.stage === "approved") ? "approved" : items.length > 0 ? "calculated" : "not_dispatched",
+    payRunIds: Array.from(new Set(items.map((record) => record.payRunId))).sort()
+  };
+}
+
+function listChildRecords(index, table, key) {
+  return (index.get(key) || []).map((id) => table.get(id)).filter(Boolean).map(copy);
+}
+
+function upgradeConsumptionStage(currentStage, nextStage) {
+  return currentStage === "approved" || nextStage === "approved" ? "approved" : "calculated";
+}
+
+function normalizeProcessingStep(value, code) {
+  const resolved = Number(value);
+  if (!Number.isInteger(resolved) || resolved < 1) {
+    throw createError(400, code, `${code} must be a positive integer.`);
+  }
+  return resolved;
 }
 
 function valueMileageLog(log) {

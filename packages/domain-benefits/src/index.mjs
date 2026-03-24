@@ -30,6 +30,7 @@ const TAX_FREE_MEAL_CONTEXTS = new Set([
   "hotel_breakfast_included",
   "public_transport_included"
 ]);
+const PAYROLL_CONSUMPTION_STAGES = Object.freeze(["calculated", "approved"]);
 
 export const BENEFIT_CODES = Object.freeze([
   "CAR_BENEFIT",
@@ -77,6 +78,9 @@ export function createBenefitsEngine({
     postingIntentIdsByEvent: new Map(),
     agiMappings: new Map(),
     agiMappingIdsByEvent: new Map(),
+    payrollConsumptions: new Map(),
+    payrollConsumptionIdsByEvent: new Map(),
+    payrollConsumptionIdByKey: new Map(),
     auditEvents: []
   };
 
@@ -92,7 +96,8 @@ export function createBenefitsEngine({
     getBenefitEvent,
     createBenefitEvent,
     listBenefitAuditEvents,
-    listPayrollBenefitPayloads
+    listPayrollBenefitPayloads,
+    registerBenefitPayrollConsumption
   };
 
   function listBenefitCatalog({ companyId } = {}) {
@@ -236,6 +241,79 @@ export function createBenefitsEngine({
       payLinePayloads: events.flatMap((event) => event.postingIntents.map((intent) => copy(intent.payrollLinePayloadJson))),
       warnings: events.flatMap((event) => event.valuation.decision.warnings).filter(Boolean)
     };
+  }
+
+  function registerBenefitPayrollConsumption({
+    companyId,
+    benefitEventId,
+    payRunId,
+    payRunLineId,
+    payItemCode,
+    processingStep,
+    sourceType = "benefit_event",
+    amount,
+    sourceSnapshotHash = null,
+    stage = "calculated",
+    actorId = "system"
+  } = {}) {
+    const event = requireBenefitEvent(state, companyId, benefitEventId);
+    const resolvedStage = assertAllowed(stage, PAYROLL_CONSUMPTION_STAGES, "benefit_payroll_consumption_stage_invalid");
+    const resolvedPayRunId = requireText(payRunId, "benefit_payroll_consumption_pay_run_id_required");
+    const resolvedPayRunLineId = requireText(payRunLineId, "benefit_payroll_consumption_pay_run_line_id_required");
+    const resolvedPayItemCode = requireText(payItemCode, "benefit_payroll_consumption_pay_item_code_required");
+    const resolvedProcessingStep = normalizeProcessingStep(processingStep, "benefit_payroll_consumption_processing_step_invalid");
+    const resolvedAmount = normalizeMoney(amount, "benefit_payroll_consumption_amount_invalid");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const now = nowIso(clock);
+    const existingId = state.payrollConsumptionIdByKey.get(resolvedPayRunLineId);
+    const existing = existingId ? state.payrollConsumptions.get(existingId) : null;
+    if (existing) {
+      existing.stage = upgradeConsumptionStage(existing.stage, resolvedStage);
+      existing.amount = resolvedAmount;
+      existing.sourceType = requireText(sourceType, "benefit_payroll_consumption_source_type_required");
+      existing.sourceSnapshotHash = normalizeOptionalText(sourceSnapshotHash);
+      existing.updatedAt = now;
+      if (existing.stage === "approved" && !existing.approvedAt) {
+        existing.approvedAt = now;
+        existing.approvedByActorId = resolvedActorId;
+      }
+      state.payrollConsumptions.set(existing.benefitPayrollConsumptionId, existing);
+      return copy(existing);
+    }
+
+    const record = {
+      benefitPayrollConsumptionId: crypto.randomUUID(),
+      benefitEventId: event.benefitEventId,
+      companyId: event.companyId,
+      employeeId: event.employeeId,
+      employmentId: event.employmentId,
+      payRunId: resolvedPayRunId,
+      payRunLineId: resolvedPayRunLineId,
+      payItemCode: resolvedPayItemCode,
+      processingStep: resolvedProcessingStep,
+      sourceType: requireText(sourceType, "benefit_payroll_consumption_source_type_required"),
+      amount: resolvedAmount,
+      sourceSnapshotHash: normalizeOptionalText(sourceSnapshotHash),
+      stage: resolvedStage,
+      calculatedAt: now,
+      calculatedByActorId: resolvedActorId,
+      approvedAt: resolvedStage === "approved" ? now : null,
+      approvedByActorId: resolvedStage === "approved" ? resolvedActorId : null,
+      updatedAt: now
+    };
+    state.payrollConsumptions.set(record.benefitPayrollConsumptionId, record);
+    appendToIndex(state.payrollConsumptionIdsByEvent, event.benefitEventId, record.benefitPayrollConsumptionId);
+    state.payrollConsumptionIdByKey.set(resolvedPayRunLineId, record.benefitPayrollConsumptionId);
+    pushAudit(state, clock, {
+      companyId: event.companyId,
+      actorId: resolvedActorId,
+      correlationId: resolvedPayRunId,
+      action: resolvedStage === "approved" ? "benefit.payroll.consumption.approved" : "benefit.payroll.consumption.registered",
+      entityType: "benefit_event",
+      entityId: event.benefitEventId,
+      explanation: `Registered payroll consumption for pay item ${resolvedPayItemCode} in pay run ${resolvedPayRunId}.`
+    });
+    return copy(record);
   }
 }
 
@@ -973,6 +1051,7 @@ function seedCatalog(state, clock, companyId) {
 }
 
 function presentBenefitEvent(state, event) {
+  const payrollConsumptions = listChildRecords(state.payrollConsumptionIdsByEvent, state.payrollConsumptions, event.benefitEventId);
   return copy({
     ...event,
     catalogItem: requireCatalogItem(state, event.companyId, event.benefitCode),
@@ -980,8 +1059,33 @@ function presentBenefitEvent(state, event) {
     deductions: listChildRecords(state.deductionIdsByEvent, state.deductions, event.benefitEventId),
     documents: listChildRecords(state.documentIdsByEvent, state.documents, event.benefitEventId),
     postingIntents: listChildRecords(state.postingIntentIdsByEvent, state.postingIntents, event.benefitEventId),
-    agiMappings: listChildRecords(state.agiMappingIdsByEvent, state.agiMappings, event.benefitEventId)
+    agiMappings: listChildRecords(state.agiMappingIdsByEvent, state.agiMappings, event.benefitEventId),
+    payrollConsumptions,
+    payrollDispatchStatus: summarizePayrollConsumptions(payrollConsumptions)
   });
+}
+
+function summarizePayrollConsumptions(records) {
+  const items = Array.isArray(records) ? records : [];
+  return {
+    totalCount: items.length,
+    calculatedCount: items.filter((record) => record.stage === "calculated").length,
+    approvedCount: items.filter((record) => record.stage === "approved").length,
+    latestStage: items.some((record) => record.stage === "approved") ? "approved" : items.length > 0 ? "calculated" : "not_dispatched",
+    payRunIds: Array.from(new Set(items.map((record) => record.payRunId))).sort()
+  };
+}
+
+function upgradeConsumptionStage(currentStage, nextStage) {
+  return currentStage === "approved" || nextStage === "approved" ? "approved" : "calculated";
+}
+
+function normalizeProcessingStep(value, code) {
+  const resolved = Number(value);
+  if (!Number.isInteger(resolved) || resolved < 1) {
+    throw createError(400, code, `${code} must be a positive integer.`);
+  }
+  return resolved;
 }
 
 function requireCatalogItem(state, companyId, benefitCode) {

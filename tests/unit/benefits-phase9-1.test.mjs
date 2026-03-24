@@ -146,9 +146,18 @@ test("Phase 9.1 integrates benefits into payroll, AGI and payroll posting with a
     payRunId: salaryRun.payRunId,
     actorId: "unit-test"
   });
+  const consumedHealthInsurance = salaryFixture.benefitsPlatform.listBenefitEvents({
+    companyId: COMPANY_ID,
+    employmentId: salaryFixture.employment.employmentId,
+    reportingPeriod: "202603"
+  })[0];
 
   assert.equal(salaryRun.lines.some((line) => line.ledgerAccountCode === "7230" && line.agiMappingCode === "taxable_benefit"), true);
   assert.equal(salaryRun.payslips[0].totals.taxableBenefitAmount, 600);
+  assert.equal(consumedHealthInsurance.payrollConsumptions.length, 1);
+  assert.equal(consumedHealthInsurance.payrollConsumptions[0].payRunId, salaryRun.payRunId);
+  assert.equal(consumedHealthInsurance.payrollConsumptions[0].stage, "approved");
+  assert.equal(consumedHealthInsurance.payrollDispatchStatus.approvedCount, 1);
 
   const posting = salaryFixture.payrollPlatform.createPayrollPosting({
     companyId: COMPANY_ID,

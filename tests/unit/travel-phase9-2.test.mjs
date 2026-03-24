@@ -184,6 +184,16 @@ test("Phase 9.2 feeds payroll with tax-free allowances, taxable mileage and adva
     employmentIds: [employment.employmentId],
     actorId: "unit-test"
   });
+  payrollPlatform.approvePayRun({
+    companyId: COMPANY_ID,
+    payRunId: payRun.payRunId,
+    actorId: "unit-test"
+  });
+  const consumedClaim = travelPlatform.listTravelClaims({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    reportingPeriod: "202603"
+  })[0];
 
   assert.equal(payRun.lines.some((line) => line.payItemCode === "TAX_FREE_TRAVEL_ALLOWANCE" && line.amount === 645), true);
   assert.equal(payRun.lines.some((line) => line.payItemCode === "TAXABLE_TRAVEL_ALLOWANCE" && line.amount === 55), true);
@@ -193,6 +203,9 @@ test("Phase 9.2 feeds payroll with tax-free allowances, taxable mileage and adva
   assert.equal(payRun.payslips[0].totals.taxFreeAllowanceAmount, 645);
   assert.equal(payRun.payslips[0].totals.expenseReimbursementAmount, 100);
   assert.equal(payRun.warningCodes.includes("travel_mileage_tax_free_denied_benefit_car_fuel"), true);
+  assert.equal(consumedClaim.payrollConsumptions.length, 5);
+  assert.equal(consumedClaim.payrollDispatchStatus.approvedCount, 5);
+  assert.equal(consumedClaim.payrollConsumptions.every((record) => record.payRunId === payRun.payRunId), true);
 });
 
 function createTravelFixture({ payModelCode, monthlySalary = null, hourlyRate = null }) {

@@ -117,6 +117,20 @@ test("Phase 9.3 carries pension, extra pension and salary exchange into payroll 
     payRunId: payRun.payRunId,
     actorId: "unit-test"
   });
+  const pensionEvents = pensionPlatform.listPensionEvents({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    reportingPeriod: "202603"
+  });
+  const salaryExchangeAgreement = pensionPlatform.listSalaryExchangeAgreements({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId
+  })[0];
+  const basisSnapshot = pensionPlatform.listPensionBasisSnapshots({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    reportingPeriod: "202603"
+  })[0];
 
   assert.equal(payRun.lines.some((line) => line.payItemCode === "PENSION_PREMIUM" && line.amount === 2925), true);
   assert.equal(payRun.lines.some((line) => line.payItemCode === "EXTRA_PENSION_PREMIUM" && line.amount === 1500), true);
@@ -124,6 +138,17 @@ test("Phase 9.3 carries pension, extra pension and salary exchange into payroll 
   assert.equal(payRun.lines.some((line) => line.payItemCode === "SALARY_EXCHANGE_GROSS_DEDUCTION" && line.amount === 3000), true);
   assert.equal(payRun.payslips[0].totals.pensionPremiumAmount, 7599);
   assert.equal(payRun.payslips[0].totals.salaryExchangeGrossDeductionAmount, 3000);
+  assert.equal(pensionEvents.length, 3);
+  assert.equal(
+    pensionEvents.filter((event) => event.eventCode === "regular_pension_premium").every((event) => event.payrollDispatchStatus.approvedCount === 1),
+    true
+  );
+  assert.equal(
+    pensionEvents.find((event) => event.eventCode === "salary_exchange_pension_premium").payrollDispatchStatus.totalCount,
+    0
+  );
+  assert.equal(salaryExchangeAgreement.payrollDispatchStatus.approvedCount, 2);
+  assert.equal(basisSnapshot.payrollDispatchStatus.approvedCount, 1);
 
   const posting = payrollPlatform.createPayrollPosting({
     companyId: COMPANY_ID,

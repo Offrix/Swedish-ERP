@@ -6,6 +6,8 @@ const SALARY_EXCHANGE_MINIMUM_MONTHLY_AMOUNT = 500;
 const SALARY_EXCHANGE_MAX_SHARE = 0.2;
 const SALARY_EXCHANGE_DEFAULT_MARKUP_PERCENT = 5.8;
 const SPECIAL_PAYROLL_TAX_RATE_PERCENT_2026 = 24.26;
+const PAYROLL_CONSUMPTION_STAGES = Object.freeze(["calculated", "approved"]);
+const PENSION_PAYROLL_SOURCE_TYPES = Object.freeze(["pension_event", "salary_exchange_agreement", "pension_basis_snapshot"]);
 
 const PENSION_PLAN_CODES = Object.freeze(["ITP1", "ITP2", "FORA", "EXTRA_PENSION"]);
 const PENSION_PROVIDER_CODES = Object.freeze(["collectum", "fora", "custom"]);
@@ -44,6 +46,9 @@ export function createPensionEngine({ clock = () => new Date(), seedDemo = true,
     eventIdsByCompany: new Map(),
     eventIdsByEmployment: new Map(),
     eventIdBySourceKey: new Map(),
+    payrollConsumptions: new Map(),
+    payrollConsumptionIdsBySourceKey: new Map(),
+    payrollConsumptionIdByKey: new Map(),
     reports: new Map(),
     reportIdsByCompany: new Map(),
     reportIdByCompanyPeriodProvider: new Map(),
@@ -77,7 +82,8 @@ export function createPensionEngine({ clock = () => new Date(), seedDemo = true,
     listPensionReconciliations,
     createPensionReconciliation,
     listPensionAuditEvents,
-    listPayrollPensionPayloads
+    listPayrollPensionPayloads,
+    registerPensionPayrollConsumption
   };
 
   function listPensionPlans({ companyId } = {}) {
@@ -204,7 +210,7 @@ export function createPensionEngine({ clock = () => new Date(), seedDemo = true,
     }
     return candidates
       .sort((left, right) => left.startsOn.localeCompare(right.startsOn) || left.createdAt.localeCompare(right.createdAt))
-      .map(copy);
+      .map((candidate) => presentSalaryExchangeAgreement(state, candidate));
   }
 
   function simulateSalaryExchangeAgreement({
@@ -370,7 +376,7 @@ export function createPensionEngine({ clock = () => new Date(), seedDemo = true,
       .filter((candidate) => (resolvedReportingPeriod ? candidate.reportingPeriod === resolvedReportingPeriod : true))
       .filter((candidate) => (employmentId ? candidate.employmentId === employmentId : true))
       .sort((left, right) => left.reportingPeriod.localeCompare(right.reportingPeriod) || left.createdAt.localeCompare(right.createdAt))
-      .map(copy);
+      .map((candidate) => presentPensionBasisSnapshot(state, candidate));
   }
 
   function listPensionEvents({ companyId, reportingPeriod = null, employmentId = null } = {}) {
@@ -383,7 +389,7 @@ export function createPensionEngine({ clock = () => new Date(), seedDemo = true,
       .filter((candidate) => (resolvedReportingPeriod ? candidate.reportingPeriod === resolvedReportingPeriod : true))
       .filter((candidate) => (employmentId ? candidate.employmentId === employmentId : true))
       .sort((left, right) => left.reportingPeriod.localeCompare(right.reportingPeriod) || left.createdAt.localeCompare(right.createdAt))
-      .map(copy);
+      .map((candidate) => presentPensionEvent(state, candidate));
   }
 
   function getPensionEvent({ companyId, pensionEventId } = {}) {
@@ -393,7 +399,7 @@ export function createPensionEngine({ clock = () => new Date(), seedDemo = true,
     if (!record || record.companyId !== resolvedCompanyId || record.status === "superseded") {
       throw createError(404, "pension_event_not_found", "Pension event was not found.");
     }
-    return copy(record);
+    return presentPensionEvent(state, record);
   }
 
   function listPensionReports({ companyId, reportingPeriod = null, providerCode = null } = {}) {
@@ -775,12 +781,88 @@ export function createPensionEngine({ clock = () => new Date(), seedDemo = true,
     });
     return {
       enrollments: activeEnrollments.map(copy),
-      activeAgreements: activeAgreement ? [copy(activeAgreement)] : [],
-      basisSnapshots: [copy(state.basisSnapshots.get(basisSnapshot.pensionBasisSnapshotId))],
+      activeAgreements: activeAgreement ? [presentSalaryExchangeAgreement(state, activeAgreement)] : [],
+      basisSnapshots: [presentPensionBasisSnapshot(state, state.basisSnapshots.get(basisSnapshot.pensionBasisSnapshotId))],
       events,
       payLinePayloads,
       warnings: uniqueStrings(warnings)
     };
+  }
+
+  function registerPensionPayrollConsumption({
+    companyId,
+    sourceType,
+    sourceId,
+    payRunId,
+    payRunLineId,
+    payItemCode,
+    processingStep,
+    amount,
+    sourceSnapshotHash = null,
+    stage = "calculated",
+    actorId = "system"
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedSourceType = assertAllowed(sourceType, PENSION_PAYROLL_SOURCE_TYPES, "pension_payroll_consumption_source_type_invalid");
+    const resolvedSourceId = requireText(sourceId, "pension_payroll_consumption_source_id_required");
+    const sourceRecord = requirePensionPayrollSourceRecord(state, resolvedCompanyId, resolvedSourceType, resolvedSourceId);
+    const resolvedStage = assertAllowed(stage, PAYROLL_CONSUMPTION_STAGES, "pension_payroll_consumption_stage_invalid");
+    const resolvedPayRunId = requireText(payRunId, "pension_payroll_consumption_pay_run_id_required");
+    const resolvedPayRunLineId = requireText(payRunLineId, "pension_payroll_consumption_pay_run_line_id_required");
+    const resolvedPayItemCode = requireText(payItemCode, "pension_payroll_consumption_pay_item_code_required");
+    const resolvedProcessingStep = normalizeProcessingStep(processingStep, "pension_payroll_consumption_processing_step_invalid");
+    const resolvedAmount = normalizeMoney(amount, "pension_payroll_consumption_amount_invalid");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const now = nowIso(clock);
+    const existingId = state.payrollConsumptionIdByKey.get(resolvedPayRunLineId);
+    const existing = existingId ? state.payrollConsumptions.get(existingId) : null;
+    if (existing) {
+      existing.stage = upgradeConsumptionStage(existing.stage, resolvedStage);
+      existing.amount = resolvedAmount;
+      existing.sourceSnapshotHash = normalizeOptionalText(sourceSnapshotHash);
+      existing.updatedAt = now;
+      if (existing.stage === "approved" && !existing.approvedAt) {
+        existing.approvedAt = now;
+        existing.approvedByActorId = resolvedActorId;
+      }
+      state.payrollConsumptions.set(existing.pensionPayrollConsumptionId, existing);
+      return copy(existing);
+    }
+
+    const record = {
+      pensionPayrollConsumptionId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      employeeId: sourceRecord.employeeId,
+      employmentId: sourceRecord.employmentId,
+      sourceType: resolvedSourceType,
+      sourceId: resolvedSourceId,
+      payRunId: resolvedPayRunId,
+      payRunLineId: resolvedPayRunLineId,
+      payItemCode: resolvedPayItemCode,
+      processingStep: resolvedProcessingStep,
+      amount: resolvedAmount,
+      sourceSnapshotHash: normalizeOptionalText(sourceSnapshotHash),
+      stage: resolvedStage,
+      calculatedAt: now,
+      calculatedByActorId: resolvedActorId,
+      approvedAt: resolvedStage === "approved" ? now : null,
+      approvedByActorId: resolvedStage === "approved" ? resolvedActorId : null,
+      updatedAt: now
+    };
+    state.payrollConsumptions.set(record.pensionPayrollConsumptionId, record);
+    appendToIndex(state.payrollConsumptionIdsBySourceKey, buildPensionPayrollSourceKey(resolvedSourceType, resolvedSourceId), record.pensionPayrollConsumptionId);
+    state.payrollConsumptionIdByKey.set(resolvedPayRunLineId, record.pensionPayrollConsumptionId);
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId: resolvedPayRunId,
+      action: resolvedStage === "approved" ? "pension.payroll.consumption.approved" : "pension.payroll.consumption.registered",
+      entityType: resolvedSourceType,
+      entityId: resolvedSourceId,
+      employmentId: sourceRecord.employmentId,
+      explanation: `Registered payroll consumption for ${resolvedSourceType} in pay run ${resolvedPayRunId}.`
+    });
+    return copy(record);
   }
 }
 
@@ -1096,6 +1178,92 @@ function upsertPensionEvent({ state, clock, sourceKey, eventDraft }) {
   appendToIndex(state.eventIdsByEmployment, record.employmentId, record.pensionEventId);
   state.eventIdBySourceKey.set(sourceKey, record.pensionEventId);
   return record;
+}
+
+function presentPensionEvent(state, record) {
+  const payrollConsumptions = listPensionPayrollConsumptions(state, "pension_event", record.pensionEventId);
+  return copy({
+    ...record,
+    payrollConsumptions,
+    payrollDispatchStatus: summarizePayrollConsumptions(payrollConsumptions)
+  });
+}
+
+function presentSalaryExchangeAgreement(state, record) {
+  const payrollConsumptions = listPensionPayrollConsumptions(state, "salary_exchange_agreement", record.salaryExchangeAgreementId);
+  return copy({
+    ...record,
+    payrollConsumptions,
+    payrollDispatchStatus: summarizePayrollConsumptions(payrollConsumptions)
+  });
+}
+
+function presentPensionBasisSnapshot(state, record) {
+  const payrollConsumptions = listPensionPayrollConsumptions(state, "pension_basis_snapshot", record.pensionBasisSnapshotId);
+  return copy({
+    ...record,
+    payrollConsumptions,
+    payrollDispatchStatus: summarizePayrollConsumptions(payrollConsumptions)
+  });
+}
+
+function listPensionPayrollConsumptions(state, sourceType, sourceId) {
+  return (state.payrollConsumptionIdsBySourceKey.get(buildPensionPayrollSourceKey(sourceType, sourceId)) || [])
+    .map((payrollConsumptionId) => state.payrollConsumptions.get(payrollConsumptionId))
+    .filter(Boolean)
+    .map(copy);
+}
+
+function buildPensionPayrollSourceKey(sourceType, sourceId) {
+  return `${requireText(sourceType, "pension_payroll_consumption_source_type_required")}:${requireText(sourceId, "pension_payroll_consumption_source_id_required")}`;
+}
+
+function requirePensionPayrollSourceRecord(state, companyId, sourceType, sourceId) {
+  if (sourceType === "pension_event") {
+    const record = state.events.get(sourceId);
+    if (!record || record.companyId !== companyId || record.status === "superseded") {
+      throw createError(404, "pension_payroll_consumption_source_not_found", "Pension event was not found for payroll consumption.");
+    }
+    return record;
+  }
+  if (sourceType === "salary_exchange_agreement") {
+    const record = state.agreements.get(sourceId);
+    if (!record || record.companyId !== companyId) {
+      throw createError(404, "pension_payroll_consumption_source_not_found", "Salary exchange agreement was not found for payroll consumption.");
+    }
+    return record;
+  }
+  if (sourceType === "pension_basis_snapshot") {
+    const record = state.basisSnapshots.get(sourceId);
+    if (!record || record.companyId !== companyId) {
+      throw createError(404, "pension_payroll_consumption_source_not_found", "Pension basis snapshot was not found for payroll consumption.");
+    }
+    return record;
+  }
+  throw createError(400, "pension_payroll_consumption_source_type_invalid", "Unsupported pension payroll consumption source type.");
+}
+
+function summarizePayrollConsumptions(records) {
+  const items = Array.isArray(records) ? records : [];
+  return {
+    totalCount: items.length,
+    calculatedCount: items.filter((record) => record.stage === "calculated").length,
+    approvedCount: items.filter((record) => record.stage === "approved").length,
+    latestStage: items.some((record) => record.stage === "approved") ? "approved" : items.length > 0 ? "calculated" : "not_dispatched",
+    payRunIds: Array.from(new Set(items.map((record) => record.payRunId))).sort()
+  };
+}
+
+function upgradeConsumptionStage(currentStage, nextStage) {
+  return currentStage === "approved" || nextStage === "approved" ? "approved" : "calculated";
+}
+
+function normalizeProcessingStep(value, code) {
+  const resolved = Number(value);
+  if (!Number.isInteger(resolved) || resolved < 1) {
+    throw createError(400, code, `${code} must be a positive integer.`);
+  }
+  return resolved;
 }
 
 function normalizeRequiredDate(value, code) {

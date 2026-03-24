@@ -7,6 +7,7 @@ export type BenefitCode =
   | "HEALTH_INSURANCE";
 
 export type BenefitTaxability = "taxable" | "tax_free" | "partially_taxable";
+export type BenefitPayrollConsumptionStage = "calculated" | "approved";
 
 export interface BenefitCatalogItem {
   readonly benefitCatalogId: string;
@@ -65,6 +66,30 @@ export interface BenefitPayrollLinePayload {
   readonly overrides: Record<string, unknown>;
 }
 
+export interface BenefitPayrollConsumptionRecord {
+  readonly benefitPayrollConsumptionId: string;
+  readonly benefitEventId: string;
+  readonly companyId: string;
+  readonly employeeId: string;
+  readonly employmentId: string;
+  readonly payRunId: string;
+  readonly payRunLineId: string;
+  readonly payItemCode: string;
+  readonly processingStep: number;
+  readonly sourceType: string;
+  readonly amount: number;
+  readonly sourceSnapshotHash: string | null;
+  readonly stage: BenefitPayrollConsumptionStage;
+}
+
+export interface BenefitPayrollDispatchStatus {
+  readonly totalCount: number;
+  readonly calculatedCount: number;
+  readonly approvedCount: number;
+  readonly latestStage: BenefitPayrollConsumptionStage | "not_dispatched";
+  readonly payRunIds: readonly string[];
+}
+
 export interface BenefitEventRecord {
   readonly benefitEventId: string;
   readonly companyId: string;
@@ -81,6 +106,12 @@ export interface BenefitEventRecord {
   readonly supportingDocumentId: string | null;
   readonly dimensionJson: Record<string, unknown>;
   readonly payloadJson: Record<string, unknown>;
+  readonly catalogItem: BenefitCatalogItem;
   readonly valuation: BenefitValuationRecord;
-  readonly payrollLinePayloads: readonly BenefitPayrollLinePayload[];
+  readonly deductions: readonly Record<string, unknown>[];
+  readonly documents: readonly Record<string, unknown>[];
+  readonly postingIntents: readonly Record<string, unknown>[];
+  readonly agiMappings: readonly Record<string, unknown>[];
+  readonly payrollConsumptions: readonly BenefitPayrollConsumptionRecord[];
+  readonly payrollDispatchStatus: BenefitPayrollDispatchStatus;
 }

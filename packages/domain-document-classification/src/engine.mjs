@@ -609,7 +609,12 @@ function dispatchIntent({ benefitsPlatform, intent, line, personLink, classifica
         carryOverFromPriorYear: payload.carryOverFromPriorYear === true,
         reimbursementAmount: payload.reimbursementAmount ?? intent.amount,
         calendarYearGrantedBeforeEvent: payload.calendarYearGrantedBeforeEvent ?? 0,
-        valuationMethod: normalizeOptionalText(payload.valuationMethod)
+        valuationMethod: normalizeOptionalText(payload.valuationMethod),
+        manualTaxableValue: payload.manualTaxableValue ?? null,
+        employerPaidValue: payload.employerPaidValue ?? payload.insurancePremium ?? intent.amount,
+        insurancePremium: payload.insurancePremium ?? null,
+        taxablePremiumRatio: payload.taxablePremiumRatio ?? null,
+        documentedLowerRatio: payload.documentedLowerRatio === true
       },
       employeePaidValue: payload.employeePaidValue ?? 0,
       netDeductionValue: payload.netDeductionValue ?? 0,

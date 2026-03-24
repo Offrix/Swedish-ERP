@@ -634,6 +634,21 @@ export function createPayrollEngine({
       note: "Payroll run approved.",
       recordedAt: nowIso(clock)
     });
+    for (const payRunLineId of state.payRunLineIdsByRun.get(payRun.payRunId) || []) {
+      const line = state.payRunLines.get(payRunLineId);
+      if (!line) {
+        continue;
+      }
+      registerExternalPayrollConsumption({
+        payRun,
+        line,
+        actorId,
+        stage: "approved",
+        benefitsPlatform,
+        travelPlatform,
+        pensionPlatform
+      });
+    }
     return enrichPayRun(state, payRun);
   }
 
@@ -837,6 +852,15 @@ export function createPayrollEngine({
         state.payRunLines.set(stored.payRunLineId, stored);
         appendToIndex(state.payRunLineIdsByRun, run.payRunId, stored.payRunLineId);
         appendToIndex(state.payRunLineIdsByEmployment, `${run.payRunId}:${stored.employmentId}`, stored.payRunLineId);
+        registerExternalPayrollConsumption({
+          payRun: run,
+          line: stored,
+          actorId,
+          stage: "calculated",
+          benefitsPlatform,
+          travelPlatform,
+          pensionPlatform
+        });
       }
 
       const payslip = createStoredPayslip({
@@ -3383,7 +3407,8 @@ function createStepLinesFromManualInputs({ processingStep, employment, inputs, s
         sourceId: input.sourceId,
         sourcePeriod: input.sourcePeriod,
         note: input.note,
-        dimensionJson: input.dimensionJson
+        dimensionJson: input.dimensionJson,
+        processingStep
       });
     });
 }
@@ -4088,6 +4113,73 @@ function createStoredPayslip({ companyId, payRunId, period, runType, result, gen
   };
 }
 
+function registerExternalPayrollConsumption({
+  payRun,
+  line,
+  actorId,
+  stage,
+  benefitsPlatform,
+  travelPlatform,
+  pensionPlatform
+}) {
+  if (!payRun || !line?.sourceId) {
+    return;
+  }
+  if (
+    (line.sourceType === "benefit_event" || line.sourceType === "benefit_net_deduction") &&
+    typeof benefitsPlatform?.registerBenefitPayrollConsumption === "function"
+  ) {
+    benefitsPlatform.registerBenefitPayrollConsumption({
+      companyId: payRun.companyId,
+      benefitEventId: line.sourceId,
+      payRunId: payRun.payRunId,
+      payRunLineId: line.payRunLineId,
+      payItemCode: line.payItemCode,
+      processingStep: line.processingStep,
+      sourceType: line.sourceType,
+      amount: line.amount,
+      sourceSnapshotHash: payRun.sourceSnapshotHash,
+      stage,
+      actorId
+    });
+    return;
+  }
+  if (line.sourceType === "travel_claim" && typeof travelPlatform?.registerTravelPayrollConsumption === "function") {
+    travelPlatform.registerTravelPayrollConsumption({
+      companyId: payRun.companyId,
+      travelClaimId: line.sourceId,
+      payRunId: payRun.payRunId,
+      payRunLineId: line.payRunLineId,
+      payItemCode: line.payItemCode,
+      processingStep: line.processingStep,
+      sourceType: line.sourceType,
+      amount: line.amount,
+      sourceSnapshotHash: payRun.sourceSnapshotHash,
+      stage,
+      actorId
+    });
+    return;
+  }
+  if (
+    ["pension_event", "salary_exchange_agreement", "pension_basis_snapshot"].includes(line.sourceType) &&
+    typeof pensionPlatform?.registerPensionPayrollConsumption === "function"
+  ) {
+    pensionPlatform.registerPensionPayrollConsumption({
+      companyId: payRun.companyId,
+      sourceType: line.sourceType,
+      sourceId: line.sourceId,
+      payRunId: payRun.payRunId,
+      payRunLineId: line.payRunLineId,
+      payItemCode: line.payItemCode,
+      processingStep: line.processingStep,
+      amount: line.amount,
+      sourceSnapshotHash: payRun.sourceSnapshotHash,
+      stage,
+      actorId
+    });
+  }
+}
+
 function enrichPayRun(state, payRun) {
   const exceptions = listPayrollExceptionsFromState(state, payRun.payRunId).map(copy);
   return {
@@ -4378,6 +4470,7 @@ function createPayLine({
   sourceLineId = null,
   note = null,
   calculationStatus = "calculated",
+  processingStep = null,
   dimensionJson = null,
   overrides = {}
 }) {
@@ -4407,6 +4500,7 @@ function createPayLine({
     sourcePayRunId: normalizeOptionalText(sourcePayRunId),
     sourceLineId: normalizeOptionalText(sourceLineId),
     calculationStatus,
+    processingStep: processingStep == null ? null : normalizeProcessingStep(processingStep, payItem.compensationBucket),
     note: normalizeOptionalText(note),
     displayOrder: payItemDisplayOrder(payItem.payItemCode),
     dimensionJson: normalizePayrollDimensions({
@@ -4431,7 +4525,8 @@ function createStepLinesFromPayloads({ processingStep, employment, payloads, sta
         sourceId: payload.sourceId || null,
         note: payload.note || null,
         dimensionJson: payload.dimensionJson || {},
-        overrides: payload.overrides || {}
+        overrides: payload.overrides || {},
+        processingStep
       });
     });
 }

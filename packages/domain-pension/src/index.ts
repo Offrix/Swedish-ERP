@@ -6,6 +6,7 @@ export type SalaryExchangeMode = "fixed_amount" | "percent_of_gross";
 export type SalaryExchangeBasisTreatment = "maintain_pre_exchange" | "reduce_with_exchange";
 export type PensionReportStatus = "draft" | "ready" | "submitted" | "corrected";
 export type PensionReconciliationStatus = "matched" | "difference_detected";
+export type PensionPayrollConsumptionStage = "calculated" | "approved";
 
 export interface PensionPlanRef {
   readonly pensionPlanId: string;
@@ -63,6 +64,8 @@ export interface SalaryExchangeAgreementRef {
   readonly basisTreatmentCode: SalaryExchangeBasisTreatment;
   readonly providerCode: PensionProviderCode;
   readonly preview: SalaryExchangeSimulation;
+  readonly payrollConsumptions: readonly PensionPayrollConsumptionRecord[];
+  readonly payrollDispatchStatus: PensionPayrollDispatchStatus;
 }
 
 export interface PensionBasisSnapshotRef {
@@ -79,6 +82,8 @@ export interface PensionBasisSnapshotRef {
   readonly specialPayrollTaxAmount: number;
   readonly warningCodes: readonly string[];
   readonly snapshotHash: string;
+  readonly payrollConsumptions: readonly PensionPayrollConsumptionRecord[];
+  readonly payrollDispatchStatus: PensionPayrollDispatchStatus;
 }
 
 export interface PensionPayrollLinePayload {
@@ -90,6 +95,30 @@ export interface PensionPayrollLinePayload {
   readonly sourcePeriod: string;
   readonly note: string | null;
   readonly dimensionJson: Record<string, unknown>;
+}
+
+export interface PensionPayrollConsumptionRecord {
+  readonly pensionPayrollConsumptionId: string;
+  readonly companyId: string;
+  readonly employeeId: string;
+  readonly employmentId: string;
+  readonly sourceType: "pension_event" | "salary_exchange_agreement" | "pension_basis_snapshot";
+  readonly sourceId: string;
+  readonly payRunId: string;
+  readonly payRunLineId: string;
+  readonly payItemCode: string;
+  readonly processingStep: number;
+  readonly amount: number;
+  readonly sourceSnapshotHash: string | null;
+  readonly stage: PensionPayrollConsumptionStage;
+}
+
+export interface PensionPayrollDispatchStatus {
+  readonly totalCount: number;
+  readonly calculatedCount: number;
+  readonly approvedCount: number;
+  readonly latestStage: PensionPayrollConsumptionStage | "not_dispatched";
+  readonly payRunIds: readonly string[];
 }
 
 export interface PensionEventRef {
@@ -112,6 +141,8 @@ export interface PensionEventRef {
   readonly invoiceReconciliationStatus: string;
   readonly payrollLinePayloadJson: PensionPayrollLinePayload;
   readonly warningCodes: readonly string[];
+  readonly payrollConsumptions: readonly PensionPayrollConsumptionRecord[];
+  readonly payrollDispatchStatus: PensionPayrollDispatchStatus;
 }
 
 export interface PensionReportLineRef {
