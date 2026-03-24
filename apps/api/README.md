@@ -337,6 +337,21 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/personalliggare/sites/:constructionSiteId/exports?companyId=...`
 - `POST /v1/personalliggare/sites/:constructionSiteId/exports`
 - `GET /v1/personalliggare/audit-events?companyId=...`
+- `GET /v1/egenkontroll/templates?companyId=...`
+- `POST /v1/egenkontroll/templates`
+- `GET /v1/egenkontroll/templates/:checklistTemplateId?companyId=...`
+- `POST /v1/egenkontroll/templates/:checklistTemplateId/activate`
+- `GET /v1/egenkontroll/instances?companyId=...`
+- `POST /v1/egenkontroll/instances`
+- `GET /v1/egenkontroll/instances/:checklistInstanceId?companyId=...`
+- `POST /v1/egenkontroll/instances/:checklistInstanceId/start`
+- `POST /v1/egenkontroll/instances/:checklistInstanceId/outcomes`
+- `GET /v1/egenkontroll/instances/:checklistInstanceId/deviations?companyId=...`
+- `POST /v1/egenkontroll/instances/:checklistInstanceId/deviations`
+- `POST /v1/egenkontroll/deviations/:checklistDeviationId/acknowledge`
+- `POST /v1/egenkontroll/deviations/:checklistDeviationId/resolve`
+- `GET /v1/egenkontroll/instances/:checklistInstanceId/signoffs?companyId=...`
+- `POST /v1/egenkontroll/instances/:checklistInstanceId/signoffs`
 - `GET /v1/field/inventory/locations?companyId=...`
 - `POST /v1/field/inventory/locations`
 - `GET /v1/field/inventory/items?companyId=...`
@@ -491,7 +506,7 @@ pnpm --filter @swedish-erp/api start
 
 ## Disable strategy
 
-Set `PHASE1_AUTH_ONBOARDING_ENABLED=false` to return `503` for FAS 1 routes without touching the rest of the API process. Set `PHASE10_PROJECTS_ENABLED=false` to disable FAS 10.1 project routes in the same way, set `PHASE10_FIELD_ENABLED=false` to disable FAS 10.2 field, dispatch, inventory and mobile sync routes, and set `PHASE10_BUILD_ENABLED=false` to disable FAS 10.3 HUS, personalliggare, ATA and build-VAT routes.
+Set `PHASE1_AUTH_ONBOARDING_ENABLED=false` to return `503` for FAS 1 routes without touching the rest of the API process. Set `PHASE10_PROJECTS_ENABLED=false` to disable FAS 10.1 project routes in the same way, set `PHASE10_FIELD_ENABLED=false` to disable FAS 10.2 field, dispatch, inventory and mobile sync routes, and set `PHASE10_BUILD_ENABLED=false` to disable FAS 10.3 HUS, personalliggare, egenkontroll, ATA and build-VAT routes.
 
 Set `PHASE2_DOCUMENT_ARCHIVE_ENABLED=false` to return `503` for FAS 2.1 document archive routes while keeping the rest of the API process alive.
 

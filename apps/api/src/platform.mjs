@@ -26,6 +26,7 @@ import { createProjectsPlatform } from "../../../packages/domain-projects/src/in
 import { createFieldPlatform } from "../../../packages/domain-field/src/index.mjs";
 import { createHusPlatform } from "../../../packages/domain-hus/src/index.mjs";
 import { createPersonalliggarePlatform } from "../../../packages/domain-personalliggare/src/index.mjs";
+import { createEgenkontrollPlatform } from "../../../packages/domain-egenkontroll/src/index.mjs";
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
 import { createCorePlatform } from "../../../packages/domain-core/src/index.mjs";
 import { createAnnualReportingPlatform } from "../../../packages/domain-annual-reporting/src/index.mjs";
@@ -79,6 +80,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "hus",
   "personalliggare",
   "field",
+  "egenkontroll",
   "annualReporting"
 ]);
 
@@ -114,6 +116,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "hus",
   "personalliggare",
   "field",
+  "egenkontroll",
   "payroll"
 ]);
 
@@ -470,6 +473,18 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         arPlatform: dependencies.ar,
         hrPlatform: dependencies.hr,
         projectsPlatform: dependencies.projects
+      })
+  }),
+  createDomainDefinition({
+    key: "egenkontroll",
+    label: "Egenkontroll",
+    packageName: "@swedish-erp/domain-egenkontroll",
+    dependsOn: ["projects", "field"],
+    create: ({ options, dependencies }) =>
+      createEgenkontrollPlatform({
+        ...options,
+        projectsPlatform: dependencies.projects,
+        fieldPlatform: dependencies.field
       })
   }),
   createDomainDefinition({

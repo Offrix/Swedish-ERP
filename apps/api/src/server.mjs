@@ -386,6 +386,17 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/personalliggare/sites/:constructionSiteId/kiosk-devices/:kioskDeviceId/revoke",
               "/v1/personalliggare/sites/:constructionSiteId/exports",
               "/v1/personalliggare/audit-events",
+              "/v1/egenkontroll/templates",
+              "/v1/egenkontroll/templates/:checklistTemplateId",
+              "/v1/egenkontroll/templates/:checklistTemplateId/activate",
+              "/v1/egenkontroll/instances",
+              "/v1/egenkontroll/instances/:checklistInstanceId",
+              "/v1/egenkontroll/instances/:checklistInstanceId/start",
+              "/v1/egenkontroll/instances/:checklistInstanceId/outcomes",
+              "/v1/egenkontroll/instances/:checklistInstanceId/deviations",
+              "/v1/egenkontroll/deviations/:checklistDeviationId/acknowledge",
+              "/v1/egenkontroll/deviations/:checklistDeviationId/resolve",
+              "/v1/egenkontroll/instances/:checklistInstanceId/signoffs",
               "/v1/field/inventory/locations",
               "/v1/field/inventory/items",
               "/v1/field/inventory/balances",
@@ -8923,6 +8934,400 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/egenkontroll/templates") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "checklist_template",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listChecklistTemplates({
+        companyId,
+        templateCode: url.searchParams.get("templateCode") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/egenkontroll/templates") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "checklist_template",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createChecklistTemplate({
+        companyId,
+        checklistTemplateId: body.checklistTemplateId ?? null,
+        templateCode: body.templateCode,
+        displayName: body.displayName,
+        industryPackCode: body.industryPackCode ?? "bygg",
+        riskClassCode: body.riskClassCode ?? "standard",
+        sections: body.sections,
+        requiredSignoffRoleCodes: Array.isArray(body.requiredSignoffRoleCodes) ? body.requiredSignoffRoleCodes : ["site_lead"],
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const egenkontrollTemplateMatch = matchPath(path, "/v1/egenkontroll/templates/:checklistTemplateId");
+  if (egenkontrollTemplateMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "checklist_template",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getChecklistTemplate({
+        companyId,
+        checklistTemplateId: egenkontrollTemplateMatch.checklistTemplateId
+      })
+    );
+    return;
+  }
+
+  const egenkontrollTemplateActivateMatch = matchPath(path, "/v1/egenkontroll/templates/:checklistTemplateId/activate");
+  if (egenkontrollTemplateActivateMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "checklist_template",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.activateChecklistTemplate({
+        companyId,
+        checklistTemplateId: egenkontrollTemplateActivateMatch.checklistTemplateId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/egenkontroll/instances") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "checklist_instance",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listChecklistInstances({
+        companyId,
+        projectId: url.searchParams.get("projectId") || null,
+        workOrderId: url.searchParams.get("workOrderId") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/egenkontroll/instances") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "checklist_instance",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createChecklistInstance({
+        companyId,
+        checklistInstanceId: body.checklistInstanceId ?? null,
+        checklistTemplateId: body.checklistTemplateId,
+        projectId: body.projectId,
+        workOrderId: body.workOrderId ?? null,
+        assignedToUserId: body.assignedToUserId ?? null,
+        dueDate: body.dueDate ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const egenkontrollInstanceMatch = matchPath(path, "/v1/egenkontroll/instances/:checklistInstanceId");
+  if (egenkontrollInstanceMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "checklist_instance",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getChecklistInstance({
+        companyId,
+        checklistInstanceId: egenkontrollInstanceMatch.checklistInstanceId
+      })
+    );
+    return;
+  }
+
+  const egenkontrollInstanceStartMatch = matchPath(path, "/v1/egenkontroll/instances/:checklistInstanceId/start");
+  if (egenkontrollInstanceStartMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "checklist_instance",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.startChecklistInstance({
+        companyId,
+        checklistInstanceId: egenkontrollInstanceStartMatch.checklistInstanceId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const egenkontrollInstanceOutcomesMatch = matchPath(path, "/v1/egenkontroll/instances/:checklistInstanceId/outcomes");
+  if (egenkontrollInstanceOutcomesMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "checklist_instance",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.recordChecklistPointOutcome({
+        companyId,
+        checklistInstanceId: egenkontrollInstanceOutcomesMatch.checklistInstanceId,
+        pointCode: body.pointCode,
+        resultCode: body.resultCode,
+        note: body.note ?? null,
+        documentIds: Array.isArray(body.documentIds) ? body.documentIds : [],
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const egenkontrollInstanceDeviationsMatch = matchPath(path, "/v1/egenkontroll/instances/:checklistInstanceId/deviations");
+  if (egenkontrollInstanceDeviationsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "checklist_deviation",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listChecklistDeviations({
+        companyId,
+        checklistInstanceId: egenkontrollInstanceDeviationsMatch.checklistInstanceId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (egenkontrollInstanceDeviationsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "checklist_deviation",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.raiseChecklistDeviation({
+        companyId,
+        checklistInstanceId: egenkontrollInstanceDeviationsMatch.checklistInstanceId,
+        pointCode: body.pointCode,
+        severityCode: body.severityCode ?? "major",
+        title: body.title,
+        description: body.description,
+        documentIds: Array.isArray(body.documentIds) ? body.documentIds : [],
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const egenkontrollDeviationAcknowledgeMatch = matchPath(path, "/v1/egenkontroll/deviations/:checklistDeviationId/acknowledge");
+  if (egenkontrollDeviationAcknowledgeMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "checklist_deviation",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.acknowledgeChecklistDeviation({
+        companyId,
+        checklistDeviationId: egenkontrollDeviationAcknowledgeMatch.checklistDeviationId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const egenkontrollDeviationResolveMatch = matchPath(path, "/v1/egenkontroll/deviations/:checklistDeviationId/resolve");
+  if (egenkontrollDeviationResolveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "checklist_deviation",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.resolveChecklistDeviation({
+        companyId,
+        checklistDeviationId: egenkontrollDeviationResolveMatch.checklistDeviationId,
+        resolutionNote: body.resolutionNote,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const egenkontrollInstanceSignoffsMatch = matchPath(path, "/v1/egenkontroll/instances/:checklistInstanceId/signoffs");
+  if (egenkontrollInstanceSignoffsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "checklist_signoff",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listChecklistSignoffs({
+        companyId,
+        checklistInstanceId: egenkontrollInstanceSignoffsMatch.checklistInstanceId
+      })
+    });
+    return;
+  }
+
+  if (egenkontrollInstanceSignoffsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "checklist_signoff",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.signOffChecklist({
+        companyId,
+        checklistInstanceId: egenkontrollInstanceSignoffsMatch.checklistInstanceId,
+        signoffRoleCode: body.signoffRoleCode,
+        note: body.note ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/field/inventory/locations") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -10487,6 +10892,7 @@ function isPhase103Route(path) {
   return (
     path.startsWith("/v1/hus") ||
     path.startsWith("/v1/personalliggare") ||
+    path.startsWith("/v1/egenkontroll") ||
     path.includes("/change-orders") ||
     path.includes("/build-vat-decisions")
   );
