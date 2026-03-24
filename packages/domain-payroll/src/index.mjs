@@ -5,6 +5,8 @@ const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
 export const PAY_RUN_TYPES = Object.freeze(["regular", "extra", "correction", "final"]);
 export const PAY_RUN_STATUSES = Object.freeze(["calculated", "approved"]);
+export const PAYROLL_EXCEPTION_STATUSES = Object.freeze(["open", "resolved", "waived"]);
+export const PAYROLL_EXCEPTION_SEVERITIES = Object.freeze(["info", "warning", "error"]);
 export const PAYROLL_FREQUENCY_CODES = Object.freeze(["monthly"]);
 export const PAYROLL_TAX_MODES = Object.freeze(["pending", "manual_rate", "sink"]);
 export const AGI_SUBMISSION_STATES = Object.freeze([
@@ -34,6 +36,35 @@ export const PAYROLL_CALCULATION_BASES = Object.freeze([
 ]);
 const PAYROLL_EMPLOYER_CONTRIBUTION_RULE_PACK_CODE = "SE-EMPLOYER-CONTRIBUTIONS";
 const PAYROLL_TAX_RULE_PACK_CODE = "SE-PAYROLL-TAX";
+const PAYROLL_EXCEPTION_RULES = Object.freeze({
+  employment_contract_missing: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
+  payroll_tax_profile_missing: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
+  payroll_tax_rate_missing: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
+  payroll_tax_mode_invalid: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
+  pending_time_approvals_exist: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
+  payroll_migration_batch_not_ready: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "fix_source" }),
+  payroll_migration_open_diffs: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "fix_source" }),
+  payroll_migration_validation_blocking: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "fix_source" }),
+  collective_agreement_resolution_failed: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "fix_source" }),
+  collective_agreement_no_active_assignment: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "fix_source" }),
+  collective_agreement_missing: Object.freeze({ severity: "warning", blocking: false, resolutionPolicy: "manual_review" }),
+  negative_net_pay: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
+  benefit_without_cash_salary: Object.freeze({ severity: "warning", blocking: false, resolutionPolicy: "manual_review" }),
+  travel_preapproval_required: Object.freeze({ severity: "warning", blocking: false, resolutionPolicy: "manual_review" }),
+  travel_allowance_excess_taxable: Object.freeze({ severity: "warning", blocking: false, resolutionPolicy: "manual_review" }),
+  benefit_car_missing_mileage_log: Object.freeze({ severity: "warning", blocking: false, resolutionPolicy: "manual_review" }),
+  benefit_wellness_prior_events_may_need_reassessment: Object.freeze({
+    severity: "warning",
+    blocking: false,
+    resolutionPolicy: "manual_review"
+  }),
+  salary_exchange_threshold_warning: Object.freeze({ severity: "warning", blocking: false, resolutionPolicy: "manual_review" }),
+  salary_exchange_social_insurance_review_required: Object.freeze({
+    severity: "warning",
+    blocking: false,
+    resolutionPolicy: "manual_review"
+  })
+});
 
 export const PAYROLL_STEP_DEFINITIONS = Object.freeze([
   createStepDefinition(1, "employment_and_period", "Fetch employment and payroll period."),
@@ -160,12 +191,15 @@ export function createPayrollEngine({
   orgAuthPlatform = null,
   hrPlatform = null,
   timePlatform = null,
+  balancesPlatform = null,
+  collectiveAgreementsPlatform = null,
   benefitsPlatform = null,
   travelPlatform = null,
   pensionPlatform = null,
   ledgerPlatform = null,
   bankingPlatform = null,
-  ruleRegistry = null
+  ruleRegistry = null,
+  getCorePlatform = null
 } = {}) {
   const rules = ruleRegistry || createRulePackRegistry({ clock, seedRulePacks: EMPLOYER_CONTRIBUTION_RULE_PACKS });
   const state = {
@@ -179,6 +213,8 @@ export function createPayrollEngine({
     payRunIdsByCompany: new Map(),
     payRunEvents: new Map(),
     payRunEventIdsByRun: new Map(),
+    payrollExceptions: new Map(),
+    payrollExceptionIdsByRun: new Map(),
     payRunLines: new Map(),
     payRunLineIdsByRun: new Map(),
     payRunLineIdsByEmployment: new Map(),
@@ -236,6 +272,8 @@ export function createPayrollEngine({
     upsertEmploymentStatutoryProfile,
     listPayRuns,
     getPayRun,
+    listPayrollExceptions,
+    resolvePayrollException,
     createPayRun,
     approvePayRun,
     listPaySlips,
@@ -516,10 +554,74 @@ export function createPayrollEngine({
     return enrichPayRun(state, payRun);
   }
 
+  function listPayrollExceptions({ companyId, payRunId, status = null, blockingOnly = false } = {}) {
+    requirePayRun(state, companyId, payRunId);
+    const resolvedStatus = status ? assertAllowed(status, PAYROLL_EXCEPTION_STATUSES, "payroll_exception_status_invalid") : null;
+    return (state.payrollExceptionIdsByRun.get(payRunId) || [])
+      .map((payrollExceptionId) => state.payrollExceptions.get(payrollExceptionId))
+      .filter(Boolean)
+      .filter((candidate) => (resolvedStatus ? candidate.status === resolvedStatus : true))
+      .filter((candidate) => (blockingOnly ? candidate.blocking === true : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.code.localeCompare(right.code))
+      .map(copy);
+  }
+
+  function resolvePayrollException({
+    companyId,
+    payRunId,
+    payrollExceptionId,
+    resolutionType = "resolved",
+    note,
+    actorId = "system"
+  } = {}) {
+    requirePayRun(state, companyId, payRunId);
+    const record = requirePayrollException(state, companyId, payRunId, payrollExceptionId);
+    if (record.status !== "open") {
+      return copy(record);
+    }
+    if (record.resolutionPolicy !== "manual_review") {
+      throw createError(
+        409,
+        "payroll_exception_manual_resolution_forbidden",
+        "This payroll exception must be fixed in source data and recalculated, not manually resolved."
+      );
+    }
+    record.status = assertAllowed(resolutionType, ["resolved", "waived"], "payroll_exception_resolution_type_invalid");
+    record.resolvedAt = nowIso(clock);
+    record.resolvedByActorId = requireText(actorId, "actor_id_required");
+    record.resolutionNote = requireText(note, "payroll_exception_resolution_note_required");
+    record.updatedAt = record.resolvedAt;
+    const payRun = requirePayRun(state, companyId, payRunId);
+    payRun.exceptionSummary = summarizePayrollExceptions(listPayrollExceptionsFromState(state, payRunId));
+    payRun.updatedAt = record.updatedAt;
+    appendRunEvent(state, {
+      payRunId,
+      companyId,
+      eventType: "exception_resolved",
+      actorId,
+      note: `Resolved payroll exception ${record.code}.`,
+      recordedAt: record.resolvedAt
+    });
+    return copy(record);
+  }
+
   function approvePayRun({ companyId, payRunId, actorId = "system" } = {}) {
     const payRun = requirePayRun(state, companyId, payRunId);
     if (payRun.status === "approved") {
       return enrichPayRun(state, payRun);
+    }
+    const blockingExceptions = listPayrollExceptions({
+      companyId,
+      payRunId,
+      status: "open",
+      blockingOnly: true
+    });
+    if (blockingExceptions.length > 0) {
+      throw createError(
+        409,
+        "payroll_run_has_blocking_exceptions",
+        "Payroll run has unresolved blocking exceptions and cannot be approved."
+      );
     }
     payRun.status = "approved";
     payRun.approvedAt = nowIso(clock);
@@ -537,6 +639,7 @@ export function createPayrollEngine({
 
   function createPayRun({
     companyId,
+    sessionToken = null,
     payCalendarId,
     reportingPeriod,
     payDate = null,
@@ -547,6 +650,9 @@ export function createPayrollEngine({
     finalPayAdjustments = [],
     leavePayItemMappings = [],
     statutoryProfiles = [],
+    migrationBatchId = null,
+    correctionOfPayRunId = null,
+    correctionReason = null,
     actorId = "system"
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
@@ -579,6 +685,21 @@ export function createPayrollEngine({
       baseProfiles: listEmploymentStatutoryProfiles({ companyId: resolvedCompanyId }),
       overrideProfiles: statutoryProfiles
     });
+    const migrationContext = resolvePayrollMigrationContext({
+      companyId: resolvedCompanyId,
+      sessionToken,
+      migrationBatchId,
+      getCorePlatform
+    });
+    const correctionSourceRun =
+      correctionOfPayRunId != null ? requirePayRun(state, resolvedCompanyId, correctionOfPayRunId) : null;
+    if (correctionSourceRun && resolvedRunType !== "correction") {
+      throw createError(
+        409,
+        "payroll_correction_source_requires_correction_run",
+        "correctionOfPayRunId can only be used together with runType=correction."
+      );
+    }
 
     const run = {
       payRunId: crypto.randomUUID(),
@@ -592,8 +713,20 @@ export function createPayrollEngine({
       runType: resolvedRunType,
       status: "calculated",
       employmentIds: selectedEmployments.map((employment) => employment.employmentId),
+      migrationBatchId: migrationContext?.batch?.payrollMigrationBatchId || null,
+      migrationSnapshot: migrationContext?.snapshot || null,
+      correctionOfPayRunId: correctionSourceRun?.payRunId || null,
+      correctionReason: normalizeOptionalText(correctionReason),
       sourceSnapshotHash: "",
+      balanceSnapshotHash: "",
+      agreementSnapshotHash: "",
       warningCodes: [],
+      exceptionSummary: {
+        totalCount: 0,
+        blockingOpenCount: 0,
+        openCount: 0,
+        resolvedCount: 0
+      },
       calculatedAt: nowIso(clock),
       approvedAt: null,
       createdByActorId: requireText(actorId, "actor_id_required"),
@@ -617,10 +750,27 @@ export function createPayrollEngine({
       retroAdjustments: normalizedRetroAdjustments,
       finalPayAdjustments: normalizedFinalPayAdjustments,
       leavePayItemMappings: normalizedLeaveMappings,
-      statutoryProfiles: [...normalizedStatutoryProfiles.values()]
+      statutoryProfiles: [...normalizedStatutoryProfiles.values()],
+      migrationSnapshot: migrationContext?.snapshot || null,
+      correctionOfPayRunId: correctionSourceRun?.payRunId || null,
+      correctionReason: normalizeOptionalText(correctionReason)
     };
+    const agreementSnapshots = [];
+    const balanceSnapshots = [];
 
     for (const employment of selectedEmployments) {
+      const employmentTimeBase = resolveEmploymentTimeBase({
+        companyId: resolvedCompanyId,
+        employmentId: employment.employmentId,
+        period,
+        timePlatform
+      });
+      const agreementContext = resolveAgreementContext({
+        companyId: resolvedCompanyId,
+        employment,
+        period,
+        collectiveAgreementsPlatform
+      });
       const result = calculateEmploymentRun({
         state,
         rules,
@@ -631,20 +781,26 @@ export function createPayrollEngine({
         retroAdjustments: normalizedRetroAdjustments.filter((item) => item.employmentId === employment.employmentId),
         finalPayAdjustments: normalizedFinalPayAdjustments.filter((item) => item.employmentId === employment.employmentId),
         leavePayItemMappings: normalizedLeaveMappings,
-          statutoryProfile: normalizedStatutoryProfiles.get(employment.employmentId) || null,
-          hrPlatform,
-          timePlatform,
-          benefitsPlatform,
-          travelPlatform,
-          pensionPlatform,
-          clock
-        });
+        statutoryProfile: normalizedStatutoryProfiles.get(employment.employmentId) || null,
+        employmentTimeBase,
+        agreementContext,
+        hrPlatform,
+        timePlatform,
+        benefitsPlatform,
+        travelPlatform,
+        pensionPlatform,
+        clock
+      });
       employmentResults.push(result);
       warnings.push(...result.warnings);
       sourceSnapshot[employment.employmentId] = result.sourceSnapshot;
+      agreementSnapshots.push(result.sourceSnapshot.agreementOverlay || null);
+      balanceSnapshots.push(result.sourceSnapshot.externalBalanceSnapshots || []);
     }
 
     run.sourceSnapshotHash = buildSnapshotHash(sourceSnapshot);
+    run.balanceSnapshotHash = buildSnapshotHash(balanceSnapshots);
+    run.agreementSnapshotHash = buildSnapshotHash(agreementSnapshots);
     run.warningCodes = [...new Set(warnings.map((warning) => warning.code))].sort();
     run.calculationSteps = PAYROLL_STEP_DEFINITIONS.map((definition) =>
       summarizeStep(definition, employmentResults.map((result) => result.steps[definition.stepNo]))
@@ -696,6 +852,16 @@ export function createPayrollEngine({
       appendToIndex(state.payslipIdsByRun, run.payRunId, payslip.payslipId);
       setIndexValue(state.payslipIdsByRunEmployment, run.payRunId, payslip.employmentId, payslip.payslipId);
     }
+
+    rebuildPayrollExceptions({
+      state,
+      run,
+      employmentResults,
+      collectiveAgreementsPlatform,
+      migrationContext,
+      actorId,
+      clock
+    });
 
     return getPayRun({
       companyId: run.companyId,
@@ -2498,6 +2664,8 @@ function calculateEmploymentRun({
   finalPayAdjustments,
   leavePayItemMappings,
   statutoryProfile,
+  employmentTimeBase = null,
+  agreementContext = null,
   hrPlatform,
   timePlatform,
   benefitsPlatform,
@@ -2505,31 +2673,30 @@ function calculateEmploymentRun({
   pensionPlatform,
   clock
 }) {
-  const employee = resolveEmployeeSnapshot({ employment, hrPlatform });
-  const contract = resolveActiveEmploymentContract(employment, period.endsOn);
-  const employeeBankAccounts = hrPlatform?.listEmployeeBankAccounts
-    ? hrPlatform.listEmployeeBankAccounts({
-        companyId: employment.companyId,
-        employeeId: employment.employeeId
-      })
-    : [];
-  const primaryBankAccount = employeeBankAccounts.find((account) => account.primaryAccount) || employeeBankAccounts[0] || null;
-
-  const timeEntries = listEmploymentTimeEntries({ companyId: employment.companyId, employmentId: employment.employmentId, period, timePlatform });
+  const hrSnapshot = employmentTimeBase?.hrSnapshot || null;
+  const employee = hrSnapshot?.employee || resolveEmployeeSnapshot({ employment, hrPlatform });
+  const contract = hrSnapshot?.activeContract || resolveActiveEmploymentContract(employment, period.endsOn);
+  const primaryBankAccount = hrSnapshot?.primaryBankAccount || resolvePrimaryBankAccount({ companyId: employment.companyId, employeeId: employment.employeeId, hrPlatform });
+  const timeEntries = timePlatform?.listTimeEntries
+    ? listEmploymentTimeEntries({ companyId: employment.companyId, employmentId: employment.employmentId, period, timePlatform })
+    : employmentTimeBase?.approvedTimeEntries || [];
   const leaveEntries = listEmploymentLeaveEntries({ companyId: employment.companyId, employmentId: employment.employmentId, period, timePlatform });
-  const balances = timePlatform?.listTimeBalances
-    ? timePlatform.listTimeBalances({
-        companyId: employment.companyId,
-        employmentId: employment.employmentId,
-        cutoffDate: period.endsOn
-      })
-    : {
-        balances: {
-          flex_minutes: 0,
-          comp_minutes: 0,
-          overtime_minutes: 0
-        }
-      };
+  const balances =
+    employmentTimeBase?.timeBalances ||
+    (timePlatform?.listTimeBalances
+      ? timePlatform.listTimeBalances({
+          companyId: employment.companyId,
+          employmentId: employment.employmentId,
+          cutoffDate: period.endsOn
+        })
+      : {
+          balances: {
+            flex_minutes: 0,
+            comp_minutes: 0,
+            overtime_minutes: 0
+          }
+        });
+  const agreementOverlay = agreementContext?.overlay || employmentTimeBase?.agreementOverlay || null;
   const benefitPayloadBundle = benefitsPlatform?.listPayrollBenefitPayloads
     ? benefitsPlatform.listPayrollBenefitPayloads({
         companyId: employment.companyId,
@@ -2549,11 +2716,16 @@ function calculateEmploymentRun({
   const sourceSnapshot = {
     employee,
     employment,
+    hrSnapshot,
     contract,
     primaryBankAccount,
+    scheduleAssignment: employmentTimeBase?.activeScheduleAssignment || null,
     timeEntries,
     leaveEntries,
     balances,
+    pendingTimeEntries: employmentTimeBase?.pendingTimeEntries || [],
+    externalBalanceSnapshots: employmentTimeBase?.balanceSnapshots || [],
+    agreementOverlay,
     benefitEvents: (benefitPayloadBundle.events || []).map((event) => ({
       benefitEventId: event.benefitEventId,
       benefitCode: event.benefitCode,
@@ -2595,7 +2767,10 @@ function calculateEmploymentRun({
   steps[2] = createCompletedStep(2, {
     timeEntryCount: timeEntries.length,
     leaveEntryCount: leaveEntries.length,
-    balanceSnapshotHash: buildSnapshotHash(balances)
+    pendingTimeApprovalCount: (employmentTimeBase?.pendingTimeEntries || []).length,
+    balanceSnapshotHash: buildSnapshotHash(balances),
+    externalBalanceSnapshotHash: buildSnapshotHash(employmentTimeBase?.balanceSnapshots || []),
+    agreementSnapshotHash: buildSnapshotHash(agreementOverlay)
   });
 
   const baseLines = createBaseSalaryLines({
@@ -2967,6 +3142,8 @@ function calculateEmploymentRun({
     employee,
     employment,
     contract,
+    employmentTimeBase,
+    agreementContext,
     sourceSnapshot,
     lines: lines.map(copy),
     warnings: warnings.map(copy),
@@ -3546,6 +3723,342 @@ function seedPayCalendar(state, template) {
   setIndexValue(state.payCalendarIdsByCode, record.companyId, record.payCalendarCode, record.payCalendarId);
 }
 
+function resolvePrimaryBankAccount({ companyId, employeeId, hrPlatform }) {
+  if (!hrPlatform?.getEmployeeBankAccountDetails) {
+    return null;
+  }
+  try {
+    return hrPlatform.getEmployeeBankAccountDetails({
+      companyId: requireText(companyId, "company_id_required"),
+      employeeId: requireText(employeeId, "employee_id_required")
+    });
+  } catch {
+    return null;
+  }
+}
+
+function resolveEmploymentTimeBase({ companyId, employmentId, period, timePlatform }) {
+  if (!timePlatform?.getEmploymentTimeBase) {
+    return null;
+  }
+  return timePlatform.getEmploymentTimeBase({
+    companyId: requireText(companyId, "company_id_required"),
+    employmentId: requireText(employmentId, "employment_id_required"),
+    workDate: period.endsOn,
+    cutoffDate: period.endsOn
+  });
+}
+
+function resolveAgreementContext({ companyId, employment, period, collectiveAgreementsPlatform }) {
+  if (!collectiveAgreementsPlatform) {
+    return null;
+  }
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const eventDate = normalizeRequiredDate(period.endsOn, "agreement_event_date_required");
+  try {
+    const activeAgreement =
+      typeof collectiveAgreementsPlatform.getActiveAgreementForEmployment === "function"
+        ? collectiveAgreementsPlatform.getActiveAgreementForEmployment({
+            companyId: resolvedCompanyId,
+            employeeId: employment.employeeId,
+            employmentId: employment.employmentId,
+            eventDate
+          })
+        : null;
+    const overlay =
+      typeof collectiveAgreementsPlatform.evaluateAgreementOverlay === "function"
+        ? collectiveAgreementsPlatform.evaluateAgreementOverlay({
+            companyId: resolvedCompanyId,
+            employeeId: employment.employeeId,
+            employmentId: employment.employmentId,
+            eventDate
+          })
+        : null;
+    return {
+      eventDate,
+      activeAgreement: activeAgreement ? copy(activeAgreement) : null,
+      overlay: overlay ? copy(overlay) : null,
+      error: null
+    };
+  } catch (error) {
+    return {
+      eventDate,
+      activeAgreement: null,
+      overlay: null,
+      error: {
+        code: error?.code || "collective_agreement_resolution_failed",
+        message: error?.message || "Collective agreement resolution failed.",
+        status: Number(error?.status || 409)
+      }
+    };
+  }
+}
+
+function resolvePayrollMigrationContext({ companyId, sessionToken, migrationBatchId, getCorePlatform }) {
+  const resolvedMigrationBatchId = normalizeOptionalText(migrationBatchId);
+  if (!resolvedMigrationBatchId) {
+    return null;
+  }
+  if (!sessionToken) {
+    throw createError(
+      400,
+      "payroll_migration_session_required",
+      "A session token is required when a payroll run references a payroll migration batch."
+    );
+  }
+  const corePlatform = typeof getCorePlatform === "function" ? getCorePlatform() : null;
+  if (!corePlatform?.getPayrollMigrationBatch) {
+    throw createError(
+      500,
+      "payroll_migration_core_platform_missing",
+      "Core migration platform is required when a payroll run references a payroll migration batch."
+    );
+  }
+  const batch = corePlatform.getPayrollMigrationBatch({
+    sessionToken,
+    companyId: requireText(companyId, "company_id_required"),
+    payrollMigrationBatchId: resolvedMigrationBatchId
+  });
+  const openDiffs =
+    typeof corePlatform.getOpenPayrollMigrationDiffs === "function"
+      ? corePlatform.getOpenPayrollMigrationDiffs({
+          sessionToken,
+          companyId,
+          payrollMigrationBatchId: resolvedMigrationBatchId
+        })
+      : [];
+  return {
+    batch: copy(batch),
+    openDiffs: copy(openDiffs || []),
+    snapshot: {
+      payrollMigrationBatchId: batch.payrollMigrationBatchId,
+      status: batch.status,
+      migrationMode: batch.migrationMode,
+      sourceSystemCode: batch.sourceSystemCode,
+      effectiveCutoverDate: batch.effectiveCutoverDate,
+      firstTargetReportingPeriod: batch.firstTargetReportingPeriod,
+      approvedForCutover: batch.approvedForCutover === true,
+      validationSummary: copy(batch.validationSummary || {}),
+      openDiffIds: (openDiffs || []).map((diff) => diff.payrollMigrationDiffId).filter(Boolean).sort(),
+      openDiffCount: Array.isArray(openDiffs) ? openDiffs.length : 0
+    }
+  };
+}
+
+function rebuildPayrollExceptions({
+  state,
+  run,
+  employmentResults,
+  collectiveAgreementsPlatform = null,
+  migrationContext = null,
+  actorId = "system",
+  clock = () => new Date()
+}) {
+  for (const payrollExceptionId of state.payrollExceptionIdsByRun.get(run.payRunId) || []) {
+    state.payrollExceptions.delete(payrollExceptionId);
+  }
+  state.payrollExceptionIdsByRun.set(run.payRunId, []);
+
+  const seen = new Set();
+  const records = [];
+  const upsert = ({ employmentId = null, employeeId = null, code, message, details = {} }) => {
+    const dedupeKey = `${employmentId || "run"}:${employeeId || "run"}:${code}`;
+    if (seen.has(dedupeKey)) {
+      return;
+    }
+    seen.add(dedupeKey);
+    const record = createPayrollExceptionRecord({
+      run,
+      employmentId,
+      employeeId,
+      code,
+      message,
+      details,
+      actorId,
+      clock
+    });
+    records.push(record);
+    state.payrollExceptions.set(record.payrollExceptionId, record);
+    appendToIndex(state.payrollExceptionIdsByRun, run.payRunId, record.payrollExceptionId);
+  };
+
+  for (const result of employmentResults || []) {
+    const employmentId = result.employment?.employmentId || null;
+    const employeeId = result.employee?.employeeId || null;
+    if (!result.contract) {
+      upsert({
+        employmentId,
+        employeeId,
+        code: "employment_contract_missing",
+        message: `Employment ${employmentId} is missing an active contract for the payroll period.`,
+        details: {
+          reportingPeriod: run.reportingPeriod
+        }
+      });
+    }
+    const pendingTimeEntries = result.employmentTimeBase?.pendingTimeEntries || [];
+    if (pendingTimeEntries.length > 0) {
+      upsert({
+        employmentId,
+        employeeId,
+        code: "pending_time_approvals_exist",
+        message: `Employment ${employmentId} has pending time entries that block payroll approval.`,
+        details: {
+          pendingTimeEntryIds: pendingTimeEntries.map((entry) => entry.timeEntryId).filter(Boolean).sort(),
+          pendingTimeApprovalCount: pendingTimeEntries.length
+        }
+      });
+    }
+    if (collectiveAgreementsPlatform) {
+      if (result.agreementContext?.error) {
+        upsert({
+          employmentId,
+          employeeId,
+          code: "collective_agreement_resolution_failed",
+          message: result.agreementContext.error.message,
+          details: {
+            eventDate: result.agreementContext.eventDate,
+            errorCode: result.agreementContext.error.code
+          }
+        });
+      } else if (!result.agreementContext?.activeAgreement || !result.agreementContext?.overlay) {
+        upsert({
+          employmentId,
+          employeeId,
+          code: "collective_agreement_missing",
+          message: `Employment ${employmentId} saknar aktivt kollektivavtal eller effektiv regeloverlay for lopberakning.`,
+          details: {
+            eventDate: result.agreementContext?.eventDate || run.periodEndsOn,
+            agreementVersionId: result.agreementContext?.activeAgreement?.agreementVersion?.agreementVersionId || null
+          }
+        });
+      }
+    }
+    const netPay = Number(result.payslipRenderPayload?.totals?.netPay);
+    if (Number.isFinite(netPay) && netPay < 0) {
+      upsert({
+        employmentId,
+        employeeId,
+        code: "negative_net_pay",
+        message: `Employment ${employmentId} resulted in negative net pay and cannot be approved.`,
+        details: {
+          netPay: roundMoney(netPay)
+        }
+      });
+    }
+    for (const warning of result.warnings || []) {
+      if (!PAYROLL_EXCEPTION_RULES[warning.code]) {
+        continue;
+      }
+      upsert({
+        employmentId,
+        employeeId,
+        code: warning.code,
+        message: warning.message,
+        details: {
+          warningCode: warning.code
+        }
+      });
+    }
+  }
+
+  if (migrationContext) {
+    const blockingIssueCount = Number(migrationContext.batch?.validationSummary?.blockingIssueCount || 0);
+    if (!["approved_for_cutover", "cutover_executed"].includes(migrationContext.batch?.status)) {
+      upsert({
+        code: "payroll_migration_batch_not_ready",
+        message: `Payroll migration batch ${migrationContext.batch?.payrollMigrationBatchId} is not ready for payroll cutover.`,
+        details: {
+          payrollMigrationBatchId: migrationContext.batch?.payrollMigrationBatchId || null,
+          payrollMigrationBatchStatus: migrationContext.batch?.status || null
+        }
+      });
+    }
+    if (blockingIssueCount > 0) {
+      upsert({
+        code: "payroll_migration_validation_blocking",
+        message: `Payroll migration batch ${migrationContext.batch?.payrollMigrationBatchId} still has blocking validation issues.`,
+        details: {
+          payrollMigrationBatchId: migrationContext.batch?.payrollMigrationBatchId || null,
+          blockingIssueCount,
+          issues: copy(migrationContext.batch?.validationSummary?.issues || [])
+        }
+      });
+    }
+    if ((migrationContext.openDiffs || []).length > 0) {
+      upsert({
+        code: "payroll_migration_open_diffs",
+        message: `Payroll migration batch ${migrationContext.batch?.payrollMigrationBatchId} has unresolved migration diffs.`,
+        details: {
+          payrollMigrationBatchId: migrationContext.batch?.payrollMigrationBatchId || null,
+          openDiffIds: migrationContext.openDiffs.map((diff) => diff.payrollMigrationDiffId).filter(Boolean).sort(),
+          openDiffCount: migrationContext.openDiffs.length
+        }
+      });
+    }
+  }
+
+  run.exceptionSummary = summarizePayrollExceptions(records);
+  run.updatedAt = nowIso(clock);
+  return records.map(copy);
+}
+
+function createPayrollExceptionRecord({ run, employmentId = null, employeeId = null, code, message, details = {}, actorId, clock }) {
+  const rule = PAYROLL_EXCEPTION_RULES[requireText(code, "payroll_exception_code_required")];
+  if (!rule) {
+    throw createError(500, "payroll_exception_rule_missing", `Payroll exception rule ${code} is not configured.`);
+  }
+  const now = nowIso(clock);
+  return {
+    payrollExceptionId: crypto.randomUUID(),
+    companyId: run.companyId,
+    payRunId: run.payRunId,
+    reportingPeriod: run.reportingPeriod,
+    employmentId: normalizeOptionalText(employmentId),
+    employeeId: normalizeOptionalText(employeeId),
+    code,
+    message: requireText(message, "payroll_exception_message_required"),
+    severity: rule.severity,
+    blocking: rule.blocking === true,
+    resolutionPolicy: rule.resolutionPolicy,
+    status: "open",
+    details: copy(details || {}),
+    createdByActorId: requireText(actorId, "actor_id_required"),
+    createdAt: now,
+    updatedAt: now,
+    resolvedAt: null,
+    resolvedByActorId: null,
+    resolutionNote: null
+  };
+}
+
+function summarizePayrollExceptions(exceptions) {
+  const records = Array.isArray(exceptions) ? exceptions : [];
+  return {
+    totalCount: records.length,
+    openCount: records.filter((record) => record.status === "open").length,
+    blockingOpenCount: records.filter((record) => record.status === "open" && record.blocking === true).length,
+    resolvedCount: records.filter((record) => record.status === "resolved").length,
+    waivedCount: records.filter((record) => record.status === "waived").length
+  };
+}
+
+function listPayrollExceptionsFromState(state, payRunId) {
+  return (state.payrollExceptionIdsByRun.get(payRunId) || [])
+    .map((payrollExceptionId) => state.payrollExceptions.get(payrollExceptionId))
+    .filter(Boolean)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.code.localeCompare(right.code));
+}
+
+function requirePayrollException(state, companyId, payRunId, payrollExceptionId) {
+  requirePayRun(state, companyId, payRunId);
+  const record = state.payrollExceptions.get(requireText(payrollExceptionId, "payroll_exception_id_required"));
+  if (!record || record.companyId !== requireText(companyId, "company_id_required") || record.payRunId !== payRunId) {
+    throw createError(404, "payroll_exception_not_found", "Payroll exception was not found.");
+  }
+  return record;
+}
+
 function createStoredPayslip({ companyId, payRunId, period, runType, result, generatedByActorId, generatedAt }) {
   const renderPayload = copy({
     reportingPeriod: period.reportingPeriod,
@@ -3576,8 +4089,11 @@ function createStoredPayslip({ companyId, payRunId, period, runType, result, gen
 }
 
 function enrichPayRun(state, payRun) {
+  const exceptions = listPayrollExceptionsFromState(state, payRun.payRunId).map(copy);
   return {
     ...copy(payRun),
+    exceptionSummary: summarizePayrollExceptions(exceptions),
+    exceptions,
     events: (state.payRunEventIdsByRun.get(payRun.payRunId) || [])
       .map((eventId) => state.payRunEvents.get(eventId))
       .filter(Boolean)

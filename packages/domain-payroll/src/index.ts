@@ -264,16 +264,50 @@ export interface PayrollStepSummary {
   readonly employmentStatuses: readonly string[];
 }
 
+export interface PayrollException {
+  readonly payrollExceptionId: string;
+  readonly companyId: string;
+  readonly payRunId: string;
+  readonly reportingPeriod: string;
+  readonly employmentId: string | null;
+  readonly employeeId: string | null;
+  readonly code: string;
+  readonly message: string;
+  readonly severity: string;
+  readonly blocking: boolean;
+  readonly resolutionPolicy: string;
+  readonly status: string;
+  readonly details: Record<string, unknown>;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly resolvedAt: string | null;
+  readonly resolvedByActorId: string | null;
+  readonly resolutionNote: string | null;
+}
+
 export interface PayRunRef {
   readonly payRunId: string;
   readonly companyId: string;
+  readonly payCalendarId: string;
+  readonly payCalendarCode: string;
   readonly reportingPeriod: string;
+  readonly periodStartsOn: string;
+  readonly periodEndsOn: string;
   readonly payDate: string;
   readonly runType: string;
   readonly status: string;
+  readonly migrationBatchId: string | null;
+  readonly migrationSnapshot: Record<string, unknown> | null;
+  readonly correctionOfPayRunId: string | null;
+  readonly correctionReason: string | null;
   readonly sourceSnapshotHash: string;
+  readonly balanceSnapshotHash: string;
+  readonly agreementSnapshotHash: string;
   readonly warningCodes: readonly string[];
+  readonly exceptionSummary: Record<string, number>;
   readonly calculationSteps: readonly PayrollStepSummary[];
+  readonly exceptions: readonly PayrollException[];
   readonly lines: readonly PayRunLine[];
   readonly payslips: readonly PayslipSnapshot[];
 }

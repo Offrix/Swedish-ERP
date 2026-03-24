@@ -392,7 +392,10 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/payroll/pay-calendars/:payCalendarId",
               "/v1/payroll/pay-runs",
               "/v1/payroll/pay-runs/:payRunId",
+              "/v1/payroll/pay-runs/:payRunId/exceptions",
+              "/v1/payroll/pay-runs/:payRunId/exceptions/:payrollExceptionId/resolve",
               "/v1/payroll/pay-runs/:payRunId/approve",
+              "/v1/payroll/pay-runs/:payRunId/correction",
               "/v1/payroll/pay-runs/:payRunId/payslips",
               "/v1/payroll/pay-runs/:payRunId/payslips/:employmentId",
               "/v1/payroll/pay-runs/:payRunId/payslips/:employmentId/regenerate",
@@ -9160,9 +9163,10 @@ async function handleRequest({ req, res, platform, flags }) {
   if (req.method === "POST" && path === "/v1/payroll/pay-runs") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const sessionToken = readSessionToken(req, body);
     const principal = authorizeCompanyAccess({
       platform,
-      sessionToken: readSessionToken(req, body),
+      sessionToken,
       companyId,
       permissionCode: "company.manage",
       objectType: "payroll_run",
@@ -9173,6 +9177,7 @@ async function handleRequest({ req, res, platform, flags }) {
       201,
       platform.createPayRun({
         companyId,
+        sessionToken,
         payCalendarId: body.payCalendarId,
         reportingPeriod: body.reportingPeriod,
         payDate: body.payDate || null,
@@ -9183,6 +9188,9 @@ async function handleRequest({ req, res, platform, flags }) {
         finalPayAdjustments: Array.isArray(body.finalPayAdjustments) ? body.finalPayAdjustments : [],
         leavePayItemMappings: Array.isArray(body.leavePayItemMappings) ? body.leavePayItemMappings : [],
         statutoryProfiles: Array.isArray(body.statutoryProfiles) ? body.statutoryProfiles : [],
+        migrationBatchId: body.migrationBatchId || null,
+        correctionOfPayRunId: body.correctionOfPayRunId || null,
+        correctionReason: body.correctionReason || null,
         actorId: principal.userId
       })
     );
@@ -9212,9 +9220,10 @@ async function handleRequest({ req, res, platform, flags }) {
   if (payRunApproveMatch && req.method === "POST") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const sessionToken = readSessionToken(req, body);
     const principal = authorizeCompanyAccess({
       platform,
-      sessionToken: readSessionToken(req, body),
+      sessionToken,
       companyId,
       permissionCode: "company.manage",
       objectType: "payroll_run",
@@ -9226,6 +9235,104 @@ async function handleRequest({ req, res, platform, flags }) {
       platform.approvePayRun({
         companyId,
         payRunId: payRunApproveMatch.payRunId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const payRunExceptionsMatch = matchPath(path, "/v1/payroll/pay-runs/:payRunId/exceptions");
+  if (payRunExceptionsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll_run",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listPayrollExceptions({
+        companyId,
+        payRunId: payRunExceptionsMatch.payRunId,
+        status: url.searchParams.get("status") || null,
+        blockingOnly: url.searchParams.get("blockingOnly") === "true"
+      })
+    });
+    return;
+  }
+
+  const payRunExceptionResolveMatch = matchPath(
+    path,
+    "/v1/payroll/pay-runs/:payRunId/exceptions/:payrollExceptionId/resolve"
+  );
+  if (payRunExceptionResolveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll_run",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.resolvePayrollException({
+        companyId,
+        payRunId: payRunExceptionResolveMatch.payRunId,
+        payrollExceptionId: payRunExceptionResolveMatch.payrollExceptionId,
+        resolutionType: body.resolutionType || "resolved",
+        note: body.note,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const payRunCorrectionMatch = matchPath(path, "/v1/payroll/pay-runs/:payRunId/correction");
+  if (payRunCorrectionMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll_run",
+      scopeCode: "payroll"
+    });
+    const sourceRun = platform.getPayRun({
+      companyId,
+      payRunId: payRunCorrectionMatch.payRunId
+    });
+    writeJson(
+      res,
+      201,
+      platform.createPayRun({
+        companyId,
+        sessionToken,
+        payCalendarId: body.payCalendarId || sourceRun.payCalendarId,
+        reportingPeriod: body.reportingPeriod || sourceRun.reportingPeriod,
+        payDate: body.payDate || null,
+        runType: "correction",
+        employmentIds: Array.isArray(body.employmentIds) ? body.employmentIds : sourceRun.employmentIds,
+        manualInputs: Array.isArray(body.manualInputs) ? body.manualInputs : [],
+        retroAdjustments: Array.isArray(body.retroAdjustments) ? body.retroAdjustments : [],
+        finalPayAdjustments: Array.isArray(body.finalPayAdjustments) ? body.finalPayAdjustments : [],
+        leavePayItemMappings: Array.isArray(body.leavePayItemMappings) ? body.leavePayItemMappings : [],
+        statutoryProfiles: Array.isArray(body.statutoryProfiles) ? body.statutoryProfiles : [],
+        migrationBatchId: body.migrationBatchId || sourceRun.migrationBatchId || null,
+        correctionOfPayRunId: sourceRun.payRunId,
+        correctionReason: body.correctionReason || null,
         actorId: principal.userId
       })
     );

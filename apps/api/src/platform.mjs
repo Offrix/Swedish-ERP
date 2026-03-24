@@ -368,18 +368,21 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "payroll",
     label: "Payroll",
     packageName: "@swedish-erp/domain-payroll",
-    dependsOn: ["orgAuth", "hr", "time", "benefits", "travel", "pension", "ledger", "banking"],
-    create: ({ options, dependencies }) =>
+    dependsOn: ["orgAuth", "hr", "time", "balances", "collectiveAgreements", "benefits", "travel", "pension", "ledger", "banking"],
+    create: ({ options, dependencies, getDomain }) =>
       createPayrollPlatform({
         ...options,
         orgAuthPlatform: dependencies.orgAuth,
         hrPlatform: dependencies.hr,
         timePlatform: dependencies.time,
+        balancesPlatform: dependencies.balances,
+        collectiveAgreementsPlatform: dependencies.collectiveAgreements,
         benefitsPlatform: dependencies.benefits,
         travelPlatform: dependencies.travel,
         pensionPlatform: dependencies.pension,
         ledgerPlatform: dependencies.ledger,
-        bankingPlatform: dependencies.banking
+        bankingPlatform: dependencies.banking,
+        getCorePlatform: () => getDomain("core")
       })
   }),
   createDomainDefinition({
