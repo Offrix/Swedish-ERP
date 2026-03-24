@@ -17,6 +17,7 @@ import { createTimePlatform } from "../../../packages/domain-time/src/index.mjs"
 import { createPayrollPlatform } from "../../../packages/domain-payroll/src/index.mjs";
 import { createBenefitsPlatform } from "../../../packages/domain-benefits/src/index.mjs";
 import { createDocumentClassificationPlatform } from "../../../packages/domain-document-classification/src/index.mjs";
+import { createImportCasesPlatform } from "../../../packages/domain-import-cases/src/index.mjs";
 import { createTravelPlatform } from "../../../packages/domain-travel/src/index.mjs";
 import { createPensionPlatform } from "../../../packages/domain-pension/src/index.mjs";
 import { createProjectsPlatform } from "../../../packages/domain-projects/src/index.mjs";
@@ -64,6 +65,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "time",
   "benefits",
   "documentClassification",
+  "importCases",
   "travel",
   "pension",
   "payroll",
@@ -99,6 +101,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "time",
   "benefits",
   "documentClassification",
+  "importCases",
   "travel",
   "pension",
   "projects",
@@ -281,6 +284,19 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         documentPlatform: dependencies.documents,
         reviewCenterPlatform: dependencies.reviewCenter,
         benefitsPlatform: dependencies.benefits
+      })
+  }),
+  createDomainDefinition({
+    key: "importCases",
+    label: "Import cases",
+    packageName: "@swedish-erp/domain-import-cases",
+    dependsOn: ["documents", "reviewCenter", "documentClassification"],
+    create: ({ options, dependencies }) =>
+      createImportCasesPlatform({
+        ...options,
+        documentPlatform: dependencies.documents,
+        reviewCenterPlatform: dependencies.reviewCenter,
+        documentClassificationPlatform: dependencies.documentClassification
       })
   }),
   createDomainDefinition({
