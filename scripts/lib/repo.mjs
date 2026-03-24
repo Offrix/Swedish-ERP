@@ -43,6 +43,7 @@ export const requiredPackages = [
   "packages/domain-pension",
   "packages/domain-hus",
   "packages/domain-projects",
+  "packages/domain-kalkyl",
   "packages/domain-field",
   "packages/domain-personalliggare",
   "packages/domain-egenkontroll",

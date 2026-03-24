@@ -23,6 +23,7 @@ import { createImportCasesPlatform } from "../../../packages/domain-import-cases
 import { createTravelPlatform } from "../../../packages/domain-travel/src/index.mjs";
 import { createPensionPlatform } from "../../../packages/domain-pension/src/index.mjs";
 import { createProjectsPlatform } from "../../../packages/domain-projects/src/index.mjs";
+import { createKalkylPlatform } from "../../../packages/domain-kalkyl/src/index.mjs";
 import { createFieldPlatform } from "../../../packages/domain-field/src/index.mjs";
 import { createHusPlatform } from "../../../packages/domain-hus/src/index.mjs";
 import { createPersonalliggarePlatform } from "../../../packages/domain-personalliggare/src/index.mjs";
@@ -75,6 +76,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "pension",
   "payroll",
   "projects",
+  "kalkyl",
   "reporting",
   "core",
   "hus",
@@ -113,6 +115,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "travel",
   "pension",
   "projects",
+  "kalkyl",
   "hus",
   "personalliggare",
   "field",
@@ -404,6 +407,18 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         timePlatform: dependencies.time,
         payrollPlatform: dependencies.payroll,
         vatPlatform: dependencies.vat
+      })
+  }),
+  createDomainDefinition({
+    key: "kalkyl",
+    label: "Kalkyl",
+    packageName: "@swedish-erp/domain-kalkyl",
+    dependsOn: ["ar", "projects"],
+    create: ({ options, dependencies }) =>
+      createKalkylPlatform({
+        ...options,
+        arPlatform: dependencies.ar,
+        projectsPlatform: dependencies.projects
       })
   }),
   createDomainDefinition({

@@ -19,6 +19,7 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.equal(typeof platform.getDomain("notifications")?.createNotification, "function");
   assert.equal(typeof platform.getDomain("activity")?.projectActivityEntry, "function");
   assert.equal(typeof platform.getDomain("egenkontroll")?.createChecklistTemplate, "function");
+  assert.equal(typeof platform.getDomain("kalkyl")?.createEstimateVersion, "function");
   assert.equal(typeof platform.getDomain("balances")?.createBalanceType, "function");
   assert.equal(typeof platform.getDomain("collectiveAgreements")?.createAgreementFamily, "function");
   assert.equal(typeof platform.getDomain("time")?.getEmploymentTimeBase, "function");
@@ -40,6 +41,8 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.equal(platform.getDomainRegistration("activity")?.buildOrder > platform.getDomainRegistration("notifications")?.buildOrder, true);
   assert.deepEqual(platform.getDomainRegistration("egenkontroll")?.dependsOn, ["projects", "field"]);
   assert.equal(platform.getDomainRegistration("egenkontroll")?.buildOrder > platform.getDomainRegistration("field")?.buildOrder, true);
+  assert.deepEqual(platform.getDomainRegistration("kalkyl")?.dependsOn, ["ar", "projects"]);
+  assert.equal(platform.getDomainRegistration("kalkyl")?.buildOrder > platform.getDomainRegistration("projects")?.buildOrder, true);
   assert.deepEqual(platform.getDomainRegistration("time")?.dependsOn, ["hr", "documents", "balances", "collectiveAgreements"]);
   assert.equal(platform.getDomainRegistration("time")?.buildOrder > platform.getDomainRegistration("collectiveAgreements")?.buildOrder, true);
   assert.deepEqual(platform.getDomainRegistration("balances")?.dependsOn, ["hr"]);

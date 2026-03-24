@@ -344,6 +344,14 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/pension/reports",
               "/v1/pension/reconciliations",
               "/v1/pension/audit-events",
+              "/v1/kalkyl/estimates",
+              "/v1/kalkyl/estimates/:estimateVersionId",
+              "/v1/kalkyl/estimates/:estimateVersionId/lines",
+              "/v1/kalkyl/estimates/:estimateVersionId/assumptions",
+              "/v1/kalkyl/estimates/:estimateVersionId/review",
+              "/v1/kalkyl/estimates/:estimateVersionId/approve",
+              "/v1/kalkyl/estimates/:estimateVersionId/convert-to-quote",
+              "/v1/kalkyl/estimates/:estimateVersionId/convert-to-project-budget",
               "/v1/projects",
               "/v1/projects/:projectId",
               "/v1/projects/:projectId/budgets",
@@ -7387,6 +7395,258 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/kalkyl/estimates") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "estimate_version",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listEstimateVersions({
+        companyId,
+        estimateNo: url.searchParams.get("estimateNo") || null,
+        status: url.searchParams.get("status") || null,
+        customerId: url.searchParams.get("customerId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/kalkyl/estimates") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "estimate_version",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createEstimateVersion({
+        companyId,
+        estimateVersionId: body.estimateVersionId ?? null,
+        estimateNo: body.estimateNo ?? null,
+        supersedesEstimateVersionId: body.supersedesEstimateVersionId ?? null,
+        customerId: body.customerId,
+        projectId: body.projectId ?? null,
+        currencyCode: body.currencyCode ?? "SEK",
+        validFrom: body.validFrom,
+        validTo: body.validTo ?? null,
+        title: body.title,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const kalkylEstimateMatch = matchPath(path, "/v1/kalkyl/estimates/:estimateVersionId");
+  if (kalkylEstimateMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "estimate_version",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getEstimateVersion({
+        companyId,
+        estimateVersionId: kalkylEstimateMatch.estimateVersionId
+      })
+    );
+    return;
+  }
+
+  const kalkylEstimateLinesMatch = matchPath(path, "/v1/kalkyl/estimates/:estimateVersionId/lines");
+  if (kalkylEstimateLinesMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "estimate_version",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.addEstimateLine({
+        companyId,
+        estimateVersionId: kalkylEstimateLinesMatch.estimateVersionId,
+        estimateLineId: body.estimateLineId ?? null,
+        lineTypeCode: body.lineTypeCode,
+        description: body.description,
+        quantity: body.quantity,
+        unitCode: body.unitCode,
+        costAmount: body.costAmount,
+        salesAmount: body.salesAmount,
+        projectPhaseCode: body.projectPhaseCode ?? null,
+        riskClassCode: body.riskClassCode ?? "standard",
+        costModelCode: body.costModelCode ?? "manual",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const kalkylEstimateAssumptionsMatch = matchPath(path, "/v1/kalkyl/estimates/:estimateVersionId/assumptions");
+  if (kalkylEstimateAssumptionsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "estimate_version",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.addEstimateAssumption({
+        companyId,
+        estimateVersionId: kalkylEstimateAssumptionsMatch.estimateVersionId,
+        estimateAssumptionId: body.estimateAssumptionId ?? null,
+        assumptionCode: body.assumptionCode,
+        description: body.description,
+        impactAmount: body.impactAmount,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const kalkylEstimateReviewMatch = matchPath(path, "/v1/kalkyl/estimates/:estimateVersionId/review");
+  if (kalkylEstimateReviewMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "estimate_version",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.reviewEstimateVersion({
+        companyId,
+        estimateVersionId: kalkylEstimateReviewMatch.estimateVersionId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const kalkylEstimateApproveMatch = matchPath(path, "/v1/kalkyl/estimates/:estimateVersionId/approve");
+  if (kalkylEstimateApproveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "estimate_version",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveEstimateVersion({
+        companyId,
+        estimateVersionId: kalkylEstimateApproveMatch.estimateVersionId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const kalkylEstimateQuoteMatch = matchPath(path, "/v1/kalkyl/estimates/:estimateVersionId/convert-to-quote");
+  if (kalkylEstimateQuoteMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "estimate_version",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.convertEstimateToQuote({
+        companyId,
+        estimateVersionId: kalkylEstimateQuoteMatch.estimateVersionId,
+        validUntil: body.validUntil ?? null,
+        quoteTitle: body.quoteTitle ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const kalkylEstimateProjectBudgetMatch = matchPath(path, "/v1/kalkyl/estimates/:estimateVersionId/convert-to-project-budget");
+  if (kalkylEstimateProjectBudgetMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "estimate_version",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.convertEstimateToProjectBudget({
+        companyId,
+        estimateVersionId: kalkylEstimateProjectBudgetMatch.estimateVersionId,
+        projectId: body.projectId ?? null,
+        budgetName: body.budgetName ?? null,
+        validFrom: body.validFrom ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/projects") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -10881,7 +11141,7 @@ function isPhase93Route(path) {
 }
 
 function isPhase101Route(path) {
-  return path.startsWith("/v1/projects");
+  return path.startsWith("/v1/projects") || path.startsWith("/v1/kalkyl");
 }
 
 function isPhase102Route(path) {

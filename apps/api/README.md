@@ -290,6 +290,15 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/pension/reconciliations?companyId=...&reportingPeriod=...&providerCode=...`
 - `POST /v1/pension/reconciliations`
 - `GET /v1/pension/audit-events?companyId=...&employmentId=...`
+- `GET /v1/kalkyl/estimates?companyId=...`
+- `POST /v1/kalkyl/estimates`
+- `GET /v1/kalkyl/estimates/:estimateVersionId?companyId=...`
+- `POST /v1/kalkyl/estimates/:estimateVersionId/lines`
+- `POST /v1/kalkyl/estimates/:estimateVersionId/assumptions`
+- `POST /v1/kalkyl/estimates/:estimateVersionId/review`
+- `POST /v1/kalkyl/estimates/:estimateVersionId/approve`
+- `POST /v1/kalkyl/estimates/:estimateVersionId/convert-to-quote`
+- `POST /v1/kalkyl/estimates/:estimateVersionId/convert-to-project-budget`
 - `GET /v1/projects?companyId=...`
 - `POST /v1/projects`
 - `GET /v1/projects/:projectId?companyId=...`
@@ -506,7 +515,7 @@ pnpm --filter @swedish-erp/api start
 
 ## Disable strategy
 
-Set `PHASE1_AUTH_ONBOARDING_ENABLED=false` to return `503` for FAS 1 routes without touching the rest of the API process. Set `PHASE10_PROJECTS_ENABLED=false` to disable FAS 10.1 project routes in the same way, set `PHASE10_FIELD_ENABLED=false` to disable FAS 10.2 field, dispatch, inventory and mobile sync routes, and set `PHASE10_BUILD_ENABLED=false` to disable FAS 10.3 HUS, personalliggare, egenkontroll, ATA and build-VAT routes.
+Set `PHASE1_AUTH_ONBOARDING_ENABLED=false` to return `503` for FAS 1 routes without touching the rest of the API process. Set `PHASE10_PROJECTS_ENABLED=false` to disable FAS 10.1 project and kalkyl routes in the same way, set `PHASE10_FIELD_ENABLED=false` to disable FAS 10.2 field, dispatch, inventory and mobile sync routes, and set `PHASE10_BUILD_ENABLED=false` to disable FAS 10.3 HUS, personalliggare, egenkontroll, ATA and build-VAT routes.
 
 Set `PHASE2_DOCUMENT_ARCHIVE_ENABLED=false` to return `503` for FAS 2.1 document archive routes while keeping the rest of the API process alive.
 
