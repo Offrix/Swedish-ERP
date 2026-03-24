@@ -269,6 +269,12 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/ap/open-items/:apOpenItemId",
               "/v1/banking/accounts",
               "/v1/banking/accounts/:bankAccountId",
+              "/v1/banking/statement-events",
+              "/v1/banking/statement-events/import",
+              "/v1/banking/statement-events/:bankStatementEventId",
+              "/v1/banking/reconciliation-cases",
+              "/v1/banking/reconciliation-cases/:reconciliationCaseId",
+              "/v1/banking/reconciliation-cases/:reconciliationCaseId/resolve",
               "/v1/banking/payment-proposals",
               "/v1/banking/payment-proposals/:paymentProposalId",
               "/v1/banking/payment-proposals/:paymentProposalId/approve",
@@ -4963,6 +4969,157 @@ async function handleRequest({ req, res, platform, flags }) {
       platform.getBankAccount({
         companyId,
         bankAccountId: bankAccountMatch.bankAccountId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/banking/statement-events") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "bank_statement_event",
+      scopeCode: "bank"
+    });
+    writeJson(res, 200, {
+      items: platform.listBankStatementEvents({
+        companyId,
+        bankAccountId: url.searchParams.get("bankAccountId") || null,
+        matchStatus: url.searchParams.get("matchStatus") || null,
+        processingStatus: url.searchParams.get("processingStatus") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/banking/statement-events/import") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "bank_statement_event",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      201,
+      platform.importBankStatementEvents({
+        ...body,
+        companyId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const bankStatementEventMatch = matchPath(path, "/v1/banking/statement-events/:bankStatementEventId");
+  if (bankStatementEventMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "bank_statement_event",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getBankStatementEvent({
+        companyId,
+        bankStatementEventId: bankStatementEventMatch.bankStatementEventId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/banking/reconciliation-cases") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "bank_reconciliation_case",
+      scopeCode: "bank"
+    });
+    writeJson(res, 200, {
+      items: platform.listBankReconciliationCases({
+        companyId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  const bankReconciliationCaseMatch = matchPath(path, "/v1/banking/reconciliation-cases/:reconciliationCaseId");
+  if (bankReconciliationCaseMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "bank_reconciliation_case",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getBankReconciliationCase({
+        companyId,
+        reconciliationCaseId: bankReconciliationCaseMatch.reconciliationCaseId
+      })
+    );
+    return;
+  }
+
+  const bankReconciliationResolve = matchPath(path, "/v1/banking/reconciliation-cases/:reconciliationCaseId/resolve");
+  if (bankReconciliationResolve && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "bank_reconciliation_case",
+      scopeCode: "bank"
+    });
+    writeJson(
+      res,
+      200,
+      platform.resolveBankReconciliationCase({
+        companyId,
+        reconciliationCaseId: bankReconciliationResolve.reconciliationCaseId,
+        resolutionCode: body.resolutionCode,
+        resolutionNote: body.resolutionNote || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
       })
     );
     return;
