@@ -229,6 +229,16 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/balances/carry-forwards`
 - `GET /v1/balances/expiry-runs?companyId=...`
 - `POST /v1/balances/expiry-runs`
+- `GET /v1/collective-agreements/families?companyId=...`
+- `POST /v1/collective-agreements/families`
+- `GET /v1/collective-agreements/versions?companyId=...`
+- `POST /v1/collective-agreements/versions`
+- `GET /v1/collective-agreements/versions/:agreementVersionId?companyId=...`
+- `GET /v1/collective-agreements/assignments?companyId=...`
+- `POST /v1/collective-agreements/assignments`
+- `GET /v1/collective-agreements/assignments/:agreementAssignmentId/overrides?companyId=...`
+- `POST /v1/collective-agreements/assignments/:agreementAssignmentId/overrides`
+- `GET /v1/collective-agreements/active?companyId=...&employeeId=...&employmentId=...&eventDate=...`
 - `POST /v1/hr/leave-types`
 - `GET /v1/hr/leave-entries?companyId=...`
 - `GET /v1/hr/leave-entries/:leaveEntryId?companyId=...`

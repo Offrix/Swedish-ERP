@@ -34,6 +34,7 @@ export const requiredPackages = [
   "packages/domain-hr",
   "packages/domain-time",
   "packages/domain-balances",
+  "packages/domain-collective-agreements",
   "packages/domain-payroll",
   "packages/domain-benefits",
   "packages/domain-document-classification",
