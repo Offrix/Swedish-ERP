@@ -255,6 +255,8 @@ export function createReportingEngine({
     getReportExportJob,
     retryReportExportJob,
     searchJournalEntries,
+    listSearchProjectionContracts,
+    listSearchProjectionDocuments,
     createReconciliationRun,
     listReconciliationRuns,
     getReconciliationRun,
@@ -893,6 +895,159 @@ export function createReportingEngine({
       reconciliationRuns: [...state.reconciliationRuns.values()],
       auditEvents: state.auditEvents
     });
+  }
+
+  function listSearchProjectionContracts({ companyId } = {}) {
+    requireText(companyId, "company_id_required");
+    return copy([
+      {
+        projectionCode: "reporting.report_definition",
+        objectType: "report_definition",
+        sourceDomainCode: "reporting",
+        displayName: "Report definitions",
+        projectionVersionNo: 1,
+        visibilityScope: "company",
+        supportsGlobalSearch: true,
+        supportsSavedViews: true,
+        surfaceCodes: ["desktop.search", "desktop.reporting"],
+        filterFieldCodes: ["reportCode", "definitionKind", "reportSourceType", "status"]
+      },
+      {
+        projectionCode: "reporting.report_snapshot",
+        objectType: "report_snapshot",
+        sourceDomainCode: "reporting",
+        displayName: "Report snapshots",
+        projectionVersionNo: 1,
+        visibilityScope: "company",
+        supportsGlobalSearch: true,
+        supportsSavedViews: true,
+        surfaceCodes: ["desktop.search", "desktop.reporting"],
+        filterFieldCodes: ["reportCode", "viewMode", "periodStatus"]
+      },
+      {
+        projectionCode: "reporting.report_export_job",
+        objectType: "report_export_job",
+        sourceDomainCode: "reporting",
+        displayName: "Report exports",
+        projectionVersionNo: 1,
+        visibilityScope: "company",
+        supportsGlobalSearch: true,
+        supportsSavedViews: false,
+        surfaceCodes: ["desktop.search", "desktop.reporting"],
+        filterFieldCodes: ["reportCode", "format", "status"]
+      },
+      {
+        projectionCode: "reporting.reconciliation_run",
+        objectType: "reconciliation_run",
+        sourceDomainCode: "reporting",
+        displayName: "Reconciliation runs",
+        projectionVersionNo: 1,
+        visibilityScope: "company",
+        supportsGlobalSearch: true,
+        supportsSavedViews: true,
+        surfaceCodes: ["desktop.search", "desktop.reporting"],
+        filterFieldCodes: ["areaCode", "accountingPeriodId", "status"]
+      },
+      {
+        projectionCode: "reporting.journal_entry",
+        objectType: "journal_entry",
+        sourceDomainCode: "reporting",
+        displayName: "Journal entries",
+        projectionVersionNo: 1,
+        visibilityScope: "company",
+        supportsGlobalSearch: true,
+        supportsSavedViews: true,
+        surfaceCodes: ["desktop.search", "desktop.reporting"],
+        filterFieldCodes: ["voucherSeriesCode", "sourceType", "status"]
+      }
+    ]);
+  }
+
+  function listSearchProjectionDocuments({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const definitions = listAllReportDefinitions(resolvedCompanyId).map((definition) => ({
+      projectionCode: "reporting.report_definition",
+      objectId: definition.reportDefinitionId || `${definition.reportCode}:v${definition.versionNo}`,
+      displayTitle: definition.name,
+      displaySubtitle: `${definition.reportCode} v${definition.versionNo}`,
+      documentStatus: definition.status,
+      searchText: [definition.name, definition.purpose, definition.reportCode, definition.definitionKind, definition.reportSourceType, definition.rowDimensionCode, ...(definition.metricCatalog || []).map((metric) => metric.metricCode)].filter(Boolean).join(" "),
+      filterPayload: {
+        reportCode: definition.reportCode,
+        definitionKind: definition.definitionKind,
+        reportSourceType: definition.reportSourceType,
+        status: definition.status
+      },
+      sourceVersion: `${definition.reportCode}:v${definition.versionNo}`,
+      sourceUpdatedAt: definition.updatedAt || definition.createdAt || nowIso()
+    }));
+    const snapshots = [...state.reportSnapshots.values()]
+      .filter((snapshot) => snapshot.companyId === resolvedCompanyId)
+      .map((snapshot) => ({
+        projectionCode: "reporting.report_snapshot",
+        objectId: snapshot.reportSnapshotId,
+        displayTitle: snapshot.reportName,
+        displaySubtitle: `${snapshot.reportCode} ${snapshot.fromDate}..${snapshot.toDate}`,
+        documentStatus: snapshot.periodStatus,
+        searchText: [snapshot.reportName, snapshot.reportCode, snapshot.viewMode, snapshot.fromDate, snapshot.toDate, snapshot.reportDefinitionKind, snapshot.rowDimensionCode, snapshot.generatedByActorId].filter(Boolean).join(" "),
+        filterPayload: {
+          reportCode: snapshot.reportCode,
+          viewMode: snapshot.viewMode,
+          periodStatus: snapshot.periodStatus
+        },
+        sourceVersion: snapshot.contentHash,
+        sourceUpdatedAt: snapshot.generatedAt
+      }));
+    const exportJobs = [...state.reportExportJobs.values()]
+      .filter((job) => job.companyId === resolvedCompanyId)
+      .map((job) => ({
+        projectionCode: "reporting.report_export_job",
+        objectId: job.reportExportJobId,
+        displayTitle: `${job.reportCode} export`,
+        displaySubtitle: `${job.format} ${job.status}`,
+        documentStatus: job.status,
+        searchText: [job.reportCode, job.format, job.status, job.watermarkMode, job.artifactName].filter(Boolean).join(" "),
+        filterPayload: {
+          reportCode: job.reportCode,
+          format: job.format,
+          status: job.status
+        },
+        sourceVersion: job.contentHash || `${job.reportExportJobId}:${job.updatedAt}`,
+        sourceUpdatedAt: job.updatedAt
+      }));
+    const reconciliations = [...state.reconciliationRuns.values()]
+      .filter((run) => run.companyId === resolvedCompanyId)
+      .map((run) => ({
+        projectionCode: "reporting.reconciliation_run",
+        objectId: run.reconciliationRunId,
+        displayTitle: `${run.areaCode} reconciliation`,
+        displaySubtitle: `${run.accountingPeriodId} ${run.status}`,
+        documentStatus: run.status,
+        searchText: [run.areaCode, run.accountingPeriodId, run.status, run.cutoffDate, run.ownerUserId].filter(Boolean).join(" "),
+        filterPayload: {
+          areaCode: run.areaCode,
+          accountingPeriodId: run.accountingPeriodId,
+          status: run.status
+        },
+        sourceVersion: run.snapshotHash,
+        sourceUpdatedAt: run.updatedAt
+      }));
+    const journalEntries = searchJournalEntries({ companyId: resolvedCompanyId }).items.map((entry) => ({
+      projectionCode: "reporting.journal_entry",
+      objectId: entry.journalEntryId,
+      displayTitle: `${entry.voucherSeriesCode}${entry.voucherNumber}`,
+      displaySubtitle: entry.description || entry.sourceType,
+      documentStatus: entry.status,
+      searchText: [entry.description, entry.sourceType, entry.sourceId, entry.voucherSeriesCode, String(entry.voucherNumber), entry.journalDate].filter(Boolean).join(" "),
+      filterPayload: {
+        voucherSeriesCode: entry.voucherSeriesCode,
+        sourceType: entry.sourceType,
+        status: entry.status
+      },
+      sourceVersion: hashObject(entry),
+      sourceUpdatedAt: entry.journalDate
+    }));
+    return copy([...definitions, ...snapshots, ...exportJobs, ...reconciliations, ...journalEntries]);
   }
 
   function requireReportSnapshot(companyId, reportSnapshotId) {

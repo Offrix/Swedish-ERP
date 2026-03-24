@@ -47,6 +47,7 @@ export const requiredPackages = [
   "packages/domain-field",
   "packages/domain-personalliggare",
   "packages/domain-egenkontroll",
+  "packages/domain-search",
   "packages/domain-reporting",
   "packages/domain-annual-reporting",
   "packages/domain-integrations",

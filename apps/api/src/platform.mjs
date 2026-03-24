@@ -28,6 +28,7 @@ import { createFieldPlatform } from "../../../packages/domain-field/src/index.mj
 import { createHusPlatform } from "../../../packages/domain-hus/src/index.mjs";
 import { createPersonalliggarePlatform } from "../../../packages/domain-personalliggare/src/index.mjs";
 import { createEgenkontrollPlatform } from "../../../packages/domain-egenkontroll/src/index.mjs";
+import { createSearchPlatform } from "../../../packages/domain-search/src/index.mjs";
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
 import { createCorePlatform } from "../../../packages/domain-core/src/index.mjs";
 import { createAnnualReportingPlatform } from "../../../packages/domain-annual-reporting/src/index.mjs";
@@ -78,6 +79,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "projects",
   "kalkyl",
   "reporting",
+  "search",
   "core",
   "hus",
   "personalliggare",
@@ -93,6 +95,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "fiscalYear",
   "ledger",
   "reporting",
+  "search",
   "automation",
   "core",
   "annualReporting",
@@ -439,6 +442,17 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         arPlatform: dependencies.ar,
         apPlatform: dependencies.ap,
         projectsPlatform: dependencies.projects
+      })
+  }),
+  createDomainDefinition({
+    key: "search",
+    label: "Search",
+    packageName: "@swedish-erp/domain-search",
+    dependsOn: ["reporting"],
+    create: ({ options, dependencies }) =>
+      createSearchPlatform({
+        ...options,
+        reportingPlatform: dependencies.reporting
       })
   }),
   createDomainDefinition({

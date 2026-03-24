@@ -167,6 +167,16 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/reporting/reconciliations",
               "/v1/reporting/reconciliations/:reconciliationRunId",
               "/v1/reporting/reconciliations/:reconciliationRunId/signoff",
+              "/v1/search/contracts",
+              "/v1/search/reindex",
+              "/v1/search/documents",
+              "/v1/search/documents/:searchDocumentId",
+              "/v1/saved-views",
+              "/v1/saved-views/:savedViewId",
+              "/v1/saved-views/:savedViewId/share",
+              "/v1/saved-views/:savedViewId/archive",
+              "/v1/saved-views/:savedViewId/repair",
+              "/v1/dashboard/widgets",
               "/v1/bureau/portfolio",
               "/v1/bureau/portfolio/memberships",
               "/v1/bureau/client-requests",
@@ -2069,6 +2079,377 @@ async function handleRequest({ req, res, platform, flags }) {
         signatoryRole: body.signatoryRole || "close_signatory",
         comment: body.comment || null,
         evidenceRefs: Array.isArray(body.evidenceRefs) ? body.evidenceRefs : [],
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/search/contracts") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "search",
+      scopeCode: "search"
+    });
+    writeJson(res, 200, {
+      items: platform.listSearchProjectionContracts({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/search/reindex") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "search",
+      scopeCode: "search"
+    });
+    writeJson(
+      res,
+      201,
+      platform.requestSearchReindex({
+        companyId,
+        projectionCode: body.projectionCode || null,
+        reasonCode: body.reasonCode || "manual_request",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/search/reindex") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "search",
+      scopeCode: "search"
+    });
+    writeJson(res, 200, {
+      items: platform.listSearchReindexRequests({
+        companyId,
+        projectionCode: url.searchParams.get("projectionCode") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/search/documents") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "search",
+      scopeCode: "search"
+    });
+    writeJson(res, 200, {
+      items: platform.listSearchDocuments({
+        companyId,
+        query: url.searchParams.get("query") || null,
+        projectionCode: url.searchParams.get("projectionCode") || null,
+        objectType: url.searchParams.get("objectType") || null,
+        status: url.searchParams.get("status") || null,
+        viewerUserId: principal.userId,
+        viewerTeamIds: [],
+        limit: url.searchParams.get("limit") || 50
+      })
+    });
+    return;
+  }
+
+  const searchDocumentMatch = matchPath(path, "/v1/search/documents/:searchDocumentId");
+  if (searchDocumentMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "search",
+      scopeCode: "search"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getSearchDocument({
+        companyId,
+        searchDocumentId: searchDocumentMatch.searchDocumentId,
+        viewerUserId: principal.userId,
+        viewerTeamIds: []
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/saved-views") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "saved_view",
+      scopeCode: "search"
+    });
+    writeJson(res, 200, {
+      items: platform.listSavedViews({
+        companyId,
+        viewerUserId: principal.userId,
+        viewerTeamIds: [],
+        surfaceCode: url.searchParams.get("surfaceCode") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/saved-views") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "saved_view",
+      scopeCode: "search"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createSavedView({
+        companyId,
+        ownerUserId: principal.userId,
+        surfaceCode: body.surfaceCode,
+        title: body.title,
+        queryJson: body.queryJson || {},
+        sortJson: body.sortJson || {},
+        visibilityCode: body.visibilityCode || "private",
+        sharedWithTeamId: body.sharedWithTeamId || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const savedViewMatch = matchPath(path, "/v1/saved-views/:savedViewId");
+  if (savedViewMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "saved_view",
+      scopeCode: "search"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getSavedView({
+        companyId,
+        savedViewId: savedViewMatch.savedViewId,
+        viewerUserId: principal.userId,
+        viewerTeamIds: []
+      })
+    );
+    return;
+  }
+
+  if (savedViewMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "saved_view",
+      scopeCode: "search"
+    });
+    writeJson(
+      res,
+      200,
+      platform.updateSavedView({
+        companyId,
+        savedViewId: savedViewMatch.savedViewId,
+        viewerUserId: principal.userId,
+        title: body.title ?? null,
+        queryJson: body.queryJson,
+        sortJson: body.sortJson,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const savedViewShareMatch = matchPath(path, "/v1/saved-views/:savedViewId/share");
+  if (savedViewShareMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "saved_view",
+      scopeCode: "search"
+    });
+    writeJson(
+      res,
+      200,
+      platform.shareSavedView({
+        companyId,
+        savedViewId: savedViewShareMatch.savedViewId,
+        viewerUserId: principal.userId,
+        visibilityCode: body.visibilityCode,
+        sharedWithTeamId: body.sharedWithTeamId || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const savedViewArchiveMatch = matchPath(path, "/v1/saved-views/:savedViewId/archive");
+  if (savedViewArchiveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "saved_view",
+      scopeCode: "search"
+    });
+    writeJson(
+      res,
+      200,
+      platform.archiveSavedView({
+        companyId,
+        savedViewId: savedViewArchiveMatch.savedViewId,
+        viewerUserId: principal.userId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const savedViewRepairMatch = matchPath(path, "/v1/saved-views/:savedViewId/repair");
+  if (savedViewRepairMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "saved_view",
+      scopeCode: "search"
+    });
+    writeJson(
+      res,
+      200,
+      platform.repairSavedView({
+        companyId,
+        savedViewId: savedViewRepairMatch.savedViewId,
+        viewerUserId: principal.userId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/dashboard/widgets") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "dashboard_widget",
+      scopeCode: "search"
+    });
+    writeJson(res, 200, {
+      items: platform.listDashboardWidgets({
+        companyId,
+        ownerUserId: principal.userId,
+        surfaceCode: url.searchParams.get("surfaceCode") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/dashboard/widgets") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "dashboard_widget",
+      scopeCode: "search"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createDashboardWidget({
+        companyId,
+        ownerUserId: principal.userId,
+        surfaceCode: body.surfaceCode,
+        widgetTypeCode: body.widgetTypeCode,
+        layoutSlot: body.layoutSlot,
+        settingsJson: body.settingsJson || {},
+        actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
     );
@@ -11241,7 +11622,7 @@ function isPhase23Route(path) {
 }
 
 function isPhase3Route(path) {
-  return path.startsWith("/v1/ledger") || path.startsWith("/v1/reporting");
+  return path.startsWith("/v1/ledger") || path.startsWith("/v1/reporting") || path.startsWith("/v1/search") || path.startsWith("/v1/saved-views") || path.startsWith("/v1/dashboard");
 }
 
 function isPhase4Route(path) {
