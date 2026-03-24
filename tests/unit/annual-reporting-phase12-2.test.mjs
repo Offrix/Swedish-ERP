@@ -63,18 +63,19 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
   assert.equal(authorityOverview.hus.totalApprovedAmount, 3000);
   assert.equal(authorityOverview.specialPayrollTax.snapshotCount, 1);
   assert.equal(authorityOverview.specialPayrollTax.specialPayrollTaxAmount > 0, true);
+  assert.equal(authorityOverview.legalFormCode, "AKTIEBOLAG");
+  assert.equal(authorityOverview.declarationProfileCode, "INK2");
 
   const taxPackage = platform.createTaxDeclarationPackage({
     companyId: COMPANY_ID,
     packageId: annualPackage.packageId,
     actorId: DEMO_IDS.userId
   });
-  assert.equal(taxPackage.exports.length, 7);
+  assert.equal(taxPackage.exports.length, 6);
   assert.deepEqual(
     taxPackage.exports.map((entry) => entry.exportCode),
     [
-      "ink_support_json",
-      "ne_support_json",
+      "ink2_support_json",
       "sru_rows_csv",
       "vat_audit_overview_json",
       "agi_audit_overview_json",

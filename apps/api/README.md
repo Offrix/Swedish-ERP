@@ -123,6 +123,16 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/close/blockers/:blockerId/override`
 - `POST /v1/close/checklists/:checklistId/signoff`
 - `POST /v1/close/checklists/:checklistId/reopen`
+- `GET /v1/legal-forms/profiles?companyId=...`
+- `POST /v1/legal-forms/profiles`
+- `GET /v1/legal-forms/profiles/:legalFormProfileId?companyId=...`
+- `POST /v1/legal-forms/profiles/:legalFormProfileId/activate`
+- `GET /v1/legal-forms/active?companyId=...&asOfDate=...`
+- `GET /v1/legal-forms/reporting-obligations?companyId=...`
+- `POST /v1/legal-forms/reporting-obligations`
+- `GET /v1/legal-forms/reporting-obligations/:reportingObligationProfileId?companyId=...`
+- `POST /v1/legal-forms/reporting-obligations/:reportingObligationProfileId/approve`
+- `GET /v1/legal-forms/declaration-profile?companyId=...&asOfDate=...`
 - `GET /v1/annual-reporting/packages?companyId=...`
 - `POST /v1/annual-reporting/packages`
 - `GET /v1/annual-reporting/packages/:packageId?companyId=...`
@@ -130,6 +140,9 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/annual-reporting/packages/:packageId/versions/:versionId/diff?companyId=...&leftVersionId=...`
 - `POST /v1/annual-reporting/packages/:packageId/versions/:versionId/signatories`
 - `POST /v1/annual-reporting/packages/:packageId/versions/:versionId/sign`
+- `POST /v1/annual-reporting/packages/:packageId/corrections`
+- `GET /v1/annual-reporting/packages/:packageId/evidence?companyId=...`
+- `GET /v1/annual-reporting/packages/:packageId/evidence/:evidencePackId?companyId=...`
 - `GET /v1/collaboration/comments?bureauOrgId=...&objectType=...&objectId=...`
   - `POST /v1/collaboration/comments`
 - `GET /v1/vat/codes?companyId=...`

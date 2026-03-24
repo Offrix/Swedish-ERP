@@ -197,12 +197,23 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/close/blockers/:blockerId/override",
               "/v1/close/checklists/:checklistId/signoff",
               "/v1/close/checklists/:checklistId/reopen",
+              "/v1/legal-forms/profiles",
+              "/v1/legal-forms/profiles/:legalFormProfileId",
+              "/v1/legal-forms/profiles/:legalFormProfileId/activate",
+              "/v1/legal-forms/active",
+              "/v1/legal-forms/reporting-obligations",
+              "/v1/legal-forms/reporting-obligations/:reportingObligationProfileId",
+              "/v1/legal-forms/reporting-obligations/:reportingObligationProfileId/approve",
+              "/v1/legal-forms/declaration-profile",
               "/v1/annual-reporting/packages",
               "/v1/annual-reporting/packages/:packageId",
               "/v1/annual-reporting/packages/:packageId/versions",
               "/v1/annual-reporting/packages/:packageId/versions/:versionId/diff",
               "/v1/annual-reporting/packages/:packageId/versions/:versionId/signatories",
               "/v1/annual-reporting/packages/:packageId/versions/:versionId/sign",
+              "/v1/annual-reporting/packages/:packageId/corrections",
+              "/v1/annual-reporting/packages/:packageId/evidence",
+              "/v1/annual-reporting/packages/:packageId/evidence/:evidencePackId",
               "/v1/annual-reporting/packages/:packageId/authority-overview",
               "/v1/annual-reporting/packages/:packageId/tax-declarations",
               "/v1/annual-reporting/packages/:packageId/tax-declarations/:taxDeclarationPackageId",
@@ -2875,6 +2886,8 @@ async function handleRequest({ req, res, platform, flags }) {
       companyId,
       accountingPeriodId: body.accountingPeriodId,
       profileCode: body.profileCode,
+      legalFormProfileId: body.legalFormProfileId ?? null,
+      reportingObligationProfileId: body.reportingObligationProfileId ?? null,
       actorId: principal.userId,
       textSections: body.textSections || {},
       noteSections: body.noteSections || {},
@@ -3133,6 +3146,12 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "submission",
       scopeCode: "annual_reporting"
     });
+    const payload = body.payload ?? buildSubmissionPayloadFromSource({
+      platform,
+      companyId,
+      sourceObjectType: body.sourceObjectType,
+      sourceObjectId: body.sourceObjectId
+    });
     writeJson(
       res,
       201,
@@ -3145,14 +3164,13 @@ async function handleRequest({ req, res, platform, flags }) {
         payloadVersion: body.payloadVersion || "phase12.2",
         providerKey: body.providerKey,
         recipientId: body.recipientId,
-        payload: body.payload ?? buildSubmissionPayloadFromSource({
-          platform,
-          companyId,
-          sourceObjectType: body.sourceObjectType,
-          sourceObjectId: body.sourceObjectId
-        }),
+        payload,
         signedState: body.signedState || "pending",
         signatoryRoleRequired: body.signatoryRoleRequired ?? null,
+        submissionFamilyCode: body.submissionFamilyCode ?? payload.packageFamilyCode ?? null,
+        evidencePackId: body.evidencePackId ?? payload.evidencePackId ?? null,
+        correctionOfSubmissionId: body.correctionOfSubmissionId ?? null,
+        correctionChainId: body.correctionChainId ?? null,
         priority: body.priority || "normal",
         retryClass: body.retryClass || "manual_only",
         actorId: principal.userId,
@@ -4158,6 +4176,76 @@ async function handleRequest({ req, res, platform, flags }) {
         projectId: url.searchParams.get("projectId") || null
       })
     });
+    return;
+  }
+
+  const annualCorrectionMatch = matchPath(path, "/v1/annual-reporting/packages/:packageId/corrections");
+  if (annualCorrectionMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "annual_report_package",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(res, 201, platform.openAnnualCorrectionPackage({
+      companyId,
+      packageId: annualCorrectionMatch.packageId,
+      profileCode: body.profileCode ?? null,
+      actorId: principal.userId,
+      textSections: body.textSections || {},
+      noteSections: body.noteSections || {},
+      includeEstablishmentCertificate: body.includeEstablishmentCertificate !== false
+    }));
+    return;
+  }
+
+  const annualEvidenceListMatch = matchPath(path, "/v1/annual-reporting/packages/:packageId/evidence");
+  if (annualEvidenceListMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "annual_report_package",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(res, 200, {
+      items: platform.listAnnualEvidencePacks({
+        companyId,
+        packageId: annualEvidenceListMatch.packageId
+      })
+    });
+    return;
+  }
+
+  const annualEvidenceMatch = matchPath(path, "/v1/annual-reporting/packages/:packageId/evidence/:evidencePackId");
+  if (annualEvidenceMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "annual_report_package",
+      scopeCode: "annual_reporting"
+    });
+    writeJson(res, 200, platform.getAnnualEvidencePack({
+      companyId,
+      evidencePackId: annualEvidenceMatch.evidencePackId
+    }));
     return;
   }
 
@@ -11558,9 +11646,13 @@ function buildSubmissionPayloadFromSource({ platform, companyId, sourceObjectTyp
       annualReportPackageId: taxPackage.annualReportPackageId,
       annualReportVersionId: taxPackage.annualReportVersionId,
       packageCode: taxPackage.packageCode,
+      declarationProfileCode: taxPackage.declarationProfileCode,
+      packageFamilyCode: taxPackage.packageFamilyCode,
       fiscalYear: taxPackage.fiscalYear,
       outputChecksum: taxPackage.outputChecksum,
+      evidencePackId: taxPackage.evidencePackId || null,
       authorityOverview: taxPackage.authorityOverview,
+      submissionFamilies: taxPackage.submissionFamilies || [],
       exports: taxPackage.exports
     };
   }
@@ -11574,10 +11666,14 @@ function buildSubmissionPayloadFromSource({ platform, companyId, sourceObjectTyp
       sourceObjectId: resolvedSourceId,
       packageId: annualPackage.packageId,
       fiscalYear: annualPackage.fiscalYear,
+      legalFormCode: annualPackage.legalFormCode,
+      declarationProfileCode: annualPackage.declarationProfileCode,
+      packageFamilyCode: annualPackage.packageFamilyCode,
       profileCode: annualPackage.profileCode,
       status: annualPackage.status,
       currentVersionId: annualPackage.currentVersion?.versionId || null,
-      checksum: annualPackage.currentVersion?.checksum || null
+      checksum: annualPackage.currentVersion?.checksum || null,
+      evidencePackId: annualPackage.currentEvidencePack?.evidencePackId || null
     };
   }
   throw createHttpError(400, "submission_source_object_unsupported", "Automatic payload building is only supported for annual-reporting source objects.");

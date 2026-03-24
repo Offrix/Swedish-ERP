@@ -21,6 +21,44 @@ test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions 
   const adminCompanyUser = snapshot.companyUsers.find(
     (candidate) => candidate.companyId === company.companyId && candidate.userId === adminUser?.userId
   );
+  const methodAssessment = platform.assessCashMethodEligibility({
+    companyId: company.companyId,
+    annualNetTurnoverSek: 0,
+    legalFormCode: "AKTIEBOLAG",
+    actorId: adminUser.userId
+  });
+  const methodProfile = platform.createMethodProfile({
+    companyId: company.companyId,
+    methodCode: "FAKTURERINGSMETOD",
+    effectiveFrom: "2026-01-01",
+    fiscalYearStartDate: "2026-01-01",
+    eligibilityAssessmentId: methodAssessment.assessmentId,
+    onboardingOverride: true,
+    actorId: adminUser.userId
+  });
+  platform.activateMethodProfile({
+    companyId: company.companyId,
+    methodProfileId: methodProfile.methodProfileId,
+    actorId: adminUser.userId
+  });
+  const fiscalYearProfile = platform.createFiscalYearProfile({
+    companyId: company.companyId,
+    legalFormCode: "AKTIEBOLAG",
+    actorId: adminUser.userId
+  });
+  const fiscalYear = platform.createFiscalYear({
+    companyId: company.companyId,
+    fiscalYearProfileId: fiscalYearProfile.fiscalYearProfileId,
+    startDate: "2026-01-01",
+    endDate: "2026-12-31",
+    approvalBasisCode: "BASELINE",
+    actorId: adminUser.userId
+  });
+  platform.activateFiscalYear({
+    companyId: company.companyId,
+    fiscalYearId: fiscalYear.fiscalYearId,
+    actorId: adminUser.userId
+  });
   platform.installLedgerCatalog({
     companyId: company.companyId,
     actorId: "phase12-1-unit"
@@ -30,6 +68,33 @@ test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions 
     fiscalYear: 2026,
     actorId: "phase12-1-unit"
   });
+  const legalFormProfile = platform.createLegalFormProfile({
+    companyId: company.companyId,
+    legalFormCode: "AKTIEBOLAG",
+    effectiveFrom: "2026-01-01",
+    actorId: adminUser.userId
+  });
+  platform.activateLegalFormProfile({
+    companyId: company.companyId,
+    legalFormProfileId: legalFormProfile.legalFormProfileId,
+    actorId: adminUser.userId
+  });
+  const reportingObligation = platform.createReportingObligationProfile({
+    companyId: company.companyId,
+    legalFormProfileId: legalFormProfile.legalFormProfileId,
+    fiscalYearKey: "2026",
+    accountingPeriodId: period.accountingPeriodId,
+    requiresAnnualReport: true,
+    requiresYearEndAccounts: false,
+    requiresBolagsverketFiling: true,
+    requiresTaxDeclarationPackage: true,
+    actorId: adminUser.userId
+  });
+  platform.approveReportingObligationProfile({
+    companyId: company.companyId,
+    reportingObligationProfileId: reportingObligation.reportingObligationProfileId,
+    actorId: adminUser.userId
+  });
   postJournal(platform, company.companyId, "phase12-1-unit-income-1", 6300);
   hardCloseYear(platform, company.companyId, period.accountingPeriodId);
 
@@ -37,6 +102,8 @@ test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions 
     companyId: company.companyId,
     accountingPeriodId: period.accountingPeriodId,
     profileCode: "k2",
+    legalFormProfileId: legalFormProfile.legalFormProfileId,
+    reportingObligationProfileId: reportingObligation.reportingObligationProfileId,
     actorId: adminUser.userId,
     textSections: {
       management_report: "Stable annual report",
@@ -48,6 +115,8 @@ test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions 
     }
   });
   assert.equal(annualPackage.profileCode, "k2");
+  assert.equal(annualPackage.legalFormCode, "AKTIEBOLAG");
+  assert.equal(annualPackage.declarationProfileCode, "INK2");
   assert.equal(annualPackage.currentVersion.versionNo, 1);
   assert.equal(annualPackage.currentVersion.checksum.length, 64);
 

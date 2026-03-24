@@ -3,6 +3,7 @@ import { createDocumentArchivePlatform } from "../../../packages/domain-document
 import { createLedgerPlatform } from "../../../packages/domain-ledger/src/index.mjs";
 import { createAccountingMethodPlatform } from "../../../packages/domain-accounting-method/src/index.mjs";
 import { createFiscalYearPlatform } from "../../../packages/domain-fiscal-year/src/index.mjs";
+import { createLegalFormPlatform } from "../../../packages/domain-legal-form/src/index.mjs";
 import { createReportingPlatform } from "../../../packages/domain-reporting/src/index.mjs";
 import { createVatPlatform } from "../../../packages/domain-vat/src/index.mjs";
 import { createArPlatform } from "../../../packages/domain-ar/src/index.mjs";
@@ -55,6 +56,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "documents",
   "accountingMethod",
   "fiscalYear",
+  "legalForm",
   "ledger",
   "vat",
   "integrations",
@@ -93,6 +95,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "documents",
   "accountingMethod",
   "fiscalYear",
+  "legalForm",
   "ledger",
   "reporting",
   "search",
@@ -150,6 +153,12 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     label: "Fiscal year",
     packageName: "@swedish-erp/domain-fiscal-year",
     create: ({ options }) => createFiscalYearPlatform(options)
+  }),
+  createDomainDefinition({
+    key: "legalForm",
+    label: "Legal form",
+    packageName: "@swedish-erp/domain-legal-form",
+    create: ({ options }) => createLegalFormPlatform(options)
   }),
   createDomainDefinition({
     key: "ledger",
@@ -525,7 +534,7 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "annualReporting",
     label: "Annual reporting",
     packageName: "@swedish-erp/domain-annual-reporting",
-    dependsOn: ["ledger", "reporting", "orgAuth", "vat", "payroll", "hus", "pension"],
+    dependsOn: ["ledger", "reporting", "orgAuth", "vat", "payroll", "hus", "pension", "fiscalYear", "legalForm", "integrations"],
     create: ({ options, dependencies }) =>
       createAnnualReportingPlatform({
         ...options,
@@ -535,7 +544,10 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         vatPlatform: dependencies.vat,
         payrollPlatform: dependencies.payroll,
         husPlatform: dependencies.hus,
-        pensionPlatform: dependencies.pension
+        pensionPlatform: dependencies.pension,
+        fiscalYearPlatform: dependencies.fiscalYear,
+        legalFormPlatform: dependencies.legalForm,
+        integrationPlatform: dependencies.integrations
       })
   })
 ]);

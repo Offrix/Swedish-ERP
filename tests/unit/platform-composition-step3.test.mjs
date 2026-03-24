@@ -13,6 +13,7 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   );
   assert.equal(typeof platform.getDomain("accountingMethod")?.getActiveMethodForDate, "function");
   assert.equal(typeof platform.getDomain("fiscalYear")?.getActiveFiscalYearForDate, "function");
+  assert.equal(typeof platform.getDomain("legalForm")?.resolveDeclarationProfile, "function");
   assert.equal(typeof platform.getDomain("ledger")?.createJournalEntry, "function");
   assert.equal(typeof platform.getDomain("taxAccount")?.createTaxAccountReconciliation, "function");
   assert.equal(typeof platform.getDomain("reviewCenter")?.createReviewItem, "function");
@@ -35,6 +36,8 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.equal(typeof platform.createJournalEntry, "function");
   assert.deepEqual(platform.getDomainRegistration("ledger")?.dependsOn, ["accountingMethod", "fiscalYear"]);
   assert.equal(platform.getDomainRegistration("ledger")?.buildOrder > platform.getDomainRegistration("fiscalYear")?.buildOrder, true);
+  assert.deepEqual(platform.getDomainRegistration("legalForm")?.dependsOn, []);
+  assert.equal(platform.getDomainRegistration("legalForm")?.buildOrder > platform.getDomainRegistration("fiscalYear")?.buildOrder, true);
   assert.deepEqual(platform.getDomainRegistration("taxAccount")?.dependsOn, ["banking"]);
   assert.equal(platform.getDomainRegistration("taxAccount")?.buildOrder > platform.getDomainRegistration("banking")?.buildOrder, true);
   assert.deepEqual(platform.getDomainRegistration("reviewCenter")?.dependsOn, []);
@@ -62,6 +65,10 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.deepEqual(
     platform.getDomainRegistration("payroll")?.dependsOn,
     ["orgAuth", "hr", "time", "balances", "collectiveAgreements", "benefits", "travel", "pension", "ledger", "banking"]
+  );
+  assert.deepEqual(
+    platform.getDomainRegistration("annualReporting")?.dependsOn,
+    ["ledger", "reporting", "orgAuth", "vat", "payroll", "hus", "pension", "fiscalYear", "legalForm", "integrations"]
   );
   assert.equal(platform.platformContractVersions.eventEnvelopeVersion, 1);
   assert.equal(platform.platformContractVersions.auditEnvelopeVersion, 1);
