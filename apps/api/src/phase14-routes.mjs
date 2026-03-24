@@ -1556,5 +1556,164 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  const documentClassificationCasesMatch = matchPath(path, "/v1/documents/:documentId/classification-cases");
+  if (req.method === "POST" && documentClassificationCasesMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "classification_case",
+      objectId: documentClassificationCasesMatch.documentId,
+      scopeCode: "document_classification"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createClassificationCase({
+        companyId,
+        documentId: documentClassificationCasesMatch.documentId,
+        sourceOcrRunId: body.sourceOcrRunId || null,
+        extractedFields: body.extractedFields || {},
+        lineInputs: body.lineInputs || [],
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && documentClassificationCasesMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "classification_case",
+      objectId: documentClassificationCasesMatch.documentId,
+      scopeCode: "document_classification"
+    });
+    writeJson(res, 200, {
+      items: platform.listClassificationCases({
+        companyId,
+        documentId: documentClassificationCasesMatch.documentId,
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  const documentClassificationCaseMatch = matchPath(path, "/v1/documents/:documentId/classification-cases/:classificationCaseId");
+  if (req.method === "GET" && documentClassificationCaseMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "classification_case",
+      objectId: documentClassificationCaseMatch.classificationCaseId,
+      scopeCode: "document_classification"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getClassificationCase({
+        companyId,
+        classificationCaseId: documentClassificationCaseMatch.classificationCaseId
+      })
+    );
+    return true;
+  }
+
+  const documentClassificationApproveMatch = matchPath(path, "/v1/documents/:documentId/classification-cases/:classificationCaseId/decide");
+  if (req.method === "POST" && documentClassificationApproveMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "classification_case",
+      objectId: documentClassificationApproveMatch.classificationCaseId,
+      scopeCode: "document_classification"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveClassificationCase({
+        companyId,
+        classificationCaseId: documentClassificationApproveMatch.classificationCaseId,
+        approvalNote: body.approvalNote || null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const documentClassificationDispatchMatch = matchPath(path, "/v1/documents/:documentId/classification-cases/:classificationCaseId/dispatch");
+  if (req.method === "POST" && documentClassificationDispatchMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "classification_case",
+      objectId: documentClassificationDispatchMatch.classificationCaseId,
+      scopeCode: "document_classification"
+    });
+    writeJson(
+      res,
+      200,
+      platform.dispatchTreatmentIntents({
+        companyId,
+        classificationCaseId: documentClassificationDispatchMatch.classificationCaseId,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const documentClassificationCorrectMatch = matchPath(path, "/v1/documents/:documentId/classification-cases/:classificationCaseId/correct");
+  if (req.method === "POST" && documentClassificationCorrectMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "classification_case",
+      objectId: documentClassificationCorrectMatch.classificationCaseId,
+      scopeCode: "document_classification"
+    });
+    writeJson(
+      res,
+      200,
+      platform.correctClassificationCase({
+        companyId,
+        classificationCaseId: documentClassificationCorrectMatch.classificationCaseId,
+        lineInputs: body.lineInputs || [],
+        extractedFields: body.extractedFields || {},
+        sourceOcrRunId: body.sourceOcrRunId || null,
+        reasonCode: body.reasonCode || "correction",
+        reasonNote: body.reasonNote || null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
   return false;
 }

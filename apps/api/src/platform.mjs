@@ -16,6 +16,7 @@ import { createHrPlatform } from "../../../packages/domain-hr/src/index.mjs";
 import { createTimePlatform } from "../../../packages/domain-time/src/index.mjs";
 import { createPayrollPlatform } from "../../../packages/domain-payroll/src/index.mjs";
 import { createBenefitsPlatform } from "../../../packages/domain-benefits/src/index.mjs";
+import { createDocumentClassificationPlatform } from "../../../packages/domain-document-classification/src/index.mjs";
 import { createTravelPlatform } from "../../../packages/domain-travel/src/index.mjs";
 import { createPensionPlatform } from "../../../packages/domain-pension/src/index.mjs";
 import { createProjectsPlatform } from "../../../packages/domain-projects/src/index.mjs";
@@ -62,6 +63,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "hr",
   "time",
   "benefits",
+  "documentClassification",
   "travel",
   "pension",
   "payroll",
@@ -96,6 +98,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "hr",
   "time",
   "benefits",
+  "documentClassification",
   "travel",
   "pension",
   "projects",
@@ -265,6 +268,19 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         ...options,
         hrPlatform: dependencies.hr,
         documentPlatform: dependencies.documents
+      })
+  }),
+  createDomainDefinition({
+    key: "documentClassification",
+    label: "Document classification",
+    packageName: "@swedish-erp/domain-document-classification",
+    dependsOn: ["documents", "reviewCenter", "benefits"],
+    create: ({ options, dependencies }) =>
+      createDocumentClassificationPlatform({
+        ...options,
+        documentPlatform: dependencies.documents,
+        reviewCenterPlatform: dependencies.reviewCenter,
+        benefitsPlatform: dependencies.benefits
       })
   }),
   createDomainDefinition({

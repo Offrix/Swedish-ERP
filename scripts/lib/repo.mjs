@@ -35,6 +35,7 @@ export const requiredPackages = [
   "packages/domain-time",
   "packages/domain-payroll",
   "packages/domain-benefits",
+  "packages/domain-document-classification",
   "packages/domain-travel",
   "packages/domain-pension",
   "packages/domain-hus",
