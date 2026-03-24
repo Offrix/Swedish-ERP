@@ -1618,7 +1618,12 @@ export function createLedgerPlatform(options = {}) {
   return createLedgerEngine(options);
 }
 
-export function createLedgerEngine({ clock = () => new Date(), seedDemo = true } = {}) {
+export function createLedgerEngine({
+  clock = () => new Date(),
+  seedDemo = true,
+  accountingMethodPlatform = null,
+  fiscalYearPlatform = null
+} = {}) {
   const state = {
     accounts: new Map(),
     accountIdsByCompanyNumber: new Map(),
@@ -1634,6 +1639,7 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
 
   if (seedDemo) {
     seedDemoState(state, clock);
+    synchronizeLedgerPeriodsForCompany(DEMO_LEDGER_COMPANY_ID);
   }
 
   return {
@@ -1752,6 +1758,7 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
 
   function listAccountingPeriods({ companyId } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
+    synchronizeLedgerPeriodsForCompany(resolvedCompanyId);
     return [...state.accountingPeriods.values()]
       .filter((period) => period.companyId === resolvedCompanyId)
       .sort((left, right) => left.startsOn.localeCompare(right.startsOn))
@@ -1765,6 +1772,7 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     correlationId = crypto.randomUUID()
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
+    synchronizeLedgerPeriodsForCompany(resolvedCompanyId);
     const resolvedFiscalYear = String(fiscalYear);
     if (!/^\d{4}$/.test(resolvedFiscalYear)) {
       throw httpError(400, "fiscal_year_invalid", "Fiscal year must be a four-digit year.");
@@ -1786,6 +1794,8 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
       companyId: resolvedCompanyId,
       startsOn,
       endsOn,
+      fiscalYearId: null,
+      fiscalPeriodId: null,
       status: "open",
       lockReasonCode: null,
       lockedByActorId: null,
@@ -1968,7 +1978,11 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     const resolvedActorId = requireText(actorId, "actor_id_required");
     const resolvedVoucherSeries = requireVoucherSeries(resolvedCompanyId, voucherSeriesCode);
     const resolvedJournalDate = normalizeDate(journalDate, "journal_date_required");
-    const accountingPeriod = resolveAccountingPeriod(resolvedCompanyId, resolvedJournalDate);
+    const accountingContext = resolveAccountingContext({
+      companyId: resolvedCompanyId,
+      journalDate: resolvedJournalDate
+    });
+    const accountingPeriod = accountingContext.accountingPeriod;
     const normalizedMetadata = normalizeMetadata(metadataJson, importedFlag);
     ensurePeriodAllowsEntryCreation(accountingPeriod, normalizedMetadata);
 
@@ -1995,6 +2009,9 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
       voucherSeriesId: resolvedVoucherSeries.voucherSeriesId,
       voucherSeriesCode: resolvedVoucherSeries.seriesCode,
       accountingPeriodId: accountingPeriod.accountingPeriodId,
+      fiscalYearId: accountingContext.fiscalYear?.fiscalYearId || accountingPeriod.fiscalYearId || null,
+      fiscalPeriodId: accountingContext.fiscalPeriod?.periodId || accountingPeriod.fiscalPeriodId || null,
+      accountingMethodProfileId: accountingContext.accountingMethodProfile?.methodProfileId || null,
       journalDate: resolvedJournalDate,
       voucherNumber,
       description: description ? String(description).trim() : null,
@@ -2334,14 +2351,156 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     return state.voucherSeries.get(voucherSeriesId);
   }
 
-  function resolveAccountingPeriod(companyId, journalDate) {
-    const accountingPeriod = [...state.accountingPeriods.values()].find(
+  function resolveAccountingContext({ companyId, journalDate } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedJournalDate = normalizeDate(journalDate, "journal_date_required");
+    const accountingMethodProfile = resolveActiveAccountingMethodProfile(resolvedCompanyId, resolvedJournalDate);
+    const fiscalBinding = resolveFiscalBindingForDate(resolvedCompanyId, resolvedJournalDate);
+    return {
+      accountingMethodProfile,
+      fiscalYear: fiscalBinding?.fiscalYear || null,
+      fiscalPeriod: fiscalBinding?.fiscalPeriod || null,
+      accountingPeriod: fiscalBinding?.accountingPeriod || resolveAccountingPeriod(resolvedCompanyId, resolvedJournalDate)
+    };
+  }
+
+  function resolveActiveAccountingMethodProfile(companyId, journalDate) {
+    if (!accountingMethodPlatform || typeof accountingMethodPlatform.getActiveMethodForDate !== "function") {
+      return null;
+    }
+    return accountingMethodPlatform.getActiveMethodForDate({
+      companyId,
+      accountingDate: journalDate
+    });
+  }
+
+  function resolveFiscalBindingForDate(companyId, journalDate) {
+    if (!fiscalYearPlatform) {
+      return null;
+    }
+    if (typeof fiscalYearPlatform.getActiveFiscalYearForDate !== "function" || typeof fiscalYearPlatform.getPeriodForDate !== "function") {
+      return null;
+    }
+    const fiscalYear = fiscalYearPlatform.getActiveFiscalYearForDate({
+      companyId,
+      accountingDate: journalDate
+    });
+    const fiscalPeriod = fiscalYearPlatform.getPeriodForDate({
+      companyId,
+      accountingDate: journalDate
+    });
+    return {
+      fiscalYear,
+      fiscalPeriod,
+      accountingPeriod: upsertAccountingPeriodFromFiscalPeriod({
+        companyId,
+        fiscalYear,
+        fiscalPeriod
+      })
+    };
+  }
+
+  function synchronizeLedgerPeriodsForCompany(companyId) {
+    if (!fiscalYearPlatform || typeof fiscalYearPlatform.listFiscalYears !== "function") {
+      return;
+    }
+    const fiscalYears = fiscalYearPlatform.listFiscalYears({
+      companyId
+    });
+    for (const fiscalYear of fiscalYears) {
+      for (const fiscalPeriod of fiscalYear.periods || []) {
+        upsertAccountingPeriodFromFiscalPeriod({
+          companyId,
+          fiscalYear,
+          fiscalPeriod
+        });
+      }
+    }
+  }
+
+  function findAccountingPeriodForDate(companyId, journalDate) {
+    return [...state.accountingPeriods.values()].find(
       (candidate) => candidate.companyId === companyId && candidate.startsOn <= journalDate && candidate.endsOn >= journalDate
     );
+  }
+
+  function resolveAccountingPeriod(companyId, journalDate) {
+    let accountingPeriod = findAccountingPeriodForDate(companyId, journalDate);
+    if (!accountingPeriod) {
+      const fiscalBinding = resolveFiscalBindingForDate(companyId, journalDate);
+      accountingPeriod = fiscalBinding?.accountingPeriod || null;
+    }
     if (!accountingPeriod) {
       throw httpError(404, "accounting_period_not_found", "No accounting period covers the supplied journal date.");
     }
     return accountingPeriod;
+  }
+
+  function upsertAccountingPeriodFromFiscalPeriod({ companyId, fiscalYear, fiscalPeriod } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedFiscalYearId = requireText(fiscalYear?.fiscalYearId, "fiscal_year_id_required");
+    const resolvedFiscalPeriodId = requireText(fiscalPeriod?.periodId, "fiscal_period_id_required");
+    const now = nowIso();
+    const existing = [...state.accountingPeriods.values()].find(
+      (candidate) =>
+        candidate.companyId === resolvedCompanyId
+        && (
+          candidate.fiscalPeriodId === resolvedFiscalPeriodId
+          || (candidate.startsOn === fiscalPeriod.startDate && candidate.endsOn === fiscalPeriod.endDate)
+        )
+    );
+    if (existing) {
+      existing.startsOn = fiscalPeriod.startDate;
+      existing.endsOn = fiscalPeriod.endDate;
+      existing.fiscalYearId = resolvedFiscalYearId;
+      existing.fiscalPeriodId = resolvedFiscalPeriodId;
+      existing.status = mergeAccountingPeriodStatus(existing.status, fiscalPeriod);
+      existing.updatedAt = now;
+      return existing;
+    }
+
+    const accountingPeriod = {
+      accountingPeriodId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      startsOn: fiscalPeriod.startDate,
+      endsOn: fiscalPeriod.endDate,
+      fiscalYearId: resolvedFiscalYearId,
+      fiscalPeriodId: resolvedFiscalPeriodId,
+      status: mapLedgerStatusFromFiscalPeriod(fiscalPeriod),
+      lockReasonCode: null,
+      lockedByActorId: null,
+      lockedAt: null,
+      reopenedByActorId: null,
+      reopenedAt: null,
+      createdAt: now,
+      updatedAt: now
+    };
+    state.accountingPeriods.set(accountingPeriod.accountingPeriodId, accountingPeriod);
+    return accountingPeriod;
+  }
+
+  function mergeAccountingPeriodStatus(currentStatus, fiscalPeriod) {
+    const fiscalStatus = mapLedgerStatusFromFiscalPeriod(fiscalPeriod);
+    if (currentStatus === "hard_closed" || fiscalStatus === "hard_closed") {
+      return "hard_closed";
+    }
+    if (currentStatus === "soft_locked" || fiscalStatus === "soft_locked") {
+      return "soft_locked";
+    }
+    return "open";
+  }
+
+  function mapLedgerStatusFromFiscalPeriod(fiscalPeriod) {
+    if (!fiscalPeriod) {
+      return "open";
+    }
+    if (fiscalPeriod.closeState === "closed" || fiscalPeriod.lockState === "hard_locked") {
+      return "hard_closed";
+    }
+    if (fiscalPeriod.lockState === "soft_locked") {
+      return "soft_locked";
+    }
+    return "open";
   }
 
   function requireAccountingPeriod(accountingPeriodId) {
@@ -2563,6 +2722,9 @@ export function createLedgerEngine({ clock = () => new Date(), seedDemo = true }
     const lines = (state.journalLinesByEntryId.get(entry.journalEntryId) || []).map(copy);
     return copy({
       ...entry,
+      fiscalYearId: entry.fiscalYearId || null,
+      fiscalPeriodId: entry.fiscalPeriodId || null,
+      accountingMethodProfileId: entry.accountingMethodProfileId || null,
       lines
     });
   }
@@ -2597,6 +2759,8 @@ function seedDemoState(state, clock) {
       companyId: DEMO_LEDGER_COMPANY_ID,
       startsOn,
       endsOn,
+      fiscalYearId: null,
+      fiscalPeriodId: null,
       status: "open",
       lockReasonCode: null,
       lockedByActorId: null,

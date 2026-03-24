@@ -42,9 +42,9 @@ function createDomainDefinition({ key, label, packageName, dependsOn = [], creat
 export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "orgAuth",
   "documents",
-  "ledger",
   "accountingMethod",
   "fiscalYear",
+  "ledger",
   "vat",
   "integrations",
   "automation",
@@ -69,9 +69,9 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
 export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "orgAuth",
   "documents",
-  "ledger",
   "accountingMethod",
   "fiscalYear",
+  "ledger",
   "reporting",
   "automation",
   "core",
@@ -107,12 +107,6 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     create: ({ options }) => createDocumentArchivePlatform(options)
   }),
   createDomainDefinition({
-    key: "ledger",
-    label: "Ledger",
-    packageName: "@swedish-erp/domain-ledger",
-    create: ({ options }) => createLedgerPlatform(options)
-  }),
-  createDomainDefinition({
     key: "accountingMethod",
     label: "Accounting method",
     packageName: "@swedish-erp/domain-accounting-method",
@@ -123,6 +117,18 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     label: "Fiscal year",
     packageName: "@swedish-erp/domain-fiscal-year",
     create: ({ options }) => createFiscalYearPlatform(options)
+  }),
+  createDomainDefinition({
+    key: "ledger",
+    label: "Ledger",
+    packageName: "@swedish-erp/domain-ledger",
+    dependsOn: ["accountingMethod", "fiscalYear"],
+    create: ({ options, dependencies }) =>
+      createLedgerPlatform({
+        ...options,
+        accountingMethodPlatform: dependencies.accountingMethod,
+        fiscalYearPlatform: dependencies.fiscalYear
+      })
   }),
   createDomainDefinition({
     key: "vat",

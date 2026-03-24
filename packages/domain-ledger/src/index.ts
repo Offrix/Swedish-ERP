@@ -84,6 +84,8 @@ export interface AccountingPeriod {
   readonly companyId: string;
   readonly startsOn: string;
   readonly endsOn: string;
+  readonly fiscalYearId?: string | null;
+  readonly fiscalPeriodId?: string | null;
   readonly status: "open" | "soft_locked" | "hard_closed";
   readonly lockReasonCode?: string | null;
   readonly lockedByActorId?: string | null;
@@ -151,6 +153,9 @@ export interface JournalEntry {
   readonly voucherSeriesId: string;
   readonly voucherSeriesCode: VoucherSeriesCode;
   readonly accountingPeriodId: string;
+  readonly fiscalYearId: string | null;
+  readonly fiscalPeriodId: string | null;
+  readonly accountingMethodProfileId: string | null;
   readonly journalDate: string;
   readonly voucherNumber: number;
   readonly description: string | null;

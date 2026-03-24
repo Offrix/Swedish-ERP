@@ -15,6 +15,8 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.equal(typeof platform.getDomain("fiscalYear")?.getActiveFiscalYearForDate, "function");
   assert.equal(typeof platform.getDomain("ledger")?.createJournalEntry, "function");
   assert.equal(typeof platform.createJournalEntry, "function");
+  assert.deepEqual(platform.getDomainRegistration("ledger")?.dependsOn, ["accountingMethod", "fiscalYear"]);
+  assert.equal(platform.getDomainRegistration("ledger")?.buildOrder > platform.getDomainRegistration("fiscalYear")?.buildOrder, true);
   assert.equal(platform.getDomainRegistration("payroll")?.dependsOn.includes("banking"), true);
   assert.equal(platform.platformContractVersions.eventEnvelopeVersion, 1);
   assert.equal(platform.platformContractVersions.auditEnvelopeVersion, 1);
