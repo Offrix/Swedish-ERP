@@ -747,7 +747,7 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
   if (req.method === "POST" && path === "/v1/automation/posting-suggestions") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req, body),
       companyId,
@@ -758,13 +758,14 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
     });
     const decision = platform.suggestLedgerPosting({
       companyId,
+      companyUserId: principal.companyUserId || null,
       sourceObjectType: body.sourceObjectType,
       sourceObjectId: body.sourceObjectId,
       candidatePostings: body.candidatePostings,
       evidence: body.evidence || {},
       rulePackId: body.rulePackId,
       effectiveDate: body.effectiveDate,
-      actorId: body.actorId || "session_user"
+      actorId: body.actorId || principal.companyUserId || "session_user"
     });
     platform.emitWebhookEvent({
       companyId,
@@ -780,7 +781,7 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
   if (req.method === "POST" && path === "/v1/automation/classifications") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req, body),
       companyId,
@@ -791,12 +792,13 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
     });
     const decision = platform.classifyArtifact({
       companyId,
+      companyUserId: principal.companyUserId || null,
       classifierType: body.classifierType,
       candidates: body.candidates,
       evidence: body.evidence || {},
       rulePackId: body.rulePackId,
       effectiveDate: body.effectiveDate,
-      actorId: body.actorId || "session_user"
+      actorId: body.actorId || principal.companyUserId || "session_user"
     });
     platform.emitWebhookEvent({
       companyId,
@@ -812,7 +814,7 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
   if (req.method === "POST" && path === "/v1/automation/anomalies") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req, body),
       companyId,
@@ -823,6 +825,7 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
     });
     const decision = platform.detectAnomaly({
       companyId,
+      companyUserId: principal.companyUserId || null,
       anomalyType: body.anomalyType,
       actualValue: body.actualValue,
       expectedValue: body.expectedValue,
@@ -830,7 +833,7 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
       evidence: body.evidence || {},
       rulePackId: body.rulePackId,
       effectiveDate: body.effectiveDate,
-      actorId: body.actorId || "session_user"
+      actorId: body.actorId || principal.companyUserId || "session_user"
     });
     platform.emitWebhookEvent({
       companyId,

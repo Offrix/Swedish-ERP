@@ -705,6 +705,567 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/balances/types") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "balance_type",
+      objectId: companyId,
+      scopeCode: "balances"
+    });
+    writeJson(res, 200, {
+      items: platform.listBalanceTypes({
+        companyId,
+        active: optionalText(url.searchParams.get("active"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/balances/types") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "balance_type",
+      objectId: companyId,
+      scopeCode: "balances"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createBalanceType({
+        companyId,
+        balanceTypeCode: body.balanceTypeCode,
+        label: body.label,
+        unitCode: body.unitCode,
+        negativeAllowed: body.negativeAllowed === true,
+        minimumBalance: body.minimumBalance ?? null,
+        maximumBalance: body.maximumBalance ?? null,
+        carryForwardModeCode: body.carryForwardModeCode,
+        carryForwardCapQuantity: body.carryForwardCapQuantity ?? null,
+        expiryModeCode: body.expiryModeCode,
+        expiryDays: body.expiryDays ?? null,
+        expiryMonthDay: body.expiryMonthDay ?? null,
+        expiryYearOffset: body.expiryYearOffset ?? 1,
+        active: body.active !== false,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/balances/accounts") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "balance_account",
+      objectId: companyId,
+      scopeCode: "balances"
+    });
+    writeJson(res, 200, {
+      items: platform.listBalanceAccounts({
+        companyId,
+        balanceTypeCode: optionalText(url.searchParams.get("balanceTypeCode")),
+        ownerTypeCode: optionalText(url.searchParams.get("ownerTypeCode")),
+        employeeId: optionalText(url.searchParams.get("employeeId")),
+        employmentId: optionalText(url.searchParams.get("employmentId")),
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/balances/accounts") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "balance_account",
+      objectId: companyId,
+      scopeCode: "balances"
+    });
+    writeJson(
+      res,
+      201,
+      platform.openBalanceAccount({
+        companyId,
+        balanceTypeCode: body.balanceTypeCode,
+        ownerTypeCode: body.ownerTypeCode,
+        employeeId: body.employeeId ?? null,
+        employmentId: body.employmentId ?? null,
+        openedOn: body.openedOn ?? null,
+        externalReference: body.externalReference ?? null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const balanceAccountMatch = matchPath(path, "/v1/balances/accounts/:balanceAccountId");
+  if (req.method === "GET" && balanceAccountMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "balance_account",
+      objectId: balanceAccountMatch.balanceAccountId,
+      scopeCode: "balances"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getBalanceAccount({
+        companyId,
+        balanceAccountId: balanceAccountMatch.balanceAccountId
+      })
+    );
+    return true;
+  }
+
+  const balanceTransactionsMatch = matchPath(path, "/v1/balances/accounts/:balanceAccountId/transactions");
+  if (req.method === "GET" && balanceTransactionsMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "balance_transaction",
+      objectId: balanceTransactionsMatch.balanceAccountId,
+      scopeCode: "balances"
+    });
+    writeJson(res, 200, {
+      items: platform.listBalanceTransactions({
+        companyId,
+        balanceAccountId: balanceTransactionsMatch.balanceAccountId
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && balanceTransactionsMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "balance_transaction",
+      objectId: balanceTransactionsMatch.balanceAccountId,
+      scopeCode: "balances"
+    });
+    writeJson(
+      res,
+      201,
+      platform.recordBalanceTransaction({
+        companyId,
+        balanceAccountId: balanceTransactionsMatch.balanceAccountId,
+        effectiveDate: body.effectiveDate,
+        transactionTypeCode: body.transactionTypeCode,
+        quantityDelta: body.quantityDelta,
+        sourceDomainCode: body.sourceDomainCode,
+        sourceObjectType: body.sourceObjectType,
+        sourceObjectId: body.sourceObjectId,
+        sourceReference: body.sourceReference ?? null,
+        idempotencyKey: body.idempotencyKey ?? null,
+        explanation: body.explanation ?? null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const balanceSnapshotMatch = matchPath(path, "/v1/balances/accounts/:balanceAccountId/snapshot");
+  if (req.method === "GET" && balanceSnapshotMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "balance_snapshot",
+      objectId: balanceSnapshotMatch.balanceAccountId,
+      scopeCode: "balances"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getBalanceSnapshot({
+        companyId,
+        balanceAccountId: balanceSnapshotMatch.balanceAccountId,
+        cutoffDate: optionalText(url.searchParams.get("cutoffDate"))
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/balances/carry-forwards") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "balance_carry_forward_run",
+      objectId: companyId,
+      scopeCode: "balances"
+    });
+    writeJson(res, 200, { items: platform.listBalanceCarryForwardRuns({ companyId }) });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/balances/carry-forwards") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "balance_carry_forward_run",
+      objectId: companyId,
+      scopeCode: "balances"
+    });
+    writeJson(
+      res,
+      201,
+      platform.runBalanceCarryForward({
+        companyId,
+        sourceDate: body.sourceDate,
+        targetDate: body.targetDate,
+        balanceTypeCode: body.balanceTypeCode ?? null,
+        balanceAccountId: body.balanceAccountId ?? null,
+        idempotencyKey: body.idempotencyKey ?? null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/balances/expiry-runs") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "balance_expiry_run",
+      objectId: companyId,
+      scopeCode: "balances"
+    });
+    writeJson(res, 200, { items: platform.listBalanceExpiryRuns({ companyId }) });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/balances/expiry-runs") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "balance_expiry_run",
+      objectId: companyId,
+      scopeCode: "balances"
+    });
+    writeJson(
+      res,
+      201,
+      platform.runBalanceExpiry({
+        companyId,
+        runDate: body.runDate,
+        balanceTypeCode: body.balanceTypeCode ?? null,
+        balanceAccountId: body.balanceAccountId ?? null,
+        idempotencyKey: body.idempotencyKey ?? null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/collective-agreements/families") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "agreement_family",
+      objectId: companyId,
+      scopeCode: "collective_agreements"
+    });
+    writeJson(res, 200, {
+      items: platform.listAgreementFamilies({
+        companyId,
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/collective-agreements/families") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "agreement_family",
+      objectId: companyId,
+      scopeCode: "collective_agreements"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createAgreementFamily({
+        companyId,
+        code: body.code,
+        name: body.name,
+        sectorCode: body.sectorCode ?? null,
+        status: body.status ?? "active",
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/collective-agreements/versions") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "agreement_version",
+      objectId: companyId,
+      scopeCode: "collective_agreements"
+    });
+    writeJson(res, 200, {
+      items: platform.listAgreementVersions({
+        companyId,
+        agreementFamilyId: optionalText(url.searchParams.get("agreementFamilyId")),
+        agreementFamilyCode: optionalText(url.searchParams.get("agreementFamilyCode")),
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/collective-agreements/versions") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "agreement_version",
+      objectId: companyId,
+      scopeCode: "collective_agreements"
+    });
+    writeJson(
+      res,
+      201,
+      platform.publishAgreementVersion({
+        companyId,
+        agreementFamilyId: body.agreementFamilyId ?? null,
+        agreementFamilyCode: body.agreementFamilyCode ?? null,
+        versionCode: body.versionCode ?? null,
+        effectiveFrom: body.effectiveFrom,
+        effectiveTo: body.effectiveTo ?? null,
+        rulepackCode: body.rulepackCode || undefined,
+        rulepackVersion: body.rulepackVersion,
+        ruleSet: body.ruleSet ?? {},
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const agreementVersionMatch = matchPath(path, "/v1/collective-agreements/versions/:agreementVersionId");
+  if (req.method === "GET" && agreementVersionMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "agreement_version",
+      objectId: agreementVersionMatch.agreementVersionId,
+      scopeCode: "collective_agreements"
+    });
+    writeJson(res, 200, platform.getAgreementVersion({
+      companyId,
+      agreementVersionId: agreementVersionMatch.agreementVersionId
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/collective-agreements/assignments") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "agreement_assignment",
+      objectId: companyId,
+      scopeCode: "collective_agreements"
+    });
+    writeJson(res, 200, {
+      items: platform.listAgreementAssignments({
+        companyId,
+        employeeId: optionalText(url.searchParams.get("employeeId")),
+        employmentId: optionalText(url.searchParams.get("employmentId")),
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/collective-agreements/assignments") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "agreement_assignment",
+      objectId: companyId,
+      scopeCode: "collective_agreements"
+    });
+    writeJson(
+      res,
+      201,
+      platform.assignAgreementToEmployment({
+        companyId,
+        employeeId: body.employeeId,
+        employmentId: body.employmentId,
+        agreementVersionId: body.agreementVersionId,
+        effectiveFrom: body.effectiveFrom,
+        effectiveTo: body.effectiveTo ?? null,
+        assignmentReasonCode: body.assignmentReasonCode,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const agreementOverridesMatch = matchPath(path, "/v1/collective-agreements/assignments/:agreementAssignmentId/overrides");
+  if (req.method === "GET" && agreementOverridesMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "agreement_override",
+      objectId: agreementOverridesMatch.agreementAssignmentId,
+      scopeCode: "collective_agreements"
+    });
+    writeJson(res, 200, {
+      items: platform.listAgreementOverrides({
+        companyId,
+        agreementAssignmentId: agreementOverridesMatch.agreementAssignmentId
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && agreementOverridesMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "agreement_override",
+      objectId: agreementOverridesMatch.agreementAssignmentId,
+      scopeCode: "collective_agreements"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createAgreementOverride({
+        companyId,
+        agreementAssignmentId: agreementOverridesMatch.agreementAssignmentId,
+        overrideTypeCode: body.overrideTypeCode,
+        overridePayload: body.overridePayload ?? {},
+        effectiveFrom: body.effectiveFrom ?? null,
+        effectiveTo: body.effectiveTo ?? null,
+        reasonCode: body.reasonCode,
+        approvedByActorId: body.approvedByActorId ?? principal.userId,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/collective-agreements/active") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const employeeId = requireText(url.searchParams.get("employeeId"), "employee_id_required", "employeeId is required.");
+    const employmentId = requireText(url.searchParams.get("employmentId"), "employment_id_required", "employmentId is required.");
+    const eventDate = requireText(url.searchParams.get("eventDate"), "event_date_required", "eventDate is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "agreement_assignment",
+      objectId: employmentId,
+      scopeCode: "collective_agreements"
+    });
+    writeJson(res, 200, platform.getActiveAgreementForEmployment({
+      companyId,
+      employeeId,
+      employmentId,
+      eventDate
+    }));
+    return true;
+  }
+
   const fiscalYearMatch = matchPath(path, "/v1/fiscal-years/:fiscalYearId");
   if (req.method === "GET" && fiscalYearMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
@@ -1709,6 +2270,201 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
         sourceOcrRunId: body.sourceOcrRunId || null,
         reasonCode: body.reasonCode || "correction",
         reasonNote: body.reasonNote || null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/import-cases") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "import_case",
+      objectId: companyId,
+      scopeCode: "import_case"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createImportCase({
+        companyId,
+        caseReference: body.caseReference,
+        goodsOriginCountry: body.goodsOriginCountry || null,
+        customsReference: body.customsReference || null,
+        currencyCode: body.currencyCode || "SEK",
+        requiresCustomsEvidence:
+          body.requiresCustomsEvidence == null ? null : body.requiresCustomsEvidence === true,
+        sourceClassificationCaseId: body.sourceClassificationCaseId || null,
+        initialDocuments: body.initialDocuments || [],
+        initialComponents: body.initialComponents || [],
+        metadataJson: body.metadataJson || {},
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/import-cases") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "import_case",
+      objectId: companyId,
+      scopeCode: "import_case"
+    });
+    writeJson(res, 200, {
+      items: platform.listImportCases({
+        companyId,
+        status: optionalText(url.searchParams.get("status")),
+        completenessStatus: optionalText(url.searchParams.get("completenessStatus"))
+      })
+    });
+    return true;
+  }
+
+  const importCaseMatch = matchPath(path, "/v1/import-cases/:importCaseId");
+  if (req.method === "GET" && importCaseMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "import_case",
+      objectId: importCaseMatch.importCaseId,
+      scopeCode: "import_case"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getImportCase({
+        companyId,
+        importCaseId: importCaseMatch.importCaseId
+      })
+    );
+    return true;
+  }
+
+  const importCaseAttachMatch = matchPath(path, "/v1/import-cases/:importCaseId/attach-document");
+  if (req.method === "POST" && importCaseAttachMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "import_case",
+      objectId: importCaseAttachMatch.importCaseId,
+      scopeCode: "import_case"
+    });
+    writeJson(
+      res,
+      200,
+      platform.attachDocumentToImportCase({
+        companyId,
+        importCaseId: importCaseAttachMatch.importCaseId,
+        documentId: body.documentId,
+        roleCode: body.roleCode,
+        metadataJson: body.metadataJson || {},
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const importCaseComponentMatch = matchPath(path, "/v1/import-cases/:importCaseId/components");
+  if (req.method === "POST" && importCaseComponentMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "import_case",
+      objectId: importCaseComponentMatch.importCaseId,
+      scopeCode: "import_case"
+    });
+    writeJson(
+      res,
+      200,
+      platform.addImportCaseComponent({
+        companyId,
+        importCaseId: importCaseComponentMatch.importCaseId,
+        componentType: body.componentType,
+        amount: body.amount,
+        currencyCode: body.currencyCode || null,
+        vatRelevanceCode: body.vatRelevanceCode || null,
+        sourceDocumentId: body.sourceDocumentId || null,
+        ledgerTreatmentCode: body.ledgerTreatmentCode || null,
+        metadataJson: body.metadataJson || {},
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const importCaseRecalculateMatch = matchPath(path, "/v1/import-cases/:importCaseId/recalculate");
+  if (req.method === "POST" && importCaseRecalculateMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "import_case",
+      objectId: importCaseRecalculateMatch.importCaseId,
+      scopeCode: "import_case"
+    });
+    writeJson(
+      res,
+      200,
+      platform.recalculateImportCase({
+        companyId,
+        importCaseId: importCaseRecalculateMatch.importCaseId,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const importCaseApproveMatch = matchPath(path, "/v1/import-cases/:importCaseId/approve");
+  if (req.method === "POST" && importCaseApproveMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "import_case",
+      objectId: importCaseApproveMatch.importCaseId,
+      scopeCode: "import_case"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveImportCase({
+        companyId,
+        importCaseId: importCaseApproveMatch.importCaseId,
+        approvalNote: body.approvalNote || null,
         actorId: principal.userId
       })
     );

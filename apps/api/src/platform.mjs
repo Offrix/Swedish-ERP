@@ -14,9 +14,12 @@ import { createNotificationsPlatform } from "../../../packages/domain-notificati
 import { createActivityPlatform } from "../../../packages/domain-activity/src/index.mjs";
 import { createHrPlatform } from "../../../packages/domain-hr/src/index.mjs";
 import { createTimePlatform } from "../../../packages/domain-time/src/index.mjs";
+import { createBalancesPlatform } from "../../../packages/domain-balances/src/index.mjs";
+import { createCollectiveAgreementsPlatform } from "../../../packages/domain-collective-agreements/src/index.mjs";
 import { createPayrollPlatform } from "../../../packages/domain-payroll/src/index.mjs";
 import { createBenefitsPlatform } from "../../../packages/domain-benefits/src/index.mjs";
 import { createDocumentClassificationPlatform } from "../../../packages/domain-document-classification/src/index.mjs";
+import { createImportCasesPlatform } from "../../../packages/domain-import-cases/src/index.mjs";
 import { createTravelPlatform } from "../../../packages/domain-travel/src/index.mjs";
 import { createPensionPlatform } from "../../../packages/domain-pension/src/index.mjs";
 import { createProjectsPlatform } from "../../../packages/domain-projects/src/index.mjs";
@@ -62,8 +65,11 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "activity",
   "hr",
   "time",
+  "balances",
+  "collectiveAgreements",
   "benefits",
   "documentClassification",
+  "importCases",
   "travel",
   "pension",
   "payroll",
@@ -97,8 +103,11 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "activity",
   "hr",
   "time",
+  "balances",
+  "collectiveAgreements",
   "benefits",
   "documentClassification",
+  "importCases",
   "travel",
   "pension",
   "projects",
@@ -166,7 +175,18 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "automation",
     label: "Automation",
     packageName: "@swedish-erp/rule-engine",
-    create: ({ options }) => createAutomationAiEngine(options)
+    create: ({ options, getDomain }) =>
+      createAutomationAiEngine({
+        ...options,
+        resolveRuntimeFlags: ({ companyId, companyUserId = null } = {}) => {
+          const corePlatform = getDomain("core");
+          if (!corePlatform || typeof corePlatform.resolveRuntimeFlags !== "function") {
+            return {};
+          }
+          return corePlatform.resolveRuntimeFlags({ companyId, companyUserId });
+        },
+        getReviewCenterPlatform: () => getDomain("reviewCenter")
+      })
   }),
   createDomainDefinition({
     key: "ar",
@@ -259,6 +279,29 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
       })
   }),
   createDomainDefinition({
+    key: "balances",
+    label: "Balances",
+    packageName: "@swedish-erp/domain-balances",
+    dependsOn: ["hr"],
+    create: ({ options, dependencies }) =>
+      createBalancesPlatform({
+        ...options,
+        hrPlatform: dependencies.hr
+      })
+  }),
+  createDomainDefinition({
+    key: "collectiveAgreements",
+    label: "Collective agreements",
+    packageName: "@swedish-erp/domain-collective-agreements",
+    dependsOn: ["hr", "balances"],
+    create: ({ options, dependencies }) =>
+      createCollectiveAgreementsPlatform({
+        ...options,
+        hrPlatform: dependencies.hr,
+        balancesPlatform: dependencies.balances
+      })
+  }),
+  createDomainDefinition({
     key: "benefits",
     label: "Benefits",
     packageName: "@swedish-erp/domain-benefits",
@@ -281,6 +324,19 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         documentPlatform: dependencies.documents,
         reviewCenterPlatform: dependencies.reviewCenter,
         benefitsPlatform: dependencies.benefits
+      })
+  }),
+  createDomainDefinition({
+    key: "importCases",
+    label: "Import cases",
+    packageName: "@swedish-erp/domain-import-cases",
+    dependsOn: ["documents", "reviewCenter", "documentClassification"],
+    create: ({ options, dependencies }) =>
+      createImportCasesPlatform({
+        ...options,
+        documentPlatform: dependencies.documents,
+        reviewCenterPlatform: dependencies.reviewCenter,
+        documentClassificationPlatform: dependencies.documentClassification
       })
   }),
   createDomainDefinition({
@@ -483,7 +539,8 @@ export function createApiPlatform(options = {}) {
     const platform = definition.create({
       options,
       dependencies: Object.freeze(dependencies),
-      domains: Object.freeze({ ...domains })
+      domains: Object.freeze({ ...domains }),
+      getDomain: (domainKey) => domains[domainKey] || null
     });
     domains[definition.key] = platform;
 

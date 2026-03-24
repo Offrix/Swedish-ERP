@@ -18,7 +18,10 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.equal(typeof platform.getDomain("reviewCenter")?.createReviewItem, "function");
   assert.equal(typeof platform.getDomain("notifications")?.createNotification, "function");
   assert.equal(typeof platform.getDomain("activity")?.projectActivityEntry, "function");
+  assert.equal(typeof platform.getDomain("balances")?.createBalanceType, "function");
+  assert.equal(typeof platform.getDomain("collectiveAgreements")?.createAgreementFamily, "function");
   assert.equal(typeof platform.getDomain("documentClassification")?.createClassificationCase, "function");
+  assert.equal(typeof platform.getDomain("importCases")?.createImportCase, "function");
   assert.equal(typeof platform.getDomain("ledger")?.upsertVoucherSeries, "function");
   assert.equal(typeof platform.getDomain("ledger")?.resolveVoucherSeriesForPurpose, "function");
   assert.equal(typeof platform.getDomain("ar")?.upsertInvoiceSeries, "function");
@@ -32,8 +35,14 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.deepEqual(platform.getDomainRegistration("notifications")?.dependsOn, []);
   assert.deepEqual(platform.getDomainRegistration("activity")?.dependsOn, []);
   assert.equal(platform.getDomainRegistration("activity")?.buildOrder > platform.getDomainRegistration("notifications")?.buildOrder, true);
+  assert.deepEqual(platform.getDomainRegistration("balances")?.dependsOn, ["hr"]);
+  assert.equal(platform.getDomainRegistration("balances")?.buildOrder > platform.getDomainRegistration("time")?.buildOrder, true);
+  assert.deepEqual(platform.getDomainRegistration("collectiveAgreements")?.dependsOn, ["hr", "balances"]);
+  assert.equal(platform.getDomainRegistration("collectiveAgreements")?.buildOrder > platform.getDomainRegistration("balances")?.buildOrder, true);
   assert.deepEqual(platform.getDomainRegistration("documentClassification")?.dependsOn, ["documents", "reviewCenter", "benefits"]);
   assert.equal(platform.getDomainRegistration("documentClassification")?.buildOrder > platform.getDomainRegistration("benefits")?.buildOrder, true);
+  assert.deepEqual(platform.getDomainRegistration("importCases")?.dependsOn, ["documents", "reviewCenter", "documentClassification"]);
+  assert.equal(platform.getDomainRegistration("importCases")?.buildOrder > platform.getDomainRegistration("documentClassification")?.buildOrder, true);
   assert.equal(platform.getDomainRegistration("payroll")?.dependsOn.includes("banking"), true);
   assert.equal(platform.platformContractVersions.eventEnvelopeVersion, 1);
   assert.equal(platform.platformContractVersions.auditEnvelopeVersion, 1);

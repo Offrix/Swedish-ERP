@@ -1,0 +1,41 @@
+INSERT INTO balance_types (
+  balance_type_id,
+  company_id,
+  balance_type_code,
+  label,
+  unit_code,
+  negative_allowed,
+  minimum_balance,
+  maximum_balance,
+  carry_forward_mode_code,
+  carry_forward_cap_quantity,
+  expiry_mode_code,
+  expiry_days,
+  expiry_month_day,
+  expiry_year_offset,
+  active,
+  created_by_actor_id,
+  created_at,
+  updated_at
+)
+VALUES (
+  'balancetype-demo-vacation',
+  '00000000-0000-4000-8000-000000000001',
+  'VACATION_DAYS',
+  'Vacation days',
+  'days',
+  FALSE,
+  0,
+  NULL,
+  'cap',
+  5.0000,
+  'fixed_date',
+  NULL,
+  '12-31',
+  5,
+  TRUE,
+  'seed',
+  NOW(),
+  NOW()
+)
+ON CONFLICT (balance_type_id) DO NOTHING;
