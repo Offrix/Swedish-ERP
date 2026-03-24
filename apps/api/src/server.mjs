@@ -374,11 +374,16 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/hus/cases/:husCaseId/recoveries",
               "/v1/hus/audit-events",
               "/v1/personalliggare/sites",
+              "/v1/personalliggare/industry-packs",
               "/v1/personalliggare/sites/:constructionSiteId",
               "/v1/personalliggare/sites/:constructionSiteId/registrations",
               "/v1/personalliggare/sites/:constructionSiteId/attendance-events",
+              "/v1/personalliggare/sites/:constructionSiteId/identity-snapshots",
+              "/v1/personalliggare/sites/:constructionSiteId/contractor-snapshots",
               "/v1/personalliggare/attendance-events/:attendanceEventId/corrections",
               "/v1/personalliggare/sites/:constructionSiteId/kiosk-devices",
+              "/v1/personalliggare/sites/:constructionSiteId/kiosk-devices/:kioskDeviceId/trust",
+              "/v1/personalliggare/sites/:constructionSiteId/kiosk-devices/:kioskDeviceId/revoke",
               "/v1/personalliggare/sites/:constructionSiteId/exports",
               "/v1/personalliggare/audit-events",
               "/v1/field/inventory/locations",
@@ -8480,6 +8485,13 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/personalliggare/industry-packs") {
+    writeJson(res, 200, {
+      items: platform.listIndustryPacks()
+    });
+    return;
+  }
+
   if (req.method === "POST" && path === "/v1/personalliggare/sites") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
@@ -8505,6 +8517,8 @@ async function handleRequest({ req, res, platform, flags }) {
         startDate: body.startDate,
         endDate: body.endDate ?? null,
         projectId: body.projectId ?? null,
+        industryPackCode: body.industryPackCode ?? "bygg",
+        workplaceIdentifier: body.workplaceIdentifier ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
@@ -8576,22 +8590,23 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(
       res,
       201,
-      platform.createConstructionSiteRegistration({
-        companyId,
-        constructionSiteId: personalliggareRegistrationsMatch.constructionSiteId,
-        registrationReference: body.registrationReference,
-        status: body.status ?? "registered",
-        checklistItems: body.checklistItems || [],
-        registeredOn: body.registeredOn ?? null,
-        actorId: principal.userId,
-        correlationId: body.correlationId || createCorrelationId()
-      })
-    );
-    return;
+        platform.createConstructionSiteRegistration({
+          companyId,
+          constructionSiteId: personalliggareRegistrationsMatch.constructionSiteId,
+          registrationReference: body.registrationReference,
+          status: body.status ?? "registered",
+          checklistItems: body.checklistItems || [],
+          registeredOn: body.registeredOn ?? null,
+          equipmentStatus: body.equipmentStatus ?? null,
+          actorId: principal.userId,
+          correlationId: body.correlationId || createCorrelationId()
+        })
+      );
+      return;
   }
 
   const personalliggareAttendanceMatch = matchPath(path, "/v1/personalliggare/sites/:constructionSiteId/attendance-events");
-  if (personalliggareAttendanceMatch && req.method === "GET") {
+    if (personalliggareAttendanceMatch && req.method === "GET") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
       "company_id_required",
@@ -8612,10 +8627,58 @@ async function handleRequest({ req, res, platform, flags }) {
         workerIdentityValue: url.searchParams.get("workerIdentityValue") || null
       })
     });
-    return;
-  }
+      return;
+    }
 
-  if (personalliggareAttendanceMatch && req.method === "POST") {
+    const personalliggareIdentitySnapshotsMatch = matchPath(path, "/v1/personalliggare/sites/:constructionSiteId/identity-snapshots");
+    if (personalliggareIdentitySnapshotsMatch && req.method === "GET") {
+      const companyId = requireText(
+        url.searchParams.get("companyId"),
+        "company_id_required",
+        "companyId query parameter is required."
+      );
+      authorizeCompanyAccess({
+        platform,
+        sessionToken: readSessionToken(req),
+        companyId,
+        permissionCode: "company.read",
+        objectType: "construction_site",
+        scopeCode: "project"
+      });
+      writeJson(res, 200, {
+        items: platform.listAttendanceIdentitySnapshots({
+          companyId,
+          constructionSiteId: personalliggareIdentitySnapshotsMatch.constructionSiteId
+        })
+      });
+      return;
+    }
+
+    const personalliggareContractorSnapshotsMatch = matchPath(path, "/v1/personalliggare/sites/:constructionSiteId/contractor-snapshots");
+    if (personalliggareContractorSnapshotsMatch && req.method === "GET") {
+      const companyId = requireText(
+        url.searchParams.get("companyId"),
+        "company_id_required",
+        "companyId query parameter is required."
+      );
+      authorizeCompanyAccess({
+        platform,
+        sessionToken: readSessionToken(req),
+        companyId,
+        permissionCode: "company.read",
+        objectType: "construction_site",
+        scopeCode: "project"
+      });
+      writeJson(res, 200, {
+        items: platform.listContractorSnapshots({
+          companyId,
+          constructionSiteId: personalliggareContractorSnapshotsMatch.constructionSiteId
+        })
+      });
+      return;
+    }
+
+    if (personalliggareAttendanceMatch && req.method === "POST") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
     const principal = authorizeCompanyAccess({
@@ -8635,11 +8698,13 @@ async function handleRequest({ req, res, platform, flags }) {
         employmentId: body.employmentId ?? null,
         workerIdentityType: body.workerIdentityType ?? "personnummer",
         workerIdentityValue: body.workerIdentityValue,
-        fullNameSnapshot: body.fullNameSnapshot,
-        employerOrgNo: body.employerOrgNo,
-        contractorOrgNo: body.contractorOrgNo,
-        eventType: body.eventType,
-        eventTimestamp: body.eventTimestamp,
+          fullNameSnapshot: body.fullNameSnapshot,
+          employerOrgNo: body.employerOrgNo,
+          contractorOrgNo: body.contractorOrgNo,
+          roleAtWorkplace: body.roleAtWorkplace ?? "worker",
+          clientEventId: body.clientEventId ?? null,
+          eventType: body.eventType,
+          eventTimestamp: body.eventTimestamp,
         sourceChannel: body.sourceChannel,
         deviceId: body.deviceId ?? null,
         offlineFlag: body.offlineFlag ?? false,
@@ -8666,16 +8731,20 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(
       res,
       201,
-      platform.correctAttendanceEvent({
-        companyId,
-        attendanceEventId: personalliggareCorrectionsMatch.attendanceEventId,
-        correctedTimestamp: body.correctedTimestamp ?? null,
-        correctedEventType: body.correctedEventType ?? null,
-        correctionReason: body.correctionReason,
-        actorId: principal.userId,
-        correlationId: body.correlationId || createCorrelationId()
-      })
-    );
+        platform.correctAttendanceEvent({
+          companyId,
+          attendanceEventId: personalliggareCorrectionsMatch.attendanceEventId,
+          correctedTimestamp: body.correctedTimestamp ?? null,
+          correctedEventType: body.correctedEventType ?? null,
+          correctedWorkerIdentityValue: body.correctedWorkerIdentityValue ?? null,
+          correctedEmployerOrgNo: body.correctedEmployerOrgNo ?? null,
+          correctedContractorOrgNo: body.correctedContractorOrgNo ?? null,
+          correctedRoleAtWorkplace: body.correctedRoleAtWorkplace ?? null,
+          correctionReason: body.correctionReason,
+          actorId: principal.userId,
+          correlationId: body.correlationId || createCorrelationId()
+        })
+      );
     return;
   }
 
@@ -8703,7 +8772,7 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
-  if (personalliggareKioskMatch && req.method === "POST") {
+    if (personalliggareKioskMatch && req.method === "POST") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
     const principal = authorizeCompanyAccess({
@@ -8725,11 +8794,63 @@ async function handleRequest({ req, res, platform, flags }) {
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
-    );
-    return;
-  }
+      );
+      return;
+    }
 
-  const personalliggareExportsMatch = matchPath(path, "/v1/personalliggare/sites/:constructionSiteId/exports");
+    const personalliggareKioskTrustMatch = matchPath(path, "/v1/personalliggare/sites/:constructionSiteId/kiosk-devices/:kioskDeviceId/trust");
+    if (personalliggareKioskTrustMatch && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+      const principal = authorizeCompanyAccess({
+        platform,
+        sessionToken: readSessionToken(req, body),
+        companyId,
+        permissionCode: "company.manage",
+        objectType: "construction_site",
+        scopeCode: "project"
+      });
+      writeJson(
+        res,
+        200,
+        platform.trustKioskDevice({
+          companyId,
+          constructionSiteId: personalliggareKioskTrustMatch.constructionSiteId,
+          kioskDeviceId: personalliggareKioskTrustMatch.kioskDeviceId,
+          actorId: principal.userId,
+          correlationId: body.correlationId || createCorrelationId()
+        })
+      );
+      return;
+    }
+
+    const personalliggareKioskRevokeMatch = matchPath(path, "/v1/personalliggare/sites/:constructionSiteId/kiosk-devices/:kioskDeviceId/revoke");
+    if (personalliggareKioskRevokeMatch && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+      const principal = authorizeCompanyAccess({
+        platform,
+        sessionToken: readSessionToken(req, body),
+        companyId,
+        permissionCode: "company.manage",
+        objectType: "construction_site",
+        scopeCode: "project"
+      });
+      writeJson(
+        res,
+        200,
+        platform.revokeKioskDevice({
+          companyId,
+          constructionSiteId: personalliggareKioskRevokeMatch.constructionSiteId,
+          kioskDeviceId: personalliggareKioskRevokeMatch.kioskDeviceId,
+          actorId: principal.userId,
+          correlationId: body.correlationId || createCorrelationId()
+        })
+      );
+      return;
+    }
+
+    const personalliggareExportsMatch = matchPath(path, "/v1/personalliggare/sites/:constructionSiteId/exports");
   if (personalliggareExportsMatch && req.method === "GET") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -10436,7 +10557,7 @@ function writeJson(res, statusCode, payload) {
 
 function writeError(res, error) {
   writeJson(res, error.status || error.statusCode || 500, {
-    error: error.code || "internal_error",
+    error: error.code || error.error || "internal_error",
     message: error.message || "Unexpected error"
   });
 }

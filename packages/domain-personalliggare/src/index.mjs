@@ -10,6 +10,16 @@ export const PERSONALLIGGARE_REGISTRATION_STATUSES = Object.freeze([
 export const PERSONALLIGGARE_ATTENDANCE_EVENT_TYPES = Object.freeze(["check_in", "check_out", "correction"]);
 export const PERSONALLIGGARE_SOURCE_CHANNELS = Object.freeze(["kiosk", "mobile", "admin"]);
 export const PERSONALLIGGARE_EXPORT_TYPES = Object.freeze(["daily", "person", "employer", "audit"]);
+export const PERSONALLIGGARE_INDUSTRY_PACK_CODES = Object.freeze(["bygg"]);
+export const PERSONALLIGGARE_THRESHOLD_STATUSES = Object.freeze([
+  "threshold_pending",
+  "threshold_not_met",
+  "registration_required",
+  "active",
+  "inactive"
+]);
+export const PERSONALLIGGARE_DEVICE_TRUST_STATUSES = Object.freeze(["pending", "trusted", "revoked"]);
+export const PERSONALLIGGARE_ATTENDANCE_EVENT_STATUSES = Object.freeze(["captured", "synced", "corrected", "voided_by_correction"]);
 export const PRICE_BASE_AMOUNT_2026 = 59200;
 export const PERSONALLIGGARE_THRESHOLD_2026_EX_VAT = PRICE_BASE_AMOUNT_2026 * 4;
 
@@ -34,17 +44,27 @@ export function createPersonalliggareEngine({
     attendanceEventTypes: PERSONALLIGGARE_ATTENDANCE_EVENT_TYPES,
     sourceChannels: PERSONALLIGGARE_SOURCE_CHANNELS,
     exportTypes: PERSONALLIGGARE_EXPORT_TYPES,
+    industryPackCodes: PERSONALLIGGARE_INDUSTRY_PACK_CODES,
+    thresholdStatuses: PERSONALLIGGARE_THRESHOLD_STATUSES,
+    deviceTrustStatuses: PERSONALLIGGARE_DEVICE_TRUST_STATUSES,
+    attendanceEventStatuses: PERSONALLIGGARE_ATTENDANCE_EVENT_STATUSES,
     thresholdAmount2026ExVat: PERSONALLIGGARE_THRESHOLD_2026_EX_VAT,
     listConstructionSites,
     getConstructionSite,
     createConstructionSite,
+    listIndustryPacks,
+    evaluateConstructionSiteThreshold,
     listConstructionSiteRegistrations,
     createConstructionSiteRegistration,
     listAttendanceEvents,
+    listAttendanceIdentitySnapshots,
+    listContractorSnapshots,
     recordAttendanceEvent,
     correctAttendanceEvent,
     listKioskDevices,
     createKioskDevice,
+    trustKioskDevice,
+    revokeKioskDevice,
     listAttendanceExports,
     exportAttendanceControlChain,
     listAttendanceAuditEvents
@@ -76,6 +96,8 @@ export function createPersonalliggareEngine({
     startDate,
     endDate = null,
     projectId = null,
+    industryPackCode = "bygg",
+    workplaceIdentifier = null,
     actorId = "system",
     correlationId = crypto.randomUUID()
   } = {}) {
@@ -89,27 +111,38 @@ export function createPersonalliggareEngine({
       projectsPlatform.getProject({ companyId: resolvedCompanyId, projectId });
     }
     const estimatedAmount = normalizeMoney(estimatedTotalCostExVat, "construction_site_estimated_cost_invalid");
+    const thresholdRequiredFlag = estimatedAmount > PERSONALLIGGARE_THRESHOLD_2026_EX_VAT;
     const record = {
       constructionSiteId: normalizeOptionalText(constructionSiteId) || crypto.randomUUID(),
+      workplaceId: null,
       companyId: resolvedCompanyId,
       siteCode: resolvedSiteCode,
       siteName: requireText(siteName, "construction_site_name_required"),
       siteAddress: requireText(siteAddress, "construction_site_address_required"),
       builderOrgNo: requireText(builderOrgNo, "construction_site_builder_org_required"),
       projectId: normalizeOptionalText(projectId),
+      industryPackCode: requireEnum(PERSONALLIGGARE_INDUSTRY_PACK_CODES, industryPackCode, "personalliggare_industry_pack_invalid"),
+      siteTypeCode: "construction_site",
+      workplaceIdentifier: normalizeOptionalText(workplaceIdentifier) || resolvedSiteCode,
       estimatedTotalCostExVat: estimatedAmount,
-      thresholdRequiredFlag: estimatedAmount > PERSONALLIGGARE_THRESHOLD_2026_EX_VAT,
+      thresholdRequiredFlag,
+      thresholdEvaluationStatus: thresholdRequiredFlag ? "registration_required" : "threshold_not_met",
       registrationStatus: "draft",
+      equipmentStatus: "pending",
       startDate: normalizeRequiredDate(startDate, "construction_site_start_date_required"),
       endDate: normalizeOptionalDate(endDate, "construction_site_end_date_invalid"),
       registrations: [],
       attendanceEvents: [],
+      attendanceIdentitySnapshots: [],
+      contractorSnapshots: [],
       kioskDevices: [],
+      deviceTrustEvents: [],
       exports: [],
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
     };
+    record.workplaceId = record.constructionSiteId;
     state.constructionSites.set(record.constructionSiteId, record);
     appendToIndex(state.siteIdsByCompany, record.companyId, record.constructionSiteId);
     state.siteIdByCode.set(scopedKey, record.constructionSiteId);
@@ -127,11 +160,54 @@ export function createPersonalliggareEngine({
     return copy(record);
   }
 
+  function listIndustryPacks() {
+    return [
+      {
+        industryPackCode: "bygg",
+        description: "Byggarbetsplats med threshold-regel, identifikationsnummer och elektronisk liggare.",
+        thresholdRuleCode: "gt_4_price_base_amounts_ex_vat",
+        deviceTrustRequired: true
+      }
+    ];
+  }
+
+  function evaluateConstructionSiteThreshold({ companyId, constructionSiteId, estimatedTotalCostExVat = null, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+    const record = requireConstructionSite(companyId, constructionSiteId);
+    if (estimatedTotalCostExVat != null) {
+      record.estimatedTotalCostExVat = normalizeMoney(estimatedTotalCostExVat, "construction_site_estimated_cost_invalid");
+    }
+    record.thresholdRequiredFlag = record.estimatedTotalCostExVat > PERSONALLIGGARE_THRESHOLD_2026_EX_VAT;
+    record.thresholdEvaluationStatus = record.thresholdRequiredFlag ? "registration_required" : "threshold_not_met";
+    record.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      constructionSiteId: record.constructionSiteId,
+      actorId,
+      correlationId,
+      action: "personalliggare.threshold_evaluated",
+      entityType: "construction_site",
+      entityId: record.constructionSiteId,
+      projectId: record.projectId,
+      explanation: `Evaluated threshold for site ${record.siteCode}.`
+    });
+    return copy(record);
+  }
+
   function listConstructionSiteRegistrations({ companyId, constructionSiteId } = {}) {
     return copy(requireConstructionSite(companyId, constructionSiteId).registrations);
   }
 
-  function createConstructionSiteRegistration({ companyId, constructionSiteId, registrationReference, status = "registered", checklistItems = [], registeredOn = null, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+  function createConstructionSiteRegistration({
+    companyId,
+    constructionSiteId,
+    registrationReference,
+    status = "registered",
+    checklistItems = [],
+    registeredOn = null,
+    equipmentStatus = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
     const record = requireConstructionSite(companyId, constructionSiteId);
     const registration = {
       constructionSiteRegistrationId: crypto.randomUUID(),
@@ -145,6 +221,14 @@ export function createPersonalliggareEngine({
     };
     record.registrations.push(registration);
     record.registrationStatus = registration.status;
+    if (normalizeOptionalText(equipmentStatus)) {
+      record.equipmentStatus = requireEnum(["pending", "available", "trusted"], equipmentStatus, "personalliggare_equipment_status_invalid");
+    } else if (registration.status === "active") {
+      record.equipmentStatus = "available";
+    }
+    record.thresholdEvaluationStatus = record.thresholdRequiredFlag
+      ? (record.registrationStatus === "active" ? "active" : "registration_required")
+      : "threshold_not_met";
     record.updatedAt = nowIso(clock);
     pushAudit(state, clock, {
       companyId: record.companyId,
@@ -166,26 +250,101 @@ export function createPersonalliggareEngine({
     return record.attendanceEvents.filter((event) => (identityFilter ? event.workerIdentityValue === identityFilter : true)).map(copy);
   }
 
-  function recordAttendanceEvent({ companyId, constructionSiteId, employmentId = null, workerIdentityType = "personnummer", workerIdentityValue, fullNameSnapshot, employerOrgNo, contractorOrgNo, eventType, eventTimestamp, sourceChannel, deviceId = null, offlineFlag = false, geoContext = null, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+  function listAttendanceIdentitySnapshots({ companyId, constructionSiteId } = {}) {
+    return copy(requireConstructionSite(companyId, constructionSiteId).attendanceIdentitySnapshots);
+  }
+
+  function listContractorSnapshots({ companyId, constructionSiteId } = {}) {
+    return copy(requireConstructionSite(companyId, constructionSiteId).contractorSnapshots);
+  }
+
+  function recordAttendanceEvent({
+    companyId,
+    constructionSiteId,
+    employmentId = null,
+    workerIdentityType = "personnummer",
+    workerIdentityValue,
+    fullNameSnapshot,
+    employerOrgNo,
+    contractorOrgNo,
+    roleAtWorkplace = "worker",
+    clientEventId = null,
+    eventType,
+    eventTimestamp,
+    sourceChannel,
+    deviceId = null,
+    offlineFlag = false,
+    geoContext = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
     const record = requireConstructionSite(companyId, constructionSiteId);
+    if (record.thresholdRequiredFlag && !["registered", "active"].includes(record.registrationStatus)) {
+      throw createError(409, "personalliggare_registration_required", "Construction site registration must be completed before attendance can be captured.");
+    }
+    if (record.thresholdRequiredFlag && sourceChannel === "kiosk") {
+      const kioskDevice = requireKioskDevice(record, deviceId);
+      if (kioskDevice.trustStatus !== "trusted") {
+        throw createError(409, "personalliggare_kiosk_not_trusted", "Trusted kiosk device is required for kiosk attendance capture.");
+      }
+    }
     if (employmentId && hrPlatform?.getEmployeeForEmployment) {
       hrPlatform.getEmployeeForEmployment({ companyId: record.companyId, employmentId });
     }
+    const resolvedIdentityType = requireText(workerIdentityType, "attendance_identity_type_required");
+    const resolvedIdentityValue = requireText(workerIdentityValue, "attendance_identity_value_required");
+    const resolvedTimestamp = normalizeRequiredTimestamp(eventTimestamp, "attendance_event_timestamp_required");
+    const resolvedSourceChannel = requireEnum(PERSONALLIGGARE_SOURCE_CHANNELS, sourceChannel, "attendance_source_channel_invalid");
+    const idempotencyKey = buildAttendanceIdempotencyKey({
+      companyId: record.companyId,
+      constructionSiteId: record.constructionSiteId,
+      clientEventId,
+      workerIdentityValue: resolvedIdentityValue,
+      eventType,
+      eventTimestamp: resolvedTimestamp,
+      deviceId,
+      sourceChannel: resolvedSourceChannel
+    });
+    const existing = record.attendanceEvents.find((candidate) => candidate.idempotencyKey === idempotencyKey);
+    if (existing) {
+      return copy(existing);
+    }
+    const contractorSnapshot = getOrCreateContractorSnapshot(record, {
+      employerOrgNo,
+      contractorOrgNo,
+      roleAtWorkplace
+    });
+    const attendanceIdentitySnapshot = getOrCreateAttendanceIdentitySnapshot(record, {
+      employmentId,
+      workerIdentityType: resolvedIdentityType,
+      workerIdentityValue: resolvedIdentityValue,
+      fullNameSnapshot,
+      employerOrgNo,
+      contractorOrgNo,
+      roleAtWorkplace
+    });
     const attendanceEvent = {
       attendanceEventId: crypto.randomUUID(),
       employmentId: normalizeOptionalText(employmentId),
-      workerIdentityType: requireText(workerIdentityType, "attendance_identity_type_required"),
-      workerIdentityValue: requireText(workerIdentityValue, "attendance_identity_value_required"),
+      attendanceIdentitySnapshotId: attendanceIdentitySnapshot.attendanceIdentitySnapshotId,
+      contractorSnapshotId: contractorSnapshot.contractorSnapshotId,
+      workerIdentityType: resolvedIdentityType,
+      workerIdentityValue: resolvedIdentityValue,
       fullNameSnapshot: requireText(fullNameSnapshot, "attendance_full_name_required"),
       employerOrgNo: requireText(employerOrgNo, "attendance_employer_org_required"),
       contractorOrgNo: requireText(contractorOrgNo, "attendance_contractor_org_required"),
+      roleAtWorkplace: normalizeOptionalText(roleAtWorkplace) || "worker",
       eventType: requireEnum(PERSONALLIGGARE_ATTENDANCE_EVENT_TYPES, eventType, "attendance_event_type_invalid"),
-      eventTimestamp: normalizeRequiredTimestamp(eventTimestamp, "attendance_event_timestamp_required"),
-      sourceChannel: requireEnum(PERSONALLIGGARE_SOURCE_CHANNELS, sourceChannel, "attendance_source_channel_invalid"),
+      eventTimestamp: resolvedTimestamp,
+      sourceChannel: resolvedSourceChannel,
       deviceId: normalizeOptionalText(deviceId),
+      clientEventId: normalizeOptionalText(clientEventId),
+      workplaceIdentifier: record.workplaceIdentifier,
       offlineFlag: offlineFlag === true,
+      status: offlineFlag === true ? "captured" : "synced",
       geoContext: normalizeObject(geoContext),
       corrections: [],
+      idempotencyKey,
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock)
     };
@@ -205,35 +364,87 @@ export function createPersonalliggareEngine({
     return copy(attendanceEvent);
   }
 
-  function correctAttendanceEvent({ companyId, attendanceEventId, correctedTimestamp = null, correctedEventType = null, correctionReason, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+  function correctAttendanceEvent({
+    companyId,
+    attendanceEventId,
+    correctedTimestamp = null,
+    correctedEventType = null,
+    correctedWorkerIdentityValue = null,
+    correctedEmployerOrgNo = null,
+    correctedContractorOrgNo = null,
+    correctedRoleAtWorkplace = null,
+    correctionReason,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
     const { constructionSite, attendanceEvent } = requireAttendanceEvent(companyId, attendanceEventId);
+    const effectiveRoleAtWorkplace = normalizeOptionalText(correctedRoleAtWorkplace) || attendanceEvent.roleAtWorkplace || "worker";
+    const contractorSnapshot = getOrCreateContractorSnapshot(constructionSite, {
+      employerOrgNo: correctedEmployerOrgNo ?? attendanceEvent.employerOrgNo,
+      contractorOrgNo: correctedContractorOrgNo ?? attendanceEvent.contractorOrgNo,
+      roleAtWorkplace: effectiveRoleAtWorkplace
+    });
+    const attendanceIdentitySnapshot = getOrCreateAttendanceIdentitySnapshot(constructionSite, {
+      employmentId: attendanceEvent.employmentId,
+      workerIdentityType: attendanceEvent.workerIdentityType,
+      workerIdentityValue: correctedWorkerIdentityValue ?? attendanceEvent.workerIdentityValue,
+      fullNameSnapshot: attendanceEvent.fullNameSnapshot,
+      employerOrgNo: correctedEmployerOrgNo ?? attendanceEvent.employerOrgNo,
+      contractorOrgNo: correctedContractorOrgNo ?? attendanceEvent.contractorOrgNo,
+      roleAtWorkplace: effectiveRoleAtWorkplace
+    });
     const correction = {
       attendanceCorrectionId: crypto.randomUUID(),
       correctionReason: requireText(correctionReason, "attendance_correction_reason_required"),
       correctedTimestamp: normalizeOptionalTimestamp(correctedTimestamp, "attendance_correction_timestamp_invalid"),
       correctedEventType: correctedEventType ? requireEnum(PERSONALLIGGARE_ATTENDANCE_EVENT_TYPES, correctedEventType, "attendance_correction_type_invalid") : null,
+      correctedWorkerIdentityValue: normalizeOptionalText(correctedWorkerIdentityValue),
+      correctedEmployerOrgNo: normalizeOptionalText(correctedEmployerOrgNo),
+      correctedContractorOrgNo: normalizeOptionalText(correctedContractorOrgNo),
+      correctedRoleAtWorkplace: normalizeOptionalText(correctedRoleAtWorkplace),
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock)
     };
     attendanceEvent.corrections.push(correction);
+    attendanceEvent.status = "corrected";
     constructionSite.attendanceEvents.push({
       attendanceEventId: crypto.randomUUID(),
       employmentId: attendanceEvent.employmentId,
+      attendanceIdentitySnapshotId: attendanceIdentitySnapshot.attendanceIdentitySnapshotId,
+      contractorSnapshotId: contractorSnapshot.contractorSnapshotId,
       workerIdentityType: attendanceEvent.workerIdentityType,
-      workerIdentityValue: attendanceEvent.workerIdentityValue,
+      workerIdentityValue: correctedWorkerIdentityValue ?? attendanceEvent.workerIdentityValue,
       fullNameSnapshot: attendanceEvent.fullNameSnapshot,
-      employerOrgNo: attendanceEvent.employerOrgNo,
-      contractorOrgNo: attendanceEvent.contractorOrgNo,
+      employerOrgNo: correctedEmployerOrgNo ?? attendanceEvent.employerOrgNo,
+      contractorOrgNo: correctedContractorOrgNo ?? attendanceEvent.contractorOrgNo,
+      roleAtWorkplace: effectiveRoleAtWorkplace,
       eventType: "correction",
       eventTimestamp: correction.correctedTimestamp || attendanceEvent.eventTimestamp,
       sourceChannel: "admin",
       deviceId: null,
+      clientEventId: null,
+      workplaceIdentifier: constructionSite.workplaceIdentifier,
       offlineFlag: false,
+      status: "synced",
       geoContext: {},
       originalAttendanceEventId: attendanceEvent.attendanceEventId,
       correctionReason: correction.correctionReason,
       correctedEventType: correction.correctedEventType,
+      correctedWorkerIdentityValue: correction.correctedWorkerIdentityValue,
+      correctedEmployerOrgNo: correction.correctedEmployerOrgNo,
+      correctedContractorOrgNo: correction.correctedContractorOrgNo,
+      correctedRoleAtWorkplace: correction.correctedRoleAtWorkplace,
       corrections: [],
+      idempotencyKey: buildAttendanceIdempotencyKey({
+        companyId: constructionSite.companyId,
+        constructionSiteId: constructionSite.constructionSiteId,
+        clientEventId: null,
+        workerIdentityValue: correctedWorkerIdentityValue ?? attendanceEvent.workerIdentityValue,
+        eventType: "correction",
+        eventTimestamp: correction.correctedTimestamp || attendanceEvent.eventTimestamp,
+        deviceId: null,
+        sourceChannel: "admin"
+      }),
       createdByActorId: correction.createdByActorId,
       createdAt: nowIso(clock)
     });
@@ -258,10 +469,18 @@ export function createPersonalliggareEngine({
 
   function createKioskDevice({ companyId, constructionSiteId, deviceCode, displayName, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
     const record = requireConstructionSite(companyId, constructionSiteId);
+    const resolvedDeviceCode = requireText(deviceCode, "kiosk_device_code_required");
+    if (record.kioskDevices.some((candidate) => candidate.deviceCode === resolvedDeviceCode)) {
+      throw createError(409, "kiosk_device_code_not_unique", "Kiosk device code must be unique per workplace.");
+    }
     const kioskDevice = {
       kioskDeviceId: crypto.randomUUID(),
-      deviceCode: requireText(deviceCode, "kiosk_device_code_required"),
+      deviceCode: resolvedDeviceCode,
       displayName: requireText(displayName, "kiosk_device_name_required"),
+      trustStatus: "pending",
+      enrollmentTokenHash: hashObject({ companyId: record.companyId, constructionSiteId: record.constructionSiteId, deviceCode }),
+      trustedAt: null,
+      revokedAt: null,
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock)
     };
@@ -277,6 +496,65 @@ export function createPersonalliggareEngine({
       entityId: kioskDevice.kioskDeviceId,
       projectId: record.projectId,
       explanation: `Created kiosk device ${kioskDevice.deviceCode} for site ${record.siteCode}.`
+    });
+    return copy(kioskDevice);
+  }
+
+  function trustKioskDevice({ companyId, constructionSiteId, kioskDeviceId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+    const record = requireConstructionSite(companyId, constructionSiteId);
+    const kioskDevice = requireKioskDeviceById(record, kioskDeviceId);
+    kioskDevice.trustStatus = "trusted";
+    kioskDevice.trustedAt = nowIso(clock);
+    kioskDevice.revokedAt = null;
+    record.deviceTrustEvents.push({
+      kioskDeviceTrustEventId: crypto.randomUUID(),
+      kioskDeviceId: kioskDevice.kioskDeviceId,
+      action: "trusted",
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock)
+    });
+    record.equipmentStatus = "trusted";
+    record.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      constructionSiteId: record.constructionSiteId,
+      actorId,
+      correlationId,
+      action: "personalliggare.kiosk.trusted",
+      entityType: "kiosk_device",
+      entityId: kioskDevice.kioskDeviceId,
+      projectId: record.projectId,
+      explanation: `Trusted kiosk device ${kioskDevice.deviceCode} for site ${record.siteCode}.`
+    });
+    return copy(kioskDevice);
+  }
+
+  function revokeKioskDevice({ companyId, constructionSiteId, kioskDeviceId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+    const record = requireConstructionSite(companyId, constructionSiteId);
+    const kioskDevice = requireKioskDeviceById(record, kioskDeviceId);
+    kioskDevice.trustStatus = "revoked";
+    kioskDevice.revokedAt = nowIso(clock);
+    record.deviceTrustEvents.push({
+      kioskDeviceTrustEventId: crypto.randomUUID(),
+      kioskDeviceId: kioskDevice.kioskDeviceId,
+      action: "revoked",
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock)
+    });
+    record.equipmentStatus = record.kioskDevices.some((candidate) => candidate.kioskDeviceId !== kioskDevice.kioskDeviceId && candidate.trustStatus === "trusted")
+      ? "trusted"
+      : "available";
+    record.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      constructionSiteId: record.constructionSiteId,
+      actorId,
+      correlationId,
+      action: "personalliggare.kiosk.revoked",
+      entityType: "kiosk_device",
+      entityId: kioskDevice.kioskDeviceId,
+      projectId: record.projectId,
+      explanation: `Revoked kiosk device ${kioskDevice.deviceCode} for site ${record.siteCode}.`
     });
     return copy(kioskDevice);
   }
@@ -308,10 +586,17 @@ export function createPersonalliggareEngine({
       }),
       payloadJson: {
         constructionSiteId: record.constructionSiteId,
+        workplaceId: record.workplaceId,
         siteCode: record.siteCode,
+        workplaceIdentifier: record.workplaceIdentifier,
+        industryPackCode: record.industryPackCode,
+        thresholdEvaluationStatus: record.thresholdEvaluationStatus,
         thresholdRequiredFlag: record.thresholdRequiredFlag,
         exportType: resolvedExportType,
         exportDate: resolvedExportDate,
+        attendanceIdentitySnapshots: record.attendanceIdentitySnapshots,
+        contractorSnapshots: record.contractorSnapshots,
+        kioskDevices: record.kioskDevices,
         events,
         corrections
       },
@@ -362,6 +647,87 @@ export function createPersonalliggareEngine({
       }
     }
     throw createError(404, "attendance_event_not_found", "Attendance event was not found.");
+  }
+
+  function getOrCreateAttendanceIdentitySnapshot(record, { employmentId, workerIdentityType, workerIdentityValue, fullNameSnapshot, employerOrgNo, contractorOrgNo, roleAtWorkplace }) {
+    const key = [
+      normalizeOptionalText(employmentId) || "-",
+      requireText(workerIdentityType, "attendance_identity_type_required"),
+      requireText(workerIdentityValue, "attendance_identity_value_required"),
+      requireText(employerOrgNo, "attendance_employer_org_required"),
+      requireText(contractorOrgNo, "attendance_contractor_org_required"),
+      normalizeOptionalText(roleAtWorkplace) || "worker"
+    ].join("|");
+    const existing = record.attendanceIdentitySnapshots.find((candidate) => candidate.identitySnapshotKey === key);
+    if (existing) {
+      return existing;
+    }
+    const snapshot = {
+      attendanceIdentitySnapshotId: crypto.randomUUID(),
+      identitySnapshotKey: key,
+      employmentId: normalizeOptionalText(employmentId),
+      workerIdentityType: requireText(workerIdentityType, "attendance_identity_type_required"),
+      workerIdentityValue: requireText(workerIdentityValue, "attendance_identity_value_required"),
+      fullNameSnapshot: requireText(fullNameSnapshot, "attendance_full_name_required"),
+      employerOrgNo: requireText(employerOrgNo, "attendance_employer_org_required"),
+      contractorOrgNo: requireText(contractorOrgNo, "attendance_contractor_org_required"),
+      roleAtWorkplace: normalizeOptionalText(roleAtWorkplace) || "worker",
+      createdAt: nowIso(clock)
+    };
+    record.attendanceIdentitySnapshots.push(snapshot);
+    return snapshot;
+  }
+
+  function getOrCreateContractorSnapshot(record, { employerOrgNo, contractorOrgNo, roleAtWorkplace }) {
+    const key = [
+      requireText(employerOrgNo, "attendance_employer_org_required"),
+      requireText(contractorOrgNo, "attendance_contractor_org_required"),
+      normalizeOptionalText(roleAtWorkplace) || "worker"
+    ].join("|");
+    const existing = record.contractorSnapshots.find((candidate) => candidate.contractorSnapshotKey === key);
+    if (existing) {
+      return existing;
+    }
+    const snapshot = {
+      contractorSnapshotId: crypto.randomUUID(),
+      contractorSnapshotKey: key,
+      employerOrgNo: requireText(employerOrgNo, "attendance_employer_org_required"),
+      contractorOrgNo: requireText(contractorOrgNo, "attendance_contractor_org_required"),
+      roleAtWorkplace: normalizeOptionalText(roleAtWorkplace) || "worker",
+      createdAt: nowIso(clock)
+    };
+    record.contractorSnapshots.push(snapshot);
+    return snapshot;
+  }
+
+  function buildAttendanceIdempotencyKey({ companyId, constructionSiteId, clientEventId, workerIdentityValue, eventType, eventTimestamp, deviceId, sourceChannel }) {
+    return [
+      requireText(companyId, "company_id_required"),
+      requireText(constructionSiteId, "construction_site_id_required"),
+      normalizeOptionalText(clientEventId) || "-",
+      requireText(workerIdentityValue, "attendance_identity_value_required"),
+      requireText(eventType, "attendance_event_type_invalid"),
+      normalizeRequiredTimestamp(eventTimestamp, "attendance_event_timestamp_required"),
+      normalizeOptionalText(deviceId) || "-",
+      requireText(sourceChannel, "attendance_source_channel_invalid")
+    ].join("|");
+  }
+
+  function requireKioskDevice(record, deviceId) {
+    const resolvedDeviceId = requireText(deviceId, "kiosk_device_id_required");
+    const kioskDevice = record.kioskDevices.find((candidate) => candidate.kioskDeviceId === resolvedDeviceId || candidate.deviceCode === resolvedDeviceId);
+    if (!kioskDevice) {
+      throw createError(404, "kiosk_device_not_found", "Kiosk device was not found.");
+    }
+    return kioskDevice;
+  }
+
+  function requireKioskDeviceById(record, kioskDeviceId) {
+    const kioskDevice = record.kioskDevices.find((candidate) => candidate.kioskDeviceId === requireText(kioskDeviceId, "kiosk_device_id_required"));
+    if (!kioskDevice) {
+      throw createError(404, "kiosk_device_not_found", "Kiosk device was not found.");
+    }
+    return kioskDevice;
   }
 }
 
