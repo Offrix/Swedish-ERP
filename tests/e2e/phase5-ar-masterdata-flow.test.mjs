@@ -81,7 +81,8 @@ test("Phase 5.1 exposes AR routes and supports quote revision plus active contra
         standardPrice: 4200,
         revenueAccountNumber: "3010",
         vatCode: "VAT_SE_DOMESTIC_25",
-        recurringFlag: true
+        recurringFlag: true,
+        projectBoundFlag: true
       }
     });
 
@@ -95,7 +96,7 @@ test("Phase 5.1 exposes AR routes and supports quote revision plus active contra
         title: "E2E offer",
         validUntil: "2026-06-30",
         currencyCode: "SEK",
-        lines: [{ itemId: item.arItemId, quantity: 1 }]
+        lines: [{ itemId: item.arItemId, quantity: 1, projectId: "project-e2e-alpha" }]
       }
     });
     await requestJson(baseUrl, `/v1/ar/quotes/${quote.quoteId}/status`, {
@@ -111,7 +112,7 @@ test("Phase 5.1 exposes AR routes and supports quote revision plus active contra
       token: sessionToken,
       body: {
         companyId: COMPANY_ID,
-        lines: [{ itemId: item.arItemId, quantity: 2 }]
+        lines: [{ itemId: item.arItemId, quantity: 2, projectId: "project-e2e-alpha" }]
       }
     });
     assert.equal(revised.currentVersionNo, 2);
@@ -134,6 +135,29 @@ test("Phase 5.1 exposes AR routes and supports quote revision plus active contra
         targetStatus: "accepted"
       }
     });
+    const quoteLinkedInvoice = await requestJson(baseUrl, "/v1/ar/invoices", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        customerId: customer.customerId,
+        sourceQuoteId: quote.quoteId,
+        invoiceType: "standard",
+        issueDate: "2026-03-24",
+        dueDate: "2026-04-23"
+      }
+    });
+    assert.equal(quoteLinkedInvoice.primaryProjectId, "project-e2e-alpha");
+    const filteredInvoices = await requestJson(
+      baseUrl,
+      `/v1/ar/invoices?companyId=${COMPANY_ID}&projectId=project-e2e-alpha`,
+      {
+        token: sessionToken
+      }
+    );
+    assert.equal(filteredInvoices.items.some((entry) => entry.customerInvoiceId === quoteLinkedInvoice.customerInvoiceId), true);
+
     const contract = await requestJson(baseUrl, "/v1/ar/contracts", {
       method: "POST",
       token: sessionToken,

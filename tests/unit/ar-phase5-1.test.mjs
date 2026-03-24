@@ -219,6 +219,102 @@ test("Phase 5.1 imports customers idempotently and updates the existing customer
   assert.equal(customer.invoiceDeliveryMethod, "peppol");
 });
 
+test("Step 25 freezes accepted quote versions into invoice drafts and materializes project links", () => {
+  const ar = createArEngine({
+    clock: () => new Date("2026-03-24T12:00:00Z"),
+    seedDemo: false
+  });
+
+  const customer = createCustomer(ar);
+  const item = createItem(ar, {
+    projectBoundFlag: true
+  });
+  const quote = ar.createQuote({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    title: "Project-bound offer",
+    validUntil: "2026-06-30",
+    currencyCode: "SEK",
+    lines: [{ itemId: item.arItemId, quantity: 2, projectId: "project-alpha" }]
+  });
+
+  ar.transitionQuote({ companyId: COMPANY_ID, quoteId: quote.quoteId, targetStatus: "sent" });
+  const accepted = ar.transitionQuote({ companyId: COMPANY_ID, quoteId: quote.quoteId, targetStatus: "accepted" });
+  const acceptedVersion = accepted.versions[accepted.versions.length - 1];
+
+  const invoice = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    sourceQuoteId: quote.quoteId,
+    invoiceType: "standard",
+    issueDate: "2026-03-24",
+    dueDate: "2026-04-23",
+    actorId: "user-1"
+  });
+
+  assert.equal(invoice.sourceQuoteId, quote.quoteId);
+  assert.equal(invoice.sourceQuoteVersionId, acceptedVersion.quoteVersionId);
+  assert.equal(invoice.lines[0].projectId, "project-alpha");
+  assert.deepEqual(invoice.projectIds, ["project-alpha"]);
+  assert.equal(invoice.primaryProjectId, "project-alpha");
+  assert.equal(invoice.projectLinkStatus, "single_project");
+  assert.equal(invoice.sourceVersion, acceptedVersion.quoteVersionId);
+  assert.equal(acceptedVersion.sentAt != null, true);
+  assert.equal(acceptedVersion.acceptedAt != null, true);
+});
+
+test("Step 25 blocks invoice drafts from non-ready quote versions and quote-breaking overrides", () => {
+  const ar = createArEngine({
+    clock: () => new Date("2026-03-24T12:15:00Z"),
+    seedDemo: false
+  });
+
+  const customer = createCustomer(ar);
+  const item = createItem(ar, {
+    projectBoundFlag: true
+  });
+  const quote = ar.createQuote({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    title: "Controlled quote",
+    validUntil: "2026-06-30",
+    currencyCode: "SEK",
+    lines: [{ itemId: item.arItemId, quantity: 1, projectId: "project-beta" }]
+  });
+
+  assert.throws(
+    () =>
+      ar.createInvoice({
+        companyId: COMPANY_ID,
+        customerId: customer.customerId,
+        sourceQuoteId: quote.quoteId,
+        invoiceType: "standard",
+        issueDate: "2026-03-24",
+        dueDate: "2026-04-23",
+        actorId: "user-1"
+      }),
+    (error) => error.code === "quote_not_invoice_ready"
+  );
+
+  ar.transitionQuote({ companyId: COMPANY_ID, quoteId: quote.quoteId, targetStatus: "sent" });
+  ar.transitionQuote({ companyId: COMPANY_ID, quoteId: quote.quoteId, targetStatus: "accepted" });
+
+  assert.throws(
+    () =>
+      ar.createInvoice({
+        companyId: COMPANY_ID,
+        customerId: customer.customerId,
+        sourceQuoteId: quote.quoteId,
+        invoiceType: "standard",
+        issueDate: "2026-03-24",
+        dueDate: "2026-04-23",
+        lines: [{ itemId: item.arItemId, quantity: 2, projectId: "project-beta" }],
+        actorId: "user-1"
+      }),
+    (error) => error.code === "quote_version_mismatch"
+  );
+});
+
 function createCustomer(ar) {
   return ar.createCustomer({
     companyId: COMPANY_ID,
@@ -245,7 +341,7 @@ function createCustomer(ar) {
   });
 }
 
-function createItem(ar) {
+function createItem(ar, overrides = {}) {
   return ar.createItem({
     companyId: COMPANY_ID,
     description: "Managed operations",
@@ -254,6 +350,7 @@ function createItem(ar) {
     standardPrice: 3000,
     revenueAccountNumber: "3010",
     vatCode: "VAT_SE_DOMESTIC_25",
-    recurringFlag: true
+    recurringFlag: true,
+    ...overrides
   });
 }

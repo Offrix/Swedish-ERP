@@ -613,6 +613,7 @@ export function createArEngine({
     const nextStatus = requireText(targetStatus, "quote_target_status_required");
     assertQuoteTransition(version.status, nextStatus);
     version.status = nextStatus;
+    setQuoteLifecycleTimestamp(version, nextStatus, clock);
     version.updatedAt = nowIso(clock);
     quote.status = nextStatus;
     quote.updatedAt = nowIso(clock);
@@ -944,11 +945,17 @@ export function createArEngine({
     };
   }
 
-  function listInvoices({ companyId } = {}) {
+  function listInvoices({ companyId, customerId = null, status = null, projectId = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedCustomerId = normalizeOptionalText(customerId);
+    const resolvedStatus = status ? assertAllowed(status, AR_INVOICE_STATUSES, "customer_invoice_status_invalid") : null;
+    const resolvedProjectId = normalizeOptionalText(projectId);
     return (state.invoiceIdsByCompany.get(resolvedCompanyId) || [])
       .map((invoiceId) => state.invoices.get(invoiceId))
       .filter(Boolean)
+      .filter((invoice) => (resolvedCustomerId ? invoice.customerId === resolvedCustomerId : true))
+      .filter((invoice) => (resolvedStatus ? invoice.status === resolvedStatus : true))
+      .filter((invoice) => (resolvedProjectId ? (invoice.projectIds || []).includes(resolvedProjectId) : true))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       .map(copy);
   }
@@ -996,9 +1003,23 @@ export function createArEngine({
     if (customer.customerStatus === "blocked" || customer.blockedForInvoicing === true) {
       throw createError(409, "invoice_validation_failed", "Blocked customers cannot be invoiced.");
     }
+    const sourceQuote = sourceQuoteId ? requireQuoteRecord(state, resolvedCompanyId, sourceQuoteId) : null;
+    const sourceQuoteVersion = sourceQuote ? requireCurrentQuoteVersion(sourceQuote) : null;
     const contract = sourceContractId ? requireContractRecord(state, resolvedCompanyId, sourceContractId) : null;
     if (contract && contract.status !== "active") {
       throw createError(409, "contract_not_active", "Only active contracts may create invoice proposals in FAS 5.2.");
+    }
+    if (contract && contract.customerId !== customer.customerId) {
+      throw createError(409, "contract_customer_mismatch", "Invoice customer must match the source contract customer.");
+    }
+    if (sourceQuote && sourceQuote.customerId !== customer.customerId) {
+      throw createError(409, "quote_customer_mismatch", "Invoice customer must match the source quote customer.");
+    }
+    if (sourceQuoteVersion && !["accepted", "converted"].includes(sourceQuoteVersion.status)) {
+      throw createError(409, "quote_not_invoice_ready", "Only accepted or converted quote versions may create invoice drafts.");
+    }
+    if (contract && sourceQuote && contract.sourceQuoteId && contract.sourceQuoteId !== sourceQuote.quoteId) {
+      throw createError(409, "contract_quote_mismatch", "Source quote must match the contract source quote when both are provided.");
     }
     const originalInvoice = originalInvoiceId ? requireInvoiceRecord(state, resolvedCompanyId, originalInvoiceId) : null;
     const resolvedInvoiceType = assertAllowed(invoiceType, AR_INVOICE_TYPES, "customer_invoice_type_invalid");
@@ -1014,7 +1035,11 @@ export function createArEngine({
     const resolvedIssueDate = normalizeDate(issueDate, "invoice_issue_date_invalid");
     const resolvedDueDate = normalizeDate(dueDate, "invoice_due_date_invalid");
     assertDateRange(resolvedIssueDate, resolvedDueDate, "invoice_due_date_invalid");
-    const resolvedCurrencyCode = normalizeUpperCode(currencyCode || contract?.currencyCode || customer.currencyCode, "currency_code_required", 3);
+    const resolvedCurrencyCode = normalizeUpperCode(
+      currencyCode || contract?.currencyCode || sourceQuoteVersion?.currencyCode || customer.currencyCode,
+      "currency_code_required",
+      3
+    );
     const resolvedSupplyDate = normalizeDate(supplyDate || resolvedIssueDate, "invoice_supply_date_invalid");
     const resolvedDeliveryDate = deliveryDate ? normalizeDate(deliveryDate, "invoice_delivery_date_invalid") : null;
     const invoiceLines = normalizeCommercialLines({
@@ -1024,11 +1049,20 @@ export function createArEngine({
       currencyCode: resolvedCurrencyCode,
       referenceDate: resolvedIssueDate,
       priceListId: null,
-      lines: lines || contract?.lines
+      lines: lines || contract?.lines || sourceQuoteVersion?.lines
     });
     if (invoiceLines.length === 0) {
       throw createError(400, "invoice_lines_required", "Invoices require at least one line.");
     }
+    assertProjectBoundLinesLinked(invoiceLines);
+    if (sourceQuoteVersion && !contract) {
+      assertQuoteVersionCompatibleWithInvoice({
+        sourceQuoteVersion,
+        invoiceCurrencyCode: resolvedCurrencyCode,
+        invoiceLines
+      });
+    }
+    const projectLinkSummary = summarizeInvoiceProjectLinks(invoiceLines);
     const totals = calculateInvoiceTotals({
       vatPlatform,
       companyId: resolvedCompanyId,
@@ -1040,7 +1074,8 @@ export function createArEngine({
     const sourceDescriptor = resolveInvoiceSourceDescriptor({
       customer,
       contract,
-      sourceQuoteId,
+      sourceQuote,
+      sourceQuoteVersion,
       originalInvoice,
       invoiceType: resolvedInvoiceType,
       issueDate: resolvedIssueDate
@@ -1084,10 +1119,14 @@ export function createArEngine({
       customerId: customer.customerId,
       sourceContractId: contract?.contractId || null,
       sourceQuoteId: normalizeOptionalText(sourceQuoteId),
+      sourceQuoteVersionId: sourceQuoteVersion?.quoteVersionId || contract?.sourceQuoteVersionId || null,
       originalInvoiceId: originalInvoice?.customerInvoiceId || null,
       sourceType: sourceDescriptor.sourceType,
       sourceId: sourceDescriptor.sourceId,
       sourceVersion: sourceDescriptor.sourceVersion,
+      projectIds: projectLinkSummary.projectIds,
+      primaryProjectId: projectLinkSummary.primaryProjectId,
+      projectLinkStatus: projectLinkSummary.projectLinkStatus,
       invoiceType: resolvedInvoiceType,
       status: "draft",
       deliveryChannel: requireText(deliveryChannel, "invoice_delivery_channel_required"),
@@ -3103,6 +3142,10 @@ function buildQuoteVersion({
     priceListId: priceListId ? requirePriceListRecord(state, companyId, priceListId).priceListId : null,
     lines: normalizedLines,
     totalAmount: roundMoney(normalizedLines.reduce((sum, line) => sum + line.lineAmount, 0)),
+    commercialSnapshotHash: buildCommercialSnapshotHash({
+      currencyCode: normalizedCurrencyCode,
+      lines: normalizedLines
+    }),
     sourceSnapshotHash: hashObject({
       title,
       validUntil: normalizedValidUntil,
@@ -3111,6 +3154,11 @@ function buildQuoteVersion({
       priceListId,
       lines: normalizedLines
     }),
+    sentAt: null,
+    acceptedAt: null,
+    rejectedAt: null,
+    expiredAt: null,
+    convertedAt: null,
     createdAt: nowIso(clock),
     updatedAt: nowIso(clock)
   };
@@ -3184,6 +3232,7 @@ function resolveItemPrice(state, companyId, item, priceListId, currencyCode, ref
 function markQuoteConverted(quote, contractId, clock = () => new Date()) {
   const version = requireCurrentQuoteVersion(quote);
   version.status = "converted";
+  version.convertedAt = version.convertedAt || nowIso(clock);
   version.updatedAt = nowIso(clock);
   quote.status = "converted";
   quote.convertedContractId = contractId;
@@ -3748,7 +3797,7 @@ function defaultVoucherPurposeForInvoiceTypes(invoiceTypeCodes) {
   return invoiceTypeCodes.length === 1 && invoiceTypeCodes[0] === "credit_note" ? "AR_CREDIT_NOTE" : "AR_INVOICE";
 }
 
-function resolveInvoiceSourceDescriptor({ customer, contract, sourceQuoteId, originalInvoice, invoiceType, issueDate }) {
+function resolveInvoiceSourceDescriptor({ customer, contract, sourceQuote, sourceQuoteVersion, originalInvoice, invoiceType, issueDate }) {
   if (originalInvoice) {
     return {
       sourceType: "AR_CREDIT_ORIGINAL",
@@ -3763,11 +3812,11 @@ function resolveInvoiceSourceDescriptor({ customer, contract, sourceQuoteId, ori
       sourceVersion: contract.updatedAt
     };
   }
-  if (sourceQuoteId) {
+  if (sourceQuoteVersion) {
     return {
       sourceType: "QUOTE",
-      sourceId: requireText(sourceQuoteId, "source_quote_id_required"),
-      sourceVersion: issueDate
+      sourceId: requireText(sourceQuote?.quoteId, "source_quote_id_required"),
+      sourceVersion: requireText(sourceQuoteVersion.quoteVersionId, "source_quote_version_id_required")
     };
   }
   return {
@@ -4033,6 +4082,90 @@ function assertQuoteTransition(currentStatus, nextStatus) {
   };
   if (!transitions[currentStatus]?.includes(nextStatus)) {
     throw createError(409, "quote_transition_invalid", `Quote cannot move from ${currentStatus} to ${nextStatus}.`);
+  }
+}
+
+function setQuoteLifecycleTimestamp(version, status, clock) {
+  if (status === "sent") {
+    version.sentAt = version.sentAt || nowIso(clock);
+  }
+  if (status === "accepted") {
+    version.acceptedAt = version.acceptedAt || nowIso(clock);
+  }
+  if (status === "rejected") {
+    version.rejectedAt = version.rejectedAt || nowIso(clock);
+  }
+  if (status === "expired") {
+    version.expiredAt = version.expiredAt || nowIso(clock);
+  }
+}
+
+function buildCommercialSnapshotHash({ currencyCode, lines }) {
+  return hashObject({
+    currencyCode: normalizeUpperCode(currencyCode, "currency_code_required", 3),
+    lines: (lines || []).map((line) => ({
+      itemId: line.itemId || null,
+      itemCode: line.itemCode || null,
+      projectId: line.projectId || null,
+      description: line.description,
+      quantity: line.quantity,
+      unitCode: line.unitCode,
+      unitPrice: line.unitPrice,
+      lineAmount: line.lineAmount,
+      revenueAccountNumber: line.revenueAccountNumber,
+      vatCode: line.vatCode,
+      recurringFlag: line.recurringFlag === true,
+      projectBoundFlag: line.projectBoundFlag === true
+    }))
+  });
+}
+
+function assertProjectBoundLinesLinked(invoiceLines) {
+  if (invoiceLines.some((line) => line.projectBoundFlag === true && !line.projectId)) {
+    throw createError(409, "project_link_required", "Project-bound invoice lines require projectId.");
+  }
+}
+
+function summarizeInvoiceProjectLinks(invoiceLines) {
+  const projectIds = [...new Set((invoiceLines || []).map((line) => normalizeOptionalText(line.projectId)).filter(Boolean))].sort();
+  if (projectIds.length === 0) {
+    return {
+      projectIds: [],
+      primaryProjectId: null,
+      projectLinkStatus: "unlinked"
+    };
+  }
+  if (projectIds.length === 1) {
+    return {
+      projectIds,
+      primaryProjectId: projectIds[0],
+      projectLinkStatus: "single_project"
+    };
+  }
+  return {
+    projectIds,
+    primaryProjectId: null,
+    projectLinkStatus: "multi_project"
+  };
+}
+
+function assertQuoteVersionCompatibleWithInvoice({ sourceQuoteVersion, invoiceCurrencyCode, invoiceLines }) {
+  const expectedHash =
+    sourceQuoteVersion.commercialSnapshotHash ||
+    buildCommercialSnapshotHash({
+      currencyCode: sourceQuoteVersion.currencyCode,
+      lines: sourceQuoteVersion.lines
+    });
+  const invoiceHash = buildCommercialSnapshotHash({
+    currencyCode: invoiceCurrencyCode,
+    lines: invoiceLines
+  });
+  if (expectedHash !== invoiceHash) {
+    throw createError(
+      409,
+      "quote_version_mismatch",
+      "Invoice draft does not match the accepted quote version. Create a new quote version or invoice from contract/project source."
+    );
   }
 }
 

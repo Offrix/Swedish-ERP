@@ -3732,7 +3732,12 @@ async function handleRequest({ req, res, platform, flags }) {
       scopeCode: "ar"
     });
     writeJson(res, 200, {
-      items: platform.listInvoices({ companyId })
+      items: platform.listInvoices({
+        companyId,
+        customerId: url.searchParams.get("customerId") || null,
+        status: url.searchParams.get("status") || null,
+        projectId: url.searchParams.get("projectId") || null
+      })
     });
     return;
   }

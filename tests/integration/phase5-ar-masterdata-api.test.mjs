@@ -28,6 +28,20 @@ test("Phase 5.1 migration and seed add AR masterdata artifacts", async () => {
   }
 });
 
+test("Step 25 migration adds quote lifecycle and invoice project link artifacts", async () => {
+  const migration = await readText("packages/db/migrations/20260324220000_phase14_ar_quote_project_links.sql");
+  for (const fragment of [
+    "ALTER TABLE quote_versions",
+    "ADD COLUMN IF NOT EXISTS commercial_snapshot_hash TEXT",
+    "ADD COLUMN IF NOT EXISTS source_quote_version_id UUID",
+    "ADD COLUMN IF NOT EXISTS primary_project_id UUID",
+    "ADD COLUMN IF NOT EXISTS project_link_status TEXT NOT NULL DEFAULT 'unlinked'",
+    "CHECK \\(project_link_status IN \\('unlinked', 'single_project', 'multi_project'\\)\\)"
+  ]) {
+    assert.match(migration, new RegExp(fragment.replaceAll(" ", "\\s+")));
+  }
+});
+
 test("Phase 5.1 API supports customer masterdata, quote revision, contract plan generation and import batches", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-22T10:30:00Z")
@@ -112,7 +126,8 @@ test("Phase 5.1 API supports customer masterdata, quote revision, contract plan 
         standardPrice: 5000,
         revenueAccountNumber: "3010",
         vatCode: "VAT_SE_DOMESTIC_25",
-        recurringFlag: true
+        recurringFlag: true,
+        projectBoundFlag: true
       }
     });
 
@@ -147,7 +162,7 @@ test("Phase 5.1 API supports customer masterdata, quote revision, contract plan 
         validUntil: "2026-06-30",
         currencyCode: "SEK",
         priceListId: priceList.priceListId,
-        lines: [{ itemId: item.arItemId, quantity: 2 }]
+        lines: [{ itemId: item.arItemId, quantity: 2, projectId: "project-api-alpha" }]
       }
     });
 
@@ -165,7 +180,7 @@ test("Phase 5.1 API supports customer masterdata, quote revision, contract plan 
       token: sessionToken,
       body: {
         companyId: COMPANY_ID,
-        lines: [{ itemId: item.arItemId, quantity: 3 }]
+        lines: [{ itemId: item.arItemId, quantity: 3, projectId: "project-api-alpha" }]
       }
     });
     assert.equal(revisedQuote.currentVersionNo, 2);
@@ -187,6 +202,34 @@ test("Phase 5.1 API supports customer masterdata, quote revision, contract plan 
       }
     });
     assert.equal(acceptedQuote.status, "accepted");
+    assert.equal(acceptedQuote.versions[acceptedQuote.versions.length - 1].acceptedAt != null, true);
+
+    const quoteLinkedInvoice = await requestJson(baseUrl, "/v1/ar/invoices", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        customerId: customer.customerId,
+        sourceQuoteId: quote.quoteId,
+        invoiceType: "standard",
+        issueDate: "2026-03-24",
+        dueDate: "2026-04-23"
+      }
+    });
+    assert.equal(quoteLinkedInvoice.sourceQuoteId, quote.quoteId);
+    assert.equal(typeof quoteLinkedInvoice.sourceQuoteVersionId, "string");
+    assert.equal(quoteLinkedInvoice.primaryProjectId, "project-api-alpha");
+    assert.equal(quoteLinkedInvoice.projectLinkStatus, "single_project");
+
+    const projectInvoices = await requestJson(
+      baseUrl,
+      `/v1/ar/invoices?companyId=${COMPANY_ID}&projectId=project-api-alpha`,
+      {
+        token: sessionToken
+      }
+    );
+    assert.equal(projectInvoices.items.some((entry) => entry.customerInvoiceId === quoteLinkedInvoice.customerInvoiceId), true);
 
     const contract = await requestJson(baseUrl, "/v1/ar/contracts", {
       method: "POST",
