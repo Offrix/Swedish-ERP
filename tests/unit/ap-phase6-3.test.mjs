@@ -220,6 +220,134 @@ test("Phase 6.3 direct platform flow supports multi-step approval, payment reser
   assert.equal(reopenedOpenItem.openAmount, 1250);
 });
 
+test("Phase 6.4 direct platform flow blocks person-linked AP documents from posting and payment readiness", () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-09-26T08:00:00Z")
+  });
+  platform.installLedgerCatalog({
+    companyId: COMPANY_ID,
+    actorId: "system"
+  });
+
+  const supplier = platform.createSupplier({
+    companyId: COMPANY_ID,
+    legalName: "Benefit Supplier AB",
+    countryCode: "SE",
+    currencyCode: "SEK",
+    paymentTermsCode: "NET30",
+    paymentRecipient: "Benefit Supplier AB",
+    bankgiro: "5555-1111",
+    defaultExpenseAccountNumber: "7699",
+    defaultVatCode: "VAT_SE_DOMESTIC_25",
+    requiresPo: false,
+    actorId: "admin"
+  });
+  const employee = platform.createEmployee({
+    companyId: COMPANY_ID,
+    givenName: "Ada",
+    familyName: "Lovelace",
+    workEmail: "ada.ap@example.test",
+    actorId: "admin"
+  });
+  const employment = platform.createEmployment({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentTypeCode: "permanent",
+    jobTitle: "Consultant",
+    payModelCode: "monthly",
+    startDate: "2026-01-01",
+    actorId: "admin"
+  });
+  const document = platform.createDocumentRecord({
+    companyId: COMPANY_ID,
+    documentType: "supplier_invoice",
+    sourceReference: "phase6-4-person-linked-ap",
+    actorId: "admin"
+  });
+  const classificationCase = platform.createClassificationCase({
+    companyId: COMPANY_ID,
+    documentId: document.documentId,
+    actorId: "admin",
+    lineInputs: [
+      {
+        lineType: "document_total",
+        description: "Employee wellness package",
+        amount: 2000,
+        treatmentCode: "WELLNESS_ALLOWANCE",
+        person: {
+          employeeId: employee.employeeId,
+          employmentId: employment.employmentId,
+          personRelationCode: "employee"
+        },
+        factsJson: {
+          benefitCode: "WELLNESS_ALLOWANCE",
+          activityType: "gym",
+          vendorName: "Benefit Supplier AB",
+          equalTermsOffered: true,
+          providedAsGiftCard: false,
+          carryOverFromPriorYear: false,
+          reimbursementAmount: 2000,
+          calendarYearGrantedBeforeEvent: 0
+        }
+      }
+    ]
+  });
+
+  const invoice = platform.ingestSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierId: supplier.supplierId,
+    classificationCaseId: classificationCase.classificationCaseId,
+    externalInvoiceRef: "SUP-6401",
+    invoiceDate: "2026-09-26",
+    dueDate: "2026-10-26",
+    sourceChannel: "api",
+    lines: [
+      {
+        description: "Employee wellness package",
+        quantity: 1,
+        unitPrice: 2000,
+        expenseAccountNumber: "7699",
+        vatCode: "VAT_SE_DOMESTIC_25"
+      }
+    ],
+    actorId: "admin"
+  });
+  assert.equal(invoice.classificationCaseId, classificationCase.classificationCaseId);
+
+  const matched = platform.runSupplierInvoiceMatch({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: invoice.supplierInvoiceId,
+    actorId: "admin"
+  });
+  assert.equal(matched.invoice.reviewRequired, true);
+  assert.equal(matched.invoice.reviewQueueCodes.includes("person_linked_document"), true);
+  assert.equal(matched.invoice.paymentHoldReasonCodes.includes("person_linked_classification_pending"), true);
+  assert.equal(matched.invoice.paymentReadinessStatus, "not_ready");
+  assert.throws(
+    () =>
+      platform.postSupplierInvoice({
+        companyId: COMPANY_ID,
+        supplierInvoiceId: invoice.supplierInvoiceId,
+        actorId: "admin"
+      }),
+    /approved without open variances/i
+  );
+
+  platform.approveClassificationCase({
+    companyId: COMPANY_ID,
+    classificationCaseId: classificationCase.classificationCaseId,
+    actorId: "admin"
+  });
+  const rematched = platform.runSupplierInvoiceMatch({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: invoice.supplierInvoiceId,
+    actorId: "admin"
+  });
+  assert.equal(rematched.invoice.paymentHoldReasonCodes.includes("person_linked_classification_pending"), false);
+  assert.equal(rematched.invoice.paymentHoldReasonCodes.includes("person_linked_handoff_required"), true);
+  assert.equal(rematched.invoice.reviewRequired, true);
+});
+
 async function loginWithRequiredFactors({ platform, companyId, email }) {
   const started = platform.startLogin({
     companyId,

@@ -97,7 +97,11 @@ export function createApEngine({
   vatPlatform = null,
   ledgerPlatform = null,
   documentPlatform = null,
-  orgAuthPlatform = null
+  orgAuthPlatform = null,
+  documentClassificationPlatform = null,
+  importCasesPlatform = null,
+  getDocumentClassificationPlatform = null,
+  getImportCasesPlatform = null
 } = {}) {
   const state = {
     suppliers: new Map(),
@@ -833,6 +837,9 @@ export function createApEngine({
     purchaseOrderId = null,
     purchaseOrderNo = null,
     documentId = null,
+    classificationCaseId = null,
+    importCaseId = null,
+    requiresImportCase = null,
     sourceChannel = "manual",
     externalInvoiceRef = null,
     invoiceDate = null,
@@ -945,7 +952,7 @@ export function createApEngine({
       actorId,
       clock
     });
-    const paymentHoldReasonCodes = supplier.paymentBlocked === true ? ["payment_hold"] : [];
+    const staticPaymentHoldReasonCodes = supplier.paymentBlocked === true ? ["payment_hold"] : [];
 
     const invoice = {
       supplierInvoiceId: crypto.randomUUID(),
@@ -969,15 +976,34 @@ export function createApEngine({
       duplicateCheckStatus: nearDuplicate ? "suspect_duplicate" : "cleared",
       duplicateFingerprintHash: fingerprintHash,
       duplicateOfSupplierInvoiceId: nearDuplicate?.supplierInvoiceId || null,
+      classificationCaseId: normalizeOptionalText(classificationCaseId),
+      classificationCaseStatus: null,
+      classificationReviewReasonCodes: [],
+      classificationTreatmentCodes: [],
+      classificationTargetDomainCodes: [],
+      personLinkedDocumentFlag: false,
+      personLinkedDocumentBlocked: false,
+      importCaseId: normalizeOptionalText(importCaseId),
+      importCaseStatus: null,
+      importCaseCompletenessStatus: null,
+      importCaseBlockingReasonCodes: [],
+      requiresImportCase: requiresImportCase === true,
       matchMode: linkedPurchaseOrder ? (supplier.requiresReceipt ? "three_way" : "two_way") : "none",
       status: reviewRequired ? "pending_approval" : "draft",
       reviewRequired,
+      staticReviewQueueCodes: reviewQueueCodes,
+      matchReviewQueueCodes: [],
+      dynamicReviewQueueCodes: [],
       reviewQueueCodes,
       approvalChainId: supplier.attestChainId || null,
       approvalStatus: approvalSteps.length > 0 ? "pending" : "not_required",
       approvalSteps,
-      paymentHold: paymentHoldReasonCodes.length > 0,
-      paymentHoldReasonCodes,
+      staticPaymentHoldReasonCodes,
+      dynamicPaymentHoldReasonCodes: [],
+      paymentHold: staticPaymentHoldReasonCodes.length > 0,
+      paymentHoldReasonCodes: staticPaymentHoldReasonCodes,
+      paymentReadinessStatus: "not_ready",
+      paymentReadinessReasonCodes: ["invoice_not_posted"],
       lines: normalizedLines,
       latestMatchRunId: null,
       journalEntryId: null,
@@ -1016,10 +1042,22 @@ export function createApEngine({
             relationType: "source_document"
           },
           actorId,
-          correlationId
+      correlationId
         });
       }
     }
+
+    refreshSupplierInvoiceControls({
+      state,
+      invoice,
+      supplier,
+      actorId,
+      correlationId,
+      documentClassificationPlatform,
+      importCasesPlatform,
+      getDocumentClassificationPlatform,
+      getImportCasesPlatform
+    });
 
     pushAudit(state, clock, {
       companyId: resolvedCompanyId,
@@ -1041,6 +1079,17 @@ export function createApEngine({
   } = {}) {
     const invoice = requireSupplierInvoiceRecord(state, companyId, supplierInvoiceId);
     const supplier = requireSupplierRecord(state, invoice.companyId, invoice.supplierId);
+    refreshSupplierInvoiceControls({
+      state,
+      invoice,
+      supplier,
+      actorId,
+      correlationId,
+      documentClassificationPlatform,
+      importCasesPlatform,
+      getDocumentClassificationPlatform,
+      getImportCasesPlatform
+    });
     const purchaseOrder = invoice.purchaseOrderId
       ? requirePurchaseOrderRecord(state, invoice.companyId, invoice.purchaseOrderId)
       : null;
@@ -1159,11 +1208,19 @@ export function createApEngine({
       .map((varianceId) => state.supplierInvoiceVariances.get(varianceId))
       .filter(Boolean)
       .filter((variance) => variance.status === "open");
-    const reviewQueueCodes = uniqueStrings([
-      ...invoice.reviewQueueCodes,
-      ...blockingVariances.map((variance) => variance.reviewQueueCode)
-    ]);
-    const reviewRequired = blockingVariances.length > 0 || reviewQueueCodes.length > 0;
+    invoice.matchReviewQueueCodes = uniqueStrings(blockingVariances.map((variance) => variance.reviewQueueCode));
+    refreshSupplierInvoiceControls({
+      state,
+      invoice,
+      supplier,
+      actorId,
+      correlationId,
+      documentClassificationPlatform,
+      importCasesPlatform,
+      getDocumentClassificationPlatform,
+      getImportCasesPlatform
+    });
+    const reviewRequired = invoice.reviewRequired;
 
     const matchRun = {
       supplierInvoiceMatchRunId: crypto.randomUUID(),
@@ -1182,8 +1239,6 @@ export function createApEngine({
 
     invoice.latestMatchRunId = matchRun.supplierInvoiceMatchRunId;
     invoice.matchMode = matchMode;
-    invoice.reviewRequired = reviewRequired;
-    invoice.reviewQueueCodes = reviewQueueCodes;
     invoice.approvalStatus = hasPendingInvoiceApprovalSteps(invoice) ? "pending" : invoice.approvalStatus;
     invoice.status = resolveInvoiceApprovalStatus({
       invoice,
@@ -1219,6 +1274,18 @@ export function createApEngine({
     correlationId = crypto.randomUUID()
   } = {}) {
     const invoice = requireSupplierInvoiceRecord(state, companyId, supplierInvoiceId);
+    const supplier = requireSupplierRecord(state, invoice.companyId, invoice.supplierId);
+    refreshSupplierInvoiceControls({
+      state,
+      invoice,
+      supplier,
+      actorId,
+      correlationId,
+      documentClassificationPlatform,
+      importCasesPlatform,
+      getDocumentClassificationPlatform,
+      getImportCasesPlatform
+    });
     if (invoice.reviewRequired) {
       throw createError(409, "supplier_invoice_review_required", "Supplier invoice still has open review requirements.");
     }
@@ -1275,6 +1342,18 @@ export function createApEngine({
     if (invoice.status === "posted") {
       return presentSupplierInvoice(state, invoice);
     }
+    const supplier = requireSupplierRecord(state, invoice.companyId, invoice.supplierId);
+    refreshSupplierInvoiceControls({
+      state,
+      invoice,
+      supplier,
+      actorId,
+      correlationId,
+      documentClassificationPlatform,
+      importCasesPlatform,
+      getDocumentClassificationPlatform,
+      getImportCasesPlatform
+    });
     if (invoice.reviewRequired || invoice.status !== "approved") {
       throw createError(409, "supplier_invoice_review_required", "Supplier invoice must be approved without open variances before posting.");
     }
@@ -1282,7 +1361,6 @@ export function createApEngine({
       throw createError(500, "ledger_platform_missing", "Ledger platform is required to post AP invoices.");
     }
 
-    const supplier = requireSupplierRecord(state, invoice.companyId, invoice.supplierId);
     const journalLines = buildSupplierInvoiceJournalLines({
       invoice,
       supplier
@@ -1320,6 +1398,22 @@ export function createApEngine({
       actorId
     });
 
+    invoice.status = "posted";
+    invoice.journalEntryId = posted.journalEntry.journalEntryId;
+    invoice.postedAt = nowIso(clock);
+    invoice.updatedAt = nowIso(clock);
+    refreshSupplierInvoiceControls({
+      state,
+      invoice,
+      supplier,
+      actorId,
+      correlationId,
+      documentClassificationPlatform,
+      importCasesPlatform,
+      getDocumentClassificationPlatform,
+      getImportCasesPlatform
+    });
+
     const openItem = {
       apOpenItemId: crypto.randomUUID(),
       companyId: invoice.companyId,
@@ -1330,11 +1424,12 @@ export function createApEngine({
       paidAmount: 0,
       dueOn: invoice.dueDate,
       status: "open",
-      paymentHold: supplier.paymentBlocked === true || invoice.paymentHold === true,
-      paymentHoldReasonCodes: uniqueStrings([
-        ...(invoice.paymentHoldReasonCodes || []),
-        ...(supplier.paymentBlocked === true ? ["payment_hold"] : [])
-      ]),
+      paymentHold: invoice.paymentHold === true,
+      paymentHoldReasonCodes: [...(invoice.paymentHoldReasonCodes || [])],
+      paymentReadinessStatus: invoice.paymentReadinessStatus,
+      paymentReadinessReasonCodes: [...(invoice.paymentReadinessReasonCodes || [])],
+      importCaseId: invoice.importCaseId || null,
+      classificationCaseId: invoice.classificationCaseId || null,
       paymentProposalId: null,
       paymentOrderId: null,
       lastPaymentOrderId: null,
@@ -1366,10 +1461,7 @@ export function createApEngine({
       purchaseOrder.updatedAt = nowIso(clock);
     }
 
-    invoice.status = "posted";
-    invoice.journalEntryId = posted.journalEntry.journalEntryId;
     invoice.apOpenItemId = openItem.apOpenItemId;
-    invoice.postedAt = nowIso(clock);
     invoice.updatedAt = nowIso(clock);
 
     pushAudit(state, clock, {
@@ -1407,6 +1499,22 @@ export function createApEngine({
     }
     const invoice = requireSupplierInvoiceRecord(state, companyId, openItem.supplierInvoiceId);
     const supplier = requireSupplierRecord(state, companyId, invoice.supplierId);
+    refreshSupplierInvoiceControls({
+      state,
+      invoice,
+      supplier,
+      actorId,
+      correlationId,
+      documentClassificationPlatform,
+      importCasesPlatform,
+      getDocumentClassificationPlatform,
+      getImportCasesPlatform
+    });
+    openItem.paymentHold = invoice.paymentHold === true;
+    openItem.paymentHoldReasonCodes = [...(invoice.paymentHoldReasonCodes || [])];
+    openItem.paymentReadinessStatus = invoice.paymentReadinessStatus;
+    openItem.paymentReadinessReasonCodes = [...(invoice.paymentReadinessReasonCodes || [])];
+    openItem.updatedAt = nowIso(clock);
     if (invoice.status !== "posted") {
       throw createError(409, "supplier_invoice_not_posted", "Only posted supplier invoices can enter payment proposals.");
     }
@@ -1805,6 +1913,296 @@ function presentSupplierInvoice(state, invoice) {
   });
 }
 
+function refreshSupplierInvoiceControls({
+  state,
+  invoice,
+  supplier,
+  actorId = "system",
+  correlationId = crypto.randomUUID(),
+  documentClassificationPlatform = null,
+  importCasesPlatform = null,
+  getDocumentClassificationPlatform = null,
+  getImportCasesPlatform = null
+}) {
+  const resolvedClassificationPlatform = resolveDeferredPlatform({
+    platform: documentClassificationPlatform,
+    getter: getDocumentClassificationPlatform
+  });
+  const resolvedImportCasesPlatform = resolveDeferredPlatform({
+    platform: importCasesPlatform,
+    getter: getImportCasesPlatform
+  });
+  const classificationCase = resolveInvoiceClassificationCase({
+    documentClassificationPlatform: resolvedClassificationPlatform,
+    companyId: invoice.companyId,
+    documentId: invoice.documentId,
+    classificationCaseId: invoice.classificationCaseId
+  });
+  const classificationAssessment = assessInvoiceClassificationCase(classificationCase);
+  const importCase = resolveInvoiceImportCase({
+    importCasesPlatform: resolvedImportCasesPlatform,
+    companyId: invoice.companyId,
+    documentId: invoice.documentId,
+    importCaseId: invoice.importCaseId,
+    actorId,
+    correlationId
+  });
+  const importAssessment = assessInvoiceImportCase({
+    invoice,
+    supplier,
+    importCase
+  });
+
+  invoice.classificationCaseId = classificationCase?.classificationCaseId || normalizeOptionalText(invoice.classificationCaseId);
+  invoice.classificationCaseStatus = classificationCase?.status || null;
+  invoice.classificationReviewReasonCodes = [...classificationAssessment.reviewReasonCodes];
+  invoice.classificationTreatmentCodes = [...classificationAssessment.treatmentCodes];
+  invoice.classificationTargetDomainCodes = [...classificationAssessment.targetDomainCodes];
+  invoice.personLinkedDocumentFlag = classificationAssessment.personLinkedDocumentFlag;
+  invoice.personLinkedDocumentBlocked = classificationAssessment.personLinkedDocumentBlocked;
+
+  invoice.importCaseId = importCase?.importCaseId || normalizeOptionalText(invoice.importCaseId);
+  invoice.importCaseStatus = importCase?.status || null;
+  invoice.importCaseCompletenessStatus = importCase?.completeness?.status || null;
+  invoice.importCaseBlockingReasonCodes = [...importAssessment.blockingReasonCodes];
+  invoice.requiresImportCase = importAssessment.requiresImportCase;
+
+  invoice.dynamicReviewQueueCodes = uniqueStrings([
+    ...classificationAssessment.reviewQueueCodes,
+    ...importAssessment.reviewQueueCodes
+  ]);
+  invoice.reviewQueueCodes = uniqueStrings([
+    ...(invoice.staticReviewQueueCodes || []),
+    ...(invoice.matchReviewQueueCodes || []),
+    ...(invoice.dynamicReviewQueueCodes || [])
+  ]);
+  invoice.reviewRequired = invoice.reviewQueueCodes.length > 0;
+
+  invoice.dynamicPaymentHoldReasonCodes = uniqueStrings([
+    ...classificationAssessment.paymentHoldReasonCodes,
+    ...importAssessment.paymentHoldReasonCodes
+  ]);
+  invoice.paymentHoldReasonCodes = uniqueStrings([
+    ...(invoice.staticPaymentHoldReasonCodes || []),
+    ...(invoice.dynamicPaymentHoldReasonCodes || [])
+  ]);
+  invoice.paymentHold = invoice.paymentHoldReasonCodes.length > 0;
+
+  invoice.paymentReadinessReasonCodes = uniqueStrings([
+    ...(invoice.status === "posted" ? [] : ["invoice_not_posted"]),
+    ...(invoice.reviewRequired ? ["review_required"] : []),
+    ...(invoice.paymentHoldReasonCodes || []),
+    ...(hasSupplierPaymentDetails(supplier) ? [] : ["supplier_payment_details_missing"])
+  ]);
+  invoice.paymentReadinessStatus =
+    invoice.paymentReadinessReasonCodes.length === 0
+      ? "ready"
+      : invoice.status === "posted"
+        ? "blocked"
+        : "not_ready";
+}
+
+function resolveDeferredPlatform({ platform = null, getter = null }) {
+  if (platform) {
+    return platform;
+  }
+  if (typeof getter === "function") {
+    return getter() || null;
+  }
+  return null;
+}
+
+function resolveInvoiceClassificationCase({
+  documentClassificationPlatform,
+  companyId,
+  documentId = null,
+  classificationCaseId = null
+}) {
+  const resolvedClassificationCaseId = normalizeOptionalText(classificationCaseId);
+  if (!resolvedClassificationCaseId && !documentId) {
+    return null;
+  }
+  if (
+    !documentClassificationPlatform ||
+    typeof documentClassificationPlatform.getClassificationCase !== "function" ||
+    typeof documentClassificationPlatform.listClassificationCases !== "function"
+  ) {
+    if (resolvedClassificationCaseId) {
+      throw createError(
+        409,
+        "document_classification_platform_missing",
+        "Document classification platform is required when classificationCaseId is supplied."
+      );
+    }
+    return null;
+  }
+
+  const classificationCase = resolvedClassificationCaseId
+    ? documentClassificationPlatform.getClassificationCase({
+        companyId,
+        classificationCaseId: resolvedClassificationCaseId
+      })
+    : documentClassificationPlatform
+        .listClassificationCases({ companyId, documentId: requireText(documentId, "document_id_required") })
+        .filter((candidate) => candidate.correctedToCaseId == null)
+        .at(-1) || null;
+
+  if (classificationCase && documentId && classificationCase.documentId !== documentId) {
+    throw createError(
+      409,
+      "classification_case_document_mismatch",
+      "Classification case does not belong to the supplier invoice document."
+    );
+  }
+  return classificationCase;
+}
+
+function assessInvoiceClassificationCase(classificationCase) {
+  if (!classificationCase) {
+    return {
+      reviewReasonCodes: [],
+      treatmentCodes: [],
+      targetDomainCodes: [],
+      personLinkedDocumentFlag: false,
+      personLinkedDocumentBlocked: false,
+      reviewQueueCodes: [],
+      paymentHoldReasonCodes: []
+    };
+  }
+
+  const treatmentIntents = Array.isArray(classificationCase.treatmentIntents) ? classificationCase.treatmentIntents : [];
+  const treatmentCodes = uniqueStrings(treatmentIntents.map((intent) => intent.treatmentCode));
+  const targetDomainCodes = uniqueStrings(treatmentIntents.map((intent) => intent.targetDomainCode));
+  const personLinkedDocumentFlag =
+    (Array.isArray(classificationCase.personLinks) && classificationCase.personLinks.length > 0) ||
+    targetDomainCodes.some((code) => ["PAYROLL", "BENEFITS"].includes(code)) ||
+    treatmentCodes.some((code) =>
+      ["PRIVATE_RECEIVABLE", "NET_SALARY_DEDUCTION", "TAXABLE_BENEFIT", "WELLNESS_ALLOWANCE"].includes(code)
+    );
+  const classificationPending = !["approved", "dispatched"].includes(classificationCase.status);
+  const personLinkedDocumentBlocked =
+    personLinkedDocumentFlag &&
+    (classificationPending ||
+      targetDomainCodes.some((code) => ["PAYROLL", "BENEFITS"].includes(code)) ||
+      treatmentCodes.some((code) =>
+        ["PRIVATE_RECEIVABLE", "NET_SALARY_DEDUCTION", "TAXABLE_BENEFIT", "WELLNESS_ALLOWANCE"].includes(code)
+      ));
+
+  return {
+    reviewReasonCodes: [...(classificationCase.reviewReasonCodes || [])],
+    treatmentCodes,
+    targetDomainCodes,
+    personLinkedDocumentFlag,
+    personLinkedDocumentBlocked,
+    reviewQueueCodes: personLinkedDocumentFlag ? ["person_linked_document"] : [],
+    paymentHoldReasonCodes: uniqueStrings([
+      ...(classificationPending ? ["person_linked_classification_pending"] : []),
+      ...(personLinkedDocumentBlocked ? ["person_linked_handoff_required"] : [])
+    ])
+  };
+}
+
+function resolveInvoiceImportCase({
+  importCasesPlatform,
+  companyId,
+  documentId = null,
+  importCaseId = null,
+  actorId = "system",
+  correlationId = crypto.randomUUID()
+}) {
+  const resolvedImportCaseId = normalizeOptionalText(importCaseId);
+  if (!resolvedImportCaseId) {
+    return null;
+  }
+  if (
+    !importCasesPlatform ||
+    typeof importCasesPlatform.getImportCase !== "function" ||
+    typeof importCasesPlatform.attachDocumentToImportCase !== "function"
+  ) {
+    throw createError(409, "import_cases_platform_missing", "Import cases platform is required when importCaseId is supplied.");
+  }
+  let importCase = importCasesPlatform.getImportCase({
+    companyId,
+    importCaseId: resolvedImportCaseId
+  });
+  if (
+    documentId &&
+    ["opened", "collecting_documents", "ready_for_review"].includes(importCase.status) &&
+    !importCase.documentLinks.some((link) => link.documentId === documentId)
+  ) {
+    const roleCode = importCase.documentLinks.some((link) => link.roleCode === "PRIMARY_SUPPLIER_DOCUMENT")
+      ? "OTHER_SUPPORTING_DOCUMENT"
+      : "PRIMARY_SUPPLIER_DOCUMENT";
+    importCase = importCasesPlatform.attachDocumentToImportCase({
+      companyId,
+      importCaseId: resolvedImportCaseId,
+      documentId,
+      roleCode,
+      metadataJson: {
+        relationType: "ap_supplier_invoice_source_document",
+        correlationId
+      },
+      actorId
+    });
+  }
+  return importCase;
+}
+
+function assessInvoiceImportCase({ invoice, supplier, importCase }) {
+  const requiresImportCase =
+    invoice.requiresImportCase === true ||
+    (supplier.countryCode !== "SE" &&
+      !EU_COUNTRY_CODES.has(supplier.countryCode) &&
+      invoice.lines.some((line) => line.goodsOrServices === "goods" || line.importCaseRequired === true));
+  if (!requiresImportCase && !importCase) {
+    return {
+      requiresImportCase: false,
+      blockingReasonCodes: [],
+      reviewQueueCodes: [],
+      paymentHoldReasonCodes: []
+    };
+  }
+
+  const blockingReasonCodes = [];
+  if (!importCase) {
+    blockingReasonCodes.push("IMPORT_CASE_REQUIRED");
+  } else {
+    if (importCase.completeness?.status !== "complete") {
+      blockingReasonCodes.push(...(importCase.completeness?.blockingReasonCodes || []));
+      blockingReasonCodes.push("IMPORT_CASE_INCOMPLETE");
+    }
+    if (!["approved", "posted"].includes(importCase.status)) {
+      blockingReasonCodes.push("IMPORT_CASE_NOT_APPROVED");
+    }
+  }
+
+  return {
+    requiresImportCase,
+    blockingReasonCodes: uniqueStrings(blockingReasonCodes),
+    reviewQueueCodes: blockingReasonCodes.length > 0 ? ["import_case_review"] : [],
+    paymentHoldReasonCodes: uniqueStrings(
+      blockingReasonCodes.map((reasonCode) => {
+        switch (reasonCode) {
+          case "IMPORT_CASE_REQUIRED":
+            return "import_case_required";
+          case "IMPORT_CASE_INCOMPLETE":
+          case "PRIMARY_SUPPLIER_DOCUMENT_MISSING":
+          case "CUSTOMS_EVIDENCE_MISSING":
+            return "import_case_incomplete";
+          case "IMPORT_CASE_NOT_APPROVED":
+            return "import_case_not_approved";
+          default:
+            return `import_case_${String(reasonCode).toLowerCase()}`;
+        }
+      })
+    )
+  };
+}
+
+function hasSupplierPaymentDetails(supplier) {
+  return Boolean(supplier?.bankgiro || supplier?.plusgiro || supplier?.iban);
+}
+
 function buildInvoiceApprovalSteps({ orgAuthPlatform, supplier, actorId = "system", clock = () => new Date() }) {
   if (!supplier?.attestChainId || !orgAuthPlatform || typeof orgAuthPlatform.getApprovalChain !== "function") {
     return [];
@@ -2029,6 +2427,7 @@ function normalizeSupplierInvoiceLines({
       expenseAccountNumber,
       dimensionsJson,
       goodsOrServices: normalizeOptionalText(line.goodsOrServices)?.toLowerCase() === "goods" ? "goods" : "services",
+      importCaseRequired: line.importCaseRequired === true,
       reverseChargeFlag: line.reverseChargeFlag === true || supplier.reverseChargeDefault === true,
       constructionServiceFlag: line.constructionServiceFlag === true,
       deductionRatio: line.deductionRatio == null ? 1 : normalizeNonNegativeNumber(line.deductionRatio, "supplier_invoice_line_deduction_ratio_invalid"),

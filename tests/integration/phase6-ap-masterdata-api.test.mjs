@@ -7,6 +7,20 @@ import { readText, stopServer } from "../../scripts/lib/repo.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
+test("Phase 6.4 migration adds AP import, classification and payment-readiness controls", async () => {
+  const migration = await readText("packages/db/migrations/20260324230000_phase14_ap_import_person_payment_readiness.sql");
+  for (const fragment of [
+    "ADD COLUMN IF NOT EXISTS classification_case_id",
+    "ADD COLUMN IF NOT EXISTS import_case_id",
+    "ADD COLUMN IF NOT EXISTS payment_readiness_status",
+    "ADD COLUMN IF NOT EXISTS import_case_required BOOLEAN",
+    "ix_supplier_invoices_phase14_payment_readiness",
+    "ix_ap_open_items_phase14_payment_readiness"
+  ]) {
+    assert.match(migration, new RegExp(fragment.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")));
+  }
+});
+
 test("Phase 6.1 migration and seeds add supplier, purchase-order, receipt and import artifacts", async () => {
   const migration = await readText("packages/db/migrations/20260321140000_phase6_ap_masterdata_po_receipts.sql");
   for (const fragment of [

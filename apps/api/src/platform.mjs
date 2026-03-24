@@ -206,13 +206,15 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     label: "Accounts payable",
     packageName: "@swedish-erp/domain-ap",
     dependsOn: ["vat", "ledger", "documents", "orgAuth"],
-    create: ({ options, dependencies }) =>
+    create: ({ options, dependencies, getDomain }) =>
       createApPlatform({
         ...options,
         vatPlatform: dependencies.vat,
         ledgerPlatform: dependencies.ledger,
         documentPlatform: dependencies.documents,
-        orgAuthPlatform: dependencies.orgAuth
+        orgAuthPlatform: dependencies.orgAuth,
+        getDocumentClassificationPlatform: () => getDomain("documentClassification"),
+        getImportCasesPlatform: () => getDomain("importCases")
       })
   }),
   createDomainDefinition({

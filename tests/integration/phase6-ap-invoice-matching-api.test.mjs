@@ -247,6 +247,169 @@ test("Phase 6.2 API ingests supplier invoices, posts multi-line costs and blocks
   }
 });
 
+test("Phase 6.4 API blocks AP posting until linked import case is complete and approved", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-09-22T08:00:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true,
+      phase5ArEnabled: true,
+      phase6ApEnabled: true
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const sessionToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    await requestJson(baseUrl, "/v1/ledger/chart/install", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+
+    const supplier = await requestJson(baseUrl, "/v1/ap/suppliers", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        legalName: "Import Linked Supplier AB",
+        countryCode: "SE",
+        currencyCode: "SEK",
+        paymentTermsCode: "NET30",
+        paymentRecipient: "Import Linked Supplier AB",
+        bankgiro: "1234-8888",
+        defaultExpenseAccountNumber: "5410",
+        defaultVatCode: "VAT_SE_DOMESTIC_25",
+        requiresPo: false
+      }
+    });
+
+    const supplierDocument = platform.createDocumentRecord({
+      companyId: COMPANY_ID,
+      documentType: "supplier_invoice",
+      sourceReference: "phase6-4-import-supplier",
+      actorId: "user-1"
+    });
+    const customsDocument = platform.createDocumentRecord({
+      companyId: COMPANY_ID,
+      documentType: "supplier_invoice",
+      sourceReference: "phase6-4-import-customs",
+      actorId: "user-1"
+    });
+    const importCase = platform.createImportCase({
+      companyId: COMPANY_ID,
+      caseReference: "IMP-API-6401",
+      goodsOriginCountry: "CN",
+      customsReference: "IMP-CUST-6401",
+      initialDocuments: [
+        {
+          documentId: supplierDocument.documentId,
+          roleCode: "PRIMARY_SUPPLIER_DOCUMENT"
+        }
+      ],
+      actorId: "user-1"
+    });
+
+    const ingested = await requestJson(baseUrl, "/v1/ap/invoices/ingest", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        supplierId: supplier.supplierId,
+        importCaseId: importCase.importCaseId,
+        externalInvoiceRef: "API-INV-6401",
+        invoiceDate: "2026-09-22",
+        dueDate: "2026-10-22",
+        sourceChannel: "api",
+        lines: [
+          {
+            description: "Import-linked service cost",
+            quantity: 1,
+            unitPrice: 1000,
+            expenseAccountNumber: "5410",
+            vatCode: "VAT_SE_DOMESTIC_25",
+            importCaseRequired: true
+          }
+        ]
+      }
+    });
+    assert.equal(ingested.importCaseId, importCase.importCaseId);
+
+    const blockedMatch = await requestJson(baseUrl, `/v1/ap/invoices/${ingested.supplierInvoiceId}/match`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+    assert.equal(blockedMatch.invoice.reviewRequired, true);
+    assert.equal(blockedMatch.invoice.reviewQueueCodes.includes("import_case_review"), true);
+    assert.equal(blockedMatch.invoice.paymentHoldReasonCodes.includes("import_case_incomplete"), true);
+
+    platform.attachDocumentToImportCase({
+      companyId: COMPANY_ID,
+      importCaseId: importCase.importCaseId,
+      documentId: customsDocument.documentId,
+      roleCode: "CUSTOMS_EVIDENCE",
+      actorId: "user-1"
+    });
+    platform.recalculateImportCase({
+      companyId: COMPANY_ID,
+      importCaseId: importCase.importCaseId,
+      actorId: "user-1"
+    });
+    platform.approveImportCase({
+      companyId: COMPANY_ID,
+      importCaseId: importCase.importCaseId,
+      approvalNote: "Complete import case for AP payment readiness.",
+      actorId: "user-1"
+    });
+
+    const approvedMatch = await requestJson(baseUrl, `/v1/ap/invoices/${ingested.supplierInvoiceId}/match`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+    assert.equal(approvedMatch.invoice.reviewRequired, false);
+    assert.equal(approvedMatch.invoice.importCaseStatus, "approved");
+    assert.equal(approvedMatch.invoice.importCaseCompletenessStatus, "complete");
+
+    const posted = await requestJson(baseUrl, `/v1/ap/invoices/${ingested.supplierInvoiceId}/post`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+    assert.equal(posted.status, "posted");
+    assert.equal(posted.paymentReadinessStatus, "ready");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
   const started = await requestJson(baseUrl, "/v1/auth/login", {
     method: "POST",
