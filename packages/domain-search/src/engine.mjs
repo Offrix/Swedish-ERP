@@ -68,6 +68,7 @@ export function createSearchEngine({ clock = () => new Date(), reportingPlatform
     shareSavedView,
     archiveSavedView,
     repairSavedView,
+    runSavedViewCompatibilityScan,
     createDashboardWidget,
     listDashboardWidgets,
     snapshotSearch
@@ -264,6 +265,68 @@ export function createSearchEngine({ clock = () => new Date(), reportingPlatform
     savedView.updatedAt = nowIso(clock);
     pushAudit({ companyId: savedView.companyId, actorId: requireText(actorId, "actor_id_required"), correlationId, action: "search.saved_view.repaired", entityType: "saved_view", entityId: savedView.savedViewId, explanation: `Repaired saved view ${savedView.savedViewId}.` });
     return copy(savedView);
+  }
+
+  function runSavedViewCompatibilityScan({ companyId, surfaceCode = null, actorId = "system", correlationId = newId() } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedSurfaceCode = normalizeOptionalText(surfaceCode)?.toUpperCase() || null;
+    const items = [];
+    let changedCount = 0;
+    let brokenCount = 0;
+    let repairedCount = 0;
+
+    for (const savedViewId of state.savedViewIdsByCompany.get(resolvedCompanyId) || []) {
+      const savedView = state.savedViews.get(savedViewId);
+      if (!savedView) {
+        continue;
+      }
+      if (resolvedSurfaceCode && savedView.surfaceCode !== resolvedSurfaceCode) {
+        continue;
+      }
+      const evaluation = evaluateSavedViewQuery(savedView.companyId, savedView.queryJson);
+      const previousStatus = savedView.status;
+      const previousBrokenReasonCode = savedView.brokenReasonCode || null;
+      const changed = previousStatus !== evaluation.status || previousBrokenReasonCode !== evaluation.brokenReasonCode;
+      if (changed) {
+        changedCount += 1;
+        if (previousStatus !== "broken" && evaluation.status === "broken") {
+          brokenCount += 1;
+        }
+        if (previousStatus === "broken" && evaluation.status === "active") {
+          repairedCount += 1;
+        }
+        savedView.status = evaluation.status;
+        savedView.brokenReasonCode = evaluation.brokenReasonCode;
+        savedView.updatedAt = nowIso(clock);
+      }
+      items.push({
+        savedViewId: savedView.savedViewId,
+        surfaceCode: savedView.surfaceCode,
+        status: savedView.status,
+        brokenReasonCode: savedView.brokenReasonCode || null,
+        changed
+      });
+    }
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "search.saved_view.compatibility_scanned",
+      entityType: "saved_view_scan",
+      entityId: correlationId,
+      explanation: `Scanned ${items.length} saved views for compatibility${resolvedSurfaceCode ? ` on ${resolvedSurfaceCode}` : ""}.`
+    });
+
+    return {
+      companyId: resolvedCompanyId,
+      surfaceCode: resolvedSurfaceCode,
+      scannedCount: items.length,
+      changedCount,
+      brokenCount,
+      repairedCount,
+      items
+    };
   }
 
   function createDashboardWidget({ companyId, ownerUserId, surfaceCode, widgetTypeCode, layoutSlot, settingsJson = {}, actorId = "system", correlationId = newId() } = {}) {

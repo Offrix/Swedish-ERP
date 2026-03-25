@@ -51,6 +51,18 @@ export function createDefaultJobHandlers({ logger = console.log } = {}) {
         resultCode: "notification_digest_built",
         resultPayload: digest
       };
+    },
+    "search.saved_view_compatibility_scan": async ({ job, platform }) => {
+      const result = platform.runSavedViewCompatibilityScan({
+        companyId: job.companyId,
+        surfaceCode: typeof job.payload?.surfaceCode === "string" ? job.payload.surfaceCode : null,
+        actorId: "worker_scheduler"
+      });
+      logger(`worker scanned ${result.scannedCount} saved views for compatibility in job ${job.jobId}`);
+      return {
+        resultCode: "saved_view_compatibility_scanned",
+        resultPayload: result
+      };
     }
   });
 }

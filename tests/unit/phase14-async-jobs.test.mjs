@@ -359,3 +359,49 @@ test("Phase 14 Step 4 worker builds notification digests for scheduled delivery 
   assert.deepEqual(attempts[0].resultPayload.notificationIds, [unreadNotification.notificationId]);
   assert.equal(attempts[0].resultPayload.unreadCount, 1);
 });
+
+test("Phase 14 Step 4 worker runs saved-view compatibility scans", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-25T13:00:00Z")
+  });
+
+  const brokenView = platform.createSavedView({
+    companyId: DEMO_IDS.companyId,
+    ownerUserId: DEMO_IDS.userId,
+    surfaceCode: "desktop_reporting",
+    title: "Broken compatibility view",
+    queryJson: {
+      projectionCode: "reporting.non_existing_projection"
+    },
+    actorId: DEMO_IDS.userId
+  });
+  assert.equal(brokenView.status, "broken");
+
+  const queuedJob = await platform.enqueueRuntimeJob({
+    companyId: DEMO_IDS.companyId,
+    jobType: "search.saved_view_compatibility_scan",
+    sourceObjectType: "saved_view",
+    sourceObjectId: brokenView.savedViewId,
+    idempotencyKey: "step4-saved-view-compat-scan",
+    payload: {
+      surfaceCode: "desktop_reporting"
+    },
+    actorId: "system"
+  });
+
+  const processed = await runWorkerBatch({
+    platform,
+    handlers: createDefaultJobHandlers({ logger: () => {} }),
+    logger: () => {},
+    workerId: "worker-step4-saved-view-compat"
+  });
+  assert.equal(processed, 1);
+
+  const completedJob = await platform.getRuntimeJob({ jobId: queuedJob.jobId });
+  const attempts = await platform.listRuntimeJobAttempts({ jobId: queuedJob.jobId });
+  assert.equal(completedJob.status, "succeeded");
+  assert.equal(completedJob.lastResultCode, "saved_view_compatibility_scanned");
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].resultPayload.scannedCount >= 1, true);
+  assert.equal(attempts[0].resultPayload.items.some((item) => item.savedViewId === brokenView.savedViewId), true);
+});

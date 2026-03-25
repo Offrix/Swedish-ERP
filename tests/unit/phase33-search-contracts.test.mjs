@@ -91,3 +91,85 @@ test("Step 33 search registry indexes reporting projections and supports saved v
   });
   assert.equal(shared.visibilityCode, "company");
 });
+
+test("Step 33 saved view compatibility scan repairs and re-breaks views deterministically", () => {
+  const sourceState = {
+    contracts: [
+      {
+        projectionCode: "reporting.report_snapshot",
+        objectType: "report_snapshot",
+        displayName: "Report snapshots",
+        sourceDomainCode: "reporting",
+        visibilityScope: "company",
+        surfaceCodes: ["desktop.search"],
+        filterFieldCodes: ["reportCode"]
+      }
+    ],
+    documents: []
+  };
+
+  const engine = createSearchEngine({
+    clock: () => new Date("2026-03-25T10:00:00Z"),
+    reportingPlatform: {
+      listSearchProjectionContracts: () => sourceState.contracts,
+      listSearchProjectionDocuments: () => sourceState.documents
+    }
+  });
+
+  const activeView = engine.createSavedView({
+    companyId: "company_search_compat_1",
+    ownerUserId: "user_1",
+    surfaceCode: "desktop_reporting",
+    title: "Snapshots",
+    queryJson: {
+      projectionCode: "reporting.report_snapshot"
+    },
+    actorId: "user_1"
+  });
+  const brokenView = engine.createSavedView({
+    companyId: "company_search_compat_1",
+    ownerUserId: "user_1",
+    surfaceCode: "desktop_reporting",
+    title: "Exports",
+    queryJson: {
+      projectionCode: "reporting.report_export_job"
+    },
+    actorId: "user_1"
+  });
+  assert.equal(activeView.status, "active");
+  assert.equal(brokenView.status, "broken");
+
+  sourceState.contracts.push({
+    projectionCode: "reporting.report_export_job",
+    objectType: "report_export_job",
+    displayName: "Report exports",
+    sourceDomainCode: "reporting",
+    visibilityScope: "company",
+    surfaceCodes: ["desktop.search"],
+    filterFieldCodes: ["status"]
+  });
+
+  const repairedScan = engine.runSavedViewCompatibilityScan({
+    companyId: "company_search_compat_1",
+    actorId: "worker_scheduler"
+  });
+  assert.equal(repairedScan.scannedCount, 2);
+  assert.equal(repairedScan.changedCount, 1);
+  assert.equal(repairedScan.repairedCount, 1);
+  assert.equal(
+    repairedScan.items.find((item) => item.savedViewId === brokenView.savedViewId)?.status,
+    "active"
+  );
+
+  sourceState.contracts = sourceState.contracts.filter((contract) => contract.projectionCode !== "reporting.report_snapshot");
+  const brokenScan = engine.runSavedViewCompatibilityScan({
+    companyId: "company_search_compat_1",
+    actorId: "worker_scheduler"
+  });
+  assert.equal(brokenScan.changedCount, 1);
+  assert.equal(brokenScan.brokenCount, 1);
+  assert.equal(
+    brokenScan.items.find((item) => item.savedViewId === activeView.savedViewId)?.brokenReasonCode,
+    "projection_contract_missing"
+  );
+});
