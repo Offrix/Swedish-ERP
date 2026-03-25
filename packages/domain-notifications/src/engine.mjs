@@ -36,6 +36,7 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     deliverNotification,
     retryNotificationDelivery,
     bulkApplyNotificationAction,
+    buildNotificationDigest,
     expireNotification,
     expireNotificationsDue,
     markNotificationRead,
@@ -235,6 +236,48 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
       actionCode: resolvedActionCode,
       totalCount: items.length,
       items
+    };
+  }
+
+  function buildNotificationDigest({
+    companyId,
+    recipientType,
+    recipientId,
+    categoryCode = null,
+    onlyUnread = true,
+    generatedAt = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedRecipientType = assertAllowed(normalizeEnumValue(recipientType, "notification_recipient_type_required"), NOTIFICATION_RECIPIENT_TYPES, "notification_recipient_type_invalid");
+    const resolvedRecipientId = requireText(recipientId, "notification_recipient_id_required");
+    const items = listNotifications({
+      companyId: resolvedCompanyId,
+      recipientType: resolvedRecipientType,
+      recipientId: resolvedRecipientId,
+      categoryCode,
+      onlyUnread
+    });
+    const summary = getNotificationInboxSummary({
+      companyId: resolvedCompanyId,
+      recipientType: resolvedRecipientType,
+      recipientId: resolvedRecipientId,
+      categoryCode,
+      onlyUnread
+    });
+    return {
+      companyId: resolvedCompanyId,
+      recipientType: resolvedRecipientType,
+      recipientId: resolvedRecipientId,
+      generatedAt: normalizeOptionalDateTime(generatedAt) || nowIso(clock),
+      onlyUnread,
+      categoryCode: normalizeOptionalCode(categoryCode),
+      totalCount: summary.totalCount,
+      unreadCount: summary.unreadCount,
+      countsByPriority: summary.countsByPriority,
+      groups: summary.groups,
+      notificationIds: items.map((item) => item.notificationId),
+      newestCreatedAt: items[0]?.createdAt || null,
+      oldestCreatedAt: items.length > 0 ? items[items.length - 1].createdAt : null
     };
   }
 

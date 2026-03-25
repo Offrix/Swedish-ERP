@@ -36,6 +36,21 @@ export function createDefaultJobHandlers({ logger = console.log } = {}) {
           notificationIds: result.items.map((item) => item.notificationId)
         }
       };
+    },
+    "notifications.build_digest": async ({ job, platform }) => {
+      const digest = platform.buildNotificationDigest({
+        companyId: job.companyId,
+        recipientType: typeof job.payload?.recipientType === "string" ? job.payload.recipientType : "user",
+        recipientId: job.payload?.recipientId,
+        categoryCode: typeof job.payload?.categoryCode === "string" ? job.payload.categoryCode : null,
+        onlyUnread: job.payload?.onlyUnread !== false,
+        generatedAt: typeof job.payload?.generatedAt === "string" ? job.payload.generatedAt : null
+      });
+      logger(`worker built notification digest for ${digest.recipientType}:${digest.recipientId} in job ${job.jobId}`);
+      return {
+        resultCode: "notification_digest_built",
+        resultPayload: digest
+      };
     }
   });
 }

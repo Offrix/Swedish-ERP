@@ -291,3 +291,71 @@ test("Phase 14 Step 4 worker expires due notifications through scheduled runtime
   assert.equal(dueAfter.status, "expired");
   assert.equal(futureAfter.status, "created");
 });
+
+test("Phase 14 Step 4 worker builds notification digests for scheduled delivery lanes", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-24T12:30:00Z")
+  });
+
+  const unreadNotification = platform.createNotification({
+    companyId: DEMO_IDS.companyId,
+    recipientType: "user",
+    recipientId: DEMO_IDS.userId,
+    categoryCode: "review_due",
+    priorityCode: "high",
+    sourceDomainCode: "REVIEW_CENTER",
+    sourceObjectType: "review_item",
+    sourceObjectId: "review-digest-job-1",
+    title: "Digest review",
+    body: "Unread digest item.",
+    actorId: "system"
+  });
+  const handledNotification = platform.createNotification({
+    companyId: DEMO_IDS.companyId,
+    recipientType: "user",
+    recipientId: DEMO_IDS.userId,
+    categoryCode: "deadline_warning",
+    priorityCode: "low",
+    sourceDomainCode: "CORE",
+    sourceObjectType: "work_item",
+    sourceObjectId: "work-digest-job-2",
+    title: "Handled digest item",
+    body: "This should not remain in the unread digest.",
+    actorId: "system"
+  });
+  platform.acknowledgeNotification({
+    companyId: DEMO_IDS.companyId,
+    notificationId: handledNotification.notificationId,
+    actorId: DEMO_IDS.userId
+  });
+
+  const queuedJob = await platform.enqueueRuntimeJob({
+    companyId: DEMO_IDS.companyId,
+    jobType: "notifications.build_digest",
+    sourceObjectType: "notification_center",
+    sourceObjectId: DEMO_IDS.userId,
+    idempotencyKey: "step4-notification-digest-user",
+    payload: {
+      recipientType: "user",
+      recipientId: DEMO_IDS.userId,
+      onlyUnread: true
+    },
+    actorId: "system"
+  });
+
+  const processed = await runWorkerBatch({
+    platform,
+    handlers: createDefaultJobHandlers({ logger: () => {} }),
+    logger: () => {},
+    workerId: "worker-step4-notifications-digest"
+  });
+  assert.equal(processed, 1);
+
+  const completedJob = await platform.getRuntimeJob({ jobId: queuedJob.jobId });
+  const attempts = await platform.listRuntimeJobAttempts({ jobId: queuedJob.jobId });
+  assert.equal(completedJob.status, "succeeded");
+  assert.equal(completedJob.lastResultCode, "notification_digest_built");
+  assert.equal(attempts.length, 1);
+  assert.deepEqual(attempts[0].resultPayload.notificationIds, [unreadNotification.notificationId]);
+  assert.equal(attempts[0].resultPayload.unreadCount, 1);
+});

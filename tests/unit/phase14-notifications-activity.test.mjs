@@ -257,6 +257,78 @@ test("Step 13 notifications expire due items without mutating terminal notificat
   assert.equal(notifications.getNotification({ companyId, notificationId: acknowledged.notificationId }).status, "acknowledged");
 });
 
+test("Step 13 notifications build user and team digests from unread inbox state", () => {
+  const notifications = createNotificationsEngine({
+    clock: () => new Date("2026-03-24T19:30:00Z")
+  });
+  const companyId = "company_notify_digest_1";
+
+  const userNotification = notifications.createNotification({
+    companyId,
+    recipientType: "user",
+    recipientId: "user_digest_1",
+    categoryCode: "review_due",
+    priorityCode: "high",
+    sourceDomainCode: "REVIEW_CENTER",
+    sourceObjectType: "review_item",
+    sourceObjectId: "review_digest_1",
+    title: "Review digest item",
+    body: "Unread item for the digest.",
+    actorId: "system"
+  });
+  notifications.createNotification({
+    companyId,
+    recipientType: "team",
+    recipientId: "finance_ops",
+    categoryCode: "deadline_warning",
+    priorityCode: "medium",
+    sourceDomainCode: "CORE",
+    sourceObjectType: "work_item",
+    sourceObjectId: "work_digest_1",
+    title: "Team deadline warning",
+    body: "Unread team notification.",
+    actorId: "system"
+  });
+  const acknowledgedUserNotification = notifications.createNotification({
+    companyId,
+    recipientType: "user",
+    recipientId: "user_digest_1",
+    categoryCode: "deadline_warning",
+    priorityCode: "low",
+    sourceDomainCode: "CORE",
+    sourceObjectType: "work_item",
+    sourceObjectId: "work_digest_2",
+    title: "Already handled",
+    body: "Should not show in unread digest.",
+    actorId: "system"
+  });
+  notifications.acknowledgeNotification({
+    companyId,
+    notificationId: acknowledgedUserNotification.notificationId,
+    actorId: "user_digest_1"
+  });
+
+  const userDigest = notifications.buildNotificationDigest({
+    companyId,
+    recipientType: "user",
+    recipientId: "user_digest_1"
+  });
+  assert.equal(userDigest.totalCount, 1);
+  assert.equal(userDigest.unreadCount, 1);
+  assert.deepEqual(userDigest.notificationIds, [userNotification.notificationId]);
+  assert.equal(userDigest.groups[0].categoryCode, "REVIEW_DUE");
+
+  const teamDigest = notifications.buildNotificationDigest({
+    companyId,
+    recipientType: "team",
+    recipientId: "finance_ops"
+  });
+  assert.equal(teamDigest.totalCount, 1);
+  assert.equal(teamDigest.unreadCount, 1);
+  assert.equal(teamDigest.notificationIds.length, 1);
+  assert.equal(teamDigest.recipientType, "team");
+});
+
 test("Step 13 activity projects append-only entries and hides by policy without duplicates", () => {
   const activity = createActivityEngine({
     clock: () => new Date("2026-03-24T15:30:00Z")
