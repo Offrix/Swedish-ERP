@@ -12048,7 +12048,12 @@ function isTimeOperationsReadPath(path) {
 }
 
 function isPayrollOperationsReadPath(path) {
-  return path.startsWith("/v1/payroll");
+  return (
+    path.startsWith("/v1/payroll") ||
+    path.startsWith("/v1/benefits") ||
+    path.startsWith("/v1/travel") ||
+    path.startsWith("/v1/pension")
+  );
 }
 
 function isFinanceOperationsReadPath(path) {

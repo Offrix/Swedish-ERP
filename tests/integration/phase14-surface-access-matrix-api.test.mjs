@@ -275,6 +275,12 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
       { path: `/v1/hr/leave-entries?companyId=${DEMO_IDS.companyId}`, error: "hr_operations_role_forbidden" },
       { path: `/v1/payroll/pay-runs?companyId=${DEMO_IDS.companyId}`, error: "payroll_operations_role_forbidden" },
       { path: `/v1/payroll/agi-submissions?companyId=${DEMO_IDS.companyId}`, error: "payroll_operations_role_forbidden" },
+      { path: `/v1/benefits/catalog?companyId=${DEMO_IDS.companyId}`, error: "payroll_operations_role_forbidden" },
+      {
+        path: `/v1/travel/claims?companyId=${DEMO_IDS.companyId}&employmentId=${employment.employmentId}`,
+        error: "payroll_operations_role_forbidden"
+      },
+      { path: `/v1/pension/plans?companyId=${DEMO_IDS.companyId}`, error: "payroll_operations_role_forbidden" },
       { path: `/v1/projects?companyId=${DEMO_IDS.companyId}`, error: "project_workspace_role_forbidden" },
       { path: `/v1/projects/${project.projectId}?companyId=${DEMO_IDS.companyId}`, error: "project_workspace_role_forbidden" },
       { path: `/v1/kalkyl/estimates?companyId=${DEMO_IDS.companyId}`, error: "project_workspace_role_forbidden" },
