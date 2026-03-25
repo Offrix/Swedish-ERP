@@ -2,6 +2,7 @@ export type NotificationStatus = "created" | "queued" | "delivered" | "read" | "
 export type NotificationRecipientType = "user" | "team";
 export type NotificationPriorityCode = "low" | "medium" | "high" | "critical";
 export type NotificationChannelCode = "in_app" | "email" | "push";
+export type NotificationBulkActionCode = "read" | "acknowledge";
 
 export interface Notification {
   readonly notificationId: string;
@@ -33,4 +34,10 @@ export interface NotificationInboxSummary {
   readonly countsByStatus: Record<NotificationStatus, number>;
   readonly countsByPriority: Record<NotificationPriorityCode, number>;
   readonly groups: readonly NotificationInboxCategoryGroup[];
+}
+
+export interface NotificationBulkActionResult {
+  readonly actionCode: NotificationBulkActionCode;
+  readonly totalCount: number;
+  readonly items: readonly Notification[];
 }

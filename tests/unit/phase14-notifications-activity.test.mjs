@@ -124,6 +124,71 @@ test("Step 13 notifications deduplicate active items and track delivery and user
   ]);
 });
 
+test("Step 13 notifications support bulk read and acknowledge without double-processing duplicate ids", () => {
+  const notifications = createNotificationsEngine({
+    clock: () => new Date("2026-03-24T17:00:00Z")
+  });
+  const companyId = "company_notify_bulk_1";
+
+  const first = notifications.createNotification({
+    companyId,
+    recipientType: "user",
+    recipientId: "user_bulk_1",
+    categoryCode: "deadline_warning",
+    priorityCode: "medium",
+    sourceDomainCode: "CORE",
+    sourceObjectType: "work_item",
+    sourceObjectId: "work_1",
+    title: "Deadline warning",
+    body: "A work item deadline is approaching.",
+    actorId: "system"
+  });
+  const second = notifications.createNotification({
+    companyId,
+    recipientType: "user",
+    recipientId: "user_bulk_1",
+    categoryCode: "review_due",
+    priorityCode: "high",
+    sourceDomainCode: "REVIEW_CENTER",
+    sourceObjectType: "review_item",
+    sourceObjectId: "review_bulk_1",
+    title: "Review assigned",
+    body: "A review item requires action.",
+    actorId: "system"
+  });
+
+  const bulkRead = notifications.bulkApplyNotificationAction({
+    companyId,
+    notificationIds: [first.notificationId, first.notificationId, second.notificationId],
+    actionCode: "read",
+    actorId: "user_bulk_1"
+  });
+  assert.equal(bulkRead.actionCode, "read");
+  assert.equal(bulkRead.totalCount, 2);
+  assert.deepEqual(
+    bulkRead.items.map((item) => item.notificationId).sort(),
+    [first.notificationId, second.notificationId].sort()
+  );
+  assert.equal(bulkRead.items.every((item) => item.status === "read"), true);
+
+  const bulkAck = notifications.bulkApplyNotificationAction({
+    companyId,
+    notificationIds: [first.notificationId, second.notificationId],
+    actionCode: "acknowledge",
+    actorId: "user_bulk_1"
+  });
+  assert.equal(bulkAck.actionCode, "acknowledge");
+  assert.equal(bulkAck.totalCount, 2);
+  assert.equal(bulkAck.items.every((item) => item.status === "acknowledged"), true);
+
+  const firstDetail = notifications.getNotification({ companyId, notificationId: first.notificationId });
+  assert.equal(firstDetail.actions.length, 2);
+  assert.deepEqual(
+    firstDetail.actions.map((action) => action.actionCode),
+    ["read", "acknowledge"]
+  );
+});
+
 test("Step 13 activity projects append-only entries and hides by policy without duplicates", () => {
   const activity = createActivityEngine({
     clock: () => new Date("2026-03-24T15:30:00Z")

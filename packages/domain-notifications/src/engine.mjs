@@ -35,6 +35,7 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     getNotification,
     deliverNotification,
     retryNotificationDelivery,
+    bulkApplyNotificationAction,
     markNotificationRead,
     acknowledgeNotification,
     snoozeNotification,
@@ -211,6 +212,30 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     });
   }
 
+  function bulkApplyNotificationAction({ companyId, notificationIds, actionCode, actorId = "system" } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActionCode = normalizeEnumValue(actionCode, "notification_action_code_required");
+    if (!["read", "acknowledge"].includes(resolvedActionCode)) {
+      throw createError(400, "notification_bulk_action_invalid", "Bulk notification action is not supported.");
+    }
+    const targetNotifications = resolveBulkNotificationTargets({
+      state,
+      companyId: resolvedCompanyId,
+      notificationIds,
+      actionCode: resolvedActionCode
+    });
+    const items = targetNotifications.map((notification) => (
+      resolvedActionCode === "read"
+        ? markNotificationRead({ companyId: resolvedCompanyId, notificationId: notification.notificationId, actorId })
+        : acknowledgeNotification({ companyId: resolvedCompanyId, notificationId: notification.notificationId, actorId })
+    ));
+    return {
+      actionCode: resolvedActionCode,
+      totalCount: items.length,
+      items
+    };
+  }
+
   function markNotificationRead({ companyId, notificationId, actorId = "system" } = {}) {
     const notification = requireNotification(state, companyId, notificationId);
     if (["cancelled", "expired"].includes(notification.status)) {
@@ -310,6 +335,23 @@ function requireNotification(state, companyId, notificationId) {
     throw createError(403, "cross_company_forbidden", "Notification belongs to another company.");
   }
   return notification;
+}
+
+function resolveBulkNotificationTargets({ state, companyId, notificationIds, actionCode }) {
+  if (!Array.isArray(notificationIds) || notificationIds.length === 0) {
+    throw createError(400, "notification_ids_required", "At least one notification id is required.");
+  }
+  const uniqueIds = [...new Set(notificationIds.map((notificationId) => requireText(notificationId, "notification_id_required")))];
+  const notifications = uniqueIds.map((notificationId) => requireNotification(state, companyId, notificationId));
+  for (const notification of notifications) {
+    if (actionCode === "read" && ["cancelled", "expired"].includes(notification.status)) {
+      throw createError(409, "notification_not_readable", "Notification cannot be read from its current status.");
+    }
+    if (actionCode === "acknowledge" && ["cancelled", "expired"].includes(notification.status)) {
+      throw createError(409, "notification_not_acknowledgeable", "Notification cannot be acknowledged from its current status.");
+    }
+  }
+  return notifications;
 }
 
 function compareNotifications(left, right) {

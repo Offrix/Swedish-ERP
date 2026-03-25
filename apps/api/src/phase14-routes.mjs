@@ -2358,6 +2358,24 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "POST" && path === "/v1/notifications/bulk-actions") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: companyId, scopeCode: "notifications" });
+    const notificationIds = requireTextArray(body.notificationIds, "notification_ids_required", "notificationIds must contain at least one notification id.");
+    for (const notificationId of notificationIds) {
+      assertNotificationReadAccess({ platform, principal, companyId, notificationId });
+    }
+    writeJson(res, 200, platform.bulkApplyNotificationAction({
+      companyId,
+      notificationIds,
+      actionCode: body.actionCode,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
   const notificationMatch = matchPath(path, "/v1/notifications/:notificationId");
   if (req.method === "GET" && notificationMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
@@ -3293,6 +3311,13 @@ function assertNotificationReadAccess({ platform, principal, companyId, notifica
   if (notification.recipientType !== "user" || notification.recipientId !== principal.userId) {
     throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification action is only allowed for the addressed user in this route.");
   }
+}
+
+function requireTextArray(value, code, message) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw createHttpError(400, code, message);
+  }
+  return value.map((entry) => requireText(entry, code, message));
 }
 
 const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);

@@ -150,6 +150,21 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     });
     assert.equal(read.status, "read");
 
+    const bulkRead = await requestJson(baseUrl, "/v1/notifications/bulk-actions", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 200,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        actionCode: "read",
+        notificationIds: [adminNotification.notificationId, adminNotification.notificationId]
+      }
+    });
+    assert.equal(bulkRead.actionCode, "read");
+    assert.equal(bulkRead.totalCount, 1);
+    assert.equal(bulkRead.items.length, 1);
+    assert.equal(bulkRead.items[0].notificationId, adminNotification.notificationId);
+
     const approverCannotMutateAdminNotification = await requestJson(baseUrl, `/v1/notifications/${adminNotification.notificationId}/ack`, {
       method: "POST",
       token: approverToken,
@@ -159,6 +174,23 @@ test("Step 13 API exposes notifications and activity as separate read models", a
       }
     });
     assert.equal(approverCannotMutateAdminNotification.error, "notification_recipient_scope_forbidden");
+    const approverCannotBulkMutateAdminNotification = await requestJson(baseUrl, "/v1/notifications/bulk-actions", {
+      method: "POST",
+      token: approverToken,
+      expectedStatus: 403,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        actionCode: "acknowledge",
+        notificationIds: [adminNotification.notificationId, approverNotification.notificationId]
+      }
+    });
+    assert.equal(approverCannotBulkMutateAdminNotification.error, "notification_recipient_scope_forbidden");
+    const approverNotificationStillUnread = await requestJson(
+      baseUrl,
+      `/v1/notifications/${approverNotification.notificationId}?companyId=${DEMO_IDS.companyId}`,
+      { token: approverToken }
+    );
+    assert.equal(approverNotificationStillUnread.status, "delivered");
 
     const acknowledged = await requestJson(baseUrl, `/v1/notifications/${approverNotification.notificationId}/ack`, {
       method: "POST",
