@@ -41,6 +41,44 @@ test("Phase 11.3 closes a month with checklist, blocks on hard stop, preserves r
     responsibleConsultantId: preparer.companyUserId,
     activeFrom: "2026-01-01"
   });
+  const eligibilityAssessment = platform.assessCashMethodEligibility({
+    companyId: client.companyId,
+    annualNetTurnoverSek: 420000,
+    legalFormCode: "AB",
+    actorId: "phase11-3-unit"
+  });
+  const methodProfile = platform.createMethodProfile({
+    companyId: client.companyId,
+    methodCode: "FAKTURERINGSMETOD",
+    effectiveFrom: "2026-01-01",
+    fiscalYearStartDate: "2026-01-01",
+    eligibilityAssessmentId: eligibilityAssessment.assessmentId,
+    onboardingOverride: true,
+    actorId: "phase11-3-unit"
+  });
+  platform.activateMethodProfile({
+    companyId: client.companyId,
+    methodProfileId: methodProfile.methodProfileId,
+    actorId: "phase11-3-unit"
+  });
+  const fiscalYearProfile = platform.createFiscalYearProfile({
+    companyId: client.companyId,
+    legalFormCode: "AKTIEBOLAG",
+    actorId: "phase11-3-unit"
+  });
+  const fiscalYear = platform.createFiscalYear({
+    companyId: client.companyId,
+    fiscalYearProfileId: fiscalYearProfile.fiscalYearProfileId,
+    startDate: "2026-01-01",
+    endDate: "2026-12-31",
+    approvalBasisCode: "BASELINE",
+    actorId: "phase11-3-unit"
+  });
+  platform.activateFiscalYear({
+    companyId: client.companyId,
+    fiscalYearId: fiscalYear.fiscalYearId,
+    actorId: "phase11-3-unit"
+  });
   platform.installLedgerCatalog({
     companyId: client.companyId,
     actorId: "phase11-3-unit"
