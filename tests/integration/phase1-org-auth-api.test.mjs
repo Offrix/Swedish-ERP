@@ -253,6 +253,36 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
     assert.equal(approvalChainRead.approvalChainId, approvalChain.approvalChainId);
     assert.equal(approvalChainRead.steps.length, 2);
 
+    const passkeyRegistration = await requestJson(`${baseUrl}/v1/auth/mfa/passkeys/register-options`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      body: {
+        deviceName: "Finance laptop key"
+      }
+    });
+    const invalidPasskeyVerify = await requestJson(`${baseUrl}/v1/auth/mfa/passkeys/register-verify`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 400,
+      body: {
+        challengeId: passkeyRegistration.challengeId,
+        credentialId: "",
+        publicKey: "pk-demo"
+      }
+    });
+    assert.equal(invalidPasskeyVerify.error, "passkey_credential_required");
+    const completedPasskeyVerify = await requestJson(`${baseUrl}/v1/auth/mfa/passkeys/register-verify`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      body: {
+        challengeId: passkeyRegistration.challengeId,
+        credentialId: "cred-finance-laptop",
+        publicKey: "pk-demo",
+        deviceName: "Finance laptop key"
+      }
+    });
+    assert.equal(completedPasskeyVerify.credentialId, "cred-finance-laptop");
+
     const financeAdmin = await requestJson(
       `${baseUrl}/v1/org/companies/00000000-0000-4000-8000-000000000001/users`,
       {

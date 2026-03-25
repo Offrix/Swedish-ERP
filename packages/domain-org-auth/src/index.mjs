@@ -672,6 +672,8 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     if (challenge.companyUserId !== session.companyUserId) {
       throw httpError(403, "passkey_challenge_scope_mismatch", "Passkey challenge belongs to another user.");
     }
+    const resolvedCredentialId = assertNonEmpty(credentialId, "passkey_credential_required");
+    const resolvedPublicKey = assertNonEmpty(publicKey, "passkey_public_key_required");
     challenge.status = "consumed";
     challenge.consumedAt = nowIso();
 
@@ -682,8 +684,8 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       factorType: "passkey",
       status: "active",
       secret: null,
-      credentialId: assertNonEmpty(credentialId, "passkey_credential_required"),
-      publicKey: assertNonEmpty(publicKey, "passkey_public_key_required"),
+      credentialId: resolvedCredentialId,
+      publicKey: resolvedPublicKey,
       providerSubject: null,
       deviceName: deviceName || challenge.payloadJson.deviceName || "Security key",
       verifiedAt: nowIso(),
