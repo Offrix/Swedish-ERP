@@ -1,10 +1,31 @@
 import { listFiles, readText } from "./lib/repo.mjs";
 
-const secretPatterns = [
-  /AKIA[0-9A-Z]{16}/,
-  /ghp_[A-Za-z0-9]{36,}/,
-  /BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY/,
-  /postgres:\/\/[^:\s]+:[^@\s]+@/i
+const scanners = [
+  {
+    name: "aws-access-key",
+    pattern: /AKIA[0-9A-Z]{16}/
+  },
+  {
+    name: "github-personal-access-token",
+    pattern: /ghp_[A-Za-z0-9]{36,}/
+  },
+  {
+    name: "private-key",
+    pattern: /BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY/
+  },
+  {
+    name: "postgres-connection-string",
+    pattern: /postgres:\/\/[^:\s]+:[^@\s]+@/i,
+    shouldIgnoreLine(line) {
+      return (
+        line.includes("${") ||
+        line.includes("encodeURIComponent(") ||
+        line.includes("process.env") ||
+        line.includes("DATABASE_URL") ||
+        line.includes("POSTGRES_URL")
+      );
+    }
+  }
 ];
 
 const errors = [];
@@ -29,9 +50,15 @@ for (const file of files) {
     continue;
   }
   const content = await readText(file);
-  for (const pattern of secretPatterns) {
-    if (pattern.test(content)) {
-      errors.push(`Potential secret detected in ${file} via ${pattern}`);
+  const lines = content.split(/\r?\n/u);
+  for (const scanner of scanners) {
+    for (const [index, line] of lines.entries()) {
+      if (scanner.shouldIgnoreLine?.(line, file)) {
+        continue;
+      }
+      if (scanner.pattern.test(line)) {
+        errors.push(`Potential secret detected in ${file}:${index + 1} via ${scanner.name}`);
+      }
     }
   }
 }

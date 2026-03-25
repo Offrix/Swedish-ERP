@@ -115,15 +115,41 @@ export async function readJson(relativePath) {
 export async function listFiles(relativeRoot, extensions = []) {
   const files = [];
   const root = repoPath(relativeRoot);
+  const skippedDirectoryNames = new Set([
+    "node_modules",
+    ".git",
+    ".next",
+    "dist",
+    "build",
+    "coverage",
+    ".turbo"
+  ]);
 
   async function walk(currentPath) {
     const entries = await fs.readdir(currentPath, { withFileTypes: true });
     for (const entry of entries) {
       const nextPath = path.join(currentPath, entry.name);
+      if (skippedDirectoryNames.has(entry.name)) {
+        continue;
+      }
+
+      const linkInfo = await fs.lstat(nextPath);
+      if (linkInfo.isSymbolicLink()) {
+        const targetInfo = await fs.stat(nextPath).catch(() => null);
+        if (targetInfo?.isDirectory()) {
+          continue;
+        }
+      }
+
       if (entry.isDirectory()) {
         await walk(nextPath);
         continue;
       }
+
+      if (!entry.isFile() && !linkInfo.isSymbolicLink()) {
+        continue;
+      }
+
       const relativeFile = path.relative(repoRoot, nextPath).replaceAll("\\", "/");
       if (extensions.length === 0 || extensions.includes(path.extname(entry.name))) {
         files.push(relativeFile);

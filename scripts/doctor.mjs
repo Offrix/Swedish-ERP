@@ -20,6 +20,23 @@ const checks = [
   { label: "uv", command: "uv", args: ["--version"] }
 ];
 
+async function resolvePnpmVersion() {
+  const direct = await commandResult(process.platform === "win32" ? "cmd.exe" : "pnpm", process.platform === "win32" ? ["/d", "/s", "/c", "pnpm --version"] : ["--version"]);
+  if (direct.code === 0) {
+    return { ...direct, source: "pnpm" };
+  }
+
+  const viaCorepack = await commandResult(
+    process.platform === "win32" ? "cmd.exe" : "corepack",
+    process.platform === "win32" ? ["/d", "/s", "/c", "corepack pnpm --version"] : ["pnpm", "--version"]
+  );
+  if (viaCorepack.code === 0) {
+    return { ...viaCorepack, source: "corepack pnpm" };
+  }
+
+  return { ...direct, source: "pnpm" };
+}
+
 async function resolvePythonVersion() {
   const direct = await commandResult("python", ["--version"]);
   if (direct.code === 0) {
@@ -79,8 +96,18 @@ if (pythonResult.code !== 0) {
   console.log(`python: ${pythonOutput}`);
 }
 
+const pnpmResult = await resolvePnpmVersion();
+const pnpmOutput = `${pnpmResult.stdout}${pnpmResult.stderr}`.trim();
+if (pnpmResult.code !== 0) {
+  failed = true;
+  console.error("pnpm: missing");
+} else if (pnpmOutput !== expectedPnpm) {
+  failed = true;
+  console.error(`pnpm: expected ${expectedPnpm}, got ${pnpmOutput}`);
+} else {
+  console.log(`pnpm: ${pnpmOutput} (${pnpmResult.source})`);
+}
+
 if (failed) {
   process.exit(1);
 }
-
-console.log(`pnpm target version: ${expectedPnpm}`);
