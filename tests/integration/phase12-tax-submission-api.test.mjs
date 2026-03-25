@@ -55,6 +55,18 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
     assert.equal(taxPackage.exports.every((entry) => entry.allChecksPassed), true);
     assert.equal(taxPackage.exports.some((entry) => entry.exportCode === "sru_rows_csv"), true);
 
+    const forbiddenTaxDeclarations = await fetch(
+      `${baseUrl}/v1/annual-reporting/packages/${annualPackage.packageId}/tax-declarations?companyId=${DEMO_IDS.companyId}`,
+      {
+        headers: {
+          authorization: `Bearer ${fieldUserToken}`
+        }
+      }
+    );
+    assert.equal(forbiddenTaxDeclarations.status, 403);
+    const forbiddenTaxDeclarationsPayload = await forbiddenTaxDeclarations.json();
+    assert.equal(forbiddenTaxDeclarationsPayload.error, "annual_operations_role_forbidden");
+
     const finalizedSubmission = await requestJson(`${baseUrl}/v1/submissions`, {
       method: "POST",
       token: adminToken,

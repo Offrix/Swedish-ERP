@@ -3226,7 +3226,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -3234,6 +3234,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(res, 200, {
       items: platform.listTaxDeclarationPackages({
         companyId,
