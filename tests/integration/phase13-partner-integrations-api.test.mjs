@@ -35,6 +35,22 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
     assert.equal(catalog.items.length, PARTNER_CONNECTION_TYPES.length);
     assert.equal(catalog.items.every((item) => item.operationCodes.length > 0), true);
 
+    const missingCredentials = await requestJson(baseUrl, "/v1/partners/connections", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 400,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        connectionType: "bank",
+        partnerCode: "missing_creds_partner",
+        displayName: "Missing creds partner",
+        mode: "sandbox",
+        rateLimitPerMinute: 10,
+        fallbackMode: "queue_retry"
+      }
+    });
+    assert.equal(missingCredentials.error, "partner_credentials_ref_required");
+
     const connections = [];
     for (const connectionType of PARTNER_CONNECTION_TYPES) {
       connections.push(

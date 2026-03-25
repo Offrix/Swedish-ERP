@@ -162,3 +162,23 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   });
   assert.equal(claimedRetry.status, "claimed");
 });
+
+test("Phase 13.2 partner connections require explicit credentials refs in every environment", () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-22T18:30:00Z")
+  });
+
+  assert.throws(
+    () =>
+      platform.createPartnerConnection({
+        companyId: DEMO_IDS.companyId,
+        connectionType: "bank",
+        partnerCode: "bank_partner",
+        displayName: "Bank partner",
+        mode: "sandbox",
+        fallbackMode: "queue_retry",
+        actorId: "phase13-2-unit"
+      }),
+    (error) => error?.code === "partner_credentials_ref_required"
+  );
+});

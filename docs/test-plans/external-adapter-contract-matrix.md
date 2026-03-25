@@ -6,6 +6,7 @@ Detta dokument listar varje extern adapter, dess kontraktstest, sandboxmiljö, t
 
 - Kontraktstester ska köras i CI där sandbox finns och i manuell verifiering där leverantören begränsar automation.
 - Varje adapter ska ha tydligt definierad request/response-shape, authmodell, idempotensnyckel, felöversättning och retry-regel.
+- Varje adapteranslutning ska ha explicit credentials reference per miljö; tyst fallback till delad eller saknad credential är förbjuden.
 - När en leverantör saknar stabil sandbox ska kontraktstester kompletteras med inspelade fixtures och strikta schemaassertioner.
 
 ## Adaptermatris

@@ -111,16 +111,17 @@ export function createPartnerModule({
     credentialsRef = null,
     actorId = "system"
   } = {}) {
+    const resolvedMode = assertAllowed(mode, ["sandbox", "production"], "partner_mode_invalid");
     const connection = {
       connectionId: crypto.randomUUID(),
       companyId: text(companyId, "company_id_required"),
       connectionType: assertAllowed(connectionType, PARTNER_CONNECTION_TYPES, "partner_connection_type_invalid"),
       partnerCode: text(partnerCode, "partner_code_required"),
       displayName: text(displayName, "partner_display_name_required"),
-      mode: assertAllowed(mode, ["sandbox", "production"], "partner_mode_invalid"),
+      mode: resolvedMode,
       rateLimitPerMinute: normalizePositiveInteger(rateLimitPerMinute, "partner_rate_limit_invalid"),
       fallbackMode: assertAllowed(fallbackMode, PARTNER_FALLBACK_MODES, "partner_fallback_mode_invalid"),
-      credentialsRef: optionalText(credentialsRef),
+      credentialsRef: text(credentialsRef, "partner_credentials_ref_required"),
       status: "active",
       createdByActorId: text(actorId || "system", "actor_id_required"),
       createdAt: nowIso(clock),

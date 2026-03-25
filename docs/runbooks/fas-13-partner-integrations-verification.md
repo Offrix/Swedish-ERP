@@ -34,6 +34,7 @@ Verifiera att partnerkopplingar, kontraktstester, fallback, rate limits och repl
 ## Verifiering
 
 - partner connections materialiseras per bolag och adaptertyp
+- partner connections nekas om credentialsRef saknas; varje miljö kräver explicit secret reference
 - kontraktstester körs och resultatet kan listas utan att historik skrivs över
 - fallback och rate-limit-status bevaras som egen operationstyp
 - async jobs, replay-planer och mass-retry är idempotenta och spårbara
@@ -42,6 +43,7 @@ Verifiera att partnerkopplingar, kontraktstester, fallback, rate limits och repl
 ## Vanliga fel
 
 - `partner_connection_not_found`: anslutningen saknas eller hör till annat bolag
+- `partner_credentials_ref_required`: anslutningen saknar explicit secret reference för aktuell miljö
 - `partner_rate_limit_exceeded`: rate-limit spärrar ny operation innan nytt fönster öppnas
 - `async_job_replay_forbidden`: replay saknar godkänd replay-plan eller replayAllowed=false
 - `partner_contract_test_missing`: kontraktstest saknas för anslutningen
