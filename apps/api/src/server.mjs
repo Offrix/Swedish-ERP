@@ -2999,7 +2999,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -3007,6 +3007,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(res, 200, {
       items: platform.listAnnualReportPackages({
         companyId
@@ -3026,6 +3027,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     const result = platform.createAnnualReportPackage({
       companyId,
       accountingPeriodId: body.accountingPeriodId,
@@ -3063,7 +3065,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -3071,6 +3073,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(res, 200, platform.getAnnualReportPackage({
       companyId,
       packageId: annualPackageMatch.packageId
@@ -3090,6 +3093,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     const result = platform.createAnnualReportVersion({
       companyId,
       packageId: annualVersionCreateMatch.packageId,
@@ -3122,7 +3126,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -3130,6 +3134,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(res, 200, platform.diffAnnualReportVersions({
       companyId,
       packageId: annualVersionDiffMatch.packageId,
@@ -3143,7 +3148,7 @@ async function handleRequest({ req, res, platform, flags }) {
   if (annualVersionSignatoryMatch && req.method === "POST") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req, body),
       companyId,
@@ -3151,6 +3156,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(res, 201, platform.inviteAnnualReportSignatory({
       companyId,
       packageId: annualVersionSignatoryMatch.packageId,
@@ -3190,7 +3196,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -3198,6 +3204,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(
       res,
       200,
@@ -3245,6 +3252,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(
       res,
       201,
@@ -3265,7 +3273,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -3273,6 +3281,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(
       res,
       200,
@@ -3290,7 +3299,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -3298,6 +3307,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "submission",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(res, 200, {
       items: platform.listAuthoritySubmissions({
         companyId,
@@ -3320,6 +3330,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "submission",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     const payload = body.payload ?? buildSubmissionPayloadFromSource({
       platform,
       companyId,
@@ -3361,7 +3372,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -3369,6 +3380,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "submission",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(res, 200, {
       items: platform.listSubmissionActionQueue({
         companyId,
@@ -3386,7 +3398,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -3394,6 +3406,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "submission",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(
       res,
       200,
@@ -3417,6 +3430,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "submission",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(
       res,
       200,
@@ -3442,6 +3456,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "submission",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(
       res,
       200,
@@ -3470,6 +3485,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "submission",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(
       res,
       201,
@@ -3500,6 +3516,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "submission",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(
       res,
       200,
@@ -3524,6 +3541,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "submission",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(
       res,
       200,
@@ -4365,6 +4383,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     const result = platform.openAnnualCorrectionPackage({
       companyId,
       packageId: annualCorrectionMatch.packageId,
@@ -4399,7 +4418,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -4407,6 +4426,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(res, 200, {
       items: platform.listAnnualEvidencePacks({
         companyId,
@@ -4423,7 +4443,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -4431,6 +4451,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "annual_report_package",
       scopeCode: "annual_reporting"
     });
+    assertAnnualOperationsAccess({ principal });
     writeJson(res, 200, platform.getAnnualEvidencePack({
       companyId,
       evidencePackId: annualEvidenceMatch.evidencePackId
@@ -11817,6 +11838,16 @@ function assertPrincipalCanApproveLeaveEntry({ platform, principal, companyId, l
   });
   if (!managerEmployments.some((employment) => employment.employmentId === leaveEntry.managerEmploymentId)) {
     throw createHttpError(403, "leave_approval_denied", "The signed-in user is not the active manager for this leave entry.");
+  }
+}
+
+const ANNUAL_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
+
+function assertAnnualOperationsAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedOperator = [...ANNUAL_OPERATIONS_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedOperator) {
+    throw createHttpError(403, "annual_operations_role_forbidden", "Current actor is not allowed to access annual reporting or filing operations.");
   }
 }
 

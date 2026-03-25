@@ -4,6 +4,7 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
+import { loginWithStrongAuth, loginWithTotpOnly } from "../helpers/api-helpers.mjs";
 
 test("Phase 12.2 API builds declaration packages, logs receipts and routes failures into action queue", async () => {
   const platform = createApiPlatform({
@@ -19,6 +20,20 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
       platform,
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
+    });
+    platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "submission-field@example.test",
+      displayName: "Submission Field",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "submission-field@example.test"
     });
     const annualPackage = prepareAnnualPackage(platform);
 
@@ -171,6 +186,14 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
       }
     });
     assert.equal(resolved.status, "resolved");
+
+    const forbiddenSubmissions = await fetch(`${baseUrl}/v1/submissions?companyId=${DEMO_IDS.companyId}`, {
+      headers: {
+        authorization: `Bearer ${fieldUserToken}`
+      }
+    });
+    assert.equal(forbiddenSubmissions.status, 403);
+    await forbiddenSubmissions.json();
   } finally {
     await stopServer(server);
   }
@@ -234,36 +257,6 @@ function prepareAnnualPackage(platform) {
       related_party_commentary: "Related party note"
     }
   });
-}
-
-async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
-  const started = await requestJson(`${baseUrl}/v1/auth/login`, {
-    method: "POST",
-    body: {
-      companyId,
-      email
-    }
-  });
-  await requestJson(`${baseUrl}/v1/auth/mfa/totp/verify`, {
-    method: "POST",
-    token: started.sessionToken,
-    body: {
-      code: platform.getTotpCodeForTesting({ companyId, email })
-    }
-  });
-  const bankidStart = await requestJson(`${baseUrl}/v1/auth/bankid/start`, {
-    method: "POST",
-    token: started.sessionToken
-  });
-  await requestJson(`${baseUrl}/v1/auth/bankid/collect`, {
-    method: "POST",
-    token: started.sessionToken,
-    body: {
-      orderRef: bankidStart.orderRef,
-      completionToken: platform.getBankIdCompletionTokenForTesting(bankidStart.orderRef)
-    }
-  });
-  return started.sessionToken;
 }
 
 async function requestJson(url, { method = "GET", body, token, expectedStatus = 200 } = {}) {

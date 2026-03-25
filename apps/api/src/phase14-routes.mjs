@@ -23,6 +23,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "annual_reporting"
     });
+    assertFinanceOperationsReadAccess({ principal });
     const result = platform.createLegalFormProfile({
       companyId,
       legalFormCode: body.legalFormCode,
@@ -47,7 +48,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/legal-forms/profiles") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -56,6 +57,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "annual_reporting"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listLegalFormProfiles({
         companyId,
@@ -69,7 +71,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && legalFormProfileMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -78,6 +80,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: legalFormProfileMatch.legalFormProfileId,
       scopeCode: "annual_reporting"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(
       res,
       200,
@@ -103,6 +106,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: legalFormActivateMatch.legalFormProfileId,
       scopeCode: "annual_reporting"
     });
+    assertFinanceOperationsReadAccess({ principal });
     const result = platform.activateLegalFormProfile({
       companyId,
       legalFormProfileId: legalFormActivateMatch.legalFormProfileId,
@@ -124,7 +128,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const asOfDate = requireText(url.searchParams.get("asOfDate"), "as_of_date_required", "asOfDate is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -133,6 +137,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "annual_reporting"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, platform.resolveActiveLegalFormProfile({ companyId, asOfDate }));
     return true;
   }
@@ -150,6 +155,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "annual_reporting"
     });
+    assertFinanceOperationsReadAccess({ principal });
     const result = platform.createReportingObligationProfile({
       companyId,
       legalFormProfileId: body.legalFormProfileId,
@@ -181,7 +187,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/legal-forms/reporting-obligations") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -190,6 +196,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "annual_reporting"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listReportingObligationProfiles({
         companyId,
@@ -203,7 +210,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && reportingObligationMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -212,6 +219,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: reportingObligationMatch.reportingObligationProfileId,
       scopeCode: "annual_reporting"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(
       res,
       200,
@@ -237,6 +245,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: approveReportingObligationMatch.reportingObligationProfileId,
       scopeCode: "annual_reporting"
     });
+    assertFinanceOperationsReadAccess({ principal });
     const result = platform.approveReportingObligationProfile({
       companyId,
       reportingObligationProfileId: approveReportingObligationMatch.reportingObligationProfileId,
@@ -258,7 +267,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const asOfDate = requireText(url.searchParams.get("asOfDate"), "as_of_date_required", "asOfDate is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -267,6 +276,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "annual_reporting"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(
       res,
       200,

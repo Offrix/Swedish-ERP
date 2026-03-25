@@ -4,6 +4,7 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
+import { loginWithStrongAuth, loginWithTotpOnly } from "../helpers/api-helpers.mjs";
 
 test("Phase 12.1 API creates annual report package, signs it and versions changed books", async () => {
   const platform = createApiPlatform({
@@ -19,6 +20,20 @@ test("Phase 12.1 API creates annual report package, signs it and versions change
       platform,
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
+    });
+    platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "annual-reporting-field@example.test",
+      displayName: "Annual Reporting Field",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "annual-reporting-field@example.test"
     });
 
     platform.installLedgerCatalog({
@@ -116,6 +131,14 @@ test("Phase 12.1 API creates annual report package, signs it and versions change
       token: adminToken
     });
     assert.equal(diff.changes.length > 0, true);
+
+    const forbiddenList = await fetch(`${baseUrl}/v1/annual-reporting/packages?companyId=${DEMO_IDS.companyId}`, {
+      headers: {
+        authorization: `Bearer ${fieldUserToken}`
+      }
+    });
+    assert.equal(forbiddenList.status, 403);
+    await forbiddenList.json();
   } finally {
     await stopServer(server);
   }
@@ -157,36 +180,6 @@ function hardCloseYear(platform, accountingPeriodId) {
     approvedByActorId: DEMO_IDS.userId,
     approvedByRoleCode: "company_admin"
   });
-}
-
-async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
-  const started = await requestJson(`${baseUrl}/v1/auth/login`, {
-    method: "POST",
-    body: {
-      companyId,
-      email
-    }
-  });
-  await requestJson(`${baseUrl}/v1/auth/mfa/totp/verify`, {
-    method: "POST",
-    token: started.sessionToken,
-    body: {
-      code: platform.getTotpCodeForTesting({ companyId, email })
-    }
-  });
-  const bankidStart = await requestJson(`${baseUrl}/v1/auth/bankid/start`, {
-    method: "POST",
-    token: started.sessionToken
-  });
-  await requestJson(`${baseUrl}/v1/auth/bankid/collect`, {
-    method: "POST",
-    token: started.sessionToken,
-    body: {
-      orderRef: bankidStart.orderRef,
-      completionToken: platform.getBankIdCompletionTokenForTesting(bankidStart.orderRef)
-    }
-  });
-  return started.sessionToken;
 }
 
 async function requestJson(url, { method = "GET", body, token, expectedStatus = 200 } = {}) {

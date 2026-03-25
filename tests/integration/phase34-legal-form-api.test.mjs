@@ -4,6 +4,7 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
+import { loginWithStrongAuth, loginWithTotpOnly } from "../helpers/api-helpers.mjs";
 
 test("Step 34-35 API creates legal-form profiles, approves obligations and exposes annual evidence", async () => {
   const platform = createApiPlatform({
@@ -19,6 +20,20 @@ test("Step 34-35 API creates legal-form profiles, approves obligations and expos
       platform,
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
+    });
+    platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "legal-form-field@example.test",
+      displayName: "Legal Form Field",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "legal-form-field@example.test"
     });
     const period = prepareAccounting(platform, DEMO_IDS.companyId);
 
@@ -104,6 +119,14 @@ test("Step 34-35 API creates legal-form profiles, approves obligations and expos
     assert.equal(evidence.items.length, 1);
     assert.equal(annualPackage.legalFormCode, "AKTIEBOLAG");
     assert.equal(correction.correctionOfPackageId, annualPackage.packageId);
+
+    const forbiddenProfiles = await fetch(`${baseUrl}/v1/legal-forms/profiles?companyId=${DEMO_IDS.companyId}`, {
+      headers: {
+        authorization: `Bearer ${fieldUserToken}`
+      }
+    });
+    assert.equal(forbiddenProfiles.status, 403);
+    await forbiddenProfiles.json();
   } finally {
     await stopServer(server);
   }
@@ -145,36 +168,6 @@ function prepareAccounting(platform, companyId) {
   return period;
 }
 
-async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
-  const started = await requestJson(`${baseUrl}/v1/auth/login`, {
-    method: "POST",
-    body: {
-      companyId,
-      email
-    }
-  });
-  await requestJson(`${baseUrl}/v1/auth/mfa/totp/verify`, {
-    method: "POST",
-    token: started.sessionToken,
-    body: {
-      code: platform.getTotpCodeForTesting({ companyId, email })
-    }
-  });
-  const bankidStart = await requestJson(`${baseUrl}/v1/auth/bankid/start`, {
-    method: "POST",
-    token: started.sessionToken
-  });
-  await requestJson(`${baseUrl}/v1/auth/bankid/collect`, {
-    method: "POST",
-    token: started.sessionToken,
-    body: {
-      orderRef: bankidStart.orderRef,
-      completionToken: platform.getBankIdCompletionTokenForTesting(bankidStart.orderRef)
-    }
-  });
-  return started.sessionToken;
-}
-
 async function requestJson(url, { method = "GET", body, token, expectedStatus = 200 } = {}) {
   const response = await fetch(url, {
     method,
@@ -185,6 +178,6 @@ async function requestJson(url, { method = "GET", body, token, expectedStatus = 
     body: body ? JSON.stringify(body) : undefined
   });
   const payload = await response.json();
-  assert.equal(response.status, expectedStatus);
+  assert.equal(response.status, expectedStatus, JSON.stringify(payload));
   return payload;
 }
