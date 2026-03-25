@@ -67,6 +67,18 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         contractValueAmount: 125000
       }
     });
+    const fieldWorkOrder = await requestJson(baseUrl, "/v1/field/work-orders", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        projectId: project.projectId,
+        displayName: "Access Matrix Field Work Order",
+        serviceTypeCode: "installation",
+        laborRateAmount: 850
+      }
+    });
     const checklistTemplate = await requestJson(baseUrl, "/v1/egenkontroll/templates", {
       method: "POST",
       token: adminToken,
@@ -182,6 +194,14 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
       {
         path: `/v1/projects/${project.projectId}/audit-events?companyId=${DEMO_IDS.companyId}`,
         error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/field/work-orders/${fieldWorkOrder.workOrderId}/dispatches?companyId=${DEMO_IDS.companyId}`,
+        error: "field_control_role_forbidden"
+      },
+      {
+        path: `/v1/field/audit-events?companyId=${DEMO_IDS.companyId}&workOrderId=${fieldWorkOrder.workOrderId}`,
+        error: "field_control_role_forbidden"
       },
       {
         path: `/v1/egenkontroll/templates?companyId=${DEMO_IDS.companyId}`,

@@ -10679,7 +10679,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -10687,6 +10687,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "field_dispatch_assignment",
       scopeCode: "project"
     });
+    assertFieldControlReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listDispatchAssignments({
         companyId,
@@ -10970,7 +10971,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -10978,6 +10979,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "field_work_order",
       scopeCode: "project"
     });
+    assertFieldControlReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listFieldAuditEvents({
         companyId,
@@ -11887,6 +11889,7 @@ const DESKTOP_SURFACE_READ_ROLE_CODES = new Set(["company_admin", "approver", "p
 const PERSONALLIGGARE_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const PROJECT_WORKSPACE_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const EGENKONTROLL_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
+const FIELD_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 
 function assertAnnualOperationsAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
@@ -11944,6 +11947,18 @@ function assertEgenkontrollControlReadAccess({ principal }) {
       403,
       "egenkontroll_control_role_forbidden",
       "Current actor is not allowed to access egenkontroll template, overview or deviation control read models."
+    );
+  }
+}
+
+function assertFieldControlReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedReader = [...FIELD_CONTROL_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedReader) {
+    throw createHttpError(
+      403,
+      "field_control_role_forbidden",
+      "Current actor is not allowed to access field dispatch, planning or audit read models."
     );
   }
 }
