@@ -31,6 +31,14 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   const catalog = platform.listPartnerConnectionCatalog();
   assert.equal(catalog.length, platform.partnerConnectionTypes.length);
   assert.equal(catalog.every((entry) => entry.operationCodes.length > 0), true);
+  assert.equal("credentialsRef" in connections[0], false);
+  assert.equal(connections[0].credentialsConfigured, true);
+
+  const listedConnections = platform.listPartnerConnections({
+    companyId: DEMO_IDS.companyId
+  });
+  assert.equal("credentialsRef" in listedConnections[0], false);
+  assert.equal(listedConnections[0].credentialsConfigured, true);
 
   const contractResults = await Promise.all(
     connections.map((connection) =>
@@ -53,6 +61,7 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   });
   assert.equal(bankCapabilities.operationCodes.includes("tax_account_sync"), true);
   assert.equal(bankCapabilities.mode, "sandbox");
+  assert.equal("credentialsRef" in bankCapabilities, false);
   const queued = await platform.dispatchPartnerOperation({
     companyId: DEMO_IDS.companyId,
     connectionId: bankConnection.connectionId,

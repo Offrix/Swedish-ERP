@@ -128,7 +128,7 @@ export function createPartnerModule({
       updatedAt: nowIso(clock)
     };
     state.partnerConnections.set(connection.connectionId, connection);
-    return clone(connection);
+    return presentPartnerConnection(connection);
   }
 
   function listPartnerConnections({ companyId, connectionType = null } = {}) {
@@ -138,14 +138,14 @@ export function createPartnerModule({
       .filter((connection) => connection.companyId === resolvedCompanyId)
       .filter((connection) => (resolvedType ? connection.connectionType === resolvedType : true))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-      .map(clone);
+      .map(presentPartnerConnection);
   }
 
   function setPartnerConnectionHealth({ companyId, connectionId, status } = {}) {
     const connection = requireConnection(companyId, connectionId);
     connection.status = assertAllowed(status, PARTNER_CONNECTION_STATUSES, "partner_connection_status_invalid");
     connection.updatedAt = nowIso(clock);
-    return clone(connection);
+    return presentPartnerConnection(connection);
   }
 
   async function runAdapterContractTest({ companyId, connectionId, actorId = "system" } = {}) {
@@ -736,6 +736,13 @@ function partnerCatalogEntry(connectionType) {
     ...catalog,
     contractAssertions: contractAssertionsFor(connectionType)
   });
+}
+
+function presentPartnerConnection(connection) {
+  const cloneConnection = clone(connection);
+  delete cloneConnection.credentialsRef;
+  cloneConnection.credentialsConfigured = true;
+  return cloneConnection;
 }
 
 function normalizeRetryPolicy(value = {}) {

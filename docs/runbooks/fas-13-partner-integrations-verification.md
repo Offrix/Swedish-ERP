@@ -35,6 +35,7 @@ Verifiera att partnerkopplingar, kontraktstester, fallback, rate limits och repl
 
 - partner connections materialiseras per bolag och adaptertyp
 - partner connections nekas om credentialsRef saknas; varje miljö kräver explicit secret reference
+- partner connection-readmodels visar inte rå credentialsRef; endast säker indikator på att credentials finns
 - kontraktstester körs och resultatet kan listas utan att historik skrivs över
 - fallback och rate-limit-status bevaras som egen operationstyp
 - async jobs, replay-planer och mass-retry är idempotenta och spårbara
