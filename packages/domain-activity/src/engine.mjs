@@ -24,6 +24,7 @@ export function createActivityEngine({ clock = () => new Date() } = {}) {
     activityVisibilityScopes: ACTIVITY_VISIBILITY_SCOPES,
     projectActivityEntry,
     listActivityEntries,
+    listActivityEntriesPage,
     getActivityEntry,
     hideActivityEntryByPolicy,
     rebuildActivityProjection,
@@ -115,7 +116,35 @@ export function createActivityEngine({ clock = () => new Date() } = {}) {
         }
         return entry.relations.some((relation) => (!relatedObjectType || relation.relatedObjectType === relatedObjectType) && (!relatedObjectId || relation.relatedObjectId === relatedObjectId));
       })
-      .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
+      .sort(compareActivityEntries);
+  }
+
+  function listActivityEntriesPage({
+    companyId,
+    objectType = null,
+    objectId = null,
+    visibilityScope = null,
+    relatedObjectType = null,
+    relatedObjectId = null,
+    limit = null,
+    cursor = null
+  } = {}) {
+    const resolvedLimit = limit == null ? null : normalizePositiveInteger(limit, "activity_limit_invalid");
+    const resolvedCursor = cursor == null ? null : decodeActivityCursor(cursor);
+    const filteredItems = listActivityEntries({
+      companyId,
+      objectType,
+      objectId,
+      visibilityScope,
+      relatedObjectType,
+      relatedObjectId
+    }).filter((entry) => isAfterActivityCursor(entry, resolvedCursor));
+    const items = resolvedLimit == null ? filteredItems : filteredItems.slice(0, resolvedLimit);
+    const nextCursor = resolvedLimit != null && filteredItems.length > resolvedLimit ? encodeActivityCursor(items[items.length - 1]) : null;
+    return {
+      items,
+      nextCursor
+    };
   }
 
   function getActivityEntry({ companyId, activityEntryId } = {}) {
@@ -185,6 +214,51 @@ function requireEntry(state, companyId, activityEntryId) {
     throw createError(403, "cross_company_forbidden", "Activity entry belongs to another company.");
   }
   return entry;
+}
+
+function compareActivityEntries(left, right) {
+  return right.occurredAt.localeCompare(left.occurredAt)
+    || right.activityEntryId.localeCompare(left.activityEntryId);
+}
+
+function normalizePositiveInteger(value, code) {
+  const normalized = Number(value);
+  if (!Number.isInteger(normalized) || normalized <= 0) {
+    throw createError(400, code, `${code} must be a positive integer.`);
+  }
+  return normalized;
+}
+
+function encodeActivityCursor(entry) {
+  return Buffer.from(JSON.stringify({
+    occurredAt: entry.occurredAt,
+    activityEntryId: entry.activityEntryId
+  }), "utf8").toString("base64url");
+}
+
+function decodeActivityCursor(cursor) {
+  try {
+    const value = JSON.parse(Buffer.from(String(cursor), "base64url").toString("utf8"));
+    return {
+      occurredAt: normalizeOptionalDateTime(value?.occurredAt),
+      activityEntryId: requireText(value?.activityEntryId, "activity_cursor_invalid")
+    };
+  } catch {
+    throw createError(400, "activity_cursor_invalid", "Activity cursor is invalid.");
+  }
+}
+
+function isAfterActivityCursor(entry, cursor) {
+  if (!cursor) {
+    return true;
+  }
+  if (entry.occurredAt < cursor.occurredAt) {
+    return true;
+  }
+  if (entry.occurredAt > cursor.occurredAt) {
+    return false;
+  }
+  return entry.activityEntryId < cursor.activityEntryId;
 }
 
 function appendToIndex(index, key, value) {

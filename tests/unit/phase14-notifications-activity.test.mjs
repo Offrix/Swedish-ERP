@@ -311,3 +311,58 @@ test("Step 13 activity projects append-only entries and hides by policy without 
   });
   assert.equal(hidden.status, "hidden_by_policy");
 });
+
+test("Step 13 activity supports stable cursor pagination", () => {
+  const activity = createActivityEngine({
+    clock: () => new Date("2026-03-24T16:30:00Z")
+  });
+  const companyId = "company_activity_page_1";
+
+  const first = activity.projectActivityEntry({
+    companyId,
+    objectType: "review_item",
+    objectId: "review_page_1",
+    activityType: "review_item_created",
+    actorType: "system",
+    actorSnapshot: { actorId: "system" },
+    summary: "Older entry.",
+    occurredAt: "2026-03-24T16:00:00Z",
+    sourceEventId: "page_evt_1",
+    visibilityScope: "company",
+    actorId: "system"
+  });
+  const second = activity.projectActivityEntry({
+    companyId,
+    objectType: "review_item",
+    objectId: "review_page_1",
+    activityType: "review_item_updated",
+    actorType: "user",
+    actorSnapshot: { userId: "user_1" },
+    summary: "Newer entry.",
+    occurredAt: "2026-03-24T16:05:00Z",
+    sourceEventId: "page_evt_2",
+    visibilityScope: "company",
+    actorId: "user_1"
+  });
+
+  const firstPage = activity.listActivityEntriesPage({
+    companyId,
+    objectType: "review_item",
+    objectId: "review_page_1",
+    limit: 1
+  });
+  assert.equal(firstPage.items.length, 1);
+  assert.equal(firstPage.items[0].activityEntryId, second.activityEntryId);
+  assert.equal(typeof firstPage.nextCursor, "string");
+
+  const secondPage = activity.listActivityEntriesPage({
+    companyId,
+    objectType: "review_item",
+    objectId: "review_page_1",
+    limit: 1,
+    cursor: firstPage.nextCursor
+  });
+  assert.equal(secondPage.items.length, 1);
+  assert.equal(secondPage.items[0].activityEntryId, first.activityEntryId);
+  assert.equal(secondPage.nextCursor, null);
+});

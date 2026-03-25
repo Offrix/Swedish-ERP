@@ -80,6 +80,32 @@ test("Step 13 API exposes notifications and activity as separate read models", a
       visibilityScope: "company",
       actorId: DEMO_IDS.userId
     });
+    platform.projectActivityEntry({
+      companyId: DEMO_IDS.companyId,
+      objectType: "review_item",
+      objectId: "review_api_paged",
+      activityType: "review_item_created",
+      actorType: "system",
+      actorSnapshot: { actorId: "system" },
+      summary: "Older paged activity.",
+      occurredAt: "2026-03-24T15:40:00Z",
+      sourceEventId: "activity_evt_page_1",
+      visibilityScope: "company",
+      actorId: DEMO_IDS.userId
+    });
+    platform.projectActivityEntry({
+      companyId: DEMO_IDS.companyId,
+      objectType: "review_item",
+      objectId: "review_api_paged",
+      activityType: "review_item_updated",
+      actorType: "user",
+      actorSnapshot: { userId: DEMO_IDS.userId },
+      summary: "Newer paged activity.",
+      occurredAt: "2026-03-24T15:50:00Z",
+      sourceEventId: "activity_evt_page_2",
+      visibilityScope: "company",
+      actorId: DEMO_IDS.userId
+    });
 
     const notificationList = await requestJson(
       baseUrl,
@@ -221,6 +247,24 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     );
     assert.equal(activity.items.length, 1);
     assert.equal(activity.items[0].summary, "Review item created for API integration test.");
+
+    const pagedActivityFirst = await requestJson(
+      baseUrl,
+      `/v1/activity?companyId=${DEMO_IDS.companyId}&objectType=review_item&objectId=review_api_paged&limit=1`,
+      { token: adminToken }
+    );
+    assert.equal(pagedActivityFirst.items.length, 1);
+    assert.equal(pagedActivityFirst.items[0].summary, "Newer paged activity.");
+    assert.equal(typeof pagedActivityFirst.nextCursor, "string");
+
+    const pagedActivitySecond = await requestJson(
+      baseUrl,
+      `/v1/activity?companyId=${DEMO_IDS.companyId}&objectType=review_item&objectId=review_api_paged&limit=1&cursor=${encodeURIComponent(pagedActivityFirst.nextCursor)}`,
+      { token: adminToken }
+    );
+    assert.equal(pagedActivitySecond.items.length, 1);
+    assert.equal(pagedActivitySecond.items[0].summary, "Older paged activity.");
+    assert.equal(pagedActivitySecond.nextCursor, null);
   } finally {
     await stopServer(server);
   }

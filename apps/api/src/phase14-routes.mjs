@@ -2469,16 +2469,16 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     if (!isObjectTimelineRequest) {
       assertActivityFeedFullReadAccess({ principal });
     }
-    writeJson(res, 200, {
-      items: platform.listActivityEntries({
-        companyId,
-        objectType,
-        objectId,
-        visibilityScope: optionalText(url.searchParams.get("visibilityScope")),
-        relatedObjectType: optionalText(url.searchParams.get("relatedObjectType")),
-        relatedObjectId: optionalText(url.searchParams.get("relatedObjectId"))
-      })
-    });
+    writeJson(res, 200, platform.listActivityEntriesPage({
+      companyId,
+      objectType,
+      objectId,
+      visibilityScope: optionalText(url.searchParams.get("visibilityScope")),
+      relatedObjectType: optionalText(url.searchParams.get("relatedObjectType")),
+      relatedObjectId: optionalText(url.searchParams.get("relatedObjectId")),
+      limit: parsePositiveInteger(url.searchParams.get("limit"), "activity_limit_invalid", "limit must be a positive integer.") || null,
+      cursor: optionalText(url.searchParams.get("cursor"))
+    }));
     return true;
   }
 
@@ -3318,6 +3318,17 @@ function requireTextArray(value, code, message) {
     throw createHttpError(400, code, message);
   }
   return value.map((entry) => requireText(entry, code, message));
+}
+
+function parsePositiveInteger(value, code, message) {
+  if (value == null || String(value).trim().length === 0) {
+    return null;
+  }
+  const normalized = Number(value);
+  if (!Number.isInteger(normalized) || normalized <= 0) {
+    throw createHttpError(400, code, message);
+  }
+  return normalized;
 }
 
 const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
