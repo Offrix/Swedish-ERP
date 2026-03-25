@@ -140,11 +140,32 @@ test("Phase 14.2 API records feature-flag metadata, emergency disables and recov
         approvalActorIds: [DEMO_APPROVER_IDS.userId]
       }
     });
+    await requestJson(baseUrl, "/v1/ops/feature-flags", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        flagKey: "reports.legacy_export",
+        description: "Legacy export path pending cleanup.",
+        flagType: "ops",
+        scopeType: "company",
+        scopeRef: DEMO_IDS.companyId,
+        defaultEnabled: false,
+        enabled: true,
+        ownerUserId: DEMO_IDS.userId,
+        riskClass: "medium",
+        sunsetAt: "2026-03-21",
+        changeReason: "Cleanup validation for expired flags."
+      }
+    });
 
     const beforeDisable = await requestJson(baseUrl, `/v1/ops/feature-flags?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
     assert.equal(beforeDisable.resolved[featureFlag.flagKey], true);
+    assert.equal(beforeDisable.resolved["reports.legacy_export"], false);
+    assert.equal(beforeDisable.items.find((item) => item.flagKey === "reports.legacy_export").expired, true);
     const userScopedView = await requestJson(baseUrl, `/v1/ops/feature-flags?companyId=${DEMO_IDS.companyId}&companyUserId=${DEMO_IDS.companyUserId}`, {
       token: adminToken
     });

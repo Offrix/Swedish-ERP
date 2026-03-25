@@ -312,7 +312,10 @@ export function createResilienceModule({
       .filter((featureFlag) => featureFlag.companyId === text(companyId, "company_id_required"))
       .filter((featureFlag) => (resolvedFlagKey ? featureFlag.flagKey === resolvedFlagKey : true))
       .sort((left, right) => left.flagKey.localeCompare(right.flagKey))
-      .map(clone);
+      .map((featureFlag) => ({
+        ...clone(featureFlag),
+        expired: isFeatureFlagExpired(featureFlag, currentDateKey(clock))
+      }));
   }
 
   function requestEmergencyDisable({
@@ -646,7 +649,12 @@ export function createResilienceModule({
         return accumulator;
       }, new Map());
     return Object.fromEntries(
-      [...resolvedFlags.entries()].map(([flagKey, featureFlag]) => [flagKey, featureFlag.enabled === true && featureFlag.emergencyDisabled !== true])
+      [...resolvedFlags.entries()].map(([flagKey, featureFlag]) => [
+        flagKey,
+        featureFlag.enabled === true
+          && featureFlag.emergencyDisabled !== true
+          && !isFeatureFlagExpired(featureFlag, currentDateKey(clock))
+      ])
     );
   }
 
@@ -657,16 +665,28 @@ export function createResilienceModule({
     const incidents = listRuntimeIncidentsForCompany(resolvedCompanyId);
     const restorePlans = listRuntimeRestorePlansForCompany(resolvedCompanyId);
     const restoreDrills = [...state.restoreDrills.values()].filter((drill) => drill.companyId === resolvedCompanyId);
+    const expiredFeatureFlags = [...state.featureFlags.values()]
+      .filter((featureFlag) => featureFlag.companyId === resolvedCompanyId)
+      .filter((featureFlag) => isFeatureFlagExpired(featureFlag, currentDateKey(clock)));
     const activeEmergencyDisableCount = [...state.emergencyDisables.values()].filter(
       (disable) => disable.companyId === resolvedCompanyId && disable.status === "active"
     ).length;
     return {
       companyId: resolvedCompanyId,
       activeEmergencyDisableCount,
+      expiredFeatureFlagCount: expiredFeatureFlags.length,
       openIncidentSignalCount: signals.filter((signal) => signal.state === "open").length,
       openIncidentCount: incidents.filter((incident) => !["resolved", "closed"].includes(incident.status)).length,
       pendingRestorePlanCount: restorePlans.filter((plan) => ["draft", "approved", "executing"].includes(plan.status)).length,
       failedRestoreDrillCount: restoreDrills.filter((drill) => drill.status === "failed").length,
+      expiredFeatureFlags: expiredFeatureFlags.slice(0, 5).map((featureFlag) => ({
+        featureFlagId: featureFlag.featureFlagId,
+        flagKey: featureFlag.flagKey,
+        scopeType: featureFlag.scopeType,
+        scopeRef: featureFlag.scopeRef,
+        sunsetAt: featureFlag.sunsetAt,
+        ownerUserId: featureFlag.ownerUserId
+      })),
       recentIncidentSignals: signals.slice(0, 5).map(clone),
       recentIncidents: incidents.slice(0, 5).map(clone),
       recentRestorePlans: restorePlans.slice(0, 5).map(clone)
@@ -1424,6 +1444,14 @@ function isActiveAuthWindow({ startsAt, endsAt, now } = {}) {
     return false;
   }
   return true;
+}
+
+function currentDateKey(clock = () => new Date()) {
+  return nowIso(clock).slice(0, 10);
+}
+
+function isFeatureFlagExpired(featureFlag, dateKey = currentDateKey()) {
+  return typeof featureFlag?.sunsetAt === "string" && featureFlag.sunsetAt < dateKey;
 }
 
 function flagMatchesRuntimeScope(featureFlag, companyId, companyUserId) {

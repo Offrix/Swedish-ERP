@@ -123,9 +123,26 @@ test("Phase 14.2 resilience records flag metadata, audit correlations and contro
     changeReason: "User override remains disabled for finance reviewer.",
     approvalActorIds: [DEMO_APPROVER_IDS.userId]
   });
+  platform.upsertFeatureFlag({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    flagKey: "reports.legacy_export",
+    description: "Legacy export path pending cleanup.",
+    flagType: "ops",
+    scopeType: "company",
+    scopeRef: DEMO_IDS.companyId,
+    defaultEnabled: false,
+    enabled: true,
+    ownerUserId: DEMO_IDS.userId,
+    riskClass: "medium",
+    sunsetAt: "2026-03-21",
+    changeReason: "Cleanup validation for expired flags."
+  });
 
   assert.equal(platform.resolveRuntimeFlags({ companyId: DEMO_IDS.companyId })[featureFlag.flagKey], true);
   assert.equal(platform.resolveRuntimeFlags({ companyId: DEMO_IDS.companyId, companyUserId: DEMO_IDS.companyUserId })[featureFlag.flagKey], false);
+  assert.equal(platform.resolveRuntimeFlags({ companyId: DEMO_IDS.companyId }).reports?.legacy_export, undefined);
+  assert.equal(platform.resolveRuntimeFlags({ companyId: DEMO_IDS.companyId })["reports.legacy_export"], false);
   assert.throws(
     () =>
       platform.requestEmergencyDisable({
@@ -236,6 +253,8 @@ test("Phase 14.2 resilience records flag metadata, audit correlations and contro
   assert.deepEqual(featureFlagAudit.metadata.approvalActorIds, [DEMO_APPROVER_IDS.userId]);
   assert.equal(featureFlagAudit.metadata.changeReason, "Payment exports are entering staged rollout.");
   assert.equal(controlPlane.activeEmergencyDisableCount, 0);
+  assert.equal(controlPlane.expiredFeatureFlagCount, 1);
+  assert.equal(controlPlane.expiredFeatureFlags[0].flagKey, "reports.legacy_export");
   assert.equal(controlPlane.openIncidentSignalCount, 1);
   assert.equal(incidentSignals.some((signal) => signal.signalType === "emergency_disable_activated"), true);
 });

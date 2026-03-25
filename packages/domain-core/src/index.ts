@@ -151,6 +151,7 @@ export interface FeatureFlagRecord {
   readonly sunsetAt: string;
   readonly emergencyDisabled: boolean;
   readonly emergencyReasonCode: string | null;
+  readonly expired?: boolean;
   readonly changeReason?: string | null;
   readonly approvalActorIds?: readonly string[];
   readonly changedByUserId?: string | null;
