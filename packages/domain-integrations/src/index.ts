@@ -62,11 +62,11 @@ export type PublicApiScopeCode =
   | "webhook.manage"
   | "partner.read"
   | "automation.read";
-export type WebhookDeliveryStatus = "queued" | "sent" | "rate_limited" | "suppressed" | "disabled";
+export type WebhookDeliveryStatus = "queued" | "running" | "sent" | "failed" | "rate_limited" | "suppressed" | "disabled";
 export type PartnerConnectionType = "bank" | "peppol" | "pension" | "crm" | "commerce" | "id06";
 export type PartnerConnectionStatus = "active" | "degraded" | "outage" | "disabled";
 export type PartnerFallbackMode = "queue_retry" | "manual_review" | "disabled";
-export type PartnerOperationStatus = "queued" | "succeeded" | "fallback" | "rate_limited";
+export type PartnerOperationStatus = "queued" | "running" | "succeeded" | "failed" | "fallback" | "rate_limited" | "retry_scheduled";
 export type AsyncJobStatus = "queued" | "claimed" | "running" | "succeeded" | "failed" | "retry_scheduled" | "dead_lettered" | "replay_planned" | "replayed";
 export type AsyncJobRiskClass = "normal" | "high_risk" | "restricted";
 export type AsyncJobErrorClass = "transient_technical" | "persistent_technical" | "business_input" | "downstream_unknown";

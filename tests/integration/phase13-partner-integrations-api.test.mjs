@@ -6,10 +6,16 @@ import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/i
 import { PARTNER_CONNECTION_TYPES } from "../../packages/domain-integrations/src/partners.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
+import {
+  createPassingPartnerContractTestExecutors,
+  createSuccessfulPartnerOperationExecutors
+} from "../helpers/phase13-integrations-fixtures.mjs";
 
 test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-safe jobs", async () => {
   const platform = createApiPlatform({
-    clock: () => new Date("2026-03-22T21:10:00Z")
+    clock: () => new Date("2026-03-22T21:10:00Z"),
+    partnerContractTestExecutors: createPassingPartnerContractTestExecutors(),
+    partnerOperationExecutors: createSuccessfulPartnerOperationExecutors()
   });
   const server = createApiServer({ platform });
   await new Promise((resolve) => server.listen(0, resolve));
@@ -147,8 +153,16 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
         payload: { customerId: "crm-1" }
       }
     });
-    assert.equal(firstCrmOperation.status, "succeeded");
+    assert.equal(firstCrmOperation.status, "queued");
     assert.equal(firstCrmOperation.mode, "sandbox");
+    const firstCrmDispatch = await requestJson(baseUrl, `/v1/partners/operations/${firstCrmOperation.operationId}/dispatch`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(firstCrmDispatch.status, "succeeded");
 
     const secondCrmOperation = await requestJson(baseUrl, "/v1/partners/operations", {
       method: "POST",

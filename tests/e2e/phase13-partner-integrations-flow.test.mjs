@@ -5,10 +5,16 @@ import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
+import {
+  createPassingPartnerContractTestExecutors,
+  createSuccessfulPartnerOperationExecutors
+} from "../helpers/phase13-integrations-fixtures.mjs";
 
 test("Phase 13.2 flow exposes partner routes and runs fallback plus replay without mutating history", async () => {
   const platform = createApiPlatform({
-    clock: () => new Date("2026-03-22T22:10:00Z")
+    clock: () => new Date("2026-03-22T22:10:00Z"),
+    partnerContractTestExecutors: createPassingPartnerContractTestExecutors(),
+    partnerOperationExecutors: createSuccessfulPartnerOperationExecutors()
   });
   const server = createApiServer({ platform });
   await new Promise((resolve) => server.listen(0, resolve));
@@ -17,6 +23,7 @@ test("Phase 13.2 flow exposes partner routes and runs fallback plus replay witho
   try {
     const root = await requestJson(baseUrl, "/");
     assert.equal(root.routes.includes("/v1/partners/operations"), true);
+    assert.equal(root.routes.includes("/v1/partners/operations/:operationId/dispatch"), true);
     assert.equal(root.routes.includes("/v1/jobs/:jobId/replay"), true);
     assert.equal(root.routes.includes("/v1/partners/catalog"), true);
     assert.equal(root.routes.includes("/v1/partners/connections/:connectionId/capabilities"), true);

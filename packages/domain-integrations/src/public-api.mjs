@@ -15,7 +15,7 @@ export const PUBLIC_API_SCOPE_CODES = Object.freeze([
   "partner.read",
   "automation.read"
 ]);
-export const WEBHOOK_DELIVERY_STATUSES = Object.freeze(["queued", "sent", "rate_limited", "suppressed", "disabled"]);
+export const WEBHOOK_DELIVERY_STATUSES = Object.freeze(["queued", "running", "sent", "failed", "rate_limited", "suppressed", "disabled"]);
 export const WEBHOOK_EVENT_TYPES = Object.freeze([
   "report.snapshot.ready",
   "submission.updated",
@@ -30,7 +30,7 @@ export const WEBHOOK_EVENT_TYPES = Object.freeze([
   "migration.diff.generated"
 ]);
 
-export function createPublicApiModule({ state, clock = () => new Date() }) {
+export function createPublicApiModule({ state, clock = () => new Date(), deliveryExecutor = defaultWebhookDeliveryExecutor }) {
   return {
     publicApiModes: PUBLIC_API_MODES,
     publicApiClientStatuses: PUBLIC_API_CLIENT_STATUSES,
@@ -49,6 +49,7 @@ export function createPublicApiModule({ state, clock = () => new Date() }) {
     createWebhookSubscription,
     listWebhookSubscriptions,
     emitWebhookEvent,
+    dispatchWebhookDeliveries,
     listWebhookEvents,
     listWebhookDeliveries,
     getPublicApiSandboxCatalog
@@ -334,17 +335,121 @@ export function createPublicApiModule({ state, clock = () => new Date() }) {
         eventId: event.eventId,
         subscriptionId: subscription.subscriptionId,
         companyId: resolvedCompanyId,
-        status: "sent",
-        deliveryAttemptNo: 1,
+        mode: resolvedMode,
+        status: "queued",
+        deliveryAttemptNo: 0,
         signature: signWebhookBody(subscription.secret, body),
         bodyHash: hashObject(body),
+        bodyJson: clone(body),
         targetUrl: subscription.targetUrl,
-        deliveredAt: nowIso(clock),
-        createdAt: nowIso(clock)
+        deliveredAt: null,
+        lastAttemptedAt: null,
+        lastHttpStatus: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        providerReference: null,
+        nextAttemptAt: nowIso(clock),
+        attempts: [],
+        createdAt: nowIso(clock),
+        updatedAt: nowIso(clock)
       };
       state.webhookDeliveries.set(delivery.deliveryId, delivery);
     }
     return materializeWebhookEvent(event);
+  }
+
+  async function dispatchWebhookDeliveries({
+    companyId,
+    deliveryId = null,
+    subscriptionId = null,
+    eventId = null,
+    actorId = "system",
+    limit = 50
+  } = {}) {
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const resolvedDeliveryId = optionalText(deliveryId);
+    const resolvedSubscriptionId = optionalText(subscriptionId);
+    const resolvedEventId = optionalText(eventId);
+    const resolvedLimit = normalizePositiveInteger(limit, "webhook_dispatch_limit_invalid", 50);
+    const resolvedActorId = text(actorId || "system", "actor_id_required");
+    const now = nowIso(clock);
+    const deliveries = [...state.webhookDeliveries.values()]
+      .filter((delivery) => delivery.companyId === resolvedCompanyId)
+      .filter((delivery) => (resolvedDeliveryId ? delivery.deliveryId === resolvedDeliveryId : true))
+      .filter((delivery) => (resolvedSubscriptionId ? delivery.subscriptionId === resolvedSubscriptionId : true))
+      .filter((delivery) => (resolvedEventId ? delivery.eventId === resolvedEventId : true))
+      .filter((delivery) => isDispatchableWebhookDelivery(delivery, now, resolvedDeliveryId != null))
+      .sort(compareWebhookDeliveries)
+      .slice(0, resolvedLimit);
+
+    const dispatched = [];
+    for (const delivery of deliveries) {
+      const event = state.webhookEvents.get(delivery.eventId);
+      const subscription = state.webhookSubscriptions.get(delivery.subscriptionId);
+      if (!event || !subscription) {
+        continue;
+      }
+      delivery.status = "running";
+      delivery.updatedAt = nowIso(clock);
+      const attemptNo = delivery.deliveryAttemptNo + 1;
+      const attemptedAt = nowIso(clock);
+      const rawResult = await executeWebhookDelivery({
+        executor: deliveryExecutor,
+        subscription,
+        event,
+        delivery
+      });
+      const result = normalizeWebhookDispatchResult(rawResult);
+      const attempt = {
+        attemptId: crypto.randomUUID(),
+        attemptNo,
+        actorId: resolvedActorId,
+        attemptedAt,
+        outcome: result.outcome,
+        httpStatus: result.httpStatus,
+        errorCode: result.errorCode,
+        errorMessage: result.errorMessage,
+        retryAfterSeconds: result.retryAfterSeconds,
+        providerReference: result.providerReference
+      };
+      delivery.deliveryAttemptNo = attemptNo;
+      delivery.lastAttemptedAt = attemptedAt;
+      delivery.lastHttpStatus = result.httpStatus;
+      delivery.lastErrorCode = result.errorCode;
+      delivery.lastErrorMessage = result.errorMessage;
+      delivery.providerReference = result.providerReference;
+      delivery.updatedAt = attemptedAt;
+      delivery.attempts.push(attempt);
+
+      if (result.outcome === "sent") {
+        delivery.status = "sent";
+        delivery.deliveredAt = attemptedAt;
+        delivery.nextAttemptAt = null;
+      } else if (result.outcome === "rate_limited") {
+        delivery.status = "rate_limited";
+        delivery.nextAttemptAt = addSecondsIso(attemptedAt, result.retryAfterSeconds || 60);
+      } else if (result.outcome === "suppressed") {
+        delivery.status = "suppressed";
+        delivery.nextAttemptAt = null;
+      } else if (result.outcome === "disabled") {
+        delivery.status = "disabled";
+        delivery.nextAttemptAt = null;
+      } else if (result.retryAfterSeconds != null) {
+        delivery.status = "queued";
+        delivery.nextAttemptAt = addSecondsIso(attemptedAt, result.retryAfterSeconds);
+      } else {
+        delivery.status = "failed";
+        delivery.nextAttemptAt = null;
+      }
+
+      dispatched.push(presentWebhookDelivery(delivery));
+    }
+
+    return {
+      companyId: resolvedCompanyId,
+      attemptedCount: dispatched.length,
+      items: dispatched
+    };
   }
 
   function listWebhookEvents({ companyId, mode = null, eventType = null } = {}) {
@@ -368,7 +473,7 @@ export function createPublicApiModule({ state, clock = () => new Date() }) {
       .filter((delivery) => (resolvedSubscriptionId ? delivery.subscriptionId === resolvedSubscriptionId : true))
       .filter((delivery) => (resolvedEventId ? delivery.eventId === resolvedEventId : true))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-      .map(clone);
+      .map(presentWebhookDelivery);
   }
 
   function getPublicApiSandboxCatalog({ companyId } = {}) {
@@ -445,7 +550,7 @@ export function createPublicApiModule({ state, clock = () => new Date() }) {
       deliveries: [...state.webhookDeliveries.values()]
         .filter((delivery) => delivery.eventId === event.eventId)
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-        .map(clone)
+        .map(presentWebhookDelivery)
     });
   }
 
@@ -464,6 +569,12 @@ export function createPublicApiModule({ state, clock = () => new Date() }) {
       cloneSubscription.secretPreview = typeof secret === "string" ? `***${secret.slice(-4)}` : null;
     }
     return cloneSubscription;
+  }
+
+  function presentWebhookDelivery(delivery) {
+    const cloneDelivery = clone(delivery);
+    delete cloneDelivery.bodyJson;
+    return cloneDelivery;
   }
 
   function requireClient(companyId, clientId) {
@@ -485,6 +596,137 @@ export function createPublicApiModule({ state, clock = () => new Date() }) {
     }
     return token;
   }
+}
+
+async function executeWebhookDelivery({ executor, subscription, event, delivery }) {
+  if (typeof executor !== "function") {
+    return {
+      outcome: "failed",
+      errorCode: "webhook_delivery_runtime_missing",
+      errorMessage: "No webhook delivery executor is registered."
+    };
+  }
+  return executor({
+    subscription: clone(subscription),
+    event: clone(event),
+    delivery: clone(delivery),
+    body: clone(delivery.bodyJson)
+  });
+}
+
+async function defaultWebhookDeliveryExecutor({ subscription, delivery, body }) {
+  try {
+    const response = await fetch(subscription.targetUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-swedish-erp-signature": delivery.signature,
+        "x-swedish-erp-event-id": delivery.eventId,
+        "x-swedish-erp-subscription-id": delivery.subscriptionId
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000)
+    });
+    const retryAfterSeconds = parseRetryAfterSeconds(response.headers.get("retry-after"));
+    if (response.status >= 200 && response.status < 300) {
+      return {
+        outcome: "sent",
+        httpStatus: response.status
+      };
+    }
+    if (response.status === 429) {
+      return {
+        outcome: "rate_limited",
+        httpStatus: response.status,
+        retryAfterSeconds: retryAfterSeconds || 60,
+        errorCode: "webhook_rate_limited"
+      };
+    }
+    if (response.status === 410) {
+      return {
+        outcome: "disabled",
+        httpStatus: response.status,
+        errorCode: "webhook_endpoint_gone"
+      };
+    }
+    if (response.status === 404 || response.status === 422) {
+      return {
+        outcome: "suppressed",
+        httpStatus: response.status,
+        errorCode: "webhook_endpoint_rejected"
+      };
+    }
+    if (response.status >= 500) {
+      return {
+        outcome: "failed",
+        httpStatus: response.status,
+        errorCode: "webhook_transport_error",
+        retryAfterSeconds: retryAfterSeconds || 60
+      };
+    }
+    return {
+      outcome: "failed",
+      httpStatus: response.status,
+      errorCode: "webhook_delivery_failed"
+    };
+  } catch (error) {
+    return {
+      outcome: "failed",
+      errorCode: "webhook_transport_error",
+      errorMessage: typeof error?.message === "string" ? error.message : "Webhook delivery failed.",
+      retryAfterSeconds: 60
+    };
+  }
+}
+
+function normalizeWebhookDispatchResult(value = {}) {
+  const resolved = value && typeof value === "object" ? value : {};
+  const outcome = assertAllowed(
+    resolved.outcome || "failed",
+    ["sent", "rate_limited", "suppressed", "disabled", "failed"],
+    "webhook_delivery_outcome_invalid"
+  );
+  return {
+    outcome,
+    httpStatus: normalizeNullableInteger(resolved.httpStatus),
+    errorCode: optionalText(resolved.errorCode),
+    errorMessage: optionalText(resolved.errorMessage),
+    retryAfterSeconds: normalizeNullablePositiveInteger(resolved.retryAfterSeconds),
+    providerReference: optionalText(resolved.providerReference)
+  };
+}
+
+function compareWebhookDeliveries(left, right) {
+  const leftNext = left.nextAttemptAt || left.createdAt;
+  const rightNext = right.nextAttemptAt || right.createdAt;
+  return leftNext.localeCompare(rightNext) || left.createdAt.localeCompare(right.createdAt);
+}
+
+function isDispatchableWebhookDelivery(delivery, now, forceDispatch) {
+  if (delivery.status === "sent" || delivery.status === "suppressed" || delivery.status === "disabled" || delivery.status === "running") {
+    return false;
+  }
+  if (forceDispatch) {
+    return true;
+  }
+  const nextAttemptAt = delivery.nextAttemptAt || delivery.createdAt;
+  return nextAttemptAt <= now;
+}
+
+function parseRetryAfterSeconds(value) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+  const numeric = Number(value);
+  if (Number.isInteger(numeric) && numeric > 0) {
+    return numeric;
+  }
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+  const seconds = Math.ceil((parsedDate.getTime() - Date.now()) / 1000);
+  return seconds > 0 ? seconds : null;
 }
 
 function normalizeScopes(values) {
@@ -550,6 +792,45 @@ function addMinutesIso(timestamp, minutes) {
   const resolved = new Date(timestamp);
   resolved.setUTCMinutes(resolved.getUTCMinutes() + minutes);
   return resolved.toISOString();
+}
+
+function addSecondsIso(timestamp, seconds) {
+  const resolved = new Date(timestamp);
+  resolved.setUTCSeconds(resolved.getUTCSeconds() + seconds);
+  return resolved.toISOString();
+}
+
+function normalizeNullableInteger(value) {
+  if (value == null) {
+    return null;
+  }
+  const number = Number(value);
+  if (!Number.isInteger(number)) {
+    return null;
+  }
+  return number;
+}
+
+function normalizeNullablePositiveInteger(value) {
+  if (value == null) {
+    return null;
+  }
+  const number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) {
+    return null;
+  }
+  return number;
+}
+
+function normalizePositiveInteger(value, code, fallback) {
+  if (value == null) {
+    return fallback;
+  }
+  const number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) {
+    throw createError(400, code, `${code} must be a positive integer.`);
+  }
+  return number;
 }
 
 function assertAllowed(value, allowed, code) {

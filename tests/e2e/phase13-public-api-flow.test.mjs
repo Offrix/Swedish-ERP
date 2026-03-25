@@ -6,10 +6,12 @@ import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/i
 import { stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
 import { seedReportSnapshot } from "../helpers/reporting-fixtures.mjs";
+import { createSentWebhookDeliveryExecutor } from "../helpers/phase13-integrations-fixtures.mjs";
 
 test("Phase 13.1 flow exposes public routes and lets a sandbox client consume snapshots and webhook events", async () => {
   const platform = createApiPlatform({
-    clock: () => new Date("2026-03-22T22:00:00Z")
+    clock: () => new Date("2026-03-22T22:00:00Z"),
+    webhookDeliveryExecutor: createSentWebhookDeliveryExecutor()
   });
   const reportSnapshot = seedReportSnapshot(platform, DEMO_IDS.companyId, "phase13-1-e2e");
   platform.prepareAuthoritySubmission({
@@ -34,6 +36,7 @@ test("Phase 13.1 flow exposes public routes and lets a sandbox client consume sn
     const root = await requestJson(baseUrl, "/");
     assert.equal(root.routes.includes("/v1/public/oauth/token"), true);
     assert.equal(root.routes.includes("/v1/public-api/webhooks"), true);
+    assert.equal(root.routes.includes("/v1/public-api/webhook-deliveries/dispatch"), true);
     assert.equal(root.routes.includes("/v1/public/legal-forms/declaration-profile"), true);
     assert.equal(root.routes.includes("/v1/public/tax-account/summary"), true);
 
@@ -138,6 +141,17 @@ test("Phase 13.1 flow exposes public routes and lets a sandbox client consume sn
       { token: adminToken }
     );
     assert.equal(deliveries.items.length, 1);
+    assert.equal(deliveries.items[0].status, "queued");
+    const dispatched = await requestJson(baseUrl, "/v1/public-api/webhook-deliveries/dispatch", {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        subscriptionId: subscription.subscriptionId
+      }
+    });
+    assert.equal(dispatched.attemptedCount, 1);
+    assert.equal(dispatched.items[0].status, "sent");
   } finally {
     await stopServer(server);
   }

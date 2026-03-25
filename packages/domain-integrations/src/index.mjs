@@ -27,7 +27,13 @@ export function createIntegrationPlatform(options = {}) {
   return createIntegrationEngine(options);
 }
 
-export function createIntegrationEngine({ clock = () => new Date(), paymentBaseUrl = "https://payments.local" } = {}) {
+export function createIntegrationEngine({
+  clock = () => new Date(),
+  paymentBaseUrl = "https://payments.local",
+  webhookDeliveryExecutor = undefined,
+  partnerContractTestExecutors = undefined,
+  partnerOperationExecutors = undefined
+} = {}) {
   const state = {
     submissions: new Map(),
     submissionIdsByCompany: new Map(),
@@ -50,8 +56,17 @@ export function createIntegrationEngine({ clock = () => new Date(), paymentBaseU
     asyncJobs: new Map(),
     asyncDeadLetters: new Map()
   };
-  const publicApiModule = createPublicApiModule({ state, clock });
-  const partnerModule = createPartnerModule({ state, clock });
+  const publicApiModule = createPublicApiModule({
+    state,
+    clock,
+    deliveryExecutor: webhookDeliveryExecutor
+  });
+  const partnerModule = createPartnerModule({
+    state,
+    clock,
+    contractTestExecutors: partnerContractTestExecutors,
+    operationExecutors: partnerOperationExecutors
+  });
 
   return {
     ...publicApiModule,

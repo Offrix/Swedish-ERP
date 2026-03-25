@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 export const PARTNER_CONNECTION_TYPES = Object.freeze(["bank", "peppol", "pension", "crm", "commerce", "id06"]);
 export const PARTNER_CONNECTION_STATUSES = Object.freeze(["active", "degraded", "outage", "disabled"]);
 export const PARTNER_FALLBACK_MODES = Object.freeze(["queue_retry", "manual_review", "disabled"]);
-export const PARTNER_OPERATION_STATUSES = Object.freeze(["queued", "succeeded", "fallback", "rate_limited"]);
+export const PARTNER_OPERATION_STATUSES = Object.freeze(["queued", "running", "succeeded", "failed", "fallback", "rate_limited", "retry_scheduled"]);
 export const JOB_STATUSES = Object.freeze(["queued", "claimed", "running", "succeeded", "failed", "retry_scheduled", "dead_lettered", "replay_planned", "replayed"]);
 export const JOB_RISK_CLASSES = Object.freeze(["normal", "high_risk", "restricted"]);
 export const JOB_ERROR_CLASSES = Object.freeze(["transient_technical", "persistent_technical", "business_input", "downstream_unknown"]);
@@ -46,7 +46,12 @@ export const PARTNER_CONNECTION_CATALOG = Object.freeze({
   })
 });
 
-export function createPartnerModule({ state, clock = () => new Date() }) {
+export function createPartnerModule({
+  state,
+  clock = () => new Date(),
+  contractTestExecutors = null,
+  operationExecutors = null
+}) {
   return {
     partnerConnectionTypes: PARTNER_CONNECTION_TYPES,
     partnerConnectionStatuses: PARTNER_CONNECTION_STATUSES,
@@ -63,6 +68,7 @@ export function createPartnerModule({ state, clock = () => new Date() }) {
     runAdapterContractTest,
     listAdapterContractResults,
     dispatchPartnerOperation,
+    executePartnerOperation,
     listPartnerOperations,
     enqueueAsyncJob,
     listAsyncJobs,
@@ -141,8 +147,27 @@ export function createPartnerModule({ state, clock = () => new Date() }) {
     return clone(connection);
   }
 
-  function runAdapterContractTest({ companyId, connectionId, actorId = "system" } = {}) {
+  async function runAdapterContractTest({ companyId, connectionId, actorId = "system" } = {}) {
     const connection = requireConnection(companyId, connectionId);
+    const assertions = contractAssertionsFor(connection.connectionType);
+    const executor = resolveConfiguredExecutor(contractTestExecutors, connection);
+    const rawResult =
+      typeof executor === "function"
+        ? await executor({
+            connection: clone(connection),
+            assertions: clone(assertions),
+            actorId: text(actorId || "system", "actor_id_required")
+          })
+        : {
+            result: "failed",
+            failures: [
+              {
+                code: "partner_contract_runtime_missing",
+                message: `No contract-test executor is registered for ${connection.connectionType}.`
+              }
+            ]
+          };
+    const normalized = normalizeContractTestResult(rawResult, assertions);
     const contractResult = {
       contractResultId: crypto.randomUUID(),
       companyId: connection.companyId,
@@ -151,8 +176,10 @@ export function createPartnerModule({ state, clock = () => new Date() }) {
       partnerCode: connection.partnerCode,
       mode: connection.mode,
       actorId: text(actorId || "system", "actor_id_required"),
-      result: "passed",
-      assertions: contractAssertionsFor(connection.connectionType),
+      result: normalized.result,
+      assertions: normalized.assertions,
+      failures: normalized.failures,
+      diagnostics: normalized.diagnostics,
       executedAt: nowIso(clock)
     };
     state.partnerContractResults.set(contractResult.contractResultId, contractResult);
@@ -169,7 +196,7 @@ export function createPartnerModule({ state, clock = () => new Date() }) {
       .map(clone);
   }
 
-  function dispatchPartnerOperation({
+  async function dispatchPartnerOperation({
     companyId,
     connectionId,
     operationCode,
@@ -256,13 +283,114 @@ export function createPartnerModule({ state, clock = () => new Date() }) {
       idempotencyKey: `${connection.connectionId}:${operation.operationCode}:${operation.payloadHash}`,
       actorId
     });
-    claimAsyncJob({ companyId, jobId: job.jobId, workerId: `${connection.connectionType}-worker` });
-    completeAsyncJob({ companyId, jobId: job.jobId, resultSummary: { providerReference: `${connection.partnerCode}:${operation.operationId}` } });
-    operation.status = "succeeded";
     operation.jobId = job.jobId;
-    operation.providerReference = `${connection.partnerCode}:${operation.operationId}`;
     operation.updatedAt = nowIso(clock);
     return clone(operation);
+  }
+
+  async function executePartnerOperation({ companyId, operationId, actorId = "system" } = {}) {
+    const operation = requireOperation(companyId, operationId);
+    const connection = requireConnection(companyId, operation.connectionId);
+    if (!operation.jobId) {
+      throw createError(409, "partner_operation_not_dispatchable", "Partner operation does not have a dispatchable async job.");
+    }
+    if (operation.status === "succeeded") {
+      return clone(operation);
+    }
+
+    const claimedJob = claimAsyncJob({
+      companyId,
+      jobId: operation.jobId,
+      workerId: `${connection.connectionType}-worker`
+    });
+    operation.status = "running";
+    operation.updatedAt = nowIso(clock);
+
+    const executor = resolveConfiguredExecutor(operationExecutors, connection);
+    if (typeof executor !== "function") {
+      const failedJob = failAsyncJobAttempt({
+        companyId,
+        jobId: operation.jobId,
+        errorClass: "persistent_technical",
+        errorMessage: `No partner-operation executor is registered for ${connection.connectionType}.`,
+        replayAllowed: true
+      });
+      return finalizePartnerOperationFailure({
+        operation,
+        connection,
+        failedJob,
+        failureStatus: connection.fallbackMode === "disabled" ? "failed" : "fallback",
+        failureCode: "partner_operation_runtime_missing",
+        failureMessage: `No partner-operation executor is registered for ${connection.connectionType}.`,
+        timestamp: nowIso(clock)
+      });
+    }
+
+    const rawResult = await executor({
+      connection: clone(connection),
+      operation: clone(operation),
+      job: clone(claimedJob),
+      actorId: text(actorId || "system", "actor_id_required")
+    });
+    const normalized = normalizePartnerOperationResult(rawResult);
+
+    if (normalized.outcome === "succeeded") {
+      completeAsyncJob({
+        companyId,
+        jobId: operation.jobId,
+        resultSummary: {
+          providerReference: normalized.providerReference || `${connection.partnerCode}:${operation.operationId}`,
+          responseSummary: normalized.responseSummary
+        }
+      });
+      operation.status = "succeeded";
+      operation.providerReference = normalized.providerReference || `${connection.partnerCode}:${operation.operationId}`;
+      operation.failureCode = null;
+      operation.failureMessage = null;
+      operation.nextRetryAt = null;
+      operation.updatedAt = nowIso(clock);
+      return clone(operation);
+    }
+
+    const failedJob = failAsyncJobAttempt({
+      companyId,
+      jobId: operation.jobId,
+      errorClass: normalized.errorClass,
+      errorMessage: normalized.errorMessage,
+      replayAllowed: normalized.replayAllowed
+    });
+
+    if (normalized.outcome === "rate_limited") {
+      return finalizePartnerOperationFailure({
+        operation,
+        connection,
+        failedJob,
+        failureStatus: "rate_limited",
+        failureCode: normalized.failureCode || "partner_rate_limit_exceeded",
+        failureMessage: normalized.errorMessage,
+        timestamp: nowIso(clock)
+      });
+    }
+    if (normalized.outcome === "fallback") {
+      return finalizePartnerOperationFailure({
+        operation,
+        connection,
+        failedJob,
+        failureStatus: "fallback",
+        failureCode: normalized.failureCode || normalized.fallbackReasonCode || "partner_fallback_triggered",
+        failureMessage: normalized.errorMessage,
+        timestamp: nowIso(clock)
+      });
+    }
+    return finalizePartnerOperationFailure({
+      operation,
+      connection,
+      failedJob,
+      failureStatus: failedJob.status === "retry_scheduled" ? "retry_scheduled" : "failed",
+      failureCode: normalized.failureCode || "partner_operation_failed",
+      failureMessage: normalized.errorMessage,
+      timestamp: nowIso(clock)
+    });
   }
 
   function listPartnerOperations({ companyId, connectionId = null, status = null } = {}) {
@@ -488,6 +616,14 @@ export function createPartnerModule({ state, clock = () => new Date() }) {
     return connection;
   }
 
+  function requireOperation(companyId, operationId) {
+    const operation = state.partnerOperations.get(text(operationId, "partner_operation_id_required"));
+    if (!operation || operation.companyId !== text(companyId, "company_id_required")) {
+      throw createError(404, "partner_operation_not_found", "Partner operation was not found.");
+    }
+    return operation;
+  }
+
   function requireJob(companyId, jobId) {
     const job = state.asyncJobs.get(text(jobId, "job_id_required"));
     if (!job || job.companyId !== text(companyId, "company_id_required")) {
@@ -524,6 +660,70 @@ export function createPartnerModule({ state, clock = () => new Date() }) {
       deadLetter: state.asyncDeadLetters.get(job.jobId) || null
     });
   }
+}
+
+function finalizePartnerOperationFailure({ operation, connection, failedJob, failureStatus, failureCode, failureMessage, timestamp }) {
+  const latestAttempt = Array.isArray(failedJob.attempts) && failedJob.attempts.length > 0 ? failedJob.attempts[failedJob.attempts.length - 1] : null;
+  operation.status = failureStatus;
+  operation.failureCode = failureCode || null;
+  operation.failureMessage = failureMessage || null;
+  operation.fallbackTriggered = failureStatus === "fallback" || failureStatus === "rate_limited";
+  operation.fallbackReasonCode = operation.fallbackTriggered ? failureCode || null : null;
+  operation.nextRetryAt = latestAttempt?.nextRetryAt || null;
+  operation.updatedAt = timestamp;
+  if (connection.fallbackMode === "disabled" && failureStatus === "fallback") {
+    operation.status = "failed";
+    operation.fallbackTriggered = false;
+    operation.fallbackReasonCode = null;
+  }
+  return clone(operation);
+}
+
+function resolveConfiguredExecutor(catalog, connection) {
+  if (typeof catalog === "function") {
+    return catalog;
+  }
+  if (!catalog || typeof catalog !== "object") {
+    return null;
+  }
+  return catalog[connection.connectionId] || catalog[connection.partnerCode] || catalog[connection.connectionType] || null;
+}
+
+function normalizeContractTestResult(value, fallbackAssertions) {
+  const resolved = value && typeof value === "object" ? value : {};
+  const result = ["passed", "failed"].includes(resolved.result) ? resolved.result : "failed";
+  const assertions = Array.isArray(resolved.assertions) && resolved.assertions.length > 0 ? resolved.assertions.map(String) : [...fallbackAssertions];
+  const failures = Array.isArray(resolved.failures)
+    ? resolved.failures.map((failure) => ({
+        code: optionalText(failure?.code) || "partner_contract_failure",
+        message: optionalText(failure?.message) || "Partner contract assertion failed."
+      }))
+    : [];
+  return {
+    result,
+    assertions,
+    failures,
+    diagnostics: resolved.diagnostics && typeof resolved.diagnostics === "object" ? clone(resolved.diagnostics) : {}
+  };
+}
+
+function normalizePartnerOperationResult(value = {}) {
+  const resolved = value && typeof value === "object" ? value : {};
+  const outcome = ["succeeded", "failed", "fallback", "rate_limited"].includes(resolved.outcome) ? resolved.outcome : "failed";
+  return {
+    outcome,
+    providerReference: optionalText(resolved.providerReference),
+    responseSummary: resolved.responseSummary && typeof resolved.responseSummary === "object" ? clone(resolved.responseSummary) : {},
+    errorClass: assertAllowed(
+      resolved.errorClass || (outcome === "rate_limited" ? "transient_technical" : outcome === "fallback" ? "downstream_unknown" : "persistent_technical"),
+      JOB_ERROR_CLASSES,
+      "job_error_class_invalid"
+    ),
+    errorMessage: optionalText(resolved.errorMessage) || `Partner operation ${outcome}.`,
+    failureCode: optionalText(resolved.failureCode),
+    fallbackReasonCode: optionalText(resolved.fallbackReasonCode),
+    replayAllowed: resolved.replayAllowed !== false
+  };
 }
 
 function partnerCatalogEntry(connectionType) {

@@ -2,11 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import {
+  createPassingPartnerContractTestExecutors,
+  createSuccessfulPartnerOperationExecutors
+} from "../helpers/phase13-integrations-fixtures.mjs";
 
-test("Phase 13.2 partner adapters expose contract tests, fallback and replay-safe jobs", () => {
+test("Phase 13.2 partner adapters expose contract tests, fallback and replay-safe jobs", async () => {
   let currentTime = new Date("2026-03-22T18:30:00Z");
   const platform = createApiPlatform({
-    clock: () => currentTime
+    clock: () => currentTime,
+    partnerContractTestExecutors: createPassingPartnerContractTestExecutors(),
+    partnerOperationExecutors: createSuccessfulPartnerOperationExecutors()
   });
 
   const connections = platform.partnerConnectionTypes.map((connectionType) =>
@@ -26,12 +32,14 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   assert.equal(catalog.length, platform.partnerConnectionTypes.length);
   assert.equal(catalog.every((entry) => entry.operationCodes.length > 0), true);
 
-  const contractResults = connections.map((connection) =>
-    platform.runAdapterContractTest({
-      companyId: DEMO_IDS.companyId,
-      connectionId: connection.connectionId,
-      actorId: "phase13-2-unit"
-    })
+  const contractResults = await Promise.all(
+    connections.map((connection) =>
+      platform.runAdapterContractTest({
+        companyId: DEMO_IDS.companyId,
+        connectionId: connection.connectionId,
+        actorId: "phase13-2-unit"
+      })
+    )
   );
   assert.equal(contractResults.length, platform.partnerConnectionTypes.length);
   assert.equal(contractResults.every((result) => result.result === "passed"), true);
@@ -45,16 +53,22 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   });
   assert.equal(bankCapabilities.operationCodes.includes("tax_account_sync"), true);
   assert.equal(bankCapabilities.mode, "sandbox");
-  const succeeded = platform.dispatchPartnerOperation({
+  const queued = await platform.dispatchPartnerOperation({
     companyId: DEMO_IDS.companyId,
     connectionId: bankConnection.connectionId,
     operationCode: "statement_sync",
     payload: { cursor: "cursor-1" },
     actorId: "phase13-2-unit"
   });
+  assert.equal(queued.status, "queued");
+  assert.equal(queued.mode, "sandbox");
+  const succeeded = await platform.executePartnerOperation({
+    companyId: DEMO_IDS.companyId,
+    operationId: queued.operationId,
+    actorId: "phase13-2-unit"
+  });
   assert.equal(succeeded.status, "succeeded");
-  assert.equal(succeeded.mode, "sandbox");
-  assert.throws(
+  await assert.rejects(
     () =>
       platform.dispatchPartnerOperation({
         companyId: DEMO_IDS.companyId,
@@ -66,7 +80,7 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
     (error) => error?.code === "partner_operation_code_not_supported"
   );
 
-  const rateLimited = platform.dispatchPartnerOperation({
+  const rateLimited = await platform.dispatchPartnerOperation({
     companyId: DEMO_IDS.companyId,
     connectionId: bankConnection.connectionId,
     operationCode: "statement_sync",

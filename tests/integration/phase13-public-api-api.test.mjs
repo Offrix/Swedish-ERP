@@ -6,10 +6,12 @@ import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/i
 import { stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
 import { seedReportSnapshot } from "../helpers/reporting-fixtures.mjs";
+import { createSentWebhookDeliveryExecutor } from "../helpers/phase13-integrations-fixtures.mjs";
 
 test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webhooks idempotent", async () => {
   const platform = createApiPlatform({
-    clock: () => new Date("2026-03-22T21:00:00Z")
+    clock: () => new Date("2026-03-22T21:00:00Z"),
+    webhookDeliveryExecutor: createSentWebhookDeliveryExecutor()
   });
   const reportSnapshot = seedReportSnapshot(platform, DEMO_IDS.companyId, "phase13-1-api");
   platform.prepareAuthoritySubmission({
@@ -290,6 +292,17 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
       }
     );
     assert.equal(deliveries.items.length, 1);
+    assert.equal(deliveries.items[0].status, "queued");
+    const dispatchedSandbox = await requestJson(baseUrl, "/v1/public-api/webhook-deliveries/dispatch", {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        subscriptionId: subscription.subscriptionId
+      }
+    });
+    assert.equal(dispatchedSandbox.attemptedCount, 1);
+    assert.equal(dispatchedSandbox.items[0].status, "sent");
 
     const productionDeliveries = await requestJson(
       baseUrl,
@@ -299,6 +312,15 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
       }
     );
     assert.equal(productionDeliveries.items.length >= 2, true);
+    const dispatchedProduction = await requestJson(baseUrl, "/v1/public-api/webhook-deliveries/dispatch", {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        subscriptionId: productionSubscription.subscriptionId
+      }
+    });
+    assert.equal(dispatchedProduction.items.every((item) => item.status === "sent"), true);
   } finally {
     await stopServer(server);
   }

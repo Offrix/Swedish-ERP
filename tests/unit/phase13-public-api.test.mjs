@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { seedReportSnapshot } from "../helpers/reporting-fixtures.mjs";
+import { createSentWebhookDeliveryExecutor } from "../helpers/phase13-integrations-fixtures.mjs";
 
-test("Phase 13.1 public API clients, compatibility baselines and webhook events are deterministic", () => {
+test("Phase 13.1 public API clients, compatibility baselines and webhook events are deterministic", async () => {
   const platform = createApiPlatform({
-    clock: () => new Date("2026-03-22T18:00:00Z")
+    clock: () => new Date("2026-03-22T18:00:00Z"),
+    webhookDeliveryExecutor: createSentWebhookDeliveryExecutor()
   });
   seedReportSnapshot(platform, DEMO_IDS.companyId, "phase13-1-unit");
 
@@ -101,6 +103,15 @@ test("Phase 13.1 public API clients, compatibility baselines and webhook events 
     subscriptionId: subscription.subscriptionId
   });
   assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].status, "queued");
+  const dispatch = await platform.dispatchWebhookDeliveries({
+    companyId: DEMO_IDS.companyId,
+    subscriptionId: subscription.subscriptionId,
+    actorId: "phase13-1-unit"
+  });
+  assert.equal(dispatch.attemptedCount, 1);
+  assert.equal(dispatch.items[0].status, "sent");
+  assert.equal(dispatch.items[0].attempts.length, 1);
   const spec = platform.getPublicApiSpec();
   assert.equal(spec.auth.scheme, "oauth2_client_credentials");
   assert.equal(spec.version, "2026-03-25");
