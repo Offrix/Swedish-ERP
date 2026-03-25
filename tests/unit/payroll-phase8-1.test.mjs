@@ -129,7 +129,46 @@ test("Phase 8.1 payroll core keeps retro corrections traceable and supports fina
   );
 });
 
-function createPayrollFixture() {
+test("Phase 8.1 payroll auto-applies the temporary youth employer contribution reduction from April 2026", () => {
+  const { payrollPlatform, employment } = createPayrollFixture({
+    givenName: "Ylva",
+    familyName: "Youth",
+    workEmail: "ylva.youth@example.com",
+    dateOfBirth: "2005-05-12",
+    monthlySalary: 30000
+  });
+  const payCalendar = payrollPlatform.listPayCalendars({ companyId: COMPANY_ID })[0];
+
+  const payRun = payrollPlatform.createPayRun({
+    companyId: COMPANY_ID,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202604",
+    statutoryProfiles: [
+      {
+        employmentId: employment.employmentId,
+        taxMode: "manual_rate",
+        taxRatePercent: 30,
+        contributionClassCode: "full"
+      }
+    ],
+    actorId: "unit-test"
+  });
+
+  assert.equal(payRun.payslips[0].totals.employerContributionPreviewAmount, 6773.5);
+  assert.equal(payRun.payslips[0].totals.employerContributionDecision.outputs.contributionClassCode, "temporary_youth_reduction");
+  assert.equal(payRun.payslips[0].totals.employerContributionDecision.outputs.reducedContributionBase, 25000);
+  assert.equal(payRun.payslips[0].totals.employerContributionDecision.outputs.overflowContributionBase, 5000);
+  assert.equal(payRun.payslips[0].totals.employerContributionDecision.outputs.reducedRatePercent, 20.81);
+  assert.equal(payRun.payslips[0].totals.employerContributionDecision.outputs.overflowRatePercent, 31.42);
+});
+
+function createPayrollFixture({
+  givenName = "Paula",
+  familyName = "Payroll",
+  workEmail = "paula.payroll@example.com",
+  dateOfBirth = null,
+  monthlySalary = 40000
+} = {}) {
   const fixedNow = new Date("2026-03-22T08:00:00Z");
   const hrPlatform = createHrPlatform({
     clock: () => fixedNow
@@ -146,9 +185,10 @@ function createPayrollFixture() {
 
   const employee = hrPlatform.createEmployee({
     companyId: COMPANY_ID,
-    givenName: "Paula",
-    familyName: "Payroll",
-    workEmail: "paula.payroll@example.com",
+    givenName,
+    familyName,
+    workEmail,
+    dateOfBirth,
     actorId: "unit-test"
   });
   const employment = hrPlatform.createEmployment({
@@ -166,7 +206,7 @@ function createPayrollFixture() {
     employmentId: employment.employmentId,
     validFrom: "2025-01-01",
     salaryModelCode: "monthly_salary",
-    monthlySalary: 40000,
+    monthlySalary,
     currencyCode: "SEK",
     actorId: "unit-test"
   });

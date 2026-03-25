@@ -198,6 +198,81 @@ test("Phase 8.1 API manages pay item catalog, payroll runs, retro traceability a
     });
     assert.equal(approvedRun.status, "approved");
 
+    const youthEmployee = await requestJson(baseUrl, "/v1/hr/employees", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        givenName: "Ylva",
+        familyName: "Youth",
+        workEmail: "ylva.youth.api@example.com",
+        dateOfBirth: "2005-05-12"
+      }
+    });
+    const youthEmployment = await requestJson(baseUrl, `/v1/hr/employees/${youthEmployee.employeeId}/employments`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentTypeCode: "permanent",
+        jobTitle: "Junior operator",
+        payModelCode: "monthly_salary",
+        startDate: "2026-01-01"
+      }
+    });
+    await requestJson(baseUrl, `/v1/hr/employees/${youthEmployee.employeeId}/contracts`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: youthEmployment.employmentId,
+        validFrom: "2026-01-01",
+        salaryModelCode: "monthly_salary",
+        monthlySalary: 30000
+      }
+    });
+    await requestJson(baseUrl, `/v1/hr/employees/${youthEmployee.employeeId}/bank-accounts`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        payoutMethod: "domestic_account",
+        accountHolderName: "Ylva Youth",
+        clearingNumber: "5000",
+        accountNumber: "1111222233",
+        bankName: "API Youth Bank",
+        primaryAccount: true
+      }
+    });
+
+    const youthRun = await requestJson(baseUrl, "/v1/payroll/pay-runs", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202604",
+        employmentIds: [youthEmployment.employmentId],
+        statutoryProfiles: [
+          {
+            employmentId: youthEmployment.employmentId,
+            taxMode: "manual_rate",
+            taxRatePercent: 30,
+            contributionClassCode: "full"
+          }
+        ]
+      }
+    });
+    assert.equal(youthRun.payslips[0].totals.employerContributionPreviewAmount, 6773.5);
+    assert.equal(youthRun.payslips[0].totals.employerContributionDecision.outputs.contributionClassCode, "temporary_youth_reduction");
+    assert.equal(youthRun.payslips[0].totals.employerContributionDecision.outputs.reducedContributionBase, 25000);
+    assert.equal(youthRun.payslips[0].totals.employerContributionDecision.outputs.overflowContributionBase, 5000);
+
     const correctionRun = await requestJson(baseUrl, "/v1/payroll/pay-runs", {
       method: "POST",
       token: sessionToken,

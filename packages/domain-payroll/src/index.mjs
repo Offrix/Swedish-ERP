@@ -95,11 +95,11 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
     domain: "payroll",
     jurisdiction: "SE",
     effectiveFrom: "2026-01-01",
-    effectiveTo: null,
+    effectiveTo: "2026-04-01",
     version: "2026.1",
     checksum: "phase8-payroll-employer-contribution-se-2026-1",
     sourceSnapshotDate: "2026-03-22",
-    semanticChangeSummary: "Phase 8.2 payroll rule pack for 2026 employer contribution classes.",
+    semanticChangeSummary: "Phase 8.2 payroll rule pack for 2026 employer contribution classes before the temporary youth relief starts.",
     machineReadableRules: {
       contributionClasses: {
         full: { ratePercent: 31.42 },
@@ -113,6 +113,44 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
     ],
     testVectors: [{ vectorId: "payroll-full-2026" }, { vectorId: "payroll-reduced-2026" }, { vectorId: "payroll-none-2026" }],
     migrationNotes: ["Phase 8.2 adds AGI submissions and SINK support on top of this contribution pack."]
+  },
+  {
+    rulePackId: "payroll-employer-contribution-se-2026.2",
+    rulePackCode: PAYROLL_EMPLOYER_CONTRIBUTION_RULE_PACK_CODE,
+    domain: "payroll",
+    jurisdiction: "SE",
+    effectiveFrom: "2026-04-01",
+    effectiveTo: null,
+    version: "2026.2",
+    checksum: "phase8-payroll-employer-contribution-se-2026-2",
+    sourceSnapshotDate: "2026-03-25",
+    semanticChangeSummary: "Adds the temporary 2026-2027 youth employer-contribution reduction with threshold split while preserving existing explicit classes.",
+    machineReadableRules: {
+      contributionClasses: {
+        full: { ratePercent: 31.42 },
+        reduced_age_pension_only: { ratePercent: 10.21 },
+        no_contribution: { ratePercent: 0 },
+        temporary_youth_reduction: {
+          reducedRatePercent: 20.81,
+          standardRatePercent: 31.42,
+          thresholdAmount: 25000,
+          eligibleAgeYears: { min: 19, max: 23 },
+          eligibilityFrom: "2026-04-01",
+          eligibilityTo: "2027-09-30"
+        }
+      }
+    },
+    humanReadableExplanation: [
+      "Employer contribution outcome is driven by rule pack, payout date and the resolved statutory profile.",
+      "For pay dates from 1 April 2026 through 30 September 2027 the platform auto-applies the temporary youth reduction for employees who are 19-23 during the payout year, up to SEK 25,000 per month."
+    ],
+    testVectors: [
+      { vectorId: "payroll-full-2026" },
+      { vectorId: "payroll-reduced-2026" },
+      { vectorId: "payroll-none-2026" },
+      { vectorId: "payroll-youth-threshold-2026" }
+    ],
+    migrationNotes: ["Phase 8.2 adds the temporary youth reduction from 1 April 2026 without mutating the pre-April historical pack."]
   },
   {
     rulePackId: "payroll-tax-se-2026.1",
@@ -3767,21 +3805,30 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
 }
 
 function buildEmployerContributionPreview({ rules, contributionBase, employee, statutoryProfile, payDate }) {
+  const effectiveDate = normalizeRequiredDate(payDate, "pay_run_pay_date_invalid");
   const rulePack = rules.resolveRulePack({
     rulePackCode: PAYROLL_EMPLOYER_CONTRIBUTION_RULE_PACK_CODE,
     domain: "payroll",
     jurisdiction: "SE",
-    effectiveDate: normalizeRequiredDate(payDate, "pay_run_pay_date_invalid")
+    effectiveDate
   });
   const machineRules = rulePack.machineReadableRules.contributionClasses || {};
-  const birthYear = employee?.dateOfBirth ? Number(String(employee.dateOfBirth).slice(0, 4)) : null;
-  const contributionClassCode =
-    birthYear != null && birthYear <= 1937
-      ? "no_contribution"
-      : statutoryProfile?.contributionClassCode || "full";
+  const contributionClassCode = resolveEmployerContributionClassCode({
+    employee,
+    statutoryProfile,
+    effectiveDate,
+    machineRules
+  });
   const classDefinition = machineRules[contributionClassCode] || machineRules.full;
   const normalizedContributionBase = roundMoney(Math.max(0, contributionBase || 0));
-  const amount = roundMoney(normalizedContributionBase * ((classDefinition?.ratePercent || 0) / 100));
+  const calculation = calculateEmployerContributionAmount({
+    contributionClassCode,
+    classDefinition,
+    machineRules,
+    contributionBase: normalizedContributionBase,
+    effectiveDate,
+    employee
+  });
   const decisionObject = {
     decision_code: "PAYROLL_EMPLOYER_CONTRIBUTION",
     inputs_hash: buildSnapshotHash({
@@ -3791,36 +3838,138 @@ function buildEmployerContributionPreview({ rules, contributionBase, employee, s
       statutoryProfile: statutoryProfile || null
     }),
     rule_pack_id: rulePack.rulePackId,
-    effective_date: normalizeRequiredDate(payDate, "pay_run_pay_date_invalid"),
+    effective_date: effectiveDate,
     outputs: {
       contributionBase: normalizedContributionBase,
       contributionClassCode,
-      ratePercent: classDefinition?.ratePercent || 0,
-      employerContributionPreviewAmount: amount
+      ratePercent: calculation.ratePercent,
+      employerContributionPreviewAmount: calculation.amount,
+      ...calculation.outputs
     },
     warnings: [],
     explanation: [
       `rulePackId=${rulePack.rulePackId}`,
       `rulePackChecksum=${rulePack.checksum}`,
       `contributionClassCode=${contributionClassCode}`,
-      `ratePercent=${classDefinition?.ratePercent || 0}`,
-      `contributionBase=${normalizedContributionBase}`
+      `ratePercent=${calculation.ratePercent}`,
+      `contributionBase=${normalizedContributionBase}`,
+      ...calculation.explanation
     ]
   };
   return {
-    amount,
+    amount: calculation.amount,
     status: "resolved_rule_pack",
     decisionObject,
     step: createCompletedStep(12, {
       rulePackId: rulePack.rulePackId,
       rulePackChecksum: rulePack.checksum,
       contributionClassCode,
-      ratePercent: classDefinition?.ratePercent || 0,
+      ratePercent: calculation.ratePercent,
       contributionBase: normalizedContributionBase,
-      employerContributionPreviewAmount: amount,
+      employerContributionPreviewAmount: calculation.amount,
       decisionObject
     })
   };
+}
+
+function resolveEmployerContributionClassCode({ employee, statutoryProfile, effectiveDate, machineRules }) {
+  const birthYear = employee?.dateOfBirth ? Number(String(employee.dateOfBirth).slice(0, 4)) : null;
+  if (birthYear != null && birthYear <= 1937) {
+    return "no_contribution";
+  }
+  const explicitClassCode = normalizeOptionalText(statutoryProfile?.contributionClassCode);
+  if (explicitClassCode && explicitClassCode !== "full") {
+    return explicitClassCode;
+  }
+  const youthClassDefinition = machineRules.temporary_youth_reduction;
+  if (isYouthReductionEligible({ classDefinition: youthClassDefinition, birthYear, effectiveDate })) {
+    return "temporary_youth_reduction";
+  }
+  return explicitClassCode || "full";
+}
+
+function calculateEmployerContributionAmount({
+  contributionClassCode,
+  classDefinition,
+  machineRules,
+  contributionBase,
+  effectiveDate,
+  employee
+}) {
+  if (contributionClassCode !== "temporary_youth_reduction") {
+    const ratePercent = roundMoney(classDefinition?.ratePercent || 0);
+    return {
+      amount: roundMoney(contributionBase * (ratePercent / 100)),
+      ratePercent,
+      outputs: {},
+      explanation: []
+    };
+  }
+
+  const birthYear = employee?.dateOfBirth ? Number(String(employee.dateOfBirth).slice(0, 4)) : null;
+  if (!isYouthReductionEligible({ classDefinition, birthYear, effectiveDate })) {
+    const fallbackRatePercent = roundMoney(machineRules.full?.ratePercent || 0);
+    return {
+      amount: roundMoney(contributionBase * (fallbackRatePercent / 100)),
+      ratePercent: fallbackRatePercent,
+      outputs: {
+        thresholdAmount: normalizeRequiredMoney(classDefinition?.thresholdAmount ?? 0, "payroll_employer_contribution_threshold_invalid"),
+        reducedContributionBase: 0,
+        overflowContributionBase: contributionBase
+      },
+      explanation: ["temporaryYouthReductionApplied=false"]
+    };
+  }
+
+  const thresholdAmount = normalizeRequiredMoney(classDefinition?.thresholdAmount ?? 0, "payroll_employer_contribution_threshold_invalid");
+  const reducedRatePercent = roundMoney(classDefinition?.reducedRatePercent || 0);
+  const standardRatePercent = roundMoney(classDefinition?.standardRatePercent ?? machineRules.full?.ratePercent ?? 0);
+  const reducedContributionBase = roundMoney(Math.min(contributionBase, thresholdAmount));
+  const overflowContributionBase = roundMoney(Math.max(0, contributionBase - reducedContributionBase));
+  const amount = roundMoney(
+    reducedContributionBase * (reducedRatePercent / 100) + overflowContributionBase * (standardRatePercent / 100)
+  );
+  const effectiveRatePercent = contributionBase > 0 ? roundMoney((amount / contributionBase) * 100) : 0;
+  return {
+    amount,
+    ratePercent: effectiveRatePercent,
+    outputs: {
+      thresholdAmount,
+      reducedContributionBase,
+      overflowContributionBase,
+      reducedRatePercent,
+      overflowRatePercent: standardRatePercent,
+      eligibilityFrom: classDefinition.eligibilityFrom,
+      eligibilityTo: classDefinition.eligibilityTo
+    },
+    explanation: [
+      "temporaryYouthReductionApplied=true",
+      `reducedContributionBase=${reducedContributionBase}`,
+      `overflowContributionBase=${overflowContributionBase}`,
+      `reducedRatePercent=${reducedRatePercent}`,
+      `overflowRatePercent=${standardRatePercent}`
+    ]
+  };
+}
+
+function isYouthReductionEligible({ classDefinition, birthYear, effectiveDate }) {
+  if (!classDefinition || birthYear == null) {
+    return false;
+  }
+  const eligibleAgeYears = classDefinition.eligibleAgeYears || {};
+  const minAge = Number(eligibleAgeYears.min);
+  const maxAge = Number(eligibleAgeYears.max);
+  if (!Number.isFinite(minAge) || !Number.isFinite(maxAge)) {
+    return false;
+  }
+  const payoutYear = Number(String(effectiveDate).slice(0, 4));
+  const ageDuringPayoutYear = payoutYear - birthYear;
+  if (ageDuringPayoutYear < minAge || ageDuringPayoutYear > maxAge) {
+    return false;
+  }
+  const eligibilityFrom = normalizeRequiredDate(classDefinition.eligibilityFrom, "payroll_employer_contribution_eligibility_from_invalid");
+  const eligibilityTo = normalizeRequiredDate(classDefinition.eligibilityTo, "payroll_employer_contribution_eligibility_to_invalid");
+  return effectiveDate >= eligibilityFrom && effectiveDate <= eligibilityTo;
 }
 
 function summarizeTotals({ lines, preliminaryTax, employerContributionPreviewAmount }) {

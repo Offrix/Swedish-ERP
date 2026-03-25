@@ -63,6 +63,8 @@ Ingår inte:
 7. För ersättningar under SINK ska särskild källskatt enligt giltigt beslut användas; från inkomstår 2026 är huvudnivån 22,5 procent enligt Skatteverket.
 8. För 2026 ska full arbetsgivaravgift behandlas som 31,42 procent och reducerad nivå som 10,21 procent i de fall regelpaketen anger det.
 
+9. FÃ¶r utbetalningsdatum 1 april 2026 till och med 30 september 2027 ska rulepacken ocksÃ¥ kunna tillÃ¤mpa den tillfÃ¤lliga ungdomsnedsÃ¤ttningen fÃ¶r personer som Ã¤r 19 till 23 Ã¥r under utbetalningsÃ¥ret: 20,81 procent pÃ¥ ersÃ¤ttning upp till 25 000 kr per mÃ¥nad och full nivÃ¥ pÃ¥ ersÃ¤ttning dÃ¤rutÃ¶ver.
+
 # Definitions
 
 - `Pay run`: låst beräkning för viss period och population.
@@ -174,6 +176,10 @@ Beräkning ska ske i denna ordning:
 ## Rule PAY-002: Contributions
 
 Arbetsgivaravgift ska för 2026 utgå från full nivå 31,42 procent eller reducerad nivå 10,21 procent när rulepacken för personens status medger det.
+
+### Youth reduction overlay
+
+FÃ¶r utbetalningsdatum 1 april 2026 till och med 30 september 2027 ska rulepacken dessutom kunna tillÃ¤mpa den tillfÃ¤lliga ungdomsnedsÃ¤ttningen fÃ¶r personer som Ã¤r 19 till 23 Ã¥r under utbetalningsÃ¥ret. Den ska berÃ¤knas som 20,81 procent pÃ¥ ersÃ¤ttning upp till 25 000 kr per mÃ¥nad och full nivÃ¥ pÃ¥ ersÃ¤ttning Ã¶ver taket. Detta ska behandlas som en egen deterministisk regel i employer-contribution-rulepacken, inte som manuell specialkod i UI eller ad hoc-override.
 
 ## Rule PAY-003: SINK
 
