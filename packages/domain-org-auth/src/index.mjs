@@ -1505,6 +1505,13 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     if (!challenge || challenge.challengeType !== challengeType) {
       throw httpError(404, "auth_challenge_not_found", "Authentication challenge was not found.");
     }
+    if (challenge.status !== "pending") {
+      throw httpError(409, "auth_challenge_not_pending", "Authentication challenge is no longer pending.");
+    }
+    if (challenge.expiresAt && new Date(challenge.expiresAt) < currentDate()) {
+      challenge.status = "expired";
+      throw httpError(409, "auth_challenge_expired", "Authentication challenge has expired.");
+    }
     return challenge;
   }
 

@@ -282,6 +282,18 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
       }
     });
     assert.equal(completedPasskeyVerify.credentialId, "cred-finance-laptop");
+    const replayedPasskeyVerify = await requestJson(`${baseUrl}/v1/auth/mfa/passkeys/register-verify`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 409,
+      body: {
+        challengeId: passkeyRegistration.challengeId,
+        credentialId: "cred-finance-laptop-replay",
+        publicKey: "pk-demo-replay",
+        deviceName: "Finance laptop key"
+      }
+    });
+    assert.equal(replayedPasskeyVerify.error, "auth_challenge_not_pending");
 
     const financeAdmin = await requestJson(
       `${baseUrl}/v1/org/companies/00000000-0000-4000-8000-000000000001/users`,
