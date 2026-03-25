@@ -290,7 +290,8 @@ export function createCoreEngine({
     audit,
     error,
     store: asyncJobStore || undefined,
-    incidentHooks
+    incidentHooks,
+    resolveRuntimeFlags: publicResilienceModule.resolveRuntimeFlags
   });
   const migrationModule = createMigrationModule({
     state,

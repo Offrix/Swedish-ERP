@@ -153,6 +153,24 @@ export function createInMemoryAsyncJobStore() {
       return claimed;
     },
 
+    async releaseJobClaim({ jobId, claimToken, workerId, availableAt, releasedAt }) {
+      const job = state.jobs.get(jobId);
+      if (!job) {
+        return null;
+      }
+      if (job.claimToken !== claimToken || job.workerId !== workerId) {
+        throw new Error(`Async job ${jobId} is not claimed by worker ${workerId}.`);
+      }
+      job.status = "queued";
+      job.claimToken = null;
+      job.workerId = null;
+      job.claimedAt = null;
+      job.claimExpiresAt = null;
+      job.availableAt = availableAt || job.availableAt;
+      job.updatedAt = releasedAt || job.updatedAt;
+      return clone(job);
+    },
+
     async startJobAttempt({ jobId, claimToken, workerId, startedAt }) {
       const job = state.jobs.get(jobId);
       if (!job) {
@@ -388,7 +406,8 @@ export function createAsyncJobsModule({
   audit,
   error,
   store = createInMemoryAsyncJobStore(),
-  incidentHooks = null
+  incidentHooks = null,
+  resolveRuntimeFlags = null
 } = {}) {
   return {
     asyncJobStatuses: ASYNC_JOB_STATUSES,
@@ -503,12 +522,46 @@ export function createAsyncJobsModule({
     limit = 10,
     claimTtlSeconds = 120
   } = {}) {
-    return store.claimAvailableJobs({
-      workerId: text(workerId, "async_job_worker_id_required", error),
+    const resolvedWorkerId = text(workerId, "async_job_worker_id_required", error);
+    const claimedJobs = await store.claimAvailableJobs({
+      workerId: resolvedWorkerId,
       limit: positiveInteger(limit, "async_job_claim_limit_invalid", error, 10),
       claimTtlSeconds: positiveInteger(claimTtlSeconds, "async_job_claim_ttl_invalid", error, 120),
       nowIso: nowIso(clock)
     });
+    const claimableJobs = [];
+    for (const job of claimedJobs) {
+      const disableDecision = resolveJobDisableDecision(job, resolveRuntimeFlags);
+      if (!disableDecision) {
+        claimableJobs.push(job);
+        continue;
+      }
+      const releasedJob = await store.releaseJobClaim({
+        jobId: job.jobId,
+        claimToken: job.claimToken,
+        workerId: resolvedWorkerId,
+        availableAt: nowIso(clock),
+        releasedAt: nowIso(clock)
+      });
+      audit({
+        companyId: job.companyId,
+        actorId: resolvedWorkerId,
+        correlationId: job.correlationId,
+        action: "jobs.async_job.claim_released",
+        entityType: "async_job",
+        entityId: job.jobId,
+        explanation: `Released claim for async job ${job.jobType} because feature flag ${disableDecision.flagKey} is disabled.`
+      });
+      if (releasedJob) {
+        claimableJobs.push({
+          ...releasedJob,
+          skipped: true,
+          skipReasonCode: disableDecision.reasonCode,
+          skipFlagKey: disableDecision.flagKey
+        });
+      }
+    }
+    return claimableJobs.filter((job) => job.skipped !== true);
   }
 
   async function startAsyncJobAttempt({
@@ -516,10 +569,43 @@ export function createAsyncJobsModule({
     claimToken,
     workerId
   } = {}) {
+    const resolvedJobId = text(jobId, "async_job_id_required", error);
+    const resolvedClaimToken = text(claimToken, "async_job_claim_token_required", error);
+    const resolvedWorkerId = text(workerId, "async_job_worker_id_required", error);
+    const currentJob = await store.getJob(resolvedJobId);
+    if (!currentJob) {
+      throw error(404, "async_job_not_found", "Async job was not found.");
+    }
+    const disableDecision = resolveJobDisableDecision(currentJob, resolveRuntimeFlags);
+    if (disableDecision) {
+      const releasedJob = await store.releaseJobClaim({
+        jobId: resolvedJobId,
+        claimToken: resolvedClaimToken,
+        workerId: resolvedWorkerId,
+        availableAt: nowIso(clock),
+        releasedAt: nowIso(clock)
+      });
+      audit({
+        companyId: currentJob.companyId,
+        actorId: resolvedWorkerId,
+        correlationId: currentJob.correlationId,
+        action: "jobs.async_job.execution_blocked",
+        entityType: "async_job",
+        entityId: currentJob.jobId,
+        explanation: `Blocked async job ${currentJob.jobType} because feature flag ${disableDecision.flagKey} is disabled.`
+      });
+      return {
+        job: releasedJob || currentJob,
+        attempt: null,
+        skipped: true,
+        skipReasonCode: disableDecision.reasonCode,
+        skipFlagKey: disableDecision.flagKey
+      };
+    }
     return store.startJobAttempt({
-      jobId: text(jobId, "async_job_id_required", error),
-      claimToken: text(claimToken, "async_job_claim_token_required", error),
-      workerId: text(workerId, "async_job_worker_id_required", error),
+      jobId: resolvedJobId,
+      claimToken: resolvedClaimToken,
+      workerId: resolvedWorkerId,
       startedAt: nowIso(clock)
     });
   }
@@ -802,4 +888,22 @@ export function createAsyncJobsModule({
       status: optionalText(filters.status)
     });
   }
+}
+
+function resolveJobDisableDecision(job, resolveRuntimeFlags) {
+  if (!job || typeof resolveRuntimeFlags !== "function") {
+    return null;
+  }
+  const flagKey = optionalText(job.metadata?.featureFlagKey || job.metadata?.runtimeFlagKey);
+  if (!flagKey) {
+    return null;
+  }
+  const runtimeFlags = resolveRuntimeFlags({ companyId: job.companyId }) || {};
+  if (runtimeFlags[flagKey] !== false) {
+    return null;
+  }
+  return {
+    flagKey,
+    reasonCode: "async_job_feature_disabled"
+  };
 }

@@ -284,6 +284,24 @@ export function createPostgresAsyncJobStore({
       });
     },
 
+    async releaseJobClaim({ jobId, claimToken, workerId, availableAt, releasedAt }) {
+      const rows = await sql`
+        update async_jobs
+        set status = 'queued',
+            claim_token = null,
+            worker_id = null,
+            claimed_at = null,
+            claim_expires_at = null,
+            available_at = ${availableAt},
+            updated_at = ${releasedAt}
+        where job_id = ${jobId}
+          and claim_token = ${claimToken}
+          and worker_id = ${workerId}
+        returning *
+      `;
+      return mapJobRow(rows[0]);
+    },
+
     async startJobAttempt({ jobId, claimToken, workerId, startedAt }) {
       return sql.begin(async (tx) => {
         const jobRow = await fetchJob(tx, jobId);

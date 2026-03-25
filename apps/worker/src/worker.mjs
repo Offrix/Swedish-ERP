@@ -87,6 +87,11 @@ export async function runWorkerBatch({
         claimToken: claimedJob.claimToken,
         workerId
       });
+      if (started?.skipped) {
+        logger(`worker skipped job ${started.job.jobId} (${started.job.jobType}) because ${started.skipReasonCode}`);
+        processedJobs += 1;
+        continue;
+      }
       const handler = handlers[started.job.jobType];
       if (!handler) {
         throw createWorkerError(`No handler registered for async job type ${started.job.jobType}.`, {
