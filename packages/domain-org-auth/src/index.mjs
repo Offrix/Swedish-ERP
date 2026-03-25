@@ -832,6 +832,11 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     adminDisplayName,
     accountingYear = String(currentDate().getUTCFullYear())
   } = {}) {
+    const normalizedAdminEmail = String(adminEmail || "").trim().toLowerCase();
+    if (!normalizedAdminEmail) {
+      throw httpError(400, "email_required", "Email is required.");
+    }
+    const resolvedAdminDisplayName = assertNonEmpty(adminDisplayName, "display_name_required");
     const company = createCompany({
       legalName,
       orgNumber,
@@ -844,8 +849,8 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       }
     });
     const adminUser = findOrCreateUser({
-      email: adminEmail,
-      displayName: adminDisplayName
+      email: normalizedAdminEmail,
+      displayName: resolvedAdminDisplayName
     });
     const companyUser = {
       companyUserId: crypto.randomUUID(),

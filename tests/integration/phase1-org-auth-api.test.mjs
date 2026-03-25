@@ -58,6 +58,22 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
       email: DEMO_ADMIN_EMAIL
     });
 
+    const companyCountBeforeInvalidOnboarding = platform.snapshot().companies.length;
+    const onboardingRunCountBeforeInvalidOnboarding = platform.snapshot().onboardingRuns.length;
+    const invalidOnboardingRun = await requestJson(`${baseUrl}/v1/onboarding/runs`, {
+      method: "POST",
+      expectedStatus: 400,
+      body: {
+        legalName: "Broken Company AB",
+        orgNumber: "559900-9998",
+        adminEmail: "",
+        adminDisplayName: "Broken Owner"
+      }
+    });
+    assert.equal(invalidOnboardingRun.error, "email_required");
+    assert.equal(platform.snapshot().companies.length, companyCountBeforeInvalidOnboarding);
+    assert.equal(platform.snapshot().onboardingRuns.length, onboardingRunCountBeforeInvalidOnboarding);
+
     const onboardingRun = await requestJson(`${baseUrl}/v1/onboarding/runs`, {
       method: "POST",
       expectedStatus: 201,
