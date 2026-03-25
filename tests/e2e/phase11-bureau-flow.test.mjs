@@ -138,6 +138,44 @@ test("Phase 11.2 end-to-end flow exposes bureau portfolio, tracked client reques
 });
 
 function seedClientReporting(platform, companyId) {
+  const eligibilityAssessment = platform.assessCashMethodEligibility({
+    companyId,
+    annualNetTurnoverSek: 450000,
+    legalFormCode: "AB",
+    actorId: "e2e"
+  });
+  const methodProfile = platform.createMethodProfile({
+    companyId,
+    methodCode: "FAKTURERINGSMETOD",
+    effectiveFrom: "2026-01-01",
+    fiscalYearStartDate: "2026-01-01",
+    eligibilityAssessmentId: eligibilityAssessment.assessmentId,
+    onboardingOverride: true,
+    actorId: "e2e"
+  });
+  platform.activateMethodProfile({
+    companyId,
+    methodProfileId: methodProfile.methodProfileId,
+    actorId: "e2e"
+  });
+  const fiscalYearProfile = platform.createFiscalYearProfile({
+    companyId,
+    legalFormCode: "AKTIEBOLAG",
+    actorId: "e2e"
+  });
+  const fiscalYear = platform.createFiscalYear({
+    companyId,
+    fiscalYearProfileId: fiscalYearProfile.fiscalYearProfileId,
+    startDate: "2026-01-01",
+    endDate: "2026-12-31",
+    approvalBasisCode: "BASELINE",
+    actorId: "e2e"
+  });
+  platform.activateFiscalYear({
+    companyId,
+    fiscalYearId: fiscalYear.fiscalYearId,
+    actorId: "e2e"
+  });
   platform.installLedgerCatalog({
     companyId,
     actorId: "e2e"

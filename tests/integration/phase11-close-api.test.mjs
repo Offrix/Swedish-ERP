@@ -165,6 +165,44 @@ function seedClientCloseSetup(platform, adminToken, responsibleConsultantId) {
     responsibleConsultantId,
     activeFrom: "2026-01-01"
   });
+  const eligibilityAssessment = platform.assessCashMethodEligibility({
+    companyId: clientCompany.companyId,
+    annualNetTurnoverSek: 480000,
+    legalFormCode: "AB",
+    actorId: "phase11-close-api"
+  });
+  const methodProfile = platform.createMethodProfile({
+    companyId: clientCompany.companyId,
+    methodCode: "FAKTURERINGSMETOD",
+    effectiveFrom: "2026-01-01",
+    fiscalYearStartDate: "2026-01-01",
+    eligibilityAssessmentId: eligibilityAssessment.assessmentId,
+    onboardingOverride: true,
+    actorId: "phase11-close-api"
+  });
+  platform.activateMethodProfile({
+    companyId: clientCompany.companyId,
+    methodProfileId: methodProfile.methodProfileId,
+    actorId: "phase11-close-api"
+  });
+  const fiscalYearProfile = platform.createFiscalYearProfile({
+    companyId: clientCompany.companyId,
+    legalFormCode: "AKTIEBOLAG",
+    actorId: "phase11-close-api"
+  });
+  const fiscalYear = platform.createFiscalYear({
+    companyId: clientCompany.companyId,
+    fiscalYearProfileId: fiscalYearProfile.fiscalYearProfileId,
+    startDate: "2026-01-01",
+    endDate: "2026-12-31",
+    approvalBasisCode: "BASELINE",
+    actorId: "phase11-close-api"
+  });
+  platform.activateFiscalYear({
+    companyId: clientCompany.companyId,
+    fiscalYearId: fiscalYear.fiscalYearId,
+    actorId: "phase11-close-api"
+  });
   platform.installLedgerCatalog({
     companyId: clientCompany.companyId,
     actorId: "phase11-close-api"

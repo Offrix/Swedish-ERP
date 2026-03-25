@@ -222,6 +222,44 @@ test("Phase 11.2 API scopes bureau portfolio and tracks requests, approvals, com
 });
 
 function seedClientReporting(platform, companyId) {
+  const eligibilityAssessment = platform.assessCashMethodEligibility({
+    companyId,
+    annualNetTurnoverSek: 500000,
+    legalFormCode: "AB",
+    actorId: "setup"
+  });
+  const methodProfile = platform.createMethodProfile({
+    companyId,
+    methodCode: "FAKTURERINGSMETOD",
+    effectiveFrom: "2026-01-01",
+    fiscalYearStartDate: "2026-01-01",
+    eligibilityAssessmentId: eligibilityAssessment.assessmentId,
+    onboardingOverride: true,
+    actorId: "setup"
+  });
+  platform.activateMethodProfile({
+    companyId,
+    methodProfileId: methodProfile.methodProfileId,
+    actorId: "setup"
+  });
+  const fiscalYearProfile = platform.createFiscalYearProfile({
+    companyId,
+    legalFormCode: "AKTIEBOLAG",
+    actorId: "setup"
+  });
+  const fiscalYear = platform.createFiscalYear({
+    companyId,
+    fiscalYearProfileId: fiscalYearProfile.fiscalYearProfileId,
+    startDate: "2026-01-01",
+    endDate: "2026-12-31",
+    approvalBasisCode: "BASELINE",
+    actorId: "setup"
+  });
+  platform.activateFiscalYear({
+    companyId,
+    fiscalYearId: fiscalYear.fiscalYearId,
+    actorId: "setup"
+  });
   platform.installLedgerCatalog({
     companyId,
     actorId: "setup"
