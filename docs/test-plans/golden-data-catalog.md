@@ -113,7 +113,9 @@ Stora golden families ska kunna köras i batch utan att överskrida definierad C
 | `GD-ANNUAL-AB-K3` | annual reporting | semantic | AB annual package K3 path | annual close AB advanced | annual-reporting-by-legal-form-tests | V5 |
 | `GD-ANNUAL-EF` | annual reporting | semantic | economic association annual path | annual close economic association | annual-reporting-by-legal-form-tests | V5 |
 | `GD-ANNUAL-HB-KB-INK4` | annual reporting | semantic | HB/KB declaration path | annual close HB/KB | annual-reporting-by-legal-form-tests | V5 |
+| `GD-ANNUAL-HB-KB-WITH-ANNUAL-REPORT` | annual reporting | semantic | HB/KB annual-report obligation path with dual filing readiness | annual close HB/KB with annual-report obligation | annual-reporting-by-legal-form-tests | V5 |
 | `GD-ANNUAL-SOLE-TRADER-NE` | annual reporting | semantic | sole trader declaration/year-end path | annual close sole trader | annual-reporting-by-legal-form-tests | V5 |
+| `GD-ANNUAL-SHORT-YEAR` | annual reporting | semantic | short-year package selection, declaration profile continuity and blocked sole-trader short-year variants | short-year filing profile selection | annual-reporting-by-legal-form-tests, fiscal-year-and-broken-year-tests | V2/V5 |
 | `GD-ANNUAL-CORRECTION-CHAIN` | annual reporting | semantic | superseding package, preserved receipts | annual correction after reopen | annual-reporting-by-legal-form-tests | V5 |
 | `GD-DR-RESTORE` | resilience | semantic | restore, replay and reconciliation after recovery | restore/replay scenarios | resilience suites | V7 |
 
