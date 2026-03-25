@@ -36,6 +36,8 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     deliverNotification,
     retryNotificationDelivery,
     bulkApplyNotificationAction,
+    expireNotification,
+    expireNotificationsDue,
     markNotificationRead,
     acknowledgeNotification,
     snoozeNotification,
@@ -231,6 +233,44 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     ));
     return {
       actionCode: resolvedActionCode,
+      totalCount: items.length,
+      items
+    };
+  }
+
+  function expireNotification({ companyId, notificationId, actorId = "system", reasonCode = "expired" } = {}) {
+    const notification = requireNotification(state, companyId, notificationId);
+    if (["cancelled", "expired", "acknowledged"].includes(notification.status)) {
+      return presentNotification(state, notification, { includeHistory: true });
+    }
+    notification.status = "expired";
+    pushAudit(state, clock, {
+      companyId: notification.companyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      action: "notification.expired",
+      entityType: "notification",
+      entityId: notification.notificationId,
+      explanation: `Notification ${notification.notificationId} expired with reason ${normalizeCode(reasonCode, "notification_expire_reason_required")}.`
+    });
+    return presentNotification(state, notification, { includeHistory: true });
+  }
+
+  function expireNotificationsDue({ companyId = null, asOf = null, actorId = "system", reasonCode = "expired" } = {}) {
+    const resolvedCompanyId = normalizeOptionalText(companyId);
+    const cutoff = normalizeOptionalDateTime(asOf) || nowIso(clock);
+    const items = [...state.notifications.values()]
+      .filter((notification) => (resolvedCompanyId ? notification.companyId === resolvedCompanyId : true))
+      .filter((notification) => Boolean(notification.expiresAt) && notification.expiresAt <= cutoff)
+      .filter((notification) => !["cancelled", "expired", "acknowledged"].includes(notification.status))
+      .sort((left, right) => left.expiresAt.localeCompare(right.expiresAt))
+      .map((notification) => expireNotification({
+        companyId: notification.companyId,
+        notificationId: notification.notificationId,
+        actorId,
+        reasonCode
+      }));
+    return {
+      asOf: cutoff,
       totalCount: items.length,
       items
     };

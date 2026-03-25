@@ -189,6 +189,74 @@ test("Step 13 notifications support bulk read and acknowledge without double-pro
   );
 });
 
+test("Step 13 notifications expire due items without mutating terminal notifications", () => {
+  const notifications = createNotificationsEngine({
+    clock: () => new Date("2026-03-24T19:00:00Z")
+  });
+  const companyId = "company_notify_expire_1";
+
+  const due = notifications.createNotification({
+    companyId,
+    recipientType: "user",
+    recipientId: "user_expire_1",
+    categoryCode: "deadline_warning",
+    priorityCode: "medium",
+    sourceDomainCode: "CORE",
+    sourceObjectType: "work_item",
+    sourceObjectId: "work_expire_1",
+    title: "Due now",
+    body: "This notification should expire.",
+    expiresAt: "2026-03-24T18:00:00Z",
+    actorId: "system"
+  });
+  const future = notifications.createNotification({
+    companyId,
+    recipientType: "user",
+    recipientId: "user_expire_1",
+    categoryCode: "deadline_warning",
+    priorityCode: "low",
+    sourceDomainCode: "CORE",
+    sourceObjectType: "work_item",
+    sourceObjectId: "work_expire_2",
+    title: "Future",
+    body: "This notification should stay active.",
+    expiresAt: "2026-03-24T20:00:00Z",
+    actorId: "system"
+  });
+  const acknowledged = notifications.createNotification({
+    companyId,
+    recipientType: "user",
+    recipientId: "user_expire_1",
+    categoryCode: "review_due",
+    priorityCode: "high",
+    sourceDomainCode: "REVIEW_CENTER",
+    sourceObjectType: "review_item",
+    sourceObjectId: "review_expire_1",
+    title: "Already acknowledged",
+    body: "This notification should remain acknowledged.",
+    expiresAt: "2026-03-24T17:00:00Z",
+    actorId: "system"
+  });
+  notifications.acknowledgeNotification({
+    companyId,
+    notificationId: acknowledged.notificationId,
+    actorId: "user_expire_1"
+  });
+
+  const expired = notifications.expireNotificationsDue({
+    companyId,
+    asOf: "2026-03-24T19:00:00Z",
+    actorId: "scheduler_1",
+    reasonCode: "notification_ttl_elapsed"
+  });
+  assert.equal(expired.totalCount, 1);
+  assert.equal(expired.items[0].notificationId, due.notificationId);
+  assert.equal(expired.items[0].status, "expired");
+
+  assert.equal(notifications.getNotification({ companyId, notificationId: future.notificationId }).status, "created");
+  assert.equal(notifications.getNotification({ companyId, notificationId: acknowledged.notificationId }).status, "acknowledged");
+});
+
 test("Step 13 activity projects append-only entries and hides by policy without duplicates", () => {
   const activity = createActivityEngine({
     clock: () => new Date("2026-03-24T15:30:00Z")

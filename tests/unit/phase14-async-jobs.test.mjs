@@ -219,3 +219,75 @@ test("Phase 14 Step 4 async jobs are blocked before execution if a kill switch f
   assert.equal(jobAfterStart.status, "queued");
   assert.equal(attempts.length, 0);
 });
+
+test("Phase 14 Step 4 worker expires due notifications through scheduled runtime jobs", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-24T12:00:00Z")
+  });
+
+  const dueNotification = platform.createNotification({
+    companyId: DEMO_IDS.companyId,
+    recipientType: "user",
+    recipientId: DEMO_IDS.userId,
+    categoryCode: "deadline_warning",
+    priorityCode: "medium",
+    sourceDomainCode: "CORE",
+    sourceObjectType: "work_item",
+    sourceObjectId: "work-notify-expire-1",
+    title: "Deadline warning",
+    body: "This notification should expire in the scheduler.",
+    expiresAt: "2026-03-24T11:00:00Z",
+    actorId: "system"
+  });
+  const futureNotification = platform.createNotification({
+    companyId: DEMO_IDS.companyId,
+    recipientType: "user",
+    recipientId: DEMO_IDS.userId,
+    categoryCode: "deadline_warning",
+    priorityCode: "low",
+    sourceDomainCode: "CORE",
+    sourceObjectType: "work_item",
+    sourceObjectId: "work-notify-expire-2",
+    title: "Future warning",
+    body: "This notification should remain active.",
+    expiresAt: "2026-03-24T13:00:00Z",
+    actorId: "system"
+  });
+
+  const queuedJob = await platform.enqueueRuntimeJob({
+    companyId: DEMO_IDS.companyId,
+    jobType: "notifications.expire_due",
+    sourceObjectType: "notification_center",
+    sourceObjectId: DEMO_IDS.companyId,
+    idempotencyKey: "step4-notification-expire-due",
+    payload: {
+      companyId: DEMO_IDS.companyId,
+      asOf: "2026-03-24T12:00:00Z",
+      reasonCode: "notification_ttl_elapsed"
+    },
+    actorId: "system"
+  });
+
+  const processed = await runWorkerBatch({
+    platform,
+    handlers: createDefaultJobHandlers({ logger: () => {} }),
+    logger: () => {},
+    workerId: "worker-step4-notifications-expire"
+  });
+  assert.equal(processed, 1);
+
+  const completedJob = await platform.getRuntimeJob({ jobId: queuedJob.jobId });
+  const dueAfter = platform.getNotification({
+    companyId: DEMO_IDS.companyId,
+    notificationId: dueNotification.notificationId
+  });
+  const futureAfter = platform.getNotification({
+    companyId: DEMO_IDS.companyId,
+    notificationId: futureNotification.notificationId
+  });
+
+  assert.equal(completedJob.status, "succeeded");
+  assert.equal(completedJob.lastResultCode, "notifications_expired");
+  assert.equal(dueAfter.status, "expired");
+  assert.equal(futureAfter.status, "created");
+});

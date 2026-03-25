@@ -20,6 +20,22 @@ export function createDefaultJobHandlers({ logger = console.log } = {}) {
       return {
         resultCode: "noop"
       };
+    },
+    "notifications.expire_due": async ({ job, platform }) => {
+      const result = platform.expireNotificationsDue({
+        companyId: typeof job.payload?.companyId === "string" ? job.payload.companyId : null,
+        asOf: typeof job.payload?.asOf === "string" ? job.payload.asOf : null,
+        actorId: "worker_scheduler",
+        reasonCode: typeof job.payload?.reasonCode === "string" ? job.payload.reasonCode : "notification_ttl_elapsed"
+      });
+      logger(`worker expired ${result.totalCount} notifications for job ${job.jobId}`);
+      return {
+        resultCode: "notifications_expired",
+        resultPayload: {
+          totalCount: result.totalCount,
+          notificationIds: result.items.map((item) => item.notificationId)
+        }
+      };
     }
   });
 }
