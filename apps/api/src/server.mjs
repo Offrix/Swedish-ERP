@@ -457,6 +457,16 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/personalliggare/sites/:constructionSiteId/kiosk-devices/:kioskDeviceId/revoke",
               "/v1/personalliggare/sites/:constructionSiteId/exports",
               "/v1/personalliggare/audit-events",
+              "/v1/id06/companies/verify",
+              "/v1/id06/companies/verifications",
+              "/v1/id06/persons/verify",
+              "/v1/id06/persons/verifications",
+              "/v1/id06/cards/validate",
+              "/v1/id06/cards/statuses",
+              "/v1/id06/workplaces/:workplaceId/bindings",
+              "/v1/id06/workplaces/:workplaceId/work-passes",
+              "/v1/id06/workplaces/:workplaceId/exports",
+              "/v1/id06/audit-events",
               "/v1/egenkontroll/templates",
               "/v1/egenkontroll/templates/:checklistTemplateId",
               "/v1/egenkontroll/templates/:checklistTemplateId/activate",
@@ -10112,6 +10122,302 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "POST" && path === "/v1/id06/companies/verify") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "id06_company_verification",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.verifyCompany({
+        companyId,
+        orgNo: body.orgNo,
+        companyName: body.companyName,
+        externalCompanyRef: body.externalCompanyRef ?? null,
+        providerCode: body.providerCode ?? "id06",
+        status: body.status ?? "verified",
+        effectiveFrom: body.effectiveFrom ?? null,
+        effectiveTo: body.effectiveTo ?? null,
+        verifiedAt: body.verifiedAt ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/id06/companies/verifications") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "id06_company_verification",
+      scopeCode: "project"
+    });
+    assertId06ControlReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listCompanyVerifications({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/id06/persons/verify") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "id06_person_verification",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.verifyPerson({
+        companyId,
+        employmentId: body.employmentId ?? null,
+        workerIdentityType: body.workerIdentityType ?? "personnummer",
+        workerIdentityValue: body.workerIdentityValue,
+        fullNameSnapshot: body.fullNameSnapshot,
+        externalPersonRef: body.externalPersonRef ?? null,
+        providerCode: body.providerCode ?? "id06",
+        status: body.status ?? "verified",
+        effectiveFrom: body.effectiveFrom ?? null,
+        effectiveTo: body.effectiveTo ?? null,
+        verifiedAt: body.verifiedAt ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/id06/persons/verifications") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "id06_person_verification",
+      scopeCode: "project"
+    });
+    assertId06ControlReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listPersonVerifications({
+        companyId,
+        workerIdentityValue: url.searchParams.get("workerIdentityValue") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/id06/cards/validate") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "id06_card_status",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.validateCard({
+        companyId,
+        employerOrgNo: body.employerOrgNo,
+        workerIdentityType: body.workerIdentityType ?? "personnummer",
+        workerIdentityValue: body.workerIdentityValue,
+        cardReference: body.cardReference,
+        maskedCardNumber: body.maskedCardNumber ?? null,
+        providerCode: body.providerCode ?? "id06",
+        status: body.status ?? "active",
+        validFrom: body.validFrom ?? null,
+        validTo: body.validTo ?? null,
+        validatedAt: body.validatedAt ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/id06/cards/statuses") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "id06_card_status",
+      scopeCode: "project"
+    });
+    assertId06ControlReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listCardStatuses({
+        companyId,
+        workerIdentityValue: url.searchParams.get("workerIdentityValue") || null,
+        workplaceId: url.searchParams.get("workplaceId") || null
+      })
+    });
+    return;
+  }
+
+  const id06WorkplaceBindingsMatch = matchPath(path, "/v1/id06/workplaces/:workplaceId/bindings");
+  if (id06WorkplaceBindingsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "id06_workplace_binding",
+      scopeCode: "project"
+    });
+    assertId06ControlReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listWorkplaceBindings({
+        companyId,
+        workplaceId: id06WorkplaceBindingsMatch.workplaceId
+      })
+    });
+    return;
+  }
+
+  if (id06WorkplaceBindingsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "id06_workplace_binding",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createWorkplaceBinding({
+        companyId,
+        workplaceId: id06WorkplaceBindingsMatch.workplaceId,
+        employerOrgNo: body.employerOrgNo,
+        workerIdentityType: body.workerIdentityType ?? "personnummer",
+        workerIdentityValue: body.workerIdentityValue,
+        cardReference: body.cardReference,
+        effectiveFrom: body.effectiveFrom ?? null,
+        effectiveTo: body.effectiveTo ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const id06WorkPassesMatch = matchPath(path, "/v1/id06/workplaces/:workplaceId/work-passes");
+  if (id06WorkPassesMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "id06_work_pass",
+      scopeCode: "project"
+    });
+    assertId06ControlReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listWorkPasses({
+        companyId,
+        workplaceId: id06WorkPassesMatch.workplaceId
+      })
+    });
+    return;
+  }
+
+  const id06ExportsMatch = matchPath(path, "/v1/id06/workplaces/:workplaceId/exports");
+  if (id06ExportsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "id06_evidence_bundle",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.exportWorkplaceEvidence({
+        companyId,
+        workplaceId: id06ExportsMatch.workplaceId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/id06/audit-events") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "id06_audit_event",
+      scopeCode: "project"
+    });
+    assertId06ControlReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listAuditEvents({
+        companyId,
+        workplaceId: url.searchParams.get("workplaceId") || null
+      })
+    });
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/egenkontroll/templates") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -11948,6 +12254,7 @@ const ANNUAL_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bure
 const FINANCE_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const DESKTOP_SURFACE_READ_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
 const PERSONALLIGGARE_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
+const ID06_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const PROJECT_WORKSPACE_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const EGENKONTROLL_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const FIELD_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
@@ -11987,6 +12294,18 @@ function assertPersonalliggareControlReadAccess({ principal }) {
       403,
       "personalliggare_control_role_forbidden",
       "Current actor is not allowed to access personalliggare control, export or audit read models."
+    );
+  }
+}
+
+function assertId06ControlReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedReader = [...ID06_CONTROL_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedReader) {
+    throw createHttpError(
+      403,
+      "id06_control_role_forbidden",
+      "Current actor is not allowed to access ID06 control, work-pass or audit read models."
     );
   }
 }
@@ -12285,6 +12604,7 @@ function isPhase103Route(path) {
   return (
     path.startsWith("/v1/hus") ||
     path.startsWith("/v1/personalliggare") ||
+    path.startsWith("/v1/id06") ||
     path.startsWith("/v1/egenkontroll") ||
     path.includes("/change-orders") ||
     path.includes("/build-vat-decisions")

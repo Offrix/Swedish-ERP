@@ -47,6 +47,7 @@ export const requiredPackages = [
   "packages/domain-kalkyl",
   "packages/domain-field",
   "packages/domain-personalliggare",
+  "packages/domain-id06",
   "packages/domain-egenkontroll",
   "packages/domain-search",
   "packages/domain-reporting",

@@ -28,6 +28,7 @@ import { createKalkylPlatform } from "../../../packages/domain-kalkyl/src/index.
 import { createFieldPlatform } from "../../../packages/domain-field/src/index.mjs";
 import { createHusPlatform } from "../../../packages/domain-hus/src/index.mjs";
 import { createPersonalliggarePlatform } from "../../../packages/domain-personalliggare/src/index.mjs";
+import { createId06Platform } from "../../../packages/domain-id06/src/index.mjs";
 import { createEgenkontrollPlatform } from "../../../packages/domain-egenkontroll/src/index.mjs";
 import { createSearchPlatform } from "../../../packages/domain-search/src/index.mjs";
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
@@ -85,6 +86,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "core",
   "hus",
   "personalliggare",
+  "id06",
   "field",
   "egenkontroll",
   "annualReporting"
@@ -124,6 +126,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "kalkyl",
   "hus",
   "personalliggare",
+  "id06",
   "field",
   "egenkontroll",
   "payroll"
@@ -423,6 +426,7 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         getFieldPlatform: () => getDomain("field"),
         getHusPlatform: () => getDomain("hus"),
         getPersonalliggarePlatform: () => getDomain("personalliggare"),
+        getId06Platform: () => getDomain("id06"),
         getEgenkontrollPlatform: () => getDomain("egenkontroll"),
         getKalkylPlatform: () => getDomain("kalkyl")
       })
@@ -504,6 +508,17 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         ...options,
         hrPlatform: dependencies.hr,
         projectsPlatform: dependencies.projects
+      })
+  }),
+  createDomainDefinition({
+    key: "id06",
+    label: "ID06",
+    packageName: "@swedish-erp/domain-id06",
+    dependsOn: ["personalliggare"],
+    create: ({ options, dependencies }) =>
+      createId06Platform({
+        ...options,
+        personalliggarePlatform: dependencies.personalliggare
       })
   }),
   createDomainDefinition({
