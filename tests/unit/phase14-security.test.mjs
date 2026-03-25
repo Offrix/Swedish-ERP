@@ -78,14 +78,14 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
     companyId: DEMO_IDS.companyId,
     category: "integration_failure",
     severity: "high",
-    approvedActions: ["plan_job_replay"],
+    approvedActions: ["plan_job_replay", "impersonation_read_only", "impersonation_limited_write"],
     relatedObjectRefs: [{ objectType: "submission", objectId: "submission-1" }]
   });
   platform.approveSupportCaseActions({
     sessionToken: approverToken,
     companyId: DEMO_IDS.companyId,
     supportCaseId: supportCase.supportCaseId,
-    approvedActions: ["plan_job_replay"]
+    approvedActions: ["plan_job_replay", "impersonation_read_only"]
   });
 
   const job = platform.enqueueAsyncJob({
@@ -145,6 +145,7 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
     sessionId: impersonation.sessionId
   });
   assert.equal(impersonationApproved.status, "active");
+  assert.deepEqual(impersonationApproved.approvalActorIds, [DEMO_APPROVER_IDS.userId]);
   const impersonationEnded = platform.terminateImpersonation({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
@@ -152,6 +153,87 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
     reasonCode: "case_resolved"
   });
   assert.equal(impersonationEnded.status, "ended");
+  assert.throws(
+    () =>
+      platform.requestImpersonation({
+        sessionToken: adminToken,
+        companyId: DEMO_IDS.companyId,
+        supportCaseId: supportCase.supportCaseId,
+        targetCompanyUserId: DEMO_APPROVER_IDS.companyUserId,
+        purposeCode: "support_limited_write_missing_allowlist",
+        mode: "limited_write"
+      }),
+    (error) => error?.code === "impersonation_restricted_actions_required"
+  );
+  const limitedWriteImpersonation = platform.requestImpersonation({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    supportCaseId: supportCase.supportCaseId,
+    targetCompanyUserId: DEMO_APPROVER_IDS.companyUserId,
+    purposeCode: "support_limited_write",
+    mode: "limited_write",
+    restrictedActions: ["jobs.retry"]
+  });
+  assert.throws(
+    () =>
+      platform.approveImpersonation({
+        sessionToken: approverToken,
+        companyId: DEMO_IDS.companyId,
+        sessionId: limitedWriteImpersonation.sessionId
+      }),
+    (error) => error?.code === "impersonation_limited_write_approval_required"
+  );
+  platform.approveSupportCaseActions({
+    sessionToken: secondApproverToken,
+    companyId: DEMO_IDS.companyId,
+    supportCaseId: supportCase.supportCaseId,
+    approvedActions: ["impersonation_limited_write"]
+  });
+  const limitedWriteApproved = platform.approveImpersonation({
+    sessionToken: approverToken,
+    companyId: DEMO_IDS.companyId,
+    sessionId: limitedWriteImpersonation.sessionId
+  });
+  assert.equal(limitedWriteApproved.status, "active");
+  assert.deepEqual(limitedWriteApproved.approvalActorIds.sort(), [DEMO_APPROVER_IDS.userId, secondApprover.user.userId].sort());
+  const limitedWriteEnded = platform.terminateImpersonation({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    sessionId: limitedWriteImpersonation.sessionId,
+    reasonCode: "case_resolved"
+  });
+  assert.equal(limitedWriteEnded.status, "ended");
+  const singleApproverWriteCase = platform.createSupportCase({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    category: "impersonation_escalation",
+    severity: "high",
+    approvedActions: ["impersonation_read_only", "impersonation_limited_write"]
+  });
+  platform.approveSupportCaseActions({
+    sessionToken: approverToken,
+    companyId: DEMO_IDS.companyId,
+    supportCaseId: singleApproverWriteCase.supportCaseId,
+    approvedActions: ["impersonation_read_only", "impersonation_limited_write"]
+  });
+  const singleApproverWriteSession = platform.requestImpersonation({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    supportCaseId: singleApproverWriteCase.supportCaseId,
+    targetCompanyUserId: DEMO_APPROVER_IDS.companyUserId,
+    purposeCode: "support_limited_write_single_approver",
+    mode: "limited_write",
+    restrictedActions: ["jobs.retry"]
+  });
+  assert.throws(
+    () =>
+      platform.approveImpersonation({
+        sessionToken: secondApproverToken,
+        companyId: DEMO_IDS.companyId,
+        sessionId: singleApproverWriteSession.sessionId
+      }),
+    (error) => error?.code === "impersonation_limited_write_dual_approval_required"
+  );
 
   const accessReview = platform.generateAccessReview({
     sessionToken: adminToken,

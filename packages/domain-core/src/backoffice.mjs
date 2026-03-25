@@ -16,6 +16,8 @@ export const ADMIN_DIAGNOSTIC_TYPES = Object.freeze([
 ]);
 
 const WRITE_DIAGNOSTIC_TYPES = new Set(["plan_job_replay", "execute_job_replay"]);
+const SUPPORT_ACTION_IMPERSONATION_READ_ONLY = "impersonation_read_only";
+const SUPPORT_ACTION_IMPERSONATION_LIMITED_WRITE = "impersonation_limited_write";
 
 export function createBackofficeModule({
   state,
@@ -270,6 +272,14 @@ export function createBackofficeModule({
     const principal = authorize(sessionToken, companyId, "company.manage");
     requireSupportCase(companyId, supportCaseId);
     const targetCompanyUser = requireCompanyUser(companyId, targetCompanyUserId, orgAuthPlatform, error);
+    const resolvedMode = assertAllowed(mode, IMPERSONATION_MODES, "impersonation_mode_invalid");
+    const normalizedRestrictedActions = normalizeActions(restrictedActions);
+    if (resolvedMode === "read_only" && normalizedRestrictedActions.length > 0) {
+      throw error(409, "impersonation_read_only_restricted_actions_forbidden", "Read-only impersonation cannot define restricted write actions.");
+    }
+    if (resolvedMode === "limited_write" && normalizedRestrictedActions.length === 0) {
+      throw error(400, "impersonation_restricted_actions_required", "Limited-write impersonation requires a restricted action allowlist.");
+    }
     const session = {
       sessionId: crypto.randomUUID(),
       companyId,
@@ -279,8 +289,9 @@ export function createBackofficeModule({
       requestedByUserId: principal.userId,
       approvedByUserId: null,
       purposeCode: text(purposeCode, "impersonation_purpose_required"),
-      mode: assertAllowed(mode, IMPERSONATION_MODES, "impersonation_mode_invalid"),
-      restrictedActions: normalizeActions(restrictedActions),
+      mode: resolvedMode,
+      restrictedActions: normalizedRestrictedActions,
+      approvalActorIds: [],
       status: "requested",
       startedAt: null,
       expiresAt: addMinutes(nowIso(clock), normalizePositiveInteger(expiresInMinutes, "impersonation_expiry_invalid")),
@@ -325,8 +336,15 @@ export function createBackofficeModule({
     if (principal.userId === session.requestedByUserId) {
       throw error(409, "impersonation_self_approval_forbidden", "Impersonation must be approved by a separate actor.");
     }
+    const supportCase = requireSupportCase(companyId, session.supportCaseId);
+    const approvalActorIds = resolveImpersonationApprovalActors({
+      supportCase,
+      session,
+      error
+    });
     session.status = "active";
     session.approvedByUserId = principal.userId;
+    session.approvalActorIds = approvalActorIds;
     session.startedAt = nowIso(clock);
     session.updatedAt = session.startedAt;
     audit({
@@ -672,6 +690,46 @@ function normalizeActions(values) {
   return [...new Set(values.map((value) => text(value, "support_case_action_invalid")))].sort();
 }
 
+function resolveImpersonationApprovalActors({ supportCase, session, error }) {
+  const readOnlyApprovers = listApprovedSupportActors(
+    supportCase,
+    SUPPORT_ACTION_IMPERSONATION_READ_ONLY,
+    session.requestedByUserId
+  );
+  if (readOnlyApprovers.length === 0) {
+    throw error(
+      403,
+      "impersonation_read_only_approval_required",
+      "Impersonation requires approved read-only support access before activation."
+    );
+  }
+  if (session.mode === "read_only") {
+    return [readOnlyApprovers[0]];
+  }
+
+  const limitedWriteApprovers = listApprovedSupportActors(
+    supportCase,
+    SUPPORT_ACTION_IMPERSONATION_LIMITED_WRITE,
+    session.requestedByUserId
+  );
+  if (limitedWriteApprovers.length === 0) {
+    throw error(
+      403,
+      "impersonation_limited_write_approval_required",
+      "Limited-write impersonation requires an explicit write-capable approval."
+    );
+  }
+  const approvalPair = findDistinctApprovalPair(readOnlyApprovers, limitedWriteApprovers);
+  if (!approvalPair) {
+    throw error(
+      403,
+      "impersonation_limited_write_dual_approval_required",
+      "Limited-write impersonation requires two distinct approval actors."
+    );
+  }
+  return approvalPair;
+}
+
 function requireApprovedSupportAction(supportCase, action, actorId, error) {
   if (!supportCase.approvedActions.includes(action)) {
     throw error(403, "support_action_not_approved", `Support case does not allow ${action}.`);
@@ -689,6 +747,34 @@ function requireApprovedSupportAction(supportCase, action, actorId, error) {
     throw error(403, "support_action_separation_required", `Support action ${action} requires approval from a separate actor.`);
   }
   return approval.approvedByUserId;
+}
+
+function listApprovedSupportActors(supportCase, action, excludedActorId) {
+  if (!supportCase.approvedActions.includes(action)) {
+    return [];
+  }
+  return [...new Set(
+    supportCase.actionApprovals
+      .filter(
+        (candidate) =>
+          Array.isArray(candidate.approvedActions)
+          && candidate.approvedActions.includes(action)
+          && candidate.approvedByUserId !== supportCase.createdByUserId
+          && candidate.approvedByUserId !== excludedActorId
+      )
+      .map((candidate) => candidate.approvedByUserId)
+  )];
+}
+
+function findDistinctApprovalPair(primaryActors, secondaryActors) {
+  for (const primaryActorId of primaryActors) {
+    for (const secondaryActorId of secondaryActors) {
+      if (primaryActorId !== secondaryActorId) {
+        return [primaryActorId, secondaryActorId];
+      }
+    }
+  }
+  return null;
 }
 
 function redactInput(input) {

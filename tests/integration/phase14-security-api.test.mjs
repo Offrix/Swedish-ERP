@@ -123,7 +123,7 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
         companyId: DEMO_IDS.companyId,
         category: "integration_failure",
         severity: "high",
-        approvedActions: ["plan_job_replay"],
+        approvedActions: ["plan_job_replay", "impersonation_read_only", "impersonation_limited_write"],
         relatedObjectRefs: [{ objectType: "submission", objectId: "submission-1" }]
       }
     });
@@ -132,7 +132,7 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       token: approverToken,
       body: {
         companyId: DEMO_IDS.companyId,
-        approvedActions: ["plan_job_replay"]
+        approvedActions: ["plan_job_replay", "impersonation_read_only"]
       }
     });
 
@@ -205,6 +205,7 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       }
     });
     assert.equal(impersonationApproved.status, "active");
+    assert.deepEqual(impersonationApproved.approvalActorIds, [DEMO_APPROVER_IDS.userId]);
     const impersonationEnded = await requestJson(baseUrl, `/v1/backoffice/impersonations/${impersonation.sessionId}/end`, {
       method: "POST",
       token: adminToken,
@@ -214,6 +215,108 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       }
     });
     assert.equal(impersonationEnded.status, "ended");
+    const limitedWriteMissingAllowlist = await requestJson(baseUrl, "/v1/backoffice/impersonations", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 400,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        supportCaseId: supportCase.supportCaseId,
+        targetCompanyUserId: DEMO_APPROVER_IDS.companyUserId,
+        purposeCode: "support_limited_write_missing_allowlist",
+        mode: "limited_write"
+      }
+    });
+    assert.equal(limitedWriteMissingAllowlist.error, "impersonation_restricted_actions_required");
+    const limitedWriteImpersonation = await requestJson(baseUrl, "/v1/backoffice/impersonations", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        supportCaseId: supportCase.supportCaseId,
+        targetCompanyUserId: DEMO_APPROVER_IDS.companyUserId,
+        purposeCode: "support_limited_write",
+        mode: "limited_write",
+        restrictedActions: ["jobs.retry"]
+      }
+    });
+    const limitedWriteDenied = await requestJson(baseUrl, `/v1/backoffice/impersonations/${limitedWriteImpersonation.sessionId}/approve`, {
+      method: "POST",
+      token: approverToken,
+      expectedStatus: 403,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(limitedWriteDenied.error, "impersonation_limited_write_approval_required");
+    await requestJson(baseUrl, `/v1/backoffice/support-cases/${supportCase.supportCaseId}/approve-actions`, {
+      method: "POST",
+      token: secondApproverToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        approvedActions: ["impersonation_limited_write"]
+      }
+    });
+    const limitedWriteApproved = await requestJson(baseUrl, `/v1/backoffice/impersonations/${limitedWriteImpersonation.sessionId}/approve`, {
+      method: "POST",
+      token: approverToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(limitedWriteApproved.status, "active");
+    assert.deepEqual(limitedWriteApproved.approvalActorIds.sort(), [DEMO_APPROVER_IDS.userId, secondApprover.user.userId].sort());
+    const limitedWriteEnded = await requestJson(baseUrl, `/v1/backoffice/impersonations/${limitedWriteImpersonation.sessionId}/end`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "case_resolved"
+      }
+    });
+    assert.equal(limitedWriteEnded.status, "ended");
+    const singleApproverWriteCase = await requestJson(baseUrl, "/v1/backoffice/support-cases", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        category: "impersonation_escalation",
+        severity: "high",
+        approvedActions: ["impersonation_read_only", "impersonation_limited_write"]
+      }
+    });
+    await requestJson(baseUrl, `/v1/backoffice/support-cases/${singleApproverWriteCase.supportCaseId}/approve-actions`, {
+      method: "POST",
+      token: approverToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        approvedActions: ["impersonation_read_only", "impersonation_limited_write"]
+      }
+    });
+    const singleApproverWriteSession = await requestJson(baseUrl, "/v1/backoffice/impersonations", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        supportCaseId: singleApproverWriteCase.supportCaseId,
+        targetCompanyUserId: DEMO_APPROVER_IDS.companyUserId,
+        purposeCode: "support_limited_write_single_approver",
+        mode: "limited_write",
+        restrictedActions: ["jobs.retry"]
+      }
+    });
+    const singleApproverDenied = await requestJson(baseUrl, `/v1/backoffice/impersonations/${singleApproverWriteSession.sessionId}/approve`, {
+      method: "POST",
+      token: secondApproverToken,
+      expectedStatus: 403,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(singleApproverDenied.error, "impersonation_limited_write_dual_approval_required");
 
     const accessReview = await requestJson(baseUrl, "/v1/backoffice/access-reviews", {
       method: "POST",
