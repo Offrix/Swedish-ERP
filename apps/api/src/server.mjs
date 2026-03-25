@@ -12063,6 +12063,9 @@ function isFinanceOperationsReadPath(path) {
 
 function isDesktopSurfaceReadPath(path) {
   return (
+    path.startsWith("/v1/documents") ||
+    path.startsWith("/v1/inbox") ||
+    path.startsWith("/v1/review-tasks") ||
     path.startsWith("/v1/search") ||
     path.startsWith("/v1/saved-views") ||
     path.startsWith("/v1/dashboard")

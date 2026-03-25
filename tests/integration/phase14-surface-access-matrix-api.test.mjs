@@ -126,6 +126,76 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         startDate: "2026-03-01"
       }
     });
+    const document = await requestJson(baseUrl, "/v1/documents", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        documentType: "supplier_invoice",
+        sourceChannel: "manual",
+        sourceReference: "phase14-access-matrix-doc"
+      }
+    });
+    await requestJson(baseUrl, `/v1/documents/${document.documentId}/versions`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        variantType: "original",
+        storageKey: "documents/originals/phase14-access-matrix-doc.pdf",
+        mimeType: "application/pdf",
+        contentText: "phase14 access matrix source"
+      }
+    });
+    const inboxChannel = await requestJson(baseUrl, "/v1/inbox/channels", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        channelCode: "access_matrix_ap_inbox",
+        inboundAddress: "access-matrix-ap@inbound.example.test",
+        useCase: "supplier_invoice_inbox",
+        allowedMimeTypes: ["application/pdf"],
+        maxAttachmentSizeBytes: 1048576,
+        defaultDocumentType: "supplier_invoice",
+        classificationConfidenceThreshold: 0.9,
+        fieldConfidenceThreshold: 0.9
+      }
+    });
+    const inboxMessage = await requestJson(baseUrl, "/v1/inbox/messages", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        recipientAddress: inboxChannel.inboundAddress,
+        messageId: "<phase14-access-matrix@inbound.example.test>",
+        rawStorageKey: "raw-mail/company/phase14-access-matrix.eml",
+        senderAddress: "supplier@example.test",
+        subject: "Access Matrix Invoice",
+        attachments: [
+          {
+            filename: "access-matrix-invoice.pdf",
+            mimeType: "application/pdf",
+            storageKey: "documents/originals/access-matrix-invoice.pdf",
+            contentText: "invoice content"
+          }
+        ]
+      }
+    });
+    const reviewSourceDocumentId = inboxMessage.routedDocuments[0].documentId;
+    const reviewRun = await requestJson(baseUrl, `/v1/documents/${reviewSourceDocumentId}/ocr/runs`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "access_matrix_review"
+      }
+    });
     const fieldWorkOrder = await requestJson(baseUrl, "/v1/field/work-orders", {
       method: "POST",
       token: adminToken,
@@ -184,6 +254,16 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
       { path: `/v1/search/documents?companyId=${DEMO_IDS.companyId}&query=trial`, error: "desktop_surface_role_forbidden" },
       { path: `/v1/saved-views?companyId=${DEMO_IDS.companyId}`, error: "desktop_surface_role_forbidden" },
       { path: `/v1/dashboard/widgets?companyId=${DEMO_IDS.companyId}&surfaceCode=desktop_reporting`, error: "desktop_surface_role_forbidden" },
+      { path: `/v1/documents/${document.documentId}/export?companyId=${DEMO_IDS.companyId}`, error: "desktop_surface_role_forbidden" },
+      {
+        path: `/v1/inbox/messages/${inboxMessage.message.emailIngestMessageId}?companyId=${DEMO_IDS.companyId}`,
+        error: "desktop_surface_role_forbidden"
+      },
+      { path: `/v1/documents/${reviewSourceDocumentId}/ocr/runs?companyId=${DEMO_IDS.companyId}`, error: "desktop_surface_role_forbidden" },
+      {
+        path: `/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}?companyId=${DEMO_IDS.companyId}`,
+        error: "desktop_surface_role_forbidden"
+      },
       { path: `/v1/banking/statement-events?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
       { path: `/v1/hus/decision-differences?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
       { path: `/v1/accounting-method/history?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
