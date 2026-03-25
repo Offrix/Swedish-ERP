@@ -161,6 +161,7 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
     });
     assert.equal("secret" in listedSubscriptions.items[0], false);
     assert.equal(listedSubscriptions.items[0].secretPresent, true);
+    assert.equal(listedSubscriptions.items[0].signingKeyVersion, 1);
 
     const productionSubscription = await requestJson(baseUrl, "/v1/public-api/webhooks", {
       method: "POST",
@@ -293,6 +294,7 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
     );
     assert.equal(deliveries.items.length, 1);
     assert.equal(deliveries.items[0].status, "queued");
+    assert.equal(deliveries.items[0].sequenceNo, 1);
     const dispatchedSandbox = await requestJson(baseUrl, "/v1/public-api/webhook-deliveries/dispatch", {
       method: "POST",
       token: adminToken,
@@ -303,6 +305,7 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
     });
     assert.equal(dispatchedSandbox.attemptedCount, 1);
     assert.equal(dispatchedSandbox.items[0].status, "sent");
+    assert.equal(dispatchedSandbox.items[0].attempts[0].responseClass, "2xx");
 
     const productionDeliveries = await requestJson(
       baseUrl,

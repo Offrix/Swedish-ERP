@@ -57,6 +57,8 @@ test("Phase 13.1 public API clients, compatibility baselines and webhook events 
   });
   assert.equal("secret" in listedSubscriptions[0], false);
   assert.equal(listedSubscriptions[0].secretPresent, true);
+  assert.equal(listedSubscriptions[0].signingKeyVersion, 1);
+  assert.equal(listedSubscriptions[0].latestSequenceNo, 0);
   assert.throws(
     () =>
       platform.createWebhookSubscription({
@@ -104,6 +106,8 @@ test("Phase 13.1 public API clients, compatibility baselines and webhook events 
   });
   assert.equal(deliveries.length, 1);
   assert.equal(deliveries[0].status, "queued");
+  assert.equal(deliveries[0].sequenceNo, 1);
+  assert.equal(deliveries[0].signingKeyVersion, 1);
   const dispatch = await platform.dispatchWebhookDeliveries({
     companyId: DEMO_IDS.companyId,
     subscriptionId: subscription.subscriptionId,
@@ -112,6 +116,18 @@ test("Phase 13.1 public API clients, compatibility baselines and webhook events 
   assert.equal(dispatch.attemptedCount, 1);
   assert.equal(dispatch.items[0].status, "sent");
   assert.equal(dispatch.items[0].attempts.length, 1);
+  assert.equal(dispatch.items[0].attempts[0].responseClass, "2xx");
+  const refreshedSubscriptions = platform.listWebhookSubscriptions({
+    companyId: DEMO_IDS.companyId,
+    clientId: client.clientId
+  });
+  assert.equal(refreshedSubscriptions[0].latestSequenceNo, 1);
+  assert.equal(typeof refreshedSubscriptions[0].lastDeliveryAt, "string");
+  const events = platform.listWebhookEvents({
+    companyId: DEMO_IDS.companyId,
+    mode: "sandbox"
+  });
+  assert.equal(events[0].deliveryStatusSummary.sent, 1);
   const spec = platform.getPublicApiSpec();
   assert.equal(spec.auth.scheme, "oauth2_client_credentials");
   assert.equal(spec.version, "2026-03-25");
@@ -124,4 +140,60 @@ test("Phase 13.1 public API clients, compatibility baselines and webhook events 
   const sandboxCatalog = platform.getPublicApiSandboxCatalog({ companyId: DEMO_IDS.companyId });
   assert.equal(sandboxCatalog.mode, "sandbox");
   assert.equal(sandboxCatalog.exampleResources.length >= 3, true);
+});
+
+test("Phase 13.1 webhook runtime dead-letters deliveries after repeated transport failure", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-22T18:30:00Z"),
+    webhookDeliveryExecutor: async () => ({
+      outcome: "failed",
+      httpStatus: 500,
+      errorCode: "webhook_transport_error",
+      retryAfterSeconds: 1
+    })
+  });
+
+  const client = platform.createPublicApiClient({
+    companyId: DEMO_IDS.companyId,
+    displayName: "Dead letter client",
+    mode: "sandbox",
+    scopes: ["api_spec.read", "webhook.manage"],
+    actorId: "phase13-1-dead-letter"
+  });
+  const subscription = platform.createWebhookSubscription({
+    companyId: DEMO_IDS.companyId,
+    clientId: client.clientId,
+    mode: "sandbox",
+    eventTypes: ["report.snapshot.ready"],
+    targetUrl: "https://example.test/dead-letter-webhook",
+    actorId: "phase13-1-dead-letter"
+  });
+  const event = platform.emitWebhookEvent({
+    companyId: DEMO_IDS.companyId,
+    eventType: "report.snapshot.ready",
+    resourceType: "report_snapshot",
+    resourceId: "snapshot-dead-letter",
+    payload: { snapshotId: "snapshot-dead-letter" },
+    mode: "sandbox",
+    eventKey: "phase13-1:dead-letter"
+  });
+  const initialDelivery = event.deliveries[0];
+
+  let latestStatus = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const dispatch = await platform.dispatchWebhookDeliveries({
+      companyId: DEMO_IDS.companyId,
+      deliveryId: initialDelivery.deliveryId,
+      actorId: "phase13-1-dead-letter"
+    });
+    latestStatus = dispatch.items[0].status;
+  }
+
+  assert.equal(latestStatus, "dead_lettered");
+  const deliveries = platform.listWebhookDeliveries({
+    companyId: DEMO_IDS.companyId,
+    subscriptionId: subscription.subscriptionId
+  });
+  assert.equal(deliveries[0].deadLetterReasonCode, "webhook_transport_error");
+  assert.equal(deliveries[0].attempts.length, 5);
 });
