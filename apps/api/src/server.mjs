@@ -151,6 +151,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/notifications/:notificationId/read",
               "/v1/notifications/:notificationId/ack",
               "/v1/notifications/:notificationId/snooze",
+              "/v1/backoffice/notifications/:notificationId/retry-delivery",
               "/v1/activity",
               "/v1/review-center/queues",
               "/v1/review-center/items",

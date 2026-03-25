@@ -34,6 +34,7 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     getNotificationInboxSummary,
     getNotification,
     deliverNotification,
+    retryNotificationDelivery,
     markNotificationRead,
     acknowledgeNotification,
     snoozeNotification,
@@ -193,6 +194,21 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
       explanation: `Delivery attempt ${delivery.attemptNo} via ${resolvedChannelCode} ended in ${resolvedDeliveryStatus}.`
     });
     return presentNotification(state, notification, { includeHistory: true });
+  }
+
+  function retryNotificationDelivery({ companyId, notificationId, channelCode = null, actorId = "system" } = {}) {
+    const notification = requireNotification(state, companyId, notificationId);
+    const latestDelivery = (state.deliveryIdsByNotification.get(notification.notificationId) || [])
+      .map((deliveryId) => state.deliveries.get(deliveryId))
+      .filter(Boolean)
+      .sort((left, right) => right.attemptNo - left.attemptNo)[0] || null;
+    return deliverNotification({
+      companyId,
+      notificationId,
+      channelCode: channelCode || latestDelivery?.channelCode || "in_app",
+      status: "queued",
+      actorId
+    });
   }
 
   function markNotificationRead({ companyId, notificationId, actorId = "system" } = {}) {

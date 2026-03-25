@@ -170,6 +170,18 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     });
     assert.equal(acknowledged.status, "acknowledged");
 
+    const retried = await requestJson(baseUrl, `/v1/backoffice/notifications/${approverNotification.notificationId}/retry-delivery`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 200,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(retried.status, "queued");
+    assert.equal(retried.deliveries.length, 2);
+    assert.equal(retried.deliveries[1].status, "queued");
+
     const activity = await requestJson(
       baseUrl,
       `/v1/activity?companyId=${DEMO_IDS.companyId}&objectType=review_item&objectId=review_api_1`,

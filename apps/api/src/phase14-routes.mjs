@@ -2417,6 +2417,30 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  const notificationRetryMatch = matchPath(path, "/v1/backoffice/notifications/:notificationId/retry-delivery");
+  if (req.method === "POST" && notificationRetryMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "notification",
+      objectId: notificationRetryMatch.notificationId,
+      scopeCode: "notifications"
+    });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, platform.retryNotificationDelivery({
+      companyId,
+      notificationId: notificationRetryMatch.notificationId,
+      channelCode: body.channelCode || null,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
   if (req.method === "GET" && path === "/v1/activity") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);

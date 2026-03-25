@@ -90,6 +90,15 @@ test("Step 13 notifications deduplicate active items and track delivery and user
     actorId: "user_2"
   });
   assert.equal(snoozed.status, "snoozed");
+  const retried = notifications.retryNotificationDelivery({
+    companyId,
+    notificationId: queued.notificationId,
+    actorId: "support_1"
+  });
+  assert.equal(retried.status, "queued");
+  assert.equal(retried.deliveries.length, 2);
+  assert.equal(retried.deliveries[1].status, "queued");
+  assert.equal(retried.deliveries[1].channelCode, "email");
 
   const summary = notifications.getNotificationInboxSummary({
     companyId,
