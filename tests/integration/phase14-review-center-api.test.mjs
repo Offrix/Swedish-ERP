@@ -28,6 +28,23 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
       email: DEMO_APPROVER_EMAIL
     });
 
+    await requestJson(baseUrl, `/v1/org/companies/${DEMO_IDS.companyId}/users`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        email: "review-field@example.test",
+        displayName: "Review Field",
+        roleCode: "field_user"
+      }
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "review-field@example.test"
+    });
+
     const seeded = platform.createReviewItem({
       companyId: DEMO_IDS.companyId,
       queueCode: "DOCUMENT_REVIEW",
@@ -56,6 +73,13 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
       { token: adminToken }
     );
     assert.equal(items.items.some((item) => item.reviewItemId === seeded.reviewItemId), true);
+
+    const fieldUserListForbidden = await requestJson(
+      baseUrl,
+      `/v1/review-center/items?companyId=${DEMO_IDS.companyId}&queueCode=DOCUMENT_REVIEW&status=open`,
+      { token: fieldUserToken, expectedStatus: 403 }
+    );
+    assert.equal(fieldUserListForbidden.error, "review_center_role_forbidden");
 
     const claimed = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/claim`, {
       method: "POST",

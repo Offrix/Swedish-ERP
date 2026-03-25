@@ -2359,7 +2359,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/review-center/queues") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_queue", objectId: companyId, scopeCode: "review_center" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_queue", objectId: companyId, scopeCode: "review_center" });
+    assertReviewCenterReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listReviewCenterQueues({
         companyId,
@@ -2372,7 +2373,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/review-center/items") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: companyId, scopeCode: "review_center" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: companyId, scopeCode: "review_center" });
+    assertReviewCenterReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listReviewCenterItems({
         companyId,
@@ -2390,7 +2392,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && reviewCenterItemMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: reviewCenterItemMatch.reviewItemId, scopeCode: "review_center" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: reviewCenterItemMatch.reviewItemId, scopeCode: "review_center" });
+    assertReviewCenterReadAccess({ principal });
     writeJson(res, 200, platform.getReviewCenterItem({
       companyId,
       reviewItemId: reviewCenterItemMatch.reviewItemId
@@ -3178,13 +3181,16 @@ function assertNotificationMutationAccess({ platform, principal, companyId, noti
 
 const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
 
-function assertReviewCenterActionAccess({ platform, principal, companyId, reviewItemId, operation }) {
+function assertReviewCenterReadAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
   const isAllowedOperator = [...REVIEW_CENTER_OPERATOR_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
   if (!isAllowedOperator) {
-    throw createHttpError(403, "review_center_role_forbidden", "Current actor is not allowed to operate review-center items.");
+    throw createHttpError(403, "review_center_role_forbidden", "Current actor is not allowed to access review-center worklists.");
   }
+}
 
+function assertReviewCenterActionAccess({ platform, principal, companyId, reviewItemId, operation }) {
+  assertReviewCenterReadAccess({ principal });
   const reviewItem = platform.getReviewCenterItem({ companyId, reviewItemId });
   const assignedUserId = reviewItem.currentAssignment?.assignedUserId || null;
   if (operation === "claim") {
