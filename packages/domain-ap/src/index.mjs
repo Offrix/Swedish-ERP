@@ -2204,10 +2204,14 @@ function hasSupplierPaymentDetails(supplier) {
 }
 
 function buildInvoiceApprovalSteps({ orgAuthPlatform, supplier, actorId = "system", clock = () => new Date() }) {
-  if (!supplier?.attestChainId || !orgAuthPlatform || typeof orgAuthPlatform.getApprovalChain !== "function") {
+  if (
+    !supplier?.attestChainId ||
+    !orgAuthPlatform ||
+    typeof orgAuthPlatform.getApprovalChainSnapshot !== "function"
+  ) {
     return [];
   }
-  const chain = orgAuthPlatform.getApprovalChain({
+  const chain = orgAuthPlatform.getApprovalChainSnapshot({
     approvalChainId: supplier.attestChainId
   });
   return (chain.steps || []).map((step) => ({

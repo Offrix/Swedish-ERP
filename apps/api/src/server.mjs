@@ -1050,7 +1050,14 @@ async function handleRequest({ req, res, platform, flags }) {
 
   const approvalChainMatch = matchPath(path, "/v1/org/attest-chains/:approvalChainId");
   if (approvalChainMatch && req.method === "GET") {
-    writeJson(res, 200, platform.getApprovalChain({ approvalChainId: approvalChainMatch.approvalChainId }));
+    writeJson(
+      res,
+      200,
+      platform.getApprovalChain({
+        sessionToken: readSessionToken(req),
+        approvalChainId: approvalChainMatch.approvalChainId
+      })
+    );
     return;
   }
 

@@ -104,6 +104,7 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     createObjectGrant,
     createApprovalChain,
     getApprovalChain,
+    getApprovalChainSnapshot,
     checkAuthorization,
     startLogin,
     logout,
@@ -397,10 +398,25 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       explanation: `Created approval chain for ${objectType}/${scopeCode}.`
     });
 
-    return getApprovalChain({ approvalChainId: approvalChain.approvalChainId });
+    return loadApprovalChain({ approvalChainId: approvalChain.approvalChainId });
   }
 
-  function getApprovalChain({ approvalChainId } = {}) {
+  function getApprovalChain({ sessionToken, approvalChainId } = {}) {
+    const approvalChain = loadApprovalChain({ approvalChainId });
+    authorizeFromSession(sessionToken, ACTIONS.COMPANY_USER_READ, {
+      companyId: approvalChain.companyId,
+      objectType: "attest_chain",
+      objectId: approvalChain.approvalChainId,
+      scopeCode: "attest_chain"
+    });
+    return approvalChain;
+  }
+
+  function getApprovalChainSnapshot({ approvalChainId } = {}) {
+    return loadApprovalChain({ approvalChainId });
+  }
+
+  function loadApprovalChain({ approvalChainId } = {}) {
     const approvalChain = state.approvalChains.get(approvalChainId);
     if (!approvalChain) {
       throw httpError(404, "approval_chain_not_found", "Approval chain was not found.");

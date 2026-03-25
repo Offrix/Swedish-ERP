@@ -99,6 +99,36 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
     );
     assert.equal(adminCreatesDelegation.resourceId, "INV-10001");
 
+    const approvalChain = await requestJson(`${baseUrl}/v1/org/attest-chains`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001",
+        scopeCode: "customer_invoice",
+        objectType: "customer_invoice",
+        steps: [
+          {
+            approverCompanyUserId: "00000000-0000-4000-8000-000000000021",
+            label: "prepare"
+          },
+          {
+            approverCompanyUserId: "00000000-0000-4000-8000-000000000022",
+            label: "approve"
+          }
+        ]
+      }
+    });
+    assert.equal(approvalChain.steps.length, 2);
+
+    const missingApprovalChainToken = await requestJson(
+      `${baseUrl}/v1/org/attest-chains/${approvalChain.approvalChainId}`,
+      {
+        expectedStatus: 400
+      }
+    );
+    assert.equal(missingApprovalChainToken.error, "session_token_required");
+
     const approverLogin = await loginWithTotpOnly({
       baseUrl,
       platform,
@@ -119,6 +149,15 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
       }
     });
     assert.equal(forbiddenMutation.error, "missing_permission");
+
+    const approvalChainRead = await requestJson(
+      `${baseUrl}/v1/org/attest-chains/${approvalChain.approvalChainId}`,
+      {
+        token: approverLogin.sessionToken
+      }
+    );
+    assert.equal(approvalChainRead.approvalChainId, approvalChain.approvalChainId);
+    assert.equal(approvalChainRead.steps.length, 2);
 
     const delegatedDecision = await requestJson(`${baseUrl}/v1/authz/check`, {
       method: "POST",
