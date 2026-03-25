@@ -2396,12 +2396,18 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/activity") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "activity_entry", objectId: companyId, scopeCode: "activity" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "activity_entry", objectId: companyId, scopeCode: "activity" });
+    const objectType = optionalText(url.searchParams.get("objectType"));
+    const objectId = optionalText(url.searchParams.get("objectId"));
+    const isObjectTimelineRequest = Boolean(objectType && objectId);
+    if (!isObjectTimelineRequest) {
+      assertActivityFeedFullReadAccess({ principal });
+    }
     writeJson(res, 200, {
       items: platform.listActivityEntries({
         companyId,
-        objectType: optionalText(url.searchParams.get("objectType")),
-        objectId: optionalText(url.searchParams.get("objectId")),
+        objectType,
+        objectId,
         visibilityScope: optionalText(url.searchParams.get("visibilityScope")),
         relatedObjectType: optionalText(url.searchParams.get("relatedObjectType")),
         relatedObjectId: optionalText(url.searchParams.get("relatedObjectId"))
@@ -3241,6 +3247,7 @@ const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", 
 const BACKOFFICE_READ_ROLE_CODES = new Set(["company_admin", "approver"]);
 const PAYROLL_OPERATIONS_ROLE_CODES = new Set(["company_admin", "payroll_admin", "approver"]);
 const FINANCE_OPERATIONS_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
+const ACTIVITY_FEED_FULL_READ_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
 
 function assertBackofficeReadAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
@@ -3271,6 +3278,14 @@ function assertReviewCenterReadAccess({ principal }) {
   const isAllowedOperator = [...REVIEW_CENTER_OPERATOR_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
   if (!isAllowedOperator) {
     throw createHttpError(403, "review_center_role_forbidden", "Current actor is not allowed to access review-center worklists.");
+  }
+}
+
+function assertActivityFeedFullReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedReader = [...ACTIVITY_FEED_FULL_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedReader) {
+    throw createHttpError(403, "activity_feed_role_forbidden", "Current actor is not allowed to access full activity-feed read models.");
   }
 }
 
