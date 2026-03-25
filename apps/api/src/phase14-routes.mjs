@@ -2850,7 +2850,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/payroll/migrations") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -2859,6 +2859,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "payroll"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listPayrollMigrationBatches({
         sessionToken,
@@ -2873,7 +2874,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && payrollMigrationMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -2882,6 +2883,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: payrollMigrationMatch.payrollMigrationBatchId,
       scopeCode: "payroll"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(
       res,
       200,
@@ -2898,7 +2900,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && payrollMigrationEmployeesMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -2907,6 +2909,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: payrollMigrationEmployeesMatch.payrollMigrationBatchId,
       scopeCode: "payroll"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.getEmployeeMigrationSummary({
         sessionToken,
@@ -3001,7 +3004,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && payrollMigrationDiffsMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -3010,6 +3013,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: payrollMigrationDiffsMatch.payrollMigrationBatchId,
       scopeCode: "payroll"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listPayrollMigrationDiffs({
         sessionToken,
@@ -3186,12 +3190,21 @@ function assertNotificationMutationAccess({ platform, principal, companyId, noti
 
 const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
 const BACKOFFICE_READ_ROLE_CODES = new Set(["company_admin", "approver"]);
+const PAYROLL_OPERATIONS_ROLE_CODES = new Set(["company_admin", "payroll_admin", "approver"]);
 
 function assertBackofficeReadAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
   const isAllowedReader = [...BACKOFFICE_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
   if (!isAllowedReader) {
     throw createHttpError(403, "backoffice_role_forbidden", "Current actor is not allowed to access backoffice read models.");
+  }
+}
+
+function assertPayrollOperationsReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedReader = [...PAYROLL_OPERATIONS_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedReader) {
+    throw createHttpError(403, "payroll_operations_role_forbidden", "Current actor is not allowed to access payroll operations worklists.");
   }
 }
 

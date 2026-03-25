@@ -4,7 +4,7 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
-import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
+import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
 
 test("Step 19 API exposes payroll migration creation, validation, diff gating and finalize", async () => {
   const platform = createApiPlatform({
@@ -45,6 +45,20 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
     });
+    const fieldUser = platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "payroll-migration-field@example.test",
+      displayName: "Payroll Migration Field",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "payroll-migration-field@example.test"
+    });
 
     const mappingSet = platform.createMappingSet({
       sessionToken: adminToken,
@@ -76,6 +90,12 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
       }
     });
     assert.equal(batch.status, "draft");
+
+    const fieldUserListForbidden = await requestJson(baseUrl, `/v1/payroll/migrations?companyId=${DEMO_IDS.companyId}`, {
+      token: fieldUserToken,
+      expectedStatus: 403
+    });
+    assert.equal(fieldUserListForbidden.error, "payroll_operations_role_forbidden");
 
     const imported = await requestJson(baseUrl, `/v1/payroll/migrations/${batch.payrollMigrationBatchId}/import-records`, {
       method: "POST",
