@@ -94,7 +94,11 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
     email: "finance-admin@example.test",
     displayName: "Finance Admin",
     roleCode: "company_admin",
-    requiresMfa: true
+    requiresMfa: false
+  });
+  const companyAdminLogin = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: "finance-admin@example.test"
   });
   const companyAdminToken = loginWithStrongAuthOnPlatform({
     platform,
@@ -102,6 +106,9 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
     email: "finance-admin@example.test"
   });
   assert.ok(companyAdmin.companyUserId);
+  assert.equal(companyAdmin.requiresMfa, true);
+  assert.equal(companyAdminLogin.session.requiredFactorCount, 2);
+  assert.deepEqual(companyAdminLogin.availableMethods.sort(), ["bankid", "totp"]);
   assert.ok(companyAdminToken);
   platform.createObjectGrant({
     sessionToken: adminToken,

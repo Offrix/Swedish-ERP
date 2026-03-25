@@ -159,6 +159,31 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
     assert.equal(approvalChainRead.approvalChainId, approvalChain.approvalChainId);
     assert.equal(approvalChainRead.steps.length, 2);
 
+    const financeAdmin = await requestJson(
+      `${baseUrl}/v1/org/companies/00000000-0000-4000-8000-000000000001/users`,
+      {
+        method: "POST",
+        token: adminSession.sessionToken,
+        expectedStatus: 201,
+        body: {
+          email: "finance-admin@example.test",
+          displayName: "Finance Admin",
+          roleCode: "company_admin",
+          requiresMfa: false
+        }
+      }
+    );
+    assert.equal(financeAdmin.roleCode, "company_admin");
+    assert.equal(financeAdmin.requiresMfa, true);
+
+    const financeAdminSession = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: "00000000-0000-4000-8000-000000000001",
+      email: "finance-admin@example.test"
+    });
+    assert.ok(financeAdminSession);
+
     const delegatedDecision = await requestJson(`${baseUrl}/v1/authz/check`, {
       method: "POST",
       token: approverLogin.sessionToken,

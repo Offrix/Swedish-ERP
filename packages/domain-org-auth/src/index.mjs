@@ -171,16 +171,18 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     const company = requireCompany(companyId);
     const now = nowIso();
     const user = findOrCreateUser({ email, displayName });
+    const resolvedRoleCode = assertSupportedRole(roleCode);
+    const resolvedRequiresMfa = resolvedRoleCode === "company_admin" ? true : requiresMfa === true;
     const companyUser = {
       companyUserId: crypto.randomUUID(),
       companyId: company.companyId,
       userId: user.userId,
-      roleCode: assertSupportedRole(roleCode),
+      roleCode: resolvedRoleCode,
       status,
       startsAt: timestamp(startsAt),
       endsAt: endsAt ? timestamp(endsAt) : null,
-      isAdmin: roleCode === "company_admin",
-      requiresMfa: typeof requiresMfa === "boolean" ? requiresMfa : roleCode === "company_admin",
+      isAdmin: resolvedRoleCode === "company_admin",
+      requiresMfa: resolvedRequiresMfa,
       metadataJson: {},
       createdAt: now,
       updatedAt: now
