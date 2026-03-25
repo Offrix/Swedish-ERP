@@ -53,6 +53,12 @@ Helper scripts for local setup, structure verification and phased rollout checks
 - `verify-phase14-security-review.ps1`: validates required FAS 14.1 backoffice, audit review, impersonation and break-glass artifacts.
 - `verify-phase14-resilience.ps1`: validates required FAS 14.2 feature-flag, emergency-disable, load-profile, restore-drill and chaos artifacts.
 - `verify-phase14-migration-go-live.ps1`: validates required FAS 14.3 migration cockpit, diff report, cutover and rollback artifacts.
+- `verify-checkpoint-v1.ps1`: runs the non-UI V1 checkpoint for platform composition, async jobs, rulepacks and resilience.
+- `verify-checkpoint-v2.ps1`: runs the non-UI V2 checkpoint for accounting method, fiscal year, ledger, VAT and tax-account foundation.
+- `verify-checkpoint-v3.ps1`: runs the non-UI V3 checkpoint for document classification, balances, agreements, payroll migration and payroll/AGI bridge.
+- `verify-checkpoint-v4.ps1`: runs the non-UI V4 checkpoint for projects, field, HUS and personalliggare.
+- `verify-checkpoint-v5.ps1`: runs the non-UI V5 checkpoint for legal form, annual reporting, filing receipts and tax submission chains.
+- `verify-checkpoint-v7.ps1`: runs the non-UI V7 checkpoint for resilience, replay, impersonation restrictions and emergency disable.
 - `verify-db.ps1`: validates migration file naming.
 - `new-migration.ps1`: creates timestamped migration file in `packages/db/migrations`.
 - `dev-up.ps1`: starts docker infra.
