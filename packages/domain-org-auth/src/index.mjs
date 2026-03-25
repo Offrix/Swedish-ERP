@@ -383,6 +383,19 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       if (!step.approverRoleCode && !step.approverCompanyUserId) {
         throw httpError(400, "approval_chain_step_target_required", "Each approval step needs a role or explicit company user target.");
       }
+      if (step.approverRoleCode) {
+        assertSupportedRole(step.approverRoleCode);
+      }
+      if (step.approverCompanyUserId) {
+        const approverCompanyUser = requireCompanyUser(step.approverCompanyUserId);
+        if (approverCompanyUser.companyId !== companyId) {
+          throw httpError(
+            400,
+            "approval_chain_step_company_mismatch",
+            "Approval-chain step assignees must belong to the same company."
+          );
+        }
+      }
       return {
         approvalChainStepId: crypto.randomUUID(),
         approvalChainId: approvalChain.approvalChainId,

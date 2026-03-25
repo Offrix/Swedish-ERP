@@ -127,6 +127,30 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
     });
     assert.equal(invalidDelegationWindow.error, "delegation_window_invalid");
 
+    const crossCompanyApprovalTarget =
+      platform
+        .snapshot()
+        .companyUsers.find((candidate) => candidate.companyId === onboardingRun.companyId)?.companyUserId || null;
+    assert.ok(crossCompanyApprovalTarget);
+
+    const crossCompanyApprovalChain = await requestJson(`${baseUrl}/v1/org/attest-chains`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 400,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001",
+        scopeCode: "customer_invoice",
+        objectType: "customer_invoice",
+        steps: [
+          {
+            approverCompanyUserId: crossCompanyApprovalTarget,
+            label: "cross_company_target"
+          }
+        ]
+      }
+    });
+    assert.equal(crossCompanyApprovalChain.error, "approval_chain_step_company_mismatch");
+
     const adminCreatesDelegation = await requestJson(
       `${baseUrl}/v1/org/delegations`,
       {
