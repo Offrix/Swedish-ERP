@@ -5618,7 +5618,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -5626,6 +5626,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "bank_account",
       scopeCode: "bank"
     });
+    assertFinanceOperationsAccess({ principal });
     writeJson(res, 200, {
       items: platform.listBankAccounts({
         companyId,
@@ -5666,7 +5667,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -5674,6 +5675,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "bank_account",
       scopeCode: "bank"
     });
+    assertFinanceOperationsAccess({ principal });
     writeJson(
       res,
       200,
@@ -5691,7 +5693,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -5699,6 +5701,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "bank_statement_event",
       scopeCode: "bank"
     });
+    assertFinanceOperationsAccess({ principal });
     writeJson(res, 200, {
       items: platform.listBankStatementEvents({
         companyId,
@@ -5741,7 +5744,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -5749,6 +5752,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "bank_statement_event",
       scopeCode: "bank"
     });
+    assertFinanceOperationsAccess({ principal });
     writeJson(
       res,
       200,
@@ -5766,7 +5770,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -5774,6 +5778,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "bank_reconciliation_case",
       scopeCode: "bank"
     });
+    assertFinanceOperationsAccess({ principal });
     writeJson(res, 200, {
       items: platform.listBankReconciliationCases({
         companyId,
@@ -5790,7 +5795,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -5798,6 +5803,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "bank_reconciliation_case",
       scopeCode: "bank"
     });
+    assertFinanceOperationsAccess({ principal });
     writeJson(
       res,
       200,
@@ -5842,7 +5848,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -5850,6 +5856,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "payment_proposal",
       scopeCode: "bank"
     });
+    assertFinanceOperationsAccess({ principal });
     writeJson(res, 200, {
       items: platform.listPaymentProposals({
         companyId,
@@ -5890,7 +5897,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -5898,6 +5905,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "payment_proposal",
       scopeCode: "bank"
     });
+    assertFinanceOperationsAccess({ principal });
     writeJson(
       res,
       200,
@@ -11842,12 +11850,21 @@ function assertPrincipalCanApproveLeaveEntry({ platform, principal, companyId, l
 }
 
 const ANNUAL_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
+const FINANCE_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 
 function assertAnnualOperationsAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
   const isAllowedOperator = [...ANNUAL_OPERATIONS_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
   if (!isAllowedOperator) {
     throw createHttpError(403, "annual_operations_role_forbidden", "Current actor is not allowed to access annual reporting or filing operations.");
+  }
+}
+
+function assertFinanceOperationsAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedOperator = [...FINANCE_OPERATIONS_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedOperator) {
+    throw createHttpError(403, "finance_operations_role_forbidden", "Current actor is not allowed to access finance operations worklists.");
   }
 }
 

@@ -47,6 +47,20 @@ test("Step 27 API imports bank statement events, bridges tax account and resolve
       companyId: COMPANY_ID,
       email: DEMO_ADMIN_EMAIL
     });
+    platform.createCompanyUser({
+      sessionToken,
+      companyId: COMPANY_ID,
+      email: "banking-field@example.test",
+      displayName: "Banking Field",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: "banking-field@example.test"
+    });
 
     platform.installLedgerCatalog({
       companyId: COMPANY_ID,
@@ -211,6 +225,14 @@ test("Step 27 API imports bank statement events, bridges tax account and resolve
       { token: sessionToken }
     );
     assert.equal(fetchedEvent.processingStatus, "processed");
+
+    const forbiddenEvents = await fetch(`${baseUrl}/v1/banking/statement-events?companyId=${COMPANY_ID}`, {
+      headers: {
+        authorization: `Bearer ${fieldUserToken}`
+      }
+    });
+    assert.equal(forbiddenEvents.status, 403);
+    await forbiddenEvents.json();
   } finally {
     await stopServer(server);
   }
@@ -244,6 +266,27 @@ async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
     body: {
       orderRef: bankidStart.orderRef,
       completionToken: platform.getBankIdCompletionTokenForTesting(bankidStart.orderRef)
+    }
+  });
+
+  return started.sessionToken;
+}
+
+async function loginWithTotpOnly({ baseUrl, platform, companyId, email }) {
+  const started = await requestJson(baseUrl, "/v1/auth/login", {
+    method: "POST",
+    body: {
+      companyId,
+      email
+    }
+  });
+
+  const totpCode = platform.getTotpCodeForTesting({ companyId, email });
+  await requestJson(baseUrl, "/v1/auth/mfa/totp/verify", {
+    method: "POST",
+    token: started.sessionToken,
+    body: {
+      code: totpCode
     }
   });
 
