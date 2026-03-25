@@ -19,6 +19,27 @@ test("Phase 14.2 resilience records flag metadata, audit correlations and contro
     companyId: DEMO_IDS.companyId,
     email: DEMO_ADMIN_EMAIL
   });
+  const releaseApprover = platform.createCompanyUser({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    email: "phase14-release-approver@example.test",
+    displayName: "Phase 14 Release Approver",
+    roleCode: "approver",
+    requiresMfa: false
+  });
+  platform.createObjectGrant({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    companyUserId: releaseApprover.companyUserId,
+    permissionCode: "company.manage",
+    objectType: "resilience",
+    objectId: DEMO_IDS.companyId
+  });
+  const releaseApproverToken = loginWithTotpOnPlatform({
+    platform,
+    companyId: DEMO_IDS.companyId,
+    email: "phase14-release-approver@example.test"
+  });
 
   const correlationId = "corr-phase14-feature-flag";
   const featureFlag = platform.upsertFeatureFlag({
@@ -94,6 +115,25 @@ test("Phase 14.2 resilience records flag metadata, audit correlations and contro
   });
   assert.equal(disable.featureFlag.emergencyDisabled, true);
   assert.equal(platform.resolveRuntimeFlags({ companyId: DEMO_IDS.companyId })[featureFlag.flagKey], false);
+  assert.throws(
+    () =>
+      platform.releaseEmergencyDisable({
+        sessionToken: adminToken,
+        companyId: DEMO_IDS.companyId,
+        emergencyDisableId: disable.emergencyDisable.emergencyDisableId,
+        verificationSummary: "Self release should be blocked for high-risk disable."
+      }),
+    (error) => error?.code === "emergency_disable_self_release_forbidden"
+  );
+  const releasedDisable = platform.releaseEmergencyDisable({
+    sessionToken: releaseApproverToken,
+    companyId: DEMO_IDS.companyId,
+    emergencyDisableId: disable.emergencyDisable.emergencyDisableId,
+    verificationSummary: "Queue health and payment adapter probes are green again."
+  });
+  assert.equal(releasedDisable.featureFlag.emergencyDisabled, false);
+  assert.equal(releasedDisable.emergencyDisable.status, "released");
+  assert.equal(platform.resolveRuntimeFlags({ companyId: DEMO_IDS.companyId })[featureFlag.flagKey], true);
 
   const loadProfile = platform.recordLoadProfile({
     sessionToken: adminToken,
@@ -153,7 +193,7 @@ test("Phase 14.2 resilience records flag metadata, audit correlations and contro
   assert.equal(correlations.length >= 1, true);
   assert.equal(featureFlagCorrelation.actionCount >= 3, true);
   assert.equal(featureFlagCorrelation.relatedEntities.some((entry) => entry.entityType === "feature_flag"), true);
-  assert.equal(controlPlane.activeEmergencyDisableCount, 1);
+  assert.equal(controlPlane.activeEmergencyDisableCount, 0);
   assert.equal(controlPlane.openIncidentSignalCount, 1);
   assert.equal(incidentSignals.some((signal) => signal.signalType === "emergency_disable_activated"), true);
 });

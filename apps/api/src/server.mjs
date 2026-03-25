@@ -522,6 +522,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/backoffice/break-glass/:breakGlassId/close",
               "/v1/ops/feature-flags",
               "/v1/ops/emergency-disables",
+              "/v1/ops/emergency-disables/:emergencyDisableId/release",
               "/v1/ops/load-profiles",
               "/v1/ops/restore-drills",
               "/v1/ops/chaos-scenarios",

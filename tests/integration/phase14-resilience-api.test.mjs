@@ -4,7 +4,7 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
-import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
+import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
 
 test("Phase 14.2 API records feature-flag metadata, emergency disables and recovery evidence", async () => {
   const platform = createApiPlatform({
@@ -20,6 +20,36 @@ test("Phase 14.2 API records feature-flag metadata, emergency disables and recov
       platform,
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
+    });
+    const releaseApprover = platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "phase14-release-approver@example.test",
+      displayName: "Phase 14 Release Approver",
+      roleCode: "approver",
+      requiresMfa: false
+    });
+    platform.createObjectGrant({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      companyUserId: releaseApprover.companyUserId,
+      permissionCode: "company.manage",
+      objectType: "resilience",
+      objectId: DEMO_IDS.companyId
+    });
+    platform.createDelegation({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      fromCompanyUserId: DEMO_IDS.companyUserId,
+      toCompanyUserId: releaseApprover.companyUserId,
+      scopeCode: "emergency_disable",
+      permissionCode: "company.manage"
+    });
+    const releaseApproverToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "phase14-release-approver@example.test"
     });
 
     const featureFlag = await requestJson(baseUrl, "/v1/ops/feature-flags", {
@@ -113,11 +143,32 @@ test("Phase 14.2 API records feature-flag metadata, emergency disables and recov
       }
     });
     assert.equal(disable.featureFlag.emergencyDisabled, true);
+    const selfReleaseDenied = await requestJson(baseUrl, `/v1/ops/emergency-disables/${disable.emergencyDisable.emergencyDisableId}/release`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        verificationSummary: "Self release should be blocked for high-risk disable."
+      }
+    });
+    assert.equal(selfReleaseDenied.error, "emergency_disable_self_release_forbidden");
+    const releasedDisable = await requestJson(baseUrl, `/v1/ops/emergency-disables/${disable.emergencyDisable.emergencyDisableId}/release`, {
+      method: "POST",
+      token: releaseApproverToken,
+      expectedStatus: 200,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        verificationSummary: "Queue health and payment adapter probes are green again."
+      }
+    });
+    assert.equal(releasedDisable.featureFlag.emergencyDisabled, false);
+    assert.equal(releasedDisable.emergencyDisable.status, "released");
 
     const afterDisable = await requestJson(baseUrl, `/v1/ops/feature-flags?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
-    assert.equal(afterDisable.resolved[featureFlag.flagKey], false);
+    assert.equal(afterDisable.resolved[featureFlag.flagKey], true);
 
     await requestJson(baseUrl, "/v1/ops/load-profiles", {
       method: "POST",
@@ -176,6 +227,7 @@ test("Phase 14.2 API records feature-flag metadata, emergency disables and recov
     });
 
     assert.equal(disables.items.length, 1);
+    assert.equal(disables.items[0].status, "released");
     assert.equal(loadProfiles.items[0].status, "passed");
     assert.equal(restoreDrills.items[0].actualRtoMinutes <= restoreDrills.items[0].targetRtoMinutes, true);
     assert.equal(chaosScenarios.items[0].queueRecoverySeconds <= 35, true);

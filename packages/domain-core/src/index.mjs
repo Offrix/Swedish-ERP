@@ -18,6 +18,7 @@ import {
   createBackofficeModule
 } from "./backoffice.mjs";
 import {
+  EMERGENCY_DISABLE_STATUSES,
   CHAOS_SCENARIO_STATUSES,
   FEATURE_FLAG_SCOPE_TYPES,
   FEATURE_FLAG_TYPES,
@@ -76,6 +77,7 @@ export {
   FEATURE_FLAG_SCOPE_TYPES,
   FEATURE_FLAG_TYPES,
   FEATURE_FLAG_RISK_CLASSES,
+  EMERGENCY_DISABLE_STATUSES,
   LOAD_PROFILE_STATUSES,
   RESTORE_DRILL_STATUSES,
   CHAOS_SCENARIO_STATUSES,
@@ -323,6 +325,7 @@ export function createCoreEngine({
       featureFlagScopeTypes: FEATURE_FLAG_SCOPE_TYPES,
       featureFlagTypes: FEATURE_FLAG_TYPES,
       featureFlagRiskClasses: FEATURE_FLAG_RISK_CLASSES,
+      emergencyDisableStatuses: EMERGENCY_DISABLE_STATUSES,
       loadProfileStatuses: LOAD_PROFILE_STATUSES,
       restoreDrillStatuses: RESTORE_DRILL_STATUSES,
       chaosScenarioStatuses: CHAOS_SCENARIO_STATUSES,
@@ -386,6 +389,7 @@ export function createCoreEngine({
       listFeatureFlags: publicResilienceModule.listFeatureFlags,
       requestEmergencyDisable: publicResilienceModule.requestEmergencyDisable,
       listEmergencyDisables: publicResilienceModule.listEmergencyDisables,
+      releaseEmergencyDisable: publicResilienceModule.releaseEmergencyDisable,
       recordLoadProfile: publicResilienceModule.recordLoadProfile,
       listLoadProfiles: publicResilienceModule.listLoadProfiles,
       recordRestoreDrill: publicResilienceModule.recordRestoreDrill,

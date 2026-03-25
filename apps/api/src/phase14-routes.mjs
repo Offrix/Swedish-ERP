@@ -1917,6 +1917,21 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  const emergencyDisableReleaseMatch = matchPath(path, "/v1/ops/emergency-disables/:emergencyDisableId/release");
+  if (req.method === "POST" && emergencyDisableReleaseMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "emergency_disable", objectId: emergencyDisableReleaseMatch.emergencyDisableId, scopeCode: "emergency_disable" });
+    writeJson(res, 200, platform.releaseEmergencyDisable({
+      sessionToken,
+      companyId,
+      emergencyDisableId: emergencyDisableReleaseMatch.emergencyDisableId,
+      verificationSummary: body.verificationSummary
+    }));
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/ops/load-profiles") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");

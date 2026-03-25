@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 export const FEATURE_FLAG_SCOPE_TYPES = Object.freeze(["global", "company", "company_user"]);
 export const FEATURE_FLAG_TYPES = Object.freeze(["release", "ops", "entitlement", "kill_switch"]);
 export const FEATURE_FLAG_RISK_CLASSES = Object.freeze(["low", "medium", "high"]);
+export const EMERGENCY_DISABLE_STATUSES = Object.freeze(["active", "released"]);
 export const LOAD_PROFILE_STATUSES = Object.freeze(["draft", "passed", "failed"]);
 export const RESTORE_DRILL_STATUSES = Object.freeze(["planned", "passed", "failed"]);
 export const CHAOS_SCENARIO_STATUSES = Object.freeze(["planned", "executed", "failed"]);
@@ -136,6 +137,7 @@ export function createResilienceModule({
     featureFlagScopeTypes: FEATURE_FLAG_SCOPE_TYPES,
     featureFlagTypes: FEATURE_FLAG_TYPES,
     featureFlagRiskClasses: FEATURE_FLAG_RISK_CLASSES,
+    emergencyDisableStatuses: EMERGENCY_DISABLE_STATUSES,
     loadProfileStatuses: LOAD_PROFILE_STATUSES,
     restoreDrillStatuses: RESTORE_DRILL_STATUSES,
     chaosScenarioStatuses: CHAOS_SCENARIO_STATUSES,
@@ -149,6 +151,7 @@ export function createResilienceModule({
     listFeatureFlags,
     requestEmergencyDisable,
     listEmergencyDisables,
+    releaseEmergencyDisable,
     recordLoadProfile,
     listLoadProfiles,
     recordRestoreDrill,
@@ -289,6 +292,7 @@ export function createResilienceModule({
     if (existingActiveDisable) {
       throw error(409, "emergency_disable_already_active", "An active emergency disable already exists for this scoped flag.");
     }
+    const previousEnabled = featureFlag.enabled === true;
     featureFlag.enabled = false;
     featureFlag.emergencyDisabled = true;
     featureFlag.emergencyReasonCode = text(reasonCode, "emergency_disable_reason_required");
@@ -302,8 +306,12 @@ export function createResilienceModule({
       reasonCode: featureFlag.emergencyReasonCode,
       requestedByUserId: principal.userId,
       status: "active",
+      previousEnabled,
       activatedAt: nowIso(clock),
       expiresAt: addMinutes(nowIso(clock), normalizePositiveInteger(expiresInMinutes, "emergency_disable_expiry_invalid")),
+      releasedByUserId: null,
+      releasedAt: null,
+      verificationSummary: null,
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
     };
@@ -346,6 +354,53 @@ export function createResilienceModule({
       .filter((disable) => disable.companyId === text(companyId, "company_id_required"))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       .map(clone);
+  }
+
+  function releaseEmergencyDisable({
+    sessionToken,
+    companyId,
+    emergencyDisableId,
+    verificationSummary,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const disable = requireEmergencyDisable(companyId, emergencyDisableId);
+    if (disable.status !== "active") {
+      throw error(409, "emergency_disable_not_active", "Only active emergency disables can be released.");
+    }
+    const featureFlag = requireFeatureFlag(companyId, disable.flagKey, {
+      scopeType: disable.scopeType,
+      scopeRef: disable.scopeRef
+    });
+    if (requiresSeparateEmergencyDisableRelease(featureFlag) && disable.requestedByUserId === principal.userId) {
+      throw error(
+        409,
+        "emergency_disable_self_release_forbidden",
+        "High-risk or global emergency disables require a separate actor for release."
+      );
+    }
+    featureFlag.enabled = disable.previousEnabled === true;
+    featureFlag.emergencyDisabled = false;
+    featureFlag.emergencyReasonCode = null;
+    featureFlag.updatedAt = nowIso(clock);
+    disable.status = "released";
+    disable.releasedByUserId = principal.userId;
+    disable.releasedAt = nowIso(clock);
+    disable.verificationSummary = text(verificationSummary, "emergency_disable_verification_summary_required");
+    disable.updatedAt = disable.releasedAt;
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.emergency_disable.released",
+      entityType: "emergency_disable",
+      entityId: disable.emergencyDisableId,
+      explanation: `Released emergency disable for ${featureFlag.flagKey}.`
+    });
+    return {
+      featureFlag: clone(featureFlag),
+      emergencyDisable: clone(disable)
+    };
   }
 
   function recordLoadProfile({
@@ -1163,6 +1218,14 @@ export function createResilienceModule({
     return featureFlag;
   }
 
+  function requireEmergencyDisable(companyId, emergencyDisableId) {
+    const disable = state.emergencyDisables.get(text(emergencyDisableId, "emergency_disable_id_required"));
+    if (!disable || disable.companyId !== text(companyId, "company_id_required")) {
+      throw error(404, "emergency_disable_not_found", "Emergency disable was not found.");
+    }
+    return disable;
+  }
+
   function requireIncidentSignal(companyId, incidentSignalId) {
     const signal = state.incidentSignals.get(text(incidentSignalId, "runtime_incident_signal_id_required"));
     if (!signal || signal.companyId !== text(companyId, "company_id_required")) {
@@ -1236,6 +1299,10 @@ function featureFlagPrecedence(featureFlag) {
     company_user: 3
   };
   return precedence[featureFlag.scopeType] || 0;
+}
+
+function requiresSeparateEmergencyDisableRelease(featureFlag) {
+  return featureFlag.scopeType === "global" || featureFlag.flagType === "kill_switch" || featureFlag.riskClass === "high";
 }
 
 function flagMatchesRuntimeScope(featureFlag, companyId, companyUserId) {

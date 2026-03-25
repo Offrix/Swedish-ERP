@@ -154,6 +154,23 @@ export interface FeatureFlagRecord {
   readonly changedByUserId?: string | null;
 }
 
+export interface EmergencyDisableRecord {
+  readonly emergencyDisableId: string;
+  readonly companyId: string;
+  readonly flagKey: string;
+  readonly scopeType: string;
+  readonly scopeRef: string | null;
+  readonly reasonCode: string;
+  readonly requestedByUserId: string;
+  readonly status: "active" | "released";
+  readonly previousEnabled: boolean;
+  readonly activatedAt: string;
+  readonly expiresAt: string;
+  readonly releasedByUserId: string | null;
+  readonly releasedAt: string | null;
+  readonly verificationSummary: string | null;
+}
+
 export interface MigrationImportBatch {
   readonly importBatchId: string;
   readonly companyId: string;

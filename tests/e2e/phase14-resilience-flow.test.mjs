@@ -17,6 +17,7 @@ test("Phase 14.2 flow exposes ops routes and keeps disable plus recovery artifac
   try {
     const root = await requestJson(baseUrl, "/");
     assert.equal(root.routes.includes("/v1/ops/feature-flags"), true);
+    assert.equal(root.routes.includes("/v1/ops/emergency-disables/:emergencyDisableId/release"), true);
     assert.equal(root.routes.includes("/v1/ops/chaos-scenarios"), true);
 
     const adminToken = await loginWithStrongAuth({
@@ -43,7 +44,7 @@ test("Phase 14.2 flow exposes ops routes and keeps disable plus recovery artifac
         enabled: true
       }
     });
-    await requestJson(baseUrl, "/v1/ops/emergency-disables", {
+    const disable = await requestJson(baseUrl, "/v1/ops/emergency-disables", {
       method: "POST",
       token: adminToken,
       expectedStatus: 201,
@@ -72,6 +73,20 @@ test("Phase 14.2 flow exposes ops routes and keeps disable plus recovery artifac
       token: adminToken
     });
     assert.equal(flags.resolved["search.async_exports"], false);
+    const released = await requestJson(baseUrl, `/v1/ops/emergency-disables/${disable.emergencyDisable.emergencyDisableId}/release`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 200,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        verificationSummary: "Export worker backlog is empty and provider checks are green."
+      }
+    });
+    assert.equal(released.emergencyDisable.status, "released");
+    const flagsAfterRelease = await requestJson(baseUrl, `/v1/ops/feature-flags?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(flagsAfterRelease.resolved["search.async_exports"], true);
   } finally {
     await stopServer(server);
   }
