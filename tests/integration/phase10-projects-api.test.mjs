@@ -154,7 +154,7 @@ test("Phase 10.1 API manages projects, budgets, resource allocations and snapsho
       }
     });
 
-    await requestJson(baseUrl, "/v1/benefits/events", {
+    const projectBenefit = await requestJson(baseUrl, "/v1/benefits/events", {
       method: "POST",
       token: sessionToken,
       expectedStatus: 201,
@@ -172,6 +172,13 @@ test("Phase 10.1 API manages projects, budgets, resource allocations and snapsho
         dimensionJson: {
           projectId: project.projectId
         }
+      }
+    });
+    await requestJson(baseUrl, `/v1/benefits/events/${projectBenefit.benefitEventId}/approve`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: COMPANY_ID
       }
     });
 

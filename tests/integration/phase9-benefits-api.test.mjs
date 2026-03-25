@@ -116,6 +116,21 @@ test("Phase 9.1 API manages catalog, benefit events, payroll mapping, posting an
     assert.equal(benefitEvent.valuation.taxableValue, 600);
     assert.equal(benefitEvent.postingIntents.some((intent) => intent.ledgerAccountCode === "7230"), true);
     assert.equal(benefitEvent.agiMappings[0].reportableAmount, 600);
+    assert.equal(benefitEvent.status, "valued");
+
+    const approvedBenefitEvent = await requestJson(
+      baseUrl,
+      `/v1/benefits/events/${benefitEvent.benefitEventId}/approve`,
+      {
+        method: "POST",
+        token: sessionToken,
+        body: {
+          companyId: COMPANY_ID
+        }
+      }
+    );
+    assert.equal(approvedBenefitEvent.status, "approved");
+    assert.equal(approvedBenefitEvent.valuation.status, "approved");
 
     const listedEvents = await requestJson(
       baseUrl,
@@ -134,6 +149,7 @@ test("Phase 9.1 API manages catalog, benefit events, payroll mapping, posting an
       }
     );
     assert.equal(fetchedEvent.benefitEventId, benefitEvent.benefitEventId);
+    assert.equal(fetchedEvent.status, "approved");
 
     const auditEvents = await requestJson(
       baseUrl,

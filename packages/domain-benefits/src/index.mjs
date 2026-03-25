@@ -30,6 +30,8 @@ const TAX_FREE_MEAL_CONTEXTS = new Set([
   "hotel_breakfast_included",
   "public_transport_included"
 ]);
+const BENEFIT_EVENT_STATUSES = Object.freeze(["valued", "approved", "dispatched_to_payroll", "corrected", "closed"]);
+const BENEFIT_VALUATION_STATUSES = Object.freeze(["proposed", "approved", "superseded"]);
 const PAYROLL_CONSUMPTION_STAGES = Object.freeze(["calculated", "approved"]);
 
 export const BENEFIT_CODES = Object.freeze([
@@ -95,6 +97,7 @@ export function createBenefitsEngine({
     listBenefitEvents,
     getBenefitEvent,
     createBenefitEvent,
+    approveBenefitEvent,
     listBenefitAuditEvents,
     listPayrollBenefitPayloads,
     registerBenefitPayrollConsumption
@@ -189,6 +192,9 @@ export function createBenefitsEngine({
       supportingDocumentId: normalizeOptionalText(supportingDocumentId),
       dimensionJson: normalizeDimensions(dimensionJson),
       payloadJson: copy(sourcePayload || {}),
+      status: BENEFIT_EVENT_STATUSES[0],
+      approvedAt: null,
+      approvedByActorId: null,
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
@@ -226,6 +232,38 @@ export function createBenefitsEngine({
     return presentBenefitEvent(state, eventDraft);
   }
 
+  function approveBenefitEvent({ companyId, benefitEventId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+    const event = requireBenefitEvent(state, companyId, benefitEventId);
+    const valuation = requireValuationByEvent(state, event.benefitEventId);
+    if (event.status === "corrected" || event.status === "closed") {
+      throw createError(409, "benefit_event_not_approvable", "Closed or corrected benefit events cannot be approved.");
+    }
+    if (event.status === "approved" || event.status === "dispatched_to_payroll") {
+      return presentBenefitEvent(state, event);
+    }
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const now = nowIso(clock);
+    event.status = "approved";
+    event.approvedAt = now;
+    event.approvedByActorId = resolvedActorId;
+    event.updatedAt = now;
+    valuation.status = "approved";
+    valuation.approvedAt = now;
+    valuation.approvedByActorId = resolvedActorId;
+    state.events.set(event.benefitEventId, event);
+    state.valuations.set(valuation.benefitValuationId, valuation);
+    pushAudit(state, clock, {
+      companyId: event.companyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "benefit.event.approved",
+      entityType: "benefit_event",
+      entityId: event.benefitEventId,
+      explanation: `Approved ${event.benefitCode} valuation for payroll and AGI handoff.`
+    });
+    return presentBenefitEvent(state, event);
+  }
+
   function listBenefitAuditEvents({ companyId, benefitEventId = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return state.auditEvents
@@ -235,7 +273,7 @@ export function createBenefitsEngine({
   }
 
   function listPayrollBenefitPayloads({ companyId, employmentId, reportingPeriod } = {}) {
-    const events = listBenefitEvents({ companyId, employmentId, reportingPeriod });
+    const events = listBenefitEvents({ companyId, employmentId, reportingPeriod }).filter(isPayrollDispatchableBenefitEvent);
     return {
       events,
       payLinePayloads: events.flatMap((event) => event.postingIntents.map((intent) => copy(intent.payrollLinePayloadJson))),
@@ -257,6 +295,9 @@ export function createBenefitsEngine({
     actorId = "system"
   } = {}) {
     const event = requireBenefitEvent(state, companyId, benefitEventId);
+    if (!isPayrollDispatchableBenefitEvent(event)) {
+      throw createError(409, "benefit_event_not_approved_for_payroll", "Benefit event must be approved before payroll consumption.");
+    }
     const resolvedStage = assertAllowed(stage, PAYROLL_CONSUMPTION_STAGES, "benefit_payroll_consumption_stage_invalid");
     const resolvedPayRunId = requireText(payRunId, "benefit_payroll_consumption_pay_run_id_required");
     const resolvedPayRunLineId = requireText(payRunLineId, "benefit_payroll_consumption_pay_run_line_id_required");
@@ -277,6 +318,9 @@ export function createBenefitsEngine({
         existing.approvedAt = now;
         existing.approvedByActorId = resolvedActorId;
       }
+      event.status = "dispatched_to_payroll";
+      event.updatedAt = now;
+      state.events.set(event.benefitEventId, event);
       state.payrollConsumptions.set(existing.benefitPayrollConsumptionId, existing);
       return copy(existing);
     }
@@ -304,6 +348,9 @@ export function createBenefitsEngine({
     state.payrollConsumptions.set(record.benefitPayrollConsumptionId, record);
     appendToIndex(state.payrollConsumptionIdsByEvent, event.benefitEventId, record.benefitPayrollConsumptionId);
     state.payrollConsumptionIdByKey.set(resolvedPayRunLineId, record.benefitPayrollConsumptionId);
+    event.status = "dispatched_to_payroll";
+    event.updatedAt = now;
+    state.events.set(event.benefitEventId, event);
     pushAudit(state, clock, {
       companyId: event.companyId,
       actorId: resolvedActorId,
@@ -375,6 +422,9 @@ function valueBenefitEvent({ catalogItem, eventDraft, sourcePayload, employeePai
       employerPaidValue: evaluated.employerPaidValue
     }),
     cashSalaryRequiredForWithholding: roundMoney(evaluated.taxableValue) > 0,
+    status: BENEFIT_VALUATION_STATUSES[0],
+    approvedAt: null,
+    approvedByActorId: null,
     decision
   };
 }
@@ -1074,6 +1124,11 @@ function summarizePayrollConsumptions(records) {
     latestStage: items.some((record) => record.stage === "approved") ? "approved" : items.length > 0 ? "calculated" : "not_dispatched",
     payRunIds: Array.from(new Set(items.map((record) => record.payRunId))).sort()
   };
+}
+
+function isPayrollDispatchableBenefitEvent(event) {
+  const status = normalizeOptionalText(event?.status);
+  return status === "approved" || status === "dispatched_to_payroll";
 }
 
 function upgradeConsumptionStage(currentStage, nextStage) {

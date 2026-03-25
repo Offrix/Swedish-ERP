@@ -71,6 +71,19 @@ test("Phase 9.1 e2e flow creates a car benefit without cash salary and exposes p
     });
     assert.equal(benefitEvent.valuation.taxableValue, 7968.5);
 
+    const approvedBenefitEvent = await requestJson(
+      baseUrl,
+      `/v1/benefits/events/${benefitEvent.benefitEventId}/approve`,
+      {
+        method: "POST",
+        token: sessionToken,
+        body: {
+          companyId: COMPANY_ID
+        }
+      }
+    );
+    assert.equal(approvedBenefitEvent.status, "approved");
+
     const payCalendar = (
       await requestJson(baseUrl, `/v1/payroll/pay-calendars?companyId=${COMPANY_ID}`, {
         token: sessionToken

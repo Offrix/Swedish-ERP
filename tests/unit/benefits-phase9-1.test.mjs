@@ -106,13 +106,53 @@ test("Phase 9.1 keeps wellness tax free and taxes gifts from the first krona abo
   assert.equal(gift.valuation.decision.explanation[0].includes("first krona"), true);
 });
 
+test("Phase 9.1 blocks unapproved benefit valuations from payroll consumption", () => {
+  const fixture = createBenefitsFixture({
+    payModelCode: "monthly_salary",
+    monthlySalary: 40000
+  });
+
+  fixture.benefitsPlatform.createBenefitEvent({
+    companyId: COMPANY_ID,
+    employeeId: fixture.employee.employeeId,
+    employmentId: fixture.employment.employmentId,
+    benefitCode: "HEALTH_INSURANCE",
+    reportingPeriod: "202603",
+    occurredOn: "2026-03-10",
+    sourceId: "unit-health-unapproved-202603",
+    sourcePayload: {
+      insurancePremium: 1000
+    },
+    actorId: "unit-test"
+  });
+
+  const payCalendar = fixture.payrollPlatform.listPayCalendars({ companyId: COMPANY_ID })[0];
+  const payRun = fixture.payrollPlatform.createPayRun({
+    companyId: COMPANY_ID,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202603",
+    statutoryProfiles: [
+      {
+        employmentId: fixture.employment.employmentId,
+        taxMode: "manual_rate",
+        taxRatePercent: 30,
+        contributionClassCode: "full"
+      }
+    ],
+    actorId: "unit-test"
+  });
+
+  assert.equal(payRun.lines.some((line) => line.sourceType === "benefit_event"), false);
+  assert.equal(payRun.payslips[0].totals.taxableBenefitAmount, 0);
+});
+
 test("Phase 9.1 integrates benefits into payroll, AGI and payroll posting with and without cash salary", () => {
   const salaryFixture = createBenefitsFixture({
     payModelCode: "monthly_salary",
     monthlySalary: 40000
   });
 
-  salaryFixture.benefitsPlatform.createBenefitEvent({
+  const healthInsurance = salaryFixture.benefitsPlatform.createBenefitEvent({
     companyId: COMPANY_ID,
     employeeId: salaryFixture.employee.employeeId,
     employmentId: salaryFixture.employment.employmentId,
@@ -123,6 +163,11 @@ test("Phase 9.1 integrates benefits into payroll, AGI and payroll posting with a
     sourcePayload: {
       insurancePremium: 1000
     },
+    actorId: "unit-test"
+  });
+  salaryFixture.benefitsPlatform.approveBenefitEvent({
+    companyId: COMPANY_ID,
+    benefitEventId: healthInsurance.benefitEventId,
     actorId: "unit-test"
   });
 
@@ -180,7 +225,7 @@ test("Phase 9.1 integrates benefits into payroll, AGI and payroll posting with a
     payModelCode: "hourly_salary",
     hourlyRate: 350
   });
-  benefitOnlyFixture.benefitsPlatform.createBenefitEvent({
+  const benefitOnlyCar = benefitOnlyFixture.benefitsPlatform.createBenefitEvent({
     companyId: COMPANY_ID,
     employeeId: benefitOnlyFixture.employee.employeeId,
     employmentId: benefitOnlyFixture.employment.employmentId,
@@ -193,6 +238,11 @@ test("Phase 9.1 integrates benefits into payroll, AGI and payroll posting with a
       extraEquipmentValue: 20000,
       vehicleTaxAnnual: 9000
     },
+    actorId: "unit-test"
+  });
+  benefitOnlyFixture.benefitsPlatform.approveBenefitEvent({
+    companyId: COMPANY_ID,
+    benefitEventId: benefitOnlyCar.benefitEventId,
     actorId: "unit-test"
   });
 

@@ -167,7 +167,7 @@ test("Phase 10.1 e2e flow covers project setup, payroll-backed actuals, AR tie-o
         workedMinutes: 480
       }
     });
-    await requestJson(enabledBaseUrl, "/v1/benefits/events", {
+    const projectBenefit = await requestJson(enabledBaseUrl, "/v1/benefits/events", {
       method: "POST",
       token: sessionToken,
       expectedStatus: 201,
@@ -185,6 +185,13 @@ test("Phase 10.1 e2e flow covers project setup, payroll-backed actuals, AR tie-o
         dimensionJson: {
           projectId: project.projectId
         }
+      }
+    });
+    await requestJson(enabledBaseUrl, `/v1/benefits/events/${projectBenefit.benefitEventId}/approve`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: COMPANY_ID
       }
     });
     await requestJson(enabledBaseUrl, "/v1/travel/claims", {

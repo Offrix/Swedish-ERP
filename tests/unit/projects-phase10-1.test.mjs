@@ -416,7 +416,7 @@ function createProjectsFixture() {
     workedMinutes: 480,
     actorId: "unit-test"
   });
-  benefitsPlatform.createBenefitEvent({
+  const projectBenefit = benefitsPlatform.createBenefitEvent({
     companyId: COMPANY_ID,
     employeeId: employee.employeeId,
     employmentId: employment.employmentId,
@@ -430,6 +430,11 @@ function createProjectsFixture() {
     dimensionJson: {
       projectId: project.projectId
     },
+    actorId: "unit-test"
+  });
+  benefitsPlatform.approveBenefitEvent({
+    companyId: COMPANY_ID,
+    benefitEventId: projectBenefit.benefitEventId,
     actorId: "unit-test"
   });
   travelPlatform.createTravelClaim({

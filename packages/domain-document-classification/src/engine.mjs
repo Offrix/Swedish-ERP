@@ -639,13 +639,22 @@ function dispatchIntent({ clock, benefitsPlatform, payrollPlatform, intent, line
       actorId,
       correlationId: intent.treatmentIntentId
     });
+    const approvedEvent =
+      typeof benefitsPlatform.approveBenefitEvent === "function"
+        ? benefitsPlatform.approveBenefitEvent({
+            companyId: classificationCase.companyId,
+            benefitEventId: event.benefitEventId,
+            actorId,
+            correlationId: intent.treatmentIntentId
+          })
+        : event;
     return {
       status: "realized",
       payload: {
         targetDomainCode: intent.targetDomainCode,
         realizedObjectType: "benefit_event",
-        realizedObjectId: event.benefitEventId,
-        warnings: copy(event.valuation?.decision?.warnings || [])
+        realizedObjectId: approvedEvent.benefitEventId,
+        warnings: copy(approvedEvent.valuation?.decision?.warnings || [])
       }
     };
   }

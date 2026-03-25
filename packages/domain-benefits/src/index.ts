@@ -8,6 +8,8 @@ export type BenefitCode =
 
 export type BenefitTaxability = "taxable" | "tax_free" | "partially_taxable";
 export type BenefitPayrollConsumptionStage = "calculated" | "approved";
+export type BenefitEventStatus = "valued" | "approved" | "dispatched_to_payroll" | "corrected" | "closed";
+export type BenefitValuationStatus = "proposed" | "approved" | "superseded";
 
 export interface BenefitCatalogItem {
   readonly benefitCatalogId: string;
@@ -50,6 +52,9 @@ export interface BenefitValuationRecord {
   readonly ledgerAccountCode: string;
   readonly taxability: BenefitTaxability;
   readonly cashSalaryRequiredForWithholding: boolean;
+  readonly status: BenefitValuationStatus;
+  readonly approvedAt: string | null;
+  readonly approvedByActorId: string | null;
   readonly decision: BenefitDecision;
 }
 
@@ -106,6 +111,9 @@ export interface BenefitEventRecord {
   readonly supportingDocumentId: string | null;
   readonly dimensionJson: Record<string, unknown>;
   readonly payloadJson: Record<string, unknown>;
+  readonly status: BenefitEventStatus;
+  readonly approvedAt: string | null;
+  readonly approvedByActorId: string | null;
   readonly catalogItem: BenefitCatalogItem;
   readonly valuation: BenefitValuationRecord;
   readonly deductions: readonly Record<string, unknown>[];

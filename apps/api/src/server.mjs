@@ -388,6 +388,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/benefits/catalog",
               "/v1/benefits/events",
               "/v1/benefits/events/:benefitEventId",
+              "/v1/benefits/events/:benefitEventId/approve",
               "/v1/benefits/audit-events",
               "/v1/travel/foreign-allowances",
               "/v1/travel/claims",
@@ -7620,6 +7621,31 @@ async function handleRequest({ req, res, platform, flags }) {
       platform.getBenefitEvent({
         companyId,
         benefitEventId: benefitEventMatch.benefitEventId
+      })
+    );
+    return;
+  }
+
+  const approveBenefitEventMatch = matchPath(path, "/v1/benefits/events/:benefitEventId/approve");
+  if (approveBenefitEventMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "benefit_event",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveBenefitEvent({
+        companyId,
+        benefitEventId: approveBenefitEventMatch.benefitEventId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
       })
     );
     return;

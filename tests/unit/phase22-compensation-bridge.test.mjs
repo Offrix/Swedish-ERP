@@ -21,7 +21,7 @@ test("Step 22 bridges benefits, travel and pension payloads into one payroll run
     employment
   } = createCompensationBridgeFixture();
 
-  benefitsPlatform.createBenefitEvent({
+  const benefitEvent = benefitsPlatform.createBenefitEvent({
     companyId: COMPANY_ID,
     employeeId: employee.employeeId,
     employmentId: employment.employmentId,
@@ -32,6 +32,11 @@ test("Step 22 bridges benefits, travel and pension payloads into one payroll run
     sourcePayload: {
       insurancePremium: 1000
     },
+    actorId: "unit-test"
+  });
+  benefitsPlatform.approveBenefitEvent({
+    companyId: COMPANY_ID,
+    benefitEventId: benefitEvent.benefitEventId,
     actorId: "unit-test"
   });
 
@@ -141,13 +146,13 @@ test("Step 22 bridges benefits, travel and pension payloads into one payroll run
   assert.equal(approved.payslips[0].totals.salaryExchangeGrossDeductionAmount, 3000);
   assert.equal(approved.payslips[0].totals.pensionPremiumAmount, 7599);
 
-  const benefitEvent = benefitsPlatform.listBenefitEvents({
+  const consumedBenefitEvent = benefitsPlatform.listBenefitEvents({
     companyId: COMPANY_ID,
     employmentId: employment.employmentId,
     reportingPeriod: "202603"
   })[0];
-  assert.equal(benefitEvent.payrollDispatchStatus.approvedCount, 1);
-  assert.equal(benefitEvent.payrollConsumptions[0].payRunId, payRun.payRunId);
+  assert.equal(consumedBenefitEvent.payrollDispatchStatus.approvedCount, 1);
+  assert.equal(consumedBenefitEvent.payrollConsumptions[0].payRunId, payRun.payRunId);
 
   const travelClaim = travelPlatform.listTravelClaims({
     companyId: COMPANY_ID,
