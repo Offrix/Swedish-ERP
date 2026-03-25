@@ -4,6 +4,7 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import {
   DEMO_ADMIN_EMAIL,
   DEMO_APPROVER_EMAIL,
+  DEMO_TEAM_IDS,
   createOrgAuthPlatform
 } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer, readText } from "../../scripts/lib/repo.mjs";
@@ -454,6 +455,74 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
     assert.equal(authAuditActions.includes("auth.login.started"), true);
     assert.equal(authAuditActions.includes("auth.mfa.totp.verify"), true);
     assert.equal(authAuditActions.includes("auth.bankid.completed"), true);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("Phase 1 API exposes operational teams and active memberships", async () => {
+  const now = new Date("2026-03-21T11:30:00Z");
+  const platform = createOrgAuthPlatform({
+    clock: () => now
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true
+    }
+  });
+
+  await new Promise((resolve) => {
+    server.listen(0, resolve);
+  });
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const adminSession = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: "00000000-0000-4000-8000-000000000001",
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const teams = await requestJson(
+      `${baseUrl}/v1/org/teams?companyId=00000000-0000-4000-8000-000000000001`,
+      {
+        token: adminSession.sessionToken
+      }
+    );
+    assert.equal(teams.items.some((team) => team.teamId === DEMO_TEAM_IDS.financeOps), true);
+    assert.equal(teams.items.some((team) => team.teamId === DEMO_TEAM_IDS.payrollOps), true);
+
+    const financeMemberships = await requestJson(
+      `${baseUrl}/v1/org/teams/${DEMO_TEAM_IDS.financeOps}/memberships?companyId=00000000-0000-4000-8000-000000000001`,
+      {
+        token: adminSession.sessionToken
+      }
+    );
+    assert.equal(financeMemberships.items.some((membership) => membership.userId === "00000000-0000-4000-8000-000000000011"), true);
+    assert.equal(financeMemberships.items.some((membership) => membership.userId === "00000000-0000-4000-8000-000000000012"), true);
+
+    await requestJson(`${baseUrl}/v1/org/companies/00000000-0000-4000-8000-000000000001/users`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        email: "phase1-payroll-admin@example.test",
+        displayName: "Phase 1 Payroll Admin",
+        roleCode: "payroll_admin"
+      }
+    });
+
+    const payrollMemberships = await requestJson(
+      `${baseUrl}/v1/org/teams/${DEMO_TEAM_IDS.payrollOps}/memberships?companyId=00000000-0000-4000-8000-000000000001`,
+      {
+        token: adminSession.sessionToken
+      }
+    );
+    assert.equal(payrollMemberships.items.some((membership) => membership.userId === "00000000-0000-4000-8000-000000000011"), false);
+    assert.equal(payrollMemberships.items.some((membership) => membership.companyUser.user.email === "phase1-payroll-admin@example.test"), true);
   } finally {
     await stopServer(server);
   }

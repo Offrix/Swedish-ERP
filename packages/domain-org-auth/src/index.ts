@@ -4,6 +4,28 @@ export interface OrganizationScope {
   readonly delegationIds: readonly string[];
 }
 
+export interface Team {
+  readonly teamId: string;
+  readonly companyId: string;
+  readonly teamCode: string;
+  readonly label: string;
+  readonly status: "active";
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface TeamMembership {
+  readonly teamMembershipId: string;
+  readonly companyId: string;
+  readonly teamId: string;
+  readonly companyUserId: string;
+  readonly userId: string;
+  readonly membershipRoleCode: "member" | "lead";
+  readonly status: "active";
+  readonly startsAt: string;
+  readonly endsAt: string | null;
+}
+
 export interface OnboardingChecklistStep {
   readonly stepCode: string;
   readonly status: "pending" | "completed";

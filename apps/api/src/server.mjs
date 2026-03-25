@@ -92,6 +92,8 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/auth/sessions/:sessionId/revoke",
               "/v1/authz/check",
               "/v1/org/companies/:companyId/users",
+              "/v1/org/teams",
+              "/v1/org/teams/:teamId/memberships",
               "/v1/org/delegations",
               "/v1/org/object-grants",
               "/v1/org/attest-chains",
@@ -955,6 +957,30 @@ async function handleRequest({ req, res, platform, flags }) {
         ...body
       })
     );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/org/teams") {
+    writeJson(res, 200, {
+      items: platform.listTeams({
+        sessionToken: readSessionToken(req),
+        companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+      })
+    });
+    return;
+  }
+
+  const teamMembershipsMatch = matchPath(path, "/v1/org/teams/:teamId/memberships");
+  if (teamMembershipsMatch && req.method === "GET") {
+    writeJson(res, 200, {
+      items: platform.listTeamMemberships({
+        sessionToken: readSessionToken(req),
+        companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required."),
+        teamId: teamMembershipsMatch.teamId,
+        companyUserId: url.searchParams.get("companyUserId") || null,
+        userId: url.searchParams.get("userId") || null
+      })
+    });
     return;
   }
 
@@ -2336,7 +2362,7 @@ async function handleRequest({ req, res, platform, flags }) {
         objectType: url.searchParams.get("objectType") || null,
         status: url.searchParams.get("status") || null,
         viewerUserId: principal.userId,
-        viewerTeamIds: [],
+        viewerTeamIds: resolvePrincipalTeamIds(principal),
         limit: url.searchParams.get("limit") || 50
       })
     });
@@ -2365,7 +2391,7 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         searchDocumentId: searchDocumentMatch.searchDocumentId,
         viewerUserId: principal.userId,
-        viewerTeamIds: []
+        viewerTeamIds: resolvePrincipalTeamIds(principal)
       })
     );
     return;
@@ -2389,7 +2415,7 @@ async function handleRequest({ req, res, platform, flags }) {
       items: platform.listSavedViews({
         companyId,
         viewerUserId: principal.userId,
-        viewerTeamIds: [],
+        viewerTeamIds: resolvePrincipalTeamIds(principal),
         surfaceCode: url.searchParams.get("surfaceCode") || null,
         status: url.searchParams.get("status") || null
       })
@@ -2449,7 +2475,7 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         savedViewId: savedViewMatch.savedViewId,
         viewerUserId: principal.userId,
-        viewerTeamIds: []
+        viewerTeamIds: resolvePrincipalTeamIds(principal)
       })
     );
     return;
@@ -12151,6 +12177,12 @@ function matchPath(actualPath, template) {
     }
   }
   return params;
+}
+
+function resolvePrincipalTeamIds(principal) {
+  return Array.isArray(principal?.teamIds)
+    ? [...new Set(principal.teamIds.filter((teamId) => typeof teamId === "string" && teamId.trim().length > 0))]
+    : [];
 }
 
 function isPhase1Route(path) {

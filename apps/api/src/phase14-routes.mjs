@@ -2333,23 +2333,23 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: companyId, scopeCode: "notifications" });
     const recipientType = optionalText(url.searchParams.get("recipientType"));
     const recipientId = optionalText(url.searchParams.get("recipientId"));
-    const resolvedRecipient = resolveNotificationRecipientScope({ principal, recipientType, recipientId });
     const status = optionalText(url.searchParams.get("status"));
     const categoryCode = optionalText(url.searchParams.get("categoryCode"));
     const onlyUnread = url.searchParams.get("onlyUnread") === "true";
+    const targets = resolveNotificationRecipientTargets({ principal, recipientType, recipientId });
     writeJson(res, 200, {
-      items: platform.listNotifications({
+      items: listAccessibleNotifications({
+        platform,
         companyId,
-        recipientType: resolvedRecipient.recipientType,
-        recipientId: resolvedRecipient.recipientId,
+        targets,
         status,
         categoryCode,
         onlyUnread
       }),
-      summary: platform.getNotificationInboxSummary({
+      summary: buildAccessibleNotificationSummary({
+        platform,
         companyId,
-        recipientType: resolvedRecipient.recipientType,
-        recipientId: resolvedRecipient.recipientId,
+        targets,
         status,
         categoryCode,
         onlyUnread
@@ -3293,24 +3293,135 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
 }
 
 function resolveNotificationRecipientScope({ principal, recipientType, recipientId }) {
-  if (recipientType != null && recipientType !== "user") {
-    throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification center only exposes the current user's direct inbox in this route.");
+  if (recipientType == null && recipientId == null) {
+    return {
+      recipientType: "user",
+      recipientId: principal.userId
+    };
   }
-  const resolvedRecipientId = recipientId || principal.userId;
-  if (resolvedRecipientId !== principal.userId) {
-    throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification center only exposes the current user's direct inbox in this route.");
+  if (recipientType === "user") {
+    const resolvedRecipientId = recipientId || principal.userId;
+    if (resolvedRecipientId !== principal.userId) {
+      throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification center only exposes the current user's direct inbox or team inboxes in this route.");
+    }
+    return {
+      recipientType: "user",
+      recipientId: resolvedRecipientId
+    };
+  }
+  if (recipientType === "team") {
+    const resolvedRecipientId = requireText(recipientId, "team_id_required", "recipientId is required for team inbox.");
+    if (!resolvePrincipalTeamIds(principal).includes(resolvedRecipientId)) {
+      throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification center only exposes team inboxes for the current actor's active teams.");
+    }
+    return {
+      recipientType: "team",
+      recipientId: resolvedRecipientId
+    };
+  }
+  throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification recipient scope is not allowed.");
+}
+
+function resolveNotificationRecipientTargets({ principal, recipientType, recipientId }) {
+  if (recipientType == null && recipientId == null) {
+    return [
+      { recipientType: "user", recipientId: principal.userId },
+      ...resolvePrincipalTeamIds(principal).map((teamId) => ({
+        recipientType: "team",
+        recipientId: teamId
+      }))
+    ];
+  }
+  return [resolveNotificationRecipientScope({ principal, recipientType, recipientId })];
+}
+
+function listAccessibleNotifications({ platform, companyId, targets, status, categoryCode, onlyUnread }) {
+  return sortNotificationsByCreatedAtDesc(dedupeNotifications(
+    targets.flatMap((target) => platform.listNotifications({
+      companyId,
+      recipientType: target.recipientType,
+      recipientId: target.recipientId,
+      status,
+      categoryCode,
+      onlyUnread
+    }))
+  ));
+}
+
+function buildAccessibleNotificationSummary({ platform, companyId, targets, status, categoryCode, onlyUnread }) {
+  const items = listAccessibleNotifications({
+    platform,
+    companyId,
+    targets,
+    status,
+    categoryCode,
+    onlyUnread
+  });
+  const countsByStatus = Object.fromEntries(platform.notificationStatuses.map((statusCode) => [statusCode, 0]));
+  const countsByPriority = Object.fromEntries(platform.notificationPriorityCodes.map((priorityCode) => [priorityCode, 0]));
+  const groups = new Map();
+  for (const item of items) {
+    countsByStatus[item.status] += 1;
+    countsByPriority[item.priorityCode] += 1;
+    if (!groups.has(item.categoryCode)) {
+      groups.set(item.categoryCode, {
+        categoryCode: item.categoryCode,
+        totalCount: 0,
+        unreadCount: 0,
+        countsByPriority: Object.fromEntries(platform.notificationPriorityCodes.map((priorityCode) => [priorityCode, 0]))
+      });
+    }
+    const group = groups.get(item.categoryCode);
+    group.totalCount += 1;
+    group.countsByPriority[item.priorityCode] += 1;
+    if (item.unread) {
+      group.unreadCount += 1;
+    }
   }
   return {
-    recipientType: "user",
-    recipientId: resolvedRecipientId
+    totalCount: items.length,
+    unreadCount: items.filter((item) => item.unread).length,
+    countsByStatus,
+    countsByPriority,
+    groups: [...groups.values()].sort((left, right) => left.categoryCode.localeCompare(right.categoryCode))
   };
 }
 
 function assertNotificationReadAccess({ platform, principal, companyId, notificationId }) {
   const notification = platform.getNotification({ companyId, notificationId });
-  if (notification.recipientType !== "user" || notification.recipientId !== principal.userId) {
-    throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification action is only allowed for the addressed user in this route.");
+  if (notification.recipientType === "user" && notification.recipientId === principal.userId) {
+    return;
   }
+  if (notification.recipientType === "team" && resolvePrincipalTeamIds(principal).includes(notification.recipientId)) {
+    return;
+  }
+  throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification action is only allowed for the addressed user or one of the actor's active teams in this route.");
+}
+
+function resolvePrincipalTeamIds(principal) {
+  return Array.isArray(principal?.teamIds)
+    ? [...new Set(principal.teamIds.filter((teamId) => typeof teamId === "string" && teamId.trim().length > 0))]
+    : [];
+}
+
+function dedupeNotifications(items) {
+  const seen = new Set();
+  const result = [];
+  for (const item of items) {
+    if (!item || seen.has(item.notificationId)) {
+      continue;
+    }
+    seen.add(item.notificationId);
+    result.push(item);
+  }
+  return result;
+}
+
+function sortNotificationsByCreatedAtDesc(items) {
+  return [...items].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt)
+    || right.notificationId.localeCompare(left.notificationId)
+  );
 }
 
 function requireTextArray(value, code, message) {

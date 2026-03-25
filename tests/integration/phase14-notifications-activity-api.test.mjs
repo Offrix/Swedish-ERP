@@ -2,7 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
-import { DEMO_ADMIN_EMAIL, DEMO_APPROVER_EMAIL, DEMO_APPROVER_IDS, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import {
+  DEMO_ADMIN_EMAIL,
+  DEMO_APPROVER_EMAIL,
+  DEMO_APPROVER_IDS,
+  DEMO_IDS,
+  DEMO_TEAM_IDS
+} from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
 
@@ -64,6 +70,26 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     platform.deliverNotification({
       companyId: DEMO_IDS.companyId,
       notificationId: approverNotification.notificationId,
+      channelCode: "in_app",
+      actorId: DEMO_IDS.userId
+    });
+
+    const financeTeamNotification = platform.createNotification({
+      companyId: DEMO_IDS.companyId,
+      recipientType: "team",
+      recipientId: DEMO_TEAM_IDS.financeOps,
+      categoryCode: "deadline_warning",
+      priorityCode: "medium",
+      sourceDomainCode: "CORE",
+      sourceObjectType: "work_item",
+      sourceObjectId: "team_deadline_1",
+      title: "Finance team deadline warning",
+      body: "The finance team has a deadline approaching.",
+      actorId: DEMO_IDS.userId
+    });
+    platform.deliverNotification({
+      companyId: DEMO_IDS.companyId,
+      notificationId: financeTeamNotification.notificationId,
       channelCode: "in_app",
       actorId: DEMO_IDS.userId
     });
@@ -130,6 +156,7 @@ test("Step 13 API exposes notifications and activity as separate read models", a
         }
       }
     ]);
+
     const notificationDetail = await requestJson(
       baseUrl,
       `/v1/notifications/${adminNotification.notificationId}?companyId=${DEMO_IDS.companyId}`,
@@ -139,13 +166,41 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     assert.equal(notificationDetail.deliveries.length, 1);
     assert.equal(notificationDetail.actions.length, 0);
 
+    const teamNotificationDetail = await requestJson(
+      baseUrl,
+      `/v1/notifications/${financeTeamNotification.notificationId}?companyId=${DEMO_IDS.companyId}`,
+      { token: approverToken }
+    );
+    assert.equal(teamNotificationDetail.notificationId, financeTeamNotification.notificationId);
+    assert.equal(teamNotificationDetail.recipientType, "team");
+
     const approverOwnInbox = await requestJson(
       baseUrl,
       `/v1/notifications?companyId=${DEMO_IDS.companyId}`,
       { token: approverToken }
     );
     assert.equal(approverOwnInbox.items.some((item) => item.notificationId === approverNotification.notificationId), true);
+    assert.equal(approverOwnInbox.items.some((item) => item.notificationId === financeTeamNotification.notificationId), true);
     assert.equal(approverOwnInbox.items.some((item) => item.notificationId === adminNotification.notificationId), false);
+
+    const adminCombinedInbox = await requestJson(
+      baseUrl,
+      `/v1/notifications?companyId=${DEMO_IDS.companyId}`,
+      { token: adminToken }
+    );
+    assert.equal(adminCombinedInbox.items.some((item) => item.notificationId === adminNotification.notificationId), true);
+    assert.equal(adminCombinedInbox.items.some((item) => item.notificationId === financeTeamNotification.notificationId), true);
+    assert.equal(adminCombinedInbox.items.some((item) => item.notificationId === approverNotification.notificationId), false);
+    assert.equal(adminCombinedInbox.summary.totalCount, 2);
+    assert.equal(adminCombinedInbox.summary.unreadCount, 2);
+
+    const adminTeamInbox = await requestJson(
+      baseUrl,
+      `/v1/notifications?companyId=${DEMO_IDS.companyId}&recipientType=team&recipientId=${DEMO_TEAM_IDS.financeOps}`,
+      { token: adminToken }
+    );
+    assert.equal(adminTeamInbox.items.length, 1);
+    assert.equal(adminTeamInbox.items[0].notificationId, financeTeamNotification.notificationId);
 
     const approverCrossUserInbox = await requestJson(
       baseUrl,
@@ -156,6 +211,7 @@ test("Step 13 API exposes notifications and activity as separate read models", a
       }
     );
     assert.equal(approverCrossUserInbox.error, "notification_recipient_scope_forbidden");
+
     const approverCrossUserDetail = await requestJson(
       baseUrl,
       `/v1/notifications/${adminNotification.notificationId}?companyId=${DEMO_IDS.companyId}`,
@@ -165,6 +221,16 @@ test("Step 13 API exposes notifications and activity as separate read models", a
       }
     );
     assert.equal(approverCrossUserDetail.error, "notification_recipient_scope_forbidden");
+
+    const approverCrossTeamInbox = await requestJson(
+      baseUrl,
+      `/v1/notifications?companyId=${DEMO_IDS.companyId}&recipientType=team&recipientId=${DEMO_TEAM_IDS.payrollOps}`,
+      {
+        token: approverToken,
+        expectedStatus: 403
+      }
+    );
+    assert.equal(approverCrossTeamInbox.error, "notification_recipient_scope_forbidden");
 
     const read = await requestJson(baseUrl, `/v1/notifications/${adminNotification.notificationId}/read`, {
       method: "POST",
@@ -191,15 +257,20 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     assert.equal(bulkRead.items.length, 1);
     assert.equal(bulkRead.items[0].notificationId, adminNotification.notificationId);
 
-    const approverCannotMutateAdminNotification = await requestJson(baseUrl, `/v1/notifications/${adminNotification.notificationId}/ack`, {
-      method: "POST",
-      token: approverToken,
-      expectedStatus: 403,
-      body: {
-        companyId: DEMO_IDS.companyId
+    const approverCannotMutateAdminNotification = await requestJson(
+      baseUrl,
+      `/v1/notifications/${adminNotification.notificationId}/ack`,
+      {
+        method: "POST",
+        token: approverToken,
+        expectedStatus: 403,
+        body: {
+          companyId: DEMO_IDS.companyId
+        }
       }
-    });
+    );
     assert.equal(approverCannotMutateAdminNotification.error, "notification_recipient_scope_forbidden");
+
     const approverCannotBulkMutateAdminNotification = await requestJson(baseUrl, "/v1/notifications/bulk-actions", {
       method: "POST",
       token: approverToken,
@@ -211,6 +282,7 @@ test("Step 13 API exposes notifications and activity as separate read models", a
       }
     });
     assert.equal(approverCannotBulkMutateAdminNotification.error, "notification_recipient_scope_forbidden");
+
     const approverNotificationStillUnread = await requestJson(
       baseUrl,
       `/v1/notifications/${approverNotification.notificationId}?companyId=${DEMO_IDS.companyId}`,
@@ -228,7 +300,7 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     });
     assert.equal(acknowledged.status, "acknowledged");
 
-    const retried = await requestJson(baseUrl, `/v1/backoffice/notifications/${approverNotification.notificationId}/retry-delivery`, {
+    const acknowledgedTeam = await requestJson(baseUrl, `/v1/notifications/${financeTeamNotification.notificationId}/ack`, {
       method: "POST",
       token: adminToken,
       expectedStatus: 200,
@@ -236,6 +308,20 @@ test("Step 13 API exposes notifications and activity as separate read models", a
         companyId: DEMO_IDS.companyId
       }
     });
+    assert.equal(acknowledgedTeam.status, "acknowledged");
+
+    const retried = await requestJson(
+      baseUrl,
+      `/v1/backoffice/notifications/${approverNotification.notificationId}/retry-delivery`,
+      {
+        method: "POST",
+        token: adminToken,
+        expectedStatus: 200,
+        body: {
+          companyId: DEMO_IDS.companyId
+        }
+      }
+    );
     assert.equal(retried.status, "queued");
     assert.equal(retried.deliveries.length, 2);
     assert.equal(retried.deliveries[1].status, "queued");
@@ -265,6 +351,99 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     assert.equal(pagedActivitySecond.items.length, 1);
     assert.equal(pagedActivitySecond.items[0].summary, "Older paged activity.");
     assert.equal(pagedActivitySecond.nextCursor, null);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("Team-scoped saved views are visible to active team members but not unrelated operational teams", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-25T08:00:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    await requestJson(
+      baseUrl,
+      `/v1/org/companies/${DEMO_IDS.companyId}/users`,
+      {
+        method: "POST",
+        token: adminToken,
+        expectedStatus: 201,
+        body: {
+          email: "payroll-admin@example.test",
+          displayName: "Payroll Admin",
+          roleCode: "payroll_admin"
+        }
+      }
+    );
+
+    const approverToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_APPROVER_EMAIL
+    });
+    const payrollAdminToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "payroll-admin@example.test"
+    });
+
+    const createdSavedView = await requestJson(baseUrl, "/v1/saved-views", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        surfaceCode: "desktop_reporting",
+        title: "Finance close queue",
+        queryJson: {
+          projectionCode: "reporting.report_definition"
+        }
+      }
+    });
+
+    const sharedSavedView = await requestJson(
+      baseUrl,
+      `/v1/saved-views/${createdSavedView.savedViewId}/share`,
+      {
+        method: "POST",
+        token: adminToken,
+        expectedStatus: 200,
+        body: {
+          companyId: DEMO_IDS.companyId,
+          visibilityCode: "team",
+          sharedWithTeamId: DEMO_TEAM_IDS.financeOps
+        }
+      }
+    );
+    assert.equal(sharedSavedView.visibilityCode, "team");
+    assert.equal(sharedSavedView.sharedWithTeamId, DEMO_TEAM_IDS.financeOps);
+
+    const approverViews = await requestJson(
+      baseUrl,
+      `/v1/saved-views?companyId=${DEMO_IDS.companyId}&surfaceCode=desktop_reporting`,
+      { token: approverToken }
+    );
+    assert.equal(approverViews.items.some((item) => item.savedViewId === createdSavedView.savedViewId), true);
+
+    const payrollAdminViews = await requestJson(
+      baseUrl,
+      `/v1/saved-views?companyId=${DEMO_IDS.companyId}&surfaceCode=desktop_reporting`,
+      { token: payrollAdminToken }
+    );
+    assert.equal(payrollAdminViews.items.some((item) => item.savedViewId === createdSavedView.savedViewId), false);
   } finally {
     await stopServer(server);
   }

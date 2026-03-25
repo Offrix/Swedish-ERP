@@ -57,6 +57,30 @@ export const DEMO_APPROVER_IDS = Object.freeze({
   companyUserId: "00000000-0000-4000-8000-000000000022"
 });
 
+export const DEMO_TEAM_IDS = Object.freeze({
+  financeOps: "finance_ops",
+  payrollOps: "payroll_ops",
+  fieldOps: "field_ops"
+});
+
+const DEFAULT_OPERATIONAL_TEAMS = Object.freeze([
+  Object.freeze({
+    teamId: DEMO_TEAM_IDS.financeOps,
+    teamCode: "finance_ops",
+    label: "Finance operations"
+  }),
+  Object.freeze({
+    teamId: DEMO_TEAM_IDS.payrollOps,
+    teamCode: "payroll_ops",
+    label: "Payroll operations"
+  }),
+  Object.freeze({
+    teamId: DEMO_TEAM_IDS.fieldOps,
+    teamCode: "field_ops",
+    label: "Field operations"
+  })
+]);
+
 export const DEMO_ADMIN_EMAIL = "admin@example.test";
 export const DEMO_TOTP_SECRET = "JBSWY3DPEHPK3PXP";
 export const DEMO_BANKID_SUBJECT = "197001011234";
@@ -68,6 +92,13 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     companies: new Map(),
     users: new Map(),
     companyUsers: new Map(),
+    teams: new Map(),
+    teamIdsByCompany: new Map(),
+    teamMemberships: new Map(),
+    teamMembershipIdsByCompany: new Map(),
+    teamMembershipIdsByTeam: new Map(),
+    teamMembershipIdsByCompanyUser: new Map(),
+    teamMembershipIdByKey: new Map(),
     delegations: new Map(),
     objectGrants: new Map(),
     approvalChains: new Map(),
@@ -99,6 +130,9 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     getCompanyProfile,
     createCompanyUser,
     listCompanyUsers,
+    listTeams,
+    listTeamMemberships,
+    listActiveTeamIds,
     listCompanyRegistrations,
     createDelegation,
     createObjectGrant,
@@ -143,6 +177,7 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       updatedAt: now
     };
     state.companies.set(company.companyId, company);
+    ensureDefaultOperationalTeams(company.companyId);
     return copy(company);
   }
 
@@ -195,6 +230,7 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     };
 
     state.companyUsers.set(companyUser.companyUserId, companyUser);
+    assignDefaultOperationalTeamMemberships(companyUser);
     provisionDefaultAuthFactors({
       company,
       user,
@@ -225,6 +261,68 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     return [...state.companyUsers.values()]
       .filter((companyUser) => companyUser.companyId === companyId)
       .map((companyUser) => decorateCompanyUser(companyUser));
+  }
+
+  function listTeams({ sessionToken, companyId } = {}) {
+    authorizeFromSession(sessionToken, ACTIONS.COMPANY_USER_READ, {
+      companyId,
+      objectType: "team",
+      objectId: companyId,
+      scopeCode: "company_user"
+    });
+
+    return (state.teamIdsByCompany.get(assertNonEmpty(companyId, "company_id_required")) || [])
+      .map((teamId) => state.teams.get(buildTeamKey(companyId, teamId)))
+      .filter(Boolean)
+      .map(copy);
+  }
+
+  function listTeamMemberships({ sessionToken, companyId, teamId = null, companyUserId = null, userId = null } = {}) {
+    authorizeFromSession(sessionToken, ACTIONS.COMPANY_USER_READ, {
+      companyId,
+      objectType: "team_membership",
+      objectId: teamId || companyUserId || companyId,
+      scopeCode: "company_user"
+    });
+
+    const resolvedCompanyId = assertNonEmpty(companyId, "company_id_required");
+    const resolvedTeamId = typeof teamId === "string" && teamId.trim().length > 0 ? teamId.trim() : null;
+    const resolvedCompanyUserId = typeof companyUserId === "string" && companyUserId.trim().length > 0 ? companyUserId.trim() : null;
+    const resolvedUserId = typeof userId === "string" && userId.trim().length > 0 ? userId.trim() : null;
+    const now = currentDate();
+
+    return (state.teamMembershipIdsByCompany.get(resolvedCompanyId) || [])
+      .map((teamMembershipId) => state.teamMemberships.get(teamMembershipId))
+      .filter(Boolean)
+      .filter((membership) => (resolvedTeamId ? membership.teamId === resolvedTeamId : true))
+      .filter((membership) => (resolvedCompanyUserId ? membership.companyUserId === resolvedCompanyUserId : true))
+      .filter((membership) => (resolvedUserId ? membership.userId === resolvedUserId : true))
+      .filter((membership) => membership.status === "active" && isWindowOpen(membership, now))
+      .sort((left, right) => left.teamId.localeCompare(right.teamId) || left.companyUserId.localeCompare(right.companyUserId))
+      .map((membership) => decorateTeamMembership(membership));
+  }
+
+  function listActiveTeamIds({ companyId, companyUserId = null, userId = null, at = currentDate() } = {}) {
+    const resolvedCompanyId = assertNonEmpty(companyId, "company_id_required");
+    const resolvedCompanyUserId =
+      typeof companyUserId === "string" && companyUserId.trim().length > 0 ? companyUserId.trim() : null;
+    const resolvedUserId = typeof userId === "string" && userId.trim().length > 0 ? userId.trim() : null;
+    if (!resolvedCompanyUserId && !resolvedUserId) {
+      return [];
+    }
+    const teamIds = (state.teamMembershipIdsByCompany.get(resolvedCompanyId) || [])
+      .map((teamMembershipId) => state.teamMemberships.get(teamMembershipId))
+      .filter(Boolean)
+      .filter((membership) => membership.status === "active")
+      .filter((membership) => isWindowOpen(membership, at))
+      .filter((membership) => {
+        if (resolvedCompanyUserId && membership.companyUserId === resolvedCompanyUserId) {
+          return true;
+        }
+        return resolvedUserId ? membership.userId === resolvedUserId : false;
+      })
+      .map((membership) => membership.teamId);
+    return [...new Set(teamIds)].sort();
   }
 
   function listCompanyRegistrations({ companyId, registrationType = null } = {}) {
@@ -869,6 +967,7 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       updatedAt: nowIso()
     };
     state.companyUsers.set(companyUser.companyUserId, companyUser);
+    assignDefaultOperationalTeamMemberships(companyUser);
     provisionDefaultAuthFactors({
       company,
       user: adminUser,
@@ -1268,6 +1367,8 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       companies: [...state.companies.values()],
       users: [...state.users.values()],
       companyUsers: [...state.companyUsers.values()],
+      teams: [...state.teams.values()],
+      teamMemberships: [...state.teamMemberships.values()].map((membership) => decorateTeamMembership(membership)),
       delegations: [...state.delegations.values()],
       objectGrants: [...state.objectGrants.values()],
       approvalChains: [...state.approvalChains.values()].map((chain) => ({
@@ -1339,16 +1440,7 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     }
 
     const companyUser = requireCompanyUser(session.companyUserId);
-    const user = state.users.get(session.userId);
-    const principal = {
-      userId: session.userId,
-      companyId: session.companyId,
-      companyUserId: session.companyUserId,
-      roles: [companyUser.roleCode],
-      permissions: [...permissionsForRoles([companyUser.roleCode])],
-      email: user?.email || null,
-      displayName: user?.displayName || null
-    };
+    const principal = buildPrincipalFromCompanyUser(companyUser);
     session.lastUsedAt = nowIso();
     return {
       session,
@@ -1487,7 +1579,64 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     const user = state.users.get(companyUser.userId);
     return {
       ...copy(companyUser),
-      user: copy(user)
+      user: copy(user),
+      teamIds: listActiveTeamIds({
+        companyId: companyUser.companyId,
+        companyUserId: companyUser.companyUserId,
+        userId: companyUser.userId
+      })
+    };
+  }
+
+  function decorateTeamMembership(membership) {
+    const companyUser = state.companyUsers.get(membership.companyUserId) || null;
+    const team = state.teams.get(buildTeamKey(membership.companyId, membership.teamId)) || null;
+    return {
+      ...copy(membership),
+      companyUser: companyUser ? decorateCompanyUser(companyUser) : null,
+      team: team ? copy(team) : null
+    };
+  }
+
+  function ensureDefaultOperationalTeams(companyId) {
+    ensureDefaultOperationalTeamsForState(state, companyId, nowIso());
+  }
+
+  function assignDefaultOperationalTeamMemberships(companyUser) {
+    ensureDefaultOperationalTeams(companyUser.companyId);
+    const defaultTeams = defaultTeamAssignmentsForRole(companyUser.roleCode);
+    for (const defaultTeamId of defaultTeams) {
+      ensureTeamMembershipRecord(state, {
+        companyId: companyUser.companyId,
+        teamId: defaultTeamId,
+        companyUserId: companyUser.companyUserId,
+        userId: companyUser.userId,
+        membershipRoleCode:
+          companyUser.roleCode === "company_admin" && defaultTeamId === DEMO_TEAM_IDS.financeOps ? "lead" : "member",
+        status: "active",
+        startsAt: companyUser.startsAt,
+        endsAt: companyUser.endsAt,
+        createdAt: companyUser.createdAt,
+        updatedAt: companyUser.updatedAt
+      });
+    }
+  }
+
+  function buildPrincipalFromCompanyUser(companyUser) {
+    const user = state.users.get(companyUser.userId);
+    return {
+      userId: companyUser.userId,
+      companyId: companyUser.companyId,
+      companyUserId: companyUser.companyUserId,
+      roles: [companyUser.roleCode],
+      permissions: [...permissionsForRoles([companyUser.roleCode])],
+      teamIds: listActiveTeamIds({
+        companyId: companyUser.companyId,
+        companyUserId: companyUser.companyUserId,
+        userId: companyUser.userId
+      }),
+      email: user?.email || null,
+      displayName: user?.displayName || null
     };
   }
 
@@ -1664,17 +1813,8 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       if (!companyUser) {
         throw httpError(409, "module_activation_approver_not_found", `Approver ${actorUserId} is not active in the company.`);
       }
-      const user = state.users.get(companyUser.userId);
       const decision = authorizeAction({
-        principal: {
-          userId: companyUser.userId,
-          companyId,
-          companyUserId: companyUser.companyUserId,
-          roles: [companyUser.roleCode],
-          permissions: [...permissionsForRoles([companyUser.roleCode])],
-          email: user?.email || null,
-          displayName: user?.displayName || null
-        },
+        principal: buildPrincipalFromCompanyUser(companyUser),
         action: ACTIONS.COMPANY_MANAGE,
         resource: {
           companyId,
@@ -1734,6 +1874,7 @@ function seedDemoState(state, clock) {
     createdAt: now,
     updatedAt: now
   });
+  ensureDefaultOperationalTeamsForState(state, DEMO_IDS.companyId, now);
   state.users.set(DEMO_IDS.userId, {
     userId: DEMO_IDS.userId,
     email: DEMO_ADMIN_EMAIL,
@@ -1775,6 +1916,30 @@ function seedDemoState(state, clock) {
     isAdmin: false,
     requiresMfa: false,
     metadataJson: {},
+    createdAt: now,
+    updatedAt: now
+  });
+  ensureTeamMembershipRecord(state, {
+    companyId: DEMO_IDS.companyId,
+    teamId: DEMO_TEAM_IDS.financeOps,
+    companyUserId: DEMO_IDS.companyUserId,
+    userId: DEMO_IDS.userId,
+    membershipRoleCode: "lead",
+    status: "active",
+    startsAt: now,
+    endsAt: null,
+    createdAt: now,
+    updatedAt: now
+  });
+  ensureTeamMembershipRecord(state, {
+    companyId: DEMO_IDS.companyId,
+    teamId: DEMO_TEAM_IDS.financeOps,
+    companyUserId: DEMO_APPROVER_IDS.companyUserId,
+    userId: DEMO_APPROVER_IDS.userId,
+    membershipRoleCode: "member",
+    status: "active",
+    startsAt: now,
+    endsAt: null,
     createdAt: now,
     updatedAt: now
   });
@@ -1935,6 +2100,95 @@ function normalizeStringList(values, code) {
     }
   }
   return result;
+}
+
+function buildTeamKey(companyId, teamId) {
+  return `${assertNonEmpty(companyId, "company_id_required")}:${assertNonEmpty(teamId, "team_id_required")}`;
+}
+
+function buildTeamMembershipKey(companyId, teamId, companyUserId) {
+  return `${assertNonEmpty(companyId, "company_id_required")}:${assertNonEmpty(teamId, "team_id_required")}:${assertNonEmpty(companyUserId, "company_user_id_required")}`;
+}
+
+function defaultTeamAssignmentsForRole(roleCode) {
+  switch (roleCode) {
+    case "company_admin":
+    case "approver":
+      return [DEMO_TEAM_IDS.financeOps];
+    case "payroll_admin":
+      return [DEMO_TEAM_IDS.payrollOps];
+    case "field_user":
+      return [DEMO_TEAM_IDS.fieldOps];
+    default:
+      return [];
+  }
+}
+
+function ensureDefaultOperationalTeamsForState(state, companyId, now) {
+  for (const team of DEFAULT_OPERATIONAL_TEAMS) {
+    const key = buildTeamKey(companyId, team.teamId);
+    if (state.teams.has(key)) {
+      continue;
+    }
+    state.teams.set(key, {
+      teamId: team.teamId,
+      companyId,
+      teamCode: team.teamCode,
+      label: team.label,
+      status: "active",
+      createdAt: now,
+      updatedAt: now
+    });
+    appendToIndex(state.teamIdsByCompany, companyId, team.teamId);
+  }
+}
+
+function ensureTeamMembershipRecord(state, {
+  companyId,
+  teamId,
+  companyUserId,
+  userId,
+  membershipRoleCode = "member",
+  status = "active",
+  startsAt,
+  endsAt = null,
+  createdAt,
+  updatedAt
+}) {
+  const key = buildTeamMembershipKey(companyId, teamId, companyUserId);
+  const existingId = state.teamMembershipIdByKey.get(key);
+  if (existingId) {
+    return state.teamMemberships.get(existingId) || null;
+  }
+  const membership = {
+    teamMembershipId: crypto.randomUUID(),
+    companyId,
+    teamId,
+    companyUserId,
+    userId,
+    membershipRoleCode,
+    status,
+    startsAt,
+    endsAt,
+    createdAt,
+    updatedAt
+  };
+  state.teamMemberships.set(membership.teamMembershipId, membership);
+  state.teamMembershipIdByKey.set(key, membership.teamMembershipId);
+  appendToIndex(state.teamMembershipIdsByCompany, companyId, membership.teamMembershipId);
+  appendToIndex(state.teamMembershipIdsByTeam, buildTeamKey(companyId, teamId), membership.teamMembershipId);
+  appendToIndex(state.teamMembershipIdsByCompanyUser, companyUserId, membership.teamMembershipId);
+  return membership;
+}
+
+function appendToIndex(index, key, value) {
+  if (!index.has(key)) {
+    index.set(key, []);
+  }
+  const items = index.get(key);
+  if (!items.includes(value)) {
+    items.push(value);
+  }
 }
 
 function normalizeDateOnly(value, code) {
