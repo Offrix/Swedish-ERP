@@ -4,7 +4,7 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
-import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
+import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
 
 test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to-end", async () => {
   const platform = createApiPlatform({
@@ -20,6 +20,20 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
       platform,
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
+    });
+    platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "phase14-migration-field@example.test",
+      displayName: "Phase 14 Migration Field",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "phase14-migration-field@example.test"
     });
 
     const mappingSet = await requestJson(baseUrl, "/v1/migration/mapping-sets", {
@@ -193,6 +207,18 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
     const cockpit = await requestJson(baseUrl, `/v1/migration/cockpit?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
+    for (const path of [
+      `/v1/migration/mapping-sets?companyId=${DEMO_IDS.companyId}`,
+      `/v1/migration/import-batches?companyId=${DEMO_IDS.companyId}`,
+      `/v1/migration/diff-reports?companyId=${DEMO_IDS.companyId}`,
+      `/v1/migration/cutover-plans?companyId=${DEMO_IDS.companyId}`,
+      `/v1/migration/cockpit?companyId=${DEMO_IDS.companyId}`
+    ]) {
+      await requestJson(baseUrl, path, {
+        token: fieldUserToken,
+        expectedStatus: 403
+      });
+    }
     assert.equal(cockpit.mappingSets.length, 1);
     assert.equal(cockpit.importBatches.length, 1);
     assert.equal(cockpit.corrections.length, 1);

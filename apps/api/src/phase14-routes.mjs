@@ -1931,7 +1931,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/ops/feature-flags") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "feature_flag", objectId: companyId, scopeCode: "feature_flag" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "feature_flag", objectId: companyId, scopeCode: "feature_flag" });
+    assertBackofficeReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listFeatureFlags({ sessionToken, companyId, flagKey: optionalText(url.searchParams.get("flagKey")) }),
       resolved: platform.resolveRuntimeFlags({ companyId, companyUserId: optionalText(url.searchParams.get("companyUserId")) })
@@ -1959,7 +1960,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/ops/emergency-disables") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "emergency_disable", objectId: companyId, scopeCode: "emergency_disable" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "emergency_disable", objectId: companyId, scopeCode: "emergency_disable" });
+    assertBackofficeReadAccess({ principal });
     writeJson(res, 200, { items: platform.listEmergencyDisables({ sessionToken, companyId }) });
     return true;
   }
@@ -1999,7 +2001,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/ops/load-profiles") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "load_profile", objectId: companyId, scopeCode: "load_profile" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "load_profile", objectId: companyId, scopeCode: "load_profile" });
+    assertBackofficeReadAccess({ principal });
     writeJson(res, 200, { items: platform.listLoadProfiles({ sessionToken, companyId }) });
     return true;
   }
@@ -2026,7 +2029,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/ops/restore-drills") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "restore_drill", objectId: companyId, scopeCode: "restore_drill" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "restore_drill", objectId: companyId, scopeCode: "restore_drill" });
+    assertBackofficeReadAccess({ principal });
     writeJson(res, 200, { items: platform.listRestoreDrills({ sessionToken, companyId }) });
     return true;
   }
@@ -2052,7 +2056,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/ops/chaos-scenarios") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "chaos_scenario", objectId: companyId, scopeCode: "chaos_scenario" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "chaos_scenario", objectId: companyId, scopeCode: "chaos_scenario" });
+    assertBackofficeReadAccess({ principal });
     writeJson(res, 200, { items: platform.listChaosScenarios({ sessionToken, companyId }) });
     return true;
   }
@@ -2076,7 +2081,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/migration/mapping-sets") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_mapping_set", objectId: companyId, scopeCode: "migration_mapping_set" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_mapping_set", objectId: companyId, scopeCode: "migration_mapping_set" });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, { items: platform.listMappingSets({ sessionToken, companyId, sourceSystem: optionalText(url.searchParams.get("sourceSystem")) }) });
     return true;
   }
@@ -2113,7 +2119,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/migration/import-batches") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_import_batch", objectId: companyId, scopeCode: "migration_import_batch" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_import_batch", objectId: companyId, scopeCode: "migration_import_batch" });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, { items: platform.listImportBatches({ sessionToken, companyId, status: optionalText(url.searchParams.get("status")) }) });
     return true;
   }
@@ -2167,7 +2174,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/migration/diff-reports") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_diff_report", objectId: companyId, scopeCode: "migration_diff_report" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_diff_report", objectId: companyId, scopeCode: "migration_diff_report" });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, { items: platform.listDiffReports({ sessionToken, companyId, status: optionalText(url.searchParams.get("status")) }) });
     return true;
   }
@@ -2208,7 +2216,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/migration/cutover-plans") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_cutover_plan", objectId: companyId, scopeCode: "migration_cutover_plan" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_cutover_plan", objectId: companyId, scopeCode: "migration_cutover_plan" });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, { items: platform.listCutoverPlans({ sessionToken, companyId }) });
     return true;
   }
@@ -2312,7 +2321,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/migration/cockpit") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_cockpit", objectId: companyId, scopeCode: "migration_cockpit" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_cockpit", objectId: companyId, scopeCode: "migration_cockpit" });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, platform.getMigrationCockpit({ sessionToken, companyId }));
     return true;
   }

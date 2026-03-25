@@ -59,6 +59,20 @@ test("Phase 14.2 API records feature-flag metadata, emergency disables and recov
       companyId: DEMO_IDS.companyId,
       email: "phase14-release-approver@example.test"
     });
+    platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "phase14-ops-field@example.test",
+      displayName: "Phase 14 Ops Field",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "phase14-ops-field@example.test"
+    });
 
     const approvalDenied = await requestJson(baseUrl, "/v1/ops/feature-flags", {
       method: "POST",
@@ -280,6 +294,18 @@ test("Phase 14.2 API records feature-flag metadata, emergency disables and recov
     const chaosScenarios = await requestJson(baseUrl, `/v1/ops/chaos-scenarios?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
+    for (const path of [
+      `/v1/ops/feature-flags?companyId=${DEMO_IDS.companyId}`,
+      `/v1/ops/emergency-disables?companyId=${DEMO_IDS.companyId}`,
+      `/v1/ops/load-profiles?companyId=${DEMO_IDS.companyId}`,
+      `/v1/ops/restore-drills?companyId=${DEMO_IDS.companyId}`,
+      `/v1/ops/chaos-scenarios?companyId=${DEMO_IDS.companyId}`
+    ]) {
+      await requestJson(baseUrl, path, {
+        token: fieldUserToken,
+        expectedStatus: 403
+      });
+    }
 
     assert.equal(disables.items.length, 1);
     assert.equal(disables.items[0].status, "released");
