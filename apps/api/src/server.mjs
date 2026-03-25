@@ -11903,6 +11903,7 @@ function assertReadSurfaceRoleAccess({ platform, req, url, path }) {
 function isFinanceOperationsReadPath(path) {
   return (
     path.startsWith("/v1/ledger") ||
+    path.startsWith("/v1/reporting") ||
     path.startsWith("/v1/vat") ||
     path.startsWith("/v1/ar") ||
     path.startsWith("/v1/ap")

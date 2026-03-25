@@ -148,6 +148,7 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
     assert.equal(fieldUserSupportListForbidden.error, "backoffice_role_forbidden");
     for (const financeReadPath of [
       `/v1/ledger/accounts?companyId=${DEMO_IDS.companyId}`,
+      `/v1/reporting/metric-definitions?companyId=${DEMO_IDS.companyId}`,
       `/v1/vat/codes?companyId=${DEMO_IDS.companyId}`,
       `/v1/ar/customers?companyId=${DEMO_IDS.companyId}`,
       `/v1/ap/suppliers?companyId=${DEMO_IDS.companyId}`
