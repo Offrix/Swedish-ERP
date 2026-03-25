@@ -88,6 +88,22 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     );
     assert.equal(notificationList.items.some((item) => item.notificationId === adminNotification.notificationId), true);
     assert.equal(notificationList.items.some((item) => item.notificationId === approverNotification.notificationId), false);
+    assert.equal(notificationList.summary.totalCount, 1);
+    assert.equal(notificationList.summary.unreadCount, 1);
+    assert.equal(notificationList.summary.countsByPriority.high, 1);
+    assert.deepEqual(notificationList.summary.groups, [
+      {
+        categoryCode: "REVIEW_DUE",
+        totalCount: 1,
+        unreadCount: 1,
+        countsByPriority: {
+          low: 0,
+          medium: 0,
+          high: 1,
+          critical: 0
+        }
+      }
+    ]);
 
     const approverOwnInbox = await requestJson(
       baseUrl,

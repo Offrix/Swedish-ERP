@@ -31,6 +31,7 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     notificationChannelCodes: NOTIFICATION_CHANNEL_CODES,
     createNotification,
     listNotifications,
+    getNotificationInboxSummary,
     getNotification,
     deliverNotification,
     markNotificationRead,
@@ -129,6 +130,37 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
 
   function getNotification({ companyId, notificationId } = {}) {
     return presentNotification(state, requireNotification(state, companyId, notificationId), { includeHistory: true });
+  }
+
+  function getNotificationInboxSummary({ companyId, recipientType = null, recipientId = null, status = null, categoryCode = null, onlyUnread = false } = {}) {
+    const items = listNotifications({
+      companyId,
+      recipientType,
+      recipientId,
+      status,
+      categoryCode,
+      onlyUnread
+    });
+    const countsByStatus = Object.fromEntries(NOTIFICATION_STATUSES.map((statusCode) => [statusCode, 0]));
+    const countsByPriority = Object.fromEntries(NOTIFICATION_PRIORITY_CODES.map((priorityCode) => [priorityCode, 0]));
+    const categorySummaries = new Map();
+    for (const item of items) {
+      countsByStatus[item.status] += 1;
+      countsByPriority[item.priorityCode] += 1;
+      const categorySummary = ensureCategorySummary(categorySummaries, item.categoryCode);
+      categorySummary.totalCount += 1;
+      categorySummary.countsByPriority[item.priorityCode] += 1;
+      if (item.unread) {
+        categorySummary.unreadCount += 1;
+      }
+    }
+    return {
+      totalCount: items.length,
+      unreadCount: items.filter((item) => item.unread).length,
+      countsByStatus,
+      countsByPriority,
+      groups: [...categorySummaries.values()].sort((left, right) => left.categoryCode.localeCompare(right.categoryCode))
+    };
   }
 
   function deliverNotification({ companyId, notificationId, channelCode = "in_app", status = "delivered", failureReasonCode = null, actorId = "system" } = {}) {
@@ -270,6 +302,20 @@ function compareNotifications(left, right) {
     return priorityRank;
   }
   return right.createdAt.localeCompare(left.createdAt);
+}
+
+function ensureCategorySummary(categorySummaries, categoryCode) {
+  let summary = categorySummaries.get(categoryCode);
+  if (!summary) {
+    summary = {
+      categoryCode,
+      totalCount: 0,
+      unreadCount: 0,
+      countsByPriority: Object.fromEntries(NOTIFICATION_PRIORITY_CODES.map((priorityCode) => [priorityCode, 0]))
+    };
+    categorySummaries.set(categoryCode, summary);
+  }
+  return summary;
 }
 
 function appendToIndex(index, key, value) {

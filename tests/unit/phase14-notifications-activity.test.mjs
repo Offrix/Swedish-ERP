@@ -90,6 +90,29 @@ test("Step 13 notifications deduplicate active items and track delivery and user
     actorId: "user_2"
   });
   assert.equal(snoozed.status, "snoozed");
+
+  const summary = notifications.getNotificationInboxSummary({
+    companyId,
+    recipientType: "user",
+    recipientId: "user_1"
+  });
+  assert.equal(summary.totalCount, 1);
+  assert.equal(summary.unreadCount, 0);
+  assert.equal(summary.countsByStatus.acknowledged, 1);
+  assert.equal(summary.countsByPriority.high, 1);
+  assert.deepEqual(summary.groups, [
+    {
+      categoryCode: "REVIEW_DUE",
+      totalCount: 1,
+      unreadCount: 0,
+      countsByPriority: {
+        low: 0,
+        medium: 0,
+        high: 1,
+        critical: 0
+      }
+    }
+  ]);
 });
 
 test("Step 13 activity projects append-only entries and hides by policy without duplicates", () => {

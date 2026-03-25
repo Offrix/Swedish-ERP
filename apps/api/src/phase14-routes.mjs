@@ -2334,14 +2334,25 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const recipientType = optionalText(url.searchParams.get("recipientType"));
     const recipientId = optionalText(url.searchParams.get("recipientId"));
     const resolvedRecipient = resolveNotificationRecipientScope({ principal, recipientType, recipientId });
+    const status = optionalText(url.searchParams.get("status"));
+    const categoryCode = optionalText(url.searchParams.get("categoryCode"));
+    const onlyUnread = url.searchParams.get("onlyUnread") === "true";
     writeJson(res, 200, {
       items: platform.listNotifications({
         companyId,
         recipientType: resolvedRecipient.recipientType,
         recipientId: resolvedRecipient.recipientId,
-        status: optionalText(url.searchParams.get("status")),
-        categoryCode: optionalText(url.searchParams.get("categoryCode")),
-        onlyUnread: url.searchParams.get("onlyUnread") === "true"
+        status,
+        categoryCode,
+        onlyUnread
+      }),
+      summary: platform.getNotificationInboxSummary({
+        companyId,
+        recipientType: resolvedRecipient.recipientType,
+        recipientId: resolvedRecipient.recipientId,
+        status,
+        categoryCode,
+        onlyUnread
       })
     });
     return true;

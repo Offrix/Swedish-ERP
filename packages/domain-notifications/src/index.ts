@@ -19,3 +19,18 @@ export interface Notification {
   readonly createdAt: string;
   readonly expiresAt: string | null;
 }
+
+export interface NotificationInboxCategoryGroup {
+  readonly categoryCode: string;
+  readonly totalCount: number;
+  readonly unreadCount: number;
+  readonly countsByPriority: Record<NotificationPriorityCode, number>;
+}
+
+export interface NotificationInboxSummary {
+  readonly totalCount: number;
+  readonly unreadCount: number;
+  readonly countsByStatus: Record<NotificationStatus, number>;
+  readonly countsByPriority: Record<NotificationPriorityCode, number>;
+  readonly groups: readonly NotificationInboxCategoryGroup[];
+}
