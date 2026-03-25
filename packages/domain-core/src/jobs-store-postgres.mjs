@@ -119,7 +119,7 @@ function mapReplayPlanRow(row) {
   };
 }
 
-function buildConnectionString({
+export function resolvePostgresConnectionString({
   connectionString = null,
   env = process.env
 } = {}) {
@@ -135,11 +135,15 @@ function buildConnectionString({
   if (!env.POSTGRES_HOST) {
     return null;
   }
-  const user = env.POSTGRES_USER || "swedish_erp";
-  const password = env.POSTGRES_PASSWORD || "swedish_erp";
+  const missingKeys = ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"].filter((key) => !env[key]);
+  if (missingKeys.length > 0) {
+    throw new Error(`Missing Postgres environment variables for async job store: ${missingKeys.join(", ")}.`);
+  }
+  const user = env.POSTGRES_USER;
+  const password = env.POSTGRES_PASSWORD;
   const host = env.POSTGRES_HOST;
-  const port = env.POSTGRES_PORT || "55432";
-  const database = env.POSTGRES_DB || "swedish_erp";
+  const port = env.POSTGRES_PORT || "5432";
+  const database = env.POSTGRES_DB;
   return `postgres://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
 }
 
@@ -173,7 +177,7 @@ export function createPostgresAsyncJobStore({
   connectTimeout = 10,
   logger = () => {}
 } = {}) {
-  const resolvedConnectionString = buildConnectionString({ connectionString, env });
+  const resolvedConnectionString = resolvePostgresConnectionString({ connectionString, env });
   if (!resolvedConnectionString) {
     throw new Error("Postgres connection information is required for the async job store.");
   }
