@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
-import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import { DEMO_ADMIN_EMAIL, DEMO_APPROVER_IDS, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
 
@@ -20,6 +20,14 @@ test("Step 16 API enforces AI boundary review creation and tenant kill switch", 
       platform,
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
+    });
+    platform.createObjectGrant({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      companyUserId: DEMO_APPROVER_IDS.companyUserId,
+      permissionCode: "company.manage",
+      objectType: "feature_flag",
+      objectId: DEMO_IDS.companyId
     });
 
     const postingDecision = await requestJson(baseUrl, "/v1/automation/posting-suggestions", {
@@ -79,9 +87,11 @@ test("Step 16 API enforces AI boundary review creation and tenant kill switch", 
         scopeRef: DEMO_IDS.companyId,
         defaultEnabled: true,
         enabled: false,
-        ownerUserId: DEMO_IDS.companyUserId,
+        ownerUserId: DEMO_IDS.userId,
         riskClass: "high",
-        sunsetAt: "2026-12-31"
+        sunsetAt: "2026-12-31",
+        changeReason: "AI classifications are disabled during incident containment.",
+        approvalActorIds: [DEMO_APPROVER_IDS.userId]
       }
     });
 

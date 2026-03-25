@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
-import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import { DEMO_ADMIN_EMAIL, DEMO_APPROVER_IDS, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
 
@@ -45,6 +45,14 @@ test("Phase 14.2 API records feature-flag metadata, emergency disables and recov
       scopeCode: "emergency_disable",
       permissionCode: "company.manage"
     });
+    platform.createObjectGrant({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      companyUserId: DEMO_APPROVER_IDS.companyUserId,
+      permissionCode: "company.manage",
+      objectType: "feature_flag",
+      objectId: DEMO_IDS.companyId
+    });
     const releaseApproverToken = await loginWithTotpOnly({
       baseUrl,
       platform,
@@ -52,6 +60,25 @@ test("Phase 14.2 API records feature-flag metadata, emergency disables and recov
       email: "phase14-release-approver@example.test"
     });
 
+    const approvalDenied = await requestJson(baseUrl, "/v1/ops/feature-flags", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        flagKey: "payments.kill_switch",
+        description: "Stops outgoing payment exports.",
+        flagType: "kill_switch",
+        scopeType: "company",
+        scopeRef: DEMO_IDS.companyId,
+        defaultEnabled: false,
+        enabled: true,
+        ownerUserId: DEMO_IDS.userId,
+        riskClass: "high",
+        sunsetAt: "2026-12-31"
+      }
+    });
+    assert.equal(approvalDenied.error, "feature_flag_approval_required");
     const featureFlag = await requestJson(baseUrl, "/v1/ops/feature-flags", {
       method: "POST",
       token: adminToken,
@@ -67,10 +94,13 @@ test("Phase 14.2 API records feature-flag metadata, emergency disables and recov
         enabled: true,
         ownerUserId: DEMO_IDS.userId,
         riskClass: "high",
-        sunsetAt: "2026-12-31"
+        sunsetAt: "2026-12-31",
+        changeReason: "Payment exports are entering staged rollout.",
+        approvalActorIds: [DEMO_APPROVER_IDS.userId]
       }
     });
     assert.equal(featureFlag.flagType, "kill_switch");
+    assert.deepEqual(featureFlag.approvalActorIds, [DEMO_APPROVER_IDS.userId]);
     await requestJson(baseUrl, "/v1/ops/feature-flags", {
       method: "POST",
       token: adminToken,
@@ -85,7 +115,9 @@ test("Phase 14.2 API records feature-flag metadata, emergency disables and recov
         enabled: false,
         ownerUserId: DEMO_IDS.userId,
         riskClass: "high",
-        sunsetAt: "2026-12-31"
+        sunsetAt: "2026-12-31",
+        changeReason: "Global default stays disabled until staged rollout is complete.",
+        approvalActorIds: [DEMO_APPROVER_IDS.userId]
       }
     });
     await requestJson(baseUrl, "/v1/ops/feature-flags", {
@@ -103,7 +135,9 @@ test("Phase 14.2 API records feature-flag metadata, emergency disables and recov
         enabled: false,
         ownerUserId: DEMO_IDS.userId,
         riskClass: "high",
-        sunsetAt: "2026-12-31"
+        sunsetAt: "2026-12-31",
+        changeReason: "User override remains disabled for finance reviewer.",
+        approvalActorIds: [DEMO_APPROVER_IDS.userId]
       }
     });
 

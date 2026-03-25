@@ -1876,7 +1876,9 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       enabled: body.enabled,
       ownerUserId: body.ownerUserId,
       riskClass: body.riskClass,
-      sunsetAt: body.sunsetAt
+      sunsetAt: body.sunsetAt,
+      changeReason: body.changeReason,
+      approvalActorIds: body.approvalActorIds
     }));
     return true;
   }

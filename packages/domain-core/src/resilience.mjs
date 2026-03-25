@@ -211,6 +211,8 @@ export function createResilienceModule({
     ownerUserId,
     riskClass = "medium",
     sunsetAt,
+    changeReason = null,
+    approvalActorIds = [],
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
@@ -218,32 +220,63 @@ export function createResilienceModule({
     const resolvedScope = normalizeScope(companyId, scopeType, scopeRef);
     const recordKey = buildFeatureFlagRecordKey(companyId, resolvedFlagKey, resolvedScope.scopeType, resolvedScope.scopeRef);
     const existing = state.featureFlags.get(recordKey);
+    const resolvedDescription = text(description || existing?.description || resolvedFlagKey, "feature_flag_description_required");
+    const resolvedFlagType = assertAllowed(flagType || existing?.flagType || "ops", FEATURE_FLAG_TYPES, "feature_flag_type_invalid");
+    const resolvedOwnerUserId = text(ownerUserId || existing?.ownerUserId || principal.userId, "feature_flag_owner_required");
+    const resolvedRiskClass = assertAllowed(riskClass || existing?.riskClass || "medium", FEATURE_FLAG_RISK_CLASSES, "feature_flag_risk_class_invalid");
+    const resolvedSunsetAt = dateOnly(sunsetAt || existing?.sunsetAt || nowIso(clock).slice(0, 10), "feature_flag_sunset_at_required");
+    const resolvedDefaultEnabled = defaultEnabled !== false;
+    const resolvedEnabled = enabled == null ? existing?.enabled ?? resolvedDefaultEnabled : enabled === true;
+    const normalizedApprovalActorIds = normalizeActorIds(approvalActorIds, "feature_flag_approval_actor_ids_invalid");
+    const resolvedChangeReason = optionalText(changeReason);
+    if (requiresFeatureFlagDualApproval({ riskClass: resolvedRiskClass })) {
+      if (normalizedApprovalActorIds.length === 0) {
+        throw error(409, "feature_flag_approval_required", "High-risk feature flag changes require a separate approver.");
+      }
+      if (normalizedApprovalActorIds.includes(principal.userId)) {
+        throw error(409, "feature_flag_self_approval_forbidden", "High-risk feature flag changes require a separate approver.");
+      }
+      validateFeatureFlagApprovalActors({
+        authState: orgAuthPlatform?.snapshot?.(),
+        companyId,
+        clock,
+        approvalActorIds: normalizedApprovalActorIds
+      });
+      if (!resolvedChangeReason) {
+        throw error(409, "feature_flag_change_reason_required", "High-risk feature flag changes require a change reason.");
+      }
+    }
+    const previousSnapshot = existing ? clone(existing) : null;
     const featureFlag = existing || {
       featureFlagId: crypto.randomUUID(),
       companyId,
       flagKey: resolvedFlagKey,
-      description: text(description || resolvedFlagKey, "feature_flag_description_required"),
-      flagType: assertAllowed(flagType, FEATURE_FLAG_TYPES, "feature_flag_type_invalid"),
+      description: resolvedDescription,
+      flagType: resolvedFlagType,
       scopeType: resolvedScope.scopeType,
       scopeRef: resolvedScope.scopeRef,
-      defaultEnabled: defaultEnabled !== false,
-      enabled: enabled == null ? defaultEnabled !== false : enabled === true,
-      ownerUserId: text(ownerUserId || principal.userId, "feature_flag_owner_required"),
-      riskClass: assertAllowed(riskClass, FEATURE_FLAG_RISK_CLASSES, "feature_flag_risk_class_invalid"),
-      sunsetAt: dateOnly(sunsetAt || nowIso(clock).slice(0, 10), "feature_flag_sunset_at_required"),
+      defaultEnabled: resolvedDefaultEnabled,
+      enabled: resolvedEnabled,
+      ownerUserId: resolvedOwnerUserId,
+      riskClass: resolvedRiskClass,
+      sunsetAt: resolvedSunsetAt,
       emergencyDisabled: false,
       emergencyReasonCode: null,
+      changeReason: resolvedChangeReason,
+      approvalActorIds: normalizedApprovalActorIds,
       changedByUserId: principal.userId,
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
     };
-    featureFlag.description = text(description || featureFlag.description, "feature_flag_description_required");
-    featureFlag.flagType = assertAllowed(flagType || featureFlag.flagType, FEATURE_FLAG_TYPES, "feature_flag_type_invalid");
-    featureFlag.defaultEnabled = defaultEnabled !== false;
-    featureFlag.enabled = enabled == null ? featureFlag.enabled : enabled === true;
-    featureFlag.ownerUserId = text(ownerUserId || featureFlag.ownerUserId, "feature_flag_owner_required");
-    featureFlag.riskClass = assertAllowed(riskClass || featureFlag.riskClass, FEATURE_FLAG_RISK_CLASSES, "feature_flag_risk_class_invalid");
-    featureFlag.sunsetAt = dateOnly(sunsetAt || featureFlag.sunsetAt, "feature_flag_sunset_at_required");
+    featureFlag.description = resolvedDescription;
+    featureFlag.flagType = resolvedFlagType;
+    featureFlag.defaultEnabled = resolvedDefaultEnabled;
+    featureFlag.enabled = resolvedEnabled;
+    featureFlag.ownerUserId = resolvedOwnerUserId;
+    featureFlag.riskClass = resolvedRiskClass;
+    featureFlag.sunsetAt = resolvedSunsetAt;
+    featureFlag.changeReason = resolvedChangeReason;
+    featureFlag.approvalActorIds = normalizedApprovalActorIds;
     featureFlag.changedByUserId = principal.userId;
     featureFlag.updatedAt = nowIso(clock);
     state.featureFlags.set(recordKey, featureFlag);
@@ -254,7 +287,20 @@ export function createResilienceModule({
       action: "resilience.feature_flag.upserted",
       entityType: "feature_flag",
       entityId: featureFlag.featureFlagId,
-      explanation: `Updated feature flag ${featureFlag.flagKey}.`
+      explanation: `Updated feature flag ${featureFlag.flagKey}.`,
+      metadata: {
+        flagKey: featureFlag.flagKey,
+        scopeType: featureFlag.scopeType,
+        scopeRef: featureFlag.scopeRef,
+        previousEnabled: previousSnapshot?.enabled ?? null,
+        newEnabled: featureFlag.enabled,
+        previousRiskClass: previousSnapshot?.riskClass ?? null,
+        newRiskClass: featureFlag.riskClass,
+        previousFlagType: previousSnapshot?.flagType ?? null,
+        newFlagType: featureFlag.flagType,
+        changeReason: featureFlag.changeReason,
+        approvalActorIds: featureFlag.approvalActorIds
+      }
     });
     return clone(featureFlag);
   }
@@ -1305,6 +1351,81 @@ function requiresSeparateEmergencyDisableRelease(featureFlag) {
   return featureFlag.scopeType === "global" || featureFlag.flagType === "kill_switch" || featureFlag.riskClass === "high";
 }
 
+function requiresFeatureFlagDualApproval({ riskClass } = {}) {
+  return riskClass === "high";
+}
+
+function validateFeatureFlagApprovalActors({ authState, companyId, approvalActorIds, clock = () => new Date() } = {}) {
+  if (!authState) {
+    throw error(500, "org_auth_snapshot_required", "Org/auth snapshot is required for high-risk feature flag approvals.");
+  }
+  const resolvedCompanyId = text(companyId, "company_id_required");
+  const now = nowIso(clock);
+  for (const actorId of approvalActorIds) {
+    const companyUser = [...(authState.companyUsers || [])].find(
+      (candidate) =>
+        candidate.companyId === resolvedCompanyId
+        && candidate.userId === actorId
+        && candidate.status === "active"
+        && isActiveAuthWindow({ startsAt: candidate.startsAt, endsAt: candidate.endsAt, now })
+        && canApproveFeatureFlagChange({
+          authState,
+          companyId: resolvedCompanyId,
+          companyUserId: candidate.companyUserId,
+          roleCode: candidate.roleCode,
+          now
+        })
+    );
+    if (!companyUser) {
+      throw error(
+        409,
+        "feature_flag_approver_unauthorized",
+        `Approval actor ${actorId} is not an active authorized approver for high-risk feature flags.`
+      );
+    }
+  }
+}
+
+function canApproveFeatureFlagChange({ authState, companyId, companyUserId, roleCode, now } = {}) {
+  if (roleCode === "company_admin") {
+    return true;
+  }
+  const hasObjectGrant = [...(authState.objectGrants || [])].some(
+    (grant) =>
+      grant.companyId === companyId
+      && grant.companyUserId === companyUserId
+      && grant.status === "active"
+      && grant.permissionCode === "company.manage"
+      && ["feature_flag", "resilience"].includes(grant.objectType)
+      && grant.objectId === companyId
+      && isActiveAuthWindow({ startsAt: grant.startsAt, endsAt: grant.endsAt, now })
+  );
+  if (hasObjectGrant) {
+    return true;
+  }
+  return [...(authState.delegations || [])].some(
+    (delegation) =>
+      delegation.companyId === companyId
+      && delegation.toCompanyUserId === companyUserId
+      && delegation.status === "active"
+      && delegation.permissionCode === "company.manage"
+      && ["feature_flag", "resilience"].includes(delegation.scopeCode)
+      && isActiveAuthWindow({ startsAt: delegation.startsAt, endsAt: delegation.endsAt, now })
+      && (!delegation.resourceType || ["feature_flag", "resilience"].includes(delegation.resourceType))
+      && (!delegation.resourceId || delegation.resourceId === companyId)
+  );
+}
+
+function isActiveAuthWindow({ startsAt, endsAt, now } = {}) {
+  if (startsAt && startsAt > now) {
+    return false;
+  }
+  if (endsAt && endsAt < now) {
+    return false;
+  }
+  return true;
+}
+
 function flagMatchesRuntimeScope(featureFlag, companyId, companyUserId) {
   if (featureFlag.scopeType === "global") {
     return true;
@@ -1397,6 +1518,26 @@ function mergeObjectRefs(left, right) {
 
 function optionalText(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeActorIds(values, code) {
+  if (values == null) {
+    return [];
+  }
+  if (!Array.isArray(values)) {
+    throw createValidationError(code, `${code} must be an array.`);
+  }
+  const actorIds = [];
+  for (const value of values) {
+    const resolved = optionalText(value);
+    if (!resolved) {
+      throw createValidationError(code, `${code} must only contain non-empty actor ids.`);
+    }
+    if (!actorIds.includes(resolved)) {
+      actorIds.push(resolved);
+    }
+  }
+  return actorIds;
 }
 
 function highestSeverity(currentSeverity, nextSeverity) {

@@ -160,7 +160,16 @@ export function createCoreEngine({
     return new Date(clock()).toISOString();
   }
 
-  function audit({ companyId, actorId, correlationId = crypto.randomUUID(), action, entityType, entityId, explanation }) {
+  function audit({
+    companyId,
+    actorId,
+    correlationId = crypto.randomUUID(),
+    action,
+    entityType,
+    entityId,
+    explanation,
+    metadata = {}
+  }) {
     const event = {
       auditEventId: crypto.randomUUID(),
       companyId,
@@ -170,6 +179,7 @@ export function createCoreEngine({
       entityType,
       entityId,
       explanation,
+      metadata: clone(metadata || {}),
       recordedAt: now()
     };
     state.auditEvents.push(event);

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { createDefaultJobHandlers, runWorkerBatch } from "../../apps/worker/src/worker.mjs";
-import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import { DEMO_ADMIN_EMAIL, DEMO_APPROVER_IDS, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { loginWithStrongAuthOnPlatform } from "../helpers/platform-auth.mjs";
 
 test("Phase 14 Step 4 async jobs support retry scheduling and completion", async () => {
@@ -82,6 +82,14 @@ test("Phase 14 Step 4 async jobs do not run while their controlling kill switch 
     companyId: DEMO_IDS.companyId,
     email: DEMO_ADMIN_EMAIL
   });
+  platform.createObjectGrant({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    companyUserId: DEMO_APPROVER_IDS.companyUserId,
+    permissionCode: "company.manage",
+    objectType: "feature_flag",
+    objectId: DEMO_IDS.companyId
+  });
 
   platform.upsertFeatureFlag({
     sessionToken: adminToken,
@@ -95,7 +103,9 @@ test("Phase 14 Step 4 async jobs do not run while their controlling kill switch 
     enabled: true,
     ownerUserId: DEMO_IDS.userId,
     riskClass: "high",
-    sunsetAt: "2026-12-31"
+    sunsetAt: "2026-12-31",
+    changeReason: "Noop lane remains available until incident disable triggers.",
+    approvalActorIds: [DEMO_APPROVER_IDS.userId]
   });
 
   const queuedJob = await platform.enqueueRuntimeJob({
@@ -142,6 +152,14 @@ test("Phase 14 Step 4 async jobs are blocked before execution if a kill switch f
     companyId: DEMO_IDS.companyId,
     email: DEMO_ADMIN_EMAIL
   });
+  platform.createObjectGrant({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    companyUserId: DEMO_APPROVER_IDS.companyUserId,
+    permissionCode: "company.manage",
+    objectType: "feature_flag",
+    objectId: DEMO_IDS.companyId
+  });
 
   platform.upsertFeatureFlag({
     sessionToken: adminToken,
@@ -155,7 +173,9 @@ test("Phase 14 Step 4 async jobs are blocked before execution if a kill switch f
     enabled: true,
     ownerUserId: DEMO_IDS.userId,
     riskClass: "high",
-    sunsetAt: "2026-12-31"
+    sunsetAt: "2026-12-31",
+    changeReason: "Noop lane remains available until incident disable triggers.",
+    approvalActorIds: [DEMO_APPROVER_IDS.userId]
   });
 
   const queuedJob = await platform.enqueueRuntimeJob({

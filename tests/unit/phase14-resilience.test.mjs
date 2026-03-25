@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import {
   DEMO_ADMIN_EMAIL,
+  DEMO_APPROVER_IDS,
   DEMO_IDS
 } from "../../packages/domain-org-auth/src/index.mjs";
 import {
@@ -40,8 +41,34 @@ test("Phase 14.2 resilience records flag metadata, audit correlations and contro
     companyId: DEMO_IDS.companyId,
     email: "phase14-release-approver@example.test"
   });
+  platform.createObjectGrant({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    companyUserId: DEMO_APPROVER_IDS.companyUserId,
+    permissionCode: "company.manage",
+    objectType: "feature_flag",
+    objectId: DEMO_IDS.companyId
+  });
 
   const correlationId = "corr-phase14-feature-flag";
+  assert.throws(
+    () =>
+      platform.upsertFeatureFlag({
+        sessionToken: adminToken,
+        companyId: DEMO_IDS.companyId,
+        flagKey: "payments.kill_switch",
+        description: "Stops outgoing payment exports.",
+        flagType: "kill_switch",
+        scopeType: "company",
+        scopeRef: DEMO_IDS.companyId,
+        defaultEnabled: false,
+        enabled: true,
+        ownerUserId: DEMO_IDS.userId,
+        riskClass: "high",
+        sunsetAt: "2026-12-31"
+      }),
+    (error) => error?.code === "feature_flag_approval_required"
+  );
   const featureFlag = platform.upsertFeatureFlag({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
@@ -55,11 +82,15 @@ test("Phase 14.2 resilience records flag metadata, audit correlations and contro
     ownerUserId: DEMO_IDS.userId,
     riskClass: "high",
     sunsetAt: "2026-12-31",
+    changeReason: "Payment exports are entering staged rollout.",
+    approvalActorIds: [DEMO_APPROVER_IDS.userId],
     correlationId
   });
   assert.equal(featureFlag.flagType, "kill_switch");
   assert.equal(featureFlag.ownerUserId, DEMO_IDS.userId);
   assert.equal(featureFlag.sunsetAt, "2026-12-31");
+  assert.deepEqual(featureFlag.approvalActorIds, [DEMO_APPROVER_IDS.userId]);
+  assert.equal(featureFlag.changeReason, "Payment exports are entering staged rollout.");
 
   platform.upsertFeatureFlag({
     sessionToken: adminToken,
@@ -72,7 +103,9 @@ test("Phase 14.2 resilience records flag metadata, audit correlations and contro
     enabled: false,
     ownerUserId: DEMO_IDS.userId,
     riskClass: "high",
-    sunsetAt: "2026-12-31"
+    sunsetAt: "2026-12-31",
+    changeReason: "Global default stays disabled until staged rollout is complete.",
+    approvalActorIds: [DEMO_APPROVER_IDS.userId]
   });
   platform.upsertFeatureFlag({
     sessionToken: adminToken,
@@ -86,7 +119,9 @@ test("Phase 14.2 resilience records flag metadata, audit correlations and contro
     enabled: false,
     ownerUserId: DEMO_IDS.userId,
     riskClass: "high",
-    sunsetAt: "2026-12-31"
+    sunsetAt: "2026-12-31",
+    changeReason: "User override remains disabled for finance reviewer.",
+    approvalActorIds: [DEMO_APPROVER_IDS.userId]
   });
 
   assert.equal(platform.resolveRuntimeFlags({ companyId: DEMO_IDS.companyId })[featureFlag.flagKey], true);
@@ -178,6 +213,11 @@ test("Phase 14.2 resilience records flag metadata, audit correlations and contro
     companyId: DEMO_IDS.companyId,
     correlationId
   });
+  const featureFlagAudit = platform.listAuditTrail({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    correlationId
+  }).find((entry) => entry.action === "resilience.feature_flag.upserted");
   const controlPlane = platform.getRuntimeControlPlaneSummary({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId
@@ -193,6 +233,8 @@ test("Phase 14.2 resilience records flag metadata, audit correlations and contro
   assert.equal(correlations.length >= 1, true);
   assert.equal(featureFlagCorrelation.actionCount >= 3, true);
   assert.equal(featureFlagCorrelation.relatedEntities.some((entry) => entry.entityType === "feature_flag"), true);
+  assert.deepEqual(featureFlagAudit.metadata.approvalActorIds, [DEMO_APPROVER_IDS.userId]);
+  assert.equal(featureFlagAudit.metadata.changeReason, "Payment exports are entering staged rollout.");
   assert.equal(controlPlane.activeEmergencyDisableCount, 0);
   assert.equal(controlPlane.openIncidentSignalCount, 1);
   assert.equal(incidentSignals.some((signal) => signal.signalType === "emergency_disable_activated"), true);
