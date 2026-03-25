@@ -776,6 +776,8 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  assertReadSurfaceRoleAccess({ platform, req, url, path });
+
   if (await tryHandlePhase13Route({ req, res, url, path, platform })) {
     return;
   }
@@ -11874,6 +11876,37 @@ function assertFinanceOperationsAccess({ principal }) {
   if (!isAllowedOperator) {
     throw createHttpError(403, "finance_operations_role_forbidden", "Current actor is not allowed to access finance operations worklists.");
   }
+}
+
+function assertReadSurfaceRoleAccess({ platform, req, url, path }) {
+  if (req.method !== "GET") {
+    return;
+  }
+  if (!isFinanceOperationsReadPath(path)) {
+    return;
+  }
+  const companyId = url.searchParams.get("companyId");
+  if (!companyId) {
+    return;
+  }
+  const principal = authorizeCompanyAccess({
+    platform,
+    sessionToken: readSessionToken(req),
+    companyId,
+    permissionCode: "company.read",
+    objectType: "company",
+    scopeCode: "company"
+  });
+  assertFinanceOperationsAccess({ principal });
+}
+
+function isFinanceOperationsReadPath(path) {
+  return (
+    path.startsWith("/v1/ledger") ||
+    path.startsWith("/v1/vat") ||
+    path.startsWith("/v1/ar") ||
+    path.startsWith("/v1/ap")
+  );
 }
 
 function buildSubmissionPayloadFromSource({ platform, companyId, sourceObjectType, sourceObjectId }) {

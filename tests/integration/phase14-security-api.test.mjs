@@ -146,6 +146,18 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       expectedStatus: 403
     });
     assert.equal(fieldUserSupportListForbidden.error, "backoffice_role_forbidden");
+    for (const financeReadPath of [
+      `/v1/ledger/accounts?companyId=${DEMO_IDS.companyId}`,
+      `/v1/vat/codes?companyId=${DEMO_IDS.companyId}`,
+      `/v1/ar/customers?companyId=${DEMO_IDS.companyId}`,
+      `/v1/ap/suppliers?companyId=${DEMO_IDS.companyId}`
+    ]) {
+      const financeReadDenied = await requestJson(baseUrl, financeReadPath, {
+        token: fieldUserToken,
+        expectedStatus: 403
+      });
+      assert.equal(financeReadDenied.error, "finance_operations_role_forbidden");
+    }
     await requestJson(baseUrl, `/v1/backoffice/support-cases/${supportCase.supportCaseId}/approve-actions`, {
       method: "POST",
       token: approverToken,
