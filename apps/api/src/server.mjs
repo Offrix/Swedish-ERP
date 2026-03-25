@@ -9749,7 +9749,7 @@ async function handleRequest({ req, res, platform, flags }) {
         "company_id_required",
         "companyId query parameter is required."
       );
-      authorizeCompanyAccess({
+      const principal = authorizeCompanyAccess({
         platform,
         sessionToken: readSessionToken(req),
         companyId,
@@ -9757,6 +9757,7 @@ async function handleRequest({ req, res, platform, flags }) {
         objectType: "construction_site",
         scopeCode: "project"
       });
+      assertPersonalliggareControlReadAccess({ principal });
       writeJson(res, 200, {
         items: platform.listAttendanceIdentitySnapshots({
           companyId,
@@ -9773,7 +9774,7 @@ async function handleRequest({ req, res, platform, flags }) {
         "company_id_required",
         "companyId query parameter is required."
       );
-      authorizeCompanyAccess({
+      const principal = authorizeCompanyAccess({
         platform,
         sessionToken: readSessionToken(req),
         companyId,
@@ -9781,6 +9782,7 @@ async function handleRequest({ req, res, platform, flags }) {
         objectType: "construction_site",
         scopeCode: "project"
       });
+      assertPersonalliggareControlReadAccess({ principal });
       writeJson(res, 200, {
         items: platform.listContractorSnapshots({
           companyId,
@@ -9867,7 +9869,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -9875,6 +9877,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "kiosk_device",
       scopeCode: "project"
     });
+    assertPersonalliggareControlReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listKioskDevices({
         companyId,
@@ -9969,7 +9972,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -9977,6 +9980,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "attendance_export",
       scopeCode: "project"
     });
+    assertPersonalliggareControlReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listAttendanceExports({
         companyId,
@@ -10018,7 +10022,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -10026,6 +10030,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "construction_site",
       scopeCode: "project"
     });
+    assertPersonalliggareControlReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listAttendanceAuditEvents({
         companyId,
@@ -11863,6 +11868,7 @@ function assertPrincipalCanApproveLeaveEntry({ platform, principal, companyId, l
 const ANNUAL_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const FINANCE_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const DESKTOP_SURFACE_READ_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
+const PERSONALLIGGARE_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 
 function assertAnnualOperationsAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
@@ -11885,6 +11891,18 @@ function assertDesktopSurfaceReadAccess({ principal }) {
   const isAllowedReader = [...DESKTOP_SURFACE_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
   if (!isAllowedReader) {
     throw createHttpError(403, "desktop_surface_role_forbidden", "Current actor is not allowed to access desktop-only read models.");
+  }
+}
+
+function assertPersonalliggareControlReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedReader = [...PERSONALLIGGARE_CONTROL_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedReader) {
+    throw createHttpError(
+      403,
+      "personalliggare_control_role_forbidden",
+      "Current actor is not allowed to access personalliggare control, export or audit read models."
+    );
   }
 }
 

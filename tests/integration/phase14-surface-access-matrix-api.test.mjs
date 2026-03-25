@@ -35,6 +35,22 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
       companyId: DEMO_IDS.companyId,
       email: "phase14-access-matrix-field@example.test"
     });
+    const personalliggareSite = await requestJson(baseUrl, "/v1/personalliggare/sites", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        siteCode: "SITE-ACCESS-MATRIX-001",
+        siteName: "Access Matrix Site",
+        siteAddress: "Kontrollgatan 14, Stockholm",
+        builderOrgNo: "5561234567",
+        estimatedTotalCostExVat: 450000,
+        startDate: "2026-03-25",
+        industryPackCode: "bygg",
+        workplaceIdentifier: "ARB-ACCESS-001"
+      }
+    });
 
     for (const surface of [
       { path: `/v1/ledger/accounts?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
@@ -52,6 +68,26 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
       { path: `/v1/fiscal-years/history?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
       { path: `/v1/tax-account/events?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
       { path: `/v1/review-center/queues?companyId=${DEMO_IDS.companyId}`, error: "review_center_role_forbidden" },
+      {
+        path: `/v1/personalliggare/sites/${personalliggareSite.constructionSiteId}/identity-snapshots?companyId=${DEMO_IDS.companyId}`,
+        error: "personalliggare_control_role_forbidden"
+      },
+      {
+        path: `/v1/personalliggare/sites/${personalliggareSite.constructionSiteId}/contractor-snapshots?companyId=${DEMO_IDS.companyId}`,
+        error: "personalliggare_control_role_forbidden"
+      },
+      {
+        path: `/v1/personalliggare/sites/${personalliggareSite.constructionSiteId}/kiosk-devices?companyId=${DEMO_IDS.companyId}`,
+        error: "personalliggare_control_role_forbidden"
+      },
+      {
+        path: `/v1/personalliggare/sites/${personalliggareSite.constructionSiteId}/exports?companyId=${DEMO_IDS.companyId}`,
+        error: "personalliggare_control_role_forbidden"
+      },
+      {
+        path: `/v1/personalliggare/audit-events?companyId=${DEMO_IDS.companyId}&constructionSiteId=${personalliggareSite.constructionSiteId}`,
+        error: "personalliggare_control_role_forbidden"
+      },
       { path: `/v1/ops/feature-flags?companyId=${DEMO_IDS.companyId}`, error: "backoffice_role_forbidden" },
       { path: `/v1/migration/cockpit?companyId=${DEMO_IDS.companyId}`, error: "payroll_operations_role_forbidden" },
       { path: `/v1/legal-forms/profiles?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
