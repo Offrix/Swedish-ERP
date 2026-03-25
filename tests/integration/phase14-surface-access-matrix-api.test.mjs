@@ -172,6 +172,18 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         error: "project_workspace_role_forbidden"
       },
       {
+        path: `/v1/projects/${project.projectId}/change-orders?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/projects/${project.projectId}/build-vat-decisions?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/projects/${project.projectId}/audit-events?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
         path: `/v1/egenkontroll/templates?companyId=${DEMO_IDS.companyId}`,
         error: "egenkontroll_control_role_forbidden"
       },

@@ -8864,7 +8864,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8872,6 +8872,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project_change_order",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listProjectChangeOrders({
         companyId,
@@ -8951,7 +8952,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8959,6 +8960,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project_build_vat_assessment",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listProjectBuildVatAssessments({
         companyId,
@@ -9016,7 +9018,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -9024,6 +9026,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listProjectAuditEvents({
         companyId,
