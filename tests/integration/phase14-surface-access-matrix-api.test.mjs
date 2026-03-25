@@ -102,6 +102,30 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         validTo: "2026-04-25"
       }
     });
+    const employee = await requestJson(baseUrl, "/v1/hr/employees", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        givenName: "Tina",
+        familyName: "Tid",
+        identityType: "personnummer",
+        identityValue: "900101-1234"
+      }
+    });
+    const employment = await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/employments`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        employmentTypeCode: "permanent",
+        jobTitle: "Montör",
+        payModelCode: "hourly_salary",
+        startDate: "2026-03-01"
+      }
+    });
     const fieldWorkOrder = await requestJson(baseUrl, "/v1/field/work-orders", {
       method: "POST",
       token: adminToken,
@@ -178,6 +202,20 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         path: `/v1/kalkyl/estimates/${estimate.estimateVersionId}?companyId=${DEMO_IDS.companyId}`,
         error: "project_workspace_role_forbidden"
       },
+      { path: `/v1/time/schedule-templates?companyId=${DEMO_IDS.companyId}`, error: "time_operations_role_forbidden" },
+      {
+        path: `/v1/time/entries?companyId=${DEMO_IDS.companyId}&employmentId=${employment.employmentId}`,
+        error: "time_operations_role_forbidden"
+      },
+      {
+        path: `/v1/time/balances?companyId=${DEMO_IDS.companyId}&employmentId=${employment.employmentId}&cutoffDate=2026-03-31`,
+        error: "time_operations_role_forbidden"
+      },
+      {
+        path: `/v1/time/employment-base?companyId=${DEMO_IDS.companyId}&employmentId=${employment.employmentId}&workDate=2026-03-25`,
+        error: "time_operations_role_forbidden"
+      },
+      { path: `/v1/time/period-locks?companyId=${DEMO_IDS.companyId}`, error: "time_operations_role_forbidden" },
       {
         path: `/v1/personalliggare/sites/${personalliggareSite.constructionSiteId}/identity-snapshots?companyId=${DEMO_IDS.companyId}`,
         error: "personalliggare_control_role_forbidden"
