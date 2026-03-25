@@ -170,7 +170,6 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
 
     const company = requireCompany(companyId);
     const now = nowIso();
-    const user = findOrCreateUser({ email, displayName });
     const resolvedRoleCode = assertSupportedRole(roleCode);
     const resolvedRequiresMfa = resolvedRoleCode === "company_admin" ? true : requiresMfa === true;
     const companyUserWindow = resolveWindow({
@@ -179,6 +178,7 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       code: "company_user_window_invalid",
       message: "Company-user start must be on or before the end of the active window."
     });
+    const user = findOrCreateUser({ email, displayName });
     const companyUser = {
       companyUserId: crypto.randomUUID(),
       companyId: company.companyId,

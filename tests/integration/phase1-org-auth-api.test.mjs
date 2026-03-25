@@ -94,6 +94,7 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
     );
     assert.equal(forbiddenCrossCompany.error, "cross_company_forbidden");
 
+    const userCountBeforeInvalidCompanyUser = platform.snapshot().users.length;
     const invalidCompanyUserWindow = await requestJson(
       `${baseUrl}/v1/org/companies/00000000-0000-4000-8000-000000000001/users`,
       {
@@ -110,6 +111,7 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
       }
     );
     assert.equal(invalidCompanyUserWindow.error, "company_user_window_invalid");
+    assert.equal(platform.snapshot().users.length, userCountBeforeInvalidCompanyUser);
 
     const invalidObjectGrantWindow = await requestJson(`${baseUrl}/v1/org/object-grants`, {
       method: "POST",
