@@ -9028,7 +9028,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -9036,6 +9036,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "hus_case",
       scopeCode: "project"
     });
+    assertFinanceOperationsAccess({ principal });
     writeJson(res, 200, {
       items: platform.listHusCases({
         companyId,
@@ -9095,7 +9096,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -9103,6 +9104,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "hus_case",
       scopeCode: "project"
     });
+    assertFinanceOperationsAccess({ principal });
     writeJson(
       res,
       200,
@@ -9194,7 +9196,7 @@ async function handleRequest({ req, res, platform, flags }) {
         "company_id_required",
         "companyId query parameter is required."
       );
-      authorizeCompanyAccess({
+      const principal = authorizeCompanyAccess({
         platform,
         sessionToken: readSessionToken(req),
         companyId,
@@ -9202,6 +9204,7 @@ async function handleRequest({ req, res, platform, flags }) {
         objectType: "hus_case",
         scopeCode: "project"
       });
+      assertFinanceOperationsAccess({ principal });
       writeJson(
         res,
         200,
@@ -9251,7 +9254,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -9259,6 +9262,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "hus_claim",
       scopeCode: "project"
     });
+    assertFinanceOperationsAccess({ principal });
     writeJson(res, 200, {
       items: platform.listHusClaims({
         companyId,
@@ -9275,7 +9279,7 @@ async function handleRequest({ req, res, platform, flags }) {
         "company_id_required",
         "companyId query parameter is required."
       );
-      authorizeCompanyAccess({
+      const principal = authorizeCompanyAccess({
         platform,
         sessionToken: readSessionToken(req),
         companyId,
@@ -9283,6 +9287,7 @@ async function handleRequest({ req, res, platform, flags }) {
         objectType: "hus_case",
         scopeCode: "project"
       });
+      assertFinanceOperationsAccess({ principal });
       writeJson(res, 200, {
         items: platform.listHusRecoveryCandidates({
           companyId,
@@ -9326,7 +9331,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -9334,6 +9339,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "hus_claim",
       scopeCode: "project"
     });
+    assertFinanceOperationsAccess({ principal });
     writeJson(
       res,
       200,
@@ -9407,7 +9413,7 @@ async function handleRequest({ req, res, platform, flags }) {
         "company_id_required",
         "companyId query parameter is required."
       );
-      authorizeCompanyAccess({
+      const principal = authorizeCompanyAccess({
         platform,
         sessionToken: readSessionToken(req),
         companyId,
@@ -9415,6 +9421,7 @@ async function handleRequest({ req, res, platform, flags }) {
         objectType: "hus_case",
         scopeCode: "project"
       });
+      assertFinanceOperationsAccess({ principal });
       writeJson(res, 200, {
         items: platform.listHusDecisionDifferences({
           companyId,
@@ -9543,7 +9550,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -9551,6 +9558,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "hus_case",
       scopeCode: "project"
     });
+    assertFinanceOperationsAccess({ principal });
     writeJson(res, 200, {
       items: platform.listHusAuditEvents({
         companyId,

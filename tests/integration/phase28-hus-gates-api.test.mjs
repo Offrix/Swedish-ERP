@@ -50,6 +50,20 @@ test("Step 28 API exposes readiness, decision difference and recovery candidate 
       companyId: COMPANY_ID,
       email: DEMO_ADMIN_EMAIL
     });
+    platform.createCompanyUser({
+      sessionToken,
+      companyId: COMPANY_ID,
+      email: "hus-field@example.test",
+      displayName: "HUS Field",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: "hus-field@example.test"
+    });
 
     const root = await requestJson(baseUrl, "/", { token: sessionToken });
     for (const route of [
@@ -226,6 +240,14 @@ test("Step 28 API exposes readiness, decision difference and recovery candidate 
     });
     assert.equal(recovery.husCase.status, "closed");
     assert.equal(recovery.husRecoveryCandidate.status, "recovered");
+
+    const forbiddenDifferences = await fetch(`${baseUrl}/v1/hus/decision-differences?companyId=${COMPANY_ID}`, {
+      headers: {
+        authorization: `Bearer ${fieldUserToken}`
+      }
+    });
+    assert.equal(forbiddenDifferences.status, 403);
+    await forbiddenDifferences.json();
   } finally {
     await stopServer(server);
   }
@@ -259,6 +281,27 @@ async function loginWithRequiredFactors({ baseUrl, platform, companyId, email })
     body: {
       orderRef: bankidStart.orderRef,
       completionToken: platform.getBankIdCompletionTokenForTesting(bankidStart.orderRef)
+    }
+  });
+
+  return started.sessionToken;
+}
+
+async function loginWithTotpOnly({ baseUrl, platform, companyId, email }) {
+  const started = await requestJson(baseUrl, "/v1/auth/login", {
+    method: "POST",
+    body: {
+      companyId,
+      email
+    }
+  });
+
+  const totpCode = platform.getTotpCodeForTesting({ companyId, email });
+  await requestJson(baseUrl, "/v1/auth/mfa/totp/verify", {
+    method: "POST",
+    token: started.sessionToken,
+    body: {
+      code: totpCode
     }
   });
 
