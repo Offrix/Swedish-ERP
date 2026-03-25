@@ -147,6 +147,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/tax-account/reconciliations",
               "/v1/tax-account/offsets",
               "/v1/notifications",
+              "/v1/notifications/:notificationId",
               "/v1/notifications/:notificationId/read",
               "/v1/notifications/:notificationId/ack",
               "/v1/notifications/:notificationId/snooze",

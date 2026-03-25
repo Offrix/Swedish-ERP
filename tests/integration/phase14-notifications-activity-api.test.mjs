@@ -104,6 +104,14 @@ test("Step 13 API exposes notifications and activity as separate read models", a
         }
       }
     ]);
+    const notificationDetail = await requestJson(
+      baseUrl,
+      `/v1/notifications/${adminNotification.notificationId}?companyId=${DEMO_IDS.companyId}`,
+      { token: adminToken }
+    );
+    assert.equal(notificationDetail.notificationId, adminNotification.notificationId);
+    assert.equal(notificationDetail.deliveries.length, 1);
+    assert.equal(notificationDetail.actions.length, 0);
 
     const approverOwnInbox = await requestJson(
       baseUrl,
@@ -122,6 +130,15 @@ test("Step 13 API exposes notifications and activity as separate read models", a
       }
     );
     assert.equal(approverCrossUserInbox.error, "notification_recipient_scope_forbidden");
+    const approverCrossUserDetail = await requestJson(
+      baseUrl,
+      `/v1/notifications/${adminNotification.notificationId}?companyId=${DEMO_IDS.companyId}`,
+      {
+        token: approverToken,
+        expectedStatus: 403
+      }
+    );
+    assert.equal(approverCrossUserDetail.error, "notification_recipient_scope_forbidden");
 
     const read = await requestJson(baseUrl, `/v1/notifications/${adminNotification.notificationId}/read`, {
       method: "POST",

@@ -2358,13 +2358,26 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  const notificationMatch = matchPath(path, "/v1/notifications/:notificationId");
+  if (req.method === "GET" && notificationMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: notificationMatch.notificationId, scopeCode: "notifications" });
+    assertNotificationReadAccess({ platform, principal, companyId, notificationId: notificationMatch.notificationId });
+    writeJson(res, 200, platform.getNotification({
+      companyId,
+      notificationId: notificationMatch.notificationId
+    }));
+    return true;
+  }
+
   const notificationReadMatch = matchPath(path, "/v1/notifications/:notificationId/read");
   if (req.method === "POST" && notificationReadMatch) {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: notificationReadMatch.notificationId, scopeCode: "notifications" });
-    assertNotificationMutationAccess({ platform, principal, companyId, notificationId: notificationReadMatch.notificationId });
+    assertNotificationReadAccess({ platform, principal, companyId, notificationId: notificationReadMatch.notificationId });
     writeJson(res, 200, platform.markNotificationRead({
       companyId,
       notificationId: notificationReadMatch.notificationId,
@@ -2379,7 +2392,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: notificationAckMatch.notificationId, scopeCode: "notifications" });
-    assertNotificationMutationAccess({ platform, principal, companyId, notificationId: notificationAckMatch.notificationId });
+    assertNotificationReadAccess({ platform, principal, companyId, notificationId: notificationAckMatch.notificationId });
     writeJson(res, 200, platform.acknowledgeNotification({
       companyId,
       notificationId: notificationAckMatch.notificationId,
@@ -2394,7 +2407,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: notificationSnoozeMatch.notificationId, scopeCode: "notifications" });
-    assertNotificationMutationAccess({ platform, principal, companyId, notificationId: notificationSnoozeMatch.notificationId });
+    assertNotificationReadAccess({ platform, principal, companyId, notificationId: notificationSnoozeMatch.notificationId });
     writeJson(res, 200, platform.snoozeNotification({
       companyId,
       notificationId: notificationSnoozeMatch.notificationId,
@@ -3251,7 +3264,7 @@ function resolveNotificationRecipientScope({ principal, recipientType, recipient
   };
 }
 
-function assertNotificationMutationAccess({ platform, principal, companyId, notificationId }) {
+function assertNotificationReadAccess({ platform, principal, companyId, notificationId }) {
   const notification = platform.getNotification({ companyId, notificationId });
   if (notification.recipientType !== "user" || notification.recipientId !== principal.userId) {
     throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification action is only allowed for the addressed user in this route.");
