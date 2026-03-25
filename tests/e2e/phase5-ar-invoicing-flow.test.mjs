@@ -194,7 +194,8 @@ test("Phase 5.2 AR invoicing routes toggle cleanly and the end-to-end flow cover
       token: sessionToken,
       expectedStatus: 201,
       body: {
-        companyId: COMPANY_ID
+        companyId: COMPANY_ID,
+        providerCode: "internal_mock"
       }
     });
     assert.equal(payLink.status, "active");

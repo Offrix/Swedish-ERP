@@ -1404,7 +1404,7 @@ export function createArEngine({
     customerInvoiceId,
     amount = null,
     expiresAt = null,
-    providerCode = "internal_mock",
+    providerCode,
     actorId = "system",
     correlationId = crypto.randomUUID()
   } = {}) {

@@ -317,11 +317,22 @@ test("Phase 5.2 API issues invoices idempotently, closes credits, validates Pepp
       token: sessionToken,
       expectedStatus: 201,
       body: {
-        companyId: COMPANY_ID
+        companyId: COMPANY_ID,
+        providerCode: "internal_mock"
       }
     });
     assert.equal(paymentLink.status, "active");
     assert.match(paymentLink.url, /payments\.local/);
+
+    const missingProvider = await requestJson(baseUrl, `/v1/ar/invoices/${subscriptionInvoice.customerInvoiceId}/payment-links`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 400,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+    assert.equal(missingProvider.error, "payment_link_provider_code_required");
   } finally {
     await stopServer(server);
   }

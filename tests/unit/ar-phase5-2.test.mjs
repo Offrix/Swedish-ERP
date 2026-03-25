@@ -172,6 +172,7 @@ test("Phase 5.2 validates Peppol delivery and creates payment links from issued 
   const paymentLink = ar.createInvoicePaymentLink({
     companyId: COMPANY_ID,
     customerInvoiceId: invoice.customerInvoiceId,
+    providerCode: "internal_mock",
     actorId: "user-1"
   });
 
@@ -179,6 +180,50 @@ test("Phase 5.2 validates Peppol delivery and creates payment links from issued 
   assert.equal(delivery.payloadType, "peppol_bis_billing_3");
   assert.equal(delivery.recipient, "0088:0007:5566778899");
   assert.equal(paymentLink.status, "active");
+});
+
+test("Phase 5.2 requires explicit payment link provider selection", () => {
+  const clock = () => new Date("2026-03-22T13:05:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const integrations = createIntegrationEngine({ clock });
+  const ar = createArEngine({
+    clock,
+    seedDemo: false,
+    ledgerPlatform: ledger,
+    integrationPlatform: integrations
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+
+  const customer = createCustomer(ar, {
+    peppolScheme: "0088",
+    peppolIdentifier: "0007:5566778899"
+  });
+  const item = createItem(ar);
+  const invoice = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-03-22",
+    dueDate: "2026-04-21",
+    currencyCode: "SEK",
+    lines: [{ itemId: item.arItemId, quantity: 1, unitPrice: 1000 }],
+    actorId: "user-1"
+  });
+  ar.issueInvoice({
+    companyId: COMPANY_ID,
+    customerInvoiceId: invoice.customerInvoiceId,
+    actorId: "user-1"
+  });
+
+  assert.throws(
+    () =>
+      ar.createInvoicePaymentLink({
+        companyId: COMPANY_ID,
+        customerInvoiceId: invoice.customerInvoiceId,
+        actorId: "user-1"
+      }),
+    (error) => error?.code === "payment_link_provider_code_required"
+  );
 });
 
 test("Phase 5.2 marks invoice delivery as failed when Peppol validation data is missing", () => {

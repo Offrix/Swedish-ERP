@@ -39,7 +39,7 @@ Denna runbook verifierar att FAS 5.2 levererar standard-, kredit-, del- och abon
 - kreditfaktura anvander serie `C` och stanger korrekt rest pa ursprungsfakturan
 - standard-, del- och abonnemangsfakturor kan skapas utan att lagga domanlogik i UI
 - PDF-leverans kraver mottagare och Peppol-leverans kraver strukturerad mottagare plus buyer reference eller order reference
-- betalningslank far bara skapas for utstalld debiterbar faktura
+- betalningslank far bara skapas for utstalld debiterbar faktura och krav pa explicit provider code verifieras
 - kundfordringskonto valjs efter geografi och utgaende moms landar pa ratt 2610/2620/2630-konto
 
 ## Vanliga fel
@@ -58,6 +58,8 @@ Denna runbook verifierar att FAS 5.2 levererar standard-, kredit-, del- och abon
   Kontrollera att buyer reference eller order reference skickas vid outbound Peppol.
 - `payment_link_not_allowed_for_credit_note`
   Kontrollera att betalningslank inte skapas for kreditfakturor.
+- `payment_link_provider_code_required`
+  Kontrollera att anropet anger explicit provider code; demo- eller sandboxprovider far inte antas tyst.
 
 ## Aterstallning
 

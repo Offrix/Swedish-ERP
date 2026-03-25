@@ -4696,7 +4696,7 @@ async function handleRequest({ req, res, platform, flags }) {
         customerInvoiceId: arInvoicePaymentLinksMatch.customerInvoiceId,
         amount: body.amount ?? null,
         expiresAt: body.expiresAt || null,
-        providerCode: body.providerCode || "internal_mock",
+        providerCode: body.providerCode ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })

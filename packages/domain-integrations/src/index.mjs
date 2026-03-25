@@ -245,7 +245,7 @@ export function createIntegrationEngine({
     invoiceId,
     amount,
     currencyCode,
-    providerCode = "internal_mock",
+    providerCode,
     expiresAt
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");

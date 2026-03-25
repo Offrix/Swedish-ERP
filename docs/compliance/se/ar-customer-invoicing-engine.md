@@ -124,6 +124,7 @@ Fält:
 - taxable amount by line
 - VAT decision per line
 - payment reference
+- explicit payment-link provider code när betalningslänk begärs
 - source object or free-text justification
 
 # State machines
@@ -164,6 +165,7 @@ Fält:
 3. Kreditnota kräver referens till ursprungsfaktura eller policytillåten fristående kreditorsak.
 4. Deldeliverans får inte överfakturera källobjektet utan dokumenterad override.
 5. Valuta, momsbeslut och kundtyp måste vara konsistenta med scenario- och rulepackval.
+6. Betalningslänk får bara skapas för issued debiterbar faktura och måste bära explicit provider code; tyst demo-default är förbjuden.
 
 # Deterministic decision rules
 
