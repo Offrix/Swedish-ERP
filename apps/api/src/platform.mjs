@@ -73,11 +73,11 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "collectiveAgreements",
   "time",
   "benefits",
-  "documentClassification",
-  "importCases",
   "travel",
   "pension",
   "payroll",
+  "documentClassification",
+  "importCases",
   "projects",
   "kalkyl",
   "reporting",
@@ -337,32 +337,6 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
       })
   }),
   createDomainDefinition({
-    key: "documentClassification",
-    label: "Document classification",
-    packageName: "@swedish-erp/domain-document-classification",
-    dependsOn: ["documents", "reviewCenter", "benefits"],
-    create: ({ options, dependencies }) =>
-      createDocumentClassificationPlatform({
-        ...options,
-        documentPlatform: dependencies.documents,
-        reviewCenterPlatform: dependencies.reviewCenter,
-        benefitsPlatform: dependencies.benefits
-      })
-  }),
-  createDomainDefinition({
-    key: "importCases",
-    label: "Import cases",
-    packageName: "@swedish-erp/domain-import-cases",
-    dependsOn: ["documents", "reviewCenter", "documentClassification"],
-    create: ({ options, dependencies }) =>
-      createImportCasesPlatform({
-        ...options,
-        documentPlatform: dependencies.documents,
-        reviewCenterPlatform: dependencies.reviewCenter,
-        documentClassificationPlatform: dependencies.documentClassification
-      })
-  }),
-  createDomainDefinition({
     key: "travel",
     label: "Travel",
     packageName: "@swedish-erp/domain-travel",
@@ -404,6 +378,33 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         ledgerPlatform: dependencies.ledger,
         bankingPlatform: dependencies.banking,
         getCorePlatform: () => getDomain("core")
+      })
+  }),
+  createDomainDefinition({
+    key: "documentClassification",
+    label: "Document classification",
+    packageName: "@swedish-erp/domain-document-classification",
+    dependsOn: ["documents", "reviewCenter", "benefits", "payroll"],
+    create: ({ options, dependencies }) =>
+      createDocumentClassificationPlatform({
+        ...options,
+        documentPlatform: dependencies.documents,
+        reviewCenterPlatform: dependencies.reviewCenter,
+        benefitsPlatform: dependencies.benefits,
+        payrollPlatform: dependencies.payroll
+      })
+  }),
+  createDomainDefinition({
+    key: "importCases",
+    label: "Import cases",
+    packageName: "@swedish-erp/domain-import-cases",
+    dependsOn: ["documents", "reviewCenter", "documentClassification"],
+    create: ({ options, dependencies }) =>
+      createImportCasesPlatform({
+        ...options,
+        documentPlatform: dependencies.documents,
+        reviewCenterPlatform: dependencies.reviewCenter,
+        documentClassificationPlatform: dependencies.documentClassification
       })
   }),
   createDomainDefinition({

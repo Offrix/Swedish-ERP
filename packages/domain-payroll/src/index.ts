@@ -286,6 +286,66 @@ export interface PayrollException {
   readonly resolutionNote: string | null;
 }
 
+export interface DocumentClassificationPayrollConsumption {
+  readonly documentClassificationPayrollConsumptionId: string;
+  readonly documentClassificationPayrollPayloadId: string;
+  readonly treatmentIntentId: string;
+  readonly companyId: string;
+  readonly employeeId: string;
+  readonly employmentId: string;
+  readonly payRunId: string;
+  readonly payRunLineId: string;
+  readonly payItemCode: string;
+  readonly processingStep: number;
+  readonly sourceType: string;
+  readonly amount: number;
+  readonly sourceSnapshotHash: string | null;
+  readonly stage: string;
+  readonly calculatedAt: string;
+  readonly calculatedByActorId: string;
+  readonly approvedAt: string | null;
+  readonly approvedByActorId: string | null;
+  readonly updatedAt: string;
+}
+
+export interface DocumentClassificationPayrollPayload {
+  readonly documentClassificationPayrollPayloadId: string;
+  readonly companyId: string;
+  readonly classificationCaseId: string;
+  readonly treatmentIntentId: string;
+  readonly documentId: string;
+  readonly employeeId: string;
+  readonly employmentId: string;
+  readonly reportingPeriod: string;
+  readonly treatmentCode: string;
+  readonly payItemCode: string;
+  readonly processingStep: number;
+  readonly sourceType: string;
+  readonly sourceId: string;
+  readonly amount: number;
+  readonly currencyCode: string;
+  readonly status: string;
+  readonly payLinePayloadJson: Record<string, unknown>;
+  readonly payloadHash: string;
+  readonly metadataJson: Record<string, unknown>;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly updatedByActorId: string;
+  readonly reversedAt: string | null;
+  readonly reversedByActorId: string | null;
+  readonly reversalReasonCode: string | null;
+  readonly replacementTreatmentIntentId: string | null;
+  readonly consumptions: readonly DocumentClassificationPayrollConsumption[];
+  readonly dispatchStatus: {
+    readonly totalCount: number;
+    readonly calculatedCount: number;
+    readonly approvedCount: number;
+    readonly latestStage: string;
+    readonly payRunIds: readonly string[];
+  };
+}
+
 export interface PayRunRef {
   readonly payRunId: string;
   readonly companyId: string;

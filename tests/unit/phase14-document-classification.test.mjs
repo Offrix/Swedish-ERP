@@ -4,6 +4,7 @@ import { createDocumentArchivePlatform } from "../../packages/domain-documents/s
 import { createReviewCenterPlatform } from "../../packages/domain-review-center/src/index.mjs";
 import { createHrPlatform } from "../../packages/domain-hr/src/index.mjs";
 import { createBenefitsPlatform } from "../../packages/domain-benefits/src/index.mjs";
+import { createPayrollPlatform } from "../../packages/domain-payroll/src/index.mjs";
 import { createDocumentClassificationEngine, DEMO_COMPANY_ID } from "../../packages/domain-document-classification/src/index.mjs";
 
 test("Step 14 document classification approves and dispatches deterministic wellness to benefits", () => {
@@ -193,4 +194,139 @@ test("Step 14 document classification opens review for private spend and preserv
   assert.equal(correction.priorCase.correctedToCaseId, correction.replacementCase.classificationCaseId);
   assert.equal(correction.replacementCase.parentClassificationCaseId, created.classificationCaseId);
   assert.equal(correction.replacementCase.treatmentIntents[0].status, "draft");
+});
+
+test("Step 14 document classification dispatches payroll intents into pay runs without duplicating AGI payloads", () => {
+  const clock = () => new Date("2026-03-24T17:15:00Z");
+  const documentPlatform = createDocumentArchivePlatform({ clock });
+  const reviewCenterPlatform = createReviewCenterPlatform({ clock, seedDemo: true });
+  const hrPlatform = createHrPlatform({ clock, seedDemo: false, documentPlatform });
+  const benefitsPlatform = createBenefitsPlatform({ clock, seedDemo: true, hrPlatform, documentPlatform });
+  const payrollPlatform = createPayrollPlatform({
+    clock,
+    seedDemo: true,
+    hrPlatform,
+    benefitsPlatform
+  });
+  const classification = createDocumentClassificationEngine({
+    clock,
+    seedDemo: false,
+    documentPlatform,
+    reviewCenterPlatform,
+    benefitsPlatform,
+    payrollPlatform
+  });
+
+  const employee = hrPlatform.createEmployee({
+    companyId: DEMO_COMPANY_ID,
+    givenName: "Karin",
+    familyName: "Larsson",
+    workEmail: "karin@example.test",
+    actorId: "user_3"
+  });
+  const employment = hrPlatform.createEmployment({
+    companyId: DEMO_COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentTypeCode: "permanent",
+    jobTitle: "Controller",
+    payModelCode: "monthly_salary",
+    startDate: "2026-01-01",
+    actorId: "user_3"
+  });
+  hrPlatform.addEmploymentContract({
+    companyId: DEMO_COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    validFrom: "2026-01-01",
+    salaryModelCode: "monthly_salary",
+    monthlySalary: 42000,
+    actorId: "user_3"
+  });
+  payrollPlatform.upsertEmploymentStatutoryProfile({
+    companyId: DEMO_COMPANY_ID,
+    employmentId: employment.employmentId,
+    taxMode: "manual_rate",
+    taxRatePercent: 30,
+    contributionClassCode: "full",
+    actorId: "user_3"
+  });
+
+  const document = documentPlatform.createDocumentRecord({
+    companyId: DEMO_COMPANY_ID,
+    documentType: "expense_receipt",
+    sourceReference: "private-payroll-unit-001",
+    actorId: "user_3"
+  });
+
+  const created = classification.createClassificationCase({
+    companyId: DEMO_COMPANY_ID,
+    documentId: document.documentId,
+    actorId: "user_3",
+    lineInputs: [
+      {
+        description: "Privat kortkop pa foretagskort",
+        amount: 1750,
+        treatmentCode: "PRIVATE_RECEIVABLE",
+        person: {
+          employeeId: employee.employeeId,
+          employmentId: employment.employmentId,
+          personRelationCode: "employee"
+        }
+      }
+    ]
+  });
+
+  const approved = classification.approveClassificationCase({
+    companyId: DEMO_COMPANY_ID,
+    classificationCaseId: created.classificationCaseId,
+    actorId: "user_3"
+  });
+  assert.equal(approved.status, "approved");
+
+  const dispatched = classification.dispatchTreatmentIntents({
+    companyId: DEMO_COMPANY_ID,
+    classificationCaseId: created.classificationCaseId,
+    actorId: "user_3"
+  });
+  assert.equal(dispatched.status, "dispatched");
+  assert.equal(dispatched.treatmentIntents[0].status, "dispatched");
+
+  const payloadBundle = payrollPlatform.listPayrollDocumentClassificationPayloads({
+    companyId: DEMO_COMPANY_ID,
+    employmentId: employment.employmentId,
+    reportingPeriod: "202603"
+  });
+  assert.equal(payloadBundle.payloads.length, 1);
+  assert.equal(payloadBundle.payloads[0].payItemCode, "NET_DEDUCTION");
+  assert.equal(payloadBundle.payloads[0].dispatchStatus.latestStage, "not_dispatched");
+
+  const payCalendar = payrollPlatform.listPayCalendars({ companyId: DEMO_COMPANY_ID })[0];
+  const payRun = payrollPlatform.createPayRun({
+    companyId: DEMO_COMPANY_ID,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202603",
+    employmentIds: [employment.employmentId],
+    actorId: "user_3"
+  });
+  payrollPlatform.approvePayRun({
+    companyId: DEMO_COMPANY_ID,
+    payRunId: payRun.payRunId,
+    actorId: "user_3"
+  });
+
+  const approvedRun = payrollPlatform.getPayRun({
+    companyId: DEMO_COMPANY_ID,
+    payRunId: payRun.payRunId
+  });
+  const deductionLine = approvedRun.lines.find((line) => line.sourceId === created.treatmentIntents[0].treatmentIntentId);
+  assert.equal(Boolean(deductionLine), true);
+  assert.equal(deductionLine.payItemCode, "NET_DEDUCTION");
+  assert.equal(deductionLine.sourceType, "document_classification_private_receivable");
+
+  const afterConsumption = payrollPlatform.listPayrollDocumentClassificationPayloads({
+    companyId: DEMO_COMPANY_ID,
+    employmentId: employment.employmentId,
+    reportingPeriod: "202603"
+  });
+  assert.equal(afterConsumption.payloads.length, 0);
 });

@@ -21,6 +21,7 @@ export const AGI_SUBMISSION_STATES = Object.freeze([
 ]);
 export const PAYROLL_POSTING_STATUSES = Object.freeze(["draft", "posted"]);
 export const PAYROLL_PAYOUT_BATCH_STATUSES = Object.freeze(["exported", "matched"]);
+const PAYROLL_EXTERNAL_CONSUMPTION_STAGES = Object.freeze(["calculated", "approved"]);
 export const PAYROLL_COMPENSATION_BUCKETS = Object.freeze([
   "gross_addition",
   "gross_deduction",
@@ -249,7 +250,15 @@ export function createPayrollEngine({
     payrollPayoutBatchIdsByCompany: new Map(),
     payrollPayoutBatchIdByRun: new Map(),
     vacationLiabilitySnapshots: new Map(),
-    vacationLiabilitySnapshotIdsByCompany: new Map()
+    vacationLiabilitySnapshotIdsByCompany: new Map(),
+    documentClassificationPayloads: new Map(),
+    documentClassificationPayloadIdsByCompany: new Map(),
+    documentClassificationPayloadIdsByEmployment: new Map(),
+    documentClassificationPayloadIdByIntent: new Map(),
+    documentClassificationPayloadIdsByCase: new Map(),
+    documentClassificationConsumptions: new Map(),
+    documentClassificationConsumptionIdsByIntent: new Map(),
+    documentClassificationConsumptionIdByKey: new Map()
   };
 
   if (seedDemo) {
@@ -294,7 +303,10 @@ export function createPayrollEngine({
     createPayrollPayoutBatch,
     matchPayrollPayoutBatch,
     listVacationLiabilitySnapshots,
-    createVacationLiabilitySnapshot
+    createVacationLiabilitySnapshot,
+    listPayrollDocumentClassificationPayloads,
+    registerDocumentClassificationPayrollPayload,
+    reverseDocumentClassificationPayrollPayload
   };
 
   function listEmployerContributionRulePacks({ effectiveDate = null } = {}) {
@@ -640,8 +652,10 @@ export function createPayrollEngine({
         continue;
       }
       registerExternalPayrollConsumption({
+        state,
         payRun,
         line,
+        clock,
         actorId,
         stage: "approved",
         benefitsPlatform,
@@ -853,8 +867,10 @@ export function createPayrollEngine({
         appendToIndex(state.payRunLineIdsByRun, run.payRunId, stored.payRunLineId);
         appendToIndex(state.payRunLineIdsByEmployment, `${run.payRunId}:${stored.employmentId}`, stored.payRunLineId);
         registerExternalPayrollConsumption({
+          state,
           payRun: run,
           line: stored,
+          clock,
           actorId,
           stage: "calculated",
           benefitsPlatform,
@@ -1431,6 +1447,129 @@ export function createPayrollEngine({
     state.vacationLiabilitySnapshots.set(record.vacationLiabilitySnapshotId, record);
     appendToIndex(state.vacationLiabilitySnapshotIdsByCompany, record.companyId, record.vacationLiabilitySnapshotId);
     return copy(record);
+  }
+
+  function listPayrollDocumentClassificationPayloads({ companyId, employmentId = null, reportingPeriod = null } = {}) {
+    return listDocumentClassificationPayloadBundleFromState(state, {
+      companyId,
+      employmentId,
+      reportingPeriod
+    });
+  }
+
+  function registerDocumentClassificationPayrollPayload({
+    companyId,
+    classificationCaseId,
+    treatmentIntentId,
+    documentId,
+    employeeId,
+    employmentId,
+    reportingPeriod,
+    treatmentCode,
+    sourceType,
+    sourceId = null,
+    amount,
+    currencyCode = "SEK",
+    payLinePayloadJson,
+    metadataJson = {},
+    actorId = "system"
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedTreatmentIntentId = requireText(treatmentIntentId, "treatment_intent_id_required");
+    const existingPayloadId = state.documentClassificationPayloadIdByIntent.get(resolvedTreatmentIntentId);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const now = nowIso(clock);
+    const normalizedPayLinePayload = normalizeDocumentClassificationPayrollPayload({
+      companyId: resolvedCompanyId,
+      employeeId,
+      employmentId,
+      reportingPeriod,
+      sourceType,
+      sourceId: sourceId || resolvedTreatmentIntentId,
+      amount,
+      payLinePayloadJson,
+      state
+    });
+
+    if (existingPayloadId) {
+      const existing = state.documentClassificationPayloads.get(existingPayloadId);
+      if (!existing) {
+        state.documentClassificationPayloadIdByIntent.delete(resolvedTreatmentIntentId);
+      } else {
+        existing.reportingPeriod = normalizedPayLinePayload.reportingPeriod;
+        existing.payItemCode = normalizedPayLinePayload.payLinePayloadJson.payItemCode;
+        existing.processingStep = normalizedPayLinePayload.payLinePayloadJson.processingStep;
+        existing.sourceType = normalizedPayLinePayload.payLinePayloadJson.sourceType;
+        existing.sourceId = normalizedPayLinePayload.payLinePayloadJson.sourceId;
+        existing.amount = normalizedPayLinePayload.payLinePayloadJson.amount;
+        existing.currencyCode = requireText(currencyCode, "currency_code_required");
+        existing.payLinePayloadJson = copy(normalizedPayLinePayload.payLinePayloadJson);
+        existing.payloadHash = buildSnapshotHash(existing.payLinePayloadJson);
+        existing.metadataJson = copy(metadataJson || {});
+        existing.status = existing.status === "reversed" ? "pending" : existing.status;
+        existing.updatedAt = now;
+        existing.updatedByActorId = resolvedActorId;
+        return presentDocumentClassificationPayload(state, existing);
+      }
+    }
+
+    const record = {
+      documentClassificationPayrollPayloadId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      classificationCaseId: requireText(classificationCaseId, "classification_case_id_required"),
+      treatmentIntentId: resolvedTreatmentIntentId,
+      documentId: requireText(documentId, "document_id_required"),
+      employeeId: requireText(employeeId, "employee_id_required"),
+      employmentId: requireText(employmentId, "employment_id_required"),
+      reportingPeriod: normalizedPayLinePayload.reportingPeriod,
+      treatmentCode: normalizeCode(treatmentCode, "treatment_code_required"),
+      payItemCode: normalizedPayLinePayload.payLinePayloadJson.payItemCode,
+      processingStep: normalizedPayLinePayload.payLinePayloadJson.processingStep,
+      sourceType: normalizedPayLinePayload.payLinePayloadJson.sourceType,
+      sourceId: normalizedPayLinePayload.payLinePayloadJson.sourceId,
+      amount: normalizedPayLinePayload.payLinePayloadJson.amount,
+      currencyCode: requireText(currencyCode, "currency_code_required"),
+      status: "pending",
+      payLinePayloadJson: copy(normalizedPayLinePayload.payLinePayloadJson),
+      payloadHash: buildSnapshotHash(normalizedPayLinePayload.payLinePayloadJson),
+      metadataJson: copy(metadataJson || {}),
+      createdByActorId: resolvedActorId,
+      createdAt: now,
+      updatedAt: now,
+      updatedByActorId: resolvedActorId,
+      reversedAt: null,
+      reversedByActorId: null,
+      reversalReasonCode: null,
+      replacementTreatmentIntentId: null
+    };
+    state.documentClassificationPayloads.set(record.documentClassificationPayrollPayloadId, record);
+    appendToIndex(state.documentClassificationPayloadIdsByCompany, record.companyId, record.documentClassificationPayrollPayloadId);
+    appendToIndex(
+      state.documentClassificationPayloadIdsByEmployment,
+      buildPayrollEmploymentKey(record.companyId, record.employmentId),
+      record.documentClassificationPayrollPayloadId
+    );
+    appendToIndex(state.documentClassificationPayloadIdsByCase, record.classificationCaseId, record.documentClassificationPayrollPayloadId);
+    state.documentClassificationPayloadIdByIntent.set(record.treatmentIntentId, record.documentClassificationPayrollPayloadId);
+    return presentDocumentClassificationPayload(state, record);
+  }
+
+  function reverseDocumentClassificationPayrollPayload({
+    companyId,
+    treatmentIntentId,
+    actorId = "system",
+    reasonCode = "correction",
+    replacementTreatmentIntentId = null
+  } = {}) {
+    const record = requireDocumentClassificationPayload(state, companyId, treatmentIntentId);
+    record.status = "reversed";
+    record.reversedAt = nowIso(clock);
+    record.reversedByActorId = requireText(actorId, "actor_id_required");
+    record.reversalReasonCode = normalizeCode(reasonCode, "document_classification_reversal_reason_required");
+    record.replacementTreatmentIntentId = normalizeOptionalText(replacementTreatmentIntentId);
+    record.updatedAt = record.reversedAt;
+    record.updatedByActorId = record.reversedByActorId;
+    return presentDocumentClassificationPayload(state, record);
   }
 }
 
@@ -2735,6 +2874,11 @@ function calculateEmploymentRun({
         reportingPeriod: period.reportingPeriod
       })
     : { claims: [], payLinePayloads: [], warnings: [] };
+  const documentClassificationPayloadBundle = listDocumentClassificationPayloadBundleFromState(state, {
+    companyId: employment.companyId,
+    employmentId: employment.employmentId,
+    reportingPeriod: period.reportingPeriod
+  });
   let pensionPayloadBundle = { enrollments: [], activeAgreements: [], basisSnapshots: [], events: [], payLinePayloads: [], warnings: [] };
 
   const sourceSnapshot = {
@@ -2755,6 +2899,15 @@ function calculateEmploymentRun({
       benefitCode: event.benefitCode,
       taxableValue: event.valuation?.taxableValue || 0,
       netDeductionValue: event.valuation?.netDeductionValue || 0
+    })),
+    documentClassificationIntents: (documentClassificationPayloadBundle.payloads || []).map((payload) => ({
+      documentClassificationPayrollPayloadId: payload.documentClassificationPayrollPayloadId,
+      treatmentIntentId: payload.treatmentIntentId,
+      treatmentCode: payload.treatmentCode,
+      processingStep: payload.processingStep,
+      payItemCode: payload.payItemCode,
+      amount: payload.amount,
+      dispatchStatus: payload.dispatchStatus?.latestStage || "not_dispatched"
     })),
     travelClaims: (travelPayloadBundle.claims || []).map((claim) => ({
       travelClaimId: claim.travelClaimId,
@@ -2862,6 +3015,12 @@ function calculateEmploymentRun({
     ...createStepLinesFromPayloads({
       processingStep: 7,
       employment,
+      payloads: documentClassificationPayloadBundle.payLinePayloads || [],
+      state
+    }),
+    ...createStepLinesFromPayloads({
+      processingStep: 7,
+      employment,
       payloads: travelPayloadBundle.payLinePayloads || [],
       state
     }),
@@ -2875,7 +3034,8 @@ function calculateEmploymentRun({
   lines.push(...travelLines);
   steps[7] = createCompletedStep(7, {
     ...summarizeLineStep(travelLines),
-    travelClaimCount: (travelPayloadBundle.claims || []).length
+    travelClaimCount: (travelPayloadBundle.claims || []).length,
+    documentClassificationPayloadCount: (documentClassificationPayloadBundle.payloads || []).filter((payload) => payload.processingStep === 7).length
   });
 
   const grossCompensationBeforeDeductions = roundMoney(
@@ -3007,6 +3167,12 @@ function calculateEmploymentRun({
     ...createStepLinesFromPayloads({
       processingStep: 13,
       employment,
+      payloads: documentClassificationPayloadBundle.payLinePayloads || [],
+      state
+    }),
+    ...createStepLinesFromPayloads({
+      processingStep: 13,
+      employment,
       payloads: benefitPayloadBundle.payLinePayloads || [],
       state
     }),
@@ -3031,7 +3197,10 @@ function calculateEmploymentRun({
     ...finalPayLines.netDeductions
   ];
   lines.push(...netDeductionLines);
-  steps[13] = createCompletedStep(13, summarizeLineStep(netDeductionLines));
+  steps[13] = createCompletedStep(13, {
+    ...summarizeLineStep(netDeductionLines),
+    documentClassificationPayloadCount: (documentClassificationPayloadBundle.payloads || []).filter((payload) => payload.processingStep === 13).length
+  });
 
   const lineTotals = summarizeTotals({
     lines,
@@ -3099,6 +3268,7 @@ function calculateEmploymentRun({
     bankAccount: primaryBankAccount,
     lines,
     benefitEvents: benefitPayloadBundle.events || [],
+    documentClassificationPayloads: documentClassificationPayloadBundle.payloads || [],
     travelClaims: travelPayloadBundle.claims || [],
     pensionEvents: pensionPayloadBundle.events || [],
     totals: {
@@ -4114,8 +4284,10 @@ function createStoredPayslip({ companyId, payRunId, period, runType, result, gen
 }
 
 function registerExternalPayrollConsumption({
+  state,
   payRun,
   line,
+  clock,
   actorId,
   stage,
   benefitsPlatform,
@@ -4123,6 +4295,24 @@ function registerExternalPayrollConsumption({
   pensionPlatform
 }) {
   if (!payRun || !line?.sourceId) {
+    return;
+  }
+  if (line.sourceType?.startsWith("document_classification_")) {
+    registerDocumentClassificationPayrollConsumption({
+      state,
+      clock,
+      companyId: payRun.companyId,
+      treatmentIntentId: line.sourceId,
+      payRunId: payRun.payRunId,
+      payRunLineId: line.payRunLineId,
+      payItemCode: line.payItemCode,
+      processingStep: line.processingStep,
+      sourceType: line.sourceType,
+      amount: line.amount,
+      sourceSnapshotHash: payRun.sourceSnapshotHash,
+      stage,
+      actorId
+    });
     return;
   }
   if (
@@ -4178,6 +4368,182 @@ function registerExternalPayrollConsumption({
       actorId
     });
   }
+}
+
+function registerDocumentClassificationPayrollConsumption({
+  state,
+  clock,
+  companyId,
+  treatmentIntentId,
+  payRunId,
+  payRunLineId,
+  payItemCode,
+  processingStep,
+  sourceType,
+  amount,
+  sourceSnapshotHash = null,
+  stage = "calculated",
+  actorId = "system"
+}) {
+  const payload = requireDocumentClassificationPayload(state, companyId, treatmentIntentId);
+  const resolvedStage = assertAllowed(stage, PAYROLL_EXTERNAL_CONSUMPTION_STAGES, "document_classification_payroll_consumption_stage_invalid");
+  const resolvedPayRunId = requireText(payRunId, "document_classification_payroll_consumption_pay_run_id_required");
+  const resolvedPayRunLineId = requireText(payRunLineId, "document_classification_payroll_consumption_pay_run_line_id_required");
+  const resolvedPayItemCode = requireText(payItemCode, "document_classification_payroll_consumption_pay_item_code_required");
+  const resolvedProcessingStep = normalizeProcessingStep(processingStep, payload.payLinePayloadJson?.compensationBucket || null);
+  const resolvedAmount = normalizeRequiredMoney(amount, "document_classification_payroll_consumption_amount_invalid");
+  const resolvedActorId = requireText(actorId, "actor_id_required");
+  const now = nowIso(clock);
+  const existingId = state.documentClassificationConsumptionIdByKey.get(resolvedPayRunLineId);
+  const existing = existingId ? state.documentClassificationConsumptions.get(existingId) : null;
+  if (existing) {
+    existing.stage = existing.stage === "approved" || resolvedStage === "approved" ? "approved" : "calculated";
+    existing.amount = resolvedAmount;
+    existing.sourceType = requireText(sourceType, "document_classification_payroll_consumption_source_type_required");
+    existing.sourceSnapshotHash = normalizeOptionalText(sourceSnapshotHash);
+    existing.updatedAt = now;
+    if (existing.stage === "approved" && !existing.approvedAt) {
+      existing.approvedAt = now;
+      existing.approvedByActorId = resolvedActorId;
+    }
+    payload.status = existing.stage;
+    payload.updatedAt = now;
+    payload.updatedByActorId = resolvedActorId;
+    return copy(existing);
+  }
+
+  const record = {
+    documentClassificationPayrollConsumptionId: crypto.randomUUID(),
+    documentClassificationPayrollPayloadId: payload.documentClassificationPayrollPayloadId,
+    treatmentIntentId: payload.treatmentIntentId,
+    companyId: payload.companyId,
+    employeeId: payload.employeeId,
+    employmentId: payload.employmentId,
+    payRunId: resolvedPayRunId,
+    payRunLineId: resolvedPayRunLineId,
+    payItemCode: resolvedPayItemCode,
+    processingStep: resolvedProcessingStep,
+    sourceType: requireText(sourceType, "document_classification_payroll_consumption_source_type_required"),
+    amount: resolvedAmount,
+    sourceSnapshotHash: normalizeOptionalText(sourceSnapshotHash),
+    stage: resolvedStage,
+    calculatedAt: now,
+    calculatedByActorId: resolvedActorId,
+    approvedAt: resolvedStage === "approved" ? now : null,
+    approvedByActorId: resolvedStage === "approved" ? resolvedActorId : null,
+    updatedAt: now
+  };
+  state.documentClassificationConsumptions.set(record.documentClassificationPayrollConsumptionId, record);
+  appendToIndex(
+    state.documentClassificationConsumptionIdsByIntent,
+    payload.treatmentIntentId,
+    record.documentClassificationPayrollConsumptionId
+  );
+  state.documentClassificationConsumptionIdByKey.set(resolvedPayRunLineId, record.documentClassificationPayrollConsumptionId);
+  payload.status = resolvedStage;
+  payload.updatedAt = now;
+  payload.updatedByActorId = resolvedActorId;
+  return copy(record);
+}
+
+function presentDocumentClassificationPayload(state, record) {
+  const consumptions = listDocumentClassificationConsumptions(state, record.treatmentIntentId);
+  return copy({
+    ...record,
+    consumptions,
+    dispatchStatus: summarizeDocumentClassificationConsumptions(consumptions)
+  });
+}
+
+function listDocumentClassificationPayloadBundleFromState(state, { companyId, employmentId = null, reportingPeriod = null } = {}) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const scopedIds = employmentId
+    ? state.documentClassificationPayloadIdsByEmployment.get(buildPayrollEmploymentKey(resolvedCompanyId, requireText(employmentId, "employment_id_required"))) || []
+    : state.documentClassificationPayloadIdsByCompany.get(resolvedCompanyId) || [];
+  const resolvedReportingPeriod = reportingPeriod ? normalizeReportingPeriod(reportingPeriod, "reporting_period_invalid") : null;
+  const payloads = scopedIds
+    .map((payloadId) => state.documentClassificationPayloads.get(payloadId))
+    .filter(Boolean)
+    .filter((payload) => payload.status !== "reversed")
+    .filter((payload) => (resolvedReportingPeriod ? payload.reportingPeriod === resolvedReportingPeriod : true))
+    .filter((payload) => !hasApprovedDocumentClassificationConsumption(state, payload.treatmentIntentId))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .map((payload) => presentDocumentClassificationPayload(state, payload));
+  return {
+    payloads,
+    payLinePayloads: payloads.map((payload) => copy(payload.payLinePayloadJson)),
+    warnings: []
+  };
+}
+
+function listDocumentClassificationConsumptions(state, treatmentIntentId) {
+  return (state.documentClassificationConsumptionIdsByIntent.get(treatmentIntentId) || [])
+    .map((consumptionId) => state.documentClassificationConsumptions.get(consumptionId))
+    .filter(Boolean)
+    .map(copy);
+}
+
+function summarizeDocumentClassificationConsumptions(consumptions) {
+  const items = Array.isArray(consumptions) ? consumptions : [];
+  return {
+    totalCount: items.length,
+    calculatedCount: items.filter((record) => record.stage === "calculated").length,
+    approvedCount: items.filter((record) => record.stage === "approved").length,
+    latestStage: items.some((record) => record.stage === "approved") ? "approved" : items.length > 0 ? "calculated" : "not_dispatched",
+    payRunIds: Array.from(new Set(items.map((record) => record.payRunId))).sort()
+  };
+}
+
+function hasApprovedDocumentClassificationConsumption(state, treatmentIntentId) {
+  return listDocumentClassificationConsumptions(state, treatmentIntentId).some((record) => record.stage === "approved");
+}
+
+function requireDocumentClassificationPayload(state, companyId, treatmentIntentId) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const resolvedTreatmentIntentId = requireText(treatmentIntentId, "treatment_intent_id_required");
+  const payloadId = state.documentClassificationPayloadIdByIntent.get(resolvedTreatmentIntentId);
+  const payload = payloadId ? state.documentClassificationPayloads.get(payloadId) || null : null;
+  if (!payload || payload.companyId !== resolvedCompanyId) {
+    throw createError(404, "document_classification_payroll_payload_not_found", "Document classification payroll payload was not found.");
+  }
+  return payload;
+}
+
+function normalizeDocumentClassificationPayrollPayload({
+  companyId,
+  employeeId,
+  employmentId,
+  reportingPeriod,
+  sourceType,
+  sourceId,
+  amount,
+  payLinePayloadJson,
+  state
+}) {
+  const payload = copy(payLinePayloadJson || {});
+  payload.employmentId = requireText(payload.employmentId || employmentId, "document_classification_payroll_employment_id_required");
+  payload.amount = normalizeRequiredMoney(payload.amount ?? amount, "document_classification_payroll_amount_invalid");
+  payload.processingStep = normalizeProcessingStep(payload.processingStep, null);
+  payload.payItemCode = normalizeCode(payload.payItemCode, "document_classification_payroll_pay_item_required");
+  requirePayItemByCode(state, companyId, payload.payItemCode);
+  payload.sourceType = requireText(payload.sourceType || sourceType, "document_classification_payroll_source_type_required");
+  payload.sourceId = normalizeOptionalText(payload.sourceId) || requireText(sourceId, "document_classification_payroll_source_id_required");
+  payload.sourcePeriod =
+    normalizeOptionalReportingPeriod(payload.sourcePeriod) ||
+    normalizeReportingPeriod(reportingPeriod, "reporting_period_invalid");
+  payload.note = normalizeOptionalText(payload.note);
+  payload.dimensionJson = normalizePayrollDimensions(payload.dimensionJson || {});
+  if (employeeId) {
+    payload.employeeId = requireText(employeeId, "employee_id_required");
+  }
+  return {
+    reportingPeriod: payload.sourcePeriod,
+    payLinePayloadJson: payload
+  };
+}
+
+function buildPayrollEmploymentKey(companyId, employmentId) {
+  return `${companyId}:${employmentId}`;
 }
 
 function enrichPayRun(state, payRun) {

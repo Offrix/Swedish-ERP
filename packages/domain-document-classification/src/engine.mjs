@@ -45,7 +45,8 @@ export function createDocumentClassificationEngine({
   seedDemo = false,
   documentPlatform = null,
   reviewCenterPlatform = null,
-  benefitsPlatform = null
+  benefitsPlatform = null,
+  payrollPlatform = null
 } = {}) {
   const state = {
     cases: new Map(),
@@ -204,7 +205,9 @@ export function createDocumentClassificationEngine({
       const line = state.treatmentLines.get(intent.treatmentLineId);
       const personLink = intent.personLinkId ? state.personLinks.get(intent.personLinkId) || null : null;
       const dispatchResult = dispatchIntent({
+        clock,
         benefitsPlatform,
+        payrollPlatform,
         intent,
         line,
         personLink,
@@ -257,11 +260,24 @@ export function createDocumentClassificationEngine({
       actorId: resolvedActorId
     });
     const now = nowIso(clock);
+    const resolvedReasonCode = normalizeCode(reasonCode || "correction", "classification_correction_reason_required");
     priorCase.status = "corrected";
     priorCase.correctedAt = now;
     priorCase.correctedByActorId = resolvedActorId;
     priorCase.correctedToCaseId = replacementCase.classificationCaseId;
     priorCase.updatedAt = now;
+    for (const intent of listCaseIntents(state, priorCase.classificationCaseId)) {
+      if (intent.targetDomainCode === "PAYROLL" && payrollPlatform?.reverseDocumentClassificationPayrollPayload) {
+        payrollPlatform.reverseDocumentClassificationPayrollPayload({
+          companyId: priorCase.companyId,
+          treatmentIntentId: intent.treatmentIntentId,
+          actorId: resolvedActorId,
+          reasonCode: resolvedReasonCode,
+          replacementTreatmentIntentId:
+            replacementCase.treatmentIntents.find((candidate) => candidate.treatmentCode === intent.treatmentCode)?.treatmentIntentId || null
+        });
+      }
+    }
     for (const intent of listCaseIntents(state, priorCase.classificationCaseId)) {
       if (!["reversed", "failed"].includes(intent.status)) {
         intent.status = "reversed";
@@ -273,7 +289,7 @@ export function createDocumentClassificationEngine({
       companyId: priorCase.companyId,
       classificationCaseId: priorCase.classificationCaseId,
       replacementClassificationCaseId: replacementCase.classificationCaseId,
-      reasonCode: normalizeCode(reasonCode || "correction", "classification_correction_reason_required"),
+      reasonCode: resolvedReasonCode,
       reasonNote: normalizeOptionalText(reasonNote),
       createdByActorId: resolvedActorId,
       createdAt: now
@@ -576,7 +592,7 @@ function settleLinkedReviewItem({ reviewCenterPlatform, classificationCase, acto
   }
 }
 
-function dispatchIntent({ benefitsPlatform, intent, line, personLink, classificationCase, actorId }) {
+function dispatchIntent({ clock, benefitsPlatform, payrollPlatform, intent, line, personLink, classificationCase, actorId }) {
   if (intent.targetDomainCode === "BENEFITS") {
     if (!benefitsPlatform || typeof benefitsPlatform.createBenefitEvent !== "function") {
       throw createError(409, "classification_benefits_platform_missing", "Benefits platform is required to dispatch benefit intents.");
@@ -634,6 +650,55 @@ function dispatchIntent({ benefitsPlatform, intent, line, personLink, classifica
     };
   }
 
+  if (intent.targetDomainCode === "PAYROLL") {
+    if (!payrollPlatform || typeof payrollPlatform.registerDocumentClassificationPayrollPayload !== "function") {
+      throw createError(409, "classification_payroll_platform_missing", "Payroll platform is required to dispatch payroll intents.");
+    }
+    if (!personLink?.employeeId || !personLink?.employmentId) {
+      throw createError(409, "classification_person_link_missing", "Payroll dispatch requires employee and employment linkage.");
+    }
+    const payrollPayload = buildPayrollDispatchPayload({
+      clock,
+      intent,
+      line,
+      personLink,
+      classificationCase
+    });
+    const registeredPayload = payrollPlatform.registerDocumentClassificationPayrollPayload({
+      companyId: classificationCase.companyId,
+      classificationCaseId: classificationCase.classificationCaseId,
+      treatmentIntentId: intent.treatmentIntentId,
+      documentId: classificationCase.documentId,
+      employeeId: personLink.employeeId,
+      employmentId: personLink.employmentId,
+      reportingPeriod: payrollPayload.reportingPeriod,
+      treatmentCode: intent.treatmentCode,
+      sourceType: payrollPayload.sourceType,
+      sourceId: intent.treatmentIntentId,
+      amount: intent.amount,
+      currencyCode: intent.currencyCode,
+      payLinePayloadJson: payrollPayload.payLinePayloadJson,
+      metadataJson: {
+        scenarioCode: intent.scenarioCode,
+        treatmentLineId: intent.treatmentLineId,
+        personRelationCode: personLink.personRelationCode
+      },
+      actorId
+    });
+    return {
+      status: "dispatched",
+      payload: {
+        targetDomainCode: intent.targetDomainCode,
+        realizedObjectType: "document_classification_payroll_payload",
+        realizedObjectId: registeredPayload.documentClassificationPayrollPayloadId,
+        reportingPeriod: registeredPayload.reportingPeriod,
+        payItemCode: registeredPayload.payItemCode,
+        sourceType: registeredPayload.sourceType,
+        treatmentIntentId: intent.treatmentIntentId
+      }
+    };
+  }
+
   return {
     status: "dispatched",
     payload: {
@@ -644,6 +709,97 @@ function dispatchIntent({ benefitsPlatform, intent, line, personLink, classifica
       treatmentIntentId: intent.treatmentIntentId
     }
   };
+}
+
+function buildPayrollDispatchPayload({ clock, intent, line, personLink, classificationCase }) {
+  const sourcePayload = copy(intent.payloadJson || {});
+  const reportingPeriod = derivePayrollReportingPeriod({ clock, sourcePayload, classificationCase });
+  const basePayload = {
+    employmentId: personLink.employmentId,
+    amount: intent.amount,
+    sourceType: null,
+    sourceId: intent.treatmentIntentId,
+    sourcePeriod: reportingPeriod,
+    note: line.description,
+    dimensionJson: copy(sourcePayload.dimensionJson || {})
+  };
+
+  switch (intent.treatmentCode) {
+    case "PRIVATE_RECEIVABLE":
+      return {
+        reportingPeriod,
+        sourceType: "document_classification_private_receivable",
+        payLinePayloadJson: {
+          ...basePayload,
+          processingStep: 13,
+          payItemCode: "NET_DEDUCTION",
+          sourceType: "document_classification_private_receivable",
+          overrides: {
+            displayName: "Privatkop foretagskort",
+            ledgerAccountCode: "2750",
+            agiMappingCode: "not_reported",
+            taxTreatmentCode: "non_taxable",
+            employerContributionTreatmentCode: "excluded",
+            includedInNetPay: true,
+            reportingOnly: false
+          }
+        }
+      };
+    case "NET_SALARY_DEDUCTION":
+      return {
+        reportingPeriod,
+        sourceType: "document_classification_net_deduction",
+        payLinePayloadJson: {
+          ...basePayload,
+          processingStep: 13,
+          payItemCode: "NET_DEDUCTION",
+          sourceType: "document_classification_net_deduction",
+          overrides: {
+            displayName: "Nettoloneavdrag dokumentklassning",
+            ledgerAccountCode: "2750",
+            agiMappingCode: "not_reported",
+            taxTreatmentCode: "non_taxable",
+            employerContributionTreatmentCode: "excluded",
+            includedInNetPay: true,
+            reportingOnly: false
+          }
+        }
+      };
+    case "REIMBURSABLE_OUTLAY":
+      return {
+        reportingPeriod,
+        sourceType: "document_classification_reimbursement",
+        payLinePayloadJson: {
+          ...basePayload,
+          processingStep: 7,
+          payItemCode: "EXPENSE_REIMBURSEMENT",
+          sourceType: "document_classification_reimbursement",
+          overrides: {
+            displayName: "Utlag dokumentklassning",
+            ledgerAccountCode: "7330",
+            agiMappingCode: "not_reported",
+            taxTreatmentCode: "non_taxable",
+            employerContributionTreatmentCode: "excluded",
+            includedInNetPay: true,
+            reportingOnly: false
+          }
+        }
+      };
+    default:
+      throw createError(409, "classification_payroll_treatment_unsupported", `Treatment ${intent.treatmentCode} cannot be dispatched to payroll.`);
+  }
+}
+
+function derivePayrollReportingPeriod({ clock, sourcePayload, classificationCase }) {
+  const candidateDate =
+    normalizeOptionalDate(sourcePayload.reportingDate, "classification_reporting_date_invalid") ||
+    normalizeOptionalDate(sourcePayload.activityDate, "classification_activity_date_invalid") ||
+    normalizeOptionalDate(sourcePayload.occurredOn, "classification_occurred_on_invalid") ||
+    normalizeOptionalDate(sourcePayload.expenseDate, "classification_expense_date_invalid") ||
+    normalizeOptionalDate(sourcePayload.documentDate, "classification_document_date_invalid") ||
+    normalizeOptionalDate(classificationCase.createdAt?.slice(0, 10), "classification_created_date_invalid") ||
+    nowIso(clock).slice(0, 10);
+  return `${candidateDate.slice(0, 4)}${candidateDate.slice(5, 7)}`;
 }
 
 function presentCase(state, classificationCase) {
