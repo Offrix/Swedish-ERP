@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 
@@ -32,6 +33,34 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/migration/cutover-plans/:cutoverPlanId/checklist/:itemCode"
 ]);
 
+function parseRoutesFromSource(sourceText) {
+  const bindings = new Map(
+    [...sourceText.matchAll(/const\s+(\w+)\s*=\s*matchPath\(path,\s*"([^"]+)"\)/g)].map((match) => [match[1], match[2]])
+  );
+  const routes = new Set();
+
+  for (const match of sourceText.matchAll(/if\s*\(([^\{]+)\)\s*\{/g)) {
+    const condition = match[1];
+    const methods = [...condition.matchAll(/req\.method\s*===\s*"([A-Z]+)"/g)];
+    if (methods.length === 0) {
+      continue;
+    }
+    for (const directPath of condition.matchAll(/path\s*===\s*"([^"]+)"/g)) {
+      routes.add(directPath[1]);
+    }
+    for (const [binding, route] of bindings.entries()) {
+      if (condition.includes(binding)) {
+        routes.add(route);
+      }
+    }
+  }
+
+  routes.delete("/");
+  routes.delete("/healthz");
+  routes.delete("/readyz");
+  return routes;
+}
+
 test("api root metadata lists critical auth, backoffice and migration routes without duplicates", async () => {
   const server = createApiServer();
   await new Promise((resolve) => server.listen(0, resolve));
@@ -50,6 +79,36 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
 
     const uniqueCount = new Set(payload.routes).size;
     assert.equal(uniqueCount, payload.routes.length, "api root metadata should not contain duplicate route entries");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("api root metadata covers all parsed route patterns from server and phase14 route handlers", async () => {
+  const [serverSource, phase13Source, phase14Source] = await Promise.all([
+    fs.readFile("apps/api/src/server.mjs", "utf8"),
+    fs.readFile("apps/api/src/phase13-routes.mjs", "utf8"),
+    fs.readFile("apps/api/src/phase14-routes.mjs", "utf8")
+  ]);
+  const parsedRoutes = new Set([
+    ...parseRoutesFromSource(serverSource),
+    ...parseRoutesFromSource(phase13Source),
+    ...parseRoutesFromSource(phase14Source)
+  ]);
+
+  const server = createApiServer();
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const response = await fetch(`${baseUrl}/`);
+    assert.equal(response.status, 200);
+
+    const payload = await response.json();
+    const exposedRoutes = new Set(payload.routes || []);
+    const missingRoutes = [...parsedRoutes].filter((route) => !exposedRoutes.has(route)).sort();
+
+    assert.deepEqual(missingRoutes, []);
   } finally {
     await stopServer(server);
   }
