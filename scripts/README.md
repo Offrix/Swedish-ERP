@@ -59,6 +59,10 @@ Helper scripts for local setup, structure verification and phased rollout checks
 - `verify-checkpoint-v4.ps1`: runs the non-UI V4 checkpoint for projects, field, HUS and personalliggare.
 - `verify-checkpoint-v5.ps1`: runs the non-UI V5 checkpoint for legal form, annual reporting, filing receipts and tax submission chains.
 - `verify-checkpoint-v7.ps1`: runs the non-UI V7 checkpoint for resilience, replay, impersonation restrictions and emergency disable.
+- `verify-step47-external-surface.ps1`: runs the late non-UI external-surface verification for public API, partner integrations and webhook-backed production flows.
+- `verify-step48-golden-scenarios.ps1`: runs the formal late golden-scenario verification slice before final non-UI readiness.
+- `run-pilot-parallel-runs.ps1`: runs the non-UI pilot parallel flows across documents, finance, payroll, projects, filings and resilience.
+- `verify-final-non-ui-readiness.ps1`: aggregates lint, typecheck, build, security, Step 47, Step 48, checkpoints V1-V5/V7 and pilot parallel runs for final non-UI readiness.
 - `verify-db.ps1`: validates migration file naming.
 - `new-migration.ps1`: creates timestamped migration file in `packages/db/migrations`.
 - `dev-up.ps1`: starts docker infra.
