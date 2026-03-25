@@ -41,6 +41,20 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       companyId: DEMO_IDS.companyId,
       email: "phase14-second-approver@example.test"
     });
+    const fieldUser = platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "phase14-field-user@example.test",
+      displayName: "Phase 14 Field User",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "phase14-field-user@example.test"
+    });
 
     platform.createCompanyUser({
       sessionToken: adminToken,
@@ -127,6 +141,11 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
         relatedObjectRefs: [{ objectType: "submission", objectId: "submission-1" }]
       }
     });
+    const fieldUserSupportListForbidden = await requestJson(baseUrl, `/v1/backoffice/support-cases?companyId=${DEMO_IDS.companyId}`, {
+      token: fieldUserToken,
+      expectedStatus: 403
+    });
+    assert.equal(fieldUserSupportListForbidden.error, "backoffice_role_forbidden");
     await requestJson(baseUrl, `/v1/backoffice/support-cases/${supportCase.supportCaseId}/approve-actions`, {
       method: "POST",
       token: approverToken,
@@ -405,6 +424,11 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
     });
     assert.equal(auditEvents.items.some((event) => event.entityType === "admin_diagnostic"), true);
     assert.equal(auditEvents.items.some((event) => event.entityType === "break_glass_session"), true);
+    const fieldUserAuditForbidden = await requestJson(baseUrl, `/v1/backoffice/audit-events?companyId=${DEMO_IDS.companyId}`, {
+      token: fieldUserToken,
+      expectedStatus: 403
+    });
+    assert.equal(fieldUserAuditForbidden.error, "backoffice_role_forbidden");
   } finally {
     await stopServer(server);
   }

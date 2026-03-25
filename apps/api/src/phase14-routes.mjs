@@ -1680,7 +1680,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/backoffice/support-cases") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "support_case", objectId: companyId, scopeCode: "support_case" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "support_case", objectId: companyId, scopeCode: "support_case" });
+    assertBackofficeReadAccess({ principal });
     writeJson(res, 200, { items: platform.listSupportCases({ sessionToken, companyId, status: optionalText(url.searchParams.get("status")) }) });
     return true;
   }
@@ -1719,7 +1720,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/backoffice/audit-events") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "audit_event", objectId: companyId, scopeCode: "audit_event" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "audit_event", objectId: companyId, scopeCode: "audit_event" });
+    assertBackofficeReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listAuditTrail({
         sessionToken,
@@ -1752,7 +1754,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/backoffice/impersonations") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "impersonation_session", objectId: companyId, scopeCode: "impersonation_session" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "impersonation_session", objectId: companyId, scopeCode: "impersonation_session" });
+    assertBackofficeReadAccess({ principal });
     writeJson(res, 200, { items: platform.listImpersonationSessions({ sessionToken, companyId, status: optionalText(url.searchParams.get("status")) }) });
     return true;
   }
@@ -1795,7 +1798,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/backoffice/access-reviews") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "access_review_batch", objectId: companyId, scopeCode: "access_review_batch" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "access_review_batch", objectId: companyId, scopeCode: "access_review_batch" });
+    assertBackofficeReadAccess({ principal });
     writeJson(res, 200, { items: platform.listAccessReviews({ sessionToken, companyId }) });
     return true;
   }
@@ -1835,7 +1839,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/backoffice/break-glass") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "break_glass_session", objectId: companyId, scopeCode: "break_glass_session" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "break_glass_session", objectId: companyId, scopeCode: "break_glass_session" });
+    assertBackofficeReadAccess({ principal });
     writeJson(res, 200, { items: platform.listBreakGlassSessions({ sessionToken, companyId }) });
     return true;
   }
@@ -3180,6 +3185,15 @@ function assertNotificationMutationAccess({ platform, principal, companyId, noti
 }
 
 const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
+const BACKOFFICE_READ_ROLE_CODES = new Set(["company_admin", "approver"]);
+
+function assertBackofficeReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedReader = [...BACKOFFICE_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedReader) {
+    throw createHttpError(403, "backoffice_role_forbidden", "Current actor is not allowed to access backoffice read models.");
+  }
+}
 
 function assertReviewCenterReadAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
