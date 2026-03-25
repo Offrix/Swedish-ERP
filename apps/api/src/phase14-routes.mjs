@@ -322,7 +322,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/accounting-method/eligibility-assessments") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -331,6 +331,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "accounting_method"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, { items: platform.listMethodEligibilityAssessments({ companyId }) });
     return true;
   }
@@ -370,7 +371,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/accounting-method/profiles") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -379,6 +380,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "accounting_method"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listMethodProfiles({
         companyId,
@@ -392,7 +394,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && accountingMethodProfileMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -401,6 +403,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: accountingMethodProfileMatch.methodProfileId,
       scopeCode: "accounting_method"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(
       res,
       200,
@@ -442,7 +445,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const accountingDate = requireText(url.searchParams.get("accountingDate"), "accounting_date_required", "accountingDate is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -451,6 +454,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "accounting_method"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, platform.getActiveMethodForDate({ companyId, accountingDate }));
     return true;
   }
@@ -458,7 +462,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/accounting-method/history") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -467,6 +471,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "accounting_method"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, platform.getMethodHistory({ companyId }));
     return true;
   }
@@ -503,7 +508,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/accounting-method/change-requests") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -512,6 +517,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "accounting_method"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listMethodChangeRequests({
         companyId,
@@ -604,7 +610,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/accounting-method/year-end-catch-up-runs") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -613,6 +619,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "accounting_method"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, { items: platform.listYearEndCatchUpRuns({ companyId }) });
     return true;
   }
@@ -621,7 +628,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && yearEndCatchUpRunMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -630,6 +637,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: yearEndCatchUpRunMatch.yearEndCatchUpRunId,
       scopeCode: "accounting_method"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(
       res,
       200,
@@ -671,7 +679,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/fiscal-years/profiles") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -680,6 +688,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "fiscal_year"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, { items: platform.listFiscalYearProfiles({ companyId }) });
     return true;
   }
@@ -717,7 +726,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/fiscal-years/change-requests") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -726,6 +735,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "fiscal_year"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listFiscalYearChangeRequests({
         companyId,
@@ -793,7 +803,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/fiscal-years") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -802,6 +812,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "fiscal_year"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listFiscalYears({
         companyId,
@@ -815,7 +826,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const accountingDate = requireText(url.searchParams.get("accountingDate"), "accounting_date_required", "accountingDate is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -824,6 +835,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "fiscal_year"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, platform.getActiveFiscalYearForDate({ companyId, accountingDate }));
     return true;
   }
@@ -832,7 +844,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const accountingDate = requireText(url.searchParams.get("accountingDate"), "accounting_date_required", "accountingDate is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -841,6 +853,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "fiscal_year"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, platform.getPeriodForDate({ companyId, accountingDate }));
     return true;
   }
@@ -848,7 +861,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/fiscal-years/history") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -857,6 +870,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "fiscal_year"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, platform.getFiscalYearHistory({ companyId }));
     return true;
   }

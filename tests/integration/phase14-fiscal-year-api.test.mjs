@@ -4,7 +4,7 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
-import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
+import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
 
 test("Step 8 API manages fiscal-year profiles, year changes, periods and active lookup", async () => {
   const platform = createApiPlatform({
@@ -20,6 +20,20 @@ test("Step 8 API manages fiscal-year profiles, year changes, periods and active 
       platform,
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
+    });
+    platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "fiscal-year-field@example.test",
+      displayName: "Fiscal Year Field",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "fiscal-year-field@example.test"
     });
 
     const seededProfileList = await requestJson(baseUrl, `/v1/fiscal-years/profiles?companyId=${DEMO_IDS.companyId}`, {
@@ -148,6 +162,14 @@ test("Step 8 API manages fiscal-year profiles, year changes, periods and active 
       }
     });
     assert.equal(reopenedPeriod.lockState, "reopened");
+
+    const forbiddenHistory = await fetch(`${baseUrl}/v1/fiscal-years/history?companyId=${DEMO_IDS.companyId}`, {
+      headers: {
+        authorization: `Bearer ${fieldUserToken}`
+      }
+    });
+    assert.equal(forbiddenHistory.status, 403);
+    await forbiddenHistory.json();
   } finally {
     await stopServer(server);
   }

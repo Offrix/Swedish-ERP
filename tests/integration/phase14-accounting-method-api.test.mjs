@@ -4,7 +4,7 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
-import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
+import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
 
 test("Step 7 API manages accounting methods, change requests and cash-method year-end catch-up", async () => {
   const platform = createApiPlatform({
@@ -20,6 +20,20 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
       platform,
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
+    });
+    platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "accounting-method-field@example.test",
+      displayName: "Accounting Method Field",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "accounting-method-field@example.test"
     });
 
     const seededActive = await requestJson(
@@ -182,6 +196,14 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
     });
     assert.equal(history.profiles.length >= 2, true);
     assert.equal(history.changeRequests.some((item) => item.status === "implemented"), true);
+
+    const forbiddenHistory = await fetch(`${baseUrl}/v1/accounting-method/history?companyId=${DEMO_IDS.companyId}`, {
+      headers: {
+        authorization: `Bearer ${fieldUserToken}`
+      }
+    });
+    assert.equal(forbiddenHistory.status, 403);
+    await forbiddenHistory.json();
   } finally {
     await stopServer(server);
   }
