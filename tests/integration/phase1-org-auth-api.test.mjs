@@ -78,6 +78,55 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
     );
     assert.equal(forbiddenCrossCompany.error, "cross_company_forbidden");
 
+    const invalidCompanyUserWindow = await requestJson(
+      `${baseUrl}/v1/org/companies/00000000-0000-4000-8000-000000000001/users`,
+      {
+        method: "POST",
+        token: adminSession.sessionToken,
+        expectedStatus: 400,
+        body: {
+          email: "invalid-window@example.test",
+          displayName: "Invalid Window",
+          roleCode: "approver",
+          startsAt: "2026-04-01T00:00:00Z",
+          endsAt: "2026-03-01T00:00:00Z"
+        }
+      }
+    );
+    assert.equal(invalidCompanyUserWindow.error, "company_user_window_invalid");
+
+    const invalidObjectGrantWindow = await requestJson(`${baseUrl}/v1/org/object-grants`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 400,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001",
+        companyUserId: "00000000-0000-4000-8000-000000000022",
+        permissionCode: "company.read",
+        objectType: "module_activation",
+        objectId: "00000000-0000-4000-8000-000000000001",
+        startsAt: "2026-04-01T00:00:00Z",
+        endsAt: "2026-03-01T00:00:00Z"
+      }
+    });
+    assert.equal(invalidObjectGrantWindow.error, "object_grant_window_invalid");
+
+    const invalidDelegationWindow = await requestJson(`${baseUrl}/v1/org/delegations`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 400,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001",
+        fromCompanyUserId: "00000000-0000-4000-8000-000000000021",
+        toCompanyUserId: "00000000-0000-4000-8000-000000000022",
+        scopeCode: "customer_invoice",
+        permissionCode: "approval.approve",
+        startsAt: "2026-04-01T00:00:00Z",
+        endsAt: "2026-03-01T00:00:00Z"
+      }
+    });
+    assert.equal(invalidDelegationWindow.error, "delegation_window_invalid");
+
     const adminCreatesDelegation = await requestJson(
       `${baseUrl}/v1/org/delegations`,
       {

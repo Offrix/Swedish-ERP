@@ -173,14 +173,20 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     const user = findOrCreateUser({ email, displayName });
     const resolvedRoleCode = assertSupportedRole(roleCode);
     const resolvedRequiresMfa = resolvedRoleCode === "company_admin" ? true : requiresMfa === true;
+    const companyUserWindow = resolveWindow({
+      startsAt,
+      endsAt,
+      code: "company_user_window_invalid",
+      message: "Company-user start must be on or before the end of the active window."
+    });
     const companyUser = {
       companyUserId: crypto.randomUUID(),
       companyId: company.companyId,
       userId: user.userId,
       roleCode: resolvedRoleCode,
       status,
-      startsAt: timestamp(startsAt),
-      endsAt: endsAt ? timestamp(endsAt) : null,
+      startsAt: companyUserWindow.startsAt,
+      endsAt: companyUserWindow.endsAt,
       isAdmin: resolvedRoleCode === "company_admin",
       requiresMfa: resolvedRequiresMfa,
       metadataJson: {},
@@ -257,6 +263,12 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     if (fromCompanyUser.companyId !== companyId || toCompanyUser.companyId !== companyId) {
       throw httpError(400, "delegation_company_mismatch", "Delegation actors must belong to the same company.");
     }
+    const delegationWindow = resolveWindow({
+      startsAt: startsAt || nowIso(),
+      endsAt,
+      code: "delegation_window_invalid",
+      message: "Delegation start must be on or before the end of the delegated window."
+    });
 
     const delegation = {
       delegationId: crypto.randomUUID(),
@@ -267,8 +279,8 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       permissionCode: permissionCode || null,
       resourceType,
       resourceId,
-      startsAt: timestamp(startsAt || nowIso()),
-      endsAt: endsAt ? timestamp(endsAt) : null,
+      startsAt: delegationWindow.startsAt,
+      endsAt: delegationWindow.endsAt,
       status,
       metadataJson: {},
       createdAt: nowIso()
@@ -310,6 +322,12 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     if (companyUser.companyId !== companyId) {
       throw httpError(400, "object_grant_company_mismatch", "Object grants must stay inside the company boundary.");
     }
+    const objectGrantWindow = resolveWindow({
+      startsAt,
+      endsAt,
+      code: "object_grant_window_invalid",
+      message: "Object-grant start must be on or before the end of the grant window."
+    });
 
     const objectGrant = {
       objectGrantId: crypto.randomUUID(),
@@ -318,8 +336,8 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       permissionCode: assertNonEmpty(permissionCode, "permission_code_required"),
       objectType: assertNonEmpty(objectType, "object_type_required"),
       objectId: assertNonEmpty(objectId, "object_id_required"),
-      startsAt: timestamp(startsAt),
-      endsAt: endsAt ? timestamp(endsAt) : null,
+      startsAt: objectGrantWindow.startsAt,
+      endsAt: objectGrantWindow.endsAt,
       status,
       createdAt: nowIso()
     };
@@ -1411,6 +1429,18 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     };
     state.users.set(user.userId, user);
     return user;
+  }
+
+  function resolveWindow({ startsAt, endsAt = null, code, message } = {}) {
+    const resolvedStartsAt = timestamp(startsAt || nowIso());
+    const resolvedEndsAt = endsAt ? timestamp(endsAt) : null;
+    if (resolvedEndsAt && new Date(resolvedEndsAt) < new Date(resolvedStartsAt)) {
+      throw httpError(400, code, message);
+    }
+    return {
+      startsAt: resolvedStartsAt,
+      endsAt: resolvedEndsAt
+    };
   }
 
   function requireCompany(companyId) {
