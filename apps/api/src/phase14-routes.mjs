@@ -1,5 +1,6 @@
 import {
   authorizeCompanyAccess,
+  createHttpError,
   matchPath,
   optionalText,
   readJsonBody,
@@ -2275,12 +2276,15 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/notifications") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: companyId, scopeCode: "notifications" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: companyId, scopeCode: "notifications" });
+    const recipientType = optionalText(url.searchParams.get("recipientType"));
+    const recipientId = optionalText(url.searchParams.get("recipientId"));
+    const resolvedRecipient = resolveNotificationRecipientScope({ principal, recipientType, recipientId });
     writeJson(res, 200, {
       items: platform.listNotifications({
         companyId,
-        recipientType: optionalText(url.searchParams.get("recipientType")),
-        recipientId: optionalText(url.searchParams.get("recipientId")),
+        recipientType: resolvedRecipient.recipientType,
+        recipientId: resolvedRecipient.recipientId,
         status: optionalText(url.searchParams.get("status")),
         categoryCode: optionalText(url.searchParams.get("categoryCode")),
         onlyUnread: url.searchParams.get("onlyUnread") === "true"
@@ -2294,7 +2298,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
-    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "notification", objectId: notificationReadMatch.notificationId, scopeCode: "notifications" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: notificationReadMatch.notificationId, scopeCode: "notifications" });
+    assertNotificationMutationAccess({ platform, principal, companyId, notificationId: notificationReadMatch.notificationId });
     writeJson(res, 200, platform.markNotificationRead({
       companyId,
       notificationId: notificationReadMatch.notificationId,
@@ -2308,7 +2313,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
-    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "notification", objectId: notificationAckMatch.notificationId, scopeCode: "notifications" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: notificationAckMatch.notificationId, scopeCode: "notifications" });
+    assertNotificationMutationAccess({ platform, principal, companyId, notificationId: notificationAckMatch.notificationId });
     writeJson(res, 200, platform.acknowledgeNotification({
       companyId,
       notificationId: notificationAckMatch.notificationId,
@@ -2322,7 +2328,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
-    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "notification", objectId: notificationSnoozeMatch.notificationId, scopeCode: "notifications" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: notificationSnoozeMatch.notificationId, scopeCode: "notifications" });
+    assertNotificationMutationAccess({ platform, principal, companyId, notificationId: notificationSnoozeMatch.notificationId });
     writeJson(res, 200, platform.snoozeNotification({
       companyId,
       notificationId: notificationSnoozeMatch.notificationId,
@@ -3132,4 +3139,25 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   }
 
   return false;
+}
+
+function resolveNotificationRecipientScope({ principal, recipientType, recipientId }) {
+  if (recipientType != null && recipientType !== "user") {
+    throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification center only exposes the current user's direct inbox in this route.");
+  }
+  const resolvedRecipientId = recipientId || principal.userId;
+  if (resolvedRecipientId !== principal.userId) {
+    throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification center only exposes the current user's direct inbox in this route.");
+  }
+  return {
+    recipientType: "user",
+    recipientId: resolvedRecipientId
+  };
+}
+
+function assertNotificationMutationAccess({ platform, principal, companyId, notificationId }) {
+  const notification = platform.getNotification({ companyId, notificationId });
+  if (notification.recipientType !== "user" || notification.recipientId !== principal.userId) {
+    throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification action is only allowed for the addressed user in this route.");
+  }
 }
