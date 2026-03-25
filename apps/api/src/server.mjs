@@ -11890,6 +11890,7 @@ const PERSONALLIGGARE_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "appro
 const PROJECT_WORKSPACE_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const EGENKONTROLL_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const FIELD_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
+const PAYROLL_OPERATIONS_READ_ROLE_CODES = new Set(["company_admin", "payroll_admin", "approver"]);
 
 function assertAnnualOperationsAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
@@ -11963,13 +11964,22 @@ function assertFieldControlReadAccess({ principal }) {
   }
 }
 
+function assertPayrollOperationsReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedReader = [...PAYROLL_OPERATIONS_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedReader) {
+    throw createHttpError(403, "payroll_operations_role_forbidden", "Current actor is not allowed to access payroll operations worklists.");
+  }
+}
+
 function assertReadSurfaceRoleAccess({ platform, req, url, path }) {
   if (req.method !== "GET") {
     return;
   }
+  const requiresPayrollOperationsAccess = isPayrollOperationsReadPath(path);
   const requiresFinanceOperationsAccess = isFinanceOperationsReadPath(path);
   const requiresDesktopSurfaceAccess = isDesktopSurfaceReadPath(path);
-  if (!requiresFinanceOperationsAccess && !requiresDesktopSurfaceAccess) {
+  if (!requiresPayrollOperationsAccess && !requiresFinanceOperationsAccess && !requiresDesktopSurfaceAccess) {
     return;
   }
   const companyId = url.searchParams.get("companyId");
@@ -11982,8 +11992,12 @@ function assertReadSurfaceRoleAccess({ platform, req, url, path }) {
     companyId,
     permissionCode: "company.read",
     objectType: "company",
-    scopeCode: "company"
+      scopeCode: "company"
   });
+  if (requiresPayrollOperationsAccess) {
+    assertPayrollOperationsReadAccess({ principal });
+    return;
+  }
   if (requiresFinanceOperationsAccess) {
     assertFinanceOperationsAccess({ principal });
     return;
@@ -11991,6 +12005,10 @@ function assertReadSurfaceRoleAccess({ platform, req, url, path }) {
   if (requiresDesktopSurfaceAccess) {
     assertDesktopSurfaceReadAccess({ principal });
   }
+}
+
+function isPayrollOperationsReadPath(path) {
+  return path.startsWith("/v1/payroll");
 }
 
 function isFinanceOperationsReadPath(path) {
