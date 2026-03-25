@@ -10054,7 +10054,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -10062,6 +10062,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "checklist_template",
       scopeCode: "project"
     });
+    assertEgenkontrollControlReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listChecklistTemplates({
         companyId,
@@ -10109,7 +10110,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -10117,6 +10118,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "checklist_template",
       scopeCode: "project"
     });
+    assertEgenkontrollControlReadAccess({ principal });
     writeJson(
       res,
       200,
@@ -10159,7 +10161,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -10167,6 +10169,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "checklist_instance",
       scopeCode: "project"
     });
+    assertEgenkontrollControlReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listChecklistInstances({
         companyId,
@@ -10294,7 +10297,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -10302,6 +10305,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "checklist_deviation",
       scopeCode: "project"
     });
+    assertEgenkontrollControlReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listChecklistDeviations({
         companyId,
@@ -10399,7 +10403,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -10407,6 +10411,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "checklist_signoff",
       scopeCode: "project"
     });
+    assertEgenkontrollControlReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listChecklistSignoffs({
         companyId,
@@ -11878,6 +11883,7 @@ const FINANCE_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bur
 const DESKTOP_SURFACE_READ_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
 const PERSONALLIGGARE_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const PROJECT_WORKSPACE_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
+const EGENKONTROLL_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 
 function assertAnnualOperationsAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
@@ -11923,6 +11929,18 @@ function assertProjectWorkspaceReadAccess({ principal }) {
       403,
       "project_workspace_role_forbidden",
       "Current actor is not allowed to access project workspace or project control read models."
+    );
+  }
+}
+
+function assertEgenkontrollControlReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedReader = [...EGENKONTROLL_CONTROL_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedReader) {
+    throw createHttpError(
+      403,
+      "egenkontroll_control_role_forbidden",
+      "Current actor is not allowed to access egenkontroll template, overview or deviation control read models."
     );
   }
 }

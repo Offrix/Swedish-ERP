@@ -67,6 +67,41 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         contractValueAmount: 125000
       }
     });
+    const checklistTemplate = await requestJson(baseUrl, "/v1/egenkontroll/templates", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        templateCode: "EK-ACCESS-001",
+        displayName: "Access Matrix Checklist",
+        industryPackCode: "bygg",
+        riskClassCode: "standard",
+        sections: [
+          {
+            sectionCode: "install",
+            label: "Installation",
+            points: [{ pointCode: "mount", label: "Mount component", evidenceRequiredFlag: false }]
+          }
+        ],
+        requiredSignoffRoleCodes: ["site_lead"]
+      }
+    });
+    await requestJson(baseUrl, `/v1/egenkontroll/templates/${checklistTemplate.checklistTemplateId}/activate`, {
+      method: "POST",
+      token: adminToken,
+      body: { companyId: DEMO_IDS.companyId }
+    });
+    const checklistInstance = await requestJson(baseUrl, "/v1/egenkontroll/instances", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        checklistTemplateId: checklistTemplate.checklistTemplateId,
+        projectId: project.projectId
+      }
+    });
 
     for (const surface of [
       { path: `/v1/ledger/accounts?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
@@ -135,6 +170,26 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
       {
         path: `/v1/projects/${project.projectId}/forecast-snapshots?companyId=${DEMO_IDS.companyId}`,
         error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/egenkontroll/templates?companyId=${DEMO_IDS.companyId}`,
+        error: "egenkontroll_control_role_forbidden"
+      },
+      {
+        path: `/v1/egenkontroll/templates/${checklistTemplate.checklistTemplateId}?companyId=${DEMO_IDS.companyId}`,
+        error: "egenkontroll_control_role_forbidden"
+      },
+      {
+        path: `/v1/egenkontroll/instances?companyId=${DEMO_IDS.companyId}&projectId=${project.projectId}`,
+        error: "egenkontroll_control_role_forbidden"
+      },
+      {
+        path: `/v1/egenkontroll/instances/${checklistInstance.checklistInstanceId}/deviations?companyId=${DEMO_IDS.companyId}`,
+        error: "egenkontroll_control_role_forbidden"
+      },
+      {
+        path: `/v1/egenkontroll/instances/${checklistInstance.checklistInstanceId}/signoffs?companyId=${DEMO_IDS.companyId}`,
+        error: "egenkontroll_control_role_forbidden"
       },
       { path: `/v1/ops/feature-flags?companyId=${DEMO_IDS.companyId}`, error: "backoffice_role_forbidden" },
       { path: `/v1/migration/cockpit?companyId=${DEMO_IDS.companyId}`, error: "payroll_operations_role_forbidden" },
