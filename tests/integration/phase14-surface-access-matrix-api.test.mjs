@@ -67,6 +67,41 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         contractValueAmount: 125000
       }
     });
+    const customer = await requestJson(baseUrl, "/v1/ar/customers", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        legalName: "Access Matrix Kalkylkund AB",
+        organizationNumber: "5566778899",
+        countryCode: "SE",
+        languageCode: "SV",
+        currencyCode: "SEK",
+        paymentTermsCode: "30d",
+        invoiceDeliveryMethod: "email",
+        reminderProfileCode: "standard",
+        billingAddress: {
+          line1: "Offertgatan 10",
+          postalCode: "11122",
+          city: "Stockholm",
+          countryCode: "SE"
+        }
+      }
+    });
+    const estimate = await requestJson(baseUrl, "/v1/kalkyl/estimates", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        customerId: customer.customerId,
+        projectId: project.projectId,
+        title: "Access Matrix Estimate",
+        validFrom: "2026-03-25",
+        validTo: "2026-04-25"
+      }
+    });
     const fieldWorkOrder = await requestJson(baseUrl, "/v1/field/work-orders", {
       method: "POST",
       token: adminToken,
@@ -136,6 +171,13 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
       { path: `/v1/hr/leave-entries?companyId=${DEMO_IDS.companyId}`, error: "hr_operations_role_forbidden" },
       { path: `/v1/payroll/pay-runs?companyId=${DEMO_IDS.companyId}`, error: "payroll_operations_role_forbidden" },
       { path: `/v1/payroll/agi-submissions?companyId=${DEMO_IDS.companyId}`, error: "payroll_operations_role_forbidden" },
+      { path: `/v1/projects?companyId=${DEMO_IDS.companyId}`, error: "project_workspace_role_forbidden" },
+      { path: `/v1/projects/${project.projectId}?companyId=${DEMO_IDS.companyId}`, error: "project_workspace_role_forbidden" },
+      { path: `/v1/kalkyl/estimates?companyId=${DEMO_IDS.companyId}`, error: "project_workspace_role_forbidden" },
+      {
+        path: `/v1/kalkyl/estimates/${estimate.estimateVersionId}?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
       {
         path: `/v1/personalliggare/sites/${personalliggareSite.constructionSiteId}/identity-snapshots?companyId=${DEMO_IDS.companyId}`,
         error: "personalliggare_control_role_forbidden"

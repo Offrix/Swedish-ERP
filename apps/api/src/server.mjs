@@ -8095,7 +8095,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8103,6 +8103,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "estimate_version",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listEstimateVersions({
         companyId,
@@ -8153,7 +8154,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8161,6 +8162,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "estimate_version",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(
       res,
       200,
@@ -8347,7 +8349,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8355,6 +8357,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listProjects({
         companyId,
@@ -8408,7 +8411,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8416,6 +8419,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(
       res,
       200,
