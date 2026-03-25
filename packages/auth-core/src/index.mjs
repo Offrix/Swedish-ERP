@@ -130,7 +130,8 @@ export function createAuditEvent({
   entityId,
   explanation,
   correlationId,
-  recordedAt = new Date()
+  recordedAt = new Date(),
+  metadata = {}
 }) {
   return {
     auditId: crypto.randomUUID(),
@@ -142,6 +143,7 @@ export function createAuditEvent({
     entityId,
     explanation,
     correlationId,
+    metadata: JSON.parse(JSON.stringify(metadata || {})),
     recordedAt: timestamp(recordedAt)
   };
 }

@@ -81,6 +81,15 @@ async function handleRequest({ req, res, platform, flags }) {
               "/healthz",
               "/readyz",
               "/v1/auth/login",
+              "/v1/org/companies/:companyId/users",
+              "/v1/org/delegations",
+              "/v1/org/object-grants",
+              "/v1/org/attest-chains",
+              "/v1/org/attest-chains/:approvalChainId",
+              "/v1/org/tenant-setup/profile",
+              "/v1/org/module-definitions",
+              "/v1/org/module-activations",
+              "/v1/org/module-activations/:moduleCode/suspend",
               "/v1/onboarding/runs",
               "/v1/documents",
               "/v1/documents/:documentId/export",
@@ -913,6 +922,101 @@ async function handleRequest({ req, res, platform, flags }) {
       platform.createApprovalChain({
         sessionToken: readSessionToken(req, body),
         ...body
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/org/tenant-setup/profile") {
+    writeJson(
+      res,
+      200,
+      platform.getTenantSetupProfile({
+        sessionToken: readSessionToken(req),
+        companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/org/module-definitions") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      platform.registerModuleDefinition({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        moduleCode: body.moduleCode,
+        label: body.label,
+        riskClass: body.riskClass,
+        coreModule: body.coreModule,
+        dependencyModuleCodes: body.dependencyModuleCodes,
+        requiredPolicyCodes: body.requiredPolicyCodes,
+        requiredRulepackCodes: body.requiredRulepackCodes,
+        requiresCompletedTenantSetup: body.requiresCompletedTenantSetup,
+        allowSuspend: body.allowSuspend
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/org/module-definitions") {
+    writeJson(
+      res,
+      200,
+      {
+        items: platform.listModuleDefinitions({
+          sessionToken: readSessionToken(req),
+          companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+        })
+      }
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/org/module-activations") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      platform.activateModule({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        moduleCode: body.moduleCode,
+        effectiveFrom: body.effectiveFrom,
+        activationReason: body.activationReason,
+        approvalActorIds: body.approvalActorIds
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/org/module-activations") {
+    writeJson(
+      res,
+      200,
+      {
+        items: platform.listModuleActivations({
+          sessionToken: readSessionToken(req),
+          companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+        })
+      }
+    );
+    return;
+  }
+
+  const moduleActivationSuspendMatch = matchPath(path, "/v1/org/module-activations/:moduleCode/suspend");
+  if (moduleActivationSuspendMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      platform.suspendModuleActivation({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        moduleCode: moduleActivationSuspendMatch.moduleCode,
+        reasonCode: body.reasonCode
       })
     );
     return;

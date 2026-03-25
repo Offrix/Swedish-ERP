@@ -36,6 +36,9 @@ export const ONBOARDING_STEP_CODES = Object.freeze([
   "vat_setup",
   "fiscal_periods"
 ]);
+export const TENANT_SETUP_STATUSES = Object.freeze(["setup_pending", "active", "suspended"]);
+export const MODULE_RISK_CLASSES = Object.freeze(["low", "medium", "high"]);
+export const MODULE_ACTIVATION_STATUSES = Object.freeze(["scheduled", "active", "suspended"]);
 
 export const DEFAULT_REGISTRATION_TYPES = Object.freeze(["f_tax", "vat", "employer"]);
 export const DEFAULT_VOUCHER_SERIES = Object.freeze(["A", "B", "E", "H", "I"]);
@@ -78,6 +81,9 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     companyVatSetups: new Map(),
     accountingPeriods: new Map(),
     companySetupBlueprints: new Map(),
+    tenantSetupProfiles: new Map(),
+    moduleDefinitions: new Map(),
+    moduleActivations: new Map(),
     auditEvents: [],
     bankIdProvider: createBankIdProvider()
   };
@@ -113,6 +119,12 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     getOnboardingRun,
     getOnboardingChecklist,
     updateOnboardingStep,
+    getTenantSetupProfile,
+    registerModuleDefinition,
+    listModuleDefinitions,
+    activateModule,
+    listModuleActivations,
+    suspendModuleActivation,
     snapshot,
     getTotpCodeForTesting,
     getBankIdCompletionTokenForTesting
@@ -783,7 +795,7 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     const company = createCompany({
       legalName,
       orgNumber,
-      status: "draft",
+      status: "setup_pending",
       settingsJson: {
         chartTemplateId: null,
         vatScheme: null,
@@ -825,6 +837,18 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       }
     };
     state.onboardingRuns.set(run.runId, run);
+    state.tenantSetupProfiles.set(company.companyId, {
+      tenantSetupProfileId: crypto.randomUUID(),
+      companyId: company.companyId,
+      onboardingRunId: run.runId,
+      status: "setup_pending",
+      onboardingCompletedAt: null,
+      approvedAt: null,
+      suspendedAt: null,
+      suspendedReasonCode: null,
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    });
 
     for (const stepCode of ONBOARDING_STEP_CODES) {
       state.onboardingStepStates.set(`${run.runId}:${stepCode}`, {
@@ -851,7 +875,12 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       result: "success",
       entityType: "onboarding_run",
       entityId: run.runId,
-      explanation: "Onboarding run created."
+      explanation: "Onboarding run created.",
+      metadata: {
+        tenantSetupStatus: "setup_pending",
+        companyStatus: company.status,
+        onboardingRunId: run.runId
+      }
     });
 
     return {
@@ -938,10 +967,247 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       result: "success",
       entityType: "onboarding_step",
       entityId: `${run.runId}:${stepCode}`,
-      explanation: `Onboarding step ${stepCode} completed.`
+      explanation: `Onboarding step ${stepCode} completed.`,
+      metadata: {
+        onboardingRunId: run.runId,
+        tenantSetupStatus: requireTenantSetupProfile(company.companyId).status
+      }
     });
 
     return getOnboardingRun({ runId, resumeToken });
+  }
+
+  function getTenantSetupProfile({ sessionToken, companyId } = {}) {
+    authorizeFromSession(sessionToken, ACTIONS.COMPANY_READ, {
+      companyId,
+      objectType: "tenant_setup",
+      objectId: companyId,
+      scopeCode: "tenant_setup"
+    });
+    return copy(requireTenantSetupProfile(companyId));
+  }
+
+  function registerModuleDefinition({
+    sessionToken,
+    companyId,
+    moduleCode,
+    label,
+    riskClass = "low",
+    coreModule = false,
+    dependencyModuleCodes = [],
+    requiredPolicyCodes = [],
+    requiredRulepackCodes = [],
+    requiresCompletedTenantSetup = true,
+    allowSuspend = true
+  } = {}) {
+    const auth = authorizeFromSession(sessionToken, ACTIONS.COMPANY_MANAGE, {
+      companyId,
+      objectType: "module_definition",
+      objectId: companyId,
+      scopeCode: "module_activation"
+    });
+    const definitionKey = buildModuleDefinitionKey(companyId, moduleCode);
+    const existing = state.moduleDefinitions.get(definitionKey);
+    const definition = {
+      moduleDefinitionId: existing?.moduleDefinitionId || crypto.randomUUID(),
+      companyId,
+      moduleCode: assertNonEmpty(moduleCode, "module_code_required"),
+      label: assertNonEmpty(label || moduleCode, "module_label_required"),
+      riskClass: assertAllowedValue(riskClass, MODULE_RISK_CLASSES, "module_risk_class_invalid"),
+      coreModule: coreModule === true,
+      dependencyModuleCodes: normalizeStringList(dependencyModuleCodes, "module_dependencies_invalid"),
+      requiredPolicyCodes: normalizeStringList(requiredPolicyCodes, "module_required_policies_invalid"),
+      requiredRulepackCodes: normalizeStringList(requiredRulepackCodes, "module_required_rulepacks_invalid"),
+      requiresCompletedTenantSetup: requiresCompletedTenantSetup !== false,
+      allowSuspend: allowSuspend !== false,
+      createdAt: existing?.createdAt || nowIso(),
+      updatedAt: nowIso(),
+      updatedByUserId: auth.principal.userId
+    };
+    state.moduleDefinitions.set(definitionKey, definition);
+    pushAudit({
+      companyId,
+      actorId: auth.principal.userId,
+      action: "tenant_setup.module_definition.upserted",
+      result: "success",
+      entityType: "module_definition",
+      entityId: definition.moduleDefinitionId,
+      explanation: `Registered module definition ${definition.moduleCode}.`,
+      metadata: {
+        moduleCode: definition.moduleCode,
+        riskClass: definition.riskClass,
+        dependencyModuleCodes: definition.dependencyModuleCodes,
+        requiredPolicyCodes: definition.requiredPolicyCodes,
+        requiredRulepackCodes: definition.requiredRulepackCodes,
+        coreModule: definition.coreModule,
+        requiresCompletedTenantSetup: definition.requiresCompletedTenantSetup,
+        allowSuspend: definition.allowSuspend
+      }
+    });
+    return copy(definition);
+  }
+
+  function listModuleDefinitions({ sessionToken, companyId } = {}) {
+    authorizeFromSession(sessionToken, ACTIONS.COMPANY_READ, {
+      companyId,
+      objectType: "module_definition_list",
+      objectId: companyId,
+      scopeCode: "module_activation"
+    });
+    return [...state.moduleDefinitions.values()]
+      .filter((definition) => definition.companyId === assertNonEmpty(companyId, "company_id_required"))
+      .sort((left, right) => left.moduleCode.localeCompare(right.moduleCode))
+      .map(copy);
+  }
+
+  function activateModule({
+    sessionToken,
+    companyId,
+    moduleCode,
+    effectiveFrom = nowIso().slice(0, 10),
+    activationReason,
+    approvalActorIds = []
+  } = {}) {
+    const auth = authorizeFromSession(sessionToken, ACTIONS.COMPANY_MANAGE, {
+      companyId,
+      objectType: "module_activation",
+      objectId: companyId,
+      scopeCode: "module_activation"
+    });
+    const tenantSetupProfile = requireTenantSetupProfile(companyId);
+    const definition = requireModuleDefinition(companyId, moduleCode);
+    if (tenantSetupProfile.status === "suspended") {
+      throw httpError(409, "tenant_setup_suspended", "Module activation is blocked while the tenant setup profile is suspended.");
+    }
+    if (definition.requiresCompletedTenantSetup && tenantSetupProfile.status !== "active") {
+      throw httpError(409, "tenant_setup_not_ready", "Tenant setup must be active before this module can be activated.");
+    }
+    const missingDependencies = definition.dependencyModuleCodes.filter(
+      (dependencyModuleCode) => resolveModuleActivation(companyId, dependencyModuleCode)?.status !== "active"
+    );
+    if (missingDependencies.length > 0) {
+      throw httpError(
+        409,
+        "module_activation_dependency_missing",
+        `Module ${definition.moduleCode} requires active dependencies: ${missingDependencies.join(", ")}.`
+      );
+    }
+    const normalizedApprovalActorIds = normalizeStringList(approvalActorIds, "module_activation_approval_actor_ids_invalid");
+    if (["medium", "high"].includes(definition.riskClass)) {
+      if (normalizedApprovalActorIds.length === 0) {
+        throw httpError(409, "module_activation_approval_required", "Medium- and high-risk modules require a separate approver.");
+      }
+      if (normalizedApprovalActorIds.includes(auth.principal.userId)) {
+        throw httpError(409, "module_activation_self_approval_forbidden", "Module activation requires a separate approver.");
+      }
+      validateApprovalActors({
+        companyId,
+        actorUserIds: normalizedApprovalActorIds,
+        scopeCode: "module_activation",
+        objectType: "module_activation",
+        objectId: companyId
+      });
+    }
+    const activationKey = buildModuleDefinitionKey(companyId, definition.moduleCode);
+    const currentDateKey = nowIso().slice(0, 10);
+    const resolvedEffectiveFrom = normalizeDateOnly(effectiveFrom, "module_activation_effective_from_invalid");
+    const status = resolvedEffectiveFrom > currentDateKey ? "scheduled" : "active";
+    const existing = state.moduleActivations.get(activationKey);
+    const activation = {
+      moduleActivationId: existing?.moduleActivationId || crypto.randomUUID(),
+      companyId,
+      moduleCode: definition.moduleCode,
+      status,
+      effectiveFrom: resolvedEffectiveFrom,
+      activationReason: assertNonEmpty(activationReason, "module_activation_reason_required"),
+      approvalActorIds: normalizedApprovalActorIds,
+      requestedByUserId: auth.principal.userId,
+      activatedAt: status === "active" ? nowIso() : null,
+      suspendedAt: null,
+      suspendedReasonCode: null,
+      validationSnapshot: {
+        dependencyModuleCodes: definition.dependencyModuleCodes,
+        requiredPolicyCodes: definition.requiredPolicyCodes,
+        requiredRulepackCodes: definition.requiredRulepackCodes
+      },
+      createdAt: existing?.createdAt || nowIso(),
+      updatedAt: nowIso()
+    };
+    state.moduleActivations.set(activationKey, activation);
+    pushAudit({
+      companyId,
+      actorId: auth.principal.userId,
+      action: "tenant_setup.module_activation.activated",
+      result: "success",
+      entityType: "module_activation",
+      entityId: activation.moduleActivationId,
+      explanation: `Activated module ${definition.moduleCode} with status ${activation.status}.`,
+      metadata: {
+        moduleCode: activation.moduleCode,
+        status: activation.status,
+        effectiveFrom: activation.effectiveFrom,
+        activationReason: activation.activationReason,
+        approvalActorIds: activation.approvalActorIds,
+        dependencyModuleCodes: activation.validationSnapshot.dependencyModuleCodes,
+        requiredPolicyCodes: activation.validationSnapshot.requiredPolicyCodes,
+        requiredRulepackCodes: activation.validationSnapshot.requiredRulepackCodes
+      }
+    });
+    return copy(activation);
+  }
+
+  function listModuleActivations({ sessionToken, companyId } = {}) {
+    authorizeFromSession(sessionToken, ACTIONS.COMPANY_READ, {
+      companyId,
+      objectType: "module_activation_list",
+      objectId: companyId,
+      scopeCode: "module_activation"
+    });
+    return [...state.moduleActivations.values()]
+      .filter((activation) => activation.companyId === assertNonEmpty(companyId, "company_id_required"))
+      .sort((left, right) => left.moduleCode.localeCompare(right.moduleCode))
+      .map(copy);
+  }
+
+  function suspendModuleActivation({
+    sessionToken,
+    companyId,
+    moduleCode,
+    reasonCode
+  } = {}) {
+    const auth = authorizeFromSession(sessionToken, ACTIONS.COMPANY_MANAGE, {
+      companyId,
+      objectType: "module_activation",
+      objectId: companyId,
+      scopeCode: "module_activation"
+    });
+    const definition = requireModuleDefinition(companyId, moduleCode);
+    if (!definition.allowSuspend) {
+      throw httpError(409, "module_activation_suspend_forbidden", `Module ${definition.moduleCode} cannot be suspended by policy.`);
+    }
+    const activation = resolveModuleActivation(companyId, moduleCode);
+    if (!activation) {
+      throw httpError(404, "module_activation_not_found", "Module activation was not found.");
+    }
+    activation.status = "suspended";
+    activation.suspendedAt = nowIso();
+    activation.suspendedReasonCode = assertNonEmpty(reasonCode, "module_activation_suspend_reason_required");
+    activation.updatedAt = activation.suspendedAt;
+    pushAudit({
+      companyId,
+      actorId: auth.principal.userId,
+      action: "tenant_setup.module_activation.suspended",
+      result: "success",
+      entityType: "module_activation",
+      entityId: activation.moduleActivationId,
+      explanation: `Suspended module ${definition.moduleCode}.`,
+      metadata: {
+        moduleCode: activation.moduleCode,
+        reasonCode: activation.suspendedReasonCode,
+        suspendedAt: activation.suspendedAt
+      }
+    });
+    return copy(activation);
   }
 
   function snapshot() {
@@ -963,6 +1229,9 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       companyVatSetups: [...state.companyVatSetups.values()],
       accountingPeriods: [...state.accountingPeriods.values()],
       companySetupBlueprints: [...state.companySetupBlueprints.values()],
+      tenantSetupProfiles: [...state.tenantSetupProfiles.values()],
+      moduleDefinitions: [...state.moduleDefinitions.values()],
+      moduleActivations: [...state.moduleActivations.values()],
       auditEvents: state.auditEvents
     });
   }
@@ -1230,15 +1499,84 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
   }
 
   function finalizeOnboardingRun(run, company) {
+    const tenantSetupProfile = requireTenantSetupProfile(company.companyId);
     run.status = "completed";
     run.currentStep = "completed";
     run.updatedAt = nowIso();
     company.status = "active";
     company.settingsJson.onboardingCompletedAt = nowIso();
     company.updatedAt = nowIso();
+    tenantSetupProfile.status = "active";
+    tenantSetupProfile.onboardingCompletedAt = nowIso();
+    tenantSetupProfile.approvedAt = tenantSetupProfile.onboardingCompletedAt;
+    tenantSetupProfile.updatedAt = tenantSetupProfile.onboardingCompletedAt;
   }
 
-  function pushAudit({ companyId, actorId, action, result, entityType, entityId, explanation }) {
+  function requireTenantSetupProfile(companyId) {
+    const profile = state.tenantSetupProfiles.get(assertNonEmpty(companyId, "company_id_required"));
+    if (!profile) {
+      throw httpError(404, "tenant_setup_profile_not_found", "Tenant setup profile was not found.");
+    }
+    return profile;
+  }
+
+  function buildModuleDefinitionKey(companyId, moduleCode) {
+    return `${assertNonEmpty(companyId, "company_id_required")}:${assertNonEmpty(moduleCode, "module_code_required")}`;
+  }
+
+  function requireModuleDefinition(companyId, moduleCode) {
+    const definition = state.moduleDefinitions.get(buildModuleDefinitionKey(companyId, moduleCode));
+    if (!definition) {
+      throw httpError(404, "module_definition_not_found", "Module definition was not found.");
+    }
+    return definition;
+  }
+
+  function resolveModuleActivation(companyId, moduleCode) {
+    return state.moduleActivations.get(buildModuleDefinitionKey(companyId, moduleCode)) || null;
+  }
+
+  function validateApprovalActors({ companyId, actorUserIds, scopeCode, objectType, objectId }) {
+    for (const actorUserId of actorUserIds) {
+      const companyUser = [...state.companyUsers.values()].find(
+        (candidate) =>
+          candidate.companyId === companyId
+          && candidate.userId === actorUserId
+          && candidate.status === "active"
+          && isWindowOpen(candidate, currentDate())
+      );
+      if (!companyUser) {
+        throw httpError(409, "module_activation_approver_not_found", `Approver ${actorUserId} is not active in the company.`);
+      }
+      const user = state.users.get(companyUser.userId);
+      const decision = authorizeAction({
+        principal: {
+          userId: companyUser.userId,
+          companyId,
+          companyUserId: companyUser.companyUserId,
+          roles: [companyUser.roleCode],
+          permissions: [...permissionsForRoles([companyUser.roleCode])],
+          email: user?.email || null,
+          displayName: user?.displayName || null
+        },
+        action: ACTIONS.COMPANY_MANAGE,
+        resource: {
+          companyId,
+          objectType,
+          objectId,
+          scopeCode
+        },
+        delegations: [...state.delegations.values()],
+        objectGrants: [...state.objectGrants.values()],
+        now: currentDate()
+      });
+      if (!decision.allowed) {
+        throw httpError(409, "module_activation_approver_unauthorized", `Approver ${actorUserId} is not authorized for module activation.`);
+      }
+    }
+  }
+
+  function pushAudit({ companyId, actorId, action, result, entityType, entityId, explanation, metadata = {} }) {
     state.auditEvents.push(
       createAuditEvent({
         companyId,
@@ -1249,7 +1587,8 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
         entityId,
         explanation,
         correlationId: crypto.randomUUID(),
-        recordedAt: currentDate()
+        recordedAt: currentDate(),
+        metadata
       })
     );
   }
@@ -1374,6 +1713,18 @@ function seedDemoState(state, clock) {
     voucherSeriesCodes: [...DEFAULT_VOUCHER_SERIES],
     configuredAt: now
   });
+  state.tenantSetupProfiles.set(DEMO_IDS.companyId, {
+    tenantSetupProfileId: crypto.randomUUID(),
+    companyId: DEMO_IDS.companyId,
+    onboardingRunId: null,
+    status: "active",
+    onboardingCompletedAt: now,
+    approvedAt: now,
+    suspendedAt: null,
+    suspendedReasonCode: null,
+    createdAt: now,
+    updatedAt: now
+  });
   for (const registrationType of DEFAULT_REGISTRATION_TYPES) {
     state.companyRegistrations.set(`${DEMO_IDS.companyId}:${registrationType}`, {
       companyRegistrationId: crypto.randomUUID(),
@@ -1451,6 +1802,39 @@ function createBankIdProvider() {
       return orders.get(orderRef)?.completionToken || null;
     }
   };
+}
+
+function normalizeStringList(values, code) {
+  if (values == null) {
+    return [];
+  }
+  if (!Array.isArray(values)) {
+    throw httpError(400, code, `${code} must be an array.`);
+  }
+  const result = [];
+  for (const value of values) {
+    const resolved = assertNonEmpty(value, code);
+    if (!result.includes(resolved)) {
+      result.push(resolved);
+    }
+  }
+  return result;
+}
+
+function normalizeDateOnly(value, code) {
+  const resolved = assertNonEmpty(value, code);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(resolved)) {
+    throw httpError(400, code, `${code} must be an ISO date.`);
+  }
+  return resolved;
+}
+
+function assertAllowedValue(value, allowedValues, code) {
+  const resolved = assertNonEmpty(value, code);
+  if (!allowedValues.includes(resolved)) {
+    throw httpError(400, code, `${code} does not allow ${resolved}.`);
+  }
+  return resolved;
 }
 
 function stripSecret(factor) {
