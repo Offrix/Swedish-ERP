@@ -463,10 +463,30 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     label: "Search",
     packageName: "@swedish-erp/domain-search",
     dependsOn: ["reporting"],
-    create: ({ options, dependencies }) =>
+    create: ({ options, dependencies, getDomain }) =>
       createSearchPlatform({
         ...options,
-        reportingPlatform: dependencies.reporting
+        reportingPlatform: dependencies.reporting,
+        getLedgerPlatform: () => getDomain("ledger"),
+        getVatPlatform: () => getDomain("vat"),
+        getTaxAccountPlatform: () => getDomain("taxAccount"),
+        getPayrollPlatform: () => getDomain("payroll"),
+        getHusPlatform: () => getDomain("hus"),
+        getAnnualReportingPlatform: () => getDomain("annualReporting"),
+        getReviewCenterPlatform: () => getDomain("reviewCenter"),
+        getNotificationsPlatform: () => getDomain("notifications"),
+        getActivityPlatform: () => getDomain("activity"),
+        getProjectsPlatform: () => getDomain("projects"),
+        getFieldPlatform: () => getDomain("field"),
+        getPersonalliggarePlatform: () => getDomain("personalliggare"),
+        getId06Platform: () => getDomain("id06"),
+        getCorePlatform: () => getDomain("core"),
+        getArPlatform: () => getDomain("ar"),
+        getApPlatform: () => getDomain("ap"),
+        getBankingPlatform: () => getDomain("banking"),
+        getImportCasesPlatform: () => getDomain("importCases"),
+        getLegalFormPlatform: () => getDomain("legalForm"),
+        getIntegrationsPlatform: () => getDomain("integrations")
       })
   }),
   createDomainDefinition({

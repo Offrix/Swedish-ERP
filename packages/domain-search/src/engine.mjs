@@ -1,5 +1,11 @@
 import { createReportingPlatform } from "../../domain-reporting/src/index.mjs";
 import {
+  getObjectProfileContract,
+  getWorkbenchContract,
+  OBJECT_PROFILE_CONTRACTS,
+  WORKBENCH_CONTRACTS
+} from "./contracts.mjs";
+import {
   DASHBOARD_WIDGET_STATUSES,
   DASHBOARD_WIDGET_TYPE_CODES,
   SAVED_VIEW_STATUSES,
@@ -33,7 +39,30 @@ export function createSearchPlatform(options = {}) {
   return createSearchEngine(options);
 }
 
-export function createSearchEngine({ clock = () => new Date(), reportingPlatform = null } = {}) {
+export function createSearchEngine({
+  clock = () => new Date(),
+  reportingPlatform = null,
+  getLedgerPlatform = null,
+  getVatPlatform = null,
+  getTaxAccountPlatform = null,
+  getPayrollPlatform = null,
+  getHusPlatform = null,
+  getAnnualReportingPlatform = null,
+  getReviewCenterPlatform = null,
+  getNotificationsPlatform = null,
+  getActivityPlatform = null,
+  getProjectsPlatform = null,
+  getFieldPlatform = null,
+  getPersonalliggarePlatform = null,
+  getId06Platform = null,
+  getCorePlatform = null,
+  getArPlatform = null,
+  getApPlatform = null,
+  getBankingPlatform = null,
+  getImportCasesPlatform = null,
+  getLegalFormPlatform = null,
+  getIntegrationsPlatform = null
+} = {}) {
   const reporting = reportingPlatform || createReportingPlatform({ clock });
   const state = {
     projectionContracts: new Map(),
@@ -48,6 +77,28 @@ export function createSearchEngine({ clock = () => new Date(), reportingPlatform
     dashboardWidgetIdsByCompany: new Map(),
     auditEvents: []
   };
+  const lazyPlatforms = {
+    ledger: getLedgerPlatform,
+    vat: getVatPlatform,
+    taxAccount: getTaxAccountPlatform,
+    payroll: getPayrollPlatform,
+    hus: getHusPlatform,
+    annualReporting: getAnnualReportingPlatform,
+    reviewCenter: getReviewCenterPlatform,
+    notifications: getNotificationsPlatform,
+    activity: getActivityPlatform,
+    projects: getProjectsPlatform,
+    field: getFieldPlatform,
+    personalliggare: getPersonalliggarePlatform,
+    id06: getId06Platform,
+    core: getCorePlatform,
+    ar: getArPlatform,
+    ap: getApPlatform,
+    banking: getBankingPlatform,
+    importCases: getImportCasesPlatform,
+    legalForm: getLegalFormPlatform,
+    integrations: getIntegrationsPlatform
+  };
 
   return {
     searchDocumentStatuses: SEARCH_DOCUMENT_STATUSES,
@@ -61,6 +112,10 @@ export function createSearchEngine({ clock = () => new Date(), reportingPlatform
     listSearchReindexRequests,
     listSearchDocuments,
     getSearchDocument,
+    listObjectProfileContracts,
+    getObjectProfile,
+    listWorkbenchContracts,
+    getWorkbench,
     createSavedView,
     listSavedViews,
     getSavedView,
@@ -165,6 +220,171 @@ export function createSearchEngine({ clock = () => new Date(), reportingPlatform
       throw createError(403, "search_document_forbidden", "Search document is not visible to the current actor.");
     }
     return copy(document);
+  }
+
+  function listObjectProfileContracts({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return OBJECT_PROFILE_CONTRACTS.map((contract) => ({
+      companyId: resolvedCompanyId,
+      profileType: contract.profileType,
+      objectType: contract.objectType,
+      sectionCodes: copy(contract.sectionCodes),
+      blockerCodes: copy(contract.blockerCodes),
+      actionContracts: copy(contract.actionContracts)
+    }));
+  }
+
+  function getObjectProfile({ companyId, objectType, objectId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedObjectType = normalizeObjectProfileType(objectType);
+    const contract = getObjectProfileContract(resolvedObjectType);
+    if (!contract) {
+      throw createError(404, "object_profile_contract_not_found", `Object profile contract ${resolvedObjectType} was not found.`);
+    }
+    const indexedDocument = [...state.searchDocuments.values()].find(
+      (document) =>
+        document.companyId === resolvedCompanyId &&
+        normalizeObjectProfileType(document.objectType) === resolvedObjectType &&
+        document.objectId === requireText(objectId, "object_id_required")
+    );
+    return {
+      profileType: contract.profileType,
+      objectType: contract.objectType,
+      objectId: requireText(objectId, "object_id_required"),
+      companyId: resolvedCompanyId,
+      version: 1,
+      status: indexedDocument?.documentStatus || "contract_defined",
+      header: {
+        title: indexedDocument?.displayTitle || `${contract.profileType} ${objectId}`,
+        subtitle: indexedDocument?.displaySubtitle || null,
+        statusCode: indexedDocument?.documentStatus || "contract_defined",
+        statusLabel: indexedDocument?.documentStatus || "contract_defined",
+        criticalBadges: [],
+        primaryActions: copy(contract.actionContracts.slice(0, 3)),
+        secondaryActions: copy(contract.actionContracts.slice(3)),
+        owner: null,
+        updatedAt: indexedDocument?.updatedAt || nowIso(clock)
+      },
+      snapshot: {
+        identityFields: [{ fieldCode: "objectId", value: requireText(objectId, "object_id_required") }],
+        financialFields: [],
+        complianceFields: [],
+        responsibilityFields: [],
+        periodFields: []
+      },
+      sections: contract.sectionCodes.map((sectionCode) => ({
+        sectionCode,
+        title: sectionCode,
+        layout: "field_list",
+        fields: [],
+        warnings: [],
+        blockers: [],
+        inlineActions: []
+      })),
+      relatedObjects: [],
+      receipts: [],
+      evidence: [],
+      allowedActions: copy(contract.actionContracts),
+      blockers: [],
+      permissionSummary: defaultPermissionSummary(),
+      correctionLineage: null,
+      auditRefs: defaultAuditRefs(),
+      timeline: [],
+      searchSummary: indexedDocument
+        ? {
+            title: indexedDocument.displayTitle,
+            subtitle: indexedDocument.displaySubtitle || null
+          }
+        : {},
+      projectionInfo: {
+        projectionCode: indexedDocument?.projectionCode || null,
+        objectType: contract.objectType,
+        objectId: requireText(objectId, "object_id_required"),
+        sourceVersion: indexedDocument?.sourceVersion || null,
+        targetVersion: indexedDocument?.sourceVersion || null,
+        staleProjection: indexedDocument?.status === "stale"
+      }
+    };
+  }
+
+  function listWorkbenchContracts({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return WORKBENCH_CONTRACTS.map((contract) => ({
+      companyId: resolvedCompanyId,
+      workbenchCode: contract.workbenchCode,
+      title: contract.title,
+      rowObjectTypes: copy(contract.rowObjectTypes),
+      counterCodes: copy(contract.counterCodes),
+      bulkActionCodes: copy(contract.bulkActionCodes),
+      savedViewCodes: copy(contract.savedViewCodes),
+      commandBarActionCodes: copy(contract.commandBarActionCodes)
+    }));
+  }
+
+  function getWorkbench({ companyId, workbenchCode } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const contract = getWorkbenchContract(requireText(workbenchCode, "workbench_code_required"));
+    if (!contract) {
+      throw createError(404, "workbench_contract_not_found", `Workbench contract ${workbenchCode} was not found.`);
+    }
+    const rows = [...state.searchDocuments.values()]
+      .filter((document) => document.companyId === resolvedCompanyId)
+      .filter((document) => contract.rowObjectTypes.includes(normalizeObjectProfileType(document.objectType)))
+      .slice(0, 50)
+      .map((document) => ({
+        rowId: `${normalizeObjectProfileType(document.objectType)}:${document.objectId}`,
+        objectType: normalizeObjectProfileType(document.objectType),
+        objectId: document.objectId,
+        status: document.documentStatus,
+        statusLabel: document.documentStatus,
+        primaryLabel: document.displayTitle,
+        secondaryLabel: document.displaySubtitle || null,
+        pillars: [],
+        blockerBadges: [],
+        receiptBadges: [],
+        owner: null,
+        updatedAt: document.updatedAt,
+        drilldownTarget: `/v1/object-profiles/${normalizeObjectProfileType(document.objectType)}/${document.objectId}`,
+        previewTarget: `/v1/object-profiles/${normalizeObjectProfileType(document.objectType)}/${document.objectId}`,
+        bulkActionEligibility: {
+          eligible: true,
+          denialReasonCodes: []
+        }
+      }));
+    const counters = Object.fromEntries((contract.counterCodes || []).map((counterCode) => [counterCode, 0]));
+    return {
+      workbenchCode: contract.workbenchCode,
+      title: contract.title,
+      scope: "company",
+      defaultViewCode: "default",
+      views: [
+        {
+          viewCode: "default",
+          label: "Default",
+          rowObjectTypes: copy(contract.rowObjectTypes)
+        }
+      ],
+      counters,
+      filters: buildDefaultWorkbenchFilters(contract),
+      sorts: buildDefaultWorkbenchSorts(),
+      bulkActions: (contract.bulkActionCodes || []).map((actionCode) => ({ actionCode, label: actionCode })),
+      rows,
+      previewContract: {
+        previewType: "object_profile",
+        openMode: "side_panel"
+      },
+      commandBar: buildDefaultCommandBar(contract),
+      savedViewsSupported: Array.isArray(contract.savedViewCodes) && contract.savedViewCodes.length > 0,
+      projectionInfo: {
+        projectionCode: contract.workbenchCode,
+        objectType: "workbench",
+        objectId: contract.workbenchCode,
+        sourceVersion: nowIso(clock),
+        targetVersion: nowIso(clock),
+        staleProjection: false
+      },
+      companyId: resolvedCompanyId
+    };
   }
 
   function createSavedView({ companyId, ownerUserId, surfaceCode, title, queryJson, sortJson = {}, visibilityCode = "private", sharedWithTeamId = null, actorId = "system", correlationId = newId() } = {}) {
@@ -447,20 +667,36 @@ export function createSearchEngine({ clock = () => new Date(), reportingPlatform
   }
 
   function collectProjectionSources() {
+    const sources = [];
     if (
       reporting &&
       typeof reporting.listSearchProjectionContracts === "function" &&
       typeof reporting.listSearchProjectionDocuments === "function"
     ) {
-      return [
-        {
-          sourceDomainCode: "reporting",
-          listSearchProjectionContracts: (input) => reporting.listSearchProjectionContracts(input),
-          listSearchProjectionDocuments: (input) => reporting.listSearchProjectionDocuments(input)
-        }
-      ];
+      sources.push({
+        sourceDomainCode: "reporting",
+        listSearchProjectionContracts: (input) => reporting.listSearchProjectionContracts(input),
+        listSearchProjectionDocuments: (input) => reporting.listSearchProjectionDocuments(input)
+      });
     }
-    return [];
+    for (const [sourceDomainCode, resolver] of Object.entries(lazyPlatforms)) {
+      if (typeof resolver !== "function") {
+        continue;
+      }
+      const candidate = resolver();
+      if (
+        candidate &&
+        typeof candidate.listSearchProjectionContracts === "function" &&
+        typeof candidate.listSearchProjectionDocuments === "function"
+      ) {
+        sources.push({
+          sourceDomainCode,
+          listSearchProjectionContracts: (input) => candidate.listSearchProjectionContracts(input),
+          listSearchProjectionDocuments: (input) => candidate.listSearchProjectionDocuments(input)
+        });
+      }
+    }
+    return sources;
   }
 
   function resolveProjectionSource(sourceDomainCode) {
@@ -707,4 +943,133 @@ function compareSearchResults(left, right) {
 
 function statusScore(status) {
   return { indexed: 4, stale: 3, tombstoned: 2, purged: 1 }[status] || 0;
+}
+
+function normalizeObjectProfileType(objectType) {
+  const resolvedObjectType = requireText(objectType, "object_profile_object_type_required");
+  const knownObjectTypes = new Set([
+    ...OBJECT_PROFILE_CONTRACTS.map((contract) => contract.objectType),
+    ...WORKBENCH_CONTRACTS.flatMap((contract) => contract.rowObjectTypes || [])
+  ]);
+  if (knownObjectTypes.has(resolvedObjectType)) {
+    return resolvedObjectType;
+  }
+  const fingerprint = normalizeObjectTypeFingerprint(resolvedObjectType);
+  for (const candidate of knownObjectTypes) {
+    if (normalizeObjectTypeFingerprint(candidate) === fingerprint) {
+      return candidate;
+    }
+  }
+  return resolvedObjectType;
+}
+
+function normalizeObjectTypeFingerprint(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9]+/g, "")
+    .toLowerCase();
+}
+
+function defaultPermissionSummary() {
+  return {
+    scope: "company",
+    visibilityCode: "desktop_only",
+    allowedRoleCodes: ["company_admin", "approver", "payroll_admin", "bureau_user"],
+    requiresStepUp: false,
+    requiresDualControl: false
+  };
+}
+
+function defaultAuditRefs() {
+  return {
+    auditClass: "desktop_read_model",
+    auditEventIds: [],
+    evidenceBundleIds: [],
+    receiptIds: [],
+    correlationIds: []
+  };
+}
+
+function buildDefaultWorkbenchFilters(contract) {
+  return [
+    {
+      filterCode: "status",
+      type: "enum",
+      label: "Status",
+      fieldPath: "status",
+      operators: ["eq", "in"],
+      allowedValues: ["contract_defined", "active", "pending", "indexed", "stale", "completed", "failed"],
+      defaultValue: null,
+      required: false
+    },
+    {
+      filterCode: "objectType",
+      type: "multi_enum",
+      label: "Object type",
+      fieldPath: "objectType",
+      operators: ["in"],
+      allowedValues: copy(contract.rowObjectTypes || []),
+      defaultValue: null,
+      required: false
+    },
+    {
+      filterCode: "updatedAt",
+      type: "date_range",
+      label: "Updated at",
+      fieldPath: "updatedAt",
+      operators: ["between"],
+      allowedValues: [],
+      defaultValue: null,
+      required: false
+    }
+  ];
+}
+
+function buildDefaultWorkbenchSorts() {
+  return [
+    {
+      sortCode: "updatedAtDesc",
+      fieldPath: "updatedAt",
+      label: "Last updated",
+      defaultDirection: "desc",
+      allowedDirections: ["asc", "desc"]
+    },
+    {
+      sortCode: "statusAsc",
+      fieldPath: "status",
+      label: "Status",
+      defaultDirection: "asc",
+      allowedDirections: ["asc", "desc"]
+    },
+    {
+      sortCode: "primaryLabelAsc",
+      fieldPath: "primaryLabel",
+      label: "Primary label",
+      defaultDirection: "asc",
+      allowedDirections: ["asc", "desc"]
+    }
+  ];
+}
+
+function buildDefaultCommandBar(contract) {
+  return {
+    contextObject: {
+      objectType: "workbench",
+      objectId: contract.workbenchCode
+    },
+    availableCommands: (contract.commandBarActionCodes || []).map((actionCode) => ({
+      actionCode,
+      label: actionCode
+    })),
+    recentCommands: [],
+    quickFilters: (contract.savedViewCodes || []).map((savedViewCode) => ({
+      filterCode: savedViewCode,
+      label: savedViewCode
+    })),
+    createActions: (contract.commandBarActionCodes || []).map((actionCode) => ({
+      actionCode,
+      label: actionCode
+    })),
+    dangerZoneActions: []
+  };
 }

@@ -207,6 +207,10 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/search/reindex",
               "/v1/search/documents",
               "/v1/search/documents/:searchDocumentId",
+              "/v1/object-profiles/contracts",
+              "/v1/object-profiles/:objectType/:objectId",
+              "/v1/workbenches/contracts",
+              "/v1/workbenches/:workbenchCode",
               "/v1/saved-views",
               "/v1/saved-views/:savedViewId",
               "/v1/saved-views/:savedViewId/share",
@@ -2405,6 +2409,99 @@ async function handleRequest({ req, res, platform, flags }) {
         searchDocumentId: searchDocumentMatch.searchDocumentId,
         viewerUserId: principal.userId,
         viewerTeamIds: resolvePrincipalTeamIds(principal)
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/object-profiles/contracts") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "object_profile",
+      scopeCode: "search"
+    });
+    writeJson(res, 200, {
+      items: platform.listObjectProfileContracts({ companyId })
+    });
+    return;
+  }
+
+  const objectProfileMatch = matchPath(path, "/v1/object-profiles/:objectType/:objectId");
+  if (objectProfileMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "object_profile",
+      scopeCode: "search"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getObjectProfile({
+        companyId,
+        objectType: objectProfileMatch.objectType,
+        objectId: objectProfileMatch.objectId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/workbenches/contracts") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "workbench",
+      scopeCode: "search"
+    });
+    writeJson(res, 200, {
+      items: platform.listWorkbenchContracts({ companyId })
+    });
+    return;
+  }
+
+  const workbenchMatch = matchPath(path, "/v1/workbenches/:workbenchCode");
+  if (workbenchMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "workbench",
+      scopeCode: "search"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getWorkbench({
+        companyId,
+        workbenchCode: workbenchMatch.workbenchCode
       })
     );
     return;
@@ -12451,6 +12548,8 @@ function isDesktopSurfaceReadPath(path) {
     path.startsWith("/v1/inbox") ||
     path.startsWith("/v1/review-tasks") ||
     path.startsWith("/v1/search") ||
+    path.startsWith("/v1/object-profiles") ||
+    path.startsWith("/v1/workbenches") ||
     path.startsWith("/v1/saved-views") ||
     path.startsWith("/v1/dashboard")
   );
@@ -12549,7 +12648,15 @@ function isPhase23Route(path) {
 }
 
 function isPhase3Route(path) {
-  return path.startsWith("/v1/ledger") || path.startsWith("/v1/reporting") || path.startsWith("/v1/search") || path.startsWith("/v1/saved-views") || path.startsWith("/v1/dashboard");
+  return (
+    path.startsWith("/v1/ledger") ||
+    path.startsWith("/v1/reporting") ||
+    path.startsWith("/v1/search") ||
+    path.startsWith("/v1/object-profiles") ||
+    path.startsWith("/v1/workbenches") ||
+    path.startsWith("/v1/saved-views") ||
+    path.startsWith("/v1/dashboard")
+  );
 }
 
 function isPhase4Route(path) {
