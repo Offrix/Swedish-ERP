@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
-import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import { DEMO_ADMIN_EMAIL, DEMO_APPROVER_EMAIL, DEMO_APPROVER_IDS, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
-import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
+import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
 
 test("Step 12 API exposes review-center queues, items, claim and decide flow", async () => {
   const platform = createApiPlatform({
@@ -20,6 +20,12 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
       platform,
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
+    });
+    const approverToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_APPROVER_EMAIL
     });
 
     const seeded = platform.createReviewItem({
@@ -53,18 +59,35 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
 
     const claimed = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/claim`, {
       method: "POST",
-      token: adminToken,
+      token: approverToken,
       expectedStatus: 200,
       body: {
         companyId: DEMO_IDS.companyId
       }
     });
     assert.equal(claimed.status, "claimed");
-    assert.equal(claimed.currentAssignment.assignedUserId, DEMO_IDS.userId);
+    assert.equal(claimed.currentAssignment.assignedUserId, DEMO_APPROVER_IDS.userId);
+
+    const adminDecideForbidden = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/decide`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 403,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        decisionCode: "approve",
+        reasonCode: "classification_confirmed",
+        note: "Admin should not bypass active assignment.",
+        decisionPayload: {
+          finalDocumentType: "supplier_invoice"
+        },
+        evidenceRefs: ["classification:forbidden"]
+      }
+    });
+    assert.equal(adminDecideForbidden.error, "review_center_assignment_required");
 
     const approved = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/decide`, {
       method: "POST",
-      token: adminToken,
+      token: approverToken,
       expectedStatus: 200,
       body: {
         companyId: DEMO_IDS.companyId,
@@ -86,7 +109,7 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
       { token: adminToken }
     );
     assert.equal(fetched.latestDecision.reasonCode, "CLASSIFICATION_CONFIRMED");
-    assert.equal(fetched.currentAssignment.assignedUserId, DEMO_IDS.userId);
+    assert.equal(fetched.currentAssignment.assignedUserId, DEMO_APPROVER_IDS.userId);
   } finally {
     await stopServer(server);
   }

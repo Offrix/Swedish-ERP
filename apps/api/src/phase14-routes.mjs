@@ -2403,7 +2403,14 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
-    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "review_item", objectId: reviewCenterClaimMatch.reviewItemId, scopeCode: "review_center" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: reviewCenterClaimMatch.reviewItemId, scopeCode: "review_center" });
+    assertReviewCenterActionAccess({
+      platform,
+      principal,
+      companyId,
+      reviewItemId: reviewCenterClaimMatch.reviewItemId,
+      operation: "claim"
+    });
     writeJson(res, 200, platform.claimReviewCenterItem({
       companyId,
       reviewItemId: reviewCenterClaimMatch.reviewItemId,
@@ -2417,7 +2424,14 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
-    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "review_item", objectId: reviewCenterDecideMatch.reviewItemId, scopeCode: "review_center" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: reviewCenterDecideMatch.reviewItemId, scopeCode: "review_center" });
+    assertReviewCenterActionAccess({
+      platform,
+      principal,
+      companyId,
+      reviewItemId: reviewCenterDecideMatch.reviewItemId,
+      operation: "decide"
+    });
     writeJson(res, 200, platform.decideReviewCenterItem({
       companyId,
       reviewItemId: reviewCenterDecideMatch.reviewItemId,
@@ -3159,5 +3173,28 @@ function assertNotificationMutationAccess({ platform, principal, companyId, noti
   const notification = platform.getNotification({ companyId, notificationId });
   if (notification.recipientType !== "user" || notification.recipientId !== principal.userId) {
     throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification action is only allowed for the addressed user in this route.");
+  }
+}
+
+const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
+
+function assertReviewCenterActionAccess({ platform, principal, companyId, reviewItemId, operation }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedOperator = [...REVIEW_CENTER_OPERATOR_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedOperator) {
+    throw createHttpError(403, "review_center_role_forbidden", "Current actor is not allowed to operate review-center items.");
+  }
+
+  const reviewItem = platform.getReviewCenterItem({ companyId, reviewItemId });
+  const assignedUserId = reviewItem.currentAssignment?.assignedUserId || null;
+  if (operation === "claim") {
+    if (assignedUserId && assignedUserId !== principal.userId) {
+      throw createHttpError(409, "review_center_claimed_by_other_user", "Review item is already claimed by another actor.");
+    }
+    return;
+  }
+
+  if (assignedUserId !== principal.userId) {
+    throw createHttpError(403, "review_center_assignment_required", "Review decisions require the current actor to hold the active assignment.");
   }
 }
