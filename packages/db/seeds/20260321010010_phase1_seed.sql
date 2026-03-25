@@ -51,7 +51,7 @@ SET is_admin = TRUE,
 WHERE company_user_id = '00000000-0000-4000-8000-000000000021';
 
 INSERT INTO auth_providers (provider_code, provider_type, status, configuration_json)
-VALUES ('bankid_stub', 'bankid', 'configured', '{"mode":"stub"}'::jsonb)
+VALUES ('signicat-bankid', 'bankid', 'configured', '{"mode":"stub","providerFamily":"signicat"}'::jsonb)
 ON CONFLICT (provider_code) DO NOTHING;
 
 INSERT INTO auth_identities (user_id, company_user_id, provider_type, provider_subject, status, verified_at)

@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
-import postgres from "postgres";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
 
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -182,6 +184,7 @@ export function createPostgresAsyncJobStore({
     throw new Error("Postgres connection information is required for the async job store.");
   }
 
+  const postgres = loadPostgresClient();
   const sql = postgres(resolvedConnectionString, {
     max,
     idle_timeout: idleTimeout,
@@ -604,4 +607,14 @@ export function createPostgresAsyncJobStore({
 
   logger("async job store using postgres backend");
   return store;
+}
+
+function loadPostgresClient() {
+  try {
+    const postgresModule = require("postgres");
+    return postgresModule?.default || postgresModule;
+  } catch (error) {
+    const message = typeof error?.message === "string" ? error.message : "unknown_error";
+    throw new Error(`Postgres client package could not be loaded for the async job store: ${message}`);
+  }
 }

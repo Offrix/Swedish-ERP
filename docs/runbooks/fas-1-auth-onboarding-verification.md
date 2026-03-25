@@ -11,7 +11,7 @@ Detta dokument sammanfattar resultatet av `P1-01`, `P1-02` och `P1-03`.
 ## P1-02 Inloggning, sessioner och stark autentisering
 
 - `auth-core` innehaller sessionshelpers, TOTP-stod, explicita auth-beslut och auditbara resultat.
-- API:t har login/logout, sessionsrevokering, TOTP-verifiering, passkey-registrering/assertion och BankID-stub bakom providerabstraktion.
+- API:t har login/logout, sessionsrevokering, TOTP-verifiering, passkey-registrering/assertion och BankID-stub bakom provideraliaset `signicat-bankid`.
 - Adminsessioner stannar i `pending` tills tva faktormetoder verifierats.
 
 ## P1-03 Bolagssetup och onboarding wizard

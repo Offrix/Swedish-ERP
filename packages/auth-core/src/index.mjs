@@ -21,7 +21,7 @@ export const ROLE_PERMISSIONS = Object.freeze({
 });
 
 export const MFA_FACTOR_TYPES = Object.freeze(["totp", "passkey", "bankid"]);
-export const BANKID_PROVIDER_CODE = "bankid_stub";
+export const BANKID_PROVIDER_CODE = "signicat-bankid";
 
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 

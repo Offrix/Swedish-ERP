@@ -874,7 +874,7 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       orderRef: providerResult.orderRef,
       expiresAt: timestamp(new Date(currentDate().getTime() + 5 * 60 * 1000)),
       consumedAt: null,
-      payloadJson: { providerCode: BANKID_PROVIDER_CODE }
+      payloadJson: { providerCode: BANKID_PROVIDER_CODE, providerMode: "stub" }
     };
     state.authChallenges.set(challenge.challengeId, challenge);
 
@@ -2048,6 +2048,7 @@ function createBankIdProvider() {
       const completionToken = issueOpaqueToken();
       const payload = {
         providerCode: BANKID_PROVIDER_CODE,
+        providerMode: "stub",
         orderRef,
         autoStartToken: issueOpaqueToken(),
         qrStartToken: issueOpaqueToken(),
@@ -2075,6 +2076,7 @@ function createBankIdProvider() {
       order.status = "complete";
       return {
         providerCode: BANKID_PROVIDER_CODE,
+        providerMode: "stub",
         orderRef,
         status: "complete"
       };
