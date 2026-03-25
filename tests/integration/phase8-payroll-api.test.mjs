@@ -20,6 +20,16 @@ test("Phase 8.1 migration and seeds add payroll core tables, rule pack and demo 
     assert.match(migration, new RegExp(fragment.replaceAll(" ", "\\s+")));
   }
 
+  const cleanupMigration = await readText("packages/db/migrations/20260325033000_phase8_payroll_placeholder_cleanup.sql");
+  for (const fragment of [
+    "UPDATE pay_item_definitions",
+    "UPDATE pay_run_lines",
+    "UPDATE pay_run_payslips",
+    "payroll_tax_profile_missing"
+  ]) {
+    assert.match(cleanupMigration, new RegExp(fragment.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")));
+  }
+
   const seed = await readText("packages/db/seeds/20260321200010_phase8_payroll_core_seed.sql");
   for (const fragment of [
     "payroll-employer-contribution-se-2026.1",
@@ -29,6 +39,7 @@ test("Phase 8.1 migration and seeds add payroll core tables, rule pack and demo 
   ]) {
     assert.match(seed, new RegExp(fragment.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")));
   }
+  assert.doesNotMatch(seed, /phase8_2_pending|phase8_3_pending/u);
 
   const demoSeed = await readText("packages/db/seeds/20260321201000_phase8_payroll_core_demo_seed.sql");
   for (const fragment of [
@@ -39,6 +50,7 @@ test("Phase 8.1 migration and seeds add payroll core tables, rule pack and demo 
   ]) {
     assert.match(demoSeed, new RegExp(fragment.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")));
   }
+  assert.doesNotMatch(demoSeed, /phase8_2_pending|phase8_3_pending/u);
 });
 
 test("Phase 8.1 API manages pay item catalog, payroll runs, retro traceability and payslip regeneration", async () => {
@@ -137,6 +149,10 @@ test("Phase 8.1 API manages pay item catalog, payroll runs, retro traceability a
       }
     });
     assert.equal(customItem.payItemCode, "FIELD_ALLOWANCE");
+    assert.equal(customItem.taxTreatmentCode, "taxable");
+    assert.equal(customItem.employerContributionTreatmentCode, "included");
+    assert.equal(customItem.agiMappingCode, "cash_compensation");
+    assert.equal(customItem.ledgerAccountCode, "7090");
 
     const payCalendars = await requestJson(baseUrl, `/v1/payroll/pay-calendars?companyId=${COMPANY_ID}`, {
       token: sessionToken

@@ -168,7 +168,7 @@ VALUES
     'taxable',
     'included',
     'cash_compensation',
-    'phase8_3_pending',
+    '7010',
     TRUE,
     TRUE,
     TRUE,
@@ -201,7 +201,7 @@ VALUES
     'taxable',
     'included',
     'taxable_benefit',
-    'phase8_3_pending',
+    '7290',
     FALSE,
     FALSE,
     FALSE,
@@ -234,7 +234,7 @@ VALUES
     'taxable',
     'included',
     'cash_compensation',
-    'phase8_3_pending',
+    '7060',
     FALSE,
     TRUE,
     TRUE,
@@ -267,7 +267,7 @@ VALUES
     'taxable',
     'included',
     'cash_compensation',
-    'phase8_3_pending',
+    '7090',
     FALSE,
     TRUE,
     TRUE,
@@ -300,7 +300,7 @@ VALUES
     'taxable',
     'included',
     'cash_compensation',
-    'phase8_3_pending',
+    '7090',
     FALSE,
     TRUE,
     TRUE,
@@ -333,7 +333,7 @@ VALUES
     'taxable',
     'included',
     'cash_compensation',
-    'phase8_3_pending',
+    '7070',
     FALSE,
     TRUE,
     TRUE,
@@ -366,7 +366,7 @@ VALUES
     'taxable',
     'included',
     'cash_compensation',
-    'phase8_3_pending',
+    '7090',
     FALSE,
     TRUE,
     TRUE,
@@ -429,7 +429,7 @@ VALUES
       "runType": "regular",
       "totals": {
         "grossEarnings": 43500.00,
-        "preliminaryTaxStatus": "phase8_2_pending"
+        "preliminaryTaxStatus": "pending"
       }
     }'::jsonb,
     'demo',
@@ -449,7 +449,7 @@ VALUES
       "runType": "extra",
       "totals": {
         "grossEarnings": 5000.00,
-        "preliminaryTaxStatus": "phase8_2_pending"
+        "preliminaryTaxStatus": "pending"
       }
     }'::jsonb,
     'demo',

@@ -357,13 +357,13 @@ export function createPayrollEngine({
     calculationBasis,
     unitCode,
     compensationBucket,
-  defaultUnitAmount = null,
-  defaultRateFactor = null,
-  taxTreatmentCode = "phase8_2_pending",
-  employerContributionTreatmentCode = "phase8_2_pending",
-  agiMappingCode = null,
-  ledgerAccountCode = null,
-  defaultDimensions = {},
+    defaultUnitAmount = null,
+    defaultRateFactor = null,
+    taxTreatmentCode = resolveDefaultTaxTreatmentCode(payItemCode),
+    employerContributionTreatmentCode = resolveDefaultEmployerContributionTreatmentCode(payItemCode),
+    agiMappingCode = null,
+    ledgerAccountCode = null,
+    defaultDimensions = {},
     affectsVacationBasis = false,
     affectsPensionBasis = false,
     includedInNetPay = true,
@@ -3878,8 +3878,9 @@ function seedPayItem(state, template) {
     compensationBucket: template.compensationBucket,
     defaultUnitAmount: template.defaultUnitAmount ?? null,
     defaultRateFactor: template.defaultRateFactor ?? null,
-    taxTreatmentCode: template.taxTreatmentCode ?? "phase8_2_pending",
-    employerContributionTreatmentCode: template.employerContributionTreatmentCode ?? "phase8_2_pending",
+    taxTreatmentCode: template.taxTreatmentCode ?? resolveDefaultTaxTreatmentCode(template.payItemCode),
+    employerContributionTreatmentCode:
+      template.employerContributionTreatmentCode ?? resolveDefaultEmployerContributionTreatmentCode(template.payItemCode),
     agiMappingCode: template.agiMappingCode ?? resolveDefaultAgiMappingCode(template.payItemCode),
     ledgerAccountCode: template.ledgerAccountCode ?? resolveDefaultLedgerAccountCode(template.payItemCode),
     defaultDimensions: copy(template.defaultDimensions || {}),
@@ -5129,20 +5130,6 @@ function createPayItemTemplate(
   affectsVacationBasis,
   affectsPensionBasis
   ) {
-    const taxTreatmentCode =
-      payItemCode.startsWith("TAX_FREE_") ||
-      ["NET_DEDUCTION", "GARNISHMENT", "ADVANCE", "RECLAIM", "PENSION_PREMIUM", "FORA_PREMIUM", "EXTRA_PENSION_PREMIUM", "PENSION_SPECIAL_PAYROLL_TAX"].includes(
-        payItemCode
-      )
-        ? "non_taxable"
-        : "taxable";
-    const employerContributionTreatmentCode =
-      payItemCode.startsWith("TAX_FREE_") ||
-      ["NET_DEDUCTION", "GARNISHMENT", "ADVANCE", "RECLAIM", "PENSION_PREMIUM", "FORA_PREMIUM", "EXTRA_PENSION_PREMIUM", "PENSION_SPECIAL_PAYROLL_TAX"].includes(
-        payItemCode
-      )
-        ? "excluded"
-        : "included";
   return Object.freeze({
     payItemCode,
     payItemType,
@@ -5150,8 +5137,8 @@ function createPayItemTemplate(
     calculationBasis,
     unitCode,
     compensationBucket,
-    taxTreatmentCode,
-    employerContributionTreatmentCode,
+    taxTreatmentCode: resolveDefaultTaxTreatmentCode(payItemCode),
+    employerContributionTreatmentCode: resolveDefaultEmployerContributionTreatmentCode(payItemCode),
     agiMappingCode: resolveDefaultAgiMappingCode(payItemCode),
     ledgerAccountCode: resolveDefaultLedgerAccountCode(payItemCode),
     affectsVacationBasis,
@@ -5159,6 +5146,32 @@ function createPayItemTemplate(
     includedInNetPay: compensationBucket !== "reporting_only",
     reportingOnly: compensationBucket === "reporting_only"
   });
+}
+
+function resolveDefaultTaxTreatmentCode(payItemCode) {
+  const resolvedCode = normalizeCode(payItemCode, "pay_item_code_required");
+  if (
+    resolvedCode.startsWith("TAX_FREE_") ||
+    ["NET_DEDUCTION", "GARNISHMENT", "ADVANCE", "RECLAIM", "PENSION_PREMIUM", "FORA_PREMIUM", "EXTRA_PENSION_PREMIUM", "PENSION_SPECIAL_PAYROLL_TAX"].includes(
+      resolvedCode
+    )
+  ) {
+    return "non_taxable";
+  }
+  return "taxable";
+}
+
+function resolveDefaultEmployerContributionTreatmentCode(payItemCode) {
+  const resolvedCode = normalizeCode(payItemCode, "pay_item_code_required");
+  if (
+    resolvedCode.startsWith("TAX_FREE_") ||
+    ["NET_DEDUCTION", "GARNISHMENT", "ADVANCE", "RECLAIM", "PENSION_PREMIUM", "FORA_PREMIUM", "EXTRA_PENSION_PREMIUM", "PENSION_SPECIAL_PAYROLL_TAX"].includes(
+      resolvedCode
+    )
+  ) {
+    return "excluded";
+  }
+  return "included";
 }
 
 function resolveDefaultAgiMappingCode(payItemCode) {
