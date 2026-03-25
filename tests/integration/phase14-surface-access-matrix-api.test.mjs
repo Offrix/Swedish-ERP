@@ -196,6 +196,54 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         reasonCode: "access_matrix_review"
       }
     });
+    const classificationCase = await requestJson(baseUrl, `/v1/documents/${document.documentId}/classification-cases`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        lineInputs: [
+          {
+            description: "Access Matrix Benefit",
+            amount: 1000,
+            treatmentCode: "TAXABLE_BENEFIT",
+            person: {
+              employeeId: employee.employeeId,
+              employmentId: employment.employmentId,
+              personRelationCode: "employee"
+            },
+            factsJson: {
+              benefitCode: "HEALTH_INSURANCE",
+              insurancePremium: 1000,
+              taxablePremiumRatio: 0.6
+            }
+          }
+        ]
+      }
+    });
+    const importCase = await requestJson(baseUrl, "/v1/import-cases", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        caseReference: "IMP-ACCESS-001",
+        goodsOriginCountry: "CN",
+        customsReference: "IMP-CUST-ACCESS-001",
+        initialDocuments: [
+          {
+            documentId: document.documentId,
+            roleCode: "PRIMARY_SUPPLIER_DOCUMENT"
+          }
+        ],
+        initialComponents: [
+          {
+            componentType: "GOODS",
+            amount: 10000
+          }
+        ]
+      }
+    });
     const fieldWorkOrder = await requestJson(baseUrl, "/v1/field/work-orders", {
       method: "POST",
       token: adminToken,
@@ -264,11 +312,24 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         path: `/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}?companyId=${DEMO_IDS.companyId}`,
         error: "desktop_surface_role_forbidden"
       },
+      {
+        path: `/v1/documents/${document.documentId}/classification-cases?companyId=${DEMO_IDS.companyId}`,
+        error: "review_center_role_forbidden"
+      },
+      {
+        path: `/v1/documents/${document.documentId}/classification-cases/${classificationCase.classificationCaseId}?companyId=${DEMO_IDS.companyId}`,
+        error: "review_center_role_forbidden"
+      },
       { path: `/v1/banking/statement-events?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
       { path: `/v1/hus/decision-differences?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
       { path: `/v1/accounting-method/history?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
       { path: `/v1/fiscal-years/history?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
       { path: `/v1/tax-account/events?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
+      { path: `/v1/import-cases?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
+      {
+        path: `/v1/import-cases/${importCase.importCaseId}?companyId=${DEMO_IDS.companyId}`,
+        error: "finance_operations_role_forbidden"
+      },
       { path: `/v1/review-center/queues?companyId=${DEMO_IDS.companyId}`, error: "review_center_role_forbidden" },
       { path: `/v1/activity?companyId=${DEMO_IDS.companyId}`, error: "activity_feed_role_forbidden" },
       { path: `/v1/hr/employees?companyId=${DEMO_IDS.companyId}`, error: "hr_operations_role_forbidden" },

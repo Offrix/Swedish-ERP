@@ -12067,6 +12067,9 @@ function isFinanceOperationsReadPath(path) {
 }
 
 function isDesktopSurfaceReadPath(path) {
+  if (path.includes("/classification-cases")) {
+    return false;
+  }
   return (
     path.startsWith("/v1/documents") ||
     path.startsWith("/v1/inbox") ||

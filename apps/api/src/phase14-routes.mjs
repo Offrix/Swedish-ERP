@@ -2543,7 +2543,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && documentClassificationCasesMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -2552,6 +2552,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: documentClassificationCasesMatch.documentId,
       scopeCode: "document_classification"
     });
+    assertReviewCenterReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listClassificationCases({
         companyId,
@@ -2566,7 +2567,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && documentClassificationCaseMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -2575,6 +2576,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: documentClassificationCaseMatch.classificationCaseId,
       scopeCode: "document_classification"
     });
+    assertReviewCenterReadAccess({ principal });
     writeJson(
       res,
       200,
@@ -2707,7 +2709,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/import-cases") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -2716,6 +2718,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "import_case"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listImportCases({
         companyId,
@@ -2730,7 +2733,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && importCaseMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -2739,6 +2742,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: importCaseMatch.importCaseId,
       scopeCode: "import_case"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(
       res,
       200,
