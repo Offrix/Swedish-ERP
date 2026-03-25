@@ -8434,7 +8434,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8442,6 +8442,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project_workspace",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(
       res,
       200,
@@ -8461,7 +8462,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8469,6 +8470,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project_deviation",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listProjectDeviations({
         companyId,
@@ -8573,7 +8575,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8581,6 +8583,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project_budget_version",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listProjectBudgetVersions({
         companyId,
@@ -8624,7 +8627,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8632,6 +8635,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project_resource_allocation",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listProjectResourceAllocations({
         companyId,
@@ -8683,7 +8687,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8691,6 +8695,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project_payroll_cost_allocation",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listProjectPayrollCostAllocations({
         companyId,
@@ -8709,7 +8714,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8717,6 +8722,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project_cost_snapshot",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listProjectCostSnapshots({
         companyId,
@@ -8758,7 +8764,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8766,6 +8772,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project_wip_snapshot",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listProjectWipSnapshots({
         companyId,
@@ -8807,7 +8814,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -8815,6 +8822,7 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project_forecast_snapshot",
       scopeCode: "project"
     });
+    assertProjectWorkspaceReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listProjectForecastSnapshots({
         companyId,
@@ -11869,6 +11877,7 @@ const ANNUAL_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bure
 const FINANCE_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const DESKTOP_SURFACE_READ_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
 const PERSONALLIGGARE_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
+const PROJECT_WORKSPACE_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 
 function assertAnnualOperationsAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
@@ -11902,6 +11911,18 @@ function assertPersonalliggareControlReadAccess({ principal }) {
       403,
       "personalliggare_control_role_forbidden",
       "Current actor is not allowed to access personalliggare control, export or audit read models."
+    );
+  }
+}
+
+function assertProjectWorkspaceReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedReader = [...PROJECT_WORKSPACE_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedReader) {
+    throw createHttpError(
+      403,
+      "project_workspace_role_forbidden",
+      "Current actor is not allowed to access project workspace or project control read models."
     );
   }
 }

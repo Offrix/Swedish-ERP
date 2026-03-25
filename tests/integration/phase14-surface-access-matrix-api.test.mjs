@@ -51,6 +51,22 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         workplaceIdentifier: "ARB-ACCESS-001"
       }
     });
+    const project = await requestJson(baseUrl, "/v1/projects", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        projectCode: "P-ACCESS-001",
+        projectReferenceCode: "project-access-001",
+        displayName: "Access Matrix Project",
+        startsOn: "2026-03-25",
+        status: "active",
+        billingModelCode: "time_and_material",
+        revenueRecognitionModelCode: "billing_equals_revenue",
+        contractValueAmount: 125000
+      }
+    });
 
     for (const surface of [
       { path: `/v1/ledger/accounts?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
@@ -87,6 +103,38 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
       {
         path: `/v1/personalliggare/audit-events?companyId=${DEMO_IDS.companyId}&constructionSiteId=${personalliggareSite.constructionSiteId}`,
         error: "personalliggare_control_role_forbidden"
+      },
+      {
+        path: `/v1/projects/${project.projectId}/workspace?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/projects/${project.projectId}/deviations?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/projects/${project.projectId}/budgets?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/projects/${project.projectId}/resource-allocations?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/projects/${project.projectId}/payroll-cost-allocations?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/projects/${project.projectId}/cost-snapshots?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/projects/${project.projectId}/wip-snapshots?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/projects/${project.projectId}/forecast-snapshots?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
       },
       { path: `/v1/ops/feature-flags?companyId=${DEMO_IDS.companyId}`, error: "backoffice_role_forbidden" },
       { path: `/v1/migration/cockpit?companyId=${DEMO_IDS.companyId}`, error: "payroll_operations_role_forbidden" },
