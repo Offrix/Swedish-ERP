@@ -133,6 +133,8 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
         .companyUsers.find((candidate) => candidate.companyId === onboardingRun.companyId)?.companyUserId || null;
     assert.ok(crossCompanyApprovalTarget);
 
+    const approvalChainCountBeforeInvalidCreate = platform.snapshot().approvalChains.length;
+
     const crossCompanyApprovalChain = await requestJson(`${baseUrl}/v1/org/attest-chains`, {
       method: "POST",
       token: adminSession.sessionToken,
@@ -150,6 +152,7 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
       }
     });
     assert.equal(crossCompanyApprovalChain.error, "approval_chain_step_company_mismatch");
+    assert.equal(platform.snapshot().approvalChains.length, approvalChainCountBeforeInvalidCreate);
 
     const adminCreatesDelegation = await requestJson(
       `${baseUrl}/v1/org/delegations`,

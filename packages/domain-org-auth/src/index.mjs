@@ -368,16 +368,9 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       throw httpError(400, "approval_chain_steps_required", "Approval chains require at least one step.");
     }
 
-    const approvalChain = {
-      approvalChainId: crypto.randomUUID(),
-      companyId,
-      scopeCode: assertNonEmpty(scopeCode, "approval_chain_scope_required"),
-      objectType: assertNonEmpty(objectType, "approval_chain_object_type_required"),
-      status: "active",
-      createdAt: nowIso(),
-      updatedAt: nowIso()
-    };
-    state.approvalChains.set(approvalChain.approvalChainId, approvalChain);
+    const approvalChainId = crypto.randomUUID();
+    const resolvedScopeCode = assertNonEmpty(scopeCode, "approval_chain_scope_required");
+    const resolvedObjectType = assertNonEmpty(objectType, "approval_chain_object_type_required");
 
     const chainSteps = steps.map((step, index) => {
       if (!step.approverRoleCode && !step.approverCompanyUserId) {
@@ -398,7 +391,7 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       }
       return {
         approvalChainStepId: crypto.randomUUID(),
-        approvalChainId: approvalChain.approvalChainId,
+        approvalChainId,
         stepOrder: index + 1,
         approverRoleCode: step.approverRoleCode || null,
         approverCompanyUserId: step.approverCompanyUserId || null,
@@ -407,6 +400,17 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       };
     });
 
+    const approvalChain = {
+      approvalChainId,
+      companyId,
+      scopeCode: resolvedScopeCode,
+      objectType: resolvedObjectType,
+      status: "active",
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    };
+
+    state.approvalChains.set(approvalChain.approvalChainId, approvalChain);
     state.approvalChainSteps.set(approvalChain.approvalChainId, chainSteps);
     pushAudit({
       companyId,
