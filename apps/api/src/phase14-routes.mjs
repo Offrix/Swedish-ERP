@@ -1002,7 +1002,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/balances/types") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -1011,6 +1011,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "balances"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listBalanceTypes({
         companyId,
@@ -1060,7 +1061,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/balances/accounts") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -1069,6 +1070,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "balances"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listBalanceAccounts({
         companyId,
@@ -1116,7 +1118,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && balanceAccountMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -1125,6 +1127,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: balanceAccountMatch.balanceAccountId,
       scopeCode: "balances"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(
       res,
       200,
@@ -1140,7 +1143,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && balanceTransactionsMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -1149,6 +1152,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: balanceTransactionsMatch.balanceAccountId,
       scopeCode: "balances"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listBalanceTransactions({
         companyId,
@@ -1196,7 +1200,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && balanceSnapshotMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -1205,6 +1209,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: balanceSnapshotMatch.balanceAccountId,
       scopeCode: "balances"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(
       res,
       200,
@@ -1220,7 +1225,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/balances/carry-forwards") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -1229,6 +1234,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "balances"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, { items: platform.listBalanceCarryForwardRuns({ companyId }) });
     return true;
   }
@@ -1265,7 +1271,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/balances/expiry-runs") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -1274,6 +1280,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "balances"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, { items: platform.listBalanceExpiryRuns({ companyId }) });
     return true;
   }
@@ -1309,7 +1316,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/collective-agreements/families") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -1318,6 +1325,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "collective_agreements"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listAgreementFamilies({
         companyId,
@@ -1358,7 +1366,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/collective-agreements/versions") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -1367,6 +1375,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "collective_agreements"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listAgreementVersions({
         companyId,
@@ -1414,7 +1423,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && agreementVersionMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -1423,6 +1432,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: agreementVersionMatch.agreementVersionId,
       scopeCode: "collective_agreements"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, platform.getAgreementVersion({
       companyId,
       agreementVersionId: agreementVersionMatch.agreementVersionId
@@ -1433,7 +1443,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/collective-agreements/assignments") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -1442,6 +1452,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "collective_agreements"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listAgreementAssignments({
         companyId,
@@ -1487,7 +1498,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && agreementOverridesMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -1496,6 +1507,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: agreementOverridesMatch.agreementAssignmentId,
       scopeCode: "collective_agreements"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listAgreementOverrides({
         companyId,
@@ -1542,7 +1554,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const employmentId = requireText(url.searchParams.get("employmentId"), "employment_id_required", "employmentId is required.");
     const eventDate = requireText(url.searchParams.get("eventDate"), "event_date_required", "eventDate is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -1551,6 +1563,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: employmentId,
       scopeCode: "collective_agreements"
     });
+    assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, platform.getActiveAgreementForEmployment({
       companyId,
       employeeId,

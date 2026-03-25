@@ -4,7 +4,7 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
-import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
+import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
 
 test("Step 18 API exposes collective agreement families, versions, assignments and overrides", async () => {
   const platform = createApiPlatform({
@@ -38,6 +38,20 @@ test("Step 18 API exposes collective agreement families, versions, assignments a
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
     });
+    platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "agreements-field@example.test",
+      displayName: "Agreements Field",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "agreements-field@example.test"
+    });
 
     const family = await requestJson(baseUrl, "/v1/collective-agreements/families", {
       method: "POST",
@@ -51,6 +65,12 @@ test("Step 18 API exposes collective agreement families, versions, assignments a
       }
     });
     assert.equal(family.code, "ALMEGA_IT");
+
+    const fieldUserFamiliesForbidden = await requestJson(baseUrl, `/v1/collective-agreements/families?companyId=${DEMO_IDS.companyId}`, {
+      token: fieldUserToken,
+      expectedStatus: 403
+    });
+    assert.equal(fieldUserFamiliesForbidden.error, "payroll_operations_role_forbidden");
 
     const version = await requestJson(baseUrl, "/v1/collective-agreements/versions", {
       method: "POST",

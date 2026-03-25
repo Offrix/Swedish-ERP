@@ -4,7 +4,7 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
-import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
+import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
 
 test("Step 17 API creates balance types, accounts, transactions, carry-forward and expiry runs", async () => {
   const platform = createApiPlatform({
@@ -38,6 +38,20 @@ test("Step 17 API creates balance types, accounts, transactions, carry-forward a
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
     });
+    platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "balances-field@example.test",
+      displayName: "Balances Field",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "balances-field@example.test"
+    });
 
     const balanceType = await requestJson(baseUrl, "/v1/balances/types", {
       method: "POST",
@@ -54,6 +68,12 @@ test("Step 17 API creates balance types, accounts, transactions, carry-forward a
       }
     });
     assert.equal(balanceType.balanceTypeCode, "FLEX_MINUTES");
+
+    const fieldUserTypesForbidden = await requestJson(baseUrl, `/v1/balances/types?companyId=${DEMO_IDS.companyId}`, {
+      token: fieldUserToken,
+      expectedStatus: 403
+    });
+    assert.equal(fieldUserTypesForbidden.error, "payroll_operations_role_forbidden");
 
     const account = await requestJson(baseUrl, "/v1/balances/accounts", {
       method: "POST",
