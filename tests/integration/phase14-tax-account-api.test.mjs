@@ -4,7 +4,7 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
-import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
+import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
 
 test("Step 11 API imports tax-account events, creates reconciliation and approves offsets", async () => {
   const platform = createApiPlatform({
@@ -20,6 +20,20 @@ test("Step 11 API imports tax-account events, creates reconciliation and approve
       platform,
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
+    });
+    platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "tax-account-field@example.test",
+      displayName: "Tax Account Field",
+      roleCode: "field_user",
+      requiresMfa: false
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "tax-account-field@example.test"
     });
 
     const expectedLiability = platform.registerExpectedTaxLiability({
@@ -118,6 +132,12 @@ test("Step 11 API imports tax-account events, creates reconciliation and approve
       { token: adminToken }
     );
     assert.equal(eventsResponse.items.some((item) => item.eventTypeCode === "PAYMENT" && item.remainingOffsetAmount === 0), true);
+    const fieldUserEventsForbidden = await requestJson(
+      baseUrl,
+      `/v1/tax-account/events?companyId=${DEMO_IDS.companyId}`,
+      { token: fieldUserToken, expectedStatus: 403 }
+    );
+    assert.equal(fieldUserEventsForbidden.error, "finance_operations_role_forbidden");
 
     const reconciliationsResponse = await requestJson(
       baseUrl,

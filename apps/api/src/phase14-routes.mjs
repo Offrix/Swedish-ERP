@@ -854,7 +854,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/tax-account/events") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -863,6 +863,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "tax_account"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listTaxAccountEvents({
         companyId,
@@ -915,7 +916,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "GET" && path === "/v1/tax-account/reconciliations") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken,
       companyId,
@@ -924,6 +925,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       objectId: companyId,
       scopeCode: "tax_account"
     });
+    assertFinanceOperationsReadAccess({ principal });
     writeJson(res, 200, {
       items: platform.listTaxAccountReconciliations({ companyId }),
       openDifferenceCases: platform.listOpenTaxAccountDifferenceCases({ companyId }),
@@ -3204,6 +3206,7 @@ function assertNotificationMutationAccess({ platform, principal, companyId, noti
 const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
 const BACKOFFICE_READ_ROLE_CODES = new Set(["company_admin", "approver"]);
 const PAYROLL_OPERATIONS_ROLE_CODES = new Set(["company_admin", "payroll_admin", "approver"]);
+const FINANCE_OPERATIONS_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 
 function assertBackofficeReadAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
@@ -3218,6 +3221,14 @@ function assertPayrollOperationsReadAccess({ principal }) {
   const isAllowedReader = [...PAYROLL_OPERATIONS_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
   if (!isAllowedReader) {
     throw createHttpError(403, "payroll_operations_role_forbidden", "Current actor is not allowed to access payroll operations worklists.");
+  }
+}
+
+function assertFinanceOperationsReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedReader = [...FINANCE_OPERATIONS_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedReader) {
+    throw createHttpError(403, "finance_operations_role_forbidden", "Current actor is not allowed to access finance operations worklists.");
   }
 }
 
