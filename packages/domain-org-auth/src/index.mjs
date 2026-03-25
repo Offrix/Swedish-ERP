@@ -187,24 +187,11 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
     };
 
     state.companyUsers.set(companyUser.companyUserId, companyUser);
-    const enrollment = generateTotpEnrollment({
-      label: `${company.companyId}:${user.email}`
-    });
-    const factorId = crypto.randomUUID();
-    state.authFactors.set(factorId, {
-      factorId,
-      companyUserId: companyUser.companyUserId,
-      userId: user.userId,
-      factorType: "totp",
-      status: "active",
-      secret: enrollment.secret,
-      credentialId: null,
-      publicKey: null,
-      providerSubject: null,
-      deviceName: "Provisioned authenticator",
-      verifiedAt: now,
-      createdAt: now,
-      updatedAt: now
+    provisionDefaultAuthFactors({
+      company,
+      user,
+      companyUser,
+      now
     });
     pushAudit({
       companyId,
@@ -838,6 +825,12 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
       updatedAt: nowIso()
     };
     state.companyUsers.set(companyUser.companyUserId, companyUser);
+    provisionDefaultAuthFactors({
+      company,
+      user: adminUser,
+      companyUser,
+      now: nowIso()
+    });
 
     const run = {
       runId: crypto.randomUUID(),
@@ -1329,6 +1322,50 @@ export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = tru
 
   function listAvailableMethods(companyUserId) {
     return [...new Set([...state.authFactors.values()].filter((factor) => factor.companyUserId === companyUserId && factor.status === "active").map((factor) => factor.factorType))];
+  }
+
+  function provisionDefaultAuthFactors({ company, user, companyUser, now = nowIso() } = {}) {
+    const enrollment = generateTotpEnrollment({
+      label: `${company.companyId}:${user.email}`
+    });
+    const factorTimestamp = timestamp(now);
+    const totpFactorId = crypto.randomUUID();
+    state.authFactors.set(totpFactorId, {
+      factorId: totpFactorId,
+      companyUserId: companyUser.companyUserId,
+      userId: user.userId,
+      factorType: "totp",
+      status: "active",
+      secret: enrollment.secret,
+      credentialId: null,
+      publicKey: null,
+      providerSubject: null,
+      deviceName: "Provisioned authenticator",
+      verifiedAt: factorTimestamp,
+      createdAt: factorTimestamp,
+      updatedAt: factorTimestamp
+    });
+
+    if (!companyUser.requiresMfa) {
+      return;
+    }
+
+    const bankIdFactorId = crypto.randomUUID();
+    state.authFactors.set(bankIdFactorId, {
+      factorId: bankIdFactorId,
+      companyUserId: companyUser.companyUserId,
+      userId: user.userId,
+      factorType: "bankid",
+      status: "active",
+      secret: null,
+      credentialId: null,
+      publicKey: null,
+      providerSubject: `bankid:${company.companyId}:${companyUser.companyUserId}`,
+      deviceName: "Provisioned BankID",
+      verifiedAt: factorTimestamp,
+      createdAt: factorTimestamp,
+      updatedAt: factorTimestamp
+    });
   }
 
   function findActiveCompanyUser(companyId, email) {

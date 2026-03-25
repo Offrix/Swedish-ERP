@@ -274,6 +274,14 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
     assert.equal(completedOnboarding.status, "completed");
     assert.equal(completedOnboarding.checklist.every((step) => step.status === "completed"), true);
 
+    const onboardedAdminSession = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: onboardingRun.companyId,
+      email: "owner@example.test"
+    });
+    assert.ok(onboardedAdminSession);
+
     const snapshot = platform.snapshot();
     const createdCompany = snapshot.companies.find((company) => company.companyId === onboardingRun.companyId);
     assert.equal(createdCompany.status, "active");

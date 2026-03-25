@@ -67,6 +67,13 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
   assert.equal(completedProfile.status, "active");
   assert.equal(Boolean(completedProfile.onboardingCompletedAt), true);
 
+  const onboardingAdminToken = loginWithStrongAuthOnPlatform({
+    platform,
+    companyId: onboardingRun.companyId,
+    email: "owner@tenant-setup.test"
+  });
+  assert.ok(onboardingAdminToken);
+
   const adminToken = loginWithStrongAuthOnPlatform({
     platform,
     companyId: DEMO_IDS.companyId,
@@ -81,6 +88,21 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
     roleCode: "approver",
     requiresMfa: false
   });
+  const companyAdmin = platform.createCompanyUser({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    email: "finance-admin@example.test",
+    displayName: "Finance Admin",
+    roleCode: "company_admin",
+    requiresMfa: true
+  });
+  const companyAdminToken = loginWithStrongAuthOnPlatform({
+    platform,
+    companyId: DEMO_IDS.companyId,
+    email: "finance-admin@example.test"
+  });
+  assert.ok(companyAdmin.companyUserId);
+  assert.ok(companyAdminToken);
   platform.createObjectGrant({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
