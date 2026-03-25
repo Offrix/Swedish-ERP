@@ -11891,6 +11891,7 @@ const PROJECT_WORKSPACE_READ_ROLE_CODES = new Set(["company_admin", "approver", 
 const EGENKONTROLL_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const FIELD_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const PAYROLL_OPERATIONS_READ_ROLE_CODES = new Set(["company_admin", "payroll_admin", "approver"]);
+const HR_OPERATIONS_READ_ROLE_CODES = new Set(["company_admin", "payroll_admin", "approver", "bureau_user"]);
 
 function assertAnnualOperationsAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
@@ -11972,14 +11973,23 @@ function assertPayrollOperationsReadAccess({ principal }) {
   }
 }
 
+function assertHrOperationsReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedReader = [...HR_OPERATIONS_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedReader) {
+    throw createHttpError(403, "hr_operations_role_forbidden", "Current actor is not allowed to access HR operations read models.");
+  }
+}
+
 function assertReadSurfaceRoleAccess({ platform, req, url, path }) {
   if (req.method !== "GET") {
     return;
   }
+  const requiresHrOperationsAccess = isHrOperationsReadPath(path);
   const requiresPayrollOperationsAccess = isPayrollOperationsReadPath(path);
   const requiresFinanceOperationsAccess = isFinanceOperationsReadPath(path);
   const requiresDesktopSurfaceAccess = isDesktopSurfaceReadPath(path);
-  if (!requiresPayrollOperationsAccess && !requiresFinanceOperationsAccess && !requiresDesktopSurfaceAccess) {
+  if (!requiresHrOperationsAccess && !requiresPayrollOperationsAccess && !requiresFinanceOperationsAccess && !requiresDesktopSurfaceAccess) {
     return;
   }
   const companyId = url.searchParams.get("companyId");
@@ -11994,6 +12004,10 @@ function assertReadSurfaceRoleAccess({ platform, req, url, path }) {
     objectType: "company",
       scopeCode: "company"
   });
+  if (requiresHrOperationsAccess) {
+    assertHrOperationsReadAccess({ principal });
+    return;
+  }
   if (requiresPayrollOperationsAccess) {
     assertPayrollOperationsReadAccess({ principal });
     return;
@@ -12005,6 +12019,10 @@ function assertReadSurfaceRoleAccess({ platform, req, url, path }) {
   if (requiresDesktopSurfaceAccess) {
     assertDesktopSurfaceReadAccess({ principal });
   }
+}
+
+function isHrOperationsReadPath(path) {
+  return path.startsWith("/v1/hr") && !path.startsWith("/v1/hr/employee-portal");
 }
 
 function isPayrollOperationsReadPath(path) {

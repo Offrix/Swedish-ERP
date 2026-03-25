@@ -132,6 +132,8 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
       { path: `/v1/tax-account/events?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
       { path: `/v1/review-center/queues?companyId=${DEMO_IDS.companyId}`, error: "review_center_role_forbidden" },
       { path: `/v1/activity?companyId=${DEMO_IDS.companyId}`, error: "activity_feed_role_forbidden" },
+      { path: `/v1/hr/employees?companyId=${DEMO_IDS.companyId}`, error: "hr_operations_role_forbidden" },
+      { path: `/v1/hr/leave-entries?companyId=${DEMO_IDS.companyId}`, error: "hr_operations_role_forbidden" },
       { path: `/v1/payroll/pay-runs?companyId=${DEMO_IDS.companyId}`, error: "payroll_operations_role_forbidden" },
       { path: `/v1/payroll/agi-submissions?companyId=${DEMO_IDS.companyId}`, error: "payroll_operations_role_forbidden" },
       {
