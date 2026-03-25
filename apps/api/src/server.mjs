@@ -11862,6 +11862,7 @@ function assertPrincipalCanApproveLeaveEntry({ platform, principal, companyId, l
 
 const ANNUAL_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const FINANCE_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
+const DESKTOP_SURFACE_READ_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
 
 function assertAnnualOperationsAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
@@ -11879,11 +11880,21 @@ function assertFinanceOperationsAccess({ principal }) {
   }
 }
 
+function assertDesktopSurfaceReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedReader = [...DESKTOP_SURFACE_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedReader) {
+    throw createHttpError(403, "desktop_surface_role_forbidden", "Current actor is not allowed to access desktop-only read models.");
+  }
+}
+
 function assertReadSurfaceRoleAccess({ platform, req, url, path }) {
   if (req.method !== "GET") {
     return;
   }
-  if (!isFinanceOperationsReadPath(path)) {
+  const requiresFinanceOperationsAccess = isFinanceOperationsReadPath(path);
+  const requiresDesktopSurfaceAccess = isDesktopSurfaceReadPath(path);
+  if (!requiresFinanceOperationsAccess && !requiresDesktopSurfaceAccess) {
     return;
   }
   const companyId = url.searchParams.get("companyId");
@@ -11898,7 +11909,13 @@ function assertReadSurfaceRoleAccess({ platform, req, url, path }) {
     objectType: "company",
     scopeCode: "company"
   });
-  assertFinanceOperationsAccess({ principal });
+  if (requiresFinanceOperationsAccess) {
+    assertFinanceOperationsAccess({ principal });
+    return;
+  }
+  if (requiresDesktopSurfaceAccess) {
+    assertDesktopSurfaceReadAccess({ principal });
+  }
 }
 
 function isFinanceOperationsReadPath(path) {
@@ -11908,6 +11925,14 @@ function isFinanceOperationsReadPath(path) {
     path.startsWith("/v1/vat") ||
     path.startsWith("/v1/ar") ||
     path.startsWith("/v1/ap")
+  );
+}
+
+function isDesktopSurfaceReadPath(path) {
+  return (
+    path.startsWith("/v1/search") ||
+    path.startsWith("/v1/saved-views") ||
+    path.startsWith("/v1/dashboard")
   );
 }
 
