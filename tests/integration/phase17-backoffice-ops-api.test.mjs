@@ -6,7 +6,7 @@ import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/i
 import { stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
 
-test("Step 17 API exposes backoffice jobs, dead-letter triage, submission monitoring and incident creation", async () => {
+test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitoring and incident creation", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-26T00:30:00Z")
   });
@@ -109,6 +109,79 @@ test("Step 17 API exposes backoffice jobs, dead-letter triage, submission monito
       token: adminToken
     });
     assert.equal(replayDeadLetters.items.some((item) => item.deadLetterId === deadLetter.deadLetterId), true);
+
+    const overdueReview = platform.createReviewItem({
+      companyId: DEMO_IDS.companyId,
+      queueCode: "DOCUMENT_REVIEW",
+      reviewTypeCode: "DOCUMENT_AMBIGUITY",
+      sourceDomainCode: "DOCUMENTS",
+      sourceObjectType: "document",
+      sourceObjectId: "phase17-review-sla",
+      requiredDecisionType: "classification",
+      riskClass: "high",
+      title: "Phase 17 overdue review item",
+      summary: "SLA scan should create a backoffice work item and reopen it on recurring breach.",
+      slaDueAt: "2026-03-25T10:00:00Z",
+      actorId: DEMO_IDS.userId
+    });
+
+    const firstSlaScan = await requestJson(baseUrl, "/v1/backoffice/review-center/sla-scan", {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        asOf: "2026-03-26T00:30:00Z"
+      }
+    });
+    assert.equal(firstSlaScan.scan.totalEscalationCount, 1);
+    assert.equal(firstSlaScan.workItems.length, 1);
+    assert.equal(firstSlaScan.notifications.length, 1);
+    assert.equal(firstSlaScan.activityEntries.length, 1);
+    assert.equal(firstSlaScan.incidentSignals.length, 0);
+    assert.equal(firstSlaScan.scan.escalations[0].reviewItemId, overdueReview.reviewItemId);
+
+    const operationalWorkItems = await requestJson(baseUrl, `/v1/work-items?companyId=${DEMO_IDS.companyId}&sourceType=review_center_sla_breach`, {
+      token: adminToken
+    });
+    const slaWorkItem = operationalWorkItems.items.find((item) => item.sourceId === overdueReview.reviewItemId);
+    assert.equal(typeof slaWorkItem?.workItemId, "string");
+    assert.equal(slaWorkItem.status, "open");
+
+    const claimedSlaWorkItem = await requestJson(baseUrl, `/v1/work-items/${slaWorkItem.workItemId}/claim`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(claimedSlaWorkItem.status, "acknowledged");
+
+    const resolvedSlaWorkItem = await requestJson(baseUrl, `/v1/work-items/${slaWorkItem.workItemId}/resolve`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        resolutionCode: "phase17_sla_handled",
+        completionNote: "Initial SLA breach reviewed by backoffice."
+      }
+    });
+    assert.equal(resolvedSlaWorkItem.status, "resolved");
+
+    const recurringSlaScan = await requestJson(baseUrl, "/v1/backoffice/review-center/sla-scan", {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        asOf: "2026-03-26T09:00:00Z"
+      }
+    });
+    assert.equal(recurringSlaScan.scan.totalEscalationCount, 1);
+    assert.equal(recurringSlaScan.scan.escalations[0].escalationKind, "recurring_sla_breach");
+    assert.equal(recurringSlaScan.workItems.length, 1);
+    assert.equal(recurringSlaScan.workItems[0].workItemId, slaWorkItem.workItemId);
+    assert.equal(recurringSlaScan.workItems[0].status, "open");
+    assert.equal(recurringSlaScan.incidentSignals.length, 1);
+    assert.equal(recurringSlaScan.incidentSignals[0].signalType, "review_queue_sla_breach");
 
     const submission = await requestJson(baseUrl, "/v1/submissions", {
       method: "POST",

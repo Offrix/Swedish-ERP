@@ -236,6 +236,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/work-items",
               "/v1/work-items/:workItemId/claim",
               "/v1/work-items/:workItemId/resolve",
+              "/v1/backoffice/review-center/sla-scan",
               "/v1/close/workbench",
               "/v1/close/workbench/:checklistId",
               "/v1/close/checklists",
@@ -4535,15 +4536,40 @@ async function handleRequest({ req, res, platform, flags }) {
   }
 
   if (req.method === "GET" && path === "/v1/work-items") {
-    const bureauOrgId = requireText(
-      url.searchParams.get("bureauOrgId"),
-      "bureau_org_id_required",
-      "bureauOrgId query parameter is required."
-    );
+    const sessionToken = readSessionToken(req);
+    const bureauOrgId = url.searchParams.get("bureauOrgId");
+    const companyId = url.searchParams.get("companyId");
+    if (companyId) {
+      const principal = authorizeCompanyAccess({
+        platform,
+        sessionToken,
+        companyId,
+        permissionCode: "company.read",
+        objectType: "operational_work_item",
+        scopeCode: "backoffice"
+      });
+      assertDesktopSurfaceReadAccess({ principal });
+      writeJson(res, 200, {
+        items: platform.listOperationalWorkItems({
+          sessionToken,
+          companyId,
+          queueCode: url.searchParams.get("queueCode"),
+          ownerTeamId: url.searchParams.get("ownerTeamId"),
+          ownerCompanyUserId: url.searchParams.get("ownerCompanyUserId"),
+          status: url.searchParams.get("status"),
+          sourceType: url.searchParams.get("sourceType")
+        })
+      });
+      return;
+    }
     writeJson(res, 200, {
       items: platform.listWorkItems({
-        sessionToken: readSessionToken(req),
-        bureauOrgId,
+        sessionToken,
+        bureauOrgId: requireText(
+          bureauOrgId,
+          "bureau_org_id_required",
+          "bureauOrgId query parameter is required."
+        ),
         clientCompanyId: url.searchParams.get("clientCompanyId"),
         ownerCompanyUserId: url.searchParams.get("ownerCompanyUserId"),
         status: url.searchParams.get("status")
@@ -4555,6 +4581,31 @@ async function handleRequest({ req, res, platform, flags }) {
   const workItemClaimMatch = matchPath(path, "/v1/work-items/:workItemId/claim");
   if (workItemClaimMatch && req.method === "POST") {
     const body = await readJsonBody(req);
+    if (body.companyId) {
+      const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+      const sessionToken = readSessionToken(req, body);
+      const principal = authorizeCompanyAccess({
+        platform,
+        sessionToken,
+        companyId,
+        permissionCode: "company.manage",
+        objectType: "operational_work_item",
+        objectId: workItemClaimMatch.workItemId,
+        scopeCode: "backoffice"
+      });
+      assertDesktopSurfaceReadAccess({ principal });
+      writeJson(
+        res,
+        200,
+        platform.claimOperationalWorkItem({
+          sessionToken,
+          companyId,
+          workItemId: workItemClaimMatch.workItemId,
+          correlationId: body.correlationId || createCorrelationId()
+        })
+      );
+      return;
+    }
     writeJson(
       res,
       200,
@@ -4571,6 +4622,33 @@ async function handleRequest({ req, res, platform, flags }) {
   const workItemResolveMatch = matchPath(path, "/v1/work-items/:workItemId/resolve");
   if (workItemResolveMatch && req.method === "POST") {
     const body = await readJsonBody(req);
+    if (body.companyId) {
+      const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+      const sessionToken = readSessionToken(req, body);
+      const principal = authorizeCompanyAccess({
+        platform,
+        sessionToken,
+        companyId,
+        permissionCode: "company.manage",
+        objectType: "operational_work_item",
+        objectId: workItemResolveMatch.workItemId,
+        scopeCode: "backoffice"
+      });
+      assertDesktopSurfaceReadAccess({ principal });
+      writeJson(
+        res,
+        200,
+        platform.resolveOperationalWorkItem({
+          sessionToken,
+          companyId,
+          workItemId: workItemResolveMatch.workItemId,
+          resolutionCode: body.resolutionCode,
+          completionNote: body.completionNote || null,
+          correlationId: body.correlationId || createCorrelationId()
+        })
+      );
+      return;
+    }
     writeJson(
       res,
       200,

@@ -5,7 +5,9 @@ import {
   REVIEW_CENTER_RULEPACK_CODE,
   REVIEW_CENTER_RULEPACK_VERSION,
   REVIEW_DECISION_CODES,
+  REVIEW_ESCALATION_KINDS,
   REVIEW_ITEM_STATUSES,
+  REVIEW_QUEUE_PRIORITIES,
   REVIEW_QUEUE_STATUSES,
   REVIEW_REQUIRED_DECISION_TYPES,
   REVIEW_RISK_CLASSES
@@ -28,6 +30,8 @@ export function createReviewCenterEngine({ clock = () => new Date(), seedDemo = 
     reviewDecisionIdsByItem: new Map(),
     reviewAssignments: new Map(),
     reviewAssignmentIdsByItem: new Map(),
+    reviewEscalations: new Map(),
+    reviewEscalationIdsByItem: new Map(),
     reviewEvents: [],
     auditEvents: []
   };
@@ -38,10 +42,12 @@ export function createReviewCenterEngine({ clock = () => new Date(), seedDemo = 
 
   return {
     reviewQueueStatuses: REVIEW_QUEUE_STATUSES,
+    reviewQueuePriorities: REVIEW_QUEUE_PRIORITIES,
     reviewItemStatuses: REVIEW_ITEM_STATUSES,
     reviewDecisionCodes: REVIEW_DECISION_CODES,
     reviewRiskClasses: REVIEW_RISK_CLASSES,
     reviewRequiredDecisionTypes: REVIEW_REQUIRED_DECISION_TYPES,
+    reviewEscalationKinds: REVIEW_ESCALATION_KINDS,
     createReviewQueue,
     listReviewCenterQueues,
     getReviewCenterQueue,
@@ -54,6 +60,7 @@ export function createReviewCenterEngine({ clock = () => new Date(), seedDemo = 
     requestReviewMoreInput,
     decideReviewCenterItem,
     closeReviewCenterItem,
+    runReviewCenterSlaScan,
     listReviewCenterEvents,
     listReviewCenterAuditEvents,
     snapshotReviewCenter
@@ -65,8 +72,10 @@ export function createReviewCenterEngine({ clock = () => new Date(), seedDemo = 
     label,
     description = null,
     ownerTeamId = null,
+    priority = "medium",
     defaultRiskClass = "medium",
     defaultSlaHours = 24,
+    escalationPolicyCode = "STANDARD_QUEUE_ESCALATION",
     allowedSourceDomains = [],
     requiredDecisionTypes = ["generic_review"],
     actorId = "system"
@@ -85,8 +94,10 @@ export function createReviewCenterEngine({ clock = () => new Date(), seedDemo = 
       label: requireText(label, "review_queue_label_required"),
       description: normalizeOptionalText(description),
       ownerTeamId: normalizeOptionalText(ownerTeamId),
+      priority: assertAllowed(normalizeEnumValue(priority, "review_queue_priority_required"), REVIEW_QUEUE_PRIORITIES, "review_queue_priority_invalid"),
       defaultRiskClass: assertAllowed(normalizeEnumValue(defaultRiskClass, "review_queue_risk_class_required"), REVIEW_RISK_CLASSES, "review_queue_risk_class_invalid"),
       defaultSlaHours: normalizePositiveInteger(defaultSlaHours, "review_queue_default_sla_hours_invalid"),
+      escalationPolicyCode: normalizeCode(escalationPolicyCode, "review_queue_escalation_policy_required"),
       allowedSourceDomains: normalizeCodeList(allowedSourceDomains),
       requiredDecisionTypes: normalizeRequiredDecisionTypes(requiredDecisionTypes),
       createdByActorId: requireText(actorId, "actor_id_required")
@@ -214,6 +225,9 @@ export function createReviewCenterEngine({ clock = () => new Date(), seedDemo = 
       latestDecisionId: null,
       latestAssignmentId: null,
       escalationCount: 0,
+      slaBreachCount: 0,
+      lastSlaBreachAt: null,
+      lastEscalationId: null,
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: now,
       updatedAt: now,
@@ -543,6 +557,86 @@ export function createReviewCenterEngine({ clock = () => new Date(), seedDemo = 
     return presentItem(state, item, clock, { includeHistory: true });
   }
 
+  function runReviewCenterSlaScan({ companyId, asOf = null, actorId = "system" } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const scanAt = normalizeOptionalDateTime(asOf) || nowIso(clock);
+    const escalations = [];
+
+    for (const reviewItemId of state.reviewItemIdsByCompany.get(resolvedCompanyId) || []) {
+      const item = state.reviewItems.get(reviewItemId);
+      if (!item || !REVIEW_ACTIVE_ITEM_STATUSES.includes(item.status)) {
+        continue;
+      }
+      if (item.slaDueAt > scanAt) {
+        continue;
+      }
+      const queue = state.reviewQueues.get(item.reviewQueueId);
+      if (!queue || queue.status !== "active") {
+        continue;
+      }
+      if (!shouldCreateSlaEscalation(item, queue, scanAt)) {
+        continue;
+      }
+
+      const breachCount = Number(item.slaBreachCount || 0) + 1;
+      const recurringBreach = breachCount > 1;
+      const escalation = {
+        reviewEscalationId: crypto.randomUUID(),
+        companyId: resolvedCompanyId,
+        reviewItemId: item.reviewItemId,
+        reviewQueueId: item.reviewQueueId,
+        queueCode: item.queueCode,
+        escalationKind: recurringBreach ? "recurring_sla_breach" : "sla_breach",
+        escalationPolicyCode: queue.escalationPolicyCode,
+        breachCount,
+        recurringBreach,
+        sourceStatus: item.status,
+        sourceSlaDueAt: item.slaDueAt,
+        detectedAt: scanAt,
+        actorId: resolvedActorId
+      };
+      state.reviewEscalations.set(escalation.reviewEscalationId, escalation);
+      appendToIndex(state.reviewEscalationIdsByItem, item.reviewItemId, escalation.reviewEscalationId);
+
+      item.slaBreachCount = breachCount;
+      item.lastSlaBreachAt = scanAt;
+      item.lastEscalationId = escalation.reviewEscalationId;
+      item.updatedAt = scanAt;
+
+      pushReviewEvent(state, clock, {
+        companyId: item.companyId,
+        actorId: resolvedActorId,
+        eventType: recurringBreach ? "review_item.sla_breach_recurred" : "review_item.sla_breached",
+        reviewItemId: item.reviewItemId,
+        reviewQueueId: item.reviewQueueId,
+        payload: {
+          reviewEscalationId: escalation.reviewEscalationId,
+          breachCount,
+          escalationPolicyCode: queue.escalationPolicyCode
+        }
+      });
+      pushAudit(state, clock, {
+        companyId: item.companyId,
+        actorId: resolvedActorId,
+        action: recurringBreach ? "review_center.item_sla_breach_recurred" : "review_center.item_sla_breached",
+        entityType: "review_item",
+        entityId: item.reviewItemId,
+        explanation: recurringBreach
+          ? `Recorded recurring SLA breach ${breachCount} for review item ${item.reviewItemId}.`
+          : `Recorded SLA breach for review item ${item.reviewItemId}.`
+      });
+      escalations.push(presentEscalation(state, escalation, clock));
+    }
+
+    return {
+      asOf: scanAt,
+      totalEscalationCount: escalations.length,
+      queues: listReviewCenterQueues({ companyId: resolvedCompanyId }),
+      escalations
+    };
+  }
+
   function listReviewCenterEvents({ companyId, reviewItemId = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedReviewItemId = normalizeOptionalText(reviewItemId);
@@ -567,13 +661,14 @@ export function createReviewCenterEngine({ clock = () => new Date(), seedDemo = 
       reviewItems: [...state.reviewItems.values()].map(copy),
       reviewDecisions: [...state.reviewDecisions.values()].map(copy),
       reviewAssignments: [...state.reviewAssignments.values()].map(copy),
+      reviewEscalations: [...state.reviewEscalations.values()].map(copy),
       reviewEvents: state.reviewEvents.map(copy),
       auditEvents: state.auditEvents.map(copy)
     };
   }
 }
 
-function buildQueueRecord({ clock, companyId, queueCode, label, description, ownerTeamId, defaultRiskClass, defaultSlaHours, allowedSourceDomains, requiredDecisionTypes, createdByActorId }) {
+function buildQueueRecord({ clock, companyId, queueCode, label, description, ownerTeamId, priority, defaultRiskClass, defaultSlaHours, escalationPolicyCode, allowedSourceDomains, requiredDecisionTypes, createdByActorId }) {
   const now = nowIso(clock);
   return {
     reviewQueueId: crypto.randomUUID(),
@@ -582,6 +677,8 @@ function buildQueueRecord({ clock, companyId, queueCode, label, description, own
     label,
     description,
     ownerTeamId,
+    priority,
+    escalationPolicyCode,
     status: "active",
     defaultRiskClass,
     defaultSlaHours,
@@ -598,14 +695,30 @@ function presentQueue(state, queue, clock) {
     .map((reviewItemId) => state.reviewItems.get(reviewItemId))
     .filter(Boolean);
   const now = nowIso(clock);
+  const activeItems = items.filter((item) => REVIEW_ACTIVE_ITEM_STATUSES.includes(item.status));
+  const earliestActiveSlaDueAt = activeItems
+    .map((item) => item.slaDueAt)
+    .sort((left, right) => left.localeCompare(right))[0] || null;
+  const oldestActiveCreatedAt = activeItems
+    .map((item) => item.createdAt)
+    .sort((left, right) => left.localeCompare(right))[0] || null;
+  const blockedCount = items.filter((item) => item.status === "waiting_input").length;
+  const openCount = activeItems.length;
   return {
     ...copy(queue),
+    slaDueAt: earliestActiveSlaDueAt,
+    oldestOpenAgeMinutes: oldestActiveCreatedAt ? diffMinutes(oldestActiveCreatedAt, now) : 0,
+    openCount,
+    blockedCount,
     metrics: {
       openItemCount: items.filter((item) => item.status === "open").length,
       claimedItemCount: items.filter((item) => item.status === "claimed" || item.status === "in_review").length,
       waitingInputCount: items.filter((item) => item.status === "waiting_input").length,
       escalatedItemCount: items.filter((item) => item.status === "escalated").length,
-      overdueItemCount: items.filter((item) => REVIEW_ACTIVE_ITEM_STATUSES.includes(item.status) && item.slaDueAt < now).length
+      overdueItemCount: items.filter((item) => REVIEW_ACTIVE_ITEM_STATUSES.includes(item.status) && item.slaDueAt < now).length,
+      blockedCount,
+      oldestOpenAgeMinutes: oldestActiveCreatedAt ? diffMinutes(oldestActiveCreatedAt, now) : 0,
+      nextSlaDueAt: earliestActiveSlaDueAt
     }
   };
 }
@@ -625,6 +738,20 @@ function presentItem(state, item, clock, { includeHistory = false } = {}) {
     result.decisionHistory = (state.reviewDecisionIdsByItem.get(item.reviewItemId) || []).map((decisionId) => copy(state.reviewDecisions.get(decisionId))).filter(Boolean);
   }
   return result;
+}
+
+function presentEscalation(state, escalation) {
+  const item = state.reviewItems.get(escalation.reviewItemId) || null;
+  const queue = state.reviewQueues.get(escalation.reviewQueueId) || null;
+  return {
+    ...copy(escalation),
+    itemTitle: item?.title || null,
+    assignedUserId: item ? getLatestAssignment(state, item.reviewItemId)?.assignedUserId || null : null,
+    ownerTeamId: queue?.ownerTeamId || null,
+    priority: queue?.priority || null,
+    reviewItem: item ? presentItem(state, item, () => new Date(escalation.detectedAt)) : null,
+    reviewQueue: queue ? copy(queue) : null
+  };
 }
 
 function appendAssignment(state, clock, item, { assignedUserId = null, assignedTeamId = null, assignedByActorId, reasonCode }) {
@@ -686,13 +813,13 @@ function requireItem(state, companyId, reviewItemId) {
 
 function seedDemoState(state, clock) {
   const demoQueues = [
-    ["DOCUMENT_REVIEW", "Document review", "finance_ops", "high", 8, ["DOCUMENTS", "DOCUMENT_CLASSIFICATION", "AUTOMATION"], ["classification", "generic_review"]],
-    ["VAT_REVIEW", "VAT review", "finance_ops", "high", 12, ["VAT", "IMPORT_CASES"], ["vat_treatment", "generic_review"]],
-    ["PAYROLL_REVIEW", "Payroll review", "payroll_ops", "critical", 4, ["PAYROLL", "BENEFITS", "DOCUMENT_CLASSIFICATION", "AUTOMATION"], ["payroll_treatment", "generic_review"]],
-    ["TAX_ACCOUNT_REVIEW", "Tax account review", "finance_ops", "high", 24, ["TAX_ACCOUNT", "VAT", "PAYROLL", "HUS"], ["tax_reconciliation", "generic_review"]],
-    ["HUS_REVIEW", "HUS review", "finance_ops", "critical", 8, ["HUS", "AR"], ["hus_outcome", "generic_review"]]
+    ["DOCUMENT_REVIEW", "Document review", "finance_ops", "high", "DOCUMENT_ESCALATION", "high", 8, ["DOCUMENTS", "DOCUMENT_CLASSIFICATION", "AUTOMATION"], ["classification", "generic_review"]],
+    ["VAT_REVIEW", "VAT review", "finance_ops", "high", "VAT_ESCALATION", "high", 12, ["VAT", "IMPORT_CASES"], ["vat_treatment", "generic_review"]],
+    ["PAYROLL_REVIEW", "Payroll review", "payroll_ops", "critical", "PAYROLL_ESCALATION", "critical", 4, ["PAYROLL", "BENEFITS", "DOCUMENT_CLASSIFICATION", "AUTOMATION"], ["payroll_treatment", "generic_review"]],
+    ["TAX_ACCOUNT_REVIEW", "Tax account review", "finance_ops", "high", "TAX_ACCOUNT_ESCALATION", "high", 24, ["TAX_ACCOUNT", "VAT", "PAYROLL", "HUS"], ["tax_reconciliation", "generic_review"]],
+    ["HUS_REVIEW", "HUS review", "finance_ops", "critical", "HUS_ESCALATION", "critical", 8, ["HUS", "AR"], ["hus_outcome", "generic_review"]]
   ];
-  for (const [queueCode, label, ownerTeamId, defaultRiskClass, defaultSlaHours, allowedSourceDomains, requiredDecisionTypes] of demoQueues) {
+  for (const [queueCode, label, ownerTeamId, priority, escalationPolicyCode, defaultRiskClass, defaultSlaHours, allowedSourceDomains, requiredDecisionTypes] of demoQueues) {
     const queue = buildQueueRecord({
       clock,
       companyId: DEMO_COMPANY_ID,
@@ -700,6 +827,8 @@ function seedDemoState(state, clock) {
       label,
       description: null,
       ownerTeamId,
+      priority,
+      escalationPolicyCode,
       defaultRiskClass,
       defaultSlaHours,
       allowedSourceDomains,
@@ -880,6 +1009,17 @@ function addHours(isoValue, hours) {
   const date = new Date(isoValue);
   date.setUTCHours(date.getUTCHours() + hours);
   return date.toISOString();
+}
+
+function shouldCreateSlaEscalation(item, queue, scanAt) {
+  if (!item.lastSlaBreachAt) {
+    return true;
+  }
+  return addHours(item.lastSlaBreachAt, queue.defaultSlaHours) <= scanAt;
+}
+
+function diffMinutes(fromIso, toIso) {
+  return Math.max(0, Math.floor((Date.parse(toIso) - Date.parse(fromIso)) / 60000));
 }
 
 function copy(value) {

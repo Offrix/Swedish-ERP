@@ -50,6 +50,42 @@ export interface CoreWorkItem {
   readonly status: string;
 }
 
+export interface OperationalWorkItemStatusTransition {
+  readonly fromStatus: string | null;
+  readonly toStatus: string;
+  readonly actorId: string;
+  readonly reasonCode: string;
+  readonly changedAt: string;
+}
+
+export interface OperationalWorkItem {
+  readonly workItemId: string;
+  readonly companyId: string;
+  readonly queueCode: string;
+  readonly ownerTeamId: string | null;
+  readonly ownerCompanyUserId: string | null;
+  readonly sourceType: string;
+  readonly sourceId: string;
+  readonly title: string;
+  readonly summary: string | null;
+  readonly priority: "low" | "medium" | "high" | "critical";
+  readonly deadlineAt: string;
+  readonly blockerScope: string;
+  readonly status: string;
+  readonly escalationPolicyCode: string | null;
+  readonly claimedAt: string | null;
+  readonly claimedByCompanyUserId: string | null;
+  readonly resolvedAt: string | null;
+  readonly resolvedByCompanyUserId: string | null;
+  readonly resolutionCode: string | null;
+  readonly completionNote: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly metadataJson: Record<string, unknown>;
+  readonly statusHistory: readonly OperationalWorkItemStatusTransition[];
+}
+
 export interface CloseChecklistStep {
   readonly stepId: string;
   readonly stepCode: string;

@@ -131,3 +131,78 @@ test("Step 12 review center creates queues, deduplicates items and records final
   assert.equal(closed.decisionHistory.length, 2);
   assert.equal(engine.listReviewCenterEvents({ companyId, reviewItemId: firstItem.reviewItemId }).length >= 6, true);
 });
+
+test("Step 17 review center SLA scan records first and recurring breaches", () => {
+  const engine = createReviewCenterEngine({
+    clock: () => new Date("2026-03-26T00:30:00Z"),
+    seedDemo: false
+  });
+  const companyId = "company_review_sla_1";
+
+  const queue = engine.createReviewQueue({
+    companyId,
+    queueCode: "PAYROLL_REVIEW",
+    label: "Payroll review",
+    ownerTeamId: "payroll_ops",
+    priority: "critical",
+    defaultSlaHours: 4,
+    escalationPolicyCode: "PAYROLL_SLA_ESCALATION",
+    allowedSourceDomains: ["PAYROLL"],
+    requiredDecisionTypes: ["generic_review"],
+    actorId: "ops_admin"
+  });
+
+  const item = engine.createReviewItem({
+    companyId,
+    queueCode: queue.queueCode,
+    reviewTypeCode: "PAYROLL_VARIANCE",
+    sourceDomainCode: "PAYROLL",
+    sourceObjectType: "pay_run",
+    sourceObjectId: "payrun_2026_03",
+    requiredDecisionType: "generic_review",
+    title: "Payroll variance requires review",
+    summary: "Variance exceeded threshold and breached the first SLA window.",
+    slaDueAt: "2026-03-25T20:00:00Z",
+    actorId: "system"
+  });
+
+  const firstScan = engine.runReviewCenterSlaScan({
+    companyId,
+    asOf: "2026-03-26T00:30:00Z",
+    actorId: "ops_admin"
+  });
+  assert.equal(firstScan.totalEscalationCount, 1);
+  assert.equal(firstScan.escalations[0].escalationKind, "sla_breach");
+  assert.equal(firstScan.escalations[0].priority, "critical");
+  assert.equal(firstScan.escalations[0].escalationPolicyCode, "PAYROLL_SLA_ESCALATION");
+  assert.equal(firstScan.queues[0].slaDueAt, item.slaDueAt);
+  assert.equal(firstScan.queues[0].openCount, 1);
+  assert.equal(firstScan.queues[0].blockedCount, 0);
+
+  const tooSoonScan = engine.runReviewCenterSlaScan({
+    companyId,
+    asOf: "2026-03-26T02:00:00Z",
+    actorId: "ops_admin"
+  });
+  assert.equal(tooSoonScan.totalEscalationCount, 0);
+
+  const recurringScan = engine.runReviewCenterSlaScan({
+    companyId,
+    asOf: "2026-03-26T05:00:00Z",
+    actorId: "ops_admin"
+  });
+  assert.equal(recurringScan.totalEscalationCount, 1);
+  assert.equal(recurringScan.escalations[0].escalationKind, "recurring_sla_breach");
+  assert.equal(recurringScan.escalations[0].breachCount, 2);
+  assert.equal(recurringScan.escalations[0].reviewItemId, item.reviewItemId);
+
+  const refreshed = engine.getReviewCenterItem({
+    companyId,
+    reviewItemId: item.reviewItemId
+  });
+  assert.equal(refreshed.slaBreachCount, 2);
+  assert.equal(refreshed.lastEscalationId, recurringScan.escalations[0].reviewEscalationId);
+
+  const snapshot = engine.snapshotReviewCenter();
+  assert.equal(snapshot.reviewEscalations.length, 2);
+});

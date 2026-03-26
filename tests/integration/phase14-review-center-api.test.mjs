@@ -137,3 +137,96 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
     await stopServer(server);
   }
 });
+
+test("Step 17 API exposes backoffice SLA scan for review-center queues", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-26T00:30:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    await requestJson(baseUrl, `/v1/org/companies/${DEMO_IDS.companyId}/users`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        email: "sla-field@example.test",
+        displayName: "SLA Field",
+        roleCode: "field_user"
+      }
+    });
+    const fieldUserToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "sla-field@example.test"
+    });
+
+    const overdueReview = platform.createReviewItem({
+      companyId: DEMO_IDS.companyId,
+      queueCode: "DOCUMENT_REVIEW",
+      reviewTypeCode: "DOCUMENT_AMBIGUITY",
+      sourceDomainCode: "DOCUMENTS",
+      sourceObjectType: "document",
+      sourceObjectId: "doc_sla_1",
+      requiredDecisionType: "classification",
+      riskClass: "high",
+      title: "Document SLA breach",
+      summary: "Backoffice SLA scan should escalate this item.",
+      slaDueAt: "2026-03-25T10:00:00Z",
+      actorId: DEMO_IDS.userId
+    });
+
+    const fieldUserDenied = await requestJson(baseUrl, "/v1/backoffice/review-center/sla-scan", {
+      method: "POST",
+      token: fieldUserToken,
+      expectedStatus: 403,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(fieldUserDenied.error, "missing_permission");
+
+    const firstScan = await requestJson(baseUrl, "/v1/backoffice/review-center/sla-scan", {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        asOf: "2026-03-26T00:30:00Z"
+      }
+    });
+    assert.equal(firstScan.scan.totalEscalationCount, 1);
+    assert.equal(firstScan.workItems.length, 1);
+    assert.equal(firstScan.notifications.length, 1);
+    assert.equal(firstScan.activityEntries.length, 1);
+    assert.equal(firstScan.incidentSignals.length, 0);
+    assert.equal(firstScan.scan.escalations[0].reviewItemId, overdueReview.reviewItemId);
+    assert.equal(firstScan.scan.escalations[0].escalationKind, "sla_breach");
+    assert.equal(firstScan.workItems[0].sourceId, overdueReview.reviewItemId);
+
+    const recurringScan = await requestJson(baseUrl, "/v1/backoffice/review-center/sla-scan", {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        asOf: "2026-03-26T09:00:00Z"
+      }
+    });
+    assert.equal(recurringScan.scan.totalEscalationCount, 1);
+    assert.equal(recurringScan.scan.escalations[0].escalationKind, "recurring_sla_breach");
+    assert.equal(recurringScan.incidentSignals.length, 1);
+    assert.equal(recurringScan.incidentSignals[0].signalType, "review_queue_sla_breach");
+    assert.equal(recurringScan.notifications[0].recipientType, "team");
+  } finally {
+    await stopServer(server);
+  }
+});

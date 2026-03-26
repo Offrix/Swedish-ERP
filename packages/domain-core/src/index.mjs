@@ -60,6 +60,7 @@ export const PORTFOLIO_STATUS_CODES = Object.freeze(["active", "waiting_for_clie
 export const CLIENT_REQUEST_STATUSES = Object.freeze(["draft", "sent", "acknowledged", "in_progress", "delivered", "accepted", "closed", "overdue", "escalated", "reopened"]);
 export const APPROVAL_PACKAGE_STATUSES = Object.freeze(["prepared", "sent_for_approval", "viewed", "approved", "rejected", "revised", "superseded"]);
 export const WORK_ITEM_STATUSES = Object.freeze(["open", "acknowledged", "waiting_external", "snoozed", "resolved", "escalated", "blocked", "closed"]);
+export const OPERATIONAL_WORK_ITEM_PRIORITIES = Object.freeze(["low", "medium", "high", "critical"]);
 export const COMMENT_VISIBILITY_CODES = Object.freeze(["internal", "external_shared", "restricted_internal"]);
 export const MASS_ACTION_TYPES = Object.freeze(["send_reminder", "reassign_owner"]);
 export {
@@ -125,6 +126,7 @@ export function createCoreEngine({
     requests: new Map(),
     approvals: new Map(),
     workItems: new Map(),
+    operationalWorkItems: new Map(),
     comments: new Map(),
     closeChecklists: new Map(),
     closeBlockers: new Map(),
@@ -217,6 +219,26 @@ export function createCoreEngine({
         objectType: "bureau_portfolio",
         objectId: bureauOrgId,
         scopeCode: "bureau_portfolio"
+      }
+    });
+    if (!decision.allowed) {
+      throw error(403, decision.reasonCode, decision.explanation);
+    }
+    return principal;
+  }
+
+  function authorizeCompany(sessionToken, companyId, action) {
+    if (!orgAuthPlatform?.checkAuthorization) {
+      throw error(500, "org_auth_platform_required", "Org/auth platform is required.");
+    }
+    const { principal, decision } = orgAuthPlatform.checkAuthorization({
+      sessionToken,
+      action,
+      resource: {
+        companyId,
+        objectType: "operational_work_item",
+        objectId: companyId,
+        scopeCode: "backoffice"
       }
     });
     if (!decision.allowed) {
@@ -322,6 +344,7 @@ export function createCoreEngine({
     clientRequestStatuses: CLIENT_REQUEST_STATUSES,
     approvalPackageStatuses: APPROVAL_PACKAGE_STATUSES,
       workItemStatuses: WORK_ITEM_STATUSES,
+      operationalWorkItemPriorities: OPERATIONAL_WORK_ITEM_PRIORITIES,
       commentVisibilityCodes: COMMENT_VISIBILITY_CODES,
       massActionTypes: MASS_ACTION_TYPES,
       closeChecklistStatuses: CLOSE_CHECKLIST_STATUSES,
@@ -375,6 +398,10 @@ export function createCoreEngine({
     listWorkItems,
     claimWorkItem,
     resolveWorkItem,
+      listOperationalWorkItems,
+      claimOperationalWorkItem,
+      resolveOperationalWorkItem,
+      upsertOperationalWorkItem,
       createComment,
       listComments,
       instantiateCloseChecklist: closeModule.instantiateCloseChecklist,
@@ -419,6 +446,7 @@ export function createCoreEngine({
       listRuntimeAuditCorrelations: publicResilienceModule.listRuntimeAuditCorrelations,
       getRuntimeAuditCorrelation: publicResilienceModule.getRuntimeAuditCorrelation,
       listRuntimeIncidentSignals: publicResilienceModule.listRuntimeIncidentSignals,
+      recordRuntimeIncidentSignal: publicResilienceModule.recordRuntimeIncidentSignal,
       acknowledgeRuntimeIncidentSignal: publicResilienceModule.acknowledgeRuntimeIncidentSignal,
       openRuntimeIncident: publicResilienceModule.openRuntimeIncident,
       listRuntimeIncidents: publicResilienceModule.listRuntimeIncidents,
@@ -912,6 +940,113 @@ export function createCoreEngine({
     return clone(workItem);
   }
 
+  function listOperationalWorkItems({
+    sessionToken,
+    companyId,
+    queueCode = null,
+    ownerTeamId = null,
+    ownerCompanyUserId = null,
+    status = null,
+    sourceType = null
+  } = {}) {
+    authorizeCompany(sessionToken, companyId, "company.read");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const statusFilter = norm(status);
+    const queueFilter = norm(queueCode);
+    const ownerTeamFilter = norm(ownerTeamId);
+    const ownerFilter = norm(ownerCompanyUserId);
+    const sourceFilter = norm(sourceType);
+    return [...state.operationalWorkItems.values()]
+      .filter((workItem) => workItem.companyId === resolvedCompanyId)
+      .filter((workItem) => !queueFilter || workItem.queueCode === queueFilter)
+      .filter((workItem) => !ownerTeamFilter || workItem.ownerTeamId === ownerTeamFilter)
+      .filter((workItem) => !ownerFilter || workItem.ownerCompanyUserId === ownerFilter)
+      .filter((workItem) => !statusFilter || workItem.status === statusFilter)
+      .filter((workItem) => !sourceFilter || workItem.sourceType === sourceFilter)
+      .sort((left, right) => left.deadlineAt.localeCompare(right.deadlineAt) || left.createdAt.localeCompare(right.createdAt))
+      .map(clone);
+  }
+
+  function claimOperationalWorkItem({
+    sessionToken,
+    companyId,
+    workItemId,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorizeCompany(sessionToken, companyId, "company.manage");
+    const workItem = requireOperationalWorkItem(companyId, workItemId);
+    if (["resolved", "closed"].includes(workItem.status)) {
+      throw error(409, "operational_work_item_not_claimable", "Resolved operational work items cannot be claimed.");
+    }
+    const previousStatus = workItem.status;
+    const claimedAt = now();
+    workItem.ownerCompanyUserId = principal.companyUserId;
+    workItem.claimedAt = claimedAt;
+    workItem.claimedByCompanyUserId = principal.companyUserId;
+    if (workItem.status !== "acknowledged") {
+      workItem.status = "acknowledged";
+      workItem.statusHistory.push({
+        fromStatus: previousStatus,
+        toStatus: workItem.status,
+        actorId: principal.userId,
+        reasonCode: "claimed",
+        changedAt: claimedAt
+      });
+    }
+    workItem.updatedAt = claimedAt;
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "core.operational_work_item.claimed",
+      entityType: "operational_work_item",
+      entityId: workItem.workItemId,
+      explanation: `Claimed operational work item ${workItem.workItemId}.`
+    });
+    return clone(workItem);
+  }
+
+  function resolveOperationalWorkItem({
+    sessionToken,
+    companyId,
+    workItemId,
+    resolutionCode,
+    completionNote = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorizeCompany(sessionToken, companyId, "company.manage");
+    const workItem = requireOperationalWorkItem(companyId, workItemId);
+    if (workItem.status === "closed") {
+      throw error(409, "operational_work_item_already_closed", "Closed operational work items cannot be resolved again.");
+    }
+    if (workItem.status !== "resolved") {
+      const resolvedAt = now();
+      workItem.statusHistory.push({
+        fromStatus: workItem.status,
+        toStatus: "resolved",
+        actorId: principal.userId,
+        reasonCode: text(resolutionCode, "operational_work_item_resolution_code_required"),
+        changedAt: resolvedAt
+      });
+      workItem.status = "resolved";
+      workItem.resolutionCode = text(resolutionCode, "operational_work_item_resolution_code_required");
+      workItem.completionNote = norm(completionNote);
+      workItem.resolvedAt = resolvedAt;
+      workItem.resolvedByCompanyUserId = principal.companyUserId;
+      workItem.updatedAt = resolvedAt;
+      audit({
+        companyId,
+        actorId: principal.userId,
+        correlationId,
+        action: "core.operational_work_item.resolved",
+        entityType: "operational_work_item",
+        entityId: workItem.workItemId,
+        explanation: `Resolved operational work item ${workItem.workItemId} with ${workItem.resolutionCode}.`
+      });
+    }
+    return clone(workItem);
+  }
+
   function createComment({ sessionToken, bureauOrgId, objectType, objectId, visibility = "internal", body, mentionCompanyUserIds = [], createAssignment = false, correlationId = crypto.randomUUID() } = {}) {
     const principal = authorize(sessionToken, bureauOrgId, "company.read");
     const portfolioId = resolvePortfolioId(objectType, objectId);
@@ -1018,6 +1153,119 @@ export function createCoreEngine({
     return clone(workItem);
   }
 
+  function upsertOperationalWorkItem({
+    companyId,
+    queueCode,
+    ownerTeamId = null,
+    ownerCompanyUserId = null,
+    sourceType,
+    sourceId,
+    title,
+    summary = null,
+    priority = "medium",
+    deadlineAt,
+    blockerScope = "none",
+    status = "open",
+    escalationPolicyCode = null,
+    metadata = {},
+    actorId = "system",
+    correlationId = crypto.randomUUID(),
+    reasonCode = "operational_escalation"
+  } = {}) {
+    const statusProvided = arguments.length > 0
+      && arguments[0] != null
+      && Object.prototype.hasOwnProperty.call(arguments[0], "status");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const resolvedSourceType = text(sourceType, "operational_work_item_source_type_required");
+    const resolvedSourceId = text(sourceId, "operational_work_item_source_id_required");
+    const resolvedSourceKey = `${resolvedCompanyId}:${resolvedSourceType}:${resolvedSourceId}`;
+    const resolvedDeadlineAt = timestamp(deadlineAt, "operational_work_item_deadline_invalid");
+    const resolvedPriority = assertAllowed(norm(priority), OPERATIONAL_WORK_ITEM_PRIORITIES, "operational_work_item_priority_invalid");
+    const resolvedStatus = text(status, "operational_work_item_status_required");
+    const existing = [...state.operationalWorkItems.values()].find((workItem) => workItem.sourceKey === resolvedSourceKey);
+    if (existing) {
+      const previousStatus = existing.status;
+      existing.queueCode = text(queueCode, "operational_work_item_queue_code_required");
+      existing.ownerTeamId = norm(ownerTeamId);
+      existing.ownerCompanyUserId = norm(ownerCompanyUserId);
+      existing.title = text(title, "operational_work_item_title_required");
+      existing.summary = norm(summary);
+      existing.priority = resolvedPriority;
+      existing.deadlineAt = resolvedDeadlineAt;
+      existing.blockerScope = text(blockerScope, "operational_work_item_blocker_scope_required");
+      existing.escalationPolicyCode = norm(escalationPolicyCode);
+      existing.metadataJson = clone(metadata || {});
+      const updatedAt = now();
+      const shouldReopenClosedItem = !statusProvided && ["resolved", "closed"].includes(existing.status);
+      if (statusProvided || shouldReopenClosedItem) {
+        const nextStatus = shouldReopenClosedItem ? "open" : resolvedStatus;
+        if (previousStatus !== nextStatus) {
+          existing.statusHistory.push({
+            fromStatus: previousStatus,
+            toStatus: nextStatus,
+            actorId: text(actorId, "actor_id_required"),
+            reasonCode,
+            changedAt: updatedAt
+          });
+          existing.status = nextStatus;
+        }
+        if (!["resolved", "closed"].includes(existing.status)) {
+          existing.resolvedAt = null;
+          existing.resolvedByCompanyUserId = null;
+          existing.resolutionCode = null;
+          existing.completionNote = null;
+          if (existing.status === "open") {
+            existing.claimedAt = null;
+            existing.claimedByCompanyUserId = null;
+            existing.ownerCompanyUserId = norm(ownerCompanyUserId);
+          }
+        }
+      }
+      existing.updatedAt = updatedAt;
+      return clone(existing);
+    }
+    const createdAt = now();
+    const workItem = {
+      workItemId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      queueCode: text(queueCode, "operational_work_item_queue_code_required"),
+      ownerTeamId: norm(ownerTeamId),
+      ownerCompanyUserId: norm(ownerCompanyUserId),
+      sourceType: resolvedSourceType,
+      sourceId: resolvedSourceId,
+      sourceKey: resolvedSourceKey,
+      title: text(title, "operational_work_item_title_required"),
+      summary: norm(summary),
+      priority: resolvedPriority,
+      deadlineAt: resolvedDeadlineAt,
+      blockerScope: text(blockerScope, "operational_work_item_blocker_scope_required"),
+      status: resolvedStatus,
+      escalationPolicyCode: norm(escalationPolicyCode),
+      claimedAt: null,
+      claimedByCompanyUserId: null,
+      resolvedAt: null,
+      resolvedByCompanyUserId: null,
+      resolutionCode: null,
+      completionNote: null,
+      createdByActorId: text(actorId, "actor_id_required"),
+      createdAt,
+      updatedAt: createdAt,
+      metadataJson: clone(metadata || {}),
+      statusHistory: [{ fromStatus: null, toStatus: resolvedStatus, actorId: text(actorId, "actor_id_required"), reasonCode, changedAt: createdAt }]
+    };
+    state.operationalWorkItems.set(workItem.workItemId, workItem);
+    audit({
+      companyId: resolvedCompanyId,
+      actorId: text(actorId, "actor_id_required"),
+      correlationId,
+      action: "core.operational_work_item.created",
+      entityType: "operational_work_item",
+      entityId: workItem.workItemId,
+      explanation: `Created operational work item ${workItem.workItemId} for ${resolvedSourceType}:${resolvedSourceId}.`
+    });
+    return clone(workItem);
+  }
+
   function transitionWorkItem(sourceType, sourceId, nextStatus, actorId, reasonCode) {
     const workItem = [...state.workItems.values()].find((candidate) => candidate.sourceKey === `${sourceType}:${sourceId}`);
     if (!workItem || workItem.status === nextStatus) {
@@ -1033,6 +1281,14 @@ export function createCoreEngine({
     const workItem = state.workItems.get(text(workItemId, "work_item_id_required"));
     if (!workItem || workItem.bureauOrgId !== bureauOrgId) {
       throw error(404, "work_item_not_found", "Work item was not found.");
+    }
+    return workItem;
+  }
+
+  function requireOperationalWorkItem(companyId, workItemId) {
+    const workItem = state.operationalWorkItems.get(text(workItemId, "operational_work_item_id_required"));
+    if (!workItem || workItem.companyId !== text(companyId, "company_id_required")) {
+      throw error(404, "operational_work_item_not_found", "Operational work item was not found.");
     }
     return workItem;
   }
@@ -1184,6 +1440,7 @@ export function createCoreEngine({
       requests: [...state.requests.values()],
         approvals: [...state.approvals.values()],
         workItems: [...state.workItems.values()],
+        operationalWorkItems: [...state.operationalWorkItems.values()],
         comments: [...state.comments.values()],
         closeChecklists: [...state.closeChecklists.values()],
         closeBlockers: [...state.closeBlockers.values()],
@@ -1268,6 +1525,13 @@ function uniq(values, code) {
     throw error(400, code, "At least one value is required.");
   }
   return [...new Set(values.map((value) => text(value, code)))];
+}
+
+function assertAllowed(value, allowedValues, code) {
+  if (!allowedValues.includes(value)) {
+    throw error(400, code, `${code} is invalid.`);
+  }
+  return value;
 }
 
 function addBusinessDays(value, amount) {

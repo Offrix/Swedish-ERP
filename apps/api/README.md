@@ -65,6 +65,7 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/activity?companyId=...`
 - `GET /v1/activity/object/:objectType/:objectId?companyId=...`
 - `GET /v1/work-items?bureauOrgId=...`
+- `GET /v1/work-items?companyId=...`
 - `POST /v1/work-items/:workItemId/claim`
 - `POST /v1/work-items/:workItemId/resolve`
 - `POST /v1/ledger/chart/install`
@@ -523,6 +524,7 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/backoffice/dead-letters?companyId=...`
 - `POST /v1/backoffice/dead-letters/:deadLetterId/triage`
 - `GET /v1/backoffice/submissions/monitor?companyId=...`
+- `POST /v1/backoffice/review-center/sla-scan`
 - `POST /v1/backoffice/incidents`
 - `GET /v1/backoffice/incidents?companyId=...`
 - `GET /v1/backoffice/incidents/:incidentId/events?companyId=...`

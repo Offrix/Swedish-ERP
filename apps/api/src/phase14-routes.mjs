@@ -2014,6 +2014,143 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "POST" && path === "/v1/backoffice/review-center/sla-scan") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "review_queue",
+      objectId: companyId,
+      scopeCode: "backoffice"
+    });
+    assertBackofficeReadAccess({ principal });
+
+    const scan = platform.runReviewCenterSlaScan({
+      companyId,
+      asOf: body.asOf || null,
+      actorId: principal.userId
+    });
+
+    const workItems = [];
+    const notifications = [];
+    const activityEntries = [];
+    const incidentSignals = [];
+
+    for (const escalation of scan.escalations) {
+      const workItem = platform.upsertOperationalWorkItem({
+        companyId,
+        queueCode: escalation.queueCode,
+        ownerTeamId: escalation.ownerTeamId,
+        sourceType: "review_center_sla_breach",
+        sourceId: escalation.reviewItemId,
+        title: `SLA breach: ${escalation.itemTitle || escalation.reviewItemId}`,
+        summary: escalation.recurringBreach
+          ? `Recurring SLA breach in ${escalation.queueCode} for review item ${escalation.reviewItemId}.`
+          : `SLA breach in ${escalation.queueCode} for review item ${escalation.reviewItemId}.`,
+        priority: escalation.priority || "high",
+        deadlineAt: escalation.sourceSlaDueAt,
+        blockerScope: "sla_breach",
+        escalationPolicyCode: escalation.escalationPolicyCode,
+        actorId: principal.userId,
+        metadata: {
+          reviewEscalationId: escalation.reviewEscalationId,
+          reviewItemId: escalation.reviewItemId,
+          reviewQueueId: escalation.reviewQueueId,
+          breachCount: escalation.breachCount,
+          recurringBreach: escalation.recurringBreach
+        }
+      });
+      workItems.push(workItem);
+
+      const notificationTarget = resolveReviewSlaNotificationTarget({
+        escalation,
+        principal
+      });
+      const notification = platform.createNotification({
+        companyId,
+        recipientType: notificationTarget.recipientType,
+        recipientId: notificationTarget.recipientId,
+        categoryCode: "review_sla_breach",
+        priorityCode: escalation.priority || "high",
+        sourceDomainCode: "REVIEW_CENTER",
+        sourceObjectType: "review_item",
+        sourceObjectId: escalation.reviewItemId,
+        title: escalation.recurringBreach
+          ? `Recurring SLA breach in ${escalation.queueCode}`
+          : `SLA breach in ${escalation.queueCode}`,
+        body: escalation.recurringBreach
+          ? `Review item ${escalation.itemTitle || escalation.reviewItemId} has breached SLA repeatedly and needs intervention.`
+          : `Review item ${escalation.itemTitle || escalation.reviewItemId} has breached SLA and needs follow-up.`,
+        deepLink: `/review-center/items/${escalation.reviewItemId}`,
+        actorId: principal.userId
+      });
+      notifications.push(notification);
+
+      const activityEntry = platform.projectActivityEntry({
+        companyId,
+        objectType: "review_item",
+        objectId: escalation.reviewItemId,
+        activityType: escalation.recurringBreach ? "review_sla_breach_recurring" : "review_sla_breach",
+        actorType: "system",
+        actorSnapshot: {
+          actorId: principal.userId,
+          actorLabel: "Backoffice SLA scan"
+        },
+        summary: escalation.recurringBreach
+          ? `Recurring SLA breach recorded for ${escalation.itemTitle || escalation.reviewItemId}.`
+          : `SLA breach recorded for ${escalation.itemTitle || escalation.reviewItemId}.`,
+        occurredAt: scan.asOf,
+        sourceEventId: escalation.reviewEscalationId,
+        visibilityScope: "company",
+        relatedObjects: [
+          {
+            relatedObjectType: "review_queue",
+            relatedObjectId: escalation.reviewQueueId,
+            relationCode: "belongs_to_queue"
+          },
+          {
+            relatedObjectType: "operational_work_item",
+            relatedObjectId: workItem.workItemId,
+            relationCode: "follow_up_work_item"
+          }
+        ],
+        actorId: principal.userId
+      });
+      activityEntries.push(activityEntry);
+
+      if (escalation.recurringBreach) {
+        incidentSignals.push(platform.recordRuntimeIncidentSignal({
+          sessionToken,
+          companyId,
+          signalType: "review_queue_sla_breach",
+          severity: mapQueuePriorityToIncidentSeverity(escalation.priority),
+          summary: `Recurring SLA breach in ${escalation.queueCode}.`,
+          sourceObjectType: "review_item",
+          sourceObjectId: escalation.reviewItemId,
+          metadata: {
+            reviewEscalationId: escalation.reviewEscalationId,
+            reviewQueueId: escalation.reviewQueueId,
+            escalationPolicyCode: escalation.escalationPolicyCode,
+            breachCount: escalation.breachCount
+          }
+        }));
+      }
+    }
+
+    writeJson(res, 200, {
+      scan,
+      workItems,
+      notifications,
+      activityEntries,
+      incidentSignals
+    });
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/backoffice/incidents") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
@@ -3868,6 +4005,35 @@ const BACKOFFICE_READ_ROLE_CODES = new Set(["company_admin", "approver"]);
 const PAYROLL_OPERATIONS_ROLE_CODES = new Set(["company_admin", "payroll_admin", "approver"]);
 const FINANCE_OPERATIONS_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
 const ACTIVITY_FEED_FULL_READ_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
+
+function resolveReviewSlaNotificationTarget({ escalation, principal }) {
+  if (escalation.ownerTeamId) {
+    return {
+      recipientType: "team",
+      recipientId: escalation.ownerTeamId
+    };
+  }
+  if (escalation.assignedUserId) {
+    return {
+      recipientType: "user",
+      recipientId: escalation.assignedUserId
+    };
+  }
+  return {
+    recipientType: "user",
+    recipientId: principal.companyUserId
+  };
+}
+
+function mapQueuePriorityToIncidentSeverity(priority) {
+  if (priority === "critical") {
+    return "critical";
+  }
+  if (priority === "high") {
+    return "high";
+  }
+  return "medium";
+}
 
 function assertBackofficeReadAccess({ principal }) {
   const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));

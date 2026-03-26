@@ -1,4 +1,5 @@
 export type ReviewQueueStatus = "active" | "disabled";
+export type ReviewQueuePriority = "low" | "medium" | "high" | "critical";
 export type ReviewItemStatus =
   | "open"
   | "claimed"
@@ -10,6 +11,7 @@ export type ReviewItemStatus =
   | "closed";
 export type ReviewDecisionCode = "approve" | "reject" | "escalate";
 export type ReviewRiskClass = "low" | "medium" | "high" | "critical";
+export type ReviewEscalationKind = "sla_breach" | "recurring_sla_breach";
 export type ReviewRequiredDecisionType =
   | "classification"
   | "vat_treatment"
@@ -25,6 +27,8 @@ export interface ReviewQueue {
   readonly label: string;
   readonly description: string | null;
   readonly ownerTeamId: string | null;
+  readonly priority: ReviewQueuePriority;
+  readonly escalationPolicyCode: string;
   readonly status: ReviewQueueStatus;
   readonly defaultRiskClass: ReviewRiskClass;
   readonly defaultSlaHours: number;
@@ -92,6 +96,9 @@ export interface ReviewItem {
   readonly latestDecisionId: string | null;
   readonly latestAssignmentId: string | null;
   readonly escalationCount: number;
+  readonly slaBreachCount: number;
+  readonly lastSlaBreachAt: string | null;
+  readonly lastEscalationId: string | null;
   readonly createdByActorId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -99,4 +106,20 @@ export interface ReviewItem {
   readonly closedAt: string | null;
   readonly closedByActorId: string | null;
   readonly metadataJson: Record<string, unknown>;
+}
+
+export interface ReviewEscalation {
+  readonly reviewEscalationId: string;
+  readonly companyId: string;
+  readonly reviewItemId: string;
+  readonly reviewQueueId: string;
+  readonly queueCode: string;
+  readonly escalationKind: ReviewEscalationKind;
+  readonly escalationPolicyCode: string;
+  readonly breachCount: number;
+  readonly recurringBreach: boolean;
+  readonly sourceStatus: ReviewItemStatus;
+  readonly sourceSlaDueAt: string;
+  readonly detectedAt: string;
+  readonly actorId: string;
 }

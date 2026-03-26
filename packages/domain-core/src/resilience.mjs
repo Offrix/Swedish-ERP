@@ -14,6 +14,7 @@ export const INCIDENT_SIGNAL_TYPES = Object.freeze([
   "async_job_dead_letter",
   "async_job_replay_planned",
   "async_job_replay_executed",
+  "review_queue_sla_breach",
   "restore_drill_failed",
   "chaos_scenario_failed",
   "emergency_disable_activated"
@@ -162,6 +163,7 @@ export function createResilienceModule({
     getRuntimeControlPlaneSummary,
     listRuntimeAuditCorrelations,
     getRuntimeAuditCorrelation,
+    recordRuntimeIncidentSignal,
     listRuntimeIncidentSignals,
     acknowledgeRuntimeIncidentSignal,
     openRuntimeIncident,
@@ -736,6 +738,31 @@ export function createResilienceModule({
       .filter((signal) => (resolvedSignalType ? signal.signalType === resolvedSignalType : true))
       .filter((signal) => (resolvedSignalState ? signal.state === resolvedSignalState : true))
       .map(clone);
+  }
+
+  function recordRuntimeIncidentSignal({
+    sessionToken,
+    companyId,
+    signalType,
+    severity = "medium",
+    summary,
+    sourceObjectType,
+    sourceObjectId,
+    metadata = {},
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    return recordIncidentSignalInternal({
+      companyId: text(companyId, "company_id_required"),
+      signalType,
+      severity,
+      summary,
+      correlationId,
+      sourceObjectType: text(sourceObjectType, "runtime_incident_signal_source_object_type_required"),
+      sourceObjectId: text(sourceObjectId, "runtime_incident_signal_source_object_id_required"),
+      actorId: principal.userId,
+      metadata
+    });
   }
 
   function acknowledgeRuntimeIncidentSignal({
