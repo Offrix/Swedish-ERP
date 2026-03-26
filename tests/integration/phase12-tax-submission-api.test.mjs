@@ -252,6 +252,153 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
   }
 });
 
+test("Phase 12.2 API opens submission corrections with preserved receipt evidence", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-22T17:20:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+    const annualPackage = prepareAnnualPackage(platform);
+
+    const taxPackage = await requestJson(`${baseUrl}/v1/annual-reporting/packages/${annualPackage.packageId}/tax-declarations`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        versionId: annualPackage.currentVersion.versionId
+      }
+    });
+
+    const originalSubmission = await requestJson(`${baseUrl}/v1/submissions`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        submissionType: "income_tax_return",
+        sourceObjectType: "tax_declaration_package",
+        sourceObjectId: taxPackage.taxDeclarationPackageId,
+        sourceObjectVersion: "api-tax-package:v1",
+        providerKey: "skatteverket",
+        recipientId: "skatteverket:income-tax",
+        payloadVersion: "phase12.2",
+        payload: {
+          exportCode: "ink2_support_json",
+          sourceObjectVersion: "api-tax-package:v1",
+          checksum: "api-tax-package-checksum-v1"
+        },
+        idempotencyKey: "phase12-api-correction-original"
+      }
+    });
+
+    await requestJson(`${baseUrl}/v1/submissions/${originalSubmission.submissionId}/sign`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    await requestJson(`${baseUrl}/v1/submissions/${originalSubmission.submissionId}/submit`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        simulatedTransportOutcome: "technical_ack"
+      }
+    });
+    await runWorkerBatch({
+      platform,
+      logger: () => {},
+      workerId: "phase12-api-correction-transport"
+    });
+    await requestJson(`${baseUrl}/v1/submissions/${originalSubmission.submissionId}/receipts`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        receiptType: "business_ack",
+        rawReference: "phase12-api-correction-business-ack"
+      }
+    });
+    await requestJson(`${baseUrl}/v1/submissions/${originalSubmission.submissionId}/receipts`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        receiptType: "final_ack",
+        rawReference: "phase12-api-correction-final-ack"
+      }
+    });
+
+    const correction = await requestJson(`${baseUrl}/v1/submissions/${originalSubmission.submissionId}/corrections`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "period_reopened",
+        sourceObjectVersion: "api-tax-package:v2",
+        payloadVersion: "phase12.2-correction",
+        payload: {
+          exportCode: "ink2_support_json",
+          sourceObjectVersion: "api-tax-package:v2",
+          checksum: "api-tax-package-checksum-v2"
+        },
+        idempotencyKey: "phase12-api-correction-v2"
+      }
+    });
+
+    assert.equal(correction.previousSubmission.status, "superseded");
+    assert.equal(correction.submission.correctionOfSubmissionId, originalSubmission.submissionId);
+    assert.equal(correction.submission.correctionChainId, originalSubmission.submissionId);
+    assert.equal(correction.submission.sourceObjectVersion, "api-tax-package:v2");
+    assert.equal(correction.correctionLink.reasonCode, "period_reopened");
+
+    const repeated = await requestJson(`${baseUrl}/v1/submissions/${originalSubmission.submissionId}/corrections`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "period_reopened",
+        sourceObjectVersion: "api-tax-package:v2",
+        payloadVersion: "phase12.2-correction",
+        payload: {
+          exportCode: "ink2_support_json",
+          sourceObjectVersion: "api-tax-package:v2",
+          checksum: "api-tax-package-checksum-v2"
+        },
+        idempotencyKey: "phase12-api-correction-v2"
+      }
+    });
+    assert.equal(repeated.idempotentReplay, true);
+    assert.equal(repeated.submission.submissionId, correction.submission.submissionId);
+
+    const correctionEvidence = await requestJson(
+      `${baseUrl}/v1/submissions/${correction.submission.submissionId}/evidence-pack?companyId=${DEMO_IDS.companyId}`,
+      {
+        token: adminToken
+      }
+    );
+    assert.equal(correctionEvidence.correctionLinks.length, 1);
+    assert.equal(correctionEvidence.preservedPriorReceiptRefs.length, 3);
+  } finally {
+    await stopServer(server);
+  }
+});
+
 function prepareAnnualPackage(platform) {
   platform.installLedgerCatalog({
     companyId: DEMO_IDS.companyId,

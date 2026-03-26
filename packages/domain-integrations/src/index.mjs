@@ -41,6 +41,9 @@ export function createIntegrationEngine({
     submissionIdsByReuseKey: new Map(),
     receipts: new Map(),
     receiptIdsBySubmission: new Map(),
+    correctionLinks: new Map(),
+    correctionLinkIdsByOriginalSubmission: new Map(),
+    correctionLinkIdsByCorrectingSubmission: new Map(),
     queueItems: new Map(),
     queueItemIdsByCompany: new Map(),
     queueItemIdsBySubmission: new Map(),
@@ -107,6 +110,9 @@ export function createIntegrationEngine({
     async requestSubmissionReplay(input) {
       return requestSubmissionReplay({ state, clock, getCorePlatform }, input);
     },
+    openSubmissionCorrection(input) {
+      return openSubmissionCorrection({ state, clock }, input);
+    },
     executeSubmissionReceiptCollection(input) {
       return executeSubmissionReceiptCollection({ state, clock }, input);
     },
@@ -129,6 +135,7 @@ export function createIntegrationEngine({
       return clone({
         submissions: [...state.submissions.values()].map((submission) => enrichSubmission(state, submission)),
         receipts: [...state.receipts.values()],
+        correctionLinks: [...state.correctionLinks.values()],
         actionQueueItems: [...state.queueItems.values()],
         publicApiCompatibilityBaselines: [...state.publicApiCompatibilityBaselines.values()],
         publicApiClients: [...state.publicApiClients.values()],
@@ -330,6 +337,11 @@ function prepareAuthoritySubmission({ state, clock }, input = {}) {
     periodId: normalizeOptionalText(input.periodId),
     sourceObjectType,
     sourceObjectId,
+    sourceObjectVersion: resolveSourceObjectVersion({
+      explicitSourceObjectVersion: input.sourceObjectVersion,
+      payload,
+      payloadVersion
+    }),
     evidencePackId: normalizeOptionalText(input.evidencePackId),
     payloadVersion,
     attemptNo: Number(input.attemptNo || 1),
@@ -416,7 +428,7 @@ function getSubmissionEvidencePack({ state }, { companyId, submissionId } = {}) 
     submissionType: submission.submissionType,
     sourceObjectType: submission.sourceObjectType,
     sourceObjectId: submission.sourceObjectId,
-    sourceObjectVersion: submission.payloadVersion,
+    sourceObjectVersion: submission.sourceObjectVersion,
     payloadHash: submission.payloadHash,
     payloadSchemaCode: submission.payloadVersion,
     correlationId: submission.correlationId,
@@ -430,21 +442,12 @@ function getSubmissionEvidencePack({ state }, { companyId, submissionId } = {}) 
         payloadVersion: submission.payloadVersion
       }
     ],
-    receiptRefs: receipts.map((receipt) => ({
-      receiptId: receipt.receiptId,
-      receiptType: receipt.receiptType,
-      providerStatus: receipt.providerStatus,
-      rawReference: receipt.rawReference,
-      rawPayloadHash: hashObject({
-        receiptType: receipt.receiptType,
-        providerStatus: receipt.providerStatus,
-        rawReference: receipt.rawReference,
-        messageText: receipt.messageText,
-        receivedAt: receipt.receivedAt
-      }),
-      receivedAt: receipt.receivedAt,
-      isFinal: receipt.isFinal
-    })),
+    correctionLinks: getCorrectionLinksForSubmission(state, submission.submissionId).map(clone),
+    receiptRefs: receipts.map((receipt) => buildReceiptRef(receipt)),
+    preservedPriorReceiptRefs:
+      submission.correctionOfSubmissionId && state.submissions.get(submission.correctionOfSubmissionId)
+        ? getSubmissionReceipts(state, submission.correctionOfSubmissionId).map((receipt) => buildReceiptRef(receipt))
+        : [],
     operatorActions: queueItems.map((queueItem) => ({
       queueItemId: queueItem.queueItemId,
       actionType: queueItem.actionType,
@@ -460,6 +463,9 @@ function getSubmissionEvidencePack({ state }, { companyId, submissionId } = {}) 
         rootSubmissionId: submission.rootSubmissionId,
         previousSubmissionId: submission.previousSubmissionId,
         correctionOfSubmissionId: submission.correctionOfSubmissionId,
+        correctionChainId: submission.correctionChainId,
+        supersededBySubmissionId: submission.supersededBySubmissionId || null,
+        sourceObjectVersion: submission.sourceObjectVersion,
         transportJobId: submission.transportJobId,
         createdByActorId: submission.createdByActorId,
         signedByActorId: submission.signedByActorId,
@@ -635,6 +641,141 @@ async function requestSubmissionReplay(
     ),
     replayQueued: false,
     replayTarget: targetJobType
+  };
+}
+
+function openSubmissionCorrection(
+  { state, clock },
+  {
+    companyId,
+    submissionId,
+    actorId,
+    reasonCode,
+    sourceObjectType = null,
+    sourceObjectId = null,
+    sourceObjectVersion = null,
+    payload = null,
+    payloadVersion = null,
+    providerKey = null,
+    recipientId = null,
+    signedState = null,
+    signatoryRoleRequired = null,
+    submissionFamilyCode = null,
+    evidencePackId = null,
+    priority = null,
+    retryClass = null,
+    idempotencyKey = null,
+    correlationId = null
+  } = {}
+) {
+  const previous = requireSubmission(state, companyId, submissionId);
+  const resolvedReasonCode = requireText(reasonCode, "submission_correction_reason_code_required");
+  const resolvedPayload = payload == null ? clone(previous.payloadJson) : clone(payload);
+  const resolvedSourceObjectType = requireText(sourceObjectType || previous.sourceObjectType, "submission_source_object_type_required");
+  const resolvedSourceObjectId = requireText(sourceObjectId || previous.sourceObjectId, "submission_source_object_id_required");
+  const resolvedPayloadVersion = requireText(payloadVersion || previous.payloadVersion, "payload_version_required");
+  const resolvedSourceObjectVersion = resolveSourceObjectVersion({
+    explicitSourceObjectVersion: sourceObjectVersion,
+    payload: resolvedPayload,
+    payloadVersion: resolvedPayloadVersion
+  });
+  const resolvedPayloadHash = hashObject(resolvedPayload);
+  const resolvedIdempotencyKey =
+    normalizeOptionalText(idempotencyKey) ||
+    hashObject({
+      originalSubmissionId: previous.submissionId,
+      reasonCode: resolvedReasonCode,
+      sourceObjectType: resolvedSourceObjectType,
+      sourceObjectId: resolvedSourceObjectId,
+      sourceObjectVersion: resolvedSourceObjectVersion,
+      payloadHash: resolvedPayloadHash
+    });
+
+  const existingCorrection = findExistingCorrectionSubmission(state, previous.submissionId, {
+    idempotencyKey: resolvedIdempotencyKey,
+    payloadHash: resolvedPayloadHash
+  });
+  if (existingCorrection) {
+    return {
+      previousSubmission: enrichSubmission(state, previous),
+      submission: enrichSubmission(state, existingCorrection),
+      correctionLink: clone(findCorrectionLink(state, previous.submissionId, existingCorrection.submissionId)),
+      idempotentReplay: true
+    };
+  }
+
+  if (["ready", "signed", "superseded"].includes(previous.status)) {
+    throw createError(
+      409,
+      "submission_correction_not_allowed",
+      "Correction requires a previously dispatched submission that has not already been superseded."
+    );
+  }
+  if (
+    resolvedSourceObjectType === previous.sourceObjectType &&
+    resolvedSourceObjectId === previous.sourceObjectId &&
+    resolvedSourceObjectVersion === previous.sourceObjectVersion &&
+    resolvedPayloadHash === previous.payloadHash
+  ) {
+    throw createError(
+      409,
+      "submission_correction_requires_new_version",
+      "Correction requires a new source-object version or a materially different payload."
+    );
+  }
+
+  const timestamp = nowIso(clock);
+  const correctionChainId = previous.correctionChainId || previous.submissionId;
+  const correction = prepareAuthoritySubmission(
+    { state, clock },
+    {
+      companyId: previous.companyId,
+      submissionType: previous.submissionType,
+      periodId: previous.periodId,
+      sourceObjectType: resolvedSourceObjectType,
+      sourceObjectId: resolvedSourceObjectId,
+      sourceObjectVersion: resolvedSourceObjectVersion,
+      payloadVersion: resolvedPayloadVersion,
+      providerKey: providerKey || previous.providerKey,
+      recipientId: recipientId || previous.recipientId,
+      payload: resolvedPayload,
+      signedState: signedState || (previous.signedState === "not_required" ? "not_required" : "pending"),
+      signatoryRoleRequired: signatoryRoleRequired ?? previous.signatoryRoleRequired,
+      submissionFamilyCode: submissionFamilyCode ?? previous.submissionFamilyCode,
+      evidencePackId: evidencePackId ?? resolvedPayload.evidencePackId ?? previous.evidencePackId,
+      previousSubmissionId: previous.submissionId,
+      supersedesSubmissionId: previous.submissionId,
+      correctionOfSubmissionId: previous.submissionId,
+      correctionChainId,
+      priority: priority || previous.priority,
+      retryClass: retryClass || previous.retryClass,
+      actorId: actorId || "system",
+      idempotencyKey: resolvedIdempotencyKey,
+      correlationId: normalizeOptionalText(correlationId) || previous.correlationId
+    }
+  );
+
+  previous.status = "superseded";
+  previous.supersededBySubmissionId = correction.submissionId;
+  previous.updatedAt = timestamp;
+  autoResolveQueueItems(state, previous.submissionId, "correction_spawned", previous.updatedAt);
+
+  const correctionLink =
+    findCorrectionLink(state, previous.submissionId, correction.submissionId) ||
+    createCorrectionLink(state, {
+      originalSubmissionId: previous.submissionId,
+      correctingSubmissionId: correction.submissionId,
+      correctionChainId,
+      reasonCode: resolvedReasonCode,
+      actorId,
+      clock
+    });
+
+  return {
+    previousSubmission: enrichSubmission(state, previous),
+    submission: correction,
+    correctionLink: clone(correctionLink),
+    idempotentReplay: false
   };
 }
 
@@ -843,6 +984,7 @@ function retryAuthoritySubmission({ state, clock }, { companyId, submissionId, a
       periodId: previous.periodId,
       sourceObjectType: previous.sourceObjectType,
       sourceObjectId: previous.sourceObjectId,
+      sourceObjectVersion: previous.sourceObjectVersion,
       payloadVersion: previous.payloadVersion,
       providerKey: previous.providerKey,
       recipientId: previous.recipientId,
@@ -891,6 +1033,7 @@ function resolveSubmissionQueueItem(
 function enrichSubmission(state, submission) {
   return clone({
     ...submission,
+    correctionLinks: getCorrectionLinksForSubmission(state, submission.submissionId).map(clone),
     receipts: getSubmissionReceipts(state, submission.submissionId).map(clone),
     actionQueueItems: getSubmissionQueueItems(state, submission.submissionId).map(clone)
   });
@@ -990,6 +1133,16 @@ function getSubmissionQueueItems(state, submissionId) {
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
+function getCorrectionLinksForSubmission(state, submissionId) {
+  return [
+    ...(state.correctionLinkIdsByOriginalSubmission.get(submissionId) || []),
+    ...(state.correctionLinkIdsByCorrectingSubmission.get(submissionId) || [])
+  ]
+    .map((correctionLinkId) => state.correctionLinks.get(correctionLinkId))
+    .filter(Boolean)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
 function hasSubmissionTransportReceipt(state, submissionId) {
   return (state.receiptIdsBySubmission.get(submissionId) || [])
     .map((receiptId) => state.receipts.get(receiptId))
@@ -1020,6 +1173,59 @@ function resolveQueuedTransportJob(getCorePlatform, jobId) {
   };
 }
 
+function buildReceiptRef(receipt) {
+  return {
+    receiptId: receipt.receiptId,
+    receiptType: receipt.receiptType,
+    providerStatus: receipt.providerStatus,
+    rawReference: receipt.rawReference,
+    rawPayloadHash: hashObject({
+      receiptType: receipt.receiptType,
+      providerStatus: receipt.providerStatus,
+      rawReference: receipt.rawReference,
+      messageText: receipt.messageText,
+      receivedAt: receipt.receivedAt
+    }),
+    receivedAt: receipt.receivedAt,
+    isFinal: receipt.isFinal
+  };
+}
+
+function createCorrectionLink(
+  state,
+  { originalSubmissionId, correctingSubmissionId, correctionChainId, reasonCode, actorId = "system", clock }
+) {
+  const correctionLink = {
+    correctionLinkId: crypto.randomUUID(),
+    originalSubmissionId,
+    correctingSubmissionId,
+    correctionChainId,
+    reasonCode,
+    createdByActorId: requireText(actorId || "system", "actor_id_required"),
+    createdAt: nowIso(clock)
+  };
+  state.correctionLinks.set(correctionLink.correctionLinkId, correctionLink);
+  appendToIndex(state.correctionLinkIdsByOriginalSubmission, originalSubmissionId, correctionLink.correctionLinkId);
+  appendToIndex(state.correctionLinkIdsByCorrectingSubmission, correctingSubmissionId, correctionLink.correctionLinkId);
+  return correctionLink;
+}
+
+function findCorrectionLink(state, originalSubmissionId, correctingSubmissionId) {
+  return (state.correctionLinkIdsByOriginalSubmission.get(originalSubmissionId) || [])
+    .map((correctionLinkId) => state.correctionLinks.get(correctionLinkId))
+    .filter(Boolean)
+    .find((correctionLink) => correctionLink.correctingSubmissionId === correctingSubmissionId);
+}
+
+function findExistingCorrectionSubmission(state, originalSubmissionId, { idempotencyKey, payloadHash }) {
+  return (state.correctionLinkIdsByOriginalSubmission.get(originalSubmissionId) || [])
+    .map((correctionLinkId) => state.correctionLinks.get(correctionLinkId))
+    .filter(Boolean)
+    .map((correctionLink) => state.submissions.get(correctionLink.correctingSubmissionId))
+    .filter(Boolean)
+    .find((submission) => submission.idempotencyKey === idempotencyKey && submission.payloadHash === payloadHash);
+}
+
 function ownerQueueForSubmission(submission) {
   if (submission.submissionType.startsWith("vat") || submission.submissionType.startsWith("income_tax") || submission.submissionType.startsWith("annual")) {
     return "tax_operator";
@@ -1038,6 +1244,17 @@ function ownerQueueForSubmission(submission) {
 
 function buildReuseKey(companyId, idempotencyKey, payloadHash) {
   return `${companyId}:${idempotencyKey}:${payloadHash}`;
+}
+
+function resolveSourceObjectVersion({ explicitSourceObjectVersion = null, payload = {}, payloadVersion }) {
+  return (
+    normalizeOptionalText(explicitSourceObjectVersion) ||
+    normalizeOptionalText(payload.sourceObjectVersion) ||
+    normalizeOptionalText(payload.currentVersionId) ||
+    normalizeOptionalText(payload.annualReportVersionId) ||
+    normalizeOptionalText(payload.outputChecksum) ||
+    requireText(payloadVersion, "payload_version_required")
+  );
 }
 
 function buildIdempotencyKey({ submissionType, providerKey, recipientId, sourceObjectType, sourceObjectId, payloadVersion, payloadHash, periodId }) {

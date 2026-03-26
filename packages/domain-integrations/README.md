@@ -21,3 +21,4 @@ Integration boundary for bank, Peppol, inbound email, BankID/eID, invoice delive
 - retries create new attempts instead of mutating historical submissions
 - authority submission transport is queued onto the shared worker runtime when a core platform is available
 - replay can re-dispatch transport or collect later receipts on the same submission payload without mutating the source object
+- corrections create a new submission version with preserved prior receipt evidence and an explicit correction link to the superseded submission

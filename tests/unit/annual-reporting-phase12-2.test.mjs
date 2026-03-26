@@ -221,6 +221,104 @@ test("Phase 12.2 submission engine routes transport failures into action queue a
   );
 });
 
+test("Phase 12.2 submission engine opens correction chains with preserved prior receipts", async () => {
+  const integrationPlatform = createIntegrationPlatform({
+    clock: () => FIXED_NOW
+  });
+
+  let submission = integrationPlatform.prepareAuthoritySubmission({
+    companyId: "company-3",
+    submissionType: "income_tax_return",
+    sourceObjectType: "tax_declaration_package",
+    sourceObjectId: "tax-package-3",
+    sourceObjectVersion: "tax-package-3:v1",
+    payloadVersion: "phase12.2",
+    providerKey: "skatteverket",
+    recipientId: "skatteverket:income-tax",
+    payload: {
+      exportCode: "ink_support_json",
+      checksum: "phase12-2-underlag-v1",
+      sourceObjectVersion: "tax-package-3:v1"
+    },
+    actorId: "phase12-2-unit"
+  });
+
+  submission = integrationPlatform.signAuthoritySubmission({
+    companyId: "company-3",
+    submissionId: submission.submissionId,
+    actorId: "phase12-2-unit"
+  });
+  submission = await integrationPlatform.submitAuthoritySubmission({
+    companyId: "company-3",
+    submissionId: submission.submissionId,
+    actorId: "phase12-2-unit",
+    simulatedTransportOutcome: "technical_ack"
+  });
+  submission = integrationPlatform.registerSubmissionReceipt({
+    companyId: "company-3",
+    submissionId: submission.submissionId,
+    receiptType: "business_ack",
+    rawReference: "phase12-2-business-ack-v1",
+    actorId: "phase12-2-unit"
+  });
+  submission = integrationPlatform.registerSubmissionReceipt({
+    companyId: "company-3",
+    submissionId: submission.submissionId,
+    receiptType: "final_ack",
+    rawReference: "phase12-2-final-ack-v1",
+    actorId: "phase12-2-unit"
+  });
+
+  const correction = integrationPlatform.openSubmissionCorrection({
+    companyId: "company-3",
+    submissionId: submission.submissionId,
+    actorId: "phase12-2-unit",
+    reasonCode: "period_reopened",
+    sourceObjectVersion: "tax-package-3:v2",
+    payloadVersion: "phase12.2-correction",
+    payload: {
+      exportCode: "ink_support_json",
+      checksum: "phase12-2-underlag-v2",
+      sourceObjectVersion: "tax-package-3:v2"
+    },
+    idempotencyKey: "phase12-2-correction-v2"
+  });
+
+  assert.equal(correction.previousSubmission.status, "superseded");
+  assert.equal(correction.previousSubmission.supersededBySubmissionId, correction.submission.submissionId);
+  assert.equal(correction.submission.previousSubmissionId, submission.submissionId);
+  assert.equal(correction.submission.correctionOfSubmissionId, submission.submissionId);
+  assert.equal(correction.submission.correctionChainId, submission.submissionId);
+  assert.equal(correction.submission.sourceObjectVersion, "tax-package-3:v2");
+  assert.equal(correction.submission.status, "ready");
+  assert.equal(correction.correctionLink.reasonCode, "period_reopened");
+
+  const evidencePack = integrationPlatform.getSubmissionEvidencePack({
+    companyId: "company-3",
+    submissionId: correction.submission.submissionId
+  });
+  assert.equal(evidencePack.correctionLinks.length, 1);
+  assert.equal(evidencePack.preservedPriorReceiptRefs.length, 3);
+  assert.equal(evidencePack.auditRefs[0].correctionChainId, submission.submissionId);
+
+  const repeated = integrationPlatform.openSubmissionCorrection({
+    companyId: "company-3",
+    submissionId: submission.submissionId,
+    actorId: "phase12-2-unit",
+    reasonCode: "period_reopened",
+    sourceObjectVersion: "tax-package-3:v2",
+    payloadVersion: "phase12.2-correction",
+    payload: {
+      exportCode: "ink_support_json",
+      checksum: "phase12-2-underlag-v2",
+      sourceObjectVersion: "tax-package-3:v2"
+    },
+    idempotencyKey: "phase12-2-correction-v2"
+  });
+  assert.equal(repeated.idempotentReplay, true);
+  assert.equal(repeated.submission.submissionId, correction.submission.submissionId);
+});
+
 function materializeVatOverview(platform) {
   platform.evaluateVatDecision({
     companyId: COMPANY_ID,

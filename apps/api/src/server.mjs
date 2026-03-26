@@ -270,6 +270,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/submissions/:submissionId",
               "/v1/submissions/:submissionId/sign",
               "/v1/submissions/:submissionId/submit",
+              "/v1/submissions/:submissionId/corrections",
               "/v1/submissions/:submissionId/receipts",
               "/v1/submissions/:submissionId/evidence-pack",
               "/v1/submissions/:submissionId/replay",
@@ -3512,6 +3513,8 @@ async function handleRequest({ req, res, platform, flags }) {
         periodId: body.periodId ?? null,
         sourceObjectType: body.sourceObjectType,
         sourceObjectId: body.sourceObjectId,
+        sourceObjectVersion:
+          body.sourceObjectVersion ?? payload.sourceObjectVersion ?? payload.currentVersionId ?? payload.annualReportVersionId ?? payload.outputChecksum ?? null,
         payloadVersion: body.payloadVersion || "phase12.2",
         providerKey: body.providerKey,
         recipientId: body.recipientId,
@@ -3709,6 +3712,62 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         submissionId: submissionRetryMatch.submissionId,
         actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const submissionCorrectionMatch = matchPath(path, "/v1/submissions/:submissionId/corrections");
+  if (submissionCorrectionMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    const previousSubmission = platform.getAuthoritySubmission({
+      companyId,
+      submissionId: submissionCorrectionMatch.submissionId
+    });
+    const sourceObjectType = body.sourceObjectType ?? previousSubmission.sourceObjectType;
+    const sourceObjectId = body.sourceObjectId ?? previousSubmission.sourceObjectId;
+    const payload =
+      body.payload ??
+      buildSubmissionPayloadFromSource({
+        platform,
+        companyId,
+        sourceObjectType,
+        sourceObjectId
+      });
+    writeJson(
+      res,
+      201,
+      platform.openSubmissionCorrection({
+        companyId,
+        submissionId: submissionCorrectionMatch.submissionId,
+        actorId: principal.userId,
+        reasonCode: body.reasonCode,
+        sourceObjectType,
+        sourceObjectId,
+        sourceObjectVersion:
+          body.sourceObjectVersion ?? payload.sourceObjectVersion ?? payload.currentVersionId ?? payload.annualReportVersionId ?? payload.outputChecksum ?? null,
+        payloadVersion: body.payloadVersion ?? previousSubmission.payloadVersion,
+        payload,
+        providerKey: body.providerKey ?? previousSubmission.providerKey,
+        recipientId: body.recipientId ?? previousSubmission.recipientId,
+        signedState: body.signedState ?? null,
+        signatoryRoleRequired: body.signatoryRoleRequired ?? previousSubmission.signatoryRoleRequired ?? null,
+        submissionFamilyCode: body.submissionFamilyCode ?? payload.packageFamilyCode ?? previousSubmission.submissionFamilyCode ?? null,
+        evidencePackId: body.evidencePackId ?? payload.evidencePackId ?? previousSubmission.evidencePackId ?? null,
+        priority: body.priority ?? previousSubmission.priority,
+        retryClass: body.retryClass ?? previousSubmission.retryClass,
+        idempotencyKey: body.idempotencyKey ?? null,
+        correlationId: body.correlationId ?? previousSubmission.correlationId ?? null
       })
     );
     return;
@@ -12793,6 +12852,7 @@ function buildSubmissionPayloadFromSource({ platform, companyId, sourceObjectTyp
     return {
       sourceObjectType: resolvedSourceType,
       sourceObjectId: resolvedSourceId,
+      sourceObjectVersion: taxPackage.annualReportVersionId || taxPackage.outputChecksum || null,
       taxDeclarationPackageId: taxPackage.taxDeclarationPackageId,
       annualReportPackageId: taxPackage.annualReportPackageId,
       annualReportVersionId: taxPackage.annualReportVersionId,
@@ -12815,6 +12875,7 @@ function buildSubmissionPayloadFromSource({ platform, companyId, sourceObjectTyp
     return {
       sourceObjectType: resolvedSourceType,
       sourceObjectId: resolvedSourceId,
+      sourceObjectVersion: annualPackage.currentVersion?.versionId || annualPackage.currentVersion?.checksum || null,
       packageId: annualPackage.packageId,
       fiscalYear: annualPackage.fiscalYear,
       legalFormCode: annualPackage.legalFormCode,
