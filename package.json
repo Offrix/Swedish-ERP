@@ -32,6 +32,7 @@
     "infra:down": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-down.ps1",
     "infra:up": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-up.ps1",
     "lint": "node scripts/lint.mjs",
+    "runtime:honesty-scan": "node scripts/runtime-honesty-scan.mjs",
     "runtime-log": "node scripts/runtime-log.mjs",
     "security": "node scripts/security-scan.mjs",
     "seed:demo": "node scripts/db-seed.mjs --demo",

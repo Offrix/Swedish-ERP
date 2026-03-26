@@ -163,6 +163,9 @@ GÃ¶ra boot, miljÃ¶lÃ¤gen, migrationslagret och startup-beteenden sanna och
 **Exit gate**  
 - API och worker startar deterministiskt per miljÃ¶lÃ¤ge, migrationer Ã¤r rena och inga kritiska domÃ¤ner kan rÃ¥ka boota med demo-lÃ¤ge i production eller pilot.
 
+**Fasstatus**  
+- Klar 2026-03-26 genom migrationshistorik-repair, explicit runtime mode i alla starters, bootstrap-normalisering, startup/flat-merge-diagnostik och kÃ¶rbar runtime honesty scanner med verifierad fas-1-gate.
+
 **Test gate**  
 - Boot-tests fÃ¶r varje mode, migrationsdrift mot tom och uppgraderad databas, samt fail-fast-tester nÃ¤r persistent store saknas i fÃ¶rbjudet lÃ¤ge.
 
