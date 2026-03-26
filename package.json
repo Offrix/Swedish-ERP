@@ -24,6 +24,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "db:migrate": "node scripts/db-migrate.mjs",
+    "db:repair-migration-history": "node scripts/repair-migration-history.mjs",
     "db:seed": "node scripts/db-seed.mjs",
     "dev": "node scripts/dev.mjs",
     "doctor": "node scripts/doctor.mjs",

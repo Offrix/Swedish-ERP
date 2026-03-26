@@ -30,23 +30,33 @@ ON CONFLICT (migration_id) DO NOTHING;
 Run:
 
 ```powershell
+pnpm run db:repair-migration-history
 pnpm run verify:db
 node --test tests/unit/phase1-migration-history.test.mjs
+node --test tests/unit/phase1-migration-history-repair.test.mjs
 ```
 
 Both checks must stay green before new migrations are added or existing migrations are applied.
 
 ## Repair steps
 
-1. Find every migration that writes `schema_migrations(version, description)` or `ON CONFLICT (version)`.
-2. Replace the insert with the canonical `migration_id` form.
-3. Remove free-form migration descriptions from `schema_migrations`.
-4. Re-run `pnpm run verify:db`.
-5. Re-run `node --test tests/unit/phase1-migration-history.test.mjs`.
-6. Re-run the full test suite before moving to the next roadmap subphase.
+1. Run `pnpm run db:repair-migration-history` without flags and inspect the generated repair plan.
+2. If the output says `status: canonical`, stop there and continue with verification.
+3. If the output says `status: repair_required`, re-run with `pnpm run db:repair-migration-history -- --apply`.
+4. The repair script renames the old table to a timestamped backup, recreates canonical `schema_migrations`, and rehydrates `migration_id` values from canonical `migration_id` or legacy `version`.
+5. Re-run `pnpm run verify:db`.
+6. Re-run:
+
+```powershell
+node --test tests/unit/phase1-migration-history.test.mjs
+node --test tests/unit/phase1-migration-history-repair.test.mjs
+```
+
+7. Re-run the full test suite before moving to the next roadmap subphase.
 
 ## Guardrails
 
 - `scripts/db-migrate.mjs` must fail fast on legacy `schema_migrations` formats.
+- `scripts/repair-migration-history.mjs` is the only supported automated repair path.
 - `scripts/new-migration.ps1` must keep generating canonical `migration_id` inserts.
 - No persistence phase may proceed on top of mixed migration-history formats.
