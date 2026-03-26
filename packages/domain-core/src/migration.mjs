@@ -29,6 +29,7 @@ export const PAYROLL_MIGRATION_BATCH_STATUSES = Object.freeze([
 export const PAYROLL_MIGRATION_MODES = Object.freeze(["test", "live"]);
 export const EMPLOYEE_MIGRATION_VALIDATION_STATES = Object.freeze(["pending", "valid", "blocking"]);
 export const PAYROLL_MIGRATION_DIFF_STATUSES = Object.freeze(["open", "explained", "accepted", "blocking", "resolved"]);
+export const POST_CUTOVER_CORRECTION_CASE_STATUSES = Object.freeze(["open", "approved", "implemented", "closed"]);
 
 export function createMigrationModule({
   state,
@@ -39,6 +40,7 @@ export function createMigrationModule({
   collectiveAgreementsPlatform = null,
   listRuntimeJobs = null,
   listRuntimeDeadLetters = null,
+  listAuthoritySubmissions = null,
   audit,
   error
 } = {}) {
@@ -73,6 +75,7 @@ export function createMigrationModule({
     payrollMigrationModes: PAYROLL_MIGRATION_MODES,
     employeeMigrationValidationStates: EMPLOYEE_MIGRATION_VALIDATION_STATES,
     payrollMigrationDiffStatuses: PAYROLL_MIGRATION_DIFF_STATUSES,
+    postCutoverCorrectionCaseStatuses: POST_CUTOVER_CORRECTION_CASE_STATUSES,
     createMappingSet,
     listMappingSets,
     approveMappingSet,
@@ -96,6 +99,8 @@ export function createMigrationModule({
     stabilizeCutover,
     startRollback,
     completeRollback,
+    createPostCutoverCorrectionCase,
+    listPostCutoverCorrectionCases,
     getMigrationCockpit,
     createPayrollMigrationBatch,
     listPayrollMigrationBatches,
@@ -437,6 +442,10 @@ export function createMigrationModule({
       status: "planned",
       switchedAt: null,
       stabilizedAt: null,
+      rollbackStartedAt: null,
+      rollbackCompletedAt: null,
+      rollbackPlan: null,
+      rollbackCompletionReceipt: null,
       createdByUserId: principal.userId,
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
@@ -819,6 +828,14 @@ export function createMigrationModule({
     companyId,
     cutoverPlanId,
     reasonCode,
+    rollbackOwnerUserId = null,
+    supportSignoffRef = null,
+    securitySignoffRef = null,
+    complianceSignoffRef = null,
+    suspendIntegrationCodes = [],
+    freezeOperationalIntake = null,
+    recoveryPlanCode = null,
+    recoveryPlanNote = null,
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
@@ -826,17 +843,111 @@ export function createMigrationModule({
     if (!cutoverPlan.rollbackPoint) {
       throw error(409, "cutover_rollback_point_missing", "Rollback requires a rollback point.");
     }
+    const rollbackMode = resolveCutoverRollbackMode(cutoverPlan, error);
+    const postSwitchSubmittedRegulatedSubmissions = listPostSwitchSubmittedRegulatedSubmissions({
+      companyId,
+      switchedAt: cutoverPlan.switchedAt,
+      listAuthoritySubmissions
+    });
+    if (rollbackMode === "post_switch_compensation") {
+      const resolvedRollbackOwnerUserId = text(
+        rollbackOwnerUserId || principal.userId,
+        "cutover_rollback_owner_user_id_required"
+      );
+      const resolvedSupportSignoffRef = text(supportSignoffRef, "cutover_rollback_support_signoff_ref_required");
+      const resolvedSecuritySignoffRef = text(securitySignoffRef, "cutover_rollback_security_signoff_ref_required");
+      const normalizedSuspendIntegrationCodes = normalizeUniqueCodes(
+        suspendIntegrationCodes,
+        "cutover_rollback_suspend_integration_code_required"
+      );
+      if (normalizedSuspendIntegrationCodes.length === 0) {
+        throw error(
+          409,
+          "cutover_rollback_suspend_integrations_required",
+          "Post-switch rollback requires explicit suspended integrations."
+        );
+      }
+      let regulatedSubmissionRecoveryPlan = null;
+      if (postSwitchSubmittedRegulatedSubmissions.length > 0) {
+        regulatedSubmissionRecoveryPlan = {
+          recoveryPlanCode: text(recoveryPlanCode, "cutover_rollback_recovery_plan_required"),
+          recoveryPlanNote: optionalText(recoveryPlanNote),
+          complianceSignoffRef: text(
+            complianceSignoffRef,
+            "cutover_rollback_compliance_signoff_ref_required"
+          ),
+          protectedSubmissionRefs: postSwitchSubmittedRegulatedSubmissions.map((submission) => ({
+            submissionId: submission.submissionId,
+            submissionType: submission.submissionType,
+            submittedAt: submission.submittedAt,
+            status: submission.status
+          })),
+          filingHistoryPreserved: true,
+          correctionRecoveryRequired: true
+        };
+      }
+      cutoverPlan.rollbackPlan = {
+        rollbackPlanId: crypto.randomUUID(),
+        rollbackExecutionMode: rollbackMode,
+        rollbackReasonCode: text(reasonCode, "cutover_rollback_reason_required"),
+        rollbackPointRef: cutoverPlan.rollbackPointRef || cutoverPlan.rollbackPoint,
+        rollbackOwnerUserId: resolvedRollbackOwnerUserId,
+        supportSignoffRef: resolvedSupportSignoffRef,
+        securitySignoffRef: resolvedSecuritySignoffRef,
+        complianceSignoffRef: regulatedSubmissionRecoveryPlan?.complianceSignoffRef || optionalText(complianceSignoffRef),
+        suspendIntegrationCodes: normalizedSuspendIntegrationCodes,
+        freezeOperationalIntake: freezeOperationalIntake === true,
+        reverseSwitchMarkers: true,
+        preserveAuditEvidence: true,
+        preserveImmutableReceipts: true,
+        purgeTargetOnlyImportedObjects: false,
+        regulatedSubmissionRecoveryPlan,
+        startedAt: nowIso(clock),
+        startedByUserId: principal.userId,
+        completedAt: null,
+        completedByUserId: null,
+        completionReceipt: null
+      };
+    } else {
+      cutoverPlan.rollbackPlan = {
+        rollbackPlanId: crypto.randomUUID(),
+        rollbackExecutionMode: rollbackMode,
+        rollbackReasonCode: text(reasonCode, "cutover_rollback_reason_required"),
+        rollbackPointRef: cutoverPlan.rollbackPointRef || cutoverPlan.rollbackPoint,
+        rollbackOwnerUserId: principal.userId,
+        supportSignoffRef: null,
+        securitySignoffRef: null,
+        complianceSignoffRef: null,
+        suspendIntegrationCodes: [],
+        freezeOperationalIntake: false,
+        reverseSwitchMarkers: false,
+        preserveAuditEvidence: true,
+        preserveImmutableReceipts: true,
+        purgeTargetOnlyImportedObjects: true,
+        regulatedSubmissionRecoveryPlan: null,
+        startedAt: nowIso(clock),
+        startedByUserId: principal.userId,
+        completedAt: null,
+        completedByUserId: null,
+        completionReceipt: null
+      };
+    }
     cutoverPlan.status = "rollback_in_progress";
-    cutoverPlan.rollbackReasonCode = text(reasonCode, "cutover_rollback_reason_required");
-    cutoverPlan.updatedAt = nowIso(clock);
+    cutoverPlan.rollbackReasonCode = cutoverPlan.rollbackPlan.rollbackReasonCode;
+    cutoverPlan.rollbackStartedAt = cutoverPlan.rollbackPlan.startedAt;
+    cutoverPlan.updatedAt = cutoverPlan.rollbackStartedAt;
     audit({
       companyId,
       actorId: principal.userId,
       correlationId,
-      action: "migration.cutover.rolled_back",
+      action: "migration.cutover.rollback_started",
       entityType: "migration_cutover_plan",
       entityId: cutoverPlan.cutoverPlanId,
-      explanation: `Rolled back cutover ${cutoverPlan.cutoverPlanId}.`
+      explanation: `Started ${cutoverPlan.rollbackPlan.rollbackExecutionMode} rollback for ${cutoverPlan.cutoverPlanId}.`,
+      metadata: {
+        rollbackExecutionMode: cutoverPlan.rollbackPlan.rollbackExecutionMode,
+        protectedSubmissionCount: cutoverPlan.rollbackPlan.regulatedSubmissionRecoveryPlan?.protectedSubmissionRefs.length || 0
+      }
     });
     return clone(cutoverPlan);
   }
@@ -845,6 +956,12 @@ export function createMigrationModule({
     sessionToken,
     companyId,
     cutoverPlanId,
+    integrationsSuspended = null,
+    switchMarkersReversed = null,
+    auditEvidencePreserved = null,
+    immutableReceiptsPreserved = null,
+    stagedObjectsPurged = null,
+    recoveryPlanActivated = null,
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
@@ -852,8 +969,30 @@ export function createMigrationModule({
     if (cutoverPlan.status !== "rollback_in_progress") {
       throw error(409, "cutover_rollback_not_started", "Rollback must be started before completion.");
     }
+    const rollbackPlan = cutoverPlan.rollbackPlan;
+    if (!rollbackPlan) {
+      throw error(409, "cutover_rollback_plan_missing", "Rollback completion requires a rollback plan.");
+    }
+    const completionReceipt = buildRollbackCompletionReceipt({
+      rollbackPlan,
+      integrationsSuspended,
+      switchMarkersReversed,
+      auditEvidencePreserved,
+      immutableReceiptsPreserved,
+      stagedObjectsPurged,
+      recoveryPlanActivated,
+      error
+    });
     cutoverPlan.status = "rolled_back";
-    cutoverPlan.updatedAt = nowIso(clock);
+    cutoverPlan.rollbackCompletedAt = nowIso(clock);
+    cutoverPlan.updatedAt = cutoverPlan.rollbackCompletedAt;
+    cutoverPlan.rollbackCompletionReceipt = completionReceipt;
+    cutoverPlan.rollbackPlan = {
+      ...rollbackPlan,
+      completedAt: cutoverPlan.rollbackCompletedAt,
+      completedByUserId: principal.userId,
+      completionReceipt
+    };
     audit({
       companyId,
       actorId: principal.userId,
@@ -861,9 +1000,77 @@ export function createMigrationModule({
       action: "migration.cutover.rollback_completed",
       entityType: "migration_cutover_plan",
       entityId: cutoverPlan.cutoverPlanId,
-      explanation: `Completed rollback for ${cutoverPlan.cutoverPlanId}.`
+      explanation: `Completed ${rollbackPlan.rollbackExecutionMode} rollback for ${cutoverPlan.cutoverPlanId}.`,
+      metadata: {
+        rollbackExecutionMode: rollbackPlan.rollbackExecutionMode,
+        protectedSubmissionCount: rollbackPlan.regulatedSubmissionRecoveryPlan?.protectedSubmissionRefs.length || 0
+      }
     });
     return clone(cutoverPlan);
+  }
+
+  function createPostCutoverCorrectionCase({
+    sessionToken,
+    companyId,
+    cutoverPlanId,
+    reasonCode,
+    linkedSourceBatchIds = [],
+    targetObjectRefs = [],
+    regulatedSubmissionRefs = [],
+    acceptanceReportDelta = {},
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const cutoverPlan = requireCutoverPlan(companyId, cutoverPlanId);
+    if (!["switched", "stabilized", "closed", "rollback_in_progress", "rolled_back"].includes(cutoverPlan.status)) {
+      throw error(
+        409,
+        "post_cutover_correction_requires_post_switch_state",
+        "Post-cutover correction cases require a switched or later cutover state."
+      );
+    }
+    const timestampValue = nowIso(clock);
+    const correctionCase = {
+      postCutoverCorrectionCaseId: crypto.randomUUID(),
+      companyId,
+      cutoverPlanId: cutoverPlan.cutoverPlanId,
+      reasonCode: text(reasonCode, "post_cutover_correction_reason_required"),
+      linkedSourceBatchIds: normalizeExistingImportBatchIds(companyId, linkedSourceBatchIds, state, error),
+      targetObjectRefs: normalizeObjectRefs(targetObjectRefs),
+      regulatedSubmissionRefs: normalizeRegulatedSubmissionRefs(regulatedSubmissionRefs),
+      acceptanceReportDelta: normalizeAcceptanceReportDelta(acceptanceReportDelta),
+      correctionChainRefs: [],
+      status: "open",
+      createdByUserId: principal.userId,
+      createdAt: timestampValue,
+      updatedAt: timestampValue
+    };
+    state.postCutoverCorrectionCases.set(correctionCase.postCutoverCorrectionCaseId, correctionCase);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "migration.post_cutover_correction_case.created",
+      entityType: "migration_post_cutover_correction_case",
+      entityId: correctionCase.postCutoverCorrectionCaseId,
+      explanation: `Opened post-cutover correction case ${correctionCase.reasonCode}.`
+    });
+    return clone(correctionCase);
+  }
+
+  function listPostCutoverCorrectionCases({ sessionToken, companyId, cutoverPlanId = null, status = null } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const resolvedCutoverPlanId = optionalText(cutoverPlanId);
+    const resolvedStatus = status == null
+      ? null
+      : assertAllowed(text(status, "post_cutover_correction_case_status_required"), POST_CUTOVER_CORRECTION_CASE_STATUSES, "post_cutover_correction_case_status_invalid");
+    return [...state.postCutoverCorrectionCases.values()]
+      .filter((correctionCase) => correctionCase.companyId === resolvedCompanyId)
+      .filter((correctionCase) => (resolvedCutoverPlanId ? correctionCase.cutoverPlanId === resolvedCutoverPlanId : true))
+      .filter((correctionCase) => (resolvedStatus ? correctionCase.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(clone);
   }
 
   function getMigrationCockpit({ sessionToken, companyId } = {}) {
@@ -877,7 +1084,8 @@ export function createMigrationModule({
         .map(clone),
       diffReports: listDiffReports({ sessionToken, companyId }),
       cutoverPlans: listCutoverPlans({ sessionToken, companyId }),
-      acceptanceRecords: listMigrationAcceptanceRecords({ sessionToken, companyId })
+      acceptanceRecords: listMigrationAcceptanceRecords({ sessionToken, companyId }),
+      postCutoverCorrectionCases: listPostCutoverCorrectionCases({ sessionToken, companyId })
     };
   }
 
@@ -2135,6 +2343,30 @@ function normalizeChecklistStatus(value) {
   return resolved;
 }
 
+function normalizeRegulatedSubmissionRefs(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values.map((value) => ({
+    submissionId: text(value?.submissionId, "post_cutover_correction_submission_id_required"),
+    submissionType: text(value?.submissionType || "unknown", "post_cutover_correction_submission_type_required"),
+    submittedAt: value?.submittedAt ? timestamp(value.submittedAt, "post_cutover_correction_submission_submitted_at_required") : null
+  }));
+}
+
+function normalizeAcceptanceReportDelta(value) {
+  if (value == null) {
+    return {};
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw createValidationError(
+      "post_cutover_correction_acceptance_report_delta_invalid",
+      "acceptanceReportDelta must be an object."
+    );
+  }
+  return clone(value);
+}
+
 function hasBlockingDiffReports(state, companyId) {
   const reports = [...state.diffReports.values()].filter((diffReport) => diffReport.companyId === companyId);
   if (reports.length === 0) {
@@ -2177,6 +2409,116 @@ async function hasOpenRegulatedSubmissionDeadLetters({ companyId, listRuntimeJob
     }
     return job.sourceObjectType === "submission" || job.jobType.startsWith("submission.");
   });
+}
+
+function resolveCutoverRollbackMode(cutoverPlan, error) {
+  if (["planned", "freeze_started", "final_extract_done", "validation_passed"].includes(cutoverPlan.status)) {
+    return "pre_switch_purge";
+  }
+  if (["switched", "stabilized"].includes(cutoverPlan.status)) {
+    return "post_switch_compensation";
+  }
+  if (cutoverPlan.status === "closed") {
+    throw error(
+      409,
+      "cutover_rollback_window_closed",
+      "Closed cutovers require post-cutover correction cases instead of rollback."
+    );
+  }
+  throw error(409, "cutover_rollback_invalid_state", "Rollback is not allowed for the current cutover state.");
+}
+
+function listPostSwitchSubmittedRegulatedSubmissions({ companyId, switchedAt, listAuthoritySubmissions }) {
+  if (!switchedAt || typeof listAuthoritySubmissions !== "function") {
+    return [];
+  }
+  const switchedAtTime = new Date(timestamp(switchedAt, "cutover_switched_at_required")).getTime();
+  return (listAuthoritySubmissions({ companyId }) || [])
+    .filter((submission) => submission?.submittedAt)
+    .filter((submission) => new Date(submission.submittedAt).getTime() >= switchedAtTime)
+    .map(clone);
+}
+
+function buildRollbackCompletionReceipt({
+  rollbackPlan,
+  integrationsSuspended,
+  switchMarkersReversed,
+  auditEvidencePreserved,
+  immutableReceiptsPreserved,
+  stagedObjectsPurged,
+  recoveryPlanActivated,
+  error
+}) {
+  if (rollbackPlan.rollbackExecutionMode === "pre_switch_purge") {
+    if (stagedObjectsPurged !== true) {
+      throw error(
+        409,
+        "cutover_rollback_stage_purge_confirmation_required",
+        "Pre-switch rollback completion requires stagedObjectsPurged=true."
+      );
+    }
+    if (auditEvidencePreserved !== true) {
+      throw error(
+        409,
+        "cutover_rollback_audit_preservation_required",
+        "Rollback completion requires auditEvidencePreserved=true."
+      );
+    }
+    return {
+      rollbackExecutionMode: rollbackPlan.rollbackExecutionMode,
+      stagedObjectsPurged: true,
+      integrationsSuspended: false,
+      switchMarkersReversed: false,
+      auditEvidencePreserved: true,
+      immutableReceiptsPreserved: true,
+      recoveryPlanActivated: false
+    };
+  }
+
+  if (integrationsSuspended !== true) {
+    throw error(
+      409,
+      "cutover_rollback_integrations_suspend_confirmation_required",
+      "Post-switch rollback completion requires integrationsSuspended=true."
+    );
+  }
+  if (switchMarkersReversed !== true) {
+    throw error(
+      409,
+      "cutover_rollback_switch_marker_confirmation_required",
+      "Post-switch rollback completion requires switchMarkersReversed=true."
+    );
+  }
+  if (auditEvidencePreserved !== true) {
+    throw error(
+      409,
+      "cutover_rollback_audit_preservation_required",
+      "Rollback completion requires auditEvidencePreserved=true."
+    );
+  }
+  if (immutableReceiptsPreserved !== true) {
+    throw error(
+      409,
+      "cutover_rollback_immutable_receipt_preservation_required",
+      "Post-switch rollback completion requires immutableReceiptsPreserved=true."
+    );
+  }
+  if (rollbackPlan.regulatedSubmissionRecoveryPlan && recoveryPlanActivated !== true) {
+    throw error(
+      409,
+      "cutover_rollback_recovery_plan_activation_required",
+      "Rollback completion requires regulated submission recovery plan activation."
+    );
+  }
+  return {
+    rollbackExecutionMode: rollbackPlan.rollbackExecutionMode,
+    stagedObjectsPurged: false,
+    integrationsSuspended: true,
+    switchMarkersReversed: true,
+    auditEvidencePreserved: true,
+    immutableReceiptsPreserved: true,
+    recoveryPlanActivated: rollbackPlan.regulatedSubmissionRecoveryPlan ? true : false
+  };
 }
 
 function hasFreshRestoreDrill({ state, companyId, restoreDrillFreshnessDays, clock }) {

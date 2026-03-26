@@ -614,6 +614,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/migration/diff-reports/:diffReportId/items/:itemId",
               "/v1/migration/cutover-plans",
               "/v1/migration/acceptance-records",
+              "/v1/migration/post-cutover-correction-cases",
               "/v1/migration/cutover-plans/:cutoverPlanId/start",
               "/v1/migration/cutover-plans/:cutoverPlanId/final-extract",
               "/v1/migration/cutover-plans/:cutoverPlanId/validate",

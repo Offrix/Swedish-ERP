@@ -2610,6 +2610,40 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "POST" && path === "/v1/migration/post-cutover-correction-cases") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "migration_post_cutover_correction_case", objectId: companyId, scopeCode: "migration_cockpit" });
+    writeJson(res, 201, platform.createPostCutoverCorrectionCase({
+      sessionToken,
+      companyId,
+      cutoverPlanId: body.cutoverPlanId,
+      reasonCode: body.reasonCode,
+      linkedSourceBatchIds: body.linkedSourceBatchIds,
+      targetObjectRefs: body.targetObjectRefs,
+      regulatedSubmissionRefs: body.regulatedSubmissionRefs,
+      acceptanceReportDelta: body.acceptanceReportDelta
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/migration/post-cutover-correction-cases") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_post_cutover_correction_case", objectId: companyId, scopeCode: "migration_cockpit" });
+    assertPayrollOperationsReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listPostCutoverCorrectionCases({
+        sessionToken,
+        companyId,
+        cutoverPlanId: optionalText(url.searchParams.get("cutoverPlanId")),
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
   const cutoverSignoffMatch = matchPath(path, "/v1/migration/cutover-plans/:cutoverPlanId/signoffs");
   if (req.method === "POST" && cutoverSignoffMatch) {
     const body = await readJsonBody(req);
@@ -2700,7 +2734,20 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "migration_cutover_plan", objectId: cutoverRollbackMatch.cutoverPlanId, scopeCode: "migration_cutover_plan" });
-    writeJson(res, 200, platform.startRollback({ sessionToken, companyId, cutoverPlanId: cutoverRollbackMatch.cutoverPlanId, reasonCode: body.reasonCode }));
+    writeJson(res, 200, platform.startRollback({
+      sessionToken,
+      companyId,
+      cutoverPlanId: cutoverRollbackMatch.cutoverPlanId,
+      reasonCode: body.reasonCode,
+      rollbackOwnerUserId: body.rollbackOwnerUserId,
+      supportSignoffRef: body.supportSignoffRef,
+      securitySignoffRef: body.securitySignoffRef,
+      complianceSignoffRef: body.complianceSignoffRef,
+      suspendIntegrationCodes: body.suspendIntegrationCodes,
+      freezeOperationalIntake: body.freezeOperationalIntake,
+      recoveryPlanCode: body.recoveryPlanCode,
+      recoveryPlanNote: body.recoveryPlanNote
+    }));
     return true;
   }
 
@@ -2710,7 +2757,17 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "migration_cutover_plan", objectId: cutoverRollbackCompleteMatch.cutoverPlanId, scopeCode: "migration_cutover_plan" });
-    writeJson(res, 200, platform.completeRollback({ sessionToken, companyId, cutoverPlanId: cutoverRollbackCompleteMatch.cutoverPlanId }));
+    writeJson(res, 200, platform.completeRollback({
+      sessionToken,
+      companyId,
+      cutoverPlanId: cutoverRollbackCompleteMatch.cutoverPlanId,
+      integrationsSuspended: body.integrationsSuspended,
+      switchMarkersReversed: body.switchMarkersReversed,
+      auditEvidencePreserved: body.auditEvidencePreserved,
+      immutableReceiptsPreserved: body.immutableReceiptsPreserved,
+      stagedObjectsPurged: body.stagedObjectsPurged,
+      recoveryPlanActivated: body.recoveryPlanActivated
+    }));
     return true;
   }
 

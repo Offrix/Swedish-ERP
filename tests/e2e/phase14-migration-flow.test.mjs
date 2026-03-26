@@ -155,13 +155,38 @@ test("Phase 14.3 flow exposes migration routes and keeps cockpit evidence intact
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId,
-        reasonCode: "parallel_run_mismatch"
+        reasonCode: "parallel_run_mismatch",
+        rollbackOwnerUserId: DEMO_IDS.userId,
+        supportSignoffRef: "support-signoff:phase14-e2e",
+        securitySignoffRef: "security-signoff:phase14-e2e",
+        suspendIntegrationCodes: ["AUTHORITY_TRANSPORTS"],
+        freezeOperationalIntake: true
+      }
+    });
+    await requestJson(baseUrl, "/v1/migration/post-cutover-correction-cases", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        cutoverPlanId: cutoverPlan.cutoverPlanId,
+        reasonCode: "source_error_after_cutover",
+        acceptanceReportDelta: {
+          impactClass: "material",
+          summary: "Phase 14 e2e correction case."
+        }
       }
     });
     await requestJson(baseUrl, `/v1/migration/cutover-plans/${cutoverPlan.cutoverPlanId}/rollback/complete`, {
       method: "POST",
       token: adminToken,
-      body: { companyId: DEMO_IDS.companyId }
+      body: {
+        companyId: DEMO_IDS.companyId,
+        integrationsSuspended: true,
+        switchMarkersReversed: true,
+        auditEvidencePreserved: true,
+        immutableReceiptsPreserved: true
+      }
     });
 
     const cockpit = await requestJson(baseUrl, `/v1/migration/cockpit?companyId=${DEMO_IDS.companyId}`, {
@@ -169,6 +194,7 @@ test("Phase 14.3 flow exposes migration routes and keeps cockpit evidence intact
     });
     assert.equal(cockpit.cutoverPlans.length, 1);
     assert.equal(cockpit.mappingSets.length, 1);
+    assert.equal(cockpit.postCutoverCorrectionCases.length, 1);
   } finally {
     await stopServer(server);
   }

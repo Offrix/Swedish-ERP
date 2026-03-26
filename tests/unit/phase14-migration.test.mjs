@@ -206,13 +206,23 @@ test("Phase 14.3 migration cockpit tracks import, diff, cutover and rollback det
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
     cutoverPlanId: cutoverPlan.cutoverPlanId,
-    reasonCode: "parallel_run_mismatch"
+    reasonCode: "parallel_run_mismatch",
+    rollbackOwnerUserId: DEMO_IDS.userId,
+    supportSignoffRef: "support-signoff:phase14-unit",
+    securitySignoffRef: "security-signoff:phase14-unit",
+    suspendIntegrationCodes: ["AUTHORITY_TRANSPORTS"],
+    freezeOperationalIntake: true
   });
   assert.equal(rollbackStarted.status, "rollback_in_progress");
+  assert.equal(rollbackStarted.rollbackPlan.rollbackExecutionMode, "post_switch_compensation");
   const rollbackCompleted = platform.completeRollback({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
-    cutoverPlanId: cutoverPlan.cutoverPlanId
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    integrationsSuspended: true,
+    switchMarkersReversed: true,
+    auditEvidencePreserved: true,
+    immutableReceiptsPreserved: true
   });
   assert.equal(rollbackCompleted.status, "rolled_back");
 
@@ -226,4 +236,275 @@ test("Phase 14.3 migration cockpit tracks import, diff, cutover and rollback det
   assert.equal(cockpit.cutoverPlans.length, 1);
   assert.equal(cockpit.acceptanceRecords.length, 1);
   assert.equal(cockpit.acceptanceRecords[0].migrationAcceptanceRecordId, acceptanceRecord.migrationAcceptanceRecordId);
+});
+
+test("Phase 14.3 rollback requires recovery plan when regulated filing was submitted after switch and closed cutover uses correction case", async () => {
+  let currentTime = new Date("2026-03-23T20:30:00Z");
+  const platform = createApiPlatform({
+    clock: () => currentTime
+  });
+  const adminToken = loginWithStrongAuthOnPlatform({
+    platform,
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+
+  const cutoverPlan = platform.createCutoverPlan({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    freezeAt: "2026-03-24T08:00:00.000Z",
+    rollbackPointRef: "snapshot://phase14-recovery-unit",
+    acceptedVarianceThresholds: {
+      countDelta: 0,
+      amountDelta: 0
+    },
+    stabilizationWindowHours: 24,
+    signoffChain: [{ userId: DEMO_IDS.userId, roleCode: "migration_lead", label: "Migration lead" }],
+    goLiveChecklist: [{ itemCode: "parallel_run_green", label: "Parallel run green" }]
+  });
+  platform.recordCutoverSignoff({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId
+  });
+  platform.generateDiffReport({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    comparisonScope: "parallel_run_finance_recovery",
+    sourceSnapshotRef: { system: "legacy_erp", period: "2026-03" },
+    targetSnapshotRef: { system: "swedish_erp", period: "2026-03" },
+    differenceItems: []
+  });
+  platform.updateCutoverChecklistItem({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    itemCode: "parallel_run_green",
+    status: "completed"
+  });
+  platform.startCutover({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId
+  });
+  platform.completeFinalExtract({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    lastExtractAt: "2026-03-24T08:10:00.000Z"
+  });
+  platform.createMigrationAcceptanceRecord({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    acceptanceType: "go_live_readiness",
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    sourceParitySummary: {
+      countParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+      amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+      unresolvedMaterialDifferences: 0,
+      openingBalanceParityPassed: true,
+      openReceivablesParityPassed: true,
+      openPayablesParityPassed: true,
+      taxAccountParityPassed: true
+    }
+  });
+  platform.recordRestoreDrill({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    drillCode: "phase14-recovery-restore",
+    targetRtoMinutes: 60,
+    targetRpoMinutes: 15,
+    actualRtoMinutes: 40,
+    actualRpoMinutes: 10,
+    status: "passed",
+    verificationSummary: "Phase 14 recovery restore drill verified."
+  });
+  await platform.passCutoverValidation({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    contractTestsPassed: true,
+    goldenScenariosPassed: true,
+    runbooksAcknowledged: true,
+    restoreDrillFreshnessDays: 30
+  });
+  platform.switchCutover({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId
+  });
+
+  let submission = platform.prepareAuthoritySubmission({
+    companyId: DEMO_IDS.companyId,
+    submissionType: "vat_return",
+    sourceObjectType: "vat_report",
+    sourceObjectId: "vat-report-phase14",
+    payloadVersion: "phase14",
+    providerKey: "skatteverket",
+    recipientId: "skatteverket:vat",
+    payload: { checksum: "phase14-vat" },
+    actorId: DEMO_IDS.userId
+  });
+  submission = platform.signAuthoritySubmission({
+    companyId: DEMO_IDS.companyId,
+    submissionId: submission.submissionId,
+    actorId: DEMO_IDS.userId
+  });
+  submission = await platform.submitAuthoritySubmission({
+    companyId: DEMO_IDS.companyId,
+    submissionId: submission.submissionId,
+    actorId: DEMO_IDS.userId,
+    simulatedTransportOutcome: "technical_ack"
+  });
+
+  assert.equal(typeof submission.submittedAt, "string");
+  assert.throws(
+    () =>
+      platform.startRollback({
+        sessionToken: adminToken,
+        companyId: DEMO_IDS.companyId,
+        cutoverPlanId: cutoverPlan.cutoverPlanId,
+        reasonCode: "filing_after_switch_requires_recovery",
+        rollbackOwnerUserId: DEMO_IDS.userId,
+        supportSignoffRef: "support-signoff:phase14-recovery",
+        securitySignoffRef: "security-signoff:phase14-recovery",
+        suspendIntegrationCodes: ["AUTHORITY_TRANSPORTS"],
+        freezeOperationalIntake: true
+      }),
+    (thrown) => thrown?.code === "cutover_rollback_recovery_plan_required"
+  );
+
+  const rollbackStarted = platform.startRollback({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    reasonCode: "filing_after_switch_requires_recovery",
+    rollbackOwnerUserId: DEMO_IDS.userId,
+    supportSignoffRef: "support-signoff:phase14-recovery",
+    securitySignoffRef: "security-signoff:phase14-recovery",
+    complianceSignoffRef: "compliance-signoff:phase14-recovery",
+    suspendIntegrationCodes: ["AUTHORITY_TRANSPORTS", "DOCUMENT_INGEST"],
+    freezeOperationalIntake: true,
+    recoveryPlanCode: "RECOVERY-PLAN-14A",
+    recoveryPlanNote: "Protect filing history and run correction chain."
+  });
+  assert.equal(rollbackStarted.rollbackPlan.regulatedSubmissionRecoveryPlan.protectedSubmissionRefs.length, 1);
+
+  const correctionCase = platform.createPostCutoverCorrectionCase({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    reasonCode: "source_error_after_cutover",
+    regulatedSubmissionRefs: [{
+      submissionId: submission.submissionId,
+      submissionType: submission.submissionType,
+      submittedAt: submission.submittedAt
+    }],
+    acceptanceReportDelta: {
+      impactClass: "material",
+      summary: "VAT return requires correction."
+    }
+  });
+  assert.equal(correctionCase.status, "open");
+
+  const rollbackCompleted = platform.completeRollback({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    integrationsSuspended: true,
+    switchMarkersReversed: true,
+    auditEvidencePreserved: true,
+    immutableReceiptsPreserved: true,
+    recoveryPlanActivated: true
+  });
+  assert.equal(rollbackCompleted.status, "rolled_back");
+
+  const secondCutoverPlan = platform.createCutoverPlan({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    freezeAt: "2026-03-25T08:00:00.000Z",
+    rollbackPointRef: "snapshot://phase14-closed",
+    acceptedVarianceThresholds: {
+      countDelta: 0,
+      amountDelta: 0
+    },
+    stabilizationWindowHours: 1,
+    signoffChain: [{ userId: DEMO_IDS.userId, roleCode: "migration_lead", label: "Migration lead" }],
+    goLiveChecklist: [{ itemCode: "cutover_done", label: "Cutover done" }]
+  });
+  platform.recordCutoverSignoff({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: secondCutoverPlan.cutoverPlanId
+  });
+  platform.updateCutoverChecklistItem({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: secondCutoverPlan.cutoverPlanId,
+    itemCode: "cutover_done",
+    status: "completed"
+  });
+  platform.startCutover({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: secondCutoverPlan.cutoverPlanId
+  });
+  platform.completeFinalExtract({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: secondCutoverPlan.cutoverPlanId,
+    lastExtractAt: "2026-03-25T08:10:00.000Z"
+  });
+  platform.createMigrationAcceptanceRecord({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    acceptanceType: "go_live_readiness",
+    cutoverPlanId: secondCutoverPlan.cutoverPlanId,
+    sourceParitySummary: {
+      countParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+      amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+      unresolvedMaterialDifferences: 0,
+      openingBalanceParityPassed: true,
+      openReceivablesParityPassed: true,
+      openPayablesParityPassed: true,
+      taxAccountParityPassed: true
+    }
+  });
+  await platform.passCutoverValidation({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: secondCutoverPlan.cutoverPlanId,
+    contractTestsPassed: true,
+    goldenScenariosPassed: true,
+    runbooksAcknowledged: true,
+    restoreDrillFreshnessDays: 30
+  });
+  platform.switchCutover({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: secondCutoverPlan.cutoverPlanId
+  });
+  platform.stabilizeCutover({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: secondCutoverPlan.cutoverPlanId,
+    close: false
+  });
+  currentTime = new Date("2026-03-23T21:31:00Z");
+  platform.stabilizeCutover({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: secondCutoverPlan.cutoverPlanId,
+    close: true
+  });
+  assert.throws(
+    () =>
+      platform.startRollback({
+        sessionToken: adminToken,
+        companyId: DEMO_IDS.companyId,
+        cutoverPlanId: secondCutoverPlan.cutoverPlanId,
+        reasonCode: "too_late"
+      }),
+    (thrown) => thrown?.code === "cutover_rollback_window_closed"
+  );
 });

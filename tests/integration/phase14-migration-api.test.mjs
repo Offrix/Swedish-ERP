@@ -329,19 +329,50 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId,
-        reasonCode: "parallel_run_mismatch"
+        reasonCode: "parallel_run_mismatch",
+        rollbackOwnerUserId: DEMO_IDS.userId,
+        supportSignoffRef: "support-signoff:phase14-api",
+        securitySignoffRef: "security-signoff:phase14-api",
+        suspendIntegrationCodes: ["AUTHORITY_TRANSPORTS"],
+        freezeOperationalIntake: true
       }
     });
     assert.equal(rollbackStarted.status, "rollback_in_progress");
+    assert.equal(rollbackStarted.rollbackPlan.rollbackExecutionMode, "post_switch_compensation");
+
+    const correctionCase = await requestJson(baseUrl, "/v1/migration/post-cutover-correction-cases", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        cutoverPlanId: cutoverPlan.cutoverPlanId,
+        reasonCode: "source_error_after_cutover",
+        acceptanceReportDelta: {
+          impactClass: "material",
+          summary: "Rollback investigation opened."
+        }
+      }
+    });
+    assert.equal(correctionCase.status, "open");
 
     const rollbackCompleted = await requestJson(baseUrl, `/v1/migration/cutover-plans/${cutoverPlan.cutoverPlanId}/rollback/complete`, {
       method: "POST",
       token: adminToken,
       body: {
-        companyId: DEMO_IDS.companyId
+        companyId: DEMO_IDS.companyId,
+        integrationsSuspended: true,
+        switchMarkersReversed: true,
+        auditEvidencePreserved: true,
+        immutableReceiptsPreserved: true
       }
     });
     assert.equal(rollbackCompleted.status, "rolled_back");
+
+    const correctionCases = await requestJson(baseUrl, `/v1/migration/post-cutover-correction-cases?companyId=${DEMO_IDS.companyId}&cutoverPlanId=${cutoverPlan.cutoverPlanId}`, {
+      token: adminToken
+    });
+    assert.equal(correctionCases.items.length, 1);
 
     const cockpit = await requestJson(baseUrl, `/v1/migration/cockpit?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
@@ -365,6 +396,7 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
     assert.equal(cockpit.diffReports.length, 1);
     assert.equal(cockpit.cutoverPlans.length, 1);
     assert.equal(cockpit.acceptanceRecords.length, 2);
+    assert.equal(cockpit.postCutoverCorrectionCases.length, 1);
   } finally {
     await stopServer(server);
   }
