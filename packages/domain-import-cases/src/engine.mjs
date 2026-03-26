@@ -42,7 +42,9 @@ export function createImportCasesPlatform(options = {}) {
 
 export function createImportCasesEngine({
   clock = () => new Date(),
-  seedDemo = false,
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   documentPlatform = null,
   reviewCenterPlatform = null,
   documentClassificationPlatform = null

@@ -16,7 +16,9 @@ export function createBankingPlatform(options = {}) {
 
 export function createBankingEngine({
   clock = () => new Date(),
-  seedDemo = false,
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   apPlatform = null,
   taxAccountPlatform = null,
   getTaxAccountPlatform = null

@@ -97,7 +97,9 @@ export function createApPlatform(options = {}) {
 
 export function createApEngine({
   clock = () => new Date(),
-  seedDemo = false,
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   vatPlatform = null,
   ledgerPlatform = null,
   documentPlatform = null,

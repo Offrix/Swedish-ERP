@@ -7,7 +7,13 @@ export function createHrPlatform(options = {}) {
   return createHrEngine(options);
 }
 
-export function createHrEngine({ clock = () => new Date(), seedDemo = false, documentPlatform = null } = {}) {
+export function createHrEngine({
+  clock = () => new Date(),
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  documentPlatform = null
+} = {}) {
   const state = {
     employees: new Map(),
     employeeIdsByCompany: new Map(),

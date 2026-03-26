@@ -42,7 +42,9 @@ export function createDocumentClassificationPlatform(options = {}) {
 
 export function createDocumentClassificationEngine({
   clock = () => new Date(),
-  seedDemo = false,
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   documentPlatform = null,
   reviewCenterPlatform = null,
   benefitsPlatform = null,

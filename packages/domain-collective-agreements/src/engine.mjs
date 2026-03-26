@@ -25,7 +25,13 @@ export function createCollectiveAgreementsPlatform(options = {}) {
   return createCollectiveAgreementsEngine(options);
 }
 
-export function createCollectiveAgreementsEngine({ clock = () => new Date(), seedDemo = false, hrPlatform = null } = {}) {
+export function createCollectiveAgreementsEngine({
+  clock = () => new Date(),
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  hrPlatform = null
+} = {}) {
   const state = {
     agreementFamilies: new Map(),
     agreementFamilyIdsByCompany: new Map(),

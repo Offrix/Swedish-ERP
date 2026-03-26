@@ -35,7 +35,13 @@ export function createBalancesPlatform(options = {}) {
   return createBalancesEngine(options);
 }
 
-export function createBalancesEngine({ clock = () => new Date(), seedDemo = false, hrPlatform = null } = {}) {
+export function createBalancesEngine({
+  clock = () => new Date(),
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  hrPlatform = null
+} = {}) {
   const state = {
     balanceTypes: new Map(),
     balanceTypeIdsByCompany: new Map(),
