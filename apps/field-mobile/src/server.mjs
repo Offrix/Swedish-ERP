@@ -81,13 +81,16 @@ export async function startFieldMobileServer({
   env = process.env,
   enforceExplicitRuntimeMode = false
 } = {}) {
-  const runtimeModeProfile = resolveRuntimeModeProfile({
+  const runtimeModeResolutionOptions = {
     runtimeMode,
     env,
     starter: "field-mobile",
-    requireExplicit: enforceExplicitRuntimeMode,
-    fallbackMode: "test"
-  });
+    requireExplicit: enforceExplicitRuntimeMode
+  };
+  if (!enforceExplicitRuntimeMode) {
+    runtimeModeResolutionOptions.fallbackMode = "test";
+  }
+  const runtimeModeProfile = resolveRuntimeModeProfile(runtimeModeResolutionOptions);
   const server = createFieldMobileServer();
   await new Promise((resolve) => {
     server.listen(port, resolve);

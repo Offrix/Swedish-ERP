@@ -82,13 +82,16 @@ export async function startDesktopWebServer({
   env = process.env,
   enforceExplicitRuntimeMode = false
 } = {}) {
-  const runtimeModeProfile = resolveRuntimeModeProfile({
+  const runtimeModeResolutionOptions = {
     runtimeMode,
     env,
     starter: "desktop-web",
-    requireExplicit: enforceExplicitRuntimeMode,
-    fallbackMode: "test"
-  });
+    requireExplicit: enforceExplicitRuntimeMode
+  };
+  if (!enforceExplicitRuntimeMode) {
+    runtimeModeResolutionOptions.fallbackMode = "test";
+  }
+  const runtimeModeProfile = resolveRuntimeModeProfile(runtimeModeResolutionOptions);
   const server = createDesktopWebServer();
   await new Promise((resolve) => {
     server.listen(port, resolve);

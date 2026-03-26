@@ -661,15 +661,18 @@ function buildRuntimeContracts(runtimeModeProfile, bootstrapModePolicy) {
 
 export function createApiPlatform(options = {}) {
   const env = options.env || process.env;
+  const runtimeModeResolutionOptions = {
+    runtimeMode: options.runtimeMode,
+    env,
+    starter: "api-platform",
+    requireExplicit: options.enforceExplicitRuntimeMode === true
+  };
+  if (options.enforceExplicitRuntimeMode !== true) {
+    runtimeModeResolutionOptions.fallbackMode = "test";
+  }
   const runtimeModeProfile =
     options.runtimeModeProfile ||
-    resolveRuntimeModeProfile({
-      runtimeMode: options.runtimeMode,
-      env,
-      starter: "api-platform",
-      requireExplicit: options.enforceExplicitRuntimeMode === true,
-      fallbackMode: "test"
-    });
+    resolveRuntimeModeProfile(runtimeModeResolutionOptions);
   const bootstrapModePolicy =
     options.bootstrapModePolicy || createBootstrapModePolicy(runtimeModeProfile);
   const bootstrapSeeding = resolveBootstrapSeeding({

@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createDefaultApiPlatform, createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { startDesktopWebServer } from "../../apps/desktop-web/src/server.mjs";
+import { startFieldMobileServer } from "../../apps/field-mobile/src/server.mjs";
 import { startWorker } from "../../apps/worker/src/worker.mjs";
 import {
   createBootstrapModePolicy,
@@ -68,5 +70,58 @@ test("phase 1.2 worker resolves runtime mode before entering the polling loop", 
     assert.equal(logs.some((message) => /sandbox_internal/u.test(message)), true);
   } finally {
     await runtime.stop();
+  }
+});
+
+test("phase 1.2 desktop-web starter requires explicit runtime mode when enforcement is on", async () => {
+  await assert.rejects(
+    () =>
+      startDesktopWebServer({
+        port: 0,
+        env: {},
+        logger: () => {},
+        enforceExplicitRuntimeMode: true
+      }),
+    /must declare runtime mode explicitly/u
+  );
+});
+
+test("phase 1.2 field-mobile starter requires explicit runtime mode when enforcement is on", async () => {
+  await assert.rejects(
+    () =>
+      startFieldMobileServer({
+        port: 0,
+        env: {},
+        logger: () => {},
+        enforceExplicitRuntimeMode: true
+      }),
+    /must declare runtime mode explicitly/u
+  );
+});
+
+test("phase 1.2 desktop-web and field-mobile carry declared runtime mode metadata", async () => {
+  const desktopRuntime = await startDesktopWebServer({
+    port: 0,
+    env: {
+      ERP_RUNTIME_MODE: "trial"
+    },
+    logger: () => {},
+    enforceExplicitRuntimeMode: true
+  });
+  const fieldRuntime = await startFieldMobileServer({
+    port: 0,
+    env: {
+      ERP_RUNTIME_MODE: "sandbox_internal"
+    },
+    logger: () => {},
+    enforceExplicitRuntimeMode: true
+  });
+
+  try {
+    assert.equal(desktopRuntime.runtimeModeProfile.environmentMode, "trial");
+    assert.equal(fieldRuntime.runtimeModeProfile.environmentMode, "sandbox_internal");
+  } finally {
+    await desktopRuntime.stop();
+    await fieldRuntime.stop();
   }
 });
