@@ -6,6 +6,7 @@ export {
   CanonicalRepositoryConflictError,
   INBOX_MESSAGE_STATUSES,
   OUTBOX_MESSAGE_STATUSES,
+  createBoundedContextCanonicalRepositories,
   createCanonicalJsonRepository,
   createCoreCanonicalRepositories,
   createInMemoryCanonicalRepositoryStore

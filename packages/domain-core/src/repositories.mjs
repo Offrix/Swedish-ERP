@@ -761,17 +761,56 @@ export function createCanonicalJsonRepository({
   };
 }
 
-export function createCoreCanonicalRepositories({ store = null, transaction = null } = {}) {
+function normalizeRepositoryObjectTypes(objectTypes) {
+  if (!objectTypes || typeof objectTypes !== "object" || Array.isArray(objectTypes)) {
+    throw new TypeError("objectTypes must be a plain object keyed by repository name.");
+  }
+
+  const entries = Object.entries(objectTypes).map(([repositoryKey, objectType]) => [
+    text(repositoryKey, "repositoryKey"),
+    text(objectType, `objectType:${repositoryKey}`)
+  ]);
+
+  if (entries.length === 0) {
+    throw new TypeError("objectTypes must contain at least one repository definition.");
+  }
+
+  return entries;
+}
+
+export function createBoundedContextCanonicalRepositories({
+  store = null,
+  transaction = null,
+  tableName = CORE_CANONICAL_REPOSITORY_TABLE,
+  boundedContextCode,
+  objectTypes
+} = {}) {
+  const normalizedBoundedContextCode = text(
+    boundedContextCode,
+    "boundedContextCode"
+  );
+  const normalizedObjectTypes = normalizeRepositoryObjectTypes(objectTypes);
+
   return Object.fromEntries(
-    Object.entries(CORE_CANONICAL_REPOSITORY_OBJECT_TYPES).map(([key, objectType]) => [
+    normalizedObjectTypes.map(([key, objectType]) => [
       key,
       createCanonicalJsonRepository({
         store,
         transaction,
-        tableName: CORE_CANONICAL_REPOSITORY_TABLE,
-        boundedContextCode: CORE_BOUNDED_CONTEXT_CODE,
+        tableName,
+        boundedContextCode: normalizedBoundedContextCode,
         objectType
       })
     ])
   );
+}
+
+export function createCoreCanonicalRepositories({ store = null, transaction = null } = {}) {
+  return createBoundedContextCanonicalRepositories({
+    store,
+    transaction,
+    tableName: CORE_CANONICAL_REPOSITORY_TABLE,
+    boundedContextCode: CORE_BOUNDED_CONTEXT_CODE,
+    objectTypes: CORE_CANONICAL_REPOSITORY_OBJECT_TYPES
+  });
 }

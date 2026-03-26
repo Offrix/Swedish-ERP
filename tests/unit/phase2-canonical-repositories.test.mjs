@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   CORE_CANONICAL_REPOSITORY_OBJECT_TYPES,
   CanonicalRepositoryConflictError,
+  createBoundedContextCanonicalRepositories,
   createCoreCanonicalRepositories,
   createInMemoryCanonicalRepositoryStore
 } from "../../packages/domain-core/src/repositories.mjs";
@@ -141,4 +142,48 @@ test("Phase 2.1 canonical repositories delete only with the current expected obj
   });
   assert.equal(deleted.objectId, "mapping-1");
   assert.equal(await repositories.mappingSets.get({ companyId: "company-2", objectId: "mapping-1" }), null);
+});
+
+test("Phase 2.1 canonical repositories can be scoped per bounded context without record collisions", async () => {
+  const store = createInMemoryCanonicalRepositoryStore();
+  const authRepositories = createBoundedContextCanonicalRepositories({
+    store,
+    boundedContextCode: "org_auth",
+    objectTypes: {
+      memberships: "membership_grant"
+    }
+  });
+  const financeRepositories = createBoundedContextCanonicalRepositories({
+    store,
+    boundedContextCode: "ledger",
+    objectTypes: {
+      journals: "journal_entry"
+    }
+  });
+
+  const authMembership = await authRepositories.memberships.save({
+    companyId: "company-3",
+    objectId: "shared-id",
+    payload: {
+      membershipGrantId: "shared-id",
+      companyId: "company-3",
+      userId: "user-1",
+      status: "active"
+    }
+  });
+  const journal = await financeRepositories.journals.save({
+    companyId: "company-3",
+    objectId: "shared-id",
+    payload: {
+      journalEntryId: "shared-id",
+      companyId: "company-3",
+      status: "draft"
+    }
+  });
+
+  assert.equal(authMembership.objectType, "membership_grant");
+  assert.equal(journal.objectType, "journal_entry");
+  assert.equal(authMembership.objectId, journal.objectId);
+  assert.equal((await authRepositories.memberships.list({ companyId: "company-3" })).length, 1);
+  assert.equal((await financeRepositories.journals.list({ companyId: "company-3" })).length, 1);
 });
