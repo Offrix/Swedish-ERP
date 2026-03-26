@@ -205,6 +205,9 @@ Flytta affÃ¤rssanningen frÃ¥n processminne till hÃ¥llbar persistence med i
 **FÃ¥r inte kÃ¶ras parallellt med**  
 - Ingen regulated submission, payroll eller tax-account-kedja fÃ¥r byggas vidare pÃ¥ in-memory truth.
 
+**Delfasstatus**  
+- 2.2 verifierad 2026-03-26: command receipt/outbox/inbox ligger i samma commit och mutationruntime bÃ¤r nu bounded-context repository bundles, inte bara core-scope.
+
 **Delfaser**
 - [x] 2.1 [NEW BUILD] **InfÃ¶r canonical repositories** â€” Varje bounded context fÃ¥r repositorygrÃ¤nssnitt med Postgres-implementation och transaktionsbunden optimistic concurrency.
 - [x] 2.2 [NEW BUILD] **InfÃ¶r command log + outbox/inbox** â€” Alla muterande commands ska skriva command receipt, expected version, actor, session revision och outbox-event i samma commit.

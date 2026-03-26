@@ -25,12 +25,26 @@ function hashPayload(payload) {
   return createHash("sha256").update(JSON.stringify(payload ?? null)).digest("hex");
 }
 
+function repositoryBundle(value) {
+  if (value == null) {
+    return {};
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("createRepositories must return a plain object.");
+  }
+  return value;
+}
+
 export function createCommandMutationRuntime({
   store,
-  clock = () => new Date()
+  clock = () => new Date(),
+  createRepositories = null
 } = {}) {
   if (!store || typeof store.withTransaction !== "function") {
     throw new TypeError("A canonical repository store is required for the command mutation runtime.");
+  }
+  if (createRepositories != null && typeof createRepositories !== "function") {
+    throw new TypeError("createRepositories must be a function.");
   }
 
   return {
@@ -93,9 +107,19 @@ export function createCommandMutationRuntime({
         }
 
         const queuedOutboxMessages = [];
-        const coreRepositories = createCoreCanonicalRepositories({ transaction });
+        const repositories = repositoryBundle(
+          createRepositories?.({
+            transaction,
+            command: clone(normalized)
+          })
+        );
+        const coreRepositories = repositories.coreRepositories || createCoreCanonicalRepositories({ transaction });
         const mutationOutput = await mutation({
           transaction,
+          repositories: {
+            ...repositories,
+            coreRepositories
+          },
           coreRepositories,
           command: clone(normalized),
           queueOutboxMessage(message) {

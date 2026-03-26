@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createCommandMutationRuntime } from "../../packages/domain-core/src/command-log.mjs";
 import {
+  createBoundedContextCanonicalRepositories,
   createCoreCanonicalRepositories,
   createInMemoryCanonicalRepositoryStore
 } from "../../packages/domain-core/src/repositories.mjs";
@@ -127,6 +128,90 @@ test("Phase 2.2 command runtime suppresses duplicate commands by idempotency key
   assert.equal(first.duplicate, false);
   assert.equal(second.duplicate, true);
   assert.equal(mutationCalls, 1);
+  assert.equal((await runtime.listCommandReceipts({ companyId: COMPANY_ID })).length, 1);
+  assert.equal((await runtime.listOutboxMessages({ companyId: COMPANY_ID })).length, 1);
+});
+
+test("Phase 2.2 command runtime supports bounded-context repository bundles in the same transaction", async () => {
+  const store = createInMemoryCanonicalRepositoryStore();
+  const runtime = createCommandMutationRuntime({
+    store,
+    createRepositories: ({ transaction, command }) => {
+      assert.equal(command.commandType, "collective_agreement.catalog.publish");
+      return {
+        collectiveAgreements: createBoundedContextCanonicalRepositories({
+          transaction,
+          boundedContextCode: "collective_agreements",
+          objectTypes: {
+            catalogEntries: "collective_agreement_catalog_entry"
+          }
+        })
+      };
+    }
+  });
+
+  const execution = await runtime.executeMutation({
+    companyId: COMPANY_ID,
+    commandType: "collective_agreement.catalog.publish",
+    aggregateType: "collective_agreement_catalog_entry",
+    aggregateId: "agreement-1",
+    actorId: "user-3",
+    sessionRevision: 7,
+    commandId: "command-agreement-1",
+    idempotencyKey: "collective-agreement:agreement-1",
+    commandPayload: {
+      agreementId: "agreement-1",
+      agreementFamilyCode: "unionen_tjansteman",
+      versionCode: "2026.1"
+    },
+    mutation: async ({ repositories, queueOutboxMessage }) => {
+      const saved = await repositories.collectiveAgreements.catalogEntries.save({
+        companyId: COMPANY_ID,
+        objectId: "agreement-1",
+        payload: {
+          agreementId: "agreement-1",
+          agreementFamilyCode: "unionen_tjansteman",
+          versionCode: "2026.1",
+          publicationStatus: "published"
+        },
+        actorId: "user-3",
+        correlationId: "corr-agreement-1"
+      });
+      queueOutboxMessage({
+        eventType: "command.accepted",
+        aggregateType: "collective_agreement_catalog_entry",
+        aggregateId: saved.objectId,
+        payload: {
+          agreementId: saved.objectId,
+          objectVersion: saved.objectVersion
+        }
+      });
+      return {
+        result: saved,
+        resultingObjectVersion: saved.objectVersion
+      };
+    }
+  });
+
+  assert.equal(execution.duplicate, false);
+  assert.equal(execution.commandReceipt.commandType, "collective_agreement.catalog.publish");
+  assert.equal(execution.commandReceipt.resultingObjectVersion, 1);
+  assert.equal(execution.outboxMessages.length, 1);
+  assert.equal(execution.outboxMessages[0].commandReceiptId, execution.commandReceipt.commandReceiptId);
+
+  const agreementRepositories = createBoundedContextCanonicalRepositories({
+    store,
+    boundedContextCode: "collective_agreements",
+    objectTypes: {
+      catalogEntries: "collective_agreement_catalog_entry"
+    }
+  });
+  const storedAgreement = await agreementRepositories.catalogEntries.get({
+    companyId: COMPANY_ID,
+    objectId: "agreement-1"
+  });
+  assert.equal(storedAgreement.objectVersion, 1);
+  assert.equal(storedAgreement.payload.publicationStatus, "published");
   assert.equal((await runtime.listCommandReceipts({ companyId: COMPANY_ID })).length, 1);
   assert.equal((await runtime.listOutboxMessages({ companyId: COMPANY_ID })).length, 1);
 });
