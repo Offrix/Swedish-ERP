@@ -237,11 +237,19 @@ test("Phase 14.3 migration cockpit tracks import, diff, cutover and rollback det
   assert.equal(cockpit.acceptanceRecords.length, 1);
   assert.equal(cockpit.acceptanceRecords[0].migrationAcceptanceRecordId, acceptanceRecord.migrationAcceptanceRecordId);
   assert.equal(cockpit.datasetSummary.acceptedImportBatchCount, 1);
+  assert.equal(cockpit.cutoverBoard.boardCode, "MigrationCutoverCockpit");
   assert.equal(cockpit.cutoverBoard.items.length, 1);
   assert.equal(cockpit.cutoverBoard.counters.rolledBack, 1);
+  assert.equal(cockpit.cutoverBoard.queueSummary[0].queueCode, "MIGRATION_CUTOVER");
   assert.equal(cockpit.cutoverBoard.items[0].objectType, "migrationCutover");
   assert.equal(cockpit.cutoverBoard.items[0].rollbackExecutionMode, "post_switch_compensation");
   assert.equal(cockpit.cutoverBoard.items[0].requiresAttention, false);
+  assert.equal(cockpit.cutoverBoard.items[0].ownerQueue, "migration_operator");
+  assert.equal(cockpit.acceptanceBoard.boardCode, "MigrationAcceptanceBoard");
+  assert.equal(cockpit.acceptanceBoard.items.length, 1);
+  assert.equal(cockpit.acceptanceBoard.counters.accepted, 1);
+  assert.equal(cockpit.acceptanceBoard.items[0].objectType, "migrationAcceptanceRecord");
+  assert.equal(cockpit.acceptanceBoard.items[0].paritySummary.taxAccountParityPassed, true);
 });
 
 test("Phase 14.3 rollback requires recovery plan when regulated filing was submitted after switch and closed cutover uses correction case", async () => {
@@ -432,6 +440,10 @@ test("Phase 14.3 rollback requires recovery plan when regulated filing was submi
   assert.equal(recoveryRow.regulatedSubmissionRecoveryRequired, true);
   assert.equal(recoveryRow.postCutoverCorrectionOpenCount, 1);
   assert.equal(recoveryRow.attentionReasonCodes.includes("post_cutover_correction_open"), true);
+  assert.equal(recoveryRow.blockedCount >= 1, true);
+  const recoveryAcceptanceRow = cockpit.acceptanceBoard.items.find((item) => item.cutoverPlanId === cutoverPlan.cutoverPlanId);
+  assert.equal(recoveryAcceptanceRow.objectType, "migrationAcceptanceRecord");
+  assert.equal(recoveryAcceptanceRow.postCutoverCorrectionOpenCount, 1);
 
   const secondCutoverPlan = platform.createCutoverPlan({
     sessionToken: adminToken,

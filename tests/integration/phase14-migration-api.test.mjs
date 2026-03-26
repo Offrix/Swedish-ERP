@@ -398,10 +398,16 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
     assert.equal(cockpit.acceptanceRecords.length, 2);
     assert.equal(cockpit.postCutoverCorrectionCases.length, 1);
     assert.equal(cockpit.datasetSummary.acceptedImportBatchCount, 1);
+    assert.equal(cockpit.cutoverBoard.boardCode, "MigrationCutoverCockpit");
     assert.equal(cockpit.cutoverBoard.items.length, 1);
     assert.equal(cockpit.cutoverBoard.counters.rolledBack, 1);
+    assert.equal(cockpit.cutoverBoard.queueSummary[0].queueCode, "MIGRATION_CUTOVER");
     assert.equal(cockpit.cutoverBoard.items[0].rollbackExecutionMode, "post_switch_compensation");
     assert.equal(cockpit.cutoverBoard.items[0].postCutoverCorrectionOpenCount, 1);
+    assert.equal(cockpit.acceptanceBoard.boardCode, "MigrationAcceptanceBoard");
+    assert.equal(cockpit.acceptanceBoard.items.length, 2);
+    assert.equal(cockpit.acceptanceBoard.counters.accepted, 2);
+    assert.equal(cockpit.acceptanceBoard.items[0].objectType, "migrationAcceptanceRecord");
   } finally {
     await stopServer(server);
   }

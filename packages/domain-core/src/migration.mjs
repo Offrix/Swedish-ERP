@@ -1086,6 +1086,7 @@ export function createMigrationModule({
     const cutoverPlans = listCutoverPlans({ sessionToken, companyId: resolvedCompanyId });
     const acceptanceRecords = listMigrationAcceptanceRecords({ sessionToken, companyId: resolvedCompanyId });
     const postCutoverCorrectionCases = listPostCutoverCorrectionCases({ sessionToken, companyId: resolvedCompanyId });
+    const currentTimestamp = nowIso(clock);
     return {
       mappingSets,
       importBatches,
@@ -1095,7 +1096,20 @@ export function createMigrationModule({
       acceptanceRecords,
       postCutoverCorrectionCases,
       datasetSummary: buildMigrationDatasetSummary({ importBatches, diffReports, acceptanceRecords, postCutoverCorrectionCases }),
-      cutoverBoard: buildMigrationCutoverBoard({ cutoverPlans, acceptanceRecords, postCutoverCorrectionCases })
+      cutoverBoard: buildMigrationCutoverBoard({
+        companyId: resolvedCompanyId,
+        cutoverPlans,
+        acceptanceRecords,
+        postCutoverCorrectionCases,
+        currentTimestamp
+      }),
+      acceptanceBoard: buildMigrationAcceptanceBoard({
+        companyId: resolvedCompanyId,
+        acceptanceRecords,
+        cutoverPlans,
+        postCutoverCorrectionCases,
+        currentTimestamp
+      })
     };
   }
 
@@ -2390,7 +2404,13 @@ function buildMigrationDatasetSummary({ importBatches, diffReports, acceptanceRe
   };
 }
 
-function buildMigrationCutoverBoard({ cutoverPlans, acceptanceRecords, postCutoverCorrectionCases }) {
+function buildMigrationCutoverBoard({
+  companyId,
+  cutoverPlans,
+  acceptanceRecords,
+  postCutoverCorrectionCases,
+  currentTimestamp
+}) {
   const acceptanceRecordsByCutoverPlanId = new Map();
   for (const acceptanceRecord of acceptanceRecords) {
     if (!acceptanceRecord.cutoverPlanId) {
@@ -2413,12 +2433,52 @@ function buildMigrationCutoverBoard({ cutoverPlans, acceptanceRecords, postCutov
       buildMigrationCutoverBoardRow({
         cutoverPlan,
         acceptanceRecords: acceptanceRecordsByCutoverPlanId.get(cutoverPlan.cutoverPlanId) || [],
-        correctionCases: correctionCasesByCutoverPlanId.get(cutoverPlan.cutoverPlanId) || []
+        correctionCases: correctionCasesByCutoverPlanId.get(cutoverPlan.cutoverPlanId) || [],
+        currentTimestamp
       })
     )
     .sort((left, right) => resolveMigrationCutoverBoardTimestamp(right).localeCompare(resolveMigrationCutoverBoardTimestamp(left)));
-  return {
+  const queueSummary = buildMigrationQueueSummary({
+    queueCode: "MIGRATION_CUTOVER",
+    ownerQueue: "migration_operator",
     items,
+    currentTimestamp
+  });
+  return {
+    boardCode: "MigrationCutoverCockpit",
+    title: "Migration cutover cockpit",
+    scope: "company",
+    companyId,
+    defaultViewCode: "attention",
+    views: [
+      { viewCode: "attention", label: "Needs attention", filter: { requiresAttention: true } },
+      { viewCode: "planned", label: "Planned", filter: { status: ["planned", "freeze_started", "final_extract_done", "validation_passed"] } },
+      { viewCode: "switched", label: "Switched", filter: { status: ["switched", "stabilized"] } },
+      { viewCode: "rollback", label: "Rollback", filter: { status: ["rollback_in_progress", "rolled_back"] } }
+    ],
+    filters: [
+      { filterCode: "status", inputType: "enum", values: CUTOVER_PLAN_STATUSES },
+      { filterCode: "requiresAttention", inputType: "boolean" },
+      { filterCode: "validationGateStatus", inputType: "enum", values: ["pending", "blocked", "passed"] }
+    ],
+    sortOptions: [
+      { sortCode: "recent", field: "boardTimestamp", direction: "desc" },
+      { sortCode: "freezeAt", field: "freezeAt", direction: "asc" },
+      { sortCode: "status", field: "status", direction: "asc" }
+    ],
+    commandBar: {
+      contextObject: { objectType: "migrationCutoverCockpit", objectId: companyId },
+      availableCommands: [
+        { actionCode: "migration.openCutoverPlans", label: "Open cutover plans" },
+        { actionCode: "migration.openAcceptanceRecords", label: "Open acceptance records" },
+        { actionCode: "migration.openCorrections", label: "Open corrections" }
+      ],
+      recentCommands: [],
+      quickFilters: ["attention", "rollback", "switched"],
+      createActions: ["migration.createCutoverPlan"]
+    },
+    items,
+    queueSummary,
     counters: {
       total: items.length,
       planned: items.filter((item) => item.status === "planned").length,
@@ -2429,12 +2489,22 @@ function buildMigrationCutoverBoard({ cutoverPlans, acceptanceRecords, postCutov
       rollbackInProgress: items.filter((item) => item.status === "rollback_in_progress").length,
       rolledBack: items.filter((item) => item.status === "rolled_back").length,
       correctionOpen: items.filter((item) => item.postCutoverCorrectionOpenCount > 0).length,
-      attentionRequired: items.filter((item) => item.requiresAttention).length
+      attentionRequired: items.filter((item) => item.requiresAttention).length,
+      acceptanceBlocked: items.filter((item) => item.latestAcceptanceStatus === "blocked").length,
+      checklistBlocked: items.filter((item) => item.checklistSummary.blockedMandatory > 0).length
+    },
+    projectionInfo: {
+      projectionCode: "MigrationCutoverCockpit",
+      objectType: "workbench",
+      objectId: companyId,
+      sourceVersion: currentTimestamp,
+      targetVersion: currentTimestamp,
+      staleProjection: false
     }
   };
 }
 
-function buildMigrationCutoverBoardRow({ cutoverPlan, acceptanceRecords, correctionCases }) {
+function buildMigrationCutoverBoardRow({ cutoverPlan, acceptanceRecords, correctionCases, currentTimestamp }) {
   const latestAcceptanceRecord = [...acceptanceRecords]
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] || null;
   const signoffSummary = {
@@ -2469,9 +2539,19 @@ function buildMigrationCutoverBoardRow({ cutoverPlan, acceptanceRecords, correct
   if (checklistSummary.blockedMandatory > 0) {
     attentionReasonCodes.push("checklist_blocked");
   }
+  const boardTimestamp = resolveMigrationCutoverBoardTimestamp({
+    rollbackCompletedAt: cutoverPlan.rollbackCompletedAt,
+    rollbackStartedAt: cutoverPlan.rollbackStartedAt,
+    stabilizedAt: cutoverPlan.stabilizedAt,
+    switchedAt: cutoverPlan.switchedAt,
+    latestAcceptanceRecordedAt: latestAcceptanceRecord?.recordedAt || null,
+    lastExtractAt: cutoverPlan.lastExtractAt,
+    freezeAt: cutoverPlan.freezeAt
+  });
   return {
     objectType: "migrationCutover",
     cutoverPlanId: cutoverPlan.cutoverPlanId,
+    boardTimestamp,
     status: cutoverPlan.status,
     validationGateStatus: cutoverPlan.validationGateStatus,
     freezeAt: cutoverPlan.freezeAt,
@@ -2492,9 +2572,191 @@ function buildMigrationCutoverBoardRow({ cutoverPlan, acceptanceRecords, correct
     regulatedSubmissionRecoveryRequired: cutoverPlan.rollbackPlan?.regulatedSubmissionRecoveryPlan != null,
     postCutoverCorrectionCaseCount: correctionCases.length,
     postCutoverCorrectionOpenCount: openCorrectionCases.length,
+    queueCode: "MIGRATION_CUTOVER",
+    ownerQueue: "migration_operator",
+    blockedCount:
+      (latestAcceptanceRecord?.blockingReasonCodes?.length || 0)
+      + (cutoverPlan.validationSummary?.blockingReasonCodes?.length || 0)
+      + checklistSummary.blockedMandatory
+      + signoffSummary.pending
+      + openCorrectionCases.length,
+    escalationPolicyCode: cutoverPlan.status === "rollback_in_progress"
+      ? "cutover_rollback_hot"
+      : cutoverPlan.status === "validation_passed"
+        ? "cutover_switch_window"
+        : "cutover_go_live_blocker",
+    availableActionCodes: resolveMigrationCutoverActionCodes(cutoverPlan),
     requiresAttention: attentionReasonCodes.length > 0,
-    attentionReasonCodes: [...new Set(attentionReasonCodes)]
+    attentionReasonCodes: [...new Set(attentionReasonCodes)],
+    ageHours: computeAgeHours(cutoverPlan.createdAt || cutoverPlan.freezeAt || currentTimestamp, currentTimestamp)
   };
+}
+
+function buildMigrationAcceptanceBoard({
+  companyId,
+  acceptanceRecords,
+  cutoverPlans,
+  postCutoverCorrectionCases,
+  currentTimestamp
+}) {
+  const cutoverPlansById = new Map(cutoverPlans.map((cutoverPlan) => [cutoverPlan.cutoverPlanId, cutoverPlan]));
+  const correctionCasesByCutoverPlanId = new Map();
+  for (const correctionCase of postCutoverCorrectionCases) {
+    if (!correctionCasesByCutoverPlanId.has(correctionCase.cutoverPlanId)) {
+      correctionCasesByCutoverPlanId.set(correctionCase.cutoverPlanId, []);
+    }
+    correctionCasesByCutoverPlanId.get(correctionCase.cutoverPlanId).push(correctionCase);
+  }
+  const items = acceptanceRecords
+    .map((acceptanceRecord) =>
+      buildMigrationAcceptanceBoardRow({
+        acceptanceRecord,
+        cutoverPlan: cutoverPlansById.get(acceptanceRecord.cutoverPlanId) || null,
+        correctionCases: correctionCasesByCutoverPlanId.get(acceptanceRecord.cutoverPlanId) || [],
+        currentTimestamp
+      })
+    )
+    .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt));
+  const queueSummary = buildMigrationQueueSummary({
+    queueCode: "MIGRATION_ACCEPTANCE",
+    ownerQueue: "migration_operator",
+    items,
+    currentTimestamp
+  });
+  return {
+    boardCode: "MigrationAcceptanceBoard",
+    title: "Migration acceptance board",
+    scope: "company",
+    companyId,
+    defaultViewCode: "blocked",
+    views: [
+      { viewCode: "blocked", label: "Blocked", filter: { status: ["blocked"] } },
+      { viewCode: "accepted", label: "Accepted", filter: { status: ["accepted"] } },
+      { viewCode: "goLiveReadiness", label: "Go-live readiness", filter: { acceptanceType: ["go_live_readiness"] } }
+    ],
+    filters: [
+      { filterCode: "status", inputType: "enum", values: MIGRATION_ACCEPTANCE_RECORD_STATUSES },
+      { filterCode: "acceptanceType", inputType: "string" },
+      { filterCode: "cutoverPlanId", inputType: "string" }
+    ],
+    sortOptions: [
+      { sortCode: "recent", field: "recordedAt", direction: "desc" },
+      { sortCode: "status", field: "status", direction: "asc" }
+    ],
+    commandBar: {
+      contextObject: { objectType: "migrationAcceptanceBoard", objectId: companyId },
+      availableCommands: [
+        { actionCode: "migration.openAcceptanceRecords", label: "Open acceptance records" },
+        { actionCode: "migration.openCutoverCockpit", label: "Open cutover cockpit" }
+      ],
+      recentCommands: [],
+      quickFilters: ["blocked", "accepted", "goLiveReadiness"],
+      createActions: []
+    },
+    items,
+    queueSummary,
+    counters: {
+      total: items.length,
+      accepted: items.filter((item) => item.status === "accepted").length,
+      blocked: items.filter((item) => item.status === "blocked").length,
+      goLiveReadinessAccepted: items.filter((item) => item.acceptanceType === "go_live_readiness" && item.status === "accepted").length,
+      linkedCorrectionOpen: items.filter((item) => item.postCutoverCorrectionOpenCount > 0).length
+    },
+    projectionInfo: {
+      projectionCode: "MigrationAcceptanceBoard",
+      objectType: "workbench",
+      objectId: companyId,
+      sourceVersion: currentTimestamp,
+      targetVersion: currentTimestamp,
+      staleProjection: false
+    }
+  };
+}
+
+function buildMigrationAcceptanceBoardRow({ acceptanceRecord, cutoverPlan, correctionCases, currentTimestamp }) {
+  const openCorrectionCases = correctionCases.filter((correctionCase) => correctionCase.status === "open");
+  const unresolvedMaterialDifferences = acceptanceRecord.sourceParitySummary?.unresolvedMaterialDifferences || 0;
+  const blockingReasonCodes = acceptanceRecord.blockingReasonCodes || [];
+  const attentionReasonCodes = [];
+  if (acceptanceRecord.status === "blocked") {
+    attentionReasonCodes.push("acceptance_blocked");
+  }
+  if (unresolvedMaterialDifferences > 0) {
+    attentionReasonCodes.push("material_differences_unresolved");
+  }
+  if (openCorrectionCases.length > 0) {
+    attentionReasonCodes.push("post_cutover_correction_open");
+  }
+  return {
+    objectType: "migrationAcceptanceRecord",
+    migrationAcceptanceRecordId: acceptanceRecord.migrationAcceptanceRecordId,
+    acceptanceType: acceptanceRecord.acceptanceType,
+    cutoverPlanId: acceptanceRecord.cutoverPlanId,
+    cutoverStatus: cutoverPlan?.status || null,
+    status: acceptanceRecord.status,
+    recordedAt: acceptanceRecord.recordedAt,
+    rollbackPointRef: acceptanceRecord.rollbackPointRef,
+    blockingReasonCodes,
+    unresolvedMaterialDifferences,
+    signoffRefCount: (acceptanceRecord.signoffRefs || []).length,
+    postCutoverCorrectionOpenCount: openCorrectionCases.length,
+    queueCode: "MIGRATION_ACCEPTANCE",
+    ownerQueue: "migration_operator",
+    blockedCount: blockingReasonCodes.length + openCorrectionCases.length,
+    escalationPolicyCode: acceptanceRecord.status === "blocked" ? "migration_acceptance_blocked" : "migration_acceptance_review",
+    requiresAttention: attentionReasonCodes.length > 0,
+    attentionReasonCodes,
+    ageHours: computeAgeHours(acceptanceRecord.recordedAt, currentTimestamp),
+    paritySummary: {
+      openingBalanceParityPassed: acceptanceRecord.sourceParitySummary?.openingBalanceParityPassed === true,
+      openReceivablesParityPassed: acceptanceRecord.sourceParitySummary?.openReceivablesParityPassed === true,
+      openPayablesParityPassed: acceptanceRecord.sourceParitySummary?.openPayablesParityPassed === true,
+      payrollYtdParityPassed: acceptanceRecord.sourceParitySummary?.payrollYtdParityPassed === true,
+      agiHistoryParityPassed: acceptanceRecord.sourceParitySummary?.agiHistoryParityPassed === true,
+      taxAccountParityPassed: acceptanceRecord.sourceParitySummary?.taxAccountParityPassed === true
+    }
+  };
+}
+
+function buildMigrationQueueSummary({ queueCode, ownerQueue, items, currentTimestamp }) {
+  const openItems = items.filter((item) => !["closed", "rolled_back"].includes(item.status));
+  return [
+    {
+      queueCode,
+      ownerQueue,
+      openCount: openItems.length,
+      blockedCount: items.reduce((sum, item) => sum + (item.blockedCount || 0), 0),
+      attentionRequiredCount: items.filter((item) => item.requiresAttention).length,
+      oldestOpenAgeHours: openItems.reduce(
+        (maxAge, item) => Math.max(maxAge, computeAgeHours(item.recordedAt || item.freezeAt || currentTimestamp, currentTimestamp)),
+        0
+      )
+    }
+  ];
+}
+
+function resolveMigrationCutoverActionCodes(cutoverPlan) {
+  if (["planned", "freeze_started", "final_extract_done"].includes(cutoverPlan.status)) {
+    return ["migration.recordSignoff", "migration.updateChecklist", "migration.validateCutover"];
+  }
+  if (cutoverPlan.status === "validation_passed") {
+    return ["migration.switchCutover", "migration.openAcceptanceRecords"];
+  }
+  if (["switched", "stabilized"].includes(cutoverPlan.status)) {
+    return ["migration.openCorrectionCase", "migration.startRollback", "migration.openSupport"];
+  }
+  if (cutoverPlan.status === "rollback_in_progress") {
+    return ["migration.completeRollback", "migration.openIncident"];
+  }
+  return ["migration.openAcceptanceRecords"];
+}
+
+function computeAgeHours(referenceTimestamp, currentTimestamp) {
+  if (!referenceTimestamp || !currentTimestamp) {
+    return 0;
+  }
+  const delta = new Date(currentTimestamp).getTime() - new Date(referenceTimestamp).getTime();
+  return delta > 0 ? Math.floor(delta / 3600000) : 0;
 }
 
 function resolveMigrationCutoverBoardTimestamp(item) {
