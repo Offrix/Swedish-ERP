@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { runWorkerBatch } from "../../apps/worker/src/worker.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, loginWithTotpOnly } from "../helpers/api-helpers.mjs";
@@ -89,13 +90,19 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
         companyId: DEMO_IDS.companyId
       }
     });
-    await requestJson(`${baseUrl}/v1/submissions/${finalizedSubmission.submissionId}/submit`, {
+    const finalizedDispatch = await requestJson(`${baseUrl}/v1/submissions/${finalizedSubmission.submissionId}/submit`, {
       method: "POST",
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId,
         simulatedTransportOutcome: "technical_ack"
       }
+    });
+    assert.equal(finalizedDispatch.transportQueued, true);
+    await runWorkerBatch({
+      platform,
+      logger: () => {},
+      workerId: "phase12-api-finalized-submission"
     });
     await requestJson(`${baseUrl}/v1/submissions/${finalizedSubmission.submissionId}/receipts`, {
       method: "POST",
@@ -144,13 +151,19 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
       }
     });
 
-    await requestJson(`${baseUrl}/v1/submissions/${queuedSubmission.submissionId}/submit`, {
+    const failedDispatch = await requestJson(`${baseUrl}/v1/submissions/${queuedSubmission.submissionId}/submit`, {
       method: "POST",
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId,
         simulatedTransportOutcome: "transport_failed"
       }
+    });
+    assert.equal(failedDispatch.transportQueued, true);
+    await runWorkerBatch({
+      platform,
+      logger: () => {},
+      workerId: "phase12-api-queued-submission"
     });
 
     const retried = await requestJson(`${baseUrl}/v1/submissions/${queuedSubmission.submissionId}/retry`, {
@@ -162,13 +175,19 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
     });
     assert.equal(retried.submission.attemptNo, 2);
 
-    await requestJson(`${baseUrl}/v1/submissions/${retried.submission.submissionId}/submit`, {
+    const retriedDispatch = await requestJson(`${baseUrl}/v1/submissions/${retried.submission.submissionId}/submit`, {
       method: "POST",
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId,
         simulatedTransportOutcome: "technical_ack"
       }
+    });
+    assert.equal(retriedDispatch.transportQueued, true);
+    await runWorkerBatch({
+      platform,
+      logger: () => {},
+      workerId: "phase12-api-retried-submission"
     });
     await requestJson(`${baseUrl}/v1/submissions/${retried.submission.submissionId}/receipts`, {
       method: "POST",

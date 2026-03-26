@@ -32,7 +32,8 @@ export function createIntegrationEngine({
   paymentBaseUrl = "https://payments.local",
   webhookDeliveryExecutor = undefined,
   partnerContractTestExecutors = undefined,
-  partnerOperationExecutors = undefined
+  partnerOperationExecutors = undefined,
+  getCorePlatform = null
 } = {}) {
   const state = {
     submissions: new Map(),
@@ -94,8 +95,11 @@ export function createIntegrationEngine({
     getAuthoritySubmission(input) {
       return getAuthoritySubmission({ state }, input);
     },
-    submitAuthoritySubmission(input) {
-      return submitAuthoritySubmission({ state, clock }, input);
+    async submitAuthoritySubmission(input) {
+      return submitAuthoritySubmission({ state, clock, getCorePlatform }, input);
+    },
+    executeAuthoritySubmissionTransport(input) {
+      return executeAuthoritySubmissionTransport({ state, clock }, input);
     },
     registerSubmissionReceipt(input) {
       return registerSubmissionReceipt({ state, clock }, input);
@@ -328,6 +332,8 @@ function prepareAuthoritySubmission({ state, clock }, input = {}) {
     payloadHash,
     payloadJson: payload,
     correlationId: normalizeOptionalText(input.correlationId) || crypto.randomUUID(),
+    transportJobId: null,
+    transportRequestedAt: null,
     submittedAt: null,
     acceptedAt: null,
     finalizedAt: null,
@@ -382,22 +388,97 @@ function getAuthoritySubmission({ state }, { companyId, submissionId } = {}) {
   return enrichSubmission(state, requireSubmission(state, companyId, submissionId));
 }
 
-function submitAuthoritySubmission(
-  { state, clock },
+async function submitAuthoritySubmission(
+  { state, clock, getCorePlatform },
   { companyId, submissionId, actorId, mode = "test", simulatedTransportOutcome = "technical_ack", providerReference = null, message = null } = {}
 ) {
   const submission = requireSubmission(state, companyId, submissionId);
+  if (submission.status === "submitted" && submission.transportJobId && !hasSubmissionTransportReceipt(state, submission.submissionId)) {
+    return {
+      ...enrichSubmission(state, submission),
+      transportQueued: true,
+      queuedJob: resolveQueuedTransportJob(getCorePlatform, submission.transportJobId)
+    };
+  }
   if (submission.status !== "signed") {
     throw createError(409, "submission_not_signed", "Submission must be signed before dispatch.");
   }
 
-  submission.status = "submitted";
-  submission.submittedAt = nowIso(clock);
-  submission.updatedAt = submission.submittedAt;
-  submission.dispatchMode = requireText(mode, "submission_mode_required");
-  submission.providerReference = normalizeOptionalText(providerReference);
-  submission.dispatchMessage = normalizeOptionalText(message);
+  markSubmissionSubmitted(submission, {
+    clock,
+    mode,
+    providerReference,
+    message
+  });
 
+  const corePlatform = resolveCorePlatform(getCorePlatform);
+  if (corePlatform) {
+    const queuedJob = await corePlatform.enqueueRuntimeJob({
+      companyId: submission.companyId,
+      jobType: "submission.transport",
+      sourceObjectType: "submission",
+      sourceObjectId: submission.submissionId,
+      idempotencyKey: `submission-transport:${submission.submissionId}:${submission.attemptNo}`,
+      payload: {
+        submissionId: submission.submissionId,
+        mode: submission.dispatchMode,
+        simulatedTransportOutcome: normalizeOptionalText(simulatedTransportOutcome) || "technical_ack",
+        providerReference: submission.providerReference,
+        message: submission.dispatchMessage
+      },
+      actorId: requireText(actorId || "system", "actor_id_required")
+    });
+    submission.transportJobId = queuedJob.jobId;
+    submission.transportRequestedAt = submission.submittedAt;
+    submission.updatedAt = submission.transportRequestedAt;
+    return {
+      ...enrichSubmission(state, submission),
+      transportQueued: true,
+      queuedJob
+    };
+  }
+
+  return executeAuthoritySubmissionTransport(
+    { state, clock },
+    {
+      companyId,
+      submissionId,
+      actorId,
+      mode,
+      simulatedTransportOutcome,
+      providerReference,
+      message
+    }
+  );
+}
+
+function executeAuthoritySubmissionTransport(
+  { state, clock },
+  { companyId, submissionId, actorId, mode = "test", simulatedTransportOutcome = "technical_ack", providerReference = null, message = null, requiredInput = [] } = {}
+) {
+  const submission = requireSubmission(state, companyId, submissionId);
+  if (submission.status === "signed") {
+    markSubmissionSubmitted(submission, {
+      clock,
+      mode,
+      providerReference,
+      message
+    });
+  }
+  if (submission.status !== "submitted") {
+    return {
+      ...enrichSubmission(state, submission),
+      executionSkipped: true,
+      skipReasonCode: "submission_transport_not_dispatchable"
+    };
+  }
+  if (hasSubmissionTransportReceipt(state, submission.submissionId)) {
+    return {
+      ...enrichSubmission(state, submission),
+      executionSkipped: true,
+      skipReasonCode: "submission_transport_already_recorded"
+    };
+  }
   const outcome = normalizeOptionalText(simulatedTransportOutcome) || "technical_ack";
   if (outcome === "transport_failed") {
     submission.status = "transport_failed";
@@ -646,6 +727,15 @@ function autoResolveQueueItems(state, submissionId, resolutionCode, timestamp) {
   }
 }
 
+function markSubmissionSubmitted(submission, { clock, mode, providerReference = null, message = null }) {
+  submission.status = "submitted";
+  submission.submittedAt = nowIso(clock);
+  submission.updatedAt = submission.submittedAt;
+  submission.dispatchMode = requireText(mode, "submission_mode_required");
+  submission.providerReference = normalizeOptionalText(providerReference);
+  submission.dispatchMessage = normalizeOptionalText(message);
+}
+
 function requireSubmission(state, companyId, submissionId) {
   const submission = state.submissions.get(requireText(submissionId, "submission_id_required"));
   if (!submission || submission.companyId !== requireText(companyId, "company_id_required")) {
@@ -670,6 +760,36 @@ function findMatchingReceipt(state, submissionId, { receiptType, providerStatus 
         receipt.messageText === normalizedMessage &&
         receipt.isFinal === normalizedFinal
     );
+}
+
+function hasSubmissionTransportReceipt(state, submissionId) {
+  return (state.receiptIdsBySubmission.get(submissionId) || [])
+    .map((receiptId) => state.receipts.get(receiptId))
+    .filter(Boolean)
+    .some((receipt) => receipt.receiptType === "technical_ack" || receipt.receiptType === "technical_nack");
+}
+
+function resolveCorePlatform(getCorePlatform) {
+  if (typeof getCorePlatform !== "function") {
+    return null;
+  }
+  const corePlatform = getCorePlatform();
+  if (!corePlatform || typeof corePlatform.enqueueRuntimeJob !== "function") {
+    return null;
+  }
+  return corePlatform;
+}
+
+function resolveQueuedTransportJob(getCorePlatform, jobId) {
+  const corePlatform = resolveCorePlatform(getCorePlatform);
+  if (!corePlatform || typeof corePlatform.getRuntimeJob !== "function" || !jobId) {
+    return {
+      jobId
+    };
+  }
+  return {
+    jobId
+  };
 }
 
 function ownerQueueForSubmission(submission) {

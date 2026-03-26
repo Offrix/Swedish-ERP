@@ -9,6 +9,7 @@ Integration boundary for bank, Peppol, inbound email, BankID/eID, invoice delive
 - public API clients, compatibility baselines, OAuth-style token exchange and webhook subscriptions
 - partner connections, contract tests, rate-limit aware operations and async job orchestration
 - submission envelopes with idempotency, receipt chains and action queue for AGI, VAT, HUS, Peppol and annual flows
+- worker-backed submission transport for composite runtime paths, while isolated engine tests can still execute synchronously without a core job store
 
 ## Guarantees
 
@@ -18,3 +19,4 @@ Integration boundary for bank, Peppol, inbound email, BankID/eID, invoice delive
 - transport failures and domain rejections stay separated in status and queue handling
 - receipt history is append-only and duplicate receipts do not create duplicate state transitions
 - retries create new attempts instead of mutating historical submissions
+- authority submission transport is queued onto the shared worker runtime when a core platform is available

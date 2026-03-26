@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { runWorkerBatch } from "../../apps/worker/src/worker.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 
@@ -60,13 +61,19 @@ test("Phase 12.2 end-to-end flow exposes declaration and submission routes and d
         companyId: DEMO_IDS.companyId
       }
     });
-    await requestJson(baseUrl, `/v1/submissions/${queuedSubmission.submissionId}/submit`, {
+    const failedDispatch = await requestJson(baseUrl, `/v1/submissions/${queuedSubmission.submissionId}/submit`, {
       method: "POST",
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId,
         simulatedTransportOutcome: "transport_failed"
       }
+    });
+    assert.equal(failedDispatch.transportQueued, true);
+    await runWorkerBatch({
+      platform,
+      logger: () => {},
+      workerId: "phase12-e2e-failed-submission"
     });
 
     const openQueue = await requestJson(baseUrl, `/v1/submissions/action-queue?companyId=${DEMO_IDS.companyId}&status=open`, {
@@ -85,13 +92,19 @@ test("Phase 12.2 end-to-end flow exposes declaration and submission routes and d
     assert.equal(retried.previousSubmission.status, "retry_pending");
     assert.equal(retried.submission.attemptNo, 2);
 
-    await requestJson(baseUrl, `/v1/submissions/${retried.submission.submissionId}/submit`, {
+    const retriedDispatch = await requestJson(baseUrl, `/v1/submissions/${retried.submission.submissionId}/submit`, {
       method: "POST",
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId,
         simulatedTransportOutcome: "technical_ack"
       }
+    });
+    assert.equal(retriedDispatch.transportQueued, true);
+    await runWorkerBatch({
+      platform,
+      logger: () => {},
+      workerId: "phase12-e2e-retried-submission"
     });
     await requestJson(baseUrl, `/v1/submissions/${retried.submission.submissionId}/receipts`, {
       method: "POST",

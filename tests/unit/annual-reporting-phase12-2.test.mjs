@@ -102,7 +102,7 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
   assert.equal(second.outputChecksum, taxPackage.outputChecksum);
 });
 
-test("Phase 12.2 submission engine separates accepted from finalized and deduplicates identical receipts", () => {
+test("Phase 12.2 submission engine separates accepted from finalized and deduplicates identical receipts", async () => {
   const integrationPlatform = createIntegrationPlatform({
     clock: () => FIXED_NOW
   });
@@ -127,7 +127,7 @@ test("Phase 12.2 submission engine separates accepted from finalized and dedupli
     submissionId: submission.submissionId,
     actorId: "phase12-2-unit"
   });
-  submission = integrationPlatform.submitAuthoritySubmission({
+  submission = await integrationPlatform.submitAuthoritySubmission({
     companyId: "company-1",
     submissionId: submission.submissionId,
     actorId: "phase12-2-unit",
@@ -162,7 +162,7 @@ test("Phase 12.2 submission engine separates accepted from finalized and dedupli
   assert.equal(submission.receipts.length, 3);
 });
 
-test("Phase 12.2 submission engine routes transport failures into action queue and blocks forbidden retry", () => {
+test("Phase 12.2 submission engine routes transport failures into action queue and blocks forbidden retry", async () => {
   const integrationPlatform = createIntegrationPlatform({
     clock: () => FIXED_NOW
   });
@@ -183,7 +183,7 @@ test("Phase 12.2 submission engine routes transport failures into action queue a
     actorId: "phase12-2-unit"
   });
 
-  submission = integrationPlatform.submitAuthoritySubmission({
+  submission = await integrationPlatform.submitAuthoritySubmission({
     companyId: "company-2",
     submissionId: submission.submissionId,
     actorId: "phase12-2-unit",

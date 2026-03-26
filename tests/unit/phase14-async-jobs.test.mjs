@@ -43,10 +43,10 @@ test("Phase 14 Step 4 async jobs dead-letter unsupported handlers and allow repl
 
   const queuedJob = await platform.enqueueRuntimeJob({
     companyId: "00000000-0000-4000-8000-000000000001",
-    jobType: "submission.transport",
+    jobType: "submission.receipt.collect",
     sourceObjectType: "submission",
     sourceObjectId: "submission-42",
-    idempotencyKey: "step4-submission-transport-missing-handler",
+    idempotencyKey: "step4-submission-receipt-missing-handler",
     payload: { submissionId: "submission-42" },
     actorId: "system"
   });
@@ -71,6 +71,61 @@ test("Phase 14 Step 4 async jobs dead-letter unsupported handlers and allow repl
     reasonCode: "handler_added"
   });
   assert.equal(replayPlan.status, "planned");
+});
+
+test("Phase 14 Step 4 worker runs submission transport jobs through the shared runtime", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-24T10:35:00Z")
+  });
+
+  const submission = await platform.prepareAuthoritySubmission({
+    companyId: DEMO_IDS.companyId,
+    submissionType: "income_tax_return",
+    sourceObjectType: "tax_declaration_package",
+    sourceObjectId: "tax-package-1",
+    providerKey: "skatteverket",
+    recipientId: "skatteverket:income-tax",
+    signedState: "signed",
+    actorId: "system",
+    payloadVersion: "1.0",
+    payload: {
+      packageId: "tax-package-1"
+    }
+  });
+
+  const dispatched = await platform.submitAuthoritySubmission({
+    companyId: DEMO_IDS.companyId,
+    submissionId: submission.submissionId,
+    actorId: "system",
+    simulatedTransportOutcome: "technical_ack"
+  });
+  assert.equal(dispatched.transportQueued, true);
+  assert.equal(typeof dispatched.queuedJob?.jobId, "string");
+
+  const processed = await runWorkerBatch({
+    platform,
+    handlers: createDefaultJobHandlers({ logger: () => {} }),
+    logger: () => {},
+    workerId: "worker-step4-submission"
+  });
+  assert.equal(processed, 1);
+
+  const completedJob = await platform.getRuntimeJob({ jobId: dispatched.queuedJob.jobId });
+  const attempts = await platform.listRuntimeJobAttempts({ jobId: dispatched.queuedJob.jobId });
+  const refreshedSubmission = platform.getAuthoritySubmission({
+    companyId: DEMO_IDS.companyId,
+    submissionId: submission.submissionId
+  });
+
+  assert.equal(completedJob.status, "succeeded");
+  assert.equal(completedJob.lastResultCode, "submission_transport_completed");
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].resultPayload.submissionId, submission.submissionId);
+  assert.equal(refreshedSubmission.status, "received");
+  assert.deepEqual(
+    refreshedSubmission.receipts.map((receipt) => receipt.receiptType),
+    ["technical_ack"]
+  );
 });
 
 test("Phase 14 Step 4 worker runs OCR jobs through the shared runtime", async () => {

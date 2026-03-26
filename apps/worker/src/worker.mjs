@@ -70,6 +70,28 @@ export function createDefaultJobHandlers({ logger = console.log } = {}) {
         }
       };
     },
+    "submission.transport": async ({ job, platform }) => {
+      const result = platform.executeAuthoritySubmissionTransport({
+        companyId: job.companyId,
+        submissionId: job.payload?.submissionId,
+        actorId: "worker_scheduler",
+        mode: typeof job.payload?.mode === "string" ? job.payload.mode : "test",
+        simulatedTransportOutcome: typeof job.payload?.simulatedTransportOutcome === "string" ? job.payload.simulatedTransportOutcome : "technical_ack",
+        providerReference: typeof job.payload?.providerReference === "string" ? job.payload.providerReference : null,
+        message: typeof job.payload?.message === "string" ? job.payload.message : null,
+        requiredInput: Array.isArray(job.payload?.requiredInput) ? job.payload.requiredInput : []
+      });
+      logger(`worker processed submission transport ${result.submissionId} in job ${job.jobId}`);
+      return {
+        resultCode: result.executionSkipped === true ? "submission_transport_skipped" : "submission_transport_completed",
+        resultPayload: {
+          submissionId: result.submissionId,
+          status: result.status,
+          receiptTypes: Array.isArray(result.receipts) ? result.receipts.map((receipt) => receipt.receiptType) : [],
+          skipReasonCode: result.skipReasonCode || null
+        }
+      };
+    },
     "search.saved_view_compatibility_scan": async ({ job, platform }) => {
       const result = platform.runSavedViewCompatibilityScan({
         companyId: job.companyId,

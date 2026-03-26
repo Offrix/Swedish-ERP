@@ -190,7 +190,11 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "integrations",
     label: "Integrations",
     packageName: "@swedish-erp/domain-integrations",
-    create: ({ options }) => createIntegrationPlatform(options)
+    create: ({ options, getDomain }) =>
+      createIntegrationPlatform({
+        ...options,
+        getCorePlatform: () => getDomain("core")
+      })
   }),
   createDomainDefinition({
     key: "automation",

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { runWorkerBatch } from "../../apps/worker/src/worker.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
@@ -210,13 +211,19 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
         companyId: DEMO_IDS.companyId
       }
     });
-    await requestJson(baseUrl, `/v1/submissions/${submission.submissionId}/submit`, {
+    const dispatchedSubmission = await requestJson(baseUrl, `/v1/submissions/${submission.submissionId}/submit`, {
       method: "POST",
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId,
         simulatedTransportOutcome: "technical_ack"
       }
+    });
+    assert.equal(dispatchedSubmission.transportQueued, true);
+    await runWorkerBatch({
+      platform,
+      logger: () => {},
+      workerId: "phase17-submission-worker"
     });
     await requestJson(baseUrl, `/v1/submissions/${submission.submissionId}/receipts`, {
       method: "POST",

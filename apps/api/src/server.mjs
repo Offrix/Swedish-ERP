@@ -3624,7 +3624,7 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(
       res,
       200,
-      platform.submitAuthoritySubmission({
+      await platform.submitAuthoritySubmission({
         companyId,
         submissionId: submissionSubmitMatch.submissionId,
         actorId: principal.userId,
