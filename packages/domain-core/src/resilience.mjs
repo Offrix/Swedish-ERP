@@ -8,7 +8,7 @@ export const LOAD_PROFILE_STATUSES = Object.freeze(["draft", "passed", "failed"]
 export const RESTORE_DRILL_STATUSES = Object.freeze(["planned", "passed", "failed"]);
 export const CHAOS_SCENARIO_STATUSES = Object.freeze(["planned", "executed", "failed"]);
 export const INCIDENT_SEVERITIES = Object.freeze(["low", "medium", "high", "critical"]);
-export const INCIDENT_STATUSES = Object.freeze(["open", "mitigating", "monitoring", "resolved", "closed"]);
+export const INCIDENT_STATUSES = Object.freeze(["open", "triaged", "mitigating", "stabilized", "resolved", "post_review", "closed"]);
 export const INCIDENT_SIGNAL_TYPES = Object.freeze([
   "async_job_retry_scheduled",
   "async_job_dead_letter",
@@ -23,9 +23,13 @@ export const INCIDENT_SIGNAL_STATES = Object.freeze(["open", "acknowledged", "pr
 export const INCIDENT_EVENT_TYPES = Object.freeze([
   "opened",
   "note_added",
+  "triaged",
   "status_changed",
   "mitigation_started",
+  "stabilized",
   "monitoring_started",
+  "post_review_started",
+  "post_review_completed",
   "hotfix_deployed",
   "kill_switch_activated",
   "restore_plan_attached",
@@ -168,8 +172,10 @@ export function createResilienceModule({
     acknowledgeRuntimeIncidentSignal,
     openRuntimeIncident,
     listRuntimeIncidents,
+    getRuntimeIncidentPostReview,
     listRuntimeIncidentEvents,
     recordRuntimeIncidentEvent,
+    recordRuntimeIncidentPostReview,
     updateRuntimeIncidentStatus,
     createRuntimeRestorePlan,
     listRuntimeRestorePlans,
@@ -678,7 +684,7 @@ export function createResilienceModule({
       activeEmergencyDisableCount,
       expiredFeatureFlagCount: expiredFeatureFlags.length,
       openIncidentSignalCount: signals.filter((signal) => signal.state === "open").length,
-      openIncidentCount: incidents.filter((incident) => !["resolved", "closed"].includes(incident.status)).length,
+      openIncidentCount: incidents.filter((incident) => !["resolved", "post_review", "closed"].includes(incident.status)).length,
       pendingRestorePlanCount: restorePlans.filter((plan) => ["draft", "approved", "executing"].includes(plan.status)).length,
       failedRestoreDrillCount: restoreDrills.filter((drill) => drill.status === "failed").length,
       expiredFeatureFlags: expiredFeatureFlags.slice(0, 5).map((featureFlag) => ({
@@ -804,6 +810,7 @@ export function createResilienceModule({
     sourceSignalId = null,
     linkedCorrelationId = null,
     relatedObjectRefs = [],
+    impactScope = null,
     commanderUserId = null,
     correlationId = crypto.randomUUID()
   } = {}) {
@@ -822,6 +829,10 @@ export function createResilienceModule({
         ...normalizeObjectRefs(relatedObjectRefs),
         ...(signal ? [{ objectType: signal.sourceObjectType, objectId: signal.sourceObjectId }] : [])
       ]),
+      impactScope: normalizeIncidentImpactScope(impactScope),
+      postReviewRequired: true,
+      postReviewCompletedAt: null,
+      postIncidentReviewId: null,
       commanderUserId: text(commanderUserId || principal.userId, "runtime_incident_commander_required"),
       openedByUserId: principal.userId,
       openedAt: nowIso(clock),
@@ -855,7 +866,7 @@ export function createResilienceModule({
       explanation: `Opened runtime incident ${incident.title}.`
     });
     return {
-      incident: clone(incident),
+      incident: materializeRuntimeIncident(incident),
       event: clone(event)
     };
   }
@@ -872,7 +883,21 @@ export function createResilienceModule({
     return listRuntimeIncidentsForCompany(text(companyId, "company_id_required"))
       .filter((incident) => (resolvedStatus ? incident.status === resolvedStatus : true))
       .filter((incident) => (resolvedSeverity ? incident.severity === resolvedSeverity : true))
-      .map(clone);
+      .map(materializeRuntimeIncident);
+  }
+
+  function getRuntimeIncidentPostReview({
+    sessionToken,
+    companyId,
+    incidentId
+  } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    requireRuntimeIncident(companyId, incidentId);
+    const review = findRuntimeIncidentPostReview(companyId, incidentId);
+    if (!review) {
+      throw error(404, "runtime_incident_post_review_not_found", "Runtime incident post-review was not found.");
+    }
+    return clone(review);
   }
 
   function listRuntimeIncidentEvents({
@@ -922,7 +947,106 @@ export function createResilienceModule({
       explanation: `Recorded ${event.eventType} for runtime incident ${incident.title}.`
     });
     return {
-      incident: clone(incident),
+      incident: materializeRuntimeIncident(incident),
+      event: clone(event)
+    };
+  }
+
+  function recordRuntimeIncidentPostReview({
+    sessionToken,
+    companyId,
+    incidentId,
+    summary,
+    rootCauseSummary,
+    impactScope = null,
+    mitigationActions = [],
+    correctiveActions = [],
+    preventiveActions = [],
+    reviewedBreakGlassIds = [],
+    evidenceRefs = [],
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const incident = requireRuntimeIncident(companyId, incidentId);
+    if (!["resolved", "post_review"].includes(incident.status)) {
+      throw error(409, "runtime_incident_post_review_requires_resolved_incident", "Incident must be resolved before post-review can be recorded.");
+    }
+    const linkedBreakGlassSessions = listBreakGlassSessionsForIncident(companyId, incidentId);
+    const unresolvedBreakGlassSessions = linkedBreakGlassSessions.filter(
+      (session) => !["reviewed", "closed"].includes(session.status)
+    );
+    if (unresolvedBreakGlassSessions.length > 0) {
+      throw error(409, "runtime_incident_break_glass_review_pending", "All linked break-glass sessions must be reviewed before post-review can be completed.");
+    }
+    const normalizedReviewedBreakGlassIds = normalizeReviewedBreakGlassIds(reviewedBreakGlassIds);
+    if (
+      linkedBreakGlassSessions.length > 0
+      && linkedBreakGlassSessions.some((session) => !normalizedReviewedBreakGlassIds.includes(session.breakGlassId))
+    ) {
+      throw error(409, "runtime_incident_post_review_break_glass_coverage_required", "Post-review must explicitly cover every linked break-glass session.");
+    }
+    const existingReview = findRuntimeIncidentPostReview(companyId, incidentId);
+    const recordedAt = nowIso(clock);
+    const review = existingReview || {
+      postIncidentReviewId: crypto.randomUUID(),
+      incidentId: incident.incidentId,
+      companyId: incident.companyId,
+      createdAt: recordedAt
+    };
+    review.status = "completed";
+    review.summary = text(summary, "runtime_incident_post_review_summary_required");
+    review.rootCauseSummary = text(rootCauseSummary, "runtime_incident_post_review_root_cause_required");
+    review.impactScope = normalizeIncidentImpactScope(impactScope || incident.impactScope || null);
+    review.mitigationActions = normalizeIncidentActionItems(mitigationActions, "runtime_incident_post_review_mitigation_actions_invalid");
+    review.correctiveActions = normalizeIncidentActionItems(correctiveActions, "runtime_incident_post_review_corrective_actions_invalid");
+    review.preventiveActions = normalizeIncidentActionItems(preventiveActions, "runtime_incident_post_review_preventive_actions_invalid");
+    review.reviewedBreakGlassIds = normalizedReviewedBreakGlassIds;
+    review.evidenceRefs = normalizeObjectRefs(evidenceRefs);
+    review.completedByUserId = principal.userId;
+    review.completedAt = recordedAt;
+    review.updatedAt = recordedAt;
+    state.runtimeIncidentPostReviews.set(review.postIncidentReviewId, review);
+
+    incident.status = "post_review";
+    incident.postIncidentReviewId = review.postIncidentReviewId;
+    incident.postReviewCompletedAt = recordedAt;
+    incident.updatedAt = recordedAt;
+    if (review.impactScope) {
+      incident.impactScope = clone(review.impactScope);
+    }
+
+    const event = createIncidentEventInternal({
+      incident,
+      eventType: "post_review_completed",
+      note: review.summary,
+      actorId: principal.userId,
+      correlationId,
+      relatedObjectRefs: normalizeObjectRefs([
+        ...review.evidenceRefs,
+        ...linkedBreakGlassSessions.map((session) => ({
+          objectType: "break_glass_session",
+          objectId: session.breakGlassId
+        }))
+      ]),
+      metadata: {
+        postIncidentReviewId: review.postIncidentReviewId,
+        reviewedBreakGlassIds: review.reviewedBreakGlassIds,
+        correctiveActionCount: review.correctiveActions.length,
+        preventiveActionCount: review.preventiveActions.length
+      }
+    });
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.runtime_incident.post_review_completed",
+      entityType: "runtime_incident",
+      entityId: incident.incidentId,
+      explanation: `Completed post-review for runtime incident ${incident.title}.`
+    });
+    return {
+      incident: materializeRuntimeIncident(incident),
+      postIncidentReview: clone(review),
       event: clone(event)
     };
   }
@@ -937,25 +1061,32 @@ export function createResilienceModule({
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
     const incident = requireRuntimeIncident(companyId, incidentId);
-    const nextStatus = assertAllowed(status, INCIDENT_STATUSES, "runtime_incident_status_invalid");
+    const nextStatus = normalizeIncidentStatus(status);
     if (incident.status === nextStatus) {
       return {
-        incident: clone(incident),
+        incident: materializeRuntimeIncident(incident),
         event: null
       };
     }
     const previousStatus = incident.status;
+    if (nextStatus === "closed" && !findRuntimeIncidentPostReview(companyId, incidentId)) {
+      throw error(409, "runtime_incident_post_review_required", "Incident requires completed post-review before it can be closed.");
+    }
+    assertIncidentStatusTransition({ incident, nextStatus });
     incident.status = nextStatus;
     incident.updatedAt = nowIso(clock);
     if (nextStatus === "resolved") {
       incident.resolvedAt = incident.updatedAt;
+    }
+    if (nextStatus === "post_review") {
+      incident.closedAt = null;
     }
     if (nextStatus === "closed") {
       incident.closedAt = incident.updatedAt;
     }
     const event = createIncidentEventInternal({
       incident,
-      eventType: "status_changed",
+      eventType: incidentStatusEventType(nextStatus),
       note: note || `Status changed from ${previousStatus} to ${nextStatus}.`,
       actorId: principal.userId,
       correlationId,
@@ -974,7 +1105,7 @@ export function createResilienceModule({
       explanation: `Changed runtime incident ${incident.title} status to ${nextStatus}.`
     });
     return {
-      incident: clone(incident),
+      incident: materializeRuntimeIncident(incident),
       event: clone(event)
     };
   }
@@ -1184,6 +1315,68 @@ export function createResilienceModule({
     return [...state.runtimeRestorePlans.values()]
       .filter((plan) => plan.companyId === companyId)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  function findRuntimeIncidentPostReview(companyId, incidentId) {
+    return [...(state.runtimeIncidentPostReviews?.values() || [])]
+      .filter((review) => review.companyId === companyId && review.incidentId === incidentId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] || null;
+  }
+
+  function listBreakGlassSessionsForIncident(companyId, incidentId) {
+    return [...(state.breakGlassSessions?.values() || [])]
+      .filter((session) => session.companyId === companyId && session.incidentId === incidentId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  function materializeRuntimeIncident(incident) {
+    const linkedBreakGlassSessions = listBreakGlassSessionsForIncident(incident.companyId, incident.incidentId).map(clone);
+    const review = findRuntimeIncidentPostReview(incident.companyId, incident.incidentId);
+    return {
+      ...clone(incident),
+      breakGlassSessionCount: linkedBreakGlassSessions.length,
+      breakGlassSessions: linkedBreakGlassSessions,
+      postReviewRequired: true,
+      postIncidentReview: review ? clone(review) : null
+    };
+  }
+
+  function normalizeIncidentStatus(status) {
+    const resolvedStatus = optionalText(status);
+    const canonicalStatus = resolvedStatus === "monitoring" ? "stabilized" : resolvedStatus;
+    return assertAllowed(canonicalStatus, INCIDENT_STATUSES, "runtime_incident_status_invalid");
+  }
+
+  function assertIncidentStatusTransition({ incident, nextStatus } = {}) {
+    const allowedTransitions = {
+      open: ["triaged", "mitigating"],
+      triaged: ["mitigating"],
+      mitigating: ["stabilized"],
+      stabilized: ["resolved"],
+      resolved: ["post_review"],
+      post_review: ["closed"],
+      closed: []
+    };
+    if ((allowedTransitions[incident.status] || []).includes(nextStatus)) {
+      return;
+    }
+    throw error(
+      409,
+      "runtime_incident_status_transition_invalid",
+      `Runtime incident cannot transition from ${incident.status} to ${nextStatus}.`
+    );
+  }
+
+  function incidentStatusEventType(nextStatus) {
+    const eventTypes = {
+      triaged: "triaged",
+      mitigating: "mitigation_started",
+      stabilized: "stabilized",
+      resolved: "resolved",
+      post_review: "post_review_started",
+      closed: "closed"
+    };
+    return eventTypes[nextStatus] || "status_changed";
   }
 
   function recordIncidentSignalInternal({
@@ -1567,8 +1760,104 @@ function normalizeObjectRefs(values) {
   return refs;
 }
 
+function normalizeIncidentImpactScope(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const scope = {};
+  if (typeof value.customerVisible === "boolean") {
+    scope.customerVisible = value.customerVisible;
+  }
+  if (typeof value.dataIntegrityRisk === "boolean") {
+    scope.dataIntegrityRisk = value.dataIntegrityRisk;
+  }
+  if (typeof value.financialRisk === "boolean") {
+    scope.financialRisk = value.financialRisk;
+  }
+  if (typeof value.regulatoryRisk === "boolean") {
+    scope.regulatoryRisk = value.regulatoryRisk;
+  }
+  const tenantCount = normalizeOptionalPositiveInteger(value.tenantCount);
+  const userCount = normalizeOptionalPositiveInteger(value.userCount);
+  if (tenantCount != null) {
+    scope.tenantCount = tenantCount;
+  }
+  if (userCount != null) {
+    scope.userCount = userCount;
+  }
+  const systems = normalizeStringArray(value.systems);
+  const regulatedDomains = normalizeStringArray(value.regulatedDomains);
+  if (systems.length > 0) {
+    scope.systems = systems;
+  }
+  if (regulatedDomains.length > 0) {
+    scope.regulatedDomains = regulatedDomains;
+  }
+  const summary = optionalText(value.summary);
+  if (summary) {
+    scope.summary = summary;
+  }
+  return Object.keys(scope).length > 0 ? scope : null;
+}
+
+function normalizeIncidentActionItems(values, code) {
+  if (values == null) {
+    return [];
+  }
+  if (!Array.isArray(values)) {
+    throw createValidationError(code, `${code} must be an array.`);
+  }
+  return values.map((entry) => {
+    if (!entry || typeof entry !== "object") {
+      throw createValidationError(code, `${code} must only contain objects.`);
+    }
+    return {
+      actionCode: text(entry.actionCode || entry.code || entry.summary, code),
+      summary: text(entry.summary || entry.actionCode || entry.code, code),
+      ownerTeamId: optionalText(entry.ownerTeamId),
+      dueAt: optionalText(entry.dueAt),
+      status: optionalText(entry.status) || "planned"
+    };
+  });
+}
+
+function normalizeReviewedBreakGlassIds(values) {
+  if (values == null) {
+    return [];
+  }
+  if (!Array.isArray(values)) {
+    throw createValidationError("runtime_incident_post_review_break_glass_ids_invalid", "Reviewed break-glass ids must be an array.");
+  }
+  return normalizeStringArray(values);
+}
+
 function mergeObjectRefs(left, right) {
   return normalizeObjectRefs([...(left || []), ...(right || [])]);
+}
+
+function normalizeStringArray(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const result = [];
+  for (const value of values) {
+    const resolved = optionalText(value);
+    if (resolved && !result.includes(resolved)) {
+      result.push(resolved);
+    }
+  }
+  return result;
+}
+
+function normalizeOptionalPositiveInteger(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+  const numericValue = Number(value);
+  if (!Number.isInteger(numericValue) || numericValue < 0) {
+    return null;
+  }
+  return numericValue;
 }
 
 function optionalText(value) {

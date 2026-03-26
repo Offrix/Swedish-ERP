@@ -530,6 +530,8 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/backoffice/incidents?companyId=...`
 - `GET /v1/backoffice/incidents/:incidentId/events?companyId=...`
 - `POST /v1/backoffice/incidents/:incidentId/events`
+- `GET /v1/backoffice/incidents/:incidentId/post-review?companyId=...`
+- `POST /v1/backoffice/incidents/:incidentId/post-review`
 - `POST /v1/backoffice/incidents/:incidentId/status`
 - `GET /v1/backoffice/impersonations?companyId=...`
 - `POST /v1/backoffice/impersonations`

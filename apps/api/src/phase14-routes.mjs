@@ -2216,7 +2216,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       sourceSignalId: body.sourceSignalId || null,
       commanderUserId: body.commanderUserId || principal.userId,
       linkedCorrelationId: body.linkedCorrelationId || null,
-      relatedObjectRefs: Array.isArray(body.relatedObjectRefs) ? body.relatedObjectRefs : []
+      relatedObjectRefs: Array.isArray(body.relatedObjectRefs) ? body.relatedObjectRefs : [],
+      impactScope: body.impactScope || null
     }));
     return true;
   }
@@ -2267,6 +2268,43 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       relatedObjectRefs: Array.isArray(body.relatedObjectRefs) ? body.relatedObjectRefs : [],
       linkedCorrelationId: body.linkedCorrelationId || null,
       metadata: body.metadata || {}
+    }));
+    return true;
+  }
+
+  const incidentPostReviewMatch = matchPath(path, "/v1/backoffice/incidents/:incidentId/post-review");
+  if (req.method === "GET" && incidentPostReviewMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "runtime_incident", objectId: incidentPostReviewMatch.incidentId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      postIncidentReview: platform.getRuntimeIncidentPostReview({
+        sessionToken,
+        companyId,
+        incidentId: incidentPostReviewMatch.incidentId
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && incidentPostReviewMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "runtime_incident", objectId: incidentPostReviewMatch.incidentId, scopeCode: "backoffice" });
+    writeJson(res, 201, platform.recordRuntimeIncidentPostReview({
+      sessionToken,
+      companyId,
+      incidentId: incidentPostReviewMatch.incidentId,
+      summary: body.summary,
+      rootCauseSummary: body.rootCauseSummary,
+      impactScope: body.impactScope || null,
+      mitigationActions: Array.isArray(body.mitigationActions) ? body.mitigationActions : [],
+      correctiveActions: Array.isArray(body.correctiveActions) ? body.correctiveActions : [],
+      preventiveActions: Array.isArray(body.preventiveActions) ? body.preventiveActions : [],
+      reviewedBreakGlassIds: Array.isArray(body.reviewedBreakGlassIds) ? body.reviewedBreakGlassIds : [],
+      evidenceRefs: Array.isArray(body.evidenceRefs) ? body.evidenceRefs : []
     }));
     return true;
   }

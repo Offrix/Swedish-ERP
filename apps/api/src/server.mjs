@@ -591,6 +591,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/backoffice/submissions/monitor/scan",
               "/v1/backoffice/incidents",
               "/v1/backoffice/incidents/:incidentId/events",
+              "/v1/backoffice/incidents/:incidentId/post-review",
               "/v1/backoffice/incidents/:incidentId/status",
               "/v1/backoffice/impersonations",
               "/v1/backoffice/impersonations/:sessionId/approve",

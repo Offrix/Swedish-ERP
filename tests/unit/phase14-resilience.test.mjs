@@ -405,6 +405,30 @@ test("Phase 14.2 resilience turns runtime job failures into signals, incidents a
     linkedCorrelationId: signals[0].correlationId,
     correlationId: signals[0].correlationId
   });
+  const triagedIncident = platform.updateRuntimeIncidentStatus({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    incidentId: openedIncident.incident.incidentId,
+    status: "triaged",
+    note: "Queue outage triaged for runtime containment.",
+    correlationId: signals[0].correlationId
+  });
+  const mitigatingIncident = platform.updateRuntimeIncidentStatus({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    incidentId: openedIncident.incident.incidentId,
+    status: "mitigating",
+    note: "Queue mitigation started.",
+    correlationId: signals[0].correlationId
+  });
+  const stabilizedIncident = platform.updateRuntimeIncidentStatus({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    incidentId: openedIncident.incident.incidentId,
+    status: "stabilized",
+    note: "Queue stabilized after restore completion.",
+    correlationId: signals[0].correlationId
+  });
   const resolvedIncident = platform.updateRuntimeIncidentStatus({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
@@ -417,6 +441,45 @@ test("Phase 14.2 resilience turns runtime job failures into signals, incidents a
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId
   });
+  assert.throws(
+    () =>
+      platform.updateRuntimeIncidentStatus({
+        sessionToken: adminToken,
+        companyId: DEMO_IDS.companyId,
+        incidentId: openedIncident.incident.incidentId,
+        status: "closed"
+      }),
+    (error) => error?.code === "runtime_incident_post_review_required"
+  );
+  const postReview = platform.recordRuntimeIncidentPostReview({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    incidentId: openedIncident.incident.incidentId,
+    summary: "Queue outage reviewed after restore verification.",
+    rootCauseSummary: "Transport lane entered persistent technical failure without immediate operator handoff.",
+    correctiveActions: [
+      {
+        actionCode: "document_submission_triage",
+        summary: "Document submission triage for dead-lettered authority transports.",
+        ownerTeamId: "platform-ops"
+      }
+    ],
+    preventiveActions: [
+      {
+        actionCode: "tighten_submission_sla",
+        summary: "Promote lagging submission queues into explicit monitor scans.",
+        ownerTeamId: "platform-ops"
+      }
+    ]
+  });
+  const closedIncident = platform.updateRuntimeIncidentStatus({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    incidentId: openedIncident.incident.incidentId,
+    status: "closed",
+    note: "Post-review completed and follow-up actions assigned.",
+    correlationId: signals[0].correlationId
+  });
   const correlation = platform.getRuntimeAuditCorrelation({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
@@ -427,7 +490,13 @@ test("Phase 14.2 resilience turns runtime job failures into signals, incidents a
   assert.equal(startedRestorePlan.status, "executing");
   assert.equal(completedRestorePlan.status, "completed");
   assert.equal(incidentEvent.event.eventType, "restore_completed");
+  assert.equal(triagedIncident.incident.status, "triaged");
+  assert.equal(mitigatingIncident.incident.status, "mitigating");
+  assert.equal(stabilizedIncident.incident.status, "stabilized");
   assert.equal(resolvedIncident.incident.status, "resolved");
+  assert.equal(postReview.incident.status, "post_review");
+  assert.equal(postReview.postIncidentReview.status, "completed");
+  assert.equal(closedIncident.incident.status, "closed");
   assert.equal(runtimeControlPlane.openIncidentCount, 0);
   assert.equal(runtimeControlPlane.pendingRestorePlanCount, 0);
   assert.equal(correlation.relatedEntities.some((entry) => entry.entityType === "incident_signal"), true);

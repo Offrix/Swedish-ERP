@@ -22,6 +22,34 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
     });
+    platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "phase17-first-approver@example.test",
+      displayName: "Phase 17 First Approver",
+      roleCode: "company_admin",
+      requiresMfa: false
+    });
+    const approverToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "phase17-first-approver@example.test"
+    });
+    platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "phase17-second-approver@example.test",
+      displayName: "Phase 17 Second Approver",
+      roleCode: "company_admin",
+      requiresMfa: false
+    });
+    const secondApproverToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "phase17-second-approver@example.test"
+    });
 
     platform.createCompanyUser({
       sessionToken: adminToken,
@@ -363,6 +391,17 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     });
     assert.equal(incidentEvents.items.some((item) => item.eventType === "mitigation_started"), true);
 
+    const triagedIncident = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/status`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        status: "triaged",
+        note: "Incident triaged for regulated submission outage."
+      }
+    });
+    assert.equal(triagedIncident.incident.status, "triaged");
+
     const incidentStatus = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/status`, {
       method: "POST",
       token: adminToken,
@@ -373,6 +412,135 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
       }
     });
     assert.equal(incidentStatus.incident.status, "mitigating");
+
+    const breakGlass = await requestJson(baseUrl, "/v1/backoffice/break-glass", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        incidentId: incident.incident.incidentId,
+        purposeCode: "incident_investigation",
+        requestedActions: ["list_submission_queue"]
+      }
+    });
+    const firstBreakGlassApproval = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/approve`, {
+      method: "POST",
+      token: approverToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(firstBreakGlassApproval.status, "requested");
+    const secondBreakGlassApproval = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/approve`, {
+      method: "POST",
+      token: secondApproverToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(secondBreakGlassApproval.status, "active");
+    const reviewedBreakGlass = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/close`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(reviewedBreakGlass.status, "reviewed");
+    const closedBreakGlass = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/close`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(closedBreakGlass.status, "closed");
+
+    const stabilizedIncident = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/status`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        status: "stabilized",
+        note: "Transport queue stabilized after operator intervention."
+      }
+    });
+    assert.equal(stabilizedIncident.incident.status, "stabilized");
+
+    const resolvedIncident = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/status`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        status: "resolved",
+        note: "Submission transport restored and verified."
+      }
+    });
+    assert.equal(resolvedIncident.incident.status, "resolved");
+
+    const closeBeforeReview = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/status`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        status: "closed"
+      }
+    });
+    assert.equal(closeBeforeReview.error, "runtime_incident_post_review_required");
+
+    const postReview = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/post-review`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        summary: "Submission outage post-review completed with break-glass chain reviewed.",
+        rootCauseSummary: "Dead-lettered submission transport path lacked earlier operator escalation.",
+        impactScope: {
+          customerVisible: true,
+          regulatoryRisk: true,
+          systems: ["submission_monitoring", "worker_runtime"],
+          regulatedDomains: ["agi"]
+        },
+        correctiveActions: [
+          {
+            actionCode: "submission_monitor_scan",
+            summary: "Materialize lagging submission monitor alerts into work items."
+          }
+        ],
+        preventiveActions: [
+          {
+            actionCode: "incident_post_review_enforcement",
+            summary: "Require post-review before closing regulated incidents."
+          }
+        ],
+        reviewedBreakGlassIds: [breakGlass.breakGlassId],
+        evidenceRefs: [
+          { objectType: "submission", objectId: submission.submissionId },
+          { objectType: "async_dead_letter", objectId: deadLetter.deadLetterId }
+        ]
+      }
+    });
+    assert.equal(postReview.incident.status, "post_review");
+    assert.equal(postReview.postIncidentReview.reviewedBreakGlassIds.includes(breakGlass.breakGlassId), true);
+
+    const fetchedPostReview = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/post-review?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(fetchedPostReview.postIncidentReview.postIncidentReviewId, postReview.postIncidentReview.postIncidentReviewId);
+
+    const closedIncident = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/status`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        status: "closed",
+        note: "Post-review completed and follow-up actions assigned."
+      }
+    });
+    assert.equal(closedIncident.incident.status, "closed");
   } finally {
     await stopServer(server);
   }
