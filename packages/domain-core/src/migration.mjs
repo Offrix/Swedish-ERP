@@ -1075,17 +1075,27 @@ export function createMigrationModule({
 
   function getMigrationCockpit({ sessionToken, companyId } = {}) {
     authorize(sessionToken, companyId, "company.read");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const mappingSets = listMappingSets({ sessionToken, companyId: resolvedCompanyId });
+    const importBatches = listImportBatches({ sessionToken, companyId: resolvedCompanyId });
+    const corrections = [...state.migrationCorrections.values()]
+      .filter((correction) => correction.companyId === resolvedCompanyId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(clone);
+    const diffReports = listDiffReports({ sessionToken, companyId: resolvedCompanyId });
+    const cutoverPlans = listCutoverPlans({ sessionToken, companyId: resolvedCompanyId });
+    const acceptanceRecords = listMigrationAcceptanceRecords({ sessionToken, companyId: resolvedCompanyId });
+    const postCutoverCorrectionCases = listPostCutoverCorrectionCases({ sessionToken, companyId: resolvedCompanyId });
     return {
-      mappingSets: listMappingSets({ sessionToken, companyId }),
-      importBatches: listImportBatches({ sessionToken, companyId }),
-      corrections: [...state.migrationCorrections.values()]
-        .filter((correction) => correction.companyId === text(companyId, "company_id_required"))
-        .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-        .map(clone),
-      diffReports: listDiffReports({ sessionToken, companyId }),
-      cutoverPlans: listCutoverPlans({ sessionToken, companyId }),
-      acceptanceRecords: listMigrationAcceptanceRecords({ sessionToken, companyId }),
-      postCutoverCorrectionCases: listPostCutoverCorrectionCases({ sessionToken, companyId })
+      mappingSets,
+      importBatches,
+      corrections,
+      diffReports,
+      cutoverPlans,
+      acceptanceRecords,
+      postCutoverCorrectionCases,
+      datasetSummary: buildMigrationDatasetSummary({ importBatches, diffReports, acceptanceRecords, postCutoverCorrectionCases }),
+      cutoverBoard: buildMigrationCutoverBoard({ cutoverPlans, acceptanceRecords, postCutoverCorrectionCases })
     };
   }
 
@@ -2365,6 +2375,139 @@ function normalizeAcceptanceReportDelta(value) {
     );
   }
   return clone(value);
+}
+
+function buildMigrationDatasetSummary({ importBatches, diffReports, acceptanceRecords, postCutoverCorrectionCases }) {
+  return {
+    importBatchCount: importBatches.length,
+    acceptedImportBatchCount: importBatches.filter((batch) => batch.status === "accepted").length,
+    correctedImportBatchCount: importBatches.filter((batch) => batch.status === "corrected").length,
+    blockingDiffReportCount: diffReports.filter((diffReport) => diffReport.status === "remediation_required").length,
+    acceptedDiffReportCount: diffReports.filter((diffReport) => diffReport.status === "accepted").length,
+    acceptedAcceptanceRecordCount: acceptanceRecords.filter((record) => record.status === "accepted").length,
+    blockedAcceptanceRecordCount: acceptanceRecords.filter((record) => record.status === "blocked").length,
+    openPostCutoverCorrectionCaseCount: postCutoverCorrectionCases.filter((correctionCase) => correctionCase.status === "open").length
+  };
+}
+
+function buildMigrationCutoverBoard({ cutoverPlans, acceptanceRecords, postCutoverCorrectionCases }) {
+  const acceptanceRecordsByCutoverPlanId = new Map();
+  for (const acceptanceRecord of acceptanceRecords) {
+    if (!acceptanceRecord.cutoverPlanId) {
+      continue;
+    }
+    if (!acceptanceRecordsByCutoverPlanId.has(acceptanceRecord.cutoverPlanId)) {
+      acceptanceRecordsByCutoverPlanId.set(acceptanceRecord.cutoverPlanId, []);
+    }
+    acceptanceRecordsByCutoverPlanId.get(acceptanceRecord.cutoverPlanId).push(acceptanceRecord);
+  }
+  const correctionCasesByCutoverPlanId = new Map();
+  for (const correctionCase of postCutoverCorrectionCases) {
+    if (!correctionCasesByCutoverPlanId.has(correctionCase.cutoverPlanId)) {
+      correctionCasesByCutoverPlanId.set(correctionCase.cutoverPlanId, []);
+    }
+    correctionCasesByCutoverPlanId.get(correctionCase.cutoverPlanId).push(correctionCase);
+  }
+  const items = cutoverPlans
+    .map((cutoverPlan) =>
+      buildMigrationCutoverBoardRow({
+        cutoverPlan,
+        acceptanceRecords: acceptanceRecordsByCutoverPlanId.get(cutoverPlan.cutoverPlanId) || [],
+        correctionCases: correctionCasesByCutoverPlanId.get(cutoverPlan.cutoverPlanId) || []
+      })
+    )
+    .sort((left, right) => resolveMigrationCutoverBoardTimestamp(right).localeCompare(resolveMigrationCutoverBoardTimestamp(left)));
+  return {
+    items,
+    counters: {
+      total: items.length,
+      planned: items.filter((item) => item.status === "planned").length,
+      validationBlocked: items.filter((item) => item.validationGateStatus === "blocked").length,
+      readyToSwitch: items.filter((item) => item.status === "validation_passed" && item.attentionReasonCodes.length === 0).length,
+      switched: items.filter((item) => item.status === "switched").length,
+      stabilized: items.filter((item) => item.status === "stabilized").length,
+      rollbackInProgress: items.filter((item) => item.status === "rollback_in_progress").length,
+      rolledBack: items.filter((item) => item.status === "rolled_back").length,
+      correctionOpen: items.filter((item) => item.postCutoverCorrectionOpenCount > 0).length,
+      attentionRequired: items.filter((item) => item.requiresAttention).length
+    }
+  };
+}
+
+function buildMigrationCutoverBoardRow({ cutoverPlan, acceptanceRecords, correctionCases }) {
+  const latestAcceptanceRecord = [...acceptanceRecords]
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] || null;
+  const signoffSummary = {
+    total: cutoverPlan.signoffChain.length,
+    approved: cutoverPlan.signoffChain.filter((step) => step.approvedAt && step.approvedByUserId).length
+  };
+  signoffSummary.pending = Math.max(signoffSummary.total - signoffSummary.approved, 0);
+  const mandatoryChecklistItems = cutoverPlan.goLiveChecklist.filter((item) => item.mandatory !== false);
+  const checklistSummary = {
+    totalMandatory: mandatoryChecklistItems.length,
+    completedMandatory: mandatoryChecklistItems.filter((item) => item.status === "completed").length,
+    blockedMandatory: mandatoryChecklistItems.filter((item) => item.status === "blocked").length
+  };
+  checklistSummary.pendingMandatory = Math.max(
+    checklistSummary.totalMandatory - checklistSummary.completedMandatory - checklistSummary.blockedMandatory,
+    0
+  );
+  const openCorrectionCases = correctionCases.filter((correctionCase) => correctionCase.status === "open");
+  const attentionReasonCodes = [];
+  if (cutoverPlan.validationGateStatus === "blocked") {
+    attentionReasonCodes.push("validation_blocked");
+  }
+  if (latestAcceptanceRecord?.status === "blocked") {
+    attentionReasonCodes.push("acceptance_blocked");
+  }
+  if (cutoverPlan.status === "rollback_in_progress") {
+    attentionReasonCodes.push("rollback_in_progress");
+  }
+  if (openCorrectionCases.length > 0) {
+    attentionReasonCodes.push("post_cutover_correction_open");
+  }
+  if (checklistSummary.blockedMandatory > 0) {
+    attentionReasonCodes.push("checklist_blocked");
+  }
+  return {
+    objectType: "migrationCutover",
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    status: cutoverPlan.status,
+    validationGateStatus: cutoverPlan.validationGateStatus,
+    freezeAt: cutoverPlan.freezeAt,
+    lastExtractAt: cutoverPlan.lastExtractAt,
+    rollbackPointRef: cutoverPlan.rollbackPointRef || cutoverPlan.rollbackPoint || null,
+    switchedAt: cutoverPlan.switchedAt,
+    stabilizedAt: cutoverPlan.stabilizedAt,
+    rollbackStartedAt: cutoverPlan.rollbackStartedAt || null,
+    rollbackCompletedAt: cutoverPlan.rollbackCompletedAt || null,
+    signoffSummary,
+    checklistSummary,
+    latestAcceptanceRecordId: latestAcceptanceRecord?.migrationAcceptanceRecordId || null,
+    latestAcceptanceStatus: latestAcceptanceRecord?.status || null,
+    latestAcceptanceRecordedAt: latestAcceptanceRecord?.recordedAt || null,
+    latestAcceptanceBlockingReasonCodes: latestAcceptanceRecord?.blockingReasonCodes || [],
+    validationBlockingReasonCodes: cutoverPlan.validationSummary?.blockingReasonCodes || [],
+    rollbackExecutionMode: cutoverPlan.rollbackPlan?.rollbackExecutionMode || null,
+    regulatedSubmissionRecoveryRequired: cutoverPlan.rollbackPlan?.regulatedSubmissionRecoveryPlan != null,
+    postCutoverCorrectionCaseCount: correctionCases.length,
+    postCutoverCorrectionOpenCount: openCorrectionCases.length,
+    requiresAttention: attentionReasonCodes.length > 0,
+    attentionReasonCodes: [...new Set(attentionReasonCodes)]
+  };
+}
+
+function resolveMigrationCutoverBoardTimestamp(item) {
+  return (
+    item.rollbackCompletedAt
+    || item.rollbackStartedAt
+    || item.stabilizedAt
+    || item.switchedAt
+    || item.latestAcceptanceRecordedAt
+    || item.lastExtractAt
+    || item.freezeAt
+    || ""
+  );
 }
 
 function hasBlockingDiffReports(state, companyId) {

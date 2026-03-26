@@ -236,6 +236,12 @@ test("Phase 14.3 migration cockpit tracks import, diff, cutover and rollback det
   assert.equal(cockpit.cutoverPlans.length, 1);
   assert.equal(cockpit.acceptanceRecords.length, 1);
   assert.equal(cockpit.acceptanceRecords[0].migrationAcceptanceRecordId, acceptanceRecord.migrationAcceptanceRecordId);
+  assert.equal(cockpit.datasetSummary.acceptedImportBatchCount, 1);
+  assert.equal(cockpit.cutoverBoard.items.length, 1);
+  assert.equal(cockpit.cutoverBoard.counters.rolledBack, 1);
+  assert.equal(cockpit.cutoverBoard.items[0].objectType, "migrationCutover");
+  assert.equal(cockpit.cutoverBoard.items[0].rollbackExecutionMode, "post_switch_compensation");
+  assert.equal(cockpit.cutoverBoard.items[0].requiresAttention, false);
 });
 
 test("Phase 14.3 rollback requires recovery plan when regulated filing was submitted after switch and closed cutover uses correction case", async () => {
@@ -418,6 +424,14 @@ test("Phase 14.3 rollback requires recovery plan when regulated filing was submi
     recoveryPlanActivated: true
   });
   assert.equal(rollbackCompleted.status, "rolled_back");
+  const cockpit = platform.getMigrationCockpit({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId
+  });
+  const recoveryRow = cockpit.cutoverBoard.items.find((item) => item.cutoverPlanId === cutoverPlan.cutoverPlanId);
+  assert.equal(recoveryRow.regulatedSubmissionRecoveryRequired, true);
+  assert.equal(recoveryRow.postCutoverCorrectionOpenCount, 1);
+  assert.equal(recoveryRow.attentionReasonCodes.includes("post_cutover_correction_open"), true);
 
   const secondCutoverPlan = platform.createCutoverPlan({
     sessionToken: adminToken,

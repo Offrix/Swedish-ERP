@@ -40,6 +40,7 @@ Verifiera att migration cockpit, diff reports, cutover, rollback och go-live-rit
 - cutover validation blockeras när reglerade submission-dead-letters är öppna
 - cutover validation kräver accepted migration acceptance record, gröna contract tests, gröna golden scenarios, ackade runbooks och färsk restore drill
 - cutover-plan följer ordningen start, final extract, acceptance, validate, sign-off, checklista, switch och stabilize
+- migration cockpit materialiserar `datasetSummary` och `cutoverBoard` med counters, attention-signaler och rollback/correction-status
 - rollback skiljer på pre-switch purge och post-switch compensation
 - post-switch rollback kräver explicit rollback-plan, suspended integrations och bevarad audit/receipt-evidence
 - rollback efter skickad reglerad filing kräver recovery plan och får inte skriva över filinghistorik

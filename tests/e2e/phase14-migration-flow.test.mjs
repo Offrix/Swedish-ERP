@@ -195,6 +195,9 @@ test("Phase 14.3 flow exposes migration routes and keeps cockpit evidence intact
     assert.equal(cockpit.cutoverPlans.length, 1);
     assert.equal(cockpit.mappingSets.length, 1);
     assert.equal(cockpit.postCutoverCorrectionCases.length, 1);
+    assert.equal(cockpit.cutoverBoard.items.length, 1);
+    assert.equal(cockpit.cutoverBoard.counters.rolledBack, 1);
+    assert.equal(cockpit.cutoverBoard.items[0].postCutoverCorrectionOpenCount, 1);
   } finally {
     await stopServer(server);
   }
