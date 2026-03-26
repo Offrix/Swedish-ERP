@@ -52,6 +52,24 @@ export function createDefaultJobHandlers({ logger = console.log } = {}) {
         resultPayload: digest
       };
     },
+    "documents.ocr.requested": async ({ job, platform }) => {
+      const result = platform.runDocumentOcr({
+        companyId: job.companyId,
+        documentId: job.payload?.documentId,
+        reasonCode: typeof job.payload?.reasonCode === "string" ? job.payload.reasonCode : undefined,
+        actorId: "worker_scheduler"
+      });
+      logger(`worker ran OCR for document ${result.document.documentId} in job ${job.jobId}`);
+      return {
+        resultCode: "document_ocr_completed",
+        resultPayload: {
+          documentId: result.document.documentId,
+          ocrRunId: result.ocrRun.ocrRunId,
+          suggestedDocumentType: result.ocrRun.suggestedDocumentType,
+          reviewTaskId: result.reviewTask?.reviewTaskId || null
+        }
+      };
+    },
     "search.saved_view_compatibility_scan": async ({ job, platform }) => {
       const result = platform.runSavedViewCompatibilityScan({
         companyId: job.companyId,

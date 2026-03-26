@@ -43,11 +43,11 @@ test("Phase 14 Step 4 async jobs dead-letter unsupported handlers and allow repl
 
   const queuedJob = await platform.enqueueRuntimeJob({
     companyId: "00000000-0000-4000-8000-000000000001",
-    jobType: "documents.ocr.requested",
-    sourceObjectType: "document",
-    sourceObjectId: "doc-42",
-    idempotencyKey: "step4-ocr-missing-handler",
-    payload: { documentId: "doc-42" },
+    jobType: "submission.transport",
+    sourceObjectType: "submission",
+    sourceObjectId: "submission-42",
+    idempotencyKey: "step4-submission-transport-missing-handler",
+    payload: { submissionId: "submission-42" },
     actorId: "system"
   });
 
@@ -71,6 +71,74 @@ test("Phase 14 Step 4 async jobs dead-letter unsupported handlers and allow repl
     reasonCode: "handler_added"
   });
   assert.equal(replayPlan.status, "planned");
+});
+
+test("Phase 14 Step 4 worker runs OCR jobs through the shared runtime", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-24T10:45:00Z")
+  });
+
+  platform.registerInboxChannel({
+    companyId: DEMO_IDS.companyId,
+    channelCode: "ocr_jobs",
+    inboundAddress: "ocr@inbound.example.test",
+    useCase: "documents_inbox",
+    allowedMimeTypes: ["application/pdf"],
+    maxAttachmentSizeBytes: 1024 * 1024,
+    classificationConfidenceThreshold: 0.9,
+    fieldConfidenceThreshold: 0.9
+  });
+
+  const ingested = platform.ingestEmailMessage({
+    companyId: DEMO_IDS.companyId,
+    recipientAddress: "ocr@inbound.example.test",
+    messageId: "<phase14-ocr-job-1>",
+    rawStorageKey: "raw-mail/phase14-ocr-job-1.eml",
+    attachments: [
+      {
+        filename: "invoice.pdf",
+        mimeType: "application/pdf",
+        storageKey: "documents/originals/phase14-ocr-job-1.pdf",
+        contentText: "Invoice: INV-3001 Supplier: Demo Leverantor AB Total: 3999.00 OCR: 77777"
+      }
+    ],
+    actorId: "system"
+  });
+  const documentId = ingested.routedDocuments[0].documentId;
+
+  const queuedJob = await platform.enqueueRuntimeJob({
+    companyId: DEMO_IDS.companyId,
+    jobType: "documents.ocr.requested",
+    sourceObjectType: "document",
+    sourceObjectId: documentId,
+    idempotencyKey: "step4-ocr-job-shared-runtime",
+    payload: {
+      documentId
+    },
+    actorId: "system"
+  });
+
+  const processed = await runWorkerBatch({
+    platform,
+    handlers: createDefaultJobHandlers({ logger: () => {} }),
+    logger: () => {},
+    workerId: "worker-step4-ocr"
+  });
+  assert.equal(processed, 1);
+
+  const completedJob = await platform.getRuntimeJob({ jobId: queuedJob.jobId });
+  const attempts = await platform.listRuntimeJobAttempts({ jobId: queuedJob.jobId });
+  const runs = platform.getDocumentOcrRuns({
+    companyId: DEMO_IDS.companyId,
+    documentId
+  });
+
+  assert.equal(completedJob.status, "succeeded");
+  assert.equal(completedJob.lastResultCode, "document_ocr_completed");
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].resultPayload.documentId, documentId);
+  assert.equal(runs.ocrRuns.length, 1);
+  assert.equal(runs.ocrRuns[0].suggestedDocumentType, "supplier_invoice");
 });
 
 test("Phase 14 Step 4 async jobs do not run while their controlling kill switch is disabled", async () => {
