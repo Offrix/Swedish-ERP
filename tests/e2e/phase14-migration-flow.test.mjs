@@ -54,7 +54,12 @@ test("Phase 14.3 flow exposes migration routes and keeps cockpit evidence intact
       body: {
         companyId: DEMO_IDS.companyId,
         freezeAt: "2026-03-23T08:00:00.000Z",
-        rollbackPoint: "snapshot://phase14-e2e",
+        rollbackPointRef: "snapshot://phase14-e2e",
+        acceptedVarianceThresholds: {
+          countDelta: 0,
+          amountDelta: 0
+        },
+        stabilizationWindowHours: 24,
         signoffChain: [{ userId: DEMO_IDS.userId, roleCode: "migration_lead", label: "Migration lead" }],
         goLiveChecklist: [{ itemCode: "parallel_run_green", label: "Parallel run green" }]
       }
@@ -99,10 +104,46 @@ test("Phase 14.3 flow exposes migration routes and keeps cockpit evidence intact
         lastExtractAt: "2026-03-23T08:10:00.000Z"
       }
     });
+    platform.recordRestoreDrill({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      drillCode: "phase14-e2e-restore",
+      targetRtoMinutes: 60,
+      targetRpoMinutes: 15,
+      actualRtoMinutes: 42,
+      actualRpoMinutes: 10,
+      status: "passed",
+      verificationSummary: "Phase 14 e2e restore drill verified."
+    });
+    await requestJson(baseUrl, "/v1/migration/acceptance-records", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        acceptanceType: "go_live_readiness",
+        cutoverPlanId: cutoverPlan.cutoverPlanId,
+        sourceParitySummary: {
+          countParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+          amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+          unresolvedMaterialDifferences: 0,
+          openingBalanceParityPassed: true,
+          openReceivablesParityPassed: true,
+          openPayablesParityPassed: true,
+          taxAccountParityPassed: true
+        }
+      }
+    });
     await requestJson(baseUrl, `/v1/migration/cutover-plans/${cutoverPlan.cutoverPlanId}/validate`, {
       method: "POST",
       token: adminToken,
-      body: { companyId: DEMO_IDS.companyId }
+      body: {
+        companyId: DEMO_IDS.companyId,
+        contractTestsPassed: true,
+        goldenScenariosPassed: true,
+        runbooksAcknowledged: true,
+        restoreDrillFreshnessDays: 30
+      }
     });
     await requestJson(baseUrl, `/v1/migration/cutover-plans/${cutoverPlan.cutoverPlanId}/switch`, {
       method: "POST",

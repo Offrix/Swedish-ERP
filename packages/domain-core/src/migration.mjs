@@ -37,6 +37,8 @@ export function createMigrationModule({
   hrPlatform = null,
   balancesPlatform = null,
   collectiveAgreementsPlatform = null,
+  listRuntimeJobs = null,
+  listRuntimeDeadLetters = null,
   audit,
   error
 } = {}) {
@@ -409,22 +411,32 @@ export function createMigrationModule({
     sessionToken,
     companyId,
     freezeAt,
-    rollbackPoint,
+    rollbackPoint = null,
+    rollbackPointRef = null,
+    acceptedVarianceThresholds,
+    stabilizationWindowHours,
     signoffChain = [],
     goLiveChecklist = [],
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
+    const resolvedRollbackPointRef = text(rollbackPointRef || rollbackPoint, "cutover_rollback_point_required");
     const cutoverPlan = {
       cutoverPlanId: crypto.randomUUID(),
       companyId,
       freezeAt: timestamp(freezeAt, "cutover_freeze_at_required"),
       lastExtractAt: null,
+      acceptedVarianceThresholds: normalizeAcceptedVarianceThresholds(acceptedVarianceThresholds),
       validationGateStatus: "pending",
-      rollbackPoint: text(rollbackPoint, "cutover_rollback_point_required"),
+      validationSummary: null,
+      rollbackPointRef: resolvedRollbackPointRef,
+      rollbackPoint: resolvedRollbackPointRef,
       signoffChain: normalizeSignoffChain(signoffChain),
       goLiveChecklist: normalizeChecklist(goLiveChecklist),
+      stabilizationWindowHours: normalizePositiveInteger(stabilizationWindowHours, "cutover_stabilization_window_hours_invalid"),
       status: "planned",
+      switchedAt: null,
+      stabilizedAt: null,
       createdByUserId: principal.userId,
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
@@ -654,10 +666,14 @@ export function createMigrationModule({
     return clone(cutoverPlan);
   }
 
-  function passCutoverValidation({
+  async function passCutoverValidation({
     sessionToken,
     companyId,
     cutoverPlanId,
+    contractTestsPassed = false,
+    goldenScenariosPassed = false,
+    runbooksAcknowledged = false,
+    restoreDrillFreshnessDays = null,
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
@@ -665,9 +681,52 @@ export function createMigrationModule({
     if (cutoverPlan.status !== "final_extract_done") {
       throw error(409, "cutover_validation_invalid_state", "Cutover validation requires completed final extract.");
     }
+    const acceptanceRecord = findLatestAcceptedMigrationAcceptanceRecord(state, companyId, cutoverPlan.cutoverPlanId);
+    const blockingReasonCodes = await computeCutoverValidationBlockingReasonCodes({
+      companyId,
+      cutoverPlan,
+      acceptanceRecord,
+      contractTestsPassed: contractTestsPassed === true,
+      goldenScenariosPassed: goldenScenariosPassed === true,
+      runbooksAcknowledged: runbooksAcknowledged === true,
+      restoreDrillFreshnessDays: normalizeOptionalPositiveInteger(restoreDrillFreshnessDays, "cutover_restore_drill_freshness_days_invalid"),
+      state,
+      clock,
+      listRuntimeJobs,
+      listRuntimeDeadLetters
+    });
+    if (blockingReasonCodes.length > 0) {
+      cutoverPlan.validationGateStatus = "blocked";
+      cutoverPlan.validationSummary = {
+        status: "blocked",
+        acceptanceRecordId: acceptanceRecord?.migrationAcceptanceRecordId || null,
+        contractTestsPassed: contractTestsPassed === true,
+        goldenScenariosPassed: goldenScenariosPassed === true,
+        runbooksAcknowledged: runbooksAcknowledged === true,
+        restoreDrillFreshnessDays: normalizeOptionalPositiveInteger(restoreDrillFreshnessDays, "cutover_restore_drill_freshness_days_invalid"),
+        blockingReasonCodes,
+        validatedAt: nowIso(clock)
+      };
+      cutoverPlan.updatedAt = cutoverPlan.validationSummary.validatedAt;
+      throw error(
+        409,
+        "cutover_validation_blocked",
+        `Cutover validation is blocked: ${blockingReasonCodes.join(", ")}.`
+      );
+    }
     cutoverPlan.validationGateStatus = "passed";
     cutoverPlan.status = "validation_passed";
-    cutoverPlan.updatedAt = nowIso(clock);
+    cutoverPlan.validationSummary = {
+      status: "passed",
+      acceptanceRecordId: acceptanceRecord?.migrationAcceptanceRecordId || null,
+      contractTestsPassed: true,
+      goldenScenariosPassed: true,
+      runbooksAcknowledged: true,
+      restoreDrillFreshnessDays: normalizeOptionalPositiveInteger(restoreDrillFreshnessDays, "cutover_restore_drill_freshness_days_invalid"),
+      blockingReasonCodes: [],
+      validatedAt: nowIso(clock)
+    };
+    cutoverPlan.updatedAt = cutoverPlan.validationSummary.validatedAt;
     audit({
       companyId,
       actorId: principal.userId,
@@ -701,7 +760,8 @@ export function createMigrationModule({
       throw error(409, "cutover_blocking_differences", "Cutover switch requires all blocking diff reports to be resolved.");
     }
     cutoverPlan.status = "switched";
-    cutoverPlan.updatedAt = nowIso(clock);
+    cutoverPlan.switchedAt = nowIso(clock);
+    cutoverPlan.updatedAt = cutoverPlan.switchedAt;
     audit({
       companyId,
       actorId: principal.userId,
@@ -723,11 +783,25 @@ export function createMigrationModule({
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
     const cutoverPlan = requireCutoverPlan(companyId, cutoverPlanId);
-    if (cutoverPlan.status !== "switched") {
-      throw error(409, "cutover_stabilize_invalid_state", "Cutover must be switched before stabilization.");
+    if (close === true) {
+      if (cutoverPlan.status !== "stabilized") {
+        throw error(409, "cutover_close_requires_stabilized", "Cutover must be stabilized before closure.");
+      }
+      const closeAt = nowIso(clock);
+      const earliestCloseAt = addHoursIso(cutoverPlan.switchedAt, cutoverPlan.stabilizationWindowHours);
+      if (closeAt < earliestCloseAt) {
+        throw error(409, "cutover_stabilization_window_open", "Cutover cannot close before the stabilization window has elapsed.");
+      }
+      cutoverPlan.status = "closed";
+      cutoverPlan.updatedAt = closeAt;
+    } else {
+      if (cutoverPlan.status !== "switched") {
+        throw error(409, "cutover_stabilize_invalid_state", "Cutover must be switched before stabilization.");
+      }
+      cutoverPlan.status = "stabilized";
+      cutoverPlan.stabilizedAt = nowIso(clock);
+      cutoverPlan.updatedAt = cutoverPlan.stabilizedAt;
     }
-    cutoverPlan.status = close === true ? "closed" : "stabilized";
-    cutoverPlan.updatedAt = nowIso(clock);
     audit({
       companyId,
       actorId: principal.userId,
@@ -1804,6 +1878,26 @@ function normalizeAcceptanceSignoffRefs(values, cutoverPlan) {
   }));
 }
 
+function normalizeAcceptedVarianceThresholds(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw createValidationError(
+      "cutover_accepted_variance_thresholds_required",
+      "Cutover plan requires acceptedVarianceThresholds."
+    );
+  }
+  const normalizedEntries = Object.entries(value).map(([thresholdCode, thresholdValue]) => [
+    text(thresholdCode, "cutover_variance_threshold_code_required"),
+    normalizeNumber(thresholdValue, "cutover_variance_threshold_value_invalid")
+  ]);
+  if (normalizedEntries.length === 0) {
+    throw createValidationError(
+      "cutover_accepted_variance_thresholds_required",
+      "Cutover plan requires at least one accepted variance threshold."
+    );
+  }
+  return Object.fromEntries(normalizedEntries);
+}
+
 function normalizeSourceParitySummary(value) {
   const summary = clone(value || {});
   return {
@@ -1910,8 +2004,68 @@ function computeAcceptanceBlockingReasonCodes({
   return [...new Set(reasons)];
 }
 
+async function computeCutoverValidationBlockingReasonCodes({
+  companyId,
+  cutoverPlan,
+  acceptanceRecord,
+  contractTestsPassed,
+  goldenScenariosPassed,
+  runbooksAcknowledged,
+  restoreDrillFreshnessDays,
+  state,
+  clock,
+  listRuntimeJobs,
+  listRuntimeDeadLetters
+}) {
+  const reasons = [];
+  if (!acceptanceRecord) {
+    reasons.push("cutover_acceptance_record_missing");
+  } else {
+    const sourceParitySummary = acceptanceRecord.sourceParitySummary || {};
+    if (sourceParitySummary.unresolvedMaterialDifferences > 0 || hasBlockingDiffReports(state, companyId)) {
+      reasons.push("material_variances_open");
+    }
+    for (const [flag, reason] of [
+      [sourceParitySummary.openingBalanceParityPassed, "opening_balance_parity_not_confirmed"],
+      [sourceParitySummary.openReceivablesParityPassed, "open_receivables_parity_not_confirmed"],
+      [sourceParitySummary.openPayablesParityPassed, "open_payables_parity_not_confirmed"],
+      [sourceParitySummary.taxAccountParityPassed, "tax_account_parity_not_confirmed"]
+    ]) {
+      if (flag !== true) {
+        reasons.push(reason);
+      }
+    }
+  }
+  if (await hasOpenRegulatedSubmissionDeadLetters({ companyId, listRuntimeJobs, listRuntimeDeadLetters })) {
+    reasons.push("regulated_submission_dead_letters_open");
+  }
+  if (hasUnresolvedPrivilegedAccessFindings(state, companyId)) {
+    reasons.push("privileged_access_findings_open");
+  }
+  if (contractTestsPassed !== true) {
+    reasons.push("contract_tests_not_green");
+  }
+  if (goldenScenariosPassed !== true) {
+    reasons.push("golden_scenarios_not_green");
+  }
+  if (runbooksAcknowledged !== true) {
+    reasons.push("runbooks_not_acknowledged");
+  }
+  if (!hasFreshRestoreDrill({ state, companyId, restoreDrillFreshnessDays, clock })) {
+    reasons.push("restore_drill_not_fresh_enough");
+  }
+  return [...new Set(reasons)];
+}
+
 function normalizeOptionalBoolean(value) {
   return typeof value === "boolean" ? value : null;
+}
+
+function normalizeOptionalPositiveInteger(value, code) {
+  if (value == null || value === "") {
+    return null;
+  }
+  return normalizePositiveInteger(value, code);
 }
 
 function normalizeNonNegativeInteger(value) {
@@ -1987,6 +2141,65 @@ function hasBlockingDiffReports(state, companyId) {
     return true;
   }
   return reports.some((diffReport) => diffReport.status === "remediation_required");
+}
+
+function findLatestAcceptedMigrationAcceptanceRecord(state, companyId, cutoverPlanId) {
+  return [...state.migrationAcceptanceRecords.values()]
+    .filter((record) => record.companyId === companyId)
+    .filter((record) => record.cutoverPlanId === cutoverPlanId)
+    .filter((record) => record.status === "accepted")
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] || null;
+}
+
+function hasUnresolvedPrivilegedAccessFindings(state, companyId) {
+  return [...state.accessReviewBatches.values()]
+    .filter((review) => review.companyId === companyId)
+    .some(
+      (review) =>
+        review.findings.length > 0
+        && !["signed_off", "archived"].includes(review.status)
+    );
+}
+
+async function hasOpenRegulatedSubmissionDeadLetters({ companyId, listRuntimeJobs, listRuntimeDeadLetters }) {
+  if (typeof listRuntimeJobs !== "function" || typeof listRuntimeDeadLetters !== "function") {
+    return false;
+  }
+  const [jobs, deadLetters] = await Promise.all([
+    listRuntimeJobs({ companyId, status: "dead_lettered" }),
+    listRuntimeDeadLetters({ companyId })
+  ]);
+  const deadLetterByJobId = new Map((deadLetters || []).map((deadLetter) => [deadLetter.jobId, deadLetter]));
+  return (jobs || []).some((job) => {
+    const deadLetter = deadLetterByJobId.get(job.jobId);
+    if (!deadLetter || ["resolved", "closed"].includes(deadLetter.operatorState)) {
+      return false;
+    }
+    return job.sourceObjectType === "submission" || job.jobType.startsWith("submission.");
+  });
+}
+
+function hasFreshRestoreDrill({ state, companyId, restoreDrillFreshnessDays, clock }) {
+  if (!restoreDrillFreshnessDays || restoreDrillFreshnessDays <= 0) {
+    return false;
+  }
+  const latestPassedDrill = [...state.restoreDrills.values()]
+    .filter((drill) => drill.companyId === companyId)
+    .filter((drill) => drill.status === "passed")
+    .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))[0];
+  if (!latestPassedDrill) {
+    return false;
+  }
+  const latestRecordedAt = new Date(latestPassedDrill.recordedAt);
+  const freshnessBoundary = new Date(clock());
+  freshnessBoundary.setUTCDate(freshnessBoundary.getUTCDate() - restoreDrillFreshnessDays);
+  return latestRecordedAt.getTime() >= freshnessBoundary.getTime();
+}
+
+function addHoursIso(timestampValue, hours) {
+  const value = new Date(timestamp(timestampValue, "cutover_switched_at_required"));
+  value.setUTCHours(value.getUTCHours() + normalizePositiveInteger(hours, "cutover_stabilization_window_hours_invalid"));
+  return value.toISOString();
 }
 
 function normalizeUniqueCodes(values, code) {

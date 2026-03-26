@@ -4,7 +4,7 @@ import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { loginWithStrongAuthOnPlatform } from "../helpers/platform-auth.mjs";
 
-test("Phase 14.3 migration cockpit tracks import, diff, cutover and rollback deterministically", () => {
+test("Phase 14.3 migration cockpit tracks import, diff, cutover and rollback deterministically", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-22T20:30:00Z")
   });
@@ -73,10 +73,17 @@ test("Phase 14.3 migration cockpit tracks import, diff, cutover and rollback det
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
     freezeAt: "2026-03-23T08:00:00.000Z",
-    rollbackPoint: "snapshot://phase14-unit",
+    rollbackPointRef: "snapshot://phase14-unit",
+    acceptedVarianceThresholds: {
+      countDelta: 0,
+      amountDelta: 0
+    },
+    stabilizationWindowHours: 24,
     signoffChain: [{ userId: DEMO_IDS.userId, roleCode: "migration_lead", label: "Migration lead" }],
     goLiveChecklist: [{ itemCode: "support_staffed", label: "Support staffed" }]
   });
+  assert.equal(cutoverPlan.rollbackPointRef, "snapshot://phase14-unit");
+  assert.equal(cutoverPlan.stabilizationWindowHours, 24);
   platform.recordCutoverSignoff({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
@@ -100,16 +107,6 @@ test("Phase 14.3 migration cockpit tracks import, diff, cutover and rollback det
     cutoverPlanId: cutoverPlan.cutoverPlanId,
     lastExtractAt: "2026-03-23T08:10:00.000Z"
   });
-  platform.passCutoverValidation({
-    sessionToken: adminToken,
-    companyId: DEMO_IDS.companyId,
-    cutoverPlanId: cutoverPlan.cutoverPlanId
-  });
-  platform.switchCutover({
-    sessionToken: adminToken,
-    companyId: DEMO_IDS.companyId,
-    cutoverPlanId: cutoverPlan.cutoverPlanId
-  });
   const acceptanceRecord = platform.createMigrationAcceptanceRecord({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
@@ -121,10 +118,90 @@ test("Phase 14.3 migration cockpit tracks import, diff, cutover and rollback det
       countParity: { passed: true, sourceCount: 42, targetCount: 42, delta: 0 },
       amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
       unresolvedDifferenceCount: 0,
-      unresolvedMaterialDifferences: 0
+      unresolvedMaterialDifferences: 0,
+      openingBalanceParityPassed: true,
+      openReceivablesParityPassed: true,
+      openPayablesParityPassed: true,
+      payrollYtdParityPassed: true,
+      agiHistoryParityPassed: true,
+      taxAccountParityPassed: true
     }
   });
   assert.equal(acceptanceRecord.status, "accepted");
+  platform.recordRestoreDrill({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    drillCode: "phase14-cutover-restore",
+    targetRtoMinutes: 60,
+    targetRpoMinutes: 15,
+    actualRtoMinutes: 42,
+    actualRpoMinutes: 10,
+    status: "passed",
+    verificationSummary: "Phase 14 migration restore drill verified."
+  });
+  const deadLetterJob = await platform.enqueueRuntimeJob({
+    companyId: DEMO_IDS.companyId,
+    jobType: "submission.transport",
+    sourceObjectType: "submission",
+    sourceObjectId: "phase14-unit-submission",
+    payload: { submissionId: "phase14-unit-submission" },
+    actorId: "phase14-unit"
+  });
+  const claimedJobs = await platform.claimAvailableRuntimeJobs({
+    workerId: "phase14-unit-worker"
+  });
+  const claimedJob = claimedJobs.find((candidate) => candidate.jobId === deadLetterJob.jobId);
+  const attempt = await platform.startRuntimeJobAttempt({
+    jobId: deadLetterJob.jobId,
+    claimToken: claimedJob.claimToken,
+    workerId: "phase14-unit-worker"
+  });
+  await platform.failRuntimeJob({
+    jobId: deadLetterJob.jobId,
+    claimToken: claimedJob.claimToken,
+    workerId: "phase14-unit-worker",
+    attemptId: attempt.attempt.jobAttemptId,
+    errorClass: "persistent_technical",
+    errorMessage: "submission transport dead-lettered",
+    replayAllowed: true
+  });
+  await assert.rejects(
+    () =>
+      platform.passCutoverValidation({
+        sessionToken: adminToken,
+        companyId: DEMO_IDS.companyId,
+        cutoverPlanId: cutoverPlan.cutoverPlanId,
+        contractTestsPassed: true,
+        goldenScenariosPassed: true,
+        runbooksAcknowledged: true,
+        restoreDrillFreshnessDays: 30
+      }),
+    (thrown) => thrown?.code === "cutover_validation_blocked"
+  );
+  const deadLetters = await platform.listRuntimeDeadLetters({
+    companyId: DEMO_IDS.companyId
+  });
+  const submissionDeadLetter = deadLetters.find((candidate) => candidate.jobId === deadLetterJob.jobId);
+  await platform.triageRuntimeDeadLetter({
+    companyId: DEMO_IDS.companyId,
+    deadLetterId: submissionDeadLetter.deadLetterId,
+    actorId: DEMO_IDS.userId,
+    operatorState: "resolved"
+  });
+  await platform.passCutoverValidation({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    contractTestsPassed: true,
+    goldenScenariosPassed: true,
+    runbooksAcknowledged: true,
+    restoreDrillFreshnessDays: 30
+  });
+  platform.switchCutover({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId
+  });
   const rollbackStarted = platform.startRollback({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,

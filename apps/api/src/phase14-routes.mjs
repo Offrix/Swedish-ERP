@@ -2555,6 +2555,9 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       companyId,
       freezeAt: body.freezeAt,
       rollbackPoint: body.rollbackPoint,
+      rollbackPointRef: body.rollbackPointRef,
+      acceptedVarianceThresholds: body.acceptedVarianceThresholds,
+      stabilizationWindowHours: body.stabilizationWindowHours,
       signoffChain: body.signoffChain,
       goLiveChecklist: body.goLiveChecklist
     }));
@@ -2659,7 +2662,15 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "migration_cutover_plan", objectId: cutoverValidateMatch.cutoverPlanId, scopeCode: "migration_cutover_plan" });
-    writeJson(res, 200, platform.passCutoverValidation({ sessionToken, companyId, cutoverPlanId: cutoverValidateMatch.cutoverPlanId }));
+    writeJson(res, 200, await platform.passCutoverValidation({
+      sessionToken,
+      companyId,
+      cutoverPlanId: cutoverValidateMatch.cutoverPlanId,
+      contractTestsPassed: body.contractTestsPassed === true,
+      goldenScenariosPassed: body.goldenScenariosPassed === true,
+      runbooksAcknowledged: body.runbooksAcknowledged === true,
+      restoreDrillFreshnessDays: body.restoreDrillFreshnessDays
+    }));
     return true;
   }
 

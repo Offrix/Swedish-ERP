@@ -140,11 +140,19 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
       body: {
         companyId: DEMO_IDS.companyId,
         freezeAt: "2026-03-23T08:00:00.000Z",
-        rollbackPoint: "snapshot://phase14-api",
+        rollbackPointRef: "snapshot://phase14-api",
+        acceptedVarianceThresholds: {
+          countDelta: 0,
+          amountDelta: 0
+        },
+        stabilizationWindowHours: 24,
         signoffChain: [{ userId: DEMO_IDS.userId, roleCode: "migration_lead", label: "Migration lead" }],
         goLiveChecklist: [{ itemCode: "support_staffed", label: "Support staffed" }]
       }
     });
+    assert.equal(cutoverPlan.rollbackPointRef, "snapshot://phase14-api");
+    assert.equal(cutoverPlan.stabilizationWindowHours, 24);
+    assert.equal(cutoverPlan.acceptedVarianceThresholds.amountDelta, 0);
     await requestJson(baseUrl, `/v1/migration/cutover-plans/${cutoverPlan.cutoverPlanId}/signoffs`, {
       method: "POST",
       token: adminToken,
@@ -174,10 +182,103 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
         lastExtractAt: "2026-03-23T08:10:00.000Z"
       }
     });
+    await requestJson(baseUrl, "/v1/migration/acceptance-records", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        acceptanceType: "go_live_readiness",
+        cutoverPlanId: cutoverPlan.cutoverPlanId,
+        importBatchIds: [batch.importBatchId],
+        diffReportIds: [diffReport.diffReportId],
+        sourceParitySummary: {
+          countParity: { passed: true, sourceCount: 42, targetCount: 42, delta: 0 },
+          amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+          unresolvedMaterialDifferences: 0,
+          openingBalanceParityPassed: true,
+          openReceivablesParityPassed: true,
+          openPayablesParityPassed: true,
+          payrollYtdParityPassed: true,
+          agiHistoryParityPassed: true,
+          taxAccountParityPassed: true
+        }
+      }
+    });
+    platform.recordRestoreDrill({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      drillCode: "phase14-cutover-restore",
+      targetRtoMinutes: 60,
+      targetRpoMinutes: 15,
+      actualRtoMinutes: 42,
+      actualRpoMinutes: 10,
+      status: "passed",
+      verificationSummary: "Phase 14 migration restore drill verified."
+    });
+
+    const deadLetterJob = await platform.enqueueRuntimeJob({
+      companyId: DEMO_IDS.companyId,
+      jobType: "submission.transport",
+      sourceObjectType: "submission",
+      sourceObjectId: "phase14-cutover-submission",
+      payload: { submissionId: "phase14-cutover-submission" },
+      riskClass: "medium",
+      actorId: "phase14-api"
+    });
+    const claimedJobs = await platform.claimAvailableRuntimeJobs({
+      workerId: "phase14-cutover-worker"
+    });
+    const claimedJob = claimedJobs.find((candidate) => candidate.jobId === deadLetterJob.jobId);
+    const attempt = await platform.startRuntimeJobAttempt({
+      jobId: deadLetterJob.jobId,
+      claimToken: claimedJob.claimToken,
+      workerId: "phase14-cutover-worker"
+    });
+    await platform.failRuntimeJob({
+      jobId: deadLetterJob.jobId,
+      claimToken: claimedJob.claimToken,
+      workerId: "phase14-cutover-worker",
+      attemptId: attempt.attempt.jobAttemptId,
+      errorClass: "persistent_technical",
+      errorMessage: "submission transport dead-lettered",
+      replayAllowed: true
+    });
+    const blockedValidation = await requestJson(baseUrl, `/v1/migration/cutover-plans/${cutoverPlan.cutoverPlanId}/validate`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        contractTestsPassed: true,
+        goldenScenariosPassed: true,
+        runbooksAcknowledged: true,
+        restoreDrillFreshnessDays: 30
+      }
+    });
+    assert.equal(blockedValidation.error, "cutover_validation_blocked");
+
+    const deadLetters = await platform.listRuntimeDeadLetters({
+      companyId: DEMO_IDS.companyId
+    });
+    const submissionDeadLetter = deadLetters.find((candidate) => candidate.jobId === deadLetterJob.jobId);
+    await platform.triageRuntimeDeadLetter({
+      companyId: DEMO_IDS.companyId,
+      deadLetterId: submissionDeadLetter.deadLetterId,
+      actorId: DEMO_IDS.userId,
+      operatorState: "resolved"
+    });
+
     await requestJson(baseUrl, `/v1/migration/cutover-plans/${cutoverPlan.cutoverPlanId}/validate`, {
       method: "POST",
       token: adminToken,
-      body: { companyId: DEMO_IDS.companyId }
+      body: {
+        companyId: DEMO_IDS.companyId,
+        contractTestsPassed: true,
+        goldenScenariosPassed: true,
+        runbooksAcknowledged: true,
+        restoreDrillFreshnessDays: 30
+      }
     });
     await requestJson(baseUrl, `/v1/migration/cutover-plans/${cutoverPlan.cutoverPlanId}/switch`, {
       method: "POST",
@@ -197,7 +298,13 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
         sourceParitySummary: {
           countParity: { passed: true, sourceCount: 42, targetCount: 42, delta: 0 },
           amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
-          unresolvedMaterialDifferences: 0
+          unresolvedMaterialDifferences: 0,
+          openingBalanceParityPassed: true,
+          openReceivablesParityPassed: true,
+          openPayablesParityPassed: true,
+          payrollYtdParityPassed: true,
+          agiHistoryParityPassed: true,
+          taxAccountParityPassed: true
         }
       }
     });
@@ -205,7 +312,7 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
     const listedAcceptanceRecords = await requestJson(baseUrl, `/v1/migration/acceptance-records?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
-    assert.equal(listedAcceptanceRecords.items.length, 1);
+    assert.equal(listedAcceptanceRecords.items.length, 2);
 
     const stabilized = await requestJson(baseUrl, `/v1/migration/cutover-plans/${cutoverPlan.cutoverPlanId}/stabilize`, {
       method: "POST",
@@ -257,7 +364,7 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
     assert.equal(cockpit.corrections.length, 1);
     assert.equal(cockpit.diffReports.length, 1);
     assert.equal(cockpit.cutoverPlans.length, 1);
-    assert.equal(cockpit.acceptanceRecords.length, 1);
+    assert.equal(cockpit.acceptanceRecords.length, 2);
   } finally {
     await stopServer(server);
   }

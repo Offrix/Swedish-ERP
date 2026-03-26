@@ -36,7 +36,10 @@ Verifiera att migration cockpit, diff reports, cutover, rollback och go-live-rit
 - mapping sets kan skapas, listas och godkännas per källsystem
 - import batches registreras, körs och kan korrigeras manuellt utan att batchhistorik muteras
 - diff reports producerar difference items med beslut per item
-- cutover-plan följer ordningen start, final extract, validate, sign-off, checklista, switch och stabilize
+- cutover-plan låser `acceptedVarianceThresholds`, `rollbackPointRef` och `stabilizationWindowHours`
+- cutover validation blockeras när reglerade submission-dead-letters är öppna
+- cutover validation kräver accepted migration acceptance record, gröna contract tests, gröna golden scenarios, ackade runbooks och färsk restore drill
+- cutover-plan följer ordningen start, final extract, acceptance, validate, sign-off, checklista, switch och stabilize
 - rollback går från planerad till påbörjad och fullföljd utan att cockpit-evidens tappas
 
 ## Vanliga fel
@@ -46,6 +49,7 @@ Verifiera att migration cockpit, diff reports, cutover, rollback och go-live-rit
 - `cutover_validation_required`: switch eller stabilisering får inte ske innan validering är godkänd
 - `cutover_signoff_incomplete`: sign-off-kedjan är inte komplett innan switch
 - `cutover_checklist_incomplete`: obligatoriska checklistpunkter är inte klara innan switch
+- `cutover_validation_blocked`: validation gate stoppas av dead letters, saknad acceptance, öppna access findings eller saknad evidence
 - `cutover_blocking_differences`: blockerande differenser måste hanteras innan switch
 - `cutover_rollback_not_started`: rollback kan inte fullföljas innan den startats
 

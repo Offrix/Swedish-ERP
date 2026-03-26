@@ -335,6 +335,8 @@ export function createCoreEngine({
     hrPlatform,
     balancesPlatform,
     collectiveAgreementsPlatform,
+    listRuntimeJobs: asyncJobsModule.listAsyncJobs,
+    listRuntimeDeadLetters: asyncJobsModule.listAsyncDeadLetters,
     audit,
     error
   });
