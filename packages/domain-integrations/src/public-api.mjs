@@ -767,7 +767,7 @@ function compareWebhookDeliveries(left, right) {
 
 function isDispatchableWebhookDelivery(delivery, now, forceDispatch) {
   if (forceDispatch) {
-    return delivery.status !== "running";
+    return !["sent", "suppressed", "disabled", "dead_lettered", "running"].includes(delivery.status);
   }
   if (
     delivery.status === "sent" ||

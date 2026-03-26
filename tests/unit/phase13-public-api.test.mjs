@@ -197,3 +197,57 @@ test("Phase 13.1 webhook runtime dead-letters deliveries after repeated transpor
   assert.equal(deliveries[0].deadLetterReasonCode, "webhook_transport_error");
   assert.equal(deliveries[0].attempts.length, 5);
 });
+
+test("Phase 13.1 explicit delivery dispatch does not resend terminal webhook deliveries", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-22T18:45:00Z"),
+    webhookDeliveryExecutor: createSentWebhookDeliveryExecutor()
+  });
+
+  const client = platform.createPublicApiClient({
+    companyId: DEMO_IDS.companyId,
+    displayName: "Terminal delivery client",
+    mode: "sandbox",
+    scopes: ["api_spec.read", "webhook.manage"],
+    actorId: "phase13-1-terminal"
+  });
+  const subscription = platform.createWebhookSubscription({
+    companyId: DEMO_IDS.companyId,
+    clientId: client.clientId,
+    mode: "sandbox",
+    eventTypes: ["report.snapshot.ready"],
+    targetUrl: "https://example.test/terminal-webhook",
+    actorId: "phase13-1-terminal"
+  });
+  const event = platform.emitWebhookEvent({
+    companyId: DEMO_IDS.companyId,
+    eventType: "report.snapshot.ready",
+    resourceType: "report_snapshot",
+    resourceId: "snapshot-terminal",
+    payload: { snapshotId: "snapshot-terminal" },
+    mode: "sandbox",
+    eventKey: "phase13-1:terminal"
+  });
+  const deliveryId = event.deliveries[0].deliveryId;
+
+  const firstDispatch = await platform.dispatchWebhookDeliveries({
+    companyId: DEMO_IDS.companyId,
+    deliveryId,
+    actorId: "phase13-1-terminal"
+  });
+  assert.equal(firstDispatch.attemptedCount, 1);
+  assert.equal(firstDispatch.items[0].status, "sent");
+
+  const secondDispatch = await platform.dispatchWebhookDeliveries({
+    companyId: DEMO_IDS.companyId,
+    deliveryId,
+    actorId: "phase13-1-terminal"
+  });
+  assert.equal(secondDispatch.attemptedCount, 0);
+
+  const delivery = platform.listWebhookDeliveries({
+    companyId: DEMO_IDS.companyId,
+    subscriptionId: subscription.subscriptionId
+  })[0];
+  assert.equal(delivery.attempts.length, 1);
+});
