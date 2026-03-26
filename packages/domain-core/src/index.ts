@@ -277,3 +277,38 @@ export interface PayrollMigrationDiff {
   readonly status: "open" | "explained" | "accepted" | "blocking" | "resolved";
   readonly differenceDescription: string;
 }
+
+export interface CanonicalRepositoryRecord<TPayload = Record<string, unknown>> {
+  readonly tableName: string;
+  readonly boundedContextCode: string;
+  readonly objectType: string;
+  readonly companyId: string;
+  readonly objectId: string;
+  readonly status: string | null;
+  readonly payload: TPayload;
+  readonly objectVersion: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly lastActorId: string | null;
+  readonly lastCorrelationId: string | null;
+}
+
+export interface CanonicalRepository<TPayload = Record<string, unknown>> {
+  get(input: { readonly companyId: string; readonly objectId: string }): Promise<CanonicalRepositoryRecord<TPayload> | null>;
+  list(input: { readonly companyId: string }): Promise<readonly CanonicalRepositoryRecord<TPayload>[]>;
+  save(input: {
+    readonly companyId: string;
+    readonly objectId: string;
+    readonly status?: string | null;
+    readonly payload: TPayload;
+    readonly expectedObjectVersion?: number | null;
+    readonly actorId?: string | null;
+    readonly correlationId?: string | null;
+    readonly recordedAt?: string | Date | null;
+  }): Promise<CanonicalRepositoryRecord<TPayload>>;
+  delete(input: {
+    readonly companyId: string;
+    readonly objectId: string;
+    readonly expectedObjectVersion: number;
+  }): Promise<CanonicalRepositoryRecord<TPayload>>;
+}

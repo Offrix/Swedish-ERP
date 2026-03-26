@@ -38,3 +38,10 @@ Shared domain primitives, value objects and cross-cutting workflow engines used 
 - import batches, manual migration corrections and diff reports
 - cutover plans with staged go-live, stabilization and rollback
 - migration cockpit projection with append-only evidence
+
+## Phase 2.1 scope
+
+- canonical repository contracts for mutable core-domain objects
+- optimistic concurrency with expected object version on updates and deletes
+- transaction-bound repository operations for future command-receipt/outbox work
+- Postgres-backed repository store for durable core-domain persistence primitives

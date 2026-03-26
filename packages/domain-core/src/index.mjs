@@ -1,4 +1,16 @@
 import crypto from "node:crypto";
+export {
+  CORE_CANONICAL_REPOSITORY_OBJECT_TYPES,
+  CORE_CANONICAL_REPOSITORY_TABLE,
+  CanonicalRepositoryConflictError,
+  createCanonicalJsonRepository,
+  createCoreCanonicalRepositories,
+  createInMemoryCanonicalRepositoryStore
+} from "./repositories.mjs";
+export {
+  createPostgresCanonicalRepositoryStore,
+  resolveCanonicalRepositoryConnectionString
+} from "./repositories-postgres.mjs";
 import {
   CLOSE_BLOCKER_SEVERITIES,
   CLOSE_BLOCKER_STATUSES,

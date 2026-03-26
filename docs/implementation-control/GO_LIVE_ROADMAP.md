@@ -203,7 +203,7 @@ Flytta affÃ¤rssanningen frÃ¥n processminne till hÃ¥llbar persistence med i
 - Ingen regulated submission, payroll eller tax-account-kedja fÃ¥r byggas vidare pÃ¥ in-memory truth.
 
 **Delfaser**
-- [ ] 2.1 [NEW BUILD] **InfÃ¶r canonical repositories** â€” Varje bounded context fÃ¥r repositorygrÃ¤nssnitt med Postgres-implementation och transaktionsbunden optimistic concurrency.
+- [x] 2.1 [NEW BUILD] **InfÃ¶r canonical repositories** â€” Varje bounded context fÃ¥r repositorygrÃ¤nssnitt med Postgres-implementation och transaktionsbunden optimistic concurrency.
 - [ ] 2.2 [NEW BUILD] **InfÃ¶r command log + outbox/inbox** â€” Alla muterande commands ska skriva command receipt, expected version, actor, session revision och outbox-event i samma commit.
 - [ ] 2.3 [HARDEN] **HÃ¥rdna job-runtime** â€” `packages/domain-core/src/jobs.mjs` och `apps/worker/src/worker.mjs` ska bÃ¤ra attempts, retry policy, dead-letter, replay plan och poison-pill-detektion.
 - [ ] 2.4 [MIGRATE] **Migrera kritiska domÃ¤ner bort frÃ¥n Map-sanning** â€” Org auth, ledger, VAT, AR, AP, payroll, tax-account, review-center, projects och submissions fÃ¥r inte lÃ¤ngre ha produktionskritisk state enbart i Map.
@@ -1148,5 +1148,6 @@ Bevisa att backend-kontrakten bÃ¤r verkliga kundscenarier, lÃ¥sa UI-kontrakt
 ## Slutregel
 
 Denna roadmap Ã¤r den enda bindande byggordningen. Ingen implementation, ingen featuregren och ingen UI-plan fÃ¥r kÃ¶ra utanfÃ¶r denna ordning utan uttrycklig Ã¤ndring i detta dokument.
+
 
 
