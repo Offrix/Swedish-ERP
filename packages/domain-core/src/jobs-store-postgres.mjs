@@ -71,6 +71,9 @@ function mapAttemptRow(row) {
     attemptNo: Number(row.attempt_no || 0),
     workerId: row.worker_id,
     claimToken: row.claim_token,
+    status: row.status,
+    claimedAt: row.claimed_at,
+    claimExpiresAt: row.claim_expires_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     resultCode: row.result_code,
@@ -297,7 +300,10 @@ export function createPostgresAsyncJobStore({
           if (attemptRow) {
             const updatedAttempts = await tx`
               update async_job_attempts
-              set finished_at = ${nowIso},
+              set status = 'claim_expired',
+                  claimed_at = coalesce(claimed_at, ${jobRow.claimed_at}),
+                  claim_expires_at = coalesce(claim_expires_at, ${jobRow.claim_expires_at}),
+                  finished_at = ${nowIso},
                   result_code = 'claim_expired',
                   error_class = 'persistent_technical',
                   error_code = 'worker_claim_expired',
@@ -311,7 +317,31 @@ export function createPostgresAsyncJobStore({
               returning *
             `;
             attemptRow = updatedAttempts[0];
+          } else {
+            const attemptNo = Number(jobRow.attempt_count || 0) + 1;
+            const insertedAttempts = await tx`
+              insert into async_job_attempts (
+                job_attempt_id, job_id, attempt_no, worker_id, claim_token, status,
+                claimed_at, claim_expires_at, started_at, finished_at, result_code,
+                error_class, error_code, error_message, result_payload_json, next_retry_at, created_at
+              ) values (
+                ${crypto.randomUUID()}, ${jobRow.job_id}, ${attemptNo}, ${jobRow.worker_id}, ${jobRow.claim_token}, 'claim_expired',
+                ${jobRow.claimed_at}, ${jobRow.claim_expires_at}, null, ${nowIso}, 'claim_expired',
+                'persistent_technical', 'worker_claim_expired', 'Async job claim expired before worker completion.',
+                ${JSON.stringify({
+                  recoveryReasonCode: "claim_expired",
+                  orphanedWorkerId: jobRow.worker_id
+                })}::jsonb, null, ${jobRow.claimed_at || nowIso}
+              )
+              returning *
+            `;
+            attemptRow = insertedAttempts[0];
           }
+
+          const attemptCountAfterRecovery = Math.max(
+            Number(jobRow.attempt_count || 0),
+            Number(attemptRow?.attempt_no || 0)
+          );
 
           const shouldDeadLetter =
             nextClaimExpiryCount >= resolveClaimExpiryPoisonThreshold(jobRow)
@@ -338,6 +368,7 @@ export function createPostgresAsyncJobStore({
                   last_error_class = ${commonJobUpdate.lastErrorClass},
                   last_error_code = ${commonJobUpdate.lastErrorCode},
                   last_error_message = ${commonJobUpdate.lastErrorMessage},
+                  attempt_count = ${attemptCountAfterRecovery},
                   claim_expiry_count = ${commonJobUpdate.claimExpiryCount},
                   last_claim_expired_at = ${commonJobUpdate.lastClaimExpiredAt}
               where job_id = ${jobRow.job_id}
@@ -391,6 +422,7 @@ export function createPostgresAsyncJobStore({
                 last_error_class = ${commonJobUpdate.lastErrorClass},
                 last_error_code = ${commonJobUpdate.lastErrorCode},
                 last_error_message = ${commonJobUpdate.lastErrorMessage},
+                attempt_count = ${attemptCountAfterRecovery},
                 claim_expiry_count = ${commonJobUpdate.claimExpiryCount},
                 last_claim_expired_at = ${commonJobUpdate.lastClaimExpiredAt}
             where job_id = ${jobRow.job_id}
@@ -483,9 +515,11 @@ export function createPostgresAsyncJobStore({
         const attemptNo = Number(jobRow.attempt_count || 0) + 1;
         const attemptRows = await tx`
           insert into async_job_attempts (
-            job_attempt_id, job_id, attempt_no, worker_id, claim_token, started_at, created_at
+            job_attempt_id, job_id, attempt_no, worker_id, claim_token, status,
+            claimed_at, claim_expires_at, started_at, created_at
           ) values (
-            ${crypto.randomUUID()}, ${jobId}, ${attemptNo}, ${workerId}, ${claimToken}, ${startedAt}, ${startedAt}
+            ${crypto.randomUUID()}, ${jobId}, ${attemptNo}, ${workerId}, ${claimToken}, 'running',
+            ${jobRow.claimed_at}, ${jobRow.claim_expires_at}, ${startedAt}, ${startedAt}
           )
           returning *
         `;
@@ -546,7 +580,8 @@ export function createPostgresAsyncJobStore({
 
         const attemptRows = await tx`
           update async_job_attempts
-          set finished_at = ${finishedAt},
+          set status = ${terminalState === "succeeded" ? "succeeded" : terminalState === "retry_scheduled" ? "retry_scheduled" : "dead_lettered"},
+              finished_at = ${finishedAt},
               result_code = ${resultCode},
               error_class = ${errorClass},
               error_code = ${errorCode},

@@ -33,6 +33,9 @@ test("Phase 14 Step 4 async jobs support retry scheduling and completion", async
   const attempts = await platform.listRuntimeJobAttempts({ jobId: queuedJob.jobId });
   assert.equal(completedJob.status, "succeeded");
   assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].status, "succeeded");
+  assert.equal(typeof attempts[0].claimedAt, "string");
+  assert.equal(typeof attempts[0].claimExpiresAt, "string");
   assert.equal(attempts[0].resultCode, "noop");
 });
 
@@ -157,6 +160,7 @@ test("Phase 14 Step 4 async jobs recover claim expiry and dead-letter poison-pil
   const attemptsAfterFirstRecovery = await platform.listRuntimeJobAttempts({ jobId: queuedJob.jobId });
   assert.equal(afterFirstRecovery.claimExpiryCount, 1);
   assert.equal(attemptsAfterFirstRecovery.length, 1);
+  assert.equal(attemptsAfterFirstRecovery[0].status, "claim_expired");
   assert.equal(attemptsAfterFirstRecovery[0].errorCode, "worker_claim_expired");
   assert.equal(attemptsAfterFirstRecovery[0].resultCode, "claim_expired");
 
@@ -195,6 +199,50 @@ test("Phase 14 Step 4 async jobs recover claim expiry and dead-letter poison-pil
   assert.equal(typeof deadLetter.poisonFingerprint, "string");
   assert.equal(deadLetter.latestAttemptId, startedSecondAttempt.attempt.jobAttemptId);
   assert.equal(replayPlan.status, "pending_approval");
+});
+
+test("Phase 14 Step 4 async jobs record synthetic attempts when a claim expires before execution starts", async () => {
+  let currentTime = "2026-03-24T10:36:00Z";
+  const platform = createApiPlatform({
+    clock: () => new Date(currentTime)
+  });
+
+  const queuedJob = await platform.enqueueRuntimeJob({
+    companyId: "00000000-0000-4000-8000-000000000001",
+    jobType: "system.noop",
+    sourceObjectType: "test_fixture",
+    sourceObjectId: "claim-expiry-before-start-1",
+    idempotencyKey: "step4-claim-expiry-before-start-1",
+    payload: { noop: true },
+    maxAttempts: 3,
+    actorId: "system"
+  });
+
+  const [claimedJob] = await platform.claimAvailableRuntimeJobs({
+    workerId: "worker-step4-claim-only",
+    limit: 1,
+    claimTtlSeconds: 60
+  });
+  assert.equal(claimedJob.jobId, queuedJob.jobId);
+
+  currentTime = "2026-03-24T10:37:05Z";
+  const reclaimedJobs = await platform.claimAvailableRuntimeJobs({
+    workerId: "worker-step4-claim-only-recovery",
+    limit: 1,
+    claimTtlSeconds: 60
+  });
+  const attempts = await platform.listRuntimeJobAttempts({ jobId: queuedJob.jobId });
+  const recoveredJob = await platform.getRuntimeJob({ jobId: queuedJob.jobId });
+
+  assert.equal(reclaimedJobs.length, 1);
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].status, "claim_expired");
+  assert.equal(attempts[0].startedAt, null);
+  assert.equal(attempts[0].claimedAt, claimedJob.claimedAt);
+  assert.equal(attempts[0].claimExpiresAt, claimedJob.claimExpiresAt);
+  assert.equal(attempts[0].errorCode, "worker_claim_expired");
+  assert.equal(recoveredJob.claimExpiryCount, 1);
+  assert.equal(recoveredJob.attemptCount, 1);
 });
 
 test("Phase 14 Step 4 worker runs submission transport jobs through the shared runtime", async () => {

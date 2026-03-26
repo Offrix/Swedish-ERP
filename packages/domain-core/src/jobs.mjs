@@ -4,6 +4,7 @@ import { createPostgresAsyncJobStore } from "./jobs-store-postgres.mjs";
 export { createPostgresAsyncJobStore };
 
 export const ASYNC_JOB_STATUSES = Object.freeze(["queued", "claimed", "running", "retry_scheduled", "succeeded", "dead_lettered", "cancelled"]);
+export const ASYNC_JOB_ATTEMPT_STATUSES = Object.freeze(["running", "retry_scheduled", "succeeded", "dead_lettered", "claim_expired"]);
 export const ASYNC_JOB_RISK_CLASSES = Object.freeze(["low", "medium", "high"]);
 export const ASYNC_JOB_REPLAY_STATUSES = Object.freeze(["pending_approval", "approved", "scheduled", "running", "completed", "failed", "cancelled"]);
 export const ASYNC_JOB_OPERATOR_STATES = Object.freeze(["pending_triage", "acknowledged", "replay_planned", "resolved", "closed"]);
@@ -65,6 +66,16 @@ function createPayloadHash(payload) {
 
 function addSeconds(isoTimestamp, seconds) {
   return new Date(new Date(isoTimestamp).getTime() + seconds * 1000).toISOString();
+}
+
+function attemptStatusForTerminalState(terminalState) {
+  if (terminalState === "succeeded") {
+    return "succeeded";
+  }
+  if (terminalState === "retry_scheduled") {
+    return "retry_scheduled";
+  }
+  return "dead_lettered";
 }
 
 function defaultRetryDelaySeconds(errorClass, attemptNo) {
@@ -256,6 +267,9 @@ export function createInMemoryAsyncJobStore() {
         let attempt = null;
         if (openAttempt) {
           const storedAttempt = state.attempts.get(openAttempt.jobAttemptId);
+          storedAttempt.status = "claim_expired";
+          storedAttempt.claimedAt = storedAttempt.claimedAt || job.claimedAt || null;
+          storedAttempt.claimExpiresAt = storedAttempt.claimExpiresAt || job.claimExpiresAt || null;
           storedAttempt.finishedAt = nowIsoValue;
           storedAttempt.resultCode = "claim_expired";
           storedAttempt.errorClass = "persistent_technical";
@@ -267,6 +281,33 @@ export function createInMemoryAsyncJobStore() {
           };
           storedAttempt.nextRetryAt = null;
           attempt = clone(storedAttempt);
+        } else {
+          const syntheticAttempt = {
+            jobAttemptId: crypto.randomUUID(),
+            jobId: job.jobId,
+            attemptNo: Number(job.attemptCount || 0) + 1,
+            workerId: job.workerId,
+            claimToken: job.claimToken,
+            status: "claim_expired",
+            claimedAt: job.claimedAt || null,
+            claimExpiresAt: job.claimExpiresAt || null,
+            startedAt: null,
+            finishedAt: nowIsoValue,
+            resultCode: "claim_expired",
+            errorClass: "persistent_technical",
+            errorCode: "worker_claim_expired",
+            errorMessage: "Async job claim expired before worker completion.",
+            resultPayload: {
+              recoveryReasonCode: "claim_expired",
+              orphanedWorkerId: job.workerId
+            },
+            nextRetryAt: null,
+            createdAt: job.claimedAt || nowIsoValue
+          };
+          job.attemptCount = Math.max(Number(job.attemptCount || 0), syntheticAttempt.attemptNo);
+          state.attempts.set(syntheticAttempt.jobAttemptId, syntheticAttempt);
+          state.attemptIdsByJob.set(job.jobId, [...(state.attemptIdsByJob.get(job.jobId) || []), syntheticAttempt.jobAttemptId]);
+          attempt = clone(syntheticAttempt);
         }
 
         const nextClaimExpiryCount = Number(job.claimExpiryCount || 0) + 1;
@@ -422,6 +463,9 @@ export function createInMemoryAsyncJobStore() {
         attemptNo,
         workerId,
         claimToken,
+        status: "running",
+        claimedAt: job.claimedAt || null,
+        claimExpiresAt: job.claimExpiresAt || null,
         startedAt,
         finishedAt: null,
         resultCode: null,
@@ -481,6 +525,7 @@ export function createInMemoryAsyncJobStore() {
       }
 
       attempt.finishedAt = finishedAt;
+      attempt.status = attemptStatusForTerminalState(terminalState);
       attempt.resultCode = resultCode;
       attempt.errorClass = errorClass;
       attempt.errorCode = errorCode;
