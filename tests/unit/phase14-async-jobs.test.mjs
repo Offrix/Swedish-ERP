@@ -62,8 +62,11 @@ test("Phase 14 Step 4 async jobs dead-letter unsupported handlers and allow repl
   const deadLetters = await platform.listRuntimeDeadLetters({
     companyId: queuedJob.companyId
   });
+  const deadLetter = deadLetters.find((candidate) => candidate.jobId === queuedJob.jobId);
   assert.equal(deadLetteredJob.status, "dead_lettered");
-  assert.equal(deadLetters.some((candidate) => candidate.jobId === queuedJob.jobId), true);
+  assert.equal(Boolean(deadLetter), true);
+  assert.equal(deadLetter.poisonPillDetected, true);
+  assert.equal(deadLetter.poisonReasonCode, "missing_handler");
 
   const replayPlan = await platform.planRuntimeJobReplay({
     jobId: queuedJob.jobId,
@@ -109,6 +112,89 @@ test("Phase 14 Step 4 async jobs dead-letter unsupported handlers and allow repl
   assert.equal(finalReplayPlan.status, "completed");
   assert.equal(finalReplayPlan.lastOutcomeCode, "replayed_noop");
   assert.equal(replayJob.status, "succeeded");
+});
+
+test("Phase 14 Step 4 async jobs recover claim expiry and dead-letter poison-pill crash loops", async () => {
+  let currentTime = "2026-03-24T10:32:00Z";
+  const platform = createApiPlatform({
+    clock: () => new Date(currentTime)
+  });
+
+  const queuedJob = await platform.enqueueRuntimeJob({
+    companyId: "00000000-0000-4000-8000-000000000001",
+    jobType: "system.noop",
+    sourceObjectType: "test_fixture",
+    sourceObjectId: "claim-expiry-poison-1",
+    idempotencyKey: "step4-claim-expiry-poison-1",
+    payload: { noop: true },
+    maxAttempts: 2,
+    actorId: "system"
+  });
+
+  const [claimedJobOne] = await platform.claimAvailableRuntimeJobs({
+    workerId: "worker-step4-poison-1",
+    limit: 1,
+    claimTtlSeconds: 60
+  });
+  assert.equal(claimedJobOne.jobId, queuedJob.jobId);
+
+  await platform.startRuntimeJobAttempt({
+    jobId: queuedJob.jobId,
+    claimToken: claimedJobOne.claimToken,
+    workerId: "worker-step4-poison-1"
+  });
+
+  currentTime = "2026-03-24T10:33:05Z";
+  const reclaimedJobs = await platform.claimAvailableRuntimeJobs({
+    workerId: "worker-step4-poison-2",
+    limit: 1,
+    claimTtlSeconds: 60
+  });
+  assert.equal(reclaimedJobs.length, 1);
+  assert.equal(reclaimedJobs[0].jobId, queuedJob.jobId);
+
+  const afterFirstRecovery = await platform.getRuntimeJob({ jobId: queuedJob.jobId });
+  const attemptsAfterFirstRecovery = await platform.listRuntimeJobAttempts({ jobId: queuedJob.jobId });
+  assert.equal(afterFirstRecovery.claimExpiryCount, 1);
+  assert.equal(attemptsAfterFirstRecovery.length, 1);
+  assert.equal(attemptsAfterFirstRecovery[0].errorCode, "worker_claim_expired");
+  assert.equal(attemptsAfterFirstRecovery[0].resultCode, "claim_expired");
+
+  const startedSecondAttempt = await platform.startRuntimeJobAttempt({
+    jobId: queuedJob.jobId,
+    claimToken: reclaimedJobs[0].claimToken,
+    workerId: "worker-step4-poison-2"
+  });
+  assert.equal(startedSecondAttempt.attempt.attemptNo, 2);
+
+  currentTime = "2026-03-24T10:34:10Z";
+  const noFurtherClaims = await platform.claimAvailableRuntimeJobs({
+    workerId: "worker-step4-poison-3",
+    limit: 1,
+    claimTtlSeconds: 60
+  });
+  assert.equal(noFurtherClaims.length, 0);
+
+  const deadLetteredJob = await platform.getRuntimeJob({ jobId: queuedJob.jobId });
+  const deadLetters = await platform.listRuntimeDeadLetters({
+    companyId: queuedJob.companyId
+  });
+  const deadLetter = deadLetters.find((candidate) => candidate.jobId === queuedJob.jobId);
+  const replayPlan = await platform.planRuntimeJobReplay({
+    jobId: queuedJob.jobId,
+    plannedByUserId: "00000000-0000-4000-8000-000000000001",
+    reasonCode: "worker_crash_loop_resolved"
+  });
+
+  assert.equal(deadLetteredJob.status, "dead_lettered");
+  assert.equal(deadLetteredJob.claimExpiryCount, 2);
+  assert.equal(deadLetteredJob.lastErrorCode, "worker_claim_expired");
+  assert.equal(deadLetter.operatorState, "pending_triage");
+  assert.equal(deadLetter.poisonPillDetected, true);
+  assert.equal(deadLetter.poisonReasonCode, "claim_expiry_loop");
+  assert.equal(typeof deadLetter.poisonFingerprint, "string");
+  assert.equal(deadLetter.latestAttemptId, startedSecondAttempt.attempt.jobAttemptId);
+  assert.equal(replayPlan.status, "pending_approval");
 });
 
 test("Phase 14 Step 4 worker runs submission transport jobs through the shared runtime", async () => {

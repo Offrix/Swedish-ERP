@@ -50,6 +50,8 @@ function mapJobRow(row) {
     lastErrorClass: row.last_error_class,
     lastErrorCode: row.last_error_code,
     lastErrorMessage: row.last_error_message,
+    claimExpiryCount: Number(row.claim_expiry_count || 0),
+    lastClaimExpiredAt: row.last_claim_expired_at,
     correlationId: row.correlation_id,
     enqueuedBy: row.enqueued_by,
     completedAt: row.completed_at,
@@ -93,6 +95,10 @@ function mapDeadLetterRow(row) {
     terminalReason: row.terminal_reason,
     operatorState: row.operator_state,
     replayAllowed: row.replay_allowed,
+    poisonPillDetected: row.poison_pill_detected === true,
+    poisonReasonCode: row.poison_reason_code,
+    poisonFingerprint: row.poison_fingerprint,
+    poisonDetectedAt: row.poison_detected_at,
     enteredAt: row.entered_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -178,6 +184,17 @@ async function fetchLatestAttemptForClaim(tx, jobId, claimToken) {
   return rows[0] || null;
 }
 
+function resolveClaimExpiryPoisonThreshold(jobRow) {
+  return Math.max(2, Math.min(Number(jobRow?.max_attempts || 5), 3));
+}
+
+function createClaimExpiryPoisonFingerprint(jobRow) {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(["claim_expiry", jobRow.job_type, jobRow.payload_hash]))
+    .digest("hex");
+}
+
 export function createPostgresAsyncJobStore({
   connectionString = null,
   env = process.env,
@@ -251,22 +268,151 @@ export function createPostgresAsyncJobStore({
       return mapJobRow(rows[0]);
     },
 
-    async claimAvailableJobs({ workerId, limit, claimTtlSeconds, nowIso }) {
+    async recoverExpiredClaims({ nowIso }) {
       return sql.begin(async (tx) => {
-        const claimExpiresAt = new Date(new Date(nowIso).getTime() + claimTtlSeconds * 1000).toISOString();
-        await tx`
-          update async_jobs
-          set status = 'queued',
-              claim_token = null,
-              worker_id = null,
-              claimed_at = null,
-              claim_expires_at = null,
-              updated_at = ${nowIso}
+        const expiredJobs = await tx`
+          select *
+          from async_jobs
           where status in ('claimed', 'running')
             and claim_expires_at is not null
             and claim_expires_at < ${nowIso}
+          order by claim_expires_at asc
+          for update skip locked
         `;
 
+        const reclaimedJobs = [];
+        const deadLetteredJobs = [];
+        for (const jobRow of expiredJobs) {
+          const nextClaimExpiryCount = Number(jobRow.claim_expiry_count || 0) + 1;
+          const openAttemptRows = await tx`
+            select *
+            from async_job_attempts
+            where job_id = ${jobRow.job_id}
+              and claim_token = ${jobRow.claim_token}
+              and finished_at is null
+            order by attempt_no desc
+            limit 1
+          `;
+          let attemptRow = openAttemptRows[0] || null;
+          if (attemptRow) {
+            const updatedAttempts = await tx`
+              update async_job_attempts
+              set finished_at = ${nowIso},
+                  result_code = 'claim_expired',
+                  error_class = 'persistent_technical',
+                  error_code = 'worker_claim_expired',
+                  error_message = 'Async job claim expired before worker completion.',
+                  result_payload_json = ${JSON.stringify({
+                    recoveryReasonCode: "claim_expired",
+                    orphanedWorkerId: jobRow.worker_id
+                  })}::jsonb,
+                  next_retry_at = null
+              where job_attempt_id = ${attemptRow.job_attempt_id}
+              returning *
+            `;
+            attemptRow = updatedAttempts[0];
+          }
+
+          const shouldDeadLetter =
+            nextClaimExpiryCount >= resolveClaimExpiryPoisonThreshold(jobRow)
+            || Number(jobRow.attempt_count || 0) >= Number(jobRow.max_attempts || 0);
+
+          const commonJobUpdate = {
+            claimExpiryCount: nextClaimExpiryCount,
+            lastClaimExpiredAt: nowIso,
+            lastErrorClass: "persistent_technical",
+            lastErrorCode: "worker_claim_expired",
+            lastErrorMessage: "Async job claim expired before worker completion."
+          };
+
+          if (shouldDeadLetter) {
+            const jobRows = await tx`
+              update async_jobs
+              set status = 'dead_lettered',
+                  claim_token = null,
+                  worker_id = null,
+                  claimed_at = null,
+                  claim_expires_at = null,
+                  updated_at = ${nowIso},
+                  last_result_code = null,
+                  last_error_class = ${commonJobUpdate.lastErrorClass},
+                  last_error_code = ${commonJobUpdate.lastErrorCode},
+                  last_error_message = ${commonJobUpdate.lastErrorMessage},
+                  claim_expiry_count = ${commonJobUpdate.claimExpiryCount},
+                  last_claim_expired_at = ${commonJobUpdate.lastClaimExpiredAt}
+              where job_id = ${jobRow.job_id}
+              returning *
+            `;
+            await tx`
+              insert into async_job_dead_letters (
+                dead_letter_id, job_id, company_id, latest_attempt_id, terminal_reason,
+                operator_state, replay_allowed, poison_pill_detected, poison_reason_code,
+                poison_fingerprint, poison_detected_at, entered_at, created_at, updated_at
+              ) values (
+                ${crypto.randomUUID()}, ${jobRow.job_id}, ${jobRow.company_id}, ${attemptRow?.job_attempt_id || null},
+                'poison_pill_detected', 'pending_triage', true, true, 'claim_expiry_loop',
+                ${createClaimExpiryPoisonFingerprint(jobRow)}, ${nowIso}, ${nowIso}, ${nowIso}, ${nowIso}
+              )
+              on conflict (job_id)
+              do update set
+                latest_attempt_id = excluded.latest_attempt_id,
+                terminal_reason = excluded.terminal_reason,
+                replay_allowed = excluded.replay_allowed,
+                poison_pill_detected = excluded.poison_pill_detected,
+                poison_reason_code = excluded.poison_reason_code,
+                poison_fingerprint = excluded.poison_fingerprint,
+                poison_detected_at = excluded.poison_detected_at,
+                updated_at = excluded.updated_at
+            `;
+            const deadLetterRows = await tx`
+              select *
+              from async_job_dead_letters
+              where job_id = ${jobRow.job_id}
+              limit 1
+            `;
+            deadLetteredJobs.push({
+              job: mapJobRow(jobRows[0]),
+              attempt: mapAttemptRow(attemptRow),
+              deadLetter: mapDeadLetterRow(deadLetterRows[0])
+            });
+            continue;
+          }
+
+          const jobRows = await tx`
+            update async_jobs
+            set status = 'queued',
+                claim_token = null,
+                worker_id = null,
+                claimed_at = null,
+                claim_expires_at = null,
+                available_at = ${nowIso},
+                updated_at = ${nowIso},
+                last_result_code = null,
+                last_error_class = ${commonJobUpdate.lastErrorClass},
+                last_error_code = ${commonJobUpdate.lastErrorCode},
+                last_error_message = ${commonJobUpdate.lastErrorMessage},
+                claim_expiry_count = ${commonJobUpdate.claimExpiryCount},
+                last_claim_expired_at = ${commonJobUpdate.lastClaimExpiredAt}
+            where job_id = ${jobRow.job_id}
+            returning *
+          `;
+          reclaimedJobs.push({
+            job: mapJobRow(jobRows[0]),
+            attempt: mapAttemptRow(attemptRow),
+            claimExpiryCount: nextClaimExpiryCount
+          });
+        }
+
+        return {
+          reclaimedJobs,
+          deadLetteredJobs
+        };
+      });
+    },
+
+    async claimAvailableJobs({ workerId, limit, claimTtlSeconds, nowIso }) {
+      return sql.begin(async (tx) => {
+        const claimExpiresAt = new Date(new Date(nowIso).getTime() + claimTtlSeconds * 1000).toISOString();
         const candidates = await tx`
           select *
           from async_jobs
@@ -373,7 +519,8 @@ export function createPostgresAsyncJobStore({
       errorMessage = null,
       nextRetryAt = null,
       terminalReason = null,
-      replayAllowed = true
+      replayAllowed = true,
+      poisonDescriptor = null
     }) {
       return sql.begin(async (tx) => {
         const jobRow = await fetchJob(tx, jobId);
@@ -464,10 +611,15 @@ export function createPostgresAsyncJobStore({
           await tx`
             insert into async_job_dead_letters (
               dead_letter_id, job_id, company_id, latest_attempt_id, terminal_reason,
-              operator_state, replay_allowed, entered_at, created_at, updated_at
+              operator_state, replay_allowed, poison_pill_detected, poison_reason_code,
+              poison_fingerprint, poison_detected_at, entered_at, created_at, updated_at
             ) values (
               ${crypto.randomUUID()}, ${jobId}, ${jobRow.company_id}, ${attemptId},
               ${terminalReason || "worker_terminal_failure"}, 'pending_triage', ${replayAllowed},
+              ${poisonDescriptor?.poisonPillDetected === true},
+              ${poisonDescriptor?.poisonReasonCode || null},
+              ${poisonDescriptor?.poisonFingerprint || null},
+              ${poisonDescriptor?.poisonPillDetected === true ? finishedAt : null},
               ${finishedAt}, ${finishedAt}, ${finishedAt}
             )
             on conflict (job_id)
@@ -475,6 +627,10 @@ export function createPostgresAsyncJobStore({
               latest_attempt_id = excluded.latest_attempt_id,
               terminal_reason = excluded.terminal_reason,
               replay_allowed = excluded.replay_allowed,
+              poison_pill_detected = async_job_dead_letters.poison_pill_detected OR excluded.poison_pill_detected,
+              poison_reason_code = coalesce(excluded.poison_reason_code, async_job_dead_letters.poison_reason_code),
+              poison_fingerprint = coalesce(excluded.poison_fingerprint, async_job_dead_letters.poison_fingerprint),
+              poison_detected_at = coalesce(excluded.poison_detected_at, async_job_dead_letters.poison_detected_at),
               updated_at = excluded.updated_at
           `;
         }

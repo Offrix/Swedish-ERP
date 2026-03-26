@@ -205,7 +205,7 @@ Flytta affÃ¤rssanningen frÃ¥n processminne till hÃ¥llbar persistence med i
 **Delfaser**
 - [x] 2.1 [NEW BUILD] **InfÃ¶r canonical repositories** â€” Varje bounded context fÃ¥r repositorygrÃ¤nssnitt med Postgres-implementation och transaktionsbunden optimistic concurrency.
 - [x] 2.2 [NEW BUILD] **InfÃ¶r command log + outbox/inbox** â€” Alla muterande commands ska skriva command receipt, expected version, actor, session revision och outbox-event i samma commit.
-- [ ] 2.3 [HARDEN] **HÃ¥rdna job-runtime** â€” `packages/domain-core/src/jobs.mjs` och `apps/worker/src/worker.mjs` ska bÃ¤ra attempts, retry policy, dead-letter, replay plan och poison-pill-detektion.
+- [x] 2.3 [HARDEN] **HÃ¥rdna job-runtime** â€” `packages/domain-core/src/jobs.mjs` och `apps/worker/src/worker.mjs` ska bÃ¤ra attempts, retry policy, dead-letter, replay plan och poison-pill-detektion.
 - [ ] 2.4 [MIGRATE] **Migrera kritiska domÃ¤ner bort frÃ¥n Map-sanning** â€” Org auth, ledger, VAT, AR, AP, payroll, tax-account, review-center, projects och submissions fÃ¥r inte lÃ¤ngre ha produktionskritisk state enbart i Map.
 - [ ] 2.5 [NEW BUILD] **InfÃ¶r projections re-build** â€” Read models ska kunna raderas och byggas om frÃ¥n event/outbox utan att source-of-truth tappar historik.
 

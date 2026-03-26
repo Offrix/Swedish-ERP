@@ -91,7 +91,10 @@ export function createResilienceModule({
           attemptNo: attempt?.attemptNo || null,
           errorClass: attempt?.errorClass || job.lastErrorClass || null,
           errorCode: attempt?.errorCode || job.lastErrorCode || null,
-          terminalReason: deadLetter.terminalReason || null
+          terminalReason: deadLetter.terminalReason || null,
+          poisonPillDetected: deadLetter.poisonPillDetected === true,
+          poisonReasonCode: deadLetter.poisonReasonCode || null,
+          poisonFingerprint: deadLetter.poisonFingerprint || null
         }
       });
     },

@@ -82,6 +82,154 @@ function compareJobs(left, right) {
     || left.jobId.localeCompare(right.jobId);
 }
 
+function resolveClaimExpiryPoisonThreshold(job) {
+  return Math.max(2, Math.min(Number(job?.maxAttempts || 5), 3));
+}
+
+function buildPoisonFingerprint({
+  job,
+  errorClass = null,
+  errorCode = null,
+  terminalReason = null,
+  strategy = "failure"
+} = {}) {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify([
+      strategy,
+      job?.jobType || null,
+      job?.payloadHash || null,
+      errorClass || null,
+      errorCode || null,
+      terminalReason || null
+    ]))
+    .digest("hex");
+}
+
+function resolvePoisonDescriptor({
+  job,
+  attemptHistory = [],
+  errorClass = null,
+  errorCode = null,
+  terminalReason = null,
+  claimExpiryCount = 0,
+  attemptCount = 0,
+  currentAttemptAlreadyPersisted = false
+} = {}) {
+  if (!job) {
+    return null;
+  }
+
+  if (errorCode === "job_handler_missing") {
+    return {
+      poisonPillDetected: true,
+      poisonReasonCode: "missing_handler",
+      poisonFingerprint: buildPoisonFingerprint({
+        job,
+        errorClass,
+        errorCode,
+        terminalReason,
+        strategy: "missing_handler"
+      })
+    };
+  }
+
+  if (
+    errorCode === "worker_claim_expired"
+    && (
+      Number(claimExpiryCount || 0) >= resolveClaimExpiryPoisonThreshold(job)
+      || Number(attemptCount || 0) >= Number(job.maxAttempts || 0)
+    )
+  ) {
+    return {
+      poisonPillDetected: true,
+      poisonReasonCode: "claim_expiry_loop",
+      poisonFingerprint: buildPoisonFingerprint({
+        job,
+        errorClass,
+        errorCode,
+        terminalReason: terminalReason || "poison_pill_detected",
+        strategy: "claim_expiry"
+      })
+    };
+  }
+
+  if (!["persistent_technical", "business_input"].includes(errorClass)) {
+    return null;
+  }
+
+  const fingerprint = buildPoisonFingerprint({
+    job,
+    errorClass,
+    errorCode,
+    terminalReason,
+    strategy: "repeated_failure"
+  });
+  const repeatedCount = attemptHistory.reduce((count, attempt) => {
+    if (!attempt?.finishedAt) {
+      return count;
+    }
+    const attemptFingerprint = buildPoisonFingerprint({
+      job,
+      errorClass: attempt.errorClass,
+      errorCode: attempt.errorCode,
+      terminalReason,
+      strategy: "repeated_failure"
+    });
+    return attemptFingerprint === fingerprint ? count + 1 : count;
+  }, currentAttemptAlreadyPersisted ? 0 : 1);
+  if (repeatedCount < 2) {
+    return null;
+  }
+
+  return {
+    poisonPillDetected: true,
+    poisonReasonCode: "repeated_persistent_failure",
+    poisonFingerprint: fingerprint
+  };
+}
+
+function upsertDeadLetterRecord({
+  existingDeadLetter = null,
+  job,
+  attempt = null,
+  terminalReason = "worker_terminal_failure",
+  replayAllowed = true,
+  updatedAt,
+  poisonDescriptor = null
+} = {}) {
+  const deadLetter = existingDeadLetter || {
+    deadLetterId: crypto.randomUUID(),
+    jobId: job.jobId,
+    companyId: job.companyId,
+    latestAttemptId: attempt?.jobAttemptId || null,
+    terminalReason,
+    operatorState: "pending_triage",
+    replayAllowed,
+    poisonPillDetected: false,
+    poisonReasonCode: null,
+    poisonFingerprint: null,
+    poisonDetectedAt: null,
+    enteredAt: updatedAt,
+    createdAt: updatedAt,
+    updatedAt
+  };
+
+  deadLetter.latestAttemptId = attempt?.jobAttemptId || deadLetter.latestAttemptId;
+  deadLetter.terminalReason = terminalReason || deadLetter.terminalReason;
+  deadLetter.replayAllowed = replayAllowed;
+  deadLetter.updatedAt = updatedAt;
+
+  if (poisonDescriptor?.poisonPillDetected === true) {
+    deadLetter.poisonPillDetected = true;
+    deadLetter.poisonReasonCode = poisonDescriptor.poisonReasonCode || deadLetter.poisonReasonCode;
+    deadLetter.poisonFingerprint = poisonDescriptor.poisonFingerprint || deadLetter.poisonFingerprint;
+    deadLetter.poisonDetectedAt = updatedAt;
+  }
+
+  return deadLetter;
+}
+
 export function createInMemoryAsyncJobStore() {
   const state = {
     jobs: new Map(),
@@ -96,17 +244,93 @@ export function createInMemoryAsyncJobStore() {
     return (state.attemptIdsByJob.get(jobId) || []).map((attemptId) => clone(state.attempts.get(attemptId)));
   }
 
-  function releaseExpiredClaims(nowIsoValue) {
+  function recoverExpiredClaims(nowIsoValue) {
+    const reclaimedJobs = [];
+    const deadLetteredJobs = [];
     for (const job of state.jobs.values()) {
       if (["claimed", "running"].includes(job.status) && job.claimExpiresAt && job.claimExpiresAt < nowIsoValue) {
-        job.status = "queued";
+        const openAttempt = listAttempts(job.jobId)
+          .filter((attempt) => attempt.claimToken === job.claimToken && !attempt.finishedAt)
+          .slice(-1)[0] || null;
+
+        let attempt = null;
+        if (openAttempt) {
+          const storedAttempt = state.attempts.get(openAttempt.jobAttemptId);
+          storedAttempt.finishedAt = nowIsoValue;
+          storedAttempt.resultCode = "claim_expired";
+          storedAttempt.errorClass = "persistent_technical";
+          storedAttempt.errorCode = "worker_claim_expired";
+          storedAttempt.errorMessage = "Async job claim expired before worker completion.";
+          storedAttempt.resultPayload = {
+            recoveryReasonCode: "claim_expired",
+            orphanedWorkerId: job.workerId
+          };
+          storedAttempt.nextRetryAt = null;
+          attempt = clone(storedAttempt);
+        }
+
+        const nextClaimExpiryCount = Number(job.claimExpiryCount || 0) + 1;
+        const poisonDescriptor = resolvePoisonDescriptor({
+          job: {
+            ...job,
+            claimExpiryCount: nextClaimExpiryCount
+          },
+          attemptHistory: listAttempts(job.jobId),
+          errorClass: "persistent_technical",
+          errorCode: "worker_claim_expired",
+          terminalReason: "poison_pill_detected",
+          claimExpiryCount: nextClaimExpiryCount,
+          attemptCount: Number(job.attemptCount || 0),
+          currentAttemptAlreadyPersisted: true
+        });
+
+        job.claimExpiryCount = nextClaimExpiryCount;
+        job.lastClaimExpiredAt = nowIsoValue;
         job.claimToken = null;
         job.workerId = null;
         job.claimedAt = null;
         job.claimExpiresAt = null;
         job.updatedAt = nowIsoValue;
+        job.lastResultCode = null;
+        job.lastErrorClass = "persistent_technical";
+        job.lastErrorCode = "worker_claim_expired";
+        job.lastErrorMessage = "Async job claim expired before worker completion.";
+
+        if (poisonDescriptor?.poisonPillDetected === true) {
+          job.status = "dead_lettered";
+          const existingDeadLetterId = state.deadLetterByJob.get(job.jobId);
+          const deadLetter = upsertDeadLetterRecord({
+            existingDeadLetter: existingDeadLetterId ? state.deadLetters.get(existingDeadLetterId) : null,
+            job,
+            attempt,
+            terminalReason: "poison_pill_detected",
+            replayAllowed: true,
+            updatedAt: nowIsoValue,
+            poisonDescriptor
+          });
+          state.deadLetters.set(deadLetter.deadLetterId, deadLetter);
+          state.deadLetterByJob.set(job.jobId, deadLetter.deadLetterId);
+          deadLetteredJobs.push({
+            job: clone(job),
+            attempt,
+            deadLetter: clone(deadLetter)
+          });
+          continue;
+        }
+
+        job.status = "queued";
+        job.availableAt = nowIsoValue;
+        reclaimedJobs.push({
+          job: clone(job),
+          attempt,
+          claimExpiryCount: nextClaimExpiryCount
+        });
       }
     }
+    return {
+      reclaimedJobs,
+      deadLetteredJobs
+    };
   }
 
   return {
@@ -134,8 +358,11 @@ export function createInMemoryAsyncJobStore() {
       return clone(state.jobs.get(jobId) || null);
     },
 
+    async recoverExpiredClaims({ nowIso: nowIsoValue }) {
+      return recoverExpiredClaims(nowIsoValue);
+    },
+
     async claimAvailableJobs({ workerId, limit, claimTtlSeconds, nowIso: nowIsoValue }) {
-      releaseExpiredClaims(nowIsoValue);
       const claimExpiresAt = addSeconds(nowIsoValue, claimTtlSeconds);
       const claimed = [];
       for (const job of [...state.jobs.values()]
@@ -231,7 +458,8 @@ export function createInMemoryAsyncJobStore() {
       errorMessage = null,
       nextRetryAt = null,
       terminalReason = null,
-      replayAllowed = true
+      replayAllowed = true,
+      poisonDescriptor = null
     }) {
       const job = state.jobs.get(jobId);
       if (!job) {
@@ -287,22 +515,15 @@ export function createInMemoryAsyncJobStore() {
         job.lastErrorCode = errorCode;
         job.lastErrorMessage = errorMessage;
         const existingDeadLetterId = state.deadLetterByJob.get(jobId);
-        const deadLetter = existingDeadLetterId ? state.deadLetters.get(existingDeadLetterId) : {
-          deadLetterId: crypto.randomUUID(),
-          jobId,
-          companyId: job.companyId,
-          latestAttemptId: attempt.jobAttemptId,
+        const deadLetter = upsertDeadLetterRecord({
+          existingDeadLetter: existingDeadLetterId ? state.deadLetters.get(existingDeadLetterId) : null,
+          job,
+          attempt,
           terminalReason: terminalReason || "worker_terminal_failure",
-          operatorState: "pending_triage",
           replayAllowed,
-          enteredAt: finishedAt,
-          createdAt: finishedAt,
-          updatedAt: finishedAt
-        };
-        deadLetter.latestAttemptId = attempt.jobAttemptId;
-        deadLetter.terminalReason = terminalReason || deadLetter.terminalReason;
-        deadLetter.replayAllowed = replayAllowed;
-        deadLetter.updatedAt = finishedAt;
+          updatedAt: finishedAt,
+          poisonDescriptor
+        });
         state.deadLetters.set(deadLetter.deadLetterId, deadLetter);
         state.deadLetterByJob.set(jobId, deadLetter.deadLetterId);
       }
@@ -563,6 +784,8 @@ export function createAsyncJobsModule({
       lastErrorClass: null,
       lastErrorCode: null,
       lastErrorMessage: null,
+      claimExpiryCount: 0,
+      lastClaimExpiredAt: null,
       correlationId,
       enqueuedBy: actorId,
       completedAt: null,
@@ -588,6 +811,38 @@ export function createAsyncJobsModule({
     limit = 10,
     claimTtlSeconds = 120
   } = {}) {
+    const recovery = typeof store.recoverExpiredClaims === "function"
+      ? await store.recoverExpiredClaims({
+        nowIso: nowIso(clock)
+      })
+      : { reclaimedJobs: [], deadLetteredJobs: [] };
+    for (const recoveredJob of recovery.reclaimedJobs || []) {
+      audit({
+        companyId: recoveredJob.job.companyId,
+        actorId: recoveredJob.attempt?.workerId || "runtime_recovery",
+        correlationId: recoveredJob.job.correlationId,
+        action: "jobs.async_job.claim_expired_requeued",
+        entityType: "async_job",
+        entityId: recoveredJob.job.jobId,
+        explanation: `Re-queued async job ${recoveredJob.job.jobType} after claim expiry.`
+      });
+    }
+    for (const deadLetteredJob of recovery.deadLetteredJobs || []) {
+      audit({
+        companyId: deadLetteredJob.job.companyId,
+        actorId: deadLetteredJob.attempt?.workerId || "runtime_recovery",
+        correlationId: deadLetteredJob.job.correlationId,
+        action: "jobs.async_job.poison_pill_dead_lettered",
+        entityType: "async_dead_letter",
+        entityId: deadLetteredJob.deadLetter.deadLetterId,
+        explanation: `Dead-lettered async job ${deadLetteredJob.job.jobType} after poison-pill detection.`
+      });
+      incidentHooks?.onAsyncJobDeadLetter?.({
+        job: deadLetteredJob.job,
+        attempt: deadLetteredJob.attempt,
+        deadLetter: deadLetteredJob.deadLetter
+      });
+    }
     const resolvedWorkerId = text(workerId, "async_job_worker_id_required", error);
     const claimedJobs = await store.claimAvailableJobs({
       workerId: resolvedWorkerId,
@@ -754,6 +1009,19 @@ export function createAsyncJobsModule({
     const resolvedRetryDelaySeconds = retryDelaySeconds == null ? defaultRetryDelaySeconds(resolvedErrorClass, currentAttemptNo) : positiveInteger(retryDelaySeconds, "async_job_retry_delay_invalid", error);
     const exhaustedAttempts = currentAttemptNo >= currentJob.maxAttempts;
     const shouldRetry = resolvedRetryDelaySeconds != null && !exhaustedAttempts;
+    const historicalAttempts = await store.listJobAttempts(currentJob.jobId);
+    const poisonDescriptor = shouldRetry
+      ? null
+      : resolvePoisonDescriptor({
+        job: currentJob,
+        attemptHistory: historicalAttempts,
+        errorClass: resolvedErrorClass,
+        errorCode: text(errorCode, "async_job_error_code_required", error),
+        terminalReason: optionalText(terminalReason) || (exhaustedAttempts ? "max_attempts_exhausted" : "worker_terminal_failure"),
+        claimExpiryCount: Number(currentJob.claimExpiryCount || 0),
+        attemptCount: Number(currentJob.attemptCount || 0),
+        currentAttemptAlreadyPersisted: false
+      });
     const finishedAt = nowIso(clock);
     const result = await store.finalizeJobAttempt({
       jobId: currentJob.jobId,
@@ -767,7 +1035,8 @@ export function createAsyncJobsModule({
       errorMessage: text(errorMessage, "async_job_error_message_required", error),
       nextRetryAt: shouldRetry ? addSeconds(finishedAt, resolvedRetryDelaySeconds) : null,
       terminalReason: shouldRetry ? null : optionalText(terminalReason) || (exhaustedAttempts ? "max_attempts_exhausted" : "worker_terminal_failure"),
-      replayAllowed
+      replayAllowed,
+      poisonDescriptor
     });
     const replayPlanId = result.job?.metadata?.replayPlanId;
     const replayPlan = replayPlanId && !shouldRetry

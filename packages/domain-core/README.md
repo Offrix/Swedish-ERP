@@ -52,3 +52,10 @@ Shared domain primitives, value objects and cross-cutting workflow engines used 
 - outbox events linked to accepted command receipts in the same transaction boundary
 - inbox message deduplication and processing state for downstream/provider receipts
 - deterministic command mutation runtime that suppresses duplicates and rolls back atomically
+
+## Phase 2.3 scope
+
+- durable worker attempts with claim expiry recovery after process death
+- poison-pill detection for missing handlers, repeated persistent failures and claim-expiry loops
+- dead-letter cases with replay eligibility and explicit poison metadata
+- worker failover behavior that re-queues recoverable jobs and dead-letters terminal crash loops
