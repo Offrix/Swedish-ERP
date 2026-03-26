@@ -57,6 +57,7 @@ export function createBackofficeModule({
     adminDiagnosticTypes: ADMIN_DIAGNOSTIC_TYPES,
     createSupportCase,
     listSupportCases,
+    closeSupportCase,
     approveSupportCaseActions,
     runAdminDiagnostic,
     requestImpersonation,
@@ -165,6 +166,40 @@ export function createBackofficeModule({
       .filter((supportCase) => (resolvedStatus ? supportCase.status === resolvedStatus : true))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       .map(clone);
+  }
+
+  function closeSupportCase({
+    sessionToken,
+    companyId,
+    supportCaseId,
+    resolutionCode,
+    resolutionNote = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const supportCase = requireSupportCase(companyId, supportCaseId);
+    if (supportCase.status === "closed") {
+      return clone(supportCase);
+    }
+    const closedAt = nowIso(clock);
+    supportCase.status = "closed";
+    supportCase.resolutionCode = text(resolutionCode, "support_case_resolution_code_required");
+    supportCase.resolutionNote = optionalText(resolutionNote);
+    supportCase.resolvedAt = supportCase.resolvedAt || closedAt;
+    supportCase.resolvedByUserId = supportCase.resolvedByUserId || principal.userId;
+    supportCase.closedAt = closedAt;
+    supportCase.closedByUserId = principal.userId;
+    supportCase.updatedAt = closedAt;
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.support_case.closed",
+      entityType: "support_case",
+      entityId: supportCase.supportCaseId,
+      explanation: `Closed support case ${supportCase.supportCaseId} with ${supportCase.resolutionCode}.`
+    });
+    return clone(supportCase);
   }
 
   function runAdminDiagnostic({

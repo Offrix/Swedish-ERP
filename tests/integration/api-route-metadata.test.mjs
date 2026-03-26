@@ -28,11 +28,13 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/ledger/journal-entries/:journalEntryId/validate",
   "/v1/ledger/journal-entries/:journalEntryId/post",
   "/v1/ar/invoice-series",
+  "/v1/backoffice/support-cases/:supportCaseId/close",
   "/v1/backoffice/support-cases/:supportCaseId/approve-actions",
   "/v1/backoffice/jobs",
   "/v1/backoffice/dead-letters/:deadLetterId/triage",
   "/v1/backoffice/submissions/monitor",
   "/v1/backoffice/incidents/:incidentId/status",
+  "/v1/migration/acceptance-records",
   "/v1/migration/cutover-plans/:cutoverPlanId/signoffs",
   "/v1/migration/cutover-plans/:cutoverPlanId/checklist/:itemCode"
 ]);

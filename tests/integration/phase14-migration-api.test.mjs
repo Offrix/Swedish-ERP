@@ -96,6 +96,15 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
       }
     });
     assert.equal(correction.importBatchId, batch.importBatchId);
+    const correctedBatch = await requestJson(baseUrl, `/v1/migration/import-batches/${batch.importBatchId}/run`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        autoAccept: true
+      }
+    });
+    assert.equal(correctedBatch.status, "accepted");
 
     const diffReport = await requestJson(baseUrl, "/v1/migration/diff-reports", {
       method: "POST",
@@ -175,6 +184,29 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
       token: adminToken,
       body: { companyId: DEMO_IDS.companyId }
     });
+    const acceptanceRecord = await requestJson(baseUrl, "/v1/migration/acceptance-records", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        acceptanceType: "go_live_readiness",
+        cutoverPlanId: cutoverPlan.cutoverPlanId,
+        importBatchIds: [batch.importBatchId],
+        diffReportIds: [diffReport.diffReportId],
+        sourceParitySummary: {
+          countParity: { passed: true, sourceCount: 42, targetCount: 42, delta: 0 },
+          amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+          unresolvedMaterialDifferences: 0
+        }
+      }
+    });
+    assert.equal(acceptanceRecord.status, "accepted");
+    const listedAcceptanceRecords = await requestJson(baseUrl, `/v1/migration/acceptance-records?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(listedAcceptanceRecords.items.length, 1);
+
     const stabilized = await requestJson(baseUrl, `/v1/migration/cutover-plans/${cutoverPlan.cutoverPlanId}/stabilize`, {
       method: "POST",
       token: adminToken,
@@ -212,6 +244,7 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
       `/v1/migration/import-batches?companyId=${DEMO_IDS.companyId}`,
       `/v1/migration/diff-reports?companyId=${DEMO_IDS.companyId}`,
       `/v1/migration/cutover-plans?companyId=${DEMO_IDS.companyId}`,
+      `/v1/migration/acceptance-records?companyId=${DEMO_IDS.companyId}`,
       `/v1/migration/cockpit?companyId=${DEMO_IDS.companyId}`
     ]) {
       await requestJson(baseUrl, path, {
@@ -224,6 +257,7 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
     assert.equal(cockpit.corrections.length, 1);
     assert.equal(cockpit.diffReports.length, 1);
     assert.equal(cockpit.cutoverPlans.length, 1);
+    assert.equal(cockpit.acceptanceRecords.length, 1);
   } finally {
     await stopServer(server);
   }

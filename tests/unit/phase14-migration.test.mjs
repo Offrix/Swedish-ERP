@@ -110,6 +110,21 @@ test("Phase 14.3 migration cockpit tracks import, diff, cutover and rollback det
     companyId: DEMO_IDS.companyId,
     cutoverPlanId: cutoverPlan.cutoverPlanId
   });
+  const acceptanceRecord = platform.createMigrationAcceptanceRecord({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    acceptanceType: "go_live_readiness",
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    importBatchIds: [batch.importBatchId],
+    diffReportIds: [diffReport.diffReportId],
+    sourceParitySummary: {
+      countParity: { passed: true, sourceCount: 42, targetCount: 42, delta: 0 },
+      amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+      unresolvedDifferenceCount: 0,
+      unresolvedMaterialDifferences: 0
+    }
+  });
+  assert.equal(acceptanceRecord.status, "accepted");
   const rollbackStarted = platform.startRollback({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
@@ -132,4 +147,6 @@ test("Phase 14.3 migration cockpit tracks import, diff, cutover and rollback det
   assert.equal(cockpit.importBatches.length, 1);
   assert.equal(cockpit.diffReports.length, 1);
   assert.equal(cockpit.cutoverPlans.length, 1);
+  assert.equal(cockpit.acceptanceRecords.length, 1);
+  assert.equal(cockpit.acceptanceRecords[0].migrationAcceptanceRecordId, acceptanceRecord.migrationAcceptanceRecordId);
 });

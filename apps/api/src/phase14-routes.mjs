@@ -1725,6 +1725,22 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  const supportCloseMatch = matchPath(path, "/v1/backoffice/support-cases/:supportCaseId/close");
+  if (req.method === "POST" && supportCloseMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "support_case", objectId: supportCloseMatch.supportCaseId, scopeCode: "support_case" });
+    writeJson(res, 200, platform.closeSupportCase({
+      sessionToken,
+      companyId,
+      supportCaseId: supportCloseMatch.supportCaseId,
+      resolutionCode: body.resolutionCode,
+      resolutionNote: body.resolutionNote
+    }));
+    return true;
+  }
+
   const supportApprovalMatch = matchPath(path, "/v1/backoffice/support-cases/:supportCaseId/approve-actions");
   if (req.method === "POST" && supportApprovalMatch) {
     const body = await readJsonBody(req);
@@ -2398,6 +2414,43 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_cutover_plan", objectId: companyId, scopeCode: "migration_cutover_plan" });
     assertPayrollOperationsReadAccess({ principal });
     writeJson(res, 200, { items: platform.listCutoverPlans({ sessionToken, companyId }) });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/migration/acceptance-records") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "migration_acceptance_record", objectId: companyId, scopeCode: "migration_cockpit" });
+    writeJson(res, 201, platform.createMigrationAcceptanceRecord({
+      sessionToken,
+      companyId,
+      acceptanceType: body.acceptanceType,
+      cutoverPlanId: body.cutoverPlanId,
+      importBatchIds: body.importBatchIds,
+      diffReportIds: body.diffReportIds,
+      sourceParitySummary: body.sourceParitySummary,
+      signoffRefs: body.signoffRefs,
+      rollbackPointRef: body.rollbackPointRef,
+      notes: body.notes
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/migration/acceptance-records") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_acceptance_record", objectId: companyId, scopeCode: "migration_cockpit" });
+    assertPayrollOperationsReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listMigrationAcceptanceRecords({
+        sessionToken,
+        companyId,
+        acceptanceType: optionalText(url.searchParams.get("acceptanceType")),
+        status: optionalText(url.searchParams.get("status")),
+        cutoverPlanId: optionalText(url.searchParams.get("cutoverPlanId"))
+      })
+    });
     return true;
   }
 

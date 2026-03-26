@@ -207,6 +207,17 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
     });
     assert.equal(secretRefDiagnostic.resultSummary.verified, true);
     assert.equal(secretRefDiagnostic.resultSummary.secretRefs[0].includes("webhook-secret"), false);
+    const closedSupportCase = await requestJson(baseUrl, `/v1/backoffice/support-cases/${supportCase.supportCaseId}/close`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        resolutionCode: "operator_resolved",
+        resolutionNote: "Replay planned and monitored."
+      }
+    });
+    assert.equal(closedSupportCase.status, "closed");
+    assert.equal(closedSupportCase.resolutionCode, "operator_resolved");
 
     const impersonation = await requestJson(baseUrl, "/v1/backoffice/impersonations", {
       method: "POST",

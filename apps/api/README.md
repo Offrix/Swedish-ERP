@@ -507,6 +507,7 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/automation/decisions/:decisionId/override`
 - `GET /v1/backoffice/support-cases?companyId=...`
 - `POST /v1/backoffice/support-cases`
+- `POST /v1/backoffice/support-cases/:supportCaseId/close`
 - `POST /v1/backoffice/support-cases/:supportCaseId/diagnostics`
 - `GET /v1/backoffice/audit-events?companyId=...`
 - `GET /v1/backoffice/jobs?companyId=...`
@@ -552,6 +553,8 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/migration/diff-reports/:diffReportId/items/:itemId`
 - `GET /v1/migration/cutover-plans?companyId=...`
 - `POST /v1/migration/cutover-plans`
+- `GET /v1/migration/acceptance-records?companyId=...`
+- `POST /v1/migration/acceptance-records`
 - `POST /v1/migration/cutover-plans/:cutoverPlanId/start`
 - `POST /v1/migration/cutover-plans/:cutoverPlanId/final-extract`
 - `POST /v1/migration/cutover-plans/:cutoverPlanId/validate`

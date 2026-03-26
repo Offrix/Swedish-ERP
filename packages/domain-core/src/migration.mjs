@@ -4,6 +4,7 @@ export const IMPORT_BATCH_STATUSES = Object.freeze(["received", "validated", "ma
 export const MAPPING_SET_STATUSES = Object.freeze(["draft", "approved"]);
 export const DIFF_REPORT_STATUSES = Object.freeze(["generated", "reviewed", "accepted", "remediation_required"]);
 export const DIFFERENCE_CLASSES = Object.freeze(["cosmetic", "timing", "mapping_error", "missing_data", "material"]);
+export const MIGRATION_ACCEPTANCE_RECORD_STATUSES = Object.freeze(["accepted", "blocked"]);
 export const CUTOVER_PLAN_STATUSES = Object.freeze([
   "planned",
   "freeze_started",
@@ -64,6 +65,7 @@ export function createMigrationModule({
     mappingSetStatuses: MAPPING_SET_STATUSES,
     diffReportStatuses: DIFF_REPORT_STATUSES,
     differenceClasses: DIFFERENCE_CLASSES,
+    migrationAcceptanceRecordStatuses: MIGRATION_ACCEPTANCE_RECORD_STATUSES,
     cutoverPlanStatuses: CUTOVER_PLAN_STATUSES,
     payrollMigrationBatchStatuses: PAYROLL_MIGRATION_BATCH_STATUSES,
     payrollMigrationModes: PAYROLL_MIGRATION_MODES,
@@ -81,6 +83,8 @@ export function createMigrationModule({
     recordDifferenceDecision,
     createCutoverPlan,
     listCutoverPlans,
+    createMigrationAcceptanceRecord,
+    listMigrationAcceptanceRecords,
     recordCutoverSignoff,
     updateCutoverChecklistItem,
     startCutover,
@@ -446,6 +450,101 @@ export function createMigrationModule({
       .map(clone);
   }
 
+  function createMigrationAcceptanceRecord({
+    sessionToken,
+    companyId,
+    acceptanceType,
+    cutoverPlanId = null,
+    importBatchIds = [],
+    diffReportIds = [],
+    sourceParitySummary = {},
+    signoffRefs = [],
+    rollbackPointRef = null,
+    notes = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const cutoverPlan = cutoverPlanId ? requireCutoverPlan(resolvedCompanyId, cutoverPlanId) : null;
+    const normalizedImportBatchIds = normalizeExistingImportBatchIds(resolvedCompanyId, importBatchIds, state, error);
+    const normalizedDiffReportIds = normalizeExistingDiffReportIds(resolvedCompanyId, diffReportIds, state, error);
+    const normalizedSignoffRefs = normalizeAcceptanceSignoffRefs(signoffRefs, cutoverPlan);
+    const normalizedParitySummary = normalizeSourceParitySummary(sourceParitySummary);
+    const rollbackPoint = optionalText(rollbackPointRef) || cutoverPlan?.rollbackPoint || null;
+    const blockingReasonCodes = computeAcceptanceBlockingReasonCodes({
+      companyId: resolvedCompanyId,
+      cutoverPlan,
+      importBatchIds: normalizedImportBatchIds,
+      diffReportIds: normalizedDiffReportIds,
+      sourceParitySummary: normalizedParitySummary,
+      signoffRefs: normalizedSignoffRefs,
+      rollbackPointRef: rollbackPoint,
+      state,
+      error
+    });
+
+    const acceptanceRecord = {
+      migrationAcceptanceRecordId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      acceptanceType: text(acceptanceType, "migration_acceptance_type_required"),
+      cutoverPlanId: cutoverPlan?.cutoverPlanId || null,
+      importBatchIds: normalizedImportBatchIds,
+      diffReportIds: normalizedDiffReportIds,
+      status: blockingReasonCodes.length === 0 ? "accepted" : "blocked",
+      blockingReasonCodes,
+      sourceParitySummary: normalizedParitySummary,
+      signoffRefs: normalizedSignoffRefs,
+      rollbackPointRef: rollbackPoint,
+      notes: optionalText(notes),
+      cutoverEvidenceBundle: {
+        cutoverEvidenceBundleId: crypto.randomUUID(),
+        companyId: resolvedCompanyId,
+        cutoverPlanId: cutoverPlan?.cutoverPlanId || null,
+        acceptedVarianceReports: normalizedDiffReportIds,
+        signoffRefs: normalizedSignoffRefs,
+        sourceParitySummary: normalizedParitySummary,
+        rollbackPointRef: rollbackPoint
+      },
+      recordedByUserId: principal.userId,
+      recordedAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.migrationAcceptanceRecords.set(acceptanceRecord.migrationAcceptanceRecordId, acceptanceRecord);
+    audit({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "migration.acceptance_record.recorded",
+      entityType: "migration_acceptance_record",
+      entityId: acceptanceRecord.migrationAcceptanceRecordId,
+      explanation: `Recorded ${acceptanceRecord.acceptanceType} migration acceptance as ${acceptanceRecord.status}.`
+    });
+    return clone(acceptanceRecord);
+  }
+
+  function listMigrationAcceptanceRecords({
+    sessionToken,
+    companyId,
+    acceptanceType = null,
+    status = null,
+    cutoverPlanId = null
+  } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const resolvedAcceptanceType = optionalText(acceptanceType);
+    const resolvedStatus = status == null
+      ? null
+      : assertAllowed(text(status, "migration_acceptance_status_required"), MIGRATION_ACCEPTANCE_RECORD_STATUSES, "migration_acceptance_status_invalid");
+    const resolvedCutoverPlanId = optionalText(cutoverPlanId);
+    return [...state.migrationAcceptanceRecords.values()]
+      .filter((record) => record.companyId === resolvedCompanyId)
+      .filter((record) => (resolvedAcceptanceType ? record.acceptanceType === resolvedAcceptanceType : true))
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .filter((record) => (resolvedCutoverPlanId ? record.cutoverPlanId === resolvedCutoverPlanId : true))
+      .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt))
+      .map(clone);
+  }
+
   function recordCutoverSignoff({
     sessionToken,
     companyId,
@@ -703,7 +802,8 @@ export function createMigrationModule({
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
         .map(clone),
       diffReports: listDiffReports({ sessionToken, companyId }),
-      cutoverPlans: listCutoverPlans({ sessionToken, companyId })
+      cutoverPlans: listCutoverPlans({ sessionToken, companyId }),
+      acceptanceRecords: listMigrationAcceptanceRecords({ sessionToken, companyId })
     };
   }
 
@@ -1662,6 +1762,175 @@ function normalizeDifferenceItems(values) {
     comment: optionalText(value?.comment),
     decision: optionalText(value?.decision) || "pending"
   }));
+}
+
+function normalizeExistingImportBatchIds(companyId, values, state, error) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return [...new Set(values.map((value) => text(value, "import_batch_id_required")))].map((importBatchId) => {
+    const batch = statefulRequire("importBatches", companyId, importBatchId, "import_batch_not_found", state, error);
+    return batch.importBatchId;
+  });
+}
+
+function normalizeExistingDiffReportIds(companyId, values, state, error) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return [...new Set(values.map((value) => text(value, "diff_report_id_required")))].map((diffReportId) => {
+    const diffReport = statefulRequire("diffReports", companyId, diffReportId, "diff_report_not_found", state, error);
+    return diffReport.diffReportId;
+  });
+}
+
+function normalizeAcceptanceSignoffRefs(values, cutoverPlan) {
+  if (Array.isArray(values) && values.length > 0) {
+    return values.map((value) => ({
+      userId: text(value?.userId, "migration_acceptance_signoff_user_required"),
+      roleCode: text(value?.roleCode, "migration_acceptance_signoff_role_required"),
+      label: text(value?.label, "migration_acceptance_signoff_label_required"),
+      approvedAt: timestamp(value?.approvedAt, "migration_acceptance_signoff_approved_at_required")
+    }));
+  }
+  if (!cutoverPlan) {
+    return [];
+  }
+  return (cutoverPlan.signoffChain || []).map((step) => ({
+    userId: step.userId,
+    roleCode: step.roleCode,
+    label: step.label,
+    approvedAt: step.approvedAt || null
+  }));
+}
+
+function normalizeSourceParitySummary(value) {
+  const summary = clone(value || {});
+  return {
+    countParity: normalizeParityCheck(summary.countParity),
+    amountParity: normalizeParityCheck(summary.amountParity),
+    duplicateSummary: normalizeSummaryCount(summary.duplicateSummary),
+    rejectedRowSummary: normalizeSummaryCount(summary.rejectedRowSummary),
+    reviewRequiredSummary: normalizeSummaryCount(summary.reviewRequiredSummary),
+    unresolvedMaterialDifferences: normalizeNonNegativeInteger(summary.unresolvedMaterialDifferences),
+    sourceParityPassed: normalizeOptionalBoolean(summary.sourceParityPassed),
+    openingBalanceParityPassed: normalizeOptionalBoolean(summary.openingBalanceParityPassed),
+    openReceivablesParityPassed: normalizeOptionalBoolean(summary.openReceivablesParityPassed),
+    openPayablesParityPassed: normalizeOptionalBoolean(summary.openPayablesParityPassed),
+    payrollYtdParityPassed: normalizeOptionalBoolean(summary.payrollYtdParityPassed),
+    agiHistoryParityPassed: normalizeOptionalBoolean(summary.agiHistoryParityPassed),
+    taxAccountParityPassed: normalizeOptionalBoolean(summary.taxAccountParityPassed),
+    notes: optionalText(summary.notes)
+  };
+}
+
+function normalizeParityCheck(value) {
+  const payload = clone(value || {});
+  return {
+    passed: payload.passed === true,
+    sourceCount: normalizeNonNegativeInteger(payload.sourceCount),
+    targetCount: normalizeNonNegativeInteger(payload.targetCount),
+    delta: Number(payload.delta || 0)
+  };
+}
+
+function normalizeSummaryCount(value) {
+  if (typeof value === "number") {
+    return normalizeNonNegativeInteger(value);
+  }
+  const payload = clone(value || {});
+  return {
+    count: normalizeNonNegativeInteger(payload.count),
+    samples: Array.isArray(payload.samples) ? payload.samples.map((sample) => text(sample, "migration_acceptance_sample_invalid")) : []
+  };
+}
+
+function computeAcceptanceBlockingReasonCodes({
+  companyId,
+  cutoverPlan,
+  importBatchIds,
+  diffReportIds,
+  sourceParitySummary,
+  signoffRefs,
+  rollbackPointRef,
+  state,
+  error
+}) {
+  const reasons = [];
+  if (sourceParitySummary.countParity.passed !== true) {
+    reasons.push("count_parity_failed");
+  }
+  if (sourceParitySummary.amountParity.passed !== true) {
+    reasons.push("amount_parity_failed");
+  }
+  if (sourceParitySummary.unresolvedMaterialDifferences > 0) {
+    reasons.push("material_variances_open");
+  }
+  for (const importBatchId of importBatchIds) {
+    const batch = statefulRequire("importBatches", companyId, importBatchId, "import_batch_not_found", state, error);
+    if (batch.status !== "accepted") {
+      reasons.push("mandatory_dataset_not_accepted");
+      break;
+    }
+  }
+  for (const diffReportId of diffReportIds) {
+    const diffReport = statefulRequire("diffReports", companyId, diffReportId, "diff_report_not_found", state, error);
+    if (diffReport.status !== "accepted") {
+      reasons.push("variance_report_not_accepted");
+      break;
+    }
+  }
+  if (cutoverPlan) {
+    if ((cutoverPlan.signoffChain || []).some((step) => !step.approvedAt || !step.approvedByUserId)) {
+      reasons.push("cutover_signoff_incomplete");
+    }
+    if ((cutoverPlan.goLiveChecklist || []).some((item) => item.mandatory !== false && item.status !== "completed")) {
+      reasons.push("cutover_checklist_incomplete");
+    }
+  }
+  if (signoffRefs.length === 0 || signoffRefs.some((ref) => !ref.approvedAt)) {
+    reasons.push("signoffs_missing");
+  }
+  if (!rollbackPointRef) {
+    reasons.push("rollback_point_missing");
+  }
+  for (const [flag, reason] of [
+    [sourceParitySummary.sourceParityPassed, "source_parity_not_confirmed"],
+    [sourceParitySummary.openingBalanceParityPassed, "opening_balance_parity_not_confirmed"],
+    [sourceParitySummary.openReceivablesParityPassed, "open_receivables_parity_not_confirmed"],
+    [sourceParitySummary.openPayablesParityPassed, "open_payables_parity_not_confirmed"],
+    [sourceParitySummary.payrollYtdParityPassed, "payroll_ytd_parity_not_confirmed"],
+    [sourceParitySummary.agiHistoryParityPassed, "agi_history_parity_not_confirmed"],
+    [sourceParitySummary.taxAccountParityPassed, "tax_account_parity_not_confirmed"]
+  ]) {
+    if (flag === false) {
+      reasons.push(reason);
+    }
+  }
+  return [...new Set(reasons)];
+}
+
+function normalizeOptionalBoolean(value) {
+  return typeof value === "boolean" ? value : null;
+}
+
+function normalizeNonNegativeInteger(value) {
+  if (value == null || value === "") {
+    return 0;
+  }
+  const resolved = Number(value);
+  if (!Number.isInteger(resolved) || resolved < 0) {
+    throw createValidationError("migration_non_negative_integer_invalid", "Value must be a non-negative integer.");
+  }
+  return resolved;
+}
+
+function statefulRequire(mapKey, companyId, objectId, notFoundCode, state, error) {
+  const record = state[mapKey]?.get?.(objectId);
+  if (!record || record.companyId !== companyId) {
+    throw error(404, notFoundCode, `${objectId} was not found.`);
+  }
+  return record;
 }
 
 function summarizeDifferenceItems(items) {

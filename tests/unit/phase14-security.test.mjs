@@ -121,6 +121,16 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
   });
   assert.equal(secretRefDiagnostic.resultSummary.verified, true);
   assert.equal(secretRefDiagnostic.resultSummary.secretRefs[0].includes("webhook-secret"), false);
+  const closedSupportCase = platform.closeSupportCase({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    supportCaseId: supportCase.supportCaseId,
+    resolutionCode: "operator_resolved",
+    resolutionNote: "Replay planned and monitored."
+  });
+  assert.equal(closedSupportCase.status, "closed");
+  assert.equal(closedSupportCase.resolutionCode, "operator_resolved");
+  assert.equal(closedSupportCase.closedByUserId, DEMO_IDS.userId);
 
   const impersonation = platform.requestImpersonation({
     sessionToken: adminToken,
