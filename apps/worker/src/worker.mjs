@@ -92,6 +92,27 @@ export function createDefaultJobHandlers({ logger = console.log } = {}) {
         }
       };
     },
+    "submission.receipt.collect": async ({ job, platform }) => {
+      const result = platform.executeSubmissionReceiptCollection({
+        companyId: job.companyId,
+        submissionId: job.payload?.submissionId,
+        actorId: "worker_scheduler",
+        simulatedReceiptType: typeof job.payload?.simulatedReceiptType === "string" ? job.payload.simulatedReceiptType : null,
+        providerStatus: typeof job.payload?.providerStatus === "string" ? job.payload.providerStatus : null,
+        message: typeof job.payload?.message === "string" ? job.payload.message : null,
+        requiredInput: Array.isArray(job.payload?.requiredInput) ? job.payload.requiredInput : []
+      });
+      logger(`worker collected submission receipts ${result.submissionId} in job ${job.jobId}`);
+      return {
+        resultCode: result.executionSkipped === true ? "submission_receipt_collection_skipped" : "submission_receipt_collection_completed",
+        resultPayload: {
+          submissionId: result.submissionId,
+          status: result.status,
+          receiptTypes: Array.isArray(result.receipts) ? result.receipts.map((receipt) => receipt.receiptType) : [],
+          skipReasonCode: result.skipReasonCode || null
+        }
+      };
+    },
     "search.saved_view_compatibility_scan": async ({ job, platform }) => {
       const result = platform.runSavedViewCompatibilityScan({
         companyId: job.companyId,

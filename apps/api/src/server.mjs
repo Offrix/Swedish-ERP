@@ -272,6 +272,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/submissions/:submissionId/submit",
               "/v1/submissions/:submissionId/receipts",
               "/v1/submissions/:submissionId/evidence-pack",
+              "/v1/submissions/:submissionId/replay",
               "/v1/submissions/:submissionId/retry",
               "/v1/submissions/action-queue",
               "/v1/submissions/action-queue/:queueItemId/resolve",
@@ -4634,6 +4635,38 @@ async function handleRequest({ req, res, platform, flags }) {
         bureauOrgId: requireText(body.bureauOrgId, "bureau_org_id_required", "bureauOrgId is required."),
         workItemId: workItemClaimMatch.workItemId,
         correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const submissionReplayMatch = matchPath(path, "/v1/submissions/:submissionId/replay");
+  if (submissionReplayMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(
+      res,
+      200,
+      await platform.requestSubmissionReplay({
+        companyId,
+        submissionId: submissionReplayMatch.submissionId,
+        actorId: principal.userId,
+        reasonCode: body.reasonCode,
+        idempotencyKey: body.idempotencyKey ?? null,
+        simulatedTransportOutcome: body.simulatedTransportOutcome ?? "technical_ack",
+        simulatedReceiptType: body.simulatedReceiptType ?? null,
+        providerStatus: body.providerStatus ?? null,
+        message: body.message ?? null,
+        requiredInput: Array.isArray(body.requiredInput) ? body.requiredInput : []
       })
     );
     return;

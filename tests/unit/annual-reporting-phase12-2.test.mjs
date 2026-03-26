@@ -133,20 +133,24 @@ test("Phase 12.2 submission engine separates accepted from finalized and dedupli
     actorId: "phase12-2-unit",
     simulatedTransportOutcome: "technical_ack"
   });
-  submission = integrationPlatform.registerSubmissionReceipt({
+  let replay = await integrationPlatform.requestSubmissionReplay({
     companyId: "company-1",
     submissionId: submission.submissionId,
-    receiptType: "business_ack",
-    rawReference: "ref-1",
-    actorId: "phase12-2-unit"
+    actorId: "phase12-2-unit",
+    reasonCode: "collect_missing_business_receipt",
+    simulatedReceiptType: "business_ack",
+    message: "Collected provider business acknowledgement."
   });
-  submission = integrationPlatform.registerSubmissionReceipt({
+  submission = replay.submission;
+  replay = await integrationPlatform.requestSubmissionReplay({
     companyId: "company-1",
     submissionId: submission.submissionId,
-    receiptType: "business_ack",
-    rawReference: "ref-1",
-    actorId: "phase12-2-unit"
+    actorId: "phase12-2-unit",
+    reasonCode: "collect_missing_business_receipt",
+    simulatedReceiptType: "business_ack",
+    message: "Collected provider business acknowledgement."
   });
+  submission = replay.submission;
   assert.equal(submission.status, "accepted");
   assert.equal(submission.receipts.length, 2);
   assert.equal(typeof submission.acceptedAt, "string");

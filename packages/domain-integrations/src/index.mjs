@@ -104,6 +104,12 @@ export function createIntegrationEngine({
     async submitAuthoritySubmission(input) {
       return submitAuthoritySubmission({ state, clock, getCorePlatform }, input);
     },
+    async requestSubmissionReplay(input) {
+      return requestSubmissionReplay({ state, clock, getCorePlatform }, input);
+    },
+    executeSubmissionReceiptCollection(input) {
+      return executeSubmissionReceiptCollection({ state, clock }, input);
+    },
     executeAuthoritySubmissionTransport(input) {
       return executeAuthoritySubmissionTransport({ state, clock }, input);
     },
@@ -529,6 +535,109 @@ async function submitAuthoritySubmission(
   );
 }
 
+async function requestSubmissionReplay(
+  { state, clock, getCorePlatform },
+  {
+    companyId,
+    submissionId,
+    actorId,
+    reasonCode,
+    idempotencyKey = null,
+    simulatedTransportOutcome = "technical_ack",
+    simulatedReceiptType = null,
+    providerStatus = null,
+    message = null,
+    requiredInput = []
+  } = {}
+) {
+  const submission = requireSubmission(state, companyId, submissionId);
+  if (["finalized", "superseded"].includes(submission.status)) {
+    throw createError(409, "submission_replay_not_allowed", "Replay is not allowed for finalized or superseded submissions.");
+  }
+  const corePlatform = resolveCorePlatform(getCorePlatform);
+  const resolvedReasonCode = requireText(reasonCode, "submission_replay_reason_code_required");
+  const targetJobType = hasSubmissionTransportReceipt(state, submission.submissionId) ? "submission.receipt.collect" : "submission.transport";
+  const resolvedIdempotencyKey =
+    normalizeOptionalText(idempotencyKey) ||
+    hashObject({
+      submissionId: submission.submissionId,
+      targetJobType,
+      reasonCode: resolvedReasonCode,
+      receiptCount: getSubmissionReceipts(state, submission.submissionId).length,
+      status: submission.status
+    });
+  if (corePlatform) {
+    const queuedJob = await corePlatform.enqueueRuntimeJob({
+      companyId: submission.companyId,
+      jobType: targetJobType,
+      sourceObjectType: "submission",
+      sourceObjectId: submission.submissionId,
+      idempotencyKey: resolvedIdempotencyKey,
+      payload:
+        targetJobType === "submission.transport"
+          ? {
+              submissionId: submission.submissionId,
+              mode: submission.dispatchMode || "test",
+              simulatedTransportOutcome: normalizeOptionalText(simulatedTransportOutcome) || "technical_ack",
+              providerReference: submission.providerReference,
+              message: normalizeOptionalText(message) || submission.dispatchMessage,
+              replayReasonCode: resolvedReasonCode
+            }
+          : {
+              submissionId: submission.submissionId,
+              simulatedReceiptType: normalizeOptionalText(simulatedReceiptType),
+              providerStatus: normalizeOptionalText(providerStatus),
+              message: normalizeOptionalText(message),
+              requiredInput: Array.isArray(requiredInput) ? requiredInput : [],
+              replayReasonCode: resolvedReasonCode
+            },
+      actorId: requireText(actorId || "system", "actor_id_required")
+    });
+    return {
+      submission: enrichSubmission(state, submission),
+      replayQueued: true,
+      replayTarget: targetJobType,
+      queuedJob
+    };
+  }
+
+  if (targetJobType === "submission.transport") {
+    return {
+      submission: executeAuthoritySubmissionTransport(
+        { state, clock },
+        {
+          companyId,
+          submissionId,
+          actorId,
+          mode: submission.dispatchMode || "test",
+          simulatedTransportOutcome,
+          providerReference: submission.providerReference,
+          message
+        }
+      ),
+      replayQueued: false,
+      replayTarget: targetJobType
+    };
+  }
+
+  return {
+    submission: executeSubmissionReceiptCollection(
+      { state, clock },
+      {
+        companyId,
+        submissionId,
+        actorId,
+        simulatedReceiptType,
+        providerStatus,
+        message,
+        requiredInput
+      }
+    ),
+    replayQueued: false,
+    replayTarget: targetJobType
+  };
+}
+
 function executeAuthoritySubmissionTransport(
   { state, clock },
   { companyId, submissionId, actorId, mode = "test", simulatedTransportOutcome = "technical_ack", providerReference = null, message = null, requiredInput = [] } = {}
@@ -588,6 +697,42 @@ function executeAuthoritySubmissionTransport(
     );
   }
   return enrichSubmission(state, submission);
+}
+
+function executeSubmissionReceiptCollection(
+  { state, clock },
+  { companyId, submissionId, actorId, simulatedReceiptType = null, providerStatus = null, message = null, isFinal = null, requiredInput = [] } = {}
+) {
+  const submission = requireSubmission(state, companyId, submissionId);
+  if (["finalized", "superseded"].includes(submission.status)) {
+    return {
+      ...enrichSubmission(state, submission),
+      executionSkipped: true,
+      skipReasonCode: "submission_receipt_collection_not_allowed"
+    };
+  }
+  const receiptType = normalizeOptionalText(simulatedReceiptType);
+  if (!receiptType) {
+    return {
+      ...enrichSubmission(state, submission),
+      executionSkipped: true,
+      skipReasonCode: "submission_receipt_collection_no_receipt_available"
+    };
+  }
+  return registerSubmissionReceipt(
+    { state, clock },
+    {
+      companyId,
+      submissionId,
+      receiptType,
+      providerStatus,
+      rawReference: null,
+      message,
+      isFinal,
+      requiredInput,
+      actorId
+    }
+  );
 }
 
 function registerSubmissionReceipt(

@@ -128,6 +128,71 @@ test("Phase 14 Step 4 worker runs submission transport jobs through the shared r
   );
 });
 
+test("Phase 14 Step 4 worker collects later submission receipts through the shared runtime", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-24T10:40:00Z")
+  });
+
+  const submission = await platform.prepareAuthoritySubmission({
+    companyId: DEMO_IDS.companyId,
+    submissionType: "income_tax_return",
+    sourceObjectType: "tax_declaration_package",
+    sourceObjectId: "tax-package-2",
+    providerKey: "skatteverket",
+    recipientId: "skatteverket:income-tax",
+    signedState: "signed",
+    actorId: "system",
+    payloadVersion: "1.0",
+    payload: {
+      packageId: "tax-package-2"
+    }
+  });
+  const dispatched = await platform.submitAuthoritySubmission({
+    companyId: DEMO_IDS.companyId,
+    submissionId: submission.submissionId,
+    actorId: "system",
+    simulatedTransportOutcome: "technical_ack"
+  });
+  await runWorkerBatch({
+    platform,
+    handlers: createDefaultJobHandlers({ logger: () => {} }),
+    logger: () => {},
+    workerId: "worker-step4-submission-collect-transport"
+  });
+
+  const replay = await platform.requestSubmissionReplay({
+    companyId: DEMO_IDS.companyId,
+    submissionId: submission.submissionId,
+    actorId: "system",
+    reasonCode: "collect_missing_business_receipt",
+    simulatedReceiptType: "business_ack",
+    idempotencyKey: `replay:${dispatched.queuedJob.jobId}:business-ack`
+  });
+  assert.equal(replay.replayQueued, true);
+  assert.equal(replay.replayTarget, "submission.receipt.collect");
+
+  const processed = await runWorkerBatch({
+    platform,
+    handlers: createDefaultJobHandlers({ logger: () => {} }),
+    logger: () => {},
+    workerId: "worker-step4-submission-collect"
+  });
+  assert.equal(processed, 1);
+
+  const completedReplayJob = await platform.getRuntimeJob({ jobId: replay.queuedJob.jobId });
+  const refreshedSubmission = platform.getAuthoritySubmission({
+    companyId: DEMO_IDS.companyId,
+    submissionId: submission.submissionId
+  });
+  assert.equal(completedReplayJob.status, "succeeded");
+  assert.equal(completedReplayJob.lastResultCode, "submission_receipt_collection_completed");
+  assert.equal(refreshedSubmission.status, "accepted");
+  assert.deepEqual(
+    refreshedSubmission.receipts.map((receipt) => receipt.receiptType),
+    ["technical_ack", "business_ack"]
+  );
+});
+
 test("Phase 14 Step 4 worker runs OCR jobs through the shared runtime", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-24T10:45:00Z")

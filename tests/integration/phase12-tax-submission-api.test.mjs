@@ -104,15 +104,22 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
       logger: () => {},
       workerId: "phase12-api-finalized-submission"
     });
-    await requestJson(`${baseUrl}/v1/submissions/${finalizedSubmission.submissionId}/receipts`, {
+    const businessReplay = await requestJson(`${baseUrl}/v1/submissions/${finalizedSubmission.submissionId}/replay`, {
       method: "POST",
       token: adminToken,
-      expectedStatus: 201,
       body: {
         companyId: DEMO_IDS.companyId,
-        receiptType: "business_ack",
-        rawReference: "phase12-2-business-ack"
+        reasonCode: "collect_missing_business_receipt",
+        simulatedReceiptType: "business_ack",
+        idempotencyKey: "phase12-2-business-ack-replay"
       }
+    });
+    assert.equal(businessReplay.replayQueued, true);
+    assert.equal(businessReplay.replayTarget, "submission.receipt.collect");
+    await runWorkerBatch({
+      platform,
+      logger: () => {},
+      workerId: "phase12-api-business-receipt"
     });
     await requestJson(`${baseUrl}/v1/submissions/${finalizedSubmission.submissionId}/receipts`, {
       method: "POST",
