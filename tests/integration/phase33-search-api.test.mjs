@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { createDefaultJobHandlers, runWorkerBatch } from "../../apps/worker/src/worker.mjs";
 import { DEMO_ADMIN_EMAIL } from "../../packages/domain-org-auth/src/index.mjs";
 import { readText, stopServer } from "../../scripts/lib/repo.mjs";
 
@@ -89,8 +90,29 @@ test("Step 33 API exposes reporting-backed search, saved views and dashboard wid
         companyId: COMPANY_ID
       }
     });
-    assert.equal(reindex.reindexRequest.status, "completed");
-    assert.equal(reindex.indexingSummary.indexedCount > 0, true);
+    assert.equal(reindex.reindexRequest.status, "requested");
+    assert.equal(typeof reindex.reindexRequest.jobId, "string");
+    assert.equal(reindex.indexingSummary, null);
+
+    const queuedRequests = await requestJson(`${baseUrl}/v1/search/reindex?companyId=${COMPANY_ID}&status=requested`, {
+      token: sessionToken
+    });
+    assert.equal(queuedRequests.items.some((item) => item.searchReindexRequestId === reindex.reindexRequest.searchReindexRequestId), true);
+
+    const processed = await runWorkerBatch({
+      platform,
+      handlers: createDefaultJobHandlers({ logger: () => {} }),
+      logger: () => {},
+      workerId: "worker-step33-search-reindex"
+    });
+    assert.equal(processed, 1);
+
+    const completedRequests = await requestJson(`${baseUrl}/v1/search/reindex?companyId=${COMPANY_ID}&status=completed`, {
+      token: sessionToken
+    });
+    const completedRequest = completedRequests.items.find((item) => item.searchReindexRequestId === reindex.reindexRequest.searchReindexRequestId);
+    assert.equal(Boolean(completedRequest), true);
+    assert.equal(completedRequest.indexedCount > 0, true);
 
     const searchResults = await requestJson(`${baseUrl}/v1/search/documents?companyId=${COMPANY_ID}&query=trial`, {
       token: sessionToken

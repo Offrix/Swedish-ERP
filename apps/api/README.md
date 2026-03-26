@@ -609,3 +609,9 @@ Set `PHASE13_AUTOMATION_ENABLED=false` to return `503` for FAS 13.3 automation a
 Set `PHASE14_SECURITY_ENABLED=false` to return `503` for FAS 14.1 backoffice, audit, impersonation, access review and break-glass routes while keeping the rest of the API process alive.
 Set `PHASE14_RESILIENCE_ENABLED=false` to return `503` for FAS 14.2 feature-flag, emergency-disable, load-profile, restore-drill and chaos routes while keeping the rest of the API process alive.
 Set `PHASE14_MIGRATION_ENABLED=false` to return `503` for FAS 14.3 migration, cutover and cockpit routes while keeping the rest of the API process alive.
+
+## Runtime notes
+
+- `POST /v1/search/reindex` is worker-backed when the runtime job platform is available.
+- The route creates a `search_reindex_request`, enqueues a `search.reindex` async job and returns the queued request with its job reference.
+- Completion or failure is written by the worker through the canonical async-job attempt chain instead of a synchronous request-path rebuild.

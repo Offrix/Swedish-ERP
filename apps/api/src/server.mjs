@@ -2344,7 +2344,7 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(
       res,
       201,
-      platform.requestSearchReindex({
+      await platform.requestSearchReindex({
         companyId,
         projectionCode: body.projectionCode || null,
         reasonCode: body.reasonCode || "manual_request",

@@ -63,6 +63,21 @@ export function createDefaultJobHandlers({ logger = console.log } = {}) {
         resultCode: "saved_view_compatibility_scanned",
         resultPayload: result
       };
+    },
+    "search.reindex": async ({ job, platform }) => {
+      const result = platform.executeSearchReindexRequest({
+        companyId: job.companyId,
+        searchReindexRequestId: job.payload?.searchReindexRequestId,
+        actorId: "worker_scheduler"
+      });
+      logger(`worker completed search reindex ${result.reindexRequest.searchReindexRequestId} for job ${job.jobId}`);
+      return {
+        resultCode: "search_reindex_completed",
+        resultPayload: {
+          searchReindexRequestId: result.reindexRequest.searchReindexRequestId,
+          indexingSummary: result.indexingSummary
+        }
+      };
     }
   });
 }

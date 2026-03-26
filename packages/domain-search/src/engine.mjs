@@ -109,6 +109,8 @@ export function createSearchEngine({
     dashboardWidgetTypeCodes: DASHBOARD_WIDGET_TYPE_CODES,
     listSearchProjectionContracts,
     requestSearchReindex,
+    executeSearchReindexRequest,
+    failSearchReindexRequest,
     listSearchReindexRequests,
     listSearchDocuments,
     getSearchDocument,
@@ -133,7 +135,7 @@ export function createSearchEngine({
     return syncProjectionContracts(requireText(companyId, "company_id_required")).map(copy);
   }
 
-  function requestSearchReindex({
+  async function requestSearchReindex({
     companyId,
     projectionCode = null,
     reasonCode = "manual_request",
@@ -150,11 +152,14 @@ export function createSearchEngine({
       requestedAt: nowIso(clock),
       startedAt: null,
       completedAt: null,
+      jobId: null,
       errorCode: null,
+      errorMessage: null,
       indexedCount: 0,
       unchangedCount: 0,
       tombstonedCount: 0
     };
+    validateReindexProjection(request);
     state.reindexRequests.set(request.searchReindexRequestId, request);
     appendToIndex(state.reindexRequestIdsByCompany, request.companyId, request.searchReindexRequestId);
     pushAudit({
@@ -166,7 +171,100 @@ export function createSearchEngine({
       entityId: request.searchReindexRequestId,
       explanation: `Requested search reindex${request.projectionCode ? ` for ${request.projectionCode}` : ""}.`
     });
-    return runReindex(request, correlationId);
+    const corePlatform = resolveCorePlatform();
+    if (corePlatform && typeof corePlatform.enqueueRuntimeJob === "function") {
+      const queuedJob = await corePlatform.enqueueRuntimeJob({
+        companyId: request.companyId,
+        jobType: "search.reindex",
+        sourceObjectType: "search_reindex_request",
+        sourceObjectId: request.searchReindexRequestId,
+        idempotencyKey: `search_reindex:${request.searchReindexRequestId}`,
+        payload: {
+          companyId: request.companyId,
+          searchReindexRequestId: request.searchReindexRequestId,
+          projectionCode: request.projectionCode
+        },
+        metadata: {
+          rebuildReasonCode: request.reasonCode,
+          projectionCode: request.projectionCode,
+          sourceDomainCode: "search"
+        },
+        riskClass: "low",
+        priority: 40,
+        actorId: request.actorId,
+        correlationId
+      });
+      request.jobId = queuedJob.jobId;
+      return {
+        reindexRequest: copy(request),
+        indexingSummary: null,
+        queuedJob: copy(queuedJob)
+      };
+    }
+      return executeSearchReindexRequest({
+        companyId: request.companyId,
+        searchReindexRequestId: request.searchReindexRequestId,
+        actorId: request.actorId,
+        correlationId
+      });
+  }
+
+  function executeSearchReindexRequest({
+    companyId,
+    searchReindexRequestId,
+    actorId = "system",
+    correlationId = newId()
+  } = {}) {
+    const request = requireSearchReindexRequest(companyId, searchReindexRequestId);
+    if (request.status === "completed") {
+      return {
+        reindexRequest: copy(request),
+        indexingSummary: buildIndexingSummary(request, 0)
+      };
+    }
+    request.status = "running";
+    request.startedAt = nowIso(clock);
+    request.completedAt = null;
+    request.errorCode = null;
+    request.errorMessage = null;
+    pushAudit({
+      companyId: request.companyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "search.reindex.started",
+      entityType: "search_reindex_request",
+      entityId: request.searchReindexRequestId,
+      explanation: `Started search reindex${request.projectionCode ? ` for ${request.projectionCode}` : ""}.`
+    });
+    try {
+      return runReindex(request, correlationId, actorId);
+    } catch (error) {
+      markReindexFailed(request, {
+        actorId,
+        correlationId,
+        errorCode: typeof error?.code === "string" ? error.code : "search_reindex_failed",
+        errorMessage: typeof error?.message === "string" && error.message.trim().length > 0 ? error.message.trim() : "Search reindex failed."
+      });
+      throw error;
+    }
+  }
+
+  function failSearchReindexRequest({
+    companyId,
+    searchReindexRequestId,
+    actorId = "system",
+    correlationId = newId(),
+    errorCode = "search_reindex_failed",
+    errorMessage = "Search reindex failed."
+  } = {}) {
+    const request = requireSearchReindexRequest(companyId, searchReindexRequestId);
+    markReindexFailed(request, {
+      actorId,
+      correlationId,
+      errorCode,
+      errorMessage
+    });
+    return copy(request);
   }
 
   function listSearchReindexRequests({ companyId, projectionCode = null, status = null } = {}) {
@@ -595,18 +693,18 @@ export function createSearchEngine({
     });
   }
 
-  function runReindex(request, correlationId) {
-    request.status = "running";
-    request.startedAt = nowIso(clock);
+  function validateReindexProjection(request) {
     const contracts = syncProjectionContracts(request.companyId).filter((contract) =>
       request.projectionCode ? contract.projectionCode === request.projectionCode : true
     );
     if (request.projectionCode && contracts.length === 0) {
-      request.status = "failed";
-      request.completedAt = nowIso(clock);
-      request.errorCode = "search_projection_contract_missing";
       throw createError(404, "search_projection_contract_missing", `Projection contract ${request.projectionCode} was not found.`);
     }
+    return contracts;
+  }
+
+  function runReindex(request, correlationId, actorId = request.actorId) {
+    const contracts = validateReindexProjection(request);
 
     const seenKeys = new Set();
     let indexedCount = 0;
@@ -649,8 +747,48 @@ export function createSearchEngine({
     request.indexedCount = indexedCount;
     request.unchangedCount = unchangedCount;
     request.tombstonedCount = tombstonedCount;
-    pushAudit({ companyId: request.companyId, actorId: request.actorId, correlationId, action: "search.reindex.completed", entityType: "search_reindex_request", entityId: request.searchReindexRequestId, explanation: `Completed search reindex with ${indexedCount} indexed and ${tombstonedCount} tombstoned documents.` });
-    return { reindexRequest: copy(request), indexingSummary: { projectionCount: contracts.length, indexedCount, unchangedCount, tombstonedCount } };
+    pushAudit({ companyId: request.companyId, actorId: requireText(actorId, "actor_id_required"), correlationId, action: "search.reindex.completed", entityType: "search_reindex_request", entityId: request.searchReindexRequestId, explanation: `Completed search reindex with ${indexedCount} indexed and ${tombstonedCount} tombstoned documents.` });
+    return { reindexRequest: copy(request), indexingSummary: buildIndexingSummary(request, contracts.length) };
+  }
+
+  function buildIndexingSummary(request, projectionCount) {
+    return {
+      projectionCount,
+      indexedCount: Number(request.indexedCount || 0),
+      unchangedCount: Number(request.unchangedCount || 0),
+      tombstonedCount: Number(request.tombstonedCount || 0)
+    };
+  }
+
+  function requireSearchReindexRequest(companyId, searchReindexRequestId) {
+    const request = state.reindexRequests.get(requireText(searchReindexRequestId, "search_reindex_request_id_required"));
+    if (!request || request.companyId !== requireText(companyId, "company_id_required")) {
+      throw createError(404, "search_reindex_request_not_found", "Search reindex request was not found.");
+    }
+    return request;
+  }
+
+  function resolveCorePlatform() {
+    return typeof lazyPlatforms.core === "function" ? lazyPlatforms.core() : null;
+  }
+
+  function markReindexFailed(request, { actorId, correlationId, errorCode, errorMessage }) {
+    request.status = "failed";
+    request.completedAt = nowIso(clock);
+    request.errorCode = normalizeCode(errorCode || "search_reindex_failed", "search_reindex_error_code_required");
+    request.errorMessage = normalizeOptionalText(errorMessage) || "Search reindex failed.";
+    pushAudit({
+      companyId: request.companyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "search.reindex.failed",
+      entityType: "search_reindex_request",
+      entityId: request.searchReindexRequestId,
+      explanation: `Search reindex failed with ${request.errorCode}.`,
+      metadata: {
+        errorMessage: request.errorMessage
+      }
+    });
   }
 
   function syncProjectionContracts(companyId) {

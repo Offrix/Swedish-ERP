@@ -405,3 +405,38 @@ test("Phase 14 Step 4 worker runs saved-view compatibility scans", async () => {
   assert.equal(attempts[0].resultPayload.scannedCount >= 1, true);
   assert.equal(attempts[0].resultPayload.items.some((item) => item.savedViewId === brokenView.savedViewId), true);
 });
+
+test("Phase 14 Step 4 worker executes queued search reindex requests", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-25T13:30:00Z")
+  });
+
+  const request = await platform.requestSearchReindex({
+    companyId: DEMO_IDS.companyId,
+    projectionCode: "reporting.report_snapshot",
+    actorId: DEMO_IDS.userId
+  });
+  assert.equal(request.reindexRequest.status, "requested");
+  assert.equal(typeof request.reindexRequest.jobId, "string");
+
+  const processed = await runWorkerBatch({
+    platform,
+    handlers: createDefaultJobHandlers({ logger: () => {} }),
+    logger: () => {},
+    workerId: "worker-step4-search-reindex"
+  });
+  assert.equal(processed, 1);
+
+  const completedJob = await platform.getRuntimeJob({ jobId: request.reindexRequest.jobId });
+  const attempts = await platform.listRuntimeJobAttempts({ jobId: request.reindexRequest.jobId });
+  const completedRequest = platform.listSearchReindexRequests({
+    companyId: DEMO_IDS.companyId,
+    status: "completed"
+  }).find((candidate) => candidate.searchReindexRequestId === request.reindexRequest.searchReindexRequestId);
+
+  assert.equal(completedJob.status, "succeeded");
+  assert.equal(completedJob.lastResultCode, "search_reindex_completed");
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].resultPayload.searchReindexRequestId, request.reindexRequest.searchReindexRequestId);
+  assert.equal(Boolean(completedRequest), true);
+});

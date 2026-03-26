@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createSearchEngine } from "../../packages/domain-search/src/index.mjs";
 
-test("Step 33 search registry indexes reporting projections and supports saved view repair", () => {
+test("Step 33 search registry indexes reporting projections and supports saved view repair", async () => {
   const sourceState = {
     contracts: [
       {
@@ -38,7 +38,7 @@ test("Step 33 search registry indexes reporting projections and supports saved v
     }
   });
 
-  const reindex = engine.requestSearchReindex({
+  const reindex = await engine.requestSearchReindex({
     companyId: "company_search_1",
     actorId: "user_1"
   });

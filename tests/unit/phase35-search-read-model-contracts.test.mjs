@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createSearchEngine } from "../../packages/domain-search/src/index.mjs";
 
-test("Step 35 search exposes object profile and workbench contracts with normalized object types", () => {
+test("Step 35 search exposes object profile and workbench contracts with normalized object types", async () => {
   const engine = createSearchEngine({
     clock: () => new Date("2026-03-25T12:00:00Z"),
     reportingPlatform: {
@@ -35,7 +35,7 @@ test("Step 35 search exposes object profile and workbench contracts with normali
   });
 
   const companyId = "company_phase35_1";
-  const reindex = engine.requestSearchReindex({
+  const reindex = await engine.requestSearchReindex({
     companyId,
     actorId: "user_1"
   });
