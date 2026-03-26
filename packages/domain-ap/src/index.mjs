@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import {
+  applyDurableStateSnapshot,
+  serializeDurableState
+} from "../../domain-core/src/state-snapshots.mjs";
 
 export const AP_SUPPLIER_STATUSES = Object.freeze(["draft", "active", "blocked", "archived"]);
 export const AP_PURCHASE_ORDER_STATUSES = Object.freeze([
@@ -172,7 +176,9 @@ export function createApEngine({
     releaseApOpenItemReservation,
     settleApOpenItem,
     reopenApOpenItem,
-    snapshotAp
+    snapshotAp,
+    exportDurableState,
+    importDurableState
   };
 
   function listSuppliers({ companyId, status = null } = {}) {
@@ -1847,6 +1853,14 @@ export function createApEngine({
       purchaseOrderImportBatches: Array.from(state.purchaseOrderImportBatches.values()).map(copy),
       auditEvents: state.auditEvents.map(copy)
     };
+  }
+
+  function exportDurableState() {
+    return serializeDurableState(state);
+  }
+
+  function importDurableState(snapshot) {
+    applyDurableStateSnapshot(state, snapshot);
   }
 
   function seedDemoState() {

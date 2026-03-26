@@ -1,5 +1,9 @@
 import crypto from "node:crypto";
 import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
+import {
+  applyDurableStateSnapshot,
+  serializeDurableState
+} from "../../domain-core/src/state-snapshots.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -346,8 +350,18 @@ export function createPayrollEngine({
     createVacationLiabilitySnapshot,
     listPayrollDocumentClassificationPayloads,
     registerDocumentClassificationPayrollPayload,
-    reverseDocumentClassificationPayrollPayload
+    reverseDocumentClassificationPayrollPayload,
+    exportDurableState,
+    importDurableState
   };
+
+  function exportDurableState() {
+    return serializeDurableState(state);
+  }
+
+  function importDurableState(snapshot) {
+    applyDurableStateSnapshot(state, snapshot);
+  }
 
   function listEmployerContributionRulePacks({ effectiveDate = null } = {}) {
     return listPayrollRulePacks({ effectiveDate }).filter(

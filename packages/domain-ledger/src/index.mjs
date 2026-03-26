@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import {
+  applyDurableStateSnapshot,
+  serializeDurableState
+} from "../../domain-core/src/state-snapshots.mjs";
 
 export const LEDGER_STATES = Object.freeze(["draft", "validated", "posted", "reversed", "locked_by_period"]);
 export const DEFAULT_LEDGER_CURRENCY = "SEK";
@@ -1678,7 +1682,9 @@ export function createLedgerEngine({
     reverseJournalEntry,
     correctJournalEntry,
     getJournalEntry,
-    snapshotLedger
+    snapshotLedger,
+    exportDurableState,
+    importDurableState
   };
 
   function installLedgerCatalog({
@@ -2529,6 +2535,14 @@ export function createLedgerEngine({
       journalEntries: [...state.journalEntries.values()].map((entry) => presentJournalEntry(entry)),
       auditEvents: state.auditEvents
     });
+  }
+
+  function exportDurableState() {
+    return serializeDurableState(state);
+  }
+
+  function importDurableState(snapshot) {
+    applyDurableStateSnapshot(state, snapshot);
   }
 
   function findVoucherSeries(runtimeState, companyId, seriesCode) {

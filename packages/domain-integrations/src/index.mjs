@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import { createPartnerModule } from "./partners.mjs";
 import { createPublicApiModule } from "./public-api.mjs";
+import {
+  applyDurableStateSnapshot,
+  serializeDurableState
+} from "../../domain-core/src/state-snapshots.mjs";
 
 export const INVOICE_DELIVERY_CHANNELS = Object.freeze(["pdf_email", "peppol"]);
 export const PAYMENT_LINK_STATUSES = Object.freeze(["active", "consumed", "expired", "cancelled"]);
@@ -150,8 +154,18 @@ export function createIntegrationEngine({
         asyncJobs: [...state.asyncJobs.values()],
         asyncDeadLetters: [...state.asyncDeadLetters.values()]
       });
-    }
+    },
+    exportDurableState,
+    importDurableState
   };
+
+  function exportDurableState() {
+    return serializeDurableState(state);
+  }
+
+  function importDurableState(snapshot) {
+    applyDurableStateSnapshot(state, snapshot);
+  }
 
   function prepareInvoiceDelivery({
     companyId,

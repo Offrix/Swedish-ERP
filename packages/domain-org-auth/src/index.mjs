@@ -14,6 +14,10 @@ import {
   timestamp,
   verifyTotpCode
 } from "../../auth-core/src/index.mjs";
+import {
+  applyDurableStateSnapshot,
+  serializeDurableState
+} from "../../domain-core/src/state-snapshots.mjs";
 
 export const ACTIONS = Object.freeze({
   COMPANY_READ: "company.read",
@@ -124,9 +128,9 @@ export function createOrgAuthPlatform({
     bankIdProvider: createBankIdProvider()
   };
 
-  if (seedDemo) {
-    seedDemoState(state, clock);
-  }
+    if (seedDemo) {
+      seedDemoState(state, clock);
+    }
 
   return {
     actions: ACTIONS,
@@ -162,13 +166,15 @@ export function createOrgAuthPlatform({
     getTenantSetupProfile,
     registerModuleDefinition,
     listModuleDefinitions,
-    activateModule,
-    listModuleActivations,
-    suspendModuleActivation,
-    snapshot,
-    getTotpCodeForTesting,
-    getBankIdCompletionTokenForTesting
-  };
+      activateModule,
+      listModuleActivations,
+      suspendModuleActivation,
+      snapshot,
+      exportDurableState,
+      importDurableState,
+      getTotpCodeForTesting,
+      getBankIdCompletionTokenForTesting
+    };
 
   function createCompany({ legalName, orgNumber, status = "draft", settingsJson = {} } = {}) {
     const now = nowIso();
@@ -1367,8 +1373,8 @@ export function createOrgAuthPlatform({
     return copy(activation);
   }
 
-  function snapshot() {
-    return copy({
+    function snapshot() {
+      return copy({
       companies: [...state.companies.values()],
       users: [...state.users.values()],
       companyUsers: [...state.companyUsers.values()],
@@ -1386,14 +1392,34 @@ export function createOrgAuthPlatform({
       onboardingStepStates: [...state.onboardingStepStates.values()],
       companyRegistrations: [...state.companyRegistrations.values()],
       companyVatSetups: [...state.companyVatSetups.values()],
-      accountingPeriods: [...state.accountingPeriods.values()],
-      companySetupBlueprints: [...state.companySetupBlueprints.values()],
-      tenantSetupProfiles: [...state.tenantSetupProfiles.values()],
-      moduleDefinitions: [...state.moduleDefinitions.values()],
-      moduleActivations: [...state.moduleActivations.values()],
-      auditEvents: state.auditEvents
-    });
-  }
+        accountingPeriods: [...state.accountingPeriods.values()],
+        companySetupBlueprints: [...state.companySetupBlueprints.values()],
+        tenantSetupProfiles: [...state.tenantSetupProfiles.values()],
+        moduleDefinitions: [...state.moduleDefinitions.values()],
+        moduleActivations: [...state.moduleActivations.values()],
+        auditEvents: state.auditEvents
+      });
+    }
+
+    function exportDurableState() {
+      return serializeDurableState(state, {
+        excludeKeys: ["bankIdProvider"],
+        customSerializers: {
+          bankIdProvider: (provider) => provider.snapshot()
+        }
+      });
+    }
+
+    function importDurableState(snapshot) {
+      applyDurableStateSnapshot(state, snapshot, {
+        preserveKeys: ["bankIdProvider"],
+        customHydrators: {
+          bankIdProvider: (provider, providerSnapshot) => {
+            provider.restore(providerSnapshot || {});
+          }
+        }
+      });
+    }
 
   function getTotpCodeForTesting({ companyId = DEMO_IDS.companyId, email = DEMO_ADMIN_EMAIL, now = currentDate() } = {}) {
     const companyUser = findActiveCompanyUser(companyId, email);
@@ -2088,6 +2114,17 @@ function createBankIdProvider() {
     },
     getCompletionToken(orderRef) {
       return orders.get(orderRef)?.completionToken || null;
+    },
+    snapshot() {
+      return {
+        orders: [...orders.entries()]
+      };
+    },
+    restore(snapshot = {}) {
+      orders.clear();
+      for (const [orderRef, order] of Array.isArray(snapshot.orders) ? snapshot.orders : []) {
+        orders.set(orderRef, order);
+      }
     }
   };
 }

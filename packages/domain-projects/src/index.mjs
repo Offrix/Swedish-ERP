@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import {
+  applyDurableStateSnapshot,
+  serializeDurableState
+} from "../../domain-core/src/state-snapshots.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -115,7 +119,9 @@ export function createProjectEngine({
     createProjectDeviation,
     assignProjectDeviation,
     transitionProjectDeviationStatus,
-    listProjectAuditEvents
+    listProjectAuditEvents,
+    exportDurableState,
+    importDurableState
   };
 
   function listProjects({ companyId, status = null } = {}) {
@@ -1077,8 +1083,16 @@ export function createProjectEngine({
     return state.auditEvents
       .filter((event) => event.companyId === resolvedCompanyId)
       .filter((event) => (resolvedProjectId ? event.projectId === requireProject(state, resolvedCompanyId, resolvedProjectId).projectId : true))
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-      .map(copy);
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+        .map(copy);
+  }
+
+  function exportDurableState() {
+    return serializeDurableState(state);
+  }
+
+  function importDurableState(snapshot) {
+    applyDurableStateSnapshot(state, snapshot);
   }
 }
 

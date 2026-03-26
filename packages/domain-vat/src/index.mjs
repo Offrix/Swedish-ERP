@@ -1,5 +1,9 @@
 import crypto from "node:crypto";
 import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
+import {
+  applyDurableStateSnapshot,
+  serializeDurableState
+} from "../../domain-core/src/state-snapshots.mjs";
 
 export const VAT_DECISION_STATUSES = Object.freeze(["decided", "review_required"]);
 export const VAT_REVIEW_QUEUE_STATUSES = Object.freeze(["open", "resolved", "waived"]);
@@ -257,7 +261,9 @@ export function createVatEngine({
     createVatPeriodicStatementRun,
     getVatPeriodicStatementRun,
     summarizeVatDeclarationBoxes,
-    snapshotVat
+    snapshotVat,
+    exportDurableState,
+    importDurableState
   };
 
   function listVatCodes({ companyId } = {}) {
@@ -577,6 +583,14 @@ export function createVatEngine({
       declarationBoxSummary: summarizeDecisionBoxAmounts([...state.vatDecisions.values()]),
       auditEvents: state.auditEvents
     });
+  }
+
+  function exportDurableState() {
+    return serializeDurableState(state);
+  }
+
+  function importDurableState(snapshot) {
+    applyDurableStateSnapshot(state, snapshot);
   }
 
   function pushAudit({ companyId, actorId, correlationId, action, entityType, entityId, explanation }) {

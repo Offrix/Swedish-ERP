@@ -1,3 +1,6 @@
+import crypto from "node:crypto";
+import os from "node:os";
+import path from "node:path";
 import { createOrgAuthPlatform } from "../../../packages/domain-org-auth/src/index.mjs";
 import { createDocumentArchivePlatform } from "../../../packages/domain-documents/src/index.mjs";
 import { createLedgerPlatform } from "../../../packages/domain-ledger/src/index.mjs";
@@ -32,7 +35,11 @@ import { createId06Platform } from "../../../packages/domain-id06/src/index.mjs"
 import { createEgenkontrollPlatform } from "../../../packages/domain-egenkontroll/src/index.mjs";
 import { createSearchPlatform } from "../../../packages/domain-search/src/index.mjs";
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
-import { createCorePlatform } from "../../../packages/domain-core/src/index.mjs";
+import {
+  createCorePlatform,
+  createInMemoryCriticalDomainStateStore,
+  createSqliteCriticalDomainStateStore
+} from "../../../packages/domain-core/src/index.mjs";
 import { createAnnualReportingPlatform } from "../../../packages/domain-annual-reporting/src/index.mjs";
 import { createAutomationAiEngine } from "../../../packages/rule-engine/src/index.mjs";
 import {
@@ -691,6 +698,11 @@ export function createApiPlatform(options = {}) {
     providerEnvironmentRef: runtimeModeProfile.providerEnvironmentRef,
     dataRetentionClass: runtimeModeProfile.dataRetentionClass
   });
+  const criticalDomainStateStore = resolveCriticalDomainStateStore({
+    options,
+    env,
+    runtimeModeProfile
+  });
   const domains = {};
   const domainRegistry = [];
   const domainRegistryByKey = {};
@@ -699,18 +711,23 @@ export function createApiPlatform(options = {}) {
     const dependencies = Object.fromEntries(
       definition.dependsOn.map((domainKey) => [domainKey, requireRegisteredDomain(domains, domainKey, definition.key)])
     );
-    const platform = definition.create({
-      options: platformOptions,
-      dependencies: Object.freeze(dependencies),
-      domains: Object.freeze({ ...domains }),
-      getDomain: (domainKey) => domains[domainKey] || null
-    });
-    domains[definition.key] = platform;
+      const platform = definition.create({
+        options: platformOptions,
+        dependencies: Object.freeze(dependencies),
+        domains: Object.freeze({ ...domains }),
+        getDomain: (domainKey) => domains[domainKey] || null
+      });
+      const persistedPlatform = decorateCriticalDomainPersistence({
+        domainKey: definition.key,
+        platform,
+        store: criticalDomainStateStore
+      });
+      domains[definition.key] = persistedPlatform;
 
-    const registration = createDomainRegistration(definition, platform, domainRegistry.length + 1);
-    domainRegistry.push(registration);
-    domainRegistryByKey[definition.key] = registration;
-  }
+      const registration = createDomainRegistration(definition, persistedPlatform, domainRegistry.length + 1);
+      domainRegistry.push(registration);
+      domainRegistryByKey[definition.key] = registration;
+    }
 
   const flatPlatform = composeFlatPlatform(domains);
   const runtimeContracts = buildRuntimeContracts(runtimeModeProfile, bootstrapModePolicy);
@@ -800,6 +817,29 @@ export function createApiPlatform(options = {}) {
       value: () => defaultRuntimeDiagnostics,
       enumerable: false
     },
+    criticalDomainStateStore: {
+      value: criticalDomainStateStore,
+      enumerable: false
+    },
+    flushCriticalDomainState: {
+      value: ({ domainKeys = CRITICAL_DOMAIN_KEYS } = {}) =>
+        domainKeys
+          .map((domainKey) => registeredDomains[domainKey])
+          .filter(Boolean)
+          .map((domain) =>
+            typeof domain.flushDurableState === "function" ? domain.flushDurableState() : null
+          )
+          .filter(Boolean),
+      enumerable: false
+    },
+    closeCriticalDomainStateStore: {
+      value: () => {
+        if (typeof criticalDomainStateStore?.close === "function") {
+          criticalDomainStateStore.close();
+        }
+      },
+      enumerable: false
+    },
     listRuntimeInvariantFindings: {
       value: () => defaultRuntimeDiagnostics.findings,
       enumerable: false
@@ -868,6 +908,171 @@ export function createDefaultApiPlatform({
     runtimeMode,
     enforceExplicitRuntimeMode
   });
+}
+
+const CRITICAL_DOMAIN_KEYS = Object.freeze([
+  "orgAuth",
+  "ledger",
+  "vat",
+  "ar",
+  "ap",
+  "payroll",
+  "taxAccount",
+  "reviewCenter",
+  "projects",
+  "integrations"
+]);
+
+const CRITICAL_DOMAIN_READ_METHOD_PREFIXES = Object.freeze([
+  "get",
+  "list",
+  "snapshot",
+  "check"
+]);
+
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((entryValue) => stableStringify(entryValue)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function resolveCriticalDomainTruthMode(store) {
+  const storeKind = typeof store?.kind === "string" ? store.kind : null;
+  if (storeKind && storeKind !== "memory_critical_domain_state_store") {
+    return "durable_snapshot";
+  }
+  return "in_memory_snapshot";
+}
+
+function hashSnapshot(value) {
+  return crypto.createHash("sha256").update(stableStringify(value ?? null)).digest("hex");
+}
+
+function isReadMethod(methodName) {
+  return CRITICAL_DOMAIN_READ_METHOD_PREFIXES.some((prefix) => methodName.startsWith(prefix));
+}
+
+function resolveCriticalDomainStateStore({
+  options,
+  env,
+  runtimeModeProfile
+}) {
+  if (options.criticalDomainStateStore) {
+    return options.criticalDomainStateStore;
+  }
+
+  const storeKind =
+    options.criticalDomainStateStoreKind ||
+    env.ERP_CRITICAL_DOMAIN_STATE_STORE ||
+    (runtimeModeProfile.environmentMode === "test" ? "memory" : "sqlite");
+
+  if (storeKind === "memory") {
+    return createInMemoryCriticalDomainStateStore();
+  }
+
+  if (storeKind === "sqlite") {
+    const filePath =
+      options.criticalDomainStateStorePath ||
+      env.ERP_CRITICAL_DOMAIN_STATE_DB_PATH ||
+      path.join(os.tmpdir(), `swedish-erp-${runtimeModeProfile.environmentMode}-critical-domain-state.sqlite`);
+    return createSqliteCriticalDomainStateStore({ filePath });
+  }
+
+  throw new Error(`Unsupported critical domain state store kind: ${storeKind}.`);
+}
+
+function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
+  if (!CRITICAL_DOMAIN_KEYS.includes(domainKey)) {
+    return platform;
+  }
+
+  if (
+    !store ||
+    typeof platform?.exportDurableState !== "function" ||
+    typeof platform?.importDurableState !== "function"
+  ) {
+    return platform;
+  }
+
+  const existingRecord = store.load(domainKey);
+  if (existingRecord?.snapshot) {
+    platform.importDurableState(existingRecord.snapshot);
+  }
+
+  let lastPersistedHash = existingRecord?.snapshotHash || null;
+  const persist = () => {
+    const snapshot = platform.exportDurableState();
+    const snapshotHash = hashSnapshot(snapshot);
+    if (snapshotHash === lastPersistedHash) {
+      return null;
+    }
+    const record = store.save({ domainKey, snapshot });
+    lastPersistedHash = record.snapshotHash;
+    return record;
+  };
+
+  persist();
+
+  const proxy = new Proxy(platform, {
+    get(target, property, receiver) {
+      if (property === "getCriticalDomainDurability") {
+        return () =>
+          Object.freeze({
+            domainKey,
+            truthMode: resolveCriticalDomainTruthMode(store),
+            persistenceStoreKind: store.kind,
+            snapshotHash: lastPersistedHash
+          });
+      }
+      if (property === "flushDurableState") {
+        return () => persist();
+      }
+
+      const value = Reflect.get(target, property, receiver);
+      if (typeof property !== "string" || typeof value !== "function") {
+        return value;
+      }
+      if (
+        [
+          "exportDurableState",
+          "importDurableState",
+          "getCriticalDomainDurability",
+          "flushDurableState"
+        ].includes(property) ||
+        isReadMethod(property)
+      ) {
+        return value.bind(target);
+      }
+      return (...args) => {
+        const result = value.apply(target, args);
+        if (result && typeof result.then === "function") {
+          return result.then((resolved) => {
+            persist();
+            return resolved;
+          });
+        }
+        persist();
+        return result;
+      };
+    }
+  });
+
+  Object.defineProperty(proxy, "__criticalDomainPersistence", {
+    value: Object.freeze({
+      domainKey,
+      storeKind: store.kind
+    }),
+    enumerable: false
+  });
+
+  return proxy;
 }
 
 function buildRuntimeDiagnostics({

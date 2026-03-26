@@ -35,7 +35,7 @@ test("phase 1.4 runtime endpoints expose startup diagnostics and bootstrap valid
     );
     assert.equal(
       invariantsPayload.findings.some((finding) => finding.findingCode === "map_only_critical_truth"),
-      true
+      false
     );
     assert.equal(
       invariantsPayload.findings.some((finding) => finding.findingCode === "stub_provider_present"),

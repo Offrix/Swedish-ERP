@@ -58,7 +58,12 @@ export async function startApiServer({
     platform: resolvedPlatform,
     runtimeDiagnostics,
     runtimeModeProfile: resolvedPlatform.getRuntimeModeProfile(),
-    stop: () => stopServer(server)
+    stop: async () => {
+      await stopServer(server);
+      if (typeof resolvedPlatform.closeCriticalDomainStateStore === "function") {
+        resolvedPlatform.closeCriticalDomainStateStore();
+      }
+    }
   };
 }
 

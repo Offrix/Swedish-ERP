@@ -12,6 +12,10 @@ import {
   REVIEW_REQUIRED_DECISION_TYPES,
   REVIEW_RISK_CLASSES
 } from "./constants.mjs";
+import {
+  applyDurableStateSnapshot,
+  serializeDurableState
+} from "../../domain-core/src/state-snapshots.mjs";
 
 export function createReviewCenterPlatform(options = {}) {
   return createReviewCenterEngine(options);
@@ -68,7 +72,9 @@ export function createReviewCenterEngine({
     runReviewCenterSlaScan,
     listReviewCenterEvents,
     listReviewCenterAuditEvents,
-    snapshotReviewCenter
+    snapshotReviewCenter,
+    exportDurableState,
+    importDurableState
   };
 
   function createReviewQueue({
@@ -670,6 +676,14 @@ export function createReviewCenterEngine({
       reviewEvents: state.reviewEvents.map(copy),
       auditEvents: state.auditEvents.map(copy)
     };
+  }
+
+  function exportDurableState() {
+    return serializeDurableState(state);
+  }
+
+  function importDurableState(snapshot) {
+    applyDurableStateSnapshot(state, snapshot);
   }
 }
 

@@ -46,6 +46,10 @@ import {
   requireText,
   roundMoney
 } from "./helpers.mjs";
+import {
+  applyDurableStateSnapshot,
+  serializeDurableState
+} from "../../domain-core/src/state-snapshots.mjs";
 
 export function createTaxAccountPlatform(options = {}) {
   return createTaxAccountEngine(options);
@@ -105,7 +109,9 @@ export function createTaxAccountEngine({
     listOpenTaxAccountDifferenceCases,
     resolveTaxAccountDifferenceCase,
     getTaxAccountBalance,
-    snapshotTaxAccount
+    snapshotTaxAccount,
+    exportDurableState,
+    importDurableState
   };
 
   function registerExpectedTaxLiability({
@@ -583,6 +589,14 @@ export function createTaxAccountEngine({
       auditEvents: state.auditEvents.filter((event) => event.companyId === resolvedCompanyId).map(copy),
       bankingBridgeReady: bankingPlatform != null
     });
+  }
+
+  function exportDurableState() {
+    return serializeDurableState(state);
+  }
+
+  function importDurableState(snapshot) {
+    applyDurableStateSnapshot(state, snapshot);
   }
 }
 

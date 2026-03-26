@@ -150,10 +150,18 @@ function createRuntimeInvariantFinding({
   });
 }
 
-function collectMapOnlyTruthFindings({ protectedMode, startupSurface, workspaceRoot }) {
+function collectMapOnlyTruthFindings({ protectedMode, startupSurface, workspaceRoot, domains = {} }) {
   const findings = [];
 
   for (const target of MAP_ONLY_CRITICAL_TARGETS) {
+    const durability =
+      typeof domains?.[target.domainKey]?.getCriticalDomainDurability === "function"
+        ? domains[target.domainKey].getCriticalDomainDurability()
+        : null;
+    if (durability?.truthMode === "durable_snapshot") {
+      continue;
+    }
+
     const source = readWorkspaceSource(target.relativePath, workspaceRoot);
     const mapCount = countMatches(source, /new Map\(/gu);
     if (mapCount === 0) {
@@ -406,7 +414,8 @@ export function scanRuntimeInvariants({
     ...collectMapOnlyTruthFindings({
       protectedMode,
       startupSurface,
-      workspaceRoot
+      workspaceRoot,
+      domains
     })
   );
   findings.push(

@@ -14,6 +14,16 @@ export {
   createPostgresCanonicalRepositoryStore,
   resolveCanonicalRepositoryConnectionString
 } from "./repositories-postgres.mjs";
+export {
+  CRITICAL_DOMAIN_STATE_SCHEMA_VERSION,
+  CRITICAL_DOMAIN_STATE_TABLE,
+  createInMemoryCriticalDomainStateStore,
+  createSqliteCriticalDomainStateStore
+} from "./critical-domain-state-store.mjs";
+export {
+  applyDurableStateSnapshot,
+  serializeDurableState
+} from "./state-snapshots.mjs";
 export { createCommandMutationRuntime } from "./command-log.mjs";
 import {
   CLOSE_BLOCKER_SEVERITIES,

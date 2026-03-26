@@ -351,15 +351,18 @@ export function startWorker({
       if (timer) {
         clearTimeout(timer);
       }
-      Promise.resolve(activeRun)
-        .finally(async () => {
-          if (typeof resolvedPlatform.closeRuntimeJobStore === "function") {
-            await resolvedPlatform.closeRuntimeJobStore();
-          }
-          logger("worker stopped");
-        })
-        .catch(() => {});
-    }
+        Promise.resolve(activeRun)
+          .finally(async () => {
+            if (typeof resolvedPlatform.closeRuntimeJobStore === "function") {
+              await resolvedPlatform.closeRuntimeJobStore();
+            }
+            if (typeof resolvedPlatform.closeCriticalDomainStateStore === "function") {
+              resolvedPlatform.closeCriticalDomainStateStore();
+            }
+            logger("worker stopped");
+          })
+          .catch(() => {});
+      }
   };
 }
 

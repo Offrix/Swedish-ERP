@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import {
+  applyDurableStateSnapshot,
+  serializeDurableState
+} from "../../domain-core/src/state-snapshots.mjs";
 
 export const AR_CUSTOMER_STATUSES = Object.freeze(["active", "blocked", "archived"]);
 export const AR_PRICE_LIST_STATUSES = Object.freeze(["draft", "active", "inactive"]);
@@ -234,7 +238,9 @@ export function createArEngine({
     captureAgingSnapshot,
     importCustomers,
     getCustomerImportBatch,
-    snapshotAr
+    snapshotAr,
+    exportDurableState,
+    importDurableState
   };
 
   function listCustomers({ companyId } = {}) {
@@ -2350,6 +2356,14 @@ export function createArEngine({
       customerImportBatches: [...state.customerImportBatches.values()],
       auditEvents: state.auditEvents
     });
+  }
+
+  function exportDurableState() {
+    return serializeDurableState(state);
+  }
+
+  function importDurableState(snapshot) {
+    applyDurableStateSnapshot(state, snapshot);
   }
 
   function seedDemoState() {
