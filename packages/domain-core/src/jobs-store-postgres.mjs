@@ -539,6 +539,17 @@ export function createPostgresAsyncJobStore({
         .filter((deadLetter) => (filters.operatorState ? deadLetter.operatorState === filters.operatorState : true));
     },
 
+    async updateDeadLetter({ deadLetterId, operatorState, updatedAt }) {
+      const rows = await sql`
+        update async_job_dead_letters
+        set operator_state = ${operatorState},
+            updated_at = ${updatedAt}
+        where dead_letter_id = ${deadLetterId}
+        returning *
+      `;
+      return mapDeadLetterRow(rows[0]);
+    },
+
     async createReplayPlan(plan) {
       const rows = await sql`
         insert into async_job_replay_plans (

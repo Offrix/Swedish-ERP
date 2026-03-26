@@ -434,6 +434,7 @@ export function createCoreEngine({
       listRuntimeJobs: asyncJobsModule.listAsyncJobs,
       listRuntimeJobAttempts: asyncJobsModule.listAsyncJobAttempts,
       listRuntimeDeadLetters: asyncJobsModule.listAsyncDeadLetters,
+      triageRuntimeDeadLetter: asyncJobsModule.triageAsyncDeadLetter,
       planRuntimeJobReplay: asyncJobsModule.planAsyncJobReplay,
       approveRuntimeJobReplay: asyncJobsModule.approveAsyncJobReplay,
       executeRuntimeJobReplay: asyncJobsModule.executeAsyncJobReplay,

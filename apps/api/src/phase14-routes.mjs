@@ -1904,6 +1904,119 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/backoffice/jobs") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "async_job", objectId: companyId, scopeCode: "async_job" });
+    assertBackofficeReadAccess({ principal });
+    const items = await buildBackofficeJobRows({
+      platform,
+      companyId,
+      status: optionalText(url.searchParams.get("status")),
+      jobType: optionalText(url.searchParams.get("jobType")),
+      operatorState: optionalText(url.searchParams.get("operatorState"))
+    });
+    writeJson(res, 200, {
+      items,
+      counters: {
+        highRiskOpen: items.filter((item) => item.riskClass === "high" && !["succeeded", "cancelled"].includes(item.status)).length,
+        deadLetterOpen: items.filter((item) => item.deadLetter?.operatorState && item.deadLetter.operatorState !== "closed").length,
+        replayPlanned: items.filter((item) => item.replayPlan?.status === "planned").length
+      }
+    });
+    return true;
+  }
+
+  const backofficeJobReplayMatch = matchPath(path, "/v1/backoffice/jobs/:jobId/replay");
+  if (req.method === "POST" && backofficeJobReplayMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "async_job", objectId: backofficeJobReplayMatch.jobId, scopeCode: "async_job" });
+    const replayPlan = await platform.planRuntimeJobReplay({
+      jobId: backofficeJobReplayMatch.jobId,
+      plannedByUserId: principal.userId,
+      reasonCode: body.reasonCode || "backoffice_manual_replay",
+      plannedPayloadStrategy: body.plannedPayloadStrategy || "reuse"
+    });
+    const deadLetter = (await platform.listRuntimeDeadLetters({ companyId }))
+      .find((candidate) => candidate.jobId === backofficeJobReplayMatch.jobId) || null;
+    const triagedDeadLetter = deadLetter
+      ? await platform.triageRuntimeDeadLetter({
+        companyId,
+        deadLetterId: deadLetter.deadLetterId,
+        actorId: principal.userId,
+        operatorState: "replay_planned"
+      })
+      : null;
+    writeJson(res, 200, { replayPlan, deadLetter: triagedDeadLetter });
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/backoffice/dead-letters") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "async_dead_letter", objectId: companyId, scopeCode: "async_job" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: await buildBackofficeDeadLetterRows({
+        platform,
+        companyId,
+        operatorState: optionalText(url.searchParams.get("operatorState"))
+      })
+    });
+    return true;
+  }
+
+  const deadLetterTriageMatch = matchPath(path, "/v1/backoffice/dead-letters/:deadLetterId/triage");
+  if (req.method === "POST" && deadLetterTriageMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "async_dead_letter", objectId: deadLetterTriageMatch.deadLetterId, scopeCode: "async_job" });
+    writeJson(res, 200, await platform.triageRuntimeDeadLetter({
+      companyId,
+      deadLetterId: deadLetterTriageMatch.deadLetterId,
+      actorId: principal.userId,
+      operatorState: body.operatorState
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/backoffice/submissions/monitor") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "submission", objectId: companyId, scopeCode: "annual_reporting" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, await buildSubmissionMonitorPayload({
+      platform,
+      companyId,
+      submissionType: optionalText(url.searchParams.get("submissionType")),
+      ownerQueue: optionalText(url.searchParams.get("ownerQueue")),
+      status: optionalText(url.searchParams.get("status"))
+    }));
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/backoffice/incidents") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "runtime_incident", objectId: companyId, scopeCode: "backoffice" });
+    writeJson(res, 201, platform.openRuntimeIncident({
+      sessionToken,
+      companyId,
+      title: body.title,
+      summary: body.summary,
+      severity: body.severity,
+      sourceSignalId: body.sourceSignalId || null,
+      commanderUserId: body.commanderUserId || principal.userId,
+      linkedCorrelationId: body.linkedCorrelationId || null,
+      relatedObjectRefs: Array.isArray(body.relatedObjectRefs) ? body.relatedObjectRefs : []
+    }));
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/ops/feature-flags") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
@@ -3440,6 +3553,127 @@ function parsePositiveInteger(value, code, message) {
     throw createHttpError(400, code, message);
   }
   return normalized;
+}
+
+async function buildBackofficeJobRows({ platform, companyId, status = null, jobType = null, operatorState = null }) {
+  const [jobs, deadLetters, replayPlans] = await Promise.all([
+    platform.listRuntimeJobs({ companyId, status, jobType }),
+    platform.listRuntimeDeadLetters({ companyId, operatorState }),
+    platform.listRuntimeJobReplayPlans({})
+  ]);
+  const deadLettersByJobId = new Map(deadLetters.map((deadLetter) => [deadLetter.jobId, deadLetter]));
+  const replayPlansByJobId = new Map();
+  for (const replayPlan of replayPlans.filter((candidate) => candidate.companyId === companyId)) {
+    const existing = replayPlansByJobId.get(replayPlan.jobId);
+    if (!existing || existing.updatedAt.localeCompare(replayPlan.updatedAt) < 0) {
+      replayPlansByJobId.set(replayPlan.jobId, replayPlan);
+    }
+  }
+  return jobs
+    .filter((job) => (operatorState ? deadLettersByJobId.get(job.jobId)?.operatorState === operatorState : true))
+    .map((job) => ({
+      ...job,
+      deadLetter: deadLettersByJobId.get(job.jobId) || null,
+      replayPlan: replayPlansByJobId.get(job.jobId) || null
+    }));
+}
+
+async function buildBackofficeDeadLetterRows({ platform, companyId, operatorState = null }) {
+  const [deadLetters, jobs, replayPlans] = await Promise.all([
+    platform.listRuntimeDeadLetters({ companyId, operatorState }),
+    platform.listRuntimeJobs({ companyId }),
+    platform.listRuntimeJobReplayPlans({})
+  ]);
+  const jobsById = new Map(jobs.map((job) => [job.jobId, job]));
+  const replayPlansByJobId = new Map();
+  for (const replayPlan of replayPlans.filter((candidate) => candidate.companyId === companyId)) {
+    const existing = replayPlansByJobId.get(replayPlan.jobId);
+    if (!existing || existing.updatedAt.localeCompare(replayPlan.updatedAt) < 0) {
+      replayPlansByJobId.set(replayPlan.jobId, replayPlan);
+    }
+  }
+  return deadLetters.map((deadLetter) => ({
+    ...deadLetter,
+    job: jobsById.get(deadLetter.jobId) || null,
+    replayPlan: replayPlansByJobId.get(deadLetter.jobId) || null
+  }));
+}
+
+async function buildSubmissionMonitorPayload({ platform, companyId, submissionType = null, ownerQueue = null, status = null }) {
+  const [submissions, queueItems] = await Promise.all([
+    platform.listAuthoritySubmissions({ companyId, submissionType }),
+    platform.listSubmissionActionQueue({ companyId, ownerQueue, status: null })
+  ]);
+  const filteredSubmissions = submissions.filter((submission) => (status ? submission.status === status : true));
+  const queueItemsBySubmissionId = new Map();
+  for (const queueItem of queueItems) {
+    if (!queueItemsBySubmissionId.has(queueItem.submissionId)) {
+      queueItemsBySubmissionId.set(queueItem.submissionId, []);
+    }
+    queueItemsBySubmissionId.get(queueItem.submissionId).push(queueItem);
+  }
+  const items = filteredSubmissions.map((submission) => {
+    const submissionQueueItems = queueItemsBySubmissionId.get(submission.submissionId) || [];
+    const receiptClasses = classifySubmissionReceiptClasses(submission.receipts || []);
+    const lagAlerts = buildSubmissionLagAlerts({ submission, queueItems: submissionQueueItems });
+    return {
+      submissionId: submission.submissionId,
+      submissionType: submission.submissionType,
+      submissionFamilyCode: submission.submissionFamilyCode,
+      sourceObjectType: submission.sourceObjectType,
+      sourceObjectId: submission.sourceObjectId,
+      providerKey: submission.providerKey,
+      status: submission.status,
+      signedState: submission.signedState,
+      attemptNo: submission.attemptNo,
+      createdAt: submission.createdAt,
+      updatedAt: submission.updatedAt,
+      receiptClasses,
+      queueItems: submissionQueueItems,
+      lagAlerts,
+      replayEligible: submission.status === "transport_failed" || submissionQueueItems.some((queueItem) => queueItem.actionType === "retry")
+    };
+  });
+  return {
+    items,
+    counters: {
+      technicalPending: items.filter((item) => item.receiptClasses.technical === "pending").length,
+      materialPending: items.filter((item) => item.receiptClasses.business === "pending" || item.receiptClasses.finalOutcome === "pending").length,
+      deadLettered: items.filter((item) => item.status === "dead_lettered" || item.queueItems.some((queueItem) => ["open", "claimed", "waiting_input"].includes(queueItem.status))).length,
+      replayPlanned: items.filter((item) => item.queueItems.some((queueItem) => queueItem.status === "open" && queueItem.actionType === "retry")).length
+    }
+  };
+}
+
+function classifySubmissionReceiptClasses(receipts) {
+  const receiptTypes = new Set((receipts || []).map((receipt) => receipt.receiptType));
+  return {
+    technical: receiptTypes.has("technical_ack") ? "received" : receiptTypes.has("technical_nack") ? "rejected" : "pending",
+    business: receiptTypes.has("business_ack") ? "received" : receiptTypes.has("business_nack") ? "rejected" : "pending",
+    finalOutcome: receiptTypes.has("final_ack") ? "received" : "pending"
+  };
+}
+
+function buildSubmissionLagAlerts({ submission, queueItems }) {
+  const alerts = [];
+  if (submission.status === "submitted" && !hasReceiptType(submission.receipts, ["technical_ack", "technical_nack"])) {
+    alerts.push({ alertCode: "technical_receipt_missing", severity: "high" });
+  }
+  if (["received", "accepted"].includes(submission.status) && !hasReceiptType(submission.receipts, ["final_ack", "business_nack", "technical_nack"])) {
+    alerts.push({ alertCode: "final_outcome_pending", severity: "medium" });
+  }
+  if (submission.status === "domain_rejected") {
+    alerts.push({ alertCode: "business_rejection", severity: "high" });
+  }
+  if ((queueItems || []).some((queueItem) => ["open", "claimed", "waiting_input"].includes(queueItem.status))) {
+    alerts.push({ alertCode: "operator_intervention_required", severity: "high" });
+  }
+  return alerts;
+}
+
+function hasReceiptType(receipts, receiptTypes) {
+  const typeSet = new Set((receipts || []).map((receipt) => receipt.receiptType));
+  return receiptTypes.some((receiptType) => typeSet.has(receiptType));
 }
 
 const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);

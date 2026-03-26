@@ -509,6 +509,12 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/backoffice/support-cases`
 - `POST /v1/backoffice/support-cases/:supportCaseId/diagnostics`
 - `GET /v1/backoffice/audit-events?companyId=...`
+- `GET /v1/backoffice/jobs?companyId=...`
+- `POST /v1/backoffice/jobs/:jobId/replay`
+- `GET /v1/backoffice/dead-letters?companyId=...`
+- `POST /v1/backoffice/dead-letters/:deadLetterId/triage`
+- `GET /v1/backoffice/submissions/monitor?companyId=...`
+- `POST /v1/backoffice/incidents`
 - `GET /v1/backoffice/impersonations?companyId=...`
 - `POST /v1/backoffice/impersonations`
 - `POST /v1/backoffice/impersonations/:sessionId/approve`

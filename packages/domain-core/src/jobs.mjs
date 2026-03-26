@@ -351,6 +351,16 @@ export function createInMemoryAsyncJobStore() {
         .map(clone);
     },
 
+    async updateDeadLetter({ deadLetterId, operatorState, updatedAt }) {
+      const deadLetter = state.deadLetters.get(deadLetterId);
+      if (!deadLetter) {
+        return null;
+      }
+      deadLetter.operatorState = operatorState;
+      deadLetter.updatedAt = updatedAt;
+      return clone(deadLetter);
+    },
+
     async createReplayPlan(plan) {
       state.replayPlans.set(plan.replayPlanId, clone(plan));
       return clone(state.replayPlans.get(plan.replayPlanId));
@@ -425,6 +435,7 @@ export function createAsyncJobsModule({
     listAsyncJobs,
     listAsyncJobAttempts,
     listAsyncDeadLetters,
+    triageAsyncDeadLetter,
     planAsyncJobReplay,
     approveAsyncJobReplay,
     executeAsyncJobReplay,
@@ -755,6 +766,48 @@ export function createAsyncJobsModule({
     });
   }
 
+  async function triageAsyncDeadLetter({
+    companyId,
+    deadLetterId,
+    actorId,
+    operatorState,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = text(companyId, "company_id_required", error);
+    const resolvedDeadLetterId = text(deadLetterId, "async_dead_letter_id_required", error);
+    const resolvedActorId = text(actorId || "system", "actor_id_required", error);
+    const nextOperatorState = assertAllowed(operatorState, ASYNC_JOB_OPERATOR_STATES, "async_job_operator_state_invalid", error);
+    const deadLetter = (await listAsyncDeadLetters({ companyId: resolvedCompanyId }))
+      .find((candidate) => candidate.deadLetterId === resolvedDeadLetterId);
+    if (!deadLetter) {
+      throw error(404, "async_dead_letter_not_found", "Async dead-letter case was not found.");
+    }
+    if (deadLetter.operatorState === nextOperatorState) {
+      return deadLetter;
+    }
+    if (!isDeadLetterTransitionAllowed(deadLetter.operatorState, nextOperatorState)) {
+      throw error(409, "async_dead_letter_transition_invalid", `Cannot move dead-letter from ${deadLetter.operatorState} to ${nextOperatorState}.`);
+    }
+    if (nextOperatorState === "replay_planned" && deadLetter.replayAllowed !== true) {
+      throw error(409, "async_dead_letter_replay_forbidden", "Replay is not allowed for this dead-letter case.");
+    }
+    const updatedDeadLetter = await store.updateDeadLetter({
+      deadLetterId: deadLetter.deadLetterId,
+      operatorState: nextOperatorState,
+      updatedAt: nowIso(clock)
+    });
+    audit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "jobs.async_job.dead_letter_triaged",
+      entityType: "async_dead_letter",
+      entityId: deadLetter.deadLetterId,
+      explanation: `Moved async dead-letter ${deadLetter.deadLetterId} to ${nextOperatorState}.`
+    });
+    return updatedDeadLetter;
+  }
+
   async function planAsyncJobReplay({
     jobId,
     plannedByUserId,
@@ -888,6 +941,17 @@ export function createAsyncJobsModule({
       status: optionalText(filters.status)
     });
   }
+}
+
+function isDeadLetterTransitionAllowed(currentState, nextState) {
+  const transitions = {
+    pending_triage: new Set(["acknowledged", "replay_planned", "resolved", "closed"]),
+    acknowledged: new Set(["replay_planned", "resolved", "closed"]),
+    replay_planned: new Set(["resolved", "closed"]),
+    resolved: new Set(["closed"]),
+    closed: new Set()
+  };
+  return transitions[currentState]?.has(nextState) === true;
 }
 
 function resolveJobDisableDecision(job, resolveRuntimeFlags) {
