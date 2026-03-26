@@ -87,7 +87,7 @@ Detta dokument ersätter alla äldre byggordningar, byggsekvenser och implementa
 - Fas 18 pilot eller extern trial-lansering före fas 17.
 - UI implementation före fas 15 och fas 18.5.
 
-## [ ] Fas 0 — Sanningslåsning, scope-frysning och destruktiv legacy-rensning
+## [x] Fas 0 — Sanningslåsning, scope-frysning och destruktiv legacy-rensning
 
 **Mål**  
 Göra de två nya dokumenten till enda sanning, döda felaktiga antaganden och låsa produktkategori, providerstrategi och projektkärnans riktning innan någon mer feature-kod byggs.
@@ -102,14 +102,17 @@ Göra de två nya dokumenten till enda sanning, döda felaktiga antaganden och l
 - Ingen implementation i reglerade flöden, auth, projects eller UI får starta innan denna fas är signerad.
 
 **Delfaser**
-- [ ] 0.1 [REMOVE/DEPRECATE] **Döda byggcentriska narrativ** — Ta bort all styrning som behandlar produkten som byggprogram. Skriv in att field/personalliggare/ID06 är vertikala pack ovanpå generell företagsplattform.
-- [ ] 0.2 [REWRITE] **Lås bindande produktkategori och benchmarkset** — Frys konkurrensbilden till finansplattformar, CRM-/projektplattformar, project-operations-ERP och bygg/field-vertikaler i exakt denna ordning.
-- [ ] 0.3 [REWRITE] **Lös dokumentkonflikter** — Resolva konflikter mellan ADR, provider-priority, legacy remediation, master build sequence och kod. Särskilt BankID-strategi, SCIM-scope, project core och regulated submissions boundary.
-- [ ] 0.4 [NEW BUILD] **Skapa full traceability** — Mappa varje kritisk punkt från FULL_SYSTEM_ANALYSIS, LEGACY_AND_REALITY_RECONCILIATION och COMPETITOR_AND_MARKET_REALITY till exakt roadmapfas, delfas och exit gate.
-- [ ] 0.5 [OPERATIONALIZE] **Inför hårda stop-regler** — Inför regler att shell-UI, demo-seeds, simulerade receipts, route-bredd och phase-etiketter aldrig får räknas som produktmognad.
+- [x] 0.1 [REMOVE/DEPRECATE] **Döda byggcentriska narrativ** — Ta bort all styrning som behandlar produkten som byggprogram. Skriv in att field/personalliggare/ID06 är vertikala pack ovanpå generell företagsplattform.
+- [x] 0.2 [REWRITE] **Lås bindande produktkategori och benchmarkset** — Frys konkurrensbilden till finansplattformar, CRM-/projektplattformar, project-operations-ERP och bygg/field-vertikaler i exakt denna ordning.
+- [x] 0.3 [REWRITE] **Lös dokumentkonflikter** — Resolva konflikter mellan ADR, provider-priority, legacy remediation, master build sequence och kod. Särskilt BankID-strategi, SCIM-scope, project core och regulated submissions boundary.
+- [x] 0.4 [NEW BUILD] **Skapa full traceability** — Mappa varje kritisk punkt från FULL_SYSTEM_ANALYSIS, LEGACY_AND_REALITY_RECONCILIATION och COMPETITOR_AND_MARKET_REALITY till exakt roadmapfas, delfas och exit gate.
+- [x] 0.5 [OPERATIONALIZE] **Inför hårda stop-regler** — Inför regler att shell-UI, demo-seeds, simulerade receipts, route-bredd och phase-etiketter aldrig får räknas som produktmognad.
 
 **Exit gate**  
 - Alla äldre dokument är nedgraderade till icke-bindande om de inte uttryckligen stämmer med denna roadmap. Produkten är formellt definierad som generell svensk företagsplattform. CRM/projekt-benchmark utanför bygg är låst.
+
+**Fasstatus**  
+- Klar 2026-03-26 genom repo-governance-låsning, historikbanner i äldre styrdokument, traceability-matris och governance-runbook.
 
 **Test gate**  
 - Dokumentgranskning: 100 % coverage i traceability-matrisen. Ingen åtgärd från analysdokumenten saknas i roadmapen.

@@ -2,7 +2,7 @@
 
 - Document ID: MBP-001
 - Title: Master Build Plan
-- Status: Binding implementation plan
+- Status: Historical implementation baseline superseded by go-live roadmap and implementation bible
 - Owner: Product architecture, compliance architecture and engineering delivery
 - Version: 2.0.0
 - Effective from: 2026-03-24
@@ -31,9 +31,20 @@
 - Related future documents:
   - all W1-W5 documents in `docs/master-control/master-document-manifest.md`
 
+# Supersession Notice
+
+Detta dokument är nu ett historiskt basdokument.
+
+Bindande genomförandeordning och bindande implementationssanning ligger i:
+
+- `docs/implementation-control/GO_LIVE_ROADMAP.md`
+- `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`
+
+Detta dokument får endast användas som historiskt inputmaterial när det inte krockar med dokumenten ovan.
+
 # Purpose
 
-Detta dokument är den bindande genomförandeplanen för hela omtaget av produkten. Det ersätter den äldre byggplanen som huvuddokument för faktisk leveransordning, exit gates och dokumentberoenden.
+Detta dokument var den bindande genomförandeplanen för omtaget av produkten. Det är nu ersatt som huvuddokument för faktisk leveransordning, exit gates och dokumentberoenden.
 
 Planen ska användas för att:
 

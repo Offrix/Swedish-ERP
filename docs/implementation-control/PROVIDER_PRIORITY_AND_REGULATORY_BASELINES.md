@@ -2,6 +2,8 @@
 
 Status: Bindande providerordning och bindande regulatoriska/specmässiga baselines för våg 1 och våg 2.
 
+Supersession notice: Detta dokument är fortsatt användbart som provider- och baseline-input, men det är inte primär sanning om det krockar med `GO_LIVE_ROADMAP.md` eller `PHASE_IMPLEMENTATION_BIBLE.md`.
+
 ## Icke-förhandlingsbara regler
 
 1. Reglerade myndighetsflöden ska gå direkt mot officiell transport när officiell transport finns.

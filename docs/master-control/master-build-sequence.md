@@ -2,7 +2,7 @@
 
 - Document ID: MCP-010
 - Title: Master Build Sequence
-- Status: Binding control baseline
+- Status: Historical control baseline superseded by go-live roadmap and implementation bible
 - Owner: Product architecture, engineering architecture and delivery control
 - Version: 1.0.0
 - Effective from: 2026-03-23
@@ -26,9 +26,20 @@
 - Related future documents:
   - all W1 and W2 documents listed in the manifest
 
+# Supersession Notice
+
+Detta dokument är nu en historisk kontrollbaslinje.
+
+Bindande byggordning och bindande implementationssanning ligger i:
+
+- `docs/implementation-control/GO_LIVE_ROADMAP.md`
+- `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`
+
+Detta dokument får endast användas som historiskt inputmaterial när det inte krockar med dokumenten ovan.
+
 # Purpose
 
-Detta dokument är den exakta byggordning som Codex ska följa för att nå korrekt, komplett och enterprise-mässigt slutresultat så snabbt och säkert som möjligt utan att tappa kontroll.
+Detta dokument var den exakta byggordning som Codex skulle följa för att nå korrekt, komplett och enterprise-mässigt slutresultat så snabbt och säkert som möjligt utan att tappa kontroll.
 
 Detta dokument är inte en lös rekommendation. Det är genomförandeordningen.
 

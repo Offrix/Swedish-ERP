@@ -2,6 +2,8 @@
 
 Status: Bindande konkret backlog för allt som måste byggas före UI.
 
+Supersession notice: Detta dokument är nu historiskt inputmaterial. Vid konflikt gäller `GO_LIVE_ROADMAP.md` och `PHASE_IMPLEMENTATION_BIBLE.md`.
+
 Varje post nedan är implementationsgrundande. Ingen post får markeras klar utan kod, tester, runbooks och audit/replay-beteende.
 
 ## 1. Runtime bootstrap honesty

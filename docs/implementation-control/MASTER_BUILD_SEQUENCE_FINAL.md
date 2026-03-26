@@ -2,6 +2,8 @@
 
 Status: Bindande slutlig byggordning före UI.
 
+Supersession notice: Detta dokument är nu historiskt inputmaterial. Vid konflikt gäller `GO_LIVE_ROADMAP.md` och `PHASE_IMPLEMENTATION_BIBLE.md`.
+
 Detta dokument ersätter alla tidigare lösa rekommendationer om ordning. Ingen implementation före UI får ske utanför denna ordning. UI får inte starta förrän Step 18 är passerad.
 
 ## Styrande principer

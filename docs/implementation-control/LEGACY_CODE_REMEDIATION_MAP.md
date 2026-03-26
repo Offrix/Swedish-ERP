@@ -2,6 +2,8 @@
 
 Status: Bindande repo-karta för gammal kod, syntetisk logik, demo-runtime och felaktiga domängränser som måste åtgärdas före implementation av allt utom UI.
 
+Supersession notice: Detta dokument är fortsatt användbart som legacy-input, men det är inte primär sanning om det krockar med `GO_LIVE_ROADMAP.md` eller `PHASE_IMPLEMENTATION_BIBLE.md`.
+
 ## Icke-förhandlingsbara regler
 
 1. Kod som kan ge falsk produktmognad i drift får inte ligga kvar i default-runtime.

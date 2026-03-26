@@ -4,6 +4,15 @@ Svensk företagsplattform för att driva hela bolaget i ett sammanhållet system
 
 Det här repo:t byggs inte för att bli ännu ett smalt bokföringsprogram eller ett byggspecialsystem med lite ekonomi bredvid. Målet är att bli världens bästa företagssida för svenska bolag: en produkt där företag faktiskt kan sköta hela verksamheten med starkare kontroll, bättre regelstöd, tydligare spårbarhet och bättre operativt arbetsflöde än dagens alternativ.
 
+## Primär Styrning
+
+De enda bindande styrdokumenten för allt kvarvarande arbete före UI är:
+
+- `docs/implementation-control/GO_LIVE_ROADMAP.md`
+- `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`
+
+Alla äldre `master-control`-, `implementation-control`-, ADR-, runbook- och analysdokument är historiska inputkällor. De får användas som stödmaterial, men de är inte bindande om de krockar med dokumenten ovan.
+
 ## Vad Produkten Är
 
 Produkten är en generell företagsplattform för alla bolag, inte bara för en viss bransch.
