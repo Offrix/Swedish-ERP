@@ -208,6 +208,7 @@ Flytta affÃ¤rssanningen frÃ¥n processminne till hÃ¥llbar persistence med i
 **Delfasstatus**  
 - 2.2 verifierad 2026-03-26: command receipt/outbox/inbox ligger i samma commit och mutationruntime bÃ¤r nu bounded-context repository bundles, inte bara core-scope.
 - 2.3 verifierad 2026-03-26: job attempts bÃ¤r explicit attemptstatus och claim metadata, och claim expiry fÃ¶re start skapar nu syntetisk attempthistorik i stÃ¤llet fÃ¶r att fÃ¶rlora spÃ¥rbarhet.
+- 2.4 verifierad 2026-03-26: plattformen exponerar nu ett explicit durability-inventory fÃ¶r alla kritiska domÃ¤ner och fasen har en egen verifieringskedja fÃ¶r repositories, command log, durable snapshots och async job recovery.
 
 **Delfaser**
 - [x] 2.1 [NEW BUILD] **InfÃ¶r canonical repositories** â€” Varje bounded context fÃ¥r repositorygrÃ¤nssnitt med Postgres-implementation och transaktionsbunden optimistic concurrency.

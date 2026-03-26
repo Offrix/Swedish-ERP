@@ -129,3 +129,33 @@ test("Phase 2.4 runtime diagnostics clear map-only truth only for durable critic
     cleanupTempDirectory(temp.directory);
   }
 });
+
+test("Phase 2.4 platform exposes per-domain durability inventory for critical domains", () => {
+  const temp = createTempSqlitePath("swedish-erp-phase24-inventory");
+  const sqlitePlatform = createApiPlatform({
+    env: {},
+    runtimeMode: "test",
+    criticalDomainStateStoreKind: "sqlite",
+    criticalDomainStateStorePath: temp.filePath
+  });
+  const memoryPlatform = createApiPlatform({
+    env: {},
+    runtimeMode: "test",
+    criticalDomainStateStoreKind: "memory"
+  });
+
+  try {
+    const sqliteInventory = sqlitePlatform.listCriticalDomainDurability();
+    const memoryInventory = memoryPlatform.listCriticalDomainDurability();
+
+    assert.deepEqual(sqliteInventory.map((entry) => entry.domainKey), CRITICAL_DOMAIN_KEYS);
+    assert.deepEqual(memoryInventory.map((entry) => entry.domainKey), CRITICAL_DOMAIN_KEYS);
+    assert.equal(sqliteInventory.every((entry) => entry.durable === true), true);
+    assert.equal(memoryInventory.every((entry) => entry.truthMode === "in_memory_snapshot"), true);
+    assert.equal(sqliteInventory.every((entry) => typeof entry.snapshotHash === "string" && entry.snapshotHash.length > 0), true);
+  } finally {
+    sqlitePlatform.closeCriticalDomainStateStore();
+    memoryPlatform.closeCriticalDomainStateStore();
+    cleanupTempDirectory(temp.directory);
+  }
+});

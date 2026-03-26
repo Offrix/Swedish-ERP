@@ -815,6 +815,30 @@ export function createApiPlatform(options = {}) {
       value: (domainKey) => registeredDomains[domainKey] || null,
       enumerable: false
     },
+    getCriticalDomainDurability: {
+      value: (domainKey) =>
+        registeredDomains[domainKey] && typeof registeredDomains[domainKey].getCriticalDomainDurability === "function"
+          ? registeredDomains[domainKey].getCriticalDomainDurability()
+          : null,
+      enumerable: false
+    },
+    listCriticalDomainDurability: {
+      value: () =>
+        CRITICAL_DOMAIN_KEYS.map((domainKey) => {
+          const durability =
+            registeredDomains[domainKey] && typeof registeredDomains[domainKey].getCriticalDomainDurability === "function"
+              ? registeredDomains[domainKey].getCriticalDomainDurability()
+              : null;
+          return Object.freeze({
+            domainKey,
+            truthMode: durability?.truthMode || "map_only",
+            persistenceStoreKind: durability?.persistenceStoreKind || null,
+            snapshotHash: durability?.snapshotHash || null,
+            durable: durability?.truthMode === "durable_snapshot"
+          });
+        }),
+      enumerable: false
+    },
     getDomainRegistration: {
       value: (domainKey) => registrationsByKey[domainKey] || null,
       enumerable: false
