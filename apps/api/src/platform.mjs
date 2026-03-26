@@ -747,6 +747,9 @@ export function createApiPlatform(options = {}) {
     env,
     options
   });
+  const defaultFlatMergeCollisions = Object.freeze(
+    defaultRuntimeDiagnostics.findings.filter((finding) => finding.findingCode === "flat_merge_collision")
+  );
   const contractVersions = Object.freeze({
     eventEnvelopeVersion: EVENT_ENVELOPE_VERSION,
     auditEnvelopeVersion: AUDIT_EVENT_VERSION
@@ -782,6 +785,10 @@ export function createApiPlatform(options = {}) {
     },
     runtimeInvariantFindings: {
       value: defaultRuntimeDiagnostics.findings,
+      enumerable: false
+    },
+    runtimeFlatMergeCollisions: {
+      value: defaultFlatMergeCollisions,
       enumerable: false
     },
     runtimeModeProfile: {
@@ -845,6 +852,10 @@ export function createApiPlatform(options = {}) {
     },
     listRuntimeInvariantFindings: {
       value: () => defaultRuntimeDiagnostics.findings,
+      enumerable: false
+    },
+    listFlatMergeCollisions: {
+      value: () => defaultFlatMergeCollisions,
       enumerable: false
     },
     scanRuntimeInvariants: {
