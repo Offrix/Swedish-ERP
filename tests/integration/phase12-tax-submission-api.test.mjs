@@ -133,6 +133,21 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
       finalizedRecord.receipts.map((receipt) => receipt.receiptType),
       ["technical_ack", "business_ack", "final_ack"]
     );
+    const finalizedReceipts = await requestJson(
+      `${baseUrl}/v1/submissions/${finalizedSubmission.submissionId}/receipts?companyId=${DEMO_IDS.companyId}`,
+      {
+        token: adminToken
+      }
+    );
+    assert.equal(finalizedReceipts.items.length, 3);
+    const finalizedEvidencePack = await requestJson(
+      `${baseUrl}/v1/submissions/${finalizedSubmission.submissionId}/evidence-pack?companyId=${DEMO_IDS.companyId}`,
+      {
+        token: adminToken
+      }
+    );
+    assert.equal(finalizedEvidencePack.receiptRefs.length, 3);
+    assert.equal(finalizedEvidencePack.signatureRefs.length, 1);
 
     const queuedSubmission = await requestJson(`${baseUrl}/v1/submissions`, {
       method: "POST",

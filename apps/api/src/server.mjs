@@ -271,6 +271,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/submissions/:submissionId/sign",
               "/v1/submissions/:submissionId/submit",
               "/v1/submissions/:submissionId/receipts",
+              "/v1/submissions/:submissionId/evidence-pack",
               "/v1/submissions/:submissionId/retry",
               "/v1/submissions/action-queue",
               "/v1/submissions/action-queue/:queueItemId/resolve",
@@ -3638,6 +3639,25 @@ async function handleRequest({ req, res, platform, flags }) {
   }
 
   const submissionReceiptMatch = matchPath(path, "/v1/submissions/:submissionId/receipts");
+  if (submissionReceiptMatch && req.method === "GET") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listSubmissionReceipts({
+        companyId,
+        submissionId: submissionReceiptMatch.submissionId
+      })
+    });
+    return;
+  }
   if (submissionReceiptMatch && req.method === "POST") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
@@ -4614,6 +4634,29 @@ async function handleRequest({ req, res, platform, flags }) {
         bureauOrgId: requireText(body.bureauOrgId, "bureau_org_id_required", "bureauOrgId is required."),
         workItemId: workItemClaimMatch.workItemId,
         correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const submissionEvidencePackMatch = matchPath(path, "/v1/submissions/:submissionId/evidence-pack");
+  if (submissionEvidencePackMatch && req.method === "GET") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(
+      res,
+      200,
+      platform.getSubmissionEvidencePack({
+        companyId,
+        submissionId: submissionEvidencePackMatch.submissionId
       })
     );
     return;

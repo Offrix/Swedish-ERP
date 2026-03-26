@@ -95,6 +95,12 @@ export function createIntegrationEngine({
     getAuthoritySubmission(input) {
       return getAuthoritySubmission({ state }, input);
     },
+    listSubmissionReceipts(input) {
+      return listSubmissionReceipts({ state }, input);
+    },
+    getSubmissionEvidencePack(input) {
+      return getSubmissionEvidencePack({ state }, input);
+    },
     async submitAuthoritySubmission(input) {
       return submitAuthoritySubmission({ state, clock, getCorePlatform }, input);
     },
@@ -388,6 +394,77 @@ function getAuthoritySubmission({ state }, { companyId, submissionId } = {}) {
   return enrichSubmission(state, requireSubmission(state, companyId, submissionId));
 }
 
+function listSubmissionReceipts({ state }, { companyId, submissionId } = {}) {
+  const submission = requireSubmission(state, companyId, submissionId);
+  return getSubmissionReceipts(state, submission.submissionId).map(clone);
+}
+
+function getSubmissionEvidencePack({ state }, { companyId, submissionId } = {}) {
+  const submission = requireSubmission(state, companyId, submissionId);
+  const receipts = getSubmissionReceipts(state, submission.submissionId);
+  const queueItems = getSubmissionQueueItems(state, submission.submissionId);
+  return clone({
+    submissionEvidencePackId: submission.evidencePackId || `submission-evidence:${submission.submissionId}`,
+    submissionId: submission.submissionId,
+    companyId: submission.companyId,
+    submissionType: submission.submissionType,
+    sourceObjectType: submission.sourceObjectType,
+    sourceObjectId: submission.sourceObjectId,
+    sourceObjectVersion: submission.payloadVersion,
+    payloadHash: submission.payloadHash,
+    payloadSchemaCode: submission.payloadVersion,
+    correlationId: submission.correlationId,
+    signingRequirementCode: submission.signedState,
+    signerIdentity: submission.signedByActorId,
+    signatureRefs: submission.signatureReference ? [submission.signatureReference] : [],
+    submittedArtifactRefs: [
+      {
+        artifactType: "submission_payload",
+        payloadHash: submission.payloadHash,
+        payloadVersion: submission.payloadVersion
+      }
+    ],
+    receiptRefs: receipts.map((receipt) => ({
+      receiptId: receipt.receiptId,
+      receiptType: receipt.receiptType,
+      providerStatus: receipt.providerStatus,
+      rawReference: receipt.rawReference,
+      rawPayloadHash: hashObject({
+        receiptType: receipt.receiptType,
+        providerStatus: receipt.providerStatus,
+        rawReference: receipt.rawReference,
+        messageText: receipt.messageText,
+        receivedAt: receipt.receivedAt
+      }),
+      receivedAt: receipt.receivedAt,
+      isFinal: receipt.isFinal
+    })),
+    operatorActions: queueItems.map((queueItem) => ({
+      queueItemId: queueItem.queueItemId,
+      actionType: queueItem.actionType,
+      status: queueItem.status,
+      resolutionCode: queueItem.resolutionCode,
+      ownerQueue: queueItem.ownerQueue,
+      ownerUserId: queueItem.ownerUserId,
+      updatedAt: queueItem.updatedAt
+    })),
+    auditRefs: [
+      {
+        submissionId: submission.submissionId,
+        rootSubmissionId: submission.rootSubmissionId,
+        previousSubmissionId: submission.previousSubmissionId,
+        correctionOfSubmissionId: submission.correctionOfSubmissionId,
+        transportJobId: submission.transportJobId,
+        createdByActorId: submission.createdByActorId,
+        signedByActorId: submission.signedByActorId,
+        correlationId: submission.correlationId,
+        createdAt: submission.createdAt,
+        updatedAt: submission.updatedAt
+      }
+    ]
+  });
+}
+
 async function submitAuthoritySubmission(
   { state, clock, getCorePlatform },
   { companyId, submissionId, actorId, mode = "test", simulatedTransportOutcome = "technical_ack", providerReference = null, message = null } = {}
@@ -669,16 +746,8 @@ function resolveSubmissionQueueItem(
 function enrichSubmission(state, submission) {
   return clone({
     ...submission,
-    receipts: (state.receiptIdsBySubmission.get(submission.submissionId) || [])
-      .map((receiptId) => state.receipts.get(receiptId))
-      .filter(Boolean)
-      .sort((left, right) => left.sequenceNo - right.sequenceNo)
-      .map(clone),
-    actionQueueItems: (state.queueItemIdsBySubmission.get(submission.submissionId) || [])
-      .map((queueItemId) => state.queueItems.get(queueItemId))
-      .filter(Boolean)
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-      .map(clone)
+    receipts: getSubmissionReceipts(state, submission.submissionId).map(clone),
+    actionQueueItems: getSubmissionQueueItems(state, submission.submissionId).map(clone)
   });
 }
 
@@ -760,6 +829,20 @@ function findMatchingReceipt(state, submissionId, { receiptType, providerStatus 
         receipt.messageText === normalizedMessage &&
         receipt.isFinal === normalizedFinal
     );
+}
+
+function getSubmissionReceipts(state, submissionId) {
+  return (state.receiptIdsBySubmission.get(submissionId) || [])
+    .map((receiptId) => state.receipts.get(receiptId))
+    .filter(Boolean)
+    .sort((left, right) => left.sequenceNo - right.sequenceNo);
+}
+
+function getSubmissionQueueItems(state, submissionId) {
+  return (state.queueItemIdsBySubmission.get(submissionId) || [])
+    .map((queueItemId) => state.queueItems.get(queueItemId))
+    .filter(Boolean)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
 function hasSubmissionTransportReceipt(state, submissionId) {

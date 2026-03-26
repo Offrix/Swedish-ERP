@@ -43,6 +43,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/backoffice/submissions/monitor",
   "/v1/backoffice/review-center/sla-scan",
   "/v1/backoffice/incidents/:incidentId/status",
+  "/v1/submissions/:submissionId/evidence-pack",
   "/v1/migration/acceptance-records",
   "/v1/migration/cutover-plans/:cutoverPlanId/signoffs",
   "/v1/migration/cutover-plans/:cutoverPlanId/checklist/:itemCode"

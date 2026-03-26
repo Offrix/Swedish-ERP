@@ -135,6 +135,22 @@ test("Phase 12.2 end-to-end flow exposes declaration and submission routes and d
       finalized.receipts.map((receipt) => receipt.receiptType),
       ["technical_ack", "business_ack", "final_ack"]
     );
+    const receiptListing = await requestJson(
+      baseUrl,
+      `/v1/submissions/${retried.submission.submissionId}/receipts?companyId=${DEMO_IDS.companyId}`,
+      {
+        token: adminToken
+      }
+    );
+    assert.equal(receiptListing.items.length, 3);
+    const evidencePack = await requestJson(
+      baseUrl,
+      `/v1/submissions/${retried.submission.submissionId}/evidence-pack?companyId=${DEMO_IDS.companyId}`,
+      {
+        token: adminToken
+      }
+    );
+    assert.equal(evidencePack.receiptRefs.length, 3);
   } finally {
     await stopServer(server);
   }

@@ -160,6 +160,19 @@ test("Phase 12.2 submission engine separates accepted from finalized and dedupli
   });
   assert.equal(submission.status, "finalized");
   assert.equal(submission.receipts.length, 3);
+  assert.equal(
+    integrationPlatform.listSubmissionReceipts({
+      companyId: "company-1",
+      submissionId: submission.submissionId
+    }).length,
+    3
+  );
+  const evidencePack = integrationPlatform.getSubmissionEvidencePack({
+    companyId: "company-1",
+    submissionId: submission.submissionId
+  });
+  assert.equal(evidencePack.receiptRefs.length, 3);
+  assert.equal(evidencePack.signatureRefs.length, 1);
 });
 
 test("Phase 12.2 submission engine routes transport failures into action queue and blocks forbidden retry", async () => {
