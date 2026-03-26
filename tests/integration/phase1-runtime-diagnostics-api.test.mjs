@@ -33,6 +33,22 @@ test("phase 1.4 runtime endpoints expose startup diagnostics and bootstrap valid
       invariantsPayload.findings.some((finding) => finding.findingCode === "flat_merge_collision"),
       true
     );
+    assert.equal(
+      invariantsPayload.findings.some((finding) => finding.findingCode === "map_only_critical_truth"),
+      true
+    );
+    assert.equal(
+      invariantsPayload.findings.some((finding) => finding.findingCode === "stub_provider_present"),
+      true
+    );
+    assert.equal(
+      invariantsPayload.findings.some((finding) => finding.findingCode === "simulated_receipt_runtime"),
+      true
+    );
+    assert.equal(
+      invariantsPayload.findings.some((finding) => finding.findingCode === "forbidden_route_family_present"),
+      true
+    );
 
     const validateResponse = await fetch(`${baseUrl}/v1/system/bootstrap/validate`, {
       method: "POST",

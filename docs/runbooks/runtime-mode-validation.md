@@ -24,6 +24,10 @@ Ensure every starter chooses an explicit runtime mode and that non-live modes ne
    - missing persistent runtime store
    - forbidden bootstrap or scenario seeding
    - flat platform merge collisions
+   - Map-only critical truth in regulated domains
+   - stub providers
+   - simulated filing or receipt runtime
+   - forbidden sandbox route families
 8. Runtime diagnostics must be observable through:
    - `GET /v1/system/runtime-mode`
    - `GET /v1/system/invariants`
@@ -51,3 +55,4 @@ Then run the full verification suite before the next roadmap subphase.
 - A starter silently falls back to demo semantics.
 - Protected boot proceeds despite blocking runtime invariant findings.
 - Runtime diagnostics endpoint omits current findings or startupAllowed state.
+- Honesty scanner misses Map-only truth, stub providers, simulated submission runtime or forbidden sandbox route families.

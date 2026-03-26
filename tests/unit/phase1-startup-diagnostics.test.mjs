@@ -12,8 +12,14 @@ test("phase 1.4 runtime diagnostics surface flat merge collisions as warnings in
 
   const findings = platform.listRuntimeInvariantFindings();
   const flatMergeFinding = findings.find((finding) => finding.findingCode === "flat_merge_collision");
+  const mapTruthFinding = findings.find((finding) => finding.findingCode === "map_only_critical_truth");
+  const stubProviderFinding = findings.find((finding) => finding.findingCode === "stub_provider_present");
+  const simulatedRuntimeFinding = findings.find((finding) => finding.findingCode === "simulated_receipt_runtime");
 
   assert.ok(flatMergeFinding);
+  assert.ok(mapTruthFinding);
+  assert.ok(stubProviderFinding);
+  assert.ok(simulatedRuntimeFinding);
   assert.equal(flatMergeFinding.severityCode, "warning");
   assert.equal(platform.getRuntimeStartupDiagnostics().startupAllowed, true);
 });

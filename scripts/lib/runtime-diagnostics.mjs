@@ -1,5 +1,81 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+
 const PROTECTED_RUNTIME_MODES = new Set(["pilot_parallel", "production"]);
 const PERSISTENT_STORE_KINDS = new Set(["postgres"]);
+const WORKSPACE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const SOURCE_CACHE = new Map();
+const MAP_ONLY_CRITICAL_TARGETS = Object.freeze([
+  Object.freeze({ domainKey: "orgAuth", relativePath: "packages/domain-org-auth/src/index.mjs" }),
+  Object.freeze({ domainKey: "ledger", relativePath: "packages/domain-ledger/src/index.mjs" }),
+  Object.freeze({ domainKey: "vat", relativePath: "packages/domain-vat/src/index.mjs" }),
+  Object.freeze({ domainKey: "ar", relativePath: "packages/domain-ar/src/index.mjs" }),
+  Object.freeze({ domainKey: "ap", relativePath: "packages/domain-ap/src/index.mjs" }),
+  Object.freeze({ domainKey: "payroll", relativePath: "packages/domain-payroll/src/index.mjs" }),
+  Object.freeze({ domainKey: "taxAccount", relativePath: "packages/domain-tax-account/src/engine.mjs" }),
+  Object.freeze({ domainKey: "reviewCenter", relativePath: "packages/domain-review-center/src/engine.mjs" }),
+  Object.freeze({ domainKey: "projects", relativePath: "packages/domain-projects/src/index.mjs" }),
+  Object.freeze({ domainKey: "integrations", relativePath: "packages/domain-integrations/src/index.mjs" })
+]);
+const STUB_PROVIDER_TARGETS = Object.freeze([
+  Object.freeze({
+    domainKey: "orgAuth",
+    relativePath: "packages/domain-org-auth/src/index.mjs",
+    pattern: /providerMode:\s*"stub"|getBankIdCompletionTokenForTesting/gu,
+    summary: "BankID provider remains stubbed.",
+    remediation: "Replace stubbed BankID behavior with real provider integration before protected boot."
+  }),
+  Object.freeze({
+    domainKey: "documents",
+    relativePath: "packages/document-engine/src/index.mjs",
+    pattern: /textract-stub-|textract_[^"]*_stub/gu,
+    summary: "OCR/document classification still relies on stub provider outputs.",
+    remediation: "Replace stub OCR providers with real OCR provider adapters before protected boot."
+  })
+]);
+const SIMULATED_RUNTIME_TARGETS = Object.freeze([
+  Object.freeze({
+    domainKey: "integrations",
+    relativePath: "packages/domain-integrations/src/index.mjs",
+    pattern: /simulatedTransportOutcome|simulatedReceiptType|technical_ack|technical_nack/gu,
+    summary: "Submission runtime still exposes simulated transport or receipt outcomes.",
+    remediation: "Replace simulated submission controls with provider-backed receipts before protected boot."
+  }),
+  Object.freeze({
+    domainKey: "api",
+    relativePath: "apps/api/src/server.mjs",
+    pattern: /simulatedTransportOutcome|simulatedReceiptType|simulatedOutcome/gu,
+    summary: "API routes still accept simulated filing and submission outcomes.",
+    remediation: "Remove or hard-gate simulated submission inputs before protected boot."
+  }),
+  Object.freeze({
+    domainKey: "worker",
+    relativePath: "apps/worker/src/worker.mjs",
+    pattern: /simulatedTransportOutcome|simulatedReceiptType/gu,
+    summary: "Worker handlers still default to simulated submission outcomes.",
+    remediation: "Replace simulated worker payload defaults with provider-backed runtime behavior."
+  })
+]);
+const FORBIDDEN_ROUTE_TARGETS = Object.freeze([
+  Object.freeze({
+    domainKey: "phase13Routes",
+    relativePath: "apps/api/src/phase13-routes.mjs",
+    pattern: /\/v1\/public\/sandbox\/catalog/gu,
+    routeFamilyCode: "public_sandbox_catalog",
+    summary: "Sandbox route family is still present in the API surface.",
+    remediation: "Move sandbox-only public routes behind trial/sandbox-only exposure before protected boot."
+  }),
+  Object.freeze({
+    domainKey: "apiMetadata",
+    relativePath: "apps/api/src/server.mjs",
+    pattern: /\/v1\/public\/sandbox\/catalog/gu,
+    routeFamilyCode: "public_sandbox_catalog",
+    summary: "API root metadata still advertises sandbox route families.",
+    remediation: "Hide sandbox-only route families from protected runtime metadata."
+  })
+]);
 
 function freeze(value) {
   return Object.freeze(value);
@@ -15,6 +91,24 @@ function normalizeText(value) {
 
 function toArray(value) {
   return Array.isArray(value) ? [...value] : [];
+}
+
+function readWorkspaceSource(relativePath, workspaceRoot = WORKSPACE_ROOT) {
+  const sourcePath = path.join(workspaceRoot, relativePath);
+  if (SOURCE_CACHE.has(sourcePath)) {
+    return SOURCE_CACHE.get(sourcePath);
+  }
+
+  const source = fs.existsSync(sourcePath) ? fs.readFileSync(sourcePath, "utf8") : null;
+  SOURCE_CACHE.set(sourcePath, source);
+  return source;
+}
+
+function countMatches(source, pattern) {
+  if (typeof source !== "string" || !(pattern instanceof RegExp)) {
+    return 0;
+  }
+  return [...source.matchAll(pattern)].length;
 }
 
 function resolveVersionRef({ versionRef = null, env = process.env } = {}) {
@@ -54,6 +148,103 @@ function createRuntimeInvariantFinding({
     detail,
     remediation
   });
+}
+
+function collectMapOnlyTruthFindings({ protectedMode, startupSurface, workspaceRoot }) {
+  const findings = [];
+
+  for (const target of MAP_ONLY_CRITICAL_TARGETS) {
+    const source = readWorkspaceSource(target.relativePath, workspaceRoot);
+    const mapCount = countMatches(source, /new Map\(/gu);
+    if (mapCount === 0) {
+      continue;
+    }
+
+    findings.push(
+      createRuntimeInvariantFinding({
+        findingCode: "map_only_critical_truth",
+        severityCode: protectedMode ? "blocking" : "warning",
+        startupSurface,
+        categoryCode: "source_of_truth",
+        domainKey: target.domainKey,
+        summary: `${target.domainKey} still keeps critical truth in process memory.`,
+        detail: `${target.relativePath} contains ${mapCount} in-memory Map registries that still act as runtime truth.`,
+        remediation: `Move ${target.domainKey} to durable repositories before protected boot.`
+      })
+    );
+  }
+
+  return findings;
+}
+
+function collectPatternFindings({
+  protectedMode,
+  startupSurface,
+  workspaceRoot,
+  targets,
+  findingCode,
+  categoryCode
+}) {
+  const findings = [];
+
+  for (const target of targets) {
+    const source = readWorkspaceSource(target.relativePath, workspaceRoot);
+    const matchCount = countMatches(source, target.pattern);
+    if (matchCount === 0) {
+      continue;
+    }
+
+    findings.push(
+      createRuntimeInvariantFinding({
+        findingCode,
+        severityCode: protectedMode ? "blocking" : "warning",
+        startupSurface,
+        categoryCode,
+        domainKey: target.domainKey,
+        summary: target.summary,
+        detail:
+          target.routeFamilyCode
+            ? `${target.relativePath} still exposes forbidden route family ${target.routeFamilyCode}.`
+            : `${target.relativePath} matched ${matchCount} honesty-scan markers.`,
+        remediation: target.remediation
+      })
+    );
+  }
+
+  return findings;
+}
+
+function collectDemoDataFindings({ protectedMode, startupSurface, domains }) {
+  if (!protectedMode) {
+    return [];
+  }
+
+  const orgAuth = domains?.orgAuth;
+  if (!orgAuth || typeof orgAuth.getCompanyProfile !== "function") {
+    return [];
+  }
+
+  try {
+    const companyProfile = orgAuth.getCompanyProfile({ companyId: DEMO_IDS.companyId });
+    if (!companyProfile || companyProfile.companyId !== DEMO_IDS.companyId) {
+      return [];
+    }
+
+    return [
+      createRuntimeInvariantFinding({
+        findingCode: "demo_data_present_in_protected_mode",
+        severityCode: "blocking",
+        startupSurface,
+        categoryCode: "demo_data",
+        domainKey: "orgAuth",
+        summary: "Protected runtime still contains demo tenant data.",
+        detail: `Demo company ${DEMO_IDS.companyId} is present in runtime state.`,
+        remediation: "Remove demo seed data before protected boot."
+      })
+    ];
+  } catch {
+    return [];
+  }
 }
 
 function detectFlatMergeCollisions({ domainRegistry = [], domains = {}, mergeOrder = [] } = {}) {
@@ -140,7 +331,8 @@ export function scanRuntimeInvariants({
   activeStoreKind = "memory",
   env = process.env,
   versionRef = null,
-  disabledAdapters = []
+  disabledAdapters = [],
+  workspaceRoot = WORKSPACE_ROOT
 } = {}) {
   const findings = [];
   const protectedMode = PROTECTED_RUNTIME_MODES.has(runtimeModeProfile?.environmentMode);
@@ -209,6 +401,51 @@ export function scanRuntimeInvariants({
       })
     );
   }
+
+  findings.push(
+    ...collectMapOnlyTruthFindings({
+      protectedMode,
+      startupSurface,
+      workspaceRoot
+    })
+  );
+  findings.push(
+    ...collectPatternFindings({
+      protectedMode,
+      startupSurface,
+      workspaceRoot,
+      targets: STUB_PROVIDER_TARGETS,
+      findingCode: "stub_provider_present",
+      categoryCode: "provider_reality"
+    })
+  );
+  findings.push(
+    ...collectPatternFindings({
+      protectedMode,
+      startupSurface,
+      workspaceRoot,
+      targets: SIMULATED_RUNTIME_TARGETS,
+      findingCode: "simulated_receipt_runtime",
+      categoryCode: "receipt_reality"
+    })
+  );
+  findings.push(
+    ...collectPatternFindings({
+      protectedMode,
+      startupSurface,
+      workspaceRoot,
+      targets: FORBIDDEN_ROUTE_TARGETS,
+      findingCode: "forbidden_route_family_present",
+      categoryCode: "route_surface"
+    })
+  );
+  findings.push(
+    ...collectDemoDataFindings({
+      protectedMode,
+      startupSurface,
+      domains
+    })
+  );
 
   const blockingFindings = freeze(findings.filter((finding) => finding.blocking));
   const warningFindings = freeze(findings.filter((finding) => !finding.blocking));
