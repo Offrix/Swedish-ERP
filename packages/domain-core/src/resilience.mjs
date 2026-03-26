@@ -705,15 +705,18 @@ export function createResilienceModule({
     sessionToken,
     companyId,
     actorId = null,
-    entityType = null
+    entityType = null,
+    entityId = null
   } = {}) {
     authorize(sessionToken, companyId, "company.read");
     const resolvedActorId = optionalText(actorId);
     const resolvedEntityType = optionalText(entityType);
+    const resolvedEntityId = optionalText(entityId);
     return [...state.auditCorrelations.values()]
       .filter((record) => record.companyId === text(companyId, "company_id_required"))
       .filter((record) => (resolvedActorId ? record.actorIds.includes(resolvedActorId) : true))
       .filter((record) => (resolvedEntityType ? record.relatedEntities.some((entry) => entry.entityType === resolvedEntityType) : true))
+      .filter((record) => (resolvedEntityId ? record.relatedEntities.some((entry) => entry.entityId === resolvedEntityId) : true))
       .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt))
       .map(clone);
   }

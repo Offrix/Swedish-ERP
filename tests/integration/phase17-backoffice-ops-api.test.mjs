@@ -541,6 +541,19 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
       }
     });
     assert.equal(closedIncident.incident.status, "closed");
+
+    const auditCorrelations = await requestJson(baseUrl, `/v1/backoffice/audit-correlations?companyId=${DEMO_IDS.companyId}&entityType=runtime_incident&entityId=${incident.incident.incidentId}`, {
+      token: adminToken
+    });
+    assert.equal(auditCorrelations.items.length >= 1, true);
+    const incidentCorrelation = auditCorrelations.items[0];
+    assert.equal(incidentCorrelation.relatedEntities.some((entry) => entry.entityType === "runtime_incident" && entry.entityId === incident.incident.incidentId), true);
+
+    const auditCorrelation = await requestJson(baseUrl, `/v1/backoffice/audit-correlations/${incidentCorrelation.correlationId}?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(auditCorrelation.correlation.correlationId, incidentCorrelation.correlationId);
+    assert.equal(auditCorrelation.correlation.relatedEntities.some((entry) => entry.entityType === "runtime_incident"), true);
   } finally {
     await stopServer(server);
   }

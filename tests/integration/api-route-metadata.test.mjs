@@ -38,6 +38,8 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/activity/object/:objectType/:objectId",
   "/v1/backoffice/support-cases/:supportCaseId/close",
   "/v1/backoffice/support-cases/:supportCaseId/approve-actions",
+  "/v1/backoffice/audit-correlations",
+  "/v1/backoffice/audit-correlations/:correlationId",
   "/v1/backoffice/jobs",
   "/v1/backoffice/dead-letters/:deadLetterId/triage",
   "/v1/backoffice/submissions/monitor",

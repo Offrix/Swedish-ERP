@@ -1788,6 +1788,44 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/backoffice/audit-correlations") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "audit_correlation", objectId: companyId, scopeCode: "audit_event" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      query: {
+        actorId: optionalText(url.searchParams.get("actorId")),
+        entityType: optionalText(url.searchParams.get("entityType")),
+        entityId: optionalText(url.searchParams.get("entityId"))
+      },
+      items: platform.listRuntimeAuditCorrelations({
+        sessionToken,
+        companyId,
+        actorId: optionalText(url.searchParams.get("actorId")),
+        entityType: optionalText(url.searchParams.get("entityType")),
+        entityId: optionalText(url.searchParams.get("entityId"))
+      })
+    });
+    return true;
+  }
+
+  const auditCorrelationMatch = matchPath(path, "/v1/backoffice/audit-correlations/:correlationId");
+  if (req.method === "GET" && auditCorrelationMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "audit_correlation", objectId: auditCorrelationMatch.correlationId, scopeCode: "audit_event" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      correlation: platform.getRuntimeAuditCorrelation({
+        sessionToken,
+        companyId,
+        correlationId: auditCorrelationMatch.correlationId
+      })
+    });
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/backoffice/impersonations") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");

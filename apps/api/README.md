@@ -519,6 +519,8 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/backoffice/support-cases/:supportCaseId/close`
 - `POST /v1/backoffice/support-cases/:supportCaseId/diagnostics`
 - `GET /v1/backoffice/audit-events?companyId=...`
+- `GET /v1/backoffice/audit-correlations?companyId=...`
+- `GET /v1/backoffice/audit-correlations/:correlationId?companyId=...`
 - `GET /v1/backoffice/jobs?companyId=...`
 - `POST /v1/backoffice/jobs/:jobId/replay`
 - `GET /v1/backoffice/dead-letters?companyId=...`

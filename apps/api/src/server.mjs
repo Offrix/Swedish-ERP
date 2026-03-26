@@ -583,6 +583,8 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/backoffice/support-cases/:supportCaseId/approve-actions",
               "/v1/backoffice/support-cases/:supportCaseId/diagnostics",
               "/v1/backoffice/audit-events",
+              "/v1/backoffice/audit-correlations",
+              "/v1/backoffice/audit-correlations/:correlationId",
               "/v1/backoffice/jobs",
               "/v1/backoffice/jobs/:jobId/replay",
               "/v1/backoffice/dead-letters",
