@@ -290,7 +290,7 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     );
     assert.equal(approverNotificationStillUnread.status, "delivered");
 
-    const acknowledged = await requestJson(baseUrl, `/v1/notifications/${approverNotification.notificationId}/ack`, {
+    const acknowledged = await requestJson(baseUrl, `/v1/notifications/${approverNotification.notificationId}/acknowledge`, {
       method: "POST",
       token: approverToken,
       expectedStatus: 200,
@@ -333,6 +333,13 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     );
     assert.equal(activity.items.length, 1);
     assert.equal(activity.items[0].summary, "Review item created for API integration test.");
+    const activityObjectRoute = await requestJson(
+      baseUrl,
+      `/v1/activity/object/review_item/review_api_1?companyId=${DEMO_IDS.companyId}`,
+      { token: adminToken }
+    );
+    assert.equal(activityObjectRoute.items.length, 1);
+    assert.equal(activityObjectRoute.items[0].summary, "Review item created for API integration test.");
 
     const pagedActivityFirst = await requestJson(
       baseUrl,

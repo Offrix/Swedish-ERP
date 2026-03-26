@@ -109,13 +109,12 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
     });
     assert.equal(adminDecideForbidden.error, "review_center_assignment_required");
 
-    const approved = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/decide`, {
+    const approved = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/approve`, {
       method: "POST",
       token: approverToken,
       expectedStatus: 200,
       body: {
         companyId: DEMO_IDS.companyId,
-        decisionCode: "approve",
         reasonCode: "classification_confirmed",
         note: "Approved in API integration test.",
         decisionPayload: {

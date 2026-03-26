@@ -201,10 +201,30 @@ test("Phase 11.2 API scopes bureau portfolio and tracks requests, approvals, com
     });
     assert.equal(comment.objectType, "bureau_client_request");
 
-    const workItems = await requestJson(`${baseUrl}/v1/bureau/work-items?bureauOrgId=${DEMO_IDS.companyId}`, {
+    const workItems = await requestJson(`${baseUrl}/v1/work-items?bureauOrgId=${DEMO_IDS.companyId}`, {
       token: consultantToken
     });
-    assert.equal(workItems.items.some((item) => item.sourceType === "core_comment"), true);
+    const commentWorkItem = workItems.items.find((item) => item.sourceType === "core_comment");
+    assert.equal(Boolean(commentWorkItem), true);
+    const claimedWorkItem = await requestJson(`${baseUrl}/v1/work-items/${commentWorkItem.workItemId}/claim`, {
+      method: "POST",
+      token: consultantToken,
+      body: {
+        bureauOrgId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(claimedWorkItem.status, "acknowledged");
+    const resolvedWorkItem = await requestJson(`${baseUrl}/v1/work-items/${commentWorkItem.workItemId}/resolve`, {
+      method: "POST",
+      token: consultantToken,
+      body: {
+        bureauOrgId: DEMO_IDS.companyId,
+        resolutionCode: "client_follow_up_done",
+        completionNote: "Follow-up completed."
+      }
+    });
+    assert.equal(resolvedWorkItem.status, "resolved");
+    assert.equal(resolvedWorkItem.resolutionCode, "client_follow_up_done");
 
     const reminders = await requestJson(`${baseUrl}/v1/bureau/mass-actions`, {
       method: "POST",

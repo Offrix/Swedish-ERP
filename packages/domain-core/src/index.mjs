@@ -373,6 +373,8 @@ export function createCoreEngine({
     recordApprovalResponse,
     runPortfolioMassAction,
     listWorkItems,
+    claimWorkItem,
+    resolveWorkItem,
       createComment,
       listComments,
       instantiateCloseChecklist: closeModule.instantiateCloseChecklist,
@@ -829,6 +831,87 @@ export function createCoreEngine({
       .map(clone);
   }
 
+  function claimWorkItem({
+    sessionToken,
+    bureauOrgId,
+    workItemId,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, bureauOrgId, "company.read");
+    const workItem = requireScopedWorkItem(bureauOrgId, workItemId);
+    assertVisible(principal, workItem.portfolioId);
+    if (["resolved", "closed"].includes(workItem.status)) {
+      throw error(409, "work_item_not_claimable", "Resolved work items cannot be claimed.");
+    }
+    const previousStatus = workItem.status;
+    workItem.ownerCompanyUserId = principal.companyUserId;
+    workItem.claimedAt = now();
+    workItem.claimedByCompanyUserId = principal.companyUserId;
+    if (workItem.status !== "acknowledged") {
+      workItem.status = "acknowledged";
+      workItem.statusHistory.push({
+        fromStatus: previousStatus,
+        toStatus: workItem.status,
+        actorId: principal.userId,
+        reasonCode: "claimed",
+        changedAt: workItem.claimedAt
+      });
+    }
+    workItem.updatedAt = workItem.claimedAt;
+    audit({
+      companyId: bureauOrgId,
+      actorId: principal.userId,
+      correlationId,
+      action: "core.work_item.claimed",
+      entityType: "core_work_item",
+      entityId: workItem.workItemId,
+      explanation: `Claimed work item ${workItem.workItemId}.`
+    });
+    return clone(workItem);
+  }
+
+  function resolveWorkItem({
+    sessionToken,
+    bureauOrgId,
+    workItemId,
+    resolutionCode,
+    completionNote = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, bureauOrgId, "company.read");
+    const workItem = requireScopedWorkItem(bureauOrgId, workItemId);
+    assertVisible(principal, workItem.portfolioId);
+    if (workItem.status === "closed") {
+      throw error(409, "work_item_already_closed", "Closed work items cannot be resolved again.");
+    }
+    if (workItem.status !== "resolved") {
+      const resolvedAt = now();
+      workItem.statusHistory.push({
+        fromStatus: workItem.status,
+        toStatus: "resolved",
+        actorId: principal.userId,
+        reasonCode: text(resolutionCode, "work_item_resolution_code_required"),
+        changedAt: resolvedAt
+      });
+      workItem.status = "resolved";
+      workItem.resolutionCode = text(resolutionCode, "work_item_resolution_code_required");
+      workItem.completionNote = norm(completionNote);
+      workItem.resolvedAt = resolvedAt;
+      workItem.resolvedByCompanyUserId = principal.companyUserId;
+      workItem.updatedAt = resolvedAt;
+      audit({
+        companyId: bureauOrgId,
+        actorId: principal.userId,
+        correlationId,
+        action: "core.work_item.resolved",
+        entityType: "core_work_item",
+        entityId: workItem.workItemId,
+        explanation: `Resolved work item ${workItem.workItemId} with ${workItem.resolutionCode}.`
+      });
+    }
+    return clone(workItem);
+  }
+
   function createComment({ sessionToken, bureauOrgId, objectType, objectId, visibility = "internal", body, mentionCompanyUserIds = [], createAssignment = false, correlationId = crypto.randomUUID() } = {}) {
     const principal = authorize(sessionToken, bureauOrgId, "company.read");
     const portfolioId = resolvePortfolioId(objectType, objectId);
@@ -944,6 +1027,14 @@ export function createCoreEngine({
     workItem.status = nextStatus;
     workItem.updatedAt = now();
     workItem.statusHistory.push({ fromStatus: previousStatus, toStatus: nextStatus, actorId, reasonCode, changedAt: now() });
+  }
+
+  function requireScopedWorkItem(bureauOrgId, workItemId) {
+    const workItem = state.workItems.get(text(workItemId, "work_item_id_required"));
+    if (!workItem || workItem.bureauOrgId !== bureauOrgId) {
+      throw error(404, "work_item_not_found", "Work item was not found.");
+    }
+    return workItem;
   }
 
   function deriveDeadline({ clientCompanyId, blockerScope, targetDate, deadlineAt, purpose }) {

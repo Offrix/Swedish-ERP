@@ -153,13 +153,18 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/notifications/:notificationId",
               "/v1/notifications/:notificationId/read",
               "/v1/notifications/:notificationId/ack",
+              "/v1/notifications/:notificationId/acknowledge",
               "/v1/notifications/:notificationId/snooze",
               "/v1/backoffice/notifications/:notificationId/retry-delivery",
               "/v1/activity",
+              "/v1/activity/object/:objectType/:objectId",
               "/v1/review-center/queues",
               "/v1/review-center/items",
               "/v1/review-center/items/:reviewItemId",
               "/v1/review-center/items/:reviewItemId/claim",
+              "/v1/review-center/items/:reviewItemId/approve",
+              "/v1/review-center/items/:reviewItemId/reject",
+              "/v1/review-center/items/:reviewItemId/escalate",
               "/v1/review-center/items/:reviewItemId/decide",
               "/v1/documents/:documentId/classification-cases",
               "/v1/documents/:documentId/classification-cases/:classificationCaseId",
@@ -228,6 +233,9 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/bureau/approval-packages/:approvalPackageId/respond",
               "/v1/bureau/mass-actions",
               "/v1/bureau/work-items",
+              "/v1/work-items",
+              "/v1/work-items/:workItemId/claim",
+              "/v1/work-items/:workItemId/resolve",
               "/v1/close/workbench",
               "/v1/close/workbench/:checklistId",
               "/v1/close/checklists",
@@ -4523,6 +4531,58 @@ async function handleRequest({ req, res, platform, flags }) {
         projectId: url.searchParams.get("projectId") || null
       })
     });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/work-items") {
+    const bureauOrgId = requireText(
+      url.searchParams.get("bureauOrgId"),
+      "bureau_org_id_required",
+      "bureauOrgId query parameter is required."
+    );
+    writeJson(res, 200, {
+      items: platform.listWorkItems({
+        sessionToken: readSessionToken(req),
+        bureauOrgId,
+        clientCompanyId: url.searchParams.get("clientCompanyId"),
+        ownerCompanyUserId: url.searchParams.get("ownerCompanyUserId"),
+        status: url.searchParams.get("status")
+      })
+    });
+    return;
+  }
+
+  const workItemClaimMatch = matchPath(path, "/v1/work-items/:workItemId/claim");
+  if (workItemClaimMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      platform.claimWorkItem({
+        sessionToken: readSessionToken(req, body),
+        bureauOrgId: requireText(body.bureauOrgId, "bureau_org_id_required", "bureauOrgId is required."),
+        workItemId: workItemClaimMatch.workItemId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const workItemResolveMatch = matchPath(path, "/v1/work-items/:workItemId/resolve");
+  if (workItemResolveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      platform.resolveWorkItem({
+        sessionToken: readSessionToken(req, body),
+        bureauOrgId: requireText(body.bureauOrgId, "bureau_org_id_required", "bureauOrgId is required."),
+        workItemId: workItemResolveMatch.workItemId,
+        resolutionCode: body.resolutionCode,
+        completionNote: body.completionNote || null,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
     return;
   }
 

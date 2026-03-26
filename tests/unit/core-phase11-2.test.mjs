@@ -178,7 +178,23 @@ test("Phase 11.2 core enforces bureau scope, derives deadlines and tracks reques
     sessionToken: consultantToken,
     bureauOrgId: DEMO_IDS.companyId
   });
-  assert.equal(workItems.some((item) => item.sourceType === "core_comment"), true);
+  const commentWorkItem = workItems.find((item) => item.sourceType === "core_comment");
+  assert.equal(Boolean(commentWorkItem), true);
+  const claimedWorkItem = core.claimWorkItem({
+    sessionToken: consultantToken,
+    bureauOrgId: DEMO_IDS.companyId,
+    workItemId: commentWorkItem.workItemId
+  });
+  assert.equal(claimedWorkItem.status, "acknowledged");
+  const resolvedWorkItem = core.resolveWorkItem({
+    sessionToken: consultantToken,
+    bureauOrgId: DEMO_IDS.companyId,
+    workItemId: commentWorkItem.workItemId,
+    resolutionCode: "client_follow_up_done",
+    completionNote: "Follow-up completed."
+  });
+  assert.equal(resolvedWorkItem.status, "resolved");
+  assert.equal(resolvedWorkItem.resolutionCode, "client_follow_up_done");
 
   const recomputedPortfolio = core.runPortfolioStatusRecomputeJob({
     bureauOrgId: DEMO_IDS.companyId

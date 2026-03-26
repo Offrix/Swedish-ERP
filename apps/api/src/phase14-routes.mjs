@@ -2667,6 +2667,21 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  const notificationAcknowledgeMatch = matchPath(path, "/v1/notifications/:notificationId/acknowledge");
+  if (req.method === "POST" && notificationAcknowledgeMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification", objectId: notificationAcknowledgeMatch.notificationId, scopeCode: "notifications" });
+    assertNotificationReadAccess({ platform, principal, companyId, notificationId: notificationAcknowledgeMatch.notificationId });
+    writeJson(res, 200, platform.acknowledgeNotification({
+      companyId,
+      notificationId: notificationAcknowledgeMatch.notificationId,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
   const notificationRetryMatch = matchPath(path, "/v1/backoffice/notifications/:notificationId/retry-delivery");
   if (req.method === "POST" && notificationRetryMatch) {
     const body = await readJsonBody(req);
@@ -2705,6 +2720,24 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       companyId,
       objectType,
       objectId,
+      visibilityScope: optionalText(url.searchParams.get("visibilityScope")),
+      relatedObjectType: optionalText(url.searchParams.get("relatedObjectType")),
+      relatedObjectId: optionalText(url.searchParams.get("relatedObjectId")),
+      limit: parsePositiveInteger(url.searchParams.get("limit"), "activity_limit_invalid", "limit must be a positive integer.") || null,
+      cursor: optionalText(url.searchParams.get("cursor"))
+    }));
+    return true;
+  }
+
+  const activityObjectMatch = matchPath(path, "/v1/activity/object/:objectType/:objectId");
+  if (req.method === "GET" && activityObjectMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "activity_entry", objectId: activityObjectMatch.objectId, scopeCode: "activity" });
+    writeJson(res, 200, platform.listActivityEntriesPage({
+      companyId,
+      objectType: activityObjectMatch.objectType,
+      objectId: activityObjectMatch.objectId,
       visibilityScope: optionalText(url.searchParams.get("visibilityScope")),
       relatedObjectType: optionalText(url.searchParams.get("relatedObjectType")),
       relatedObjectId: optionalText(url.searchParams.get("relatedObjectId")),
@@ -3165,6 +3198,41 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       })
     );
     return true;
+  }
+
+  for (const [routePattern, decisionCode] of [
+    ["/v1/review-center/items/:reviewItemId/approve", "approve"],
+    ["/v1/review-center/items/:reviewItemId/reject", "reject"],
+    ["/v1/review-center/items/:reviewItemId/escalate", "escalate"]
+  ]) {
+    const decisionAliasMatch = matchPath(path, routePattern);
+    if (req.method === "POST" && decisionAliasMatch) {
+      const body = await readJsonBody(req);
+      const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+      const sessionToken = readSessionToken(req, body);
+      const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: decisionAliasMatch.reviewItemId, scopeCode: "review_center" });
+      assertReviewCenterActionAccess({
+        platform,
+        principal,
+        companyId,
+        reviewItemId: decisionAliasMatch.reviewItemId,
+        operation: "decide"
+      });
+      writeJson(res, 200, platform.decideReviewCenterItem({
+        companyId,
+        reviewItemId: decisionAliasMatch.reviewItemId,
+        decisionCode,
+        reasonCode: body.reasonCode,
+        note: body.note || null,
+        decisionPayload: body.decisionPayload || {},
+        evidenceRefs: body.evidenceRefs || [],
+        overrideReasonCode: body.overrideReasonCode || null,
+        resultingCommand: body.resultingCommand || null,
+        targetQueueCode: body.targetQueueCode || null,
+        actorId: principal.userId
+      }));
+      return true;
+    }
   }
 
   if (req.method === "POST" && path === "/v1/payroll/migrations") {
