@@ -4226,6 +4226,11 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
     const submissionQueueItems = queueItemsBySubmissionId.get(submission.submissionId) || [];
     const receiptClasses = classifySubmissionReceiptClasses(submission.receipts || []);
     const lagAlerts = buildSubmissionLagAlerts({ submission, queueItems: submissionQueueItems, deadLetter: null, asOf: resolvedAsOf });
+    const queueMetrics = buildSubmissionQueueMetrics({
+      queueItems: submissionQueueItems,
+      asOf: resolvedAsOf,
+      escalationPolicyCode: "submission_monitor.default"
+    });
     return {
       objectType: "authoritySubmission",
       submissionId: submission.submissionId,
@@ -4242,7 +4247,7 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
       receiptClasses,
       queueItems: submissionQueueItems,
       ownerQueues: [...new Set(submissionQueueItems.map((queueItem) => queueItem.ownerQueue).filter(Boolean))],
-      slaDueAt: resolveSubmissionQueueSlaDueAt(submissionQueueItems),
+      ...queueMetrics,
       lagAlerts,
       replayEligible: submission.status === "transport_failed" || submissionQueueItems.some((queueItem) => queueItem.actionType === "retry")
     };
@@ -4264,6 +4269,13 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
       }
       const submissionId = linkedSubmission?.submissionId || optionalText(job?.sourceObjectId);
       const submissionQueueItems = submissionId ? (queueItemsBySubmissionId.get(submissionId) || []) : [];
+      const queueMetrics = buildSubmissionQueueMetrics({
+        queueItems: submissionQueueItems,
+        asOf: resolvedAsOf,
+        escalationPolicyCode: deadLetter.operatorState === "replay_planned"
+          ? "submission_monitor.dead_letter_replay"
+          : "submission_monitor.dead_letter"
+      });
       return {
         objectType: "submissionDeadLetter",
         deadLetterId: deadLetter.deadLetterId,
@@ -4293,7 +4305,7 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
         replayPlan: replayPlansByJobId.get(deadLetter.jobId) || null,
         job,
         ownerQueues: [...new Set(submissionQueueItems.map((queueItem) => queueItem.ownerQueue).filter(Boolean))],
-        slaDueAt: resolveSubmissionQueueSlaDueAt(submissionQueueItems)
+        ...queueMetrics
       };
     })
     .filter(Boolean);
@@ -4313,7 +4325,7 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
         + submissionRows.filter((item) => item.queueItems.some((queueItem) => queueItem.status === "open" && queueItem.actionType === "retry")).length,
       lagging: [...submissionRows, ...submissionDeadLetterRows].filter((item) => item.lagAlerts.length > 0).length
     },
-    queueSummary: buildSubmissionMonitorQueueSummary({ items: submissionRows, asOf: resolvedAsOf })
+    queueSummary: buildSubmissionMonitorQueueSummary({ items, asOf: resolvedAsOf })
   };
 }
 
@@ -4466,14 +4478,36 @@ function resolveSubmissionQueueSlaDueAt(queueItems) {
     .sort((left, right) => left.localeCompare(right))[0] || null;
 }
 
+function buildSubmissionQueueMetrics({ queueItems, asOf, escalationPolicyCode = "submission_monitor.default" }) {
+  const resolvedAsOf = resolveSubmissionMonitorAsOf(asOf);
+  const openQueueItems = (queueItems || []).filter((queueItem) => ["open", "claimed", "waiting_input"].includes(queueItem.status));
+  const oldestOpenAgeMinutes = openQueueItems.reduce((maxAge, queueItem) => {
+    const ageMinutes = Math.max(0, Math.round((Date.parse(resolvedAsOf) - Date.parse(queueItem.createdAt)) / 60000));
+    return Math.max(maxAge, ageMinutes);
+  }, 0);
+  return {
+    slaDueAt: resolveSubmissionQueueSlaDueAt(openQueueItems),
+    blockedCount: openQueueItems.filter((queueItem) => queueItem.status === "waiting_input").length,
+    oldestOpenAgeMinutes,
+    oldestOpenAgeHours: Number((oldestOpenAgeMinutes / 60).toFixed(2)),
+    escalationPolicyCode
+  };
+}
+
 function buildSubmissionMonitorQueueSummary({ items, asOf }) {
   const resolvedAsOf = resolveSubmissionMonitorAsOf(asOf);
   const queues = new Map();
+  const seenQueueItems = new Set();
   for (const item of items) {
     for (const queueItem of item.queueItems || []) {
       if (!["open", "claimed", "waiting_input"].includes(queueItem.status)) {
         continue;
       }
+      const queueIdentity = queueItem.queueItemId || `${queueItem.submissionId || item.submissionId || item.deadLetterId}:${queueItem.actionType}:${queueItem.createdAt}`;
+      if (seenQueueItems.has(queueIdentity)) {
+        continue;
+      }
+      seenQueueItems.add(queueIdentity);
       const key = queueItem.ownerQueue || "submission_operator";
       const existing = queues.get(key) || {
         ownerQueue: key,
@@ -4481,6 +4515,7 @@ function buildSubmissionMonitorQueueSummary({ items, asOf }) {
         openCount: 0,
         blockedCount: 0,
         oldestOpenAgeMinutes: 0,
+        oldestOpenAgeHours: 0,
         escalationPolicyCode: "submission_monitor.default"
       };
       existing.openCount += 1;
@@ -4493,6 +4528,7 @@ function buildSubmissionMonitorQueueSummary({ items, asOf }) {
       const ageMinutes = Math.max(0, Math.round((Date.parse(resolvedAsOf) - Date.parse(queueItem.createdAt)) / 60000));
       if (ageMinutes > existing.oldestOpenAgeMinutes) {
         existing.oldestOpenAgeMinutes = ageMinutes;
+        existing.oldestOpenAgeHours = Number((ageMinutes / 60).toFixed(2));
       }
       queues.set(key, existing);
     }

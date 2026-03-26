@@ -321,6 +321,8 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     assert.equal(submissionDeadLetterRow.job.jobId, job.jobId);
     assert.equal(submissionDeadLetterRow.deadLetter.operatorState, "replay_planned");
     assert.equal(submissionDeadLetterRow.replayPlan.status, "pending_approval");
+    assert.equal(submissionDeadLetterRow.escalationPolicyCode, "submission_monitor.dead_letter_replay");
+    assert.equal(typeof submissionDeadLetterRow.oldestOpenAgeMinutes, "number");
     assert.equal(submissionDeadLetterRow.lagAlerts.some((alert) => alert.alertCode === "dead_letter_open"), true);
     assert.equal(submissionDeadLetterRow.replayEligible, true);
     assert.equal(submissionMonitor.counters.materialPending >= 1, true);
@@ -328,7 +330,10 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     assert.equal(submissionMonitor.counters.replayPlanned >= 1, true);
     assert.equal(submissionMonitor.counters.lagging >= 2, true);
     assert.equal(submissionRow.queueItems[0].slaDueAt, submissionRow.queueItems[0].createdAt);
-    assert.equal(submissionMonitor.queueSummary.some((queue) => queue.ownerQueue === "tax_operator"), true);
+    const submissionMonitorQueue = submissionMonitor.queueSummary.find((queue) => queue.ownerQueue === "tax_operator");
+    assert.ok(submissionMonitorQueue);
+    assert.equal(submissionMonitorQueue.escalationPolicyCode, "submission_monitor.default");
+    assert.equal(typeof submissionMonitorQueue.oldestOpenAgeHours, "number");
 
     const submissionMonitorScan = await requestJson(baseUrl, "/v1/backoffice/submissions/monitor/scan", {
       method: "POST",
