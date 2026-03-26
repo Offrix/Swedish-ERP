@@ -71,6 +71,25 @@ test("Phase 14 Step 4 async jobs dead-letter unsupported handlers and allow repl
     reasonCode: "handler_added"
   });
   assert.equal(replayPlan.status, "planned");
+  await assert.rejects(
+    () =>
+      platform.approveRuntimeJobReplay({
+        replayPlanId: replayPlan.replayPlanId,
+        approvedByUserId: "00000000-0000-4000-8000-000000000001"
+      }),
+    (error) => error?.code === "async_job_replay_self_approval_forbidden"
+  );
+  const approvedReplayPlan = await platform.approveRuntimeJobReplay({
+    replayPlanId: replayPlan.replayPlanId,
+    approvedByUserId: "00000000-0000-4000-8000-000000000002"
+  });
+  assert.equal(approvedReplayPlan.status, "approved");
+  const executedReplay = await platform.executeRuntimeJobReplay({
+    replayPlanId: replayPlan.replayPlanId,
+    actorId: "00000000-0000-4000-8000-000000000002"
+  });
+  assert.equal(executedReplay.replayPlan.status, "executed");
+  assert.equal(executedReplay.replayJob.metadata.replayPlanId, replayPlan.replayPlanId);
 });
 
 test("Phase 14 Step 4 worker runs submission transport jobs through the shared runtime", async () => {

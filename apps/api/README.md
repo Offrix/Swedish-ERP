@@ -522,6 +522,9 @@ pnpm --filter @swedish-erp/api start
 - `GET /v1/backoffice/audit-correlations?companyId=...`
 - `GET /v1/backoffice/audit-correlations/:correlationId?companyId=...`
 - `GET /v1/backoffice/jobs?companyId=...`
+- `GET /v1/backoffice/replays?companyId=...`
+- `POST /v1/backoffice/replays/:replayPlanId/approve`
+- `POST /v1/backoffice/replays/:replayPlanId/execute`
 - `POST /v1/backoffice/jobs/:jobId/replay`
 - `GET /v1/backoffice/dead-letters?companyId=...`
 - `POST /v1/backoffice/dead-letters/:deadLetterId/triage`

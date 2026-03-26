@@ -554,6 +554,43 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     });
     assert.equal(auditCorrelation.correlation.correlationId, incidentCorrelation.correlationId);
     assert.equal(auditCorrelation.correlation.relatedEntities.some((entry) => entry.entityType === "runtime_incident"), true);
+
+    const replayListBeforeApproval = await requestJson(baseUrl, `/v1/backoffice/replays?companyId=${DEMO_IDS.companyId}&status=planned`, {
+      token: adminToken
+    });
+    assert.equal(replayListBeforeApproval.items.some((item) => item.replayPlanId === replayPlanned.replayPlan.replayPlanId), true);
+
+    const selfApprovalDenied = await requestJson(baseUrl, `/v1/backoffice/replays/${replayPlanned.replayPlan.replayPlanId}/approve`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        incidentId: opsIncident.incident.incidentId
+      }
+    });
+    assert.equal(selfApprovalDenied.error, "async_job_replay_self_approval_forbidden");
+
+    const approvedReplay = await requestJson(baseUrl, `/v1/backoffice/replays/${replayPlanned.replayPlan.replayPlanId}/approve`, {
+      method: "POST",
+      token: approverToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        incidentId: opsIncident.incident.incidentId
+      }
+    });
+    assert.equal(approvedReplay.replayPlan.status, "approved");
+
+    const executedReplay = await requestJson(baseUrl, `/v1/backoffice/replays/${replayPlanned.replayPlan.replayPlanId}/execute`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        incidentId: opsIncident.incident.incidentId
+      }
+    });
+    assert.equal(executedReplay.replayPlan.status, "executed");
+    assert.equal(executedReplay.deadLetter.operatorState, "resolved");
   } finally {
     await stopServer(server);
   }

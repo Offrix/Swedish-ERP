@@ -1981,6 +1981,79 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/backoffice/replays") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "async_job_replay_plan", objectId: companyId, scopeCode: "async_job" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: await buildBackofficeReplayRows({
+        platform,
+        companyId,
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  const replayApproveMatch = matchPath(path, "/v1/backoffice/replays/:replayPlanId/approve");
+  if (req.method === "POST" && replayApproveMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "async_job_replay_plan", objectId: replayApproveMatch.replayPlanId, scopeCode: "async_job" });
+    resolveBackofficeOperatorBinding({
+      platform,
+      sessionToken,
+      companyId,
+      supportCaseId: body.supportCaseId,
+      incidentId: body.incidentId,
+      requiredSupportAction: "plan_job_replay"
+    });
+    const replayPlan = await platform.approveRuntimeJobReplay({
+      replayPlanId: replayApproveMatch.replayPlanId,
+      approvedByUserId: principal.userId
+    });
+    writeJson(res, 200, { replayPlan });
+    return true;
+  }
+
+  const replayExecuteMatch = matchPath(path, "/v1/backoffice/replays/:replayPlanId/execute");
+  if (req.method === "POST" && replayExecuteMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "async_job_replay_plan", objectId: replayExecuteMatch.replayPlanId, scopeCode: "async_job" });
+    resolveBackofficeOperatorBinding({
+      platform,
+      sessionToken,
+      companyId,
+      supportCaseId: body.supportCaseId,
+      incidentId: body.incidentId,
+      requiredSupportAction: "execute_job_replay"
+    });
+    const replay = await platform.executeRuntimeJobReplay({
+      replayPlanId: replayExecuteMatch.replayPlanId,
+      actorId: principal.userId
+    });
+    const deadLetter = (await platform.listRuntimeDeadLetters({ companyId }))
+      .find((candidate) => candidate.jobId === replay.replayPlan.jobId) || null;
+    const resolvedDeadLetter = deadLetter
+      ? await platform.triageRuntimeDeadLetter({
+        companyId,
+        deadLetterId: deadLetter.deadLetterId,
+        actorId: principal.userId,
+        operatorState: "resolved"
+      })
+      : null;
+    writeJson(res, 200, {
+      replayPlan: replay.replayPlan,
+      replayJob: replay.replayJob,
+      deadLetter: resolvedDeadLetter
+    });
+    return true;
+  }
+
   const backofficeJobReplayMatch = matchPath(path, "/v1/backoffice/jobs/:jobId/replay");
   if (req.method === "POST" && backofficeJobReplayMatch) {
     const body = await readJsonBody(req);
@@ -4110,6 +4183,23 @@ async function buildBackofficeDeadLetterRows({ platform, companyId, operatorStat
     job: jobsById.get(deadLetter.jobId) || null,
     replayPlan: replayPlansByJobId.get(deadLetter.jobId) || null
   }));
+}
+
+async function buildBackofficeReplayRows({ platform, companyId, status = null }) {
+  const [replayPlans, jobs, deadLetters] = await Promise.all([
+    platform.listRuntimeJobReplayPlans({ status }),
+    platform.listRuntimeJobs({ companyId }),
+    platform.listRuntimeDeadLetters({ companyId })
+  ]);
+  const jobsById = new Map(jobs.map((job) => [job.jobId, job]));
+  const deadLettersByJobId = new Map(deadLetters.map((deadLetter) => [deadLetter.jobId, deadLetter]));
+  return replayPlans
+    .filter((replayPlan) => replayPlan.companyId === companyId)
+    .map((replayPlan) => ({
+      ...replayPlan,
+      job: jobsById.get(replayPlan.jobId) || null,
+      deadLetter: deadLettersByJobId.get(replayPlan.jobId) || null
+    }));
 }
 
 async function buildSubmissionMonitorPayload({ platform, companyId, submissionType = null, ownerQueue = null, status = null, asOf = null }) {

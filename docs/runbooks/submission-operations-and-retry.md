@@ -2,91 +2,93 @@
 
 ## Syfte
 
-Detta runbook beskriver drift av generiska submissions till externa mottagare såsom AGI, moms, HUS, Peppol och årsflöden. Fokus är kvittenshantering, felklassning, action queue, retry och säker manuell åtgärd.
+Detta runbook beskriver drift av generiska submissions till externa mottagare sasom AGI, moms, HUS, Peppol och arsfloden. Fokus ar kvittenshantering, felklassning, action queue, retry, replay och saker manuell atgard.
 
-## När den används
+## Nar den anvands
 
-- när submission fastnar i `prepared`, `in_transit`, `awaiting_receipt`, `failed` eller `manual_action_required`
-- när extern mottagare returnerar kvittens med avvisning, varning eller okänt utfall
-- när submissions behöver återförsökas eller kompletteras efter mänsklig granskning
-- när operatör behöver utreda skillnaden mellan transportfel och domänfel
+- nar submission fastnar i `prepared`, `in_transit`, `awaiting_receipt`, `failed` eller `manual_action_required`
+- nar extern mottagare returnerar kvittens med avvisning, varning eller okant utfall
+- nar submissions behover aterforsokas eller kompletteras efter mansklig granskning
+- nar operator behover utreda skillnaden mellan transportfel och domanfel
 
-## Förkrav
+## Forkrav
 
-1. Operatören ska ha åtkomst till submission-operatörsvy, receipt-historik och relaterad action queue.
-2. Det ska vara känt vilken mottagare och vilken submission-typ som påverkas.
-3. Signerings- eller attestkrav för submissionen ska redan vara uppfyllda innan ny sändning initieras.
-4. Eventuella externa incidentmeddelanden eller servicefönster ska vara kända.
+1. Operatoren ska ha atkomst till submission-operatorvy, receipt-historik och relaterad action queue.
+2. Det ska vara kant vilken mottagare och vilken submission-typ som paverkas.
+3. Signerings- eller attestkrav for submissionen ska redan vara uppfyllda innan ny sandning initieras.
+4. Eventuella externa incidentmeddelanden eller servicefonster ska vara kanda.
 
-## Steg för steg
+## Steg for steg
 
 1. Identifiera submissionen.
-   - sök på submission-id, korrelations-id, bolag, period, mottagare och payload-hash
-   - bekräfta att underlaget fortfarande är giltigt och inte har ersatts av nyare version
-2. Läs senaste statuskedja.
+   - sok pa submission-id, korrelations-id, bolag, period, mottagare och payload-hash
+   - bekrafta att underlaget fortfarande ar giltigt och inte har ersatts av nyare version
+2. Las senaste statuskedja.
    - `prepared`
    - `queued`
    - `in_transit`
    - `awaiting_receipt`
    - `accepted`, `accepted_with_warning`, `rejected`, `failed_transport`, `failed_domain`, `cancelled`
 3. Klassificera felet.
-   - transportfel: timeout, nätfel, 5xx, signaturfel, autentiseringsfel, rate-limit
-   - domänfel: valideringsfel i payload, ogiltig period, saknat godkännande, felaktigt referensdata
-   - osäkert utfall: inget definitivt svar men potentiell mottagning kan ha skett
+   - transportfel: timeout, natfel, 5xx, signaturfel, autentiseringsfel, rate-limit
+   - domanfel: valideringsfel i payload, ogiltig period, saknat godkannande, felaktigt referensdata
+   - osakert utfall: inget definitivt svar men potentiell mottagning kan ha skett
 4. Hantera kvittenser.
-   - om kvittens är definitiv `accepted` eller `rejected` ska submissionen avslutas terminalt
-   - om kvittens är varning ska action queue få uppgift när policyn kräver åtgärd
-   - om kvittens saknas efter timeout ska mottagarens inquiry- eller statuskontroll användas om den finns; annars markeras submissionen `unknown_outcome`
-   - backoffice submission monitor ska kunna materialisera samma läge som work items, notifications och activity när lag alerts kräver operatörsingrepp
-5. Välj operativ åtgärd.
-   - transportfel utan mottagarbevis: retry med samma idempotensnyckel när felet är löst
-   - domänfel: skapa action queue-post till ansvarig roll; ny submission får ske först efter korrigerat underlag
-   - osäkert utfall: kontrollera om mottagaren redan registrerat underlaget innan ny sändning
-6. Kör återförsök.
+   - om kvittens ar definitiv `accepted` eller `rejected` ska submissionen avslutas terminalt
+   - om kvittens ar varning ska action queue fa uppgift nar policyn kraver atgard
+   - om kvittens saknas efter timeout ska mottagarens inquiry- eller statuskontroll anvandas om den finns; annars markeras submissionen `unknown_outcome`
+   - backoffice submission monitor ska kunna materialisera samma lage som work items, notifications och activity nar lag alerts kraver operatorsingrepp
+5. Valj operativ atgard.
+   - transportfel utan mottagarbevis: retry med samma idempotensnyckel nar felet ar lost
+   - domanfel: skapa action queue-post till ansvarig roll; ny submission far ske forst efter korrigerat underlag
+   - osakert utfall: kontrollera om mottagaren redan registrerat underlaget innan ny sandning
+   - replay av tekniskt stoppad jobbkedja ska ga via replay plan -> separat approval -> execute, aldrig som direkt databasatgard
+6. Kor aterforsok.
    - dokumentera `retry_reason`
-   - bibehåll underlagslåsning och payload-version
-   - skapa ny transmissionsattempt men samma affärssubmission när modellen kräver det
-7. Manuell åtgärd.
-   - om operatör måste ladda upp komplettering, ändra referens eller kontakta mottagare ska detta loggas i submissionens historik
-   - submissionen får inte markeras `accepted` manuellt utan officiell kvittens eller definierad overrideprocess
-8. Stäng ärendet.
-   - verifiera att slutstatus är korrekt
-   - säkerställ att action queue är uppdaterad
-   - länka receipt, supportärende eller incident efter behov
+   - bibehall underlagslasning och payload-version
+   - skapa ny transmissionsattempt men samma affarssubmission nar modellen kraver det
+7. Manuell atgard.
+   - om operator maste ladda upp komplettering, andra referens eller kontakta mottagare ska detta loggas i submissionens historik
+   - submissionen far inte markeras `accepted` manuellt utan officiell kvittens eller definierad overrideprocess
+8. Stang arendet.
+   - verifiera att slutstatus ar korrekt
+   - sakerstall att action queue ar uppdaterad
+   - lanka receipt, supportarende eller incident efter behov
 
 ## Verifiering
 
-- varje submission har entydig terminal status eller aktiv owner för manuell åtgärd
-- kvittenshistorik och attempt-historik är komplett
-- osäkra utfall är antingen uppklarade eller tydligt blockerade från dublettsändning
-- action queue speglar kvarvarande domänarbete och inga tekniska fel maskeras som affärsgodkända
-- submission monitor speglar SLA/lag och kan öppna operativa work items utan DB-ingrepp
+- varje submission har entydig terminal status eller aktiv owner for manuell atgard
+- kvittenshistorik och attempt-historik ar komplett
+- osakra utfall ar antingen uppklarade eller tydligt blockerade fran dublettsandning
+- replay-planer visar planned, approved och executed utan att kringga approval-kedjan
+- action queue speglar kvarvarande domanarbete och inga tekniska fel maskeras som affarsgodkanda
+- submission monitor speglar SLA/lag och kan oppna operativa work items utan DB-ingrepp
 
 ## Vanliga fel
 
-- **Fel:** timeout följt av sen kvittens.  
-  **Åtgärd:** använd statusfråga eller mottagarsökning innan ny attempt; markera tidigare attempt som `late_receipt_received`.
-- **Fel:** användare vill “skicka om” efter domänfel utan att korrigera underlaget.  
-  **Åtgärd:** blockera ny sändning, skapa action queue-post och hänvisa till domänägare.
-- **Fel:** flera submissions för samma period och mottagare ser lika ut.  
-  **Åtgärd:** jämför payload-hash, versionsnummer och idempotensnyckel; markera superseded fall.
+- **Fel:** timeout foljt av sen kvittens.  
+  **Atgard:** anvand statusfraga eller mottagarsokning innan ny attempt; markera tidigare attempt som `late_receipt_received`.
+- **Fel:** anvandare vill "skicka om" efter domanfel utan att korrigera underlaget.  
+  **Atgard:** blockera ny sandning, skapa action queue-post och hanvisa till domanagare.
+- **Fel:** flera submissions for samma period och mottagare ser lika ut.  
+  **Atgard:** jamfor payload-hash, versionsnummer och idempotensnyckel; markera superseded fall.
 - **Fel:** kvittens finns men inte parsad.  
-  **Åtgärd:** kör receipt-replay, kontrollera schema och klassificera receipt manuellt om parsern är felaktig.
+  **Atgard:** kor receipt-replay, kontrollera schema och klassificera receipt manuellt om parsern ar felaktig.
 
-## Återställning
+## Aterstallning
 
-- om fel submission skickats ska respektive domäns rättelse- eller återkallelseflöde användas; submissionobjektet ska spegla vad som faktiskt skett externt
-- om extern mottagare varit nere ska submissionflödet sättas i `degraded` och nya skick begränsas tills kommunikation eller fallback är verifierad
+- om fel submission skickats ska respektive domans rattelse- eller aterkallelseflode anvandas; submissionobjektet ska spegla vad som faktiskt skett externt
+- om extern mottagare varit nere ska submissionflodet sattas i `degraded` och nya skick begransas tills kommunikation eller fallback ar verifierad
 
 ## Rollback
 
-- rollback av operativ ändring sker genom att stoppa ytterligare attempts, återställa tidigare känd stabil adapterkonfiguration och använda action queue för kvarvarande mänskliga korrigeringar
-- redan mottagna externa kvittenser rullas aldrig tillbaka internt; i stället skapas rättelsekedja
+- rollback av operativ andring sker genom att stoppa ytterligare attempts, aterstalla tidigare kand stabil adapterkonfiguration och anvanda action queue for kvarvarande manskliga korrigeringar
+- redan mottagna externa kvittenser rullas aldrig tillbaka internt; i stallet skapas rattelsekedja
 
 ## Ansvarig
 
-Primärt ansvarig är operatör för myndighets- eller integrationsflöden. Domänsignatär ansvarar för korrigering av underlag när felet är affärsmässigt och inte tekniskt.
+Primart ansvarig ar operator for myndighets- eller integrationsfloden. Domainsignatar ansvarar for korrigering av underlag nar felet ar affarsmassigt och inte tekniskt.
 
 ## Exit gate
 
-Runbooken är klar när varje berörd submission har korrekt slutstatus eller aktiv handlingsplan, och ingen dublettsändning riskerar att uppstå.
+Runbooken ar klar nar varje berord submission har korrekt slutstatus eller aktiv handlingsplan, ingen dublettsandning riskerar att uppsta och replay-kedjan fortfarande ar spårbar via plan, approval och execute.

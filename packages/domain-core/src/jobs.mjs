@@ -857,14 +857,23 @@ export function createAsyncJobsModule({
     approvedByUserId,
     correlationId = crypto.randomUUID()
   } = {}) {
-    const replayPlan = await store.approveReplayPlan({
-      replayPlanId: text(replayPlanId, "async_job_replay_plan_id_required", error),
-      approvedByUserId: text(approvedByUserId, "async_job_replay_approved_by_required", error),
-      approvedAt: nowIso(clock)
-    });
-    if (!replayPlan) {
+    const resolvedReplayPlanId = text(replayPlanId, "async_job_replay_plan_id_required", error);
+    const resolvedApprovedByUserId = text(approvedByUserId, "async_job_replay_approved_by_required", error);
+    const existingReplayPlan = await store.getReplayPlan(resolvedReplayPlanId);
+    if (!existingReplayPlan) {
       throw error(404, "async_job_replay_plan_not_found", "Replay plan was not found.");
     }
+    if (existingReplayPlan.status !== "planned") {
+      throw error(409, "async_job_replay_plan_not_planned", "Replay plan must be in planned state before approval.");
+    }
+    if (existingReplayPlan.plannedByUserId === resolvedApprovedByUserId) {
+      throw error(409, "async_job_replay_self_approval_forbidden", "Replay plans require a separate approver.");
+    }
+    const replayPlan = await store.approveReplayPlan({
+      replayPlanId: resolvedReplayPlanId,
+      approvedByUserId: resolvedApprovedByUserId,
+      approvedAt: nowIso(clock)
+    });
     audit({
       companyId: replayPlan.companyId,
       actorId: replayPlan.approvedByUserId,
