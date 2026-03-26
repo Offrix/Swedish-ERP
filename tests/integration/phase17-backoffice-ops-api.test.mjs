@@ -84,22 +84,61 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     });
     const deadLetter = deadLetters.items.find((item) => item.jobId === job.jobId);
     assert.equal(deadLetter.operatorState, "pending_triage");
+    const missingDeadLetterBinding = await requestJson(baseUrl, `/v1/backoffice/dead-letters/${deadLetter.deadLetterId}/triage`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 400,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        operatorState: "acknowledged"
+      }
+    });
+    assert.equal(missingDeadLetterBinding.error, "backoffice_operator_binding_required");
+
+    const opsIncident = await requestJson(baseUrl, "/v1/backoffice/incidents", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        title: "Phase 17 async dead letter",
+        summary: "Anchor replay and dead-letter handling to an active incident.",
+        severity: "high",
+        relatedObjectRefs: [
+          { objectType: "async_job", objectId: job.jobId },
+          { objectType: "async_dead_letter", objectId: deadLetter.deadLetterId }
+        ]
+      }
+    });
 
     const triaged = await requestJson(baseUrl, `/v1/backoffice/dead-letters/${deadLetter.deadLetterId}/triage`, {
       method: "POST",
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId,
+        incidentId: opsIncident.incident.incidentId,
         operatorState: "acknowledged"
       }
     });
     assert.equal(triaged.operatorState, "acknowledged");
+
+    const missingReplayBinding = await requestJson(baseUrl, `/v1/backoffice/jobs/${job.jobId}/replay`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 400,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "phase17_ops_repair"
+      }
+    });
+    assert.equal(missingReplayBinding.error, "backoffice_operator_binding_required");
 
     const replayPlanned = await requestJson(baseUrl, `/v1/backoffice/jobs/${job.jobId}/replay`, {
       method: "POST",
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId,
+        incidentId: opsIncident.incident.incidentId,
         reasonCode: "phase17_ops_repair"
       }
     });
@@ -240,11 +279,25 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     const submissionMonitor = await requestJson(baseUrl, `/v1/backoffice/submissions/monitor?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
-    const submissionRow = submissionMonitor.items.find((item) => item.submissionId === submission.submissionId);
+    const submissionRow = submissionMonitor.items.find(
+      (item) => item.objectType === "authoritySubmission" && item.submissionId === submission.submissionId
+    );
+    assert.ok(submissionRow);
     assert.equal(submissionRow.receiptClasses.technical, "received");
     assert.equal(submissionRow.receiptClasses.business, "rejected");
     assert.equal(submissionRow.lagAlerts.some((alert) => alert.alertCode === "business_rejection"), true);
+    const submissionDeadLetterRow = submissionMonitor.items.find(
+      (item) => item.objectType === "submissionDeadLetter" && item.deadLetterId === deadLetter.deadLetterId
+    );
+    assert.ok(submissionDeadLetterRow);
+    assert.equal(submissionDeadLetterRow.job.jobId, job.jobId);
+    assert.equal(submissionDeadLetterRow.deadLetter.operatorState, "replay_planned");
+    assert.equal(submissionDeadLetterRow.replayPlan.status, "planned");
+    assert.equal(submissionDeadLetterRow.lagAlerts.some((alert) => alert.alertCode === "dead_letter_open"), true);
+    assert.equal(submissionDeadLetterRow.replayEligible, true);
     assert.equal(submissionMonitor.counters.materialPending >= 1, true);
+    assert.equal(submissionMonitor.counters.deadLettered >= 1, true);
+    assert.equal(submissionMonitor.counters.replayPlanned >= 1, true);
 
     const incident = await requestJson(baseUrl, "/v1/backoffice/incidents", {
       method: "POST",

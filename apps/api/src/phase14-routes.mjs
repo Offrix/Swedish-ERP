@@ -1949,6 +1949,14 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "async_job", objectId: backofficeJobReplayMatch.jobId, scopeCode: "async_job" });
+    resolveBackofficeOperatorBinding({
+      platform,
+      sessionToken,
+      companyId,
+      supportCaseId: body.supportCaseId,
+      incidentId: body.incidentId,
+      requiredSupportAction: "plan_job_replay"
+    });
     const replayPlan = await platform.planRuntimeJobReplay({
       jobId: backofficeJobReplayMatch.jobId,
       plannedByUserId: principal.userId,
@@ -1990,6 +1998,14 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "async_dead_letter", objectId: deadLetterTriageMatch.deadLetterId, scopeCode: "async_job" });
+    resolveBackofficeOperatorBinding({
+      platform,
+      sessionToken,
+      companyId,
+      supportCaseId: body.supportCaseId,
+      incidentId: body.incidentId,
+      requiredSupportAction: body.operatorState === "replay_planned" ? "plan_job_replay" : null
+    });
     writeJson(res, 200, await platform.triageRuntimeDeadLetter({
       companyId,
       deadLetterId: deadLetterTriageMatch.deadLetterId,
@@ -3909,13 +3925,7 @@ async function buildBackofficeDeadLetterRows({ platform, companyId, operatorStat
     platform.listRuntimeJobReplayPlans({})
   ]);
   const jobsById = new Map(jobs.map((job) => [job.jobId, job]));
-  const replayPlansByJobId = new Map();
-  for (const replayPlan of replayPlans.filter((candidate) => candidate.companyId === companyId)) {
-    const existing = replayPlansByJobId.get(replayPlan.jobId);
-    if (!existing || existing.updatedAt.localeCompare(replayPlan.updatedAt) < 0) {
-      replayPlansByJobId.set(replayPlan.jobId, replayPlan);
-    }
-  }
+  const replayPlansByJobId = buildReplayPlansByJobId({ replayPlans, companyId });
   return deadLetters.map((deadLetter) => ({
     ...deadLetter,
     job: jobsById.get(deadLetter.jobId) || null,
@@ -3924,11 +3934,15 @@ async function buildBackofficeDeadLetterRows({ platform, companyId, operatorStat
 }
 
 async function buildSubmissionMonitorPayload({ platform, companyId, submissionType = null, ownerQueue = null, status = null }) {
-  const [submissions, queueItems] = await Promise.all([
+  const [submissions, queueItems, jobs, deadLetters, replayPlans] = await Promise.all([
     platform.listAuthoritySubmissions({ companyId, submissionType }),
-    platform.listSubmissionActionQueue({ companyId, ownerQueue, status: null })
+    platform.listSubmissionActionQueue({ companyId, ownerQueue, status: null }),
+    platform.listRuntimeJobs({ companyId }),
+    platform.listRuntimeDeadLetters({ companyId }),
+    platform.listRuntimeJobReplayPlans({})
   ]);
   const filteredSubmissions = submissions.filter((submission) => (status ? submission.status === status : true));
+  const submissionsById = new Map(submissions.map((submission) => [submission.submissionId, submission]));
   const queueItemsBySubmissionId = new Map();
   for (const queueItem of queueItems) {
     if (!queueItemsBySubmissionId.has(queueItem.submissionId)) {
@@ -3936,11 +3950,12 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
     }
     queueItemsBySubmissionId.get(queueItem.submissionId).push(queueItem);
   }
-  const items = filteredSubmissions.map((submission) => {
+  const submissionRows = filteredSubmissions.map((submission) => {
     const submissionQueueItems = queueItemsBySubmissionId.get(submission.submissionId) || [];
     const receiptClasses = classifySubmissionReceiptClasses(submission.receipts || []);
-    const lagAlerts = buildSubmissionLagAlerts({ submission, queueItems: submissionQueueItems });
+    const lagAlerts = buildSubmissionLagAlerts({ submission, queueItems: submissionQueueItems, deadLetter: null });
     return {
+      objectType: "authoritySubmission",
       submissionId: submission.submissionId,
       submissionType: submission.submissionType,
       submissionFamilyCode: submission.submissionFamilyCode,
@@ -3958,13 +3973,66 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
       replayEligible: submission.status === "transport_failed" || submissionQueueItems.some((queueItem) => queueItem.actionType === "retry")
     };
   });
+  const jobsById = new Map(jobs.map((job) => [job.jobId, job]));
+  const replayPlansByJobId = buildReplayPlansByJobId({ replayPlans, companyId });
+  const submissionDeadLetterRows = deadLetters
+    .map((deadLetter) => {
+      const job = jobsById.get(deadLetter.jobId) || null;
+      if (!isSubmissionMonitorJob(job)) {
+        return null;
+      }
+      const linkedSubmission = job?.sourceObjectId ? submissionsById.get(job.sourceObjectId) || null : null;
+      if (submissionType && linkedSubmission?.submissionType !== submissionType) {
+        return null;
+      }
+      if (status && status !== "dead_lettered" && linkedSubmission?.status !== status) {
+        return null;
+      }
+      const submissionId = linkedSubmission?.submissionId || optionalText(job?.sourceObjectId);
+      const submissionQueueItems = submissionId ? (queueItemsBySubmissionId.get(submissionId) || []) : [];
+      return {
+        objectType: "submissionDeadLetter",
+        deadLetterId: deadLetter.deadLetterId,
+        submissionId,
+        submissionType: linkedSubmission?.submissionType || null,
+        submissionFamilyCode: linkedSubmission?.submissionFamilyCode || null,
+        sourceObjectType: linkedSubmission?.sourceObjectType || optionalText(job?.sourceObjectType),
+        sourceObjectId: linkedSubmission?.sourceObjectId || optionalText(job?.sourceObjectId),
+        sourceObjectVersion: linkedSubmission?.sourceObjectVersion || null,
+        providerKey: linkedSubmission?.providerKey || null,
+        status: "dead_lettered",
+        signedState: linkedSubmission?.signedState || null,
+        attemptNo: linkedSubmission?.attemptNo || Number(job?.attemptCount || 0),
+        createdAt: deadLetter.createdAt,
+        updatedAt: deadLetter.updatedAt,
+        enteredAt: deadLetter.enteredAt,
+        receiptClasses: classifySubmissionReceiptClasses(linkedSubmission?.receipts || []),
+        queueItems: submissionQueueItems,
+        lagAlerts: buildSubmissionLagAlerts({
+          submission: linkedSubmission,
+          queueItems: submissionQueueItems,
+          deadLetter
+        }),
+        replayEligible: deadLetter.replayAllowed === true,
+        deadLetter,
+        replayPlan: replayPlansByJobId.get(deadLetter.jobId) || null,
+        job
+      };
+    })
+    .filter(Boolean);
+  const items = [...submissionRows, ...submissionDeadLetterRows]
+    .sort((left, right) =>
+      resolveWorkbenchTimestamp(right).localeCompare(resolveWorkbenchTimestamp(left))
+      || resolveWorkbenchIdentity(right).localeCompare(resolveWorkbenchIdentity(left))
+    );
   return {
     items,
     counters: {
-      technicalPending: items.filter((item) => item.receiptClasses.technical === "pending").length,
-      materialPending: items.filter((item) => item.receiptClasses.business === "pending" || item.receiptClasses.finalOutcome === "pending").length,
-      deadLettered: items.filter((item) => item.status === "dead_lettered" || item.queueItems.some((queueItem) => ["open", "claimed", "waiting_input"].includes(queueItem.status))).length,
-      replayPlanned: items.filter((item) => item.queueItems.some((queueItem) => queueItem.status === "open" && queueItem.actionType === "retry")).length
+      technicalPending: submissionRows.filter((item) => item.receiptClasses.technical === "pending").length,
+      materialPending: submissionRows.filter((item) => item.receiptClasses.business === "pending" || item.receiptClasses.finalOutcome === "pending").length,
+      deadLettered: submissionDeadLetterRows.filter((item) => item.deadLetter?.operatorState && item.deadLetter.operatorState !== "closed").length,
+      replayPlanned: submissionDeadLetterRows.filter((item) => item.replayPlan?.status === "planned").length
+        + submissionRows.filter((item) => item.queueItems.some((queueItem) => queueItem.status === "open" && queueItem.actionType === "retry")).length
     }
   };
 }
@@ -3978,16 +4046,19 @@ function classifySubmissionReceiptClasses(receipts) {
   };
 }
 
-function buildSubmissionLagAlerts({ submission, queueItems }) {
+function buildSubmissionLagAlerts({ submission = null, queueItems = [], deadLetter = null }) {
   const alerts = [];
-  if (submission.status === "submitted" && !hasReceiptType(submission.receipts, ["technical_ack", "technical_nack"])) {
+  if (submission?.status === "submitted" && !hasReceiptType(submission.receipts, ["technical_ack", "technical_nack"])) {
     alerts.push({ alertCode: "technical_receipt_missing", severity: "high" });
   }
-  if (["received", "accepted"].includes(submission.status) && !hasReceiptType(submission.receipts, ["final_ack", "business_nack", "technical_nack"])) {
+  if (["received", "accepted"].includes(submission?.status) && !hasReceiptType(submission.receipts, ["final_ack", "business_nack", "technical_nack"])) {
     alerts.push({ alertCode: "final_outcome_pending", severity: "medium" });
   }
-  if (submission.status === "domain_rejected") {
+  if (submission?.status === "domain_rejected") {
     alerts.push({ alertCode: "business_rejection", severity: "high" });
+  }
+  if (deadLetter) {
+    alerts.push({ alertCode: "dead_letter_open", severity: "high" });
   }
   if ((queueItems || []).some((queueItem) => ["open", "claimed", "waiting_input"].includes(queueItem.status))) {
     alerts.push({ alertCode: "operator_intervention_required", severity: "high" });
@@ -3998,6 +4069,89 @@ function buildSubmissionLagAlerts({ submission, queueItems }) {
 function hasReceiptType(receipts, receiptTypes) {
   const typeSet = new Set((receipts || []).map((receipt) => receipt.receiptType));
   return receiptTypes.some((receiptType) => typeSet.has(receiptType));
+}
+
+function resolveBackofficeOperatorBinding({
+  platform,
+  sessionToken,
+  companyId,
+  supportCaseId = null,
+  incidentId = null,
+  requiredSupportAction = null
+}) {
+  const resolvedSupportCaseId = optionalText(supportCaseId);
+  const resolvedIncidentId = optionalText(incidentId);
+  if (!resolvedSupportCaseId && !resolvedIncidentId) {
+    throw createHttpError(
+      400,
+      "backoffice_operator_binding_required",
+      "Backoffice operator actions must be bound to an active support case or runtime incident."
+    );
+  }
+  if (resolvedSupportCaseId) {
+    const supportCase = platform.listSupportCases({ sessionToken, companyId })
+      .find((candidate) => candidate.supportCaseId === resolvedSupportCaseId);
+    if (!supportCase) {
+      throw createHttpError(404, "support_case_not_found", "Support case was not found.");
+    }
+    if (supportCase.status === "closed") {
+      throw createHttpError(409, "support_case_closed", "Support case is closed and cannot anchor new operator actions.");
+    }
+    if (requiredSupportAction && !supportCase.approvedActions.includes(requiredSupportAction)) {
+      throw createHttpError(
+        403,
+        "support_case_action_not_approved",
+        `Support case must approve ${requiredSupportAction} before this operator action is allowed.`
+      );
+    }
+  }
+  if (resolvedIncidentId) {
+    const incident = platform.listRuntimeIncidents({ sessionToken, companyId })
+      .find((candidate) => candidate.incidentId === resolvedIncidentId);
+    if (!incident) {
+      throw createHttpError(404, "runtime_incident_not_found", "Runtime incident was not found.");
+    }
+    if (incident.status === "closed") {
+      throw createHttpError(409, "runtime_incident_closed", "Runtime incident is closed and cannot anchor new operator actions.");
+    }
+  }
+  return {
+    supportCaseId: resolvedSupportCaseId,
+    incidentId: resolvedIncidentId
+  };
+}
+
+function buildReplayPlansByJobId({ replayPlans, companyId }) {
+  const replayPlansByJobId = new Map();
+  for (const replayPlan of replayPlans.filter((candidate) => candidate.companyId === companyId)) {
+    const existing = replayPlansByJobId.get(replayPlan.jobId);
+    if (!existing || existing.updatedAt.localeCompare(replayPlan.updatedAt) < 0) {
+      replayPlansByJobId.set(replayPlan.jobId, replayPlan);
+    }
+  }
+  return replayPlansByJobId;
+}
+
+function isSubmissionMonitorJob(job) {
+  if (!job) {
+    return false;
+  }
+  return job.sourceObjectType === "submission"
+    || typeof job.jobType === "string" && job.jobType.startsWith("submission.");
+}
+
+function resolveWorkbenchTimestamp(item) {
+  return optionalText(item.updatedAt)
+    || optionalText(item.enteredAt)
+    || optionalText(item.createdAt)
+    || "";
+}
+
+function resolveWorkbenchIdentity(item) {
+  return optionalText(item.deadLetterId)
+    || optionalText(item.submissionId)
+    || optionalText(item.jobId)
+    || "";
 }
 
 const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
