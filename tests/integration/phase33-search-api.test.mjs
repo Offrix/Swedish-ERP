@@ -21,6 +21,19 @@ test("Step 33 migration adds search projection registry and personalization sche
   }
 });
 
+test("Phase 2.5 migration adds projection checkpoints and rebuild metadata", async () => {
+  const migration = await readText("packages/db/migrations/20260326130000_phase2_projection_checkpoints.sql");
+  for (const fragment of [
+    "ALTER TABLE search_reindex_requests",
+    "ADD COLUMN IF NOT EXISTS rebuild_mode",
+    "ADD COLUMN IF NOT EXISTS purged_count",
+    "CREATE TABLE IF NOT EXISTS search_projection_checkpoints",
+    "phase2 projection checkpoints and rebuild metadata"
+  ]) {
+    assert.match(migration, new RegExp(fragment.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")));
+  }
+});
+
 test("Step 33 API exposes reporting-backed search, saved views and dashboard widgets", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-25T10:15:00Z")
@@ -55,6 +68,7 @@ test("Step 33 API exposes reporting-backed search, saved views and dashboard wid
     const root = await requestJson(`${baseUrl}/`, { token: sessionToken });
     for (const route of [
       "/v1/search/contracts",
+      "/v1/search/projection-checkpoints",
       "/v1/search/reindex",
       "/v1/search/documents",
       "/v1/saved-views",
@@ -113,6 +127,12 @@ test("Step 33 API exposes reporting-backed search, saved views and dashboard wid
     const completedRequest = completedRequests.items.find((item) => item.searchReindexRequestId === reindex.reindexRequest.searchReindexRequestId);
     assert.equal(Boolean(completedRequest), true);
     assert.equal(completedRequest.indexedCount > 0, true);
+
+    const checkpoints = await requestJson(`${baseUrl}/v1/search/projection-checkpoints?companyId=${COMPANY_ID}`, {
+      token: sessionToken
+    });
+    assert.equal(checkpoints.items.length > 0, true);
+    assert.equal(checkpoints.items.some((item) => item.status === "completed"), true);
 
     const searchResults = await requestJson(`${baseUrl}/v1/search/documents?companyId=${COMPANY_ID}&query=trial`, {
       token: sessionToken

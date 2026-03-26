@@ -173,3 +173,98 @@ test("Step 33 saved view compatibility scan repairs and re-breaks views determin
     "projection_contract_missing"
   );
 });
+
+test("Phase 2.5 search full rebuild purges projection documents and records checkpoints", async () => {
+  const sourceState = {
+    contracts: [
+      {
+        projectionCode: "reporting.report_snapshot",
+        objectType: "report_snapshot",
+        displayName: "Report snapshots",
+        sourceDomainCode: "reporting",
+        visibilityScope: "company",
+        surfaceCodes: ["desktop.search"],
+        filterFieldCodes: ["reportCode"]
+      }
+    ],
+    documents: [
+      {
+        projectionCode: "reporting.report_snapshot",
+        objectId: "snapshot-1",
+        objectType: "report_snapshot",
+        displayTitle: "Snapshot v1",
+        displaySubtitle: "trial_balance",
+        documentStatus: "active",
+        searchText: "Snapshot v1 trial balance",
+        filterPayload: { reportCode: "trial_balance" },
+        sourceVersion: "snapshot-1:v1",
+        sourceUpdatedAt: "2026-03-25T11:00:00Z"
+      }
+    ]
+  };
+
+  const engine = createSearchEngine({
+    clock: () => new Date("2026-03-25T12:30:00Z"),
+    reportingPlatform: {
+      listSearchProjectionContracts: () => sourceState.contracts,
+      listSearchProjectionDocuments: () => sourceState.documents
+    }
+  });
+
+  const companyId = "company_projection_rebuild_1";
+  const first = await engine.requestSearchReindex({
+    companyId,
+    actorId: "user_1"
+  });
+  assert.equal(first.indexingSummary.indexedCount, 1);
+
+  const firstDocumentId = engine.listSearchDocuments({
+    companyId,
+    query: "snapshot",
+    viewerUserId: "user_1"
+  })[0].searchDocumentId;
+
+  sourceState.documents = [
+    {
+      projectionCode: "reporting.report_snapshot",
+      objectId: "snapshot-1",
+      objectType: "report_snapshot",
+      displayTitle: "Snapshot v2",
+      displaySubtitle: "trial_balance",
+      documentStatus: "active",
+      searchText: "Snapshot v2 trial balance",
+      filterPayload: { reportCode: "trial_balance" },
+      sourceVersion: "snapshot-1:v2",
+      sourceUpdatedAt: "2026-03-25T12:00:00Z"
+    }
+  ];
+
+  const rebuilt = await engine.requestSearchReindex({
+    companyId,
+    actorId: "user_1",
+    rebuildMode: "full",
+    projectionCode: "reporting.report_snapshot"
+  });
+  assert.equal(rebuilt.reindexRequest.status, "completed");
+  assert.equal(rebuilt.indexingSummary.rebuildMode, "full");
+  assert.equal(rebuilt.indexingSummary.purgedCount, 1);
+
+  const rebuiltDocument = engine.listSearchDocuments({
+    companyId,
+    query: "v2",
+    viewerUserId: "user_1"
+  })[0];
+  assert.equal(rebuiltDocument.displayTitle, "Snapshot v2");
+  assert.notEqual(rebuiltDocument.searchDocumentId, firstDocumentId);
+
+  const checkpoint = engine.listProjectionCheckpoints({
+    companyId,
+    projectionCode: "reporting.report_snapshot"
+  })[0];
+  assert.equal(checkpoint.status, "completed");
+  assert.equal(checkpoint.lastRebuildMode, "full");
+  assert.equal(checkpoint.lastPurgedCount, 1);
+  assert.equal(checkpoint.lastIndexedCount, 1);
+  assert.equal(checkpoint.lastDocumentCount, 1);
+  assert.equal(checkpoint.checkpointSequenceNo, 2);
+});

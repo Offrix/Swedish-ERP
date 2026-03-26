@@ -1,5 +1,7 @@
 export const SEARCH_DOCUMENT_STATUSES = Object.freeze(["indexed", "stale", "tombstoned", "purged"]);
 export const SEARCH_REINDEX_STATUSES = Object.freeze(["requested", "running", "completed", "failed", "cancelled"]);
+export const SEARCH_REBUILD_MODES = Object.freeze(["delta", "full"]);
+export const PROJECTION_CHECKPOINT_STATUSES = Object.freeze(["idle", "running", "completed", "failed"]);
 export const SEARCH_VISIBILITY_SCOPES = Object.freeze(["company", "private", "team", "backoffice"]);
 export const SAVED_VIEW_STATUSES = Object.freeze(["active", "broken", "archived"]);
 export const SAVED_VIEW_VISIBILITY_CODES = Object.freeze(["private", "team", "company"]);

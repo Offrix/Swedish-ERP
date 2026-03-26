@@ -8,9 +8,11 @@ import {
 import {
   DASHBOARD_WIDGET_STATUSES,
   DASHBOARD_WIDGET_TYPE_CODES,
+  PROJECTION_CHECKPOINT_STATUSES,
   SAVED_VIEW_STATUSES,
   SAVED_VIEW_VISIBILITY_CODES,
   SEARCH_DOCUMENT_STATUSES,
+  SEARCH_REBUILD_MODES,
   SEARCH_REINDEX_STATUSES
 } from "./constants.mjs";
 import {
@@ -66,6 +68,8 @@ export function createSearchEngine({
   const reporting = reportingPlatform || createReportingPlatform({ clock });
   const state = {
     projectionContracts: new Map(),
+    projectionCheckpoints: new Map(),
+    projectionCheckpointIdsByCompany: new Map(),
     searchDocuments: new Map(),
     searchDocumentIdsByCompany: new Map(),
     searchDocumentIdByKey: new Map(),
@@ -103,11 +107,14 @@ export function createSearchEngine({
   return {
     searchDocumentStatuses: SEARCH_DOCUMENT_STATUSES,
     searchReindexStatuses: SEARCH_REINDEX_STATUSES,
+    searchRebuildModes: SEARCH_REBUILD_MODES,
+    projectionCheckpointStatuses: PROJECTION_CHECKPOINT_STATUSES,
     savedViewStatuses: SAVED_VIEW_STATUSES,
     savedViewVisibilityCodes: SAVED_VIEW_VISIBILITY_CODES,
     dashboardWidgetStatuses: DASHBOARD_WIDGET_STATUSES,
     dashboardWidgetTypeCodes: DASHBOARD_WIDGET_TYPE_CODES,
     listSearchProjectionContracts,
+    listProjectionCheckpoints,
     requestSearchReindex,
     executeSearchReindexRequest,
     failSearchReindexRequest,
@@ -135,9 +142,26 @@ export function createSearchEngine({
     return syncProjectionContracts(requireText(companyId, "company_id_required")).map(copy);
   }
 
+  function listProjectionCheckpoints({ companyId, projectionCode = null, status = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus =
+      status == null
+        ? null
+        : assertAllowed(normalizeEnumValue(status, "projection_checkpoint_status_required"), PROJECTION_CHECKPOINT_STATUSES, "projection_checkpoint_status_invalid");
+    const resolvedProjectionCode = normalizeOptionalText(projectionCode);
+    return (state.projectionCheckpointIdsByCompany.get(resolvedCompanyId) || [])
+      .map((checkpointId) => state.projectionCheckpoints.get(checkpointId))
+      .filter(Boolean)
+      .filter((checkpoint) => (resolvedProjectionCode ? checkpoint.projectionCode === resolvedProjectionCode : true))
+      .filter((checkpoint) => (resolvedStatus ? checkpoint.status === resolvedStatus : true))
+      .sort((left, right) => left.projectionCode.localeCompare(right.projectionCode))
+      .map(copy);
+  }
+
   async function requestSearchReindex({
     companyId,
     projectionCode = null,
+    rebuildMode = "delta",
     reasonCode = "manual_request",
     actorId = "system",
     correlationId = newId()
@@ -146,6 +170,7 @@ export function createSearchEngine({
       searchReindexRequestId: newId(),
       companyId: requireText(companyId, "company_id_required"),
       projectionCode: normalizeOptionalText(projectionCode),
+      rebuildMode: assertAllowed(normalizeEnumValue(rebuildMode, "search_rebuild_mode_required"), SEARCH_REBUILD_MODES, "search_rebuild_mode_invalid"),
       reasonCode: normalizeCode(reasonCode, "search_reindex_reason_required"),
       actorId: requireText(actorId, "actor_id_required"),
       status: "requested",
@@ -182,11 +207,13 @@ export function createSearchEngine({
         payload: {
           companyId: request.companyId,
           searchReindexRequestId: request.searchReindexRequestId,
-          projectionCode: request.projectionCode
+          projectionCode: request.projectionCode,
+          rebuildMode: request.rebuildMode
         },
         metadata: {
           rebuildReasonCode: request.reasonCode,
           projectionCode: request.projectionCode,
+          rebuildMode: request.rebuildMode,
           sourceDomainCode: "search"
         },
         riskClass: "low",
@@ -216,10 +243,11 @@ export function createSearchEngine({
     correlationId = newId()
   } = {}) {
     const request = requireSearchReindexRequest(companyId, searchReindexRequestId);
+    const contracts = validateReindexProjection(request);
     if (request.status === "completed") {
       return {
         reindexRequest: copy(request),
-        indexingSummary: buildIndexingSummary(request, 0)
+        indexingSummary: buildIndexingSummary(request, contracts.length)
       };
     }
     request.status = "running";
@@ -227,6 +255,7 @@ export function createSearchEngine({
     request.completedAt = null;
     request.errorCode = null;
     request.errorMessage = null;
+    markProjectionCheckpointsRunning({ request, contracts });
     pushAudit({
       companyId: request.companyId,
       actorId: requireText(actorId, "actor_id_required"),
@@ -237,8 +266,14 @@ export function createSearchEngine({
       explanation: `Started search reindex${request.projectionCode ? ` for ${request.projectionCode}` : ""}.`
     });
     try {
-      return runReindex(request, correlationId, actorId);
+      return runReindex(request, contracts, correlationId, actorId);
     } catch (error) {
+      markProjectionCheckpointsFailed({
+        request,
+        contracts,
+        errorCode: typeof error?.code === "string" ? error.code : "search_reindex_failed",
+        errorMessage: typeof error?.message === "string" && error.message.trim().length > 0 ? error.message.trim() : "Search reindex failed."
+      });
       markReindexFailed(request, {
         actorId,
         correlationId,
@@ -685,6 +720,7 @@ export function createSearchEngine({
   function snapshotSearch() {
     return copy({
       projectionContracts: [...state.projectionContracts.values()],
+      projectionCheckpoints: [...state.projectionCheckpoints.values()],
       searchDocuments: [...state.searchDocuments.values()],
       reindexRequests: [...state.reindexRequests.values()],
       savedViews: [...state.savedViews.values()],
@@ -703,22 +739,37 @@ export function createSearchEngine({
     return contracts;
   }
 
-  function runReindex(request, correlationId, actorId = request.actorId) {
-    const contracts = validateReindexProjection(request);
-
+  function runReindex(request, contracts, correlationId, actorId = request.actorId) {
     const seenKeys = new Set();
+    const projectionStats = new Map();
+    const targetedProjectionCodes = new Set(contracts.map((contract) => contract.projectionCode));
     let indexedCount = 0;
     let unchangedCount = 0;
+    let purgedCount = 0;
+    if (request.rebuildMode === "full") {
+      purgedCount = purgeProjectionDocuments({
+        companyId: request.companyId,
+        projectionCodes: targetedProjectionCodes,
+        projectionStats
+      });
+    }
     for (const contract of contracts) {
       const source = resolveProjectionSource(contract.sourceDomainCode);
-      const documents = source.listSearchProjectionDocuments({ companyId: request.companyId }).filter((document) => document.projectionCode === contract.projectionCode);
+      const documents = source
+        .listSearchProjectionDocuments({ companyId: request.companyId })
+        .filter((document) => document.projectionCode === contract.projectionCode);
+      const sourceHash = buildProjectionSourceHash(documents);
+      ensureProjectionStats(projectionStats, contract.projectionCode).sourceHash = sourceHash;
       for (const rawDocument of documents) {
         const result = upsertProjectionDocument(request.companyId, contract, rawDocument);
         seenKeys.add(result.documentKey);
+        const stats = ensureProjectionStats(projectionStats, contract.projectionCode);
         if (result.changed) {
           indexedCount += 1;
+          stats.indexedCount += 1;
         } else {
           unchangedCount += 1;
+          stats.unchangedCount += 1;
         }
       }
     }
@@ -740,6 +791,7 @@ export function createSearchEngine({
       document.tombstonedAt = nowIso(clock);
       document.updatedAt = document.tombstonedAt;
       tombstonedCount += 1;
+      ensureProjectionStats(projectionStats, document.projectionCode).tombstonedCount += 1;
     }
 
     request.status = "completed";
@@ -747,6 +799,8 @@ export function createSearchEngine({
     request.indexedCount = indexedCount;
     request.unchangedCount = unchangedCount;
     request.tombstonedCount = tombstonedCount;
+    request.purgedCount = purgedCount;
+    markProjectionCheckpointsCompleted({ request, contracts, projectionStats });
     pushAudit({ companyId: request.companyId, actorId: requireText(actorId, "actor_id_required"), correlationId, action: "search.reindex.completed", entityType: "search_reindex_request", entityId: request.searchReindexRequestId, explanation: `Completed search reindex with ${indexedCount} indexed and ${tombstonedCount} tombstoned documents.` });
     return { reindexRequest: copy(request), indexingSummary: buildIndexingSummary(request, contracts.length) };
   }
@@ -756,7 +810,9 @@ export function createSearchEngine({
       projectionCount,
       indexedCount: Number(request.indexedCount || 0),
       unchangedCount: Number(request.unchangedCount || 0),
-      tombstonedCount: Number(request.tombstonedCount || 0)
+      tombstonedCount: Number(request.tombstonedCount || 0),
+      purgedCount: Number(request.purgedCount || 0),
+      rebuildMode: request.rebuildMode || "delta"
     };
   }
 
@@ -789,6 +845,155 @@ export function createSearchEngine({
         errorMessage: request.errorMessage
       }
     });
+  }
+
+  function markProjectionCheckpointsRunning({ request, contracts }) {
+    const requestedAt = request.requestedAt || nowIso(clock);
+    const startedAt = request.startedAt || nowIso(clock);
+    for (const contract of contracts) {
+      const checkpoint = upsertProjectionCheckpoint(request.companyId, contract);
+      checkpoint.status = "running";
+      checkpoint.lastRequestId = request.searchReindexRequestId;
+      checkpoint.lastRequestedAt = requestedAt;
+      checkpoint.lastStartedAt = startedAt;
+      checkpoint.lastCompletedAt = null;
+      checkpoint.lastErrorCode = null;
+      checkpoint.lastErrorMessage = null;
+      checkpoint.lastRebuildMode = request.rebuildMode || "delta";
+    }
+  }
+
+  function markProjectionCheckpointsCompleted({ request, contracts, projectionStats }) {
+    const completedAt = request.completedAt || nowIso(clock);
+    for (const contract of contracts) {
+      const checkpoint = upsertProjectionCheckpoint(request.companyId, contract);
+      const stats = projectionStats.get(contract.projectionCode) || ensureProjectionStats(projectionStats, contract.projectionCode);
+      checkpoint.status = "completed";
+      checkpoint.lastRequestId = request.searchReindexRequestId;
+      checkpoint.lastRebuildMode = request.rebuildMode || "delta";
+      checkpoint.lastCompletedAt = completedAt;
+      checkpoint.lastErrorCode = null;
+      checkpoint.lastErrorMessage = null;
+      checkpoint.lastIndexedCount = stats.indexedCount;
+      checkpoint.lastUnchangedCount = stats.unchangedCount;
+      checkpoint.lastTombstonedCount = stats.tombstonedCount;
+      checkpoint.lastPurgedCount = stats.purgedCount;
+      checkpoint.lastDocumentCount = countIndexedProjectionDocuments(request.companyId, contract.projectionCode);
+      checkpoint.lastSourceHash = stats.sourceHash;
+      checkpoint.checkpointSequenceNo += 1;
+      checkpoint.updatedAt = completedAt;
+    }
+  }
+
+  function markProjectionCheckpointsFailed({ request, contracts, errorCode, errorMessage }) {
+    const failedAt = nowIso(clock);
+    const normalizedErrorCode = normalizeCode(errorCode || "search_reindex_failed", "search_reindex_error_code_required");
+    const normalizedErrorMessage = normalizeOptionalText(errorMessage) || "Search reindex failed.";
+    for (const contract of contracts) {
+      const checkpoint = upsertProjectionCheckpoint(request.companyId, contract);
+      checkpoint.status = "failed";
+      checkpoint.lastRequestId = request.searchReindexRequestId;
+      checkpoint.lastRebuildMode = request.rebuildMode || "delta";
+      checkpoint.lastCompletedAt = failedAt;
+      checkpoint.lastErrorCode = normalizedErrorCode;
+      checkpoint.lastErrorMessage = normalizedErrorMessage;
+      checkpoint.updatedAt = failedAt;
+    }
+  }
+
+  function upsertProjectionCheckpoint(companyId, contract) {
+    const checkpointId = `${companyId}::${contract.projectionCode}`;
+    let checkpoint = state.projectionCheckpoints.get(checkpointId);
+    if (!checkpoint) {
+      checkpoint = {
+        projectionCheckpointId: checkpointId,
+        companyId,
+        projectionCode: contract.projectionCode,
+        sourceDomainCode: contract.sourceDomainCode,
+        status: "idle",
+        checkpointSequenceNo: 0,
+        lastRequestId: null,
+        lastRequestedAt: null,
+        lastStartedAt: null,
+        lastCompletedAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastRebuildMode: "delta",
+        lastIndexedCount: 0,
+        lastUnchangedCount: 0,
+        lastTombstonedCount: 0,
+        lastPurgedCount: 0,
+        lastDocumentCount: 0,
+        lastSourceHash: null,
+        createdAt: nowIso(clock),
+        updatedAt: nowIso(clock)
+      };
+      state.projectionCheckpoints.set(checkpointId, checkpoint);
+      appendToIndex(state.projectionCheckpointIdsByCompany, companyId, checkpointId);
+    } else {
+      checkpoint.sourceDomainCode = contract.sourceDomainCode;
+      checkpoint.updatedAt = nowIso(clock);
+    }
+    return checkpoint;
+  }
+
+  function ensureProjectionStats(projectionStats, projectionCode) {
+    if (!projectionStats.has(projectionCode)) {
+      projectionStats.set(projectionCode, {
+        indexedCount: 0,
+        unchangedCount: 0,
+        tombstonedCount: 0,
+        purgedCount: 0,
+        sourceHash: buildProjectionSourceHash([])
+      });
+    }
+    return projectionStats.get(projectionCode);
+  }
+
+  function purgeProjectionDocuments({ companyId, projectionCodes, projectionStats }) {
+    const retainedIds = [];
+    let purgedCount = 0;
+    for (const documentId of state.searchDocumentIdsByCompany.get(companyId) || []) {
+      const document = state.searchDocuments.get(documentId);
+      if (!document) {
+        continue;
+      }
+      if (projectionCodes.has(document.projectionCode)) {
+        const stats = ensureProjectionStats(projectionStats, document.projectionCode);
+        stats.purgedCount += 1;
+        purgedCount += 1;
+        state.searchDocuments.delete(documentId);
+        state.searchDocumentIdByKey.delete(documentRegistryKey(document.companyId, document.projectionCode, document.objectId));
+        continue;
+      }
+      retainedIds.push(documentId);
+    }
+    if (retainedIds.length > 0) {
+      state.searchDocumentIdsByCompany.set(companyId, retainedIds);
+    } else {
+      state.searchDocumentIdsByCompany.delete(companyId);
+    }
+    return purgedCount;
+  }
+
+  function countIndexedProjectionDocuments(companyId, projectionCode) {
+    return (state.searchDocumentIdsByCompany.get(companyId) || [])
+      .map((documentId) => state.searchDocuments.get(documentId))
+      .filter(Boolean)
+      .filter((document) => document.projectionCode === projectionCode)
+      .filter((document) => !["tombstoned", "purged"].includes(document.status))
+      .length;
+  }
+
+  function buildProjectionSourceHash(documents) {
+    return hashObject(
+      [...(Array.isArray(documents) ? documents : [])]
+        .map((document) => copy(document))
+        .sort((left, right) =>
+          requireText(left.projectionCode || "", "search_projection_code_required").localeCompare(requireText(right.projectionCode || "", "search_projection_code_required"))
+          || requireText(left.objectId || "", "search_projection_object_id_required").localeCompare(requireText(right.objectId || "", "search_projection_object_id_required"))
+        )
+    );
   }
 
   function syncProjectionContracts(companyId) {

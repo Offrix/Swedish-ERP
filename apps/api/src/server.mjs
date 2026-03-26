@@ -315,6 +315,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/reporting/reconciliations/:reconciliationRunId",
               "/v1/reporting/reconciliations/:reconciliationRunId/signoff",
               "/v1/search/contracts",
+              "/v1/search/projection-checkpoints",
               "/v1/search/reindex",
               "/v1/search/documents",
               "/v1/search/documents/:searchDocumentId",
@@ -2464,6 +2465,7 @@ async function handleRequest({ req, res, platform, flags }) {
       await platform.requestSearchReindex({
         companyId,
         projectionCode: body.projectionCode || null,
+        rebuildMode: body.rebuildMode || "delta",
         reasonCode: body.reasonCode || "manual_request",
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
@@ -2488,6 +2490,30 @@ async function handleRequest({ req, res, platform, flags }) {
     });
     writeJson(res, 200, {
       items: platform.listSearchReindexRequests({
+        companyId,
+        projectionCode: url.searchParams.get("projectionCode") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/search/projection-checkpoints") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "search",
+      scopeCode: "search"
+    });
+    writeJson(res, 200, {
+      items: platform.listProjectionCheckpoints({
         companyId,
         projectionCode: url.searchParams.get("projectionCode") || null,
         status: url.searchParams.get("status") || null
