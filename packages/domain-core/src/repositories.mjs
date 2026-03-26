@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
 
 export const CORE_CANONICAL_REPOSITORY_TABLE = "core_domain_records";
+export const COMMAND_RECEIPT_STATUSES = Object.freeze(["accepted", "duplicate", "replayed"]);
+export const OUTBOX_MESSAGE_STATUSES = Object.freeze(["pending", "published"]);
+export const INBOX_MESSAGE_STATUSES = Object.freeze(["recorded", "processed", "rejected"]);
 
 export const CORE_CANONICAL_REPOSITORY_OBJECT_TYPES = Object.freeze({
   portfolios: "bureau_portfolio_membership",
@@ -56,6 +59,28 @@ function text(value, fieldName) {
   return value.trim();
 }
 
+function optionalText(value, fieldName) {
+  if (value == null) {
+    return null;
+  }
+  return text(value, fieldName);
+}
+
+function positiveInteger(value, fieldName) {
+  const normalized = Number(value);
+  if (!Number.isInteger(normalized) || normalized <= 0) {
+    throw new TypeError(`${fieldName} must be a positive integer.`);
+  }
+  return normalized;
+}
+
+function assertAllowed(value, allowedValues, fieldName) {
+  if (!allowedValues.includes(value)) {
+    throw new TypeError(`${fieldName} must be one of ${allowedValues.join(", ")}.`);
+  }
+  return value;
+}
+
 function normalizeStatus(value, payload) {
   if (typeof value === "string" && value.trim().length > 0) {
     return value.trim();
@@ -79,6 +104,18 @@ function buildRecordKey({ tableName, boundedContextCode, objectType, companyId, 
   return [tableName, boundedContextCode, objectType, companyId, objectId].join("::");
 }
 
+function buildCommandReceiptCommandKey({ companyId, commandType, commandId }) {
+  return [companyId, commandType, commandId].join("::");
+}
+
+function buildCommandReceiptIdempotencyKey({ companyId, idempotencyKey }) {
+  return [companyId, idempotencyKey].join("::");
+}
+
+function buildInboxKey({ companyId, sourceSystem, messageId }) {
+  return [companyId, sourceSystem, messageId].join("::");
+}
+
 function toRepositoryObject(record) {
   if (!record) {
     return null;
@@ -96,6 +133,79 @@ function toRepositoryObject(record) {
     updatedAt: record.updatedAt,
     lastActorId: record.lastActorId,
     lastCorrelationId: record.lastCorrelationId
+  };
+}
+
+function toCommandReceiptObject(record) {
+  if (!record) {
+    return null;
+  }
+  return {
+    commandReceiptId: record.commandReceiptId,
+    companyId: record.companyId,
+    commandType: record.commandType,
+    aggregateType: record.aggregateType,
+    aggregateId: record.aggregateId,
+    commandId: record.commandId,
+    idempotencyKey: record.idempotencyKey,
+    expectedObjectVersion: record.expectedObjectVersion,
+    resultingObjectVersion: record.resultingObjectVersion,
+    actorId: record.actorId,
+    sessionRevision: record.sessionRevision,
+    correlationId: record.correlationId,
+    causationId: record.causationId,
+    payloadHash: record.payloadHash,
+    commandPayload: clone(record.commandPayload),
+    metadata: clone(record.metadata),
+    status: record.status,
+    recordedAt: record.recordedAt,
+    processedAt: record.processedAt
+  };
+}
+
+function toOutboxMessageObject(record) {
+  if (!record) {
+    return null;
+  }
+  return {
+    eventId: record.eventId,
+    companyId: record.companyId,
+    eventType: record.eventType,
+    aggregateType: record.aggregateType,
+    aggregateId: record.aggregateId,
+    commandReceiptId: record.commandReceiptId,
+    payload: clone(record.payload),
+    occurredAt: record.occurredAt,
+    recordedAt: record.recordedAt,
+    publishedAt: record.publishedAt,
+    actorId: record.actorId,
+    correlationId: record.correlationId,
+    causationId: record.causationId,
+    idempotencyKey: record.idempotencyKey,
+    status: record.status
+  };
+}
+
+function toInboxMessageObject(record) {
+  if (!record) {
+    return null;
+  }
+  return {
+    inboxMessageId: record.inboxMessageId,
+    companyId: record.companyId,
+    sourceSystem: record.sourceSystem,
+    messageId: record.messageId,
+    aggregateType: record.aggregateType,
+    aggregateId: record.aggregateId,
+    payloadHash: record.payloadHash,
+    payload: clone(record.payload),
+    correlationId: record.correlationId,
+    causationId: record.causationId,
+    actorId: record.actorId,
+    status: record.status,
+    receivedAt: record.receivedAt,
+    processedAt: record.processedAt,
+    errorCode: record.errorCode
   };
 }
 
@@ -121,7 +231,17 @@ function createConflictError({ tableName, boundedContextCode, objectType, compan
   });
 }
 
-function createMemoryTransaction(records) {
+function createMemoryTransaction(records, commandReceipts, outboxMessages, inboxMessages) {
+  function findCommandReceipt({ companyId, commandType = null, commandId = null, idempotencyKey = null }) {
+    const normalizedCompanyId = text(companyId, "companyId");
+    return [...commandReceipts.values()].find((candidate) =>
+      candidate.companyId === normalizedCompanyId
+      && (commandType ? candidate.commandType === text(commandType, "commandType") : true)
+      && (commandId ? candidate.commandId === text(commandId, "commandId") : true)
+      && (idempotencyKey ? candidate.idempotencyKey === text(idempotencyKey, "idempotencyKey") : true)
+    ) || null;
+  }
+
   return {
     kind: "memory_canonical_repository_transaction",
 
@@ -268,12 +388,229 @@ function createMemoryTransaction(records) {
       }
       records.delete(key);
       return toRepositoryObject(existing);
+    },
+
+    async getCommandReceipt({ companyId, commandType = null, commandId = null, idempotencyKey = null }) {
+      return toCommandReceiptObject(findCommandReceipt({ companyId, commandType, commandId, idempotencyKey }));
+    },
+
+    async listCommandReceipts({ companyId, commandType = null }) {
+      const normalizedCompanyId = text(companyId, "companyId");
+      return [...commandReceipts.values()]
+        .filter((candidate) => candidate.companyId === normalizedCompanyId)
+        .filter((candidate) => (commandType ? candidate.commandType === text(commandType, "commandType") : true))
+        .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt) || left.commandReceiptId.localeCompare(right.commandReceiptId))
+        .map(toCommandReceiptObject);
+    },
+
+    async appendCommandReceipt({
+      companyId,
+      commandType,
+      aggregateType,
+      aggregateId,
+      commandId = crypto.randomUUID(),
+      idempotencyKey,
+      expectedObjectVersion = null,
+      resultingObjectVersion = null,
+      actorId,
+      sessionRevision,
+      correlationId,
+      causationId = null,
+      payloadHash,
+      commandPayload,
+      metadata = {},
+      status = "accepted",
+      recordedAt = null
+    }) {
+      const normalized = {
+        companyId: text(companyId, "companyId"),
+        commandType: text(commandType, "commandType"),
+        aggregateType: text(aggregateType, "aggregateType"),
+        aggregateId: text(aggregateId, "aggregateId"),
+        commandId: text(commandId, "commandId"),
+        idempotencyKey: text(idempotencyKey, "idempotencyKey"),
+        actorId: text(actorId, "actorId"),
+        sessionRevision: positiveInteger(sessionRevision, "sessionRevision"),
+        correlationId: text(correlationId, "correlationId"),
+        causationId: optionalText(causationId, "causationId"),
+        payloadHash: text(payloadHash, "payloadHash"),
+        commandPayload: clone(commandPayload ?? {}),
+        metadata: clone(metadata || {}),
+        status: assertAllowed(status, COMMAND_RECEIPT_STATUSES, "status"),
+        recordedAt: normalizeTimestamp(recordedAt),
+        expectedObjectVersion: expectedObjectVersion == null ? null : Number(expectedObjectVersion),
+        resultingObjectVersion: resultingObjectVersion == null ? null : Number(resultingObjectVersion)
+      };
+      const existingByCommand = findCommandReceipt({
+        companyId: normalized.companyId,
+        commandType: normalized.commandType,
+        commandId: normalized.commandId
+      });
+      const existingByIdempotency = findCommandReceipt({
+        companyId: normalized.companyId,
+        idempotencyKey: normalized.idempotencyKey
+      });
+      if (existingByCommand || existingByIdempotency) {
+        throw createConflictError({
+          tableName: "command_receipts",
+          boundedContextCode: CORE_BOUNDED_CONTEXT_CODE,
+          objectType: normalized.commandType,
+          companyId: normalized.companyId,
+          objectId: normalized.commandId,
+          expectedObjectVersion: normalized.expectedObjectVersion,
+          actualObjectVersion: existingByCommand?.resultingObjectVersion ?? existingByIdempotency?.resultingObjectVersion ?? null,
+          action: "command_receipt_duplicate"
+        });
+      }
+      const receipt = {
+        commandReceiptId: crypto.randomUUID(),
+        processedAt: normalized.recordedAt,
+        ...normalized
+      };
+      commandReceipts.set(receipt.commandReceiptId, receipt);
+      return toCommandReceiptObject(receipt);
+    },
+
+    async listOutboxMessages({ companyId, aggregateType = null, aggregateId = null, commandReceiptId = null, published = null }) {
+      const normalizedCompanyId = text(companyId, "companyId");
+      return [...outboxMessages.values()]
+        .filter((candidate) => candidate.companyId === normalizedCompanyId)
+        .filter((candidate) => (aggregateType ? candidate.aggregateType === text(aggregateType, "aggregateType") : true))
+        .filter((candidate) => (aggregateId ? candidate.aggregateId === text(aggregateId, "aggregateId") : true))
+        .filter((candidate) => (commandReceiptId ? candidate.commandReceiptId === text(commandReceiptId, "commandReceiptId") : true))
+        .filter((candidate) => (published == null ? true : published ? Boolean(candidate.publishedAt) : !candidate.publishedAt))
+        .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt) || left.eventId.localeCompare(right.eventId))
+        .map(toOutboxMessageObject);
+    },
+
+    async enqueueOutboxMessage({
+      eventId = crypto.randomUUID(),
+      companyId,
+      eventType,
+      aggregateType,
+      aggregateId,
+      commandReceiptId = null,
+      payload,
+      occurredAt = null,
+      recordedAt = null,
+      actorId,
+      correlationId,
+      causationId = null,
+      idempotencyKey = null
+    }) {
+      const normalizedRecordedAt = normalizeTimestamp(recordedAt);
+      const normalizedOccurredAt = normalizeTimestamp(occurredAt || normalizedRecordedAt);
+      const message = {
+        eventId: text(eventId, "eventId"),
+        companyId: text(companyId, "companyId"),
+        eventType: text(eventType, "eventType"),
+        aggregateType: text(aggregateType, "aggregateType"),
+        aggregateId: text(aggregateId, "aggregateId"),
+        commandReceiptId: optionalText(commandReceiptId, "commandReceiptId"),
+        payload: clone(payload ?? {}),
+        occurredAt: normalizedOccurredAt,
+        recordedAt: normalizedRecordedAt,
+        publishedAt: null,
+        actorId: text(actorId, "actorId"),
+        correlationId: text(correlationId, "correlationId"),
+        causationId: optionalText(causationId, "causationId"),
+        idempotencyKey: optionalText(idempotencyKey, "idempotencyKey"),
+        status: "pending"
+      };
+      outboxMessages.set(message.eventId, message);
+      return toOutboxMessageObject(message);
+    },
+
+    async markOutboxMessagePublished({ eventId, publishedAt = null }) {
+      const message = outboxMessages.get(text(eventId, "eventId"));
+      if (!message) {
+        return null;
+      }
+      message.publishedAt = normalizeTimestamp(publishedAt);
+      message.status = "published";
+      return toOutboxMessageObject(message);
+    },
+
+    async getInboxMessage({ companyId, sourceSystem, messageId }) {
+      const key = buildInboxKey({
+        companyId: text(companyId, "companyId"),
+        sourceSystem: text(sourceSystem, "sourceSystem"),
+        messageId: text(messageId, "messageId")
+      });
+      return toInboxMessageObject(inboxMessages.get(key) || null);
+    },
+
+    async listInboxMessages({ companyId, sourceSystem = null, status = null }) {
+      const normalizedCompanyId = text(companyId, "companyId");
+      return [...inboxMessages.values()]
+        .filter((candidate) => candidate.companyId === normalizedCompanyId)
+        .filter((candidate) => (sourceSystem ? candidate.sourceSystem === text(sourceSystem, "sourceSystem") : true))
+        .filter((candidate) => (status ? candidate.status === assertAllowed(status, INBOX_MESSAGE_STATUSES, "status") : true))
+        .sort((left, right) => left.receivedAt.localeCompare(right.receivedAt) || left.inboxMessageId.localeCompare(right.inboxMessageId))
+        .map(toInboxMessageObject);
+    },
+
+    async recordInboxMessage({
+      companyId,
+      sourceSystem,
+      messageId,
+      aggregateType = null,
+      aggregateId = null,
+      payloadHash,
+      payload,
+      correlationId = null,
+      causationId = null,
+      actorId = null,
+      status = "recorded",
+      receivedAt = null
+    }) {
+      const normalized = {
+        companyId: text(companyId, "companyId"),
+        sourceSystem: text(sourceSystem, "sourceSystem"),
+        messageId: text(messageId, "messageId"),
+        aggregateType: optionalText(aggregateType, "aggregateType"),
+        aggregateId: optionalText(aggregateId, "aggregateId"),
+        payloadHash: text(payloadHash, "payloadHash"),
+        payload: clone(payload ?? {}),
+        correlationId: optionalText(correlationId, "correlationId"),
+        causationId: optionalText(causationId, "causationId"),
+        actorId: optionalText(actorId, "actorId"),
+        status: assertAllowed(status, INBOX_MESSAGE_STATUSES, "status"),
+        receivedAt: normalizeTimestamp(receivedAt),
+        processedAt: null,
+        errorCode: null
+      };
+      const key = buildInboxKey(normalized);
+      const existing = inboxMessages.get(key) || null;
+      if (existing) {
+        return toInboxMessageObject(existing);
+      }
+      const message = {
+        inboxMessageId: crypto.randomUUID(),
+        ...normalized
+      };
+      inboxMessages.set(key, message);
+      return toInboxMessageObject(message);
+    },
+
+    async markInboxMessageProcessed({ inboxMessageId, processedAt = null, status = "processed", errorCode = null }) {
+      const message = [...inboxMessages.values()].find((candidate) => candidate.inboxMessageId === text(inboxMessageId, "inboxMessageId")) || null;
+      if (!message) {
+        return null;
+      }
+      message.status = assertAllowed(status, INBOX_MESSAGE_STATUSES, "status");
+      message.processedAt = normalizeTimestamp(processedAt);
+      message.errorCode = optionalText(errorCode, "errorCode");
+      return toInboxMessageObject(message);
     }
   };
 }
 
 export function createInMemoryCanonicalRepositoryStore() {
   const records = new Map();
+  const commandReceipts = new Map();
+  const outboxMessages = new Map();
+  const inboxMessages = new Map();
 
   return {
     kind: "memory_canonical_repository_store",
@@ -281,21 +618,55 @@ export function createInMemoryCanonicalRepositoryStore() {
     async close() {},
 
     async withTransaction(work) {
-      const transactionalState = new Map();
+      const transactionalRecords = new Map();
       for (const [key, value] of records.entries()) {
-        transactionalState.set(key, clone(value));
+        transactionalRecords.set(key, clone(value));
       }
-      const transaction = createMemoryTransaction(transactionalState);
+      const transactionalCommandReceipts = new Map();
+      for (const [key, value] of commandReceipts.entries()) {
+        transactionalCommandReceipts.set(key, clone(value));
+      }
+      const transactionalOutboxMessages = new Map();
+      for (const [key, value] of outboxMessages.entries()) {
+        transactionalOutboxMessages.set(key, clone(value));
+      }
+      const transactionalInboxMessages = new Map();
+      for (const [key, value] of inboxMessages.entries()) {
+        transactionalInboxMessages.set(key, clone(value));
+      }
+      const transaction = createMemoryTransaction(
+        transactionalRecords,
+        transactionalCommandReceipts,
+        transactionalOutboxMessages,
+        transactionalInboxMessages
+      );
       const result = await work(transaction);
       records.clear();
-      for (const [key, value] of transactionalState.entries()) {
+      for (const [key, value] of transactionalRecords.entries()) {
         records.set(key, value);
+      }
+      commandReceipts.clear();
+      for (const [key, value] of transactionalCommandReceipts.entries()) {
+        commandReceipts.set(key, value);
+      }
+      outboxMessages.clear();
+      for (const [key, value] of transactionalOutboxMessages.entries()) {
+        outboxMessages.set(key, value);
+      }
+      inboxMessages.clear();
+      for (const [key, value] of transactionalInboxMessages.entries()) {
+        inboxMessages.set(key, value);
       }
       return result;
     },
 
     snapshot() {
-      return [...records.values()].map(toRepositoryObject);
+      return {
+        records: [...records.values()].map(toRepositoryObject),
+        commandReceipts: [...commandReceipts.values()].map(toCommandReceiptObject),
+        outboxMessages: [...outboxMessages.values()].map(toOutboxMessageObject),
+        inboxMessages: [...inboxMessages.values()].map(toInboxMessageObject)
+      };
     }
   };
 }

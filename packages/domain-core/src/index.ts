@@ -312,3 +312,61 @@ export interface CanonicalRepository<TPayload = Record<string, unknown>> {
     readonly expectedObjectVersion: number;
   }): Promise<CanonicalRepositoryRecord<TPayload>>;
 }
+
+export interface CommandReceiptRecord<TPayload = Record<string, unknown>> {
+  readonly commandReceiptId: string;
+  readonly companyId: string;
+  readonly commandType: string;
+  readonly aggregateType: string;
+  readonly aggregateId: string;
+  readonly commandId: string;
+  readonly idempotencyKey: string;
+  readonly expectedObjectVersion: number | null;
+  readonly resultingObjectVersion: number | null;
+  readonly actorId: string;
+  readonly sessionRevision: number;
+  readonly correlationId: string;
+  readonly causationId: string | null;
+  readonly payloadHash: string;
+  readonly commandPayload: TPayload;
+  readonly metadata: Record<string, unknown>;
+  readonly status: string;
+  readonly recordedAt: string;
+  readonly processedAt: string;
+}
+
+export interface OutboxMessageRecord<TPayload = Record<string, unknown>> {
+  readonly eventId: string;
+  readonly companyId: string;
+  readonly eventType: string;
+  readonly aggregateType: string;
+  readonly aggregateId: string;
+  readonly commandReceiptId: string | null;
+  readonly payload: TPayload;
+  readonly occurredAt: string;
+  readonly recordedAt: string;
+  readonly publishedAt: string | null;
+  readonly actorId: string;
+  readonly correlationId: string;
+  readonly causationId: string | null;
+  readonly idempotencyKey: string | null;
+  readonly status: string;
+}
+
+export interface InboxMessageRecord<TPayload = Record<string, unknown>> {
+  readonly inboxMessageId: string;
+  readonly companyId: string;
+  readonly sourceSystem: string;
+  readonly messageId: string;
+  readonly aggregateType: string | null;
+  readonly aggregateId: string | null;
+  readonly payloadHash: string;
+  readonly payload: TPayload;
+  readonly correlationId: string | null;
+  readonly causationId: string | null;
+  readonly actorId: string | null;
+  readonly status: string;
+  readonly receivedAt: string;
+  readonly processedAt: string | null;
+  readonly errorCode: string | null;
+}

@@ -2,7 +2,10 @@ import crypto from "node:crypto";
 export {
   CORE_CANONICAL_REPOSITORY_OBJECT_TYPES,
   CORE_CANONICAL_REPOSITORY_TABLE,
+  COMMAND_RECEIPT_STATUSES,
   CanonicalRepositoryConflictError,
+  INBOX_MESSAGE_STATUSES,
+  OUTBOX_MESSAGE_STATUSES,
   createCanonicalJsonRepository,
   createCoreCanonicalRepositories,
   createInMemoryCanonicalRepositoryStore
@@ -11,6 +14,7 @@ export {
   createPostgresCanonicalRepositoryStore,
   resolveCanonicalRepositoryConnectionString
 } from "./repositories-postgres.mjs";
+export { createCommandMutationRuntime } from "./command-log.mjs";
 import {
   CLOSE_BLOCKER_SEVERITIES,
   CLOSE_BLOCKER_STATUSES,

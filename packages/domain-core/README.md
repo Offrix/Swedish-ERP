@@ -45,3 +45,10 @@ Shared domain primitives, value objects and cross-cutting workflow engines used 
 - optimistic concurrency with expected object version on updates and deletes
 - transaction-bound repository operations for future command-receipt/outbox work
 - Postgres-backed repository store for durable core-domain persistence primitives
+
+## Phase 2.2 scope
+
+- command receipts with command id, idempotency key, expected object version, actor and session revision
+- outbox events linked to accepted command receipts in the same transaction boundary
+- inbox message deduplication and processing state for downstream/provider receipts
+- deterministic command mutation runtime that suppresses duplicates and rolls back atomically
