@@ -10,6 +10,15 @@ import {
   createSuccessfulPartnerOperationExecutors
 } from "../helpers/phase13-integrations-fixtures.mjs";
 
+const PROVIDER_CODES = Object.freeze({
+  bank: "enable_banking",
+  peppol: "pagero_online",
+  pension: "tenant_managed_pension_export",
+  crm: "generic_crm_rest",
+  commerce: "generic_commerce_rest",
+  id06: "official_id06_integration"
+});
+
 test("Phase 13.2 flow exposes partner routes and runs fallback plus replay without mutating history", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-22T22:10:00Z"),
@@ -47,7 +56,7 @@ test("Phase 13.2 flow exposes partner routes and runs fallback plus replay witho
       body: {
         companyId: DEMO_IDS.companyId,
         connectionType: "peppol",
-        partnerCode: "peppol_partner",
+        providerCode: PROVIDER_CODES.peppol,
         displayName: "Peppol Adapter",
         mode: "sandbox",
         rateLimitPerMinute: 5,
@@ -64,7 +73,8 @@ test("Phase 13.2 flow exposes partner routes and runs fallback plus replay witho
       token: adminToken,
       expectedStatus: 201,
       body: {
-        companyId: DEMO_IDS.companyId
+        companyId: DEMO_IDS.companyId,
+        testPackCode: "test-pack-v1"
       }
     });
     await requestJson(baseUrl, `/v1/partners/connections/${connection.connectionId}/health`, {
@@ -84,6 +94,7 @@ test("Phase 13.2 flow exposes partner routes and runs fallback plus replay witho
         companyId: DEMO_IDS.companyId,
         connectionId: connection.connectionId,
         operationCode: "invoice_send",
+        operationKey: "peppol:invoice_send:INV-13-E2E",
         payload: { invoiceId: "INV-13-E2E" }
       }
     });

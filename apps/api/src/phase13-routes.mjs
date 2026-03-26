@@ -373,12 +373,13 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
       platform.createPartnerConnection({
         companyId,
         connectionType: body.connectionType,
-        partnerCode: body.partnerCode,
+        providerCode: body.providerCode || body.partnerCode,
         displayName: body.displayName,
         mode: body.mode,
         rateLimitPerMinute: body.rateLimitPerMinute,
         fallbackMode: body.fallbackMode,
         credentialsRef: body.credentialsRef,
+        config: body.config || {},
         actorId: body.actorId || "session_user"
       })
     );
@@ -444,7 +445,9 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
     writeJson(res, 200, {
       items: platform.listPartnerConnections({
         companyId,
-        connectionType: optionalText(url.searchParams.get("connectionType"))
+        connectionType: optionalText(url.searchParams.get("connectionType")),
+        providerCode: optionalText(url.searchParams.get("providerCode")),
+        mode: optionalText(url.searchParams.get("mode"))
       })
     });
     return true;
@@ -504,6 +507,33 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  const partnerHealthCheckMatch = matchPath(path, "/v1/partners/connections/:connectionId/health-checks");
+  if (req.method === "POST" && partnerHealthCheckMatch) {
+    const body = await readJsonBody(req);
+    const sessionToken = readSessionToken(req, body);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "partner_connection",
+      objectId: partnerHealthCheckMatch.connectionId,
+      scopeCode: "partner_connection"
+    });
+    writeJson(
+      res,
+      201,
+      platform.runPartnerHealthCheck({
+        companyId,
+        connectionId: partnerHealthCheckMatch.connectionId,
+        checkSetCode: body.checkSetCode || "standard",
+        actorId: body.actorId || "session_user"
+      })
+    );
+    return true;
+  }
+
   const contractTestMatch = matchPath(path, "/v1/partners/connections/:connectionId/contract-tests");
   if (req.method === "POST" && contractTestMatch) {
     const body = await readJsonBody(req);
@@ -521,6 +551,8 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
     const result = await platform.runAdapterContractTest({
       companyId,
       connectionId: contractTestMatch.connectionId,
+      testPackCode: body.testPackCode || null,
+      mode: body.mode || null,
       actorId: body.actorId || "session_user"
     });
     platform.emitWebhookEvent({
@@ -549,7 +581,8 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
     writeJson(res, 200, {
       items: platform.listAdapterContractResults({
         companyId,
-        connectionId: optionalText(url.searchParams.get("connectionId"))
+        connectionId: optionalText(url.searchParams.get("connectionId")),
+        status: optionalText(url.searchParams.get("status"))
       })
     });
     return true;
@@ -572,7 +605,9 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
       companyId,
       connectionId: body.connectionId,
       operationCode: body.operationCode,
+      operationKey: body.operationKey || null,
       payload: body.payload || {},
+      dryRun: body.dryRun === true,
       actorId: body.actorId || "session_user"
     });
     if (operation.status === "succeeded") {
@@ -655,9 +690,61 @@ export async function tryHandlePhase13Route({ req, res, url, path, platform }) {
       items: platform.listPartnerOperations({
         companyId,
         connectionId: optionalText(url.searchParams.get("connectionId")),
-        status: optionalText(url.searchParams.get("status"))
+        status: optionalText(url.searchParams.get("status")),
+        operationCode: optionalText(url.searchParams.get("operationCode"))
       })
     });
+    return true;
+  }
+
+  const partnerOperationMatch = matchPath(path, "/v1/partners/operations/:operationId");
+  if (req.method === "GET" && partnerOperationMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      action: "company.read",
+      objectType: "partner_operation",
+      objectId: partnerOperationMatch.operationId,
+      scopeCode: "partner_operation"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getPartnerOperation({
+        companyId,
+        operationId: partnerOperationMatch.operationId
+      })
+    );
+    return true;
+  }
+
+  const partnerOperationReplayMatch = matchPath(path, "/v1/partners/operations/:operationId/replay");
+  if (req.method === "POST" && partnerOperationReplayMatch) {
+    const body = await readJsonBody(req);
+    const sessionToken = readSessionToken(req, body);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "partner_operation",
+      objectId: partnerOperationReplayMatch.operationId,
+      scopeCode: "partner_operation"
+    });
+    writeJson(
+      res,
+      200,
+      platform.replayPartnerOperation({
+        companyId,
+        operationId: partnerOperationReplayMatch.operationId,
+        actorId: body.actorId || "session_user",
+        reasonCode: body.reasonCode || null,
+        approvedByActorId: body.approvedByActorId || null
+      })
+    );
     return true;
   }
 

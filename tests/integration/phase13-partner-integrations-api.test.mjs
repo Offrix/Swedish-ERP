@@ -11,6 +11,15 @@ import {
   createSuccessfulPartnerOperationExecutors
 } from "../helpers/phase13-integrations-fixtures.mjs";
 
+const PROVIDER_CODES = Object.freeze({
+  bank: "enable_banking",
+  peppol: "pagero_online",
+  pension: "tenant_managed_pension_export",
+  crm: "generic_crm_rest",
+  commerce: "generic_commerce_rest",
+  id06: "official_id06_integration"
+});
+
 test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-safe jobs", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-22T21:10:00Z"),
@@ -42,6 +51,7 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
       body: {
         companyId: DEMO_IDS.companyId,
         connectionType: "bank",
+        providerCode: PROVIDER_CODES.bank,
         partnerCode: "missing_creds_partner",
         displayName: "Missing creds partner",
         mode: "sandbox",
@@ -61,9 +71,9 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
           body: {
             companyId: DEMO_IDS.companyId,
             connectionType,
-            partnerCode: `${connectionType}_partner`,
+            providerCode: PROVIDER_CODES[connectionType],
             displayName: `${connectionType} adapter`,
-            mode: "sandbox",
+            mode: connectionType === "id06" ? "production" : "sandbox",
             rateLimitPerMinute: connectionType === "crm" ? 1 : 10,
             fallbackMode: "queue_retry",
             credentialsRef: `secret://${connectionType}`
@@ -73,21 +83,37 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
     }
     assert.equal(connections.length, PARTNER_CONNECTION_TYPES.length);
     assert.equal("credentialsRef" in connections[0], false);
-    assert.equal(connections[0].credentialsConfigured, true);
+    assert.equal(connections[0].credentialsPresent, true);
 
     const listed = await requestJson(baseUrl, `/v1/partners/connections?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
     assert.equal(listed.items.length, PARTNER_CONNECTION_TYPES.length);
     assert.equal("credentialsRef" in listed.items[0], false);
-    assert.equal(listed.items[0].credentialsConfigured, true);
+    assert.equal(listed.items[0].credentialsPresent, true);
+    assert.equal(listed.items.find((item) => item.connectionType === "bank").providerCode, PROVIDER_CODES.bank);
 
     const bankCapabilities = await requestJson(baseUrl, `/v1/partners/connections/${connections.find((connection) => connection.connectionType === "bank").connectionId}/capabilities?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
     assert.equal(bankCapabilities.operationCodes.includes("tax_account_sync"), true);
     assert.equal(bankCapabilities.mode, "sandbox");
+    assert.equal(bankCapabilities.providerCode, PROVIDER_CODES.bank);
+    assert.equal(Array.isArray(bankCapabilities.objectMappings), true);
+    assert.equal(Array.isArray(bankCapabilities.requiredEvents), true);
     assert.equal("credentialsRef" in bankCapabilities, false);
+
+    const bankHealthCheck = await requestJson(baseUrl, `/v1/partners/connections/${connections.find((connection) => connection.connectionType === "bank").connectionId}/health-checks`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        checkSetCode: "full"
+      }
+    });
+    assert.equal(typeof bankHealthCheck.healthCheckId, "string");
+    assert.equal(Array.isArray(bankHealthCheck.results), true);
 
     for (const connection of connections) {
       await requestJson(baseUrl, `/v1/partners/connections/${connection.connectionId}/contract-tests`, {
@@ -95,11 +121,12 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
         token: adminToken,
         expectedStatus: 201,
         body: {
-          companyId: DEMO_IDS.companyId
+          companyId: DEMO_IDS.companyId,
+          testPackCode: "test-pack-v1"
         }
       });
     }
-    const contractResults = await requestJson(baseUrl, `/v1/partners/contract-tests?companyId=${DEMO_IDS.companyId}`, {
+    const contractResults = await requestJson(baseUrl, `/v1/partners/contract-tests?companyId=${DEMO_IDS.companyId}&status=passed`, {
       token: adminToken
     });
     assert.equal(contractResults.items.length, PARTNER_CONNECTION_TYPES.length);
@@ -122,6 +149,7 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
         companyId: DEMO_IDS.companyId,
         connectionId: bankConnection.connectionId,
         operationCode: "payment_export",
+        operationKey: "bank:payment_export:phase13-2-bank",
         payload: { payoutBatchId: "phase13-2-bank" }
       }
     });
@@ -171,6 +199,7 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
         companyId: DEMO_IDS.companyId,
         connectionId: crmConnection.connectionId,
         operationCode: "customer_sync",
+        operationKey: "crm:customer_sync:crm-1",
         payload: { customerId: "crm-1" }
       }
     });
@@ -193,6 +222,7 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
         companyId: DEMO_IDS.companyId,
         connectionId: crmConnection.connectionId,
         operationCode: "customer_sync",
+        operationKey: "crm:customer_sync:crm-2",
         payload: { customerId: "crm-2" }
       }
     });
@@ -216,10 +246,17 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
         companyId: DEMO_IDS.companyId,
         connectionId: crmConnection.connectionId,
         operationCode: "customer_sync",
+        operationKey: "crm:customer_sync:crm-3",
         payload: { customerId: "crm-3" }
       }
     });
     assert.equal(["fallback", "rate_limited"].includes(thirdCrmOperation.status), true);
+
+    const crmOperationDetail = await requestJson(baseUrl, `/v1/partners/operations/${firstCrmOperation.operationId}?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(crmOperationDetail.status, "succeeded");
+    assert.equal(Array.isArray(crmOperationDetail.receipts), true);
 
     const retryJob = await requestJson(baseUrl, "/v1/jobs", {
       method: "POST",
@@ -291,6 +328,16 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
     });
     assert.equal(massRetry.items.length, 2);
     assert.equal(massRetry.items.every((job) => job.status === "replay_planned"), true);
+
+    const replayEnvelope = await requestJson(baseUrl, `/v1/partners/operations/${secondCrmOperation.operationId}/replay`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "manual_partner_repair"
+      }
+    });
+    assert.equal(replayEnvelope.status, "replay_planned");
   } finally {
     await stopServer(server);
   }

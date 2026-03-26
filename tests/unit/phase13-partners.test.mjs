@@ -7,6 +7,15 @@ import {
   createSuccessfulPartnerOperationExecutors
 } from "../helpers/phase13-integrations-fixtures.mjs";
 
+const PROVIDER_CODES = Object.freeze({
+  bank: "enable_banking",
+  peppol: "pagero_online",
+  pension: "tenant_managed_pension_export",
+  crm: "generic_crm_rest",
+  commerce: "generic_commerce_rest",
+  id06: "official_id06_integration"
+});
+
 test("Phase 13.2 partner adapters expose contract tests, fallback and replay-safe jobs", async () => {
   let currentTime = new Date("2026-03-22T18:30:00Z");
   const platform = createApiPlatform({
@@ -19,9 +28,9 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
     platform.createPartnerConnection({
       companyId: DEMO_IDS.companyId,
       connectionType,
-      partnerCode: `${connectionType}_partner`,
+      providerCode: PROVIDER_CODES[connectionType],
       displayName: `${connectionType} partner`,
-      mode: "sandbox",
+      mode: connectionType === "id06" ? "production" : "sandbox",
       rateLimitPerMinute: connectionType === "bank" ? 1 : 60,
       fallbackMode: "queue_retry",
       credentialsRef: `secret://${connectionType}`,
@@ -30,29 +39,35 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   );
   const catalog = platform.listPartnerConnectionCatalog();
   assert.equal(catalog.length, platform.partnerConnectionTypes.length);
-  assert.equal(catalog.every((entry) => entry.operationCodes.length > 0), true);
+  assert.equal(catalog.every((entry) => entry.supportedProviders.length > 0), true);
+  assert.equal(catalog.every((entry) => entry.supportedOperations.length > 0), true);
   assert.equal("credentialsRef" in connections[0], false);
-  assert.equal(connections[0].credentialsConfigured, true);
+  assert.equal(connections[0].credentialsPresent, true);
 
   const listedConnections = platform.listPartnerConnections({
     companyId: DEMO_IDS.companyId
   });
   assert.equal("credentialsRef" in listedConnections[0], false);
-  assert.equal(listedConnections[0].credentialsConfigured, true);
+  assert.equal(listedConnections[0].credentialsPresent, true);
 
   const contractResults = await Promise.all(
     connections.map((connection) =>
       platform.runAdapterContractTest({
         companyId: DEMO_IDS.companyId,
         connectionId: connection.connectionId,
+        testPackCode: platform.getPartnerConnectionCapabilities({
+          companyId: DEMO_IDS.companyId,
+          connectionId: connection.connectionId
+        }).contractTestPackCode,
         actorId: "phase13-2-unit"
       })
     )
   );
   assert.equal(contractResults.length, platform.partnerConnectionTypes.length);
-  assert.equal(contractResults.every((result) => result.result === "passed"), true);
+  assert.equal(contractResults.every((result) => result.status === "passed"), true);
   assert.equal(contractResults.every((result) => result.assertions.length > 0), true);
-  assert.equal(contractResults.every((result) => result.mode === "sandbox"), true);
+  assert.equal(contractResults.filter((result) => result.connectionType !== "id06").every((result) => result.mode === "sandbox"), true);
+  assert.equal(contractResults.find((result) => result.connectionType === "id06").mode, "production");
 
   const bankConnection = connections.find((connection) => connection.connectionType === "bank");
   const bankCapabilities = platform.getPartnerConnectionCapabilities({
@@ -61,11 +76,24 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   });
   assert.equal(bankCapabilities.operationCodes.includes("tax_account_sync"), true);
   assert.equal(bankCapabilities.mode, "sandbox");
+  assert.equal(bankCapabilities.providerCode, PROVIDER_CODES.bank);
+  assert.equal(Array.isArray(bankCapabilities.objectMappings), true);
+  assert.equal(Array.isArray(bankCapabilities.requiredEvents), true);
   assert.equal("credentialsRef" in bankCapabilities, false);
+  const healthCheck = platform.runPartnerHealthCheck({
+    companyId: DEMO_IDS.companyId,
+    connectionId: bankConnection.connectionId,
+    checkSetCode: "full",
+    actorId: "phase13-2-unit"
+  });
+  assert.equal(typeof healthCheck.healthCheckId, "string");
+  assert.equal(Array.isArray(healthCheck.results), true);
+  assert.equal(["healthy", "degraded", "outage"].includes(healthCheck.status), true);
   const queued = await platform.dispatchPartnerOperation({
     companyId: DEMO_IDS.companyId,
     connectionId: bankConnection.connectionId,
     operationCode: "statement_sync",
+    operationKey: "bank:statement-sync:1",
     payload: { cursor: "cursor-1" },
     actorId: "phase13-2-unit"
   });
@@ -77,6 +105,14 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
     actorId: "phase13-2-unit"
   });
   assert.equal(succeeded.status, "succeeded");
+  assert.equal(succeeded.receiptRefs.length, 1);
+  assert.equal(succeeded.receipts.length, 1);
+  const operationDetail = platform.getPartnerOperation({
+    companyId: DEMO_IDS.companyId,
+    operationId: queued.operationId
+  });
+  assert.equal(operationDetail.receipts.length, 1);
+  assert.equal(operationDetail.attempts.length, 1);
   await assert.rejects(
     () =>
       platform.dispatchPartnerOperation({
@@ -93,6 +129,7 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
     companyId: DEMO_IDS.companyId,
     connectionId: bankConnection.connectionId,
     operationCode: "statement_sync",
+    operationKey: "bank:statement-sync:2",
     payload: { cursor: "cursor-2" },
     actorId: "phase13-2-unit"
   });
@@ -126,6 +163,14 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
     approvedByActorId: DEMO_IDS.userId
   });
   assert.equal(replayPlan.status, "replay_planned");
+  const operationReplay = platform.replayPartnerOperation({
+    companyId: DEMO_IDS.companyId,
+    operationId: rateLimited.operationId,
+    actorId: "phase13-2-unit",
+    reasonCode: "manual_partner_repair",
+    approvedByActorId: DEMO_IDS.userId
+  });
+  assert.equal(operationReplay.status, "replay_planned");
 
   const replayed = platform.executeJobReplay({
     companyId: DEMO_IDS.companyId,
@@ -182,7 +227,7 @@ test("Phase 13.2 partner connections require explicit credentials refs in every 
       platform.createPartnerConnection({
         companyId: DEMO_IDS.companyId,
         connectionType: "bank",
-        partnerCode: "bank_partner",
+        providerCode: PROVIDER_CODES.bank,
         displayName: "Bank partner",
         mode: "sandbox",
         fallbackMode: "queue_retry",
