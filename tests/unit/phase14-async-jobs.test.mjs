@@ -43,11 +43,11 @@ test("Phase 14 Step 4 async jobs dead-letter unsupported handlers and allow repl
 
   const queuedJob = await platform.enqueueRuntimeJob({
     companyId: "00000000-0000-4000-8000-000000000001",
-    jobType: "submission.receipt.collect",
-    sourceObjectType: "submission",
-    sourceObjectId: "submission-42",
-    idempotencyKey: "step4-submission-receipt-missing-handler",
-    payload: { submissionId: "submission-42" },
+    jobType: "system.replayable_noop",
+    sourceObjectType: "test_fixture",
+    sourceObjectId: "replayable-noop-1",
+    idempotencyKey: "step4-replayable-noop-missing-handler",
+    payload: { replay: true },
     actorId: "system"
   });
 
@@ -70,7 +70,7 @@ test("Phase 14 Step 4 async jobs dead-letter unsupported handlers and allow repl
     plannedByUserId: "00000000-0000-4000-8000-000000000001",
     reasonCode: "handler_added"
   });
-  assert.equal(replayPlan.status, "planned");
+  assert.equal(replayPlan.status, "pending_approval");
   await assert.rejects(
     () =>
       platform.approveRuntimeJobReplay({
@@ -88,8 +88,27 @@ test("Phase 14 Step 4 async jobs dead-letter unsupported handlers and allow repl
     replayPlanId: replayPlan.replayPlanId,
     actorId: "00000000-0000-4000-8000-000000000002"
   });
-  assert.equal(executedReplay.replayPlan.status, "executed");
+  assert.equal(executedReplay.replayPlan.status, "scheduled");
   assert.equal(executedReplay.replayJob.metadata.replayPlanId, replayPlan.replayPlanId);
+
+  const processedReplay = await runWorkerBatch({
+    platform,
+    handlers: {
+      "system.replayable_noop": async () => ({
+        resultCode: "replayed_noop",
+        resultPayload: { replayed: true }
+      })
+    },
+    logger: () => {},
+    workerId: "worker-step4-replay"
+  });
+  assert.equal(processedReplay, 1);
+
+  const finalReplayPlan = (await platform.listRuntimeJobReplayPlans({ jobId: queuedJob.jobId }))[0];
+  const replayJob = await platform.getRuntimeJob({ jobId: executedReplay.replayJob.jobId });
+  assert.equal(finalReplayPlan.status, "completed");
+  assert.equal(finalReplayPlan.lastOutcomeCode, "replayed_noop");
+  assert.equal(replayJob.status, "succeeded");
 });
 
 test("Phase 14 Step 4 worker runs submission transport jobs through the shared runtime", async () => {

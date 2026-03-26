@@ -170,7 +170,7 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
         reasonCode: "phase17_ops_repair"
       }
     });
-    assert.equal(replayPlanned.replayPlan.status, "planned");
+    assert.equal(replayPlanned.replayPlan.status, "pending_approval");
     assert.equal(replayPlanned.deadLetter.operatorState, "replay_planned");
 
     const replayDeadLetters = await requestJson(baseUrl, `/v1/backoffice/dead-letters?companyId=${DEMO_IDS.companyId}&operatorState=replay_planned`, {
@@ -320,7 +320,7 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     assert.ok(submissionDeadLetterRow);
     assert.equal(submissionDeadLetterRow.job.jobId, job.jobId);
     assert.equal(submissionDeadLetterRow.deadLetter.operatorState, "replay_planned");
-    assert.equal(submissionDeadLetterRow.replayPlan.status, "planned");
+    assert.equal(submissionDeadLetterRow.replayPlan.status, "pending_approval");
     assert.equal(submissionDeadLetterRow.lagAlerts.some((alert) => alert.alertCode === "dead_letter_open"), true);
     assert.equal(submissionDeadLetterRow.replayEligible, true);
     assert.equal(submissionMonitor.counters.materialPending >= 1, true);
@@ -555,7 +555,7 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     assert.equal(auditCorrelation.correlation.correlationId, incidentCorrelation.correlationId);
     assert.equal(auditCorrelation.correlation.relatedEntities.some((entry) => entry.entityType === "runtime_incident"), true);
 
-    const replayListBeforeApproval = await requestJson(baseUrl, `/v1/backoffice/replays?companyId=${DEMO_IDS.companyId}&status=planned`, {
+    const replayListBeforeApproval = await requestJson(baseUrl, `/v1/backoffice/replays?companyId=${DEMO_IDS.companyId}&status=pending_approval`, {
       token: adminToken
     });
     assert.equal(replayListBeforeApproval.items.some((item) => item.replayPlanId === replayPlanned.replayPlan.replayPlanId), true);
@@ -589,7 +589,7 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
         incidentId: opsIncident.incident.incidentId
       }
     });
-    assert.equal(executedReplay.replayPlan.status, "executed");
+    assert.equal(executedReplay.replayPlan.status, "scheduled");
     assert.equal(executedReplay.deadLetter.operatorState, "resolved");
   } finally {
     await stopServer(server);

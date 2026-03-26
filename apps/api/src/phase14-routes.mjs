@@ -9,6 +9,8 @@ import {
   writeJson
 } from "./route-helpers.mjs";
 
+const OPEN_RUNTIME_REPLAY_PLAN_STATUSES = new Set(["pending_approval", "approved", "scheduled", "running"]);
+
 export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
   if (req.method === "POST" && path === "/v1/legal-forms/profiles") {
     const body = await readJsonBody(req);
@@ -1975,7 +1977,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       counters: {
         highRiskOpen: items.filter((item) => item.riskClass === "high" && !["succeeded", "cancelled"].includes(item.status)).length,
         deadLetterOpen: items.filter((item) => item.deadLetter?.operatorState && item.deadLetter.operatorState !== "closed").length,
-        replayPlanned: items.filter((item) => item.replayPlan?.status === "planned").length
+        replayPlanned: items.filter((item) => OPEN_RUNTIME_REPLAY_PLAN_STATUSES.has(item.replayPlan?.status)).length
       }
     });
     return true;
@@ -4307,7 +4309,7 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
       technicalPending: submissionRows.filter((item) => item.receiptClasses.technical === "pending").length,
       materialPending: submissionRows.filter((item) => item.receiptClasses.business === "pending" || item.receiptClasses.finalOutcome === "pending").length,
       deadLettered: submissionDeadLetterRows.filter((item) => item.deadLetter?.operatorState && item.deadLetter.operatorState !== "closed").length,
-      replayPlanned: submissionDeadLetterRows.filter((item) => item.replayPlan?.status === "planned").length
+      replayPlanned: submissionDeadLetterRows.filter((item) => OPEN_RUNTIME_REPLAY_PLAN_STATUSES.has(item.replayPlan?.status)).length
         + submissionRows.filter((item) => item.queueItems.some((queueItem) => queueItem.status === "open" && queueItem.actionType === "retry")).length,
       lagging: [...submissionRows, ...submissionDeadLetterRows].filter((item) => item.lagAlerts.length > 0).length
     },

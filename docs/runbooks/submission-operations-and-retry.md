@@ -60,7 +60,7 @@ Detta runbook beskriver drift av generiska submissions till externa mottagare sa
 - varje submission har entydig terminal status eller aktiv owner for manuell atgard
 - kvittenshistorik och attempt-historik ar komplett
 - osakra utfall ar antingen uppklarade eller tydligt blockerade fran dublettsandning
-- replay-planer visar planned, approved och executed utan att kringga approval-kedjan
+- replay-planer visar pending_approval, approved, scheduled, running och avslutade utfall utan att kringga approval-kedjan
 - action queue speglar kvarvarande domanarbete och inga tekniska fel maskeras som affarsgodkanda
 - submission monitor speglar SLA/lag och kan oppna operativa work items utan DB-ingrepp
 

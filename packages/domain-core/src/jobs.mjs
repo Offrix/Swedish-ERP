@@ -5,7 +5,7 @@ export { createPostgresAsyncJobStore };
 
 export const ASYNC_JOB_STATUSES = Object.freeze(["queued", "claimed", "running", "retry_scheduled", "succeeded", "dead_lettered", "cancelled"]);
 export const ASYNC_JOB_RISK_CLASSES = Object.freeze(["low", "medium", "high"]);
-export const ASYNC_JOB_REPLAY_STATUSES = Object.freeze(["planned", "approved", "executed", "rejected"]);
+export const ASYNC_JOB_REPLAY_STATUSES = Object.freeze(["pending_approval", "approved", "scheduled", "running", "completed", "failed", "cancelled"]);
 export const ASYNC_JOB_OPERATOR_STATES = Object.freeze(["pending_triage", "acknowledged", "replay_planned", "resolved", "closed"]);
 export const ASYNC_JOB_ERROR_CLASSES = Object.freeze(["transient_technical", "persistent_technical", "business_input", "downstream_unknown"]);
 
@@ -390,15 +390,70 @@ export function createInMemoryAsyncJobStore() {
       return clone(replayPlan);
     },
 
-    async markReplayPlanExecuted({ replayPlanId, replayJobId, executedAt }) {
+    async markReplayPlanScheduled({ replayPlanId, replayJobId, scheduledAt }) {
       const replayPlan = state.replayPlans.get(replayPlanId);
       if (!replayPlan) {
         return null;
       }
-      replayPlan.status = "executed";
+      replayPlan.status = "scheduled";
       replayPlan.replayJobId = replayJobId;
-      replayPlan.executedAt = executedAt;
-      replayPlan.updatedAt = executedAt;
+      replayPlan.scheduledAt = scheduledAt;
+      replayPlan.executedAt = scheduledAt;
+      replayPlan.updatedAt = scheduledAt;
+      return clone(replayPlan);
+    },
+
+    async markReplayPlanRunning({ replayPlanId, replayJobId, startedAt }) {
+      const replayPlan = state.replayPlans.get(replayPlanId);
+      if (!replayPlan) {
+        return null;
+      }
+      replayPlan.status = "running";
+      replayPlan.replayJobId = replayJobId || replayPlan.replayJobId;
+      replayPlan.startedAt = startedAt;
+      replayPlan.updatedAt = startedAt;
+      return clone(replayPlan);
+    },
+
+    async markReplayPlanCompleted({ replayPlanId, replayJobId, completedAt, resultCode = null }) {
+      const replayPlan = state.replayPlans.get(replayPlanId);
+      if (!replayPlan) {
+        return null;
+      }
+      replayPlan.status = "completed";
+      replayPlan.replayJobId = replayJobId || replayPlan.replayJobId;
+      replayPlan.completedAt = completedAt;
+      replayPlan.lastOutcomeCode = resultCode;
+      replayPlan.lastErrorClass = null;
+      replayPlan.updatedAt = completedAt;
+      return clone(replayPlan);
+    },
+
+    async markReplayPlanFailed({ replayPlanId, replayJobId, failedAt, errorCode = null, errorClass = null }) {
+      const replayPlan = state.replayPlans.get(replayPlanId);
+      if (!replayPlan) {
+        return null;
+      }
+      replayPlan.status = "failed";
+      replayPlan.replayJobId = replayJobId || replayPlan.replayJobId;
+      replayPlan.failedAt = failedAt;
+      replayPlan.lastOutcomeCode = errorCode;
+      replayPlan.lastErrorClass = errorClass;
+      replayPlan.updatedAt = failedAt;
+      return clone(replayPlan);
+    },
+
+    async markReplayPlanCancelled({ replayPlanId, replayJobId, cancelledAt, reasonCode = null }) {
+      const replayPlan = state.replayPlans.get(replayPlanId);
+      if (!replayPlan) {
+        return null;
+      }
+      replayPlan.status = "cancelled";
+      replayPlan.replayJobId = replayJobId || replayPlan.replayJobId;
+      replayPlan.cancelledAt = cancelledAt;
+      replayPlan.lastOutcomeCode = reasonCode;
+      replayPlan.lastErrorClass = null;
+      replayPlan.updatedAt = cancelledAt;
       return clone(replayPlan);
     }
   };
@@ -613,12 +668,26 @@ export function createAsyncJobsModule({
         skipFlagKey: disableDecision.flagKey
       };
     }
-    return store.startJobAttempt({
+    const startedAt = nowIso(clock);
+    const result = await store.startJobAttempt({
       jobId: resolvedJobId,
       claimToken: resolvedClaimToken,
       workerId: resolvedWorkerId,
-      startedAt: nowIso(clock)
+      startedAt
     });
+    const replayPlanId = result.job?.metadata?.replayPlanId;
+    if (replayPlanId) {
+      const replayPlan = await store.markReplayPlanRunning({
+        replayPlanId,
+        replayJobId: result.job.jobId,
+        startedAt
+      });
+      return {
+        ...result,
+        replayPlan
+      };
+    }
+    return result;
   }
 
   async function completeAsyncJob({
@@ -629,16 +698,26 @@ export function createAsyncJobsModule({
     resultCode = "succeeded",
     resultPayload = {}
   } = {}) {
+    const finishedAt = nowIso(clock);
     const result = await store.finalizeJobAttempt({
       jobId: text(jobId, "async_job_id_required", error),
       claimToken: text(claimToken, "async_job_claim_token_required", error),
       workerId: text(workerId, "async_job_worker_id_required", error),
       attemptId: text(attemptId, "async_job_attempt_id_required", error),
-      finishedAt: nowIso(clock),
+      finishedAt,
       terminalState: "succeeded",
       resultCode: text(resultCode, "async_job_result_code_required", error),
       resultPayload: clone(resultPayload || {})
     });
+    const replayPlanId = result.job?.metadata?.replayPlanId;
+    const replayPlan = replayPlanId
+      ? await store.markReplayPlanCompleted({
+        replayPlanId,
+        replayJobId: result.job.jobId,
+        completedAt: finishedAt,
+        resultCode
+      })
+      : null;
     audit({
       companyId: result.job.companyId,
       actorId: workerId,
@@ -648,7 +727,10 @@ export function createAsyncJobsModule({
       entityId: result.job.jobId,
       explanation: `Completed async job ${result.job.jobType}.`
     });
-    return result;
+    return {
+      ...result,
+      replayPlan
+    };
   }
 
   async function failAsyncJob({
@@ -672,20 +754,31 @@ export function createAsyncJobsModule({
     const resolvedRetryDelaySeconds = retryDelaySeconds == null ? defaultRetryDelaySeconds(resolvedErrorClass, currentAttemptNo) : positiveInteger(retryDelaySeconds, "async_job_retry_delay_invalid", error);
     const exhaustedAttempts = currentAttemptNo >= currentJob.maxAttempts;
     const shouldRetry = resolvedRetryDelaySeconds != null && !exhaustedAttempts;
+    const finishedAt = nowIso(clock);
     const result = await store.finalizeJobAttempt({
       jobId: currentJob.jobId,
       claimToken: text(claimToken, "async_job_claim_token_required", error),
       workerId: text(workerId, "async_job_worker_id_required", error),
       attemptId: text(attemptId, "async_job_attempt_id_required", error),
-      finishedAt: nowIso(clock),
+      finishedAt,
       terminalState: shouldRetry ? "retry_scheduled" : "dead_lettered",
       errorClass: resolvedErrorClass,
       errorCode: text(errorCode, "async_job_error_code_required", error),
       errorMessage: text(errorMessage, "async_job_error_message_required", error),
-      nextRetryAt: shouldRetry ? addSeconds(nowIso(clock), resolvedRetryDelaySeconds) : null,
+      nextRetryAt: shouldRetry ? addSeconds(finishedAt, resolvedRetryDelaySeconds) : null,
       terminalReason: shouldRetry ? null : optionalText(terminalReason) || (exhaustedAttempts ? "max_attempts_exhausted" : "worker_terminal_failure"),
       replayAllowed
     });
+    const replayPlanId = result.job?.metadata?.replayPlanId;
+    const replayPlan = replayPlanId && !shouldRetry
+      ? await store.markReplayPlanFailed({
+        replayPlanId,
+        replayJobId: result.job.jobId,
+        failedAt: finishedAt,
+        errorCode: result.attempt?.errorCode || errorCode,
+        errorClass: resolvedErrorClass
+      })
+      : null;
     audit({
       companyId: result.job.companyId,
       actorId: workerId,
@@ -710,7 +803,10 @@ export function createAsyncJobsModule({
         deadLetter: result.deadLetter
       });
     }
-    return result;
+    return {
+      ...result,
+      replayPlan
+    };
   }
 
   async function cancelAsyncJob({
@@ -719,14 +815,24 @@ export function createAsyncJobsModule({
     correlationId = crypto.randomUUID(),
     reasonCode = "cancelled_by_operator"
   } = {}) {
+    const cancelledAt = nowIso(clock);
     const cancelled = await store.cancelJob({
       jobId: text(jobId, "async_job_id_required", error),
-      cancelledAt: nowIso(clock),
+      cancelledAt,
       reasonCode: text(reasonCode, "async_job_cancel_reason_required", error)
     });
     if (!cancelled) {
       throw error(404, "async_job_not_found", "Async job was not found.");
     }
+    const replayPlanId = cancelled.metadata?.replayPlanId;
+    const replayPlan = replayPlanId
+      ? await store.markReplayPlanCancelled({
+        replayPlanId,
+        replayJobId: cancelled.jobId,
+        cancelledAt,
+        reasonCode
+      })
+      : null;
     audit({
       companyId: cancelled.companyId,
       actorId,
@@ -736,7 +842,7 @@ export function createAsyncJobsModule({
       entityId: cancelled.jobId,
       explanation: `Cancelled async job ${cancelled.jobType}.`
     });
-    return cancelled;
+    return replayPlan ? { ...cancelled, replayPlan } : cancelled;
   }
 
   async function getAsyncJob({ jobId } = {}) {
@@ -827,12 +933,19 @@ export function createAsyncJobsModule({
       plannedByUserId: text(plannedByUserId, "async_job_replay_planned_by_required", error),
       reasonCode: text(reasonCode, "async_job_replay_reason_required", error),
       plannedPayloadStrategy: text(plannedPayloadStrategy, "async_job_replay_payload_strategy_required", error),
-      status: "planned",
+      status: "pending_approval",
       approvedByUserId: null,
       replayJobId: null,
       plannedAt: nowIso(clock),
       approvedAt: null,
       executedAt: null,
+      scheduledAt: null,
+      startedAt: null,
+      completedAt: null,
+      failedAt: null,
+      cancelledAt: null,
+      lastOutcomeCode: null,
+      lastErrorClass: null,
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
     });
@@ -863,8 +976,8 @@ export function createAsyncJobsModule({
     if (!existingReplayPlan) {
       throw error(404, "async_job_replay_plan_not_found", "Replay plan was not found.");
     }
-    if (existingReplayPlan.status !== "planned") {
-      throw error(409, "async_job_replay_plan_not_planned", "Replay plan must be in planned state before approval.");
+    if (existingReplayPlan.status !== "pending_approval") {
+      throw error(409, "async_job_replay_plan_not_planned", "Replay plan must be pending approval before approval.");
     }
     if (existingReplayPlan.plannedByUserId === resolvedApprovedByUserId) {
       throw error(409, "async_job_replay_self_approval_forbidden", "Replay plans require a separate approver.");
@@ -919,10 +1032,11 @@ export function createAsyncJobsModule({
       actorId: text(actorId || replayPlan.approvedByUserId, "async_job_replay_actor_required", error),
       correlationId
     });
-    const executedPlan = await store.markReplayPlanExecuted({
+    const scheduledAt = nowIso(clock);
+    const executedPlan = await store.markReplayPlanScheduled({
       replayPlanId: replayPlan.replayPlanId,
       replayJobId: replayJob.jobId,
-      executedAt: nowIso(clock)
+      scheduledAt
     });
     audit({
       companyId: replayPlan.companyId,

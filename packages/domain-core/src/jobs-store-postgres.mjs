@@ -116,6 +116,13 @@ function mapReplayPlanRow(row) {
     plannedAt: row.planned_at,
     approvedAt: row.approved_at,
     executedAt: row.executed_at,
+    scheduledAt: row.scheduled_at || row.executed_at,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    failedAt: row.failed_at,
+    cancelledAt: row.cancelled_at,
+    lastOutcomeCode: row.last_outcome_code,
+    lastErrorClass: row.last_error_class,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -555,12 +562,14 @@ export function createPostgresAsyncJobStore({
         insert into async_job_replay_plans (
           replay_plan_id, job_id, company_id, planned_by_user_id, reason_code,
           planned_payload_strategy, status, approved_by_user_id, replay_job_id,
-          planned_at, approved_at, executed_at, created_at, updated_at
+          planned_at, approved_at, executed_at, scheduled_at, started_at, completed_at,
+          failed_at, cancelled_at, last_outcome_code, last_error_class, created_at, updated_at
         ) values (
           ${plan.replayPlanId}, ${plan.jobId}, ${plan.companyId}, ${plan.plannedByUserId},
           ${plan.reasonCode}, ${plan.plannedPayloadStrategy}, ${plan.status}, ${plan.approvedByUserId},
           ${plan.replayJobId}, ${plan.plannedAt}, ${plan.approvedAt}, ${plan.executedAt},
-          ${plan.createdAt}, ${plan.updatedAt}
+          ${plan.scheduledAt}, ${plan.startedAt}, ${plan.completedAt}, ${plan.failedAt},
+          ${plan.cancelledAt}, ${plan.lastOutcomeCode}, ${plan.lastErrorClass}, ${plan.createdAt}, ${plan.updatedAt}
         )
         returning *
       `;
@@ -602,13 +611,71 @@ export function createPostgresAsyncJobStore({
       return mapReplayPlanRow(rows[0]);
     },
 
-    async markReplayPlanExecuted({ replayPlanId, replayJobId, executedAt }) {
+    async markReplayPlanScheduled({ replayPlanId, replayJobId, scheduledAt }) {
       const rows = await sql`
         update async_job_replay_plans
-        set status = 'executed',
+        set status = 'scheduled',
             replay_job_id = ${replayJobId},
-            executed_at = ${executedAt},
-            updated_at = ${executedAt}
+            scheduled_at = ${scheduledAt},
+            executed_at = ${scheduledAt},
+            updated_at = ${scheduledAt}
+        where replay_plan_id = ${replayPlanId}
+        returning *
+      `;
+      return mapReplayPlanRow(rows[0]);
+    },
+
+    async markReplayPlanRunning({ replayPlanId, replayJobId, startedAt }) {
+      const rows = await sql`
+        update async_job_replay_plans
+        set status = 'running',
+            replay_job_id = coalesce(${replayJobId}, replay_job_id),
+            started_at = ${startedAt},
+            updated_at = ${startedAt}
+        where replay_plan_id = ${replayPlanId}
+        returning *
+      `;
+      return mapReplayPlanRow(rows[0]);
+    },
+
+    async markReplayPlanCompleted({ replayPlanId, replayJobId, completedAt, resultCode = null }) {
+      const rows = await sql`
+        update async_job_replay_plans
+        set status = 'completed',
+            replay_job_id = coalesce(${replayJobId}, replay_job_id),
+            completed_at = ${completedAt},
+            last_outcome_code = ${resultCode},
+            last_error_class = null,
+            updated_at = ${completedAt}
+        where replay_plan_id = ${replayPlanId}
+        returning *
+      `;
+      return mapReplayPlanRow(rows[0]);
+    },
+
+    async markReplayPlanFailed({ replayPlanId, replayJobId, failedAt, errorCode = null, errorClass = null }) {
+      const rows = await sql`
+        update async_job_replay_plans
+        set status = 'failed',
+            replay_job_id = coalesce(${replayJobId}, replay_job_id),
+            failed_at = ${failedAt},
+            last_outcome_code = ${errorCode},
+            last_error_class = ${errorClass},
+            updated_at = ${failedAt}
+        where replay_plan_id = ${replayPlanId}
+        returning *
+      `;
+      return mapReplayPlanRow(rows[0]);
+    },
+
+    async markReplayPlanCancelled({ replayPlanId, replayJobId, cancelledAt, reasonCode = null }) {
+      const rows = await sql`
+        update async_job_replay_plans
+        set status = 'cancelled',
+            replay_job_id = coalesce(${replayJobId}, replay_job_id),
+            cancelled_at = ${cancelledAt},
+            last_outcome_code = ${reasonCode},
+            updated_at = ${cancelledAt}
         where replay_plan_id = ${replayPlanId}
         returning *
       `;
