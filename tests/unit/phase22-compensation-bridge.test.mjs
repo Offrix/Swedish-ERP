@@ -189,6 +189,7 @@ function createCompensationBridgeFixture() {
   });
   const benefitsPlatform = createBenefitsPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     hrPlatform
   });
   const travelPlatform = createTravelPlatform({
@@ -197,6 +198,7 @@ function createCompensationBridgeFixture() {
   });
   const pensionPlatform = createPensionPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     hrPlatform
   });
   const ledgerPlatform = createLedgerPlatform({
@@ -208,6 +210,7 @@ function createCompensationBridgeFixture() {
   });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     hrPlatform,
     timePlatform,
     benefitsPlatform,

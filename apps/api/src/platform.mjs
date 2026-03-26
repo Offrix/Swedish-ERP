@@ -41,6 +41,15 @@ import {
   createAuditEnvelope,
   createEventEnvelope
 } from "../../../packages/events/src/index.mjs";
+import {
+  createBootstrapModePolicy,
+  resolveBootstrapSeeding,
+  resolveRuntimeModeProfile
+} from "../../../scripts/lib/runtime-mode.mjs";
+import {
+  resolveRuntimeStoreKind,
+  scanRuntimeInvariants
+} from "../../../scripts/lib/runtime-diagnostics.mjs";
 
 function createDomainDefinition({ key, label, packageName, dependsOn = [], create }) {
   return Object.freeze({
@@ -628,8 +637,12 @@ function composeFlatPlatform(domains) {
   }, {});
 }
 
-function buildRuntimeContracts() {
+function buildRuntimeContracts(runtimeModeProfile, bootstrapModePolicy) {
   return Object.freeze({
+    runtime: Object.freeze({
+      ...runtimeModeProfile,
+      bootstrapModePolicy
+    }),
     events: Object.freeze({
       eventEnvelopeVersion: EVENT_ENVELOPE_VERSION,
       auditEnvelopeVersion: AUDIT_EVENT_VERSION,
@@ -640,6 +653,44 @@ function buildRuntimeContracts() {
 }
 
 export function createApiPlatform(options = {}) {
+  const env = options.env || process.env;
+  const runtimeModeProfile =
+    options.runtimeModeProfile ||
+    resolveRuntimeModeProfile({
+      runtimeMode: options.runtimeMode,
+      env,
+      starter: "api-platform",
+      requireExplicit: options.enforceExplicitRuntimeMode === true,
+      fallbackMode: "test"
+    });
+  const bootstrapModePolicy =
+    options.bootstrapModePolicy || createBootstrapModePolicy(runtimeModeProfile);
+  const bootstrapSeeding = resolveBootstrapSeeding({
+    bootstrapMode:
+      options.bootstrapMode ||
+      (runtimeModeProfile.environmentMode === "test" && !options.bootstrapScenarioCode && options.seedDemo !== false
+        ? "scenario_seed"
+        : bootstrapModePolicy.defaultBootstrapMode),
+    bootstrapScenarioCode:
+      options.bootstrapScenarioCode ||
+      (runtimeModeProfile.environmentMode === "test" && options.seedDemo !== false ? "test_default_demo" : null),
+    seedDemo: options.seedDemo
+  });
+  const platformOptions = Object.freeze({
+    ...options,
+    runtimeMode: runtimeModeProfile.environmentMode,
+    environmentMode: runtimeModeProfile.environmentMode,
+    runtimeModeProfile,
+    bootstrapModePolicy,
+    bootstrapMode: bootstrapSeeding.bootstrapMode,
+    bootstrapScenarioCode: bootstrapSeeding.bootstrapScenarioCode,
+    seedDemo: bootstrapSeeding.shouldSeedDemo,
+    supportsLegalEffect: runtimeModeProfile.supportsLegalEffect,
+    modeWatermarkCode: runtimeModeProfile.modeWatermarkCode,
+    sequenceSpace: runtimeModeProfile.sequenceSpace,
+    providerEnvironmentRef: runtimeModeProfile.providerEnvironmentRef,
+    dataRetentionClass: runtimeModeProfile.dataRetentionClass
+  });
   const domains = {};
   const domainRegistry = [];
   const domainRegistryByKey = {};
@@ -649,7 +700,7 @@ export function createApiPlatform(options = {}) {
       definition.dependsOn.map((domainKey) => [domainKey, requireRegisteredDomain(domains, domainKey, definition.key)])
     );
     const platform = definition.create({
-      options,
+      options: platformOptions,
       dependencies: Object.freeze(dependencies),
       domains: Object.freeze({ ...domains }),
       getDomain: (domainKey) => domains[domainKey] || null
@@ -662,10 +713,20 @@ export function createApiPlatform(options = {}) {
   }
 
   const flatPlatform = composeFlatPlatform(domains);
-  const runtimeContracts = buildRuntimeContracts();
+  const runtimeContracts = buildRuntimeContracts(runtimeModeProfile, bootstrapModePolicy);
   const registeredDomains = Object.freeze({ ...domains });
   const registrations = Object.freeze([...domainRegistry]);
   const registrationsByKey = Object.freeze({ ...domainRegistryByKey });
+  const defaultRuntimeDiagnostics = buildRuntimeDiagnostics({
+    startupSurface: options.startupSurface || "api",
+    runtimeModeProfile,
+    bootstrapModePolicy,
+    bootstrapSeeding,
+    domains: registeredDomains,
+    domainRegistry: registrations,
+    env,
+    options
+  });
   const contractVersions = Object.freeze({
     eventEnvelopeVersion: EVENT_ENVELOPE_VERSION,
     auditEnvelopeVersion: AUDIT_EVENT_VERSION
@@ -695,6 +756,30 @@ export function createApiPlatform(options = {}) {
       value: runtimeContracts,
       enumerable: false
     },
+    runtimeStartupDiagnostics: {
+      value: defaultRuntimeDiagnostics,
+      enumerable: false
+    },
+    runtimeInvariantFindings: {
+      value: defaultRuntimeDiagnostics.findings,
+      enumerable: false
+    },
+    runtimeModeProfile: {
+      value: runtimeModeProfile,
+      enumerable: false
+    },
+    bootstrapModePolicy: {
+      value: bootstrapModePolicy,
+      enumerable: false
+    },
+    environmentMode: {
+      value: runtimeModeProfile.environmentMode,
+      enumerable: false
+    },
+    supportsLegalEffect: {
+      value: runtimeModeProfile.supportsLegalEffect,
+      enumerable: false
+    },
     platformContractVersions: {
       value: contractVersions,
       enumerable: false
@@ -705,6 +790,53 @@ export function createApiPlatform(options = {}) {
     },
     getDomainRegistration: {
       value: (domainKey) => registrationsByKey[domainKey] || null,
+      enumerable: false
+    },
+    getRuntimeModeProfile: {
+      value: () => runtimeModeProfile,
+      enumerable: false
+    },
+    getRuntimeStartupDiagnostics: {
+      value: () => defaultRuntimeDiagnostics,
+      enumerable: false
+    },
+    listRuntimeInvariantFindings: {
+      value: () => defaultRuntimeDiagnostics.findings,
+      enumerable: false
+    },
+    scanRuntimeInvariants: {
+      value: (overrides = {}) =>
+        buildRuntimeDiagnostics({
+          startupSurface: overrides.startupSurface || options.startupSurface || "api",
+          runtimeModeProfile,
+          bootstrapModePolicy,
+          bootstrapSeeding: {
+            ...bootstrapSeeding,
+            bootstrapMode: overrides.bootstrapMode || bootstrapSeeding.bootstrapMode,
+            bootstrapScenarioCode:
+              overrides.bootstrapScenarioCode === undefined
+                ? bootstrapSeeding.bootstrapScenarioCode
+                : overrides.bootstrapScenarioCode,
+            shouldSeedDemo:
+              overrides.seedDemo === undefined ? bootstrapSeeding.shouldSeedDemo : overrides.seedDemo === true
+          },
+          domains: registeredDomains,
+          domainRegistry: registrations,
+          env,
+          options: {
+            ...options,
+            disabledAdapters:
+              overrides.disabledAdapters === undefined ? options.disabledAdapters : overrides.disabledAdapters,
+            versionRef: overrides.versionRef === undefined ? options.versionRef : overrides.versionRef,
+            runtimeStoreKind:
+              overrides.activeStoreKind ||
+              overrides.runtimeStoreKind ||
+              options.runtimeStoreKind ||
+              options.asyncJobStoreKind ||
+              options.asyncJobStore?.kind ||
+              null
+          }
+        }),
       enumerable: false
     },
     listRegisteredDomains: {
@@ -724,4 +856,54 @@ export function createApiPlatform(options = {}) {
   return platform;
 }
 
-export const defaultApiPlatform = createApiPlatform();
+export function createDefaultApiPlatform({
+  env = process.env,
+  runtimeMode = null,
+  enforceExplicitRuntimeMode = false,
+  ...options
+} = {}) {
+  return createApiPlatform({
+    ...options,
+    env,
+    runtimeMode,
+    enforceExplicitRuntimeMode
+  });
+}
+
+function buildRuntimeDiagnostics({
+  startupSurface = "api",
+  runtimeModeProfile,
+  bootstrapModePolicy,
+  bootstrapSeeding,
+  domains,
+  domainRegistry,
+  env,
+  options
+}) {
+  const activeStoreKind = resolveRuntimeStoreKind({
+    explicitStoreKind:
+      options.runtimeStoreKind ||
+      options.asyncJobStoreKind ||
+      options.asyncJobStore?.kind ||
+      null,
+    env
+  });
+
+  return scanRuntimeInvariants({
+    startupSurface,
+    runtimeModeProfile,
+    bootstrapModePolicy,
+    bootstrapMode: bootstrapSeeding.bootstrapMode,
+    bootstrapScenarioCode: bootstrapSeeding.bootstrapScenarioCode,
+    seedDemo: bootstrapSeeding.shouldSeedDemo,
+    domainRegistry,
+    domains,
+    mergeOrder: API_PLATFORM_FLAT_MERGE_ORDER,
+    activeStoreKind,
+    env,
+    versionRef: options.versionRef || null,
+    disabledAdapters: options.disabledAdapters || []
+  });
+}
+
+export const defaultApiPlatform = createDefaultApiPlatform();

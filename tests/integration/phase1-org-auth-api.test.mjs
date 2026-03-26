@@ -36,7 +36,8 @@ test("Phase 1 migration adds the auth and onboarding table set", async () => {
 test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboarding state", async () => {
   const now = new Date("2026-03-21T10:15:00Z");
   const platform = createOrgAuthPlatform({
-    clock: () => now
+    clock: () => now,
+    bootstrapScenarioCode: "test_default_demo"
   });
   const server = createApiServer({
     platform,
@@ -463,7 +464,8 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
 test("Phase 1 API exposes operational teams and active memberships", async () => {
   const now = new Date("2026-03-21T11:30:00Z");
   const platform = createOrgAuthPlatform({
-    clock: () => now
+    clock: () => now,
+    bootstrapScenarioCode: "test_default_demo"
   });
   const server = createApiServer({
     platform,

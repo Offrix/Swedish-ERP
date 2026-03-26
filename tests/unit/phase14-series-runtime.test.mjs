@@ -65,7 +65,11 @@ test("Step 10 ledger voucher series resolves by purpose and preserves imported n
 test("Step 10 AR invoice numbering and ledger voucher series are configurable independently", () => {
   const clock = () => new Date("2026-03-24T13:00:00Z");
   const ledger = createLedgerPlatform({ clock, seedDemo: false });
-  const vat = createVatPlatform({ clock, ledgerPlatform: ledger });
+  const vat = createVatPlatform({
+    clock,
+    bootstrapScenarioCode: "test_default_demo",
+    ledgerPlatform: ledger
+  });
   const integrations = createIntegrationEngine({ clock });
   const ar = createArEngine({
     clock,
@@ -254,7 +258,10 @@ test("Step 10 AP postings resolve configurable voucher series by purpose", () =>
 
 test("Step 10 payroll postings and payout matching resolve configurable voucher series by purpose", () => {
   const fixedNow = new Date("2026-03-22T09:00:00Z");
-  const orgAuthPlatform = createOrgAuthPlatform({ clock: () => fixedNow });
+  const orgAuthPlatform = createOrgAuthPlatform({
+    clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo"
+  });
   const hrPlatform = createHrPlatform({ clock: () => fixedNow });
   const timePlatform = createTimePlatform({
     clock: () => fixedNow,
@@ -295,6 +302,7 @@ test("Step 10 payroll postings and payout matching resolve configurable voucher 
   });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     orgAuthPlatform,
     hrPlatform,
     timePlatform,

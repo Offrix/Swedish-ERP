@@ -154,10 +154,10 @@ Göra boot, miljölägen, migrationslagret och startup-beteenden sanna och deter
 - Ingen ny domänfunktion får bero på nuvarande seedDemo-standarder eller felaktiga bootstrapstigar.
 
 **Delfaser**
-- [ ] 1.1 [REWRITE] **Laga schema_migrations-inkonsistens** — Gör migrationshistoriken självkonsistent och stoppa alla scripts som skriver fel kolumnnamn eller dubbla format.
-- [ ] 1.2 [HARDEN] **Inför explicit runtime mode** — Alla starter ska välja `trial`, `sandbox_internal`, `test`, `pilot_parallel` eller `production`; implicit demo-boot är förbjudet.
-- [ ] 1.3 [REPLACE] **Byt `seedDemo=true` default** — Alla kärndomäner ska defaulta till `bootstrapMode=none`; demo-seed tillåts endast via explicit trial/demo-scenario.
-- [ ] 1.4 [REWRITE] **Rensa startup och flat merge-risker** — Bryt ut startupdiagnostik och varna/faila om någon kärndomän körs utan persistent store i lägen där det inte är tillåtet.
+- [x] 1.1 [REWRITE] **Laga schema_migrations-inkonsistens** — Gör migrationshistoriken självkonsistent och stoppa alla scripts som skriver fel kolumnnamn eller dubbla format.
+- [x] 1.2 [HARDEN] **Inför explicit runtime mode** — Alla starter ska välja `trial`, `sandbox_internal`, `test`, `pilot_parallel` eller `production`; implicit demo-boot är förbjudet.
+- [x] 1.3 [REPLACE] **Byt `seedDemo=true` default** — Alla kärndomäner ska defaulta till `bootstrapMode=none`; demo-seed tillåts endast via explicit trial/demo-scenario.
+- [x] 1.4 [REWRITE] **Rensa startup och flat merge-risker** — Bryt ut startupdiagnostik och varna/faila om någon kärndomän körs utan persistent store i lägen där det inte är tillåtet.
 - [ ] 1.5 [NEW BUILD] **Bygg runtime honesty scanner** — Scanner ska hitta Map-baserad sanning, stub-provider, simulerade receipts, demo-data i production mode och otillåtna route-familjer.
 
 **Exit gate**  

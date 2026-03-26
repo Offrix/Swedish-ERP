@@ -58,7 +58,9 @@ export function createBenefitsPlatform(options = {}) {
 
 export function createBenefitsEngine({
   clock = () => new Date(),
-  seedDemo = true,
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   hrPlatform = null,
   documentPlatform = null
 } = {}) {

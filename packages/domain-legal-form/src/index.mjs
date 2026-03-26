@@ -30,7 +30,12 @@ export function createLegalFormPlatform(options = {}) {
   return createLegalFormEngine(options);
 }
 
-export function createLegalFormEngine({ clock = () => new Date(), seedDemo = true } = {}) {
+export function createLegalFormEngine({
+  clock = () => new Date(),
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null
+} = {}) {
   const state = {
     legalFormProfiles: new Map(),
     legalFormProfileIdsByCompany: new Map(),

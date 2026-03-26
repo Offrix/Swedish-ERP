@@ -245,6 +245,11 @@ test("Phase 4.3 declaration corrections diff changed boxes and can reconcile aga
     chartTemplateId: "DSAM-2026",
     actorId: "user-1"
   });
+  ledger.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
+    actorId: "user-1"
+  });
   const entry = ledger.createJournalEntry({
     companyId: COMPANY_ID,
     journalDate: "2026-03-21",

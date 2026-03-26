@@ -5,7 +5,8 @@ import { loginWithStrongAuthOnPlatform } from "../helpers/platform-auth.mjs";
 
 test("Phase 1 tenant setup and module activation enforce onboarding readiness, dependencies and approvals", () => {
   const platform = createOrgAuthPlatform({
-    clock: () => new Date("2026-03-25T08:00:00Z")
+    clock: () => new Date("2026-03-25T08:00:00Z"),
+    bootstrapScenarioCode: "test_default_demo"
   });
 
   const onboardingRun = platform.createOnboardingRun({

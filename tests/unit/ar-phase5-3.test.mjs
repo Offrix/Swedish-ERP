@@ -17,6 +17,7 @@ test("Phase 5.3 creates open items, handles partial payments and captures determ
     integrationPlatform: integrations
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
 
   const customer = createCustomer(ar);
   const item = createItem(ar);
@@ -92,6 +93,7 @@ test("Phase 5.3 bank matching keeps overpayments in unmatched receipts and marks
     integrationPlatform: integrations
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
 
   const customer = createCustomer(ar);
   const item = createItem(ar);
@@ -145,6 +147,7 @@ test("Phase 5.3 can reverse a mis-match and reopen the open item without losing 
     integrationPlatform: integrations
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
 
   const customer = createCustomer(ar);
   const item = createItem(ar);
@@ -206,6 +209,7 @@ test("Phase 5.3 blocks dunning on held disputes and books deterministic reminder
     integrationPlatform: integrations
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
 
   const customer = createCustomer(ar);
   const item = createItem(ar);

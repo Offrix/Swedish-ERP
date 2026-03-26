@@ -226,7 +226,9 @@ export function createPayrollPlatform(options = {}) {
 
 export function createPayrollEngine({
   clock = () => new Date(),
-  seedDemo = true,
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   orgAuthPlatform = null,
   hrPlatform = null,
   timePlatform = null,

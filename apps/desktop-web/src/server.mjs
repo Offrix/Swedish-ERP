@@ -2,6 +2,7 @@ import http from "node:http";
 import { createAppShell } from "../../../packages/ui-core/src/index.js";
 import { renderDesktopChrome } from "../../../packages/ui-desktop/src/index.js";
 import { isMainModule, stopServer } from "../../../scripts/lib/repo.mjs";
+import { resolveRuntimeModeProfile } from "../../../scripts/lib/runtime-mode.mjs";
 
 export function createDesktopWebServer() {
   return http.createServer((req, res) => {
@@ -74,21 +75,37 @@ export function createDesktopWebServer() {
   });
 }
 
-export async function startDesktopWebServer({ port = Number(process.env.PORT || 3001), logger = console.log } = {}) {
+export async function startDesktopWebServer({
+  port = Number(process.env.PORT || 3001),
+  logger = console.log,
+  runtimeMode = null,
+  env = process.env,
+  enforceExplicitRuntimeMode = false
+} = {}) {
+  const runtimeModeProfile = resolveRuntimeModeProfile({
+    runtimeMode,
+    env,
+    starter: "desktop-web",
+    requireExplicit: enforceExplicitRuntimeMode,
+    fallbackMode: "test"
+  });
   const server = createDesktopWebServer();
   await new Promise((resolve) => {
     server.listen(port, resolve);
   });
-  logger(`desktop-web listening on http://localhost:${port}`);
+  logger(`desktop-web listening on http://localhost:${port} (${runtimeModeProfile.environmentMode})`);
   return {
     port,
     server,
+    runtimeModeProfile,
     stop: () => stopServer(server)
   };
 }
 
 if (isMainModule(import.meta.url)) {
-  const runtime = await startDesktopWebServer();
+  const runtime = await startDesktopWebServer({
+    enforceExplicitRuntimeMode: true
+  });
   process.on("SIGINT", async () => {
     await runtime.stop();
     process.exit(0);

@@ -56,13 +56,9 @@ test("Phase 9.3 warns when salary exchange pushes cash salary under the 2026 thr
 });
 
 test("Phase 9.3 carries pension, extra pension and salary exchange into payroll and posting", () => {
-  const { pensionPlatform, payrollPlatform, ledgerPlatform, employee, employment } = createPensionFixture({
+  const { pensionPlatform, payrollPlatform, employee, employment } = createPensionFixture({
     payModelCode: "monthly_salary",
     monthlySalary: 65000
-  });
-  ledgerPlatform.installLedgerCatalog({
-    companyId: COMPANY_ID,
-    actorId: "unit-test"
   });
 
   pensionPlatform.createPensionEnrollment({
@@ -248,13 +244,24 @@ function createPensionFixture({ payModelCode, monthlySalary = null, hourlyRate =
   });
   const pensionPlatform = createPensionPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     hrPlatform
   });
   const ledgerPlatform = createLedgerPlatform({
     clock: () => fixedNow
   });
+  ledgerPlatform.installLedgerCatalog({
+    companyId: COMPANY_ID,
+    actorId: "unit-test"
+  });
+  ledgerPlatform.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
+    actorId: "unit-test"
+  });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     hrPlatform,
     timePlatform,
     pensionPlatform,

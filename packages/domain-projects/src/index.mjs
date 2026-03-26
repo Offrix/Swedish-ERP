@@ -33,7 +33,9 @@ export function createProjectsPlatform(options = {}) {
 
 export function createProjectEngine({
   clock = () => new Date(),
-  seedDemo = true,
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   arPlatform = null,
   hrPlatform = null,
   timePlatform = null,

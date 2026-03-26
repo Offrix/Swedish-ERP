@@ -10,6 +10,7 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-24T19:45:00Z")
   });
+  const balanceTypeCode = "VACATION_DAYS_PHASE19_API";
   const employee = platform.createEmployee({
     companyId: DEMO_IDS.companyId,
     givenName: "Mikael",
@@ -28,7 +29,7 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
   });
   platform.createBalanceType({
     companyId: DEMO_IDS.companyId,
-    balanceTypeCode: "VACATION_DAYS",
+    balanceTypeCode,
     label: "Vacation days",
     unitCode: "days",
     actorId: DEMO_IDS.userId
@@ -85,7 +86,7 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
         effectiveCutoverDate: "2026-04-01",
         firstTargetReportingPeriod: "2026-04",
         mappingSetId: mappingSet.mappingSetId,
-        requiredBalanceTypeCodes: ["VACATION_DAYS"],
+        requiredBalanceTypeCodes: [balanceTypeCode],
         requiredApprovalRoleCodes: ["PAYROLL_OWNER"]
       }
     });
@@ -137,7 +138,7 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
           {
             employeeId: employee.employeeId,
             employmentId: employment.employmentId,
-            balanceTypeCode: "VACATION_DAYS",
+            balanceTypeCode,
             openingQuantity: 10,
             effectiveDate: "2026-04-01"
           }

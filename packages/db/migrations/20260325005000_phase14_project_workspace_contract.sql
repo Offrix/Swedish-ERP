@@ -21,8 +21,9 @@ CREATE TABLE IF NOT EXISTS project_deviations (
 CREATE INDEX IF NOT EXISTS idx_project_deviations_company_project
   ON project_deviations(company_id, project_id, status, created_at);
 
-INSERT INTO schema_migrations(version, description)
-VALUES ('20260325005000', 'phase14 project workspace contract')
-ON CONFLICT (version) DO NOTHING;
+-- phase14 project workspace contract
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260325005000_phase14_project_workspace_contract')
+ON CONFLICT (migration_id) DO NOTHING;
 
 COMMIT;

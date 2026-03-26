@@ -20,6 +20,11 @@ test("Phase 3.3 stores reproducible report snapshots with drilldown to linked do
     companyId: COMPANY_ID,
     actorId: "user-1"
   });
+  ledger.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
+    actorId: "user-1"
+  });
 
   const januaryPeriod = ledger
     .listAccountingPeriods({ companyId: COMPANY_ID })
@@ -103,6 +108,11 @@ test("Phase 3.3 supports journal search and reconciliation sign-off bound to sna
 
   ledger.installLedgerCatalog({
     companyId: COMPANY_ID,
+    actorId: "user-1"
+  });
+  ledger.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
     actorId: "user-1"
   });
 

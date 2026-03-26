@@ -20,6 +20,11 @@ test("Phase 6.2 ingests OCR invoice lines, explains VAT and posts multiple cost 
     documentPlatform: documents
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
+    actorId: "user-1"
+  });
 
   const channel = documents.registerInboxChannel({
     companyId: COMPANY_ID,
@@ -126,6 +131,11 @@ test("Phase 6.2 blocks posting when 3-way matching finds receipt variance", () =
     ledgerPlatform: ledger
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
+    actorId: "user-1"
+  });
 
   const supplier = ap.createSupplier({
     companyId: COMPANY_ID,

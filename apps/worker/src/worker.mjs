@@ -2,6 +2,7 @@ import os from "node:os";
 import { createApiPlatform } from "../../api/src/platform.mjs";
 import { createInMemoryAsyncJobStore, createPostgresAsyncJobStore } from "../../../packages/domain-core/src/jobs.mjs";
 import { isMainModule } from "../../../scripts/lib/repo.mjs";
+import { assertRuntimeStartupAllowed } from "../../../scripts/lib/runtime-diagnostics.mjs";
 
 function createWorkerError(message, { retryable = false, retryDelaySeconds = null, errorClass = "persistent_technical", errorCode = "worker_failure", replayAllowed = true } = {}) {
   const error = new Error(message);
@@ -75,7 +76,10 @@ export function createDefaultJobHandlers({ logger = console.log } = {}) {
         companyId: job.companyId,
         submissionId: job.payload?.submissionId,
         actorId: "worker_scheduler",
-        mode: typeof job.payload?.mode === "string" ? job.payload.mode : "test",
+        mode:
+          typeof job.payload?.mode === "string"
+            ? job.payload.mode
+            : platform.getRuntimeModeProfile?.().environmentMode || platform.environmentMode || "test",
         simulatedTransportOutcome: typeof job.payload?.simulatedTransportOutcome === "string" ? job.payload.simulatedTransportOutcome : "technical_ack",
         providerReference: typeof job.payload?.providerReference === "string" ? job.payload.providerReference : null,
         message: typeof job.payload?.message === "string" ? job.payload.message : null,
@@ -269,11 +273,31 @@ export function startWorker({
   handlers = createDefaultJobHandlers({ logger }),
   platform = null,
   jobStore = null,
-  env = process.env
+  env = process.env,
+  runtimeMode = null,
+  enforceExplicitRuntimeMode = false
 } = {}) {
   const resolvedJobStore = jobStore || resolveWorkerJobStore({ env, logger });
   const resolvedPlatform = platform || createApiPlatform({
-    asyncJobStore: resolvedJobStore
+    asyncJobStore: resolvedJobStore,
+    asyncJobStoreKind: resolvedJobStore.kind,
+    startupSurface: "worker",
+    env,
+    runtimeMode,
+    enforceExplicitRuntimeMode
+  });
+  const runtimeDiagnostics =
+    typeof resolvedPlatform.scanRuntimeInvariants === "function"
+      ? resolvedPlatform.scanRuntimeInvariants({
+          startupSurface: "worker",
+          activeStoreKind: resolvedJobStore.kind
+        })
+      : typeof resolvedPlatform.getRuntimeStartupDiagnostics === "function"
+        ? resolvedPlatform.getRuntimeStartupDiagnostics()
+        : null;
+  assertRuntimeStartupAllowed({
+    diagnostics: runtimeDiagnostics,
+    starter: "worker"
   });
   const workerId = buildWorkerId(env);
 
@@ -281,7 +305,11 @@ export function startWorker({
   let timer = null;
   let activeRun = Promise.resolve();
 
-  logger(`worker started with poll interval ${intervalMs}ms and worker id ${workerId}`);
+  logger(
+    `worker started with poll interval ${intervalMs}ms, worker id ${workerId}, mode ${resolvedPlatform.environmentMode}, store ${
+      runtimeDiagnostics?.activeStoreKind || resolvedJobStore.kind
+    } and findings ${runtimeDiagnostics?.summary?.totalCount || 0}`
+  );
 
   async function tick() {
     if (stopped) {
@@ -316,6 +344,7 @@ export function startWorker({
     claimTtlSeconds,
     workerId,
     platform: resolvedPlatform,
+    runtimeDiagnostics,
     asyncJobStoreKind: resolvedJobStore.kind,
     stop() {
       stopped = true;
@@ -335,7 +364,9 @@ export function startWorker({
 }
 
 if (isMainModule(import.meta.url)) {
-  const runtime = startWorker();
+  const runtime = startWorker({
+    enforceExplicitRuntimeMode: true
+  });
   process.on("SIGINT", () => {
     runtime.stop();
     process.exit(0);

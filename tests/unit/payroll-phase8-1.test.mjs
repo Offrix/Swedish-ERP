@@ -179,6 +179,7 @@ function createPayrollFixture({
   });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     hrPlatform,
     timePlatform
   });

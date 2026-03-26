@@ -27,6 +27,11 @@ test("Phase 3.1 validates balance, preserves idempotency, marks imports and numb
     companyId: "00000000-0000-4000-8000-000000000001",
     actorId: "user-1"
   });
+  engine.ensureAccountingYearPeriod({
+    companyId: "00000000-0000-4000-8000-000000000001",
+    fiscalYear: 2026,
+    actorId: "user-1"
+  });
 
   const firstDraft = engine.createJournalEntry({
     companyId: "00000000-0000-4000-8000-000000000001",

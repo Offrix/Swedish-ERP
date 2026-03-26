@@ -28,7 +28,13 @@ export function createPensionPlatform(options = {}) {
   return createPensionEngine(options);
 }
 
-export function createPensionEngine({ clock = () => new Date(), seedDemo = true, hrPlatform = null } = {}) {
+export function createPensionEngine({
+  clock = () => new Date(),
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  hrPlatform = null
+} = {}) {
   const state = {
     plans: new Map(),
     planIdsByCompany: new Map(),

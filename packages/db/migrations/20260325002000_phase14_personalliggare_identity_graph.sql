@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS kiosk_device_trust_events (
 CREATE INDEX IF NOT EXISTS ix_kiosk_device_trust_events_phase14_site
   ON kiosk_device_trust_events (company_id, construction_site_id, kiosk_device_id, created_at);
 
-INSERT INTO schema_migrations(version, description)
-VALUES ('20260325002000_phase14_personalliggare_identity_graph', 'Phase 14 personalliggare identity graph')
-ON CONFLICT (version) DO NOTHING;
+-- Phase 14 personalliggare identity graph
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260325002000_phase14_personalliggare_identity_graph')
+ON CONFLICT (migration_id) DO NOTHING;

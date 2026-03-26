@@ -11,7 +11,10 @@ const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
 test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reproduces vacation liability snapshots", () => {
   const fixedNow = new Date("2026-03-22T09:00:00Z");
-  const orgAuthPlatform = createOrgAuthPlatform({ clock: () => fixedNow });
+  const orgAuthPlatform = createOrgAuthPlatform({
+    clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo"
+  });
   const hrPlatform = createHrPlatform({ clock: () => fixedNow });
   const timePlatform = createTimePlatform({
     clock: () => fixedNow,
@@ -24,11 +27,17 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
     companyId: COMPANY_ID,
     actorId: "unit-test"
   });
+  ledgerPlatform.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
+    actorId: "unit-test"
+  });
   const bankingPlatform = createBankingPlatform({
     clock: () => fixedNow
   });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     orgAuthPlatform,
     hrPlatform,
     timePlatform,

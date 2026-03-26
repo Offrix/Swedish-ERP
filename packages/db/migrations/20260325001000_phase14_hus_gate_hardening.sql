@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS hus_recovery_candidates (
 CREATE INDEX IF NOT EXISTS ix_hus_recovery_candidates_phase14_status
   ON hus_recovery_candidates (company_id, hus_case_id, status, created_at);
 
-INSERT INTO schema_migrations(version, description)
-VALUES ('20260325001000_phase14_hus_gate_hardening', 'Phase 14 HUS gate hardening')
-ON CONFLICT (version) DO NOTHING;
+-- Phase 14 HUS gate hardening
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260325001000_phase14_hus_gate_hardening')
+ON CONFLICT (migration_id) DO NOTHING;

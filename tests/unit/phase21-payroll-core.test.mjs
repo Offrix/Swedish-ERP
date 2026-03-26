@@ -11,11 +11,15 @@ const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
 test("Step 21 payroll surfaces migration, agreement and approval exceptions before approval", () => {
   const fixedNow = new Date("2026-03-24T09:00:00Z");
-  const orgAuthPlatform = createOrgAuthPlatform({ clock: () => fixedNow });
+  const orgAuthPlatform = createOrgAuthPlatform({
+    clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo"
+  });
   const hrPlatform = createHrPlatform({ clock: () => fixedNow });
   const balancesPlatform = createBalancesPlatform({ clock: () => fixedNow, hrPlatform });
   const collectiveAgreementsPlatform = createCollectiveAgreementsPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     hrPlatform
   });
   const timePlatform = createTimePlatform({
@@ -26,6 +30,7 @@ test("Step 21 payroll surfaces migration, agreement and approval exceptions befo
   });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     orgAuthPlatform,
     hrPlatform,
     timePlatform,

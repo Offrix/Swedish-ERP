@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS estimate_versions (
 CREATE INDEX IF NOT EXISTS ix_estimate_versions_phase14_company_status
   ON estimate_versions (company_id, estimate_no, status, version_no DESC);
 
-INSERT INTO schema_migrations(version, description)
-VALUES ('20260325004000_phase14_kalkyl', 'Phase 14 kalkyl bounded context')
-ON CONFLICT (version) DO NOTHING;
+-- Phase 14 kalkyl bounded context
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260325004000_phase14_kalkyl')
+ON CONFLICT (migration_id) DO NOTHING;

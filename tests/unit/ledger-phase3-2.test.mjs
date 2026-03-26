@@ -6,14 +6,14 @@ const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
 test("Phase 3.2 validates required project dimensions and known dimension values", () => {
   const engine = createLedgerEngine({
-    clock: () => new Date("2026-03-21T20:00:00Z")
+    clock: () => new Date("2026-03-21T20:00:00Z"),
+    bootstrapScenarioCode: "test_default_demo"
   });
 
   engine.installLedgerCatalog({
     companyId: COMPANY_ID,
     actorId: "user-1"
   });
-
   assert.throws(
     () =>
       engine.createJournalEntry({
@@ -61,14 +61,14 @@ test("Phase 3.2 validates required project dimensions and known dimension values
 
 test("Phase 3.2 locks periods against mutation and corrections create new vouchers in the next open period after hard close", () => {
   const engine = createLedgerEngine({
-    clock: () => new Date("2026-03-21T20:15:00Z")
+    clock: () => new Date("2026-03-21T20:15:00Z"),
+    bootstrapScenarioCode: "test_default_demo"
   });
 
   engine.installLedgerCatalog({
     companyId: COMPANY_ID,
     actorId: "user-1"
   });
-
   const januaryPeriod = engine
     .listAccountingPeriods({ companyId: COMPANY_ID })
     .find((period) => period.startsOn === "2026-01-01");

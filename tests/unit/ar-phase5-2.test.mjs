@@ -17,6 +17,7 @@ test("Phase 5.2 issues an invoice only once and reuses the posted journal on rep
     integrationPlatform: integrations
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
 
   const customer = createCustomer(ar);
   const item = createItem(ar);
@@ -60,6 +61,7 @@ test("Phase 5.2 full credit note closes the credited invoice and posts a separat
     integrationPlatform: integrations
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
 
   const customer = createCustomer(ar, {
     peppolScheme: "0088",
@@ -127,6 +129,7 @@ test("Phase 5.2 validates Peppol delivery and creates payment links from issued 
     integrationPlatform: integrations
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
 
   const customer = createCustomer(ar, {
     peppolScheme: "0088",
@@ -193,6 +196,7 @@ test("Phase 5.2 requires explicit payment link provider selection", () => {
     integrationPlatform: integrations
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
 
   const customer = createCustomer(ar, {
     peppolScheme: "0088",
@@ -237,6 +241,7 @@ test("Phase 5.2 marks invoice delivery as failed when Peppol validation data is 
     integrationPlatform: integrations
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
 
   const customer = createCustomer(ar, {
     peppolScheme: "0088",
@@ -288,6 +293,7 @@ test("Step 24 blocks reverse-charge invoices until buyer VAT and legal text are 
     integrationPlatform: integrations
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
 
   const customer = createCustomer(ar);
   const reverseChargeItem = createItem(ar, {

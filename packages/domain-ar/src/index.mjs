@@ -108,7 +108,9 @@ export function createArPlatform(options = {}) {
 
 export function createArEngine({
   clock = () => new Date(),
-  seedDemo = true,
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   vatPlatform = null,
   ledgerPlatform = null,
   integrationPlatform = null

@@ -1632,7 +1632,9 @@ export function createLedgerPlatform(options = {}) {
 
 export function createLedgerEngine({
   clock = () => new Date(),
-  seedDemo = true,
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   accountingMethodPlatform = null,
   fiscalYearPlatform = null
 } = {}) {

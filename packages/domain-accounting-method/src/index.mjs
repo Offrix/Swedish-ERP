@@ -36,7 +36,12 @@ export function createAccountingMethodPlatform(options = {}) {
   return createAccountingMethodEngine(options);
 }
 
-export function createAccountingMethodEngine({ clock = () => new Date(), seedDemo = true } = {}) {
+export function createAccountingMethodEngine({
+  clock = () => new Date(),
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null
+} = {}) {
   const state = {
     methodProfiles: new Map(),
     methodProfileIdsByCompany: new Map(),

@@ -87,7 +87,12 @@ export const DEMO_BANKID_SUBJECT = "197001011234";
 export const DEMO_APPROVER_EMAIL = "approver@example.test";
 export const DEMO_APPROVER_TOTP_SECRET = "KRSXG5DSNFXGOIDB";
 
-export function createOrgAuthPlatform({ clock = () => new Date(), seedDemo = true } = {}) {
+export function createOrgAuthPlatform({
+  clock = () => new Date(),
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null
+} = {}) {
   const state = {
     companies: new Map(),
     users: new Map(),

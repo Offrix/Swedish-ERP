@@ -8,6 +8,7 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-24T19:30:00Z")
   });
+  const balanceTypeCode = "VACATION_DAYS_PHASE19";
   const adminToken = loginWithStrongAuthOnPlatform({
     platform,
     companyId: DEMO_IDS.companyId,
@@ -32,7 +33,7 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
   });
   platform.createBalanceType({
     companyId: DEMO_IDS.companyId,
-    balanceTypeCode: "VACATION_DAYS",
+    balanceTypeCode,
     label: "Vacation days",
     unitCode: "days",
     actorId: DEMO_IDS.userId
@@ -64,7 +65,7 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
     versionNo: 1,
     mappings: [
       { sourceField: "employee_no", targetField: "employeeId", transformCode: "identity" },
-      { sourceField: "vacation_days", targetField: "VACATION_DAYS", transformCode: "identity" }
+      { sourceField: "vacation_days", targetField: balanceTypeCode, transformCode: "identity" }
     ]
   });
   platform.approveMappingSet({
@@ -81,7 +82,7 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
     effectiveCutoverDate: "2026-04-01",
     firstTargetReportingPeriod: "2026-04",
     mappingSetId: mappingSet.mappingSetId,
-    requiredBalanceTypeCodes: ["VACATION_DAYS"],
+    requiredBalanceTypeCodes: [balanceTypeCode],
     requiredApprovalRoleCodes: ["PAYROLL_OWNER"]
   });
   assert.equal(batch.status, "draft");
@@ -122,7 +123,7 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
       {
         employeeId: employee.employeeId,
         employmentId: employment.employmentId,
-        balanceTypeCode: "VACATION_DAYS",
+        balanceTypeCode,
         openingQuantity: 12,
         effectiveDate: "2026-04-01"
       }
@@ -188,7 +189,7 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
   const account = platform
     .listBalanceAccounts({
       companyId: DEMO_IDS.companyId,
-      balanceTypeCode: "VACATION_DAYS",
+      balanceTypeCode,
       ownerTypeCode: "employment",
       employmentId: employment.employmentId
     })

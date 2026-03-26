@@ -350,9 +350,17 @@ function createProjectWorkspaceFixture() {
   const clock = () => fixedNow;
   const hrPlatform = createHrPlatform({ clock });
   const timePlatform = createTimePlatform({ clock, hrPlatform });
-  const benefitsPlatform = createBenefitsPlatform({ clock, hrPlatform });
+  const benefitsPlatform = createBenefitsPlatform({
+    clock,
+    bootstrapScenarioCode: "test_default_demo",
+    hrPlatform
+  });
   const travelPlatform = createTravelPlatform({ clock, hrPlatform });
-  const pensionPlatform = createPensionPlatform({ clock, hrPlatform });
+  const pensionPlatform = createPensionPlatform({
+    clock,
+    bootstrapScenarioCode: "test_default_demo",
+    hrPlatform
+  });
   const ledgerPlatform = createLedgerPlatform({ clock });
   ledgerPlatform.installLedgerCatalog({
     companyId: COMPANY_ID,
@@ -360,6 +368,7 @@ function createProjectWorkspaceFixture() {
   });
   const vatPlatform = createVatPlatform({
     clock,
+    bootstrapScenarioCode: "test_default_demo",
     ledgerPlatform
   });
   const arPlatform = createArPlatform({
@@ -369,6 +378,7 @@ function createProjectWorkspaceFixture() {
   });
   const payrollPlatform = createPayrollPlatform({
     clock,
+    bootstrapScenarioCode: "test_default_demo",
     hrPlatform,
     timePlatform,
     benefitsPlatform,

@@ -40,8 +40,9 @@ CREATE INDEX IF NOT EXISTS ix_annual_evidence_packs_company_package
 CREATE INDEX IF NOT EXISTS ix_annual_reporting_submission_links_company_package
   ON annual_reporting_submission_links (company_id, package_id, created_at DESC);
 
-INSERT INTO schema_migrations(version, description)
-VALUES ('20260325021000', 'phase14 annual reporting evidence and submission links')
-ON CONFLICT (version) DO NOTHING;
+-- phase14 annual reporting evidence and submission links
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260325021000_phase14_annual_reporting_evidence')
+ON CONFLICT (migration_id) DO NOTHING;
 
 COMMIT;

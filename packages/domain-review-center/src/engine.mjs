@@ -17,7 +17,12 @@ export function createReviewCenterPlatform(options = {}) {
   return createReviewCenterEngine(options);
 }
 
-export function createReviewCenterEngine({ clock = () => new Date(), seedDemo = true } = {}) {
+export function createReviewCenterEngine({
+  clock = () => new Date(),
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null
+} = {}) {
   const state = {
     reviewQueues: new Map(),
     reviewQueueIdsByCompany: new Map(),

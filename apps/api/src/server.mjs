@@ -1,11 +1,15 @@
 import crypto from "node:crypto";
 import http from "node:http";
-import { defaultApiPlatform } from "./platform.mjs";
+import { createDefaultApiPlatform } from "./platform.mjs";
 import { tryHandlePhase13Route } from "./phase13-routes.mjs";
 import { tryHandlePhase14Route } from "./phase14-routes.mjs";
 import { isMainModule, stopServer } from "../../../scripts/lib/repo.mjs";
+import { assertRuntimeStartupAllowed } from "../../../scripts/lib/runtime-diagnostics.mjs";
 
-export function createApiServer({ platform = defaultApiPlatform, flags = readFeatureFlags(process.env) } = {}) {
+export function createApiServer({
+  platform = createDefaultApiPlatform({ env: process.env }),
+  flags = readFeatureFlags(process.env)
+} = {}) {
   return http.createServer((req, res) => {
     handleRequest({ req, res, platform, flags }).catch((error) => {
       writeError(res, error);
@@ -16,17 +20,44 @@ export function createApiServer({ platform = defaultApiPlatform, flags = readFea
 export async function startApiServer({
   port = Number(process.env.PORT || 3000),
   logger = console.log,
-  platform = defaultApiPlatform,
-  flags = readFeatureFlags(process.env)
+  platform = null,
+  flags = readFeatureFlags(process.env),
+  runtimeMode = null,
+  env = process.env,
+  enforceExplicitRuntimeMode = false
 } = {}) {
-  const server = createApiServer({ platform, flags });
+  const resolvedPlatform =
+    platform ||
+    createDefaultApiPlatform({
+      env,
+      runtimeMode,
+      enforceExplicitRuntimeMode
+    });
+  const runtimeDiagnostics =
+    typeof resolvedPlatform.scanRuntimeInvariants === "function"
+      ? resolvedPlatform.scanRuntimeInvariants({ startupSurface: "api" })
+      : typeof resolvedPlatform.getRuntimeStartupDiagnostics === "function"
+        ? resolvedPlatform.getRuntimeStartupDiagnostics()
+        : null;
+  assertRuntimeStartupAllowed({
+    diagnostics: runtimeDiagnostics,
+    starter: "api"
+  });
+  const server = createApiServer({ platform: resolvedPlatform, flags });
   await new Promise((resolve) => {
     server.listen(port, resolve);
   });
-  logger(`api listening on http://localhost:${port}`);
+  logger(
+    `api listening on http://localhost:${port} (${resolvedPlatform.environmentMode}) store=${
+      runtimeDiagnostics?.activeStoreKind || "unknown"
+    } findings=${runtimeDiagnostics?.summary?.totalCount || 0}`
+  );
   return {
     port,
     server,
+    platform: resolvedPlatform,
+    runtimeDiagnostics,
+    runtimeModeProfile: resolvedPlatform.getRuntimeModeProfile(),
     stop: () => stopServer(server)
   };
 }
@@ -34,6 +65,73 @@ export async function startApiServer({
 async function handleRequest({ req, res, platform, flags }) {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
   const path = url.pathname;
+
+  if (req.method === "GET" && path === "/v1/system/runtime-mode") {
+    const diagnostics =
+      typeof platform.scanRuntimeInvariants === "function"
+        ? platform.scanRuntimeInvariants({ startupSurface: "api" })
+        : typeof platform.getRuntimeStartupDiagnostics === "function"
+          ? platform.getRuntimeStartupDiagnostics()
+          : null;
+    writeJson(res, 200, {
+      runtimeModeProfile: typeof platform.getRuntimeModeProfile === "function" ? platform.getRuntimeModeProfile() : null,
+      bootstrapModePolicy: platform.bootstrapModePolicy || null,
+      bootstrapMode: diagnostics?.bootstrapMode || null,
+      bootstrapScenarioCode: diagnostics?.bootstrapScenarioCode || null,
+      activeStoreKind: diagnostics?.activeStoreKind || null,
+      startupAllowed: diagnostics?.startupAllowed !== false,
+      summary: diagnostics?.summary || {
+        totalCount: 0,
+        blockingCount: 0,
+        warningCount: 0
+      }
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/system/invariants") {
+    const diagnostics =
+      typeof platform.scanRuntimeInvariants === "function"
+        ? platform.scanRuntimeInvariants({ startupSurface: "api" })
+        : typeof platform.getRuntimeStartupDiagnostics === "function"
+          ? platform.getRuntimeStartupDiagnostics()
+          : null;
+    writeJson(res, 200, diagnostics || {
+      startupSurface: "api",
+      findings: [],
+      summary: {
+        totalCount: 0,
+        blockingCount: 0,
+        warningCount: 0
+      },
+      startupAllowed: true
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/system/bootstrap/validate") {
+    const body = await readJsonBody(req, true);
+    const diagnostics =
+      typeof platform.scanRuntimeInvariants === "function"
+        ? platform.scanRuntimeInvariants({
+            startupSurface: typeof body.startupSurface === "string" ? body.startupSurface : "api",
+            bootstrapMode: body.bootstrapMode,
+            bootstrapScenarioCode: body.bootstrapScenarioCode,
+            seedDemo: body.seedDemo === true,
+            activeStoreKind: body.activeStoreKind
+          })
+        : null;
+    writeJson(res, 200, diagnostics || {
+      startupAllowed: true,
+      findings: [],
+      summary: {
+        totalCount: 0,
+        blockingCount: 0,
+        warningCount: 0
+      }
+    });
+    return;
+  }
 
   if (path === "/" || path === "/healthz" || path === "/readyz") {
     writeJson(
@@ -80,6 +178,9 @@ async function handleRequest({ req, res, platform, flags }) {
             routes: [
               "/healthz",
               "/readyz",
+              "/v1/system/runtime-mode",
+              "/v1/system/invariants",
+              "/v1/system/bootstrap/validate",
               "/v1/auth/login",
               "/v1/auth/logout",
               "/v1/auth/mfa/totp/enroll",
@@ -13125,7 +13226,9 @@ function readFeatureFlags(env) {
 }
 
 if (isMainModule(import.meta.url)) {
-  const runtime = await startApiServer();
+  const runtime = await startApiServer({
+    enforceExplicitRuntimeMode: true
+  });
   process.on("SIGINT", async () => {
     await runtime.stop();
     process.exit(0);

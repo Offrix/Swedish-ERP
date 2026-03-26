@@ -5,7 +5,8 @@ import { createOrgAuthPlatform, DEMO_IDS, DEMO_ADMIN_EMAIL } from "../../package
 
 test("Phase 1 BankID stub keeps the Signicat provider alias while exposing stub mode", () => {
   const platform = createOrgAuthPlatform({
-    clock: () => new Date("2026-03-25T08:00:00Z")
+    clock: () => new Date("2026-03-25T08:00:00Z"),
+    bootstrapScenarioCode: "test_default_demo"
   });
 
   const login = platform.startLogin({

@@ -51,7 +51,13 @@ export function createTaxAccountPlatform(options = {}) {
   return createTaxAccountEngine(options);
 }
 
-export function createTaxAccountEngine({ clock = () => new Date(), seedDemo = true, bankingPlatform = null } = {}) {
+export function createTaxAccountEngine({
+  clock = () => new Date(),
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  bankingPlatform = null
+} = {}) {
   const state = {
     importBatches: new Map(),
     importBatchIdsByCompany: new Map(),

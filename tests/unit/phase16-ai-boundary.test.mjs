@@ -6,7 +6,8 @@ import { DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 
 test("Step 16 AI boundary forces review, creates review items and closes them on manual override", () => {
   const reviewCenter = createReviewCenterPlatform({
-    clock: () => new Date("2026-03-24T18:00:00Z")
+    clock: () => new Date("2026-03-24T18:00:00Z"),
+    bootstrapScenarioCode: "test_default_demo"
   });
   const automation = createAutomationAiEngine({
     clock: () => new Date("2026-03-24T18:00:00Z"),
@@ -73,7 +74,8 @@ test("Step 16 AI boundary forces review, creates review items and closes them on
 
 test("Step 16 AI boundary blocks module-disabled AI decisions and forbids safe-to-post overrides", () => {
   const reviewCenter = createReviewCenterPlatform({
-    clock: () => new Date("2026-03-24T18:10:00Z")
+    clock: () => new Date("2026-03-24T18:10:00Z"),
+    bootstrapScenarioCode: "test_default_demo"
   });
   const automation = createAutomationAiEngine({
     clock: () => new Date("2026-03-24T18:10:00Z"),

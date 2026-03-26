@@ -276,6 +276,7 @@ function createBenefitsFixture({ payModelCode, monthlySalary = null, hourlyRate 
   });
   const benefitsPlatform = createBenefitsPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     hrPlatform
   });
   const ledgerPlatform = createLedgerPlatform({
@@ -285,8 +286,14 @@ function createBenefitsFixture({ payModelCode, monthlySalary = null, hourlyRate 
     companyId: COMPANY_ID,
     actorId: "unit-test"
   });
+  ledgerPlatform.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
+    actorId: "unit-test"
+  });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     hrPlatform,
     timePlatform,
     benefitsPlatform,

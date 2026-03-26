@@ -266,6 +266,7 @@ function createProjectsFixture() {
   });
   const benefitsPlatform = createBenefitsPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     hrPlatform
   });
   const travelPlatform = createTravelPlatform({
@@ -274,6 +275,7 @@ function createProjectsFixture() {
   });
   const pensionPlatform = createPensionPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     hrPlatform
   });
   const ledgerPlatform = createLedgerPlatform({
@@ -283,8 +285,14 @@ function createProjectsFixture() {
     companyId: COMPANY_ID,
     actorId: "unit-test"
   });
+  ledgerPlatform.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
+    actorId: "unit-test"
+  });
   const vatPlatform = createVatPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     ledgerPlatform
   });
   const arPlatform = createArPlatform({
@@ -294,6 +302,7 @@ function createProjectsFixture() {
   });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     hrPlatform,
     timePlatform,
     benefitsPlatform,

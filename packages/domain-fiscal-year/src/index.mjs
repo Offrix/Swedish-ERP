@@ -22,7 +22,12 @@ export function createFiscalYearPlatform(options = {}) {
   return createFiscalYearEngine(options);
 }
 
-export function createFiscalYearEngine({ clock = () => new Date(), seedDemo = true } = {}) {
+export function createFiscalYearEngine({
+  clock = () => new Date(),
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null
+} = {}) {
   const state = {
     profiles: new Map(),
     profileIdsByCompany: new Map(),

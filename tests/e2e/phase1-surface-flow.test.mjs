@@ -8,7 +8,8 @@ import { stopServer } from "../../scripts/lib/repo.mjs";
 test("desktop-web exposes auth/onboarding entrypoints while API completes the matching FAS 1 flow", async () => {
   const now = new Date("2026-03-21T10:15:00Z");
   const platform = createOrgAuthPlatform({
-    clock: () => now
+    clock: () => now,
+    bootstrapScenarioCode: "test_default_demo"
   });
   const apiServer = createApiServer({
     platform,

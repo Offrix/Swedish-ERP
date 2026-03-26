@@ -2,6 +2,7 @@ import http from "node:http";
 import { createAppShell } from "../../../packages/ui-core/src/index.js";
 import { renderMobileChrome } from "../../../packages/ui-mobile/src/index.js";
 import { isMainModule, stopServer } from "../../../scripts/lib/repo.mjs";
+import { resolveRuntimeModeProfile } from "../../../scripts/lib/runtime-mode.mjs";
 
 export function createFieldMobileServer() {
   return http.createServer((req, res) => {
@@ -73,21 +74,37 @@ export function createFieldMobileServer() {
   });
 }
 
-export async function startFieldMobileServer({ port = Number(process.env.PORT || 3002), logger = console.log } = {}) {
+export async function startFieldMobileServer({
+  port = Number(process.env.PORT || 3002),
+  logger = console.log,
+  runtimeMode = null,
+  env = process.env,
+  enforceExplicitRuntimeMode = false
+} = {}) {
+  const runtimeModeProfile = resolveRuntimeModeProfile({
+    runtimeMode,
+    env,
+    starter: "field-mobile",
+    requireExplicit: enforceExplicitRuntimeMode,
+    fallbackMode: "test"
+  });
   const server = createFieldMobileServer();
   await new Promise((resolve) => {
     server.listen(port, resolve);
   });
-  logger(`field-mobile listening on http://localhost:${port}`);
+  logger(`field-mobile listening on http://localhost:${port} (${runtimeModeProfile.environmentMode})`);
   return {
     port,
     server,
+    runtimeModeProfile,
     stop: () => stopServer(server)
   };
 }
 
 if (isMainModule(import.meta.url)) {
-  const runtime = await startFieldMobileServer();
+  const runtime = await startFieldMobileServer({
+    enforceExplicitRuntimeMode: true
+  });
   process.on("SIGINT", async () => {
     await runtime.stop();
     process.exit(0);

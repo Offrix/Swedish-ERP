@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS checklist_signoffs (
 CREATE INDEX IF NOT EXISTS ix_checklist_signoffs_phase14_instance
   ON checklist_signoffs (company_id, checklist_instance_id, signed_at);
 
-INSERT INTO schema_migrations(version, description)
-VALUES ('20260325003000_phase14_egenkontroll', 'Phase 14 egenkontroll bounded context')
-ON CONFLICT (version) DO NOTHING;
+-- Phase 14 egenkontroll bounded context
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260325003000_phase14_egenkontroll')
+ON CONFLICT (migration_id) DO NOTHING;

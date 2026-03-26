@@ -211,7 +211,13 @@ export function createVatPlatform(options = {}) {
   return createVatEngine(options);
 }
 
-export function createVatEngine({ clock = () => new Date(), seedDemo = true, ledgerPlatform = null } = {}) {
+export function createVatEngine({
+  clock = () => new Date(),
+  bootstrapMode = "none",
+  bootstrapScenarioCode = null,
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  ledgerPlatform = null
+} = {}) {
   const ruleRegistry = createRulePackRegistry({
     clock,
     seedRulePacks: SEEDED_RULE_PACKS

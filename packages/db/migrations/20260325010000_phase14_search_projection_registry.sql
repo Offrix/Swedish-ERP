@@ -100,8 +100,9 @@ CREATE INDEX IF NOT EXISTS ix_saved_views_company_owner
 CREATE INDEX IF NOT EXISTS ix_dashboard_widgets_company_owner
   ON dashboard_widgets (company_id, owner_user_id, surface_code, updated_at DESC);
 
-INSERT INTO schema_migrations(version, description)
-VALUES ('20260325010000', 'phase14 search projection registry')
-ON CONFLICT (version) DO NOTHING;
+-- phase14 search projection registry
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260325010000_phase14_search_projection_registry')
+ON CONFLICT (migration_id) DO NOTHING;
 
 COMMIT;

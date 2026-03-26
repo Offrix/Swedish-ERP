@@ -5,6 +5,9 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 
 const REQUIRED_ROUTE_METADATA = Object.freeze([
+  "/v1/system/runtime-mode",
+  "/v1/system/invariants",
+  "/v1/system/bootstrap/validate",
   "/v1/auth/logout",
   "/v1/auth/mfa/totp/enroll",
   "/v1/auth/mfa/totp/verify",

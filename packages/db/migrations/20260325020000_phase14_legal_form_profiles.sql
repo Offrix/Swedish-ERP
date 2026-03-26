@@ -50,8 +50,9 @@ CREATE INDEX IF NOT EXISTS ix_legal_form_profiles_company_effective
 CREATE INDEX IF NOT EXISTS ix_reporting_obligation_profiles_company_year
   ON reporting_obligation_profiles (company_id, fiscal_year_key, status, updated_at DESC);
 
-INSERT INTO schema_migrations(version, description)
-VALUES ('20260325020000', 'phase14 legal form profiles')
-ON CONFLICT (version) DO NOTHING;
+-- phase14 legal form profiles
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260325020000_phase14_legal_form_profiles')
+ON CONFLICT (migration_id) DO NOTHING;
 
 COMMIT;

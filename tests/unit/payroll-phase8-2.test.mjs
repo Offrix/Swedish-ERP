@@ -10,7 +10,8 @@ const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 test("Phase 8.2 payroll resolves manual tax and SINK, locks AGI absence and creates correction versions", () => {
   const fixedNow = new Date("2026-03-22T08:00:00Z");
   const orgAuthPlatform = createOrgAuthPlatform({
-    clock: () => fixedNow
+    clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo"
   });
   const hrPlatform = createHrPlatform({
     clock: () => fixedNow
@@ -21,6 +22,7 @@ test("Phase 8.2 payroll resolves manual tax and SINK, locks AGI absence and crea
   });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
     orgAuthPlatform,
     hrPlatform,
     timePlatform

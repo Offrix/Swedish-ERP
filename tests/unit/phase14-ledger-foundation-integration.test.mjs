@@ -25,10 +25,17 @@ test("Phase 14.1 migration binds ledger journals and periods to fiscal year and 
 
 test("Phase 14.1 ledger binds journals to the active fiscal year, fiscal period and accounting method profile", () => {
   const clock = () => new Date("2026-03-24T09:00:00Z");
-  const accountingMethodPlatform = createAccountingMethodPlatform({ clock });
-  const fiscalYearPlatform = createFiscalYearPlatform({ clock });
+  const accountingMethodPlatform = createAccountingMethodPlatform({
+    clock,
+    bootstrapScenarioCode: "test_default_demo"
+  });
+  const fiscalYearPlatform = createFiscalYearPlatform({
+    clock,
+    bootstrapScenarioCode: "test_default_demo"
+  });
   const engine = createLedgerEngine({
     clock,
+    bootstrapScenarioCode: "test_default_demo",
     accountingMethodPlatform,
     fiscalYearPlatform
   });
@@ -87,6 +94,11 @@ test("Phase 14.1 ledger preserves legacy fallback behavior when method and fisca
 
   engine.installLedgerCatalog({
     companyId: COMPANY_ID,
+    actorId: "user-1"
+  });
+  engine.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
     actorId: "user-1"
   });
 

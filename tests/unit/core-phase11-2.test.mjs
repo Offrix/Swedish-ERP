@@ -5,7 +5,7 @@ import { createOrgAuthPlatform, DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../package
 
 test("Phase 11.2 core enforces bureau scope, derives deadlines and tracks requests plus approvals", () => {
   const clock = () => new Date("2026-03-22T10:00:00Z");
-  const org = createOrgAuthPlatform({ clock });
+  const org = createOrgAuthPlatform({ clock, bootstrapScenarioCode: "test_default_demo" });
   const core = createCorePlatform({ orgAuthPlatform: org, clock });
   const adminToken = loginStrongAuth(org, DEMO_IDS.companyId, DEMO_ADMIN_EMAIL);
 
