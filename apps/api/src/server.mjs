@@ -576,6 +576,8 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/backoffice/dead-letters/:deadLetterId/triage",
               "/v1/backoffice/submissions/monitor",
               "/v1/backoffice/incidents",
+              "/v1/backoffice/incidents/:incidentId/events",
+              "/v1/backoffice/incidents/:incidentId/status",
               "/v1/backoffice/impersonations",
               "/v1/backoffice/impersonations/:sessionId/approve",
               "/v1/backoffice/impersonations/:sessionId/end",

@@ -183,6 +183,39 @@ test("Step 17 API exposes backoffice jobs, dead-letter triage, submission monito
     });
     assert.equal(incident.incident.status, "open");
     assert.equal(incident.incident.relatedObjectRefs.length, 2);
+
+    const incidentList = await requestJson(baseUrl, `/v1/backoffice/incidents?companyId=${DEMO_IDS.companyId}&status=open`, {
+      token: adminToken
+    });
+    assert.equal(incidentList.items.some((item) => item.incidentId === incident.incident.incidentId), true);
+
+    const incidentEvent = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/events`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        eventType: "mitigation_started",
+        note: "Containment started for transport outage."
+      }
+    });
+    assert.equal(incidentEvent.event.eventType, "mitigation_started");
+
+    const incidentEvents = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/events?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(incidentEvents.items.some((item) => item.eventType === "mitigation_started"), true);
+
+    const incidentStatus = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/status`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        status: "mitigating",
+        note: "Mitigation in progress."
+      }
+    });
+    assert.equal(incidentStatus.incident.status, "mitigating");
   } finally {
     await stopServer(server);
   }

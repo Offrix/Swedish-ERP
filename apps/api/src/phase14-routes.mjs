@@ -2017,6 +2017,72 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/backoffice/incidents") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "runtime_incident", objectId: companyId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listRuntimeIncidents({
+        sessionToken,
+        companyId,
+        status: optionalText(url.searchParams.get("status")),
+        severity: optionalText(url.searchParams.get("severity"))
+      })
+    });
+    return true;
+  }
+
+  const incidentEventsMatch = matchPath(path, "/v1/backoffice/incidents/:incidentId/events");
+  if (req.method === "GET" && incidentEventsMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "runtime_incident", objectId: incidentEventsMatch.incidentId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listRuntimeIncidentEvents({
+        sessionToken,
+        companyId,
+        incidentId: incidentEventsMatch.incidentId
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && incidentEventsMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "runtime_incident", objectId: incidentEventsMatch.incidentId, scopeCode: "backoffice" });
+    writeJson(res, 201, platform.recordRuntimeIncidentEvent({
+      sessionToken,
+      companyId,
+      incidentId: incidentEventsMatch.incidentId,
+      eventType: body.eventType || "note_added",
+      note: body.note,
+      relatedObjectRefs: Array.isArray(body.relatedObjectRefs) ? body.relatedObjectRefs : [],
+      linkedCorrelationId: body.linkedCorrelationId || null,
+      metadata: body.metadata || {}
+    }));
+    return true;
+  }
+
+  const incidentStatusMatch = matchPath(path, "/v1/backoffice/incidents/:incidentId/status");
+  if (req.method === "POST" && incidentStatusMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "runtime_incident", objectId: incidentStatusMatch.incidentId, scopeCode: "backoffice" });
+    writeJson(res, 200, platform.updateRuntimeIncidentStatus({
+      sessionToken,
+      companyId,
+      incidentId: incidentStatusMatch.incidentId,
+      status: body.status,
+      note: body.note || null
+    }));
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/ops/feature-flags") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
