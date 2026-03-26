@@ -210,6 +210,7 @@ test("Phase 12.2 submission engine routes transport failures into action queue a
   assert.equal(submission.status, "transport_failed");
   assert.equal(submission.actionQueueItems.length, 1);
   assert.equal(submission.actionQueueItems[0].actionType, "retry");
+  assert.equal(submission.actionQueueItems[0].slaDueAt, submission.actionQueueItems[0].retryAfter);
   assert.throws(
     () =>
       integrationPlatform.retryAuthoritySubmission({
@@ -317,6 +318,48 @@ test("Phase 12.2 submission engine opens correction chains with preserved prior 
   });
   assert.equal(repeated.idempotentReplay, true);
   assert.equal(repeated.submission.submissionId, correction.submission.submissionId);
+});
+
+test("Phase 12.2 submission queue items carry explicit SLA timestamps for correction work", async () => {
+  const integrationPlatform = createIntegrationPlatform({
+    clock: () => FIXED_NOW
+  });
+
+  let submission = integrationPlatform.prepareAuthoritySubmission({
+    companyId: "company-4",
+    submissionType: "agi_monthly",
+    sourceObjectType: "agi_submission_period",
+    sourceObjectId: "agi-period-2026-03",
+    sourceObjectVersion: "agi:v1",
+    periodId: "2026-03",
+    providerKey: "skatteverket",
+    recipientId: "skatteverket:agi",
+    payloadVersion: "phase12.2-company-4-v1",
+    payload: {
+      sourceObjectVersion: "agi:v1",
+      checksum: "agi-v1"
+    },
+    actorId: "phase12-2-unit",
+    signedState: "not_required"
+  });
+
+  submission = await integrationPlatform.submitAuthoritySubmission({
+    companyId: "company-4",
+    submissionId: submission.submissionId,
+    actorId: "phase12-2-unit",
+    simulatedTransportOutcome: "technical_ack"
+  });
+  submission = integrationPlatform.registerSubmissionReceipt({
+    companyId: "company-4",
+    submissionId: submission.submissionId,
+    receiptType: "business_nack",
+    requiredInput: ["correct_agi_values"],
+    actorId: "phase12-2-unit"
+  });
+
+  assert.equal(submission.actionQueueItems.length, 1);
+  assert.equal(submission.actionQueueItems[0].actionType, "collect_more_data");
+  assert.equal(submission.actionQueueItems[0].slaDueAt, submission.actionQueueItems[0].createdAt);
 });
 
 function materializeVatOverview(platform) {

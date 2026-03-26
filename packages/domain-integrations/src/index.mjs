@@ -816,6 +816,7 @@ function executeAuthoritySubmissionTransport(
       priority: submission.priority,
       ownerQueue: ownerQueueForSubmission(submission),
       retryAfter: addMinutesIso(submission.updatedAt, 15),
+      slaDueAt: addMinutesIso(submission.updatedAt, 15),
       requiredInput: [],
       rootCauseCode: "transport_failed",
       clock
@@ -926,30 +927,32 @@ function registerSubmissionReceipt(
   } else if (normalizedType === "technical_nack") {
     submission.status = "transport_failed";
     submission.updatedAt = receipt.receivedAt;
-    createQueueItem(state, {
-      submission,
-      actionType: "retry",
-      priority: escalatePriority(submission.priority, "technical_nack"),
-      ownerQueue: ownerQueueForSubmission(submission),
-      retryAfter: addMinutesIso(receipt.receivedAt, 15),
-      requiredInput: [],
-      rootCauseCode: "technical_nack",
-      clock
-    });
-  } else if (normalizedType === "business_nack") {
+      createQueueItem(state, {
+        submission,
+        actionType: "retry",
+        priority: escalatePriority(submission.priority, "technical_nack"),
+        ownerQueue: ownerQueueForSubmission(submission),
+        retryAfter: addMinutesIso(receipt.receivedAt, 15),
+        slaDueAt: addMinutesIso(receipt.receivedAt, 15),
+        requiredInput: [],
+        rootCauseCode: "technical_nack",
+        clock
+      });
+    } else if (normalizedType === "business_nack") {
     submission.status = "domain_rejected";
     submission.updatedAt = receipt.receivedAt;
-    createQueueItem(state, {
-      submission,
-      actionType: Array.isArray(requiredInput) && requiredInput.length > 0 ? "collect_more_data" : "correct_payload",
-      priority: escalatePriority(submission.priority, "business_nack"),
-      ownerQueue: ownerQueueForSubmission(submission),
-      retryAfter: null,
-      requiredInput: Array.isArray(requiredInput) ? requiredInput : [],
-      rootCauseCode: "business_nack",
-      clock
-    });
-  }
+      createQueueItem(state, {
+        submission,
+        actionType: Array.isArray(requiredInput) && requiredInput.length > 0 ? "collect_more_data" : "correct_payload",
+        priority: escalatePriority(submission.priority, "business_nack"),
+        ownerQueue: ownerQueueForSubmission(submission),
+        retryAfter: null,
+        slaDueAt: receipt.receivedAt,
+        requiredInput: Array.isArray(requiredInput) ? requiredInput : [],
+        rootCauseCode: "business_nack",
+        clock
+      });
+    }
   return enrichSubmission(state, submission);
 }
 
@@ -1041,13 +1044,19 @@ function enrichSubmission(state, submission) {
 
 function createQueueItem(
   state,
-  { submission, actionType, priority, ownerQueue, retryAfter, requiredInput = [], rootCauseCode, clock }
+  { submission, actionType, priority, ownerQueue, retryAfter, slaDueAt = null, requiredInput = [], rootCauseCode, clock }
 ) {
   const existing = (state.queueItemIdsBySubmission.get(submission.submissionId) || [])
     .map((queueItemId) => state.queueItems.get(queueItemId))
     .filter(Boolean)
     .find((candidate) => ["open", "claimed", "waiting_input"].includes(candidate.status) && candidate.actionType === actionType && candidate.rootCauseCode === rootCauseCode);
   if (existing) {
+    if (slaDueAt) {
+      existing.slaDueAt = normalizeOptionalText(slaDueAt);
+    }
+    if (retryAfter) {
+      existing.retryAfter = normalizeOptionalText(retryAfter);
+    }
     return existing;
   }
   const queueItem = {
@@ -1060,6 +1069,7 @@ function createQueueItem(
     ownerUserId: null,
     status: "open",
     retryAfter,
+    slaDueAt: normalizeOptionalText(slaDueAt),
     requiredInput: clone(requiredInput),
     resolutionCode: null,
     rootCauseCode,

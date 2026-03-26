@@ -2025,8 +2025,43 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       companyId,
       submissionType: optionalText(url.searchParams.get("submissionType")),
       ownerQueue: optionalText(url.searchParams.get("ownerQueue")),
-      status: optionalText(url.searchParams.get("status"))
+      status: optionalText(url.searchParams.get("status")),
+      asOf: optionalText(url.searchParams.get("asOf"))
     }));
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/backoffice/submissions/monitor/scan") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "submission",
+      objectId: companyId,
+      scopeCode: "backoffice"
+    });
+    assertBackofficeReadAccess({ principal });
+
+    const monitor = await buildSubmissionMonitorPayload({
+      platform,
+      companyId,
+      submissionType: optionalText(body.submissionType),
+      ownerQueue: optionalText(body.ownerQueue),
+      status: optionalText(body.status),
+      asOf: optionalText(body.asOf)
+    });
+    const scan = buildSubmissionMonitorScan({
+      platform,
+      companyId,
+      principal,
+      monitor,
+      asOf: monitor.asOf
+    });
+    writeJson(res, 200, scan);
     return true;
   }
 
@@ -4001,7 +4036,8 @@ async function buildBackofficeDeadLetterRows({ platform, companyId, operatorStat
   }));
 }
 
-async function buildSubmissionMonitorPayload({ platform, companyId, submissionType = null, ownerQueue = null, status = null }) {
+async function buildSubmissionMonitorPayload({ platform, companyId, submissionType = null, ownerQueue = null, status = null, asOf = null }) {
+  const resolvedAsOf = resolveSubmissionMonitorAsOf(asOf);
   const [submissions, queueItems, jobs, deadLetters, replayPlans] = await Promise.all([
     platform.listAuthoritySubmissions({ companyId, submissionType }),
     platform.listSubmissionActionQueue({ companyId, ownerQueue, status: null }),
@@ -4021,7 +4057,7 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
   const submissionRows = filteredSubmissions.map((submission) => {
     const submissionQueueItems = queueItemsBySubmissionId.get(submission.submissionId) || [];
     const receiptClasses = classifySubmissionReceiptClasses(submission.receipts || []);
-    const lagAlerts = buildSubmissionLagAlerts({ submission, queueItems: submissionQueueItems, deadLetter: null });
+    const lagAlerts = buildSubmissionLagAlerts({ submission, queueItems: submissionQueueItems, deadLetter: null, asOf: resolvedAsOf });
     return {
       objectType: "authoritySubmission",
       submissionId: submission.submissionId,
@@ -4037,6 +4073,8 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
       updatedAt: submission.updatedAt,
       receiptClasses,
       queueItems: submissionQueueItems,
+      ownerQueues: [...new Set(submissionQueueItems.map((queueItem) => queueItem.ownerQueue).filter(Boolean))],
+      slaDueAt: resolveSubmissionQueueSlaDueAt(submissionQueueItems),
       lagAlerts,
       replayEligible: submission.status === "transport_failed" || submissionQueueItems.some((queueItem) => queueItem.actionType === "retry")
     };
@@ -4079,12 +4117,15 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
         lagAlerts: buildSubmissionLagAlerts({
           submission: linkedSubmission,
           queueItems: submissionQueueItems,
-          deadLetter
+          deadLetter,
+          asOf: resolvedAsOf
         }),
         replayEligible: deadLetter.replayAllowed === true,
         deadLetter,
         replayPlan: replayPlansByJobId.get(deadLetter.jobId) || null,
-        job
+        job,
+        ownerQueues: [...new Set(submissionQueueItems.map((queueItem) => queueItem.ownerQueue).filter(Boolean))],
+        slaDueAt: resolveSubmissionQueueSlaDueAt(submissionQueueItems)
       };
     })
     .filter(Boolean);
@@ -4094,14 +4135,17 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
       || resolveWorkbenchIdentity(right).localeCompare(resolveWorkbenchIdentity(left))
     );
   return {
+    asOf: resolvedAsOf,
     items,
     counters: {
       technicalPending: submissionRows.filter((item) => item.receiptClasses.technical === "pending").length,
       materialPending: submissionRows.filter((item) => item.receiptClasses.business === "pending" || item.receiptClasses.finalOutcome === "pending").length,
       deadLettered: submissionDeadLetterRows.filter((item) => item.deadLetter?.operatorState && item.deadLetter.operatorState !== "closed").length,
       replayPlanned: submissionDeadLetterRows.filter((item) => item.replayPlan?.status === "planned").length
-        + submissionRows.filter((item) => item.queueItems.some((queueItem) => queueItem.status === "open" && queueItem.actionType === "retry")).length
-    }
+        + submissionRows.filter((item) => item.queueItems.some((queueItem) => queueItem.status === "open" && queueItem.actionType === "retry")).length,
+      lagging: [...submissionRows, ...submissionDeadLetterRows].filter((item) => item.lagAlerts.length > 0).length
+    },
+    queueSummary: buildSubmissionMonitorQueueSummary({ items: submissionRows, asOf: resolvedAsOf })
   };
 }
 
@@ -4114,8 +4158,10 @@ function classifySubmissionReceiptClasses(receipts) {
   };
 }
 
-function buildSubmissionLagAlerts({ submission = null, queueItems = [], deadLetter = null }) {
+function buildSubmissionLagAlerts({ submission = null, queueItems = [], deadLetter = null, asOf = null }) {
   const alerts = [];
+  const openQueueItems = (queueItems || []).filter((queueItem) => ["open", "claimed", "waiting_input"].includes(queueItem.status));
+  const resolvedAsOf = resolveSubmissionMonitorAsOf(asOf);
   if (submission?.status === "submitted" && !hasReceiptType(submission.receipts, ["technical_ack", "technical_nack"])) {
     alerts.push({ alertCode: "technical_receipt_missing", severity: "high" });
   }
@@ -4125,18 +4171,165 @@ function buildSubmissionLagAlerts({ submission = null, queueItems = [], deadLett
   if (submission?.status === "domain_rejected") {
     alerts.push({ alertCode: "business_rejection", severity: "high" });
   }
+  if (openQueueItems.some((queueItem) => ["correct_payload", "collect_more_data"].includes(queueItem.actionType))) {
+    alerts.push({ alertCode: "correction_required", severity: "high" });
+  }
   if (deadLetter) {
     alerts.push({ alertCode: "dead_letter_open", severity: "high" });
   }
-  if ((queueItems || []).some((queueItem) => ["open", "claimed", "waiting_input"].includes(queueItem.status))) {
+  if (openQueueItems.some((queueItem) => queueItem.slaDueAt && queueItem.slaDueAt.localeCompare(resolvedAsOf) <= 0)) {
+    alerts.push({ alertCode: "long_lag", severity: "high" });
+  }
+  if (openQueueItems.length > 0) {
     alerts.push({ alertCode: "operator_intervention_required", severity: "high" });
   }
   return alerts;
 }
 
+function buildSubmissionMonitorScan({ platform, companyId, principal, monitor, asOf }) {
+  const workItems = [];
+  const notifications = [];
+  const activityEntries = [];
+
+  for (const item of monitor.items.filter((candidate) => Array.isArray(candidate.lagAlerts) && candidate.lagAlerts.length > 0)) {
+    const alertCodes = [...new Set(item.lagAlerts.map((alert) => alert.alertCode).filter(Boolean))];
+    const severity = resolveSubmissionMonitorPriority(item.lagAlerts);
+    const sourceObjectId = resolveSubmissionMonitorSourceId(item);
+    const title = buildSubmissionMonitorTitle(item);
+    const summary = buildSubmissionMonitorSummary(item, alertCodes);
+    const workItem = platform.upsertOperationalWorkItem({
+      companyId,
+      queueCode: "SUBMISSION_MONITORING",
+      sourceType: item.objectType,
+      sourceId: sourceObjectId,
+      title,
+      summary,
+      priority: severity,
+      deadlineAt: item.slaDueAt || asOf,
+      blockerScope: "submission_monitoring",
+      escalationPolicyCode: "submission_monitor.default",
+      actorId: principal.userId,
+      metadata: {
+        submissionId: item.submissionId || null,
+        deadLetterId: item.deadLetterId || null,
+        submissionType: item.submissionType || null,
+        ownerQueues: Array.isArray(item.ownerQueues) ? item.ownerQueues : [],
+        alertCodes,
+        receiptClasses: item.receiptClasses || null,
+        replayEligible: item.replayEligible === true
+      }
+    });
+    workItems.push(workItem);
+
+    notifications.push(platform.createNotification({
+      companyId,
+      recipientType: "user",
+      recipientId: principal.userId,
+      categoryCode: "submission_monitor_alert",
+      priorityCode: severity,
+      sourceDomainCode: "INTEGRATIONS",
+      sourceObjectType: item.objectType,
+      sourceObjectId,
+      title,
+      body: summary,
+      deepLink: `/backoffice/submissions/${item.submissionId || sourceObjectId}`,
+      dedupeKey: `${companyId}::submission_monitor_alert::${item.objectType}::${sourceObjectId}::${alertCodes.join("|")}`,
+      actorId: principal.userId
+    }));
+
+    activityEntries.push(platform.projectActivityEntry({
+      companyId,
+      objectType: item.objectType,
+      objectId: sourceObjectId,
+      activityType: "submission_monitor_alert",
+      actorType: "system",
+      actorSnapshot: {
+        actorId: principal.userId,
+        actorLabel: "Backoffice submission monitor scan"
+      },
+      summary,
+      occurredAt: asOf,
+      sourceEventId: `submission_monitor:${item.objectType}:${sourceObjectId}:${alertCodes.join("|")}`,
+      visibilityScope: "company",
+      relatedObjects: [
+        item.submissionId ? { relatedObjectType: "submission", relatedObjectId: item.submissionId } : null,
+        item.deadLetterId ? { relatedObjectType: "async_dead_letter", relatedObjectId: item.deadLetterId } : null,
+        item.job?.jobId ? { relatedObjectType: "async_job", relatedObjectId: item.job.jobId } : null
+      ].filter(Boolean),
+      actorId: principal.userId
+    }));
+  }
+
+  return {
+    scan: {
+      asOf,
+      rowCount: monitor.items.length,
+      laggingRowCount: monitor.items.filter((candidate) => candidate.lagAlerts?.length > 0).length,
+      totalAlertCount: monitor.items.reduce((sum, candidate) => sum + (candidate.lagAlerts?.length || 0), 0)
+    },
+    workItems,
+    notifications,
+    activityEntries
+  };
+}
+
 function hasReceiptType(receipts, receiptTypes) {
   const typeSet = new Set((receipts || []).map((receipt) => receipt.receiptType));
   return receiptTypes.some((receiptType) => typeSet.has(receiptType));
+}
+
+function resolveSubmissionMonitorAsOf(asOf = null) {
+  const value = optionalText(asOf);
+  if (!value) {
+    return new Date().toISOString();
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw createHttpError(400, "submission_monitor_as_of_invalid", "Submission monitor asOf must be a valid ISO timestamp.");
+  }
+  return parsed.toISOString();
+}
+
+function resolveSubmissionQueueSlaDueAt(queueItems) {
+  return (queueItems || [])
+    .filter((queueItem) => ["open", "claimed", "waiting_input"].includes(queueItem.status))
+    .map((queueItem) => optionalText(queueItem.slaDueAt))
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right))[0] || null;
+}
+
+function buildSubmissionMonitorQueueSummary({ items, asOf }) {
+  const resolvedAsOf = resolveSubmissionMonitorAsOf(asOf);
+  const queues = new Map();
+  for (const item of items) {
+    for (const queueItem of item.queueItems || []) {
+      if (!["open", "claimed", "waiting_input"].includes(queueItem.status)) {
+        continue;
+      }
+      const key = queueItem.ownerQueue || "submission_operator";
+      const existing = queues.get(key) || {
+        ownerQueue: key,
+        slaDueAt: null,
+        openCount: 0,
+        blockedCount: 0,
+        oldestOpenAgeMinutes: 0,
+        escalationPolicyCode: "submission_monitor.default"
+      };
+      existing.openCount += 1;
+      if (queueItem.status === "waiting_input") {
+        existing.blockedCount += 1;
+      }
+      if (queueItem.slaDueAt && (!existing.slaDueAt || existing.slaDueAt.localeCompare(queueItem.slaDueAt) > 0)) {
+        existing.slaDueAt = queueItem.slaDueAt;
+      }
+      const ageMinutes = Math.max(0, Math.round((Date.parse(resolvedAsOf) - Date.parse(queueItem.createdAt)) / 60000));
+      if (ageMinutes > existing.oldestOpenAgeMinutes) {
+        existing.oldestOpenAgeMinutes = ageMinutes;
+      }
+      queues.set(key, existing);
+    }
+  }
+  return [...queues.values()].sort((left, right) => left.ownerQueue.localeCompare(right.ownerQueue));
 }
 
 function resolveBackofficeOperatorBinding({
@@ -4206,6 +4399,38 @@ function isSubmissionMonitorJob(job) {
   }
   return job.sourceObjectType === "submission"
     || typeof job.jobType === "string" && job.jobType.startsWith("submission.");
+}
+
+function resolveSubmissionMonitorSourceId(item) {
+  return optionalText(item.deadLetterId) || requireText(item.submissionId, "submission_monitor_source_id_required", "Submission monitor source id is required.");
+}
+
+function buildSubmissionMonitorTitle(item) {
+  if (item.objectType === "submissionDeadLetter") {
+    return `Submission dead letter: ${item.submissionType || item.submissionId || item.deadLetterId}`;
+  }
+  return `Submission monitor alert: ${item.submissionType || item.submissionId}`;
+}
+
+function buildSubmissionMonitorSummary(item, alertCodes) {
+  const joinedAlerts = alertCodes.join(", ");
+  if (item.objectType === "submissionDeadLetter") {
+    return `Submission dead letter ${item.deadLetterId} requires operator action. Active alerts: ${joinedAlerts}.`;
+  }
+  return `Submission ${item.submissionId} requires operator action. Active alerts: ${joinedAlerts}.`;
+}
+
+function resolveSubmissionMonitorPriority(lagAlerts) {
+  if ((lagAlerts || []).some((alert) => alert.severity === "critical")) {
+    return "critical";
+  }
+  if ((lagAlerts || []).some((alert) => alert.severity === "high")) {
+    return "high";
+  }
+  if ((lagAlerts || []).some((alert) => alert.severity === "medium")) {
+    return "medium";
+  }
+  return "low";
 }
 
 function resolveWorkbenchTimestamp(item) {

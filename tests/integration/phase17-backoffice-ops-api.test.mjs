@@ -298,6 +298,30 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     assert.equal(submissionMonitor.counters.materialPending >= 1, true);
     assert.equal(submissionMonitor.counters.deadLettered >= 1, true);
     assert.equal(submissionMonitor.counters.replayPlanned >= 1, true);
+    assert.equal(submissionMonitor.counters.lagging >= 2, true);
+    assert.equal(submissionRow.queueItems[0].slaDueAt, submissionRow.queueItems[0].createdAt);
+    assert.equal(submissionMonitor.queueSummary.some((queue) => queue.ownerQueue === "tax_operator"), true);
+
+    const submissionMonitorScan = await requestJson(baseUrl, "/v1/backoffice/submissions/monitor/scan", {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        asOf: "2026-03-26T00:30:00Z"
+      }
+    });
+    assert.equal(submissionMonitorScan.scan.laggingRowCount >= 2, true);
+    assert.equal(submissionMonitorScan.workItems.length >= 2, true);
+    assert.equal(submissionMonitorScan.notifications.length >= 2, true);
+    assert.equal(submissionMonitorScan.activityEntries.length >= 2, true);
+    const submissionAlertWorkItem = submissionMonitorScan.workItems.find((item) => item.sourceType === "authoritySubmission" && item.sourceId === submission.submissionId);
+    assert.ok(submissionAlertWorkItem);
+    assert.equal(submissionAlertWorkItem.queueCode, "SUBMISSION_MONITORING");
+    assert.equal(submissionAlertWorkItem.metadataJson.alertCodes.includes("business_rejection"), true);
+    assert.equal(submissionAlertWorkItem.metadataJson.alertCodes.includes("correction_required"), true);
+    const deadLetterAlertWorkItem = submissionMonitorScan.workItems.find((item) => item.sourceType === "submissionDeadLetter" && item.sourceId === deadLetter.deadLetterId);
+    assert.ok(deadLetterAlertWorkItem);
+    assert.equal(deadLetterAlertWorkItem.metadataJson.alertCodes.includes("dead_letter_open"), true);
 
     const incident = await requestJson(baseUrl, "/v1/backoffice/incidents", {
       method: "POST",

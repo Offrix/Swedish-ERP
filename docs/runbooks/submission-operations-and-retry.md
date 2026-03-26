@@ -37,6 +37,7 @@ Detta runbook beskriver drift av generiska submissions till externa mottagare s�
    - om kvittens är definitiv `accepted` eller `rejected` ska submissionen avslutas terminalt
    - om kvittens är varning ska action queue få uppgift när policyn kräver åtgärd
    - om kvittens saknas efter timeout ska mottagarens inquiry- eller statuskontroll användas om den finns; annars markeras submissionen `unknown_outcome`
+   - backoffice submission monitor ska kunna materialisera samma läge som work items, notifications och activity när lag alerts kräver operatörsingrepp
 5. Välj operativ åtgärd.
    - transportfel utan mottagarbevis: retry med samma idempotensnyckel när felet är löst
    - domänfel: skapa action queue-post till ansvarig roll; ny submission får ske först efter korrigerat underlag
@@ -59,6 +60,7 @@ Detta runbook beskriver drift av generiska submissions till externa mottagare s�
 - kvittenshistorik och attempt-historik är komplett
 - osäkra utfall är antingen uppklarade eller tydligt blockerade från dublettsändning
 - action queue speglar kvarvarande domänarbete och inga tekniska fel maskeras som affärsgodkända
+- submission monitor speglar SLA/lag och kan öppna operativa work items utan DB-ingrepp
 
 ## Vanliga fel
 
