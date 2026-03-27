@@ -1,5 +1,6 @@
 ﻿import {
   authorizeCompanyAccess,
+  createHttpError,
   matchPath,
   optionalText,
   readJsonBody,
@@ -17,9 +18,7 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
     requireTextArray,
     assertNotificationReadAccess,
     assertActivityFeedFullReadAccess,
-    parsePositiveInteger,
-    assertReviewCenterReadAccess,
-    assertReviewCenterActionAccess
+    parsePositiveInteger
   } = helpers;
 
   if (req.method === "GET" && path === "/v1/notifications") {
@@ -468,4 +467,39 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
 
 
   return false;
+}
+
+const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
+const ACTIVITY_FEED_FULL_READ_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
+
+function assertReviewCenterReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedOperator = [...REVIEW_CENTER_OPERATOR_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedOperator) {
+    throw createHttpError(403, "review_center_role_forbidden", "Current actor is not allowed to access review-center worklists.");
+  }
+}
+
+function assertActivityFeedFullReadAccess({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  const isAllowedReader = [...ACTIVITY_FEED_FULL_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  if (!isAllowedReader) {
+    throw createHttpError(403, "activity_feed_role_forbidden", "Current actor is not allowed to access full activity-feed read models.");
+  }
+}
+
+function assertReviewCenterActionAccess({ platform, principal, companyId, reviewItemId, operation }) {
+  assertReviewCenterReadAccess({ principal });
+  const reviewItem = platform.getReviewCenterItem({ companyId, reviewItemId });
+  const assignedUserId = reviewItem.currentAssignment?.assignedUserId || null;
+  if (operation === "claim") {
+    if (assignedUserId && assignedUserId !== principal.userId) {
+      throw createHttpError(409, "review_center_claimed_by_other_user", "Review item is already claimed by another actor.");
+    }
+    return;
+  }
+
+  if (assignedUserId !== principal.userId) {
+    throw createHttpError(403, "review_center_assignment_required", "Review decisions require the current actor to hold the active assignment.");
+  }
 }
