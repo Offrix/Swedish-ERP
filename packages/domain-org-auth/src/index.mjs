@@ -168,10 +168,11 @@ export function createOrgAuthPlatform({
     listModuleDefinitions,
       activateModule,
       listModuleActivations,
-      suspendModuleActivation,
+    suspendModuleActivation,
       snapshot,
       exportDurableState,
       importDurableState,
+      inspectSession,
       getTotpCodeForTesting,
       getBankIdCompletionTokenForTesting
     };
@@ -1451,6 +1452,14 @@ export function createOrgAuthPlatform({
       session,
       principal,
       decision
+    };
+  }
+
+  function inspectSession({ sessionToken, allowPending = false } = {}) {
+    const { session, principal } = requireSession(sessionToken, { allowPending });
+    return {
+      session: publicSession(session),
+      principal: copy(principal)
     };
   }
 

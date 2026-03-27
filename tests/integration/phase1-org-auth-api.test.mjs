@@ -337,6 +337,67 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
     });
     assert.equal(delegatedDecision.decision.allowed, true);
 
+    const routeContractDecision = await requestJson(`${baseUrl}/v1/authz/check`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      body: {
+        route: {
+          method: "POST",
+          path: "/v1/org/delegations"
+        },
+        resource: {
+          companyId: "00000000-0000-4000-8000-000000000001"
+        }
+      }
+    });
+    assert.equal(routeContractDecision.decision.allowed, true);
+    assert.equal(routeContractDecision.contract.requiredActionClass, "org_identity_admin");
+    assert.equal(routeContractDecision.permissionResolution.currentTrustLevel, "strong_mfa");
+    assert.equal(routeContractDecision.permissionResolution.requiredTrustLevel, "strong_mfa");
+
+    const routeContractDenied = await requestJson(`${baseUrl}/v1/authz/check`, {
+      method: "POST",
+      token: approverLogin.sessionToken,
+      body: {
+        route: {
+          method: "POST",
+          path: "/v1/org/delegations"
+        },
+        resource: {
+          companyId: "00000000-0000-4000-8000-000000000001"
+        }
+      }
+    });
+    assert.equal(routeContractDenied.decision.allowed, false);
+    assert.equal(routeContractDenied.decision.reasonCode, "trust_level_insufficient");
+
+    const publicRouteContractDecision = await requestJson(`${baseUrl}/v1/authz/check`, {
+      method: "POST",
+      body: {
+        route: {
+          method: "POST",
+          path: "/v1/onboarding/runs"
+        }
+      }
+    });
+    assert.equal(publicRouteContractDecision.decision.allowed, true);
+    assert.equal(publicRouteContractDecision.permissionResolution.resolutionMode, "public_route");
+    assert.equal(publicRouteContractDecision.permissionResolution.currentTrustLevel, "public");
+
+    const selfRouteContractDecision = await requestJson(`${baseUrl}/v1/authz/check`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      body: {
+        route: {
+          method: "POST",
+          path: "/v1/auth/logout"
+        }
+      }
+    });
+    assert.equal(selfRouteContractDecision.decision.allowed, true);
+    assert.equal(selfRouteContractDecision.permissionResolution.resolutionMode, "trust_scoped");
+    assert.equal(selfRouteContractDecision.contract.requiredScopeType, "self");
+
     const futureDelegation = await requestJson(`${baseUrl}/v1/org/delegations`, {
       method: "POST",
       token: adminSession.sessionToken,

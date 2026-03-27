@@ -23,6 +23,7 @@ export const ROLE_PERMISSIONS = Object.freeze({
 
 export const MFA_FACTOR_TYPES = Object.freeze(["totp", "passkey", "bankid"]);
 export const BANKID_PROVIDER_CODE = "signicat-bankid";
+export const SESSION_TRUST_LEVELS = Object.freeze(["public", "authenticated", "mfa", "strong_mfa"]);
 
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
@@ -68,6 +69,34 @@ export function isActiveWithinWindow({ startsAt, endsAt, now = new Date() }) {
 
 export function createAuthorizationResult(allowed, reasonCode, explanation) {
   return { allowed, reasonCode, explanation };
+}
+
+export function resolveSessionTrustLevel(session = null) {
+  if (!session) {
+    return "public";
+  }
+  if (!Array.isArray(session.amr) || session.amr.length === 0) {
+    return "authenticated";
+  }
+  if (session.amr.length >= 2 && session.amr.includes("bankid")) {
+    return "strong_mfa";
+  }
+  if (session.amr.length >= 1) {
+    return "mfa";
+  }
+  return "authenticated";
+}
+
+export function trustLevelSatisfies(currentLevel, requiredLevel) {
+  const currentIndex = SESSION_TRUST_LEVELS.indexOf(currentLevel);
+  const requiredIndex = SESSION_TRUST_LEVELS.indexOf(requiredLevel);
+  if (requiredIndex < 0) {
+    return true;
+  }
+  if (currentIndex < 0) {
+    return false;
+  }
+  return currentIndex >= requiredIndex;
 }
 
 export function authorizeAction({

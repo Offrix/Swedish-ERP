@@ -3,6 +3,7 @@ import http from "node:http";
 import { createDefaultApiPlatform } from "./platform.mjs";
 import { tryHandlePhase13Route } from "./phase13-routes.mjs";
 import { tryHandlePhase14Route } from "./phase14-routes.mjs";
+import { listPublishedRouteContracts, resolvePublishedRouteContract } from "./route-contracts.mjs";
 import {
   CANONICAL_API_VERSION,
   createHttpError,
@@ -12,6 +13,7 @@ import {
   writeError,
   writeJson
 } from "./route-helpers.mjs";
+import { resolveSessionTrustLevel, trustLevelSatisfies } from "../../../packages/auth-core/src/index.mjs";
 import { isMainModule, stopServer } from "../../../scripts/lib/repo.mjs";
 import { assertRuntimeStartupAllowed } from "../../../scripts/lib/runtime-diagnostics.mjs";
 
@@ -294,6 +296,7 @@ async function handleRequest({ req, res, platform, flags }) {
             phase14SecurityEnabled: flags.phase14SecurityEnabled,
             phase14ResilienceEnabled: flags.phase14ResilienceEnabled,
             phase14MigrationEnabled: flags.phase14MigrationEnabled,
+            routeContracts: listPublishedRouteContracts(),
             routes: [
               "/healthz",
               "/readyz",
@@ -1301,6 +1304,82 @@ async function handleRequest({ req, res, platform, flags }) {
 
   if (req.method === "POST" && path === "/v1/authz/check") {
     const body = await readJsonBody(req);
+    if (body.route && !body.action) {
+      const sessionToken = readSessionToken(req, body);
+      const routeContract = resolvePublishedRouteContract({
+        method: body.route.method,
+        path: body.route.path
+      });
+      if (!routeContract) {
+        throw createHttpError(404, "route_contract_not_found", "No published route contract matched the supplied method and path.");
+      }
+      const sessionInspection =
+        typeof platform.inspectSession === "function" && sessionToken
+          ? platform.inspectSession({
+              sessionToken
+            })
+          : null;
+      const currentTrustLevel = resolveSessionTrustLevel(sessionInspection?.session || null);
+      const trustSatisfied = trustLevelSatisfies(currentTrustLevel, routeContract.requiredTrustLevel);
+      const resource = buildRouteContractResource({
+        routeContract,
+        routeParams: routeContract.params,
+        resource: body.resource || {}
+      });
+      const authorization = routeContract.permissionCode
+        ? platform.checkAuthorization({
+            sessionToken,
+            action: routeContract.permissionCode,
+            resource
+          })
+        : {
+            principal: sessionInspection?.principal || null,
+            decision: routeContract.requiredTrustLevel === "public"
+              ? {
+                  allowed: true,
+                  reasonCode: "public_route",
+                  explanation: "Route is intentionally available without an authenticated company permission."
+                }
+              : !sessionToken
+                ? {
+                    allowed: false,
+                    reasonCode: "session_token_required",
+                    explanation: "Route requires an authenticated session."
+                  }
+                : {
+                    allowed: trustSatisfied,
+                    reasonCode: trustSatisfied ? "trust_scoped_route" : "trust_level_insufficient",
+                    explanation: trustSatisfied
+                      ? "Route resolves through trust-scoped session ownership instead of a company permission."
+                      : `Route requires ${routeContract.requiredTrustLevel} but session only satisfies ${currentTrustLevel}.`
+                  }
+          };
+      const decision = trustSatisfied
+        ? authorization.decision
+        : {
+            allowed: false,
+            reasonCode: "trust_level_insufficient",
+            explanation: `Route requires ${routeContract.requiredTrustLevel} but session only satisfies ${currentTrustLevel}.`
+          };
+      writeJson(res, 200, {
+        principal: authorization.principal,
+        decision,
+        contract: stripRouteContractParams(routeContract),
+        permissionResolution: {
+          resolvedPermissionCode: routeContract.permissionCode,
+          resolutionMode: routeContract.permissionCode ? "company_permission" : routeContract.requiredTrustLevel === "public" ? "public_route" : "trust_scoped",
+          requiredActionClass: routeContract.requiredActionClass,
+          requiredTrustLevel: routeContract.requiredTrustLevel,
+          currentTrustLevel,
+          requiredScopeType: routeContract.requiredScopeType,
+          scopeCode: routeContract.scopeCode,
+          objectType: routeContract.objectType,
+          expectedObjectVersion: routeContract.expectedObjectVersion
+        },
+        resource
+      });
+      return;
+    }
     writeJson(
       res,
       200,
@@ -12758,6 +12837,40 @@ async function handleRequest({ req, res, platform, flags }) {
 
 function writeFeatureDisabledError(res, message) {
   writeError(res, createHttpError(503, "feature_disabled", message));
+}
+
+function buildRouteContractResource({ routeContract, routeParams = {}, resource = {} }) {
+  const companyId = resource.companyId || routeParams.companyId || null;
+  return {
+    companyId,
+    objectType: resource.objectType || routeContract.objectType,
+    objectId: resource.objectId || deriveRouteContractObjectId({ routeContract, routeParams, companyId }),
+    scopeCode: resource.scopeCode || routeContract.scopeCode
+  };
+}
+
+function deriveRouteContractObjectId({ routeContract, routeParams, companyId }) {
+  if (routeContract.requiredScopeType === "company") {
+    return companyId;
+  }
+  const firstParamValue = Object.values(routeParams || {}).find((value) => typeof value === "string" && value.length > 0);
+  return firstParamValue || companyId || null;
+}
+
+function stripRouteContractParams(routeContract) {
+  return {
+    method: routeContract.method,
+    path: routeContract.path,
+    routeFamily: routeContract.routeFamily,
+    mutation: routeContract.mutation,
+    requiredActionClass: routeContract.requiredActionClass,
+    requiredTrustLevel: routeContract.requiredTrustLevel,
+    requiredScopeType: routeContract.requiredScopeType,
+    scopeCode: routeContract.scopeCode,
+    objectType: routeContract.objectType,
+    permissionCode: routeContract.permissionCode,
+    expectedObjectVersion: routeContract.expectedObjectVersion
+  };
 }
 
 function authorizeDocumentAccess({ platform, sessionToken, companyId, permissionCode }) {

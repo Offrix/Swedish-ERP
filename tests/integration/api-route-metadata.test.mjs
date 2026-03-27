@@ -73,7 +73,7 @@ function parseRoutesFromSource(sourceText) {
   const bindings = new Map(
     [...sourceText.matchAll(/const\s+(\w+)\s*=\s*matchPath\(path,\s*"([^"]+)"\)/g)].map((match) => [match[1], match[2]])
   );
-  const routes = new Set();
+  const routes = [];
 
   for (const match of sourceText.matchAll(/if\s*\(([^\{]+)\)\s*\{/g)) {
     const condition = match[1];
@@ -81,20 +81,20 @@ function parseRoutesFromSource(sourceText) {
     if (methods.length === 0) {
       continue;
     }
-    for (const directPath of condition.matchAll(/path\s*===\s*"([^"]+)"/g)) {
-      routes.add(directPath[1]);
-    }
-    for (const [binding, route] of bindings.entries()) {
-      if (condition.includes(binding)) {
-        routes.add(route);
+    const directPaths = [...condition.matchAll(/path\s*===\s*"([^"]+)"/g)].map((directPath) => directPath[1]);
+    const boundPaths = [...bindings.entries()]
+      .filter(([binding]) => condition.includes(binding))
+      .map(([, route]) => route);
+    for (const { 1: method } of methods) {
+      if (!["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+        continue;
+      }
+      for (const route of new Set([...directPaths, ...boundPaths])) {
+        routes.push({ method, path: route });
       }
     }
   }
-
-  routes.delete("/");
-  routes.delete("/healthz");
-  routes.delete("/readyz");
-  return routes;
+  return routes.filter((route) => !["/", "/healthz", "/readyz"].includes(route.path));
 }
 
 test("api root metadata lists critical auth, backoffice and migration routes without duplicates", async () => {
@@ -108,13 +108,37 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
 
     const payload = await response.json();
     assert.equal(Array.isArray(payload.routes), true);
+    assert.equal(Array.isArray(payload.routeContracts), true);
 
     for (const route of REQUIRED_ROUTE_METADATA) {
       assert.equal(payload.routes.includes(route), true, `${route} should be exposed in api root metadata`);
     }
 
+    const supportCaseCloseContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/backoffice/support-cases/:supportCaseId/close"
+    );
+    assert.ok(supportCaseCloseContract);
+    assert.equal(supportCaseCloseContract.requiredActionClass, "support_case_operate");
+    assert.equal(supportCaseCloseContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(supportCaseCloseContract.requiredScopeType, "support_case");
+    assert.equal(supportCaseCloseContract.expectedObjectVersion, true);
+
     const uniqueCount = new Set(payload.routes).size;
     assert.equal(uniqueCount, payload.routes.length, "api root metadata should not contain duplicate route entries");
+    assert.equal(
+      payload.routeContracts.every(
+        (routeContract) =>
+          typeof routeContract.requiredActionClass === "string"
+          && routeContract.requiredActionClass.length > 0
+          && typeof routeContract.requiredTrustLevel === "string"
+          && routeContract.requiredTrustLevel.length > 0
+          && typeof routeContract.requiredScopeType === "string"
+          && routeContract.requiredScopeType.length > 0
+          && typeof routeContract.expectedObjectVersion === "boolean"
+      ),
+      true,
+      "every published route contract should expose action class, trust, scope and object-version requirements"
+    );
   } finally {
     await stopServer(server);
   }
@@ -126,11 +150,11 @@ test("api root metadata covers all parsed route patterns from server and phase14
     fs.readFile("apps/api/src/phase13-routes.mjs", "utf8"),
     fs.readFile("apps/api/src/phase14-routes.mjs", "utf8")
   ]);
-  const parsedRoutes = new Set([
+  const parsedRoutes = [
     ...parseRoutesFromSource(serverSource),
     ...parseRoutesFromSource(phase13Source),
     ...parseRoutesFromSource(phase14Source)
-  ]);
+  ];
 
   const server = createApiServer();
   await new Promise((resolve) => server.listen(0, resolve));
@@ -142,9 +166,16 @@ test("api root metadata covers all parsed route patterns from server and phase14
 
     const payload = await response.json();
     const exposedRoutes = new Set(payload.routes || []);
-    const missingRoutes = [...parsedRoutes].filter((route) => !exposedRoutes.has(route)).sort();
+    const exposedContracts = new Set((payload.routeContracts || []).map((routeContract) => `${routeContract.method} ${routeContract.path}`));
+    const missingRoutes = parsedRoutes.map((route) => route.path).filter((route) => !exposedRoutes.has(route)).sort();
+    const missingContracts = parsedRoutes
+      .map((route) => `${route.method} ${route.path}`)
+      .filter((route) => !exposedContracts.has(route))
+      .sort();
 
     assert.deepEqual(missingRoutes, []);
+    assert.deepEqual(missingContracts, []);
+    assert.equal(payload.routeContracts.some((routeContract) => routeContract.path === "/v1/submissions/:submissionId/replay"), true);
   } finally {
     await stopServer(server);
   }

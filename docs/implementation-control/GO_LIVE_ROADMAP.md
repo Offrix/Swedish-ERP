@@ -335,7 +335,7 @@ Standardisera alla externa och interna kontrakt, bryta upp blandade route-filer 
 
 **Delfaser**
 - [x] 4.1 [NEW BUILD] **Standard request/success/error envelopes** â€” Alla routes, public API, partner API och webhooks anvÃ¤nder samma envelopeform, correlation-id, idempotency key och classification.
-- [ ] 4.2 [HARDEN] **Action classes och permission resolution** â€” Varje muterande route mÃ¤rks med required action class, trust level, scope type och expected object version.
+- [x] 4.2 [HARDEN] **Action classes och permission resolution** â€” Varje muterande route mÃ¤rks med required action class, trust level, scope type och expected object version. Route-contract registry tÃ¤cker nu hela POST/PUT/PATCH/DELETE-ytan och `authz/check` kan resolva public, self och company-scoped routes.
 - [ ] 4.3 [REWRITE] **Dela upp `phase13-routes.mjs` och `phase14-routes.mjs`** â€” Skapa routekatalog per domÃ¤n/funktion: auth, public API, partner API, backoffice, migration, annual reporting, resilience, projects, submissions.
 - [ ] 4.4 [NEW BUILD] **Etablera hard boundary fÃ¶r regulated submissions** â€” Transport, attempts, receipts och recovery separeras frÃ¥n generella integrationskopplingar. Antingen nytt package eller tydligt submodule med egna APIs.
 - [ ] 4.5 [OPERATIONALIZE] **Contract-test miniminivÃ¥** â€” Alla routefamiljer fÃ¥r golden envelopes, denial reasons, conflict semantics och idempotency-tests.
