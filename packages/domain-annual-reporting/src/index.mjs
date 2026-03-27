@@ -101,9 +101,9 @@ export function createAnnualReportingEngine({
     annualReportSignatoryStatuses: ANNUAL_REPORT_SIGNATORY_STATUSES,
     taxDeclarationPackageStatuses: TAX_DECLARATION_PACKAGE_STATUSES,
     createAnnualReportPackage: (input) =>
-      createAnnualReportPackage({ state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, evidencePlatform, clock }, input),
+      createAnnualReportPackage({ state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, evidencePlatform, providerBaselineRegistry: providerBaselines, clock }, input),
     createAnnualReportVersion: (input) =>
-      createAnnualReportVersion({ state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, evidencePlatform, clock }, input),
+      createAnnualReportVersion({ state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, evidencePlatform, providerBaselineRegistry: providerBaselines, clock }, input),
     listAnnualReportPackages: ({ companyId } = {}) =>
       [...state.packages.values()]
         .filter((candidate) => candidate.companyId === text(companyId, "company_id_required"))
@@ -126,7 +126,7 @@ export function createAnnualReportingEngine({
     inviteAnnualReportSignatory: (input) => inviteAnnualReportSignatory({ state, orgAuthPlatform, clock }, input),
     signAnnualReportVersion: (input) => signAnnualReportVersion({ state, orgAuthPlatform, clock }, input),
     openAnnualCorrectionPackage: (input) =>
-      openAnnualCorrectionPackage({ state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, evidencePlatform, clock }, input),
+      openAnnualCorrectionPackage({ state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, evidencePlatform, providerBaselineRegistry: providerBaselines, clock }, input),
     diffAnnualReportVersions: ({ companyId, packageId, leftVersionId, rightVersionId } = {}) => {
       requirePackage(state, text(companyId, "company_id_required"), packageId);
       return {
@@ -196,7 +196,7 @@ export function createAnnualReportingEngine({
 }
 
 function createAnnualReportPackage(context, input = {}) {
-  const { state, ledgerPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, clock } = context;
+  const { state, ledgerPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, providerBaselineRegistry, clock } = context;
   const companyId = text(input.companyId, "company_id_required");
   const accountingPeriod = requireHardClosedPeriod(ledgerPlatform, companyId, input.accountingPeriodId);
   const annualContext = resolveAnnualContext({
@@ -206,6 +206,11 @@ function createAnnualReportPackage(context, input = {}) {
     accountingPeriod,
     legalFormProfileId: input.legalFormProfileId || null,
     reportingObligationProfileId: input.reportingObligationProfileId || null
+  });
+  const providerBaselineRefs = resolveAnnualVersionProviderBaselineRefs({
+    providerBaselineRegistry,
+    annualContext,
+    accountingPeriod
   });
   const profileCode = requireProfileCode(input.profileCode, annualContext.legalFormCode);
   const actorId = text(input.actorId, "actor_id_required");
@@ -241,6 +246,8 @@ function createAnnualReportPackage(context, input = {}) {
     requiresBolagsverketFiling: annualContext.requiresBolagsverketFiling,
     requiresTaxDeclarationPackage: annualContext.requiresTaxDeclarationPackage,
     correctionOfPackageId: normalizeText(input.correctionOfPackageId),
+    rulepackRefs: buildAnnualRulepackRefs(annualContext),
+    providerBaselineRefs,
     status: "draft",
     currentVersionId: null,
     currentEvidencePackId: null,
@@ -253,7 +260,7 @@ function createAnnualReportPackage(context, input = {}) {
 }
 
 function createAnnualReportVersion(context, input = {}) {
-  const { state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, evidencePlatform, clock } = context;
+  const { state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, evidencePlatform, providerBaselineRegistry, clock } = context;
   const companyId = text(input.companyId, "company_id_required");
   const annualPackage = requirePackage(state, companyId, input.packageId);
   const accountingPeriod = requireHardClosedPeriod(ledgerPlatform, companyId, annualPackage.accountingPeriodId);
@@ -267,12 +274,18 @@ function createAnnualReportVersion(context, input = {}) {
     legalFormProfileId: annualPackage.legalFormProfileId,
     reportingObligationProfileId: annualPackage.reportingObligationProfileId
   });
+  const providerBaselineRefs = resolveAnnualVersionProviderBaselineRefs({
+    providerBaselineRegistry,
+    annualContext,
+    accountingPeriod
+  });
   const payload = materializeVersionPayload({
     reportingPlatform,
     companyId,
     accountingPeriod,
     profileCode: annualPackage.profileCode,
     annualContext,
+    providerBaselineRefs,
     textSections: input.textSections || {},
     noteSections: input.noteSections || {},
     includeEstablishmentCertificate: input.includeEstablishmentCertificate !== false,
@@ -305,6 +318,8 @@ function createAnnualReportVersion(context, input = {}) {
     noteSections: payload.noteSections,
     taxPackageOutputs: payload.taxPackageOutputs,
     evidencePackId: null,
+    rulepackRefs: clone(payload.evidencePack.rulepackRefs || []),
+    providerBaselineRefs: clone(payload.evidencePack.providerBaselineRefs || []),
     sourceFingerprint: payload.sourceFingerprint,
     checksum: payload.checksum,
     diffFromPrevious: currentVersion ? buildVersionDiff(currentVersion, candidateVersion(payload)) : [],
@@ -335,6 +350,8 @@ function createAnnualReportVersion(context, input = {}) {
   state.evidencePacks.set(registeredEvidencePack.evidencePackId, registeredEvidencePack);
   annualPackage.currentVersionId = version.versionId;
   annualPackage.currentEvidencePackId = registeredEvidencePack.evidencePackId;
+  annualPackage.rulepackRefs = clone(version.rulepackRefs || []);
+  annualPackage.providerBaselineRefs = clone(version.providerBaselineRefs || []);
   annualPackage.status = "draft";
   annualPackage.updatedAt = now;
   for (const signatory of state.signatories.values()) {
@@ -354,6 +371,8 @@ function createAnnualReportVersion(context, input = {}) {
       legalFormCode: version.legalFormCode,
       declarationProfileCode: version.declarationProfileCode,
       packageFamilyCode: version.packageFamilyCode,
+      rulepackRefs: version.rulepackRefs,
+      providerBaselineRefs: version.providerBaselineRefs,
       evidencePackId: payload.evidencePack.evidencePackId
     },
     clock
@@ -516,6 +535,7 @@ function createTaxDeclarationPackage(context, input = {}) {
     outputChecksum: model.outputChecksum,
     authorityOverview: model.authorityOverview,
     evidencePackId: annualPackage.currentEvidencePackId,
+    rulepackRefs: clone(model.rulepackRefs || version.rulepackRefs || annualPackage.rulepackRefs || []),
     providerBaselineRefs: model.providerBaselineRefs,
     submissionFamilies: buildSubmissionFamilies(annualPackage, integrationPlatform),
     exports: model.exports,
@@ -530,7 +550,12 @@ function createTaxDeclarationPackage(context, input = {}) {
     version.versionId,
     "tax_package_prepared",
     record.outputChecksum,
-    { taxDeclarationPackageId: record.taxDeclarationPackageId, exportCodes: record.exports.map((entry) => entry.exportCode) },
+    {
+      taxDeclarationPackageId: record.taxDeclarationPackageId,
+      exportCodes: record.exports.map((entry) => entry.exportCode),
+      rulepackRefs: record.rulepackRefs,
+      providerBaselineRefs: record.providerBaselineRefs
+    },
     clock
   );
   return clone(record);
@@ -633,9 +658,11 @@ function buildTaxDeclarationPackageModel({
     ], authorityAuditBaselineRef)
   ];
   const providerBaselineRefs = dedupeProviderBaselineRefs(exports.map((entry) => entry.providerBaselineRef).filter(Boolean));
+  const rulepackRefs = dedupeAnnualRulepackRefs(version.rulepackRefs || annualPackage.rulepackRefs || []);
   return {
     authorityOverview,
     exports,
+    rulepackRefs,
     providerBaselineRefs,
     sourceFingerprint: hashPayload({
       annualReportVersionId: version.versionId,
@@ -645,6 +672,7 @@ function buildTaxDeclarationPackageModel({
       incomeStatementHash: incomeStatement.contentHash,
       declarationProfileCode: annualPackage.declarationProfileCode,
       packageFamilyCode: annualPackage.packageFamilyCode,
+      rulepackRefs,
       providerBaselineRefs,
       authorityOverview
     }),
@@ -655,6 +683,7 @@ function buildTaxDeclarationPackageModel({
         providerBaselineId: entry.providerBaselineId || null,
         checks: entry.checks.map((check) => ({ checkCode: check.checkCode, passed: check.passed }))
       })),
+      rulepackRefs,
       providerBaselineRefs,
       authorityOverview
     })
@@ -710,7 +739,7 @@ function buildDeclarationSupportPayload({ annualPackage, version, company, balan
   }
 }
 
-function buildEvidencePack({ companyId, accountingPeriod, annualContext, balanceSheet, incomeStatement, documents, sourceFingerprint, checksum }) {
+function buildEvidencePack({ companyId, accountingPeriod, annualContext, providerBaselineRefs = [], balanceSheet, incomeStatement, documents, sourceFingerprint, checksum }) {
   return {
     evidencePackId: crypto.randomUUID(),
     companyId,
@@ -727,10 +756,8 @@ function buildEvidencePack({ companyId, accountingPeriod, annualContext, balance
     ),
     reportSnapshotRefs: [balanceSheet.reportSnapshotId, incomeStatement.reportSnapshotId],
     closeSnapshotRefs: [accountingPeriod.accountingPeriodId],
-    rulepackRefs: [
-      { rulepackCode: "RP-LEGAL-FORM-SE", rulepackVersion: annualContext.rulepackVersion },
-      { rulepackCode: "RP-ANNUAL-FILING-SE", rulepackVersion: annualContext.rulepackVersion }
-    ],
+    rulepackRefs: buildAnnualRulepackRefs(annualContext),
+    providerBaselineRefs: dedupeProviderBaselineRefs(providerBaselineRefs),
     documentChecksums: documents.map((document) => ({ documentCode: document.documentCode, checksum: document.checksum })),
     sourceFingerprint,
     checksum,
@@ -785,7 +812,8 @@ function registerAnnualEvidencePack({
       ...evidencePack.closeSnapshotRefs.map((closeSnapshotRef) => ({
         closeSnapshotRef
       })),
-      ...clone(evidencePack.rulepackRefs)
+      ...clone(evidencePack.rulepackRefs),
+      ...clone(evidencePack.providerBaselineRefs)
     ],
     actorId,
     correlationId
@@ -841,7 +869,7 @@ function buildAuthorityOverview({ reportingPlatform, vatPlatform, payrollPlatfor
   };
 }
 
-function materializeVersionPayload({ reportingPlatform, companyId, accountingPeriod, profileCode, annualContext, textSections, noteSections, includeEstablishmentCertificate, actorId }) {
+function materializeVersionPayload({ reportingPlatform, companyId, accountingPeriod, profileCode, annualContext, providerBaselineRefs = [], textSections, noteSections, includeEstablishmentCertificate, actorId }) {
   if (!reportingPlatform?.runReportSnapshot || !reportingPlatform?.getReportSnapshot) {
     throw error(500, "annual_reporting_reporting_platform_missing", "Reporting platform is required for annual reporting.");
   }
@@ -911,6 +939,7 @@ function materializeVersionPayload({ reportingPlatform, companyId, accountingPer
     balanceSheetHash: balanceSheet.contentHash,
     incomeStatementReportSnapshotId: incomeStatement.reportSnapshotId,
     incomeStatementHash: incomeStatement.contentHash,
+    providerBaselineRefs,
     textSections: normalizedTextSections,
     noteSections: normalizedNoteSections,
     includeEstablishmentCertificate
@@ -919,14 +948,17 @@ function materializeVersionPayload({ reportingPlatform, companyId, accountingPer
     companyId,
     accountingPeriod,
     annualContext,
+    providerBaselineRefs,
     balanceSheet,
     incomeStatement,
     documents,
     sourceFingerprint,
+    providerBaselineRefs,
     checksum: hashPayload({
       annualContext,
       sourceFingerprint,
-      documents
+      documents,
+      providerBaselineRefs
     })
   });
   const checksum = hashPayload({
@@ -936,6 +968,7 @@ function materializeVersionPayload({ reportingPlatform, companyId, accountingPer
     documents,
     taxPackageOutputs,
     sourceFingerprint,
+    providerBaselineRefs,
     evidencePackChecksum: evidencePack.checksum
   });
   return {
@@ -997,6 +1030,8 @@ function candidateVersion(payload) {
     noteSections: payload.noteSections,
     taxPackageOutputs: payload.taxPackageOutputs,
     evidencePackId: payload.evidencePack.evidencePackId,
+    rulepackRefs: payload.evidencePack.rulepackRefs,
+    providerBaselineRefs: payload.evidencePack.providerBaselineRefs,
     sourceFingerprint: payload.sourceFingerprint,
     checksum: payload.checksum
   };
@@ -1011,6 +1046,8 @@ function buildVersionDiff(leftVersion, rightVersion) {
     ["note_sections", leftVersion.noteSections, rightVersion.noteSections],
     ["tax_package_outputs", leftVersion.taxPackageOutputs, rightVersion.taxPackageOutputs],
     ["evidence_pack_id", leftVersion.evidencePackId, rightVersion.evidencePackId],
+    ["rulepack_refs", leftVersion.rulepackRefs, rightVersion.rulepackRefs],
+    ["provider_baseline_refs", leftVersion.providerBaselineRefs, rightVersion.providerBaselineRefs],
     ["source_fingerprint", leftVersion.sourceFingerprint, rightVersion.sourceFingerprint],
     ["checksum", leftVersion.checksum, rightVersion.checksum]
   ];
@@ -1148,6 +1185,56 @@ function dedupeProviderBaselineRefs(values = []) {
     }
   }
   return refs;
+}
+
+function dedupeAnnualRulepackRefs(values = []) {
+  const refs = [];
+  for (const candidate of values) {
+    if (!candidate?.rulepackCode || !candidate?.rulepackVersion) {
+      continue;
+    }
+    if (!refs.some((existing) => existing.rulepackCode === candidate.rulepackCode && existing.rulepackVersion === candidate.rulepackVersion)) {
+      refs.push(clone(candidate));
+    }
+  }
+  return refs;
+}
+
+function buildAnnualRulepackRefs(annualContext) {
+  return dedupeAnnualRulepackRefs([
+    {
+      rulepackId: annualContext.rulepackId || null,
+      rulepackCode: "RP-LEGAL-FORM-SE",
+      rulepackVersion: annualContext.rulepackVersion,
+      rulepackChecksum: annualContext.rulepackChecksum || null,
+      effectiveDate: annualContext.fiscalYearEndsOn || null
+    },
+    {
+      rulepackId: annualContext.rulepackId || null,
+      rulepackCode: "RP-ANNUAL-FILING-SE",
+      rulepackVersion: annualContext.rulepackVersion,
+      rulepackChecksum: annualContext.rulepackChecksum || null,
+      effectiveDate: annualContext.fiscalYearEndsOn || null
+    }
+  ]);
+}
+
+function resolveAnnualVersionProviderBaselineRefs({ providerBaselineRegistry, annualContext, accountingPeriod }) {
+  if (!providerBaselineRegistry || annualContext.requiresBolagsverketFiling !== true) {
+    return [];
+  }
+  const effectiveDate = accountingPeriod.endsOn || accountingPeriod.toDate || accountingPeriod.endDate || accountingPeriod.startsOn;
+  return dedupeProviderBaselineRefs([
+    resolveAnnualProviderBaselineRef(providerBaselineRegistry, {
+      providerCode: "bolagsverket-ixbrl",
+      baselineCode: "SE-IXBRL-FILING",
+      effectiveDate,
+      metadata: {
+        packageFamilyCode: annualContext.packageFamilyCode,
+        declarationProfileCode: annualContext.declarationProfileCode
+      }
+    })
+  ]);
 }
 
 function buildHashCheck(checkCode, expectedHash, actualHash) {

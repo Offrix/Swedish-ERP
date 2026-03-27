@@ -55,6 +55,10 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
     });
     assert.equal(taxPackage.exports.every((entry) => entry.allChecksPassed), true);
     assert.equal(taxPackage.exports.some((entry) => entry.exportCode === "sru_rows_csv"), true);
+    assert.deepEqual(
+      taxPackage.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
+      ["RP-ANNUAL-FILING-SE", "RP-LEGAL-FORM-SE"]
+    );
 
     const forbiddenTaxDeclarations = await fetch(
       `${baseUrl}/v1/annual-reporting/packages/${annualPackage.packageId}/tax-declarations?companyId=${DEMO_IDS.companyId}`,
@@ -79,7 +83,21 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
         sourceObjectId: taxPackage.taxDeclarationPackageId,
         providerKey: "skatteverket",
         recipientId: "skatteverket:income-tax",
-        retryClass: "manual_only"
+        retryClass: "manual_only",
+        rulepackRefs: taxPackage.rulepackRefs,
+        providerBaselineRefs: taxPackage.providerBaselineRefs,
+        decisionSnapshotRefs: [
+          {
+            decisionSnapshotId: "phase12-api-annual-decision-1",
+            snapshotTypeCode: "annual_tax_decision",
+            sourceDomain: "annual_reporting",
+            sourceObjectId: taxPackage.taxDeclarationPackageId,
+            sourceObjectVersion: taxPackage.annualReportVersionId,
+            decisionHash: "phase12-api-annual-decision-1",
+            rulepackCode: "RP-ANNUAL-FILING-SE",
+            rulepackVersion: "2026.1"
+          }
+        ]
       }
     });
 
@@ -137,6 +155,10 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
     });
     assert.equal(finalizedRecord.status, "finalized");
     assert.deepEqual(
+      finalizedRecord.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
+      ["RP-ANNUAL-FILING-SE", "RP-LEGAL-FORM-SE"]
+    );
+    assert.deepEqual(
       finalizedRecord.receipts.map((receipt) => receipt.receiptType),
       ["technical_ack", "business_ack", "final_ack"]
     );
@@ -155,6 +177,8 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
     );
     assert.equal(finalizedEvidencePack.receiptRefs.length, 3);
     assert.equal(finalizedEvidencePack.signatureRefs.length, 1);
+    assert.equal(finalizedEvidencePack.providerBaselineRefs.length >= 1, true);
+    assert.equal(finalizedEvidencePack.decisionSnapshotRefs[0].snapshotTypeCode, "annual_tax_decision");
 
     const queuedSubmission = await requestJson(`${baseUrl}/v1/submissions`, {
       method: "POST",
@@ -169,7 +193,21 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
         recipientId: "bolagsverket:annual-report",
         signedState: "not_required",
         retryClass: "manual_only",
-        idempotencyKey: "phase12-2-annual-report-submission"
+        idempotencyKey: "phase12-2-annual-report-submission",
+        rulepackRefs: annualPackage.currentVersion.rulepackRefs,
+        providerBaselineRefs: annualPackage.currentVersion.providerBaselineRefs,
+        decisionSnapshotRefs: [
+          {
+            decisionSnapshotId: "phase12-api-annual-report-decision-1",
+            snapshotTypeCode: "annual_report_filing_decision",
+            sourceDomain: "annual_reporting",
+            sourceObjectId: annualPackage.packageId,
+            sourceObjectVersion: annualPackage.currentVersion.versionId,
+            decisionHash: "phase12-api-annual-report-decision-1",
+            rulepackCode: "RP-ANNUAL-FILING-SE",
+            rulepackVersion: "2026.1"
+          }
+        ]
       }
     });
 
@@ -196,6 +234,11 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
       }
     });
     assert.equal(retried.submission.attemptNo, 2);
+    assert.deepEqual(
+      retried.submission.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
+      ["RP-ANNUAL-FILING-SE", "RP-LEGAL-FORM-SE"]
+    );
+    assert.equal(retried.submission.providerBaselineRefs[0].baselineCode, "SE-IXBRL-FILING");
 
     const retriedDispatch = await requestJson(`${baseUrl}/v1/submissions/${retried.submission.submissionId}/submit`, {
       method: "POST",

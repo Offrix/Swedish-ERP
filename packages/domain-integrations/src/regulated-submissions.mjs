@@ -134,6 +134,9 @@ function prepareAuthoritySubmission({ state, clock, evidencePlatform }, input = 
     signatoryRoleRequired: normalizeOptionalText(input.signatoryRoleRequired),
     priority,
     retryClass: assertAllowed(input.retryClass || "manual_only", SUBMISSION_RETRY_CLASSES, "submission_retry_class_invalid"),
+    rulepackRefs: normalizeRulepackRefs(input.rulepackRefs ?? payload.rulepackRefs ?? []),
+    providerBaselineRefs: normalizeProviderBaselineRefs(input.providerBaselineRefs ?? payload.providerBaselineRefs ?? []),
+    decisionSnapshotRefs: normalizeDecisionSnapshotRefs(input.decisionSnapshotRefs ?? payload.decisionSnapshotRefs ?? []),
     payloadHash,
     payloadJson: payload,
     correlationId: normalizeOptionalText(input.correlationId) || crypto.randomUUID(),
@@ -223,6 +226,9 @@ function buildSubmissionEvidencePackPayload(state, submission) {
     sourceEvidenceBundleId: submission.sourceEvidenceBundleId || null,
     payloadHash: submission.payloadHash,
     payloadSchemaCode: submission.payloadVersion,
+    rulepackRefs: clone(submission.rulepackRefs || []),
+    providerBaselineRefs: clone(submission.providerBaselineRefs || []),
+    decisionSnapshotRefs: clone(submission.decisionSnapshotRefs || []),
     correlationId: submission.correlationId,
     signingRequirementCode: submission.signedState,
     signerIdentity: submission.signedByActorId,
@@ -317,7 +323,19 @@ function syncSubmissionEvidenceBundle({ state, evidencePlatform, submission }) {
       {
         sourceEvidenceBundleId: submission.sourceEvidenceBundleId || null
       },
-      ...clone(payload.correctionLinks)
+      ...clone(payload.correctionLinks),
+      ...payload.rulepackRefs.map((ref) => ({
+        sourceType: "rulepack_ref",
+        ...clone(ref)
+      })),
+      ...payload.providerBaselineRefs.map((ref) => ({
+        sourceType: "provider_baseline_ref",
+        ...clone(ref)
+      })),
+      ...payload.decisionSnapshotRefs.map((ref) => ({
+        sourceType: "decision_snapshot_ref",
+        ...clone(ref)
+      }))
     ],
     relatedObjectRefs: [
       ...(submission.sourceEvidenceBundleId
@@ -615,6 +633,9 @@ function openSubmissionCorrection(
       signatoryRoleRequired: signatoryRoleRequired ?? previous.signatoryRoleRequired,
       submissionFamilyCode: submissionFamilyCode ?? previous.submissionFamilyCode,
       evidencePackId: evidencePackId ?? resolvedPayload.evidencePackId ?? previous.sourceEvidenceBundleId ?? null,
+      rulepackRefs: previous.rulepackRefs,
+      providerBaselineRefs: previous.providerBaselineRefs,
+      decisionSnapshotRefs: previous.decisionSnapshotRefs,
       previousSubmissionId: previous.submissionId,
       supersedesSubmissionId: previous.submissionId,
       correctionOfSubmissionId: previous.submissionId,
@@ -881,6 +902,9 @@ function retryAuthoritySubmission({ state, clock, evidencePlatform }, { companyI
       correctionChainId: previous.correctionChainId || previous.rootSubmissionId,
       submissionFamilyCode: previous.submissionFamilyCode,
       evidencePackId: previous.sourceEvidenceBundleId,
+      rulepackRefs: previous.rulepackRefs,
+      providerBaselineRefs: previous.providerBaselineRefs,
+      decisionSnapshotRefs: previous.decisionSnapshotRefs,
       attemptNo: previous.attemptNo + 1,
       priority: previous.priority,
       retryClass: previous.retryClass,
@@ -1187,6 +1211,100 @@ function normalizeOptionalText(value) {
     return null;
   }
   return String(value).trim();
+}
+
+function normalizeRulepackRefs(values = []) {
+  return dedupeRefs(
+    values,
+    (candidate) => requireText(candidate.rulepackCode, "submission_rulepack_code_required"),
+    (candidate) => ({
+      rulepackId: normalizeOptionalText(candidate.rulepackId),
+      rulepackCode: requireText(candidate.rulepackCode, "submission_rulepack_code_required"),
+      rulepackVersion: requireText(candidate.rulepackVersion, "submission_rulepack_version_required"),
+      rulepackChecksum: normalizeOptionalText(candidate.rulepackChecksum),
+      effectiveDate: normalizeOptionalText(candidate.effectiveDate),
+      scopeCode: normalizeOptionalText(candidate.scopeCode),
+      sourceObjectId: normalizeOptionalText(candidate.sourceObjectId),
+      sourceObjectVersion: normalizeOptionalText(candidate.sourceObjectVersion)
+    })
+  );
+}
+
+function normalizeProviderBaselineRefs(values = []) {
+  return dedupeRefs(
+    values,
+    (candidate) =>
+      normalizeOptionalText(candidate.providerBaselineId)
+      || requireText(candidate.baselineCode || candidate.providerBaselineCode, "submission_provider_baseline_code_required"),
+    (candidate) => ({
+      providerBaselineId: normalizeOptionalText(candidate.providerBaselineId),
+      providerCode: normalizeOptionalText(candidate.providerCode),
+      baselineCode: requireText(candidate.baselineCode || candidate.providerBaselineCode, "submission_provider_baseline_code_required"),
+      providerBaselineVersion: requireText(candidate.providerBaselineVersion, "submission_provider_baseline_version_required"),
+      providerBaselineChecksum: normalizeOptionalText(candidate.providerBaselineChecksum),
+      effectiveDate: normalizeOptionalText(candidate.effectiveDate),
+      formatFamily: normalizeOptionalText(candidate.formatFamily)
+    })
+  );
+}
+
+function normalizeDecisionSnapshotRefs(values = []) {
+  return dedupeRefs(
+    values,
+    (candidate) =>
+      normalizeOptionalText(candidate.decisionSnapshotId)
+      || buildDecisionSnapshotIdentity(candidate),
+    (candidate) => ({
+      decisionSnapshotId: normalizeOptionalText(candidate.decisionSnapshotId) || buildDecisionSnapshotIdentity(candidate),
+      snapshotTypeCode: requireText(candidate.snapshotTypeCode, "submission_decision_snapshot_type_required"),
+      sourceDomain: normalizeOptionalText(candidate.sourceDomain),
+      sourceObjectId: normalizeOptionalText(candidate.sourceObjectId),
+      sourceObjectVersion: normalizeOptionalText(candidate.sourceObjectVersion),
+      employeeId: normalizeOptionalText(candidate.employeeId),
+      employmentId: normalizeOptionalText(candidate.employmentId),
+      decisionHash: normalizeOptionalText(candidate.decisionHash),
+      rulepackId: normalizeOptionalText(candidate.rulepackId),
+      rulepackCode: normalizeOptionalText(candidate.rulepackCode),
+      rulepackVersion: normalizeOptionalText(candidate.rulepackVersion),
+      rulepackChecksum: normalizeOptionalText(candidate.rulepackChecksum),
+      effectiveDate: normalizeOptionalText(candidate.effectiveDate)
+    })
+  );
+}
+
+function dedupeRefs(values, keyResolver, mapper) {
+  if (!Array.isArray(values) || values.length === 0) {
+    return [];
+  }
+  const refs = [];
+  const seen = new Set();
+  for (const candidate of values) {
+    if (!candidate || typeof candidate !== "object") {
+      continue;
+    }
+    const mapped = mapper(candidate);
+    const key = keyResolver(mapped);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    refs.push(mapped);
+  }
+  return refs;
+}
+
+function buildDecisionSnapshotIdentity(candidate = {}) {
+  return hashObject({
+    snapshotTypeCode: normalizeOptionalText(candidate.snapshotTypeCode),
+    sourceDomain: normalizeOptionalText(candidate.sourceDomain),
+    sourceObjectId: normalizeOptionalText(candidate.sourceObjectId),
+    sourceObjectVersion: normalizeOptionalText(candidate.sourceObjectVersion),
+    employeeId: normalizeOptionalText(candidate.employeeId),
+    employmentId: normalizeOptionalText(candidate.employmentId),
+    decisionHash: normalizeOptionalText(candidate.decisionHash),
+    rulepackCode: normalizeOptionalText(candidate.rulepackCode),
+    rulepackVersion: normalizeOptionalText(candidate.rulepackVersion)
+  });
 }
 
 function addMinutesIso(timestamp, minutes) {

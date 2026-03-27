@@ -52,6 +52,14 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
       simplified_notes: "Simplified notes"
     }
   });
+  assert.deepEqual(
+    annualPackage.currentVersion.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
+    ["RP-ANNUAL-FILING-SE", "RP-LEGAL-FORM-SE"]
+  );
+  assert.deepEqual(
+    annualPackage.currentVersion.providerBaselineRefs.map((entry) => entry.baselineCode),
+    ["SE-IXBRL-FILING"]
+  );
 
   const authorityOverview = platform.getAnnualAuthorityOverview({
     companyId: COMPANY_ID,
@@ -105,6 +113,10 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
     taxPackage.exports.find((entry) => entry.exportCode === "ink2_support_json").providerBaselineCode,
     "SE-ANNUAL-DECLARATION-JSON"
   );
+  assert.deepEqual(
+    taxPackage.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
+    ["RP-ANNUAL-FILING-SE", "RP-LEGAL-FORM-SE"]
+  );
 
   const second = platform.createTaxDeclarationPackage({
     companyId: COMPANY_ID,
@@ -133,6 +145,37 @@ test("Phase 12.2 submission engine separates accepted from finalized and dedupli
       exportCode: "ink_support_json",
       checksum: "phase12-2-underlag"
     },
+    rulepackRefs: [
+      {
+        rulepackId: "annual-rulepack-2026",
+        rulepackCode: "RP-ANNUAL-FILING-SE",
+        rulepackVersion: "2026.1",
+        rulepackChecksum: "annual-rulepack-2026"
+      }
+    ],
+    providerBaselineRefs: [
+      {
+        providerBaselineId: "annual-json-baseline-2026",
+        providerCode: "skatteverket-json-support",
+        baselineCode: "SE-ANNUAL-DECLARATION-JSON",
+        providerBaselineVersion: "2026.1",
+        providerBaselineChecksum: "annual-json-baseline-2026"
+      }
+    ],
+    decisionSnapshotRefs: [
+      {
+        decisionSnapshotId: "annual-decision-snapshot-1",
+        snapshotTypeCode: "annual_tax_decision",
+        sourceDomain: "annual_reporting",
+        sourceObjectId: "tax-package-1",
+        sourceObjectVersion: "1",
+        decisionHash: "annual-decision-snapshot-1",
+        rulepackId: "annual-rulepack-2026",
+        rulepackCode: "RP-ANNUAL-FILING-SE",
+        rulepackVersion: "2026.1",
+        rulepackChecksum: "annual-rulepack-2026"
+      }
+    ],
     actorId: "phase12-2-unit"
   });
 
@@ -168,6 +211,9 @@ test("Phase 12.2 submission engine separates accepted from finalized and dedupli
   assert.equal(submission.status, "accepted");
   assert.equal(submission.receipts.length, 2);
   assert.equal(typeof submission.acceptedAt, "string");
+  assert.equal(submission.rulepackRefs[0].rulepackCode, "RP-ANNUAL-FILING-SE");
+  assert.equal(submission.providerBaselineRefs[0].baselineCode, "SE-ANNUAL-DECLARATION-JSON");
+  assert.equal(submission.decisionSnapshotRefs[0].snapshotTypeCode, "annual_tax_decision");
 
   submission = integrationPlatform.registerSubmissionReceipt({
     companyId: "company-1",
@@ -191,6 +237,9 @@ test("Phase 12.2 submission engine separates accepted from finalized and dedupli
   });
   assert.equal(evidencePack.receiptRefs.length, 3);
   assert.equal(evidencePack.signatureRefs.length, 1);
+  assert.equal(evidencePack.rulepackRefs[0].rulepackCode, "RP-ANNUAL-FILING-SE");
+  assert.equal(evidencePack.providerBaselineRefs[0].baselineCode, "SE-ANNUAL-DECLARATION-JSON");
+  assert.equal(evidencePack.decisionSnapshotRefs[0].snapshotTypeCode, "annual_tax_decision");
 });
 
 test("Phase 12.2 submission engine routes transport failures into action queue and blocks forbidden retry", async () => {
@@ -209,6 +258,35 @@ test("Phase 12.2 submission engine routes transport failures into action queue a
     payload: {
       exportCode: "vat_audit_overview_json"
     },
+    rulepackRefs: [
+      {
+        rulepackId: "vat-rulepack-2026",
+        rulepackCode: "RP-VAT-SE",
+        rulepackVersion: "2026.1",
+        rulepackChecksum: "vat-rulepack-2026"
+      }
+    ],
+    providerBaselineRefs: [
+      {
+        providerBaselineId: "vat-json-baseline-2026",
+        providerCode: "skatteverket-audit-json",
+        baselineCode: "SE-AUTHORITY-AUDIT-JSON",
+        providerBaselineVersion: "2026.1",
+        providerBaselineChecksum: "vat-json-baseline-2026"
+      }
+    ],
+    decisionSnapshotRefs: [
+      {
+        decisionSnapshotId: "vat-decision-snapshot-1",
+        snapshotTypeCode: "vat_decision",
+        sourceDomain: "vat",
+        sourceObjectId: "vat-run-1",
+        sourceObjectVersion: "1",
+        decisionHash: "vat-decision-snapshot-1",
+        rulepackCode: "RP-VAT-SE",
+        rulepackVersion: "2026.1"
+      }
+    ],
     signedState: "not_required",
     retryClass: "forbidden",
     actorId: "phase12-2-unit"
@@ -225,6 +303,8 @@ test("Phase 12.2 submission engine routes transport failures into action queue a
   assert.equal(submission.actionQueueItems.length, 1);
   assert.equal(submission.actionQueueItems[0].actionType, "retry");
   assert.equal(submission.actionQueueItems[0].slaDueAt, submission.actionQueueItems[0].retryAfter);
+  assert.equal(submission.rulepackRefs[0].rulepackCode, "RP-VAT-SE");
+  assert.equal(submission.providerBaselineRefs[0].baselineCode, "SE-AUTHORITY-AUDIT-JSON");
   assert.throws(
     () =>
       integrationPlatform.retryAuthoritySubmission({
@@ -255,6 +335,35 @@ test("Phase 12.2 submission engine opens correction chains with preserved prior 
       checksum: "phase12-2-underlag-v1",
       sourceObjectVersion: "tax-package-3:v1"
     },
+    rulepackRefs: [
+      {
+        rulepackId: "annual-rulepack-2026",
+        rulepackCode: "RP-ANNUAL-FILING-SE",
+        rulepackVersion: "2026.1",
+        rulepackChecksum: "annual-rulepack-2026"
+      }
+    ],
+    providerBaselineRefs: [
+      {
+        providerBaselineId: "annual-json-baseline-2026",
+        providerCode: "skatteverket-json-support",
+        baselineCode: "SE-ANNUAL-DECLARATION-JSON",
+        providerBaselineVersion: "2026.1",
+        providerBaselineChecksum: "annual-json-baseline-2026"
+      }
+    ],
+    decisionSnapshotRefs: [
+      {
+        decisionSnapshotId: "annual-decision-snapshot-chain-1",
+        snapshotTypeCode: "annual_tax_decision",
+        sourceDomain: "annual_reporting",
+        sourceObjectId: "tax-package-3",
+        sourceObjectVersion: "v1",
+        decisionHash: "annual-decision-snapshot-chain-1",
+        rulepackCode: "RP-ANNUAL-FILING-SE",
+        rulepackVersion: "2026.1"
+      }
+    ],
     actorId: "phase12-2-unit"
   });
 
@@ -307,6 +416,9 @@ test("Phase 12.2 submission engine opens correction chains with preserved prior 
   assert.equal(correction.submission.sourceObjectVersion, "tax-package-3:v2");
   assert.equal(correction.submission.status, "ready");
   assert.equal(correction.correctionLink.reasonCode, "period_reopened");
+  assert.equal(correction.submission.rulepackRefs[0].rulepackCode, "RP-ANNUAL-FILING-SE");
+  assert.equal(correction.submission.providerBaselineRefs[0].baselineCode, "SE-ANNUAL-DECLARATION-JSON");
+  assert.equal(correction.submission.decisionSnapshotRefs[0].snapshotTypeCode, "annual_tax_decision");
 
   const evidencePack = integrationPlatform.getSubmissionEvidencePack({
     companyId: "company-3",

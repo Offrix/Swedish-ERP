@@ -804,6 +804,9 @@ export function createPayrollEngine({
       balanceSnapshotHash: "",
       agreementSnapshotHash: "",
       warningCodes: [],
+      rulepackRefs: [],
+      providerBaselineRefs: [],
+      decisionSnapshotRefs: [],
       exceptionSummary: {
         totalCount: 0,
         blockingOpenCount: 0,
@@ -884,6 +887,8 @@ export function createPayrollEngine({
     run.sourceSnapshotHash = buildSnapshotHash(sourceSnapshot);
     run.balanceSnapshotHash = buildSnapshotHash(balanceSnapshots);
     run.agreementSnapshotHash = buildSnapshotHash(agreementSnapshots);
+    run.rulepackRefs = collectPayRunRulepackRefs(employmentResults);
+    run.decisionSnapshotRefs = collectPayRunDecisionSnapshotRefs(run, employmentResults);
     run.warningCodes = [...new Set(warnings.map((warning) => warning.code))].sort();
     run.calculationSteps = PAYROLL_STEP_DEFINITIONS.map((definition) =>
       summarizeStep(definition, employmentResults.map((result) => result.steps[definition.stepNo]))
@@ -1035,6 +1040,9 @@ export function createPayrollEngine({
       reportingPeriod: resolvedReportingPeriod,
       currentVersionId: null,
       latestSubmittedVersionId: null,
+      rulepackRefs: [],
+      providerBaselineRefs: [],
+      decisionSnapshotRefs: [],
       status: "draft",
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock),
@@ -1057,6 +1065,9 @@ export function createPayrollEngine({
     });
     persistAgiMaterialization(state, materialized);
     submission.currentVersionId = materialized.version.agiSubmissionVersionId;
+    submission.rulepackRefs = copy(materialized.version.rulepackRefs || []);
+    submission.providerBaselineRefs = copy(materialized.version.providerBaselineRefs || []);
+    submission.decisionSnapshotRefs = copy(materialized.version.decisionSnapshotRefs || []);
     submission.status = materialized.version.state;
     submission.updatedAt = nowIso(clock);
     return getAgiSubmission({
@@ -1206,6 +1217,9 @@ export function createPayrollEngine({
     });
     persistAgiMaterialization(state, materialized);
     submission.currentVersionId = materialized.version.agiSubmissionVersionId;
+    submission.rulepackRefs = copy(materialized.version.rulepackRefs || []);
+    submission.providerBaselineRefs = copy(materialized.version.providerBaselineRefs || []);
+    submission.decisionSnapshotRefs = copy(materialized.version.decisionSnapshotRefs || []);
     submission.status = materialized.version.state;
     submission.updatedAt = nowIso(clock);
     return enrichAgiSubmission(state, submission);
@@ -1259,7 +1273,10 @@ export function createPayrollEngine({
         pipelineStage: "payroll_posting",
         payRunId: payRun.payRunId,
         reportingPeriod: payRun.reportingPeriod,
-        runType: payRun.runType
+        runType: payRun.runType,
+        rulepackRefs: copy(payRun.rulepackRefs || []),
+        providerBaselineRefs: copy(payRun.providerBaselineRefs || []),
+        decisionSnapshotRefs: copy(payRun.decisionSnapshotRefs || [])
       },
       lines: postingModel.journalLines
     });
@@ -1285,6 +1302,9 @@ export function createPayrollEngine({
       journalEntryId: posted.journalEntry.journalEntryId,
       payloadHash: postingModel.payloadHash,
       sourceSnapshotHash: postingModel.sourceSnapshotHash,
+      rulepackRefs: copy(payRun.rulepackRefs || []),
+      providerBaselineRefs: copy(payRun.providerBaselineRefs || []),
+      decisionSnapshotRefs: copy(payRun.decisionSnapshotRefs || []),
       totals: postingModel.totals,
       journalLines: postingModel.journalLines.map(copy),
       createdByActorId: requireText(actorId, "actor_id_required"),
@@ -1359,6 +1379,9 @@ export function createPayrollEngine({
       exportFileName: `PAYROLL-${payRun.reportingPeriod}-${payRun.payRunId.slice(0, 8)}.csv`,
       exportPayload: batchModel.exportPayload,
       exportPayloadHash: batchModel.payloadHash,
+      rulepackRefs: copy(payRun.rulepackRefs || []),
+      providerBaselineRefs: copy(payRun.providerBaselineRefs || []),
+      decisionSnapshotRefs: copy(payRun.decisionSnapshotRefs || []),
       lines: batchModel.lines.map(copy),
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: now,
@@ -1418,7 +1441,10 @@ export function createPayrollEngine({
         metadataJson: {
           pipelineStage: "payroll_payout_match",
           payRunId: payRun.payRunId,
-          payrollPayoutBatchId: batch.payrollPayoutBatchId
+          payrollPayoutBatchId: batch.payrollPayoutBatchId,
+          rulepackRefs: copy(batch.rulepackRefs || []),
+          providerBaselineRefs: copy(batch.providerBaselineRefs || []),
+          decisionSnapshotRefs: copy(batch.decisionSnapshotRefs || [])
         },
         lines: mergePayrollJournalLines([
           {
@@ -2223,6 +2249,9 @@ function materializeAgiSubmissionVersion({
     },
     reportingPeriod,
     sourcePayRunIds: approvedRuns.map((run) => run.payRunId),
+    rulepackRefs: dedupePayrollRulepackRefs(approvedRuns.flatMap((run) => run.rulepackRefs || [])),
+    providerBaselineRefs: dedupeProviderBaselineRefs(approvedRuns.flatMap((run) => run.providerBaselineRefs || [])),
+    decisionSnapshotRefs: dedupeDecisionSnapshotRefs(approvedRuns.flatMap((run) => run.decisionSnapshotRefs || [])),
     totals: summarizeAgiEmployeeTotals(employees),
     employees: employees.map((employee) => copy(employee.payloadJson)),
     generatedAt: materializedAt,
@@ -2242,6 +2271,9 @@ function materializeAgiSubmissionVersion({
     correctionReason: correctionReason || null,
     sourcePayRunIds: approvedRuns.map((run) => run.payRunId),
     sourceSnapshotHash,
+    rulepackRefs: copy(payload.rulepackRefs || []),
+    providerBaselineRefs: copy(payload.providerBaselineRefs || []),
+    decisionSnapshotRefs: copy(payload.decisionSnapshotRefs || []),
     payloadHash: buildSnapshotHash(payload),
     payloadJson: payload,
     adapterPayloadJson: {
@@ -2282,9 +2314,142 @@ function buildAgiSourceSnapshotHash(payRuns) {
       payDate: payRun.payDate,
       runType: payRun.runType,
       status: payRun.status,
-      sourceSnapshotHash: payRun.sourceSnapshotHash
+      sourceSnapshotHash: payRun.sourceSnapshotHash,
+      rulepackRefs: payRun.rulepackRefs || [],
+      decisionSnapshotRefs: payRun.decisionSnapshotRefs || []
     }))
   );
+}
+
+function collectPayRunRulepackRefs(employmentResults = []) {
+  return dedupePayrollRulepackRefs(
+    employmentResults.flatMap((result) => {
+      const totals = result?.payslipRenderPayload?.totals || {};
+      return [totals.taxDecision, totals.employerContributionDecision]
+        .map((decisionObject) => buildPayrollRulepackRef(decisionObject))
+        .filter(Boolean);
+    })
+  );
+}
+
+function collectPayRunDecisionSnapshotRefs(run, employmentResults = []) {
+  return dedupeDecisionSnapshotRefs(
+    employmentResults.flatMap((result) => {
+      const totals = result?.payslipRenderPayload?.totals || {};
+      const employmentId = result?.employment?.employmentId || null;
+      const employeeId = result?.employee?.employeeId || null;
+      return [
+        buildPayrollDecisionSnapshotRef({
+          payRunId: run.payRunId,
+          employmentId,
+          employeeId,
+          snapshotTypeCode: "payroll_tax_decision",
+          decisionObject: totals.taxDecision
+        }),
+        buildPayrollDecisionSnapshotRef({
+          payRunId: run.payRunId,
+          employmentId,
+          employeeId,
+          snapshotTypeCode: "payroll_employer_contribution_decision",
+          decisionObject: totals.employerContributionDecision
+        })
+      ].filter(Boolean);
+    })
+  );
+}
+
+function buildPayrollRulepackRef(decisionObject) {
+  if (!decisionObject?.rule_pack_id || !decisionObject?.rule_pack_code || !decisionObject?.rule_pack_version) {
+    return null;
+  }
+  return {
+    rulepackId: decisionObject.rule_pack_id,
+    rulepackCode: decisionObject.rule_pack_code,
+    rulepackVersion: decisionObject.rule_pack_version,
+    rulepackChecksum: decisionObject.rule_pack_checksum || null,
+    effectiveDate: decisionObject.effective_date || null
+  };
+}
+
+function buildPayrollDecisionSnapshotRef({ payRunId, employmentId, employeeId, snapshotTypeCode, decisionObject }) {
+  if (!decisionObject || !decisionObject.inputs_hash) {
+    return null;
+  }
+  const decisionHash = buildSnapshotHash(decisionObject);
+  return {
+    decisionSnapshotId: buildSnapshotHash({
+      payRunId,
+      employmentId,
+      employeeId,
+      snapshotTypeCode,
+      decisionHash
+    }),
+    snapshotTypeCode,
+    sourceDomain: "payroll",
+    sourceObjectId: payRunId,
+    sourceObjectVersion: decisionObject.inputs_hash,
+    employeeId: employeeId || null,
+    employmentId: employmentId || null,
+    decisionHash,
+    rulepackId: decisionObject.rule_pack_id || null,
+    rulepackCode: decisionObject.rule_pack_code || null,
+    rulepackVersion: decisionObject.rule_pack_version || null,
+    rulepackChecksum: decisionObject.rule_pack_checksum || null,
+    effectiveDate: decisionObject.effective_date || null
+  };
+}
+
+function dedupePayrollRulepackRefs(values = []) {
+  const refs = [];
+  for (const candidate of values) {
+    if (!candidate?.rulepackCode || !candidate?.rulepackVersion) {
+      continue;
+    }
+    if (!refs.some((existing) => existing.rulepackCode === candidate.rulepackCode && existing.rulepackVersion === candidate.rulepackVersion)) {
+      refs.push(copy(candidate));
+    }
+  }
+  return refs;
+}
+
+function dedupeDecisionSnapshotRefs(values = []) {
+  const refs = [];
+  for (const candidate of values) {
+    if (!candidate?.decisionSnapshotId) {
+      continue;
+    }
+    if (!refs.some((existing) => existing.decisionSnapshotId === candidate.decisionSnapshotId)) {
+      refs.push(copy(candidate));
+    }
+  }
+  return refs;
+}
+
+function dedupeProviderBaselineRefs(values = []) {
+  const refs = [];
+  for (const candidate of values) {
+    if (!candidate?.providerBaselineId && !candidate?.baselineCode && !candidate?.providerBaselineCode) {
+      continue;
+    }
+    const baselineCode = candidate.baselineCode || candidate.providerBaselineCode;
+    if (
+      !refs.some(
+        (existing) =>
+          (existing.providerBaselineId || null) === (candidate.providerBaselineId || null)
+          && (existing.baselineCode || existing.providerBaselineCode) === baselineCode
+      )
+    ) {
+      refs.push(copy({
+        providerBaselineId: candidate.providerBaselineId || null,
+        providerCode: candidate.providerCode || null,
+        baselineCode,
+        providerBaselineVersion: candidate.providerBaselineVersion || null,
+        providerBaselineChecksum: candidate.providerBaselineChecksum || null,
+        effectiveDate: candidate.effectiveDate || null
+      }));
+    }
+  }
+  return refs;
 }
 
 function buildAgiEmployeeGroups({ state, companyId, reportingPeriod, approvedRuns, hrPlatform, timePlatform }) {
@@ -3660,6 +3825,9 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
       effectiveProfile
     }),
     rule_pack_id: rulePack.rulePackId,
+    rule_pack_code: rulePack.rulePackCode,
+    rule_pack_version: rulePack.version,
+    rule_pack_checksum: rulePack.checksum,
     effective_date: resolvedPayDate,
     warnings: [],
     outputs: {
@@ -3854,6 +4022,9 @@ function buildEmployerContributionPreview({ rules, contributionBase, employee, s
       statutoryProfile: statutoryProfile || null
     }),
     rule_pack_id: rulePack.rulePackId,
+    rule_pack_code: rulePack.rulePackCode,
+    rule_pack_version: rulePack.version,
+    rule_pack_checksum: rulePack.checksum,
     effective_date: effectiveDate,
     outputs: {
       contributionBase: normalizedContributionBase,

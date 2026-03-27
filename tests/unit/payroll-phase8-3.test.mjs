@@ -105,6 +105,11 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
 
   assert.equal(run.calculationSteps.find((step) => step.stepNo === 17)?.status, "completed");
   assert.equal(run.calculationSteps.find((step) => step.stepNo === 18)?.status, "completed");
+  assert.deepEqual(
+    run.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
+    ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
+  );
+  assert.equal(run.decisionSnapshotRefs.length >= 2, true);
 
   payrollPlatform.approvePayRun({
     companyId: COMPANY_ID,
@@ -125,6 +130,19 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
     costCenterCode: "CC-200",
     businessAreaCode: "BA-FIELD"
   });
+  assert.deepEqual(
+    posting.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
+    ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
+  );
+  assert.equal(posting.decisionSnapshotRefs.length >= 2, true);
+  const postingJournal = ledgerPlatform.getJournalEntry({
+    companyId: COMPANY_ID,
+    journalEntryId: posting.journalEntryId
+  });
+  assert.deepEqual(
+    postingJournal.metadataJson.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
+    ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
+  );
 
   const payoutBatch = payrollPlatform.createPayrollPayoutBatch({
     companyId: COMPANY_ID,
@@ -132,6 +150,7 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
     actorId: "unit-test"
   });
   assert.match(payoutBatch.exportPayload, /5000:1234567890/);
+  assert.equal(payoutBatch.decisionSnapshotRefs.length >= 2, true);
 
   const matchedBatch = payrollPlatform.matchPayrollPayoutBatch({
     companyId: COMPANY_ID,
@@ -141,6 +160,25 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
   });
   assert.equal(matchedBatch.status, "matched");
   assert.ok(matchedBatch.matchedJournalEntryId);
+  const payoutMatchJournal = ledgerPlatform.getJournalEntry({
+    companyId: COMPANY_ID,
+    journalEntryId: matchedBatch.matchedJournalEntryId
+  });
+  assert.deepEqual(
+    payoutMatchJournal.metadataJson.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
+    ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
+  );
+
+  const agiSubmission = payrollPlatform.createAgiSubmission({
+    companyId: COMPANY_ID,
+    reportingPeriod: "202603",
+    actorId: "unit-test"
+  });
+  assert.deepEqual(
+    agiSubmission.currentVersion.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
+    ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
+  );
+  assert.equal(agiSubmission.currentVersion.decisionSnapshotRefs.length >= 2, true);
 
   const snapshot = payrollPlatform.createVacationLiabilitySnapshot({
     companyId: COMPANY_ID,

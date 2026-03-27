@@ -132,6 +132,11 @@ test("Phase 8.3 API creates payroll postings, payout batches and vacation snapsh
         ]
       }
     });
+    assert.deepEqual(
+      run.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
+      ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
+    );
+    assert.equal(run.decisionSnapshotRefs.length >= 2, true);
 
     await requestJson(baseUrl, `/v1/payroll/pay-runs/${run.payRunId}/approve`, {
       method: "POST",
@@ -153,6 +158,10 @@ test("Phase 8.3 API creates payroll postings, payout batches and vacation snapsh
     assert.equal(posting.status, "posted");
     assert.equal(posting.journalLines.some((line) => line.dimensionJson.projectId === "project-demo-alpha"), true);
     assert.equal(posting.journalLines.some((line) => line.dimensionJson.costCenterCode === "CC-200"), true);
+    assert.deepEqual(
+      posting.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
+      ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
+    );
 
     const payoutBatch = await requestJson(baseUrl, "/v1/payroll/payout-batches", {
       method: "POST",
@@ -164,6 +173,7 @@ test("Phase 8.3 API creates payroll postings, payout batches and vacation snapsh
       }
     });
     assert.match(payoutBatch.exportPayload, /5000:1234567890/);
+    assert.equal(payoutBatch.decisionSnapshotRefs.length >= 2, true);
 
     const matchedBatch = await requestJson(
       baseUrl,

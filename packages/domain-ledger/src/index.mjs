@@ -2370,7 +2370,7 @@ export function createLedgerEngine({
       idempotencyKey: `reversal:${originalEntry.journalEntryId}:${resolvedCorrectionKey}`,
       lines: reverseLines(requireJournalLines(originalEntry.journalEntryId)),
       metadataJson: {
-        ...copy(metadataJson),
+        ...mergeJournalPinningMetadata(originalEntry.metadataJson, metadataJson),
         originalJournalEntryId: originalEntry.journalEntryId,
         originalPeriodUntouched: target.originalPeriodUntouched,
         pipelineStage: "ledger_reversal",
@@ -2479,7 +2479,7 @@ export function createLedgerEngine({
       idempotencyKey: `correction:${originalEntry.journalEntryId}:${resolvedCorrectionKey}`,
       lines,
       metadataJson: {
-        ...copy(metadataJson),
+        ...mergeJournalPinningMetadata(originalEntry.metadataJson, metadataJson),
         originalJournalEntryId: originalEntry.journalEntryId,
         originalPeriodUntouched: target.originalPeriodUntouched,
         pipelineStage: "ledger_correction",
@@ -3143,6 +3143,9 @@ function calculateTotals(lines) {
 
 function normalizeMetadata(metadataJson, importedFlag) {
   const normalized = copy(metadataJson || {});
+  normalized.rulepackRefs = normalizeJournalRulepackRefs(normalized.rulepackRefs);
+  normalized.providerBaselineRefs = normalizeJournalProviderBaselineRefs(normalized.providerBaselineRefs);
+  normalized.decisionSnapshotRefs = normalizeJournalDecisionSnapshotRefs(normalized.decisionSnapshotRefs);
   if (importedFlag && !normalized.importSourceType) {
     normalized.importSourceType = "historical_import";
   }
@@ -3150,6 +3153,97 @@ function normalizeMetadata(metadataJson, importedFlag) {
     normalized.pipelineStage = "ledger_posting";
   }
   return normalized;
+}
+
+function mergeJournalPinningMetadata(originalMetadata = {}, overrideMetadata = {}) {
+  const original = normalizeMetadata(originalMetadata, false);
+  const override = normalizeMetadata(overrideMetadata, false);
+  return {
+    ...original,
+    ...override,
+    rulepackRefs: mergeUniqueRefs(original.rulepackRefs, override.rulepackRefs, (candidate) => `${candidate.rulepackCode}:${candidate.rulepackVersion}`),
+    providerBaselineRefs: mergeUniqueRefs(
+      original.providerBaselineRefs,
+      override.providerBaselineRefs,
+      (candidate) => `${candidate.providerBaselineId || ""}:${candidate.baselineCode || ""}:${candidate.providerBaselineVersion || ""}`
+    ),
+    decisionSnapshotRefs: mergeUniqueRefs(original.decisionSnapshotRefs, override.decisionSnapshotRefs, (candidate) => candidate.decisionSnapshotId)
+  };
+}
+
+function normalizeJournalRulepackRefs(values = []) {
+  return mergeUniqueRefs([], values, (candidate) => `${candidate.rulepackCode}:${candidate.rulepackVersion}`, (candidate) => ({
+    rulepackId: normalizeOptionalText(candidate.rulepackId),
+    rulepackCode: requireText(candidate.rulepackCode, "ledger_rulepack_code_required"),
+    rulepackVersion: requireText(candidate.rulepackVersion, "ledger_rulepack_version_required"),
+    rulepackChecksum: normalizeOptionalText(candidate.rulepackChecksum),
+    effectiveDate: normalizeOptionalText(candidate.effectiveDate)
+  }));
+}
+
+function normalizeJournalProviderBaselineRefs(values = []) {
+  return mergeUniqueRefs(
+    [],
+    values,
+    (candidate) => `${candidate.providerBaselineId || ""}:${candidate.baselineCode || candidate.providerBaselineCode}:${candidate.providerBaselineVersion || ""}`,
+    (candidate) => ({
+      providerBaselineId: normalizeOptionalText(candidate.providerBaselineId),
+      providerCode: normalizeOptionalText(candidate.providerCode),
+      baselineCode: requireText(candidate.baselineCode || candidate.providerBaselineCode, "ledger_provider_baseline_code_required"),
+      providerBaselineVersion: requireText(candidate.providerBaselineVersion, "ledger_provider_baseline_version_required"),
+      providerBaselineChecksum: normalizeOptionalText(candidate.providerBaselineChecksum),
+      effectiveDate: normalizeOptionalText(candidate.effectiveDate)
+    })
+  );
+}
+
+function normalizeJournalDecisionSnapshotRefs(values = []) {
+  return mergeUniqueRefs(
+    [],
+    values,
+    (candidate) => normalizeOptionalText(candidate.decisionSnapshotId) || hashPayload(candidate),
+    (candidate) => ({
+      decisionSnapshotId: normalizeOptionalText(candidate.decisionSnapshotId) || hashPayload(candidate),
+      snapshotTypeCode: requireText(candidate.snapshotTypeCode, "ledger_decision_snapshot_type_required"),
+      sourceDomain: normalizeOptionalText(candidate.sourceDomain),
+      sourceObjectId: normalizeOptionalText(candidate.sourceObjectId),
+      sourceObjectVersion: normalizeOptionalText(candidate.sourceObjectVersion),
+      employeeId: normalizeOptionalText(candidate.employeeId),
+      employmentId: normalizeOptionalText(candidate.employmentId),
+      decisionHash: normalizeOptionalText(candidate.decisionHash),
+      rulepackId: normalizeOptionalText(candidate.rulepackId),
+      rulepackCode: normalizeOptionalText(candidate.rulepackCode),
+      rulepackVersion: normalizeOptionalText(candidate.rulepackVersion),
+      rulepackChecksum: normalizeOptionalText(candidate.rulepackChecksum),
+      effectiveDate: normalizeOptionalText(candidate.effectiveDate)
+    })
+  );
+}
+
+function mergeUniqueRefs(baseValues = [], overrideValues = [], keyResolver, mapper = (value) => copy(value)) {
+  const refs = [];
+  const seen = new Set();
+  for (const candidate of [...(Array.isArray(baseValues) ? baseValues : []), ...(Array.isArray(overrideValues) ? overrideValues : [])]) {
+    if (!candidate || typeof candidate !== "object") {
+      continue;
+    }
+    const mapped = mapper(candidate);
+    const key = keyResolver(mapped);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    refs.push(mapped);
+  }
+  return refs;
+}
+
+function normalizeOptionalText(value) {
+  if (value == null) {
+    return null;
+  }
+  const normalized = String(value).trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function normalizeDimensionJson({ companyId, accountNumber, dimensionJson, sourceType, metadataJson }) {
