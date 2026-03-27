@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # HUS_ROT_RUT_XML_AND_SUBMISSION_SPEC
 
 Status: Bindande HUS/ROT/RUT-specifikation för claim-kedja, XML, submission, receipts och recovery.
@@ -331,3 +332,4 @@ Dokumentet är uppfyllt först när:
 - XML är versionspinnad och validerad mot officiellt schema
 - systemet inte låtsas att direktkanal finns när den inte finns
 - reconciliation mellan AR, HUS-state, ledger och customer debt är fullständig
+

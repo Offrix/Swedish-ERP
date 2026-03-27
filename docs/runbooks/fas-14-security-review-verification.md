@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 14.1 verification
 
 ## Syfte
@@ -68,3 +69,4 @@ Verifiera att backoffice, audit review, access review, impersonation, break-glas
 - alla steg ovan gröna
 - backoffice, audit review, impersonation, break-glass och SoD verifierade
 - FAS 14.1 kan markeras klar i plan och verifieringsgrindar
+

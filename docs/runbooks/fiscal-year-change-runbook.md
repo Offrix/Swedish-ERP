@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: RB-012
@@ -121,3 +122,4 @@ Följande är incident:
 - [ ] nya perioder och locks är verifierade
 - [ ] annual, reporting och declaration profiles pekar på rätt räkenskapsårsprofil
 - [ ] inga historiska packages eller receipts har muterats
+

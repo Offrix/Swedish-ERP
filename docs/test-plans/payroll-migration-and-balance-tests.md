@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: TP-005
@@ -96,3 +97,4 @@ Fel här gör löneinförandet oanvändbart och kan ge fel nettolön, fel AGI oc
 - [ ] YTD och saldon är reproducerbara
 - [ ] cutover lock och rollback beter sig korrekt
 - [ ] första pay-run preview stämmer mot godkänd diff
+

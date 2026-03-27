@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-004
@@ -197,3 +198,4 @@ Backoffice-appen äger sin egen yta och får inte döljas som en vanlig desktops
 - [ ] backoffice är separat bounded context och separat yta
 - [ ] support och audit sker via officiella kommandon
 - [ ] impersonation och diagnostics är strikt kontrollerade
+

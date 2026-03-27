@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Audit review and SoD tests
 
 ## Mål
@@ -71,3 +72,4 @@ Målet är att verifiera att audit explorer, access review, supportåtkomst, imp
 ## Exit gate
 
 Testplanen är klar när granskningsspår, SoD-kontroller och supportbegränsningar bevisligen stödjer både intern kontroll och incidentutredning.
+

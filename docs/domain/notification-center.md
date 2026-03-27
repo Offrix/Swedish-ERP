@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-003
@@ -198,3 +199,4 @@ Desktop-web äger full notification center-yta. Field-mobile får bara visa begr
 - [ ] notification center är separat från activity feed, work items och review center
 - [ ] leveransstatus och läst-status ägs server-side
 - [ ] desktop och mobile konsumerar samma notifieringsdomän med olika yträttigheter
+

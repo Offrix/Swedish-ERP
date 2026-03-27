@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-008
@@ -181,3 +182,4 @@ Field-mobile äger snabb ifyllnad. Desktop-web äger malladministration, översi
 - [ ] egenkontroll finns som egen domän med mall, instans och sign-off
 - [ ] field och desktop arbetar mot samma serverregler
 - [ ] avvikelser och evidence är spårbara
+

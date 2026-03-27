@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # LEGACY_CODE_REMEDIATION_MAP
 
 Status: Bindande repo-karta för gammal kod, syntetisk logik, demo-runtime och felaktiga domängränser som måste åtgärdas före implementation av allt utom UI.
@@ -348,3 +349,4 @@ Supersession notice: Detta dokument är fortsatt användbart som legacy-input, m
 - [ ] Collective agreements, projects och personalliggare följer nya bounded-context-regler.
 - [ ] Routefilerna är splittade per bounded context och surface.
 - [ ] Legacy-kod som lämnas kvar är uttryckligen märkt `keep` eller `harden` med aktivt testskydd.
+

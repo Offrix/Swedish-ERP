@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # INTEGRATIONS_API_EVENTS_AND_WEBHOOKS
 
 Status: Bindande integrations-, API-, event- och webhookspecifikation.
@@ -1115,3 +1116,4 @@ Detta dokument är uppfyllt först när:
 - sandbox/test/prod är strikt separerade
 - public API och partner API har idempotens, auth, versionering och replay
 - onboarding, secret rotation, health checks och operatoransvar är implementerade
+

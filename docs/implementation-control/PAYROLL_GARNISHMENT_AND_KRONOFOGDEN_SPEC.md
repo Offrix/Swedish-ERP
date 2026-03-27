@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # PAYROLL_GARNISHMENT_AND_KRONOFOGDEN_SPEC
 
 Status: Bindande specifikation för löneutmätning och Kronofogden-flöde.
@@ -347,3 +348,4 @@ Dokumentet är uppfyllt först när:
 - employer reporting messages är strukturerade
 - golden scenarios är gröna
 - payroll, ledger, banking och backoffice kan spåra varje belopp från beslut till betalning
+

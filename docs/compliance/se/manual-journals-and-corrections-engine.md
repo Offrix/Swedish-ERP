@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Manual journals and corrections engine
 
 Detta dokument definierar manuella verifikationer, korrigeringar, reverseringar, underlagskrav, attest och låsta perioder för svenska bolag.
@@ -187,3 +188,4 @@ Detta dokument definierar manuella verifikationer, korrigeringar, reverseringar,
 - [ ] låsta perioder och kontrollkonton är tekniskt skyddade
 - [ ] schemalagda reverseringar kan köras idempotent och övervakas
 - [ ] audit och sökbarhet räcker för intern kontroll och extern revision
+

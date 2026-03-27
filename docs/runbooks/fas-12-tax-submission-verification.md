@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 12.2 verification
 
 ## Syfte
@@ -62,3 +63,4 @@ Verifiera att skatt- och deklarationsunderlag kan materialiseras från låst år
 - underlagsfiler matchar intern numerik
 - submissions, receipts och action queue fungerar generiskt
 - transportfel och domänfel leder till rätt operativt utfall
+

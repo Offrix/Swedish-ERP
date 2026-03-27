@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # ADR-0009 — Identity, signing and enterprise auth strategy
 
 Status: Accepted  
@@ -49,3 +50,4 @@ Date: 2026-03-21
 - [ ] enterprise SSO kan anslutas via SAML eller OIDC utan kodändring i kärndomänen
 - [ ] signeringsflöde för PDF kan köras med PAdES och full audit
 - [ ] sandbox- och prod-domäner, hemligheter och callback-URL:er är fysiskt separerade
+

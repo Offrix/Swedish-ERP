@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Pilot UAT scenarios
 
 Detta dokument definierar riktiga pilotscenarier för AR, AP, bank, moms, dokumentinbox, lön, close och återställning.
@@ -81,3 +82,4 @@ Detta dokument definierar riktiga pilotscenarier för AR, AP, bank, moms, dokume
 - [ ] minst ett verkligt bolag eller realistiskt pilotbolag har kört varje kärnscenario
 - [ ] observability-data och affärsbevis är sparade per scenario
 - [ ] blockerande fel har stängts eller fått signerad riskacceptans
+

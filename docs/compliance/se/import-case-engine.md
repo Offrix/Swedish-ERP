@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: SE-CMP-007
@@ -233,3 +234,4 @@ Queries:
 - [ ] importcase finns som eget bounded context
 - [ ] flera dokument kan länkas till samma importcase
 - [ ] completeness gate blockerar osäkra moms- och bokföringsutfall
+

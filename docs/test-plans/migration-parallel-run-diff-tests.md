@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Migration parallel run diff tests
 
 ## Mål
@@ -70,3 +71,4 @@ Målet är att verifiera att migrationer kan köras reproducerbart, att parallel
 ## Exit gate
 
 Testplanen är klar när migrationscockpit, diff reports och cutover-sign-off bevisligen kan styra en säker pilotmigrering utan oklassificerade differenser.
+

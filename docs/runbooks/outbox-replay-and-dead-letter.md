@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Outbox replay and dead-letter
 
 ## Syfte
@@ -58,3 +59,4 @@ Detta runbook styr operatorarbete kring durable async jobs, claim expiry, poison
 ## Exit gate
 
 Runbooken är klar när operator kan hantera claim-expiry-failover, poison-pill-detektion, dead-letter och replay utan direkt databasingrepp.
+

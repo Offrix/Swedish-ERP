@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Client approval, deadline and escalation policy
 
 ## Syfte
@@ -76,3 +77,4 @@ Detta dokument definierar när klientunderlag, dokument och godkännanden ska be
 - [ ] påminnelse och eskalering följer fast kadens
 - [ ] öppna klientbrister blockerar close eller submission där policy kräver det
 - [ ] undantag och återanvända godkännanden är fullt spårbara
+

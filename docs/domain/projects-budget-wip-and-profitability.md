@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-011
@@ -199,3 +200,4 @@ Desktop-web projects workspace äger presentation och drilldown.
 - [ ] projektbudget, actuals, WIP och forecast materialiseras server-side
 - [ ] payroll cost allocation och AR-tie-out ingår i samma kontrollkedja
 - [ ] workspace kan bygga vidare på låsta snapshots i stället för UI-kalkyl
+

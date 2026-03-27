@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 2 Document Archive Verification
 
 Detta dokument sammanfattar resultatet av `P2-01`.
@@ -54,3 +55,4 @@ Resultat efter lokal migrering och seed:
 - Satt `PHASE2_DOCUMENT_ARCHIVE_ENABLED=false` for att returnera `503` pa dokumentarkivrutter utan att stoppa resten av API-processen.
 - Databasrollback sker inte genom omskrivning av historik.
 - Korrigeringar ska ske med framatrullande migrering eller nya dokumentversioner.
+

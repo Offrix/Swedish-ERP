@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: POL-001
@@ -123,3 +124,4 @@ Inga undantag får tillåta AI att bli slutlig ekonomisk beslutsmotor. Enda till
 - [ ] review center fångar högriskförslag
 - [ ] audit visar modell, confidence och mänskligt beslut
 - [ ] kill switch finns och är testad
+

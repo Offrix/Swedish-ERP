@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: SE-CMP-001
@@ -289,3 +290,4 @@ Måste täckas av:
 - [ ] eligibility, history och year-end catch-up är deterministiska
 - [ ] ledger, AR, AP och VAT läser från motorn i stället för från implicit logik
 - [ ] golden tests och replaytester finns
+

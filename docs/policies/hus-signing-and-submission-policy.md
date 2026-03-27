@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: POL-011
@@ -113,3 +114,4 @@ Akuta undantag får bara ske via backoffice och ska omedelbart följas av post-r
 - [ ] claim-signoff är hashbundet och auditbart
 - [ ] submission kan inte kringgå blockerande HUS-gates
 - [ ] correction, replay och recovery följer tydlig ansvarskedja
+

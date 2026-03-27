@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: MBP-001
@@ -297,3 +298,4 @@ Denna plan är uppfylld först när:
 - byggordningen i master-build-sequence är genomförbar utan motsägelser
 - äldre huvudplanering som strider mot master-control har tagits bort
 - inget område längre styrs av utkast, chattsvar eller `Downloads`-filer
+

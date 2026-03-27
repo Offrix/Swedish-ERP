@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: MCP-010
@@ -1032,3 +1033,4 @@ Detta dokument är uppfyllt först när följande gäller:
 - inga kritiska områden lämnas som “kan tas senare”
 - build sequence stämmer med gap-registret, code impact map, domain map och document manifest
 - Codex kan följa denna sekvens direkt utan att behöva gissa vad som kommer först, vad som blockeras av vad eller när UI-arbetet får börja på allvar
+

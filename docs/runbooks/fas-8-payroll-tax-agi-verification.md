@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 8.2 verification
 
 ## Scope
@@ -76,3 +77,4 @@ FAS 8.2 can be marked complete only when:
 - AGI-sensitive absence is locked before sign and stays locked after submit
 - correction versions preserve immutable history, receipt trail and changed-employee traceability
 - docs, gates, prompts and verify script are updated in the same change
+

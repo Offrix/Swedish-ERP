@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Production deploy runbook
 
 Detta dokument beskriver hur produkten ska deployas till produktion, hur miljöer sätts upp och hur rollback, backup och övervakning fungerar.
@@ -163,3 +164,4 @@ Data rollback får aldrig ske tyst i produktion utan incidentnummer och godkänn
 - [ ] Backup och restore har testats.
 - [ ] Observability täcker alla kritiska domäner.
 - [ ] Rollback är övad, inte bara dokumenterad.
+

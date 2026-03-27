@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Pilot migration and cutover
 
 ## Syfte
@@ -88,3 +89,4 @@ Primärt ansvarig är migreringsledaren. Kundansvarig konsult, dataansvarig och 
 ## Exit gate
 
 Runbooken är klar när pilotkunden antingen är verifierat överflyttad med godkänd hypercare-plan eller är kontrollerat återställd till tidigare läge utan okända dataförluster.
+

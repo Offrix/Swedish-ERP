@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # ADR-0014 — Work items, deadlines and notifications strategy
 
 Status: Accepted  
@@ -36,3 +37,4 @@ Date: 2026-03-21
 - [ ] snooze, escalation och blockerlogik följer policy
 - [ ] notifieringsleverans är skild från task-state
 - [ ] reopen och close lämnar fullständig historik
+

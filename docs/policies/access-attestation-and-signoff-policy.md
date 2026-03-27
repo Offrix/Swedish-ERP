@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: POL-BRIDGE-001
@@ -105,3 +106,4 @@ Runtime enforcement ska implementeras mot den nya SoD-policyn, inte mot denna br
 
 - [ ] denna fil används endast som historisk brygga
 - [ ] primär implementation använder den nya SoD-policyn
+

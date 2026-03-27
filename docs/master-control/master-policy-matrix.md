@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: MCP-008
@@ -150,3 +151,4 @@ Detta dokument är uppfyllt först när följande gäller:
 - approval model är definierad
 - inga kritiska policyområden lämnas oklara eller ospecificerade
 - senare policydokument måste mappa tillbaka till denna matris och får inte utelämna required sections
+

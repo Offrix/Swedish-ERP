@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 12.1 verification
 
 ## Syfte
@@ -61,3 +62,4 @@ Verifiera att årsredovisningsmotorn kan skapa versionslåsta K2/K3-paket, spår
 - K2/K3-spår fungerar
 - årsredovisningspaket är versionslåsta
 - signering och diffad ny version fungerar
+

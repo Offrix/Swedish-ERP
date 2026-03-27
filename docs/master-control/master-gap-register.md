@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: MCP-002
@@ -262,3 +263,4 @@ Detta gap-register är låst först när följande gäller:
 - highest-risk gaps används som tidig styrning i build-sekvensen
 - inga implementationer efter detta får beskrivas som klara om deras motsvarande gap-rad fortfarande står öppen i sak
 - varje kommande Codex-arbete ska kunna mappas till minst en gap-rad i detta register
+

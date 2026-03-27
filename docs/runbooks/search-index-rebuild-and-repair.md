@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Search index rebuild and repair
 
 ## Syfte
@@ -108,3 +109,4 @@ Primärt ansvarig är sök-/plattformsteamets driftansvariga. Säkerhetsansvarig
 ## Exit gate
 
 Runbooken är klar när indexet är verifierat, incident eller supportärende har tydlig root cause, eventuell reindex är auditloggad och inga oklassificerade sökfel återstår i action queue.
+

@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # ADR-0003 — Domain boundaries
 
 Status: Accepted  
@@ -132,3 +133,4 @@ flowchart LR
 - [ ] Inga förbjudna imports mellan domäner.
 - [ ] Dependency-cruiser eller motsvarande blockerar cirkulära beroenden.
 - [ ] Ledger mutationer kan bara ske via ledger application service.
+

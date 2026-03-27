@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 4.2 VAT rules verification
 
 ## Syfte
@@ -75,3 +76,4 @@ Denna runbook verifierar att FAS 4.2 levererar scenariostyrd svensk momslogik me
 - [ ] kreditnota spegelvÃ¤nder moms korrekt
 - [ ] importmoms och reverse charge dubbelbokas rÃ¤tt
 - [ ] migration, seeds, tester och verifieringsscript Ã¤r grÃ¶na
+

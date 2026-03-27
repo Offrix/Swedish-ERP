@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: MCP-006
@@ -708,3 +709,4 @@ Detta dokument är uppfyllt först när följande gäller:
 - desktop-vs-mobile responsibilities är uttryckliga
 - public site och logged-in feel är så tydliga att ingen kan bygga en AI-demo i stället för premium enterprise
 - inga senare UI-beslut får återinföra shell-tänk eller modul-silo som bryter detta dokument
+

@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: TP-009
@@ -91,3 +92,4 @@ Fel här förstör projektens actual cost, forecast och marginal.
 - [ ] projektactuals stämmer mot payroll source
 - [ ] replay och correction fungerar utan dubbelkostnad
 - [ ] WIP-fel på grund av kostnadsallokering upptäcks i test
+

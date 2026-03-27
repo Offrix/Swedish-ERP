@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Projection Rebuild
 
 ## Purpose
@@ -63,3 +64,4 @@ Phase 2.5 is not complete until:
 - rebuild is available through API and worker/runtime
 - tests prove parity after rebuild from empty read model
 - retry after failed rebuild is verified and does not mutate source-of-truth
+

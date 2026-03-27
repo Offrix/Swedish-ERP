@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # DOMAIN_OWNERSHIP_AND_SOURCE_OF_TRUTH
 
 Status: Bindande domänkarta och source-of-truth-regelverk.
@@ -1448,3 +1449,4 @@ Detta dokument är uppfyllt först när:
 - correction chains är materialiserade och testade
 - audit, review och receipt ownership är separerade
 - UI och integrationsytor endast konsumerar read models och commands, aldrig affärssanning direkt
+

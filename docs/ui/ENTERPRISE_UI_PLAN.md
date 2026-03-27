@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: UI-BRIDGE-001
@@ -143,3 +144,4 @@ Det bindande designsystemet finns nu i `docs/ui/DESIGN_SYSTEM_AND_OBJECT_PROFILE
 
 - [ ] denna fil används endast som historisk brygga
 - [ ] inga nya implementationer hänvisar till denna fil som primär UI-spec
+

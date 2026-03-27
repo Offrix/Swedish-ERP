@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # REGULATED_SUBMISSIONS_RECEIPTS_AND_RECOVERY
 
 Status: Bindande transport-, receipt- och recoverymodell för AGI, VAT, HUS och annual filing/declarations.
@@ -308,3 +309,4 @@ Dokumentet är uppfyllt först när:
 - retry, replay, correction och dead-letter är separata flöden
 - evidence pack går att läsa för varje submission
 - reconciliation till payroll, ledger, tax account och annual state är implementerad
+

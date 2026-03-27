@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 13.1 verification
 
 ## Syfte
@@ -66,3 +67,4 @@ Verifiera att publikt API, OAuth-scope, sandbox och webhook-kedjan fungerar enli
 - alla steg ovan gröna
 - publikt API, OAuth, webhook-idempotens och compatibility-baselines verifierade
 - FAS 13.1 kan markeras klar i plan och verifieringsgrindar
+

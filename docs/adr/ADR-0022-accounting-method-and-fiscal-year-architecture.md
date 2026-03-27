@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: ADR-0022
@@ -144,3 +145,4 @@ ADR:n är uppfylld först när:
 - `packages/domain-accounting-method` och `packages/domain-fiscal-year` finns som egna bounded contexts
 - inga nya metod- eller årregler längre införs i ledger, VAT eller UI
 - relevanta W1 compliance docs, testplaner och migrationsspår är skrivna
+

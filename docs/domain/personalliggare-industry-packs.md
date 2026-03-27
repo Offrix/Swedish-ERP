@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-005
@@ -215,3 +216,4 @@ Field-mobile äger snabb check-in/check-out. Desktop-web och backoffice äger ko
 - [ ] workplace abstraction och industry packs finns som egen domänmodell
 - [ ] identity graph binder attendance till rätt person, arbetsgivare och entreprenör
 - [ ] kiosk, mobile och backoffice arbetar mot samma append-only kärna
+

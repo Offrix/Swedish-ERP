@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: ADR-0025
@@ -110,3 +111,4 @@ ADR:n är uppfylld först när:
 - `packages/domain-tax-account` finns
 - skattekonto inte längre beskrivs som kontospegling i styrdokumenten
 - reconciliation och offset har egna dokument, tester och runbooks
+

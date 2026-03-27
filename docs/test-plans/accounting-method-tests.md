@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: TP-001
@@ -105,3 +106,4 @@ Fel här ger direkt risk för fel bokföring, fel moms och fel årsutfall.
 - [ ] testsviten täcker båda metoderna och årsskifte
 - [ ] replay/idempotens är verifierad
 - [ ] blockerande felvägar är gröna
+

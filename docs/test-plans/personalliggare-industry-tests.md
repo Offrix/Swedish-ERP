@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: TP-007
@@ -96,3 +97,4 @@ Fel här ger direkt kontrollrisk och kan göra närvarospåret oanvändbart vid 
 - [ ] workplace, identity och kioskflöden är gröna
 - [ ] offline replay är idempotent
 - [ ] correctioner bevarar originalspår
+

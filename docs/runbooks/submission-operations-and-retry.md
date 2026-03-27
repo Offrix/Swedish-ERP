@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Submission operations and retry
 
 ## Syfte
@@ -92,3 +93,4 @@ Primart ansvarig ar operator for myndighets- eller integrationsfloden. Domainsig
 ## Exit gate
 
 Runbooken ar klar nar varje berord submission har korrekt slutstatus eller aktiv handlingsplan, ingen dublettsandning riskerar att uppsta och replay-kedjan fortfarande ar spårbar via plan, approval och execute.
+

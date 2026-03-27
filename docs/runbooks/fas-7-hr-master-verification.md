@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 7.1 HR master verification
 
 ## Syfte
@@ -87,3 +88,4 @@ Fasen ar verifierad forst nar foljande ar grona:
 - [ ] Anstallningshistorik bevaras
 - [ ] Kansliga falt loggas
 - [ ] Disable-strategi fungerar
+

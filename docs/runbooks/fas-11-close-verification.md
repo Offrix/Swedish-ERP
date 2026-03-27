@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 11.3 verification
 
 ## Syfte
@@ -69,3 +70,4 @@ Verifiera att close workbench, bokslutschecklistor, blockers, sign-off och reope
 - alla steg ovan gröna
 - close workbench, blockers, sign-off och reopen verifierade
 - FAS 11.3 kan markeras klar i plan och verifieringsgrindar
+

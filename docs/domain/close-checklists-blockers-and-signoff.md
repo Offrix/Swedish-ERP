@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Close checklists, blockers and sign-off
 
 ## Syfte
@@ -186,3 +187,4 @@ Detta dokument definierar checklistor, delmoment, blockers, sign-off chain, over
 - [ ] reopen bevarar tidigare beslut och markerar downstream-påverkan
 - [ ] override och undantag följer policy och auditkrav
 - [ ] close-workbench kan tydligt visa vad som blockerar stängning
+

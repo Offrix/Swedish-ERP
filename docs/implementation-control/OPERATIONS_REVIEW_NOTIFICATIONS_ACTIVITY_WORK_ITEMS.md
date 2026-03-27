@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # OPERATIONS_REVIEW_NOTIFICATIONS_ACTIVITY_WORK_ITEMS
 
 Status: Bindande operations- och operatörsspecifikation.
@@ -331,3 +332,4 @@ Dokumentet är uppfyllt först när:
 - replay, dead-letter och submission monitoring kan användas utan DB-ingrepp
 - support/backoffice-boundaries verkställs tekniskt
 - queue ownership och SLA är mätbara i backend
+

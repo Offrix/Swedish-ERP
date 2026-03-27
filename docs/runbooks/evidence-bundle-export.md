@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Evidence Bundle Export
 
 Den här runbooken används när operator, support eller verifiering behöver exportera ett immutabelt evidence bundle från systemet.
@@ -97,3 +98,4 @@ Den här runbooken används när operator, support eller verifiering behöver ex
 - export får skapa ny frozen bundle och arkivera tidigare bundle för samma källobjekt om innehållet ändrats
 - archived bundle får inte muteras
 - checksum mismatch ska behandlas som incident
+

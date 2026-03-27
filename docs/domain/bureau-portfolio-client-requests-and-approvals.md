@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Bureau portfolio, client requests and approvals
 
 ## Syfte
@@ -187,3 +188,4 @@ Detta dokument definierar byråportfölj, klientstatus, klientbegäranden, dokum
 - [ ] reminders, deadlines och eskalering fungerar per klient och period
 - [ ] blockerande klientbrister stoppar close eller rapportering där policy kräver det
 - [ ] massåtgärder är säkra, selektiva och fullt auditerbara
+

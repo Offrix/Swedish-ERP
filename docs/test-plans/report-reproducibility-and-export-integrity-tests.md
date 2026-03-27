@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Report reproducibility and export integrity tests
 
 ## Mål
@@ -71,3 +72,4 @@ Målet är att verifiera att metric catalog, rapportdefinitioner och exportjobb 
 ## Exit gate
 
 Testplanen är klar när rapporter, metrik och exporter kan granskas och återskapas med full spårbarhet trots versioner, rättelser och asynkron filgenerering.
+

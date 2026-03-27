@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: ADR-0030
@@ -149,3 +150,4 @@ Verifiering måste visa att:
 - [ ] `annual-reporting` konsumerar filing profiles, inte generiska antaganden
 - [ ] företagsformsspecifika close- och filingblockerare är uttryckliga
 - [ ] AB, EF, HB/KB och enskild näringsverksamhet har separata filingprofiler
+

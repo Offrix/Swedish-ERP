@@ -273,10 +273,10 @@ GÃ¶ra audit och driftbevis fÃ¶rstaklassiga samt sÃ¤kra att systemet kan Ã
 
 **Delfasstatus**  
 - 3.1 återverifierad 2026-03-27: canonical audit envelope är fortsatt gemensam writer-form för auth, review, search, documents, activity, notifications och kvarvarande legacy-audit-writers, med verifierad integrity hash, audit-envelope-version, correlation-id, canonical `recordedAt`, deterministisk voucherkoppling och DSAM/A–Z-ledgergrunder som fortsatt grön under riktad 3.1-svit.
-- 3.2 verifierad 2026-03-27: central evidence-bundle-runtime finns nu som egen bounded context och levererar frysta, checksum-backed bundle snapshots fÃ¶r annual reporting, regulated submissions, cutover acceptance, support cases, break-glass och project workspace. Bundle-lineage, arkivering av ersatta snapshots, durability inventory och evidence-export-runbook Ã¤r verifierade med riktade tester plus full regression suite.
-- 3.3 verifierad 2026-03-27: central observability-route `/v1/ops/observability` visar nu provider health, projection lag, queue age alerts, invariant alarms, audit correlations, structured logs och trace chains frÃ¥n bÃ¥de API- och worker-runtime. Riktade observability-tester samt full regression suite verifierar alarms, worker-spans, runtime metrics och backoffice access enforcement.
-- 3.4 verifierad 2026-03-27: restore drills Ã¤r nu verklig livscykel (`scheduled -> running -> passed|failed`) med explicit coverage fÃ¶r `database_restore`, `projection_rebuild` och `worker_restart`. Nya ops-rutter fÃ¶r start/complete, worker-restart-chaos med restore-drill-koppling, control-plane coverage i observability, databasmigration fÃ¶r drill-livscykeln och bindande `docs/runbooks/restore-drill.md` Ã¤r verifierade med riktade 3.4-tester plus full regression suite.
-- 3.5 verifierad 2026-03-27: secrets, callback-hemligheter och certifikatkedjor är nu formaliserade som egna runtime-objekt med mode-bunden vaultvalidering, rotationsposter, dual-running-overlap, certifikatsförnyelsefönster och observability-sammanfattning. Nya ops-rutter för inventory/rotation, bindande `docs/runbooks/secret-rotation.md`, redigerade refs i läsmodeller och riktade 3.5-smoke tester plus full regression suite verifierar att trial/sandbox/pilot/production inte delar hemligheter eller providerkedjor.
+- 3.2 omöppnad 2026-03-27: tidigare markering byggde för mycket på existerande runtime och riktade tester. Delfasen får inte räknas klar igen förrän evidence-pack-kraven i bibeln är mappade punkt för punkt till faktisk kod, runbook och exit gate.
+- 3.3 omöppnad 2026-03-27: tidigare markering byggde för mycket på existerande observability-runtime och riktade tester. Delfasen får inte räknas klar igen förrän full observability enligt bibeln är mappad punkt för punkt till faktisk kod, alarms, drilldown och exit gate.
+- 3.4 återverifierad 2026-03-27: restore drills bär fortsatt verklig livscykel (`scheduled -> running -> passed|failed`) med explicit coverage för `database_restore`, `projection_rebuild` och `worker_restart`; riktad 3.4-svit samt resilience- och migration-cockpit-tester bekräftar restore-plan-koppling, chaos-signaler och rollbackdisciplin.
+- 3.5 återverifierad 2026-03-27: secrets, callback-hemligheter och certifikatkedjor är fortsatt formaliserade som egna runtime-objekt med mode-bunden vaultvalidering, rotationsposter, dual-running-overlap, certifikatsförnyelsefönster och observability-sammanfattning; riktad 3.5-svit bekräftar att rotation och certifikatsummering håller.
 
 **Delfaser**
 - [x] 3.1 [HARDEN] **Canonical audit envelope** â€” Alla commands, provider calls, approvals, impersonations, submissions och replay-Ã¥tgÃ¤rder ska skriva samma auditform.
@@ -328,7 +328,7 @@ Standardisera alla externa och interna kontrakt, bryta upp blandade route-filer 
 - Ingen ny routefamilj eller extern adapter fÃ¥r byggas pÃ¥ gamla blandade phase13/phase14-rutter.
 
 **Delfasstatus**  
-- 4.1 verifierad 2026-03-27: canonical response-meta finns nu pÃ¥ API-routes, public API, partner API och webhook-leveranser. Success envelopes bÃ¤r `meta` + `data` med bakÃ¥tkompatibel toppnivÃ¥speglad payload, error envelopes bÃ¤r canonical felmetadata med legacy error-code shim, request envelope stÃ¶der `meta.idempotencyKey` och `meta.correlationId`, och full regression suite verifierar att hela API-ytan fortfarande Ã¤r grÃ¶n.
+- 4.1 omöppnad 2026-03-27: tidigare markering byggde för mycket på existerande envelope-tester. Delfasen får inte räknas klar igen förrän standard request/success/error envelopes är bevisade mot bibelns fulla kontrakt över API, public API, partner API och webhook-ytor.
 
 **Delfaser**
 - [x] 4.1 [NEW BUILD] **Standard request/success/error envelopes** â€” Alla routes, public API, partner API och webhooks anvÃ¤nder samma envelopeform, correlation-id, idempotency key och classification.
@@ -1178,6 +1178,9 @@ Bevisa att backend-kontrakten bÃ¤r verkliga kundscenarier, lÃ¥sa UI-kontrakt
 ## Slutregel
 
 Denna roadmap Ã¤r den enda bindande byggordningen. Ingen implementation, ingen featuregren och ingen UI-plan fÃ¥r kÃ¶ra utanfÃ¶r denna ordning utan uttrycklig Ã¤ndring i detta dokument.
+
+
+
 
 
 

@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: SE-CMP-015
@@ -234,3 +235,4 @@ Audit ska visa:
 - [ ] leverantörsfaktura kan inte autopostas från dokument utan kontrollkedja
 - [ ] import-case och personpåverkande scenarier stoppas korrekt
 - [ ] AP-reskontra och correction chain är reproducerbar
+

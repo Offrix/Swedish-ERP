@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Critical Domain State Store
 
 ## Purpose
@@ -86,3 +87,4 @@ Phase 2.4 is only complete when all of the following are true:
 - runtime diagnostics clear `map_only_critical_truth` only for durable critical-domain stores
 - API and worker shutdown close the critical-domain state store
 - this runbook exists and matches runtime behavior
+

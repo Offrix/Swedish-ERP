@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: TP-014
@@ -259,3 +260,4 @@ Följande testplaner är obligatoriska när scopet berör området:
 - [ ] replay, restore och failure paths testas
 - [ ] alla nya reglerade buggar genererar regressionstest
 - [ ] tvärgående testplaner är kopplade till release- och pilotkrav
+

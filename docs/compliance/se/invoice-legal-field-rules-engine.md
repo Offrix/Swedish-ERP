@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: SE-CMP-012
@@ -226,3 +227,4 @@ Queries:
 - [ ] issue blockeras på saknade lagkravade fält
 - [ ] ändringsfakturor kräver korrekt referenskedja
 - [ ] specialmoms- och HUS-scenarier kan inte smita förbi
+

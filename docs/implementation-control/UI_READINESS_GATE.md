@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # UI_READINESS_GATE
 
 Status: Bindande pass/fail-gate före all UI-implementation.
@@ -351,3 +352,4 @@ UI får börja byggas först när:
 - object profile catalog och workbench catalog är genererade från backend contracts
 - permission snapshot tests och projection rebuild tests är gröna
 - support/backoffice, field mobile och desktop har separata backend boundaries
+

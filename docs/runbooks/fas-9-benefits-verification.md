@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 9.1 verification
 
 ## Scope
@@ -73,3 +74,4 @@ FAS 9.1 can be marked complete only when:
 - bilforman start and stop behavior matches the configured month-valuation rule
 - AGI payloads and payroll postings expose the same taxable benefit amount
 - docs, gates, prompts and verify script are updated in the same change
+

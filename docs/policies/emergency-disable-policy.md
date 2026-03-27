@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: POL-005
@@ -114,3 +115,4 @@ Inga undantag får göra disable osynlig. Även akut CLI- eller backoffice-aktiv
 - [ ] kritiska scopes har kill switches
 - [ ] aktivering och återaktivering är auditloggade
 - [ ] disable fungerar utan deploy
+

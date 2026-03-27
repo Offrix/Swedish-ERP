@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Migration History Repair
 
 ## Purpose
@@ -62,3 +63,4 @@ node --test tests/unit/phase1-migration-history-repair.test.mjs
 - `scripts/repair-migration-history.mjs` is the only supported automated repair path.
 - `scripts/new-migration.ps1` must keep generating canonical `migration_id` inserts.
 - No persistence phase may proceed on top of mixed migration-history formats.
+

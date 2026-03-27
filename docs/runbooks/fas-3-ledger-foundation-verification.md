@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 3 Ledger Foundation Verification
 
 Detta dokument sammanfattar resultatet av `3.1`.
@@ -55,3 +56,4 @@ Resultat som ska kunna verifieras efter lokal migrering och seed:
 - Satt `PHASE3_LEDGER_ENABLED=false` for att returnera `503` pa ledger-rutter utan att stoppa resten av API-processen.
 - Databasrollback sker inte genom att skriva om bokade journal entries eller linehistorik.
 - Korrigeringar ska ske med ny framatrullande migrering eller ny korrigeringsverifikation i senare fas.
+

@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 11.2 bureau portfolio verification
 
 ## Syfte
@@ -77,3 +78,4 @@ Denna runbook verifierar att FAS 11.2 levererar byråportfölj, scope-filtrering
 - [ ] klientdokument kan begäras och spåras
 - [ ] massåtgärder och auditkedja är verifierade
 - [ ] migration, seeds, tester och verifieringsscript är gröna
+

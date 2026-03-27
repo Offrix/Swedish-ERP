@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 10.3 build verification
 
 ## Syfte
@@ -84,3 +85,4 @@ Runbooken ar klar nar verifieringen reproducerbart visar att:
 - byggmoms triggas korrekt
 - personalliggare exporterar kontrollbar kedja
 och resultatet ar dokumenterat utan oppna kritiska avvikelser.
+

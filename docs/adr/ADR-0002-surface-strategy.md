@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # ADR-0002 - Surface strategy
 
 Status: Accepted  
@@ -60,3 +61,4 @@ Vi bygger tva produkt-ytor fran samma backend och samma domanmodell:
 - [ ] `field-mobile` deployas separat.
 - [ ] Guided patterns ligger inuti samma `desktop-web`, inte i en separat app.
 - [ ] `ui-core`, `ui-desktop` och `ui-mobile` finns som delade komponentlager.
+

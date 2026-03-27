@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # MIGRATION_IMPORT_AND_CUTOVER_DATA_SPEC
 
 Status: Bindande dataspec för import, mapping, parity checks, cutover, rollback och post-cutover correction.

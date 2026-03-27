@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # ADR-0020 — Migration, parallel run and cutover strategy
 
 Status: Accepted  
@@ -36,3 +37,4 @@ Date: 2026-03-21
 - [ ] rollback point finns före switch
 - [ ] cutover och rollback är övade i runbook och testplan
 - [ ] go-live evidence kan granskas i efterhand
+

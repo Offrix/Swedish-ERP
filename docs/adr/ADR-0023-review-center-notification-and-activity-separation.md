@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: ADR-0023
@@ -119,3 +120,4 @@ ADR:n är uppfylld först när:
 - `review-center`, `notifications` och `activity` finns som separata domänkontrakt
 - den gamla överlastade modellen i `docs/domain/work-items-deadlines-notifications.md` har ersatts enligt manifestet
 - UI-kontrakten för de tre ytorna är skrivna
+

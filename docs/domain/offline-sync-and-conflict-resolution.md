@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-013
@@ -182,3 +183,4 @@ Field-mobile visar pending, sync och conflict-status. Backoffice och desktop äg
 - [ ] offline mutationer följer explicit capability policy
 - [ ] pending, sync och conflict är tydliga states i både API och UI
 - [ ] idempotens och repair path är definierade server-side
+

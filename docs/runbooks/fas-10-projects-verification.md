@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 10.1 projects verification
 
 ## Scope
@@ -37,3 +38,4 @@ Verifiera att FAS 10.1 levererar:
 - [x] WIP kan stammas av mot fakturering
 - [x] Forecast at completion fungerar
 - [x] Projektrutter kan stangas av utan att ovriga API:t dor
+

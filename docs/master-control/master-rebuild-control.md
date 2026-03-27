@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: MCP-001
@@ -576,3 +577,4 @@ Detta dokument är uppfyllt först när samtliga villkor nedan är sanna:
 - build-sekvensen bygger de saknade motorerna före UI-ytskikt som är beroende av dem
 - ingen Codex-implementation får efter detta hänvisa till den gamla UI-planen som primär källa
 - ingen del av repo:t får efter detta beskrivas som produktionsklar om den fortfarande ligger i kategorin dokumenterad, delvis kodstött eller falskt färdig enligt denna kontrollbas
+

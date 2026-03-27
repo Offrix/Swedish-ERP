@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Inbound email inbox setup
 
 Detta runbook beskriver hur domäner och adresser för företagsinbox sätts upp, hur routingregler, råmail-lagring, bilagehantering, spam/skadlig fil-hantering och felsökning fungerar.
@@ -103,3 +104,4 @@ Detta runbook beskriver hur domäner och adresser för företagsinbox sätts upp
 - [ ] routing från adress till bolag och kanal fungerar
 - [ ] dedupe, karantän och bilagelogik är verifierade
 - [ ] råmail kan återspelas efter fel
+

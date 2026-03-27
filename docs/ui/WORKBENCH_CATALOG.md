@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: UI-007
@@ -161,3 +162,4 @@ Backoffice workbenches:
 - [ ] varje högfrekvent arbetsklass har en uttrycklig workbench
 - [ ] inga dubbletter eller otydliga ägarskap finns mellan workbenches
 - [ ] implementation kan börja mot en låst katalog i stället för ad hoc-ytor
+

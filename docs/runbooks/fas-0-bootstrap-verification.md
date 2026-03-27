@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 0 Bootstrap Verification
 
 Detta dokument sammanfattar resultatet av P0-01, P0-02 och P0-03.
@@ -32,3 +33,4 @@ pnpm run runtime-log
 pnpm run db:migrate -- --dry-run
 pnpm run seed:demo -- --dry-run
 ```
+

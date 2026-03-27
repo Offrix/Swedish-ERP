@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: SE-CMP-011
@@ -244,3 +245,4 @@ Queries:
 - [ ] bank events, payment orders and returns är explicita objekt
 - [ ] osäkra matchningar går till review eller reconciliation
 - [ ] tax-account-flöden kan särskiljas och härledas
+

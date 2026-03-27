@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-014
@@ -177,3 +178,4 @@ Desktop-web owns global search UI. Backoffice has scoped diagnostics and support
 - [ ] global search is read-only and permission-safe
 - [ ] reindex and tombstone semantics are explicit
 - [ ] desktop and backoffice can consume one stable search domain
+

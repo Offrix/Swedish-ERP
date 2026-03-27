@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 13.2 verification
 
 ## Syfte
@@ -68,3 +69,4 @@ Verifiera att partnerkopplingar, kontraktstester, fallback, rate limits och repl
 - alla steg ovan gröna
 - partnerkopplingar, kontraktstester, fallback, rate limits och replay verifierade
 - FAS 13.2 kan markeras klar i plan och verifieringsgrindar
+

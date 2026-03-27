@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Data retention, GDPR and legal hold policy
 
 Detta dokument definierar retention per objekttyp, anonymisering och radering, legal hold, loggretention, dokumentretention, råmail-retention och hur personuppgiftsbegäran hanteras.
@@ -61,3 +62,4 @@ Detta dokument definierar retention per objekttyp, anonymisering och radering, l
 - kvartalsvis genomgång av retention-scheman och legal holds
 - månadsvis rapport över misslyckade gallringsjobb
 - årlig granskning av om produktanalys och supportdata fortfarande är dataminimerade
+

@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: TP-016
@@ -147,3 +148,4 @@ Stora golden families ska kunna köras i batch utan att överskrida definierad C
 - [ ] datasetversion och expected outcomes är dokumenterade
 - [ ] rulepackändringar skapar ny datasetversion när utfall ändras
 - [ ] restore och replay av golden data kan köras i tom miljö
+

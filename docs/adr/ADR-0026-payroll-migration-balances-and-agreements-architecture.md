@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: ADR-0026
@@ -123,3 +124,4 @@ ADR:n är uppfylld först när:
 - `packages/domain-balances` och `packages/domain-collective-agreements` finns
 - payroll migration behandlas som egen motor och inte som ad hoc-import
 - W1-dokument för migration, balances, agreements, policy och test är skrivna
+

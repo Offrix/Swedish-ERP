@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Travel and traktamente engine
 
 Detta dokument definierar resemotorn: tjänsteresa, utlägg, inrikes och utrikes traktamente, måltidsreduktion, nattraktamente, bilersättning, körjournal och bokförings-/lönekoppling.
@@ -223,3 +224,4 @@ Store both decision codes and explanations for every claim.
 - [ ] Långtidsreduktion fungerar.
 - [ ] Flera länder och måltidsreduktion fungerar.
 - [ ] Bilersättning och körjournal kan granskas i efterhand.
+

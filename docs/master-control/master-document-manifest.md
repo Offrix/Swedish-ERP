@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: MCP-009
@@ -486,3 +487,4 @@ Detta manifest är uppfyllt först när följande gäller:
 - replacement map är fullständig för kända befintliga filer som inte längre räcker
 - future writing order är konkret och stödjer build-sekvensen
 - inga senare dokument får införas utan att antingen läggas till i detta manifest eller uttryckligen ersätta en befintlig manifestpost
+

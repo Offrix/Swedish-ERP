@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 7.2 verification
 
 ## Scope
@@ -74,3 +75,4 @@ FAS 7.2 can be marked complete only when:
 - balances are reproducible for the same cutoff date
 - period locking blocks new mutations inside the locked range
 - docs, gates, prompts and verify script are updated in the same change
+

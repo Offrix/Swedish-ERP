@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # External adapter contract matrix
 
 Detta dokument listar varje extern adapter, dess kontraktstest, sandboxmiljö, testdata, webhook-signatur, felkoder och acceptanskriterier.
@@ -34,3 +35,4 @@ Detta dokument listar varje extern adapter, dess kontraktstest, sandboxmiljö, t
 - [ ] felkoder är mappade till intern taxonomi
 - [ ] webhook-verifiering är testad med både giltig och ogiltig signatur
 - [ ] idempotensfall är testade för inkommande och utgående events
+

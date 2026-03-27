@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: RB-010
@@ -93,3 +94,4 @@ saknat beslutsspår, fel recovery-belopp eller dubbelsubmission är incident
 - [ ] replay och new-version paths hålls tydligt isär
 - [ ] delgodkännande och recovery ger full ekonomisk och auditbar konsekvens
 - [ ] HUS-operatören kan följa receipt chain från början till slut
+

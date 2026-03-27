@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # PROJECTS_FIELD_PERSONALLIGGARE_ID06_GENERAL_SPEC
 
 Status: Fullständig omskriven och bindande specifikation för generell projects/operations-kärna med vertikala packs för field, personalliggare, egenkontroll och ID06.

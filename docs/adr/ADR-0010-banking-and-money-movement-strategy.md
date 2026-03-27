@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # ADR-0010 — Banking and money movement strategy
 
 Status: Accepted  
@@ -42,3 +43,4 @@ Date: 2026-03-21
 - [ ] leverantörsbetalning kan köras som förslag, export, bankportaluppladdning och senare bankavprickning
 - [ ] OCR-referenser kan genereras, valideras och användas i auto-matchning
 - [ ] bankfel, returer och manuella reservrutiner är dokumenterade i runbook
+

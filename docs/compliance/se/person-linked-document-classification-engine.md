@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: SE-CMP-003
@@ -276,3 +277,4 @@ Måste täckas av:
 - [ ] personpåverkan är explicit länkad
 - [ ] payroll och ledger tar bara emot godkända intents
 - [ ] review center fångar tvetydiga fall
+

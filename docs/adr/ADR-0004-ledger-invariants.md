@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # ADR-0004 — Ledger invariants
 
 Status: Accepted  
@@ -79,3 +80,4 @@ För manuell verifikation krävs:
 - [ ] Mutation tests visar att försök att ändra låst period stoppas.
 - [ ] E2E-test visar att rättelse skapar ny verifikation, inte tyst uppdatering.
 - [ ] Drilldown från rapport till rad till källdokument fungerar.
+

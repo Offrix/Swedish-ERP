@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Reporting metric catalog and export jobs
 
 ## Syfte
@@ -168,3 +169,4 @@ Detta dokument definierar måttkatalog, metric definitions, rapportdefinitioner,
 - [ ] drilldown är definierat eller uttryckligen förbjudet per mått
 - [ ] exportjobb är asynkrona, spårbara och watermarksätter när policy kräver det
 - [ ] tidigare exporter kan relateras till senare ändrade underlag
+

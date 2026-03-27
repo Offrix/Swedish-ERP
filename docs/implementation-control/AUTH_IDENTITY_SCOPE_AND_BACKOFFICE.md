@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # AUTH_IDENTITY_SCOPE_AND_BACKOFFICE
 
 Status: Bindande auth-, identity-, scope- och backoffice-specifikation.
@@ -333,3 +334,4 @@ Dokumentet är uppfyllt först när:
 - impersonation och break-glass följer approvalkedja och audit
 - search, notifications, activity och review respekterar resolved permissions
 - API-rutter bär trust- och scope-krav
+

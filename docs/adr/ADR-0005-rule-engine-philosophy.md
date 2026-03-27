@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # ADR-0005 — Rule engine philosophy
 
 Status: Accepted  
@@ -72,3 +73,4 @@ Varje regelbeslut ska returnera:
 - [ ] Alla regelpaket har golden tests.
 - [ ] Ett historiskt dokument kan återberäknas med dåtidens regelpaket.
 - [ ] UI kan visa mänsklig förklaring för varje regelbeslut.
+

@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: RB-005
@@ -101,3 +102,4 @@ felaktig YTD, fel balansbank eller fel AGI constituent i preview är blockerande
 - [ ] opening balances och YTD är låsta och auditbara
 - [ ] första målperiodens preview är verifierad
 - [ ] källdatumsgräns och ansvarskedja är dokumenterade
+

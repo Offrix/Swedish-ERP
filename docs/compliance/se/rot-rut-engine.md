@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: SE-CMP-019
@@ -198,3 +199,4 @@ Audit ska visa:
 - [ ] ROT/RUT-klassning är deterministisk och versionerad
 - [ ] yearly caps och procentregler styrs av rulepacks
 - [ ] HUS-kedjan får komplett och låst material för claim
+

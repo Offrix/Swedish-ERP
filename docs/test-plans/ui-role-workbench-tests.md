@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: TP-010
@@ -100,3 +101,4 @@ Fel här gör att hela UI-reseten ser rätt ut visuellt men faller i verkligt op
 - [ ] workbenches are verified by role, not just by screen render
 - [ ] list/preview/detail pattern works under real data
 - [ ] forbidden actions stay forbidden in UI
+

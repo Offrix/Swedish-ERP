@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # COMPETITOR_WIN_MATRIX
 
 Status: Bindande marknads- och paritymatris.
@@ -302,3 +303,4 @@ Detta dokument är uppfyllt först när:
 - paritykraven ovan kan visas i produkt och inte bara i dokument
 - advantagekraven är planerade och delvis implementerade i rätt ordning
 - ingen konkurrentkategori längre har ett uppenbart oåtkomligt gap i kärnflödena
+

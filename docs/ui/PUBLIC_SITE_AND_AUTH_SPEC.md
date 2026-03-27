@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: UI-002
@@ -191,3 +192,4 @@ Auth måste fungera väl på mobil för inloggning och challenge, men full tenan
 - [ ] auth, onboarding och challenge center är tydligt separerade
 - [ ] tenant setup följer policy och kan inte hamna i odefinierat mellanläge
 - [ ] upplevelsen känns som samma premiumprodukt som desktopen
+

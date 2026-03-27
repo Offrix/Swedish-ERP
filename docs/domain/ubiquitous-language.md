@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Ubiquitous language
 
 Detta dokument definierar de ord som ska användas konsekvent i kod, databas, dokumentation, tester och UI. Om ett ord saknas här ska det läggas till innan större implementation fortsätter.
@@ -636,3 +637,4 @@ Kommentar eller tråd som bara får visas för interna användare hos byrå elle
 
 ### Extern synlighet
 Kommentar eller tråd som uttryckligen får delas med kund, klient eller annan extern part.
+

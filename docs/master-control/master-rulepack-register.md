@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: MCP-005
@@ -304,3 +305,4 @@ Detta dokument är uppfyllt först när följande gäller:
 - minst ett boundary- och replaykrav finns för varje pack
 - de nya motorerna accounting method, fiscal year, document classification, tax account, balances och collective agreements har egna rulepacks
 - inget nytt domänområde får byggas med hårdkodade svenska regler som egentligen ska ligga i register eller rulepacks
+

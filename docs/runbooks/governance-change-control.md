@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Governance Change Control
 
 ## Syfte
@@ -110,3 +111,4 @@ Varje governance-ändring ska dokumentera:
 ## Slutregel
 
 Om en ändring inte kan kopplas till både roadmap och implementation-bibel är ändringen inte godkänd.
+

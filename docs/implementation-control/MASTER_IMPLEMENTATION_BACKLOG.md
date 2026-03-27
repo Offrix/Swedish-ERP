@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # MASTER_IMPLEMENTATION_BACKLOG
 
 Status: Bindande konkret backlog för allt som måste byggas före UI.
@@ -860,3 +861,4 @@ Varje post nedan är implementationsgrundande. Ingen post får markeras klar uta
 - What blocks enterprise readiness: yes.
 - What blocks competitor parity: yes.
 - What blocks competitor advantage: yes.
+

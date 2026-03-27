@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 14.2 verification
 
 ## Syfte
@@ -67,3 +68,4 @@ Verifiera att feature flags, emergency disable, load profiles, restore drills oc
 - alla steg ovan gröna
 - feature flags, emergency disable, load profiler, restore drills och chaos-scenarier verifierade
 - FAS 14.2 kan markeras klar i plan och verifieringsgrindar
+

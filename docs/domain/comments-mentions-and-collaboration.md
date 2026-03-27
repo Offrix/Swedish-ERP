@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Comments, mentions and collaboration
 
 ## Syfte
@@ -176,3 +177,4 @@ Detta dokument definierar kommentarer, mentions, trådar, läst/oläst, objektko
 - [ ] assignments från kommentarer är spårbara
 - [ ] moderering och delete lämnar full historik
 - [ ] notifieringar och read state fungerar utan att kringgå behörighet
+

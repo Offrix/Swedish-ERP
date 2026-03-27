@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: UI-001
@@ -162,3 +163,4 @@ IA ska bygga på:
 - [ ] desktop, mobile och backoffice har tydligt separerade ansvar
 - [ ] workbench-first och object-profile-first är bindande
 - [ ] UI-omtaget kan nu brytas ned i de mer precisa UI-specarna
+

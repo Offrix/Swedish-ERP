@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: MCP-011
@@ -134,3 +135,4 @@ Detta dokument är uppfyllt först när:
 - inga blockerande dokument bara finns utanför repo:t
 - replacement- och split-replace-kraven är uppfyllda
 - implementation kan starta utan att dokumentfasen först måste kompletteras
+

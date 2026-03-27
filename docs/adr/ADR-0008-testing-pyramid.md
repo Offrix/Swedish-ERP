@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # ADR-0008 — Testing pyramid
 
 Status: Accepted  
@@ -68,3 +69,4 @@ Vi använder en hård testpyramid med extra vikt på reglerade golden-data-teste
 - [ ] CI rapporterar testlager separat.
 - [ ] Golden-testbibliotek finns per domän.
 - [ ] Varje incident ger nytt regressionsfall.
+

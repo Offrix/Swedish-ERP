@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-009
@@ -175,3 +176,4 @@ Desktop-web äger hela kalkylarbetsytan.
 - [ ] kalkyl finns som separat versionsstyrd domän
 - [ ] offert och projektbudget kan läsa kalkyl utan att äga den
 - [ ] konvertering är spårbar och reproducerbar
+

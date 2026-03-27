@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Open banking and payment setup
 
 Detta runbook beskriver hur open-banking-partner, sandbox/prod, webhooks, kontokoppling, betalningsinitiering eller betalfilstrategi, nycklar, fallback och felsökning sätts upp.
@@ -95,3 +96,4 @@ Detta runbook beskriver hur open-banking-partner, sandbox/prod, webhooks, kontok
 - [ ] betalfilflöde är testat från förslag till bankbokning
 - [ ] fallback till manuell import är dokumenterad och övad
 - [ ] bankunika begränsningar är nedskrivna per stödd bank
+

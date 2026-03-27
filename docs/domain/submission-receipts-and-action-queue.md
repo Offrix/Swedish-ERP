@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-003
@@ -206,3 +207,4 @@ Desktop och backoffice får konsumera status- och actionqueueprojektioner, men s
 - [ ] generic submission/receipt/action queue model används tvärgående
 - [ ] receipts är append-only
 - [ ] provider logic är normaliserad före intern status
+

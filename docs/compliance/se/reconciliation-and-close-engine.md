@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Reconciliation and close engine
 
 Detta dokument definierar bankavstämning, kundreskontraavstämning, leverantörsreskontraavstämning, momsavstämning, periodstängning, sign-off, reopen/rättelse och close-checklistor för svenska bolag.
@@ -216,3 +217,4 @@ Detta dokument definierar bankavstämning, kundreskontraavstämning, leverantör
 - [ ] reopen, waiver och difference items har full audit och tydliga regler
 - [ ] periodlåsning sker stegvis och kan visas i historik
 - [ ] sign-off går att koppla till exakt det underlag som användes vid stängning
+

@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: UI-005
@@ -144,3 +145,4 @@ Primära flikar:
 - [ ] mobile är tydligt separerad från desktop i ansvar och informationsmängd
 - [ ] offline, pending och conflict states är synliga i alla relevanta flöden
 - [ ] Today, Jobs, Time och Check-in räcker för dagligt fältarbete utan att låtsas vara full desktop
+

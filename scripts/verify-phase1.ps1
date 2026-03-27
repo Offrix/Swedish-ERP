@@ -62,6 +62,7 @@ if ($LASTEXITCODE -ne 0) {
   --bootstrap-scenario-code "phase1_protected_seed_probe" `
   --seed-demo `
   --expect-finding "seed_demo_forbidden" `
+  --expect-finding "demo_data_present_in_protected_mode" `
   --require-startup-blocked `
   --require-blocking `
   --json

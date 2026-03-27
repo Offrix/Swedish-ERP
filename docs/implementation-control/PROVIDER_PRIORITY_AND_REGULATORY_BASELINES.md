@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # PROVIDER_PRIORITY_AND_REGULATORY_BASELINES
 
 Status: Bindande providerordning och bindande regulatoriska/specmässiga baselines för våg 1 och våg 2.
@@ -470,3 +471,4 @@ Varje provideradapter måste ha gröna tester för:
 - [ ] Provider swap-regler är fastställda.
 - [ ] Inga regulated transports är beroende av syntetiska eller manuella mellanled som primär väg.
 - [ ] Contract tests, health, retry, dead-letter och replay är definierade per providerklass.
+

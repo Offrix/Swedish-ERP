@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # CODEX PROMPT LIBRARY
 
 Detta dokument innehåller nästan färdiga prompts till Codex för varje delfas. Kopiera en prompt åt gången.
@@ -1835,3 +1836,4 @@ Return:
 4) follow-up tasks
 5) any blockers requiring human action
 ```
+

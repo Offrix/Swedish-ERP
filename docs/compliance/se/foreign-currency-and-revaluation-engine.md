@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Foreign currency and revaluation engine
 
 Detta dokument definierar valutakurser, omräkning, kursdifferenser, omvärdering av AR, AP och bank samt betalning i annan valuta än fakturan.
@@ -182,3 +183,4 @@ Detta dokument definierar valutakurser, omräkning, kursdifferenser, omvärderin
 - [ ] periodisk omvärdering går att köra idempotent med tydlig sign-off
 - [ ] betalning i annan valuta än fakturan kan förklaras utan glapp
 - [ ] kursovernrides är sällsynta och fullt auditerade
+

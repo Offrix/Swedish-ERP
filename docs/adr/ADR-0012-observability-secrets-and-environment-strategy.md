@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # ADR-0012 — Observability, secrets and environment strategy
 
 Status: Accepted  
@@ -44,3 +45,4 @@ Date: 2026-03-21
 - [ ] secrets och certifikat har tydlig ägare, naming och rotation
 - [ ] dev, staging och prod är tydligt separerade i data och credentials
 - [ ] feature flags har policy, ägare och borttagningsdatum
+

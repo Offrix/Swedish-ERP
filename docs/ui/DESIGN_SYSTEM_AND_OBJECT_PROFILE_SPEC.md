@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: UI-003
@@ -188,3 +189,4 @@ Kärnkomponentfamiljer:
 - [ ] object profile-anatomin är låst
 - [ ] tabelldensitet och statusspråk är definierade
 - [ ] desktop, mobile och backoffice delar samma visuella ryggrad
+

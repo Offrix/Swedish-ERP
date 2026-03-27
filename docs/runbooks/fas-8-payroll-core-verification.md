@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 8.1 verification
 
 ## Scope
@@ -74,3 +75,4 @@ FAS 8.1 can be marked complete only when:
 - retro corrections remain traceable to their source period or source run
 - payslip regeneration keeps the original snapshot hash while incrementing regeneration metadata
 - docs, gates, prompts and verify script are updated in the same change
+

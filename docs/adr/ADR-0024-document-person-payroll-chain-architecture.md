@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: ADR-0024
@@ -131,3 +132,4 @@ ADR:n är uppfylld först när:
 - `packages/domain-document-classification` finns
 - inga dokument längre går direkt från OCR till slutlig bokföring eller payroll
 - golden tests för document -> person -> payroll -> AGI är skrivna
+

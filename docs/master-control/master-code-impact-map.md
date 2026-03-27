@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: MCP-003
@@ -618,3 +619,4 @@ Detta dokument är uppfyllt först när följande gäller:
 - testytor är konkreta nog att mappa till nya testfiler
 - dependency map stämmer med `docs/master-control/master-build-sequence.md`
 - inga implementationer efter detta får hävda att ett package är “klart” om dess required action här fortfarande är rewrite, new eller major extend
+

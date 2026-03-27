@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Pension and salary exchange engine
 
 Detta dokument definierar pensionsmotorn: tjänstepension, extra pension, kollektivavtalsstyrning, rapportering, avstämning, särskild löneskatt på pensionskostnader och löneväxling.
@@ -154,3 +155,4 @@ Implement the pension engine with:
 - [ ] Löneväxling kan simuleras, aktiveras, pausas och stoppas.
 - [ ] Rapporter går att generera och rätta.
 - [ ] Pensionskostnader och särskild löneskatt kan avstämmas.
+

@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Cash card and clearing engine
 
 Detta dokument definierar kassa, kort, kortinlösen, anställdas utlägg, settlement, avgifter och clearing för svenska bolag.
@@ -193,3 +194,4 @@ Detta dokument definierar kassa, kort, kortinlösen, anställdas utlägg, settle
 - [ ] ingen kort- eller kassahändelse dubbelbokas
 - [ ] fordran på anställd och skuld till anställd särskiljs korrekt
 - [ ] settlement och banklikvid går att stämma av mot ledgern
+

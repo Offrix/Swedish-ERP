@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: POL-003
@@ -113,3 +114,4 @@ Enda tillåtna undantaget är akut suspend/disable via särskild incident- eller
 - [ ] tenant-setup och modulaktivering är serverstyrd
 - [ ] beroenden och godkännanden valideras före aktivering
 - [ ] audit och rollback/suspend-spår finns
+

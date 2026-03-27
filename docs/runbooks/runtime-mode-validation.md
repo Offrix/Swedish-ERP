@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Runtime Mode Validation
 
 ## Purpose
@@ -65,3 +66,4 @@ Then run the full verification suite before the next roadmap subphase.
 - Honesty scanner misses Map-only truth, stub providers, simulated submission runtime or forbidden sandbox route families.
 - Honesty scanner misses demo data already resident in protected runtime state.
 - Protected boot does not emit `seed_demo_forbidden` when scenario seeding or `seedDemo=true` is attempted.
+

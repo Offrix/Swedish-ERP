@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-015
@@ -160,3 +161,4 @@ Desktop-web äger saved views och dashboards.
 - [ ] saved views och dashboards är egna, tydliga ytkontrakt
 - [ ] trasiga vyer hanteras explicit
 - [ ] personalization kan byggas utan att bära domänlogik
+

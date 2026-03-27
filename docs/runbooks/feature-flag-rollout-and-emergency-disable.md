@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Feature flag rollout and emergency disable
 
 ## Syfte
@@ -84,3 +85,4 @@ Primärt ansvarig är flaggans owner. Vid emergency disable tar incident command
 ## Exit gate
 
 Runbooken är klar när flaggan är i avsett slutläge, incident eller change är dokumenterad och eventuella efterföljande korrigeringsåtgärder har owner och deadline.
+

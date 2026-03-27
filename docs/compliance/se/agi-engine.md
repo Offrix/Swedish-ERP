@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # AGI engine
 
 Detta dokument definierar AGI-motorn: hur individuppgifter byggs, hur frånvarouppgifter låses, hur submission-versioner skapas och hur kvittenser och rättelser hanteras.
@@ -166,3 +167,4 @@ Create migrations, services, contract tests and golden datasets.
 - [ ] Versioner och kvittenser sparas.
 - [ ] Frånvarouppgifter blockeras om de inte är kompletta i tid.
 - [ ] Rättelser bygger ny version utan att förstöra historik.
+

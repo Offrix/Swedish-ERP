@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: RB-002
@@ -104,3 +105,4 @@ Följande ska sparas:
 - [ ] isolerad verifiering är gjord
 - [ ] smoke tests är gröna
 - [ ] återöppning av trafik är godkänd
+

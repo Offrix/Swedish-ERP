@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: MCP-004
@@ -600,3 +601,4 @@ Detta dokument är uppfyllt först när följande gäller:
 - UI-ytor är bundna till domänägarskap utan att UI blir rule owner
 - listan över silent-mutation-forbud täcker alla reglerade objekt
 - inga senare implementationer får införa nya tvärkopplingar som bryter denna karta utan ny bindande ADR och uppdatering av denna masterfil
+

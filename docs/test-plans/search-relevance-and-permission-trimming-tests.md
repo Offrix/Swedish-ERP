@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Search relevance and permission trimming tests
 
 ## Mål
@@ -72,3 +73,4 @@ Målet är att verifiera att global sökning returnerar rätt objekt i rätt ord
 ## Exit gate
 
 Testplanen är klar när sök, saved searches och permissions trimming beter sig deterministiskt över rollprofiler, schemaändringar och reindex-operationer.
+

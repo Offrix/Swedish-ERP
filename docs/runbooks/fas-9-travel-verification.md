@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 9.2 travel verification
 
 ## Scope
@@ -39,3 +40,4 @@ Verifiera att FAS 9.2 levererar:
 - [x] Overskjutande del blir lon
 - [x] Mileage, utlagg och reseforskott paverkar payroll deterministiskt
 - [x] Travel routes kan stangas av utan att ovriga API:t dor
+

@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Queue resilience and replay tests
 
 ## Mål
@@ -73,3 +74,4 @@ Målet är att verifiera att köer, jobbstatus, retry-policy, replay och dead-le
 ## Exit gate
 
 Testplanen är klar när samtliga kötyper passerar resilience-, replay- och dead-letter-scenarier utan okända dubletter, tyst dataförlust eller oförklarade statusbrott.
+

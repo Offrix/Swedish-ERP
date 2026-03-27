@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Feature flag rollback and disable tests
 
 ## Mål
@@ -71,3 +72,4 @@ Målet är att verifiera att feature flags, rollout och kill switches fungerar s
 ## Exit gate
 
 Testplanen är klar när feature-flag-lagret bevisligen stödjer säker rollout och snabb riskreducering utan att bli en dold källa till otestad affärslogik.
+

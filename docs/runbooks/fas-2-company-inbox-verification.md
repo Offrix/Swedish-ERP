@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 2 Company Inbox Verification
 
 Detta dokument sammanfattar resultatet av `P2-02`.
@@ -55,3 +56,4 @@ Resultat efter lokal migrering och seed:
 - Satt `PHASE2_DOCUMENT_ARCHIVE_ENABLED=false` om hela FAS 2 ska stangas av inklusive underliggande dokumentarkiv.
 - Databasrollback sker inte genom att skriva om historiska raw-mail eller dokument.
 - Korrigeringar ska ske med framatrullande migrering och ny ingest eller omspelning fran bevarat raw-mail.
+

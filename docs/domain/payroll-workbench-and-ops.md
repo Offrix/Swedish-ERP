@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-006
@@ -195,3 +196,4 @@ Desktop-web äger hela payroll-workbenchen. Backoffice får läsa och assistera 
 - [ ] payroll workbench täcker pay runs, balances, AGI och migration utan att bära domänlogik i UI
 - [ ] exceptions, approvals och corrections går via server-side commands
 - [ ] backoffice och desktop har tydliga och separata roller
+

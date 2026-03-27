@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: RB-009
@@ -93,3 +94,4 @@ misstänkt komprometterad kiosk eller oklar offlinekö är incident
 - [ ] device trust är explicit och workplace-bundet
 - [ ] revoke och reenroll fungerar utan dold state
 - [ ] offline recovery är auditbar
+

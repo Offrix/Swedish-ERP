@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 7.3 absence and employee portal verification
 
 ## Syfte
@@ -91,3 +92,4 @@ Fasen ar verifierad forst nar foljande ar grona:
 - [ ] Historik visas for anstalld och admin
 - [ ] Uppgifter for franvarosignaler ar kompletta
 - [ ] Disable-strategi fungerar
+

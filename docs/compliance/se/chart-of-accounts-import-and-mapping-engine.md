@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Chart of accounts import and mapping engine
 
 Detta dokument definierar import av kundkontoplan, mapping mot DSAM/BAS, versionsstyrning och spärrar så att historik och rapporter inte bryts.
@@ -174,3 +175,4 @@ Detta dokument definierar import av kundkontoplan, mapping mot DSAM/BAS, version
 - [ ] mappingversioner bevaras på varje bokföringsrad
 - [ ] konton kan blockeras eller ersättas framtidssäkert
 - [ ] DSAM/BAS-rapportering och kundens egen rapportlogik kan samexistera
+

@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: RB-007
@@ -91,3 +92,4 @@ obetydliga avrundningsskillnader kan ligga i differenskö; större oklar skattek
 - [ ] perioden är avstämd eller har formellt dokumenterade differenser
 - [ ] manuella offsets är auditbara
 - [ ] close kan läsa skattekontoläge utan dold manuell logik
+

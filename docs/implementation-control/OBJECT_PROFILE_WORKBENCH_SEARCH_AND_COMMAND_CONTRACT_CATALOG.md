@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # OBJECT_PROFILE_WORKBENCH_SEARCH_AND_COMMAND_CONTRACT_CATALOG
 
 Status: Bindande kontraktskatalog för object profiles, workbenches, listor, sök, preview, command bar och projection rebuild. Detta dokument är det enda backendkontrakt som framtida UI får byggas ovanpå.

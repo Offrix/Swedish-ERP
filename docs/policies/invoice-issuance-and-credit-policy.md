@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: POL-009
@@ -105,3 +106,4 @@ Det är tillåtet att i vissa felaktiga fall kräva helt ny faktura i stället f
 - [ ] issue och credit blockerar på saknade krav
 - [ ] specialscenarier kan inte smita förbi
 - [ ] kreditkedjan är spårbar
+

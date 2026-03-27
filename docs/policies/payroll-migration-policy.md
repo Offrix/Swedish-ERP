@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: POL-007
@@ -101,3 +102,4 @@ Akut undantag får endast användas om bolaget uttryckligen accepterat risk och 
 - [ ] skarp cutover kan inte ske utan grön policykedja
 - [ ] alla diffar är klassade
 - [ ] rollback-plan finns
+

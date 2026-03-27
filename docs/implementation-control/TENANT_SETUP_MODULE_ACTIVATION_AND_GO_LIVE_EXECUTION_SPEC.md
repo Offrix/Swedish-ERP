@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # TENANT_SETUP_MODULE_ACTIVATION_AND_GO_LIVE_EXECUTION_SPEC
 
 Status: Bindande exekveringsspec för tenant bootstrap, company setup, module activation, pilot, parallel run, go-live, cutover och rollback.

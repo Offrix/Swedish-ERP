@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: TP-008
@@ -98,3 +99,4 @@ Fel här ger felaktig skattereduktion, kundkrav eller återkrav mot bolaget.
 - [ ] edge cases runt delgodkännande och recovery är gröna
 - [ ] replay är idempotent och receipt-säker
 - [ ] blockerande datafel stoppas innan submission
+

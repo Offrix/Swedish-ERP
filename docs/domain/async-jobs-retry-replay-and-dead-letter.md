@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-001
@@ -239,3 +240,4 @@ Backoffice och reviewnära operatörsytor får konsumera jobbdata, men jobbdomä
 - [ ] replay, attempts och dead-letter är append-only
 - [ ] UI använder bara serverkommandon
 - [ ] operatörsvyer och runbooks är synkade mot domänmodellen
+

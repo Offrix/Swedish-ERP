@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 11.1 reporting and drilldown verification
 
 ## Syfte
@@ -76,3 +77,4 @@ Denna runbook verifierar att FAS 11.1 levererar historiskt reproducerbara rappor
 - [ ] belopp kan spåras till källdokument eller stödjande snapshot
 - [ ] export till Excel/PDF fungerar
 - [ ] migration, seeds, tester och verifieringsscript är gröna
+

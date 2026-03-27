@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # BankID provider setup
 
 Detta runbook beskriver exakt hur BankID/eID-provider sätts upp i sandbox och produktion, hur certifikat och hemligheter lagras, vilka callback-URL:er som används, hur testidentiteter hanteras och hur fel verifieras.
@@ -96,3 +97,4 @@ Detta runbook beskriver exakt hur BankID/eID-provider sätts upp i sandbox och p
 - [ ] testidentiteter hanteras säkert utanför repo
 - [ ] smoke tests för login och signering är gröna
 - [ ] driftansvarig och renewal-datum är dokumenterade
+

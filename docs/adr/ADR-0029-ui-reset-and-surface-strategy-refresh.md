@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: ADR-0029
@@ -128,3 +129,4 @@ ADR:n är uppfylld först när:
 - nya UI-specar är skrivna
 - `docs/ui/ENTERPRISE_UI_PLAN.md` har ersatts eller degraderats till historiskt appendix
 - byggsekvensen använder det nya surface-beslutet som enda styrande källa
+

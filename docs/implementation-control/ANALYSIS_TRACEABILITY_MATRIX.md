@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # ANALYSIS_TRACEABILITY_MATRIX
 
 Status: Stöddokument för fas 0.4.  
@@ -70,3 +71,4 @@ Detta dokument är inte primär sanning. Det finns för att bevisa att kritiska 
 
 - Alla stora findings från de tre analysdokumenten är mappade till roadmapfaser.
 - Ingen kritisk finding ska behandlas som slutförd innan motsvarande roadmapfas och exit gate är gröna.
+

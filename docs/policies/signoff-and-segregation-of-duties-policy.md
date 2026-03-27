@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: POL-004
@@ -123,3 +124,4 @@ Break-glass-undantag får endast användas vid incident eller juridiskt tvingand
 - [ ] högrisksteg har signoff class
 - [ ] SoD-regler verkställs server-side
 - [ ] override är strikt, sällsynt och auditerad
+

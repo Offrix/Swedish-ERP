@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # E-invoice and Peppol engine
 
 Detta dokument definierar e-faktura- och Peppolmotorn för inkommande och utgående elektroniska fakturor.
@@ -135,3 +136,4 @@ Persist every payload and every delivery event.
 - [ ] Inkommande elektroniska fakturor kan skapa AP-objekt.
 - [ ] Kreditnotor fungerar i båda riktningar.
 - [ ] Tekniska händelser och payloads kan spåras fullt ut.
+

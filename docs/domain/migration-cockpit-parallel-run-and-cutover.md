@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Migration cockpit, parallel run and cutover
 
 ## Syfte
@@ -180,3 +181,4 @@ Detta dokument definierar importbatch, mapping review, diff report, parallellkö
 - [ ] cutover kräver uttrycklig accept gate och rollback point
 - [ ] manuella korrigeringar är separata, godkända och auditerade
 - [ ] go-live evidence räcker för kund, intern kontroll och eftergranskning
+

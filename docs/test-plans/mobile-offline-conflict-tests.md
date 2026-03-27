@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: TP-011
@@ -101,3 +102,4 @@ Fel här ger dubbletter, tappad fältdata eller felaktiga attendance/work-order 
 - [ ] offline queue, retry and conflict behaviors are green
 - [ ] idempotency holds under retry and reconnect
 - [ ] repair flow is test-backed and operationally usable
+

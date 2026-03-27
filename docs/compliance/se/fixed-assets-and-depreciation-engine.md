@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Fixed assets and depreciation engine
 
 Detta dokument definierar anläggningsregister, anskaffning, aktivering, avskrivningsplaner, utrangering och exakt bokföringspåverkan för svenska bolag.
@@ -183,3 +184,4 @@ Detta dokument definierar anläggningsregister, anskaffning, aktivering, avskriv
 - [ ] anläggningsregister kan stämmas av mot ledgern
 - [ ] historiskt importerade tillgångar och nya tillgångar kan samexistera
 - [ ] dubbla avskrivningar och otillåtna ändringar blockeras tekniskt
+

@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # FAS 3.3 reporting and reconciliation verification
 
 ## Syfte
@@ -75,3 +76,4 @@ Denna runbook verifierar att FAS 3.3 levererar historiskt reproducerbara rapport
 - [ ] drilldown når journal och länkade dokument
 - [ ] reconciliation sign-off sparar evidence snapshot
 - [ ] migration, seeds, tester och verifieringsscript är gröna
+

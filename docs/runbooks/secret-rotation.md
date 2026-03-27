@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Secret rotation
 
 Detta runbook är den bindande 3.5-kedjan för hemligheter, callback-hemligheter och certifikat.
@@ -81,3 +82,4 @@ Efter varje rotation ska minst detta verifieras:
 - [ ] certificate chains har renewal window och private-key-ref i rätt vault
 - [ ] minst ett smoke test körs efter rotation
 - [ ] `GET /v1/ops/observability` visar `modeIsolationViolationCount = 0`
+

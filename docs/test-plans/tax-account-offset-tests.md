@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: TP-006
@@ -94,3 +95,4 @@ Fel här ger fel skatteskuld, fel close och risk för felaktig manuell kvittning
 - [ ] import, offset och differenshantering är testade
 - [ ] idempotens och close blocker-logik är grön
 - [ ] manuell matchning kräver rätt approval
+

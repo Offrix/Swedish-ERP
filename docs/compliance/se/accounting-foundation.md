@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: SE-CMP-009
@@ -221,3 +222,4 @@ Queries:
 - [ ] ledger är enda bokföringssanning
 - [ ] period, år och metod är explicita referenser
 - [ ] correctionkedjor är append-only och spårbara
+

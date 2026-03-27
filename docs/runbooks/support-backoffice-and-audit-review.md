@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Support backoffice and audit review
 
 ## Syfte
@@ -85,3 +86,4 @@ Primärt ansvarig är supportansvarig eller incident commander beroende på äre
 ## Exit gate
 
 Runbooken är klar när ärendet är löst eller korrekt eskalerat, alla förhöjda åtkomster är stängda och auditspåret är komplett för eftergranskning.
+

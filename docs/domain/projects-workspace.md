@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-010
@@ -172,3 +173,4 @@ Desktop-web äger projects workspace. Mobile visar bara jobbrelaterade utsnitt.
 - [ ] projects workspace binder ihop ekonomi, field och compliance utan att ta över deras logik
 - [ ] projekthändelser, avvikelser och drilldowns är tydligt definierade
 - [ ] desktop kan byggas mot ett stabilt workspace-kontrakt
+

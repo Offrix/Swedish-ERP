@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # ACCOUNTING_TAX_PAYROLL_AND_REGULATED_LOGIC
 
 Status: Bindande normativa regler för bokföring, moms, skatt, lön, AGI, benefits, pension, HUS, skattekonto och annual/declaration-flöden.
@@ -621,3 +622,4 @@ Detta dokument är uppfyllt först när:
 - manual_rate inte är huvudmodell för preliminärskatt
 - ungdomsnedsättning 2026, SINK 22,5 procent och HUS/ROT 2026-regler ligger i rulepacks
 - close blockerar öppen discrepancy, öppen correction eller saknad receipt där det krävs
+

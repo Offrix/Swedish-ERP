@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # MASTER_BUILD_SEQUENCE_FINAL
 
 Status: Bindande slutlig byggordning före UI.
@@ -1003,3 +1004,4 @@ Saknad unified review center, saknad tax account reconciliation, saknad end-to-e
 ## Slutregel
 
 Codex får endast bygga UI efter att detta dokument, `DOMAIN_OWNERSHIP_AND_SOURCE_OF_TRUTH.md`, `ACCOUNTING_TAX_PAYROLL_AND_REGULATED_LOGIC.md`, `INTEGRATIONS_API_EVENTS_AND_WEBHOOKS.md`, `AUTH_IDENTITY_SCOPE_AND_BACKOFFICE.md`, `OPERATIONS_REVIEW_NOTIFICATIONS_ACTIVITY_WORK_ITEMS.md`, `PROJECTS_FIELD_PERSONALLIGGARE_ID06_GENERAL_SPEC.md`, `REGULATED_SUBMISSIONS_RECEIPTS_AND_RECOVERY.md` och `UI_READINESS_GATE.md` är implementerade i kod, tester och runbooks.
+

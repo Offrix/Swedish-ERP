@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: DOM-BRIDGE-001
@@ -148,3 +149,4 @@ Read models ska byggas per bounded context och inte från en gemensam "allt-i-et
 
 - [ ] gamla referenser är mappade till rätt primärdokument
 - [ ] ingen ny implementation använder denna fil som primär spec
+

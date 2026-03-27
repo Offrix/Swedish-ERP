@@ -1,3 +1,4 @@
+﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # Master metadata
 
 - Document ID: UI-004
@@ -168,3 +169,4 @@ Varje objektprofil ska ha:
 - [ ] desktop-ytan har en enda tydlig huvud-IA
 - [ ] varje huvudområde mappar till workbenches och objektprofiler, inte till gamla shell-vyer
 - [ ] global search, work, finance, payroll, projects och close kan implementeras utan nya strukturfrågor
+
