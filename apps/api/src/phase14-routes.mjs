@@ -2542,6 +2542,160 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "POST" && path === "/v1/ops/secrets") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "managed_secret", objectId: companyId, scopeCode: "backoffice" });
+    writeJson(res, 201, platform.registerManagedSecret({
+      sessionToken,
+      companyId,
+      mode: body.mode,
+      providerCode: body.providerCode,
+      secretType: body.secretType,
+      secretRef: body.secretRef,
+      ownerUserId: body.ownerUserId,
+      backupOwnerUserId: body.backupOwnerUserId,
+      rotationCadenceDays: body.rotationCadenceDays,
+      supportsDualRunning: body.supportsDualRunning,
+      metadataJson: body.metadataJson
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/ops/secrets") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "managed_secret", objectId: companyId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listManagedSecrets({
+        sessionToken,
+        companyId,
+        mode: optionalText(url.searchParams.get("mode")),
+        providerCode: optionalText(url.searchParams.get("providerCode"))
+      })
+    });
+    return true;
+  }
+
+  const rotateManagedSecretMatch = matchPath(path, "/v1/ops/secrets/:managedSecretId/rotate");
+  if (req.method === "POST" && rotateManagedSecretMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "managed_secret", objectId: rotateManagedSecretMatch.managedSecretId, scopeCode: "backoffice" });
+    writeJson(res, 200, platform.rotateManagedSecret({
+      sessionToken,
+      companyId,
+      managedSecretId: rotateManagedSecretMatch.managedSecretId,
+      nextSecretRef: body.nextSecretRef,
+      nextSecretVersion: body.nextSecretVersion,
+      verificationMode: body.verificationMode,
+      dualRunningUntil: body.dualRunningUntil,
+      callbackSecretIds: body.callbackSecretIds,
+      certificateChainIds: body.certificateChainIds
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/ops/secret-rotations") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "secret_rotation", objectId: companyId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listSecretRotationRecords({
+        sessionToken,
+        companyId,
+        mode: optionalText(url.searchParams.get("mode")),
+        providerCode: optionalText(url.searchParams.get("providerCode"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/ops/certificate-chains") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "certificate_chain", objectId: companyId, scopeCode: "backoffice" });
+    writeJson(res, 201, platform.registerCertificateChain({
+      sessionToken,
+      companyId,
+      mode: body.mode,
+      providerCode: body.providerCode,
+      certificateLabel: body.certificateLabel,
+      callbackDomain: body.callbackDomain,
+      subjectCommonName: body.subjectCommonName,
+      sanDomains: body.sanDomains,
+      certificateSecretRef: body.certificateSecretRef,
+      privateKeySecretRef: body.privateKeySecretRef,
+      ownerUserId: body.ownerUserId,
+      backupOwnerUserId: body.backupOwnerUserId,
+      issuedAt: body.issuedAt,
+      notBefore: body.notBefore,
+      notAfter: body.notAfter,
+      renewalWindowDays: body.renewalWindowDays
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/ops/certificate-chains") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "certificate_chain", objectId: companyId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listCertificateChains({
+        sessionToken,
+        companyId,
+        mode: optionalText(url.searchParams.get("mode")),
+        providerCode: optionalText(url.searchParams.get("providerCode"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/ops/callback-secrets") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "callback_secret", objectId: companyId, scopeCode: "backoffice" });
+    writeJson(res, 201, platform.registerCallbackSecret({
+      sessionToken,
+      companyId,
+      mode: body.mode,
+      providerCode: body.providerCode,
+      callbackLabel: body.callbackLabel,
+      callbackDomain: body.callbackDomain,
+      callbackPath: body.callbackPath,
+      currentSecretRef: body.currentSecretRef,
+      managedSecretId: body.managedSecretId,
+      ownerUserId: body.ownerUserId,
+      backupOwnerUserId: body.backupOwnerUserId,
+      rotationCadenceDays: body.rotationCadenceDays,
+      overlapEndsAt: body.overlapEndsAt
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/ops/callback-secrets") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "callback_secret", objectId: companyId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listCallbackSecrets({
+        sessionToken,
+        companyId,
+        mode: optionalText(url.searchParams.get("mode")),
+        providerCode: optionalText(url.searchParams.get("providerCode"))
+      })
+    });
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/ops/restore-drills") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
@@ -4619,6 +4773,7 @@ async function buildObservabilityPayload({
         };
   const [
     controlPlane,
+    secretManagementSummary,
     partnerConnections,
     projectionContracts,
     projectionCheckpoints,
@@ -4633,6 +4788,9 @@ async function buildObservabilityPayload({
   ] = await Promise.all([
     typeof platform.getRuntimeControlPlaneSummary === "function"
       ? platform.getRuntimeControlPlaneSummary({ sessionToken, companyId })
+      : null,
+    typeof platform.getSecretManagementSummary === "function"
+      ? platform.getSecretManagementSummary({ sessionToken, companyId })
       : null,
     typeof platform.listPartnerConnections === "function"
       ? platform.listPartnerConnections({ companyId })
@@ -4708,10 +4866,14 @@ async function buildObservabilityPayload({
       structuredLogCount: structuredLogs.length,
       traceChainCount: traceChains.length,
       openIncidentCount: controlPlane?.openIncidentCount || 0,
-      openIncidentSignalCount: controlPlane?.openIncidentSignalCount || 0
+      openIncidentSignalCount: controlPlane?.openIncidentSignalCount || 0,
+      rotationDueSecretCount: secretManagementSummary?.rotationDueCount || 0,
+      expiringCertificateCount: secretManagementSummary?.expiringCertificateCount || 0,
+      secretIsolationViolationCount: secretManagementSummary?.modeIsolationViolationCount || 0
     },
     runtimeDiagnostics,
     runtimeControlPlane: controlPlane,
+    secretManagement: secretManagementSummary,
     providerHealth,
     projectionLag,
     queueAgeAlerts,

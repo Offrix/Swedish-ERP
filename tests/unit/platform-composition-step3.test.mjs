@@ -33,6 +33,11 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.equal(typeof platform.getDomain("documentClassification")?.createClassificationCase, "function");
   assert.equal(typeof platform.getDomain("importCases")?.createImportCase, "function");
   assert.equal(typeof platform.createPayrollMigrationBatch, "function");
+  assert.equal(typeof platform.registerManagedSecret, "function");
+  assert.equal(typeof platform.rotateManagedSecret, "function");
+  assert.equal(typeof platform.registerCertificateChain, "function");
+  assert.equal(typeof platform.registerCallbackSecret, "function");
+  assert.equal(typeof platform.getSecretManagementSummary, "function");
   assert.equal(typeof platform.getDomain("ledger")?.upsertVoucherSeries, "function");
   assert.equal(typeof platform.getDomain("ledger")?.resolveVoucherSeriesForPurpose, "function");
   assert.equal(typeof platform.getDomain("ar")?.upsertInvoiceSeries, "function");

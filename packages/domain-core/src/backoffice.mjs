@@ -6,6 +6,11 @@ export const IMPERSONATION_MODES = Object.freeze(["read_only", "limited_write"])
 export const IMPERSONATION_STATES = Object.freeze(["requested", "approved", "active", "ended", "terminated", "denied"]);
 export const ACCESS_REVIEW_STATUSES = Object.freeze(["generated", "assigned", "in_review", "remediated", "signed_off", "archived"]);
 export const BREAK_GLASS_STATES = Object.freeze(["requested", "dual_approved", "active", "reviewed", "closed"]);
+export const MANAGED_SECRET_TYPES = Object.freeze(["api_secret", "oauth_client_secret", "webhook_signing_secret", "certificate_private_key"]);
+export const MANAGED_SECRET_STATUSES = Object.freeze(["active", "dual_running", "retired"]);
+export const SECRET_ROTATION_RECORD_STATUSES = Object.freeze(["rotated", "failed", "revoked"]);
+export const CERTIFICATE_CHAIN_STATUSES = Object.freeze(["active", "renewal_due", "expired", "revoked"]);
+export const CALLBACK_SECRET_STATUSES = Object.freeze(["active", "dual_running", "retired"]);
 export const ADMIN_DIAGNOSTIC_TYPES = Object.freeze([
   "list_async_jobs",
   "list_submission_queue",
@@ -18,6 +23,17 @@ export const ADMIN_DIAGNOSTIC_TYPES = Object.freeze([
 const WRITE_DIAGNOSTIC_TYPES = new Set(["plan_job_replay", "execute_job_replay"]);
 const SUPPORT_ACTION_IMPERSONATION_READ_ONLY = "impersonation_read_only";
 const SUPPORT_ACTION_IMPERSONATION_LIMITED_WRITE = "impersonation_limited_write";
+const CANONICAL_VAULT_MODE_CODES = Object.freeze(["trial", "sandbox_internal", "test", "pilot_parallel", "production"]);
+const VAULT_MODE_ALIASES = Object.freeze({
+  trial: "trial",
+  sandbox: "sandbox_internal",
+  sandbox_internal: "sandbox_internal",
+  test: "test",
+  pilot: "pilot_parallel",
+  pilot_parallel: "pilot_parallel",
+  prod: "production",
+  production: "production"
+});
 
 export function createBackofficeModule({
   state,
@@ -55,11 +71,25 @@ export function createBackofficeModule({
     impersonationStates: IMPERSONATION_STATES,
     accessReviewStatuses: ACCESS_REVIEW_STATUSES,
     breakGlassStates: BREAK_GLASS_STATES,
+    managedSecretTypes: MANAGED_SECRET_TYPES,
+    managedSecretStatuses: MANAGED_SECRET_STATUSES,
+    secretRotationRecordStatuses: SECRET_ROTATION_RECORD_STATUSES,
+    certificateChainStatuses: CERTIFICATE_CHAIN_STATUSES,
+    callbackSecretStatuses: CALLBACK_SECRET_STATUSES,
     adminDiagnosticTypes: ADMIN_DIAGNOSTIC_TYPES,
     createSupportCase,
     listSupportCases,
     closeSupportCase,
     approveSupportCaseActions,
+    registerManagedSecret,
+    listManagedSecrets,
+    rotateManagedSecret,
+    listSecretRotationRecords,
+    registerCertificateChain,
+    listCertificateChains,
+    registerCallbackSecret,
+    listCallbackSecrets,
+    getSecretManagementSummary,
     runAdminDiagnostic,
     requestImpersonation,
     listImpersonationSessions,
@@ -220,6 +250,410 @@ export function createBackofficeModule({
     });
   }
 
+  function registerManagedSecret({
+    sessionToken,
+    companyId,
+    mode,
+    providerCode,
+    secretType,
+    secretRef,
+    ownerUserId,
+    backupOwnerUserId = null,
+    rotationCadenceDays,
+    supportsDualRunning = true,
+    metadataJson = {},
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const parsedSecret = parseVaultSecretRef(secretRef, {
+      code: "managed_secret_ref_invalid",
+      allowLegacyModeAliases: true
+    });
+    const resolvedMode = normalizeVaultMode(mode, "managed_secret_mode_invalid");
+    const resolvedProviderCode = text(providerCode, "managed_secret_provider_code_required");
+    const resolvedCadenceDays = normalizePositiveInteger(rotationCadenceDays, "managed_secret_rotation_cadence_invalid");
+    if (parsedSecret.canonicalMode !== resolvedMode) {
+      throw error(409, "managed_secret_mode_mismatch", "Managed secret ref must use the same runtime mode as the managed secret record.");
+    }
+    if (parsedSecret.providerCode !== resolvedProviderCode) {
+      throw error(409, "managed_secret_provider_mismatch", "Managed secret ref must use the same provider code as the managed secret record.");
+    }
+    ensureSecretRefIsUniqueAcrossInventory({
+      state,
+      companyId,
+      secretRef: parsedSecret.originalRef
+    });
+    const createdAt = nowIso(clock);
+    const managedSecret = {
+      managedSecretId: crypto.randomUUID(),
+      companyId: text(companyId, "company_id_required"),
+      mode: resolvedMode,
+      providerCode: resolvedProviderCode,
+      secretType: assertAllowed(secretType, MANAGED_SECRET_TYPES, "managed_secret_type_invalid"),
+      currentSecretRef: parsedSecret.originalRef,
+      currentSecretVersion: parsedSecret.secretName,
+      previousSecretRef: null,
+      previousSecretVersion: null,
+      vaultRef: parsedSecret.vaultRef,
+      ownerUserId: text(ownerUserId, "managed_secret_owner_user_id_required"),
+      backupOwnerUserId: optionalText(backupOwnerUserId),
+      rotationCadenceDays: resolvedCadenceDays,
+      supportsDualRunning: supportsDualRunning !== false,
+      status: "active",
+      lastRotatedAt: createdAt,
+      nextRotationDueAt: addDaysToTimestamp(createdAt, resolvedCadenceDays),
+      metadataJson: clone(metadataJson || {}),
+      createdByUserId: principal.userId,
+      createdAt,
+      updatedAt: createdAt
+    };
+    state.managedSecrets.set(managedSecret.managedSecretId, managedSecret);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.managed_secret.registered",
+      entityType: "managed_secret",
+      entityId: managedSecret.managedSecretId,
+      explanation: `Registered ${managedSecret.secretType} for ${managedSecret.providerCode} in ${managedSecret.mode}.`
+    });
+    return projectManagedSecret(managedSecret);
+  }
+
+  function listManagedSecrets({ sessionToken, companyId, mode = null, providerCode = null } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedMode = optionalText(mode) ? normalizeVaultMode(mode, "managed_secret_mode_invalid") : null;
+    const resolvedProviderCode = optionalText(providerCode);
+    return [...state.managedSecrets.values()]
+      .filter((record) => record.companyId === text(companyId, "company_id_required"))
+      .filter((record) => (resolvedMode ? record.mode === resolvedMode : true))
+      .filter((record) => (resolvedProviderCode ? record.providerCode === resolvedProviderCode : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(projectManagedSecret);
+  }
+
+  function rotateManagedSecret({
+    sessionToken,
+    companyId,
+    managedSecretId,
+    nextSecretRef,
+    nextSecretVersion = null,
+    verificationMode = "synthetic_smoke",
+    dualRunningUntil = null,
+    callbackSecretIds = [],
+    certificateChainIds = [],
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const managedSecret = requireManagedSecret(state, error, companyId, managedSecretId);
+    const parsedNextSecretRef = parseVaultSecretRef(nextSecretRef, {
+      code: "managed_secret_next_secret_ref_invalid",
+      allowLegacyModeAliases: true
+    });
+    if (parsedNextSecretRef.canonicalMode !== managedSecret.mode) {
+      throw error(409, "managed_secret_rotation_mode_mismatch", "Next secret ref must remain in the same runtime mode vault.");
+    }
+    if (parsedNextSecretRef.providerCode !== managedSecret.providerCode) {
+      throw error(409, "managed_secret_rotation_provider_mismatch", "Next secret ref must remain under the same provider code.");
+    }
+    if (parsedNextSecretRef.originalRef === managedSecret.currentSecretRef) {
+      throw error(409, "managed_secret_rotation_duplicate_ref", "Next secret ref must differ from the current secret ref.");
+    }
+    ensureSecretRefIsUniqueAcrossInventory({
+      state,
+      companyId,
+      secretRef: parsedNextSecretRef.originalRef,
+      ignoredManagedSecretId: managedSecret.managedSecretId
+    });
+    const rotatedAt = nowIso(clock);
+    const normalizedDualRunningUntil = optionalIsoTimestamp(dualRunningUntil, "managed_secret_dual_running_until_invalid");
+    if (normalizedDualRunningUntil && managedSecret.supportsDualRunning !== true) {
+      throw error(409, "managed_secret_dual_running_not_supported", "This managed secret type does not support dual-running overlap.");
+    }
+    const linkedCallbackSecretIds = normalizeIdList(callbackSecretIds, "callback_secret_id_required");
+    const linkedCertificateChainIds = normalizeIdList(certificateChainIds, "certificate_chain_id_required");
+    managedSecret.previousSecretRef = managedSecret.currentSecretRef;
+    managedSecret.previousSecretVersion = managedSecret.currentSecretVersion;
+    managedSecret.currentSecretRef = parsedNextSecretRef.originalRef;
+    managedSecret.currentSecretVersion = optionalText(nextSecretVersion) || parsedNextSecretRef.secretName;
+    managedSecret.lastRotatedAt = rotatedAt;
+    managedSecret.nextRotationDueAt = addDaysToTimestamp(rotatedAt, managedSecret.rotationCadenceDays);
+    managedSecret.status = normalizedDualRunningUntil ? "dual_running" : "active";
+    managedSecret.updatedAt = rotatedAt;
+    const rotationRecord = {
+      secretRotationRecordId: crypto.randomUUID(),
+      companyId,
+      managedSecretId: managedSecret.managedSecretId,
+      mode: managedSecret.mode,
+      providerCode: managedSecret.providerCode,
+      secretType: managedSecret.secretType,
+      previousSecretVersion: managedSecret.previousSecretVersion,
+      nextSecretVersion: managedSecret.currentSecretVersion,
+      previousSecretRef: managedSecret.previousSecretRef,
+      nextSecretRef: managedSecret.currentSecretRef,
+      requestedByUserId: principal.userId,
+      verificationMode: text(verificationMode, "secret_rotation_verification_mode_required"),
+      dualRunningUntil: normalizedDualRunningUntil,
+      linkedCallbackSecretIds,
+      linkedCertificateChainIds,
+      rotatedAt,
+      status: "rotated"
+    };
+    for (const callbackSecretId of linkedCallbackSecretIds) {
+      const callbackSecret = requireCallbackSecret(state, error, companyId, callbackSecretId);
+      if (callbackSecret.mode !== managedSecret.mode || callbackSecret.providerCode !== managedSecret.providerCode) {
+        throw error(409, "callback_secret_rotation_scope_mismatch", "Linked callback secret must belong to the same mode and provider.");
+      }
+      callbackSecret.previousSecretRef = managedSecret.previousSecretRef;
+      callbackSecret.currentSecretRef = managedSecret.currentSecretRef;
+      callbackSecret.currentSecretVersion = managedSecret.currentSecretVersion;
+      callbackSecret.lastRotatedAt = rotatedAt;
+      callbackSecret.nextRotationDueAt = addDaysToTimestamp(rotatedAt, callbackSecret.rotationCadenceDays);
+      callbackSecret.overlapEndsAt = normalizedDualRunningUntil;
+      callbackSecret.status = normalizedDualRunningUntil ? "dual_running" : "active";
+      callbackSecret.updatedAt = rotatedAt;
+    }
+    for (const certificateChainId of linkedCertificateChainIds) {
+      const certificateChain = requireCertificateChain(state, error, companyId, certificateChainId);
+      if (certificateChain.mode !== managedSecret.mode || certificateChain.providerCode !== managedSecret.providerCode) {
+        throw error(409, "certificate_chain_rotation_scope_mismatch", "Linked certificate chain must belong to the same mode and provider.");
+      }
+      certificateChain.privateKeySecretRef = managedSecret.currentSecretRef;
+      certificateChain.privateKeySecretVersion = managedSecret.currentSecretVersion;
+      certificateChain.updatedAt = rotatedAt;
+    }
+    state.secretRotationRecords.set(rotationRecord.secretRotationRecordId, rotationRecord);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.secret.rotated",
+      entityType: "managed_secret",
+      entityId: managedSecret.managedSecretId,
+      explanation: `Rotated ${managedSecret.secretType} for ${managedSecret.providerCode} in ${managedSecret.mode}.`,
+      metadata: {
+        secretRotationRecordId: rotationRecord.secretRotationRecordId,
+        dualRunningUntil: rotationRecord.dualRunningUntil
+      }
+    });
+    return projectSecretRotationRecord(rotationRecord);
+  }
+
+  function listSecretRotationRecords({ sessionToken, companyId, mode = null, providerCode = null } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedMode = optionalText(mode) ? normalizeVaultMode(mode, "managed_secret_mode_invalid") : null;
+    const resolvedProviderCode = optionalText(providerCode);
+    return [...state.secretRotationRecords.values()]
+      .filter((record) => record.companyId === text(companyId, "company_id_required"))
+      .filter((record) => (resolvedMode ? record.mode === resolvedMode : true))
+      .filter((record) => (resolvedProviderCode ? record.providerCode === resolvedProviderCode : true))
+      .sort((left, right) => right.rotatedAt.localeCompare(left.rotatedAt))
+      .map(projectSecretRotationRecord);
+  }
+
+  function registerCertificateChain({
+    sessionToken,
+    companyId,
+    mode,
+    providerCode,
+    certificateLabel,
+    callbackDomain,
+    subjectCommonName,
+    sanDomains = [],
+    certificateSecretRef = null,
+    privateKeySecretRef,
+    ownerUserId,
+    backupOwnerUserId = null,
+    issuedAt = null,
+    notBefore = null,
+    notAfter,
+    renewalWindowDays = 30,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const resolvedMode = normalizeVaultMode(mode, "certificate_chain_mode_invalid");
+    const resolvedProviderCode = text(providerCode, "certificate_chain_provider_code_required");
+    const parsedPrivateKeySecret = parseVaultSecretRef(privateKeySecretRef, {
+      code: "certificate_chain_private_key_ref_invalid",
+      allowLegacyModeAliases: true
+    });
+    if (parsedPrivateKeySecret.canonicalMode !== resolvedMode || parsedPrivateKeySecret.providerCode !== resolvedProviderCode) {
+      throw error(409, "certificate_chain_private_key_scope_mismatch", "Certificate private key secret must live in the same mode and provider vault.");
+    }
+    const parsedCertificateSecret = optionalText(certificateSecretRef)
+      ? parseVaultSecretRef(certificateSecretRef, {
+          code: "certificate_chain_secret_ref_invalid",
+          allowLegacyModeAliases: true
+        })
+      : null;
+    if (parsedCertificateSecret && (parsedCertificateSecret.canonicalMode !== resolvedMode || parsedCertificateSecret.providerCode !== resolvedProviderCode)) {
+      throw error(409, "certificate_chain_secret_scope_mismatch", "Certificate bundle secret must live in the same mode and provider vault.");
+    }
+    const createdAt = nowIso(clock);
+    const certificateChain = {
+      certificateChainId: crypto.randomUUID(),
+      companyId: text(companyId, "company_id_required"),
+      mode: resolvedMode,
+      providerCode: resolvedProviderCode,
+      certificateLabel: text(certificateLabel, "certificate_chain_label_required"),
+      callbackDomain: text(callbackDomain, "certificate_chain_callback_domain_required"),
+      subjectCommonName: text(subjectCommonName, "certificate_chain_subject_common_name_required"),
+      sanDomains: normalizeStringList(sanDomains, "certificate_chain_san_domain_required"),
+      certificateSecretRef: parsedCertificateSecret?.originalRef || null,
+      privateKeySecretRef: parsedPrivateKeySecret.originalRef,
+      privateKeySecretVersion: parsedPrivateKeySecret.secretName,
+      ownerUserId: text(ownerUserId, "certificate_chain_owner_user_id_required"),
+      backupOwnerUserId: optionalText(backupOwnerUserId),
+      issuedAt: optionalIsoTimestamp(issuedAt, "certificate_chain_issued_at_invalid"),
+      notBefore: optionalIsoTimestamp(notBefore, "certificate_chain_not_before_invalid"),
+      notAfter: isoTimestamp(notAfter, "certificate_chain_not_after_required"),
+      renewalWindowDays: normalizePositiveInteger(renewalWindowDays, "certificate_chain_renewal_window_invalid"),
+      createdByUserId: principal.userId,
+      createdAt,
+      updatedAt: createdAt
+    };
+    certificateChain.renewalDueAt = subtractDaysFromTimestamp(certificateChain.notAfter, certificateChain.renewalWindowDays);
+    certificateChain.status = resolveCertificateChainStatus(certificateChain, clock);
+    state.certificateChains.set(certificateChain.certificateChainId, certificateChain);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.certificate_chain.registered",
+      entityType: "certificate_chain",
+      entityId: certificateChain.certificateChainId,
+      explanation: `Registered certificate chain ${certificateChain.certificateLabel} for ${certificateChain.providerCode} in ${certificateChain.mode}.`
+    });
+    return projectCertificateChain(certificateChain, clock);
+  }
+
+  function listCertificateChains({ sessionToken, companyId, mode = null, providerCode = null } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedMode = optionalText(mode) ? normalizeVaultMode(mode, "certificate_chain_mode_invalid") : null;
+    const resolvedProviderCode = optionalText(providerCode);
+    return [...state.certificateChains.values()]
+      .filter((record) => record.companyId === text(companyId, "company_id_required"))
+      .filter((record) => (resolvedMode ? record.mode === resolvedMode : true))
+      .filter((record) => (resolvedProviderCode ? record.providerCode === resolvedProviderCode : true))
+      .sort((left, right) => left.callbackDomain.localeCompare(right.callbackDomain))
+      .map((record) => projectCertificateChain(record, clock));
+  }
+
+  function registerCallbackSecret({
+    sessionToken,
+    companyId,
+    mode,
+    providerCode,
+    callbackLabel,
+    callbackDomain,
+    callbackPath,
+    currentSecretRef,
+    managedSecretId = null,
+    ownerUserId,
+    backupOwnerUserId = null,
+    rotationCadenceDays,
+    overlapEndsAt = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const resolvedMode = normalizeVaultMode(mode, "callback_secret_mode_invalid");
+    const resolvedProviderCode = text(providerCode, "callback_secret_provider_code_required");
+    const parsedSecret = parseVaultSecretRef(currentSecretRef, {
+      code: "callback_secret_ref_invalid",
+      allowLegacyModeAliases: true
+    });
+    const resolvedCadenceDays = normalizePositiveInteger(rotationCadenceDays, "callback_secret_rotation_cadence_invalid");
+    if (parsedSecret.canonicalMode !== resolvedMode || parsedSecret.providerCode !== resolvedProviderCode) {
+      throw error(409, "callback_secret_scope_mismatch", "Callback secret must live in the same mode and provider vault.");
+    }
+    const linkedManagedSecretId = optionalText(managedSecretId);
+    if (linkedManagedSecretId) {
+      const managedSecret = requireManagedSecret(state, error, companyId, linkedManagedSecretId);
+      if (managedSecret.mode !== resolvedMode || managedSecret.providerCode !== resolvedProviderCode) {
+        throw error(409, "callback_secret_managed_secret_scope_mismatch", "Linked managed secret must belong to the same mode and provider.");
+      }
+    }
+    const createdAt = nowIso(clock);
+    const callbackSecret = {
+      callbackSecretId: crypto.randomUUID(),
+      companyId: text(companyId, "company_id_required"),
+      mode: resolvedMode,
+      providerCode: resolvedProviderCode,
+      callbackLabel: text(callbackLabel, "callback_secret_label_required"),
+      callbackDomain: text(callbackDomain, "callback_secret_callback_domain_required"),
+      callbackPath: text(callbackPath, "callback_secret_callback_path_required"),
+      managedSecretId: linkedManagedSecretId,
+      currentSecretRef: parsedSecret.originalRef,
+      currentSecretVersion: parsedSecret.secretName,
+      previousSecretRef: null,
+      ownerUserId: text(ownerUserId, "callback_secret_owner_user_id_required"),
+      backupOwnerUserId: optionalText(backupOwnerUserId),
+      rotationCadenceDays: resolvedCadenceDays,
+      overlapEndsAt: optionalIsoTimestamp(overlapEndsAt, "callback_secret_overlap_ends_at_invalid"),
+      status: optionalText(overlapEndsAt) ? "dual_running" : "active",
+      lastRotatedAt: createdAt,
+      nextRotationDueAt: addDaysToTimestamp(createdAt, resolvedCadenceDays),
+      createdByUserId: principal.userId,
+      createdAt,
+      updatedAt: createdAt
+    };
+    state.callbackSecrets.set(callbackSecret.callbackSecretId, callbackSecret);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.callback_secret.registered",
+      entityType: "callback_secret",
+      entityId: callbackSecret.callbackSecretId,
+      explanation: `Registered callback secret ${callbackSecret.callbackLabel} for ${callbackSecret.providerCode} in ${callbackSecret.mode}.`
+    });
+    return projectCallbackSecret(callbackSecret);
+  }
+
+  function listCallbackSecrets({ sessionToken, companyId, mode = null, providerCode = null } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedMode = optionalText(mode) ? normalizeVaultMode(mode, "callback_secret_mode_invalid") : null;
+    const resolvedProviderCode = optionalText(providerCode);
+    return [...state.callbackSecrets.values()]
+      .filter((record) => record.companyId === text(companyId, "company_id_required"))
+      .filter((record) => (resolvedMode ? record.mode === resolvedMode : true))
+      .filter((record) => (resolvedProviderCode ? record.providerCode === resolvedProviderCode : true))
+      .sort((left, right) => left.callbackDomain.localeCompare(right.callbackDomain))
+      .map(projectCallbackSecret);
+  }
+
+  function getSecretManagementSummary({ sessionToken, companyId } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const managedSecrets = [...state.managedSecrets.values()].filter((record) => record.companyId === resolvedCompanyId);
+    const certificateChains = [...state.certificateChains.values()].filter((record) => record.companyId === resolvedCompanyId);
+    const callbackSecrets = [...state.callbackSecrets.values()].filter((record) => record.companyId === resolvedCompanyId);
+    const secretRotationRecords = [...state.secretRotationRecords.values()].filter((record) => record.companyId === resolvedCompanyId);
+    const evaluatedCertificateChains = certificateChains.map((record) => projectCertificateChain(record, clock));
+    const modeIsolationViolations = [
+      ...managedSecrets.flatMap((record) => detectManagedSecretIsolationViolations(record)),
+      ...callbackSecrets.flatMap((record) => detectCallbackSecretIsolationViolations(record)),
+      ...certificateChains.flatMap((record) => detectCertificateChainIsolationViolations(record))
+    ];
+    return {
+      companyId: resolvedCompanyId,
+      generatedAt: nowIso(clock),
+      managedSecretCount: managedSecrets.length,
+      rotationDueCount: managedSecrets.filter((record) => new Date(record.nextRotationDueAt) <= new Date(clock())).length,
+      dualRunningSecretCount: managedSecrets.filter((record) => record.status === "dual_running").length,
+      secretRotationRecordCount: secretRotationRecords.length,
+      expiringCertificateCount: evaluatedCertificateChains.filter((record) => record.status === "renewal_due").length,
+      expiredCertificateCount: evaluatedCertificateChains.filter((record) => record.status === "expired").length,
+      dualRunningCallbackSecretCount: callbackSecrets.filter((record) => record.status === "dual_running").length,
+      modeIsolationViolationCount: modeIsolationViolations.length,
+      modeIsolationViolations,
+      recentSecretRotations: secretRotationRecords
+        .sort((left, right) => right.rotatedAt.localeCompare(left.rotatedAt))
+        .slice(0, 10)
+        .map(projectSecretRotationRecord)
+    };
+  }
+
   function runAdminDiagnostic({
     sessionToken,
     companyId,
@@ -261,9 +695,38 @@ export function createBackofficeModule({
       };
     } else if (resolvedCommandType === "verify_secret_refs") {
       const refs = Array.isArray(input.secretRefs) ? input.secretRefs : [];
+      const inventory = [...state.managedSecrets.values()].filter((entry) => entry.companyId === companyId);
+      const parsedRefs = refs.map((entry) => {
+        try {
+          const parsed = parseVaultSecretRef(entry, {
+            code: "secret_ref_invalid",
+            allowLegacyModeAliases: true
+          });
+          const inventoryMatch = inventory.find((candidate) => candidate.currentSecretRef === parsed.originalRef || candidate.previousSecretRef === parsed.originalRef);
+          return {
+            secretRef: redactSecretRef(entry),
+            valid: true,
+            canonicalMode: parsed.canonicalMode,
+            providerCode: parsed.providerCode,
+            registered: Boolean(inventoryMatch)
+          };
+        } catch {
+          return {
+            secretRef: redactSecretRef(entry),
+            valid: false,
+            canonicalMode: null,
+            providerCode: null,
+            registered: false
+          };
+        }
+      });
       resultSummary = {
-        verified: refs.length > 0 && refs.every((entry) => typeof entry === "string" && entry.trim().length > 0),
-        secretRefs: refs.map((entry) => redactSecretRef(entry))
+        verified:
+          parsedRefs.length > 0
+          && parsedRefs.every((entry) => entry.valid)
+          && (inventory.length === 0 || parsedRefs.every((entry) => entry.registered)),
+        secretRefs: parsedRefs.map((entry) => entry.secretRef),
+        secretRefInventory: parsedRefs
       };
     } else if (resolvedCommandType === "plan_job_replay") {
       resultSummary = {
@@ -1000,11 +1463,26 @@ function redactInput(input) {
   if (Array.isArray(payload.secretRefs)) {
     payload.secretRefs = payload.secretRefs.map((entry) => redactSecretRef(entry));
   }
+  if (typeof payload.secretRef === "string") {
+    payload.secretRef = redactSecretRef(payload.secretRef);
+  }
+  if (typeof payload.currentSecretRef === "string") {
+    payload.currentSecretRef = redactSecretRef(payload.currentSecretRef);
+  }
+  if (typeof payload.nextSecretRef === "string") {
+    payload.nextSecretRef = redactSecretRef(payload.nextSecretRef);
+  }
+  if (typeof payload.privateKeySecretRef === "string") {
+    payload.privateKeySecretRef = redactSecretRef(payload.privateKeySecretRef);
+  }
+  if (typeof payload.certificateSecretRef === "string") {
+    payload.certificateSecretRef = redactSecretRef(payload.certificateSecretRef);
+  }
   return payload;
 }
 
 function redactSecretRef(value) {
-  const resolved = text(value, "secret_ref_required");
+  const resolved = typeof value === "string" && value.trim().length > 0 ? value.trim() : "***";
   if (resolved.length <= 4) {
     return "***";
   }
@@ -1027,6 +1505,18 @@ function addDays(date, days) {
   return value.toISOString().slice(0, 10);
 }
 
+function addDaysToTimestamp(timestamp, days) {
+  const value = new Date(timestamp);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString();
+}
+
+function subtractDaysFromTimestamp(timestamp, days) {
+  const value = new Date(timestamp);
+  value.setUTCDate(value.getUTCDate() - days);
+  return value.toISOString();
+}
+
 function normalizePositiveInteger(value, code) {
   const resolved = Number(value);
   if (!Number.isInteger(resolved) || resolved <= 0) {
@@ -1047,6 +1537,21 @@ function optionalText(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function isoTimestamp(value, code) {
+  const resolved = new Date(text(value, code));
+  if (Number.isNaN(resolved.getTime())) {
+    throw createValidationError(code, `${code} must be a valid ISO timestamp.`);
+  }
+  return resolved.toISOString();
+}
+
+function optionalIsoTimestamp(value, code) {
+  if (value == null || value === "") {
+    return null;
+  }
+  return isoTimestamp(value, code);
+}
+
 function text(value, code) {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw createValidationError(code, `${code} is required.`);
@@ -1056,6 +1561,304 @@ function text(value, code) {
 
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function normalizeStringList(values, code) {
+  if (!Array.isArray(values) || values.length === 0) {
+    throw createValidationError(code, `${code} must contain at least one value.`);
+  }
+  return [...new Set(values.map((entry) => text(entry, code)))];
+}
+
+function normalizeIdList(values, code) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return [...new Set(values.map((entry) => text(entry, code)))];
+}
+
+function normalizeVaultMode(value, code) {
+  const resolved = text(value, code).toLowerCase();
+  const canonicalMode = VAULT_MODE_ALIASES[resolved] || null;
+  if (!canonicalMode || !CANONICAL_VAULT_MODE_CODES.includes(canonicalMode)) {
+    throw createValidationError(code, `${code} does not allow ${resolved}.`);
+  }
+  return canonicalMode;
+}
+
+function parseVaultSecretRef(value, { code = "secret_ref_invalid", allowLegacyModeAliases = false } = {}) {
+  const resolved = text(value, code);
+  const match = /^vault:\/\/([^/]+)\/([^/]+)\/(.+)$/u.exec(resolved);
+  if (!match) {
+    throw createValidationError(code, `${code} must use vault://<mode>/<provider>/<secret-name>.`);
+  }
+  const rawMode = match[1].trim().toLowerCase();
+  const canonicalMode = allowLegacyModeAliases ? normalizeVaultMode(rawMode, code) : rawMode;
+  if (!CANONICAL_VAULT_MODE_CODES.includes(canonicalMode)) {
+    throw createValidationError(code, `${code} must use one of ${CANONICAL_VAULT_MODE_CODES.join(", ")}.`);
+  }
+  const providerCode = text(match[2], code);
+  const secretName = text(match[3], code);
+  return {
+    originalRef: resolved,
+    rawMode,
+    canonicalMode,
+    providerCode,
+    secretName,
+    vaultRef: `vault://${canonicalMode}/${providerCode}`
+  };
+}
+
+function requireManagedSecret(state, error, companyId, managedSecretId) {
+  const managedSecret = state.managedSecrets.get(text(managedSecretId, "managed_secret_id_required"));
+  if (!managedSecret || managedSecret.companyId !== text(companyId, "company_id_required")) {
+    throw error(404, "managed_secret_not_found", "Managed secret was not found.");
+  }
+  return managedSecret;
+}
+
+function requireCertificateChain(state, error, companyId, certificateChainId) {
+  const certificateChain = state.certificateChains.get(text(certificateChainId, "certificate_chain_id_required"));
+  if (!certificateChain || certificateChain.companyId !== text(companyId, "company_id_required")) {
+    throw error(404, "certificate_chain_not_found", "Certificate chain was not found.");
+  }
+  return certificateChain;
+}
+
+function requireCallbackSecret(state, error, companyId, callbackSecretId) {
+  const callbackSecret = state.callbackSecrets.get(text(callbackSecretId, "callback_secret_id_required"));
+  if (!callbackSecret || callbackSecret.companyId !== text(companyId, "company_id_required")) {
+    throw error(404, "callback_secret_not_found", "Callback secret was not found.");
+  }
+  return callbackSecret;
+}
+
+function ensureSecretRefIsUniqueAcrossInventory({ state, companyId, secretRef, ignoredManagedSecretId = null }) {
+  for (const record of state.managedSecrets.values()) {
+    if (record.companyId !== companyId) {
+      continue;
+    }
+    if (ignoredManagedSecretId && record.managedSecretId === ignoredManagedSecretId) {
+      continue;
+    }
+    if (record.currentSecretRef === secretRef || record.previousSecretRef === secretRef) {
+      throw createValidationError("managed_secret_ref_duplicate", "Secret ref is already registered in managed secret inventory.");
+    }
+  }
+}
+
+function resolveCertificateChainStatus(record, clock) {
+  const now = new Date(clock());
+  const notAfter = new Date(record.notAfter);
+  if (notAfter < now) {
+    return "expired";
+  }
+  const renewalDueAt = new Date(record.renewalDueAt);
+  if (renewalDueAt <= now) {
+    return "renewal_due";
+  }
+  return "active";
+}
+
+function projectManagedSecret(record) {
+  return {
+    managedSecretId: record.managedSecretId,
+    companyId: record.companyId,
+    mode: record.mode,
+    providerCode: record.providerCode,
+    secretType: record.secretType,
+    ownerUserId: record.ownerUserId,
+    backupOwnerUserId: record.backupOwnerUserId,
+    vaultRef: record.vaultRef,
+    currentSecretRef: redactSecretRef(record.currentSecretRef),
+    previousSecretRef: record.previousSecretRef ? redactSecretRef(record.previousSecretRef) : null,
+    currentSecretVersion: record.currentSecretVersion,
+    previousSecretVersion: record.previousSecretVersion,
+    rotationCadenceDays: record.rotationCadenceDays,
+    lastRotatedAt: record.lastRotatedAt,
+    nextRotationDueAt: record.nextRotationDueAt,
+    supportsDualRunning: record.supportsDualRunning,
+    status: record.status,
+    metadataJson: clone(record.metadataJson),
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt
+  };
+}
+
+function projectSecretRotationRecord(record) {
+  return {
+    secretRotationRecordId: record.secretRotationRecordId,
+    companyId: record.companyId,
+    managedSecretId: record.managedSecretId,
+    mode: record.mode,
+    providerCode: record.providerCode,
+    secretType: record.secretType,
+    previousSecretVersion: record.previousSecretVersion,
+    nextSecretVersion: record.nextSecretVersion,
+    previousSecretRef: record.previousSecretRef ? redactSecretRef(record.previousSecretRef) : null,
+    nextSecretRef: redactSecretRef(record.nextSecretRef),
+    requestedByUserId: record.requestedByUserId,
+    verificationMode: record.verificationMode,
+    dualRunningUntil: record.dualRunningUntil,
+    linkedCallbackSecretIds: [...record.linkedCallbackSecretIds],
+    linkedCertificateChainIds: [...record.linkedCertificateChainIds],
+    rotatedAt: record.rotatedAt,
+    status: record.status
+  };
+}
+
+function projectCertificateChain(record, clock) {
+  const status = resolveCertificateChainStatus(record, clock);
+  return {
+    certificateChainId: record.certificateChainId,
+    companyId: record.companyId,
+    mode: record.mode,
+    providerCode: record.providerCode,
+    certificateLabel: record.certificateLabel,
+    callbackDomain: record.callbackDomain,
+    subjectCommonName: record.subjectCommonName,
+    sanDomains: [...record.sanDomains],
+    certificateSecretRef: record.certificateSecretRef ? redactSecretRef(record.certificateSecretRef) : null,
+    privateKeySecretRef: redactSecretRef(record.privateKeySecretRef),
+    privateKeySecretVersion: record.privateKeySecretVersion,
+    ownerUserId: record.ownerUserId,
+    backupOwnerUserId: record.backupOwnerUserId,
+    issuedAt: record.issuedAt,
+    notBefore: record.notBefore,
+    notAfter: record.notAfter,
+    renewalWindowDays: record.renewalWindowDays,
+    renewalDueAt: record.renewalDueAt,
+    status,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt
+  };
+}
+
+function projectCallbackSecret(record) {
+  return {
+    callbackSecretId: record.callbackSecretId,
+    companyId: record.companyId,
+    mode: record.mode,
+    providerCode: record.providerCode,
+    callbackLabel: record.callbackLabel,
+    callbackDomain: record.callbackDomain,
+    callbackPath: record.callbackPath,
+    managedSecretId: record.managedSecretId,
+    currentSecretRef: redactSecretRef(record.currentSecretRef),
+    previousSecretRef: record.previousSecretRef ? redactSecretRef(record.previousSecretRef) : null,
+    currentSecretVersion: record.currentSecretVersion,
+    ownerUserId: record.ownerUserId,
+    backupOwnerUserId: record.backupOwnerUserId,
+    rotationCadenceDays: record.rotationCadenceDays,
+    overlapEndsAt: record.overlapEndsAt,
+    status: record.status,
+    lastRotatedAt: record.lastRotatedAt,
+    nextRotationDueAt: record.nextRotationDueAt,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt
+  };
+}
+
+function detectManagedSecretIsolationViolations(record) {
+  try {
+    const parsedCurrent = parseVaultSecretRef(record.currentSecretRef, {
+      code: "managed_secret_ref_invalid",
+      allowLegacyModeAliases: true
+    });
+    const violations = [];
+    if (parsedCurrent.canonicalMode !== record.mode) {
+      violations.push({
+        objectType: "managed_secret",
+        objectId: record.managedSecretId,
+        violationCode: "managed_secret_mode_mismatch",
+        detail: `${record.managedSecretId} points to ${parsedCurrent.canonicalMode} while record mode is ${record.mode}.`
+      });
+    }
+    if (parsedCurrent.providerCode !== record.providerCode) {
+      violations.push({
+        objectType: "managed_secret",
+        objectId: record.managedSecretId,
+        violationCode: "managed_secret_provider_mismatch",
+        detail: `${record.managedSecretId} points to provider ${parsedCurrent.providerCode} while record provider is ${record.providerCode}.`
+      });
+    }
+    return violations;
+  } catch {
+    return [{
+      objectType: "managed_secret",
+      objectId: record.managedSecretId,
+      violationCode: "managed_secret_ref_invalid",
+      detail: `${record.managedSecretId} stores an invalid vault reference.`
+    }];
+  }
+}
+
+function detectCallbackSecretIsolationViolations(record) {
+  try {
+    const parsedCurrent = parseVaultSecretRef(record.currentSecretRef, {
+      code: "callback_secret_ref_invalid",
+      allowLegacyModeAliases: true
+    });
+    const violations = [];
+    if (parsedCurrent.canonicalMode !== record.mode) {
+      violations.push({
+        objectType: "callback_secret",
+        objectId: record.callbackSecretId,
+        violationCode: "callback_secret_mode_mismatch",
+        detail: `${record.callbackSecretId} points to ${parsedCurrent.canonicalMode} while record mode is ${record.mode}.`
+      });
+    }
+    if (parsedCurrent.providerCode !== record.providerCode) {
+      violations.push({
+        objectType: "callback_secret",
+        objectId: record.callbackSecretId,
+        violationCode: "callback_secret_provider_mismatch",
+        detail: `${record.callbackSecretId} points to provider ${parsedCurrent.providerCode} while record provider is ${record.providerCode}.`
+      });
+    }
+    return violations;
+  } catch {
+    return [{
+      objectType: "callback_secret",
+      objectId: record.callbackSecretId,
+      violationCode: "callback_secret_ref_invalid",
+      detail: `${record.callbackSecretId} stores an invalid callback secret reference.`
+    }];
+  }
+}
+
+function detectCertificateChainIsolationViolations(record) {
+  try {
+    const parsedPrivateKey = parseVaultSecretRef(record.privateKeySecretRef, {
+      code: "certificate_chain_private_key_ref_invalid",
+      allowLegacyModeAliases: true
+    });
+    const violations = [];
+    if (parsedPrivateKey.canonicalMode !== record.mode) {
+      violations.push({
+        objectType: "certificate_chain",
+        objectId: record.certificateChainId,
+        violationCode: "certificate_chain_mode_mismatch",
+        detail: `${record.certificateChainId} private key points to ${parsedPrivateKey.canonicalMode} while record mode is ${record.mode}.`
+      });
+    }
+    if (parsedPrivateKey.providerCode !== record.providerCode) {
+      violations.push({
+        objectType: "certificate_chain",
+        objectId: record.certificateChainId,
+        violationCode: "certificate_chain_provider_mismatch",
+        detail: `${record.certificateChainId} private key points to provider ${parsedPrivateKey.providerCode} while record provider is ${record.providerCode}.`
+      });
+    }
+    return violations;
+  } catch {
+    return [{
+      objectType: "certificate_chain",
+      objectId: record.certificateChainId,
+      violationCode: "certificate_chain_private_key_invalid",
+      detail: `${record.certificateChainId} stores an invalid private key secret reference.`
+    }];
+  }
 }
 
 function createValidationError(code, message) {

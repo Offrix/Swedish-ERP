@@ -551,6 +551,14 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/backoffice/break-glass/:breakGlassId/close`
 - `GET /v1/ops/feature-flags?companyId=...`
 - `POST /v1/ops/feature-flags`
+- `GET /v1/ops/secrets?companyId=...`
+- `POST /v1/ops/secrets`
+- `POST /v1/ops/secrets/:managedSecretId/rotate`
+- `GET /v1/ops/secret-rotations?companyId=...`
+- `GET /v1/ops/certificate-chains?companyId=...`
+- `POST /v1/ops/certificate-chains`
+- `GET /v1/ops/callback-secrets?companyId=...`
+- `POST /v1/ops/callback-secrets`
 - `GET /v1/ops/emergency-disables?companyId=...`
 - `POST /v1/ops/emergency-disables`
 - `GET /v1/ops/load-profiles?companyId=...`

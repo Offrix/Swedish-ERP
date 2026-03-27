@@ -268,13 +268,14 @@ GÃ¶ra audit och driftbevis fÃ¶rstaklassiga samt sÃ¤kra att systemet kan Ã
 - 3.2 verifierad 2026-03-27: central evidence-bundle-runtime finns nu som egen bounded context och levererar frysta, checksum-backed bundle snapshots fÃ¶r annual reporting, regulated submissions, cutover acceptance, support cases, break-glass och project workspace. Bundle-lineage, arkivering av ersatta snapshots, durability inventory och evidence-export-runbook Ã¤r verifierade med riktade tester plus full regression suite.
 - 3.3 verifierad 2026-03-27: central observability-route `/v1/ops/observability` visar nu provider health, projection lag, queue age alerts, invariant alarms, audit correlations, structured logs och trace chains frÃ¥n bÃ¥de API- och worker-runtime. Riktade observability-tester samt full regression suite verifierar alarms, worker-spans, runtime metrics och backoffice access enforcement.
 - 3.4 verifierad 2026-03-27: restore drills Ã¤r nu verklig livscykel (`scheduled -> running -> passed|failed`) med explicit coverage fÃ¶r `database_restore`, `projection_rebuild` och `worker_restart`. Nya ops-rutter fÃ¶r start/complete, worker-restart-chaos med restore-drill-koppling, control-plane coverage i observability, databasmigration fÃ¶r drill-livscykeln och bindande `docs/runbooks/restore-drill.md` Ã¤r verifierade med riktade 3.4-tester plus full regression suite.
+- 3.5 verifierad 2026-03-27: secrets, callback-hemligheter och certifikatkedjor är nu formaliserade som egna runtime-objekt med mode-bunden vaultvalidering, rotationsposter, dual-running-overlap, certifikatsförnyelsefönster och observability-sammanfattning. Nya ops-rutter för inventory/rotation, bindande `docs/runbooks/secret-rotation.md`, redigerade refs i läsmodeller och riktade 3.5-smoke tester plus full regression suite verifierar att trial/sandbox/pilot/production inte delar hemligheter eller providerkedjor.
 
 **Delfaser**
 - [x] 3.1 [HARDEN] **Canonical audit envelope** â€” Alla commands, provider calls, approvals, impersonations, submissions och replay-Ã¥tgÃ¤rder ska skriva samma auditform.
 - [x] 3.2 [NEW BUILD] **Bygg evidence-packs** â€” Submissions, annual packages, cutover, support cases, break-glass och project evidence ska kunna paketeras, hash-as och arkiveras.
 - [x] 3.3 [NEW BUILD] **Full observability** â€” Metrics, tracing, structured logs, invariant alarms, queue age alarms, provider health och projection lag ska vara synliga.
 - [x] 3.4 [OPERATIONALIZE] **Restore drills och chaos** â€” Ã…terstÃ¤llning av databas, projection rebuild och worker restart ska Ã¶vas och dokumenteras.
-- [ ] 3.5 [HARDEN] **Secrets, certifikat och rotationsregler** â€” Separata vaults per mode, certifikatkedjor, callback-hemligheter och nyckelrotation ska vara formaliserade.
+- [x] 3.5 [HARDEN] **Secrets, certifikat och rotationsregler** â€” Separata vaults per mode, certifikatkedjor, callback-hemligheter och nyckelrotation ska vara formaliserade.
 
 **Exit gate**  
 - Audit explorer, evidence packs och Ã¥terstÃ¤llningsrutiner fungerar i testad drift. Secrets Ã¤r isolerade per mode och provider.
