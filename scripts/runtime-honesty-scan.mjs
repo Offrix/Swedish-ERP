@@ -173,7 +173,11 @@ async function main() {
     env: { ...process.env, ERP_RUNTIME_MODE: args.mode },
     runtimeMode: args.mode,
     enforceExplicitRuntimeMode: true,
-    criticalDomainStateStoreKind: args.criticalDomainStateStoreKind || undefined
+    criticalDomainStateStoreKind: args.criticalDomainStateStoreKind || undefined,
+    bootstrapMode: args.bootstrapMode || undefined,
+    bootstrapScenarioCode:
+      args.bootstrapScenarioCode === null ? undefined : args.bootstrapScenarioCode,
+    seedDemo: args.seedDemo === true
   });
 
   try {

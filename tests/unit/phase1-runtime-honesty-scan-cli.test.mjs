@@ -80,3 +80,51 @@ test("phase 1.5 runtime honesty scan CLI fails when an expected finding is missi
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Missing expected finding: does_not_exist/u);
 });
+
+test("phase 1.5 runtime honesty scan CLI reports protected demo data when explicit seeding leaks into production", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      SCRIPT_PATH,
+      "--mode",
+      "production",
+      "--surface",
+      "api",
+      "--active-store-kind",
+      "memory",
+      "--critical-domain-state-store-kind",
+      "memory",
+      "--bootstrap-mode",
+      "scenario_seed",
+      "--bootstrap-scenario-code",
+      "test_default_demo",
+      "--seed-demo",
+      "--expect-finding",
+      "seed_demo_forbidden",
+      "--expect-finding",
+      "demo_data_present_in_protected_mode",
+      "--require-startup-blocked",
+      "--require-blocking",
+      "--json"
+    ],
+    {
+      cwd: WORKSPACE_ROOT,
+      encoding: "utf8"
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.runtimeMode, "production");
+  assert.equal(payload.startupAllowed, false);
+  assert.equal(
+    payload.findings.some(
+      (finding) => finding.findingCode === "demo_data_present_in_protected_mode"
+    ),
+    true
+  );
+  assert.equal(
+    payload.findings.some((finding) => finding.findingCode === "seed_demo_forbidden"),
+    true
+  );
+});

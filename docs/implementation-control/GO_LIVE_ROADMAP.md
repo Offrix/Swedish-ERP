@@ -165,6 +165,7 @@ GÃ¶ra boot, miljÃ¶lÃ¤gen, migrationslagret och startup-beteenden sanna och
 - 1.2 återverifierad 2026-03-27: API, worker, desktop-web, field-mobile, dev-start och standardplattform väljer nu explicit runtime mode; starter-fallback till tyst `test`-mode är borttagen från bootvägarna och smoke/runtime-mode-sviten är grön.
 - 1.3 återverifierad 2026-03-27: implicit `test_default_demo`-boot är borttagen från API-plattformen; demo-fixturer tillåts nu bara via explicit `bootstrapScenarioCode`, och alla berörda e2e-, integrations- och enhetstester använder namngiven explicit demo-testplattform i stället för dold autoseed.
 - 1.4 återverifierad 2026-03-27: startupdiagnostik och protected-boot-gater är nu ärliga om persistent truth; API och worker blockar fortsatt skyddade starter med blockerande invariants, och critical-domain snapshots auto-provisioneras inte längre till dold temp-sqlite utan kräver explicit store-konfiguration.
+- 1.5 återverifierad 2026-03-27: runtime honesty scanner körs nu som explicit fasgate i CLI och runbook, och verifierar både resident demo-data i protected runtime, Map-baserad sanning, stub-providers, simulerade receipts och förbjudna routefamiljer innan protected boot får fortsätta.
 
 **Exit gate**  
 - API och worker startar deterministiskt per miljÃ¶lÃ¤ge, migrationer Ã¤r rena och inga kritiska domÃ¤ner kan rÃ¥ka boota med demo-lÃ¤ge i production eller pilot.
