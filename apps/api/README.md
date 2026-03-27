@@ -8,6 +8,45 @@ HTTP baseline plus phased domain routes through FAS 14.3.
 pnpm --filter @swedish-erp/api start
 ```
 
+## Canonical envelopes
+
+All API responses now emit canonical response metadata.
+
+- `meta.requestId`
+- `meta.correlationId`
+- `meta.apiVersion`
+- `meta.mode`
+- `meta.classification`
+- `meta.idempotencyKey` when present on mutating requests
+
+Success responses also emit `data` while preserving mirrored top-level object fields during the compatibility window for the remaining route split.
+
+Error responses emit:
+
+- top-level `error` as legacy code shim
+- `errorDetail.code`
+- `errorDetail.message`
+- `errorDetail.classification`
+- `errorDetail.retryable`
+- `errorDetail.reviewRequired`
+- `errorDetail.denialReasonCode`
+- `errorDetail.supportRef`
+- `errorDetail.details`
+
+Canonical request envelopes may be sent as:
+
+```json
+{
+  "meta": {
+    "correlationId": "req-123",
+    "idempotencyKey": "mutation-123"
+  },
+  "data": {
+    "companyId": "company_demo_001"
+  }
+}
+```
+
 ## Endpoints
 
 - `GET /`

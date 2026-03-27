@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 const PUBLIC_API_SPEC_VERSION = "2026-03-25";
+const CANONICAL_API_VERSION = "2026-03-27";
 const MAX_WEBHOOK_DELIVERY_ATTEMPTS = 5;
 
 export const PUBLIC_API_MODES = Object.freeze(["sandbox", "production"]);
@@ -325,7 +326,23 @@ export function createPublicApiModule({ state, clock = () => new Date(), deliver
       if (!subscription.eventTypes.includes(resolvedEventType)) {
         continue;
       }
+      const deliveryId = crypto.randomUUID();
       const body = {
+        meta: {
+          requestId: deliveryId,
+          correlationId: event.eventId,
+          apiVersion: CANONICAL_API_VERSION,
+          mode: resolvedMode,
+          classification: "event",
+          idempotencyKey: resolvedEventKey
+        },
+        data: {
+          eventId: event.eventId,
+          eventType: event.eventType,
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          payload: clone(event.payloadJson)
+        },
         eventId: event.eventId,
         eventType: event.eventType,
         resourceType: event.resourceType,
@@ -334,7 +351,7 @@ export function createPublicApiModule({ state, clock = () => new Date(), deliver
       };
       const sequenceNo = nextWebhookSequenceNo(state, subscription.subscriptionId);
       const delivery = {
-        deliveryId: crypto.randomUUID(),
+        deliveryId,
         eventId: event.eventId,
         subscriptionId: subscription.subscriptionId,
         sequenceNo,

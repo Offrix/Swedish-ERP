@@ -3,6 +3,15 @@ import http from "node:http";
 import { createDefaultApiPlatform } from "./platform.mjs";
 import { tryHandlePhase13Route } from "./phase13-routes.mjs";
 import { tryHandlePhase14Route } from "./phase14-routes.mjs";
+import {
+  CANONICAL_API_VERSION,
+  createHttpError,
+  readJsonBody,
+  readSessionToken,
+  requireText,
+  writeError,
+  writeJson
+} from "./route-helpers.mjs";
 import { isMainModule, stopServer } from "../../../scripts/lib/repo.mjs";
 import { assertRuntimeStartupAllowed } from "../../../scripts/lib/runtime-diagnostics.mjs";
 
@@ -12,12 +21,15 @@ export function createApiServer({
 } = {}) {
   return http.createServer((req, res) => {
     const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const requestContext = createRequestContext({ req, platform });
+    req.__swedishErpRequestContext = requestContext;
+    res.__swedishErpRequestContext = requestContext;
     const traceSpan =
       typeof platform.startTraceSpan === "function"
         ? platform.startTraceSpan({
             companyId: readRequestCompanyId(req),
             traceCode: "api.request",
-            correlationId: readRequestCorrelationId(req),
+            correlationId: requestContext.correlationId,
             sourceObjectType: "http_request",
             sourceObjectId: `${req.method || "GET"} ${requestUrl.pathname}`,
             actorId: "api_server",
@@ -36,7 +48,7 @@ export function createApiServer({
           severity: res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info",
           eventCode: "api.request.completed",
           message: `Completed ${req.method || "GET"} ${requestUrl.pathname} with status ${res.statusCode}.`,
-          correlationId: traceSpan?.correlationId || readRequestCorrelationId(req),
+          correlationId: traceSpan?.correlationId || requestContext.correlationId,
           traceId: traceSpan?.traceId || null,
           spanId: traceSpan?.spanId || null,
           sourceObjectType: "http_request",
@@ -67,7 +79,7 @@ export function createApiServer({
           severity: "error",
           eventCode: "api.request.failed",
           message: error?.message || "API request failed.",
-          correlationId: traceSpan?.correlationId || readRequestCorrelationId(req),
+          correlationId: traceSpan?.correlationId || requestContext.correlationId,
           traceId: traceSpan?.traceId || null,
           spanId: traceSpan?.spanId || null,
           sourceObjectType: "http_request",
@@ -13271,53 +13283,6 @@ function isPhase142Route(path) {
 function isPhase143Route(path) {
   return path.startsWith("/v1/migration");
 }
-
-async function readJsonBody(req, allowEmpty = false) {
-  const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(chunk);
-  }
-  const text = Buffer.concat(chunks).toString("utf8");
-  if (!text) {
-    return allowEmpty ? {} : {};
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    const error = new Error("Request body is not valid JSON.");
-    error.status = 400;
-    error.code = "json_invalid";
-    throw error;
-  }
-}
-
-function readSessionToken(req, body = {}) {
-  const header = req.headers.authorization;
-  if (typeof header === "string" && header.startsWith("Bearer ")) {
-    return header.slice("Bearer ".length).trim();
-  }
-  return body.sessionToken || null;
-}
-
-function requireText(value, code, message) {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw createHttpError(400, code, message);
-  }
-  return value.trim();
-}
-
-function writeJson(res, statusCode, payload) {
-  res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
-  res.end(`${JSON.stringify(payload, null, 2)}\n`);
-}
-
-function writeError(res, error) {
-  writeJson(res, error.status || error.statusCode || 500, {
-    error: error.code || error.error || "internal_error",
-    message: error.message || "Unexpected error"
-  });
-}
-
 function readRequestCompanyId(req) {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
@@ -13343,11 +13308,28 @@ function createCorrelationId() {
   return crypto.randomUUID();
 }
 
-function createHttpError(status, code, message) {
-  const error = new Error(message);
-  error.status = status;
-  error.code = code;
-  return error;
+function createRequestContext({ req, platform }) {
+  const requestId = readOptionalHeader(req, "x-request-id") || createCorrelationId();
+  const correlationId = readRequestCorrelationId(req) || requestId;
+  const idempotencyKey = readOptionalHeader(req, "idempotency-key");
+  return {
+    requestId,
+    correlationId,
+    idempotencyKey,
+    apiVersion: CANONICAL_API_VERSION,
+    environmentMode: platform.environmentMode || null
+  };
+}
+
+function readOptionalHeader(req, headerName) {
+  const value = req.headers[headerName];
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+  if (Array.isArray(value) && value.length > 0 && typeof value[0] === "string" && value[0].trim().length > 0) {
+    return value[0].trim();
+  }
+  return null;
 }
 
 function readFeatureFlags(env) {

@@ -319,8 +319,11 @@ Standardisera alla externa och interna kontrakt, bryta upp blandade route-filer 
 **FÃ¥r inte kÃ¶ras parallellt med**  
 - Ingen ny routefamilj eller extern adapter fÃ¥r byggas pÃ¥ gamla blandade phase13/phase14-rutter.
 
+**Delfasstatus**  
+- 4.1 verifierad 2026-03-27: canonical response-meta finns nu pÃ¥ API-routes, public API, partner API och webhook-leveranser. Success envelopes bÃ¤r `meta` + `data` med bakÃ¥tkompatibel toppnivÃ¥speglad payload, error envelopes bÃ¤r canonical felmetadata med legacy error-code shim, request envelope stÃ¶der `meta.idempotencyKey` och `meta.correlationId`, och full regression suite verifierar att hela API-ytan fortfarande Ã¤r grÃ¶n.
+
 **Delfaser**
-- [ ] 4.1 [NEW BUILD] **Standard request/success/error envelopes** â€” Alla routes, public API, partner API och webhooks anvÃ¤nder samma envelopeform, correlation-id, idempotency key och classification.
+- [x] 4.1 [NEW BUILD] **Standard request/success/error envelopes** â€” Alla routes, public API, partner API och webhooks anvÃ¤nder samma envelopeform, correlation-id, idempotency key och classification.
 - [ ] 4.2 [HARDEN] **Action classes och permission resolution** â€” Varje muterande route mÃ¤rks med required action class, trust level, scope type och expected object version.
 - [ ] 4.3 [REWRITE] **Dela upp `phase13-routes.mjs` och `phase14-routes.mjs`** â€” Skapa routekatalog per domÃ¤n/funktion: auth, public API, partner API, backoffice, migration, annual reporting, resilience, projects, submissions.
 - [ ] 4.4 [NEW BUILD] **Etablera hard boundary fÃ¶r regulated submissions** â€” Transport, attempts, receipts och recovery separeras frÃ¥n generella integrationskopplingar. Antingen nytt package eller tydligt submodule med egna APIs.

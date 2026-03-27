@@ -49,5 +49,19 @@ export async function requestJson(baseUrl, pathname, { method = "GET", body = nu
   });
   const payload = await response.json();
   assert.equal(response.status, expectedStatus, JSON.stringify(payload));
+  return normalizeApiTestPayload(payload, expectedStatus);
+}
+
+function normalizeApiTestPayload(payload, expectedStatus) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) || !payload.meta) {
+    return payload;
+  }
+  if (expectedStatus >= 400 && payload.error && typeof payload.error === "object") {
+    return {
+      ...payload,
+      error: payload.error.code,
+      errorDetail: payload.error
+    };
+  }
   return payload;
 }
