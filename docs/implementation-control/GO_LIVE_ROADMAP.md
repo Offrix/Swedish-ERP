@@ -332,11 +332,12 @@ Standardisera alla externa och interna kontrakt, bryta upp blandade route-filer 
 
 **Delfasstatus**  
 - 4.1 återverifierad 2026-03-27: standard request/success/error envelopes är nu bevisade mot bibelns fulla kontrakt över API, public API, partner API och webhook-ytor; feature-flag-block och 404 fallback går via canonical error envelopes i stället för success-path, och full svit plus riktade envelope-/webhook-/partner-/public-API-tester håller grönt.
+- 4.3 klar 2026-03-27: `phase14-routes.mjs` är nu reducerad till orchestration plus hjälpfunktioner medan tax-account, balances, fiscal-year och collective-agreements ligger i egna routekataloger; `phase13-routes.mjs` är samtidigt rensad från duplicerade routeblock och delegerar nu endast till public-, partner-, job- och automation-kataloger. Full svit, lint, typecheck, build och security-scan håller grönt efter omsplitten.
 
 **Delfaser**
 - [x] 4.1 [NEW BUILD] **Standard request/success/error envelopes** â€” Alla routes, public API, partner API och webhooks anvÃ¤nder samma envelopeform, correlation-id, idempotency key och classification.
 - [x] 4.2 [HARDEN] **Action classes och permission resolution** â€” Varje muterande route mÃ¤rks med required action class, trust level, scope type och expected object version. Route-contract registry tÃ¤cker nu hela POST/PUT/PATCH/DELETE-ytan och `authz/check` kan resolva public, self och company-scoped routes.
-- [ ] 4.3 [REWRITE] **Dela upp `phase13-routes.mjs` och `phase14-routes.mjs`** â€” Skapa routekatalog per domÃ¤n/funktion: auth, public API, partner API, backoffice, migration, annual reporting, resilience, projects, submissions.
+- [x] 4.3 [REWRITE] **Dela upp `phase13-routes.mjs` och `phase14-routes.mjs`** â€” Skapa routekatalog per domÃ¤n/funktion: auth, public API, partner API, backoffice, migration, annual reporting, resilience, projects, submissions.
 - [ ] 4.4 [NEW BUILD] **Etablera hard boundary fÃ¶r regulated submissions** â€” Transport, attempts, receipts och recovery separeras frÃ¥n generella integrationskopplingar. Antingen nytt package eller tydligt submodule med egna APIs.
 - [ ] 4.5 [OPERATIONALIZE] **Contract-test miniminivÃ¥** â€” Alla routefamiljer fÃ¥r golden envelopes, denial reasons, conflict semantics och idempotency-tests.
 
