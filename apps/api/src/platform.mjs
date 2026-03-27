@@ -1018,8 +1018,7 @@ function isReadMethod(methodName) {
 
 function resolveCriticalDomainStateStore({
   options,
-  env,
-  runtimeModeProfile
+  env
 }) {
   if (options.criticalDomainStateStore) {
     return options.criticalDomainStateStore;
@@ -1028,7 +1027,7 @@ function resolveCriticalDomainStateStore({
   const storeKind =
     options.criticalDomainStateStoreKind ||
     env.ERP_CRITICAL_DOMAIN_STATE_STORE ||
-    (runtimeModeProfile.environmentMode === "test" ? "memory" : "sqlite");
+    "memory";
 
   if (storeKind === "memory") {
     return createInMemoryCriticalDomainStateStore();

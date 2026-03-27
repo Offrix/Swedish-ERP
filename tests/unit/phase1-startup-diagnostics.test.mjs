@@ -57,3 +57,18 @@ test("phase 1.4 worker rejects protected boot when runtime store is not persiste
     /startup blocked by runtime invariants/u
   );
 });
+
+test("phase 1.4 protected runtime does not auto-provision sqlite-backed critical truth", () => {
+  const platform = createApiPlatform({
+    runtimeMode: "production",
+    env: {}
+  });
+
+  try {
+    const durability = platform.listCriticalDomainDurability();
+    assert.equal(durability.every((entry) => entry.truthMode === "in_memory_snapshot"), true);
+    assert.equal(platform.getRuntimeStartupDiagnostics().startupAllowed, false);
+  } finally {
+    platform.closeCriticalDomainStateStore?.();
+  }
+});

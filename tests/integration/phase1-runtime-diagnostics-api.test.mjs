@@ -7,7 +7,8 @@ import { stopServer } from "../../scripts/lib/repo.mjs";
 test("phase 1.4 runtime endpoints expose startup diagnostics and bootstrap validation", async () => {
   const platform = createApiPlatform({
     runtimeMode: "production",
-    env: {}
+    env: {},
+    criticalDomainStateStoreKind: "memory"
   });
   const server = createApiServer({ platform });
   await new Promise((resolve) => server.listen(0, resolve));
@@ -35,7 +36,7 @@ test("phase 1.4 runtime endpoints expose startup diagnostics and bootstrap valid
     );
     assert.equal(
       invariantsPayload.findings.some((finding) => finding.findingCode === "map_only_critical_truth"),
-      false
+      true
     );
     assert.equal(
       invariantsPayload.findings.some((finding) => finding.findingCode === "stub_provider_present"),

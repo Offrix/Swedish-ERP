@@ -28,7 +28,8 @@ Ensure every starter chooses an explicit runtime mode and that non-live modes ne
    - stub providers
    - simulated filing or receipt runtime
    - forbidden sandbox route families
-8. Runtime diagnostics must be observable through:
+8. Critical-domain snapshot persistence is never auto-provisioned for protected modes; if a durable store is required it must be configured explicitly.
+9. Runtime diagnostics must be observable through:
    - `GET /v1/system/runtime-mode`
    - `GET /v1/system/invariants`
    - `POST /v1/system/bootstrap/validate`
@@ -57,6 +58,7 @@ Then run the full verification suite before the next roadmap subphase.
 - A platform exposes no `runtimeModeProfile`.
 - A non-live mode claims `supportsLegalEffect=true`.
 - A starter silently falls back to demo semantics.
+- Protected runtime silently creates temp-file critical-domain persistence instead of reporting missing explicit store configuration.
 - Protected boot proceeds despite blocking runtime invariant findings.
 - Runtime diagnostics endpoint omits current findings or startupAllowed state.
 - Honesty scanner misses Map-only truth, stub providers, simulated submission runtime or forbidden sandbox route families.
