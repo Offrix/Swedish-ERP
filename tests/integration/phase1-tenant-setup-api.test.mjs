@@ -248,7 +248,16 @@ test("Phase 1 API routes tenant setup, trial and module lifecycles through tenan
         seedScenarioCode: "agency_trial_seed"
       }
     });
+    assert.equal(trialEnvironment.mode, "trial");
+    assert.equal(trialEnvironment.watermarkCode, "TRIAL");
+    assert.equal(trialEnvironment.providerPolicyCode, "trial_safe_default");
     assert.equal(trialEnvironment.liveSubmissionPolicy, "blocked");
+    assert.equal(trialEnvironment.supportsRealCredentials, false);
+    assert.equal(trialEnvironment.supportsLegalEffect, false);
+    assert.equal(trialEnvironment.promotionEligibleFlag, true);
+    assert.equal(trialEnvironment.trialIsolationStatus, "isolated");
+    assert.equal(trialEnvironment.blockedOperationClasses.includes("live_credentials"), true);
+    assert.equal(trialEnvironment.providerPolicy.authProviders.length >= 2, true);
 
     const trialEnvironments = await requestJson(baseUrl, `/v1/trial/environments?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken

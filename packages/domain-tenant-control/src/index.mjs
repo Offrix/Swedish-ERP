@@ -57,6 +57,17 @@ const DEFAULT_VAT_FILING_PERIOD = "monthly";
 const DEFAULT_ACCOUNTING_METHOD_CODE = "FAKTURERINGSMETOD";
 const DEFAULT_LEGAL_FORM_CODE = "AKTIEBOLAG";
 const TENANT_BOOTSTRAP_ACTOR_ID = "tenant_control_bootstrap";
+const DEFAULT_TRIAL_MODE = "trial";
+const DEFAULT_TRIAL_WATERMARK_CODE = "TRIAL";
+const DEFAULT_TRIAL_PROVIDER_POLICY_CODE = "trial_safe_default";
+const DEFAULT_TRIAL_BLOCKED_OPERATION_CLASSES = Object.freeze([
+  "live_credentials",
+  "live_submissions",
+  "live_bank_rails",
+  "live_tax_account_events",
+  "live_psp_settlement",
+  "legal_effect"
+]);
 const DEFAULT_FINANCE_QUEUE_STRUCTURE = Object.freeze([
   Object.freeze({
     queueCode: "finance_review",
@@ -406,7 +417,7 @@ export function createTenantControlEngine({
     companyId,
     label = null,
     seedScenarioCode = null,
-    watermarkCode = "trial",
+    watermarkCode = DEFAULT_TRIAL_WATERMARK_CODE,
     expiresAt = null
   } = {}) {
     const principal = authorizeCompanyAction({
@@ -419,13 +430,30 @@ export function createTenantControlEngine({
     });
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const now = nowIso();
+    const trialIsolationProfile = buildTrialIsolationProfile({
+      orgAuthPlatform: requireOrgAuthPlatform(),
+      sessionToken,
+      companyId: resolvedCompanyId,
+      watermarkCode
+    });
     const record = {
       trialEnvironmentProfileId: crypto.randomUUID(),
+      trialEnvironmentId: null,
+      tenantId: resolvedCompanyId,
       companyId: resolvedCompanyId,
       label: normalizeOptionalText(label) || `Trial ${resolvedCompanyId.slice(0, 8)}`,
+      mode: trialIsolationProfile.mode,
       status: "active",
-      watermarkCode: requireText(watermarkCode, "trial_watermark_required"),
+      watermarkCode: trialIsolationProfile.watermarkCode,
+      watermarkPolicy: trialIsolationProfile.watermarkPolicy,
       seedScenarioCode: normalizeOptionalText(seedScenarioCode),
+      providerPolicyCode: trialIsolationProfile.providerPolicyCode,
+      providerPolicy: trialIsolationProfile.providerPolicy,
+      supportsRealCredentials: trialIsolationProfile.supportsRealCredentials,
+      supportsLegalEffect: trialIsolationProfile.supportsLegalEffect,
+      promotionEligibleFlag: trialIsolationProfile.promotionEligibleFlag,
+      trialIsolationStatus: trialIsolationProfile.trialIsolationStatus,
+      blockedOperationClasses: copy(trialIsolationProfile.blockedOperationClasses),
       liveCredentialPolicy: "blocked",
       liveSubmissionPolicy: "blocked",
       liveBankRailPolicy: "blocked",
@@ -437,13 +465,17 @@ export function createTenantControlEngine({
       createdAt: now,
       updatedAt: now
     };
+    record.trialEnvironmentId = record.trialEnvironmentProfileId;
     state.trialEnvironmentProfiles.set(record.trialEnvironmentProfileId, record);
     appendToIndex(state.trialEnvironmentIdsByCompany, resolvedCompanyId, record.trialEnvironmentProfileId);
     appendDomainEvent("trial.environment.created", {
       companyId: resolvedCompanyId,
       trialEnvironmentProfileId: record.trialEnvironmentProfileId,
       actorUserId: principal.userId,
-      seedScenarioCode: record.seedScenarioCode
+      seedScenarioCode: record.seedScenarioCode,
+      mode: record.mode,
+      watermarkCode: record.watermarkCode,
+      providerPolicyCode: record.providerPolicyCode
     });
     appendAuditEvent({
       companyId: resolvedCompanyId,
@@ -453,7 +485,10 @@ export function createTenantControlEngine({
       entityId: record.trialEnvironmentProfileId,
       metadata: {
         watermarkCode: record.watermarkCode,
-        seedScenarioCode: record.seedScenarioCode
+        seedScenarioCode: record.seedScenarioCode,
+        mode: record.mode,
+        providerPolicyCode: record.providerPolicyCode,
+        supportsLegalEffect: record.supportsLegalEffect
       }
     });
     return copy(record);
@@ -482,6 +517,7 @@ export function createTenantControlEngine({
     reasonCode = "manual_reset"
   } = {}) {
     const trialEnvironment = requireTrialEnvironment(trialEnvironmentProfileId);
+    assertTrialEnvironmentIsolated(trialEnvironment);
     const principal = authorizeCompanyAction({
       sessionToken,
       companyId: trialEnvironment.companyId,
@@ -524,6 +560,10 @@ export function createTenantControlEngine({
     executeNow = false
   } = {}) {
     const trialEnvironment = requireTrialEnvironment(trialEnvironmentProfileId);
+    assertTrialEnvironmentIsolated(trialEnvironment);
+    if (trialEnvironment.promotionEligibleFlag !== true) {
+      throw httpError(409, "trial_environment_not_promotion_eligible", "Trial environment is not eligible for promotion.");
+    }
     const principal = authorizeCompanyAction({
       sessionToken,
       companyId: trialEnvironment.companyId,
@@ -621,6 +661,7 @@ export function createTenantControlEngine({
       scopeCode: "parallel_run"
     });
     const trialEnvironment = requireTrialEnvironment(trialEnvironmentProfileId);
+    assertTrialEnvironmentIsolated(trialEnvironment);
     if (trialEnvironment.companyId !== requireText(companyId, "company_id_required")) {
       throw httpError(409, "parallel_run_trial_scope_mismatch", "Trial environment belongs to another company.");
     }
@@ -1494,6 +1535,122 @@ function allowsSimplifiedYearEnd(legalFormCode) {
 function normalizeMoneyOrDefault(value, defaultValue) {
   const resolved = Number(value);
   return Number.isFinite(resolved) && resolved >= 0 ? resolved : defaultValue;
+}
+
+function buildTrialIsolationProfile({ orgAuthPlatform, sessionToken, companyId, watermarkCode } = {}) {
+  const normalizedWatermarkCode = normalizeTrialWatermarkCode(watermarkCode);
+  const authModeCatalog = resolveTrialAuthModeCatalog({ orgAuthPlatform, sessionToken, companyId });
+  return {
+    mode: DEFAULT_TRIAL_MODE,
+    watermarkCode: normalizedWatermarkCode,
+    watermarkPolicy: {
+      watermarkCode: normalizedWatermarkCode,
+      bannerText: "TRIAL - no legal effect",
+      applyToEvidence: true,
+      applyToExports: true,
+      applyToReadModels: true
+    },
+    providerPolicyCode: DEFAULT_TRIAL_PROVIDER_POLICY_CODE,
+    providerPolicy: {
+      providerPolicyCode: DEFAULT_TRIAL_PROVIDER_POLICY_CODE,
+      supportsLegalEffect: false,
+      supportsRealCredentials: false,
+      authProviders: authModeCatalog,
+      adapters: {
+        banking: {
+          trialSafe: true,
+          sandboxSupported: false,
+          adapterMode: "simulator",
+          supportsLegalEffect: false
+        },
+        submissions: {
+          trialSafe: true,
+          sandboxSupported: false,
+          adapterMode: "simulator",
+          supportsLegalEffect: false,
+          receiptMode: "synthetic"
+        },
+        payments: {
+          trialSafe: true,
+          sandboxSupported: true,
+          adapterMode: "sandbox_or_simulator",
+          supportsLegalEffect: false
+        },
+        taxAccount: {
+          trialSafe: true,
+          sandboxSupported: false,
+          adapterMode: "simulator",
+          supportsLegalEffect: false
+        },
+        ocr: {
+          trialSafe: true,
+          sandboxSupported: true,
+          adapterMode: "sandbox_or_simulator",
+          supportsLegalEffect: false
+        },
+        publicApi: {
+          trialSafe: true,
+          sandboxSupported: true,
+          adapterMode: "sandbox",
+          supportsLegalEffect: false
+        }
+      }
+    },
+    supportsRealCredentials: false,
+    supportsLegalEffect: false,
+    promotionEligibleFlag: true,
+    trialIsolationStatus: "isolated",
+    blockedOperationClasses: DEFAULT_TRIAL_BLOCKED_OPERATION_CLASSES
+  };
+}
+
+function resolveTrialAuthModeCatalog({ orgAuthPlatform, sessionToken, companyId } = {}) {
+  if (!orgAuthPlatform || typeof orgAuthPlatform.getIdentityIsolationSummary !== "function") {
+    return [];
+  }
+  const summary = orgAuthPlatform.getIdentityIsolationSummary({
+    sessionToken,
+    companyId
+  });
+  return (summary.modeCatalog || [])
+    .filter((entry) => entry.runtimeMode === DEFAULT_TRIAL_MODE)
+    .map((entry) => ({
+      providerCode: entry.providerCode,
+      providerEnvironmentRef: entry.providerEnvironmentRef,
+      callbackDomain: entry.callbackDomain,
+      callbackPath: entry.callbackPath,
+      redirectUri: entry.redirectUri,
+      allowsTestIdentities: entry.allowsTestIdentities === true,
+      supportsLegalEffect: entry.supportsLegalEffect === true,
+      sandboxSupported: true
+    }));
+}
+
+function normalizeTrialWatermarkCode(value) {
+  return requireText(String(value || DEFAULT_TRIAL_WATERMARK_CODE), "trial_watermark_required")
+    .replaceAll(/[^A-Za-z0-9_]+/g, "_")
+    .replaceAll(/_+/g, "_")
+    .replace(/^_/, "")
+    .replace(/_$/, "")
+    .toUpperCase();
+}
+
+function assertTrialEnvironmentIsolated(trialEnvironment) {
+  if (!trialEnvironment || trialEnvironment.mode !== DEFAULT_TRIAL_MODE) {
+    throw httpError(409, "trial_environment_mode_invalid", "Trial environment must run in trial mode.");
+  }
+  if (trialEnvironment.supportsRealCredentials !== false || trialEnvironment.liveCredentialPolicy !== "blocked") {
+    throw httpError(409, "trial_environment_live_credentials_not_blocked", "Trial environment must block live credentials.");
+  }
+  if (trialEnvironment.supportsLegalEffect !== false || trialEnvironment.liveSubmissionPolicy !== "blocked") {
+    throw httpError(409, "trial_environment_legal_effect_not_blocked", "Trial environment must block legal effect.");
+  }
+  if (trialEnvironment.liveBankRailPolicy !== "blocked" || trialEnvironment.liveEconomicEffectPolicy !== "blocked") {
+    throw httpError(409, "trial_environment_live_effect_not_blocked", "Trial environment must block live bank rails and live economic effect.");
+  }
+  if (normalizeOptionalText(trialEnvironment.providerPolicyCode) == null || trialEnvironment.trialIsolationStatus !== "isolated") {
+    throw httpError(409, "trial_environment_not_isolated", "Trial environment isolation policy is incomplete.");
+  }
 }
 
 function mapCompanySetupStatus(tenantStatus, bootstrapStatus = null, companyStatus = null) {

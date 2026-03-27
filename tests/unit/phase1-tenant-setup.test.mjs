@@ -226,7 +226,17 @@ test("Phase 1 tenant setup flows through tenant-control with finance-ready state
     companyId: DEMO_IDS.companyId,
     seedScenarioCode: "agency_trial_seed"
   });
+  assert.equal(trialEnvironment.mode, "trial");
+  assert.equal(trialEnvironment.watermarkCode, "TRIAL");
+  assert.equal(trialEnvironment.providerPolicyCode, "trial_safe_default");
   assert.equal(trialEnvironment.liveCredentialPolicy, "blocked");
+  assert.equal(trialEnvironment.supportsRealCredentials, false);
+  assert.equal(trialEnvironment.supportsLegalEffect, false);
+  assert.equal(trialEnvironment.promotionEligibleFlag, true);
+  assert.equal(trialEnvironment.trialIsolationStatus, "isolated");
+  assert.equal(trialEnvironment.blockedOperationClasses.includes("live_credentials"), true);
+  assert.equal(trialEnvironment.providerPolicy.authProviders.length >= 2, true);
+  assert.equal(trialEnvironment.providerPolicy.adapters.submissions.supportsLegalEffect, false);
 
   const resetTrialEnvironment = tenantControl.resetTrialEnvironment({
     sessionToken: adminToken,
@@ -256,4 +266,50 @@ test("Phase 1 tenant setup flows through tenant-control with finance-ready state
   assert.equal(snapshot.trialEnvironmentProfiles.length >= 1, true);
   assert.equal(snapshot.promotionPlans.length >= 1, true);
   assert.equal(snapshot.parallelRunPlans.length >= 1, true);
+});
+
+test("Phase 7.3 trial isolation blocks promotion and parallel run when the isolation contract is broken", () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-25T08:00:00Z"),
+    bootstrapScenarioCode: "test_default_demo"
+  });
+  const tenantControl = platform.getDomain("tenantControl");
+  const adminToken = loginWithStrongAuthOnPlatform({
+    platform,
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+
+  const trialEnvironment = tenantControl.createTrialEnvironment({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    seedScenarioCode: "agency_trial_seed"
+  });
+
+  const snapshot = tenantControl.exportDurableState();
+  const trialEnvironmentEntry = snapshot.trialEnvironmentProfiles.entries.find(
+    ([trialEnvironmentProfileId]) => trialEnvironmentProfileId === trialEnvironment.trialEnvironmentProfileId
+  );
+  trialEnvironmentEntry[1].supportsLegalEffect = true;
+  trialEnvironmentEntry[1].trialIsolationStatus = "broken";
+  trialEnvironmentEntry[1].liveSubmissionPolicy = "allowed";
+  tenantControl.importDurableState(snapshot);
+
+  assert.throws(
+    () =>
+      tenantControl.promoteTrialToLive({
+        sessionToken: adminToken,
+        trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId
+      }),
+    (error) => error?.code === "trial_environment_legal_effect_not_blocked"
+  );
+  assert.throws(
+    () =>
+      tenantControl.startParallelRun({
+        sessionToken: adminToken,
+        companyId: DEMO_IDS.companyId,
+        trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId
+      }),
+    (error) => error?.code === "trial_environment_legal_effect_not_blocked"
+  );
 });

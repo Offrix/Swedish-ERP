@@ -515,13 +515,14 @@ Skapa en separat kÃ¤lla fÃ¶r tenant bootstrap, module activation, finance re
 **Delfaser**
 - [x] 7.1 [NEW BUILD] **InfÃ¶r `domain-tenant-control`** â€” Nytt package Ã¤ger `TenantBootstrap`, `CompanySetupProfile`, `ModuleActivationProfile`, `GoLivePlan`, `TrialEnvironmentProfile`, `ParallelRunPlan`, `PromotionPlan`.
 - [x] 7.2 [HARDEN] **Bygg finance-ready bootstrap** â€” Legal form, accounting method, fiscal year, chart template, VAT profile, reporting obligation profile, role template och queue structure ska skapas i korrekt ordning.
-- [ ] 7.3 [NEW BUILD] **Bygg trial/testkonto-isolering** â€” Trial tenants fÃ¥r eget mode, vattenmÃ¤rkning, fake/sandbox providers, blocked live credentials och skydd mot verkliga ekonomiska konsekvenser.
+- [x] 7.3 [NEW BUILD] **Bygg trial/testkonto-isolering** â€” Trial tenants fÃ¥r eget mode, vattenmÃ¤rkning, fake/sandbox providers, blocked live credentials och skydd mot verkliga ekonomiska konsekvenser.
 - [ ] 7.4 [NEW BUILD] **Seed scenarios, reset och refresh** â€” Bygg deterministiska seed-scenarier per bolagstyp och reset/refresh utan att blanda trial-data med live-data.
 - [ ] 7.5 [MIGRATE] **Bygg upgrade trial->live** â€” Promotion skapar ny live tenant/company profile frÃ¥n godkÃ¤nd masterdata; trial ledger, receipts, provider refs och submissions fÃ¥r aldrig flyttas rakt in i live.
 
 **Delfasstatus**
 - 7.1 Ã¥terverifierad 2026-03-27
 - 7.2 klar 2026-03-27
+- 7.3 klar 2026-03-27
 
 **Exit gate**  
 - Tenant kan bli finance-ready eller trial-safe via samma orchestrator. Trial Ã¤r marknadsmÃ¤ssig, sÃ¤ker och isolerad. Promotion till live Ã¤r definierad och testad.
