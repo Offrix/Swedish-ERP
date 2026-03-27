@@ -80,7 +80,7 @@ export async function startDesktopWebServer({
   logger = console.log,
   runtimeMode = null,
   env = process.env,
-  enforceExplicitRuntimeMode = false
+  enforceExplicitRuntimeMode = true
 } = {}) {
   const runtimeModeResolutionOptions = {
     runtimeMode,

@@ -38,6 +38,20 @@ test("phase 1.2 starter defaults fail fast when runtime mode is missing in expli
   );
 });
 
+test("phase 1.2 api starter requires explicit runtime mode by default", async () => {
+  await assert.rejects(
+    () =>
+      import("../../apps/api/src/server.mjs").then(({ startApiServer }) =>
+        startApiServer({
+          port: 0,
+          env: {},
+          logger: () => {}
+        })
+      ),
+    /must declare runtime mode explicitly/u
+  );
+});
+
 test("phase 1.2 api platform carries runtime mode metadata", () => {
   const platform = createApiPlatform({
     runtimeMode: "trial",

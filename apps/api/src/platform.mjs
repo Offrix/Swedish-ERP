@@ -1174,4 +1174,7 @@ function buildRuntimeDiagnostics({
   });
 }
 
-export const defaultApiPlatform = createDefaultApiPlatform();
+export const defaultApiPlatform = createDefaultApiPlatform({
+  runtimeMode: "test",
+  enforceExplicitRuntimeMode: true
+});

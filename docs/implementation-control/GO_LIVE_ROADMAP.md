@@ -108,9 +108,6 @@ GÃ¶ra de tvÃ¥ nya dokumenten till enda sanning, dÃ¶da felaktiga antaganden
 - [x] 0.4 [NEW BUILD] **Skapa full traceability** â€” Mappa varje kritisk punkt frÃ¥n FULL_SYSTEM_ANALYSIS, LEGACY_AND_REALITY_RECONCILIATION och COMPETITOR_AND_MARKET_REALITY till exakt roadmapfas, delfas och exit gate.
 - [x] 0.5 [OPERATIONALIZE] **InfÃ¶r hÃ¥rda stop-regler** â€” InfÃ¶r regler att shell-UI, demo-seeds, simulerade receipts, route-bredd och phase-etiketter aldrig fÃ¥r rÃ¤knas som produktmognad.
 
-**Delfasstatus**
-- 1.1 återverifierad 2026-03-27: alla migrationer självregistrerar nu exakt ett canonical `migration_id` som matchar filnamnet, och både Node- och PowerShell-validering failar på saknad, dubbel eller felaktig migrationsregistrering.
-
 **Exit gate**  
 - Alla Ã¤ldre dokument Ã¤r nedgraderade till icke-bindande om de inte uttryckligen stÃ¤mmer med denna roadmap. Produkten Ã¤r formellt definierad som generell svensk fÃ¶retagsplattform. CRM/projekt-benchmark utanfÃ¶r bygg Ã¤r lÃ¥st.
 
@@ -162,6 +159,10 @@ GÃ¶ra boot, miljÃ¶lÃ¤gen, migrationslagret och startup-beteenden sanna och
 - [x] 1.3 [REPLACE] **Byt `seedDemo=true` default** â€” Alla kÃ¤rndomÃ¤ner ska defaulta till `bootstrapMode=none`; demo-seed tillÃ¥ts endast via explicit trial/demo-scenario.
 - [x] 1.4 [REWRITE] **Rensa startup och flat merge-risker** â€” Bryt ut startupdiagnostik och varna/faila om nÃ¥gon kÃ¤rndomÃ¤n kÃ¶rs utan persistent store i lÃ¤gen dÃ¤r det inte Ã¤r tillÃ¥tet.
 - [x] 1.5 [NEW BUILD] **Bygg runtime honesty scanner** â€” Scanner ska hitta Map-baserad sanning, stub-provider, simulerade receipts, demo-data i production mode och otillÃ¥tna route-familjer.
+
+**Delfasstatus**
+- 1.1 återverifierad 2026-03-27: alla migrationer självregistrerar nu exakt ett canonical `migration_id` som matchar filnamnet, och både Node- och PowerShell-validering failar på saknad, dubbel eller felaktig migrationsregistrering.
+- 1.2 återverifierad 2026-03-27: API, worker, desktop-web, field-mobile, dev-start och standardplattform väljer nu explicit runtime mode; starter-fallback till tyst `test`-mode är borttagen från bootvägarna och smoke/runtime-mode-sviten är grön.
 
 **Exit gate**  
 - API och worker startar deterministiskt per miljÃ¶lÃ¤ge, migrationer Ã¤r rena och inga kritiska domÃ¤ner kan rÃ¥ka boota med demo-lÃ¤ge i production eller pilot.

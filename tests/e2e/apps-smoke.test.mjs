@@ -10,12 +10,13 @@ test("app baselines expose green health checks and worker heartbeats", async () 
   let heartbeatSeen = false;
 
   try {
-    runtimes.push(await startApiServer({ port: 4300, logger: () => {} }));
-    runtimes.push(await startDesktopWebServer({ port: 4301, logger: () => {} }));
-    runtimes.push(await startFieldMobileServer({ port: 4302, logger: () => {} }));
+    runtimes.push(await startApiServer({ port: 4300, logger: () => {}, runtimeMode: "test" }));
+    runtimes.push(await startDesktopWebServer({ port: 4301, logger: () => {}, runtimeMode: "test" }));
+    runtimes.push(await startFieldMobileServer({ port: 4302, logger: () => {}, runtimeMode: "test" }));
     runtimes.push(
       startWorker({
         intervalMs: 25,
+        runtimeMode: "test",
         logger: (message) => {
           if (message.includes("worker heartbeat")) {
             heartbeatSeen = true;

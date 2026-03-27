@@ -370,7 +370,7 @@ export function startWorker({
   jobStore = null,
   env = process.env,
   runtimeMode = null,
-  enforceExplicitRuntimeMode = false
+  enforceExplicitRuntimeMode = true
 } = {}) {
   const resolvedJobStore = jobStore || resolveWorkerJobStore({ env, logger });
   const resolvedPlatform = platform || createApiPlatform({

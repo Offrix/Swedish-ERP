@@ -16,7 +16,15 @@ import { isMainModule, stopServer } from "../../../scripts/lib/repo.mjs";
 import { assertRuntimeStartupAllowed } from "../../../scripts/lib/runtime-diagnostics.mjs";
 
 export function createApiServer({
-  platform = createDefaultApiPlatform({ env: process.env }),
+  platform = createDefaultApiPlatform({
+    env: process.env,
+    runtimeMode:
+      process.env.ERP_RUNTIME_MODE ||
+      process.env.RUNTIME_MODE ||
+      process.env.APP_RUNTIME_MODE ||
+      "test",
+    enforceExplicitRuntimeMode: true
+  }),
   flags = readFeatureFlags(process.env)
 } = {}) {
   return http.createServer((req, res) => {
@@ -115,7 +123,7 @@ export async function startApiServer({
   flags = readFeatureFlags(process.env),
   runtimeMode = null,
   env = process.env,
-  enforceExplicitRuntimeMode = false
+  enforceExplicitRuntimeMode = true
 } = {}) {
   const resolvedPlatform =
     platform ||
