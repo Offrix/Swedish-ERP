@@ -66,6 +66,18 @@ export function optionalText(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+export function optionalInteger(value) {
+  const normalized = optionalText(value);
+  if (normalized == null) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  if (!Number.isInteger(parsed)) {
+    throw createHttpError(400, "integer_invalid", "Value must be an integer.");
+  }
+  return parsed;
+}
+
 export function readSessionToken(req, body = {}) {
   return readBearerToken(req) || body.sessionToken || null;
 }

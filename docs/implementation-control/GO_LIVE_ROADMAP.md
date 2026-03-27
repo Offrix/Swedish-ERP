@@ -266,11 +266,12 @@ GÃ¶ra audit och driftbevis fÃ¶rstaklassiga samt sÃ¤kra att systemet kan Ã
 **Delfasstatus**  
 - 3.1 verifierad 2026-03-26: canonical audit envelope Ã¤r nu gemensam writer-form fÃ¶r auth, review, search, documents, activity, notifications samt alla kvarvarande legacy-audit-writers i ekonomi-, HR-, projekt-, field-, HUS- och importdomÃ¤ner. Integrity hash, audit-envelope-version, correlation-id och canonical `recordedAt` Ã¤r verifierade med full regression suite.
 - 3.2 verifierad 2026-03-27: central evidence-bundle-runtime finns nu som egen bounded context och levererar frysta, checksum-backed bundle snapshots fÃ¶r annual reporting, regulated submissions, cutover acceptance, support cases, break-glass och project workspace. Bundle-lineage, arkivering av ersatta snapshots, durability inventory och evidence-export-runbook Ã¤r verifierade med riktade tester plus full regression suite.
+- 3.3 verifierad 2026-03-27: central observability-route `/v1/ops/observability` visar nu provider health, projection lag, queue age alerts, invariant alarms, audit correlations, structured logs och trace chains frÃ¥n bÃ¥de API- och worker-runtime. Riktade observability-tester samt full regression suite verifierar alarms, worker-spans, runtime metrics och backoffice access enforcement.
 
 **Delfaser**
 - [x] 3.1 [HARDEN] **Canonical audit envelope** â€” Alla commands, provider calls, approvals, impersonations, submissions och replay-Ã¥tgÃ¤rder ska skriva samma auditform.
 - [x] 3.2 [NEW BUILD] **Bygg evidence-packs** â€” Submissions, annual packages, cutover, support cases, break-glass och project evidence ska kunna paketeras, hash-as och arkiveras.
-- [ ] 3.3 [NEW BUILD] **Full observability** â€” Metrics, tracing, structured logs, invariant alarms, queue age alarms, provider health och projection lag ska vara synliga.
+- [x] 3.3 [NEW BUILD] **Full observability** â€” Metrics, tracing, structured logs, invariant alarms, queue age alarms, provider health och projection lag ska vara synliga.
 - [ ] 3.4 [OPERATIONALIZE] **Restore drills och chaos** â€” Ã…terstÃ¤llning av databas, projection rebuild och worker restart ska Ã¶vas och dokumenteras.
 - [ ] 3.5 [HARDEN] **Secrets, certifikat och rotationsregler** â€” Separata vaults per mode, certifikatkedjor, callback-hemligheter och nyckelrotation ska vara formaliserade.
 

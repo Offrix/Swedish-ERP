@@ -2,6 +2,7 @@ import {
   authorizeCompanyAccess,
   createHttpError,
   matchPath,
+  optionalInteger,
   optionalText,
   readJsonBody,
   readSessionToken,
@@ -2596,6 +2597,24 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/ops/observability") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "observability", objectId: companyId, scopeCode: "resilience" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, await buildObservabilityPayload({
+      platform,
+      sessionToken,
+      companyId,
+      principal,
+      asOf: optionalText(url.searchParams.get("asOf")),
+      includeGlobal: url.searchParams.get("includeGlobal") !== "false",
+      logLimit: optionalInteger(url.searchParams.get("logLimit")) || 50,
+      traceLimit: optionalInteger(url.searchParams.get("traceLimit")) || 25
+    }));
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/migration/mapping-sets") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
@@ -4534,6 +4553,423 @@ function buildSubmissionMonitorQueueSummary({ items, asOf }) {
     }
   }
   return [...queues.values()].sort((left, right) => left.ownerQueue.localeCompare(right.ownerQueue));
+}
+
+async function buildObservabilityPayload({
+  platform,
+  sessionToken,
+  companyId,
+  principal,
+  asOf = null,
+  includeGlobal = true,
+  logLimit = 50,
+  traceLimit = 25
+}) {
+  const resolvedAsOf = resolveSubmissionMonitorAsOf(asOf);
+  const runtimeDiagnostics =
+    typeof platform.scanRuntimeInvariants === "function"
+      ? platform.scanRuntimeInvariants({ startupSurface: "api" })
+      : {
+          findings: [],
+          summary: {
+            totalCount: 0,
+            blockingCount: 0,
+            warningCount: 0
+          }
+        };
+  const [
+    controlPlane,
+    partnerConnections,
+    projectionContracts,
+    projectionCheckpoints,
+    reindexRequests,
+    runtimeJobs,
+    deadLetters,
+    reviewItems,
+    submissionQueueItems,
+    structuredLogs,
+    traceChains,
+    auditCorrelations
+  ] = await Promise.all([
+    typeof platform.getRuntimeControlPlaneSummary === "function"
+      ? platform.getRuntimeControlPlaneSummary({ sessionToken, companyId })
+      : null,
+    typeof platform.listPartnerConnections === "function"
+      ? platform.listPartnerConnections({ companyId })
+      : [],
+    typeof platform.listSearchProjectionContracts === "function"
+      ? platform.listSearchProjectionContracts({ companyId })
+      : [],
+    typeof platform.listProjectionCheckpoints === "function"
+      ? platform.listProjectionCheckpoints({ companyId })
+      : [],
+    typeof platform.listSearchReindexRequests === "function"
+      ? platform.listSearchReindexRequests({ companyId })
+      : [],
+    typeof platform.listRuntimeJobs === "function"
+      ? platform.listRuntimeJobs({ companyId })
+      : [],
+    typeof platform.listRuntimeDeadLetters === "function"
+      ? platform.listRuntimeDeadLetters({ companyId })
+      : [],
+    typeof platform.listReviewCenterItems === "function"
+      ? platform.listReviewCenterItems({ companyId })
+      : [],
+    typeof platform.listSubmissionActionQueue === "function"
+      ? platform.listSubmissionActionQueue({ companyId })
+      : [],
+    typeof platform.listStructuredLogs === "function"
+      ? platform.listStructuredLogs({ companyId, includeGlobal, limit: logLimit })
+      : [],
+    typeof platform.listTraceChains === "function"
+      ? platform.listTraceChains({ companyId, includeGlobal, limit: traceLimit })
+      : [],
+    typeof platform.listRuntimeAuditCorrelations === "function"
+      ? platform.listRuntimeAuditCorrelations({ sessionToken, companyId }).slice(0, traceLimit)
+      : []
+  ]);
+  const providerHealth = buildProviderHealthPayload(partnerConnections);
+  const projectionLag = buildProjectionLagPayload({
+    projectionContracts,
+    projectionCheckpoints,
+    reindexRequests,
+    asOf: resolvedAsOf
+  });
+  const queueAgeAlerts = buildObservabilityQueueAgeAlerts({
+    reviewItems,
+    runtimeJobs,
+    deadLetters,
+    submissionQueueItems,
+    asOf: resolvedAsOf
+  });
+  synchronizeObservabilityAlarms({
+    platform,
+    companyId,
+    runtimeDiagnostics,
+    providerHealthItems: providerHealth.items,
+    projectionLagItems: projectionLag.items,
+    actorId: principal.userId
+  });
+  const invariantAlarms =
+    typeof platform.listInvariantAlarms === "function"
+      ? platform.listInvariantAlarms({ companyId, includeGlobal, limit: 100 })
+      : [];
+  return {
+    companyId,
+    asOf: resolvedAsOf,
+    metrics: {
+      runtimeFindingCount: runtimeDiagnostics.summary?.totalCount || 0,
+      openInvariantAlarmCount: invariantAlarms.filter((alarm) => alarm.state !== "resolved").length,
+      unhealthyProviderCount: providerHealth.items.filter((item) => ["degraded", "outage"].includes(item.healthStatus)).length,
+      laggingProjectionCount: projectionLag.items.filter((item) => item.lagState !== "healthy").length,
+      queueAgeAlertCount: queueAgeAlerts.length,
+      runtimeJobBacklogCount: runtimeJobs.filter((job) => ["queued", "retry_scheduled", "claimed", "running"].includes(job.status)).length,
+      runtimeDeadLetterCount: deadLetters.filter((item) => item.operatorState !== "closed").length,
+      structuredLogCount: structuredLogs.length,
+      traceChainCount: traceChains.length,
+      openIncidentCount: controlPlane?.openIncidentCount || 0,
+      openIncidentSignalCount: controlPlane?.openIncidentSignalCount || 0
+    },
+    runtimeDiagnostics,
+    runtimeControlPlane: controlPlane,
+    providerHealth,
+    projectionLag,
+    queueAgeAlerts,
+    invariantAlarms,
+    structuredLogs,
+    traceChains,
+    auditCorrelations
+  };
+}
+
+function buildProviderHealthPayload(partnerConnections = []) {
+  const items = (partnerConnections || [])
+    .map((connection) => ({
+      connectionId: connection.connectionId,
+      connectionType: connection.connectionType,
+      providerCode: connection.providerCode,
+      displayName: connection.displayName,
+      mode: connection.mode,
+      status: connection.status,
+      healthStatus: connection.healthStatus || "unknown",
+      fallbackMode: connection.fallbackMode,
+      lastHealthCheckAt: connection.lastHealthCheckAt || null,
+      lastSuccessfulOperationAt: connection.lastSuccessfulOperationAt || null,
+      lastFailureOperationAt: connection.lastFailureOperationAt || null,
+      latestReceiptAt: connection.latestReceiptAt || null
+    }))
+    .sort((left, right) => left.displayName.localeCompare(right.displayName) || left.connectionId.localeCompare(right.connectionId));
+  return {
+    items,
+    counters: {
+      total: items.length,
+      healthy: items.filter((item) => item.healthStatus === "healthy").length,
+      degraded: items.filter((item) => item.healthStatus === "degraded").length,
+      outage: items.filter((item) => item.healthStatus === "outage").length,
+      unknown: items.filter((item) => item.healthStatus === "unknown").length
+    }
+  };
+}
+
+function buildProjectionLagPayload({
+  projectionContracts = [],
+  projectionCheckpoints = [],
+  reindexRequests = [],
+  asOf = null
+}) {
+  const resolvedAsOf = resolveSubmissionMonitorAsOf(asOf);
+  const checkpointsByProjectionCode = new Map(
+    (projectionCheckpoints || []).map((checkpoint) => [checkpoint.projectionCode, checkpoint])
+  );
+  const reindexRequestsByProjectionCode = new Map();
+  for (const request of reindexRequests || []) {
+    const key = request.projectionCode || "__all__";
+    if (!reindexRequestsByProjectionCode.has(key)) {
+      reindexRequestsByProjectionCode.set(key, []);
+    }
+    reindexRequestsByProjectionCode.get(key).push(request);
+  }
+  const items = (projectionContracts || []).map((contract) => {
+    const checkpoint = checkpointsByProjectionCode.get(contract.projectionCode) || null;
+    const projectionRequests = [
+      ...(reindexRequestsByProjectionCode.get(contract.projectionCode) || []),
+      ...(reindexRequestsByProjectionCode.get("__all__") || [])
+    ].filter((request) => ["requested", "running"].includes(request.status));
+    const checkpointStatus = checkpoint?.status || "missing";
+    const checkpointAgeMinutes = checkpoint?.lastCompletedAt
+      ? Math.max(0, Math.round((Date.parse(resolvedAsOf) - Date.parse(checkpoint.lastCompletedAt)) / 60000))
+      : null;
+    const runningAgeMinutes = checkpoint?.lastStartedAt
+      ? Math.max(0, Math.round((Date.parse(resolvedAsOf) - Date.parse(checkpoint.lastStartedAt)) / 60000))
+      : null;
+    const lagState =
+      !checkpoint || Number(checkpoint.checkpointSequenceNo || 0) === 0
+        ? "never_built"
+        : checkpointStatus === "failed"
+          ? "failed"
+          : checkpointStatus === "running" && Number(runningAgeMinutes || 0) >= 15
+            ? "running_lagging"
+            : projectionRequests.some((request) =>
+              Math.max(0, Math.round((Date.parse(resolvedAsOf) - Date.parse(request.requestedAt)) / 60000)) >= 15
+            )
+              ? "reindex_backlog"
+              : "healthy";
+    return {
+      projectionCode: contract.projectionCode,
+      displayName: contract.displayName,
+      sourceDomainCode: contract.sourceDomainCode,
+      checkpointStatus,
+      checkpointSequenceNo: checkpoint?.checkpointSequenceNo || 0,
+      lagState,
+      lastRequestedAt: checkpoint?.lastRequestedAt || null,
+      lastStartedAt: checkpoint?.lastStartedAt || null,
+      lastCompletedAt: checkpoint?.lastCompletedAt || null,
+      lastErrorCode: checkpoint?.lastErrorCode || null,
+      lastErrorMessage: checkpoint?.lastErrorMessage || null,
+      checkpointAgeMinutes,
+      runningAgeMinutes,
+      openReindexRequestCount: projectionRequests.length
+    };
+  });
+  return {
+    items,
+    counters: {
+      total: items.length,
+      healthy: items.filter((item) => item.lagState === "healthy").length,
+      neverBuilt: items.filter((item) => item.lagState === "never_built").length,
+      failed: items.filter((item) => item.lagState === "failed").length,
+      lagging: items.filter((item) => ["running_lagging", "reindex_backlog"].includes(item.lagState)).length
+    }
+  };
+}
+
+function buildObservabilityQueueAgeAlerts({
+  reviewItems = [],
+  runtimeJobs = [],
+  deadLetters = [],
+  submissionQueueItems = [],
+  asOf = null
+}) {
+  const resolvedAsOf = resolveSubmissionMonitorAsOf(asOf);
+  const alerts = [];
+  const overdueReviewGroups = new Map();
+  for (const item of (reviewItems || []).filter((candidate) => ["open", "claimed", "waiting_input", "escalated"].includes(candidate.status))) {
+    if (!item.slaDueAt || item.slaDueAt.localeCompare(resolvedAsOf) > 0) {
+      continue;
+    }
+    const key = item.queueCode || "review_center";
+    const existing = overdueReviewGroups.get(key) || {
+      alertCode: "review_queue_overdue",
+      severity: "high",
+      queueType: "review_center",
+      queueKey: key,
+      openCount: 0,
+      oldestOpenAgeMinutes: 0,
+      sourceObjectRefs: []
+    };
+    existing.openCount += 1;
+    const ageMinutes = Math.max(0, Math.round((Date.parse(resolvedAsOf) - Date.parse(item.createdAt)) / 60000));
+    existing.oldestOpenAgeMinutes = Math.max(existing.oldestOpenAgeMinutes, ageMinutes);
+    existing.sourceObjectRefs.push({ objectType: "review_item", objectId: item.reviewItemId });
+    overdueReviewGroups.set(key, existing);
+  }
+  alerts.push(...overdueReviewGroups.values());
+
+  for (const job of (runtimeJobs || []).filter((candidate) => ["queued", "retry_scheduled"].includes(candidate.status))) {
+    const referenceTime = job.availableAt || job.createdAt;
+    const ageMinutes = Math.max(0, Math.round((Date.parse(resolvedAsOf) - Date.parse(referenceTime)) / 60000));
+    if (ageMinutes < 15) {
+      continue;
+    }
+    alerts.push({
+      alertCode: "async_job_queue_lag",
+      severity: ageMinutes >= 60 ? "high" : "medium",
+      queueType: "async_jobs",
+      queueKey: job.jobType,
+      openCount: 1,
+      oldestOpenAgeMinutes: ageMinutes,
+      sourceObjectRefs: [{ objectType: "async_job", objectId: job.jobId }]
+    });
+  }
+
+  for (const queueItem of (submissionQueueItems || []).filter((candidate) => ["open", "claimed", "waiting_input"].includes(candidate.status))) {
+    if (!queueItem.slaDueAt || queueItem.slaDueAt.localeCompare(resolvedAsOf) > 0) {
+      continue;
+    }
+    const ageMinutes = Math.max(0, Math.round((Date.parse(resolvedAsOf) - Date.parse(queueItem.createdAt)) / 60000));
+    alerts.push({
+      alertCode: "submission_queue_overdue",
+      severity: "high",
+      queueType: "submission_operator",
+      queueKey: queueItem.ownerQueue || "submission_operator",
+      openCount: 1,
+      blockedCount: queueItem.status === "waiting_input" ? 1 : 0,
+      oldestOpenAgeMinutes: ageMinutes,
+      sourceObjectRefs: [{ objectType: "submission_queue_item", objectId: queueItem.queueItemId || `${queueItem.submissionId}:${queueItem.actionType}` }]
+    });
+  }
+
+  for (const deadLetter of (deadLetters || []).filter((candidate) => candidate.operatorState !== "closed")) {
+    alerts.push({
+      alertCode: "async_dead_letter_open",
+      severity: deadLetter.poisonPillDetected === true ? "critical" : "high",
+      queueType: "async_dead_letter",
+      queueKey: deadLetter.terminalReason || "dead_letter",
+      openCount: 1,
+      oldestOpenAgeMinutes: Math.max(0, Math.round((Date.parse(resolvedAsOf) - Date.parse(deadLetter.enteredAt || deadLetter.createdAt)) / 60000)),
+      sourceObjectRefs: [{ objectType: "async_dead_letter", objectId: deadLetter.deadLetterId }]
+    });
+  }
+
+  return alerts.sort((left, right) =>
+    compareObservabilitySeverity(left.severity, right.severity)
+    || right.oldestOpenAgeMinutes - left.oldestOpenAgeMinutes
+    || left.queueType.localeCompare(right.queueType)
+    || left.queueKey.localeCompare(right.queueKey)
+  );
+}
+
+function synchronizeObservabilityAlarms({
+  platform,
+  companyId,
+  runtimeDiagnostics,
+  providerHealthItems = [],
+  projectionLagItems = [],
+  actorId = "system"
+}) {
+  if (typeof platform.synchronizeInvariantAlarm !== "function" || typeof platform.listInvariantAlarms !== "function") {
+    return;
+  }
+  const activeKeys = new Set();
+
+  for (const finding of runtimeDiagnostics?.findings || []) {
+    const alarmCode = `runtime_invariant.${finding.findingCode || "unknown"}`;
+    const sourceObjectType = "runtime_startup_surface";
+    const sourceObjectId = finding.startupSurface || runtimeDiagnostics?.startupSurface || "api";
+    activeKeys.add(`${alarmCode}::${sourceObjectType}::${sourceObjectId}`);
+    platform.synchronizeInvariantAlarm({
+      companyId,
+      alarmCode,
+      sourceObjectType,
+      sourceObjectId,
+      severity: finding.severity === "blocking" ? "critical" : "high",
+      summary: finding.message || finding.explanation || finding.findingCode || "Runtime invariant failed.",
+      metadata: {
+        severity: finding.severity || null,
+        category: finding.category || null
+      },
+      actorId,
+      active: true
+    });
+  }
+
+  for (const item of providerHealthItems.filter((candidate) => ["degraded", "outage"].includes(candidate.healthStatus))) {
+    const alarmCode = "provider_health_unhealthy";
+    const sourceObjectType = "partner_connection";
+    const sourceObjectId = item.connectionId;
+    activeKeys.add(`${alarmCode}::${sourceObjectType}::${sourceObjectId}`);
+    platform.synchronizeInvariantAlarm({
+      companyId,
+      alarmCode,
+      sourceObjectType,
+      sourceObjectId,
+      severity: item.healthStatus === "outage" ? "critical" : "high",
+      summary: `${item.displayName} is ${item.healthStatus}.`,
+      metadata: {
+        connectionType: item.connectionType,
+        providerCode: item.providerCode,
+        mode: item.mode
+      },
+      actorId,
+      active: true
+    });
+  }
+
+  for (const item of projectionLagItems.filter((candidate) => candidate.lagState !== "healthy")) {
+    const alarmCode = "projection_lag";
+    const sourceObjectType = "search_projection";
+    const sourceObjectId = item.projectionCode;
+    activeKeys.add(`${alarmCode}::${sourceObjectType}::${sourceObjectId}`);
+    platform.synchronizeInvariantAlarm({
+      companyId,
+      alarmCode,
+      sourceObjectType,
+      sourceObjectId,
+      severity: item.lagState === "failed" ? "critical" : "medium",
+      summary: `Projection ${item.projectionCode} is ${item.lagState}.`,
+      metadata: {
+        lagState: item.lagState,
+        checkpointStatus: item.checkpointStatus,
+        sourceDomainCode: item.sourceDomainCode
+      },
+      actorId,
+      active: true
+    });
+  }
+
+  for (const alarm of platform.listInvariantAlarms({ companyId, includeGlobal: false, limit: 500 })) {
+    const sourceObjectType = alarm.sourceObjectType || "_";
+    const sourceObjectId = alarm.sourceObjectId || "_";
+    const key = `${alarm.alarmCode}::${sourceObjectType}::${sourceObjectId}`;
+    if (
+      ["runtime_invariant", "provider_health_unhealthy", "projection_lag"].some((prefix) => alarm.alarmCode.startsWith(prefix))
+      && !activeKeys.has(key)
+    ) {
+      platform.synchronizeInvariantAlarm({
+        companyId,
+        alarmCode: alarm.alarmCode,
+        sourceObjectType: alarm.sourceObjectType,
+        sourceObjectId: alarm.sourceObjectId,
+        actorId,
+        active: false
+      });
+    }
+  }
+}
+
+function compareObservabilitySeverity(left, right) {
+  const order = ["critical", "high", "medium", "low"];
+  return order.indexOf(left) - order.indexOf(right);
 }
 
 function resolveBackofficeOperatorBinding({

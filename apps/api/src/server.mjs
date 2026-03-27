@@ -11,7 +11,86 @@ export function createApiServer({
   flags = readFeatureFlags(process.env)
 } = {}) {
   return http.createServer((req, res) => {
-    handleRequest({ req, res, platform, flags }).catch((error) => {
+    const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const traceSpan =
+      typeof platform.startTraceSpan === "function"
+        ? platform.startTraceSpan({
+            companyId: readRequestCompanyId(req),
+            traceCode: "api.request",
+            correlationId: readRequestCorrelationId(req),
+            sourceObjectType: "http_request",
+            sourceObjectId: `${req.method || "GET"} ${requestUrl.pathname}`,
+            actorId: "api_server",
+            attributes: {
+              surfaceCode: "api",
+              method: req.method || "GET",
+              path: requestUrl.pathname
+            }
+          })
+        : null;
+    handleRequest({ req, res, platform, flags }).then(() => {
+      if (typeof platform.recordStructuredLog === "function") {
+        platform.recordStructuredLog({
+          companyId: readRequestCompanyId(req),
+          surfaceCode: "api",
+          severity: res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info",
+          eventCode: "api.request.completed",
+          message: `Completed ${req.method || "GET"} ${requestUrl.pathname} with status ${res.statusCode}.`,
+          correlationId: traceSpan?.correlationId || readRequestCorrelationId(req),
+          traceId: traceSpan?.traceId || null,
+          spanId: traceSpan?.spanId || null,
+          sourceObjectType: "http_request",
+          sourceObjectId: `${req.method || "GET"} ${requestUrl.pathname}`,
+          actorId: "api_server",
+          metadata: {
+            method: req.method || "GET",
+            path: requestUrl.pathname,
+            statusCode: res.statusCode
+          }
+        });
+      }
+      if (traceSpan && typeof platform.completeTraceSpan === "function") {
+        platform.completeTraceSpan({
+          spanId: traceSpan.spanId,
+          outcomeCode: `http_${res.statusCode}`,
+          resultSummary: {
+            statusCode: res.statusCode,
+            path: requestUrl.pathname
+          }
+        });
+      }
+    }).catch((error) => {
+      if (typeof platform.recordStructuredLog === "function") {
+        platform.recordStructuredLog({
+          companyId: readRequestCompanyId(req),
+          surfaceCode: "api",
+          severity: "error",
+          eventCode: "api.request.failed",
+          message: error?.message || "API request failed.",
+          correlationId: traceSpan?.correlationId || readRequestCorrelationId(req),
+          traceId: traceSpan?.traceId || null,
+          spanId: traceSpan?.spanId || null,
+          sourceObjectType: "http_request",
+          sourceObjectId: `${req.method || "GET"} ${requestUrl.pathname}`,
+          actorId: "api_server",
+          metadata: {
+            method: req.method || "GET",
+            path: requestUrl.pathname,
+            errorCode: error?.code || error?.error || "internal_error",
+            statusCode: error?.status || error?.statusCode || 500
+          }
+        });
+      }
+      if (traceSpan && typeof platform.failTraceSpan === "function") {
+        platform.failTraceSpan({
+          spanId: traceSpan.spanId,
+          errorCode: error?.code || error?.error || "internal_error",
+          errorMessage: error?.message || "API request failed.",
+          resultSummary: {
+            path: requestUrl.pathname
+          }
+        });
+      }
       writeError(res, error);
     });
   });
@@ -52,6 +131,21 @@ export async function startApiServer({
       runtimeDiagnostics?.activeStoreKind || "unknown"
     } findings=${runtimeDiagnostics?.summary?.totalCount || 0}`
   );
+  if (typeof resolvedPlatform.recordStructuredLog === "function") {
+    resolvedPlatform.recordStructuredLog({
+      surfaceCode: "api",
+      severity: "info",
+      eventCode: "api.startup",
+      message: `API started on port ${port}.`,
+      actorId: "api_server",
+      metadata: {
+        port,
+        environmentMode: resolvedPlatform.environmentMode,
+        activeStoreKind: runtimeDiagnostics?.activeStoreKind || "unknown",
+        runtimeFindingCount: runtimeDiagnostics?.summary?.totalCount || 0
+      }
+    });
+  }
   return {
     port,
     server,
@@ -714,6 +808,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/backoffice/break-glass/:breakGlassId/approve",
               "/v1/backoffice/break-glass/:breakGlassId/close",
               "/v1/ops/feature-flags",
+              "/v1/ops/observability",
               "/v1/ops/emergency-disables",
               "/v1/ops/emergency-disables/:emergencyDisableId/release",
               "/v1/ops/load-profiles",
@@ -13214,6 +13309,27 @@ function writeError(res, error) {
     error: error.code || error.error || "internal_error",
     message: error.message || "Unexpected error"
   });
+}
+
+function readRequestCompanyId(req) {
+  try {
+    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const value = url.searchParams.get("companyId");
+    return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function readRequestCorrelationId(req) {
+  const header = req.headers["x-correlation-id"];
+  if (typeof header === "string" && header.trim().length > 0) {
+    return header.trim();
+  }
+  if (Array.isArray(header) && header.length > 0 && typeof header[0] === "string" && header[0].trim().length > 0) {
+    return header[0].trim();
+  }
+  return null;
 }
 
 function createCorrelationId() {

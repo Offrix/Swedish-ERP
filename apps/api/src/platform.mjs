@@ -4,6 +4,7 @@ import path from "node:path";
 import { createOrgAuthPlatform } from "../../../packages/domain-org-auth/src/index.mjs";
 import { createDocumentArchivePlatform } from "../../../packages/domain-documents/src/index.mjs";
 import { createEvidencePlatform } from "../../../packages/domain-evidence/src/index.mjs";
+import { createObservabilityPlatform } from "../../../packages/domain-observability/src/index.mjs";
 import { createLedgerPlatform } from "../../../packages/domain-ledger/src/index.mjs";
 import { createAccountingMethodPlatform } from "../../../packages/domain-accounting-method/src/index.mjs";
 import { createFiscalYearPlatform } from "../../../packages/domain-fiscal-year/src/index.mjs";
@@ -73,6 +74,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "orgAuth",
   "documents",
   "evidence",
+  "observability",
   "accountingMethod",
   "fiscalYear",
   "legalForm",
@@ -114,6 +116,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "orgAuth",
   "documents",
   "evidence",
+  "observability",
   "accountingMethod",
   "fiscalYear",
   "legalForm",
@@ -169,6 +172,12 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     label: "Evidence",
     packageName: "@swedish-erp/domain-evidence",
     create: ({ options }) => createEvidencePlatform(options)
+  }),
+  createDomainDefinition({
+    key: "observability",
+    label: "Observability",
+    packageName: "@swedish-erp/domain-observability",
+    create: ({ options }) => createObservabilityPlatform(options)
   }),
   createDomainDefinition({
     key: "accountingMethod",
@@ -965,6 +974,7 @@ export function createDefaultApiPlatform({
 const CRITICAL_DOMAIN_KEYS = Object.freeze([
   "orgAuth",
   "evidence",
+  "observability",
   "ledger",
   "vat",
   "ar",

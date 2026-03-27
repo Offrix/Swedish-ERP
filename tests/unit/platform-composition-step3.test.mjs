@@ -12,6 +12,7 @@ test("Step 3 platform composition registers bounded contexts without breaking th
     API_PLATFORM_BUILD_ORDER
   );
   assert.equal(typeof platform.getDomain("evidence")?.createEvidenceBundle, "function");
+  assert.equal(typeof platform.getDomain("observability")?.recordStructuredLog, "function");
   assert.equal(typeof platform.getDomain("accountingMethod")?.getActiveMethodForDate, "function");
   assert.equal(typeof platform.getDomain("fiscalYear")?.getActiveFiscalYearForDate, "function");
   assert.equal(typeof platform.getDomain("legalForm")?.resolveDeclarationProfile, "function");

@@ -204,6 +204,7 @@ export async function runWorkerBatch({
 
   for (const claimedJob of claimedJobs) {
     let started = null;
+    let traceSpan = null;
     try {
       started = await platform.startRuntimeJobAttempt({
         jobId: claimedJob.jobId,
@@ -211,9 +212,41 @@ export async function runWorkerBatch({
         workerId
       });
       if (started?.skipped) {
+        if (typeof platform.recordStructuredLog === "function") {
+          platform.recordStructuredLog({
+            companyId: claimedJob.companyId,
+            surfaceCode: "worker",
+            severity: "warn",
+            eventCode: "worker.job.skipped",
+            message: `Skipped async job ${started.job.jobType} because ${started.skipReasonCode}.`,
+            correlationId: started.job.correlationId || null,
+            sourceObjectType: "async_job",
+            sourceObjectId: started.job.jobId,
+            actorId: workerId,
+            metadata: {
+              jobType: started.job.jobType,
+              skipReasonCode: started.skipReasonCode
+            }
+          });
+        }
         logger(`worker skipped job ${started.job.jobId} (${started.job.jobType}) because ${started.skipReasonCode}`);
         processedJobs += 1;
         continue;
+      }
+      if (typeof platform.startTraceSpan === "function") {
+        traceSpan = platform.startTraceSpan({
+          companyId: started.job.companyId,
+          traceCode: "worker.job",
+          correlationId: started.job.correlationId || started.job.jobId,
+          sourceObjectType: "async_job",
+          sourceObjectId: started.job.jobId,
+          actorId: workerId,
+          attributes: {
+            surfaceCode: "worker",
+            jobType: started.job.jobType,
+            workerId
+          }
+        });
       }
       const handler = handlers[started.job.jobType];
       if (!handler) {
@@ -238,6 +271,35 @@ export async function runWorkerBatch({
         resultCode: result?.resultCode || "succeeded",
         resultPayload: result?.resultPayload || result?.payload || {}
       });
+      if (typeof platform.recordStructuredLog === "function") {
+        platform.recordStructuredLog({
+          companyId: started.job.companyId,
+          surfaceCode: "worker",
+          severity: "info",
+          eventCode: "worker.job.completed",
+          message: `Completed async job ${started.job.jobType}.`,
+          correlationId: started.job.correlationId || null,
+          traceId: traceSpan?.traceId || null,
+          spanId: traceSpan?.spanId || null,
+          sourceObjectType: "async_job",
+          sourceObjectId: started.job.jobId,
+          actorId: workerId,
+          metadata: {
+            jobType: started.job.jobType,
+            resultCode: result?.resultCode || "succeeded"
+          }
+        });
+      }
+      if (traceSpan && typeof platform.completeTraceSpan === "function") {
+        platform.completeTraceSpan({
+          spanId: traceSpan.spanId,
+          outcomeCode: result?.resultCode || "succeeded",
+          resultSummary: {
+            jobType: started.job.jobType,
+            jobId: started.job.jobId
+          }
+        });
+      }
       logger(`worker completed job ${started.job.jobId} (${started.job.jobType})`);
     } catch (error) {
       const referenceJob = started?.job || claimedJob;
@@ -255,6 +317,39 @@ export async function runWorkerBatch({
           retryDelaySeconds: failure.retryDelaySeconds,
           terminalReason: failure.terminalReason,
           replayAllowed: failure.replayAllowed
+        });
+      }
+      if (typeof platform.recordStructuredLog === "function") {
+        platform.recordStructuredLog({
+          companyId: referenceJob.companyId,
+          surfaceCode: "worker",
+          severity: "error",
+          eventCode: "worker.job.failed",
+          message: failure.errorMessage,
+          correlationId: referenceJob.correlationId || null,
+          traceId: traceSpan?.traceId || null,
+          spanId: traceSpan?.spanId || null,
+          sourceObjectType: "async_job",
+          sourceObjectId: referenceJob.jobId,
+          actorId: workerId,
+          metadata: {
+            jobType: referenceJob.jobType,
+            errorCode: failure.errorCode,
+            errorClass: failure.errorClass,
+            retryDelaySeconds: failure.retryDelaySeconds,
+            terminalReason: failure.terminalReason
+          }
+        });
+      }
+      if (traceSpan && typeof platform.failTraceSpan === "function") {
+        platform.failTraceSpan({
+          spanId: traceSpan.spanId,
+          errorCode: failure.errorCode,
+          errorMessage: failure.errorMessage,
+          resultSummary: {
+            jobType: referenceJob.jobType,
+            jobId: referenceJob.jobId
+          }
         });
       }
       logger(`worker failed job ${referenceJob.jobId} (${referenceJob.jobType}) with ${failure.errorCode}`);
@@ -310,6 +405,23 @@ export function startWorker({
       runtimeDiagnostics?.activeStoreKind || resolvedJobStore.kind
     } and findings ${runtimeDiagnostics?.summary?.totalCount || 0}`
   );
+  if (typeof resolvedPlatform.recordStructuredLog === "function") {
+    resolvedPlatform.recordStructuredLog({
+      surfaceCode: "worker",
+      severity: "info",
+      eventCode: "worker.startup",
+      message: `Worker started with id ${workerId}.`,
+      actorId: workerId,
+      metadata: {
+        intervalMs,
+        batchSize,
+        claimTtlSeconds,
+        environmentMode: resolvedPlatform.environmentMode,
+        activeStoreKind: runtimeDiagnostics?.activeStoreKind || resolvedJobStore.kind,
+        runtimeFindingCount: runtimeDiagnostics?.summary?.totalCount || 0
+      }
+    });
+  }
 
   async function tick() {
     if (stopped) {
