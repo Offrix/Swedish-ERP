@@ -332,6 +332,7 @@ test("Step 10 payroll postings and payout matching resolve configurable voucher 
     companyId: COMPANY_ID,
     employmentId: employee.employment.employmentId,
     taxMode: "manual_rate",
+    manualRateReasonCode: "emergency_manual_transition",
     taxRatePercent: 30,
     contributionClassCode: "full",
     actorId: "unit-test"

@@ -108,7 +108,10 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
       contributionClasses: {
         full: { ratePercent: 31.42 },
         reduced_age_pension_only: { ratePercent: 10.21 },
-        no_contribution: { ratePercent: 0 }
+        no_contribution: {
+          ratePercent: 0,
+          eligibilityBirthYearOnOrBefore: 1937
+        }
       }
     },
     humanReadableExplanation: [
@@ -133,7 +136,10 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
       contributionClasses: {
         full: { ratePercent: 31.42 },
         reduced_age_pension_only: { ratePercent: 10.21 },
-        no_contribution: { ratePercent: 0 },
+        no_contribution: {
+          ratePercent: 0,
+          eligibilityBirthYearOnOrBefore: 1937
+        },
         temporary_youth_reduction: {
           reducedRatePercent: 20.81,
           standardRatePercent: 31.42,
@@ -570,8 +576,10 @@ export function createPayrollEngine({
     sinkRatePercent = null,
     sinkSeaIncome = false,
     sinkDecisionDocumentId = null,
+    manualRateReasonCode = null,
     fallbackTaxMode = null,
     fallbackTaxRatePercent = null,
+    fallbackManualRateReasonCode = null,
     actorId = "system"
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
@@ -598,8 +606,10 @@ export function createPayrollEngine({
       sinkRatePercent,
       sinkSeaIncome,
       sinkDecisionDocumentId,
+      manualRateReasonCode,
       fallbackTaxMode,
-      fallbackTaxRatePercent
+      fallbackTaxRatePercent,
+      fallbackManualRateReasonCode
     });
     const existingId = state.employmentStatutoryProfileIdByEmployment.get(resolvedEmploymentId);
     const existing = existingId ? state.employmentStatutoryProfiles.get(existingId) : null;
@@ -3039,6 +3049,7 @@ function resolveEffectiveTaxProfile({ statutoryProfile, effectiveDate, rulePack 
         ...copy(statutoryProfile),
         taxMode: statutoryProfile.fallbackTaxMode,
         taxRatePercent: statutoryProfile.fallbackTaxRatePercent ?? statutoryProfile.taxRatePercent ?? null,
+        manualRateReasonCode: statutoryProfile.fallbackManualRateReasonCode ?? statutoryProfile.manualRateReasonCode ?? null,
         fallbackApplied: true
       };
     }
@@ -3880,6 +3891,7 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
 
   if (effectiveProfile.taxMode === "manual_rate") {
     const taxRatePercent = effectiveProfile.taxRatePercent;
+    const manualRateReasonCode = effectiveProfile.manualRateReasonCode;
     if (taxRatePercent == null) {
       warnings.push(createWarning("payroll_tax_rate_missing", "Manual-rate tax mode requires taxRatePercent."));
       const decisionObject = {
@@ -3914,12 +3926,14 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
         ...decisionObjectBase.outputs,
         taxMode: effectiveProfile.taxMode,
         taxRatePercent,
+        manualRateReasonCode,
         taxFieldCode: "preliminary_tax",
         preliminaryTax: amount
       },
       explanation: [
         `taxMode=${effectiveProfile.taxMode}`,
         `taxRatePercent=${taxRatePercent}`,
+        `manualRateReasonCode=${manualRateReasonCode}`,
         `taxableBase=${normalizedTaxableBase}`
       ]
     };
@@ -3931,6 +3945,7 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
       step: createCompletedStep(11, {
         taxMode: effectiveProfile.taxMode,
         taxRatePercent,
+        manualRateReasonCode,
         preliminaryTax: amount,
         taxFieldCode: "preliminary_tax",
         fallbackApplied: effectiveProfile.fallbackApplied === true,
@@ -4077,7 +4092,8 @@ function buildEmployerContributionPreview({ rules, contributionBase, employee, s
 
 function resolveEmployerContributionClassCode({ employee, statutoryProfile, effectiveDate, machineRules }) {
   const birthYear = employee?.dateOfBirth ? Number(String(employee.dateOfBirth).slice(0, 4)) : null;
-  if (birthYear != null && birthYear <= 1937) {
+  const noContributionBirthYearOnOrBefore = Number(machineRules?.no_contribution?.eligibilityBirthYearOnOrBefore);
+  if (birthYear != null && Number.isFinite(noContributionBirthYearOnOrBefore) && birthYear <= noContributionBirthYearOnOrBefore) {
     return "no_contribution";
   }
   const explicitClassCode = normalizeOptionalText(statutoryProfile?.contributionClassCode);
@@ -5369,6 +5385,30 @@ function normalizeStatutoryProfile(profile = {}) {
   const fallbackTaxMode = normalizeOptionalText(profile.fallbackTaxMode)
     ? assertAllowed(profile.fallbackTaxMode, PAYROLL_TAX_MODES, "statutory_profile_fallback_tax_mode_invalid")
     : null;
+  const manualRateReasonCode = normalizeOptionalText(profile.manualRateReasonCode);
+  const fallbackManualRateReasonCode = normalizeOptionalText(profile.fallbackManualRateReasonCode);
+  const sinkDecisionDocumentId = normalizeOptionalText(profile.sinkDecisionDocumentId);
+  if (taxMode === "manual_rate" && !manualRateReasonCode) {
+    throw createError(
+      400,
+      "statutory_profile_manual_rate_reason_required",
+      "Manual-rate tax mode is deprecated and requires manualRateReasonCode."
+    );
+  }
+  if (fallbackTaxMode === "manual_rate" && !fallbackManualRateReasonCode) {
+    throw createError(
+      400,
+      "statutory_profile_fallback_manual_rate_reason_required",
+      "Fallback manual-rate tax mode is deprecated and requires fallbackManualRateReasonCode."
+    );
+  }
+  if (taxMode === "sink" && !sinkDecisionDocumentId) {
+    throw createError(
+      400,
+      "statutory_profile_sink_decision_document_required",
+      "SINK tax mode requires sinkDecisionDocumentId."
+    );
+  }
   return {
     employmentId: requireText(profile.employmentId, "statutory_profile_employment_id_required"),
     taxMode,
@@ -5379,9 +5419,11 @@ function normalizeStatutoryProfile(profile = {}) {
     sinkValidTo,
     sinkRatePercent: normalizeOptionalNumber(profile.sinkRatePercent, "statutory_profile_sink_rate_invalid"),
     sinkSeaIncome: profile.sinkSeaIncome === true,
-    sinkDecisionDocumentId: normalizeOptionalText(profile.sinkDecisionDocumentId),
+    sinkDecisionDocumentId,
+    manualRateReasonCode,
     fallbackTaxMode,
-    fallbackTaxRatePercent: normalizeOptionalNumber(profile.fallbackTaxRatePercent, "statutory_profile_fallback_tax_rate_invalid")
+    fallbackTaxRatePercent: normalizeOptionalNumber(profile.fallbackTaxRatePercent, "statutory_profile_fallback_tax_rate_invalid"),
+    fallbackManualRateReasonCode
   };
 }
 

@@ -17,6 +17,15 @@ const SALARY_EXCHANGE_STATUSES = Object.freeze(["draft", "active", "paused", "st
 const SALARY_EXCHANGE_MODES = Object.freeze(["fixed_amount", "percent_of_gross"]);
 const BASIS_TREATMENT_CODES = Object.freeze(["maintain_pre_exchange", "reduce_with_exchange"]);
 const REPORT_STATUSES = Object.freeze(["draft", "ready", "submitted", "corrected"]);
+const PENSION_PROVIDER_POLICY_REGISTRY = Object.freeze({
+  collectum: Object.freeze({
+    invoiceDueDayOfNextMonth: 15
+  }),
+  fora: Object.freeze({
+    reportDueStrategy: "end_of_next_month"
+  }),
+  custom: Object.freeze({})
+});
 
 const PLAN_CATALOG_SEED = Object.freeze([
   createPlanSeed("ITP1", "collectum", "itp1", "ITP 1", "monthly_gross_salary", "PENSION_PREMIUM"),
@@ -1075,19 +1084,21 @@ function buildReportLinePayload(event, reportingPeriod) {
 }
 
 function resolveReportDueDate(providerCode, reportingPeriod) {
-  if (providerCode === "fora") {
+  const providerPolicy = PENSION_PROVIDER_POLICY_REGISTRY[providerCode] || null;
+  if (providerPolicy?.reportDueStrategy === "end_of_next_month") {
     return endOfNextMonth(reportingPeriod);
   }
   return null;
 }
 
 function resolveInvoiceDueDate(providerCode, reportingPeriod) {
-  if (providerCode === "collectum") {
+  const providerPolicy = PENSION_PROVIDER_POLICY_REGISTRY[providerCode] || null;
+  if (Number.isInteger(providerPolicy?.invoiceDueDayOfNextMonth)) {
     const year = Number(reportingPeriod.slice(0, 4));
     const month = Number(reportingPeriod.slice(4, 6));
     const nextMonth = month === 12 ? 1 : month + 1;
     const nextYear = month === 12 ? year + 1 : year;
-    return `${String(nextYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-15`;
+    return `${String(nextYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-${String(providerPolicy.invoiceDueDayOfNextMonth).padStart(2, "0")}`;
   }
   return null;
 }

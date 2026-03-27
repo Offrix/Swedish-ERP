@@ -34,6 +34,7 @@ test("Phase 8.1 payroll core keeps the calculation chain ordered and payslips re
       {
         employmentId: employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }
@@ -71,6 +72,7 @@ test("Phase 8.1 payroll core keeps retro corrections traceable and supports fina
       {
         employmentId: employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30
       }
     ],
@@ -147,6 +149,7 @@ test("Phase 8.1 payroll auto-applies the temporary youth employer contribution r
       {
         employmentId: employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }

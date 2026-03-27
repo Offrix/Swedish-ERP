@@ -86,6 +86,7 @@ test("Phase 9.1 API manages catalog, benefit events, payroll mapping, posting an
         companyId: COMPANY_ID,
         employmentId: employee.employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }

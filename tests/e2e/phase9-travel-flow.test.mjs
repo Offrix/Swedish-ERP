@@ -43,6 +43,7 @@ test("Phase 9.2 e2e flow creates a foreign multi-country claim and exposes taxab
         companyId: COMPANY_ID,
         employmentId: employee.employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }

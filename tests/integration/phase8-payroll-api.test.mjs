@@ -180,6 +180,7 @@ test("Phase 8.1 API manages pay item catalog, payroll runs, retro traceability a
           {
             employmentId: employment.employmentId,
             taxMode: "manual_rate",
+            manualRateReasonCode: "emergency_manual_transition",
             taxRatePercent: 30,
             contributionClassCode: "full"
           }
@@ -262,6 +263,7 @@ test("Phase 8.1 API manages pay item catalog, payroll runs, retro traceability a
           {
             employmentId: youthEmployment.employmentId,
             taxMode: "manual_rate",
+            manualRateReasonCode: "emergency_manual_transition",
             taxRatePercent: 30,
             contributionClassCode: "full"
           }

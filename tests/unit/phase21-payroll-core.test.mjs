@@ -93,6 +93,7 @@ test("Step 21 payroll surfaces migration, agreement and approval exceptions befo
       {
         employmentId: employee.employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }

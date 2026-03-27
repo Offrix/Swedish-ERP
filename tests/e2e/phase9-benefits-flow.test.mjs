@@ -43,6 +43,7 @@ test("Phase 9.1 e2e flow creates a car benefit without cash salary and exposes p
         companyId: COMPANY_ID,
         employmentId: employee.employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }

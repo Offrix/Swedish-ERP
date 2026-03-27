@@ -34,8 +34,10 @@ export interface EmploymentStatutoryProfile {
   readonly sinkRatePercent: number | null;
   readonly sinkSeaIncome: boolean;
   readonly sinkDecisionDocumentId: string | null;
+  readonly manualRateReasonCode: string | null;
   readonly fallbackTaxMode: "pending" | "manual_rate" | "sink" | null;
   readonly fallbackTaxRatePercent: number | null;
+  readonly fallbackManualRateReasonCode: string | null;
   readonly createdByActorId: string;
   readonly createdAt: string;
   readonly updatedAt: string;

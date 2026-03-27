@@ -99,6 +99,7 @@ test("Phase 10.1 API manages projects, budgets, resource allocations and snapsho
         companyId: COMPANY_ID,
         employmentId: employee.employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }

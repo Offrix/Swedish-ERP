@@ -586,6 +586,7 @@ function materializePayrollAndAgiOverview(platform) {
     companyId: COMPANY_ID,
     employmentId: employment.employmentId,
     taxMode: "manual_rate",
+    manualRateReasonCode: "emergency_manual_transition",
     taxRatePercent: 30,
     contributionClassCode: "full",
     actorId: "phase12-2-unit"

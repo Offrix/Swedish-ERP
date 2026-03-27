@@ -246,6 +246,7 @@ test("Step 14 document classification dispatches payroll intents into pay runs w
     companyId: DEMO_COMPANY_ID,
     employmentId: employment.employmentId,
     taxMode: "manual_rate",
+    manualRateReasonCode: "emergency_manual_transition",
     taxRatePercent: 30,
     contributionClassCode: "full",
     actorId: "user_3"

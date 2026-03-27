@@ -119,6 +119,7 @@ test("Step 21 payroll API exposes exceptions, manual resolution and correction r
           {
             employmentId: employment.employmentId,
             taxMode: "manual_rate",
+            manualRateReasonCode: "emergency_manual_transition",
             taxRatePercent: 30,
             contributionClassCode: "full"
           }
@@ -192,6 +193,7 @@ test("Step 21 payroll API exposes exceptions, manual resolution and correction r
           {
             employmentId: employment.employmentId,
             taxMode: "manual_rate",
+            manualRateReasonCode: "emergency_manual_transition",
             taxRatePercent: 30,
             contributionClassCode: "full"
           }

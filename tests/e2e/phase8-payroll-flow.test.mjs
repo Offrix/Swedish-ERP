@@ -115,6 +115,7 @@ test("Phase 8.1 e2e flow runs payroll, traces retro adjustments and regenerates 
           {
             employmentId: employment.employmentId,
             taxMode: "manual_rate",
+            manualRateReasonCode: "emergency_manual_transition",
             taxRatePercent: 30
           }
         ]

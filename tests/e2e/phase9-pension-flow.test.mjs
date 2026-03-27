@@ -59,6 +59,7 @@ test("Phase 9.3 e2e flow produces collective-agreement pension reports and recon
           companyId: COMPANY_ID,
           employmentId: employment.employmentId,
           taxMode: "manual_rate",
+          manualRateReasonCode: "emergency_manual_transition",
           taxRatePercent: 30,
           contributionClassCode: "full"
         }

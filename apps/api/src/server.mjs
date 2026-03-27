@@ -8181,8 +8181,10 @@ async function handleRequest({ req, res, platform, flags }) {
         sinkRatePercent: body.sinkRatePercent ?? null,
         sinkSeaIncome: body.sinkSeaIncome === true,
         sinkDecisionDocumentId: body.sinkDecisionDocumentId ?? null,
+        manualRateReasonCode: body.manualRateReasonCode ?? null,
         fallbackTaxMode: body.fallbackTaxMode ?? null,
         fallbackTaxRatePercent: body.fallbackTaxRatePercent ?? null,
+        fallbackManualRateReasonCode: body.fallbackManualRateReasonCode ?? null,
         actorId: principal.userId
       })
     );

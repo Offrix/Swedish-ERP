@@ -65,6 +65,7 @@ test("Step 14 API exposes document classification creation, approval and dispatc
       companyId: DEMO_IDS.companyId,
       employmentId: employment.employmentId,
       taxMode: "manual_rate",
+      manualRateReasonCode: "emergency_manual_transition",
       taxRatePercent: 30,
       contributionClassCode: "full",
       actorId: DEMO_IDS.userId
@@ -217,6 +218,7 @@ test("Step 14 API dispatches private spend into payroll net deduction flow", asy
       companyId: DEMO_IDS.companyId,
       employmentId: employment.employmentId,
       taxMode: "manual_rate",
+      manualRateReasonCode: "emergency_manual_transition",
       taxRatePercent: 30,
       contributionClassCode: "full",
       actorId: DEMO_IDS.userId

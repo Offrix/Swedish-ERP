@@ -95,6 +95,7 @@ test("Phase 9.3 carries pension, extra pension and salary exchange into payroll 
     companyId: COMPANY_ID,
     employmentId: employment.employmentId,
     taxMode: "manual_rate",
+    manualRateReasonCode: "emergency_manual_transition",
     taxRatePercent: 30,
     contributionClassCode: "full",
     actorId: "unit-test"

@@ -80,6 +80,7 @@ test("Step 32 API exposes project workspace and deviation lifecycle across conne
         companyId: COMPANY_ID,
         employmentId: employee.employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }

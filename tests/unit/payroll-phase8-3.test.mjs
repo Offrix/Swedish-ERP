@@ -67,6 +67,7 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
     companyId: COMPANY_ID,
     employmentId: employee.employment.employmentId,
     taxMode: "manual_rate",
+    manualRateReasonCode: "emergency_manual_transition",
     taxRatePercent: 30,
     contributionClassCode: "full",
     actorId: "unit-test"

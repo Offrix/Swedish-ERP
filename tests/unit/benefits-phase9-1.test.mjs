@@ -135,6 +135,7 @@ test("Phase 9.1 blocks unapproved benefit valuations from payroll consumption", 
       {
         employmentId: fixture.employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }
@@ -180,6 +181,7 @@ test("Phase 9.1 integrates benefits into payroll, AGI and payroll posting with a
       {
         employmentId: salaryFixture.employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }
@@ -255,6 +257,7 @@ test("Phase 9.1 integrates benefits into payroll, AGI and payroll posting with a
       {
         employmentId: benefitOnlyFixture.employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }

@@ -89,6 +89,7 @@ test("Phase 8.3 API creates payroll postings, payout batches and vacation snapsh
       companyId: COMPANY_ID,
       employmentId: employee.employment.employmentId,
       taxMode: "manual_rate",
+      manualRateReasonCode: "emergency_manual_transition",
       taxRatePercent: 30,
       contributionClassCode: "full",
       actorId: "integration-test"

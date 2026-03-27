@@ -80,6 +80,7 @@ test("Phase 9.3 API manages pension enrollments, salary exchange, reports and re
         companyId: COMPANY_ID,
         employmentId: employee.employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }

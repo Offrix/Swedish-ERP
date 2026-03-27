@@ -73,7 +73,9 @@ test("Phase 8.2 e2e flow handles payroll tax, AGI signing, leave locks and corre
         sinkValidFrom: "2026-01-01",
         sinkValidTo: "2026-12-31",
         sinkRatePercent: 22.5,
+        sinkDecisionDocumentId: "sink-decision-2026",
         fallbackTaxMode: "manual_rate",
+        fallbackManualRateReasonCode: "sink_fallback_pending_decision",
         fallbackTaxRatePercent: 30
       }
     });

@@ -98,6 +98,7 @@ test("Phase 10.1 e2e flow covers project setup, payroll-backed actuals, AR tie-o
         companyId: COMPANY_ID,
         employmentId: employee.employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }

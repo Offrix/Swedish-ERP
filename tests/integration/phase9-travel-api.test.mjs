@@ -80,6 +80,7 @@ test("Phase 9.2 API manages travel claims and carries them into payroll, posting
         companyId: COMPANY_ID,
         employmentId: employee.employment.employmentId,
         taxMode: "manual_rate",
+        manualRateReasonCode: "emergency_manual_transition",
         taxRatePercent: 30,
         contributionClassCode: "full"
       }

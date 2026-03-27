@@ -118,6 +118,19 @@ export const PARTNER_CONNECTION_CATALOG = Object.freeze({
   })
 });
 
+const PARTNER_PROVIDER_BASELINE_SELECTIONS = Object.freeze({
+  bank: Object.freeze({
+    enable_banking: "SE-OPEN-BANKING-CORE",
+    bank_file_channel: "SE-BANK-FILE-FORMAT"
+  }),
+  peppol: Object.freeze({
+    pagero_online: "SE-PEPPOL-BIS-BILLING-3"
+  }),
+  id06: Object.freeze({
+    official_id06_integration: "SE-ID06-API"
+  })
+});
+
 export function createPartnerModule({
   state,
   clock = () => new Date(),
@@ -1121,42 +1134,36 @@ function resolvePartnerProviderBaseline({ providerBaselineRegistry, connectionTy
   if (!providerBaselineRegistry || typeof providerBaselineRegistry.resolveProviderBaseline !== "function") {
     return null;
   }
-  const baselineCode = partnerProviderBaselineCode(connectionType, providerCode);
+  const resolvedConnectionType = text(connectionType, "partner_connection_type_required");
+  const resolvedProviderCode = text(providerCode, "partner_provider_code_required");
+  const baselineCode = PARTNER_PROVIDER_BASELINE_SELECTIONS[resolvedConnectionType]?.[resolvedProviderCode] || null;
   if (!baselineCode) {
     return null;
   }
-  const providerBaseline = providerBaselineRegistry.resolveProviderBaseline({
-    domain: "integrations",
-    jurisdiction: "SE",
-    providerCode,
-    baselineCode,
-    effectiveDate,
-    environmentMode: mode
-  });
-  return providerBaselineRegistry.buildProviderBaselineRef({
-    effectiveDate,
-    providerBaseline,
-    metadata: {
-      connectionType,
-      mode
+  try {
+    const providerBaseline = providerBaselineRegistry.resolveProviderBaseline({
+      domain: "integrations",
+      jurisdiction: "SE",
+      providerCode: resolvedProviderCode,
+      baselineCode,
+      effectiveDate,
+      environmentMode: mode
+    });
+    return providerBaselineRegistry.buildProviderBaselineRef({
+      effectiveDate,
+      providerBaseline,
+      metadata: {
+        connectionType: resolvedConnectionType,
+        mode,
+        baselineSelectionCode: baselineCode
+      }
+    });
+  } catch (error) {
+    if (error?.code === "provider_baseline_not_found") {
+      return null;
     }
-  });
-}
-
-function partnerProviderBaselineCode(connectionType, providerCode) {
-  if (connectionType === "bank" && providerCode === "enable_banking") {
-    return "SE-OPEN-BANKING-CORE";
+    throw error;
   }
-  if (connectionType === "bank" && providerCode === "bank_file_channel") {
-    return "SE-BANK-FILE-FORMAT";
-  }
-  if (connectionType === "peppol" && providerCode === "pagero_online") {
-    return "SE-PEPPOL-BIS-BILLING-3";
-  }
-  if (connectionType === "id06" && providerCode === "official_id06_integration") {
-    return "SE-ID06-API";
-  }
-  return null;
 }
 
 function normalizeIsoDateTime(value, code) {

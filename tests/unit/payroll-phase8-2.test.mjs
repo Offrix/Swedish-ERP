@@ -81,6 +81,7 @@ test("Phase 8.2 payroll resolves manual tax and SINK, locks AGI absence and crea
     companyId: COMPANY_ID,
     employmentId: manual.employment.employmentId,
     taxMode: "manual_rate",
+    manualRateReasonCode: "emergency_manual_transition",
     taxRatePercent: 30,
     contributionClassCode: "full",
     actorId: "unit-test"
@@ -94,7 +95,9 @@ test("Phase 8.2 payroll resolves manual tax and SINK, locks AGI absence and crea
     sinkValidFrom: "2026-01-01",
     sinkValidTo: "2026-12-31",
     sinkRatePercent: 22.5,
+    sinkDecisionDocumentId: "sink-decision-2026",
     fallbackTaxMode: "manual_rate",
+    fallbackManualRateReasonCode: "sink_fallback_pending_decision",
     fallbackTaxRatePercent: 30,
     actorId: "unit-test"
   });
