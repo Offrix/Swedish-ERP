@@ -1018,7 +1018,8 @@ function isReadMethod(methodName) {
 
 function resolveCriticalDomainStateStore({
   options,
-  env
+  env,
+  runtimeModeProfile
 }) {
   if (options.criticalDomainStateStore) {
     return options.criticalDomainStateStore;

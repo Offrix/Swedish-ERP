@@ -161,3 +161,22 @@ test("Phase 2.4 platform exposes per-domain durability inventory for critical do
     cleanupTempDirectory(temp.directory);
   }
 });
+
+test("Phase 2.4 can bootstrap sqlite-backed critical truth without explicit file path", () => {
+  const platform = createApiPlatform({
+    env: {},
+    runtimeMode: "test",
+    criticalDomainStateStoreKind: "sqlite"
+  });
+
+  try {
+    const durability = platform.listCriticalDomainDurability();
+    assert.equal(durability.every((entry) => entry.truthMode === "durable_snapshot"), true);
+    assert.equal(
+      durability.every((entry) => typeof entry.snapshotHash === "string" && entry.snapshotHash.length > 0),
+      true
+    );
+  } finally {
+    platform.closeCriticalDomainStateStore();
+  }
+});

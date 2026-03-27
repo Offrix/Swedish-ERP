@@ -128,3 +128,28 @@ test("phase 1.5 runtime honesty scan CLI reports protected demo data when explic
     true
   );
 });
+
+test("phase 1.5 runtime honesty scan CLI can boot sqlite-backed critical truth without explicit file path", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      SCRIPT_PATH,
+      "--mode",
+      "test",
+      "--surface",
+      "api",
+      "--critical-domain-state-store-kind",
+      "sqlite",
+      "--json"
+    ],
+    {
+      cwd: WORKSPACE_ROOT,
+      encoding: "utf8"
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.runtimeMode, "test");
+  assert.ok(payload.summary.totalCount >= 1);
+});

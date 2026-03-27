@@ -216,7 +216,7 @@ Flytta affÃ¤rssanningen frÃ¥n processminne till hÃ¥llbar persistence med i
 - 2.1 återverifierad 2026-03-27: canonical repositories bär nu explicit optimistic concurrency, transaktionsbunden rollback över flera repositorygränser, bounded-context-scope utan nyckelkollisioner och verifierad Postgres-konfigurationskedja för durable repository store.
 - 2.2 återverifierad 2026-03-27: command receipt, outbox och inbox ligger fortsatt i samma commit, duplicate suppression hålls på idempotency-nivå och mutationruntime bär bounded-context repository bundles utan att förlora rollback-garantin.
 - 2.3 återverifierad 2026-03-27: job runtime bär explicit attemptlivscykel, retry policy, dead-letter och replay-planer; claim expiry före start skapar syntetisk attempthistorik och poison-pill-loopar stängs i dead-letter i stället för att försvinna tyst.
-- 2.4 återverifierad 2026-03-27: kritiska domäner kan rehydreras från durable snapshots, runtime diagnostics släpper inte igenom Map-only truth förrän durability inventory visar verklig snapshot-backed persistence, och plattformen exponerar nu per-domän durability inventory som fasgate.
+- 2.4 återverifierad 2026-03-27: kritiska domäner kan rehydreras från durable snapshots, sqlite-backed critical truth bootar nu korrekt även utan explicit state-filpath, runtime diagnostics släpper inte igenom Map-only truth förrän durability inventory visar verklig snapshot-backed persistence, och plattformen exponerar nu per-domän durability inventory som fasgate.
 - 2.5 återverifierad 2026-03-27: projection rebuild bevarar source of truth och icke-målade projektioner, targeted full rebuild purgar bara rätt projectionsdokument och failed rebuild lämnar truth orörd tills lyckad retry rensar checkpoint-felet.
 
 **Delfaser**
