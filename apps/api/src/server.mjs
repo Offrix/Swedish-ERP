@@ -869,194 +869,122 @@ async function handleRequest({ req, res, platform, flags }) {
   }
 
   if (!flags.phase1AuthOnboardingEnabled && isPhase1Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 1 auth and onboarding routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 1 auth and onboarding routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase2DocumentArchiveEnabled && isPhase2Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 2.1 document archive routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 2.1 document archive routes are disabled by configuration.");
     return;
   }
 
   if ((!flags.phase2DocumentArchiveEnabled || !flags.phase2CompanyInboxEnabled) && isPhase2InboxRoute(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 2.2 company inbox routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 2.2 company inbox routes are disabled by configuration.");
     return;
   }
 
   if ((!flags.phase2DocumentArchiveEnabled || !flags.phase2OcrReviewEnabled) && isPhase23Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 2.3 OCR and review routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 2.3 OCR and review routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase3LedgerEnabled && isPhase3Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 3 ledger and reporting routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 3 ledger and reporting routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase4VatEnabled && isPhase4Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 4 VAT routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 4 VAT routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase5ArEnabled && isPhase5Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 5 AR routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 5 AR routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase6ApEnabled && isPhase6Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 6 AP routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 6 AP routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase7HrEnabled && isPhase7Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 7.1 HR masterdata routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 7.1 HR masterdata routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase7TimeEnabled && isPhase72Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 7.2 time reporting routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 7.2 time reporting routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase7AbsenceEnabled && isPhase73Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 7.3 leave and employee portal routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 7.3 leave and employee portal routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase8PayrollEnabled && isPhase8Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 8 payroll routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 8 payroll routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase9BenefitsEnabled && isPhase91Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 9.1 benefits routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 9.1 benefits routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase9TravelEnabled && isPhase92Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 9.2 travel routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 9.2 travel routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase9PensionEnabled && isPhase93Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 9.3 pension routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 9.3 pension routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase10ProjectsEnabled && isPhase101Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 10.1 project routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 10.1 project routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase10FieldEnabled && isPhase102Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 10.2 field routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 10.2 field routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase10BuildEnabled && isPhase103Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 10.3 build routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 10.3 build routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase13PublicApiEnabled && isPhase131Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 13.1 public API routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 13.1 public API routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase13PartnerEnabled && isPhase132Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 13.2 partner integration routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 13.2 partner integration routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase13AutomationEnabled && isPhase133Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 13.3 automation routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 13.3 automation routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase14SecurityEnabled && isPhase141Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 14.1 security and backoffice routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 14.1 security and backoffice routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase14ResilienceEnabled && isPhase142Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 14.2 resilience routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 14.2 resilience routes are disabled by configuration.");
     return;
   }
 
   if (!flags.phase14MigrationEnabled && isPhase143Route(path)) {
-    writeJson(res, 503, {
-      error: "feature_disabled",
-      message: "FAS 14.3 migration routes are disabled by configuration."
-    });
+    writeFeatureDisabledError(res, "FAS 14.3 migration routes are disabled by configuration.");
     return;
   }
 
@@ -12825,7 +12753,11 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
-  writeJson(res, 404, { error: "not_found" });
+  writeError(res, createHttpError(404, "not_found", "Route was not found."));
+}
+
+function writeFeatureDisabledError(res, message) {
+  writeError(res, createHttpError(503, "feature_disabled", message));
 }
 
 function authorizeDocumentAccess({ platform, sessionToken, companyId, permissionCode }) {

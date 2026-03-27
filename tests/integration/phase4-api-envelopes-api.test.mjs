@@ -143,3 +143,50 @@ test("Phase 4.1 API emits canonical success, error and webhook envelopes", async
     await stopServer(server);
   }
 });
+
+test("Phase 4.1 feature-disabled and not-found routes emit canonical error envelopes", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-27T08:30:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: false
+    }
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const disabledResponse = await fetch(`${baseUrl}/v1/vat/codes?companyId=${DEMO_IDS.companyId}`);
+    assert.equal(disabledResponse.status, 503);
+    const disabledPayload = await disabledResponse.json();
+    assert.equal(typeof disabledPayload.meta.requestId, "string");
+    assert.equal(typeof disabledPayload.meta.correlationId, "string");
+    assert.equal(disabledPayload.meta.apiVersion, "2026-03-27");
+    assert.equal(disabledPayload.meta.classification, "technical");
+    assert.equal(disabledPayload.error, "feature_disabled");
+    assert.equal(disabledPayload.errorDetail.code, "feature_disabled");
+    assert.equal(disabledPayload.errorDetail.retryable, true);
+    assert.equal(disabledPayload.message, "FAS 4 VAT routes are disabled by configuration.");
+
+    const missingResponse = await fetch(`${baseUrl}/v1/not-a-real-route`);
+    assert.equal(missingResponse.status, 404);
+    const missingPayload = await missingResponse.json();
+    assert.equal(typeof missingPayload.meta.requestId, "string");
+    assert.equal(typeof missingPayload.meta.correlationId, "string");
+    assert.equal(missingPayload.meta.apiVersion, "2026-03-27");
+    assert.equal(missingPayload.meta.classification, "validation");
+    assert.equal(missingPayload.error, "not_found");
+    assert.equal(missingPayload.errorDetail.code, "not_found");
+    assert.equal(missingPayload.errorDetail.retryable, false);
+    assert.equal(missingPayload.message, "Route was not found.");
+  } finally {
+    await stopServer(server);
+  }
+});

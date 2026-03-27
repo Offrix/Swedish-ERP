@@ -331,7 +331,7 @@ Standardisera alla externa och interna kontrakt, bryta upp blandade route-filer 
 - Ingen ny routefamilj eller extern adapter fÃ¥r byggas pÃ¥ gamla blandade phase13/phase14-rutter.
 
 **Delfasstatus**  
-- 4.1 omöppnad 2026-03-27: tidigare markering byggde för mycket på existerande envelope-tester. Delfasen får inte räknas klar igen förrän standard request/success/error envelopes är bevisade mot bibelns fulla kontrakt över API, public API, partner API och webhook-ytor.
+- 4.1 återverifierad 2026-03-27: standard request/success/error envelopes är nu bevisade mot bibelns fulla kontrakt över API, public API, partner API och webhook-ytor; feature-flag-block och 404 fallback går via canonical error envelopes i stället för success-path, och full svit plus riktade envelope-/webhook-/partner-/public-API-tester håller grönt.
 
 **Delfaser**
 - [x] 4.1 [NEW BUILD] **Standard request/success/error envelopes** â€” Alla routes, public API, partner API och webhooks anvÃ¤nder samma envelopeform, correlation-id, idempotency key och classification.
