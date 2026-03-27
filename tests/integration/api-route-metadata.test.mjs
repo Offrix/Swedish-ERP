@@ -17,6 +17,8 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/auth/mfa/passkeys/assert",
   "/v1/auth/bankid/start",
   "/v1/auth/bankid/collect",
+  "/v1/auth/federation/start",
+  "/v1/auth/federation/callback",
   "/v1/auth/sessions/:sessionId/revoke",
   "/v1/authz/check",
   "/v1/onboarding/runs/:runId",

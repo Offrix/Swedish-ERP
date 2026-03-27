@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import http from "node:http";
 import { createDefaultApiPlatform } from "./platform.mjs";
+import { tryHandlePhase6AuthRoutes } from "./phase6-auth-routes.mjs";
 import { tryHandlePhase13Route } from "./phase13-routes.mjs";
 import { tryHandlePhase14Route } from "./phase14-routes.mjs";
 import { listPublishedRouteContracts, resolvePublishedRouteContract } from "./route-contracts.mjs";
@@ -312,6 +313,8 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/auth/mfa/passkeys/assert",
               "/v1/auth/bankid/start",
               "/v1/auth/bankid/collect",
+              "/v1/auth/federation/start",
+              "/v1/auth/federation/callback",
               "/v1/auth/sessions/:sessionId/revoke",
               "/v1/authz/check",
               "/v1/org/companies/:companyId/users",
@@ -1009,6 +1012,10 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (await tryHandlePhase6AuthRoutes({ req, res, path, platform })) {
+    return;
+  }
+
   if (req.method === "POST" && path === "/v1/auth/login") {
     const body = await readJsonBody(req);
     writeJson(res, 200, platform.startLogin(body));
@@ -1018,17 +1025,6 @@ async function handleRequest({ req, res, platform, flags }) {
   if (req.method === "POST" && path === "/v1/auth/logout") {
     writeJson(res, 200, {
       session: platform.logout({ sessionToken: readSessionToken(req, await readJsonBody(req, true)) })
-    });
-    return;
-  }
-
-  const revokeMatch = matchPath(path, "/v1/auth/sessions/:sessionId/revoke");
-  if (req.method === "POST" && revokeMatch) {
-    writeJson(res, 200, {
-      session: platform.revokeSession({
-        sessionToken: readSessionToken(req, await readJsonBody(req, true)),
-        targetSessionId: revokeMatch.sessionId
-      })
     });
     return;
   }
@@ -1084,26 +1080,6 @@ async function handleRequest({ req, res, platform, flags }) {
         sessionToken: readSessionToken(req, body),
         credentialId: body.credentialId,
         assertion: body.assertion
-      })
-    );
-    return;
-  }
-
-  if (req.method === "POST" && path === "/v1/auth/bankid/start") {
-    const body = await readJsonBody(req);
-    writeJson(res, 200, platform.startBankIdAuthentication({ sessionToken: readSessionToken(req, body) }));
-    return;
-  }
-
-  if (req.method === "POST" && path === "/v1/auth/bankid/collect") {
-    const body = await readJsonBody(req);
-    writeJson(
-      res,
-      200,
-      platform.collectBankIdAuthentication({
-        sessionToken: readSessionToken(req, body),
-        orderRef: body.orderRef,
-        completionToken: body.completionToken
       })
     );
     return;

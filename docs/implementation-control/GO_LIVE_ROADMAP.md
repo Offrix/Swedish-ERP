@@ -450,7 +450,7 @@ GÃ¶ra identitet, step-up, federation, impersonation och break-glass verkliga o
 - Inga regulated submissions eller write-capable supportflÃ¶den fÃ¥r Ã¶ppnas innan step-up och backoffice-boundaries Ã¤r tvingande.
 
 **Delfaser**
-- [ ] 6.1 [REPLACE] **Byt BankID-stub mot auth broker** â€” Implementera auth broker med Signicat-baserad BankID-provider i v1, passkeys/TOTP lokalt och WorkOS eller likvÃ¤rdig broker fÃ¶r enterprise federation.
+- [x] 6.1 [REPLACE] **Byt BankID-stub mot auth broker** â€” Klar: auth broker ersÃ¤tter stubben, Signicat-baserad BankID kÃ¶r i sandbox/production via broker, passkeys/TOTP lÃ¤nkas som lokala identity accounts, WorkOS-baserad federation har start/callback-routes, durable broker-state och runbook.
 - [ ] 6.2 [NEW BUILD] **Session trust och challenge center** â€” InfÃ¶r `SessionRevision`, trustnivÃ¥er, fresh step-up, device trust, challenge completion receipts och action-specific TTL.
 - [ ] 6.3 [HARDEN] **Scope, queue och visibility enforcement** â€” Search, notifications, activity, review/work ownership och API responses ska permission-trimmas server-side.
 - [ ] 6.4 [NEW BUILD] **Impersonation, break-glass och access attestation** â€” Implementera tidsbegrÃ¤nsade, vattenmÃ¤rkta sessions, dual approvals, allowlists och kvartalsvisa access reviews.

@@ -134,6 +134,7 @@ const GENERIC_OBJECT_TYPES = new Set([
 const EXACT_PUBLIC_ROUTE_KEYS = new Set([
   "POST /v1/system/bootstrap/validate",
   "POST /v1/auth/login",
+  "POST /v1/auth/federation/start",
   "POST /v1/onboarding/runs",
   "POST /v1/public/oauth/token"
 ]);
@@ -146,6 +147,7 @@ const SELF_ROUTE_KEYS = new Set([
   "POST /v1/auth/mfa/passkeys/assert",
   "POST /v1/auth/bankid/start",
   "POST /v1/auth/bankid/collect",
+  "POST /v1/auth/federation/callback",
   "POST /v1/authz/check",
   "POST /v1/hr/employee-portal/me/leave-entries",
   "PATCH /v1/hr/employee-portal/me/leave-entries/:leaveEntryId",
@@ -187,6 +189,8 @@ const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["POST /v1/auth/mfa/passkeys/assert", override("auth", "identity_factor_verify", "authenticated", "self", "auth_factor", "auth_factor", null, false)],
   ["POST /v1/auth/bankid/start", override("auth", "identity_factor_verify", "authenticated", "self", "auth_factor", "auth_factor", null, false)],
   ["POST /v1/auth/bankid/collect", override("auth", "identity_factor_verify", "authenticated", "self", "auth_factor", "auth_factor", null, false)],
+  ["POST /v1/auth/federation/start", override("auth", "identity_federation_start", "public", "self", "auth_federation", "auth_challenge", null, false)],
+  ["POST /v1/auth/federation/callback", override("auth", "identity_federation_complete", "authenticated", "self", "auth_federation", "auth_challenge", null, false)],
   ["POST /v1/auth/sessions/:sessionId/revoke", override("auth", "identity_session_manage", "strong_mfa", "company", "auth_session", "auth_session", "auth.session.revoke", true)],
   ["POST /v1/authz/check", { ...override("auth", "permission_resolution", "authenticated", "self", "authorization", "authorization_decision", null, false), mutation: false }],
   ["POST /v1/org/delegations", override("org", "org_identity_admin", "strong_mfa", "company", "delegation", "delegation", "delegation.manage", false)],

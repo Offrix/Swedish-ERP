@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { BANKID_PROVIDER_CODE } from "../../packages/auth-core/src/index.mjs";
 import { createOrgAuthPlatform, DEMO_IDS, DEMO_ADMIN_EMAIL } from "../../packages/domain-org-auth/src/index.mjs";
 
-test("Phase 1 BankID stub keeps the Signicat provider alias while exposing stub mode", () => {
+test("Phase 6.1 BankID broker keeps the Signicat provider alias while exposing sandbox mode", () => {
   const platform = createOrgAuthPlatform({
     clock: () => new Date("2026-03-25T08:00:00Z"),
     bootstrapScenarioCode: "test_default_demo"
@@ -24,10 +24,12 @@ test("Phase 1 BankID stub keeps the Signicat provider alias while exposing stub 
 
   assert.equal(BANKID_PROVIDER_CODE, "signicat-bankid");
   assert.equal(bankIdStart.providerCode, "signicat-bankid");
-  assert.equal(bankIdStart.providerMode, "stub");
+  assert.equal(bankIdStart.providerMode, "sandbox");
+  assert.equal(bankIdStart.brokerCode, "signicat");
   assert.equal(bankIdStart.providerBaselineCode, "SE-BANKID-RP-API");
   assert.equal(typeof bankIdStart.providerBaselineChecksum, "string");
   assert.equal(bankIdCollect.provider.providerCode, "signicat-bankid");
-  assert.equal(bankIdCollect.provider.providerMode, "stub");
+  assert.equal(bankIdCollect.provider.providerMode, "sandbox");
+  assert.equal(bankIdCollect.provider.brokerCode, "signicat");
   assert.equal(bankIdCollect.provider.providerBaselineCode, "SE-BANKID-RP-API");
 });

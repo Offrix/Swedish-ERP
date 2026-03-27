@@ -19,6 +19,10 @@ import {
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
 import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
+import {
+  WORKOS_FEDERATION_PROVIDER_CODE,
+  createAuthBroker
+} from "../../domain-integrations/src/providers/auth-broker.mjs";
 
 export const ACTIONS = Object.freeze({
   COMPANY_READ: "company.read",
@@ -64,6 +68,20 @@ export const AUTH_PROVIDER_BASELINES = Object.freeze([
     checksum: "bankid-signicat-se-2026.1",
     sourceSnapshotDate: "2026-03-27",
     semanticChangeSummary: "BankID authentication baseline for start/collect challenge envelopes and provider response pinning."
+  }),
+  Object.freeze({
+    providerBaselineId: "workos-federation-se-2026.1",
+    baselineCode: "SE-ENTERPRISE-FEDERATION-BROKER",
+    providerCode: WORKOS_FEDERATION_PROVIDER_CODE,
+    domain: "auth",
+    jurisdiction: "SE",
+    formatFamily: "enterprise_federation_broker",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "workos-federation-se-2026.1",
+    sourceSnapshotDate: "2026-03-27",
+    semanticChangeSummary: "Enterprise federation broker baseline for sandbox and production WorkOS-mediated SAML/OIDC flows."
   })
 ]);
 
@@ -107,9 +125,12 @@ export const DEMO_TOTP_SECRET = "JBSWY3DPEHPK3PXP";
 export const DEMO_BANKID_SUBJECT = "197001011234";
 export const DEMO_APPROVER_EMAIL = "approver@example.test";
 export const DEMO_APPROVER_TOTP_SECRET = "KRSXG5DSNFXGOIDB";
+export const LOCAL_TOTP_PROVIDER_CODE = "local-totp";
+export const LOCAL_PASSKEY_PROVIDER_CODE = "local-passkey";
 
 export function createOrgAuthPlatform({
   clock = () => new Date(),
+  environmentMode = "test",
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
@@ -135,6 +156,8 @@ export function createOrgAuthPlatform({
     authSessions: new Map(),
     authFactors: new Map(),
     authChallenges: new Map(),
+    identityAccounts: new Map(),
+    personIdentities: new Map(),
     onboardingRuns: new Map(),
     onboardingStepStates: new Map(),
     companyRegistrations: new Map(),
@@ -145,7 +168,10 @@ export function createOrgAuthPlatform({
     moduleDefinitions: new Map(),
     moduleActivations: new Map(),
     auditEvents: [],
-    bankIdProvider: createBankIdProvider()
+    authBroker: createAuthBroker({
+      clock,
+      environmentMode: typeof environmentMode === "string" && environmentMode.trim().length > 0 ? environmentMode : "test"
+    })
   };
 
     if (seedDemo) {
@@ -179,6 +205,8 @@ export function createOrgAuthPlatform({
     assertPasskey,
     startBankIdAuthentication,
     collectBankIdAuthentication,
+    startFederationAuthentication,
+    completeFederationAuthentication,
     createOnboardingRun,
     getOnboardingRun,
     getOnboardingChecklist,
@@ -193,9 +221,12 @@ export function createOrgAuthPlatform({
       exportDurableState,
       importDurableState,
         inspectSession,
+        listIdentityAccounts,
+        listPersonIdentities,
         getTotpCodeForTesting,
         providerBaselineRegistry: providerBaselines,
-        getBankIdCompletionTokenForTesting
+        getBankIdCompletionTokenForTesting,
+        getFederationAuthorizationCodeForTesting
       };
 
   function createCompany({ legalName, orgNumber, status = "draft", settingsJson = {} } = {}) {
@@ -746,6 +777,19 @@ export function createOrgAuthPlatform({
     }
 
     completeSessionFactor(session, "totp");
+    upsertIdentityAccount({
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      userId: session.userId,
+      providerCode: LOCAL_TOTP_PROVIDER_CODE,
+      factorType: "totp",
+      credentialId: factor.factorId,
+      lastVerifiedAt: factor.verifiedAt || nowIso(),
+      metadataJson: {
+        factorId: factor.factorId,
+        deviceName: factor.deviceName
+      }
+    });
     pushAudit({
       companyId: session.companyId,
       actorId: principal.userId,
@@ -824,6 +868,19 @@ export function createOrgAuthPlatform({
       updatedAt: nowIso()
     };
     state.authFactors.set(factor.factorId, factor);
+    upsertIdentityAccount({
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      userId: session.userId,
+      providerCode: LOCAL_PASSKEY_PROVIDER_CODE,
+      factorType: "passkey",
+      credentialId: factor.credentialId,
+      lastVerifiedAt: factor.verifiedAt,
+      metadataJson: {
+        factorId: factor.factorId,
+        deviceName: factor.deviceName
+      }
+    });
 
     pushAudit({
       companyId: session.companyId,
@@ -889,15 +946,15 @@ export function createOrgAuthPlatform({
       throw httpError(404, "bankid_identity_missing", "No BankID identity is enrolled for this company user.");
     }
 
-      const providerResult = state.bankIdProvider.start({
-        sessionId: session.sessionId,
-        companyId: session.companyId,
-        companyUserId: session.companyUserId,
-        providerSubject: factor.providerSubject
-      });
-      const providerBaselineRef = resolveBankIdProviderBaselineRef(providerBaselines, currentDate());
+    const providerResult = state.authBroker.startBankIdChallenge({
+      sessionId: session.sessionId,
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      providerSubject: factor.providerSubject
+    });
+    const providerBaselineRef = resolveBankIdProviderBaselineRef(providerBaselines, currentDate());
 
-      const challenge = {
+    const challenge = {
       challengeId: providerResult.orderRef,
       companyId: session.companyId,
       companyUserId: session.companyUserId,
@@ -908,15 +965,17 @@ export function createOrgAuthPlatform({
       orderRef: providerResult.orderRef,
       expiresAt: timestamp(new Date(currentDate().getTime() + 5 * 60 * 1000)),
       consumedAt: null,
-        payloadJson: {
-          providerCode: BANKID_PROVIDER_CODE,
-          providerMode: "stub",
-          providerBaselineId: providerBaselineRef.providerBaselineId,
-          providerBaselineCode: providerBaselineRef.baselineCode,
-          providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
-          providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum
-        }
-      };
+      payloadJson: {
+        providerCode: BANKID_PROVIDER_CODE,
+        brokerCode: providerResult.brokerCode,
+        providerMode: providerResult.providerMode,
+        providerOrderRef: providerResult.providerOrderRef,
+        providerBaselineId: providerBaselineRef.providerBaselineId,
+        providerBaselineCode: providerBaselineRef.baselineCode,
+        providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
+        providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum
+      }
+    };
     state.authChallenges.set(challenge.challengeId, challenge);
 
     pushAudit({
@@ -929,15 +988,15 @@ export function createOrgAuthPlatform({
       explanation: "BankID authentication started."
     });
 
-      return {
-        ...providerResult,
-        providerBaselineId: providerBaselineRef.providerBaselineId,
-        providerBaselineCode: providerBaselineRef.baselineCode,
-        providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
-        providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum,
-        providerBaselineRef
-      };
-    }
+    return {
+      ...providerResult,
+      providerBaselineId: providerBaselineRef.providerBaselineId,
+      providerBaselineCode: providerBaselineRef.baselineCode,
+      providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
+      providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum,
+      providerBaselineRef
+    };
+  }
 
   function collectBankIdAuthentication({ sessionToken, orderRef, completionToken } = {}) {
     const { session, principal } = requireSession(sessionToken, { allowPending: true });
@@ -946,18 +1005,36 @@ export function createOrgAuthPlatform({
       throw httpError(403, "bankid_scope_mismatch", "BankID challenge belongs to another user.");
     }
 
-      const providerResult = state.bankIdProvider.collect({
-        orderRef,
-        completionToken
-      });
-      const providerBaselineRef = resolveBankIdProviderBaselineRef(providerBaselines, currentDate());
-      if (providerResult.status !== "complete") {
-        throw httpError(409, "bankid_not_complete", "BankID flow has not completed yet.");
-      }
+    const providerResult = state.authBroker.collectBankIdChallenge({
+      orderRef,
+      completionToken
+    });
+    const providerBaselineRef = resolveBankIdProviderBaselineRef(providerBaselines, currentDate());
+    if (providerResult.status !== "complete") {
+      throw httpError(409, "bankid_not_complete", "BankID flow has not completed yet.");
+    }
 
     challenge.status = "consumed";
     challenge.consumedAt = nowIso();
     completeSessionFactor(session, "bankid");
+    upsertIdentityAccount({
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      userId: session.userId,
+      providerCode: BANKID_PROVIDER_CODE,
+      factorType: "bankid",
+      providerSubject: providerResult.providerSubject,
+      lastVerifiedAt: challenge.consumedAt
+    });
+    upsertPersonIdentity({
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      userId: session.userId,
+      providerCode: BANKID_PROVIDER_CODE,
+      providerSubject: providerResult.providerSubject,
+      email: principal.email,
+      displayName: principal.displayName
+    });
     pushAudit({
       companyId: session.companyId,
       actorId: principal.userId,
@@ -968,18 +1045,147 @@ export function createOrgAuthPlatform({
       explanation: "BankID authentication completed."
     });
 
-      return {
-        provider: {
-          ...providerResult,
-          providerBaselineId: providerBaselineRef.providerBaselineId,
-          providerBaselineCode: providerBaselineRef.baselineCode,
-          providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
-          providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum,
-          providerBaselineRef
-        },
-        session: publicSession(session)
-      };
+    return {
+      provider: {
+        ...providerResult,
+        providerBaselineId: providerBaselineRef.providerBaselineId,
+        providerBaselineCode: providerBaselineRef.baselineCode,
+        providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
+        providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum,
+        providerBaselineRef
+      },
+      session: publicSession(session)
+    };
+  }
+
+  function startFederationAuthentication({
+    sessionToken = null,
+    companyId = null,
+    email = null,
+    connectionId = "default-enterprise-sso",
+    loginHint = null,
+    redirectUri = null
+  } = {}) {
+    let loginResult = null;
+    if (sessionToken == null) {
+      loginResult = startLogin({
+        companyId: assertNonEmpty(companyId, "company_id_required"),
+        email: assertNonEmpty(email, "email_required")
+      });
+      sessionToken = loginResult.sessionToken;
     }
+    const { session, principal } = requireSession(sessionToken, { allowPending: true });
+    const providerResult = state.authBroker.startFederationAuthorization({
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      userId: session.userId,
+      connectionId,
+      loginHint: loginHint || principal.email,
+      redirectUri
+    });
+    const providerBaselineRef = resolveFederationProviderBaselineRef(providerBaselines, currentDate());
+    const challenge = {
+      challengeId: providerResult.authRequestId,
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      userId: session.userId,
+      challengeType: "federation_auth",
+      status: "pending",
+      challenge: providerResult.state,
+      orderRef: providerResult.authRequestId,
+      expiresAt: timestamp(new Date(currentDate().getTime() + 10 * 60 * 1000)),
+      consumedAt: null,
+      payloadJson: {
+        providerCode: providerResult.providerCode,
+        brokerCode: providerResult.brokerCode,
+        providerMode: providerResult.providerMode,
+        connectionId: providerResult.connectionId,
+        authorizationUrl: providerResult.authorizationUrl,
+        providerBaselineId: providerBaselineRef.providerBaselineId,
+        providerBaselineCode: providerBaselineRef.baselineCode,
+        providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
+        providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum
+      }
+    };
+    state.authChallenges.set(challenge.challengeId, challenge);
+    pushAudit({
+      companyId: session.companyId,
+      actorId: principal.userId,
+      action: "auth.federation.started",
+      result: "pending",
+      entityType: "auth_challenge",
+      entityId: challenge.challengeId,
+      explanation: "Enterprise federation authentication started."
+    });
+    return {
+      ...providerResult,
+      sessionToken,
+      session: publicSession(session),
+      providerBaselineId: providerBaselineRef.providerBaselineId,
+      providerBaselineCode: providerBaselineRef.baselineCode,
+      providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
+      providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum,
+      providerBaselineRef
+    };
+  }
+
+  function completeFederationAuthentication({ sessionToken, authRequestId, authorizationCode, state: providerState } = {}) {
+    const { session, principal } = requireSession(sessionToken, { allowPending: true });
+    const challenge = requireChallenge(authRequestId, "federation_auth");
+    if (challenge.companyUserId !== session.companyUserId) {
+      throw httpError(403, "federation_scope_mismatch", "Federation challenge belongs to another user.");
+    }
+    const providerResult = state.authBroker.completeFederationAuthorization({
+      authRequestId,
+      authorizationCode,
+      state: providerState
+    });
+    const providerBaselineRef = resolveFederationProviderBaselineRef(providerBaselines, currentDate());
+    challenge.status = "consumed";
+    challenge.consumedAt = nowIso();
+    completeSessionFactor(session, "federation");
+    upsertIdentityAccount({
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      userId: session.userId,
+      providerCode: WORKOS_FEDERATION_PROVIDER_CODE,
+      factorType: "federation",
+      providerSubject: providerResult.subject,
+      lastVerifiedAt: challenge.consumedAt,
+      metadataJson: {
+        connectionId: providerResult.connectionId
+      }
+    });
+    upsertPersonIdentity({
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      userId: session.userId,
+      providerCode: WORKOS_FEDERATION_PROVIDER_CODE,
+      providerSubject: providerResult.subject,
+      email: providerResult.claims?.email || principal.email,
+      displayName: principal.displayName
+    });
+    pushAudit({
+      companyId: session.companyId,
+      actorId: principal.userId,
+      action: "auth.federation.completed",
+      result: "success",
+      entityType: "auth_challenge",
+      entityId: authRequestId,
+      explanation: "Enterprise federation authentication completed."
+    });
+    return {
+      provider: {
+        ...providerResult,
+        providerBaselineId: providerBaselineRef.providerBaselineId,
+        providerBaselineCode: providerBaselineRef.baselineCode,
+        providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
+        providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum,
+        providerBaselineRef
+      },
+      session: publicSession(session)
+    };
+  }
 
   function createOnboardingRun({
     legalName,
@@ -1433,6 +1639,8 @@ export function createOrgAuthPlatform({
       })),
       authSessions: [...state.authSessions.values()].map(publicSession),
       authFactors: [...state.authFactors.values()].map(stripSecret),
+      identityAccounts: listIdentityAccounts(),
+      personIdentities: listPersonIdentities(),
       onboardingRuns: [...state.onboardingRuns.values()],
       onboardingStepStates: [...state.onboardingStepStates.values()],
       companyRegistrations: [...state.companyRegistrations.values()],
@@ -1447,23 +1655,20 @@ export function createOrgAuthPlatform({
     }
 
     function exportDurableState() {
-      return serializeDurableState(state, {
-        excludeKeys: ["bankIdProvider"],
-        customSerializers: {
-          bankIdProvider: (provider) => provider.snapshot()
-        }
-      });
+      return {
+        ...serializeDurableState(state, {
+          excludeKeys: ["authBroker"]
+        }),
+        authBroker: state.authBroker.snapshot()
+      };
     }
 
     function importDurableState(snapshot) {
+      const brokerSnapshot = snapshot?.authBroker || {};
       applyDurableStateSnapshot(state, snapshot, {
-        preserveKeys: ["bankIdProvider"],
-        customHydrators: {
-          bankIdProvider: (provider, providerSnapshot) => {
-            provider.restore(providerSnapshot || {});
-          }
-        }
+        preserveKeys: ["authBroker"]
       });
+      state.authBroker.restore(brokerSnapshot);
     }
 
   function getTotpCodeForTesting({ companyId = DEMO_IDS.companyId, email = DEMO_ADMIN_EMAIL, now = currentDate() } = {}) {
@@ -1476,7 +1681,11 @@ export function createOrgAuthPlatform({
   }
 
   function getBankIdCompletionTokenForTesting(orderRef) {
-    return state.bankIdProvider.getCompletionToken(orderRef);
+    return state.authBroker.getBankIdCompletionToken(orderRef);
+  }
+
+  function getFederationAuthorizationCodeForTesting(authRequestId) {
+    return state.authBroker.getFederationAuthorizationCode(authRequestId);
   }
 
   function authorizeFromSession(sessionToken, action, resource) {
@@ -1565,6 +1774,19 @@ export function createOrgAuthPlatform({
       createdAt: factorTimestamp,
       updatedAt: factorTimestamp
     });
+    upsertIdentityAccount({
+      companyId: company.companyId,
+      companyUserId: companyUser.companyUserId,
+      userId: user.userId,
+      providerCode: LOCAL_TOTP_PROVIDER_CODE,
+      factorType: "totp",
+      credentialId: totpFactorId,
+      lastVerifiedAt: factorTimestamp,
+      metadataJson: {
+        factorId: totpFactorId,
+        deviceName: "Provisioned authenticator"
+      }
+    });
 
     if (!companyUser.requiresMfa) {
       return;
@@ -1585,6 +1807,29 @@ export function createOrgAuthPlatform({
       verifiedAt: factorTimestamp,
       createdAt: factorTimestamp,
       updatedAt: factorTimestamp
+    });
+    upsertIdentityAccount({
+      companyId: company.companyId,
+      companyUserId: companyUser.companyUserId,
+      userId: user.userId,
+      providerCode: BANKID_PROVIDER_CODE,
+      factorType: "bankid",
+      providerSubject: `bankid:${company.companyId}:${companyUser.companyUserId}`,
+      credentialId: bankIdFactorId,
+      lastVerifiedAt: factorTimestamp,
+      metadataJson: {
+        factorId: bankIdFactorId,
+        deviceName: "Provisioned BankID"
+      }
+    });
+    upsertPersonIdentity({
+      companyId: company.companyId,
+      companyUserId: companyUser.companyUserId,
+      userId: user.userId,
+      providerCode: BANKID_PROVIDER_CODE,
+      providerSubject: `bankid:${company.companyId}:${companyUser.companyUserId}`,
+      email: user.email,
+      displayName: user.displayName
     });
   }
 
@@ -1722,6 +1967,121 @@ export function createOrgAuthPlatform({
       email: user?.email || null,
       displayName: user?.displayName || null
     };
+  }
+
+  function listIdentityAccounts({ companyId = null, companyUserId = null, userId = null } = {}) {
+    return [...state.identityAccounts.values()]
+      .filter((identityAccount) => (companyId ? identityAccount.companyId === companyId : true))
+      .filter((identityAccount) => (companyUserId ? identityAccount.companyUserId === companyUserId : true))
+      .filter((identityAccount) => (userId ? identityAccount.userId === userId : true))
+      .sort(
+        (left, right) =>
+          left.companyId.localeCompare(right.companyId)
+          || left.companyUserId.localeCompare(right.companyUserId)
+          || left.providerCode.localeCompare(right.providerCode)
+          || left.factorType.localeCompare(right.factorType)
+      )
+      .map(copy);
+  }
+
+  function listPersonIdentities({ companyId = null, companyUserId = null, userId = null } = {}) {
+    return [...state.personIdentities.values()]
+      .filter((personIdentity) => (companyId ? personIdentity.companyId === companyId : true))
+      .filter((personIdentity) => (companyUserId ? personIdentity.companyUserId === companyUserId : true))
+      .filter((personIdentity) => (userId ? personIdentity.userId === userId : true))
+      .sort(
+        (left, right) =>
+          left.companyId.localeCompare(right.companyId)
+          || left.providerCode.localeCompare(right.providerCode)
+          || left.providerSubject.localeCompare(right.providerSubject)
+      )
+      .map(copy);
+  }
+
+  function upsertIdentityAccount({
+    companyId,
+    companyUserId,
+    userId,
+    providerCode,
+    factorType,
+    providerSubject = null,
+    credentialId = null,
+    lastVerifiedAt = nowIso(),
+    metadataJson = {}
+  } = {}) {
+    const identityAccountKey = buildIdentityAccountKey({
+      companyId,
+      companyUserId,
+      providerCode,
+      factorType,
+      providerSubject,
+      credentialId
+    });
+    const existingIdentityAccount = state.identityAccounts.get(identityAccountKey);
+    const identityAccount = existingIdentityAccount || {
+      identityAccountId: crypto.randomUUID(),
+      companyId: assertNonEmpty(companyId, "company_id_required"),
+      companyUserId: assertNonEmpty(companyUserId, "company_user_id_required"),
+      userId: assertNonEmpty(userId, "user_id_required"),
+      providerCode: assertNonEmpty(providerCode, "provider_code_required"),
+      factorType: assertNonEmpty(factorType, "factor_type_required"),
+      providerSubject: normalizeOptionalKeyPart(providerSubject),
+      credentialId: normalizeOptionalKeyPart(credentialId),
+      status: "active",
+      linkedAt: nowIso(),
+      createdAt: nowIso()
+    };
+    identityAccount.providerSubject = normalizeOptionalKeyPart(providerSubject);
+    identityAccount.credentialId = normalizeOptionalKeyPart(credentialId);
+    identityAccount.status = "active";
+    identityAccount.lastVerifiedAt = lastVerifiedAt || nowIso();
+    identityAccount.updatedAt = nowIso();
+    identityAccount.metadataJson = {
+      ...(identityAccount.metadataJson || {}),
+      ...copy(metadataJson || {})
+    };
+    state.identityAccounts.set(identityAccountKey, identityAccount);
+    return identityAccount;
+  }
+
+  function upsertPersonIdentity({
+    companyId,
+    companyUserId,
+    userId,
+    providerCode,
+    providerSubject,
+    email = null,
+    displayName = null,
+    metadataJson = {}
+  } = {}) {
+    const personIdentityKey = buildPersonIdentityKey({
+      companyId,
+      providerCode,
+      providerSubject
+    });
+    const existingPersonIdentity = state.personIdentities.get(personIdentityKey);
+    const personIdentity = existingPersonIdentity || {
+      personIdentityId: crypto.randomUUID(),
+      companyId: assertNonEmpty(companyId, "company_id_required"),
+      companyUserId: assertNonEmpty(companyUserId, "company_user_id_required"),
+      userId: assertNonEmpty(userId, "user_id_required"),
+      providerCode: assertNonEmpty(providerCode, "provider_code_required"),
+      providerSubject: assertNonEmpty(providerSubject, "provider_subject_required"),
+      status: "linked",
+      linkedAt: nowIso(),
+      createdAt: nowIso()
+    };
+    personIdentity.companyUserId = assertNonEmpty(companyUserId, "company_user_id_required");
+    personIdentity.userId = assertNonEmpty(userId, "user_id_required");
+    personIdentity.email = normalizeOptionalKeyPart(email);
+    personIdentity.displayName = normalizeOptionalKeyPart(displayName);
+    personIdentity.updatedAt = nowIso();
+    personIdentity.metadataJson = {
+      ...(personIdentity.metadataJson || {}),
+      ...copy(metadataJson || {})
+    };
+    state.personIdentities.set(personIdentityKey, personIdentity);
+    return personIdentity;
   }
 
   function findFactor(companyUserId, factorType, statuses = ["active"]) {
@@ -2072,6 +2432,113 @@ function seedDemoState(state, clock) {
     createdAt: now,
     updatedAt: now
   });
+  state.identityAccounts.set(
+    buildIdentityAccountKey({
+      companyId: DEMO_IDS.companyId,
+      companyUserId: DEMO_IDS.companyUserId,
+      providerCode: LOCAL_TOTP_PROVIDER_CODE,
+      factorType: "totp",
+      credentialId: "demo-totp-factor"
+    }),
+    {
+      identityAccountId: crypto.randomUUID(),
+      companyId: DEMO_IDS.companyId,
+      companyUserId: DEMO_IDS.companyUserId,
+      userId: DEMO_IDS.userId,
+      providerCode: LOCAL_TOTP_PROVIDER_CODE,
+      factorType: "totp",
+      providerSubject: null,
+      credentialId: "demo-totp-factor",
+      status: "active",
+      linkedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      lastVerifiedAt: now,
+      metadataJson: {
+        factorId: "demo-totp-factor",
+        deviceName: "Demo authenticator"
+      }
+    }
+  );
+  state.identityAccounts.set(
+    buildIdentityAccountKey({
+      companyId: DEMO_IDS.companyId,
+      companyUserId: DEMO_IDS.companyUserId,
+      providerCode: BANKID_PROVIDER_CODE,
+      factorType: "bankid",
+      providerSubject: DEMO_BANKID_SUBJECT,
+      credentialId: "demo-bankid-factor"
+    }),
+    {
+      identityAccountId: crypto.randomUUID(),
+      companyId: DEMO_IDS.companyId,
+      companyUserId: DEMO_IDS.companyUserId,
+      userId: DEMO_IDS.userId,
+      providerCode: BANKID_PROVIDER_CODE,
+      factorType: "bankid",
+      providerSubject: DEMO_BANKID_SUBJECT,
+      credentialId: "demo-bankid-factor",
+      status: "active",
+      linkedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      lastVerifiedAt: now,
+      metadataJson: {
+        factorId: "demo-bankid-factor",
+        deviceName: "Demo BankID"
+      }
+    }
+  );
+  state.identityAccounts.set(
+    buildIdentityAccountKey({
+      companyId: DEMO_IDS.companyId,
+      companyUserId: DEMO_APPROVER_IDS.companyUserId,
+      providerCode: LOCAL_TOTP_PROVIDER_CODE,
+      factorType: "totp",
+      credentialId: "demo-approver-totp-factor"
+    }),
+    {
+      identityAccountId: crypto.randomUUID(),
+      companyId: DEMO_IDS.companyId,
+      companyUserId: DEMO_APPROVER_IDS.companyUserId,
+      userId: DEMO_APPROVER_IDS.userId,
+      providerCode: LOCAL_TOTP_PROVIDER_CODE,
+      factorType: "totp",
+      providerSubject: null,
+      credentialId: "demo-approver-totp-factor",
+      status: "active",
+      linkedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      lastVerifiedAt: now,
+      metadataJson: {
+        factorId: "demo-approver-totp-factor",
+        deviceName: "Approver authenticator"
+      }
+    }
+  );
+  state.personIdentities.set(
+    buildPersonIdentityKey({
+      companyId: DEMO_IDS.companyId,
+      providerCode: BANKID_PROVIDER_CODE,
+      providerSubject: DEMO_BANKID_SUBJECT
+    }),
+    {
+      personIdentityId: crypto.randomUUID(),
+      companyId: DEMO_IDS.companyId,
+      companyUserId: DEMO_IDS.companyUserId,
+      userId: DEMO_IDS.userId,
+      providerCode: BANKID_PROVIDER_CODE,
+      providerSubject: DEMO_BANKID_SUBJECT,
+      email: DEMO_ADMIN_EMAIL,
+      displayName: "Phase 1 Admin",
+      status: "linked",
+      linkedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      metadataJson: {}
+    }
+  );
   state.companySetupBlueprints.set(DEMO_IDS.companyId, {
     companyId: DEMO_IDS.companyId,
     chartTemplateId: DEFAULT_CHART_TEMPLATE_ID,
@@ -2123,65 +2590,6 @@ function seedDemoState(state, clock) {
   }
 }
 
-function createBankIdProvider() {
-  const orders = new Map();
-
-  return {
-    start({ sessionId, companyId, companyUserId, providerSubject }) {
-      const orderRef = crypto.randomUUID();
-      const completionToken = issueOpaqueToken();
-      const payload = {
-        providerCode: BANKID_PROVIDER_CODE,
-        providerMode: "stub",
-        orderRef,
-        autoStartToken: issueOpaqueToken(),
-        qrStartToken: issueOpaqueToken(),
-        qrStartSecret: issueOpaqueToken().slice(0, 16),
-        completionToken
-      };
-      orders.set(orderRef, {
-        ...payload,
-        sessionId,
-        companyId,
-        companyUserId,
-        providerSubject,
-        status: "pending"
-      });
-      return payload;
-    },
-    collect({ orderRef, completionToken }) {
-      const order = orders.get(orderRef);
-      if (!order) {
-        throw httpError(404, "bankid_order_not_found", "BankID order ref was not found.");
-      }
-      if (order.completionToken !== completionToken) {
-        throw httpError(403, "bankid_completion_token_invalid", "Completion token did not match the challenge.");
-      }
-      order.status = "complete";
-      return {
-        providerCode: BANKID_PROVIDER_CODE,
-        providerMode: "stub",
-        orderRef,
-        status: "complete"
-      };
-    },
-    getCompletionToken(orderRef) {
-      return orders.get(orderRef)?.completionToken || null;
-    },
-    snapshot() {
-      return {
-        orders: [...orders.entries()]
-      };
-    },
-    restore(snapshot = {}) {
-      orders.clear();
-      for (const [orderRef, order] of Array.isArray(snapshot.orders) ? snapshot.orders : []) {
-        orders.set(orderRef, order);
-      }
-    }
-  };
-}
-
 function resolveBankIdProviderBaselineRef(providerBaselines, now) {
   const effectiveDate = timestamp(now).slice(0, 10);
   const providerBaseline = providerBaselines.resolveProviderBaseline({
@@ -2198,6 +2606,52 @@ function resolveBankIdProviderBaselineRef(providerBaselines, now) {
       factorType: "bankid"
     }
   });
+}
+
+function resolveFederationProviderBaselineRef(providerBaselines, now) {
+  const effectiveDate = timestamp(now).slice(0, 10);
+  const providerBaseline = providerBaselines.resolveProviderBaseline({
+    domain: "auth",
+    jurisdiction: "SE",
+    providerCode: WORKOS_FEDERATION_PROVIDER_CODE,
+    baselineCode: "SE-ENTERPRISE-FEDERATION-BROKER",
+    effectiveDate
+  });
+  return providerBaselines.buildProviderBaselineRef({
+    effectiveDate,
+    providerBaseline,
+    metadata: {
+      factorType: "federation"
+    }
+  });
+}
+
+function buildIdentityAccountKey({ companyId, companyUserId, providerCode, factorType, providerSubject = null, credentialId = null }) {
+  const resolvedProviderSubject = normalizeOptionalKeyPart(providerSubject);
+  const resolvedCredentialId = normalizeOptionalKeyPart(credentialId);
+  return [
+    assertNonEmpty(companyId, "company_id_required"),
+    assertNonEmpty(companyUserId, "company_user_id_required"),
+    assertNonEmpty(providerCode, "provider_code_required"),
+    assertNonEmpty(factorType, "factor_type_required"),
+    resolvedProviderSubject || resolvedCredentialId || "local"
+  ].join(":");
+}
+
+function buildPersonIdentityKey({ companyId, providerCode, providerSubject }) {
+  return [
+    assertNonEmpty(companyId, "company_id_required"),
+    assertNonEmpty(providerCode, "provider_code_required"),
+    assertNonEmpty(providerSubject, "provider_subject_required")
+  ].join(":");
+}
+
+function normalizeOptionalKeyPart(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const trimmed = String(value).trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function normalizeStringList(values, code) {
