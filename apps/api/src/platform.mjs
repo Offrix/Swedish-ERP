@@ -43,7 +43,11 @@ import {
   createSqliteCriticalDomainStateStore
 } from "../../../packages/domain-core/src/index.mjs";
 import { createAnnualReportingPlatform, ANNUAL_REPORTING_PROVIDER_BASELINES } from "../../../packages/domain-annual-reporting/src/index.mjs";
-import { createAutomationAiEngine, createProviderBaselineRegistry } from "../../../packages/rule-engine/src/index.mjs";
+import {
+  createAutomationAiEngine,
+  createProviderBaselineRegistry,
+  createRegulatoryChangeCalendar
+} from "../../../packages/rule-engine/src/index.mjs";
 import { INTEGRATION_PROVIDER_BASELINES } from "../../../packages/domain-integrations/src/index.mjs";
 import {
   AUDIT_EVENT_VERSION,
@@ -783,8 +787,23 @@ export function createApiPlatform(options = {}) {
     eventEnvelopeVersion: EVENT_ENVELOPE_VERSION,
     auditEnvelopeVersion: AUDIT_EVENT_VERSION
   });
+  const regulatoryChangeCalendar = createRegulatoryChangeCalendar({
+    clock: options.clock || (() => new Date()),
+    providerBaselineRegistry,
+    resolveRulePackTargets: () =>
+      Object.freeze({
+        accounting_method: registeredDomains.accountingMethod.rulePackGovernance,
+        fiscal_year: registeredDomains.fiscalYear.rulePackGovernance,
+        legal_form: registeredDomains.legalForm.rulePackGovernance,
+        vat: registeredDomains.vat.rulePackGovernance,
+        payroll: registeredDomains.payroll.rulePackGovernance,
+        hus: registeredDomains.hus.rulePackGovernance,
+        tax_account: registeredDomains.taxAccount.rulePackGovernance
+      })
+  });
   const platform = {
-    ...flatPlatform
+    ...flatPlatform,
+    ...regulatoryChangeCalendar
   };
 
   Object.defineProperties(platform, {
@@ -824,17 +843,21 @@ export function createApiPlatform(options = {}) {
       value: runtimeModeProfile,
       enumerable: false
     },
-      bootstrapModePolicy: {
-        value: bootstrapModePolicy,
-        enumerable: false
-      },
-      providerBaselineRegistry: {
-        value: providerBaselineRegistry,
-        enumerable: false
-      },
-      environmentMode: {
-        value: runtimeModeProfile.environmentMode,
-        enumerable: false
+    bootstrapModePolicy: {
+      value: bootstrapModePolicy,
+      enumerable: false
+    },
+    providerBaselineRegistry: {
+      value: providerBaselineRegistry,
+      enumerable: false
+    },
+    regulatoryChangeCalendar: {
+      value: regulatoryChangeCalendar,
+      enumerable: false
+    },
+    environmentMode: {
+      value: runtimeModeProfile.environmentMode,
+      enumerable: false
     },
     supportsLegalEffect: {
       value: runtimeModeProfile.supportsLegalEffect,

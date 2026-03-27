@@ -1,4 +1,11 @@
 import crypto from "node:crypto";
+export {
+  REGULATORY_CHANGE_APPROVAL_ROLES,
+  REGULATORY_CHANGE_SANDBOX_RESULTS,
+  REGULATORY_CHANGE_STATUSES,
+  REGULATORY_CHANGE_TARGET_TYPES,
+  createRegulatoryChangeCalendar
+} from "./change-calendar.mjs";
 
 export const AUTOMATION_DECISION_TYPES = Object.freeze(["posting_suggestion", "classification", "anomaly_detection"]);
 export const AUTOMATION_DECISION_STATES = Object.freeze(["proposed", "manual_override", "accepted"]);

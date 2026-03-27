@@ -149,7 +149,7 @@ export function createLegalFormEngine({
     );
   }
 
-  return {
+  const engine = {
     legalFormCodes: LEGAL_FORM_CODES,
     legalFormProfileStatuses: LEGAL_FORM_PROFILE_STATUSES,
     reportingObligationProfileStatuses: REPORTING_OBLIGATION_PROFILE_STATUSES,
@@ -169,6 +169,22 @@ export function createLegalFormEngine({
     resolveDeclarationProfile,
     listLegalFormAuditEvents
   };
+
+  Object.defineProperty(engine, "rulePackGovernance", {
+    value: Object.freeze({
+      listRulePacks: (filters = {}) => rules.listRulePacks({ jurisdiction: "SE", ...filters }),
+      getRulePack: (filters) => rules.getRulePack(filters),
+      createDraftRulePackVersion: (input) => rules.createDraftRulePackVersion(input),
+      validateRulePackVersion: (input) => rules.validateRulePackVersion(input),
+      approveRulePackVersion: (input) => rules.approveRulePackVersion(input),
+      publishRulePackVersion: (input) => rules.publishRulePackVersion(input),
+      rollbackRulePackVersion: (input) => rules.rollbackRulePackVersion(input),
+      listRulePackRollbacks: (filters = {}) => rules.listRulePackRollbacks({ jurisdiction: "SE", ...filters })
+    }),
+    enumerable: false
+  });
+
+  return engine;
 
   function createLegalFormProfile({
     companyId,

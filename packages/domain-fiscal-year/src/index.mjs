@@ -76,7 +76,7 @@ export function createFiscalYearEngine({
     seedDemoCompany(state, clock, resolveFiscalYearRulePack("2026-01-01"));
   }
 
-  return {
+  const engine = {
     fiscalYearStatuses: FISCAL_YEAR_STATUSES,
     fiscalPeriodLockStates: FISCAL_PERIOD_LOCK_STATES,
     fiscalYearKinds: FISCAL_YEAR_KINDS,
@@ -97,6 +97,22 @@ export function createFiscalYearEngine({
     getFiscalYearHistory,
     listFiscalYearAuditEvents
   };
+
+  Object.defineProperty(engine, "rulePackGovernance", {
+    value: Object.freeze({
+      listRulePacks: (filters = {}) => rules.listRulePacks({ domain: "fiscal_year", jurisdiction: "SE", ...filters }),
+      getRulePack: (filters) => rules.getRulePack(filters),
+      createDraftRulePackVersion: (input) => rules.createDraftRulePackVersion(input),
+      validateRulePackVersion: (input) => rules.validateRulePackVersion(input),
+      approveRulePackVersion: (input) => rules.approveRulePackVersion(input),
+      publishRulePackVersion: (input) => rules.publishRulePackVersion(input),
+      rollbackRulePackVersion: (input) => rules.rollbackRulePackVersion(input),
+      listRulePackRollbacks: (filters = {}) => rules.listRulePackRollbacks({ domain: "fiscal_year", jurisdiction: "SE", ...filters })
+    }),
+    enumerable: false
+  });
+
+  return engine;
 
   function createFiscalYearProfile({
     companyId,

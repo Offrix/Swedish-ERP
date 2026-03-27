@@ -309,7 +309,7 @@ export function createPayrollEngine({
     seedPayrollDemo(state, { clock, companyId: DEMO_COMPANY_ID });
   }
 
-  return {
+  const engine = {
     payRunTypes: PAY_RUN_TYPES,
     payRunStatuses: PAY_RUN_STATUSES,
     payrollStepDefinitions: PAYROLL_STEP_DEFINITIONS.map(copy),
@@ -354,6 +354,22 @@ export function createPayrollEngine({
     exportDurableState,
     importDurableState
   };
+
+  Object.defineProperty(engine, "rulePackGovernance", {
+    value: Object.freeze({
+      listRulePacks: (filters = {}) => rules.listRulePacks({ domain: "payroll", jurisdiction: "SE", ...filters }),
+      getRulePack: (filters) => rules.getRulePack(filters),
+      createDraftRulePackVersion: (input) => rules.createDraftRulePackVersion(input),
+      validateRulePackVersion: (input) => rules.validateRulePackVersion(input),
+      approveRulePackVersion: (input) => rules.approveRulePackVersion(input),
+      publishRulePackVersion: (input) => rules.publishRulePackVersion(input),
+      rollbackRulePackVersion: (input) => rules.rollbackRulePackVersion(input),
+      listRulePackRollbacks: (filters = {}) => rules.listRulePackRollbacks({ domain: "payroll", jurisdiction: "SE", ...filters })
+    }),
+    enumerable: false
+  });
+
+  return engine;
 
   function exportDurableState() {
     return serializeDurableState(state);

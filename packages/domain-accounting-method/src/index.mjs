@@ -91,7 +91,7 @@ export function createAccountingMethodEngine({
     seedDemoCompany(state, clock, resolveAccountingMethodRulePack(currentDate(clock)));
   }
 
-  return {
+  const engine = {
     accountingMethodCodes: ACCOUNTING_METHOD_CODES,
     accountingMethodProfileStatuses: ACCOUNTING_METHOD_PROFILE_STATUSES,
     methodChangeRequestStatuses: METHOD_CHANGE_REQUEST_STATUSES,
@@ -114,6 +114,22 @@ export function createAccountingMethodEngine({
     getYearEndCatchUpRun,
     listAccountingMethodAuditEvents
   };
+
+  Object.defineProperty(engine, "rulePackGovernance", {
+    value: Object.freeze({
+      listRulePacks: (filters = {}) => rules.listRulePacks({ domain: "accounting_method", jurisdiction: "SE", ...filters }),
+      getRulePack: (filters) => rules.getRulePack(filters),
+      createDraftRulePackVersion: (input) => rules.createDraftRulePackVersion(input),
+      validateRulePackVersion: (input) => rules.validateRulePackVersion(input),
+      approveRulePackVersion: (input) => rules.approveRulePackVersion(input),
+      publishRulePackVersion: (input) => rules.publishRulePackVersion(input),
+      rollbackRulePackVersion: (input) => rules.rollbackRulePackVersion(input),
+      listRulePackRollbacks: (filters = {}) => rules.listRulePackRollbacks({ domain: "accounting_method", jurisdiction: "SE", ...filters })
+    }),
+    enumerable: false
+  });
+
+  return engine;
 
   function assessCashMethodEligibility({
     companyId,

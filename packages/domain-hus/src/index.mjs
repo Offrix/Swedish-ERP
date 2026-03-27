@@ -99,7 +99,7 @@ export function createHusEngine({
     auditEvents: []
   };
 
-  return {
+  const engine = {
     husCaseStates: HUS_CASE_STATES,
     husServiceTypeCodes: HUS_SERVICE_TYPE_CODES,
     husPaymentChannels: HUS_PAYMENT_CHANNELS,
@@ -130,6 +130,22 @@ export function createHusEngine({
     recordHusRecovery,
     listHusAuditEvents
   };
+
+  Object.defineProperty(engine, "rulePackGovernance", {
+    value: Object.freeze({
+      listRulePacks: (filters = {}) => rules.listRulePacks({ domain: "hus", jurisdiction: "SE", ...filters }),
+      getRulePack: (filters) => rules.getRulePack(filters),
+      createDraftRulePackVersion: (input) => rules.createDraftRulePackVersion(input),
+      validateRulePackVersion: (input) => rules.validateRulePackVersion(input),
+      approveRulePackVersion: (input) => rules.approveRulePackVersion(input),
+      publishRulePackVersion: (input) => rules.publishRulePackVersion(input),
+      rollbackRulePackVersion: (input) => rules.rollbackRulePackVersion(input),
+      listRulePackRollbacks: (filters = {}) => rules.listRulePackRollbacks({ domain: "hus", jurisdiction: "SE", ...filters })
+    }),
+    enumerable: false
+  });
+
+  return engine;
 
   function listHusCases({ companyId, status = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");

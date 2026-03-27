@@ -59,6 +59,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/ops/secret-rotations",
   "/v1/ops/certificate-chains",
   "/v1/ops/callback-secrets",
+  "/v1/ops/rule-governance/changes/:regulatoryChangeEntryId/publish",
   "/v1/ops/restore-drills/:restoreDrillId/start",
   "/v1/ops/restore-drills/:restoreDrillId/complete",
   "/v1/submissions/:submissionId/evidence-pack",

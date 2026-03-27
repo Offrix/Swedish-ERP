@@ -135,7 +135,7 @@ export function createTaxAccountEngine({
     seedDemoState(state, clock);
   }
 
-  return {
+  const engine = {
     taxAccountEventTypes: TAX_ACCOUNT_EVENT_TYPES,
     taxAccountEventEffectDirections: TAX_ACCOUNT_EVENT_EFFECT_DIRECTIONS,
     taxAccountEventMappingStatuses: TAX_ACCOUNT_EVENT_MAPPING_STATUSES,
@@ -162,6 +162,22 @@ export function createTaxAccountEngine({
     exportDurableState,
     importDurableState
   };
+
+  Object.defineProperty(engine, "rulePackGovernance", {
+    value: Object.freeze({
+      listRulePacks: (filters = {}) => rules.listRulePacks({ domain: "tax_account", jurisdiction: "SE", ...filters }),
+      getRulePack: (filters) => rules.getRulePack(filters),
+      createDraftRulePackVersion: (input) => rules.createDraftRulePackVersion(input),
+      validateRulePackVersion: (input) => rules.validateRulePackVersion(input),
+      approveRulePackVersion: (input) => rules.approveRulePackVersion(input),
+      publishRulePackVersion: (input) => rules.publishRulePackVersion(input),
+      rollbackRulePackVersion: (input) => rules.rollbackRulePackVersion(input),
+      listRulePackRollbacks: (filters = {}) => rules.listRulePackRollbacks({ domain: "tax_account", jurisdiction: "SE", ...filters })
+    }),
+    enumerable: false
+  });
+
+  return engine;
 
   function registerExpectedTaxLiability({
     companyId,

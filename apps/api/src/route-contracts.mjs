@@ -197,7 +197,14 @@ const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["POST /v1/review-center/items/:reviewItemId/reject", override("review", "review_center_decide", "mfa", "review_item", "review_item", "review_item", "approval.approve", true)],
   ["POST /v1/review-center/items/:reviewItemId/escalate", override("review", "review_center_escalate", "mfa", "review_item", "review_item", "review_item", "approval.approve", true)],
   ["POST /v1/migration/cutover-plans/:cutoverPlanId/checklist/:itemCode", override("migration", "cutover_checklist_update", "strong_mfa", "checklist_item", "cutover_plan", "cutover_checklist_item", "company.manage", true)],
-  ["POST /v1/notifications/:notificationId/acknowledge", override("ops", "notification_acknowledge", "authenticated", "notification", "notification", "notification", "company.read", true)]
+  ["POST /v1/notifications/:notificationId/acknowledge", override("ops", "notification_acknowledge", "authenticated", "notification", "notification", "notification", "company.read", true)],
+  ["POST /v1/ops/rule-governance/changes", override("ops", "regulatory_change_create", "strong_mfa", "company", "regulatory_change_entry", "regulatory_change_entry", "company.manage", false)],
+  ["POST /v1/ops/rule-governance/changes/:regulatoryChangeEntryId/source-snapshots", override("ops", "regulatory_change_source_capture", "strong_mfa", "regulatory_change_entry", "regulatory_change_entry", "regulatory_change_entry", "company.manage", true)],
+  ["POST /v1/ops/rule-governance/changes/:regulatoryChangeEntryId/diff-review", override("ops", "regulatory_change_diff_review", "strong_mfa", "regulatory_change_entry", "regulatory_change_entry", "regulatory_change_entry", "company.manage", true)],
+  ["POST /v1/ops/rule-governance/changes/:regulatoryChangeEntryId/sandbox-verification", override("ops", "regulatory_change_sandbox_verify", "strong_mfa", "regulatory_change_entry", "regulatory_change_entry", "regulatory_change_entry", "company.manage", true)],
+  ["POST /v1/ops/rule-governance/changes/:regulatoryChangeEntryId/approve", override("ops", "regulatory_change_approve", "strong_mfa", "regulatory_change_entry", "regulatory_change_entry", "regulatory_change_entry", "company.manage", true)],
+  ["POST /v1/ops/rule-governance/changes/:regulatoryChangeEntryId/publish", override("ops", "regulatory_change_publish", "strong_mfa", "regulatory_change_entry", "regulatory_change_entry", "regulatory_change_entry", "company.manage", true)],
+  ["POST /v1/ops/rule-governance/changes/:regulatoryChangeEntryId/rollback", override("ops", "regulatory_change_rollback", "strong_mfa", "regulatory_change_entry", "regulatory_change_entry", "regulatory_change_entry", "company.manage", true)]
 ]);
 
 const SOURCE_ROUTE_FILES = Object.freeze([

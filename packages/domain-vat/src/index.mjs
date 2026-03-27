@@ -247,7 +247,7 @@ export function createVatEngine({
     seedVatMasterdata(state, clock);
   }
 
-  return {
+  const engine = {
     vatDecisionStatuses: VAT_DECISION_STATUSES,
     vatReviewQueueStatuses: VAT_REVIEW_QUEUE_STATUSES,
     vatBoxAmountTypes: VAT_BOX_AMOUNT_TYPES,
@@ -266,6 +266,22 @@ export function createVatEngine({
     exportDurableState,
     importDurableState
   };
+
+  Object.defineProperty(engine, "rulePackGovernance", {
+    value: Object.freeze({
+      listRulePacks: (filters = {}) => ruleRegistry.listRulePacks({ domain: "vat", jurisdiction: "SE", ...filters }),
+      getRulePack: (filters) => ruleRegistry.getRulePack(filters),
+      createDraftRulePackVersion: (input) => ruleRegistry.createDraftRulePackVersion(input),
+      validateRulePackVersion: (input) => ruleRegistry.validateRulePackVersion(input),
+      approveRulePackVersion: (input) => ruleRegistry.approveRulePackVersion(input),
+      publishRulePackVersion: (input) => ruleRegistry.publishRulePackVersion(input),
+      rollbackRulePackVersion: (input) => ruleRegistry.rollbackRulePackVersion(input),
+      listRulePackRollbacks: (filters = {}) => ruleRegistry.listRulePackRollbacks({ domain: "vat", jurisdiction: "SE", ...filters })
+    }),
+    enumerable: false
+  });
+
+  return engine;
 
   function listVatCodes({ companyId } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");

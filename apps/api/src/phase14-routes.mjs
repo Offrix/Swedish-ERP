@@ -17,6 +17,7 @@ import { tryHandlePhase14FiscalYearRoutes } from "./phase14-fiscal-year-routes.m
 import { tryHandlePhase14LegalFormRoutes } from "./phase14-legal-form-routes.mjs";
 import { tryHandlePhase14MigrationIntakeRoutes } from "./phase14-migration-intake-routes.mjs";
 import { tryHandlePhase14MigrationRoutes } from "./phase14-migration-routes.mjs";
+import { tryHandlePhase14RuleGovernanceRoutes } from "./phase14-rule-governance-routes.mjs";
 import { tryHandlePhase14ResilienceRoutes } from "./phase14-resilience-routes.mjs";
 import { tryHandlePhase14ReviewRoutes } from "./phase14-review-routes.mjs";
 import { tryHandlePhase14TaxAccountRoutes } from "./phase14-tax-account-routes.mjs";
@@ -133,6 +134,18 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
         resolveReviewSlaNotificationTarget,
         mapQueuePriorityToIncidentSeverity
       }
+    })
+  ) {
+    return true;
+  }
+
+  if (
+    await tryHandlePhase14RuleGovernanceRoutes({
+      req,
+      res,
+      url,
+      path,
+      platform
     })
   ) {
     return true;
