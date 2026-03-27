@@ -29,6 +29,17 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/authz/check",
   "/v1/onboarding/runs/:runId",
   "/v1/onboarding/runs/:runId/checklist",
+  "/v1/tenant/bootstrap",
+  "/v1/tenant/bootstrap/:tenantBootstrapId",
+  "/v1/tenant/bootstrap/:tenantBootstrapId/checklist",
+  "/v1/tenant/bootstrap/profile",
+  "/v1/tenant/modules/definitions",
+  "/v1/tenant/modules/activations",
+  "/v1/tenant/modules/activations/:moduleCode/suspend",
+  "/v1/tenant/parallel-runs",
+  "/v1/trial/environments",
+  "/v1/trial/environments/:trialEnvironmentProfileId/reset",
+  "/v1/trial/promotions",
   "/v1/documents/:documentId/versions",
   "/v1/documents/:documentId/links",
   "/v1/inbox/messages/:emailIngestMessageId",
@@ -134,6 +145,13 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(supportCaseCloseContract.requiredTrustLevel, "strong_mfa");
     assert.equal(supportCaseCloseContract.requiredScopeType, "support_case");
     assert.equal(supportCaseCloseContract.expectedObjectVersion, true);
+
+    const tenantBootstrapContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/tenant/bootstrap"
+    );
+    assert.ok(tenantBootstrapContract);
+    assert.equal(tenantBootstrapContract.requiredTrustLevel, "public");
+    assert.equal(tenantBootstrapContract.requiredScopeType, "public");
 
     const uniqueCount = new Set(payload.routes).size;
     assert.equal(uniqueCount, payload.routes.length, "api root metadata should not contain duplicate route entries");

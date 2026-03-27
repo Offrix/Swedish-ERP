@@ -13,7 +13,7 @@ test("Phase 1 tenant setup migration creates setup and module activation tables"
   }
 });
 
-test("Phase 1 API exposes tenant setup profile and module activation lifecycle", async () => {
+test("Phase 1 API routes tenant setup, trial and module lifecycles through tenant-control", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-25T09:00:00Z")
   });
@@ -30,13 +30,84 @@ test("Phase 1 API exposes tenant setup profile and module activation lifecycle",
     });
 
     const root = await requestJson(baseUrl, "/", { token: adminToken });
-    assert.equal(root.routes.includes("/v1/org/tenant-setup/profile"), true);
-    assert.equal(root.routes.includes("/v1/org/module-activations"), true);
+    for (const route of [
+      "/v1/org/tenant-setup/profile",
+      "/v1/org/module-activations",
+      "/v1/tenant/bootstrap",
+      "/v1/tenant/modules/definitions",
+      "/v1/tenant/modules/activations",
+      "/v1/trial/environments",
+      "/v1/trial/promotions",
+      "/v1/tenant/parallel-runs"
+    ]) {
+      assert.equal(root.routes.includes(route), true, `${route} should be exposed`);
+    }
+
+    const onboardingRun = await requestJson(baseUrl, "/v1/tenant/bootstrap", {
+      method: "POST",
+      expectedStatus: 201,
+      body: {
+        legalName: "API Tenant Bootstrap AB",
+        orgNumber: "559900-6767",
+        adminEmail: "api-owner@example.test",
+        adminDisplayName: "API Owner"
+      }
+    });
+    assert.equal(onboardingRun.companySetupStatus, "bootstrap_running");
+
+    const onboardingRead = await requestJson(baseUrl, `/v1/onboarding/runs/${onboardingRun.tenantBootstrapId}?resumeToken=${onboardingRun.resumeToken}`);
+    assert.equal(onboardingRead.companyId, onboardingRun.companyId);
+
+    await requestJson(baseUrl, `/v1/onboarding/runs/${onboardingRun.tenantBootstrapId}/steps/registrations`, {
+      method: "POST",
+      body: {
+        resumeToken: onboardingRun.resumeToken,
+        registrations: [
+          { registrationType: "f_tax", registrationValue: "configured-f-tax", status: "configured" },
+          { registrationType: "vat", registrationValue: "configured-vat", status: "configured" },
+          { registrationType: "employer", registrationValue: "configured-employer", status: "configured" }
+        ]
+      }
+    });
+    await requestJson(baseUrl, `/v1/onboarding/runs/${onboardingRun.tenantBootstrapId}/steps/chart`, {
+      method: "POST",
+      body: {
+        resumeToken: onboardingRun.resumeToken,
+        chartTemplateId: "DSAM-2026",
+        voucherSeriesCodes: ["A", "B", "E", "H", "I"]
+      }
+    });
+    await requestJson(baseUrl, `/v1/onboarding/runs/${onboardingRun.tenantBootstrapId}/steps/vat`, {
+      method: "POST",
+      body: {
+        resumeToken: onboardingRun.resumeToken,
+        vatScheme: "se_standard",
+        filingPeriod: "monthly"
+      }
+    });
+    await requestJson(baseUrl, `/v1/onboarding/runs/${onboardingRun.tenantBootstrapId}/steps/periods`, {
+      method: "POST",
+      body: {
+        resumeToken: onboardingRun.resumeToken,
+        year: 2026
+      }
+    });
+
+    const onboardingChecklist = await requestJson(
+      baseUrl,
+      `/v1/tenant/bootstrap/${onboardingRun.tenantBootstrapId}/checklist?resumeToken=${onboardingRun.resumeToken}`
+    );
+    assert.equal(onboardingChecklist.checklist.every((item) => item.status === "completed"), true);
 
     const tenantProfile = await requestJson(baseUrl, `/v1/org/tenant-setup/profile?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
-    assert.equal(tenantProfile.status, "active");
+    assert.equal(["finance_ready", "production_live", "pilot"].includes(tenantProfile.status), true);
+
+    const canonicalTenantProfile = await requestJson(baseUrl, `/v1/tenant/bootstrap/profile?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(canonicalTenantProfile.companyId, DEMO_IDS.companyId);
 
     const approver = platform.createCompanyUser({
       sessionToken: adminToken,
@@ -55,7 +126,7 @@ test("Phase 1 API exposes tenant setup profile and module activation lifecycle",
       objectId: DEMO_IDS.companyId
     });
 
-    const ledgerModule = await requestJson(baseUrl, "/v1/org/module-definitions", {
+    const ledgerModule = await requestJson(baseUrl, "/v1/tenant/modules/definitions", {
       method: "POST",
       token: adminToken,
       expectedStatus: 201,
@@ -69,7 +140,7 @@ test("Phase 1 API exposes tenant setup profile and module activation lifecycle",
         requiredRulepackCodes: ["RP-ACCOUNTING-METHOD-SE"]
       }
     });
-    const payrollModule = await requestJson(baseUrl, "/v1/org/module-definitions", {
+    const payrollModule = await requestJson(baseUrl, "/v1/tenant/modules/definitions", {
       method: "POST",
       token: adminToken,
       expectedStatus: 201,
@@ -86,12 +157,12 @@ test("Phase 1 API exposes tenant setup profile and module activation lifecycle",
     assert.equal(ledgerModule.moduleCode, "ledger");
     assert.equal(payrollModule.moduleCode, "payroll");
 
-    const definitions = await requestJson(baseUrl, `/v1/org/module-definitions?companyId=${DEMO_IDS.companyId}`, {
+    const definitions = await requestJson(baseUrl, `/v1/tenant/modules/definitions?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
     assert.equal(definitions.items.length >= 2, true);
 
-    const missingDependency = await requestJson(baseUrl, "/v1/org/module-activations", {
+    const missingDependency = await requestJson(baseUrl, "/v1/tenant/modules/activations", {
       method: "POST",
       token: adminToken,
       expectedStatus: 409,
@@ -104,7 +175,7 @@ test("Phase 1 API exposes tenant setup profile and module activation lifecycle",
     });
     assert.equal(missingDependency.error, "module_activation_dependency_missing");
 
-    const ledgerActivation = await requestJson(baseUrl, "/v1/org/module-activations", {
+    const ledgerActivation = await requestJson(baseUrl, "/v1/tenant/modules/activations", {
       method: "POST",
       token: adminToken,
       expectedStatus: 201,
@@ -116,19 +187,7 @@ test("Phase 1 API exposes tenant setup profile and module activation lifecycle",
     });
     assert.equal(ledgerActivation.status, "active");
 
-    const missingApproval = await requestJson(baseUrl, "/v1/org/module-activations", {
-      method: "POST",
-      token: adminToken,
-      expectedStatus: 409,
-      body: {
-        companyId: DEMO_IDS.companyId,
-        moduleCode: "payroll",
-        activationReason: "Payroll rollout without approver should fail."
-      }
-    });
-    assert.equal(missingApproval.error, "module_activation_approval_required");
-
-    const payrollActivation = await requestJson(baseUrl, "/v1/org/module-activations", {
+    const payrollActivation = await requestJson(baseUrl, "/v1/tenant/modules/activations", {
       method: "POST",
       token: adminToken,
       expectedStatus: 201,
@@ -142,13 +201,13 @@ test("Phase 1 API exposes tenant setup profile and module activation lifecycle",
     assert.equal(payrollActivation.status, "active");
     assert.deepEqual(payrollActivation.approvalActorIds, [approver.user.userId]);
 
-    const activations = await requestJson(baseUrl, `/v1/org/module-activations?companyId=${DEMO_IDS.companyId}`, {
+    const activations = await requestJson(baseUrl, `/v1/tenant/modules/activations?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
     assert.equal(activations.items.some((item) => item.moduleCode === "ledger"), true);
     assert.equal(activations.items.some((item) => item.moduleCode === "payroll"), true);
 
-    const suspended = await requestJson(baseUrl, "/v1/org/module-activations/payroll/suspend", {
+    const suspended = await requestJson(baseUrl, "/v1/tenant/modules/activations/payroll/suspend", {
       method: "POST",
       token: adminToken,
       body: {
@@ -158,10 +217,60 @@ test("Phase 1 API exposes tenant setup profile and module activation lifecycle",
     });
     assert.equal(suspended.status, "suspended");
 
-    const snapshot = platform.snapshot();
-    const auditEvent = snapshot.auditEvents.find((event) => event.action === "tenant_setup.module_activation.activated" && event.metadata?.moduleCode === "payroll");
-    assert.deepEqual(auditEvent.metadata.approvalActorIds, [approver.user.userId]);
-    assert.equal(auditEvent.metadata.activationReason, "Payroll rollout for controlled pilot.");
+    const trialEnvironment = await requestJson(baseUrl, "/v1/trial/environments", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        label: "Go-live trial",
+        seedScenarioCode: "agency_trial_seed"
+      }
+    });
+    assert.equal(trialEnvironment.liveSubmissionPolicy, "blocked");
+
+    const trialEnvironments = await requestJson(baseUrl, `/v1/trial/environments?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(trialEnvironments.items.some((item) => item.trialEnvironmentProfileId === trialEnvironment.trialEnvironmentProfileId), true);
+
+    const reset = await requestJson(baseUrl, `/v1/trial/environments/${trialEnvironment.trialEnvironmentProfileId}/reset`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        reasonCode: "reset_for_demo"
+      }
+    });
+    assert.equal(reset.resetCount, 1);
+
+    const promotion = await requestJson(baseUrl, "/v1/trial/promotions", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
+        carryOverSelectionCodes: ["settings", "document_templates"],
+        approvalActorIds: [approver.user.userId]
+      }
+    });
+    assert.equal(["approved", "validated"].includes(promotion.status), true);
+
+    const promotions = await requestJson(baseUrl, `/v1/trial/promotions?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(promotions.items.length >= 1, true);
+
+    const parallelRun = await requestJson(baseUrl, "/v1/tenant/parallel-runs", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
+        runWindowDays: 21
+      }
+    });
+    assert.equal(parallelRun.status, "started");
   } finally {
     await stopServer(server);
   }

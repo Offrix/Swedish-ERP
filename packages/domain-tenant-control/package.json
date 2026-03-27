@@ -1,0 +1,7 @@
+{
+  "name": "@swedish-erp/domain-tenant-control",
+  "version": "0.0.0-phase14.3",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs"
+}

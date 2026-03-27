@@ -334,6 +334,17 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/org/module-definitions",
               "/v1/org/module-activations",
               "/v1/org/module-activations/:moduleCode/suspend",
+              "/v1/tenant/bootstrap",
+              "/v1/tenant/bootstrap/:tenantBootstrapId",
+              "/v1/tenant/bootstrap/:tenantBootstrapId/checklist",
+              "/v1/tenant/bootstrap/profile",
+              "/v1/tenant/modules/definitions",
+              "/v1/tenant/modules/activations",
+              "/v1/tenant/modules/activations/:moduleCode/suspend",
+              "/v1/tenant/parallel-runs",
+              "/v1/trial/environments",
+              "/v1/trial/environments/:trialEnvironmentProfileId/reset",
+              "/v1/trial/promotions",
               "/v1/onboarding/runs",
               "/v1/onboarding/runs/:runId",
               "/v1/onboarding/runs/:runId/checklist",
@@ -1190,7 +1201,7 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(
       res,
       200,
-      platform.getTenantSetupProfile({
+      requireTenantControlDomain(platform).getCompanySetupProfile({
         sessionToken: readSessionToken(req),
         companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
       })
@@ -1203,7 +1214,7 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(
       res,
       201,
-      platform.registerModuleDefinition({
+      requireTenantControlDomain(platform).registerTenantModuleDefinition({
         sessionToken: readSessionToken(req, body),
         companyId: body.companyId,
         moduleCode: body.moduleCode,
@@ -1225,7 +1236,7 @@ async function handleRequest({ req, res, platform, flags }) {
       res,
       200,
       {
-        items: platform.listModuleDefinitions({
+        items: requireTenantControlDomain(platform).listTenantModuleDefinitions({
           sessionToken: readSessionToken(req),
           companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
         })
@@ -1239,7 +1250,7 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(
       res,
       201,
-      platform.activateModule({
+      requireTenantControlDomain(platform).activateTenantModule({
         sessionToken: readSessionToken(req, body),
         companyId: body.companyId,
         moduleCode: body.moduleCode,
@@ -1256,7 +1267,7 @@ async function handleRequest({ req, res, platform, flags }) {
       res,
       200,
       {
-        items: platform.listModuleActivations({
+        items: requireTenantControlDomain(platform).listTenantModuleActivations({
           sessionToken: readSessionToken(req),
           companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
         })
@@ -1271,7 +1282,7 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(
       res,
       200,
-      platform.suspendModuleActivation({
+      requireTenantControlDomain(platform).suspendTenantModuleActivation({
         sessionToken: readSessionToken(req, body),
         companyId: body.companyId,
         moduleCode: moduleActivationSuspendMatch.moduleCode,
@@ -1386,7 +1397,7 @@ async function handleRequest({ req, res, platform, flags }) {
 
   if (req.method === "POST" && path === "/v1/onboarding/runs") {
     const body = await readJsonBody(req);
-    writeJson(res, 201, platform.createOnboardingRun(body));
+    writeJson(res, 201, requireTenantControlDomain(platform).createTenantBootstrap(body));
     return;
   }
 
@@ -1395,8 +1406,8 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(
       res,
       200,
-      platform.getOnboardingRun({
-        runId: onboardingRunMatch.runId,
+      requireTenantControlDomain(platform).getTenantBootstrap({
+        tenantBootstrapId: onboardingRunMatch.runId,
         resumeToken: url.searchParams.get("resumeToken") || req.headers["x-resume-token"]
       })
     );
@@ -1408,8 +1419,8 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(
       res,
       200,
-      platform.getOnboardingChecklist({
-        runId: onboardingChecklistMatch.runId,
+      requireTenantControlDomain(platform).getTenantBootstrapChecklist({
+        tenantBootstrapId: onboardingChecklistMatch.runId,
         resumeToken: url.searchParams.get("resumeToken") || req.headers["x-resume-token"]
       })
     );
@@ -1433,8 +1444,8 @@ async function handleRequest({ req, res, platform, flags }) {
       writeJson(
         res,
         200,
-        platform.updateOnboardingStep({
-          runId: match.runId,
+        requireTenantControlDomain(platform).updateTenantBootstrapStep({
+          tenantBootstrapId: match.runId,
           resumeToken: body.resumeToken || req.headers["x-resume-token"],
           stepCode,
           payload: body
@@ -1442,6 +1453,225 @@ async function handleRequest({ req, res, platform, flags }) {
       );
       return;
     }
+  }
+
+  if (req.method === "POST" && path === "/v1/tenant/bootstrap") {
+    const body = await readJsonBody(req);
+    writeJson(res, 201, requireTenantControlDomain(platform).createTenantBootstrap(body));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/tenant/bootstrap/profile") {
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).getCompanySetupProfile({
+        sessionToken: readSessionToken(req),
+        companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+      })
+    );
+    return;
+  }
+
+  const tenantBootstrapMatch = matchPath(path, "/v1/tenant/bootstrap/:tenantBootstrapId");
+  if (tenantBootstrapMatch && req.method === "GET") {
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).getTenantBootstrap({
+        tenantBootstrapId: tenantBootstrapMatch.tenantBootstrapId,
+        resumeToken: url.searchParams.get("resumeToken") || req.headers["x-resume-token"]
+      })
+    );
+    return;
+  }
+
+  const tenantBootstrapChecklistMatch = matchPath(path, "/v1/tenant/bootstrap/:tenantBootstrapId/checklist");
+  if (tenantBootstrapChecklistMatch && req.method === "GET") {
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).getTenantBootstrapChecklist({
+        tenantBootstrapId: tenantBootstrapChecklistMatch.tenantBootstrapId,
+        resumeToken: url.searchParams.get("resumeToken") || req.headers["x-resume-token"]
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/tenant/modules/definitions") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      requireTenantControlDomain(platform).registerTenantModuleDefinition({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        moduleCode: body.moduleCode,
+        label: body.label,
+        riskClass: body.riskClass,
+        coreModule: body.coreModule,
+        dependencyModuleCodes: body.dependencyModuleCodes,
+        requiredPolicyCodes: body.requiredPolicyCodes,
+        requiredRulepackCodes: body.requiredRulepackCodes,
+        requiresCompletedTenantSetup: body.requiresCompletedTenantSetup,
+        allowSuspend: body.allowSuspend
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/tenant/modules/definitions") {
+    writeJson(
+      res,
+      200,
+      {
+        items: requireTenantControlDomain(platform).listTenantModuleDefinitions({
+          sessionToken: readSessionToken(req),
+          companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+        })
+      }
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/tenant/modules/activations") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      requireTenantControlDomain(platform).activateTenantModule({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        moduleCode: body.moduleCode,
+        effectiveFrom: body.effectiveFrom,
+        activationReason: body.activationReason,
+        approvalActorIds: body.approvalActorIds
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/tenant/modules/activations") {
+    writeJson(
+      res,
+      200,
+      {
+        items: requireTenantControlDomain(platform).listTenantModuleActivations({
+          sessionToken: readSessionToken(req),
+          companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+        })
+      }
+    );
+    return;
+  }
+
+  const tenantModuleActivationSuspendMatch = matchPath(path, "/v1/tenant/modules/activations/:moduleCode/suspend");
+  if (tenantModuleActivationSuspendMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).suspendTenantModuleActivation({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        moduleCode: tenantModuleActivationSuspendMatch.moduleCode,
+        reasonCode: body.reasonCode
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/trial/environments") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      requireTenantControlDomain(platform).createTrialEnvironment({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        label: body.label,
+        seedScenarioCode: body.seedScenarioCode,
+        watermarkCode: body.watermarkCode,
+        expiresAt: body.expiresAt
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/trial/environments") {
+    writeJson(
+      res,
+      200,
+      {
+        items: requireTenantControlDomain(platform).listTrialEnvironments({
+          sessionToken: readSessionToken(req),
+          companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+        })
+      }
+    );
+    return;
+  }
+
+  const trialEnvironmentResetMatch = matchPath(path, "/v1/trial/environments/:trialEnvironmentProfileId/reset");
+  if (trialEnvironmentResetMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).resetTrialEnvironment({
+        sessionToken: readSessionToken(req, body),
+        trialEnvironmentProfileId: trialEnvironmentResetMatch.trialEnvironmentProfileId,
+        reasonCode: body.reasonCode
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/trial/promotions") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      requireTenantControlDomain(platform).promoteTrialToLive({
+        sessionToken: readSessionToken(req, body),
+        trialEnvironmentProfileId: body.trialEnvironmentProfileId,
+        carryOverSelectionCodes: body.carryOverSelectionCodes,
+        approvalActorIds: body.approvalActorIds,
+        executeNow: body.executeNow === true
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/trial/promotions") {
+    writeJson(
+      res,
+      200,
+      {
+        items: requireTenantControlDomain(platform).listPromotionPlans({
+          sessionToken: readSessionToken(req),
+          companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+        })
+      }
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/tenant/parallel-runs") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      requireTenantControlDomain(platform).startParallelRun({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        trialEnvironmentProfileId: body.trialEnvironmentProfileId,
+        liveCompanyId: body.liveCompanyId,
+        runWindowDays: body.runWindowDays
+      })
+    );
+    return;
   }
 
   if (req.method === "POST" && path === "/v1/documents") {
@@ -13333,6 +13563,71 @@ function isPhase142Route(path) {
 function isPhase143Route(path) {
   return path.startsWith("/v1/migration");
 }
+
+function requireTenantControlDomain(platform) {
+  const domain =
+    platform && typeof platform.getDomain === "function"
+      ? platform.getDomain("tenantControl")
+      : null;
+  if (domain) {
+    return domain;
+  }
+  if (
+    platform
+    && typeof platform.createOnboardingRun === "function"
+    && typeof platform.getOnboardingRun === "function"
+    && typeof platform.getOnboardingChecklist === "function"
+    && typeof platform.updateOnboardingStep === "function"
+  ) {
+    return {
+      createTenantBootstrap: (payload) => platform.createOnboardingRun(payload),
+      getTenantBootstrap: ({ tenantBootstrapId, resumeToken } = {}) =>
+        platform.getOnboardingRun({
+          runId: tenantBootstrapId,
+          resumeToken
+        }),
+      getTenantBootstrapChecklist: ({ tenantBootstrapId, resumeToken } = {}) =>
+        platform.getOnboardingChecklist({
+          runId: tenantBootstrapId,
+          resumeToken
+        }),
+      updateTenantBootstrapStep: ({ tenantBootstrapId, resumeToken, stepCode, payload } = {}) =>
+        platform.updateOnboardingStep({
+          runId: tenantBootstrapId,
+          resumeToken,
+          stepCode,
+          payload
+        }),
+      getCompanySetupProfile: ({ sessionToken, companyId } = {}) =>
+        platform.getTenantSetupProfile({ sessionToken, companyId }),
+      registerTenantModuleDefinition: (payload) => platform.registerModuleDefinition(payload),
+      listTenantModuleDefinitions: (payload) => platform.listModuleDefinitions(payload),
+      activateTenantModule: (payload) => platform.activateModule(payload),
+      listTenantModuleActivations: (payload) => platform.listModuleActivations(payload),
+      suspendTenantModuleActivation: (payload) => platform.suspendModuleActivation(payload),
+      createTrialEnvironment: () => {
+        throw new Error("Tenant control trial runtime is not available on the legacy org-auth-only platform.");
+      },
+      listTrialEnvironments: () => {
+        throw new Error("Tenant control trial runtime is not available on the legacy org-auth-only platform.");
+      },
+      resetTrialEnvironment: () => {
+        throw new Error("Tenant control trial runtime is not available on the legacy org-auth-only platform.");
+      },
+      promoteTrialToLive: () => {
+        throw new Error("Tenant control trial runtime is not available on the legacy org-auth-only platform.");
+      },
+      listPromotionPlans: () => {
+        throw new Error("Tenant control trial runtime is not available on the legacy org-auth-only platform.");
+      },
+      startParallelRun: () => {
+        throw new Error("Tenant control trial runtime is not available on the legacy org-auth-only platform.");
+      }
+    };
+  }
+  throw new Error("Tenant control domain must be registered before tenant bootstrap routes can execute.");
+}
+
 function readRequestCompanyId(req) {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);

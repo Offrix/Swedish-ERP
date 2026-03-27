@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { createOrgAuthPlatform, AUTH_PROVIDER_BASELINES } from "../../../packages/domain-org-auth/src/index.mjs";
+import { createTenantControlPlatform } from "../../../packages/domain-tenant-control/src/index.mjs";
 import { createDocumentArchivePlatform } from "../../../packages/domain-documents/src/index.mjs";
 import { createEvidencePlatform } from "../../../packages/domain-evidence/src/index.mjs";
 import { createObservabilityPlatform } from "../../../packages/domain-observability/src/index.mjs";
@@ -77,6 +78,7 @@ function createDomainDefinition({ key, label, packageName, dependsOn = [], creat
 
 export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "orgAuth",
+  "tenantControl",
   "documents",
   "evidence",
   "observability",
@@ -119,6 +121,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
 
 export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "orgAuth",
+  "tenantControl",
   "documents",
   "evidence",
   "observability",
@@ -165,6 +168,17 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     label: "Org and auth",
     packageName: "@swedish-erp/domain-org-auth",
     create: ({ options }) => createOrgAuthPlatform(options)
+  }),
+  createDomainDefinition({
+    key: "tenantControl",
+    label: "Tenant control",
+    packageName: "@swedish-erp/domain-tenant-control",
+    dependsOn: ["orgAuth"],
+    create: ({ options, dependencies }) =>
+      createTenantControlPlatform({
+        ...options,
+        orgAuthPlatform: dependencies.orgAuth
+      })
   }),
   createDomainDefinition({
     key: "documents",
@@ -1140,6 +1154,7 @@ export function createDefaultApiPlatform({
 
 const CRITICAL_DOMAIN_KEYS = Object.freeze([
   "orgAuth",
+  "tenantControl",
   "evidence",
   "observability",
   "ledger",

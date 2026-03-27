@@ -136,6 +136,7 @@ const EXACT_PUBLIC_ROUTE_KEYS = new Set([
   "POST /v1/auth/login",
   "POST /v1/auth/federation/start",
   "POST /v1/onboarding/runs",
+  "POST /v1/tenant/bootstrap",
   "POST /v1/public/oauth/token"
 ]);
 const SELF_ROUTE_KEYS = new Set([
@@ -181,12 +182,29 @@ const HIGH_RISK_ROUTE_PREFIXES = Object.freeze([
   "/v1/accounting-method/",
   "/v1/fiscal-years/",
   "/v1/balances/",
-  "/v1/collective-agreements/"
+  "/v1/collective-agreements/",
+  "/v1/tenant/",
+  "/v1/trial/"
 ]);
 
 const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["POST /v1/auth/logout", override("auth", "identity_session_end", "authenticated", "self", "auth_session", "auth_session", null, false)],
   ["GET /v1/auth/providers/isolation", { ...override("auth", "identity_provider_isolation_read", "strong_mfa", "company", "auth_provider_isolation", "auth_provider_isolation", "company.read", true), mutation: false }],
+  ["POST /v1/tenant/bootstrap", override("tenant", "tenant_bootstrap_create", "public", "public", "tenant_bootstrap", "tenant_bootstrap", null, false)],
+  ["GET /v1/tenant/bootstrap/:tenantBootstrapId", { ...override("tenant", "tenant_bootstrap_read", "authenticated", "company", "tenant_bootstrap", "tenant_bootstrap", "company.read", true), mutation: false }],
+  ["GET /v1/tenant/bootstrap/:tenantBootstrapId/checklist", { ...override("tenant", "tenant_bootstrap_checklist_read", "authenticated", "company", "tenant_bootstrap", "tenant_bootstrap", "company.read", false), mutation: false }],
+  ["GET /v1/tenant/bootstrap/profile", { ...override("tenant", "company_setup_profile_read", "strong_mfa", "company", "tenant_setup", "company_setup_profile", "company.read", false), mutation: false }],
+  ["POST /v1/tenant/modules/definitions", override("tenant", "module_definition_manage", "strong_mfa", "company", "module_activation", "module_definition", "company.manage", false)],
+  ["GET /v1/tenant/modules/definitions", { ...override("tenant", "module_definition_read", "strong_mfa", "company", "module_activation", "module_definition", "company.read", false), mutation: false }],
+  ["POST /v1/tenant/modules/activations", override("tenant", "module_activation_manage", "strong_mfa", "company", "module_activation", "module_activation_profile", "company.manage", true)],
+  ["GET /v1/tenant/modules/activations", { ...override("tenant", "module_activation_read", "strong_mfa", "company", "module_activation", "module_activation_profile", "company.read", false), mutation: false }],
+  ["POST /v1/tenant/modules/activations/:moduleCode/suspend", override("tenant", "module_activation_suspend", "strong_mfa", "company", "module_activation", "module_activation_profile", "company.manage", true)],
+  ["POST /v1/tenant/parallel-runs", override("tenant", "parallel_run_start", "strong_mfa", "company", "parallel_run", "parallel_run_plan", "company.manage", true)],
+  ["POST /v1/trial/environments", override("trial", "trial_environment_create", "strong_mfa", "company", "trial_environment", "trial_environment_profile", "company.manage", false)],
+  ["GET /v1/trial/environments", { ...override("trial", "trial_environment_read", "strong_mfa", "company", "trial_environment", "trial_environment_profile", "company.read", false), mutation: false }],
+  ["POST /v1/trial/environments/:trialEnvironmentProfileId/reset", override("trial", "trial_environment_reset", "strong_mfa", "company", "trial_environment", "trial_environment_profile", "company.manage", true)],
+  ["POST /v1/trial/promotions", override("trial", "trial_promotion_create", "strong_mfa", "company", "promotion_plan", "promotion_plan", "company.manage", false)],
+  ["GET /v1/trial/promotions", { ...override("trial", "trial_promotion_read", "strong_mfa", "company", "promotion_plan", "promotion_plan", "company.read", false), mutation: false }],
   ["POST /v1/auth/challenges", override("auth", "identity_step_up_start", "authenticated", "self", "auth_challenge", "auth_challenge", null, false)],
   ["POST /v1/auth/challenges/:challengeId/complete", override("auth", "identity_factor_verify", "authenticated", "self", "auth_challenge", "auth_challenge", null, false)],
   ["POST /v1/auth/devices/:deviceTrustRecordId/trust", override("auth", "identity_device_trust_manage", "mfa", "self", "device_trust_record", "device_trust_record", null, false)],

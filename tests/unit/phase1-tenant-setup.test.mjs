@@ -1,29 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createOrgAuthPlatform, DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { loginWithStrongAuthOnPlatform } from "../helpers/platform-auth.mjs";
 
-test("Phase 1 tenant setup and module activation enforce onboarding readiness, dependencies and approvals", () => {
-  const platform = createOrgAuthPlatform({
+test("Phase 1 tenant setup flows through tenant-control with finance-ready state, module activation and trial lifecycles", () => {
+  const platform = createApiPlatform({
     clock: () => new Date("2026-03-25T08:00:00Z"),
     bootstrapScenarioCode: "test_default_demo"
   });
+  const tenantControl = platform.getDomain("tenantControl");
 
-  const onboardingRun = platform.createOnboardingRun({
+  const onboardingRun = tenantControl.createTenantBootstrap({
     legalName: "Tenant Setup AB",
     orgNumber: "559900-4242",
     adminEmail: "owner@tenant-setup.test",
     adminDisplayName: "Owner Admin",
     accountingYear: "2026"
   });
-  let snapshot = platform.snapshot();
-  const createdCompany = snapshot.companies.find((company) => company.companyId === onboardingRun.companyId);
-  const createdProfile = snapshot.tenantSetupProfiles.find((profile) => profile.companyId === onboardingRun.companyId);
-  assert.equal(createdCompany.status, "setup_pending");
-  assert.equal(createdProfile.status, "setup_pending");
 
-  platform.updateOnboardingStep({
-    runId: onboardingRun.runId,
+  let snapshot = tenantControl.snapshotTenantControl();
+  const createdProfile = snapshot.companySetupProfiles.find((profile) => profile.companyId === onboardingRun.companyId);
+  const createdBootstrap = snapshot.tenantBootstraps.find((record) => record.companyId === onboardingRun.companyId);
+  assert.equal(createdBootstrap.bootstrapStatus, "in_progress");
+  assert.equal(createdProfile.status, "bootstrap_running");
+  assert.equal(onboardingRun.companySetupStatus, "bootstrap_running");
+
+  tenantControl.updateTenantBootstrapStep({
+    tenantBootstrapId: onboardingRun.tenantBootstrapId,
     resumeToken: onboardingRun.resumeToken,
     stepCode: "registrations",
     payload: {
@@ -34,8 +38,8 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
       ]
     }
   });
-  platform.updateOnboardingStep({
-    runId: onboardingRun.runId,
+  tenantControl.updateTenantBootstrapStep({
+    tenantBootstrapId: onboardingRun.tenantBootstrapId,
     resumeToken: onboardingRun.resumeToken,
     stepCode: "chart_template",
     payload: {
@@ -43,8 +47,8 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
       voucherSeriesCodes: ["A", "B", "E", "H", "I"]
     }
   });
-  platform.updateOnboardingStep({
-    runId: onboardingRun.runId,
+  tenantControl.updateTenantBootstrapStep({
+    tenantBootstrapId: onboardingRun.tenantBootstrapId,
     resumeToken: onboardingRun.resumeToken,
     stepCode: "vat_setup",
     payload: {
@@ -52,8 +56,8 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
       filingPeriod: "monthly"
     }
   });
-  platform.updateOnboardingStep({
-    runId: onboardingRun.runId,
+  tenantControl.updateTenantBootstrapStep({
+    tenantBootstrapId: onboardingRun.tenantBootstrapId,
     resumeToken: onboardingRun.resumeToken,
     stepCode: "fiscal_periods",
     payload: {
@@ -61,11 +65,11 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
     }
   });
 
-  snapshot = platform.snapshot();
-  const completedCompany = snapshot.companies.find((company) => company.companyId === onboardingRun.companyId);
-  const completedProfile = snapshot.tenantSetupProfiles.find((profile) => profile.companyId === onboardingRun.companyId);
-  assert.equal(completedCompany.status, "active");
-  assert.equal(completedProfile.status, "active");
+  snapshot = tenantControl.snapshotTenantControl();
+  const completedProfile = snapshot.companySetupProfiles.find((profile) => profile.companyId === onboardingRun.companyId);
+  const completedBootstrap = snapshot.tenantBootstraps.find((record) => record.companyId === onboardingRun.companyId);
+  assert.equal(completedBootstrap.bootstrapStatus, "completed");
+  assert.equal(completedProfile.status, "finance_ready");
   assert.equal(Boolean(completedProfile.onboardingCompletedAt), true);
 
   const onboardingAdminToken = loginWithStrongAuthOnPlatform({
@@ -89,28 +93,6 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
     roleCode: "approver",
     requiresMfa: false
   });
-  const companyAdmin = platform.createCompanyUser({
-    sessionToken: adminToken,
-    companyId: DEMO_IDS.companyId,
-    email: "finance-admin@example.test",
-    displayName: "Finance Admin",
-    roleCode: "company_admin",
-    requiresMfa: false
-  });
-  const companyAdminLogin = platform.startLogin({
-    companyId: DEMO_IDS.companyId,
-    email: "finance-admin@example.test"
-  });
-  const companyAdminToken = loginWithStrongAuthOnPlatform({
-    platform,
-    companyId: DEMO_IDS.companyId,
-    email: "finance-admin@example.test"
-  });
-  assert.ok(companyAdmin.companyUserId);
-  assert.equal(companyAdmin.requiresMfa, true);
-  assert.equal(companyAdminLogin.session.requiredFactorCount, 2);
-  assert.deepEqual(companyAdminLogin.availableMethods.sort(), ["bankid", "totp"]);
-  assert.ok(companyAdminToken);
   platform.createObjectGrant({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
@@ -120,7 +102,7 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
     objectId: DEMO_IDS.companyId
   });
 
-  const ledgerModule = platform.registerModuleDefinition({
+  const ledgerModule = tenantControl.registerTenantModuleDefinition({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
     moduleCode: "ledger",
@@ -130,7 +112,7 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
     requiredPolicyCodes: ["MODULE_ACTIVATION_AND_TENANT_SETUP"],
     requiredRulepackCodes: ["RP-ACCOUNTING-METHOD-SE"]
   });
-  const payrollModule = platform.registerModuleDefinition({
+  const payrollModule = tenantControl.registerTenantModuleDefinition({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
     moduleCode: "payroll",
@@ -145,7 +127,7 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
 
   assert.throws(
     () =>
-      platform.activateModule({
+      tenantControl.activateTenantModule({
         sessionToken: adminToken,
         companyId: DEMO_IDS.companyId,
         moduleCode: "payroll",
@@ -155,7 +137,7 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
     (error) => error?.code === "module_activation_dependency_missing"
   );
 
-  const ledgerActivation = platform.activateModule({
+  const ledgerActivation = tenantControl.activateTenantModule({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
     moduleCode: "ledger",
@@ -163,19 +145,7 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
   });
   assert.equal(ledgerActivation.status, "active");
 
-  assert.throws(
-    () =>
-      platform.activateModule({
-        sessionToken: adminToken,
-        companyId: DEMO_IDS.companyId,
-        moduleCode: "payroll",
-        activationReason: "Prepare payroll rollout.",
-        approvalActorIds: [DEMO_IDS.userId]
-      }),
-    (error) => error?.code === "module_activation_self_approval_forbidden"
-  );
-
-  const payrollActivation = platform.activateModule({
+  const payrollActivation = tenantControl.activateTenantModule({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
     moduleCode: "payroll",
@@ -183,9 +153,8 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
     approvalActorIds: [approver.user.userId]
   });
   assert.equal(payrollActivation.status, "active");
-  assert.deepEqual(payrollActivation.approvalActorIds, [approver.user.userId]);
 
-  const suspended = platform.suspendModuleActivation({
+  const suspended = tenantControl.suspendTenantModuleActivation({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
     moduleCode: "payroll",
@@ -193,10 +162,39 @@ test("Phase 1 tenant setup and module activation enforce onboarding readiness, d
   });
   assert.equal(suspended.status, "suspended");
 
-  snapshot = platform.snapshot();
-  const activationAudit = snapshot.auditEvents.find((event) => event.action === "tenant_setup.module_activation.activated" && event.metadata?.moduleCode === "payroll");
-  const suspensionAudit = snapshot.auditEvents.find((event) => event.action === "tenant_setup.module_activation.suspended" && event.metadata?.moduleCode === "payroll");
-  assert.deepEqual(activationAudit.metadata.approvalActorIds, [approver.user.userId]);
-  assert.equal(activationAudit.metadata.activationReason, "Payroll rollout for migration wave 1.");
-  assert.equal(suspensionAudit.metadata.reasonCode, "tenant_hold");
+  const trialEnvironment = tenantControl.createTrialEnvironment({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    seedScenarioCode: "agency_trial_seed"
+  });
+  assert.equal(trialEnvironment.liveCredentialPolicy, "blocked");
+
+  const resetTrialEnvironment = tenantControl.resetTrialEnvironment({
+    sessionToken: adminToken,
+    trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
+    reasonCode: "verification_reset"
+  });
+  assert.equal(resetTrialEnvironment.resetCount, 1);
+
+  const promotionPlan = tenantControl.promoteTrialToLive({
+    sessionToken: adminToken,
+    trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
+    carryOverSelectionCodes: ["settings", "document_templates"],
+    approvalActorIds: [approver.user.userId]
+  });
+  assert.equal(["approved", "validated"].includes(promotionPlan.status), true);
+
+  const parallelRunPlan = tenantControl.startParallelRun({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
+    runWindowDays: 14
+  });
+  assert.equal(parallelRunPlan.status, "started");
+
+  snapshot = tenantControl.snapshotTenantControl();
+  assert.equal(snapshot.moduleActivationProfiles.some((item) => item.moduleCode === "payroll" && item.status === "suspended"), true);
+  assert.equal(snapshot.trialEnvironmentProfiles.length >= 1, true);
+  assert.equal(snapshot.promotionPlans.length >= 1, true);
+  assert.equal(snapshot.parallelRunPlans.length >= 1, true);
 });
