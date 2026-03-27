@@ -24,6 +24,7 @@ export function createBackofficeModule({
   clock = () => new Date(),
   orgAuthPlatform,
   integrationPlatform,
+  evidencePlatform = null,
   audit,
   error
 } = {}) {
@@ -71,6 +72,8 @@ export function createBackofficeModule({
     listBreakGlassSessions,
     approveBreakGlass,
     closeBreakGlassSession,
+    exportSupportCaseEvidenceBundle,
+    exportBreakGlassEvidenceBundle,
     listAuditTrail
   };
 
@@ -200,6 +203,21 @@ export function createBackofficeModule({
       explanation: `Closed support case ${supportCase.supportCaseId} with ${supportCase.resolutionCode}.`
     });
     return clone(supportCase);
+  }
+
+  function exportSupportCaseEvidenceBundle({
+    sessionToken,
+    companyId,
+    supportCaseId,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.read");
+    const supportCase = requireSupportCase(companyId, supportCaseId);
+    return syncSupportCaseEvidenceBundle({
+      supportCase,
+      actorId: principal.userId,
+      correlationId
+    });
   }
 
   function runAdminDiagnostic({
@@ -613,6 +631,21 @@ export function createBackofficeModule({
     return clone(session);
   }
 
+  function exportBreakGlassEvidenceBundle({
+    sessionToken,
+    companyId,
+    breakGlassId,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.read");
+    const session = requireBreakGlass(companyId, breakGlassId);
+    return syncBreakGlassEvidenceBundle({
+      session,
+      actorId: principal.userId,
+      correlationId
+    });
+  }
+
   function listAuditTrail({ sessionToken, companyId, entityType = null, correlationId = null } = {}) {
     authorize(sessionToken, companyId, "company.read");
     const resolvedEntityType = optionalText(entityType);
@@ -655,6 +688,152 @@ export function createBackofficeModule({
       throw error(404, "break_glass_not_found", "Break-glass session was not found.");
     }
     return session;
+  }
+
+  function syncSupportCaseEvidenceBundle({ supportCase, actorId, correlationId }) {
+    if (!evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+      throw error(500, "evidence_platform_required", "Evidence platform is required.");
+    }
+    const diagnostics = [...state.adminDiagnostics.values()]
+      .filter((diagnostic) => diagnostic.companyId === supportCase.companyId && diagnostic.supportCaseId === supportCase.supportCaseId)
+      .sort((left, right) => left.executedAt.localeCompare(right.executedAt));
+    const payload = {
+      supportCaseId: supportCase.supportCaseId,
+      companyId: supportCase.companyId,
+      category: supportCase.category,
+      severity: supportCase.severity,
+      status: supportCase.status,
+      requester: clone(supportCase.requester),
+      policyScope: supportCase.policyScope,
+      requestedActions: [...supportCase.requestedActions],
+      approvedActions: [...supportCase.approvedActions],
+      actionApprovals: clone(supportCase.actionApprovals),
+      relatedObjectRefs: normalizeRefs(supportCase.relatedObjectRefs),
+      diagnosticRefs: diagnostics.map((diagnostic) => ({
+        commandId: diagnostic.commandId,
+        commandType: diagnostic.commandType,
+        riskClass: diagnostic.riskClass,
+        executedAt: diagnostic.executedAt
+      })),
+      resolutionCode: supportCase.resolutionCode || null,
+      resolutionNote: supportCase.resolutionNote || null,
+      closedAt: supportCase.closedAt || null
+    };
+    const bundle = evidencePlatform.createFrozenEvidenceBundleSnapshot({
+      companyId: supportCase.companyId,
+      bundleType: "support_case",
+      sourceObjectType: "support_case",
+      sourceObjectId: supportCase.supportCaseId,
+      sourceObjectVersion: supportCase.updatedAt,
+      title: `Support case ${supportCase.supportCaseId}`,
+      retentionClass: "regulated",
+      classificationCode: "restricted_internal",
+      metadata: {
+        compatibilityPayload: payload
+      },
+      artifactRefs: diagnostics.map((diagnostic) => ({
+        artifactType: "admin_diagnostic",
+        artifactRef: diagnostic.commandId,
+        checksum: hashObject({
+          commandType: diagnostic.commandType,
+          resultSummary: diagnostic.resultSummary,
+          executedAt: diagnostic.executedAt
+        }),
+        roleCode: diagnostic.riskClass,
+        metadata: {
+          commandType: diagnostic.commandType
+        }
+      })),
+      auditRefs: clone(supportCase.actionApprovals),
+      sourceRefs: payload.diagnosticRefs,
+      relatedObjectRefs: payload.relatedObjectRefs,
+      actorId,
+      correlationId,
+      previousEvidenceBundleId: supportCase.currentEvidenceBundleId || null
+    });
+    supportCase.currentEvidenceBundleId = bundle.evidenceBundleId;
+    return clone({
+      supportCaseEvidenceBundleId: bundle.evidenceBundleId,
+      evidenceBundleId: bundle.evidenceBundleId,
+      checksum: bundle.checksum,
+      status: bundle.status,
+      frozenAt: bundle.frozenAt,
+      archivedAt: bundle.archivedAt,
+      ...payload,
+      supportCaseStatus: payload.status,
+      status: bundle.status
+    });
+  }
+
+  function syncBreakGlassEvidenceBundle({ session, actorId, correlationId }) {
+    if (!evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+      throw error(500, "evidence_platform_required", "Evidence platform is required.");
+    }
+    const payload = {
+      breakGlassId: session.breakGlassId,
+      companyId: session.companyId,
+      incidentId: session.incidentId,
+      purposeCode: session.purposeCode,
+      requestedActions: [...session.requestedActions],
+      requestedByUserId: session.requestedByUserId,
+      approvals: [...session.approvals],
+      status: session.status,
+      activatedAt: session.activatedAt,
+      reviewedAt: session.reviewedAt,
+      closedAt: session.closedAt
+    };
+    const bundle = evidencePlatform.createFrozenEvidenceBundleSnapshot({
+      companyId: session.companyId,
+      bundleType: "break_glass",
+      sourceObjectType: "break_glass_session",
+      sourceObjectId: session.breakGlassId,
+      sourceObjectVersion: session.updatedAt,
+      title: `Break-glass ${session.breakGlassId}`,
+      retentionClass: "regulated",
+      classificationCode: "restricted_internal",
+      metadata: {
+        compatibilityPayload: payload
+      },
+      artifactRefs: payload.approvals.map((approvalActorId) => ({
+        artifactType: "break_glass_approval",
+        artifactRef: approvalActorId,
+        checksum: hashObject({
+          approvalActorId,
+          breakGlassId: session.breakGlassId
+        }),
+        roleCode: "approval"
+      })),
+      auditRefs: payload.approvals.map((approvalActorId) => ({
+        approvalActorId
+      })),
+      sourceRefs: [
+        {
+          incidentId: session.incidentId,
+          status: session.status
+        }
+      ],
+      relatedObjectRefs: [
+        {
+          objectType: "runtime_incident",
+          objectId: session.incidentId
+        }
+      ],
+      actorId,
+      correlationId,
+      previousEvidenceBundleId: session.currentEvidenceBundleId || null
+    });
+    session.currentEvidenceBundleId = bundle.evidenceBundleId;
+    return clone({
+      breakGlassEvidenceBundleId: bundle.evidenceBundleId,
+      evidenceBundleId: bundle.evidenceBundleId,
+      checksum: bundle.checksum,
+      status: bundle.status,
+      frozenAt: bundle.frozenAt,
+      archivedAt: bundle.archivedAt,
+      ...payload,
+      breakGlassStatus: payload.status,
+      status: bundle.status
+    });
   }
 }
 
@@ -723,6 +902,10 @@ function normalizeActions(values) {
     return [];
   }
   return [...new Set(values.map((value) => text(value, "support_case_action_invalid")))].sort();
+}
+
+function hashObject(value) {
+  return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
 }
 
 function resolveImpersonationApprovalActors({ supportCase, session, error }) {

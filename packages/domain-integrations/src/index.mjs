@@ -37,6 +37,7 @@ export function createIntegrationEngine({
   webhookDeliveryExecutor = undefined,
   partnerContractTestExecutors = undefined,
   partnerOperationExecutors = undefined,
+  evidencePlatform = null,
   getCorePlatform = null
 } = {}) {
   const state = {
@@ -91,10 +92,10 @@ export function createIntegrationEngine({
     prepareInvoiceDelivery,
     createPaymentLink,
     prepareAuthoritySubmission(input) {
-      return prepareAuthoritySubmission({ state, clock }, input);
+      return prepareAuthoritySubmission({ state, clock, evidencePlatform }, input);
     },
     signAuthoritySubmission(input) {
-      return signAuthoritySubmission({ state, clock }, input);
+      return signAuthoritySubmission({ state, clock, evidencePlatform }, input);
     },
     listAuthoritySubmissions(input) {
       return listAuthoritySubmissions({ state }, input);
@@ -106,7 +107,7 @@ export function createIntegrationEngine({
       return listSubmissionReceipts({ state }, input);
     },
     getSubmissionEvidencePack(input) {
-      return getSubmissionEvidencePack({ state }, input);
+      return getSubmissionEvidencePack({ state, evidencePlatform }, input);
     },
     async submitAuthoritySubmission(input) {
       return submitAuthoritySubmission({ state, clock, getCorePlatform }, input);
@@ -115,22 +116,22 @@ export function createIntegrationEngine({
       return requestSubmissionReplay({ state, clock, getCorePlatform }, input);
     },
     openSubmissionCorrection(input) {
-      return openSubmissionCorrection({ state, clock }, input);
+      return openSubmissionCorrection({ state, clock, evidencePlatform }, input);
     },
     executeSubmissionReceiptCollection(input) {
-      return executeSubmissionReceiptCollection({ state, clock }, input);
+      return executeSubmissionReceiptCollection({ state, clock, evidencePlatform }, input);
     },
     executeAuthoritySubmissionTransport(input) {
-      return executeAuthoritySubmissionTransport({ state, clock }, input);
+      return executeAuthoritySubmissionTransport({ state, clock, evidencePlatform }, input);
     },
     registerSubmissionReceipt(input) {
-      return registerSubmissionReceipt({ state, clock }, input);
+      return registerSubmissionReceipt({ state, clock, evidencePlatform }, input);
     },
     listSubmissionActionQueue(input) {
       return listSubmissionActionQueue({ state }, input);
     },
     retryAuthoritySubmission(input) {
-      return retryAuthoritySubmission({ state, clock }, input);
+      return retryAuthoritySubmission({ state, clock, evidencePlatform }, input);
     },
     resolveSubmissionQueueItem(input) {
       return resolveSubmissionQueueItem({ state, clock }, input);
@@ -308,7 +309,7 @@ export function createIntegrationEngine({
   }
 }
 
-function prepareAuthoritySubmission({ state, clock }, input = {}) {
+function prepareAuthoritySubmission({ state, clock, evidencePlatform }, input = {}) {
   const submissionType = requireText(input.submissionType, "submission_type_required");
   const companyId = requireText(input.companyId, "company_id_required");
   const payloadVersion = requireText(input.payloadVersion, "payload_version_required");
@@ -356,7 +357,8 @@ function prepareAuthoritySubmission({ state, clock }, input = {}) {
       payload,
       payloadVersion
     }),
-    evidencePackId: normalizeOptionalText(input.evidencePackId),
+    sourceEvidenceBundleId: normalizeOptionalText(input.evidencePackId),
+    evidencePackId: null,
     payloadVersion,
     attemptNo: Number(input.attemptNo || 1),
     status: signedState === "pending" ? "ready" : "signed",
@@ -387,13 +389,16 @@ function prepareAuthoritySubmission({ state, clock }, input = {}) {
   state.submissions.set(submission.submissionId, submission);
   appendToIndex(state.submissionIdsByCompany, companyId, submission.submissionId);
   state.submissionIdsByReuseKey.set(reuseKey, submission.submissionId);
+  if (evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+    syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
+  }
   return {
     ...enrichSubmission(state, submission),
     idempotentReplay: false
   };
 }
 
-function signAuthoritySubmission({ state, clock }, { companyId, submissionId, actorId, signatureReference = null } = {}) {
+function signAuthoritySubmission({ state, clock, evidencePlatform }, { companyId, submissionId, actorId, signatureReference = null } = {}) {
   const submission = requireSubmission(state, companyId, submissionId);
   if (submission.signedState === "not_required") {
     return enrichSubmission(state, submission);
@@ -407,6 +412,9 @@ function signAuthoritySubmission({ state, clock }, { companyId, submissionId, ac
   submission.signedByActorId = requireText(actorId || "system", "actor_id_required");
   submission.signatureReference = normalizeOptionalText(signatureReference) || `signature:${submission.submissionId}`;
   submission.updatedAt = submission.signedAt;
+  if (evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+    syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
+  }
   return enrichSubmission(state, submission);
 }
 
@@ -431,11 +439,15 @@ function listSubmissionReceipts({ state }, { companyId, submissionId } = {}) {
   return getSubmissionReceipts(state, submission.submissionId).map(clone);
 }
 
-function getSubmissionEvidencePack({ state }, { companyId, submissionId } = {}) {
+function getSubmissionEvidencePack({ state, evidencePlatform }, { companyId, submissionId } = {}) {
   const submission = requireSubmission(state, companyId, submissionId);
+  return syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
+}
+
+function buildSubmissionEvidencePackPayload(state, submission) {
   const receipts = getSubmissionReceipts(state, submission.submissionId);
   const queueItems = getSubmissionQueueItems(state, submission.submissionId);
-  return clone({
+  return {
     submissionEvidencePackId: submission.evidencePackId || `submission-evidence:${submission.submissionId}`,
     submissionId: submission.submissionId,
     companyId: submission.companyId,
@@ -443,6 +455,7 @@ function getSubmissionEvidencePack({ state }, { companyId, submissionId } = {}) 
     sourceObjectType: submission.sourceObjectType,
     sourceObjectId: submission.sourceObjectId,
     sourceObjectVersion: submission.sourceObjectVersion,
+    sourceEvidenceBundleId: submission.sourceEvidenceBundleId || null,
     payloadHash: submission.payloadHash,
     payloadSchemaCode: submission.payloadVersion,
     correlationId: submission.correlationId,
@@ -488,6 +501,86 @@ function getSubmissionEvidencePack({ state }, { companyId, submissionId } = {}) 
         updatedAt: submission.updatedAt
       }
     ]
+  };
+}
+
+function syncSubmissionEvidenceBundle({ state, evidencePlatform, submission }) {
+  const payload = buildSubmissionEvidencePackPayload(state, submission);
+  if (!evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+    return clone(payload);
+  }
+  const bundle = evidencePlatform.createFrozenEvidenceBundleSnapshot({
+    companyId: submission.companyId,
+    bundleType: "regulated_submission",
+    sourceObjectType: "submission",
+    sourceObjectId: submission.submissionId,
+    sourceObjectVersion: `${submission.attemptNo}:${submission.status}:${submission.updatedAt}`,
+    title: `Submission evidence ${submission.submissionId}`,
+    retentionClass: "regulated",
+    classificationCode: "restricted_internal",
+    metadata: {
+      compatibilityPayload: payload
+    },
+    artifactRefs: [
+      ...payload.submittedArtifactRefs.map((artifact) => ({
+        artifactType: artifact.artifactType,
+        artifactRef: artifact.payloadHash,
+        checksum: artifact.payloadHash,
+        roleCode: artifact.payloadVersion,
+        metadata: {
+          payloadVersion: artifact.payloadVersion
+        }
+      })),
+      ...payload.signatureRefs.map((signatureRef) => ({
+        artifactType: "submission_signature",
+        artifactRef: signatureRef,
+        checksum: hashObject({
+          signatureRef,
+          submissionId: submission.submissionId
+        }),
+        roleCode: "signature"
+      })),
+      ...payload.receiptRefs.map((receiptRef) => ({
+        artifactType: "submission_receipt",
+        artifactRef: receiptRef.receiptId,
+        checksum: receiptRef.rawReference || receiptRef.providerStatus || receiptRef.receiptType,
+        roleCode: receiptRef.receiptType
+      }))
+    ],
+    auditRefs: clone(payload.auditRefs),
+    sourceRefs: [
+      {
+        sourceEvidenceBundleId: submission.sourceEvidenceBundleId || null
+      },
+      ...clone(payload.correctionLinks)
+    ],
+    relatedObjectRefs: [
+      ...(submission.sourceEvidenceBundleId
+        ? [
+            {
+              objectType: "evidence_bundle",
+              objectId: submission.sourceEvidenceBundleId
+            }
+          ]
+        : []),
+      ...payload.operatorActions.map((action) => ({
+        objectType: "submission_action_queue_item",
+        objectId: action.queueItemId
+      }))
+    ],
+    actorId: submission.createdByActorId || "system",
+    correlationId: submission.correlationId,
+    previousEvidenceBundleId: submission.evidencePackId || null
+  });
+  submission.evidencePackId = bundle.evidenceBundleId;
+  return clone({
+    ...payload,
+    submissionEvidencePackId: bundle.evidenceBundleId,
+    evidenceBundleId: bundle.evidenceBundleId,
+    checksum: bundle.checksum,
+    status: bundle.status,
+    frozenAt: bundle.frozenAt,
+    archivedAt: bundle.archivedAt
   });
 }
 
@@ -659,7 +752,7 @@ async function requestSubmissionReplay(
 }
 
 function openSubmissionCorrection(
-  { state, clock },
+  { state, clock, evidencePlatform },
   {
     companyId,
     submissionId,
@@ -756,7 +849,7 @@ function openSubmissionCorrection(
       signedState: signedState || (previous.signedState === "not_required" ? "not_required" : "pending"),
       signatoryRoleRequired: signatoryRoleRequired ?? previous.signatoryRoleRequired,
       submissionFamilyCode: submissionFamilyCode ?? previous.submissionFamilyCode,
-      evidencePackId: evidencePackId ?? resolvedPayload.evidencePackId ?? previous.evidencePackId,
+      evidencePackId: evidencePackId ?? resolvedPayload.evidencePackId ?? previous.sourceEvidenceBundleId ?? null,
       previousSubmissionId: previous.submissionId,
       supersedesSubmissionId: previous.submissionId,
       correctionOfSubmissionId: previous.submissionId,
@@ -773,6 +866,9 @@ function openSubmissionCorrection(
   previous.supersededBySubmissionId = correction.submissionId;
   previous.updatedAt = timestamp;
   autoResolveQueueItems(state, previous.submissionId, "correction_spawned", previous.updatedAt);
+  if (evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+    syncSubmissionEvidenceBundle({ state, evidencePlatform, submission: previous });
+  }
 
   const correctionLink =
     findCorrectionLink(state, previous.submissionId, correction.submissionId) ||
@@ -794,7 +890,7 @@ function openSubmissionCorrection(
 }
 
 function executeAuthoritySubmissionTransport(
-  { state, clock },
+  { state, clock, evidencePlatform },
   { companyId, submissionId, actorId, mode = "test", simulatedTransportOutcome = "technical_ack", providerReference = null, message = null, requiredInput = [] } = {}
 ) {
   const submission = requireSubmission(state, companyId, submissionId);
@@ -835,12 +931,15 @@ function executeAuthoritySubmissionTransport(
       rootCauseCode: "transport_failed",
       clock
     });
+    if (evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+      syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
+    }
     return enrichSubmission(state, submission);
   }
 
   if (outcome === "technical_ack" || outcome === "technical_nack") {
     registerSubmissionReceipt(
-      { state, clock },
+      { state, clock, evidencePlatform },
       {
         companyId,
         submissionId,
@@ -856,7 +955,7 @@ function executeAuthoritySubmissionTransport(
 }
 
 function executeSubmissionReceiptCollection(
-  { state, clock },
+  { state, clock, evidencePlatform },
   { companyId, submissionId, actorId, simulatedReceiptType = null, providerStatus = null, message = null, isFinal = null, requiredInput = [] } = {}
 ) {
   const submission = requireSubmission(state, companyId, submissionId);
@@ -876,7 +975,7 @@ function executeSubmissionReceiptCollection(
     };
   }
   return registerSubmissionReceipt(
-    { state, clock },
+    { state, clock, evidencePlatform },
     {
       companyId,
       submissionId,
@@ -892,7 +991,7 @@ function executeSubmissionReceiptCollection(
 }
 
 function registerSubmissionReceipt(
-  { state, clock },
+  { state, clock, evidencePlatform },
   { companyId, submissionId, receiptType, providerStatus = null, rawReference = null, message = null, isFinal = null, requiredInput = [], actorId = "system" } = {}
 ) {
   const submission = requireSubmission(state, companyId, submissionId);
@@ -967,6 +1066,9 @@ function registerSubmissionReceipt(
         clock
       });
     }
+  if (evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+    syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
+  }
   return enrichSubmission(state, submission);
 }
 
@@ -981,7 +1083,7 @@ function listSubmissionActionQueue({ state }, { companyId, status = null, ownerQ
     .map(clone);
 }
 
-function retryAuthoritySubmission({ state, clock }, { companyId, submissionId, actorId } = {}) {
+function retryAuthoritySubmission({ state, clock, evidencePlatform }, { companyId, submissionId, actorId } = {}) {
   const previous = requireSubmission(state, companyId, submissionId);
   if (previous.status !== "transport_failed") {
     throw createError(409, "submission_not_retryable", "Only transport-failed submissions can be retried with the same payload.");
@@ -1013,7 +1115,7 @@ function retryAuthoritySubmission({ state, clock }, { companyId, submissionId, a
       correctionOfSubmissionId: previous.correctionOfSubmissionId,
       correctionChainId: previous.correctionChainId || previous.rootSubmissionId,
       submissionFamilyCode: previous.submissionFamilyCode,
-      evidencePackId: previous.evidencePackId,
+      evidencePackId: previous.sourceEvidenceBundleId,
       attemptNo: previous.attemptNo + 1,
       priority: previous.priority,
       retryClass: previous.retryClass,
@@ -1021,6 +1123,9 @@ function retryAuthoritySubmission({ state, clock }, { companyId, submissionId, a
       correlationId: previous.correlationId
     }
   );
+  if (evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+    syncSubmissionEvidenceBundle({ state, evidencePlatform, submission: previous });
+  }
   return {
     previousSubmission: enrichSubmission(state, previous),
     submission: retried

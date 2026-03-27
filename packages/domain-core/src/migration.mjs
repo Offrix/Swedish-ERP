@@ -38,6 +38,7 @@ export function createMigrationModule({
   hrPlatform = null,
   balancesPlatform = null,
   collectiveAgreementsPlatform = null,
+  evidencePlatform = null,
   listRuntimeJobs = null,
   listRuntimeDeadLetters = null,
   listAuthoritySubmissions = null,
@@ -90,6 +91,7 @@ export function createMigrationModule({
     listCutoverPlans,
     createMigrationAcceptanceRecord,
     listMigrationAcceptanceRecords,
+    exportCutoverEvidenceBundle,
     recordCutoverSignoff,
     updateCutoverChecklistItem,
     startCutover,
@@ -517,19 +519,16 @@ export function createMigrationModule({
       signoffRefs: normalizedSignoffRefs,
       rollbackPointRef: rollbackPoint,
       notes: optionalText(notes),
-      cutoverEvidenceBundle: {
-        cutoverEvidenceBundleId: crypto.randomUUID(),
-        companyId: resolvedCompanyId,
-        cutoverPlanId: cutoverPlan?.cutoverPlanId || null,
-        acceptedVarianceReports: normalizedDiffReportIds,
-        signoffRefs: normalizedSignoffRefs,
-        sourceParitySummary: normalizedParitySummary,
-        rollbackPointRef: rollbackPoint
-      },
+      cutoverEvidenceBundle: null,
       recordedByUserId: principal.userId,
       recordedAt: nowIso(clock),
       updatedAt: nowIso(clock)
     };
+    acceptanceRecord.cutoverEvidenceBundle = syncCutoverEvidenceBundle({
+      acceptanceRecord,
+      actorId: principal.userId,
+      correlationId
+    });
     state.migrationAcceptanceRecords.set(acceptanceRecord.migrationAcceptanceRecordId, acceptanceRecord);
     audit({
       companyId: resolvedCompanyId,
@@ -541,6 +540,23 @@ export function createMigrationModule({
       explanation: `Recorded ${acceptanceRecord.acceptanceType} migration acceptance as ${acceptanceRecord.status}.`
     });
     return clone(acceptanceRecord);
+  }
+
+  function exportCutoverEvidenceBundle({
+    sessionToken,
+    companyId,
+    migrationAcceptanceRecordId,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.read");
+    const record = requireAcceptanceRecord(companyId, migrationAcceptanceRecordId);
+    const bundle = syncCutoverEvidenceBundle({
+      acceptanceRecord: record,
+      actorId: principal.userId,
+      correlationId
+    });
+    record.cutoverEvidenceBundle = bundle;
+    return clone(bundle);
   }
 
   function listMigrationAcceptanceRecords({
@@ -591,6 +607,105 @@ export function createMigrationModule({
       explanation: `Recorded cutover sign-off ${signoff.label} for ${cutoverPlan.cutoverPlanId}.`
     });
     return clone(cutoverPlan);
+  }
+
+  function requireAcceptanceRecord(companyId, migrationAcceptanceRecordId) {
+    const record = state.migrationAcceptanceRecords.get(text(migrationAcceptanceRecordId, "migration_acceptance_record_id_required"));
+    if (!record || record.companyId !== text(companyId, "company_id_required")) {
+      throw error(404, "migration_acceptance_record_not_found", "Migration acceptance record was not found.");
+    }
+    return record;
+  }
+
+  function syncCutoverEvidenceBundle({ acceptanceRecord, actorId, correlationId }) {
+    if (!evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+      return {
+        cutoverEvidenceBundleId: crypto.randomUUID(),
+        companyId: acceptanceRecord.companyId,
+        cutoverPlanId: acceptanceRecord.cutoverPlanId,
+        acceptedVarianceReports: acceptanceRecord.diffReportIds,
+        signoffRefs: acceptanceRecord.signoffRefs,
+        sourceParitySummary: acceptanceRecord.sourceParitySummary,
+        rollbackPointRef: acceptanceRecord.rollbackPointRef
+      };
+    }
+    const payload = {
+      companyId: acceptanceRecord.companyId,
+      migrationAcceptanceRecordId: acceptanceRecord.migrationAcceptanceRecordId,
+      acceptanceType: acceptanceRecord.acceptanceType,
+      cutoverPlanId: acceptanceRecord.cutoverPlanId,
+      acceptedVarianceReports: acceptanceRecord.diffReportIds,
+      importBatchIds: acceptanceRecord.importBatchIds,
+      signoffRefs: acceptanceRecord.signoffRefs,
+      sourceParitySummary: acceptanceRecord.sourceParitySummary,
+      rollbackPointRef: acceptanceRecord.rollbackPointRef,
+      status: acceptanceRecord.status,
+      blockingReasonCodes: acceptanceRecord.blockingReasonCodes
+    };
+    const bundle = evidencePlatform.createFrozenEvidenceBundleSnapshot({
+      companyId: acceptanceRecord.companyId,
+      bundleType: "cutover_acceptance",
+      sourceObjectType: "migration_acceptance_record",
+      sourceObjectId: acceptanceRecord.migrationAcceptanceRecordId,
+      sourceObjectVersion: acceptanceRecord.updatedAt,
+      title: `Cutover acceptance ${acceptanceRecord.acceptanceType}`,
+      retentionClass: "regulated",
+      classificationCode: "restricted_internal",
+      metadata: {
+        compatibilityPayload: payload
+      },
+      artifactRefs: acceptanceRecord.diffReportIds.map((diffReportId) => ({
+        artifactType: "variance_report",
+        artifactRef: diffReportId,
+        checksum: hashObject({
+          diffReportId,
+          acceptanceType: acceptanceRecord.acceptanceType
+        })
+      })),
+      auditRefs: clone(acceptanceRecord.signoffRefs),
+      signoffRefs: clone(acceptanceRecord.signoffRefs),
+      sourceRefs: [
+        {
+          rollbackPointRef: acceptanceRecord.rollbackPointRef
+        },
+        clone(acceptanceRecord.sourceParitySummary)
+      ],
+      relatedObjectRefs: [
+        ...acceptanceRecord.importBatchIds.map((importBatchId) => ({
+          objectType: "migration_import_batch",
+          objectId: importBatchId
+        })),
+        ...acceptanceRecord.diffReportIds.map((diffReportId) => ({
+          objectType: "migration_diff_report",
+          objectId: diffReportId
+        })),
+        ...(acceptanceRecord.cutoverPlanId
+          ? [
+              {
+                objectType: "migration_cutover_plan",
+                objectId: acceptanceRecord.cutoverPlanId
+              }
+            ]
+          : [])
+      ],
+      actorId,
+      correlationId,
+      previousEvidenceBundleId: acceptanceRecord.cutoverEvidenceBundle?.cutoverEvidenceBundleId || null
+    });
+    return {
+      cutoverEvidenceBundleId: bundle.evidenceBundleId,
+      companyId: acceptanceRecord.companyId,
+      cutoverPlanId: acceptanceRecord.cutoverPlanId,
+      acceptedVarianceReports: acceptanceRecord.diffReportIds,
+      signoffRefs: acceptanceRecord.signoffRefs,
+      sourceParitySummary: acceptanceRecord.sourceParitySummary,
+      rollbackPointRef: acceptanceRecord.rollbackPointRef,
+      acceptanceRecordStatus: acceptanceRecord.status,
+      checksum: bundle.checksum,
+      status: bundle.status,
+      frozenAt: bundle.frozenAt,
+      archivedAt: bundle.archivedAt
+    };
   }
 
   function updateCutoverChecklistItem({
@@ -3038,6 +3153,10 @@ function nowIso(clock = () => new Date()) {
 
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function hashObject(value) {
+  return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
 }
 
 function createValidationError(code, message) {

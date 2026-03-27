@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createOrgAuthPlatform } from "../../../packages/domain-org-auth/src/index.mjs";
 import { createDocumentArchivePlatform } from "../../../packages/domain-documents/src/index.mjs";
+import { createEvidencePlatform } from "../../../packages/domain-evidence/src/index.mjs";
 import { createLedgerPlatform } from "../../../packages/domain-ledger/src/index.mjs";
 import { createAccountingMethodPlatform } from "../../../packages/domain-accounting-method/src/index.mjs";
 import { createFiscalYearPlatform } from "../../../packages/domain-fiscal-year/src/index.mjs";
@@ -71,6 +72,7 @@ function createDomainDefinition({ key, label, packageName, dependsOn = [], creat
 export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "orgAuth",
   "documents",
+  "evidence",
   "accountingMethod",
   "fiscalYear",
   "legalForm",
@@ -111,6 +113,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
 export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "orgAuth",
   "documents",
+  "evidence",
   "accountingMethod",
   "fiscalYear",
   "legalForm",
@@ -162,6 +165,12 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     create: ({ options }) => createDocumentArchivePlatform(options)
   }),
   createDomainDefinition({
+    key: "evidence",
+    label: "Evidence",
+    packageName: "@swedish-erp/domain-evidence",
+    create: ({ options }) => createEvidencePlatform(options)
+  }),
+  createDomainDefinition({
     key: "accountingMethod",
     label: "Accounting method",
     packageName: "@swedish-erp/domain-accounting-method",
@@ -206,9 +215,11 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "integrations",
     label: "Integrations",
     packageName: "@swedish-erp/domain-integrations",
-    create: ({ options, getDomain }) =>
+    dependsOn: ["evidence"],
+    create: ({ options, getDomain, dependencies }) =>
       createIntegrationPlatform({
         ...options,
+        evidencePlatform: dependencies.evidence,
         getCorePlatform: () => getDomain("core")
       })
   }),
@@ -434,7 +445,7 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "projects",
     label: "Projects",
     packageName: "@swedish-erp/domain-projects",
-    dependsOn: ["ar", "hr", "time", "payroll", "vat"],
+    dependsOn: ["ar", "hr", "time", "payroll", "vat", "evidence"],
     create: ({ options, dependencies, getDomain }) =>
       createProjectsPlatform({
         ...options,
@@ -443,6 +454,7 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         timePlatform: dependencies.time,
         payrollPlatform: dependencies.payroll,
         vatPlatform: dependencies.vat,
+        evidencePlatform: dependencies.evidence,
         getFieldPlatform: () => getDomain("field"),
         getHusPlatform: () => getDomain("hus"),
         getPersonalliggarePlatform: () => getDomain("personalliggare"),
@@ -513,7 +525,7 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "core",
     label: "Core operations",
     packageName: "@swedish-erp/domain-core",
-    dependsOn: ["orgAuth", "reporting", "ledger", "integrations", "hr", "balances", "collectiveAgreements"],
+    dependsOn: ["orgAuth", "reporting", "ledger", "integrations", "hr", "balances", "collectiveAgreements", "evidence"],
     create: ({ options, dependencies }) =>
       createCorePlatform({
         ...options,
@@ -523,7 +535,8 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         integrationPlatform: dependencies.integrations,
         hrPlatform: dependencies.hr,
         balancesPlatform: dependencies.balances,
-        collectiveAgreementsPlatform: dependencies.collectiveAgreements
+        collectiveAgreementsPlatform: dependencies.collectiveAgreements,
+        evidencePlatform: dependencies.evidence
       })
   }),
   createDomainDefinition({
@@ -590,7 +603,7 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "annualReporting",
     label: "Annual reporting",
     packageName: "@swedish-erp/domain-annual-reporting",
-    dependsOn: ["ledger", "reporting", "orgAuth", "vat", "payroll", "hus", "pension", "fiscalYear", "legalForm", "integrations"],
+    dependsOn: ["ledger", "reporting", "orgAuth", "vat", "payroll", "hus", "pension", "fiscalYear", "legalForm", "integrations", "evidence"],
     create: ({ options, dependencies }) =>
       createAnnualReportingPlatform({
         ...options,
@@ -603,7 +616,8 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         pensionPlatform: dependencies.pension,
         fiscalYearPlatform: dependencies.fiscalYear,
         legalFormPlatform: dependencies.legalForm,
-        integrationPlatform: dependencies.integrations
+        integrationPlatform: dependencies.integrations,
+        evidencePlatform: dependencies.evidence
       })
   })
 ]);
@@ -950,6 +964,7 @@ export function createDefaultApiPlatform({
 
 const CRITICAL_DOMAIN_KEYS = Object.freeze([
   "orgAuth",
+  "evidence",
   "ledger",
   "vat",
   "ar",

@@ -20,6 +20,7 @@ export function createAnnualReportingEngine({
   fiscalYearPlatform = null,
   legalFormPlatform = null,
   integrationPlatform = null,
+  evidencePlatform = null,
   clock = () => new Date()
 } = {}) {
   const state = {
@@ -37,9 +38,9 @@ export function createAnnualReportingEngine({
     annualReportSignatoryStatuses: ANNUAL_REPORT_SIGNATORY_STATUSES,
     taxDeclarationPackageStatuses: TAX_DECLARATION_PACKAGE_STATUSES,
     createAnnualReportPackage: (input) =>
-      createAnnualReportPackage({ state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, clock }, input),
+      createAnnualReportPackage({ state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, evidencePlatform, clock }, input),
     createAnnualReportVersion: (input) =>
-      createAnnualReportVersion({ state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, clock }, input),
+      createAnnualReportVersion({ state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, evidencePlatform, clock }, input),
     listAnnualReportPackages: ({ companyId } = {}) =>
       [...state.packages.values()]
         .filter((candidate) => candidate.companyId === text(companyId, "company_id_required"))
@@ -62,7 +63,7 @@ export function createAnnualReportingEngine({
     inviteAnnualReportSignatory: (input) => inviteAnnualReportSignatory({ state, orgAuthPlatform, clock }, input),
     signAnnualReportVersion: (input) => signAnnualReportVersion({ state, orgAuthPlatform, clock }, input),
     openAnnualCorrectionPackage: (input) =>
-      openAnnualCorrectionPackage({ state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, clock }, input),
+      openAnnualCorrectionPackage({ state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, evidencePlatform, clock }, input),
     diffAnnualReportVersions: ({ companyId, packageId, leftVersionId, rightVersionId } = {}) => {
       requirePackage(state, text(companyId, "company_id_required"), packageId);
       return {
@@ -187,7 +188,7 @@ function createAnnualReportPackage(context, input = {}) {
 }
 
 function createAnnualReportVersion(context, input = {}) {
-  const { state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, clock } = context;
+  const { state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, evidencePlatform, clock } = context;
   const companyId = text(input.companyId, "company_id_required");
   const annualPackage = requirePackage(state, companyId, input.packageId);
   const accountingPeriod = requireHardClosedPeriod(ledgerPlatform, companyId, annualPackage.accountingPeriodId);
@@ -238,7 +239,7 @@ function createAnnualReportVersion(context, input = {}) {
     textSections: payload.textSections,
     noteSections: payload.noteSections,
     taxPackageOutputs: payload.taxPackageOutputs,
-    evidencePackId: payload.evidencePack.evidencePackId,
+    evidencePackId: null,
     sourceFingerprint: payload.sourceFingerprint,
     checksum: payload.checksum,
     diffFromPrevious: currentVersion ? buildVersionDiff(currentVersion, candidateVersion(payload)) : [],
@@ -254,10 +255,21 @@ function createAnnualReportVersion(context, input = {}) {
     currentVersion.packageStatus = "superseded";
     currentVersion.updatedAt = now;
   }
+  const registeredEvidencePack = registerAnnualEvidencePack({
+    evidencePlatform,
+    annualPackage,
+    version,
+    evidencePack: payload.evidencePack,
+    actorId,
+    correlationId: input.correlationId || `${annualPackage.packageId}:${version.versionNo}`
+  });
+  payload.evidencePack = registeredEvidencePack;
+  version.evidencePackId = registeredEvidencePack.evidencePackId;
+  version.diffFromPrevious = currentVersion ? buildVersionDiff(currentVersion, candidateVersion(payload)) : [];
   state.versions.set(version.versionId, version);
-  state.evidencePacks.set(payload.evidencePack.evidencePackId, payload.evidencePack);
+  state.evidencePacks.set(registeredEvidencePack.evidencePackId, registeredEvidencePack);
   annualPackage.currentVersionId = version.versionId;
-  annualPackage.currentEvidencePackId = payload.evidencePack.evidencePackId;
+  annualPackage.currentEvidencePackId = registeredEvidencePack.evidencePackId;
   annualPackage.status = "draft";
   annualPackage.updatedAt = now;
   for (const signatory of state.signatories.values()) {
@@ -599,6 +611,70 @@ function buildEvidencePack({ companyId, accountingPeriod, annualContext, balance
     sourceFingerprint,
     checksum,
     createdAt: new Date().toISOString()
+  };
+}
+
+function registerAnnualEvidencePack({
+  evidencePlatform,
+  annualPackage,
+  version,
+  evidencePack,
+  actorId,
+  correlationId
+}) {
+  if (!evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+    return clone(evidencePack);
+  }
+  const bundle = evidencePlatform.createFrozenEvidenceBundleSnapshot({
+    companyId: annualPackage.companyId,
+    bundleType: "annual_reporting_package",
+    sourceObjectType: "annual_report_package",
+    sourceObjectId: annualPackage.packageId,
+    sourceObjectVersion: version.versionId,
+    title: `Annual evidence ${annualPackage.packageId} v${version.versionNo}`,
+    retentionClass: "regulated",
+    classificationCode: "restricted_internal",
+    metadata: {
+      compatibilityPayload: {
+        ...clone(evidencePack),
+        versionId: version.versionId,
+        versionNo: version.versionNo
+      }
+    },
+    artifactRefs: [
+      ...evidencePack.documentChecksums.map((document) => ({
+        artifactType: "annual_document_checksum",
+        artifactRef: document.documentCode,
+        checksum: document.checksum,
+        roleCode: document.documentCode
+      })),
+      ...evidencePack.reportSnapshotRefs.map((reportSnapshotRef) => ({
+        artifactType: "report_snapshot",
+        artifactRef: reportSnapshotRef,
+        checksum: hashPayload({
+          reportSnapshotRef,
+          sourceFingerprint: evidencePack.sourceFingerprint
+        })
+      }))
+    ],
+    sourceRefs: [
+      ...evidencePack.closeSnapshotRefs.map((closeSnapshotRef) => ({
+        closeSnapshotRef
+      })),
+      ...clone(evidencePack.rulepackRefs)
+    ],
+    actorId,
+    correlationId
+  });
+  return {
+    ...clone(evidencePack),
+    evidencePackId: bundle.evidenceBundleId,
+    evidenceBundleId: bundle.evidenceBundleId,
+    checksum: bundle.checksum,
+    bundleStatus: bundle.status,
+    frozenAt: bundle.frozenAt,
+    archivedAt: bundle.archivedAt,
+    createdAt: bundle.frozenAt || bundle.createdAt
   };
 }
 

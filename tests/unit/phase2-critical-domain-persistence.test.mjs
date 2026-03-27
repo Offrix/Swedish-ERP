@@ -7,6 +7,7 @@ import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 
 const CRITICAL_DOMAIN_KEYS = Object.freeze([
   "orgAuth",
+  "evidence",
   "ledger",
   "vat",
   "ar",

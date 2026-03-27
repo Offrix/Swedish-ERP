@@ -150,6 +150,7 @@ export function createCoreEngine({
   hrPlatform = null,
   balancesPlatform = null,
   collectiveAgreementsPlatform = null,
+  evidencePlatform = null,
   asyncJobStore = null,
   clock = () => new Date()
 } = {}) {
@@ -348,6 +349,7 @@ export function createCoreEngine({
     clock,
     orgAuthPlatform,
     integrationPlatform,
+    evidencePlatform,
     audit,
     error
   });
@@ -374,6 +376,7 @@ export function createCoreEngine({
     hrPlatform,
     balancesPlatform,
     collectiveAgreementsPlatform,
+    evidencePlatform,
     listRuntimeJobs: asyncJobsModule.listAsyncJobs,
     listRuntimeDeadLetters: asyncJobsModule.listAsyncDeadLetters,
     listAuthoritySubmissions: integrationPlatform?.listAuthoritySubmissions,
@@ -459,6 +462,7 @@ export function createCoreEngine({
       createSupportCase: backofficeModule.createSupportCase,
       listSupportCases: backofficeModule.listSupportCases,
       closeSupportCase: backofficeModule.closeSupportCase,
+      exportSupportCaseEvidenceBundle: backofficeModule.exportSupportCaseEvidenceBundle,
       approveSupportCaseActions: backofficeModule.approveSupportCaseActions,
       runAdminDiagnostic: backofficeModule.runAdminDiagnostic,
       requestImpersonation: backofficeModule.requestImpersonation,
@@ -472,6 +476,7 @@ export function createCoreEngine({
       listBreakGlassSessions: backofficeModule.listBreakGlassSessions,
       approveBreakGlass: backofficeModule.approveBreakGlass,
       closeBreakGlassSession: backofficeModule.closeBreakGlassSession,
+      exportBreakGlassEvidenceBundle: backofficeModule.exportBreakGlassEvidenceBundle,
       listAuditTrail: backofficeModule.listAuditTrail,
       upsertFeatureFlag: publicResilienceModule.upsertFeatureFlag,
       listFeatureFlags: publicResilienceModule.listFeatureFlags,
@@ -534,6 +539,7 @@ export function createCoreEngine({
       listCutoverPlans: migrationModule.listCutoverPlans,
       createMigrationAcceptanceRecord: migrationModule.createMigrationAcceptanceRecord,
       listMigrationAcceptanceRecords: migrationModule.listMigrationAcceptanceRecords,
+      exportCutoverEvidenceBundle: migrationModule.exportCutoverEvidenceBundle,
       createPostCutoverCorrectionCase: migrationModule.createPostCutoverCorrectionCase,
       listPostCutoverCorrectionCases: migrationModule.listPostCutoverCorrectionCases,
       recordCutoverSignoff: migrationModule.recordCutoverSignoff,

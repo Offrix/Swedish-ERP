@@ -46,6 +46,7 @@ export function createProjectEngine({
   timePlatform = null,
   payrollPlatform = null,
   vatPlatform = null,
+  evidencePlatform = null,
   fieldPlatform = null,
   husPlatform = null,
   personalliggarePlatform = null,
@@ -120,6 +121,7 @@ export function createProjectEngine({
     createProjectDeviation,
     assignProjectDeviation,
     transitionProjectDeviationStatus,
+    exportProjectEvidenceBundle,
     listProjectAuditEvents,
     exportDurableState,
     importDurableState
@@ -1086,6 +1088,119 @@ export function createProjectEngine({
       .filter((event) => (resolvedProjectId ? event.projectId === requireProject(state, resolvedCompanyId, resolvedProjectId).projectId : true))
         .sort(compareAuditEvents)
         .map(copy);
+  }
+
+  function exportProjectEvidenceBundle({
+    companyId,
+    projectId,
+    cutoffDate = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    if (!evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+      throw createError(500, "evidence_platform_required", "Evidence platform is required.");
+    }
+    const project = requireProject(state, companyId, projectId);
+    const workspace = getProjectWorkspace({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      cutoffDate
+    });
+    const projectAuditEvents = listProjectAuditEvents({
+      companyId: project.companyId,
+      projectId: project.projectId
+    });
+    const payload = {
+      projectId: project.projectId,
+      projectCode: project.projectCode,
+      projectReferenceCode: project.projectReferenceCode,
+      projectStatus: project.status,
+      billingModelCode: project.billingModelCode,
+      revenueRecognitionModelCode: project.revenueRecognitionModelCode,
+      cutoffDate: normalizeOptionalText(cutoffDate),
+      warningCodes: [...workspace.warningCodes],
+      complianceIndicatorStrip: copy(workspace.complianceIndicatorStrip),
+      projectDeviations: copy(workspace.projectDeviations),
+      fieldSummary: copy(workspace.fieldSummary),
+      husSummary: copy(workspace.husSummary),
+      personalliggareSummary: copy(workspace.personalliggareSummary),
+      egenkontrollSummary: copy(workspace.egenkontrollSummary),
+      kalkylSummary: copy(workspace.kalkylSummary)
+    };
+    const bundle = evidencePlatform.createFrozenEvidenceBundleSnapshot({
+      companyId: project.companyId,
+      bundleType: "project_workspace",
+      sourceObjectType: "project",
+      sourceObjectId: project.projectId,
+      sourceObjectVersion: [
+        workspace.budgetVersionId,
+        workspace.currentCostSnapshotId,
+        workspace.currentWipSnapshotId,
+        workspace.currentForecastSnapshotId
+      ]
+        .filter(Boolean)
+        .join(":") || workspace.projectStatus,
+      title: `Project evidence ${project.projectCode}`,
+      retentionClass: "regulated",
+      classificationCode: "restricted_internal",
+      metadata: {
+        compatibilityPayload: payload
+      },
+      artifactRefs: [
+        ...[
+          ["project_budget_snapshot", workspace.budgetVersionId],
+          ["project_cost_snapshot", workspace.currentCostSnapshotId],
+          ["project_wip_snapshot", workspace.currentWipSnapshotId],
+          ["project_forecast_snapshot", workspace.currentForecastSnapshotId]
+        ]
+          .filter(([, artifactRef]) => artifactRef)
+          .map(([artifactType, artifactRef]) => ({
+            artifactType,
+            artifactRef,
+            checksum: hashObject({
+              artifactType,
+              artifactRef,
+              projectId: project.projectId
+            })
+          })),
+        ...workspace.projectDeviations.map((deviation) => ({
+          artifactType: "project_deviation",
+          artifactRef: deviation.projectDeviationId,
+          checksum: hashObject({
+            projectDeviationId: deviation.projectDeviationId,
+            status: deviation.status,
+            severityCode: deviation.severityCode
+          }),
+          roleCode: deviation.severityCode
+        }))
+      ],
+      auditRefs: projectAuditEvents.map((event) => ({
+        auditId: event.auditId || event.auditEventId,
+        action: event.action,
+        recordedAt: event.recordedAt
+      })),
+      sourceRefs: [
+        {
+          cutoffDate: normalizeOptionalText(cutoffDate),
+          warningCodeCount: workspace.warningCodes.length
+        }
+      ],
+      relatedObjectRefs: workspace.projectDeviations.map((deviation) => ({
+        objectType: "project_deviation",
+        objectId: deviation.projectDeviationId
+      })),
+      actorId,
+      correlationId
+    });
+    return {
+      projectEvidenceBundleId: bundle.evidenceBundleId,
+      evidenceBundleId: bundle.evidenceBundleId,
+      checksum: bundle.checksum,
+      status: bundle.status,
+      frozenAt: bundle.frozenAt,
+      archivedAt: bundle.archivedAt,
+      ...payload
+    };
   }
 
   function exportDurableState() {
