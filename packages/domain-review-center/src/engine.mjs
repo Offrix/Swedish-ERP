@@ -136,7 +136,7 @@ export function createReviewCenterEngine({
     return presentQueue(state, queue, clock);
   }
 
-  function listReviewCenterQueues({ companyId, status = null } = {}) {
+  function listReviewCenterQueues({ companyId, status = null, viewerUserId = null, viewerTeamIds = [] } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedStatus = status == null
       ? null
@@ -145,12 +145,22 @@ export function createReviewCenterEngine({
       .map((queueId) => state.reviewQueues.get(queueId))
       .filter(Boolean)
       .filter((queue) => (resolvedStatus ? queue.status === resolvedStatus : true))
-      .map((queue) => presentQueue(state, queue, clock))
+      .map((queue) => ({
+        queue,
+        visibleItems: listQueueItems(state, queue.reviewQueueId).filter((item) => canViewerSeeReviewItem(state, item, { viewerUserId, viewerTeamIds }))
+      }))
+      .filter(({ queue, visibleItems }) => canViewerSeeReviewQueue(state, queue, { viewerUserId, viewerTeamIds, visibleItems }))
+      .map(({ queue, visibleItems }) => presentQueue(state, queue, clock, { items: visibleItems }))
       .sort((left, right) => left.label.localeCompare(right.label) || left.queueCode.localeCompare(right.queueCode));
   }
 
-  function getReviewCenterQueue({ companyId, reviewQueueId = null, queueCode = null } = {}) {
-    return presentQueue(state, requireQueue(state, companyId, { reviewQueueId, queueCode }), clock);
+  function getReviewCenterQueue({ companyId, reviewQueueId = null, queueCode = null, viewerUserId = null, viewerTeamIds = [] } = {}) {
+    const queue = requireQueue(state, companyId, { reviewQueueId, queueCode });
+    const visibleItems = listQueueItems(state, queue.reviewQueueId).filter((item) => canViewerSeeReviewItem(state, item, { viewerUserId, viewerTeamIds }));
+    if (!canViewerSeeReviewQueue(state, queue, { viewerUserId, viewerTeamIds, visibleItems })) {
+      throw createError(403, "review_center_scope_forbidden", "Review queue is outside the actor scope.");
+    }
+    return presentQueue(state, queue, clock, { items: visibleItems });
   }
 
   function createReviewItem({
@@ -292,7 +302,16 @@ export function createReviewCenterEngine({
     return presentItem(state, item, clock);
   }
 
-  function listReviewCenterItems({ companyId, queueCode = null, status = null, assignedUserId = null, riskClass = null, sourceDomainCode = null } = {}) {
+  function listReviewCenterItems({
+    companyId,
+    queueCode = null,
+    status = null,
+    assignedUserId = null,
+    riskClass = null,
+    sourceDomainCode = null,
+    viewerUserId = null,
+    viewerTeamIds = []
+  } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedQueueCode = normalizeOptionalCode(queueCode);
     const resolvedStatus = normalizeOptionalEnumValue(status, REVIEW_ITEM_STATUSES, "review_item_status_invalid");
@@ -303,6 +322,7 @@ export function createReviewCenterEngine({
     return (state.reviewItemIdsByCompany.get(resolvedCompanyId) || [])
       .map((reviewItemId) => state.reviewItems.get(reviewItemId))
       .filter(Boolean)
+      .filter((item) => canViewerSeeReviewItem(state, item, { viewerUserId, viewerTeamIds }))
       .map((item) => presentItem(state, item, clock))
       .filter((item) => (resolvedQueueCode ? item.queueCode === resolvedQueueCode : true))
       .filter((item) => (resolvedStatus ? item.status === resolvedStatus : true))
@@ -312,12 +332,15 @@ export function createReviewCenterEngine({
       .sort(compareReviewItems);
   }
 
-  function getReviewCenterItem({ companyId, reviewItemId } = {}) {
-    return presentItem(state, requireItem(state, companyId, reviewItemId), clock, { includeHistory: true });
+  function getReviewCenterItem({ companyId, reviewItemId, viewerUserId = null, viewerTeamIds = [] } = {}) {
+    const item = requireItem(state, companyId, reviewItemId);
+    assertReviewItemVisibleToViewer(state, item, { viewerUserId, viewerTeamIds });
+    return presentItem(state, item, clock, { includeHistory: true });
   }
 
-  function claimReviewCenterItem({ companyId, reviewItemId, actorId = "system" } = {}) {
+  function claimReviewCenterItem({ companyId, reviewItemId, actorId = "system", viewerUserId = null, viewerTeamIds = [] } = {}) {
     const item = requireItem(state, companyId, reviewItemId);
+    assertReviewItemVisibleToViewer(state, item, { viewerUserId, viewerTeamIds });
     if (!["open", "waiting_input", "escalated"].includes(item.status)) {
       throw createError(409, "review_item_not_claimable", "Review item cannot be claimed from its current status.");
     }
@@ -327,9 +350,10 @@ export function createReviewCenterEngine({
     }
 
     const latestAssignment = getLatestAssignment(state, item.reviewItemId);
+    const queue = state.reviewQueues.get(item.reviewQueueId) || null;
     const assignment = appendAssignment(state, clock, item, {
       assignedUserId: resolvedActorId,
-      assignedTeamId: latestAssignment?.assignedTeamId || null,
+      assignedTeamId: latestAssignment?.assignedTeamId || queue?.ownerTeamId || null,
       assignedByActorId: resolvedActorId,
       reasonCode: "claim"
     });
@@ -467,9 +491,12 @@ export function createReviewCenterEngine({
     overrideReasonCode = null,
     resultingCommand = null,
     targetQueueCode = null,
-    actorId = "system"
+    actorId = "system",
+    viewerUserId = null,
+    viewerTeamIds = []
   } = {}) {
     const item = requireItem(state, companyId, reviewItemId);
+    assertReviewItemVisibleToViewer(state, item, { viewerUserId, viewerTeamIds });
     if (!["claimed", "in_review", "waiting_input", "escalated"].includes(item.status)) {
       throw createError(409, "review_item_not_decidable", "Review item cannot be decided from its current status.");
     }
@@ -710,19 +737,17 @@ function buildQueueRecord({ clock, companyId, queueCode, label, description, own
   };
 }
 
-function presentQueue(state, queue, clock) {
-  const items = (state.reviewItemIdsByQueue.get(queue.reviewQueueId) || [])
-    .map((reviewItemId) => state.reviewItems.get(reviewItemId))
-    .filter(Boolean);
+function presentQueue(state, queue, clock, { items = null } = {}) {
+  const queueItems = items == null ? listQueueItems(state, queue.reviewQueueId) : items;
   const now = nowIso(clock);
-  const activeItems = items.filter((item) => REVIEW_ACTIVE_ITEM_STATUSES.includes(item.status));
+  const activeItems = queueItems.filter((item) => REVIEW_ACTIVE_ITEM_STATUSES.includes(item.status));
   const earliestActiveSlaDueAt = activeItems
     .map((item) => item.slaDueAt)
     .sort((left, right) => left.localeCompare(right))[0] || null;
   const oldestActiveCreatedAt = activeItems
     .map((item) => item.createdAt)
     .sort((left, right) => left.localeCompare(right))[0] || null;
-  const blockedCount = items.filter((item) => item.status === "waiting_input").length;
+  const blockedCount = queueItems.filter((item) => item.status === "waiting_input").length;
   const openCount = activeItems.length;
   return {
     ...copy(queue),
@@ -731,11 +756,11 @@ function presentQueue(state, queue, clock) {
     openCount,
     blockedCount,
     metrics: {
-      openItemCount: items.filter((item) => item.status === "open").length,
-      claimedItemCount: items.filter((item) => item.status === "claimed" || item.status === "in_review").length,
-      waitingInputCount: items.filter((item) => item.status === "waiting_input").length,
-      escalatedItemCount: items.filter((item) => item.status === "escalated").length,
-      overdueItemCount: items.filter((item) => REVIEW_ACTIVE_ITEM_STATUSES.includes(item.status) && item.slaDueAt < now).length,
+      openItemCount: queueItems.filter((item) => item.status === "open").length,
+      claimedItemCount: queueItems.filter((item) => item.status === "claimed" || item.status === "in_review").length,
+      waitingInputCount: queueItems.filter((item) => item.status === "waiting_input").length,
+      escalatedItemCount: queueItems.filter((item) => item.status === "escalated").length,
+      overdueItemCount: queueItems.filter((item) => REVIEW_ACTIVE_ITEM_STATUSES.includes(item.status) && item.slaDueAt < now).length,
       blockedCount,
       oldestOpenAgeMinutes: oldestActiveCreatedAt ? diffMinutes(oldestActiveCreatedAt, now) : 0,
       nextSlaDueAt: earliestActiveSlaDueAt
@@ -793,6 +818,65 @@ function appendAssignment(state, clock, item, { assignedUserId = null, assignedT
 function getLatestAssignment(state, reviewItemId) {
   const assignmentIds = state.reviewAssignmentIdsByItem.get(reviewItemId) || [];
   return assignmentIds.length === 0 ? null : state.reviewAssignments.get(assignmentIds.at(-1)) || null;
+}
+
+function listQueueItems(state, reviewQueueId) {
+  return (state.reviewItemIdsByQueue.get(reviewQueueId) || [])
+    .map((reviewItemId) => state.reviewItems.get(reviewItemId))
+    .filter(Boolean);
+}
+
+function assertReviewItemVisibleToViewer(state, item, { viewerUserId = null, viewerTeamIds = [] } = {}) {
+  if (canViewerSeeReviewItem(state, item, { viewerUserId, viewerTeamIds })) {
+    return;
+  }
+  throw createError(403, "review_center_scope_forbidden", "Review item is outside the actor scope.");
+}
+
+function canViewerSeeReviewQueue(state, queue, { viewerUserId = null, viewerTeamIds = [], visibleItems = null } = {}) {
+  const resolvedUserId = normalizeOptionalText(viewerUserId);
+  const resolvedTeamIds = normalizeViewerTeamIds(viewerTeamIds);
+  if (!resolvedUserId && resolvedTeamIds.length === 0) {
+    return true;
+  }
+  if (!queue.ownerTeamId) {
+    return true;
+  }
+  if (resolvedTeamIds.includes(queue.ownerTeamId)) {
+    return true;
+  }
+  const queueVisibleItems = visibleItems == null
+    ? listQueueItems(state, queue.reviewQueueId).filter((item) => canViewerSeeReviewItem(state, item, { viewerUserId: resolvedUserId, viewerTeamIds: resolvedTeamIds }))
+    : visibleItems;
+  return queueVisibleItems.length > 0;
+}
+
+function canViewerSeeReviewItem(state, item, { viewerUserId = null, viewerTeamIds = [] } = {}) {
+  const resolvedUserId = normalizeOptionalText(viewerUserId);
+  const resolvedTeamIds = normalizeViewerTeamIds(viewerTeamIds);
+  if (!resolvedUserId && resolvedTeamIds.length === 0) {
+    return true;
+  }
+  if (resolvedUserId && item.createdByActorId === resolvedUserId) {
+    return true;
+  }
+  const currentAssignment = getLatestAssignment(state, item.reviewItemId);
+  if (resolvedUserId && currentAssignment?.assignedUserId === resolvedUserId) {
+    return true;
+  }
+  const queue = state.reviewQueues.get(item.reviewQueueId) || null;
+  const effectiveTeamIds = [currentAssignment?.assignedTeamId, queue?.ownerTeamId]
+    .filter((teamId) => typeof teamId === "string" && teamId.trim().length > 0);
+  if (effectiveTeamIds.some((teamId) => resolvedTeamIds.includes(teamId))) {
+    return true;
+  }
+  return !currentAssignment?.assignedUserId && effectiveTeamIds.length === 0;
+}
+
+function normalizeViewerTeamIds(viewerTeamIds) {
+  return Array.isArray(viewerTeamIds)
+    ? [...new Set(viewerTeamIds.filter((teamId) => typeof teamId === "string" && teamId.trim().length > 0).map((teamId) => teamId.trim()))]
+    : [];
 }
 
 function getLatestDecision(state, reviewItemId) {

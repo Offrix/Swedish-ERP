@@ -206,3 +206,93 @@ test("Step 17 review center SLA scan records first and recurring breaches", () =
   const snapshot = engine.snapshotReviewCenter();
   assert.equal(snapshot.reviewEscalations.length, 2);
 });
+
+test("Step 6.3 review center trims queues, items and item detail by viewer team scope", () => {
+  const engine = createReviewCenterEngine({
+    clock: () => new Date("2026-03-27T08:00:00Z"),
+    seedDemo: false
+  });
+  const companyId = "company_review_scope_1";
+
+  engine.createReviewQueue({
+    companyId,
+    queueCode: "DOCUMENT_REVIEW",
+    label: "Document review",
+    ownerTeamId: "finance_ops",
+    allowedSourceDomains: ["DOCUMENTS"],
+    requiredDecisionTypes: ["classification"],
+    actorId: "ops_admin"
+  });
+  engine.createReviewQueue({
+    companyId,
+    queueCode: "PAYROLL_REVIEW",
+    label: "Payroll review",
+    ownerTeamId: "payroll_ops",
+    allowedSourceDomains: ["PAYROLL"],
+    requiredDecisionTypes: ["generic_review"],
+    actorId: "ops_admin"
+  });
+
+  const financeItem = engine.createReviewItem({
+    companyId,
+    queueCode: "DOCUMENT_REVIEW",
+    reviewTypeCode: "DOCUMENT_AMBIGUITY",
+    sourceDomainCode: "DOCUMENTS",
+    sourceObjectType: "document",
+    sourceObjectId: "doc_scope_1",
+    requiredDecisionType: "classification",
+    title: "Finance scoped review",
+    actorId: "system"
+  });
+  const payrollItem = engine.createReviewItem({
+    companyId,
+    queueCode: "PAYROLL_REVIEW",
+    reviewTypeCode: "PAYROLL_VARIANCE",
+    sourceDomainCode: "PAYROLL",
+    sourceObjectType: "pay_run",
+    sourceObjectId: "pay_scope_1",
+    requiredDecisionType: "generic_review",
+    title: "Payroll scoped review",
+    actorId: "system"
+  });
+
+  const financeQueues = engine.listReviewCenterQueues({
+    companyId,
+    viewerUserId: "finance_user",
+    viewerTeamIds: ["finance_ops"]
+  });
+  assert.deepEqual(financeQueues.map((queue) => queue.queueCode), ["DOCUMENT_REVIEW"]);
+  assert.equal(financeQueues[0].metrics.openItemCount, 1);
+
+  const payrollQueues = engine.listReviewCenterQueues({
+    companyId,
+    viewerUserId: "payroll_user",
+    viewerTeamIds: ["payroll_ops"]
+  });
+  assert.deepEqual(payrollQueues.map((queue) => queue.queueCode), ["PAYROLL_REVIEW"]);
+  assert.equal(payrollQueues[0].metrics.openItemCount, 1);
+
+  const financeVisibleItems = engine.listReviewCenterItems({
+    companyId,
+    viewerUserId: "finance_user",
+    viewerTeamIds: ["finance_ops"]
+  });
+  assert.deepEqual(financeVisibleItems.map((item) => item.reviewItemId), [financeItem.reviewItemId]);
+
+  const payrollVisibleItems = engine.listReviewCenterItems({
+    companyId,
+    viewerUserId: "payroll_user",
+    viewerTeamIds: ["payroll_ops"]
+  });
+  assert.deepEqual(payrollVisibleItems.map((item) => item.reviewItemId), [payrollItem.reviewItemId]);
+
+  assert.throws(
+    () => engine.getReviewCenterItem({
+      companyId,
+      reviewItemId: financeItem.reviewItemId,
+      viewerUserId: "payroll_user",
+      viewerTeamIds: ["payroll_ops"]
+    }),
+    (candidate) => candidate?.code === "review_center_scope_forbidden"
+  );
+});

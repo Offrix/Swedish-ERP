@@ -455,3 +455,125 @@ test("Team-scoped saved views are visible to active team members but not unrelat
     await stopServer(server);
   }
 });
+
+test("Step 6.3 activity API trims team, user and backoffice visibility server-side", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-27T09:00:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    await requestJson(
+      baseUrl,
+      `/v1/org/companies/${DEMO_IDS.companyId}/users`,
+      {
+        method: "POST",
+        token: adminToken,
+        expectedStatus: 201,
+        body: {
+          email: "scope-payroll-admin@example.test",
+          displayName: "Scope Payroll Admin",
+          roleCode: "payroll_admin"
+        }
+      }
+    );
+
+    const payrollAdminToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "scope-payroll-admin@example.test"
+    });
+
+    platform.projectActivityEntry({
+      companyId: DEMO_IDS.companyId,
+      objectType: "review_item",
+      objectId: "review_scope_api_1",
+      activityType: "review_item_created",
+      actorType: "system",
+      actorSnapshot: { actorId: "system" },
+      summary: "Company-visible entry.",
+      occurredAt: "2026-03-27T08:00:00Z",
+      sourceEventId: "scope_api_company",
+      visibilityScope: "company",
+      actorId: DEMO_IDS.userId
+    });
+    platform.projectActivityEntry({
+      companyId: DEMO_IDS.companyId,
+      objectType: "review_item",
+      objectId: "review_scope_api_1",
+      activityType: "review_item_team_flagged",
+      actorType: "user",
+      actorSnapshot: { userId: DEMO_IDS.userId },
+      summary: "Finance-team entry.",
+      occurredAt: "2026-03-27T08:01:00Z",
+      sourceEventId: "scope_api_team",
+      visibilityScope: "team",
+      visibilityTeamId: DEMO_TEAM_IDS.financeOps,
+      actorId: DEMO_IDS.userId
+    });
+    platform.projectActivityEntry({
+      companyId: DEMO_IDS.companyId,
+      objectType: "review_item",
+      objectId: "review_scope_api_1",
+      activityType: "review_item_private_note",
+      actorType: "user",
+      actorSnapshot: { userId: DEMO_IDS.userId },
+      summary: "Admin-only entry.",
+      occurredAt: "2026-03-27T08:02:00Z",
+      sourceEventId: "scope_api_user",
+      visibilityScope: "user",
+      visibilityUserId: DEMO_IDS.userId,
+      actorId: DEMO_IDS.userId
+    });
+    platform.projectActivityEntry({
+      companyId: DEMO_IDS.companyId,
+      objectType: "review_item",
+      objectId: "review_scope_api_1",
+      activityType: "review_item_backoffice_flagged",
+      actorType: "system",
+      actorSnapshot: { actorId: "system" },
+      summary: "Backoffice-only entry.",
+      occurredAt: "2026-03-27T08:03:00Z",
+      sourceEventId: "scope_api_backoffice",
+      visibilityScope: "backoffice",
+      actorId: DEMO_IDS.userId
+    });
+
+    const adminActivity = await requestJson(
+      baseUrl,
+      `/v1/activity?companyId=${DEMO_IDS.companyId}&objectType=review_item&objectId=review_scope_api_1`,
+      { token: adminToken }
+    );
+    assert.deepEqual(
+      adminActivity.items.map((item) => item.activityType).sort(),
+      [
+        "REVIEW_ITEM_BACKOFFICE_FLAGGED",
+        "REVIEW_ITEM_CREATED",
+        "REVIEW_ITEM_PRIVATE_NOTE",
+        "REVIEW_ITEM_TEAM_FLAGGED"
+      ]
+    );
+
+    const payrollActivity = await requestJson(
+      baseUrl,
+      `/v1/activity?companyId=${DEMO_IDS.companyId}&objectType=review_item&objectId=review_scope_api_1`,
+      { token: payrollAdminToken }
+    );
+    assert.deepEqual(
+      payrollActivity.items.map((item) => item.activityType).sort(),
+      ["REVIEW_ITEM_CREATED"]
+    );
+  } finally {
+    await stopServer(server);
+  }
+});

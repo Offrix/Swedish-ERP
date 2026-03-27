@@ -186,7 +186,10 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
       relatedObjectType: optionalText(url.searchParams.get("relatedObjectType")),
       relatedObjectId: optionalText(url.searchParams.get("relatedObjectId")),
       limit: parsePositiveInteger(url.searchParams.get("limit"), "activity_limit_invalid", "limit must be a positive integer.") || null,
-      cursor: optionalText(url.searchParams.get("cursor"))
+      cursor: optionalText(url.searchParams.get("cursor")),
+      viewerUserId: principal.userId,
+      viewerTeamIds: resolvePrincipalTeamIds(principal),
+      viewerCanReadBackoffice: canReadBackofficeActivity({ principal })
     }));
     return true;
   }
@@ -195,7 +198,7 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
   if (req.method === "GET" && activityObjectMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
-    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "activity_entry", objectId: activityObjectMatch.objectId, scopeCode: "activity" });
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "activity_entry", objectId: activityObjectMatch.objectId, scopeCode: "activity" });
     writeJson(res, 200, platform.listActivityEntriesPage({
       companyId,
       objectType: activityObjectMatch.objectType,
@@ -204,7 +207,10 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
       relatedObjectType: optionalText(url.searchParams.get("relatedObjectType")),
       relatedObjectId: optionalText(url.searchParams.get("relatedObjectId")),
       limit: parsePositiveInteger(url.searchParams.get("limit"), "activity_limit_invalid", "limit must be a positive integer.") || null,
-      cursor: optionalText(url.searchParams.get("cursor"))
+      cursor: optionalText(url.searchParams.get("cursor")),
+      viewerUserId: principal.userId,
+      viewerTeamIds: resolvePrincipalTeamIds(principal),
+      viewerCanReadBackoffice: canReadBackofficeActivity({ principal })
     }));
     return true;
   }
@@ -217,7 +223,9 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
     writeJson(res, 200, {
       items: platform.listReviewCenterQueues({
         companyId,
-        status: optionalText(url.searchParams.get("status"))
+        status: optionalText(url.searchParams.get("status")),
+        viewerUserId: principal.userId,
+        viewerTeamIds: resolvePrincipalTeamIds(principal)
       })
     });
     return true;
@@ -235,7 +243,9 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
         status: optionalText(url.searchParams.get("status")),
         assignedUserId: optionalText(url.searchParams.get("assignedUserId")),
         riskClass: optionalText(url.searchParams.get("riskClass")),
-        sourceDomainCode: optionalText(url.searchParams.get("sourceDomainCode"))
+        sourceDomainCode: optionalText(url.searchParams.get("sourceDomainCode")),
+        viewerUserId: principal.userId,
+        viewerTeamIds: resolvePrincipalTeamIds(principal)
       })
     });
     return true;
@@ -249,7 +259,9 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
     assertReviewCenterReadAccess({ principal });
     writeJson(res, 200, platform.getReviewCenterItem({
       companyId,
-      reviewItemId: reviewCenterItemMatch.reviewItemId
+      reviewItemId: reviewCenterItemMatch.reviewItemId,
+      viewerUserId: principal.userId,
+      viewerTeamIds: resolvePrincipalTeamIds(principal)
     }));
     return true;
   }
@@ -270,7 +282,9 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
     writeJson(res, 200, platform.claimReviewCenterItem({
       companyId,
       reviewItemId: reviewCenterClaimMatch.reviewItemId,
-      actorId: principal.userId
+      actorId: principal.userId,
+      viewerUserId: principal.userId,
+      viewerTeamIds: resolvePrincipalTeamIds(principal)
     }));
     return true;
   }
@@ -299,7 +313,9 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
       overrideReasonCode: body.overrideReasonCode || null,
       resultingCommand: body.resultingCommand || null,
       targetQueueCode: body.targetQueueCode || null,
-      actorId: principal.userId
+      actorId: principal.userId,
+      viewerUserId: principal.userId,
+      viewerTeamIds: resolvePrincipalTeamIds(principal)
     }));
     return true;
   }
@@ -470,6 +486,7 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
 }
 
 const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
+const BACKOFFICE_ACTIVITY_ROLE_CODES = new Set(["company_admin", "approver"]);
 const ACTIVITY_FEED_FULL_READ_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
 
 function assertReviewCenterReadAccess({ principal }) {
@@ -490,7 +507,12 @@ function assertActivityFeedFullReadAccess({ principal }) {
 
 function assertReviewCenterActionAccess({ platform, principal, companyId, reviewItemId, operation }) {
   assertReviewCenterReadAccess({ principal });
-  const reviewItem = platform.getReviewCenterItem({ companyId, reviewItemId });
+  const reviewItem = platform.getReviewCenterItem({
+    companyId,
+    reviewItemId,
+    viewerUserId: principal.userId,
+    viewerTeamIds: resolvePrincipalTeamIds(principal)
+  });
   const assignedUserId = reviewItem.currentAssignment?.assignedUserId || null;
   if (operation === "claim") {
     if (assignedUserId && assignedUserId !== principal.userId) {
@@ -502,4 +524,15 @@ function assertReviewCenterActionAccess({ platform, principal, companyId, review
   if (assignedUserId !== principal.userId) {
     throw createHttpError(403, "review_center_assignment_required", "Review decisions require the current actor to hold the active assignment.");
   }
+}
+
+function canReadBackofficeActivity({ principal }) {
+  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
+  return [...BACKOFFICE_ACTIVITY_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+}
+
+function resolvePrincipalTeamIds(principal) {
+  return Array.isArray(principal?.teamIds)
+    ? [...new Set(principal.teamIds.filter((teamId) => typeof teamId === "string" && teamId.trim().length > 0))]
+    : [];
 }

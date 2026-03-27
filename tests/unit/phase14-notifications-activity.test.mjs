@@ -438,3 +438,99 @@ test("Step 13 activity supports stable cursor pagination", () => {
   assert.equal(secondPage.items[0].activityEntryId, first.activityEntryId);
   assert.equal(secondPage.nextCursor, null);
 });
+
+test("Step 6.3 activity enforces user, team and backoffice visibility server-side", () => {
+  const activity = createActivityEngine({
+    clock: () => new Date("2026-03-27T08:30:00Z")
+  });
+  const companyId = "company_activity_scope_1";
+
+  activity.projectActivityEntry({
+    companyId,
+    objectType: "review_item",
+    objectId: "review_scope_1",
+    activityType: "review_item_created",
+    actorType: "system",
+    actorSnapshot: { actorId: "system" },
+    summary: "Company-visible activity.",
+    sourceEventId: "scope_evt_company",
+    visibilityScope: "company",
+    actorId: "system"
+  });
+  activity.projectActivityEntry({
+    companyId,
+    objectType: "review_item",
+    objectId: "review_scope_1",
+    activityType: "review_item_team_flagged",
+    actorType: "user",
+    actorSnapshot: { userId: "finance_user" },
+    summary: "Finance-team activity.",
+    sourceEventId: "scope_evt_team",
+    visibilityScope: "team",
+    visibilityTeamId: "finance_ops",
+    actorId: "finance_user"
+  });
+  activity.projectActivityEntry({
+    companyId,
+    objectType: "review_item",
+    objectId: "review_scope_1",
+    activityType: "review_item_private_note",
+    actorType: "user",
+    actorSnapshot: { userId: "approver_user" },
+    summary: "User-only activity.",
+    sourceEventId: "scope_evt_user",
+    visibilityScope: "user",
+    visibilityUserId: "approver_user",
+    actorId: "approver_user"
+  });
+  const backofficeEntry = activity.projectActivityEntry({
+    companyId,
+    objectType: "review_item",
+    objectId: "review_scope_1",
+    activityType: "review_item_backoffice_flagged",
+    actorType: "system",
+    actorSnapshot: { actorId: "system" },
+    summary: "Backoffice-only activity.",
+    sourceEventId: "scope_evt_backoffice",
+    visibilityScope: "backoffice",
+    actorId: "system"
+  });
+
+  const financeViewer = activity.listActivityEntries({
+    companyId,
+    objectType: "review_item",
+    objectId: "review_scope_1",
+    viewerUserId: "approver_user",
+    viewerTeamIds: ["finance_ops"],
+    viewerCanReadBackoffice: true
+  });
+  assert.deepEqual(
+    financeViewer.map((entry) => entry.activityType).sort(),
+    ["REVIEW_ITEM_BACKOFFICE_FLAGGED", "REVIEW_ITEM_PRIVATE_NOTE", "REVIEW_ITEM_TEAM_FLAGGED", "REVIEW_ITEM_CREATED"]
+      .sort(),
+  );
+
+  const payrollViewer = activity.listActivityEntries({
+    companyId,
+    objectType: "review_item",
+    objectId: "review_scope_1",
+    viewerUserId: "payroll_user",
+    viewerTeamIds: ["payroll_ops"],
+    viewerCanReadBackoffice: false
+  });
+  assert.deepEqual(
+    payrollViewer.map((entry) => entry.activityType),
+    ["REVIEW_ITEM_CREATED"]
+  );
+
+  assert.throws(
+    () => activity.getActivityEntry({
+      companyId,
+      activityEntryId: backofficeEntry.activityEntryId,
+      viewerUserId: "payroll_user",
+      viewerTeamIds: ["payroll_ops"],
+      viewerCanReadBackoffice: false
+    }),
+    (candidate) => candidate?.code === "activity_entry_scope_forbidden"
+  );
+});

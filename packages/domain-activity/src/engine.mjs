@@ -43,6 +43,8 @@ export function createActivityEngine({ clock = () => new Date() } = {}) {
     occurredAt = null,
     sourceEventId,
     visibilityScope = "company",
+    visibilityUserId = null,
+    visibilityTeamId = null,
     relatedObjects = [],
     actorId = "system"
   } = {}) {
@@ -57,6 +59,22 @@ export function createActivityEngine({ clock = () => new Date() } = {}) {
       return presentActivityEntry(state, state.entries.get(existingEntryId));
     }
 
+    const resolvedVisibilityScope = assertAllowed(normalizeEnumValue(visibilityScope, "activity_visibility_scope_required"), ACTIVITY_VISIBILITY_SCOPES, "activity_visibility_scope_invalid");
+    const resolvedVisibilityUserId = normalizeOptionalText(visibilityUserId);
+    const resolvedVisibilityTeamId = normalizeOptionalText(visibilityTeamId);
+    if (resolvedVisibilityScope === "user" && !resolvedVisibilityUserId) {
+      throw createError(400, "activity_visibility_user_id_required", "User-scoped activity requires a visibilityUserId.");
+    }
+    if (resolvedVisibilityScope === "team" && !resolvedVisibilityTeamId) {
+      throw createError(400, "activity_visibility_team_id_required", "Team-scoped activity requires a visibilityTeamId.");
+    }
+    if (resolvedVisibilityScope !== "user" && resolvedVisibilityUserId) {
+      throw createError(400, "activity_visibility_user_scope_mismatch", "visibilityUserId is only allowed for user-scoped activity.");
+    }
+    if (resolvedVisibilityScope !== "team" && resolvedVisibilityTeamId) {
+      throw createError(400, "activity_visibility_team_scope_mismatch", "visibilityTeamId is only allowed for team-scoped activity.");
+    }
+
     const entry = {
       activityEntryId: crypto.randomUUID(),
       companyId: resolvedCompanyId,
@@ -68,7 +86,9 @@ export function createActivityEngine({ clock = () => new Date() } = {}) {
       summary: requireText(summary, "activity_summary_required"),
       occurredAt: normalizeOptionalDateTime(occurredAt) || nowIso(clock),
       sourceEventId: resolvedSourceEventId,
-      visibilityScope: assertAllowed(normalizeEnumValue(visibilityScope, "activity_visibility_scope_required"), ACTIVITY_VISIBILITY_SCOPES, "activity_visibility_scope_invalid"),
+      visibilityScope: resolvedVisibilityScope,
+      visibilityUserId: resolvedVisibilityUserId,
+      visibilityTeamId: resolvedVisibilityTeamId,
       status: "visible",
       hiddenReasonCode: null,
       createdByActorId: requireText(actorId, "actor_id_required"),
@@ -101,12 +121,23 @@ export function createActivityEngine({ clock = () => new Date() } = {}) {
     return presentActivityEntry(state, entry);
   }
 
-  function listActivityEntries({ companyId, objectType = null, objectId = null, visibilityScope = null, relatedObjectType = null, relatedObjectId = null } = {}) {
+  function listActivityEntries({
+    companyId,
+    objectType = null,
+    objectId = null,
+    visibilityScope = null,
+    relatedObjectType = null,
+    relatedObjectId = null,
+    viewerUserId = null,
+    viewerTeamIds = [],
+    viewerCanReadBackoffice = false
+  } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedVisibilityScope = visibilityScope == null ? null : assertAllowed(normalizeEnumValue(visibilityScope, "activity_visibility_scope_required"), ACTIVITY_VISIBILITY_SCOPES, "activity_visibility_scope_invalid");
     return (state.entryIdsByCompany.get(resolvedCompanyId) || [])
       .map((entryId) => state.entries.get(entryId))
       .filter(Boolean)
+      .filter((entry) => canViewerSeeActivityEntry(entry, { viewerUserId, viewerTeamIds, viewerCanReadBackoffice }))
       .map((entry) => presentActivityEntry(state, entry))
       .filter((entry) => (objectType ? entry.objectType === objectType : true))
       .filter((entry) => (objectId ? entry.objectId === objectId : true))
@@ -128,7 +159,10 @@ export function createActivityEngine({ clock = () => new Date() } = {}) {
     relatedObjectType = null,
     relatedObjectId = null,
     limit = null,
-    cursor = null
+    cursor = null,
+    viewerUserId = null,
+    viewerTeamIds = [],
+    viewerCanReadBackoffice = false
   } = {}) {
     const resolvedLimit = limit == null ? null : normalizePositiveInteger(limit, "activity_limit_invalid");
     const resolvedCursor = cursor == null ? null : decodeActivityCursor(cursor);
@@ -138,7 +172,10 @@ export function createActivityEngine({ clock = () => new Date() } = {}) {
       objectId,
       visibilityScope,
       relatedObjectType,
-      relatedObjectId
+      relatedObjectId,
+      viewerUserId,
+      viewerTeamIds,
+      viewerCanReadBackoffice
     }).filter((entry) => isAfterActivityCursor(entry, resolvedCursor));
     const items = resolvedLimit == null ? filteredItems : filteredItems.slice(0, resolvedLimit);
     const nextCursor = resolvedLimit != null && filteredItems.length > resolvedLimit ? encodeActivityCursor(items[items.length - 1]) : null;
@@ -148,8 +185,12 @@ export function createActivityEngine({ clock = () => new Date() } = {}) {
     };
   }
 
-  function getActivityEntry({ companyId, activityEntryId } = {}) {
-    return presentActivityEntry(state, requireEntry(state, companyId, activityEntryId));
+  function getActivityEntry({ companyId, activityEntryId, viewerUserId = null, viewerTeamIds = [], viewerCanReadBackoffice = false } = {}) {
+    const entry = requireEntry(state, companyId, activityEntryId);
+    if (!canViewerSeeActivityEntry(entry, { viewerUserId, viewerTeamIds, viewerCanReadBackoffice })) {
+      throw createError(403, "activity_entry_scope_forbidden", "Activity entry is outside the actor scope.");
+    }
+    return presentActivityEntry(state, entry);
   }
 
   function hideActivityEntryByPolicy({ companyId, activityEntryId, reasonCode, actorId = "system" } = {}) {
@@ -217,9 +258,36 @@ function requireEntry(state, companyId, activityEntryId) {
   return entry;
 }
 
+function canViewerSeeActivityEntry(entry, { viewerUserId = null, viewerTeamIds = [], viewerCanReadBackoffice = false } = {}) {
+  const resolvedViewerUserId = normalizeOptionalText(viewerUserId);
+  const resolvedViewerTeamIds = normalizeViewerTeamIds(viewerTeamIds);
+  switch (entry.visibilityScope) {
+    case "company":
+      return true;
+    case "user":
+      return Boolean(resolvedViewerUserId && entry.visibilityUserId === resolvedViewerUserId);
+    case "team":
+      return Boolean(entry.visibilityTeamId && resolvedViewerTeamIds.includes(entry.visibilityTeamId));
+    case "backoffice":
+      return viewerCanReadBackoffice === true;
+    default:
+      return false;
+  }
+}
+
 function compareActivityEntries(left, right) {
   return right.occurredAt.localeCompare(left.occurredAt)
     || right.activityEntryId.localeCompare(left.activityEntryId);
+}
+
+function normalizeOptionalText(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeViewerTeamIds(viewerTeamIds) {
+  return Array.isArray(viewerTeamIds)
+    ? [...new Set(viewerTeamIds.filter((teamId) => typeof teamId === "string" && teamId.trim().length > 0).map((teamId) => teamId.trim()))]
+    : [];
 }
 
 function normalizePositiveInteger(value, code) {

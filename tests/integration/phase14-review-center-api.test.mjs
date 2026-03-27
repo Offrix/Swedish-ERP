@@ -27,6 +27,22 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
       companyId: DEMO_IDS.companyId,
       email: DEMO_APPROVER_EMAIL
     });
+    await requestJson(baseUrl, `/v1/org/companies/${DEMO_IDS.companyId}/users`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        email: "review-payroll@example.test",
+        displayName: "Review Payroll",
+        roleCode: "payroll_admin"
+      }
+    });
+    const payrollAdminToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "review-payroll@example.test"
+    });
 
     await requestJson(baseUrl, `/v1/org/companies/${DEMO_IDS.companyId}/users`, {
       method: "POST",
@@ -59,6 +75,20 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
       evidenceRefs: ["document:doc_api_1"],
       actorId: DEMO_IDS.userId
     });
+    const payrollSeeded = platform.createReviewItem({
+      companyId: DEMO_IDS.companyId,
+      queueCode: "PAYROLL_REVIEW",
+      reviewTypeCode: "PAYROLL_VARIANCE",
+      sourceDomainCode: "PAYROLL",
+      sourceObjectType: "pay_run",
+      sourceObjectId: "pay_api_1",
+      requiredDecisionType: "generic_review",
+      riskClass: "high",
+      title: "Payroll requires review",
+      summary: "Payroll queue item created for scope verification.",
+      evidenceRefs: ["payrun:pay_api_1"],
+      actorId: DEMO_IDS.userId
+    });
 
     const queues = await requestJson(
       baseUrl,
@@ -80,6 +110,38 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
       { token: fieldUserToken, expectedStatus: 403 }
     );
     assert.equal(fieldUserListForbidden.error, "review_center_role_forbidden");
+
+    const payrollQueues = await requestJson(
+      baseUrl,
+      `/v1/review-center/queues?companyId=${DEMO_IDS.companyId}`,
+      { token: payrollAdminToken }
+    );
+    assert.equal(payrollQueues.items.some((item) => item.queueCode === "DOCUMENT_REVIEW"), false);
+    assert.equal(payrollQueues.items.some((item) => item.queueCode === "PAYROLL_REVIEW"), true);
+
+    const payrollDocumentItems = await requestJson(
+      baseUrl,
+      `/v1/review-center/items?companyId=${DEMO_IDS.companyId}&queueCode=DOCUMENT_REVIEW&status=open`,
+      { token: payrollAdminToken }
+    );
+    assert.equal(payrollDocumentItems.items.length, 0);
+
+    const payrollDetailForbidden = await requestJson(
+      baseUrl,
+      `/v1/review-center/items/${seeded.reviewItemId}?companyId=${DEMO_IDS.companyId}`,
+      { token: payrollAdminToken, expectedStatus: 403 }
+    );
+    assert.equal(payrollDetailForbidden.error, "review_center_scope_forbidden");
+
+    const payrollClaimForbidden = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/claim`, {
+      method: "POST",
+      token: payrollAdminToken,
+      expectedStatus: 403,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(payrollClaimForbidden.error, "review_center_scope_forbidden");
 
     const claimed = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/claim`, {
       method: "POST",
@@ -125,6 +187,13 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
     });
     assert.equal(approved.status, "approved");
     assert.equal(approved.latestDecision.decisionCode, "approve");
+
+    const payrollItems = await requestJson(
+      baseUrl,
+      `/v1/review-center/items?companyId=${DEMO_IDS.companyId}&queueCode=PAYROLL_REVIEW&status=open`,
+      { token: payrollAdminToken }
+    );
+    assert.equal(payrollItems.items.some((item) => item.reviewItemId === payrollSeeded.reviewItemId), true);
 
     const fetched = await requestJson(
       baseUrl,

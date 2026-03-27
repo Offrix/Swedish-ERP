@@ -1042,7 +1042,7 @@ export function createCoreEngine({
     status = null,
     sourceType = null
   } = {}) {
-    authorizeCompany(sessionToken, companyId, "company.read");
+    const principal = authorizeCompany(sessionToken, companyId, "company.read");
     const resolvedCompanyId = text(companyId, "company_id_required");
     const statusFilter = norm(status);
     const queueFilter = norm(queueCode);
@@ -1051,6 +1051,7 @@ export function createCoreEngine({
     const sourceFilter = norm(sourceType);
     return [...state.operationalWorkItems.values()]
       .filter((workItem) => workItem.companyId === resolvedCompanyId)
+      .filter((workItem) => canPrincipalSeeOperationalWorkItem(principal, workItem))
       .filter((workItem) => !queueFilter || workItem.queueCode === queueFilter)
       .filter((workItem) => !ownerTeamFilter || workItem.ownerTeamId === ownerTeamFilter)
       .filter((workItem) => !ownerFilter || workItem.ownerCompanyUserId === ownerFilter)
@@ -1068,6 +1069,7 @@ export function createCoreEngine({
   } = {}) {
     const principal = authorizeCompany(sessionToken, companyId, "company.manage");
     const workItem = requireOperationalWorkItem(companyId, workItemId);
+    assertOperationalWorkItemVisible(principal, workItem);
     if (["resolved", "closed"].includes(workItem.status)) {
       throw error(409, "operational_work_item_not_claimable", "Resolved operational work items cannot be claimed.");
     }
@@ -1109,6 +1111,7 @@ export function createCoreEngine({
   } = {}) {
     const principal = authorizeCompany(sessionToken, companyId, "company.manage");
     const workItem = requireOperationalWorkItem(companyId, workItemId);
+    assertOperationalWorkItemVisible(principal, workItem);
     if (workItem.status === "closed") {
       throw error(409, "operational_work_item_already_closed", "Closed operational work items cannot be resolved again.");
     }
@@ -1378,15 +1381,40 @@ export function createCoreEngine({
     return workItem;
   }
 
-  function requireOperationalWorkItem(companyId, workItemId) {
-    const workItem = state.operationalWorkItems.get(text(workItemId, "operational_work_item_id_required"));
-    if (!workItem || workItem.companyId !== text(companyId, "company_id_required")) {
-      throw error(404, "operational_work_item_not_found", "Operational work item was not found.");
-    }
-    return workItem;
+function requireOperationalWorkItem(companyId, workItemId) {
+  const workItem = state.operationalWorkItems.get(text(workItemId, "operational_work_item_id_required"));
+  if (!workItem || workItem.companyId !== text(companyId, "company_id_required")) {
+    throw error(404, "operational_work_item_not_found", "Operational work item was not found.");
   }
+  return workItem;
+}
 
-  function deriveDeadline({ clientCompanyId, blockerScope, targetDate, deadlineAt, purpose }) {
+function assertOperationalWorkItemVisible(principal, workItem) {
+  if (canPrincipalSeeOperationalWorkItem(principal, workItem)) {
+    return;
+  }
+  throw error(403, "operational_work_item_scope_forbidden", "Operational work item is outside the actor scope.");
+}
+
+function canPrincipalSeeOperationalWorkItem(principal, workItem) {
+  const viewerCompanyUserId = norm(principal?.companyUserId);
+  const viewerTeamIds = resolvePrincipalTeamIds(principal);
+  if (!workItem?.ownerCompanyUserId && !workItem?.ownerTeamId) {
+    return true;
+  }
+  if (viewerCompanyUserId && workItem.ownerCompanyUserId === viewerCompanyUserId) {
+    return true;
+  }
+  return Boolean(workItem?.ownerTeamId && viewerTeamIds.includes(workItem.ownerTeamId));
+}
+
+function resolvePrincipalTeamIds(principal) {
+  return Array.isArray(principal?.teamIds)
+    ? [...new Set(principal.teamIds.filter((teamId) => typeof teamId === "string" && teamId.trim().length > 0).map((teamId) => teamId.trim()))]
+    : [];
+}
+
+function deriveDeadline({ clientCompanyId, blockerScope, targetDate, deadlineAt, purpose }) {
     if (deadlineAt) {
       return { deadlineAt: timestamp(deadlineAt, "client_deadline_invalid"), deadlineBasis: { basisType: "explicit_deadline", basisValue: timestamp(deadlineAt, "client_deadline_invalid") } };
     }

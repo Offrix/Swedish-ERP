@@ -65,6 +65,20 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
       companyId: DEMO_IDS.companyId,
       email: "phase17-field@example.test"
     });
+    platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "phase17-payroll@example.test",
+      displayName: "Phase 17 Payroll Admin",
+      roleCode: "payroll_admin",
+      requiresMfa: false
+    });
+    const payrollAdminToken = await loginWithTotpOnly({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "phase17-payroll@example.test"
+    });
 
     const job = await platform.enqueueRuntimeJob({
       companyId: DEMO_IDS.companyId,
@@ -215,6 +229,21 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     assert.equal(typeof slaWorkItem?.workItemId, "string");
     assert.equal(slaWorkItem.status, "open");
 
+    const payrollOperationalWorkItems = await requestJson(baseUrl, `/v1/work-items?companyId=${DEMO_IDS.companyId}&sourceType=review_center_sla_breach`, {
+      token: payrollAdminToken
+    });
+    assert.equal(payrollOperationalWorkItems.items.some((item) => item.workItemId === slaWorkItem.workItemId), false);
+
+    const payrollClaimForbidden = await requestJson(baseUrl, `/v1/work-items/${slaWorkItem.workItemId}/claim`, {
+      method: "POST",
+      token: payrollAdminToken,
+      expectedStatus: 403,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(payrollClaimForbidden.error, "missing_permission");
+
     const claimedSlaWorkItem = await requestJson(baseUrl, `/v1/work-items/${slaWorkItem.workItemId}/claim`, {
       method: "POST",
       token: adminToken,
@@ -234,6 +263,17 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
       }
     });
     assert.equal(resolvedSlaWorkItem.status, "resolved");
+
+    const payrollResolveForbidden = await requestJson(baseUrl, `/v1/work-items/${slaWorkItem.workItemId}/resolve`, {
+      method: "POST",
+      token: payrollAdminToken,
+      expectedStatus: 403,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        resolutionCode: "phase17_sla_handled"
+      }
+    });
+    assert.equal(payrollResolveForbidden.error, "missing_permission");
 
     const recurringSlaScan = await requestJson(baseUrl, "/v1/backoffice/review-center/sla-scan", {
       method: "POST",

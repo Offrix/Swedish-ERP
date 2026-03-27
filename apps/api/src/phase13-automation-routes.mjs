@@ -86,7 +86,7 @@ export async function tryHandlePhase13AutomationRoutes({ req, res, url, path, pl
       evidence: body.evidence || {},
       rulePackId: body.rulePackId,
       effectiveDate: body.effectiveDate,
-      actorId: body.actorId || principal.companyUserId || "session_user"
+      actorId: body.actorId || principal.userId || "session_user"
     });
     platform.emitWebhookEvent({
       companyId,
@@ -119,7 +119,7 @@ export async function tryHandlePhase13AutomationRoutes({ req, res, url, path, pl
       evidence: body.evidence || {},
       rulePackId: body.rulePackId,
       effectiveDate: body.effectiveDate,
-      actorId: body.actorId || principal.companyUserId || "session_user"
+      actorId: body.actorId || principal.userId || "session_user"
     });
     platform.emitWebhookEvent({
       companyId,
@@ -154,7 +154,7 @@ export async function tryHandlePhase13AutomationRoutes({ req, res, url, path, pl
       evidence: body.evidence || {},
       rulePackId: body.rulePackId,
       effectiveDate: body.effectiveDate,
-      actorId: body.actorId || principal.companyUserId || "session_user"
+      actorId: body.actorId || principal.userId || "session_user"
     });
     platform.emitWebhookEvent({
       companyId,
