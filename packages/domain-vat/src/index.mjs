@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 import {
   applyDurableStateSnapshot,
@@ -593,18 +594,14 @@ export function createVatEngine({
     applyDurableStateSnapshot(state, snapshot);
   }
 
-  function pushAudit({ companyId, actorId, correlationId, action, entityType, entityId, explanation }) {
-    state.auditEvents.push({
-      auditEventId: crypto.randomUUID(),
-      companyId,
-      actorId,
-      correlationId,
-      action,
-      entityType,
-      entityId,
-      explanation,
-      recordedAt: nowIso()
-    });
+  function pushAudit(event) {
+    state.auditEvents.push(
+      createAuditEnvelopeFromLegacyEvent({
+        clock,
+        auditClass: "vat_action",
+        event
+      })
+    );
   }
 
   function requireVatDeclarationRunForCompany({ companyId, vatDeclarationRunId }) {

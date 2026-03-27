@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 const SALARY_EXCHANGE_THRESHOLD_2026 = 56087;
@@ -1381,19 +1382,14 @@ function uniqueStrings(values) {
   return [...new Set((Array.isArray(values) ? values : []).filter(Boolean))];
 }
 
-function pushAudit(state, clock, { companyId, actorId, correlationId, action, entityType, entityId, explanation, employmentId = null }) {
-  state.auditEvents.push({
-    auditEventId: crypto.randomUUID(),
-    companyId,
-    actorId,
-    correlationId,
-    action,
-    entityType,
-    entityId,
-    employmentId,
-    explanation,
-    occurredAt: nowIso(clock)
-  });
+function pushAudit(state, clock, event) {
+  state.auditEvents.push(
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "pension_action",
+      event
+    })
+  );
 }
 
 function createError(statusCode, errorCode, message) {

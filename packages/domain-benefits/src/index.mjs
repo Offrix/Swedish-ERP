@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 const DEFAULT_RULE_VERSION = "benefits-se-2026.1";
@@ -1340,18 +1341,14 @@ function setScopedIndex(index, scope, key, value) {
   index.set(scope, bucket);
 }
 
-function pushAudit(state, clock, { companyId, actorId, correlationId, action, entityType, entityId, explanation }) {
-  state.auditEvents.push({
-    auditEventId: crypto.randomUUID(),
-    companyId,
-    actorId,
-    correlationId,
-    action,
-    entityType,
-    entityId,
-    explanation,
-    recordedAt: nowIso(clock)
-  });
+function pushAudit(state, clock, event) {
+  state.auditEvents.push(
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "benefits_action",
+      event
+    })
+  );
 }
 
 function buildSnapshotHash(value) {

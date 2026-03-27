@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -941,19 +942,14 @@ export function createFieldEngine({
   };
 }
 
-function pushAudit(state, clock, { companyId, actorId, correlationId, action, entityType, entityId, projectId, explanation }) {
-  state.auditEvents.push({
-    auditEventId: crypto.randomUUID(),
-    companyId,
-    actorId,
-    correlationId,
-    action,
-    entityType,
-    entityId,
-    projectId,
-    explanation,
-    createdAt: nowIso(clock)
-  });
+function pushAudit(state, clock, event) {
+  state.auditEvents.push(
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "field_action",
+      event
+    })
+  );
 }
 
 function enrichInventoryItem(state, record) {

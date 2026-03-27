@@ -16,6 +16,7 @@ import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
+import { createAuditEnvelope } from "../../events/src/index.mjs";
 
 export function createReviewCenterPlatform(options = {}) {
   return createReviewCenterEngine(options);
@@ -897,17 +898,34 @@ function pushReviewEvent(state, clock, { companyId, actorId, eventType, reviewIt
   });
 }
 
-function pushAudit(state, clock, { companyId, actorId, action, entityType, entityId, explanation }) {
-  state.auditEvents.push({
-    auditEventId: crypto.randomUUID(),
-    companyId,
-    actorId,
-    action,
-    entityType,
-    entityId,
-    explanation,
-    recordedAt: nowIso(clock)
-  });
+function pushAudit(state, clock, {
+  companyId,
+  actorId,
+  action,
+  entityType,
+  entityId,
+  explanation,
+  result = "success",
+  correlationId = crypto.randomUUID(),
+  metadata = {},
+  sessionId = null
+}) {
+  state.auditEvents.push(
+    createAuditEnvelope({
+      companyId,
+      actorId,
+      action,
+      entityType,
+      entityId,
+      explanation,
+      result,
+      correlationId,
+      metadata,
+      sessionId,
+      recordedAt: new Date(clock()),
+      auditClass: "review_center_action"
+    })
+  );
 }
 
 function compareReviewItems(left, right) {

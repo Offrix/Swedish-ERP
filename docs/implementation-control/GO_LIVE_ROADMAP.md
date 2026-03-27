@@ -263,8 +263,11 @@ GÃ¶ra audit och driftbevis fÃ¶rstaklassiga samt sÃ¤kra att systemet kan Ã
 **FÃ¥r inte kÃ¶ras parallellt med**  
 - Ingen live providercredential eller signeringsnyckel fÃ¥r anvÃ¤ndas innan secret governance Ã¤r aktiv.
 
+**Delfasstatus**  
+- 3.1 verifierad 2026-03-26: canonical audit envelope Ã¤r nu gemensam writer-form fÃ¶r auth, review, search, documents, activity, notifications samt alla kvarvarande legacy-audit-writers i ekonomi-, HR-, projekt-, field-, HUS- och importdomÃ¤ner. Integrity hash, audit-envelope-version, correlation-id och canonical `recordedAt` Ã¤r verifierade med full regression suite.
+
 **Delfaser**
-- [ ] 3.1 [HARDEN] **Canonical audit envelope** â€” Alla commands, provider calls, approvals, impersonations, submissions och replay-Ã¥tgÃ¤rder ska skriva samma auditform.
+- [x] 3.1 [HARDEN] **Canonical audit envelope** â€” Alla commands, provider calls, approvals, impersonations, submissions och replay-Ã¥tgÃ¤rder ska skriva samma auditform.
 - [ ] 3.2 [NEW BUILD] **Bygg evidence-packs** â€” Submissions, annual packages, cutover, support cases, break-glass och project evidence ska kunna paketeras, hash-as och arkiveras.
 - [ ] 3.3 [NEW BUILD] **Full observability** â€” Metrics, tracing, structured logs, invariant alarms, queue age alarms, provider health och projection lag ska vara synliga.
 - [ ] 3.4 [OPERATIONALIZE] **Restore drills och chaos** â€” Ã…terstÃ¤llning av databas, projection rebuild och worker restart ska Ã¶vas och dokumenteras.

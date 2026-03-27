@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelope } from "../../events/src/index.mjs";
 
 export const ROLE_PERMISSIONS = Object.freeze({
   company_admin: Object.freeze([
@@ -125,7 +126,7 @@ export function createAuditEvent({
   companyId,
   actorId,
   action,
-  result,
+  result = "success",
   entityType,
   entityId,
   explanation,
@@ -133,7 +134,7 @@ export function createAuditEvent({
   recordedAt = new Date(),
   metadata = {}
 }) {
-  return {
+  return createAuditEnvelope({
     auditId: crypto.randomUUID(),
     companyId,
     actorId,
@@ -143,9 +144,10 @@ export function createAuditEvent({
     entityId,
     explanation,
     correlationId,
-    metadata: JSON.parse(JSON.stringify(metadata || {})),
-    recordedAt: timestamp(recordedAt)
-  };
+    recordedAt,
+    metadata,
+    auditClass: "auth_action"
+  });
 }
 
 export function generateTotpEnrollment({ label, issuer = "Swedish ERP", bytes = 20 } = {}) {

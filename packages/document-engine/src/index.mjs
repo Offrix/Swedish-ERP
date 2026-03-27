@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelope } from "../../events/src/index.mjs";
 
 export const DOCUMENT_STATES = Object.freeze([
   "received",
@@ -1282,19 +1283,35 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     return null;
   }
 
-  function pushAudit({ companyId, actorId, action, result, entityType, entityId, explanation, correlationId }) {
-    state.auditEvents.push({
-      auditId: crypto.randomUUID(),
-      companyId,
-      actorId,
-      action,
-      result,
-      entityType,
-      entityId,
-      explanation,
-      correlationId,
-      recordedAt: nowIso()
-    });
+  function pushAudit({
+    companyId,
+    actorId,
+    action,
+    result = "success",
+    entityType,
+    entityId,
+    explanation,
+    correlationId = crypto.randomUUID(),
+    metadata = {},
+    sessionId = null
+  }) {
+    state.auditEvents.push(
+      createAuditEnvelope({
+        auditId: crypto.randomUUID(),
+        companyId,
+        actorId,
+        action,
+        result,
+        entityType,
+        entityId,
+        explanation,
+        correlationId,
+        metadata,
+        sessionId,
+        recordedAt: new Date(clock()),
+        auditClass: "document_action"
+      })
+    );
   }
 
   function nowIso() {

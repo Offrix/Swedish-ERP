@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 
 export function copy(value) {
   if (value === null || value === undefined) {
@@ -114,10 +115,10 @@ export function buildDeterministicId(seed) {
 
 export function pushAudit(state, clock, event) {
   state.auditEvents.push(
-    Object.freeze({
-      auditEventId: crypto.randomUUID(),
-      createdAt: nowIso(clock),
-      ...copy(event)
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "balances_action",
+      event: copy(event)
     })
   );
 }

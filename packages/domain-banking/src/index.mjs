@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 
 export const BANK_ACCOUNT_STATUSES = Object.freeze(["active", "blocked", "archived"]);
 export const PAYMENT_PROPOSAL_STATUSES = Object.freeze(["draft", "approved", "exported", "submitted", "accepted_by_bank", "partially_executed", "settled", "failed", "cancelled"]);
@@ -999,7 +1000,15 @@ function normalizeDate(value, code) { const normalized = requireText(value, code
 function assertAllowed(value, allowedValues, code) { const normalized = requireText(value, code); if (!allowedValues.includes(normalized)) throw createError(409, code, `Unsupported value ${normalized}.`); return normalized; }
 function roundMoney(value) { return Number(Number(value || 0).toFixed(2)); }
 function nowIso(clock) { return clock().toISOString(); }
-function pushAudit(state, clock, event) { state.auditEvents.push({ auditEventId: crypto.randomUUID(), createdAt: nowIso(clock), ...event }); }
+function pushAudit(state, clock, event) {
+  state.auditEvents.push(
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "banking_action",
+      event
+    })
+  );
+}
 function copy(value) { return value === undefined ? undefined : JSON.parse(JSON.stringify(value)); }
 function createError(statusCode, code, message) { const error = new Error(message); error.statusCode = statusCode; error.code = code; return error; }
 function toCompanyScopedKey(companyId, value) { return `${requireText(companyId, "company_id_required")}::${requireText(value, "scoped_key_required")}`; }

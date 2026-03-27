@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 
 export const ESTIMATE_VERSION_STATUSES = Object.freeze(["draft", "reviewed", "approved", "quoted", "converted", "superseded"]);
 export const ESTIMATE_LINE_TYPE_CODES = Object.freeze(["labor", "material", "subcontractor", "equipment", "other"]);
@@ -350,7 +351,7 @@ export function createKalkylEngine({
     return state.auditEvents
       .filter((event) => event.companyId === resolvedCompanyId)
       .filter((event) => (resolvedEstimateVersionId ? event.entityId === resolvedEstimateVersionId : true))
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .sort(compareAuditEvents)
       .map(copy);
   }
 
@@ -580,22 +581,26 @@ function nowIso(clock) {
 }
 
 function pushAudit(state, clock, entry) {
-  state.auditEvents.push({
-    auditEventId: crypto.randomUUID(),
-    companyId: entry.companyId,
-    actorId: entry.actorId,
-    correlationId: entry.correlationId,
-    action: entry.action,
-    entityType: entry.entityType,
-    entityId: entry.entityId,
-    projectId: entry.projectId || null,
-    createdAt: nowIso(clock),
-    explanation: entry.explanation
-  });
+  state.auditEvents.push(
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "kalkyl_action",
+      event: entry
+    })
+  );
 }
 
 function roundMoney(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function compareAuditEvents(left, right) {
+  return resolveAuditRecordedAt(left).localeCompare(resolveAuditRecordedAt(right))
+    || String(left.auditId || left.auditEventId || "").localeCompare(String(right.auditId || right.auditEventId || ""));
+}
+
+function resolveAuditRecordedAt(event) {
+  return String(event?.recordedAt || event?.createdAt || event?.occurredAt || "");
 }
 
 function copy(value) {

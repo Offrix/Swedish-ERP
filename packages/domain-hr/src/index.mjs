@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 
 export const HR_IDENTITY_TYPES = Object.freeze(["personnummer", "samordningsnummer", "other"]);
 export const HR_BANK_PAYOUT_METHODS = Object.freeze(["domestic_account", "bankgiro", "plusgiro", "iban"]);
@@ -848,19 +849,14 @@ function latestManagerEmploymentId(state, employmentId) {
   return assignments.length > 0 ? assignments[assignments.length - 1].managerEmploymentId : null;
 }
 
-function pushAudit(state, clock, { companyId, actorId, correlationId, action, entityType, entityId, explanation }) {
-  state.auditEvents.push({
-    auditId: crypto.randomUUID(),
-    companyId,
-    actorId: requireText(actorId, "actor_id_required"),
-    action: requireText(action, "audit_action_required"),
-    result: "success",
-    entityType: requireText(entityType, "audit_entity_type_required"),
-    entityId: requireText(entityId, "audit_entity_id_required"),
-    explanation: requireText(explanation, "audit_explanation_required"),
-    correlationId: requireText(correlationId, "audit_correlation_id_required"),
-    recordedAt: nowIso(clock)
-  });
+function pushAudit(state, clock, event) {
+  state.auditEvents.push(
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "hr_action",
+      event
+    })
+  );
 }
 
 function ensureUniqueCode(index, companyId, code, errorCode) {

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { COUNTRY_NAME_BY_CODE, FOREIGN_NORMAL_AMOUNTS_2026 } from "./normal-amounts-2026.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
@@ -1563,18 +1564,14 @@ function stableStringify(value) {
   return JSON.stringify(value);
 }
 
-function pushAudit(state, clock, { companyId, actorId, correlationId, action, entityType, entityId, explanation }) {
-  state.auditEvents.push({
-    auditId: crypto.randomUUID(),
-    companyId: requireText(companyId, "company_id_required"),
-    actorId: requireText(actorId, "actor_id_required"),
-    correlationId: normalizeOptionalText(correlationId),
-    action: requireText(action, "travel_audit_action_required"),
-    entityType: requireText(entityType, "travel_audit_entity_type_required"),
-    entityId: requireText(entityId, "travel_audit_entity_id_required"),
-    explanation: normalizeOptionalText(explanation),
-    recordedAt: nowIso(clock)
-  });
+function pushAudit(state, clock, event) {
+  state.auditEvents.push(
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "travel_action",
+      event
+    })
+  );
 }
 
 function copy(value) {

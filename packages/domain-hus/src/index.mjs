@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 
 export const HUS_CASE_STATES = Object.freeze([
   "draft",
@@ -927,7 +928,7 @@ export function createHusEngine({
     return state.auditEvents
       .filter((event) => event.companyId === resolvedCompanyId)
       .filter((event) => (resolvedCaseId ? event.caseId === resolvedCaseId : true))
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .sort(compareAuditEvents)
       .map(copy);
   }
 
@@ -1577,19 +1578,13 @@ function moneyEquals(left, right) {
 }
 
 function pushAudit(state, clock, entry) {
-  state.auditEvents.push({
-    auditEventId: crypto.randomUUID(),
-    companyId: entry.companyId,
-    caseId: entry.caseId || null,
-    actorId: entry.actorId,
-    correlationId: entry.correlationId,
-    action: entry.action,
-    entityType: entry.entityType,
-    entityId: entry.entityId,
-    projectId: entry.projectId || null,
-    createdAt: nowIso(clock),
-    explanation: entry.explanation
-  });
+  state.auditEvents.push(
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "hus_action",
+      event: entry
+    })
+  );
 }
 
 function hashObject(value) {
@@ -1605,6 +1600,15 @@ function stableStringify(value) {
   }
   const keys = Object.keys(value).sort();
   return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+}
+
+function compareAuditEvents(left, right) {
+  return resolveAuditRecordedAt(left).localeCompare(resolveAuditRecordedAt(right))
+    || String(left.auditId || left.auditEventId || "").localeCompare(String(right.auditId || right.auditEventId || ""));
+}
+
+function resolveAuditRecordedAt(event) {
+  return String(event?.recordedAt || event?.createdAt || event?.occurredAt || "");
 }
 
 function copy(value) {

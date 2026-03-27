@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import {
   ASSESSMENT_EVENT_TYPES,
   CREDIT_EVENT_TYPES,
@@ -37,17 +38,12 @@ export function appendUniqueToIndex(index, key, value) {
   }
 }
 
-export function pushAudit(state, clock, { companyId, actorId, action, entityType, entityId, explanation }) {
+export function pushAudit(state, clock, event) {
   state.auditEvents.push(
-    Object.freeze({
-      auditEventId: crypto.randomUUID(),
-      companyId,
-      actorId,
-      action,
-      entityType,
-      entityId,
-      explanation,
-      recordedAt: nowIso(clock)
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "tax_account_action",
+      event
     })
   );
 }

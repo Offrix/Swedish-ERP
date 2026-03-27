@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 
 export const LEGAL_FORM_CODES = Object.freeze([
   "AKTIEBOLAG",
@@ -683,11 +684,13 @@ function createError(status, code, message) {
 }
 
 function pushAudit(state, clock, auditEvent) {
-  state.auditEvents.push(Object.freeze({
-    auditEventId: crypto.randomUUID(),
-    recordedAt: nowIso(clock),
-    ...copy(auditEvent)
-  }));
+  state.auditEvents.push(
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "legal_form_action",
+      event: auditEvent
+    })
+  );
 }
 
 function nowIso(clock) {

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import {
   DEMO_COMPANY_ID,
   EU_COUNTRY_CODES,
@@ -941,16 +942,13 @@ function requireDocumentSnapshot({ documentPlatform, companyId, documentId }) {
 }
 
 function pushAudit(state, event) {
-  state.auditEvents.push({
-    auditEventId: crypto.randomUUID(),
-    companyId: event.companyId,
-    actorId: event.actorId,
-    action: event.action,
-    entityType: event.entityType,
-    entityId: event.entityId,
-    explanation: event.explanation,
-    recordedAt: event.recordedAt || new Date().toISOString()
-  });
+  state.auditEvents.push(
+    createAuditEnvelopeFromLegacyEvent({
+      clock: () => event.recordedAt || new Date(),
+      auditClass: "import_cases_action",
+      event
+    })
+  );
 }
 
 function seedDemoState() {

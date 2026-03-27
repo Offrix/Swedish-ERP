@@ -74,7 +74,7 @@ test("Step 3 platform composition registers bounded contexts without breaking th
     ["ledger", "reporting", "orgAuth", "vat", "payroll", "hus", "pension", "fiscalYear", "legalForm", "integrations"]
   );
   assert.equal(platform.platformContractVersions.eventEnvelopeVersion, 1);
-  assert.equal(platform.platformContractVersions.auditEnvelopeVersion, 1);
+  assert.equal(platform.platformContractVersions.auditEnvelopeVersion, 2);
 });
 
 test("Step 3 platform composition exposes immutable shared event and audit envelopes", () => {

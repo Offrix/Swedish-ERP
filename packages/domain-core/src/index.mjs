@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelope } from "../../events/src/index.mjs";
 export {
   CORE_CANONICAL_REPOSITORY_OBJECT_TYPES,
   CORE_CANONICAL_REPOSITORY_TABLE,
@@ -206,10 +207,12 @@ export function createCoreEngine({
     entityType,
     entityId,
     explanation,
-    metadata = {}
+    metadata = {},
+    result = "success",
+    sessionId = null
   }) {
-    const event = {
-      auditEventId: crypto.randomUUID(),
+    const event = createAuditEnvelope({
+      auditId: crypto.randomUUID(),
       companyId,
       actorId,
       correlationId,
@@ -217,9 +220,12 @@ export function createCoreEngine({
       entityType,
       entityId,
       explanation,
-      metadata: clone(metadata || {}),
-      recordedAt: now()
-    };
+      metadata,
+      result,
+      sessionId,
+      recordedAt: new Date(clock()),
+      auditClass: "core_control_action"
+    });
     state.auditEvents.push(event);
     recordAuditCorrelationEvent(state, event);
     return event;

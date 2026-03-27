@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import {
   CLASSIFICATION_CASE_STATUSES,
   CLASSIFICATION_REVIEW_REASON_CODES,
@@ -1106,15 +1107,10 @@ function buildDocumentKey(companyId, documentId) {
 
 function pushAudit(state, clock, event) {
   state.auditEvents.push(
-    Object.freeze({
-      auditEventId: crypto.randomUUID(),
-      companyId: event.companyId,
-      actorId: event.actorId,
-      action: event.action,
-      entityType: event.entityType,
-      entityId: event.entityId,
-      explanation: event.explanation,
-      recordedAt: nowIso(clock)
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "document_classification_action",
+      event
     })
   );
 }

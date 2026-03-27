@@ -7,6 +7,7 @@ import {
   NOTIFICATION_RECIPIENT_TYPES,
   NOTIFICATION_STATUSES
 } from "./constants.mjs";
+import { createAuditEnvelope } from "../../events/src/index.mjs";
 
 export function createNotificationsPlatform(options = {}) {
   return createNotificationsEngine(options);
@@ -466,17 +467,34 @@ function appendToIndex(index, key, value) {
   index.get(key).push(value);
 }
 
-function pushAudit(state, clock, { companyId, actorId, action, entityType, entityId, explanation }) {
-  state.auditEvents.push({
-    auditEventId: crypto.randomUUID(),
-    companyId,
-    actorId,
-    action,
-    entityType,
-    entityId,
-    explanation,
-    recordedAt: nowIso(clock)
-  });
+function pushAudit(state, clock, {
+  companyId,
+  actorId,
+  action,
+  entityType,
+  entityId,
+  explanation,
+  result = "success",
+  correlationId = crypto.randomUUID(),
+  metadata = {},
+  sessionId = null
+}) {
+  state.auditEvents.push(
+    createAuditEnvelope({
+      companyId,
+      actorId,
+      action,
+      entityType,
+      entityId,
+      explanation,
+      result,
+      correlationId,
+      metadata,
+      sessionId,
+      recordedAt: new Date(clock()),
+      auditClass: "notification_action"
+    })
+  );
 }
 
 function normalizeCode(value, code) {

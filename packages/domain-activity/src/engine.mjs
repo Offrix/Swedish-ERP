@@ -3,6 +3,7 @@ import {
   ACTIVITY_ENTRY_STATUSES,
   ACTIVITY_VISIBILITY_SCOPES
 } from "./constants.mjs";
+import { createAuditEnvelope } from "../../events/src/index.mjs";
 
 export function createActivityPlatform(options = {}) {
   return createActivityEngine(options);
@@ -268,17 +269,34 @@ function appendToIndex(index, key, value) {
   index.get(key).push(value);
 }
 
-function pushAudit(state, clock, { companyId, actorId, action, entityType, entityId, explanation }) {
-  state.auditEvents.push({
-    auditEventId: crypto.randomUUID(),
-    companyId,
-    actorId,
-    action,
-    entityType,
-    entityId,
-    explanation,
-    recordedAt: nowIso(clock)
-  });
+function pushAudit(state, clock, {
+  companyId,
+  actorId,
+  action,
+  entityType,
+  entityId,
+  explanation,
+  result = "success",
+  correlationId = crypto.randomUUID(),
+  metadata = {},
+  sessionId = null
+}) {
+  state.auditEvents.push(
+    createAuditEnvelope({
+      companyId,
+      actorId,
+      action,
+      entityType,
+      entityId,
+      explanation,
+      result,
+      correlationId,
+      metadata,
+      sessionId,
+      recordedAt: new Date(clock()),
+      auditClass: "activity_action"
+    })
+  );
 }
 
 function normalizeCode(value, code) {

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -2977,19 +2978,14 @@ export function createLedgerEngine({
     });
   }
 
-  function pushAudit({ companyId, actorId, correlationId, action, entityType, entityId, explanation }) {
-    state.auditEvents.push({
-      auditEventId: crypto.randomUUID(),
-      companyId,
-      actorId,
-      correlationId,
-      action,
-      result: "success",
-      entityType,
-      entityId,
-      explanation,
-      recordedAt: nowIso()
-    });
+  function pushAudit(event) {
+    state.auditEvents.push(
+      createAuditEnvelopeFromLegacyEvent({
+        clock,
+        auditClass: "ledger_action",
+        event
+      })
+    );
   }
 
   function nowIso() {

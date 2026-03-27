@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -3528,11 +3529,13 @@ function createError(statusCode, code, message) {
 }
 
 function pushAudit(state, clock, event) {
-  state.auditEvents.push({
-    auditEventId: crypto.randomUUID(),
-    createdAt: nowIso(clock),
-    ...event
-  });
+  state.auditEvents.push(
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "ap_action",
+      event
+    })
+  );
 }
 
 function hashObject(value) {

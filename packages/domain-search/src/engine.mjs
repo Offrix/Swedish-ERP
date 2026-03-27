@@ -36,6 +36,7 @@ import {
   nowIso,
   requireText
 } from "./helpers.mjs";
+import { createAuditEnvelope } from "../../events/src/index.mjs";
 
 export function createSearchPlatform(options = {}) {
   return createSearchEngine(options);
@@ -1151,18 +1152,35 @@ export function createSearchEngine({
     return savedView;
   }
 
-  function pushAudit({ companyId, actorId, correlationId, action, entityType, entityId, explanation }) {
-    state.auditEvents.push({
-      auditEventId: newId(),
-      companyId,
-      actorId,
-      correlationId,
-      action,
-      entityType,
-      entityId,
-      explanation,
-      recordedAt: nowIso(clock)
-    });
+  function pushAudit({
+    companyId,
+    actorId,
+    correlationId,
+    action,
+    entityType,
+    entityId,
+    explanation,
+    result = "success",
+    metadata = {},
+    sessionId = null
+  }) {
+    state.auditEvents.push(
+      createAuditEnvelope({
+        auditId: newId(),
+        companyId,
+        actorId,
+        correlationId,
+        action,
+        entityType,
+        entityId,
+        explanation,
+        result,
+        metadata,
+        sessionId,
+        recordedAt: new Date(clock()),
+        auditClass: "search_action"
+      })
+    );
   }
 }
 

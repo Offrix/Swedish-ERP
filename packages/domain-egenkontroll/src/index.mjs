@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 
 export const EGENKONTROLL_TEMPLATE_STATUSES = Object.freeze(["draft", "active", "retired"]);
 export const EGENKONTROLL_INSTANCE_STATUSES = Object.freeze([
@@ -579,7 +580,7 @@ export function createEgenkontrollEngine({
     return state.auditEvents
       .filter((event) => event.companyId === resolvedCompanyId)
       .filter((event) => (resolvedChecklistInstanceId ? event.checklistInstanceId === resolvedChecklistInstanceId : true))
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .sort(compareAuditEvents)
       .map(copy);
   }
 
@@ -868,19 +869,13 @@ function nowIso(clock) {
 }
 
 function pushAudit(state, clock, entry) {
-  state.auditEvents.push({
-    auditEventId: crypto.randomUUID(),
-    companyId: entry.companyId,
-    checklistInstanceId: entry.checklistInstanceId || null,
-    actorId: entry.actorId,
-    correlationId: entry.correlationId,
-    action: entry.action,
-    entityType: entry.entityType,
-    entityId: entry.entityId,
-    projectId: entry.projectId || null,
-    createdAt: nowIso(clock),
-    explanation: entry.explanation
-  });
+  state.auditEvents.push(
+    createAuditEnvelopeFromLegacyEvent({
+      clock,
+      auditClass: "egenkontroll_action",
+      event: entry
+    })
+  );
 }
 
 function buildHash(value) {
@@ -896,6 +891,15 @@ function stableStringify(value) {
   }
   const keys = Object.keys(value).sort();
   return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+}
+
+function compareAuditEvents(left, right) {
+  return resolveAuditRecordedAt(left).localeCompare(resolveAuditRecordedAt(right))
+    || String(left.auditId || left.auditEventId || "").localeCompare(String(right.auditId || right.auditEventId || ""));
+}
+
+function resolveAuditRecordedAt(event) {
+  return String(event?.recordedAt || event?.createdAt || event?.occurredAt || "");
 }
 
 function copy(value) {

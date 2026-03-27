@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { createLedgerEngine, REQUIRED_ENGINE_ACCOUNTS } from "../../domain-ledger/src/index.mjs";
 import { createDocumentArchiveEngine } from "../../document-engine/src/index.mjs";
 
@@ -2143,18 +2144,14 @@ export function createReportingEngine({
     return "unclassified";
   }
 
-  function pushAudit({ companyId, actorId, correlationId, action, entityType, entityId, explanation }) {
-    state.auditEvents.push({
-      auditEventId: crypto.randomUUID(),
-      companyId,
-      actorId,
-      correlationId,
-      action,
-      entityType,
-      entityId,
-      explanation,
-      recordedAt: nowIso()
-    });
+  function pushAudit(event) {
+    state.auditEvents.push(
+      createAuditEnvelopeFromLegacyEvent({
+        clock,
+        auditClass: "reporting_action",
+        event
+      })
+    );
   }
 
   function nowIso() {
