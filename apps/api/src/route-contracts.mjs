@@ -140,6 +140,10 @@ const EXACT_PUBLIC_ROUTE_KEYS = new Set([
 ]);
 const SELF_ROUTE_KEYS = new Set([
   "POST /v1/auth/logout",
+  "POST /v1/auth/challenges",
+  "POST /v1/auth/challenges/:challengeId/complete",
+  "POST /v1/auth/devices/:deviceTrustRecordId/trust",
+  "POST /v1/auth/devices/:deviceTrustRecordId/revoke",
   "POST /v1/auth/mfa/totp/enroll",
   "POST /v1/auth/mfa/totp/verify",
   "POST /v1/auth/mfa/passkeys/register-options",
@@ -182,6 +186,10 @@ const HIGH_RISK_ROUTE_PREFIXES = Object.freeze([
 
 const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["POST /v1/auth/logout", override("auth", "identity_session_end", "authenticated", "self", "auth_session", "auth_session", null, false)],
+  ["POST /v1/auth/challenges", override("auth", "identity_step_up_start", "authenticated", "self", "auth_challenge", "auth_challenge", null, false)],
+  ["POST /v1/auth/challenges/:challengeId/complete", override("auth", "identity_factor_verify", "authenticated", "self", "auth_challenge", "auth_challenge", null, false)],
+  ["POST /v1/auth/devices/:deviceTrustRecordId/trust", override("auth", "identity_device_trust_manage", "mfa", "self", "device_trust_record", "device_trust_record", null, false)],
+  ["POST /v1/auth/devices/:deviceTrustRecordId/revoke", override("auth", "identity_device_trust_manage", "mfa", "self", "device_trust_record", "device_trust_record", null, false)],
   ["POST /v1/auth/mfa/totp/enroll", override("auth", "identity_factor_manage", "authenticated", "self", "auth_factor", "auth_factor", "auth.factor.manage", false)],
   ["POST /v1/auth/mfa/totp/verify", override("auth", "identity_factor_verify", "authenticated", "self", "auth_factor", "auth_factor", null, false)],
   ["POST /v1/auth/mfa/passkeys/register-options", override("auth", "identity_factor_manage", "authenticated", "self", "auth_factor", "auth_factor", "auth.factor.manage", false)],

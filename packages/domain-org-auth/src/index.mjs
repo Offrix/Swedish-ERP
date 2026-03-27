@@ -10,6 +10,7 @@ import {
   issueOpaqueToken,
   permissionsForRoles,
   requiredFactorCountForRoles,
+  resolveSessionTrustLevel,
   sessionIsActive,
   timestamp,
   verifyTotpCode
@@ -128,6 +129,23 @@ export const DEMO_APPROVER_TOTP_SECRET = "KRSXG5DSNFXGOIDB";
 export const LOCAL_TOTP_PROVIDER_CODE = "local-totp";
 export const LOCAL_PASSKEY_PROVIDER_CODE = "local-passkey";
 
+const ACTION_CLASS_FRESHNESS_TTL_SECONDS = Object.freeze({
+  identity_session_manage: 600,
+  identity_device_trust_manage: 1800,
+  identity_federation_complete: 900,
+  org_identity_admin: 900,
+  support_case_operate: 900,
+  review_center_decide: 900,
+  review_task_decide: 900,
+  regulatory_change_publish: 900
+});
+
+const TRUST_LEVEL_FRESHNESS_TTL_SECONDS = Object.freeze({
+  authenticated: 8 * 60 * 60,
+  mfa: 30 * 60,
+  strong_mfa: 15 * 60
+});
+
 export function createOrgAuthPlatform({
   clock = () => new Date(),
   environmentMode = "test",
@@ -154,8 +172,16 @@ export function createOrgAuthPlatform({
     approvalChains: new Map(),
     approvalChainSteps: new Map(),
     authSessions: new Map(),
+    sessionRevisions: new Map(),
+    sessionRevisionIdsBySession: new Map(),
     authFactors: new Map(),
     authChallenges: new Map(),
+    challengeCompletionReceipts: new Map(),
+    challengeReceiptIdsByChallenge: new Map(),
+    challengeReceiptIdsBySession: new Map(),
+    deviceTrustRecords: new Map(),
+    deviceTrustRecordIdByKey: new Map(),
+    deviceTrustRecordIdsByCompanyUser: new Map(),
     identityAccounts: new Map(),
     personIdentities: new Map(),
     onboardingRuns: new Map(),
@@ -207,6 +233,12 @@ export function createOrgAuthPlatform({
     collectBankIdAuthentication,
     startFederationAuthentication,
     completeFederationAuthentication,
+    createChallenge,
+    completeChallenge,
+    listChallenges,
+    listDeviceTrustRecords,
+    trustDevice,
+    revokeDevice,
     createOnboardingRun,
     getOnboardingRun,
     getOnboardingChecklist,
@@ -644,6 +676,10 @@ export function createOrgAuthPlatform({
       status: "pending",
       requiredFactorCount,
       amr: [],
+      freshTrustByActionClass: {},
+      freshTrustByTrustLevel: {},
+      sessionRevisionId: null,
+      sessionRevisionNumber: 0,
       issuedAt: timestamp(now),
       expiresAt: timestamp(new Date(now.getTime() + 8 * 60 * 60 * 1000)),
       revokedAt: null,
@@ -652,6 +688,9 @@ export function createOrgAuthPlatform({
     };
 
     state.authSessions.set(session.sessionId, session);
+    createSessionRevision(session, {
+      reasonCode: "login_started"
+    });
     pushAudit({
       companyId,
       actorId: companyUser.userId,
@@ -673,6 +712,9 @@ export function createOrgAuthPlatform({
     const { session, principal } = requireSession(sessionToken, { allowPending: true });
     session.status = "revoked";
     session.revokedAt = nowIso();
+    createSessionRevision(session, {
+      reasonCode: "logout"
+    });
     pushAudit({
       companyId: session.companyId,
       actorId: principal.userId,
@@ -699,6 +741,9 @@ export function createOrgAuthPlatform({
     }
     targetSession.status = "revoked";
     targetSession.revokedAt = nowIso();
+    createSessionRevision(targetSession, {
+      reasonCode: "session_revoked"
+    });
     pushAudit({
       companyId: targetSession.companyId,
       actorId: auth.principal.userId,
@@ -748,7 +793,7 @@ export function createOrgAuthPlatform({
     };
   }
 
-  function verifyTotp({ sessionToken, code, factorId = null } = {}) {
+  function verifyTotp({ sessionToken, code, factorId = null, actionClass = null, challengeId = null, deviceFingerprint = null } = {}) {
     const { session, principal } = requireSession(sessionToken, { allowPending: true });
     const factor =
       factorId !== null ? state.authFactors.get(factorId) : findFactor(session.companyUserId, "totp", ["active"]);
@@ -776,7 +821,15 @@ export function createOrgAuthPlatform({
       factor.updatedAt = nowIso();
     }
 
-    completeSessionFactor(session, "totp");
+    const challenge = challengeId ? consumeOwnedChallenge({ challengeId, session, allowedTypes: ["totp_step_up"] }) : null;
+    const completion = completeSessionFactor(session, "totp", {
+      actionClass: actionClass || challenge?.payloadJson?.actionClass || null,
+      challengeId: challenge?.challengeId || null,
+      challengeType: challenge?.challengeType || "totp",
+      factorId: factor.factorId,
+      deviceName: factor.deviceName,
+      deviceFingerprint
+    });
     upsertIdentityAccount({
       companyId: session.companyId,
       companyUserId: session.companyUserId,
@@ -802,7 +855,8 @@ export function createOrgAuthPlatform({
 
     return {
       factor: copy(stripSecret(factor)),
-      session: publicSession(session)
+      session: publicSession(session),
+      receipt: completion.receipt
     };
   }
 
@@ -895,7 +949,7 @@ export function createOrgAuthPlatform({
     return copy(stripSecret(factor));
   }
 
-  function assertPasskey({ sessionToken, credentialId, assertion } = {}) {
+  function assertPasskey({ sessionToken, credentialId, assertion, actionClass = null, challengeId = null, deviceFingerprint = null } = {}) {
     const { session, principal } = requireSession(sessionToken, { allowPending: true });
     const factor = [...state.authFactors.values()].find(
       (candidate) =>
@@ -922,7 +976,16 @@ export function createOrgAuthPlatform({
       throw httpError(403, "passkey_assertion_invalid", "Passkey assertion was invalid.");
     }
 
-    completeSessionFactor(session, "passkey");
+    const challenge = challengeId ? consumeOwnedChallenge({ challengeId, session, allowedTypes: ["passkey_assertion"] }) : null;
+    const completion = completeSessionFactor(session, "passkey", {
+      actionClass: actionClass || challenge?.payloadJson?.actionClass || null,
+      challengeId: challenge?.challengeId || null,
+      challengeType: challenge?.challengeType || "passkey",
+      factorId: factor.factorId,
+      credentialId: factor.credentialId,
+      deviceName: factor.deviceName,
+      deviceFingerprint
+    });
     pushAudit({
       companyId: session.companyId,
       actorId: principal.userId,
@@ -935,11 +998,12 @@ export function createOrgAuthPlatform({
 
     return {
       factor: copy(stripSecret(factor)),
-      session: publicSession(session)
+      session: publicSession(session),
+      receipt: completion.receipt
     };
   }
 
-  function startBankIdAuthentication({ sessionToken } = {}) {
+  function startBankIdAuthentication({ sessionToken, actionClass = null } = {}) {
     const { session, principal } = requireSession(sessionToken, { allowPending: true });
     const factor = findFactor(session.companyUserId, "bankid", ["active"]);
     if (!factor) {
@@ -970,6 +1034,7 @@ export function createOrgAuthPlatform({
         brokerCode: providerResult.brokerCode,
         providerMode: providerResult.providerMode,
         providerOrderRef: providerResult.providerOrderRef,
+        actionClass,
         providerBaselineId: providerBaselineRef.providerBaselineId,
         providerBaselineCode: providerBaselineRef.baselineCode,
         providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
@@ -998,7 +1063,7 @@ export function createOrgAuthPlatform({
     };
   }
 
-  function collectBankIdAuthentication({ sessionToken, orderRef, completionToken } = {}) {
+  function collectBankIdAuthentication({ sessionToken, orderRef, completionToken, actionClass = null, deviceFingerprint = null } = {}) {
     const { session, principal } = requireSession(sessionToken, { allowPending: true });
     const challenge = requireChallenge(orderRef, "bankid_auth");
     if (challenge.companyUserId !== session.companyUserId) {
@@ -1016,7 +1081,14 @@ export function createOrgAuthPlatform({
 
     challenge.status = "consumed";
     challenge.consumedAt = nowIso();
-    completeSessionFactor(session, "bankid");
+    const completion = completeSessionFactor(session, "bankid", {
+      actionClass: actionClass || challenge.payloadJson?.actionClass || null,
+      challengeId: challenge.challengeId,
+      challengeType: challenge.challengeType,
+      providerSubject: providerResult.providerSubject,
+      deviceName: findFactor(session.companyUserId, "bankid", ["active"])?.deviceName || "BankID",
+      deviceFingerprint
+    });
     upsertIdentityAccount({
       companyId: session.companyId,
       companyUserId: session.companyUserId,
@@ -1054,7 +1126,8 @@ export function createOrgAuthPlatform({
         providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum,
         providerBaselineRef
       },
-      session: publicSession(session)
+      session: publicSession(session),
+      receipt: completion.receipt
     };
   }
 
@@ -1129,7 +1202,14 @@ export function createOrgAuthPlatform({
     };
   }
 
-  function completeFederationAuthentication({ sessionToken, authRequestId, authorizationCode, state: providerState } = {}) {
+  function completeFederationAuthentication({
+    sessionToken,
+    authRequestId,
+    authorizationCode,
+    state: providerState,
+    actionClass = null,
+    deviceFingerprint = null
+  } = {}) {
     const { session, principal } = requireSession(sessionToken, { allowPending: true });
     const challenge = requireChallenge(authRequestId, "federation_auth");
     if (challenge.companyUserId !== session.companyUserId) {
@@ -1143,7 +1223,14 @@ export function createOrgAuthPlatform({
     const providerBaselineRef = resolveFederationProviderBaselineRef(providerBaselines, currentDate());
     challenge.status = "consumed";
     challenge.consumedAt = nowIso();
-    completeSessionFactor(session, "federation");
+    const completion = completeSessionFactor(session, "federation", {
+      actionClass: actionClass || challenge.payloadJson?.actionClass || null,
+      challengeId: challenge.challengeId,
+      challengeType: challenge.challengeType,
+      providerSubject: providerResult.subject,
+      deviceName: `Federation ${providerResult.connectionId}`,
+      deviceFingerprint
+    });
     upsertIdentityAccount({
       companyId: session.companyId,
       companyUserId: session.companyUserId,
@@ -1183,8 +1270,152 @@ export function createOrgAuthPlatform({
         providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum,
         providerBaselineRef
       },
+      session: publicSession(session),
+      receipt: completion.receipt
+    };
+  }
+
+  function createChallenge({ sessionToken, factorType, actionClass = null, deviceName = "Security key" } = {}) {
+    const { session, principal } = requireSession(sessionToken, { allowPending: false });
+    const resolvedFactorType = assertAllowedValue(factorType, ["totp", "passkey", "bankid"], "challenge_factor_type_invalid");
+    if (resolvedFactorType === "bankid") {
+      return startBankIdAuthentication({
+        sessionToken,
+        actionClass
+      });
+    }
+
+    const challengeTemplate = resolvedFactorType === "passkey" ? createPasskeyChallenge() : {
+      challengeId: crypto.randomUUID(),
+      challenge: issueOpaqueToken()
+    };
+    const challenge = {
+      challengeId: challengeTemplate.challengeId,
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      userId: session.userId,
+      challengeType: resolvedFactorType === "passkey" ? "passkey_assertion" : "totp_step_up",
+      status: "pending",
+      challenge: challengeTemplate.challenge,
+      orderRef: null,
+      expiresAt: timestamp(new Date(currentDate().getTime() + 5 * 60 * 1000)),
+      consumedAt: null,
+      payloadJson: {
+        factorType: resolvedFactorType,
+        actionClass,
+        deviceName
+      }
+    };
+    state.authChallenges.set(challenge.challengeId, challenge);
+    pushAudit({
+      companyId: session.companyId,
+      actorId: principal.userId,
+      action: "auth.challenge.started",
+      result: "pending",
+      entityType: "auth_challenge",
+      entityId: challenge.challengeId,
+      explanation: `Started ${resolvedFactorType} challenge for action ${actionClass || "default"}.`
+    });
+    return {
+      challengeId: challenge.challengeId,
+      challenge: challenge.challenge,
+      factorType: resolvedFactorType,
+      actionClass,
+      expiresAt: challenge.expiresAt,
       session: publicSession(session)
     };
+  }
+
+  function completeChallenge({
+    sessionToken,
+    challengeId,
+    code = null,
+    factorId = null,
+    credentialId = null,
+    assertion = null,
+    completionToken = null,
+    deviceFingerprint = null
+  } = {}) {
+    const challenge = requireChallenge(assertNonEmpty(challengeId, "challenge_id_required"), null);
+    if (challenge.challengeType === "bankid_auth") {
+      return collectBankIdAuthentication({
+        sessionToken,
+        orderRef: challenge.challengeId,
+        completionToken,
+        actionClass: challenge.payloadJson?.actionClass || null,
+        deviceFingerprint
+      });
+    }
+    if (challenge.challengeType === "totp_step_up") {
+      return verifyTotp({
+        sessionToken,
+        code,
+        factorId,
+        actionClass: challenge.payloadJson?.actionClass || null,
+        challengeId: challenge.challengeId,
+        deviceFingerprint
+      });
+    }
+    if (challenge.challengeType === "passkey_assertion") {
+      return assertPasskey({
+        sessionToken,
+        credentialId,
+        assertion,
+        actionClass: challenge.payloadJson?.actionClass || null,
+        challengeId: challenge.challengeId,
+        deviceFingerprint
+      });
+    }
+    throw httpError(409, "auth_challenge_type_unsupported", `Challenge type ${challenge.challengeType} cannot be completed through the challenge center.`);
+  }
+
+  function listChallenges({ sessionToken, status = null } = {}) {
+    const { session } = requireSession(sessionToken, { allowPending: true });
+    const resolvedStatus = typeof status === "string" && status.trim().length > 0 ? status.trim() : null;
+    return [...state.authChallenges.values()]
+      .filter((challenge) => challenge.companyUserId === session.companyUserId)
+      .filter((challenge) => (resolvedStatus ? challenge.status === resolvedStatus : true))
+      .sort((left, right) => right.expiresAt.localeCompare(left.expiresAt))
+      .map((challenge) => ({
+        ...copy(challenge),
+        receipts: (state.challengeReceiptIdsByChallenge.get(challenge.challengeId) || [])
+          .map((receiptId) => state.challengeCompletionReceipts.get(receiptId))
+          .filter(Boolean)
+          .map(copy)
+      }));
+  }
+
+  function listDeviceTrustRecords({ sessionToken } = {}) {
+    const { session } = requireSession(sessionToken, { allowPending: true });
+    return (state.deviceTrustRecordIdsByCompanyUser.get(session.companyUserId) || [])
+      .map((deviceTrustRecordId) => state.deviceTrustRecords.get(deviceTrustRecordId))
+      .filter(Boolean)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .map(copy);
+  }
+
+  function trustDevice({ sessionToken, deviceTrustRecordId, trustedUntil = null } = {}) {
+    const { session } = requireSession(sessionToken, { allowPending: false });
+    const deviceTrustRecord = requireDeviceTrustRecord(deviceTrustRecordId);
+    if (deviceTrustRecord.companyUserId !== session.companyUserId) {
+      throw httpError(403, "device_trust_scope_mismatch", "Device trust record belongs to another user.");
+    }
+    deviceTrustRecord.status = "trusted";
+    deviceTrustRecord.trustedUntil = trustedUntil || timestamp(new Date(currentDate().getTime() + 30 * 24 * 60 * 60 * 1000));
+    deviceTrustRecord.updatedAt = nowIso();
+    return copy(deviceTrustRecord);
+  }
+
+  function revokeDevice({ sessionToken, deviceTrustRecordId } = {}) {
+    const { session } = requireSession(sessionToken, { allowPending: false });
+    const deviceTrustRecord = requireDeviceTrustRecord(deviceTrustRecordId);
+    if (deviceTrustRecord.companyUserId !== session.companyUserId) {
+      throw httpError(403, "device_trust_scope_mismatch", "Device trust record belongs to another user.");
+    }
+    deviceTrustRecord.status = "revoked";
+    deviceTrustRecord.trustedUntil = null;
+    deviceTrustRecord.updatedAt = nowIso();
+    return copy(deviceTrustRecord);
   }
 
   function createOnboardingRun({
@@ -1638,7 +1869,10 @@ export function createOrgAuthPlatform({
         steps: state.approvalChainSteps.get(chain.approvalChainId) || []
       })),
       authSessions: [...state.authSessions.values()].map(publicSession),
+      sessionRevisions: [...state.sessionRevisions.values()].map(copy),
       authFactors: [...state.authFactors.values()].map(stripSecret),
+      challengeCompletionReceipts: [...state.challengeCompletionReceipts.values()].map(copy),
+      deviceTrustRecords: [...state.deviceTrustRecords.values()].map(copy),
       identityAccounts: listIdentityAccounts(),
       personIdentities: listPersonIdentities(),
       onboardingRuns: [...state.onboardingRuns.values()],
@@ -1668,6 +1902,7 @@ export function createOrgAuthPlatform({
       applyDurableStateSnapshot(state, snapshot, {
         preserveKeys: ["authBroker"]
       });
+      normalizeDeviceTrustRecordStorage();
       state.authBroker.restore(brokerSnapshot);
     }
 
@@ -1712,7 +1947,15 @@ export function createOrgAuthPlatform({
     const { session, principal } = requireSession(sessionToken, { allowPending });
     return {
       session: publicSession(session),
-      principal: copy(principal)
+      principal: copy(principal),
+      sessionRevisions: (state.sessionRevisionIdsBySession.get(session.sessionId) || [])
+        .map((sessionRevisionId) => state.sessionRevisions.get(sessionRevisionId))
+        .filter(Boolean)
+        .map(copy),
+      deviceTrustRecords: (state.deviceTrustRecordIdsByCompanyUser.get(session.companyUserId) || [])
+        .map((deviceTrustRecordId) => state.deviceTrustRecords.get(deviceTrustRecordId))
+        .filter(Boolean)
+        .map(copy)
     };
   }
 
@@ -1741,12 +1984,64 @@ export function createOrgAuthPlatform({
     };
   }
 
-  function completeSessionFactor(session, factorType) {
+  function completeSessionFactor(
+    session,
+    factorType,
+    {
+      actionClass = null,
+      challengeId = null,
+      challengeType = null,
+      factorId = null,
+      credentialId = null,
+      providerSubject = null,
+      deviceName = null,
+      deviceFingerprint = null
+    } = {}
+  ) {
     const existing = new Set(session.amr);
     existing.add(factorType);
     session.amr = [...existing];
     session.lastVerifiedAt = nowIso();
     session.status = session.amr.length >= session.requiredFactorCount ? "active" : "pending";
+    const trustLevel = resolveSessionTrustLevel(session);
+    grantFreshTrust({
+      session,
+      actionClass,
+      trustLevel
+    });
+    const deviceTrustRecord = upsertDeviceTrustRecord({
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      userId: session.userId,
+      factorId,
+      factorType,
+      credentialId,
+      providerSubject,
+      deviceName,
+      deviceFingerprint,
+      trustLevel,
+      lastVerifiedAt: session.lastVerifiedAt
+    });
+    const sessionRevision = createSessionRevision(session, {
+      reasonCode: "factor_completed",
+      factorType,
+      actionClass,
+      challengeId
+    });
+    const receipt = createChallengeCompletionReceipt({
+      session,
+      sessionRevision,
+      challengeId,
+      challengeType,
+      factorType,
+      actionClass,
+      deviceTrustRecordId: deviceTrustRecord.deviceTrustRecordId
+    });
+    return {
+      sessionRevision,
+      receipt,
+      deviceTrustRecord
+    };
   }
 
   function listAvailableMethods(companyUserId) {
@@ -2084,6 +2379,182 @@ export function createOrgAuthPlatform({
     return personIdentity;
   }
 
+  function upsertDeviceTrustRecord({
+    companyId,
+    companyUserId,
+    userId,
+    factorId = null,
+    factorType,
+    credentialId = null,
+    providerSubject = null,
+    deviceName = null,
+    deviceFingerprint = null,
+    trustLevel = "authenticated",
+    lastVerifiedAt = nowIso()
+  } = {}) {
+    const deviceTrustRecordKey = buildDeviceTrustRecordKey({
+      companyId,
+      companyUserId,
+      factorType,
+      credentialId,
+      providerSubject,
+      deviceFingerprint,
+      factorId
+    });
+    const existingDeviceTrustRecordId = state.deviceTrustRecordIdByKey.get(deviceTrustRecordKey);
+    const existingDeviceTrustRecord = existingDeviceTrustRecordId
+      ? state.deviceTrustRecords.get(existingDeviceTrustRecordId)
+      : null;
+    const deviceTrustRecord = existingDeviceTrustRecord || {
+      deviceTrustRecordId: crypto.randomUUID(),
+      companyId: assertNonEmpty(companyId, "company_id_required"),
+      companyUserId: assertNonEmpty(companyUserId, "company_user_id_required"),
+      userId: assertNonEmpty(userId, "user_id_required"),
+      factorType: assertNonEmpty(factorType, "factor_type_required"),
+      createdAt: nowIso()
+    };
+    deviceTrustRecord.factorId = normalizeOptionalKeyPart(factorId);
+    deviceTrustRecord.credentialId = normalizeOptionalKeyPart(credentialId);
+    deviceTrustRecord.providerSubject = normalizeOptionalKeyPart(providerSubject);
+    deviceTrustRecord.deviceFingerprint = normalizeOptionalKeyPart(deviceFingerprint);
+    deviceTrustRecord.deviceName = normalizeOptionalKeyPart(deviceName) || `${factorType} device`;
+    deviceTrustRecord.status = "trusted";
+    deviceTrustRecord.trustLevel = trustLevel;
+    deviceTrustRecord.firstSeenAt = deviceTrustRecord.firstSeenAt || lastVerifiedAt;
+    deviceTrustRecord.lastSeenAt = lastVerifiedAt;
+    deviceTrustRecord.lastVerifiedAt = lastVerifiedAt;
+    deviceTrustRecord.updatedAt = nowIso();
+    state.deviceTrustRecords.set(deviceTrustRecord.deviceTrustRecordId, deviceTrustRecord);
+    state.deviceTrustRecordIdByKey.set(deviceTrustRecordKey, deviceTrustRecord.deviceTrustRecordId);
+    appendToIndex(state.deviceTrustRecordIdsByCompanyUser, deviceTrustRecord.companyUserId, deviceTrustRecord.deviceTrustRecordId);
+    return deviceTrustRecord;
+  }
+
+  function createSessionRevision(session, { reasonCode, factorType = null, actionClass = null, challengeId = null } = {}) {
+    const sessionRevisionIds = state.sessionRevisionIdsBySession.get(session.sessionId) || [];
+    const sessionRevision = {
+      sessionRevisionId: crypto.randomUUID(),
+      sessionId: session.sessionId,
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      userId: session.userId,
+      revisionNumber: sessionRevisionIds.length + 1,
+      reasonCode: assertNonEmpty(reasonCode, "session_revision_reason_required"),
+      factorType: normalizeOptionalKeyPart(factorType),
+      actionClass: normalizeOptionalKeyPart(actionClass),
+      challengeId: normalizeOptionalKeyPart(challengeId),
+      sessionStatus: session.status,
+      trustLevel: resolveSessionTrustLevel(session),
+      amr: [...session.amr],
+      freshTrustByActionClass: copy(session.freshTrustByActionClass || {}),
+      freshTrustByTrustLevel: copy(session.freshTrustByTrustLevel || {}),
+      createdAt: nowIso()
+    };
+    state.sessionRevisions.set(sessionRevision.sessionRevisionId, sessionRevision);
+    appendToIndex(state.sessionRevisionIdsBySession, session.sessionId, sessionRevision.sessionRevisionId);
+    session.sessionRevisionId = sessionRevision.sessionRevisionId;
+    session.sessionRevisionNumber = sessionRevision.revisionNumber;
+    return sessionRevision;
+  }
+
+  function grantFreshTrust({ session, actionClass = null, trustLevel }) {
+    const resolvedTrustLevel = trustLevel || resolveSessionTrustLevel(session);
+    if (!session.freshTrustByActionClass || typeof session.freshTrustByActionClass !== "object") {
+      session.freshTrustByActionClass = {};
+    }
+    if (!session.freshTrustByTrustLevel || typeof session.freshTrustByTrustLevel !== "object") {
+      session.freshTrustByTrustLevel = {};
+    }
+    const trustLevelTtlSeconds = TRUST_LEVEL_FRESHNESS_TTL_SECONDS[resolvedTrustLevel] || TRUST_LEVEL_FRESHNESS_TTL_SECONDS.authenticated;
+    session.freshTrustByTrustLevel[resolvedTrustLevel] = timestamp(new Date(currentDate().getTime() + trustLevelTtlSeconds * 1000));
+    if (actionClass) {
+      const actionClassTtlSeconds = ACTION_CLASS_FRESHNESS_TTL_SECONDS[actionClass] || trustLevelTtlSeconds;
+      session.freshTrustByActionClass[actionClass] = timestamp(new Date(currentDate().getTime() + actionClassTtlSeconds * 1000));
+    }
+  }
+
+  function createChallengeCompletionReceipt({
+    session,
+    sessionRevision,
+    challengeId = null,
+    challengeType = null,
+    factorType,
+    actionClass = null,
+    deviceTrustRecordId = null
+  } = {}) {
+    const challengeCompletionReceipt = {
+      challengeCompletionReceiptId: crypto.randomUUID(),
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      userId: session.userId,
+      sessionId: session.sessionId,
+      sessionRevisionId: sessionRevision.sessionRevisionId,
+      challengeId: normalizeOptionalKeyPart(challengeId),
+      challengeType: normalizeOptionalKeyPart(challengeType) || assertNonEmpty(factorType, "factor_type_required"),
+      factorType: assertNonEmpty(factorType, "factor_type_required"),
+      actionClass: normalizeOptionalKeyPart(actionClass),
+      trustLevel: resolveSessionTrustLevel(session),
+      freshTrustByActionClass: copy(session.freshTrustByActionClass || {}),
+      freshTrustByTrustLevel: copy(session.freshTrustByTrustLevel || {}),
+      deviceTrustRecordId: normalizeOptionalKeyPart(deviceTrustRecordId),
+      completedAt: nowIso()
+    };
+    state.challengeCompletionReceipts.set(
+      challengeCompletionReceipt.challengeCompletionReceiptId,
+      challengeCompletionReceipt
+    );
+    if (challengeCompletionReceipt.challengeId) {
+      appendToIndex(
+        state.challengeReceiptIdsByChallenge,
+        challengeCompletionReceipt.challengeId,
+        challengeCompletionReceipt.challengeCompletionReceiptId
+      );
+    }
+    appendToIndex(
+      state.challengeReceiptIdsBySession,
+      challengeCompletionReceipt.sessionId,
+      challengeCompletionReceipt.challengeCompletionReceiptId
+    );
+    return challengeCompletionReceipt;
+  }
+
+  function requireDeviceTrustRecord(deviceTrustRecordId) {
+    const deviceTrustRecord = state.deviceTrustRecords.get(
+      assertNonEmpty(deviceTrustRecordId, "device_trust_record_id_required")
+    );
+    if (!deviceTrustRecord) {
+      throw httpError(404, "device_trust_record_not_found", "Device trust record was not found.");
+    }
+    return deviceTrustRecord;
+  }
+
+  function normalizeDeviceTrustRecordStorage() {
+    const normalizedRecords = new Map();
+    state.deviceTrustRecordIdByKey.clear();
+    state.deviceTrustRecordIdsByCompanyUser.clear();
+    for (const deviceTrustRecord of state.deviceTrustRecords.values()) {
+      if (!deviceTrustRecord?.deviceTrustRecordId) {
+        continue;
+      }
+      const deviceTrustRecordKey = buildDeviceTrustRecordKey({
+        companyId: deviceTrustRecord.companyId,
+        companyUserId: deviceTrustRecord.companyUserId,
+        factorType: deviceTrustRecord.factorType,
+        credentialId: deviceTrustRecord.credentialId,
+        providerSubject: deviceTrustRecord.providerSubject,
+        deviceFingerprint: deviceTrustRecord.deviceFingerprint,
+        factorId: deviceTrustRecord.factorId
+      });
+      normalizedRecords.set(deviceTrustRecord.deviceTrustRecordId, deviceTrustRecord);
+      state.deviceTrustRecordIdByKey.set(deviceTrustRecordKey, deviceTrustRecord.deviceTrustRecordId);
+      appendToIndex(state.deviceTrustRecordIdsByCompanyUser, deviceTrustRecord.companyUserId, deviceTrustRecord.deviceTrustRecordId);
+    }
+    state.deviceTrustRecords.clear();
+    for (const [deviceTrustRecordId, deviceTrustRecord] of normalizedRecords.entries()) {
+      state.deviceTrustRecords.set(deviceTrustRecordId, deviceTrustRecord);
+    }
+  }
+
   function findFactor(companyUserId, factorType, statuses = ["active"]) {
     return [...state.authFactors.values()].find(
       (candidate) =>
@@ -2093,9 +2564,9 @@ export function createOrgAuthPlatform({
     );
   }
 
-  function requireChallenge(challengeId, challengeType) {
+  function requireChallenge(challengeId, challengeType = null) {
     const challenge = state.authChallenges.get(challengeId);
-    if (!challenge || challenge.challengeType !== challengeType) {
+    if (!challenge || (challengeType && challenge.challengeType !== challengeType)) {
       throw httpError(404, "auth_challenge_not_found", "Authentication challenge was not found.");
     }
     if (challenge.status !== "pending") {
@@ -2105,6 +2576,19 @@ export function createOrgAuthPlatform({
       challenge.status = "expired";
       throw httpError(409, "auth_challenge_expired", "Authentication challenge has expired.");
     }
+    return challenge;
+  }
+
+  function consumeOwnedChallenge({ challengeId, session, allowedTypes = [] } = {}) {
+    const challenge = requireChallenge(assertNonEmpty(challengeId, "challenge_id_required"), null);
+    if (challenge.companyUserId !== session.companyUserId) {
+      throw httpError(403, "auth_challenge_scope_mismatch", "Authentication challenge belongs to another user.");
+    }
+    if (allowedTypes.length > 0 && !allowedTypes.includes(challenge.challengeType)) {
+      throw httpError(409, "auth_challenge_type_invalid", `Challenge type ${challenge.challengeType} is not supported for this completion flow.`);
+    }
+    challenge.status = "consumed";
+    challenge.consumedAt = nowIso();
     return challenge;
   }
 
@@ -2646,6 +3130,27 @@ function buildPersonIdentityKey({ companyId, providerCode, providerSubject }) {
   ].join(":");
 }
 
+function buildDeviceTrustRecordKey({
+  companyId,
+  companyUserId,
+  factorType,
+  credentialId = null,
+  providerSubject = null,
+  deviceFingerprint = null,
+  factorId = null
+}) {
+  return [
+    assertNonEmpty(companyId, "company_id_required"),
+    assertNonEmpty(companyUserId, "company_user_id_required"),
+    assertNonEmpty(factorType, "factor_type_required"),
+    normalizeOptionalKeyPart(deviceFingerprint)
+      || normalizeOptionalKeyPart(credentialId)
+      || normalizeOptionalKeyPart(providerSubject)
+      || normalizeOptionalKeyPart(factorId)
+      || "device"
+  ].join(":");
+}
+
 function normalizeOptionalKeyPart(value) {
   if (value === null || value === undefined) {
     return null;
@@ -2790,7 +3295,12 @@ function publicSession(session) {
     companyUserId: session.companyUserId,
     status: session.status,
     requiredFactorCount: session.requiredFactorCount,
+    sessionRevisionId: session.sessionRevisionId || null,
+    sessionRevisionNumber: session.sessionRevisionNumber || 0,
     amr: [...session.amr],
+    trustLevel: resolveSessionTrustLevel(session),
+    freshTrustByActionClass: copy(session.freshTrustByActionClass || {}),
+    freshTrustByTrustLevel: copy(session.freshTrustByTrustLevel || {}),
     issuedAt: session.issuedAt,
     expiresAt: session.expiresAt,
     revokedAt: session.revokedAt
