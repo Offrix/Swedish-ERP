@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 
 export const LEGAL_FORM_CODES = Object.freeze([
   "AKTIEBOLAG",
@@ -24,8 +25,97 @@ export const FILING_PROFILE_CODES = Object.freeze([
   "PARTNERSHIP_INK4",
   "PARTNERSHIP_ANNUAL_REPORT_AND_INK4"
 ]);
+export const LEGAL_FORM_RULEPACK_CODE = "RP-LEGAL-FORM-SE";
+export const ANNUAL_FILING_RULEPACK_CODE = "RP-ANNUAL-FILING-SE";
 export const LEGAL_FORM_RULEPACK_VERSION = "se-legal-form-2026.1";
 export const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+
+const LEGAL_FORM_RULE_PACKS = Object.freeze([
+  Object.freeze({
+    rulePackId: "legal-form-se-2025.1",
+    rulePackCode: LEGAL_FORM_RULEPACK_CODE,
+    domain: "legal_form",
+    jurisdiction: "SE",
+    effectiveFrom: "2025-01-01",
+    effectiveTo: "2026-01-01",
+    version: "se-legal-form-2025.1",
+    checksum: "legal-form-se-2025.1",
+    sourceSnapshotDate: "2026-03-24",
+    semanticChangeSummary: "Swedish legal-form baseline for 2025 filing and signatory duties.",
+    machineReadableRules: Object.freeze({
+      legalFormCodes: LEGAL_FORM_CODES,
+      filingProfileCodes: FILING_PROFILE_CODES
+    }),
+    humanReadableExplanation: Object.freeze([
+      "Legal-form profiles determine filing profile, declaration family and signatory class for annual obligations."
+    ]),
+    testVectors: Object.freeze([]),
+    migrationNotes: Object.freeze([])
+  }),
+  Object.freeze({
+    rulePackId: "legal-form-se-2026.1",
+    rulePackCode: LEGAL_FORM_RULEPACK_CODE,
+    domain: "legal_form",
+    jurisdiction: "SE",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    version: LEGAL_FORM_RULEPACK_VERSION,
+    checksum: "legal-form-se-2026.1",
+    sourceSnapshotDate: "2026-03-24",
+    semanticChangeSummary: "Swedish legal-form baseline for filing profile, declaration profile and signatory duties.",
+    machineReadableRules: Object.freeze({
+      legalFormCodes: LEGAL_FORM_CODES,
+      filingProfileCodes: FILING_PROFILE_CODES
+    }),
+    humanReadableExplanation: Object.freeze([
+      "Legal-form profiles determine filing profile, declaration family and signatory class for annual obligations."
+    ]),
+    testVectors: Object.freeze([]),
+    migrationNotes: Object.freeze([])
+  }),
+  Object.freeze({
+    rulePackId: "annual-filing-se-2025.1",
+    rulePackCode: ANNUAL_FILING_RULEPACK_CODE,
+    domain: "annual_filing",
+    jurisdiction: "SE",
+    effectiveFrom: "2025-01-01",
+    effectiveTo: "2026-01-01",
+    version: "se-annual-filing-2025.1",
+    checksum: "annual-filing-se-2025.1",
+    sourceSnapshotDate: "2026-03-24",
+    semanticChangeSummary: "Swedish annual filing baseline for 2025 declaration packages.",
+    machineReadableRules: Object.freeze({
+      declarationProfileCodes: DECLARATION_PROFILE_CODES,
+      filingProfileCodes: FILING_PROFILE_CODES
+    }),
+    humanReadableExplanation: Object.freeze([
+      "Reporting obligation profiles determine annual package family, declaration profile and filing obligations."
+    ]),
+    testVectors: Object.freeze([]),
+    migrationNotes: Object.freeze([])
+  }),
+  Object.freeze({
+    rulePackId: "annual-filing-se-2026.1",
+    rulePackCode: ANNUAL_FILING_RULEPACK_CODE,
+    domain: "annual_filing",
+    jurisdiction: "SE",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    version: LEGAL_FORM_RULEPACK_VERSION,
+    checksum: "annual-filing-se-2026.1",
+    sourceSnapshotDate: "2026-03-24",
+    semanticChangeSummary: "Swedish annual filing baseline for declaration packages and Bolagsverket/Skatteverket package families.",
+    machineReadableRules: Object.freeze({
+      declarationProfileCodes: DECLARATION_PROFILE_CODES,
+      filingProfileCodes: FILING_PROFILE_CODES
+    }),
+    humanReadableExplanation: Object.freeze([
+      "Reporting obligation profiles determine annual package family, declaration profile and filing obligations."
+    ]),
+    testVectors: Object.freeze([]),
+    migrationNotes: Object.freeze([])
+  })
+]);
 
 export function createLegalFormPlatform(options = {}) {
   return createLegalFormEngine(options);
@@ -35,8 +125,13 @@ export function createLegalFormEngine({
   clock = () => new Date(),
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
-  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  ruleRegistry = null
 } = {}) {
+  const rules = ruleRegistry || createRulePackRegistry({
+    clock,
+    seedRulePacks: LEGAL_FORM_RULE_PACKS
+  });
   const state = {
     legalFormProfiles: new Map(),
     legalFormProfileIdsByCompany: new Map(),
@@ -46,7 +141,12 @@ export function createLegalFormEngine({
   };
 
   if (seedDemo) {
-    seedDemoState(state, clock);
+    seedDemoState(
+      state,
+      clock,
+      resolveLegalFormRulePack("2026-01-01"),
+      resolveAnnualFilingRulePack("2026-01-01")
+    );
   }
 
   return {
@@ -83,6 +183,7 @@ export function createLegalFormEngine({
     const resolvedLegalFormCode = assertAllowed(normalizeCode(legalFormCode, "legal_form_code_required"), LEGAL_FORM_CODES, "legal_form_code_invalid");
     const resolvedEffectiveFrom = normalizeDate(effectiveFrom, "effective_from_invalid");
     const resolvedEffectiveTo = normalizeOptionalDate(effectiveTo, "effective_to_invalid");
+    const rulePack = resolveLegalFormRulePack(resolvedEffectiveFrom);
     if (resolvedEffectiveTo && resolvedEffectiveTo <= resolvedEffectiveFrom) {
       throw createError(400, "legal_form_profile_interval_invalid", "effectiveTo must be later than effectiveFrom.");
     }
@@ -105,8 +206,10 @@ export function createLegalFormEngine({
       ) || defaultSignatoryClassCode(resolvedLegalFormCode),
       declarationProfileCode: defaultDeclarationProfileCode(resolvedLegalFormCode),
       status: "planned",
-      rulepackCode: "RP-LEGAL-FORM-SE",
-      rulepackVersion: LEGAL_FORM_RULEPACK_VERSION,
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum,
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock),
@@ -216,6 +319,7 @@ export function createLegalFormEngine({
     const resolvedSignatoryClassCode =
       normalizeOptionalAllowedCode(signatoryClassCode, SIGNATORY_CLASS_CODES, "signatory_class_code_invalid") ||
       legalFormProfile.signatoryClassCode;
+    const rulePack = resolveAnnualFilingRulePack(resolveAnnualObligationEffectiveDate(legalFormProfile, resolvedFiscalYearKey));
     const obligation = Object.freeze({
       reportingObligationProfileId: crypto.randomUUID(),
       companyId: resolvedCompanyId,
@@ -238,8 +342,10 @@ export function createLegalFormEngine({
           requiresAnnualReport: requiresAnnualReport === true
         }),
       status: "draft",
-      rulepackCode: "RP-ANNUAL-FILING-SE",
-      rulepackVersion: LEGAL_FORM_RULEPACK_VERSION,
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum,
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock),
@@ -382,9 +488,27 @@ export function createLegalFormEngine({
       .filter((event) => event.companyId === resolvedCompanyId)
       .map(copy);
   }
+
+  function resolveLegalFormRulePack(effectiveDate) {
+    return rules.resolveRulePack({
+      rulePackCode: LEGAL_FORM_RULEPACK_CODE,
+      domain: "legal_form",
+      jurisdiction: "SE",
+      effectiveDate
+    });
+  }
+
+  function resolveAnnualFilingRulePack(effectiveDate) {
+    return rules.resolveRulePack({
+      rulePackCode: ANNUAL_FILING_RULEPACK_CODE,
+      domain: "annual_filing",
+      jurisdiction: "SE",
+      effectiveDate
+    });
+  }
 }
 
-function seedDemoState(state, clock) {
+function seedDemoState(state, clock, legalFormRulePack, annualFilingRulePack) {
   const profile = Object.freeze({
     legalFormProfileId: crypto.randomUUID(),
     companyId: DEMO_COMPANY_ID,
@@ -395,8 +519,10 @@ function seedDemoState(state, clock) {
     signatoryClassCode: "BOARD_OR_CEO",
     declarationProfileCode: "INK2",
     status: "active",
-    rulepackCode: "RP-LEGAL-FORM-SE",
-    rulepackVersion: LEGAL_FORM_RULEPACK_VERSION,
+    rulepackId: legalFormRulePack.rulePackId,
+    rulepackCode: legalFormRulePack.rulePackCode,
+    rulepackVersion: legalFormRulePack.version,
+    rulepackChecksum: legalFormRulePack.checksum,
     createdByActorId: "seed",
     createdAt: nowIso(clock),
     updatedAt: nowIso(clock),
@@ -423,8 +549,10 @@ function seedDemoState(state, clock) {
     filingProfileCode: profile.filingProfileCode,
     packageFamilyCode: "annual_report_ab",
     status: "approved",
-    rulepackCode: "RP-ANNUAL-FILING-SE",
-    rulepackVersion: LEGAL_FORM_RULEPACK_VERSION,
+    rulepackId: annualFilingRulePack.rulePackId,
+    rulepackCode: annualFilingRulePack.rulePackCode,
+    rulepackVersion: annualFilingRulePack.version,
+    rulepackChecksum: annualFilingRulePack.checksum,
     createdByActorId: "seed",
     createdAt: nowIso(clock),
     updatedAt: nowIso(clock),
@@ -459,6 +587,13 @@ function submissionFamilyCodeFor(reportingObligation) {
     return "bolagsverket_annual_plus_tax";
   }
   return "skatteverket_tax_only";
+}
+
+function resolveAnnualObligationEffectiveDate(legalFormProfile, fiscalYearKey) {
+  if (typeof fiscalYearKey === "string" && /^\d{4}$/.test(fiscalYearKey.trim())) {
+    return `${fiscalYearKey.trim()}-01-01`;
+  }
+  return legalFormProfile.effectiveFrom;
 }
 
 function assertObligationConsistency(profile) {

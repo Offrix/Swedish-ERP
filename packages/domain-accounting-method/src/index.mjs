@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -23,7 +24,32 @@ export const FINANCIAL_ENTITY_CLASSIFICATIONS = Object.freeze([
   "FINANCIAL_HOLDING_GROUP"
 ]);
 export const CASH_METHOD_NET_TURNOVER_LIMIT_SEK = 3_000_000;
+export const ACCOUNTING_METHOD_RULEPACK_CODE = "RP-ACCOUNTING-METHOD-SE";
 export const ACCOUNTING_METHOD_RULEPACK_VERSION = "se-accounting-method-2026.1";
+
+const ACCOUNTING_METHOD_RULE_PACKS = Object.freeze([
+  Object.freeze({
+    rulePackId: "accounting-method-se-2026.1",
+    rulePackCode: ACCOUNTING_METHOD_RULEPACK_CODE,
+    domain: "accounting_method",
+    jurisdiction: "SE",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    version: ACCOUNTING_METHOD_RULEPACK_VERSION,
+    checksum: "accounting-method-se-2026.1",
+    sourceSnapshotDate: "2026-03-24",
+    semanticChangeSummary: "Swedish accounting-method baseline for cash and invoice method eligibility and year-end catch-up.",
+    machineReadableRules: Object.freeze({
+      cashMethodNetTurnoverLimitSek: CASH_METHOD_NET_TURNOVER_LIMIT_SEK,
+      financialEntityExclusions: Object.freeze([...FINANCIAL_ENTITY_CLASSIFICATIONS].filter((code) => code !== "NON_FINANCIAL"))
+    }),
+    humanReadableExplanation: Object.freeze([
+      "Cash method is limited to companies within the statutory turnover threshold and excluded for financial entities."
+    ]),
+    testVectors: Object.freeze([]),
+    migrationNotes: Object.freeze([])
+  })
+]);
 
 const CASH_METHOD_LEGAL_BASIS_CODE = "BFL_5_2_3";
 const INVOICE_METHOD_LEGAL_BASIS_CODE = "BFL_5_2_1";
@@ -41,8 +67,13 @@ export function createAccountingMethodEngine({
   clock = () => new Date(),
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
-  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  ruleRegistry = null
 } = {}) {
+  const rules = ruleRegistry || createRulePackRegistry({
+    clock,
+    seedRulePacks: ACCOUNTING_METHOD_RULE_PACKS
+  });
   const state = {
     methodProfiles: new Map(),
     methodProfileIdsByCompany: new Map(),
@@ -57,7 +88,7 @@ export function createAccountingMethodEngine({
   };
 
   if (seedDemo) {
-    seedDemoCompany(state, clock);
+    seedDemoCompany(state, clock, resolveAccountingMethodRulePack(currentDate(clock)));
   }
 
   return {
@@ -102,6 +133,7 @@ export function createAccountingMethodEngine({
       "financial_entity_classification_invalid"
     );
     const blockingReasons = [];
+    const rulePack = resolveAccountingMethodRulePack(resolvedAssessmentDate);
 
     if (resolvedAnnualNetTurnoverSek > CASH_METHOD_NET_TURNOVER_LIMIT_SEK) {
       blockingReasons.push(CASH_METHOD_BLOCKING_REASONS.turnover);
@@ -119,8 +151,10 @@ export function createAccountingMethodEngine({
       entityTypeBasis: resolvedLegalFormCode,
       financialEntityClassification: resolvedFinancialEntityClassification,
       financialEntityExclusion: resolvedFinancialEntityClassification !== "NON_FINANCIAL",
-      rulepackCode: "RP-ACCOUNTING-METHOD-SE",
-      rulepackVersion: ACCOUNTING_METHOD_RULEPACK_VERSION,
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum,
       eligibleForCashMethod: blockingReasons.length === 0,
       blockingReasons: Object.freeze([...blockingReasons]),
       assessedByActorId: requireText(actorId, "actor_id_required"),
@@ -199,6 +233,7 @@ export function createAccountingMethodEngine({
       }
     }
 
+    const rulePack = resolveAccountingMethodRulePack(resolvedEffectiveFrom);
     assertNoPlannedProfileOverlap({
       state,
       companyId: resolvedCompanyId,
@@ -212,6 +247,10 @@ export function createAccountingMethodEngine({
       methodCode: resolvedMethodCode,
       effectiveFrom: resolvedEffectiveFrom,
       effectiveTo: resolvedEffectiveTo,
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum,
       fiscalYearStartDate: resolvedFiscalYearStartDate,
       legalBasisCode: normalizeOptionalText(legalBasisCode) || defaultLegalBasisCode(resolvedMethodCode),
       eligibilityAssessmentId: assessment.assessmentId,
@@ -221,7 +260,10 @@ export function createAccountingMethodEngine({
         netTurnoverBasisSek: assessment.netTurnoverBasisSek,
         legalFormCode: assessment.legalFormCode,
         financialEntityClassification: assessment.financialEntityClassification,
-        rulepackVersion: assessment.rulepackVersion
+        rulepackId: assessment.rulepackId,
+        rulepackCode: assessment.rulepackCode,
+        rulepackVersion: assessment.rulepackVersion,
+        rulepackChecksum: assessment.rulepackChecksum
       }),
       status: "planned",
       onboardingOverride: resolvedOnboardingOverride,
@@ -518,6 +560,7 @@ export function createAccountingMethodEngine({
 
     const normalizedOpenItems = normalizeOpenItems(openItems, resolvedFiscalYearEndDate);
     const capturedItems = normalizedOpenItems.filter((item) => item.recognitionDate <= resolvedFiscalYearEndDate && item.unpaidAmount > 0);
+    const rulePack = resolveAccountingMethodRulePack(resolvedFiscalYearEndDate);
     const snapshotHash = buildSnapshotHash({
       companyId: resolvedCompanyId,
       fiscalYearEndDate: resolvedFiscalYearEndDate,
@@ -547,7 +590,10 @@ export function createAccountingMethodEngine({
       fiscalYearEndDate: resolvedFiscalYearEndDate,
       methodProfileId: activeMethod.methodProfileId,
       methodCode: activeMethod.methodCode,
-      rulepackVersion: ACCOUNTING_METHOD_RULEPACK_VERSION,
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum,
       timingSignal: "year_end_catch_up",
       status: "completed",
       snapshotHash,
@@ -603,9 +649,18 @@ export function createAccountingMethodEngine({
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return state.auditEvents.filter((event) => event.companyId === resolvedCompanyId).map(copy);
   }
+
+  function resolveAccountingMethodRulePack(effectiveDate) {
+    return rules.resolveRulePack({
+      rulePackCode: ACCOUNTING_METHOD_RULEPACK_CODE,
+      domain: "accounting_method",
+      jurisdiction: "SE",
+      effectiveDate
+    });
+  }
 }
 
-function seedDemoCompany(state, clock) {
+function seedDemoCompany(state, clock, rulePack) {
   const assessedAt = nowIso(clock);
   const assessment = Object.freeze({
     assessmentId: crypto.randomUUID(),
@@ -616,8 +671,10 @@ function seedDemoCompany(state, clock) {
     entityTypeBasis: "AB",
     financialEntityClassification: "NON_FINANCIAL",
     financialEntityExclusion: false,
-    rulepackCode: "RP-ACCOUNTING-METHOD-SE",
-    rulepackVersion: ACCOUNTING_METHOD_RULEPACK_VERSION,
+    rulepackId: rulePack.rulePackId,
+    rulepackCode: rulePack.rulePackCode,
+    rulepackVersion: rulePack.version,
+    rulepackChecksum: rulePack.checksum,
     eligibleForCashMethod: false,
     blockingReasons: Object.freeze([CASH_METHOD_BLOCKING_REASONS.turnover]),
     assessedByActorId: "seed",
@@ -632,6 +689,10 @@ function seedDemoCompany(state, clock) {
     methodCode: "FAKTURERINGSMETOD",
     effectiveFrom: "2026-01-01",
     effectiveTo: null,
+    rulepackId: rulePack.rulePackId,
+    rulepackCode: rulePack.rulePackCode,
+    rulepackVersion: rulePack.version,
+    rulepackChecksum: rulePack.checksum,
     fiscalYearStartDate: "2026-01-01",
     legalBasisCode: INVOICE_METHOD_LEGAL_BASIS_CODE,
     eligibilityAssessmentId: assessment.assessmentId,
@@ -641,7 +702,10 @@ function seedDemoCompany(state, clock) {
       netTurnoverBasisSek: assessment.netTurnoverBasisSek,
       legalFormCode: assessment.legalFormCode,
       financialEntityClassification: assessment.financialEntityClassification,
-      rulepackVersion: assessment.rulepackVersion
+      rulepackId: assessment.rulepackId,
+      rulepackCode: assessment.rulepackCode,
+      rulepackVersion: assessment.rulepackVersion,
+      rulepackChecksum: assessment.rulepackChecksum
     }),
     status: "active",
     onboardingOverride: true,

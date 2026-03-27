@@ -1186,6 +1186,9 @@ function resolveAnnualContext({ fiscalYearPlatform, legalFormPlatform, companyId
     requiresAnnualReport: reportingObligationProfile.requiresAnnualReport === true,
     requiresBolagsverketFiling: reportingObligationProfile.requiresBolagsverketFiling === true,
     requiresTaxDeclarationPackage: reportingObligationProfile.requiresTaxDeclarationPackage !== false,
+    rulepackId: reportingObligationProfile.rulepackId || legalFormProfile.rulepackId || null,
+    rulepackCode: reportingObligationProfile.rulepackCode || legalFormProfile.rulepackCode || null,
+    rulepackChecksum: reportingObligationProfile.rulepackChecksum || legalFormProfile.rulepackChecksum || null,
     rulepackVersion: reportingObligationProfile.rulepackVersion || legalFormProfile.rulepackVersion || "unknown"
   };
 }

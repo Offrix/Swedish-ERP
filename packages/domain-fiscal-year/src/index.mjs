@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -17,7 +18,32 @@ export const FISCAL_PERIOD_CLOSE_STATES = Object.freeze(["open", "closing", "clo
 export const FISCAL_YEAR_KINDS = Object.freeze(["CALENDAR", "BROKEN", "SHORT", "EXTENDED"]);
 export const LEGAL_FORM_CODES_REQUIRING_CALENDAR_YEAR = Object.freeze(["FYSISK_PERSON", "ENSKILD_NARINGSVERKSAMHET"]);
 export const OWNER_TAXATION_CODES = Object.freeze(["LEGAL_PERSON_ONLY", "PHYSICAL_PERSON_PARTICIPANT"]);
+export const FISCAL_YEAR_RULEPACK_CODE = "RP-FISCAL-YEAR-SE";
 export const FISCAL_YEAR_RULEPACK_VERSION = "se-fiscal-year-2026.1";
+
+const FISCAL_YEAR_RULE_PACKS = Object.freeze([
+  Object.freeze({
+    rulePackId: "fiscal-year-se-2026.1",
+    rulePackCode: FISCAL_YEAR_RULEPACK_CODE,
+    domain: "fiscal_year",
+    jurisdiction: "SE",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    version: FISCAL_YEAR_RULEPACK_VERSION,
+    checksum: "fiscal-year-se-2026.1",
+    sourceSnapshotDate: "2026-03-24",
+    semanticChangeSummary: "Swedish fiscal-year baseline covering calendar-year restrictions, change permissions and month-boundary periods.",
+    machineReadableRules: Object.freeze({
+      legalFormCodesRequiringCalendarYear: LEGAL_FORM_CODES_REQUIRING_CALENDAR_YEAR,
+      ownerTaxationCodes: OWNER_TAXATION_CODES
+    }),
+    humanReadableExplanation: Object.freeze([
+      "Fiscal-year selection is constrained by legal form, owner taxation and change-of-year approval basis."
+    ]),
+    testVectors: Object.freeze([]),
+    migrationNotes: Object.freeze([])
+  })
+]);
 
 export function createFiscalYearPlatform(options = {}) {
   return createFiscalYearEngine(options);
@@ -27,8 +53,13 @@ export function createFiscalYearEngine({
   clock = () => new Date(),
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
-  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  ruleRegistry = null
 } = {}) {
+  const rules = ruleRegistry || createRulePackRegistry({
+    clock,
+    seedRulePacks: FISCAL_YEAR_RULE_PACKS
+  });
   const state = {
     profiles: new Map(),
     profileIdsByCompany: new Map(),
@@ -42,7 +73,7 @@ export function createFiscalYearEngine({
   };
 
   if (seedDemo) {
-    seedDemoCompany(state, clock);
+    seedDemoCompany(state, clock, resolveFiscalYearRulePack("2026-01-01"));
   }
 
   return {
@@ -81,6 +112,7 @@ export function createFiscalYearEngine({
       OWNER_TAXATION_CODES,
       "owner_taxation_code_invalid"
     );
+    const rulePack = resolveFiscalYearRulePack(currentDate(clock));
     const profile = Object.freeze({
       fiscalYearProfileId: crypto.randomUUID(),
       companyId: resolvedCompanyId,
@@ -88,8 +120,10 @@ export function createFiscalYearEngine({
       ownerTaxationCode: resolvedOwnerTaxationCode,
       mustUseCalendarYear: mustUseCalendarYear({ legalFormCode: resolvedLegalFormCode, ownerTaxationCode: resolvedOwnerTaxationCode }),
       groupAlignmentRequired: groupAlignmentRequired === true,
-      rulepackCode: "RP-FISCAL-YEAR-SE",
-      rulepackVersion: FISCAL_YEAR_RULEPACK_VERSION,
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum,
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
@@ -135,6 +169,7 @@ export function createFiscalYearEngine({
     const profile = requireLatestFiscalYearProfile(state, resolvedCompanyId);
     const resolvedRequestedStartDate = normalizeMonthBoundaryStartDate(requestedStartDate, "requested_start_date_invalid");
     const resolvedRequestedEndDate = normalizeMonthBoundaryEndDate(requestedEndDate, "requested_end_date_invalid");
+    const rulePack = resolveFiscalYearRulePack(resolvedRequestedStartDate);
     const yearKind = resolveFiscalYearKind(resolvedRequestedStartDate, resolvedRequestedEndDate);
     assertFiscalYearAllowedForProfile({
       profile,
@@ -158,6 +193,10 @@ export function createFiscalYearEngine({
       taxAgencyPermissionRequired,
       permissionStatus: taxAgencyPermissionRequired ? (normalizeOptionalText(permissionReference) ? "granted" : "pending") : "not_required",
       permissionReference: normalizeOptionalText(permissionReference),
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum,
       groupAlignmentStartDate: normalizeOptionalDate(groupAlignmentStartDate, "group_alignment_start_date_invalid"),
       groupAlignmentEndDate: normalizeOptionalDate(groupAlignmentEndDate, "group_alignment_end_date_invalid"),
       status: "submitted",
@@ -250,6 +289,7 @@ export function createFiscalYearEngine({
         : requireFiscalYearProfile(state, resolvedCompanyId, fiscalYearProfileId);
     const resolvedStartDate = normalizeMonthBoundaryStartDate(startDate, "start_date_invalid");
     const resolvedEndDate = normalizeMonthBoundaryEndDate(endDate, "end_date_invalid");
+    const rulePack = resolveFiscalYearRulePack(resolvedStartDate);
     const yearKind = resolveFiscalYearKind(resolvedStartDate, resolvedEndDate);
     const resolvedApprovalBasisCode = normalizeCode(approvalBasisCode, "approval_basis_code_required");
     const linkedChangeRequestId = normalizeOptionalText(changeRequestId);
@@ -282,6 +322,10 @@ export function createFiscalYearEngine({
       fiscalYearProfileId: profile.fiscalYearProfileId,
       startDate: resolvedStartDate,
       endDate: resolvedEndDate,
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum,
       yearKind,
       approvalBasisCode: resolvedApprovalBasisCode,
       changeRequestId: linkedChangeRequestId,
@@ -487,9 +531,18 @@ export function createFiscalYearEngine({
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return state.auditEvents.filter((event) => event.companyId === resolvedCompanyId).map(copy);
   }
+
+  function resolveFiscalYearRulePack(effectiveDate) {
+    return rules.resolveRulePack({
+      rulePackCode: FISCAL_YEAR_RULEPACK_CODE,
+      domain: "fiscal_year",
+      jurisdiction: "SE",
+      effectiveDate
+    });
+  }
 }
 
-function seedDemoCompany(state, clock) {
+function seedDemoCompany(state, clock, rulePack) {
   const profile = Object.freeze({
     fiscalYearProfileId: crypto.randomUUID(),
     companyId: DEMO_COMPANY_ID,
@@ -497,8 +550,10 @@ function seedDemoCompany(state, clock) {
     ownerTaxationCode: "LEGAL_PERSON_ONLY",
     mustUseCalendarYear: false,
     groupAlignmentRequired: false,
-    rulepackCode: "RP-FISCAL-YEAR-SE",
-    rulepackVersion: FISCAL_YEAR_RULEPACK_VERSION,
+    rulepackId: rulePack.rulePackId,
+    rulepackCode: rulePack.rulePackCode,
+    rulepackVersion: rulePack.version,
+    rulepackChecksum: rulePack.checksum,
     createdByActorId: "seed",
     createdAt: nowIso(clock),
     updatedAt: nowIso(clock)
@@ -512,6 +567,10 @@ function seedDemoCompany(state, clock) {
     fiscalYearProfileId: profile.fiscalYearProfileId,
     startDate: "2026-01-01",
     endDate: "2026-12-31",
+    rulepackId: rulePack.rulePackId,
+    rulepackCode: rulePack.rulePackCode,
+    rulepackVersion: rulePack.version,
+    rulepackChecksum: rulePack.checksum,
     yearKind: "CALENDAR",
     approvalBasisCode: "BASELINE",
     changeRequestId: null,

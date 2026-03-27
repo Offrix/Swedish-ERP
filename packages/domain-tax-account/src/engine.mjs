@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 import {
   DEMO_COMPANY_ID,
   EVENT_TYPE_TO_LIABILITY_TYPE,
@@ -51,6 +52,49 @@ import {
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
 
+const TAX_ACCOUNT_RULE_PACKS = Object.freeze([
+  Object.freeze({
+    rulePackId: "tax-account-mapping-se-2026.1",
+    rulePackCode: TAX_ACCOUNT_RULEPACK_CODE,
+    domain: "tax_account",
+    jurisdiction: "SE",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    version: TAX_ACCOUNT_RULEPACK_VERSION,
+    checksum: "tax-account-mapping-se-2026.1",
+    sourceSnapshotDate: "2026-03-24",
+    semanticChangeSummary: "Swedish tax-account mapping baseline for assessment/liability classification.",
+    machineReadableRules: Object.freeze({
+      eventTypeToLiabilityType: EVENT_TYPE_TO_LIABILITY_TYPE
+    }),
+    humanReadableExplanation: Object.freeze([
+      "Assessment events must map deterministically to a tax-account liability type and expected reconciliation item."
+    ]),
+    testVectors: Object.freeze([]),
+    migrationNotes: Object.freeze([])
+  }),
+  Object.freeze({
+    rulePackId: "tax-account-offset-se-2026.1",
+    rulePackCode: TAX_ACCOUNT_OFFSET_RULEPACK_CODE,
+    domain: "tax_account",
+    jurisdiction: "SE",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    version: TAX_ACCOUNT_RULEPACK_VERSION,
+    checksum: "tax-account-offset-se-2026.1",
+    sourceSnapshotDate: "2026-03-24",
+    semanticChangeSummary: "Swedish tax-account offset baseline for payment/refund settlement ordering.",
+    machineReadableRules: Object.freeze({
+      liabilityTypePriority: Object.freeze(EVENT_TYPE_TO_LIABILITY_TYPE)
+    }),
+    humanReadableExplanation: Object.freeze([
+      "Credit events must only settle approved, open liabilities and every suggested offset must pin the offset rulepack."
+    ]),
+    testVectors: Object.freeze([]),
+    migrationNotes: Object.freeze([])
+  })
+]);
+
 export function createTaxAccountPlatform(options = {}) {
   return createTaxAccountEngine(options);
 }
@@ -60,8 +104,13 @@ export function createTaxAccountEngine({
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
-  bankingPlatform = null
+  bankingPlatform = null,
+  ruleRegistry = null
 } = {}) {
+  const rules = ruleRegistry || createRulePackRegistry({
+    clock,
+    seedRulePacks: TAX_ACCOUNT_RULE_PACKS
+  });
   const state = {
     importBatches: new Map(),
     importBatchIdsByCompany: new Map(),
@@ -140,6 +189,7 @@ export function createTaxAccountEngine({
     const resolvedAmount = normalizeMoney(amount, "expected_amount_invalid");
     const resolvedCurrencyCode = normalizeUpperCode(currencyCode, "currency_code_required", 3);
     const resolvedPeriodKey = normalizeOptionalText(periodKey);
+    const rulePack = resolveTaxAccountMappingRulePack(resolvedDueDate);
     const itemKey = buildHash({
       companyId: resolvedCompanyId,
       liabilityTypeCode: resolvedLiabilityTypeCode,
@@ -163,6 +213,10 @@ export function createTaxAccountEngine({
       sourceReference: normalizeOptionalText(sourceReference),
       periodKey: resolvedPeriodKey,
       dueDate: resolvedDueDate,
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum,
       currencyCode: resolvedCurrencyCode,
       expectedAmount: resolvedAmount,
       assessedAmount: 0,
@@ -328,7 +382,13 @@ export function createTaxAccountEngine({
 
     for (const event of events.filter((candidate) => isAssessmentEvent(candidate))) {
       reviewedEventIds.push(event.taxAccountEventId);
-      const assessmentResult = reconcileAssessmentEvent({ state, event, clock, actorId: resolvedActorId });
+      const assessmentResult = reconcileAssessmentEvent({
+        state,
+        event,
+        clock,
+        actorId: resolvedActorId,
+        rulePack: resolveTaxAccountMappingRulePack(event.eventDate)
+      });
       if (assessmentResult.discrepancyCaseId) {
         discrepancyCaseIds.push(assessmentResult.discrepancyCaseId);
       }
@@ -336,7 +396,8 @@ export function createTaxAccountEngine({
 
     for (const event of events.filter((candidate) => isCreditEvent(candidate))) {
       reviewedEventIds.push(event.taxAccountEventId);
-      const creditSuggestions = buildSuggestedOffsetsForEvent(state, event);
+      const rulePack = resolveTaxAccountOffsetRulePack(event.eventDate);
+      const creditSuggestions = buildSuggestedOffsetsForEvent(state, event, rulePack);
       if (creditSuggestions.length === 0) {
         const discrepancy = openDifferenceCase(state, clock, {
           companyId: resolvedCompanyId,
@@ -351,7 +412,10 @@ export function createTaxAccountEngine({
         updateTaxAccountEvent(state, event.taxAccountEventId, {
           mappingStatus: "mapped",
           reconciliationStatus: "unmatched",
-          mappedByRuleCode: TAX_ACCOUNT_OFFSET_RULEPACK_CODE,
+          mappedByRuleCode: rulePack.rulePackCode,
+          mappedByRulepackId: rulePack.rulePackId,
+          mappedByRulepackVersion: rulePack.version,
+          mappedByRulepackChecksum: rulePack.checksum,
           updatedAt: nowIso(clock)
         });
       } else {
@@ -359,7 +423,10 @@ export function createTaxAccountEngine({
         updateTaxAccountEvent(state, event.taxAccountEventId, {
           mappingStatus: "mapped",
           reconciliationStatus: determineCreditEventReconciliationStatus(state, event.taxAccountEventId),
-          mappedByRuleCode: TAX_ACCOUNT_OFFSET_RULEPACK_CODE,
+          mappedByRuleCode: rulePack.rulePackCode,
+          mappedByRulepackId: rulePack.rulePackId,
+          mappedByRulepackVersion: rulePack.version,
+          mappedByRulepackChecksum: rulePack.checksum,
           updatedAt: nowIso(clock)
         });
       }
@@ -367,10 +434,14 @@ export function createTaxAccountEngine({
 
     for (const event of events.filter((candidate) => !isAssessmentEvent(candidate) && !isCreditEvent(candidate))) {
       reviewedEventIds.push(event.taxAccountEventId);
+      const rulePack = resolveTaxAccountMappingRulePack(event.eventDate);
       updateTaxAccountEvent(state, event.taxAccountEventId, {
         mappingStatus: "mapped",
         reconciliationStatus: "closed",
-        mappedByRuleCode: TAX_ACCOUNT_RULEPACK_CODE,
+        mappedByRuleCode: rulePack.rulePackCode,
+        mappedByRulepackId: rulePack.rulePackId,
+        mappedByRulepackVersion: rulePack.version,
+        mappedByRulepackChecksum: rulePack.checksum,
         updatedAt: nowIso(clock)
       });
     }
@@ -457,6 +528,7 @@ export function createTaxAccountEngine({
       throw createError(409, "tax_account_offset_exceeds_open_liability", "Offset exceeds the remaining open amount on the liability.");
     }
 
+    const rulePack = resolveTaxAccountOffsetRulePack(event.eventDate);
     const offset = Object.freeze({
       taxAccountOffsetId: crypto.randomUUID(),
       companyId: resolvedCompanyId,
@@ -468,6 +540,10 @@ export function createTaxAccountEngine({
       offsetReasonCode: resolvedOffsetReasonCode,
       status: "approved",
       approvalNote: normalizeOptionalText(approvalNote),
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum,
       createdByActorId: resolvedActorId,
       createdAt: nowIso(clock)
     });
@@ -490,7 +566,10 @@ export function createTaxAccountEngine({
     updateTaxAccountEvent(state, event.taxAccountEventId, {
       mappingStatus: nextEventRemaining === 0 ? "reconciled" : "mapped",
       reconciliationStatus: nextEventRemaining === 0 ? "closed" : "partially_matched",
-      mappedByRuleCode: TAX_ACCOUNT_OFFSET_RULEPACK_CODE,
+      mappedByRuleCode: offset.rulepackCode,
+      mappedByRulepackId: offset.rulepackId,
+      mappedByRulepackVersion: offset.rulepackVersion,
+      mappedByRulepackChecksum: offset.rulepackChecksum,
       updatedAt: nowIso(clock)
     });
 
@@ -597,9 +676,27 @@ export function createTaxAccountEngine({
   function importDurableState(snapshot) {
     applyDurableStateSnapshot(state, snapshot);
   }
+
+  function resolveTaxAccountMappingRulePack(effectiveDate) {
+    return rules.resolveRulePack({
+      rulePackCode: TAX_ACCOUNT_RULEPACK_CODE,
+      domain: "tax_account",
+      jurisdiction: "SE",
+      effectiveDate
+    });
+  }
+
+  function resolveTaxAccountOffsetRulePack(effectiveDate) {
+    return rules.resolveRulePack({
+      rulePackCode: TAX_ACCOUNT_OFFSET_RULEPACK_CODE,
+      domain: "tax_account",
+      jurisdiction: "SE",
+      effectiveDate
+    });
+  }
 }
 
-function reconcileAssessmentEvent({ state, event, clock, actorId }) {
+function reconcileAssessmentEvent({ state, event, clock, actorId, rulePack }) {
   const liabilityTypeCode = event.liabilityTypeCode || EVENT_TYPE_TO_LIABILITY_TYPE[event.eventTypeCode] || null;
   if (!liabilityTypeCode) {
     const discrepancy = openDifferenceCase(state, clock, {
@@ -648,15 +745,18 @@ function reconcileAssessmentEvent({ state, event, clock, actorId }) {
     }),
     updatedAt: nowIso(clock)
   });
-  updateTaxAccountEvent(state, event.taxAccountEventId, {
-    mappingStatus: "mapped",
-    reconciliationStatus: nextAssessedAmount === candidate.expectedAmount ? "closed" : "partially_matched",
-    mappedTargetObjectType: "tax_account_reconciliation_item",
-    mappedTargetObjectId: candidate.reconciliationItemId,
-    mappedLiabilityTypeCode: liabilityTypeCode,
-    mappedByRuleCode: TAX_ACCOUNT_RULEPACK_CODE,
-    updatedAt: nowIso(clock)
-  });
+    updateTaxAccountEvent(state, event.taxAccountEventId, {
+      mappingStatus: "mapped",
+      reconciliationStatus: nextAssessedAmount === candidate.expectedAmount ? "closed" : "partially_matched",
+      mappedTargetObjectType: "tax_account_reconciliation_item",
+      mappedTargetObjectId: candidate.reconciliationItemId,
+      mappedLiabilityTypeCode: liabilityTypeCode,
+      mappedByRuleCode: rulePack.rulePackCode,
+      mappedByRulepackId: rulePack.rulePackId,
+      mappedByRulepackVersion: rulePack.version,
+      mappedByRulepackChecksum: rulePack.checksum,
+      updatedAt: nowIso(clock)
+    });
 
   const differenceAmount = roundMoney(candidate.expectedAmount - nextAssessedAmount);
   if (differenceAmount !== 0) {
@@ -675,7 +775,7 @@ function reconcileAssessmentEvent({ state, event, clock, actorId }) {
   return { discrepancyCaseId: null };
 }
 
-function buildSuggestedOffsetsForEvent(state, event) {
+function buildSuggestedOffsetsForEvent(state, event, rulePack) {
   const availableAmount = remainingCreditAmountForEvent(state, event.taxAccountEventId);
   if (availableAmount <= 0) {
     return [];
@@ -698,6 +798,10 @@ function buildSuggestedOffsetsForEvent(state, event) {
         reconciliationItemId: item.reconciliationItemId,
         offsetAmount: suggestionAmount,
         offsetReasonCode: "AGGREGATED_TAX_ACCOUNT_SETTLEMENT",
+        rulepackId: rulePack.rulePackId,
+        rulepackCode: rulePack.rulePackCode,
+        rulepackVersion: rulePack.version,
+        rulepackChecksum: rulePack.checksum,
         priority
       })
     );

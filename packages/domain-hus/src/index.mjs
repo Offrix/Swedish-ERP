@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 
 export const HUS_CASE_STATES = Object.freeze([
   "draft",
@@ -32,6 +33,43 @@ export const HUS_CLAIM_ELIGIBILITY_STATUSES = Object.freeze(["blocked", "not_rea
 export const HUS_DECISION_DIFFERENCE_STATUSES = Object.freeze(["open", "resolved"]);
 export const HUS_RECOVERY_CANDIDATE_STATUSES = Object.freeze(["open", "recovered", "written_off"]);
 export const HUS_DECISION_RESOLUTION_CODES = Object.freeze(["customer_reinvoice", "internal_writeoff", "credit_note_issued"]);
+export const HUS_RULEPACK_CODE = "RP-HUS-SE";
+export const HUS_RULEPACK_VERSION = "se-hus-2026.1";
+
+const HUS_RULE_PACKS = Object.freeze([
+  Object.freeze({
+    rulePackId: "hus-se-2025.1",
+    rulePackCode: HUS_RULEPACK_CODE,
+    domain: "hus",
+    jurisdiction: "SE",
+    effectiveFrom: "2025-01-01",
+    effectiveTo: "2026-01-01",
+    version: "se-hus-2025.1",
+    checksum: "hus-se-2025.1",
+    sourceSnapshotDate: "2026-03-24",
+    semanticChangeSummary: "Swedish HUS baseline for 2025 claims.",
+    machineReadableRules: Object.freeze({ ruleYear: 2025 }),
+    humanReadableExplanation: Object.freeze(["HUS decisions must pin the rule year that applied when the work was completed and the claim payload was created."]),
+    testVectors: Object.freeze([]),
+    migrationNotes: Object.freeze([])
+  }),
+  Object.freeze({
+    rulePackId: "hus-se-2026.1",
+    rulePackCode: HUS_RULEPACK_CODE,
+    domain: "hus",
+    jurisdiction: "SE",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    version: HUS_RULEPACK_VERSION,
+    checksum: "hus-se-2026.1",
+    sourceSnapshotDate: "2026-03-24",
+    semanticChangeSummary: "Swedish HUS baseline for 2026 claims.",
+    machineReadableRules: Object.freeze({ ruleYear: 2026 }),
+    humanReadableExplanation: Object.freeze(["HUS decisions must pin the rule year that applied when the work was completed and the claim payload was created."]),
+    testVectors: Object.freeze([]),
+    migrationNotes: Object.freeze([])
+  })
+]);
 
 const ALLOWED_AR_INVOICE_STATUSES = new Set(["issued", "delivered", "partially_paid", "paid", "overdue", "disputed", "credited"]);
 const MONEY_EPSILON = 0.01;
@@ -43,8 +81,13 @@ export function createHusPlatform(options = {}) {
 export function createHusEngine({
   clock = () => new Date(),
   arPlatform = null,
-  projectsPlatform = null
+  projectsPlatform = null,
+  ruleRegistry = null
 } = {}) {
+  const rules = ruleRegistry || createRulePackRegistry({
+    clock,
+    seedRulePacks: HUS_RULE_PACKS
+  });
   const state = {
     husCases: new Map(),
     husCaseIdsByCompany: new Map(),
@@ -152,6 +195,10 @@ export function createHusEngine({
       workCompletedFrom,
       workCompletedTo
     });
+    const rulePack = resolveHusRulePack({
+      effectiveDate: workInterval.workCompletedOn,
+      ruleYear: normalizeWholeNumber(ruleYear, "hus_rule_year_invalid")
+    });
     const record = {
       husCaseId: normalizeOptionalText(husCaseId) || crypto.randomUUID(),
       companyId: resolvedCompanyId,
@@ -164,7 +211,11 @@ export function createHusEngine({
       workCompletedFrom: workInterval.workCompletedFrom,
       workCompletedTo: workInterval.workCompletedTo,
       currencyCode: normalizeUpperCode(currencyCode, "hus_currency_code_required", 3),
-      ruleYear: normalizeWholeNumber(ruleYear, "hus_rule_year_invalid"),
+      ruleYear: rulePack.ruleYear,
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum,
       status: "draft",
       totalGrossAmount: 0,
       totalEligibleLaborAmount: 0,
@@ -258,6 +309,10 @@ export function createHusEngine({
     record.classificationDecisions.push({
       husClassificationDecisionId: crypto.randomUUID(),
       ruleYear: record.ruleYear,
+      rulepackId: record.rulepackId,
+      rulepackCode: record.rulepackCode,
+      rulepackVersion: record.rulepackVersion,
+      rulepackChecksum: record.rulepackChecksum,
       decisionHash: hashObject({
         normalizedLines,
         normalizedBuyers,
@@ -464,11 +519,16 @@ export function createHusEngine({
       throw createError(409, "hus_claim_amount_exceeds_ready_amount", "Requested HUS claim amount exceeds currently claimable reduction.");
     }
     const paymentAllocations = allocateClaimAmountAcrossPayments(record, resolvedRequestedAmount);
+    const rulePack = resolveHusRulePack({ effectiveDate: record.workCompletedOn, ruleYear: record.ruleYear });
     const claimRecord = {
       husClaimId: crypto.randomUUID(),
       companyId: record.companyId,
       husCaseId: record.husCaseId,
       versionNo: record.claims.length + 1,
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum,
       requestedAmount: resolvedRequestedAmount,
       transportType: requireEnum(HUS_CLAIM_TRANSPORT_TYPES, transportType, "hus_claim_transport_invalid"),
       status: "claim_draft",
@@ -602,12 +662,20 @@ export function createHusEngine({
       rejectedAmount ?? Math.max(0, claimRecord.requestedAmount - resolvedApprovedAmount),
       "hus_decision_rejected_amount_invalid"
     );
+    const rulePack = resolveHusRulePack({
+      effectiveDate: claimRecord.submittedOn || record.workCompletedOn,
+      ruleYear: record.ruleYear
+    });
     if (!moneyEquals(roundMoney(resolvedApprovedAmount + resolvedRejectedAmount), claimRecord.requestedAmount)) {
       throw createError(409, "hus_decision_amount_mismatch", "Approved and rejected HUS decision amounts must reconcile to the requested amount.");
     }
     const decision = {
       husDecisionId: crypto.randomUUID(),
       husClaimId: claimRecord.husClaimId,
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum,
       decisionDate: normalizeRequiredDate(decisionDate, "hus_decision_date_required"),
       requestedAmount: claimRecord.requestedAmount,
       approvedAmount: resolvedApprovedAmount,
@@ -930,6 +998,23 @@ export function createHusEngine({
       .filter((event) => (resolvedCaseId ? event.caseId === resolvedCaseId : true))
       .sort(compareAuditEvents)
       .map(copy);
+  }
+
+  function resolveHusRulePack({ effectiveDate, ruleYear = null } = {}) {
+    const rulePack = rules.resolveRulePack({
+      rulePackCode: HUS_RULEPACK_CODE,
+      domain: "hus",
+      jurisdiction: "SE",
+      effectiveDate
+    });
+    const resolvedRuleYear = Number(rulePack.machineReadableRules?.ruleYear || String(rulePack.effectiveFrom).slice(0, 4));
+    if (ruleYear != null && Number(ruleYear) !== resolvedRuleYear) {
+      throw createError(409, "hus_rule_year_rulepack_mismatch", "Provided HUS rule year does not match the effective rulepack.");
+    }
+    return {
+      ...rulePack,
+      ruleYear: resolvedRuleYear
+    };
   }
 
   function projectHusCase(record) {
@@ -1375,6 +1460,10 @@ function buildClaimPayload(record, claimRecord, readiness) {
     caseReference: record.caseReference,
     customerInvoiceId: record.customerInvoiceId,
     ruleYear: record.ruleYear,
+    rulepackId: claimRecord.rulepackId || record.rulepackId,
+    rulepackCode: claimRecord.rulepackCode || record.rulepackCode,
+    rulepackVersion: claimRecord.rulepackVersion || record.rulepackVersion,
+    rulepackChecksum: claimRecord.rulepackChecksum || record.rulepackChecksum,
     serviceTypeCode: record.serviceTypeCode,
     workCompletedOn: record.workCompletedOn,
     workCompletedFrom: record.workCompletedFrom,
