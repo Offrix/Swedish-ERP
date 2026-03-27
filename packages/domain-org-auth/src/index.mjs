@@ -18,6 +18,7 @@ import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
+import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
 
 export const ACTIONS = Object.freeze({
   COMPANY_READ: "company.read",
@@ -49,6 +50,22 @@ export const DEFAULT_VOUCHER_SERIES = Object.freeze(["A", "B", "E", "H", "I"]);
 export const DEFAULT_CHART_TEMPLATE_ID = "DSAM-2026";
 export const DEFAULT_VAT_SCHEME = "se_standard";
 export const DEFAULT_VAT_FILING_PERIOD = "monthly";
+export const AUTH_PROVIDER_BASELINES = Object.freeze([
+  Object.freeze({
+    providerBaselineId: "bankid-signicat-se-2026.1",
+    baselineCode: "SE-BANKID-RP-API",
+    providerCode: BANKID_PROVIDER_CODE,
+    domain: "auth",
+    jurisdiction: "SE",
+    formatFamily: "bankid_rp_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "bankid-signicat-se-2026.1",
+    sourceSnapshotDate: "2026-03-27",
+    semanticChangeSummary: "BankID authentication baseline for start/collect challenge envelopes and provider response pinning."
+  })
+]);
 
 export const DEMO_IDS = Object.freeze({
   companyId: "00000000-0000-4000-8000-000000000001",
@@ -95,8 +112,11 @@ export function createOrgAuthPlatform({
   clock = () => new Date(),
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
-  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null
+  seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  providerBaselineRegistry = null
 } = {}) {
+  const providerBaselines =
+    providerBaselineRegistry || createProviderBaselineRegistry({ clock, seedProviderBaselines: AUTH_PROVIDER_BASELINES });
   const state = {
     companies: new Map(),
     users: new Map(),
@@ -172,10 +192,11 @@ export function createOrgAuthPlatform({
       snapshot,
       exportDurableState,
       importDurableState,
-      inspectSession,
-      getTotpCodeForTesting,
-      getBankIdCompletionTokenForTesting
-    };
+        inspectSession,
+        getTotpCodeForTesting,
+        providerBaselineRegistry: providerBaselines,
+        getBankIdCompletionTokenForTesting
+      };
 
   function createCompany({ legalName, orgNumber, status = "draft", settingsJson = {} } = {}) {
     const now = nowIso();
@@ -868,14 +889,15 @@ export function createOrgAuthPlatform({
       throw httpError(404, "bankid_identity_missing", "No BankID identity is enrolled for this company user.");
     }
 
-    const providerResult = state.bankIdProvider.start({
-      sessionId: session.sessionId,
-      companyId: session.companyId,
-      companyUserId: session.companyUserId,
-      providerSubject: factor.providerSubject
-    });
+      const providerResult = state.bankIdProvider.start({
+        sessionId: session.sessionId,
+        companyId: session.companyId,
+        companyUserId: session.companyUserId,
+        providerSubject: factor.providerSubject
+      });
+      const providerBaselineRef = resolveBankIdProviderBaselineRef(providerBaselines, currentDate());
 
-    const challenge = {
+      const challenge = {
       challengeId: providerResult.orderRef,
       companyId: session.companyId,
       companyUserId: session.companyUserId,
@@ -886,8 +908,15 @@ export function createOrgAuthPlatform({
       orderRef: providerResult.orderRef,
       expiresAt: timestamp(new Date(currentDate().getTime() + 5 * 60 * 1000)),
       consumedAt: null,
-      payloadJson: { providerCode: BANKID_PROVIDER_CODE, providerMode: "stub" }
-    };
+        payloadJson: {
+          providerCode: BANKID_PROVIDER_CODE,
+          providerMode: "stub",
+          providerBaselineId: providerBaselineRef.providerBaselineId,
+          providerBaselineCode: providerBaselineRef.baselineCode,
+          providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
+          providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum
+        }
+      };
     state.authChallenges.set(challenge.challengeId, challenge);
 
     pushAudit({
@@ -900,8 +929,15 @@ export function createOrgAuthPlatform({
       explanation: "BankID authentication started."
     });
 
-    return providerResult;
-  }
+      return {
+        ...providerResult,
+        providerBaselineId: providerBaselineRef.providerBaselineId,
+        providerBaselineCode: providerBaselineRef.baselineCode,
+        providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
+        providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum,
+        providerBaselineRef
+      };
+    }
 
   function collectBankIdAuthentication({ sessionToken, orderRef, completionToken } = {}) {
     const { session, principal } = requireSession(sessionToken, { allowPending: true });
@@ -910,13 +946,14 @@ export function createOrgAuthPlatform({
       throw httpError(403, "bankid_scope_mismatch", "BankID challenge belongs to another user.");
     }
 
-    const providerResult = state.bankIdProvider.collect({
-      orderRef,
-      completionToken
-    });
-    if (providerResult.status !== "complete") {
-      throw httpError(409, "bankid_not_complete", "BankID flow has not completed yet.");
-    }
+      const providerResult = state.bankIdProvider.collect({
+        orderRef,
+        completionToken
+      });
+      const providerBaselineRef = resolveBankIdProviderBaselineRef(providerBaselines, currentDate());
+      if (providerResult.status !== "complete") {
+        throw httpError(409, "bankid_not_complete", "BankID flow has not completed yet.");
+      }
 
     challenge.status = "consumed";
     challenge.consumedAt = nowIso();
@@ -931,11 +968,18 @@ export function createOrgAuthPlatform({
       explanation: "BankID authentication completed."
     });
 
-    return {
-      provider: providerResult,
-      session: publicSession(session)
-    };
-  }
+      return {
+        provider: {
+          ...providerResult,
+          providerBaselineId: providerBaselineRef.providerBaselineId,
+          providerBaselineCode: providerBaselineRef.baselineCode,
+          providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
+          providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum,
+          providerBaselineRef
+        },
+        session: publicSession(session)
+      };
+    }
 
   function createOnboardingRun({
     legalName,
@@ -2136,6 +2180,24 @@ function createBankIdProvider() {
       }
     }
   };
+}
+
+function resolveBankIdProviderBaselineRef(providerBaselines, now) {
+  const effectiveDate = timestamp(now).slice(0, 10);
+  const providerBaseline = providerBaselines.resolveProviderBaseline({
+    domain: "auth",
+    jurisdiction: "SE",
+    providerCode: BANKID_PROVIDER_CODE,
+    baselineCode: "SE-BANKID-RP-API",
+    effectiveDate
+  });
+  return providerBaselines.buildProviderBaselineRef({
+    effectiveDate,
+    providerBaseline,
+    metadata: {
+      factorType: "bankid"
+    }
+  });
 }
 
 function normalizeStringList(values, code) {

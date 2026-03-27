@@ -25,6 +25,9 @@ test("Phase 1 BankID stub keeps the Signicat provider alias while exposing stub 
   assert.equal(BANKID_PROVIDER_CODE, "signicat-bankid");
   assert.equal(bankIdStart.providerCode, "signicat-bankid");
   assert.equal(bankIdStart.providerMode, "stub");
+  assert.equal(bankIdStart.providerBaselineCode, "SE-BANKID-RP-API");
+  assert.equal(typeof bankIdStart.providerBaselineChecksum, "string");
   assert.equal(bankIdCollect.provider.providerCode, "signicat-bankid");
   assert.equal(bankIdCollect.provider.providerMode, "stub");
+  assert.equal(bankIdCollect.provider.providerBaselineCode, "SE-BANKID-RP-API");
 });

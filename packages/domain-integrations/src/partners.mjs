@@ -122,7 +122,8 @@ export function createPartnerModule({
   state,
   clock = () => new Date(),
   contractTestExecutors = null,
-  operationExecutors = null
+  operationExecutors = null,
+  providerBaselineRegistry = null
 }) {
   state.partnerHealthChecks ||= new Map();
   return {
@@ -163,13 +164,18 @@ export function createPartnerModule({
     return PARTNER_CONNECTION_TYPES.map((connectionType) => partnerCatalogEntry(connectionType));
   }
 
-  function getPartnerConnectionCapabilities({ companyId, connectionId } = {}) {
-    const connection = requireConnection(companyId, connectionId);
-    const catalog = partnerCatalogEntry(connection.connectionType);
-    return {
-      connectionId: connection.connectionId,
-      providerCode: connection.providerCode,
-      operationCodes: catalog.supportedOperations,
+    function getPartnerConnectionCapabilities({ companyId, connectionId } = {}) {
+      const connection = requireConnection(companyId, connectionId);
+      const catalog = partnerCatalogEntry(connection.connectionType);
+      return {
+        connectionId: connection.connectionId,
+        providerCode: connection.providerCode,
+        providerBaselineId: connection.providerBaselineId || null,
+        providerBaselineCode: connection.providerBaselineCode || null,
+        providerBaselineVersion: connection.providerBaselineVersion || null,
+        providerBaselineChecksum: connection.providerBaselineChecksum || null,
+        providerBaselineRef: clone(connection.providerBaselineRef || null),
+        operationCodes: catalog.supportedOperations,
       objectMappings: catalog.objectMappings,
       replaySafe: catalog.replaySafe,
       rateLimits: {
@@ -214,17 +220,29 @@ export function createPartnerModule({
       throw createError(409, "partner_sandbox_not_supported", `${resolvedConnectionType} does not support sandbox mode.`);
     }
     const resolvedProviderCode = text(providerCode || partnerCode, "partner_provider_code_required");
-    if (!catalog.supportedProviders.includes(resolvedProviderCode)) {
-      throw createError(400, "partner_provider_code_invalid", `${resolvedProviderCode} is not a supported provider for ${resolvedConnectionType}.`);
-    }
-    const resolvedConfig = normalizePartnerConfig(config);
-    const connection = {
-      connectionId: crypto.randomUUID(),
-      companyId: text(companyId, "company_id_required"),
-      connectionType: resolvedConnectionType,
-      providerCode: resolvedProviderCode,
-      partnerCode: resolvedProviderCode,
-      displayName: text(displayName, "partner_display_name_required"),
+      if (!catalog.supportedProviders.includes(resolvedProviderCode)) {
+        throw createError(400, "partner_provider_code_invalid", `${resolvedProviderCode} is not a supported provider for ${resolvedConnectionType}.`);
+      }
+      const resolvedConfig = normalizePartnerConfig(config);
+      const providerBaselineRef = resolvePartnerProviderBaseline({
+        providerBaselineRegistry,
+        connectionType: resolvedConnectionType,
+        providerCode: resolvedProviderCode,
+        effectiveDate: nowIso(clock).slice(0, 10),
+        mode: resolvedMode
+      });
+      const connection = {
+        connectionId: crypto.randomUUID(),
+        companyId: text(companyId, "company_id_required"),
+        connectionType: resolvedConnectionType,
+        providerCode: resolvedProviderCode,
+        partnerCode: resolvedProviderCode,
+        providerBaselineId: providerBaselineRef?.providerBaselineId || null,
+        providerBaselineCode: providerBaselineRef?.baselineCode || null,
+        providerBaselineVersion: providerBaselineRef?.providerBaselineVersion || null,
+        providerBaselineChecksum: providerBaselineRef?.providerBaselineChecksum || null,
+        providerBaselineRef: providerBaselineRef ? clone(providerBaselineRef) : null,
+        displayName: text(displayName, "partner_display_name_required"),
       mode: resolvedMode,
       rateLimitPerMinute: normalizePositiveInteger(rateLimitPerMinute || catalog.defaultRateLimitPerMinute, "partner_rate_limit_invalid"),
       fallbackMode: assertAllowed(fallbackMode, PARTNER_FALLBACK_MODES, "partner_fallback_mode_invalid"),
@@ -1097,6 +1115,48 @@ function normalizePartnerConfig(value = {}) {
     config.capabilityVersion = text(config.capabilityVersion, "partner_capability_version_invalid");
   }
   return config;
+}
+
+function resolvePartnerProviderBaseline({ providerBaselineRegistry, connectionType, providerCode, effectiveDate, mode }) {
+  if (!providerBaselineRegistry || typeof providerBaselineRegistry.resolveProviderBaseline !== "function") {
+    return null;
+  }
+  const baselineCode = partnerProviderBaselineCode(connectionType, providerCode);
+  if (!baselineCode) {
+    return null;
+  }
+  const providerBaseline = providerBaselineRegistry.resolveProviderBaseline({
+    domain: "integrations",
+    jurisdiction: "SE",
+    providerCode,
+    baselineCode,
+    effectiveDate,
+    environmentMode: mode
+  });
+  return providerBaselineRegistry.buildProviderBaselineRef({
+    effectiveDate,
+    providerBaseline,
+    metadata: {
+      connectionType,
+      mode
+    }
+  });
+}
+
+function partnerProviderBaselineCode(connectionType, providerCode) {
+  if (connectionType === "bank" && providerCode === "enable_banking") {
+    return "SE-OPEN-BANKING-CORE";
+  }
+  if (connectionType === "bank" && providerCode === "bank_file_channel") {
+    return "SE-BANK-FILE-FORMAT";
+  }
+  if (connectionType === "peppol" && providerCode === "pagero_online") {
+    return "SE-PEPPOL-BIS-BILLING-3";
+  }
+  if (connectionType === "id06" && providerCode === "official_id06_integration") {
+    return "SE-ID06-API";
+  }
+  return null;
 }
 
 function normalizeIsoDateTime(value, code) {

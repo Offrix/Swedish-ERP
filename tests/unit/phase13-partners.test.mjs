@@ -77,6 +77,8 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   assert.equal(bankCapabilities.operationCodes.includes("tax_account_sync"), true);
   assert.equal(bankCapabilities.mode, "sandbox");
   assert.equal(bankCapabilities.providerCode, PROVIDER_CODES.bank);
+  assert.equal(bankCapabilities.providerBaselineCode, "SE-OPEN-BANKING-CORE");
+  assert.equal(typeof bankCapabilities.providerBaselineChecksum, "string");
   assert.equal(Array.isArray(bankCapabilities.objectMappings), true);
   assert.equal(Array.isArray(bankCapabilities.requiredEvents), true);
   assert.equal("credentialsRef" in bankCapabilities, false);
@@ -179,6 +181,14 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   });
   assert.equal(replayed.originalJob.status, "replayed");
   assert.equal(replayed.replayJob.replayOfJobId, rateLimited.jobId);
+
+  const id06Connection = connections.find((connection) => connection.connectionType === "id06");
+  const id06Capabilities = platform.getPartnerConnectionCapabilities({
+    companyId: DEMO_IDS.companyId,
+    connectionId: id06Connection.connectionId
+  });
+  assert.equal(id06Capabilities.providerBaselineCode, "SE-ID06-API");
+  assert.equal(typeof id06Capabilities.providerBaselineChecksum, "string");
 
   const retryJob = platform.enqueueAsyncJob({
     companyId: DEMO_IDS.companyId,

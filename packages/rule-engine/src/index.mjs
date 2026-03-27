@@ -5,6 +5,9 @@ export const AUTOMATION_DECISION_STATES = Object.freeze(["proposed", "manual_ove
 export const RULE_PACK_STATUSES = Object.freeze(["draft", "validated", "approved", "published", "retired", "emergency_disabled"]);
 export const RULE_PACK_SELECTION_MODES = Object.freeze(["effective_date", "rollback_override", "exact_version"]);
 export const RULE_PACK_ROLLBACK_STATUSES = Object.freeze(["planned", "activated", "superseded", "cancelled"]);
+export const PROVIDER_BASELINE_STATUSES = Object.freeze([...RULE_PACK_STATUSES]);
+export const PROVIDER_BASELINE_SELECTION_MODES = Object.freeze([...RULE_PACK_SELECTION_MODES]);
+export const PROVIDER_BASELINE_ROLLBACK_STATUSES = Object.freeze([...RULE_PACK_ROLLBACK_STATUSES]);
 export const AUTOMATION_BOUNDARY_POLICY_CODE = "AI_DECISION_BOUNDARY";
 export const AUTOMATION_REVIEW_SOURCE_DOMAIN_CODE = "AUTOMATION";
 export const AUTOMATION_FLAG_KEYS = Object.freeze({
@@ -320,6 +323,339 @@ export function createRulePackRegistry({ clock = () => new Date(), seedRulePacks
       .filter((item) => intervalsOverlap(item, candidate));
     if (overlapping.length > 0) {
       throw createError(409, "rule_pack_effective_interval_overlaps", `Rule pack ${candidate.rulePackId} overlaps a published version.`);
+    }
+  }
+
+  function nowDate() {
+    return new Date(clock()).toISOString().slice(0, 10);
+  }
+
+  function nowIso() {
+    return new Date(clock()).toISOString();
+  }
+}
+
+export function createProviderBaselineRegistry({ clock = () => new Date(), seedProviderBaselines = [] } = {}) {
+  const state = {
+    providerBaselines: new Map(),
+    rollbacks: new Map()
+  };
+
+  for (const providerBaseline of seedProviderBaselines) {
+    registerProviderBaseline(providerBaseline);
+  }
+
+  return {
+    providerBaselineStatuses: PROVIDER_BASELINE_STATUSES,
+    providerBaselineSelectionModes: PROVIDER_BASELINE_SELECTION_MODES,
+    providerBaselineRollbackStatuses: PROVIDER_BASELINE_ROLLBACK_STATUSES,
+    registerProviderBaseline,
+    createDraftProviderBaselineVersion,
+    validateProviderBaselineVersion,
+    approveProviderBaselineVersion,
+    publishProviderBaselineVersion,
+    retireProviderBaselineVersion,
+    rollbackProviderBaselineVersion,
+    listProviderBaselineRollbacks,
+    listProviderBaselines,
+    getProviderBaseline,
+    resolveProviderBaseline,
+    buildProviderBaselineRef,
+    snapshotProviderBaselineRegistry
+  };
+
+  function registerProviderBaseline(providerBaselineInput = {}) {
+    const normalized = normalizeProviderBaseline(providerBaselineInput, {
+      defaultStatus: normalizeOptionalStatus(providerBaselineInput.status) || "published",
+      nowIso: nowIso()
+    });
+    assertProviderBaselineIdIsUnique(normalized.providerBaselineId);
+    if (normalized.status === "published") {
+      assertNoPublishedProviderBaselineOverlap(normalized);
+    }
+    state.providerBaselines.set(normalized.providerBaselineId, normalized);
+    return copy(normalized);
+  }
+
+  function createDraftProviderBaselineVersion(providerBaselineInput = {}) {
+    const normalized = normalizeProviderBaseline(providerBaselineInput, {
+      defaultStatus: "draft",
+      nowIso: nowIso()
+    });
+    assertProviderBaselineIdIsUnique(normalized.providerBaselineId);
+    state.providerBaselines.set(normalized.providerBaselineId, normalized);
+    return copy(normalized);
+  }
+
+  function validateProviderBaselineVersion({ providerBaselineId, actorId = "system" } = {}) {
+    const providerBaseline = requireProviderBaseline(providerBaselineId);
+    assertProviderBaselineStatus(providerBaseline, ["draft"], "provider_baseline_cannot_be_validated");
+    providerBaseline.status = "validated";
+    providerBaseline.validatedAt = nowIso();
+    providerBaseline.updatedAt = providerBaseline.validatedAt;
+    providerBaseline.validatedBy = requireText(actorId, "actor_id_required");
+    return copy(providerBaseline);
+  }
+
+  function approveProviderBaselineVersion({ providerBaselineId, actorId = "system", approvalRef = null } = {}) {
+    const providerBaseline = requireProviderBaseline(providerBaselineId);
+    assertProviderBaselineStatus(providerBaseline, ["validated", "approved"], "provider_baseline_cannot_be_approved");
+    providerBaseline.status = "approved";
+    providerBaseline.approvedAt = nowIso();
+    providerBaseline.updatedAt = providerBaseline.approvedAt;
+    providerBaseline.approvedBy = requireText(actorId, "actor_id_required");
+    if (approvalRef != null) {
+      providerBaseline.approvalRef = requireText(String(approvalRef), "approval_ref_invalid");
+    }
+    return copy(providerBaseline);
+  }
+
+  function publishProviderBaselineVersion({ providerBaselineId, actorId = "system", approvalRef = null } = {}) {
+    const providerBaseline = requireProviderBaseline(providerBaselineId);
+    assertProviderBaselineStatus(providerBaseline, ["approved", "published"], "provider_baseline_cannot_be_published");
+    if (providerBaseline.status !== "published") {
+      assertNoPublishedProviderBaselineOverlap(providerBaseline);
+    }
+    providerBaseline.status = "published";
+    providerBaseline.approvedAt = providerBaseline.approvedAt || nowIso();
+    providerBaseline.approvedBy = providerBaseline.approvedBy || requireText(actorId, "actor_id_required");
+    providerBaseline.publishedAt = nowIso();
+    providerBaseline.updatedAt = providerBaseline.publishedAt;
+    if (approvalRef != null) {
+      providerBaseline.approvalRef = requireText(String(approvalRef), "approval_ref_invalid");
+    }
+    return copy(providerBaseline);
+  }
+
+  function retireProviderBaselineVersion({ providerBaselineId, actorId = "system", retirementReason = null } = {}) {
+    const providerBaseline = requireProviderBaseline(providerBaselineId);
+    assertProviderBaselineStatus(providerBaseline, ["published", "retired"], "provider_baseline_cannot_be_retired");
+    providerBaseline.status = "retired";
+    providerBaseline.retiredAt = nowIso();
+    providerBaseline.updatedAt = providerBaseline.retiredAt;
+    providerBaseline.retiredBy = requireText(actorId, "actor_id_required");
+    if (retirementReason != null) {
+      providerBaseline.retirementReason = requireText(String(retirementReason), "retirement_reason_invalid");
+    }
+    return copy(providerBaseline);
+  }
+
+  function rollbackProviderBaselineVersion({
+    providerBaselineId,
+    effectiveFrom = null,
+    actorId = "system",
+    reasonCode,
+    replayRequired = false
+  } = {}) {
+    const target = requireProviderBaseline(providerBaselineId);
+    if (!["published", "retired"].includes(target.status)) {
+      throw createError(409, "provider_baseline_rollback_target_invalid", "Rollback target must be published or retired.");
+    }
+    const rollbackRecord = {
+      rollbackId: crypto.randomUUID(),
+      baselineCode: target.baselineCode,
+      targetProviderBaselineId: target.providerBaselineId,
+      providerCode: target.providerCode,
+      domain: target.domain,
+      jurisdiction: target.jurisdiction,
+      effectiveFrom: normalizeDate(effectiveFrom || nowDate(), "provider_baseline_rollback_effective_from_invalid"),
+      status: "activated",
+      actorId: requireText(actorId, "actor_id_required"),
+      reasonCode: requireText(reasonCode, "provider_baseline_rollback_reason_required"),
+      replayRequired: replayRequired === true,
+      createdAt: nowIso()
+    };
+    state.rollbacks.set(rollbackRecord.rollbackId, rollbackRecord);
+    return copy(rollbackRecord);
+  }
+
+  function listProviderBaselineRollbacks({ baselineCode = null, providerCode = null, domain = null, jurisdiction = null, status = null } = {}) {
+    return [...state.rollbacks.values()]
+      .filter((record) => (baselineCode ? record.baselineCode === baselineCode : true))
+      .filter((record) => (providerCode ? record.providerCode === providerCode : true))
+      .filter((record) => (domain ? record.domain === domain : true))
+      .filter((record) => (jurisdiction ? record.jurisdiction === jurisdiction : true))
+      .filter((record) => (status ? record.status === status : true))
+      .sort(sortRollbackRecords)
+      .map(copy);
+  }
+
+  function listProviderBaselines({ domain = null, jurisdiction = null, providerCode = null, baselineCode = null, status = null } = {}) {
+    return [...state.providerBaselines.values()]
+      .filter((providerBaseline) => (domain ? providerBaseline.domain === domain : true))
+      .filter((providerBaseline) => (jurisdiction ? providerBaseline.jurisdiction === jurisdiction : true))
+      .filter((providerBaseline) => (providerCode ? providerBaseline.providerCode === providerCode : true))
+      .filter((providerBaseline) => (baselineCode ? providerBaseline.baselineCode === baselineCode : true))
+      .filter((providerBaseline) => (status ? providerBaseline.status === status : true))
+      .sort(sortProviderBaselines)
+      .map(copy);
+  }
+
+  function getProviderBaseline({ providerBaselineId, required = true } = {}) {
+    const providerBaseline = state.providerBaselines.get(requireText(providerBaselineId, "provider_baseline_id_required")) || null;
+    if (!providerBaseline && required) {
+      throw createError(404, "provider_baseline_not_found", "Provider baseline was not found.");
+    }
+    return providerBaseline ? copy(providerBaseline) : null;
+  }
+
+  function resolveProviderBaseline({
+    providerBaselineId = null,
+    baselineCode = null,
+    providerCode,
+    domain,
+    jurisdiction,
+    effectiveDate,
+    environmentMode = null,
+    channelCode = null,
+    specialCaseCode = null
+  } = {}) {
+    if (providerBaselineId) {
+      return attachProviderBaselineSelectionMetadata(getProviderBaseline({ providerBaselineId }), "exact_version", null);
+    }
+
+    const resolvedDomain = requireText(domain, "provider_baseline_domain_required");
+    const resolvedJurisdiction = requireText(jurisdiction, "provider_baseline_jurisdiction_required");
+    const resolvedProviderCode = requireText(providerCode, "provider_code_required");
+    const resolvedEffectiveDate = normalizeDate(effectiveDate || nowDate(), "provider_baseline_effective_date_invalid");
+    const selectionInputs = { environmentMode, channelCode, specialCaseCode };
+    const matches = listProviderBaselines({
+      domain: resolvedDomain,
+      jurisdiction: resolvedJurisdiction,
+      providerCode: resolvedProviderCode
+    })
+      .filter((providerBaseline) => providerBaseline.status === "published")
+      .filter((providerBaseline) => (baselineCode ? providerBaseline.baselineCode === baselineCode : true))
+      .filter((providerBaseline) => providerBaseline.effectiveFrom <= resolvedEffectiveDate)
+      .filter((providerBaseline) => !providerBaseline.effectiveTo || providerBaseline.effectiveTo > resolvedEffectiveDate)
+      .filter((providerBaseline) => providerBaselineScopeMatches(providerBaseline, selectionInputs));
+
+    if (matches.length === 0) {
+      throw createError(
+        404,
+        "provider_baseline_not_found",
+        `No provider baseline matched ${resolvedProviderCode}/${resolvedDomain}/${resolvedJurisdiction} on ${resolvedEffectiveDate}.`
+      );
+    }
+
+    const rollbackOverride = resolveProviderBaselineRollbackOverride({
+      domain: resolvedDomain,
+      jurisdiction: resolvedJurisdiction,
+      providerCode: resolvedProviderCode,
+      baselineCode,
+      effectiveDate: resolvedEffectiveDate,
+      selectionInputs
+    });
+    if (rollbackOverride) {
+      return rollbackOverride;
+    }
+
+    const matchedCodes = [...new Set(matches.map((providerBaseline) => providerBaseline.baselineCode))];
+    if (!baselineCode && matchedCodes.length > 1) {
+      throw createError(
+        409,
+        "provider_baseline_selection_ambiguous",
+        `Multiple provider baseline codes matched ${resolvedProviderCode}/${resolvedDomain}/${resolvedJurisdiction} on ${resolvedEffectiveDate}.`
+      );
+    }
+
+    return attachProviderBaselineSelectionMetadata(matches[0], "effective_date", null);
+  }
+
+  function buildProviderBaselineRef({ effectiveDate, providerBaseline, metadata = {} } = {}) {
+    const resolvedProviderBaseline = providerBaseline && typeof providerBaseline === "object" ? copy(providerBaseline) : null;
+    if (!resolvedProviderBaseline?.providerBaselineId) {
+      throw createError(400, "provider_baseline_required", "Provider baseline is required.");
+    }
+    const ref = {
+      providerBaselineId: resolvedProviderBaseline.providerBaselineId,
+      baselineCode: resolvedProviderBaseline.baselineCode,
+      providerCode: resolvedProviderBaseline.providerCode,
+      domain: resolvedProviderBaseline.domain,
+      jurisdiction: resolvedProviderBaseline.jurisdiction,
+      providerBaselineVersion: resolvedProviderBaseline.version,
+      providerBaselineChecksum: resolvedProviderBaseline.checksum,
+      selectionMode: resolvedProviderBaseline.selectionMode || "effective_date",
+      effectiveDate: normalizeDate(effectiveDate || nowDate(), "provider_baseline_ref_effective_date_invalid"),
+      specVersion: resolvedProviderBaseline.specVersion,
+      formatFamily: resolvedProviderBaseline.formatFamily,
+      metadata: copy(metadata || {})
+    };
+    if (resolvedProviderBaseline.rollbackId) {
+      ref.rollbackId = resolvedProviderBaseline.rollbackId;
+    }
+    return ref;
+  }
+
+  function snapshotProviderBaselineRegistry() {
+    const items = listProviderBaselines();
+    const rollbacks = listProviderBaselineRollbacks();
+    return {
+      statuses: PROVIDER_BASELINE_STATUSES,
+      selectionModes: PROVIDER_BASELINE_SELECTION_MODES,
+      rollbackStatuses: PROVIDER_BASELINE_ROLLBACK_STATUSES,
+      totalProviderBaselineCount: items.length,
+      publishedProviderBaselineCount: items.filter((item) => item.status === "published").length,
+      retiredProviderBaselineCount: items.filter((item) => item.status === "retired").length,
+      totalRollbackCount: rollbacks.length,
+      items,
+      rollbacks
+    };
+  }
+
+  function resolveProviderBaselineRollbackOverride({ domain, jurisdiction, providerCode, baselineCode, effectiveDate, selectionInputs }) {
+    const rollback = listProviderBaselineRollbacks({ domain, jurisdiction, providerCode, status: "activated" })
+      .filter((record) => record.effectiveFrom <= effectiveDate)
+      .filter((record) => (baselineCode ? record.baselineCode === baselineCode : true))[0];
+    if (!rollback) {
+      return null;
+    }
+    const target = state.providerBaselines.get(rollback.targetProviderBaselineId);
+    if (!target) {
+      throw createError(500, "provider_baseline_rollback_target_missing", "Rollback target provider baseline is missing.");
+    }
+    if (!providerBaselineScopeMatches(target, selectionInputs)) {
+      return null;
+    }
+    return attachProviderBaselineSelectionMetadata(target, "rollback_override", rollback.rollbackId);
+  }
+
+  function requireProviderBaseline(providerBaselineId) {
+    const stored = state.providerBaselines.get(requireText(providerBaselineId, "provider_baseline_id_required"));
+    if (!stored) {
+      throw createError(404, "provider_baseline_not_found", "Provider baseline was not found.");
+    }
+    return stored;
+  }
+
+  function assertProviderBaselineIdIsUnique(providerBaselineId) {
+    if (state.providerBaselines.has(providerBaselineId)) {
+      throw createError(409, "provider_baseline_id_exists", `Provider baseline ${providerBaselineId} already exists.`);
+    }
+  }
+
+  function assertProviderBaselineStatus(providerBaseline, allowedStatuses, code) {
+    if (!allowedStatuses.includes(providerBaseline.status)) {
+      throw createError(409, code, `Provider baseline ${providerBaseline.providerBaselineId} is ${providerBaseline.status}.`);
+    }
+  }
+
+  function assertNoPublishedProviderBaselineOverlap(candidate) {
+    const overlapping = [...state.providerBaselines.values()]
+      .filter((item) => item.providerBaselineId !== candidate.providerBaselineId)
+      .filter((item) => item.status === "published")
+      .filter((item) => item.domain === candidate.domain)
+      .filter((item) => item.jurisdiction === candidate.jurisdiction)
+      .filter((item) => item.providerCode === candidate.providerCode)
+      .filter((item) => item.baselineCode === candidate.baselineCode)
+      .filter((item) => buildProviderBaselineScopeSignature(item) === buildProviderBaselineScopeSignature(candidate))
+      .filter((item) => intervalsOverlap(item, candidate));
+    if (overlapping.length > 0) {
+      throw createError(
+        409,
+        "provider_baseline_effective_interval_overlaps",
+        `Provider baseline ${candidate.providerBaselineId} overlaps a published version.`
+      );
     }
   }
 
@@ -1333,6 +1669,112 @@ function normalizeRulePack(rulePackInput, { defaultStatus, nowIso }) {
   };
 }
 
+function normalizeProviderBaseline(providerBaselineInput, { defaultStatus, nowIso }) {
+  const domain = requireText(providerBaselineInput.domain, "provider_baseline_domain_required");
+  const jurisdiction = requireText(providerBaselineInput.jurisdiction, "provider_baseline_jurisdiction_required");
+  const providerCode = requireText(providerBaselineInput.providerCode, "provider_code_required");
+  const effectiveFrom = normalizeDate(providerBaselineInput.effectiveFrom, "provider_baseline_effective_from_invalid");
+  const effectiveTo =
+    providerBaselineInput.effectiveTo === null || providerBaselineInput.effectiveTo === undefined || providerBaselineInput.effectiveTo === ""
+      ? null
+      : normalizeDate(providerBaselineInput.effectiveTo, "provider_baseline_effective_to_invalid");
+  if (effectiveTo && effectiveTo <= effectiveFrom) {
+    throw createError(400, "provider_baseline_effective_interval_invalid", "effectiveTo must be later than effectiveFrom.");
+  }
+  const version = requireText(String(providerBaselineInput.version), "provider_baseline_version_required");
+  const providerBaselineId = requireText(providerBaselineInput.providerBaselineId, "provider_baseline_id_required");
+  const baselineCode = requireText(
+    String(providerBaselineInput.baselineCode || deriveProviderBaselineCode({ domain, jurisdiction, providerCode, providerBaselineId })),
+    "provider_baseline_code_required"
+  ).toUpperCase();
+  const formatFamily = requireText(providerBaselineInput.formatFamily || baselineCode.toLowerCase(), "provider_baseline_format_family_required");
+  const status = normalizeOptionalStatus(providerBaselineInput.status) || defaultStatus;
+  const machineReadableRules = copy(providerBaselineInput.machineReadableRules || providerBaselineInput.machineReadableBaseline || {});
+  const humanReadableExplanation = Array.isArray(providerBaselineInput.humanReadableExplanation)
+    ? copy(providerBaselineInput.humanReadableExplanation)
+    : [String(providerBaselineInput.humanReadableExplanation || "")].filter(Boolean);
+  const testVectors = Array.isArray(providerBaselineInput.testVectors) ? copy(providerBaselineInput.testVectors) : [];
+  const migrationNotes = Array.isArray(providerBaselineInput.migrationNotes) ? copy(providerBaselineInput.migrationNotes) : [];
+  const sourceSnapshotDate = normalizeDate(
+    providerBaselineInput.sourceSnapshotDate || effectiveFrom,
+    "provider_baseline_source_snapshot_date_invalid"
+  );
+  const checksum =
+    typeof providerBaselineInput.checksum === "string" && providerBaselineInput.checksum.trim().length > 0
+      ? providerBaselineInput.checksum.trim()
+      : hashObject({
+          domain,
+          jurisdiction,
+          providerCode,
+          baselineCode,
+          effectiveFrom,
+          effectiveTo,
+          version,
+          formatFamily,
+          machineReadableRules,
+          humanReadableExplanation,
+          testVectors,
+          migrationNotes
+        });
+
+  return {
+    providerBaselineId,
+    baselineCode,
+    immutableVersionId: requireText(providerBaselineInput.immutableVersionId || providerBaselineId, "provider_baseline_immutable_version_id_required"),
+    providerCode,
+    domain,
+    jurisdiction,
+    status,
+    effectiveFrom,
+    effectiveTo,
+    version,
+    specVersion: requireText(String(providerBaselineInput.specVersion || version), "provider_baseline_spec_version_required"),
+    payloadSchemaVersion: requireText(String(providerBaselineInput.payloadSchemaVersion || "1"), "provider_baseline_payload_schema_version_required"),
+    formatFamily,
+    approvalRef: normalizeOptionalText(providerBaselineInput.approvalRef),
+    changeReason: requireText(
+      providerBaselineInput.changeReason || providerBaselineInput.semanticChangeSummary || "Initial provider baseline registration.",
+      "provider_baseline_change_reason_required"
+    ),
+    supersedesVersion: normalizeOptionalText(providerBaselineInput.supersedesVersion),
+    rollbackPolicy: normalizeOptionalText(providerBaselineInput.rollbackPolicy) || "publish_successor_or_activate_prior_version",
+    testVectorSetId: normalizeOptionalText(providerBaselineInput.testVectorSetId),
+    createdBy: requireText(String(providerBaselineInput.createdBy || "system"), "provider_baseline_created_by_required"),
+    approvedBy: normalizeOptionalText(providerBaselineInput.approvedBy),
+    publishedAt:
+      normalizeOptionalTimestamp(providerBaselineInput.publishedAt, "provider_baseline_published_at_invalid") ||
+      (status === "published" || status === "retired" ? nowIso : null),
+    retiredAt:
+      normalizeOptionalTimestamp(providerBaselineInput.retiredAt, "provider_baseline_retired_at_invalid") ||
+      (status === "retired" ? nowIso : null),
+    validatedAt:
+      normalizeOptionalTimestamp(providerBaselineInput.validatedAt, "provider_baseline_validated_at_invalid") ||
+      (["validated", "approved", "published", "retired"].includes(status) ? nowIso : null),
+    approvedAt:
+      normalizeOptionalTimestamp(providerBaselineInput.approvedAt, "provider_baseline_approved_at_invalid") ||
+      (["approved", "published", "retired"].includes(status) ? nowIso : null),
+    checksum,
+    sourceSnapshotDate,
+    semanticChangeSummary: requireText(
+      providerBaselineInput.semanticChangeSummary || "Initial provider baseline registration.",
+      "provider_baseline_semantic_change_summary_required"
+    ),
+    machineReadableRules,
+    humanReadableExplanation,
+    testVectors,
+    migrationNotes,
+    environmentModes: normalizeOptionalStringArray(providerBaselineInput.environmentModes),
+    channelCodes: normalizeOptionalStringArray(providerBaselineInput.channelCodes),
+    specialCaseCodes: normalizeOptionalStringArray(providerBaselineInput.specialCaseCodes),
+    createdAt: normalizeOptionalTimestamp(providerBaselineInput.createdAt, "provider_baseline_created_at_invalid") || nowIso,
+    updatedAt: normalizeOptionalTimestamp(providerBaselineInput.updatedAt, "provider_baseline_updated_at_invalid") || nowIso,
+    emergencyDisabledAt: normalizeOptionalTimestamp(
+      providerBaselineInput.emergencyDisabledAt,
+      "provider_baseline_emergency_disabled_at_invalid"
+    )
+  };
+}
+
 function normalizeCandidatePostings(values, evidence) {
   const normalizedValues = Array.isArray(values) ? values : [];
   if (normalizedValues.length > 0) {
@@ -1521,12 +1963,30 @@ function deriveRulePackCode({ domain, jurisdiction, rulePackId }) {
     .toUpperCase();
 }
 
+function deriveProviderBaselineCode({ domain, jurisdiction, providerCode, providerBaselineId }) {
+  const base = `${jurisdiction}_${domain}_${providerCode}_${String(providerBaselineId || "BASELINE")}`;
+  return base
+    .replaceAll(/[^A-Za-z0-9]+/g, "_")
+    .replaceAll(/_+/g, "_")
+    .replace(/^_/, "")
+    .replace(/_$/, "")
+    .toUpperCase();
+}
+
 function scopeMatches(rulePack, selectionInputs = {}) {
   return (
     matchesScopedValue(rulePack.companyTypes, selectionInputs.companyType) &&
     matchesScopedValue(rulePack.registrationCodes, selectionInputs.registrationCode) &&
     matchesScopedValue(rulePack.groupCodes, selectionInputs.groupCode) &&
     matchesScopedValue(rulePack.specialCaseCodes, selectionInputs.specialCaseCode)
+  );
+}
+
+function providerBaselineScopeMatches(providerBaseline, selectionInputs = {}) {
+  return (
+    matchesScopedValue(providerBaseline.environmentModes, selectionInputs.environmentMode) &&
+    matchesScopedValue(providerBaseline.channelCodes, selectionInputs.channelCode) &&
+    matchesScopedValue(providerBaseline.specialCaseCodes, selectionInputs.specialCaseCode)
   );
 }
 
@@ -1552,12 +2012,33 @@ function attachSelectionMetadata(rulePack, selectionMode, rollbackId) {
   return resolvedRulePack;
 }
 
+function attachProviderBaselineSelectionMetadata(providerBaseline, selectionMode, rollbackId) {
+  const resolvedProviderBaseline = copy(providerBaseline);
+  resolvedProviderBaseline.selectionMode = assertAllowed(
+    selectionMode,
+    PROVIDER_BASELINE_SELECTION_MODES,
+    "provider_baseline_selection_mode_invalid"
+  );
+  if (rollbackId) {
+    resolvedProviderBaseline.rollbackId = rollbackId;
+  }
+  return resolvedProviderBaseline;
+}
+
 function buildScopeSignature(rulePack) {
   return JSON.stringify({
     companyTypes: rulePack.companyTypes || [],
     registrationCodes: rulePack.registrationCodes || [],
     groupCodes: rulePack.groupCodes || [],
     specialCaseCodes: rulePack.specialCaseCodes || []
+  });
+}
+
+function buildProviderBaselineScopeSignature(providerBaseline) {
+  return JSON.stringify({
+    environmentModes: providerBaseline.environmentModes || [],
+    channelCodes: providerBaseline.channelCodes || [],
+    specialCaseCodes: providerBaseline.specialCaseCodes || []
   });
 }
 
@@ -1602,4 +2083,32 @@ function stableStringify(value) {
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function sortProviderBaselines(left, right) {
+  const domainComparison = left.domain.localeCompare(right.domain);
+  if (domainComparison !== 0) {
+    return domainComparison;
+  }
+  const jurisdictionComparison = left.jurisdiction.localeCompare(right.jurisdiction);
+  if (jurisdictionComparison !== 0) {
+    return jurisdictionComparison;
+  }
+  const providerComparison = left.providerCode.localeCompare(right.providerCode);
+  if (providerComparison !== 0) {
+    return providerComparison;
+  }
+  const codeComparison = left.baselineCode.localeCompare(right.baselineCode);
+  if (codeComparison !== 0) {
+    return codeComparison;
+  }
+  const fromComparison = right.effectiveFrom.localeCompare(left.effectiveFrom);
+  if (fromComparison !== 0) {
+    return fromComparison;
+  }
+  const publishedComparison = String(right.publishedAt || "").localeCompare(String(left.publishedAt || ""));
+  if (publishedComparison !== 0) {
+    return publishedComparison;
+  }
+  return left.providerBaselineId.localeCompare(right.providerBaselineId);
 }

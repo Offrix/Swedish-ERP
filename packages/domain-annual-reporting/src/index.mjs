@@ -1,9 +1,68 @@
 import crypto from "node:crypto";
+import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
 
 export const ANNUAL_REPORT_PROFILE_CODES = Object.freeze(["k1", "k2", "k3"]);
 export const ANNUAL_REPORT_PACKAGE_STATUSES = Object.freeze(["draft", "ready_for_signature", "signed", "submitted", "locked", "superseded"]);
 export const ANNUAL_REPORT_SIGNATORY_STATUSES = Object.freeze(["invited", "signed", "declined", "superseded"]);
 export const TAX_DECLARATION_PACKAGE_STATUSES = Object.freeze(["ready", "submitted", "accepted", "rejected", "superseded"]);
+export const ANNUAL_REPORTING_PROVIDER_BASELINES = Object.freeze([
+  Object.freeze({
+    providerBaselineId: "annual-declaration-json-se-2026.1",
+    baselineCode: "SE-ANNUAL-DECLARATION-JSON",
+    providerCode: "skatteverket-json-support",
+    domain: "annual_reporting",
+    jurisdiction: "SE",
+    formatFamily: "annual_declaration_support_json",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "phase14.35",
+    checksum: "annual-declaration-json-se-2026.1",
+    sourceSnapshotDate: "2026-03-27",
+    semanticChangeSummary: "Annual declaration support JSON baseline for INK2, INK4 and NE package generation."
+  }),
+  Object.freeze({
+    providerBaselineId: "annual-sru-export-se-2026.1",
+    baselineCode: "SE-SRU-FILE",
+    providerCode: "skatteverket-sru",
+    domain: "annual_reporting",
+    jurisdiction: "SE",
+    formatFamily: "sru_file",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "annual-sru-export-se-2026.1",
+    sourceSnapshotDate: "2026-03-27",
+    semanticChangeSummary: "SRU export baseline for annual declaration balance and income rows."
+  }),
+  Object.freeze({
+    providerBaselineId: "authority-audit-json-se-2026.1",
+    baselineCode: "SE-AUTHORITY-AUDIT-JSON",
+    providerCode: "skatteverket-audit-json",
+    domain: "annual_reporting",
+    jurisdiction: "SE",
+    formatFamily: "authority_audit_json",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "phase12.2",
+    checksum: "authority-audit-json-se-2026.1",
+    sourceSnapshotDate: "2026-03-27",
+    semanticChangeSummary: "Authority audit overview baseline for VAT, AGI, HUS and special payroll tax support outputs."
+  }),
+  Object.freeze({
+    providerBaselineId: "annual-ixbrl-se-2026.1",
+    baselineCode: "SE-IXBRL-FILING",
+    providerCode: "bolagsverket-ixbrl",
+    domain: "annual_reporting",
+    jurisdiction: "SE",
+    formatFamily: "ixbrl_filing",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "2026.1",
+    checksum: "annual-ixbrl-se-2026.1",
+    sourceSnapshotDate: "2026-03-27",
+    semanticChangeSummary: "Baseline registry entry for Bolagsverket iXBRL annual filing formats and checksums."
+  })
+]);
 
 export function createAnnualReportingPlatform(options = {}) {
   return createAnnualReportingEngine(options);
@@ -21,8 +80,12 @@ export function createAnnualReportingEngine({
   legalFormPlatform = null,
   integrationPlatform = null,
   evidencePlatform = null,
-  clock = () => new Date()
+  clock = () => new Date(),
+  providerBaselineRegistry = null
 } = {}) {
+  const providerBaselines =
+    providerBaselineRegistry
+    || createProviderBaselineRegistry({ clock, seedProviderBaselines: ANNUAL_REPORTING_PROVIDER_BASELINES });
   const state = {
     packages: new Map(),
     versions: new Map(),
@@ -85,6 +148,7 @@ export function createAnnualReportingEngine({
           husPlatform,
           pensionPlatform,
           integrationPlatform,
+          providerBaselineRegistry: providerBaselines,
           clock
         },
         input
@@ -125,7 +189,8 @@ export function createAnnualReportingEngine({
         evidencePacks: [...state.evidencePacks.values()],
         signatories: [...state.signatories.values()],
         submissionEvents: [...state.submissionEvents.values()],
-        taxDeclarationPackages: [...state.taxPackages.values()]
+        taxDeclarationPackages: [...state.taxPackages.values()],
+        providerBaselines: providerBaselines.snapshotProviderBaselineRegistry()
       })
   };
 }
@@ -395,7 +460,19 @@ function openAnnualCorrectionPackage(context, input = {}) {
 }
 
 function createTaxDeclarationPackage(context, input = {}) {
-  const { state, ledgerPlatform, reportingPlatform, orgAuthPlatform, vatPlatform, payrollPlatform, husPlatform, pensionPlatform, integrationPlatform, clock } = context;
+  const {
+    state,
+    ledgerPlatform,
+    reportingPlatform,
+    orgAuthPlatform,
+    vatPlatform,
+    payrollPlatform,
+    husPlatform,
+    pensionPlatform,
+    integrationPlatform,
+    providerBaselineRegistry,
+    clock
+  } = context;
   const companyId = text(input.companyId, "company_id_required");
   const annualPackage = requirePackage(state, companyId, input.packageId);
   const version = requireVersion(state, annualPackage.packageId, input.versionId || annualPackage.currentVersionId);
@@ -411,7 +488,8 @@ function createTaxDeclarationPackage(context, input = {}) {
     pensionPlatform,
     annualPackage,
     version,
-    accountingPeriod
+    accountingPeriod,
+    providerBaselineRegistry
   });
   const existing = [...state.taxPackages.values()].find(
     (candidate) =>
@@ -438,6 +516,7 @@ function createTaxDeclarationPackage(context, input = {}) {
     outputChecksum: model.outputChecksum,
     authorityOverview: model.authorityOverview,
     evidencePackId: annualPackage.currentEvidencePackId,
+    providerBaselineRefs: model.providerBaselineRefs,
     submissionFamilies: buildSubmissionFamilies(annualPackage, integrationPlatform),
     exports: model.exports,
     createdByActorId: actorId,
@@ -457,7 +536,18 @@ function createTaxDeclarationPackage(context, input = {}) {
   return clone(record);
 }
 
-function buildTaxDeclarationPackageModel({ orgAuthPlatform, reportingPlatform, vatPlatform, payrollPlatform, husPlatform, pensionPlatform, annualPackage, version, accountingPeriod }) {
+function buildTaxDeclarationPackageModel({
+  orgAuthPlatform,
+  reportingPlatform,
+  vatPlatform,
+  payrollPlatform,
+  husPlatform,
+  pensionPlatform,
+  annualPackage,
+  version,
+  accountingPeriod,
+  providerBaselineRegistry
+}) {
   const company = requireCompany(orgAuthPlatform, annualPackage.companyId);
   const balanceSheet = reportingPlatform.getReportSnapshot({ companyId: annualPackage.companyId, reportSnapshotId: version.balanceSheetReportSnapshotId });
   const incomeStatement = reportingPlatform.getReportSnapshot({ companyId: annualPackage.companyId, reportSnapshotId: version.incomeStatementReportSnapshotId });
@@ -476,6 +566,31 @@ function buildTaxDeclarationPackageModel({ orgAuthPlatform, reportingPlatform, v
   });
   const summarizedBalanceSheet = summarizeReportSnapshot(balanceSheet);
   const summarizedIncomeStatement = summarizeReportSnapshot(incomeStatement);
+  const effectiveDate = accountingPeriod.endsOn || accountingPeriod.toDate || accountingPeriod.endDate || `${annualPackage.fiscalYear}-12-31`;
+  const declarationBaselineRef = resolveAnnualProviderBaselineRef(providerBaselineRegistry, {
+    providerCode: "skatteverket-json-support",
+    baselineCode: "SE-ANNUAL-DECLARATION-JSON",
+    effectiveDate,
+    metadata: {
+      declarationProfileCode: annualPackage.declarationProfileCode
+    }
+  });
+  const sruBaselineRef = resolveAnnualProviderBaselineRef(providerBaselineRegistry, {
+    providerCode: "skatteverket-sru",
+    baselineCode: "SE-SRU-FILE",
+    effectiveDate,
+    metadata: {
+      declarationProfileCode: annualPackage.declarationProfileCode
+    }
+  });
+  const authorityAuditBaselineRef = resolveAnnualProviderBaselineRef(providerBaselineRegistry, {
+    providerCode: "skatteverket-audit-json",
+    baselineCode: "SE-AUTHORITY-AUDIT-JSON",
+    effectiveDate,
+    metadata: {
+      declarationProfileCode: annualPackage.declarationProfileCode
+    }
+  });
   const declarationPayload = buildDeclarationSupportPayload({
     annualPackage,
     version,
@@ -494,32 +609,34 @@ function buildTaxDeclarationPackageModel({ orgAuthPlatform, reportingPlatform, v
     createJsonExportArtifact(declarationPayload.exportCode, `${declarationPayload.filePrefix}_${annualPackage.fiscalYear}.json`, declarationPayload.payload, [
       buildHashCheck("balance_sheet_snapshot_hash", balanceSheet.contentHash, declarationPayload.payload.balanceSheet.contentHash),
       buildHashCheck("income_statement_snapshot_hash", incomeStatement.contentHash, declarationPayload.payload.incomeStatement.contentHash)
-    ]),
+    ], declarationBaselineRef),
     createTextExportArtifact("sru_rows_csv", `SRU_${annualPackage.fiscalYear}.csv`, sruPayloadText, [
       buildAmountCheck(
         "sru_total_balance_amount",
         roundMoney(Number(balanceSheet.totals.balanceAmount || 0) + Number(incomeStatement.totals.balanceAmount || 0) + Number(authorityOverview.specialPayrollTax.specialPayrollTaxAmount || 0)),
         roundMoney(sruRows.reduce((sum, row) => sum + Number(row.amount || 0), 0))
       )
-    ]),
+    ], sruBaselineRef),
     createJsonExportArtifact("vat_audit_overview_json", `VAT_${annualPackage.fiscalYear}.json`, vatOverviewPayload, [
       buildAmountCheck("vat_declared_tax_amount", authorityOverview.vat.totalDeclaredTaxAmount, vatOverviewPayload.overview.totalDeclaredTaxAmount)
-    ]),
+    ], authorityAuditBaselineRef),
     createJsonExportArtifact("agi_audit_overview_json", `AGI_${annualPackage.fiscalYear}.json`, agiOverviewPayload, [
       buildAmountCheck("agi_cash_compensation_amount", authorityOverview.agi.totalCashCompensationAmount, agiOverviewPayload.overview.totalCashCompensationAmount),
       buildAmountCheck("agi_preliminary_tax_amount", authorityOverview.agi.totalPreliminaryTaxAmount, agiOverviewPayload.overview.totalPreliminaryTaxAmount)
-    ]),
+    ], authorityAuditBaselineRef),
     createJsonExportArtifact("hus_summary_json", `HUS_${annualPackage.fiscalYear}.json`, husOverviewPayload, [
       buildAmountCheck("hus_requested_amount", authorityOverview.hus.totalRequestedAmount, husOverviewPayload.overview.totalRequestedAmount),
       buildAmountCheck("hus_approved_amount", authorityOverview.hus.totalApprovedAmount, husOverviewPayload.overview.totalApprovedAmount)
-    ]),
+    ], authorityAuditBaselineRef),
     createJsonExportArtifact("special_payroll_tax_json", `SLP_${annualPackage.fiscalYear}.json`, pensionOverviewPayload, [
       buildAmountCheck("special_payroll_tax_amount", authorityOverview.specialPayrollTax.specialPayrollTaxAmount, pensionOverviewPayload.overview.specialPayrollTaxAmount)
-    ])
+    ], authorityAuditBaselineRef)
   ];
+  const providerBaselineRefs = dedupeProviderBaselineRefs(exports.map((entry) => entry.providerBaselineRef).filter(Boolean));
   return {
     authorityOverview,
     exports,
+    providerBaselineRefs,
     sourceFingerprint: hashPayload({
       annualReportVersionId: version.versionId,
       balanceSheetReportSnapshotId: balanceSheet.reportSnapshotId,
@@ -528,10 +645,17 @@ function buildTaxDeclarationPackageModel({ orgAuthPlatform, reportingPlatform, v
       incomeStatementHash: incomeStatement.contentHash,
       declarationProfileCode: annualPackage.declarationProfileCode,
       packageFamilyCode: annualPackage.packageFamilyCode,
+      providerBaselineRefs,
       authorityOverview
     }),
     outputChecksum: hashPayload({
-      exports: exports.map((entry) => ({ exportCode: entry.exportCode, payloadHash: entry.payloadHash, checks: entry.checks.map((check) => ({ checkCode: check.checkCode, passed: check.passed })) })),
+      exports: exports.map((entry) => ({
+        exportCode: entry.exportCode,
+        payloadHash: entry.payloadHash,
+        providerBaselineId: entry.providerBaselineId || null,
+        checks: entry.checks.map((check) => ({ checkCode: check.checkCode, passed: check.passed }))
+      })),
+      providerBaselineRefs,
       authorityOverview
     })
   };
@@ -958,7 +1082,7 @@ function buildSruRows(balanceSheet, incomeStatement, specialPayrollTax) {
   ];
 }
 
-function createJsonExportArtifact(exportCode, fileName, payload, checks = []) {
+function createJsonExportArtifact(exportCode, fileName, payload, checks = [], providerBaselineRef = null) {
   const finalizedChecks = checks.map(finalizeCheck);
   return {
     exportCode,
@@ -968,12 +1092,17 @@ function createJsonExportArtifact(exportCode, fileName, payload, checks = []) {
     contentHash: hashPayload({ fileName, payload }),
     payload,
     content: JSON.stringify(payload, null, 2),
+    providerBaselineId: providerBaselineRef?.providerBaselineId || null,
+    providerBaselineCode: providerBaselineRef?.baselineCode || null,
+    providerBaselineVersion: providerBaselineRef?.providerBaselineVersion || null,
+    providerBaselineChecksum: providerBaselineRef?.providerBaselineChecksum || null,
+    providerBaselineRef: providerBaselineRef ? clone(providerBaselineRef) : null,
     checks: finalizedChecks,
     allChecksPassed: finalizedChecks.every((check) => check.passed)
   };
 }
 
-function createTextExportArtifact(exportCode, fileName, payloadText, checks = []) {
+function createTextExportArtifact(exportCode, fileName, payloadText, checks = [], providerBaselineRef = null) {
   const finalizedChecks = checks.map(finalizeCheck);
   return {
     exportCode,
@@ -983,9 +1112,42 @@ function createTextExportArtifact(exportCode, fileName, payloadText, checks = []
     contentHash: hashPayload({ fileName, payloadText }),
     payloadText,
     content: payloadText,
+    providerBaselineId: providerBaselineRef?.providerBaselineId || null,
+    providerBaselineCode: providerBaselineRef?.baselineCode || null,
+    providerBaselineVersion: providerBaselineRef?.providerBaselineVersion || null,
+    providerBaselineChecksum: providerBaselineRef?.providerBaselineChecksum || null,
+    providerBaselineRef: providerBaselineRef ? clone(providerBaselineRef) : null,
     checks: finalizedChecks,
     allChecksPassed: finalizedChecks.every((check) => check.passed)
   };
+}
+
+function resolveAnnualProviderBaselineRef(providerBaselineRegistry, { providerCode, baselineCode, effectiveDate, metadata = {} }) {
+  const providerBaseline = providerBaselineRegistry.resolveProviderBaseline({
+    domain: "annual_reporting",
+    jurisdiction: "SE",
+    providerCode,
+    baselineCode,
+    effectiveDate
+  });
+  return providerBaselineRegistry.buildProviderBaselineRef({
+    effectiveDate,
+    providerBaseline,
+    metadata
+  });
+}
+
+function dedupeProviderBaselineRefs(values = []) {
+  const refs = [];
+  for (const candidate of values) {
+    if (!candidate?.providerBaselineId) {
+      continue;
+    }
+    if (!refs.some((existing) => existing.providerBaselineId === candidate.providerBaselineId)) {
+      refs.push(clone(candidate));
+    }
+  }
+  return refs;
 }
 
 function buildHashCheck(checkCode, expectedHash, actualHash) {

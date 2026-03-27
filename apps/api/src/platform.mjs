@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { createOrgAuthPlatform } from "../../../packages/domain-org-auth/src/index.mjs";
+import { createOrgAuthPlatform, AUTH_PROVIDER_BASELINES } from "../../../packages/domain-org-auth/src/index.mjs";
 import { createDocumentArchivePlatform } from "../../../packages/domain-documents/src/index.mjs";
 import { createEvidencePlatform } from "../../../packages/domain-evidence/src/index.mjs";
 import { createObservabilityPlatform } from "../../../packages/domain-observability/src/index.mjs";
@@ -42,8 +42,9 @@ import {
   createInMemoryCriticalDomainStateStore,
   createSqliteCriticalDomainStateStore
 } from "../../../packages/domain-core/src/index.mjs";
-import { createAnnualReportingPlatform } from "../../../packages/domain-annual-reporting/src/index.mjs";
-import { createAutomationAiEngine } from "../../../packages/rule-engine/src/index.mjs";
+import { createAnnualReportingPlatform, ANNUAL_REPORTING_PROVIDER_BASELINES } from "../../../packages/domain-annual-reporting/src/index.mjs";
+import { createAutomationAiEngine, createProviderBaselineRegistry } from "../../../packages/rule-engine/src/index.mjs";
+import { INTEGRATION_PROVIDER_BASELINES } from "../../../packages/domain-integrations/src/index.mjs";
 import {
   AUDIT_EVENT_VERSION,
   EVENT_ENVELOPE_VERSION,
@@ -703,6 +704,16 @@ export function createApiPlatform(options = {}) {
     bootstrapScenarioCode: options.bootstrapScenarioCode || null,
     seedDemo: options.seedDemo
   });
+  const providerBaselineRegistry =
+    options.providerBaselineRegistry
+    || createProviderBaselineRegistry({
+      clock: options.clock || (() => new Date()),
+      seedProviderBaselines: [
+        ...AUTH_PROVIDER_BASELINES,
+        ...ANNUAL_REPORTING_PROVIDER_BASELINES,
+        ...INTEGRATION_PROVIDER_BASELINES
+      ]
+    });
   const platformOptions = Object.freeze({
     ...options,
     runtimeMode: runtimeModeProfile.environmentMode,
@@ -711,13 +722,14 @@ export function createApiPlatform(options = {}) {
     bootstrapModePolicy,
     bootstrapMode: bootstrapSeeding.bootstrapMode,
     bootstrapScenarioCode: bootstrapSeeding.bootstrapScenarioCode,
-    seedDemo: bootstrapSeeding.shouldSeedDemo,
-    supportsLegalEffect: runtimeModeProfile.supportsLegalEffect,
-    modeWatermarkCode: runtimeModeProfile.modeWatermarkCode,
-    sequenceSpace: runtimeModeProfile.sequenceSpace,
-    providerEnvironmentRef: runtimeModeProfile.providerEnvironmentRef,
-    dataRetentionClass: runtimeModeProfile.dataRetentionClass
-  });
+      seedDemo: bootstrapSeeding.shouldSeedDemo,
+      supportsLegalEffect: runtimeModeProfile.supportsLegalEffect,
+      modeWatermarkCode: runtimeModeProfile.modeWatermarkCode,
+      sequenceSpace: runtimeModeProfile.sequenceSpace,
+      providerEnvironmentRef: runtimeModeProfile.providerEnvironmentRef,
+      dataRetentionClass: runtimeModeProfile.dataRetentionClass,
+      providerBaselineRegistry
+    });
   const criticalDomainStateStore = resolveCriticalDomainStateStore({
     options,
     env,
@@ -812,13 +824,17 @@ export function createApiPlatform(options = {}) {
       value: runtimeModeProfile,
       enumerable: false
     },
-    bootstrapModePolicy: {
-      value: bootstrapModePolicy,
-      enumerable: false
-    },
-    environmentMode: {
-      value: runtimeModeProfile.environmentMode,
-      enumerable: false
+      bootstrapModePolicy: {
+        value: bootstrapModePolicy,
+        enumerable: false
+      },
+      providerBaselineRegistry: {
+        value: providerBaselineRegistry,
+        enumerable: false
+      },
+      environmentMode: {
+        value: runtimeModeProfile.environmentMode,
+        enumerable: false
     },
     supportsLegalEffect: {
       value: runtimeModeProfile.supportsLegalEffect,

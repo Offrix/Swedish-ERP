@@ -391,13 +391,14 @@ GÃ¶ra all reglerad logik, baseline-versionering och providerspecifika format s
 
 **Delfaser**
 - [x] 5.1 [NEW BUILD] **Rulepack registry** â€” InfÃ¶r versionerade rulepacks fÃ¶r VAT, payroll tax, employer contributions, benefits, mileage, HUS, tax account classification och legal form obligations.
-- [ ] 5.2 [NEW BUILD] **Provider baseline registry** â€” Versionera XML-scheman, API-versioner, SRU-format, iXBRL/checksums, BankID, Peppol och bankfilformat med effectiveFrom/effectiveTo/checksum.
+- [x] 5.2 [NEW BUILD] **Provider baseline registry** â€” Versionera XML-scheman, API-versioner, SRU-format, iXBRL/checksums, BankID, Peppol och bankfilformat med effectiveFrom/effectiveTo/checksum.
 - [ ] 5.3 [HARDEN] **Historical pinning** â€” Varje beslut, journal, submission och annual package ska peka pÃ¥ rulepack-version och baseline-version som anvÃ¤ndes.
 - [ ] 5.4 [OPERATIONALIZE] **Annual change calendar** â€” InfÃ¶r process fÃ¶r regeluppdateringar, diff-review, sandbox-verifiering, staged publish och rollback.
 - [ ] 5.5 [REMOVE/DEPRECATE] **Stoppa hÃ¥rdkodade regulatoriska specialfall** â€” Ta bort fri `manual_rate`-logik som standard, hÃ¥rdkodade SINK/avgiftsbrancher utan snapshot och ad hoc provider-switchar.
 
 **Delfasstatus**
 - 5.1 klar 2026-03-27: central rulepack-registry styr nu accounting-method, fiscal-year, legal-form obligations, HUS och tax-account med effective-dated resolution i stället för hårdkodade versionssträngar; annual context bär nu pinned rulepack refs, dedikerad 5.1-svit bevisar date-cutover över flera domäner och `docs/runbooks/rulepack-publication.md` finns nu som operativ publiceringsrunbook.
+- 5.2 klar 2026-03-27: central provider baseline-registry styr nu BankID RP API, Peppol BIS Billing, payment link API, open banking, bankfilformat, SRU, authority audit exports och iXBRL-format genom effective-dated baselines med checksum och rollbackstöd; auth-, integrations-, partner- och annual-reporting-runtime bär nu pinned provider baseline refs, dedikerad 5.2-svit samt AR-, annual- och partner-sviter bevisar resolutionen och `docs/runbooks/provider-baseline-update.md` finns nu som operativ publiceringsrunbook.
 
 **Exit gate**  
 - All reglerad logik och alla providerformat gÃ¥r att spÃ¥ra till version, baseline, effective dating och checksum.

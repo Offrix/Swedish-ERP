@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { createPartnerModule } from "./partners.mjs";
 import { createPublicApiModule } from "./public-api.mjs";
 import { createRegulatedSubmissionsModule } from "./regulated-submissions.mjs";
+import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -9,6 +10,78 @@ import {
 
 export const INVOICE_DELIVERY_CHANNELS = Object.freeze(["pdf_email", "peppol"]);
 export const PAYMENT_LINK_STATUSES = Object.freeze(["active", "consumed", "expired", "cancelled"]);
+export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
+  Object.freeze({
+    providerBaselineId: "peppol-bis-billing-3-se-2026.1",
+    baselineCode: "SE-PEPPOL-BIS-BILLING-3",
+    providerCode: "pagero_online",
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "peppol_bis_billing_3",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "3.0",
+    checksum: "peppol-bis-billing-3-se-2026.1",
+    sourceSnapshotDate: "2026-03-27",
+    semanticChangeSummary: "Peppol BIS Billing 3 baseline for outbound invoice and credit-note envelopes."
+  }),
+  Object.freeze({
+    providerBaselineId: "payment-link-api-se-2026.1",
+    baselineCode: "SE-PAYMENT-LINK-API",
+    providerCode: "internal_mock",
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "payment_link_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "payment-link-api-se-2026.1",
+    sourceSnapshotDate: "2026-03-27",
+    semanticChangeSummary: "Internal payment-link contract baseline for deterministic trial and sandbox checkout flows."
+  }),
+  Object.freeze({
+    providerBaselineId: "open-banking-core-se-2026.1",
+    baselineCode: "SE-OPEN-BANKING-CORE",
+    providerCode: "enable_banking",
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "open_banking_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "open-banking-core-se-2026.1",
+    sourceSnapshotDate: "2026-03-27",
+    semanticChangeSummary: "Open-banking adapter baseline for statement sync, payment export and tax-account sync."
+  }),
+  Object.freeze({
+    providerBaselineId: "bank-file-format-se-2026.1",
+    baselineCode: "SE-BANK-FILE-FORMAT",
+    providerCode: "bank_file_channel",
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "bank_file_format",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "bank-file-format-se-2026.1",
+    sourceSnapshotDate: "2026-03-27",
+    semanticChangeSummary: "Bank file channel baseline for deterministic export/import file envelopes."
+  }),
+  Object.freeze({
+    providerBaselineId: "id06-api-se-2026.1",
+    baselineCode: "SE-ID06-API",
+    providerCode: "official_id06_integration",
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "id06_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "id06-api-se-2026.1",
+    sourceSnapshotDate: "2026-03-27",
+    semanticChangeSummary: "ID06 provider adapter baseline for official workforce and site synchronization."
+  })
+]);
 
 export function createIntegrationPlatform(options = {}) {
   return createIntegrationEngine(options);
@@ -21,8 +94,11 @@ export function createIntegrationEngine({
   partnerContractTestExecutors = undefined,
   partnerOperationExecutors = undefined,
   evidencePlatform = null,
-  getCorePlatform = null
+  getCorePlatform = null,
+  providerBaselineRegistry = null
 } = {}) {
+  const providerBaselines =
+    providerBaselineRegistry || createProviderBaselineRegistry({ clock, seedProviderBaselines: INTEGRATION_PROVIDER_BASELINES });
   const state = {
     submissions: new Map(),
     submissionIdsByCompany: new Map(),
@@ -58,7 +134,8 @@ export function createIntegrationEngine({
     state,
     clock,
     contractTestExecutors: partnerContractTestExecutors,
-    operationExecutors: partnerOperationExecutors
+    operationExecutors: partnerOperationExecutors,
+    providerBaselineRegistry: providerBaselines
   });
   const regulatedSubmissionsModule = createRegulatedSubmissionsModule({
     state,
@@ -73,6 +150,10 @@ export function createIntegrationEngine({
     ...regulatedSubmissionsModule,
     deliveryChannels: INVOICE_DELIVERY_CHANNELS,
     paymentLinkStatuses: PAYMENT_LINK_STATUSES,
+    providerBaselineRegistry: providerBaselines,
+    listProviderBaselines: (filters) => providerBaselines.listProviderBaselines(filters),
+    resolveProviderBaseline: (filters) => providerBaselines.resolveProviderBaseline(filters),
+    snapshotProviderBaselineRegistry: () => providerBaselines.snapshotProviderBaselineRegistry(),
     prepareInvoiceDelivery,
     createPaymentLink,
     snapshotIntegrations() {
@@ -92,7 +173,8 @@ export function createIntegrationEngine({
         partnerContractResults: [...state.partnerContractResults.values()],
         partnerOperations: [...state.partnerOperations.values()],
         asyncJobs: [...state.asyncJobs.values()],
-        asyncDeadLetters: [...state.asyncDeadLetters.values()]
+        asyncDeadLetters: [...state.asyncDeadLetters.values()],
+        providerBaselines: providerBaselines.snapshotProviderBaselineRegistry()
       });
     },
     exportDurableState,
@@ -154,6 +236,15 @@ export function createIntegrationEngine({
       };
     }
 
+    const peppolBaseline = resolveProviderBaselineRef(providerBaselines, {
+      providerCode: "pagero_online",
+      baselineCode: "SE-PEPPOL-BIS-BILLING-3",
+      effectiveDate: invoice.issueDate || nowIso(clock).slice(0, 10),
+      metadata: {
+        invoiceId: invoice.customerInvoiceId,
+        channel: "peppol"
+      }
+    });
     const peppolId = normalizeOptionalText(customer.peppolIdentifier);
     const peppolScheme = normalizeOptionalText(customer.peppolScheme);
     if (!peppolId || !peppolScheme) {
@@ -210,6 +301,12 @@ export function createIntegrationEngine({
       payloadType: "peppol_bis_billing_3",
       payloadVersion: "3.0",
       payloadHash: hashObject(payload),
+      providerCode: peppolBaseline.providerCode,
+      providerBaselineId: peppolBaseline.providerBaselineId,
+      providerBaselineCode: peppolBaseline.baselineCode,
+      providerBaselineVersion: peppolBaseline.providerBaselineVersion,
+      providerBaselineChecksum: peppolBaseline.providerBaselineChecksum,
+      providerBaselineRef: peppolBaseline,
       status: "prepared",
       recipient: `${peppolScheme}:${peppolId}`,
       buyerReference: resolvedBuyerReference,
@@ -233,11 +330,25 @@ export function createIntegrationEngine({
     const resolvedCurrencyCode = normalizeUpperCode(currencyCode, "currency_code_required", 3);
     const paymentLinkId = crypto.randomUUID();
     const resolvedExpiresAt = normalizeDate(expiresAt || addDaysIso(nowIso(clock).slice(0, 10), 14), "payment_link_expiry_invalid");
+    const paymentLinkBaseline = resolveProviderBaselineRef(providerBaselines, {
+      providerCode: requireText(providerCode, "payment_link_provider_code_required"),
+      baselineCode: "SE-PAYMENT-LINK-API",
+      effectiveDate: nowIso(clock).slice(0, 10),
+      metadata: {
+        invoiceId: resolvedInvoiceId,
+        currencyCode: resolvedCurrencyCode
+      }
+    });
     return {
       paymentLinkId,
       companyId: resolvedCompanyId,
       invoiceId: resolvedInvoiceId,
-      providerCode: requireText(providerCode, "payment_link_provider_code_required"),
+      providerCode: paymentLinkBaseline.providerCode,
+      providerBaselineId: paymentLinkBaseline.providerBaselineId,
+      providerBaselineCode: paymentLinkBaseline.baselineCode,
+      providerBaselineVersion: paymentLinkBaseline.providerBaselineVersion,
+      providerBaselineChecksum: paymentLinkBaseline.providerBaselineChecksum,
+      providerBaselineRef: paymentLinkBaseline,
       status: "active",
       amount: resolvedAmount,
       currencyCode: resolvedCurrencyCode,
@@ -328,6 +439,21 @@ function nowIso(clock = () => new Date()) {
 
 function roundMoney(value) {
   return Number(Number(value || 0).toFixed(2));
+}
+
+function resolveProviderBaselineRef(providerBaselines, { providerCode, baselineCode, effectiveDate, metadata = {} }) {
+  const resolvedBaseline = providerBaselines.resolveProviderBaseline({
+    domain: "integrations",
+    jurisdiction: "SE",
+    providerCode,
+    baselineCode,
+    effectiveDate
+  });
+  return providerBaselines.buildProviderBaselineRef({
+    effectiveDate,
+    providerBaseline: resolvedBaseline,
+    metadata
+  });
 }
 
 function hashObject(value) {

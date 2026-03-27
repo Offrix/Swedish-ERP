@@ -92,6 +92,19 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
     taxPackage.exports.find((entry) => entry.exportCode === "agi_audit_overview_json").payload.overview.totalCashCompensationAmount > 0,
     true
   );
+  assert.deepEqual(
+    taxPackage.providerBaselineRefs.map((entry) => entry.baselineCode).sort(),
+    ["SE-ANNUAL-DECLARATION-JSON", "SE-AUTHORITY-AUDIT-JSON", "SE-SRU-FILE"]
+  );
+  assert.equal(taxPackage.exports.every((entry) => typeof entry.providerBaselineChecksum === "string"), true);
+  assert.equal(
+    taxPackage.exports.find((entry) => entry.exportCode === "sru_rows_csv").providerBaselineCode,
+    "SE-SRU-FILE"
+  );
+  assert.equal(
+    taxPackage.exports.find((entry) => entry.exportCode === "ink2_support_json").providerBaselineCode,
+    "SE-ANNUAL-DECLARATION-JSON"
+  );
 
   const second = platform.createTaxDeclarationPackage({
     companyId: COMPANY_ID,
@@ -100,6 +113,7 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
   });
   assert.equal(second.taxDeclarationPackageId, taxPackage.taxDeclarationPackageId);
   assert.equal(second.outputChecksum, taxPackage.outputChecksum);
+  assert.deepEqual(second.providerBaselineRefs, taxPackage.providerBaselineRefs);
 });
 
 test("Phase 12.2 submission engine separates accepted from finalized and deduplicates identical receipts", async () => {
