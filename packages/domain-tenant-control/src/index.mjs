@@ -60,6 +60,13 @@ const TENANT_BOOTSTRAP_ACTOR_ID = "tenant_control_bootstrap";
 const DEFAULT_TRIAL_MODE = "trial";
 const DEFAULT_TRIAL_WATERMARK_CODE = "TRIAL";
 const DEFAULT_TRIAL_PROVIDER_POLICY_CODE = "trial_safe_default";
+const DEFAULT_TRIAL_SEED_SCENARIO_CODE = "service_company_basic";
+const TRIAL_SEED_SCENARIO_VERSION = "2026.1";
+const TRIAL_REFRESH_PACK_VERSION = "2026.1";
+const TRIAL_DATA_RETENTION_POLICY_CODE = "trial_reset_archive_30d";
+const TRIAL_REFRESH_POLICY_CODE = "preserve_masterdata_reset_process";
+const TRIAL_SESSION_TERMINATION_POLICY_CODE = "revoke_non_operator_sessions";
+const DEFAULT_TRIAL_REFRESH_PACK_CODE = "documents_and_work_items";
 const DEFAULT_TRIAL_BLOCKED_OPERATION_CLASSES = Object.freeze([
   "live_credentials",
   "live_submissions",
@@ -68,6 +75,149 @@ const DEFAULT_TRIAL_BLOCKED_OPERATION_CLASSES = Object.freeze([
   "live_psp_settlement",
   "legal_effect"
 ]);
+const TRIAL_SEED_SCENARIO_ALIAS_CODES = Object.freeze({
+  agency_trial_seed: "retainer_capacity_agency"
+});
+const TRIAL_SEED_SCENARIOS = Object.freeze({
+  service_company_basic: Object.freeze({
+    code: "service_company_basic",
+    label: "Service company basic",
+    legalFormCode: "AKTIEBOLAG",
+    chartTemplateId: "DSAM-2026",
+    vatScheme: "se_standard",
+    vatFilingPeriod: "monthly",
+    employees: Object.freeze([]),
+    employments: Object.freeze([]),
+    documents: Object.freeze(["supplier_invoice_sample", "sales_invoice_sample", "ocr_receipt_sample"]),
+    projects: Object.freeze([]),
+    invoices: Object.freeze(["standard_sales_invoice"]),
+    syntheticFeeds: Object.freeze(["bank_statement_basic", "tax_account_basic"]),
+    workItems: Object.freeze(["review_queue_seed", "notification_seed", "activity_seed"])
+  }),
+  consulting_time_and_milestone: Object.freeze({
+    code: "consulting_time_and_milestone",
+    label: "Consulting time and milestone",
+    legalFormCode: "AKTIEBOLAG",
+    chartTemplateId: "DSAM-2026",
+    vatScheme: "se_standard",
+    vatFilingPeriod: "monthly",
+    employees: Object.freeze(["consultant_1", "consultant_2"]),
+    employments: Object.freeze(["consultant_monthly_salary"]),
+    documents: Object.freeze(["milestone_contract", "supplier_invoice_sample", "time_report_sample"]),
+    projects: Object.freeze(["consulting_project_time", "consulting_project_milestone"]),
+    invoices: Object.freeze(["time_invoice", "milestone_invoice"]),
+    syntheticFeeds: Object.freeze(["bank_statement_consulting", "tax_account_basic"]),
+    workItems: Object.freeze(["time_review_seed", "delivery_review_seed", "notification_seed"])
+  }),
+  salary_employer_with_agi: Object.freeze({
+    code: "salary_employer_with_agi",
+    label: "Salary employer with AGI",
+    legalFormCode: "AKTIEBOLAG",
+    chartTemplateId: "DSAM-2026",
+    vatScheme: "se_standard",
+    vatFilingPeriod: "monthly",
+    employees: Object.freeze(["employee_admin", "employee_operator"]),
+    employments: Object.freeze(["monthly_salary", "hourly_salary"]),
+    documents: Object.freeze(["employment_contract", "expense_receipt_sample"]),
+    projects: Object.freeze([]),
+    invoices: Object.freeze([]),
+    syntheticFeeds: Object.freeze(["agi_receipt_sandbox", "tax_account_payroll", "bank_statement_payroll"]),
+    workItems: Object.freeze(["payroll_review_seed", "agi_receipt_seed", "notification_seed"])
+  }),
+  hus_eligible_services_company: Object.freeze({
+    code: "hus_eligible_services_company",
+    label: "HUS eligible services company",
+    legalFormCode: "AKTIEBOLAG",
+    chartTemplateId: "DSAM-2026",
+    vatScheme: "se_standard",
+    vatFilingPeriod: "monthly",
+    employees: Object.freeze(["hus_operator"]),
+    employments: Object.freeze(["monthly_salary"]),
+    documents: Object.freeze(["hus_invoice_sample", "hus_property_reference"]),
+    projects: Object.freeze(["hus_service_project"]),
+    invoices: Object.freeze(["hus_invoice"]),
+    syntheticFeeds: Object.freeze(["hus_decision_sandbox", "bank_statement_hus", "tax_account_basic"]),
+    workItems: Object.freeze(["hus_review_seed", "submission_monitor_seed", "notification_seed"])
+  }),
+  project_service_with_field_pack: Object.freeze({
+    code: "project_service_with_field_pack",
+    label: "Project service with field pack",
+    legalFormCode: "AKTIEBOLAG",
+    chartTemplateId: "DSAM-2026",
+    vatScheme: "se_standard",
+    vatFilingPeriod: "monthly",
+    employees: Object.freeze(["dispatcher", "field_worker"]),
+    employments: Object.freeze(["field_salary"]),
+    documents: Object.freeze(["work_order_sample", "field_photo_sample"]),
+    projects: Object.freeze(["service_project", "field_work_order"]),
+    invoices: Object.freeze(["field_service_invoice"]),
+    syntheticFeeds: Object.freeze(["bank_statement_field", "tax_account_basic"]),
+    workItems: Object.freeze(["field_dispatch_seed", "review_queue_seed", "activity_seed"])
+  }),
+  construction_service_pack: Object.freeze({
+    code: "construction_service_pack",
+    label: "Construction service pack",
+    legalFormCode: "AKTIEBOLAG",
+    chartTemplateId: "DSAM-2026",
+    vatScheme: "se_standard",
+    vatFilingPeriod: "monthly",
+    employees: Object.freeze(["site_manager", "construction_worker"]),
+    employments: Object.freeze(["construction_salary"]),
+    documents: Object.freeze(["personalliggare_sample", "id06_sample", "site_log_sample"]),
+    projects: Object.freeze(["construction_project", "site_visit_project"]),
+    invoices: Object.freeze(["construction_invoice"]),
+    syntheticFeeds: Object.freeze(["bank_statement_construction", "tax_account_basic"]),
+    workItems: Object.freeze(["id06_review_seed", "personalliggare_review_seed", "notification_seed"])
+  }),
+  retainer_capacity_agency: Object.freeze({
+    code: "retainer_capacity_agency",
+    label: "Retainer capacity agency",
+    legalFormCode: "AKTIEBOLAG",
+    chartTemplateId: "DSAM-2026",
+    vatScheme: "se_standard",
+    vatFilingPeriod: "monthly",
+    employees: Object.freeze(["agency_pm", "agency_creator"]),
+    employments: Object.freeze(["agency_salary"]),
+    documents: Object.freeze(["retainer_contract", "ocr_receipt_sample", "supplier_invoice_sample"]),
+    projects: Object.freeze(["retainer_project", "capacity_pool"]),
+    invoices: Object.freeze(["retainer_invoice", "change_order_invoice"]),
+    syntheticFeeds: Object.freeze(["bank_statement_agency", "tax_account_basic"]),
+    workItems: Object.freeze(["capacity_review_seed", "client_delivery_seed", "notification_seed"])
+  }),
+  trade_and_supplier_invoices: Object.freeze({
+    code: "trade_and_supplier_invoices",
+    label: "Trade and supplier invoices",
+    legalFormCode: "AKTIEBOLAG",
+    chartTemplateId: "DSAM-2026",
+    vatScheme: "se_standard",
+    vatFilingPeriod: "monthly",
+    employees: Object.freeze(["warehouse_admin"]),
+    employments: Object.freeze(["monthly_salary"]),
+    documents: Object.freeze(["supplier_invoice_sample", "goods_receipt_sample", "ocr_receipt_sample"]),
+    projects: Object.freeze([]),
+    invoices: Object.freeze(["trade_sales_invoice"]),
+    syntheticFeeds: Object.freeze(["bank_statement_trade", "tax_account_basic"]),
+    workItems: Object.freeze(["ap_matching_seed", "payment_review_seed", "notification_seed"])
+  })
+});
+const TRIAL_REFRESH_PACKS = Object.freeze({
+  documents_and_work_items: Object.freeze({
+    refreshPackCode: "documents_and_work_items",
+    label: "Documents and work items refresh",
+    preserveMasterdata: true,
+    resetProcessData: false,
+    appendDocuments: Object.freeze(["new_invoice_upload", "ocr_mailroom_drop", "supplier_pdf_batch"]),
+    appendWorkItems: Object.freeze(["review_queue_delta", "notification_delta", "activity_delta"])
+  }),
+  bank_tax_and_receipts: Object.freeze({
+    refreshPackCode: "bank_tax_and_receipts",
+    label: "Bank, tax and receipt refresh",
+    preserveMasterdata: true,
+    resetProcessData: false,
+    appendDocuments: Object.freeze(["bank_statement_delta", "tax_account_delta"]),
+    appendWorkItems: Object.freeze(["submission_monitor_delta", "tax_reconciliation_delta"])
+  })
+});
 const DEFAULT_FINANCE_QUEUE_STRUCTURE = Object.freeze([
   Object.freeze({
     queueCode: "finance_review",
@@ -183,6 +333,7 @@ export function createTenantControlEngine({
     createTrialEnvironment,
     listTrialEnvironments,
     resetTrialEnvironment,
+    refreshTrialEnvironment,
     promoteTrialToLive,
     listPromotionPlans,
     startParallelRun,
@@ -436,6 +587,14 @@ export function createTenantControlEngine({
       companyId: resolvedCompanyId,
       watermarkCode
     });
+    const resolvedScenario = resolveTrialSeedScenario(seedScenarioCode);
+    const seededAt = nowIso();
+    const seedMaterialization = materializeTrialSeedScenario({
+      companyId: resolvedCompanyId,
+      scenario: resolvedScenario,
+      seededAt,
+      label
+    });
     const record = {
       trialEnvironmentProfileId: crypto.randomUUID(),
       trialEnvironmentId: null,
@@ -446,7 +605,12 @@ export function createTenantControlEngine({
       status: "active",
       watermarkCode: trialIsolationProfile.watermarkCode,
       watermarkPolicy: trialIsolationProfile.watermarkPolicy,
-      seedScenarioCode: normalizeOptionalText(seedScenarioCode),
+      requestedSeedScenarioCode: normalizeOptionalText(seedScenarioCode),
+      seedScenarioCode: resolvedScenario.code,
+      seedScenarioVersion: TRIAL_SEED_SCENARIO_VERSION,
+      seedScenarioLabel: resolvedScenario.label,
+      seedScenarioSummary: seedMaterialization.summary,
+      seedScenarioManifest: seedMaterialization.manifest,
       providerPolicyCode: trialIsolationProfile.providerPolicyCode,
       providerPolicy: trialIsolationProfile.providerPolicy,
       supportsRealCredentials: trialIsolationProfile.supportsRealCredentials,
@@ -458,8 +622,19 @@ export function createTenantControlEngine({
       liveSubmissionPolicy: "blocked",
       liveBankRailPolicy: "blocked",
       liveEconomicEffectPolicy: "blocked",
+      trialDataRetentionPolicyCode: TRIAL_DATA_RETENTION_POLICY_CODE,
+      refreshPolicyCode: TRIAL_REFRESH_POLICY_CODE,
+      sessionTerminationPolicyCode: TRIAL_SESSION_TERMINATION_POLICY_CODE,
       resetCount: 0,
+      refreshCount: 0,
       lastResetAt: null,
+      lastRefreshedAt: null,
+      lastSeededAt: seededAt,
+      archivedDataRefs: [],
+      resetHistory: [],
+      refreshHistory: [],
+      latestResetEvidenceBundleId: null,
+      latestRefreshEvidenceBundleId: null,
       expiresAt: normalizeOptionalText(expiresAt),
       createdByUserId: principal.userId,
       createdAt: now,
@@ -473,6 +648,7 @@ export function createTenantControlEngine({
       trialEnvironmentProfileId: record.trialEnvironmentProfileId,
       actorUserId: principal.userId,
       seedScenarioCode: record.seedScenarioCode,
+      requestedSeedScenarioCode: record.requestedSeedScenarioCode,
       mode: record.mode,
       watermarkCode: record.watermarkCode,
       providerPolicyCode: record.providerPolicyCode
@@ -486,6 +662,7 @@ export function createTenantControlEngine({
       metadata: {
         watermarkCode: record.watermarkCode,
         seedScenarioCode: record.seedScenarioCode,
+        seedScenarioVersion: record.seedScenarioVersion,
         mode: record.mode,
         providerPolicyCode: record.providerPolicyCode,
         supportsLegalEffect: record.supportsLegalEffect
@@ -526,17 +703,71 @@ export function createTenantControlEngine({
       objectId: trialEnvironmentProfileId,
       scopeCode: "trial_environment"
     });
+    const resetStartedAt = nowIso();
     trialEnvironment.status = "reset_in_progress";
-    trialEnvironment.updatedAt = nowIso();
-    trialEnvironment.status = "active";
+    trialEnvironment.updatedAt = resetStartedAt;
+    const terminatedSessions = terminateTrialSessions({
+      sessionToken,
+      companyId: trialEnvironment.companyId
+    });
+    const archivedDataRef = archiveTrialProcessState(trialEnvironment);
+    const reseededAt = nowIso();
+    const resolvedScenario = resolveTrialSeedScenario(trialEnvironment.seedScenarioCode);
+    const seedMaterialization = materializeTrialSeedScenario({
+      companyId: trialEnvironment.companyId,
+      scenario: resolvedScenario,
+      seededAt: reseededAt,
+      label: trialEnvironment.label
+    });
+    trialEnvironment.seedScenarioCode = resolvedScenario.code;
+    trialEnvironment.seedScenarioVersion = TRIAL_SEED_SCENARIO_VERSION;
+    trialEnvironment.seedScenarioLabel = resolvedScenario.label;
+    trialEnvironment.seedScenarioSummary = seedMaterialization.summary;
+    trialEnvironment.seedScenarioManifest = seedMaterialization.manifest;
+    trialEnvironment.refreshCount = 0;
+    trialEnvironment.lastRefreshedAt = null;
+    trialEnvironment.refreshHistory = [];
     trialEnvironment.resetCount += 1;
-    trialEnvironment.lastResetAt = nowIso();
-    trialEnvironment.updatedAt = trialEnvironment.lastResetAt;
+    trialEnvironment.lastSeededAt = reseededAt;
+    trialEnvironment.lastResetAt = reseededAt;
+    trialEnvironment.updatedAt = reseededAt;
+    trialEnvironment.status = "active";
+    const resetEvidenceBundle = createTrialLifecycleEvidenceBundle({
+      trialEnvironment,
+      actorId: principal.userId,
+      bundleType: "trial_reset",
+      title: `Trial reset ${trialEnvironment.label}`,
+      metadata: {
+        reasonCode,
+        resetCount: trialEnvironment.resetCount,
+        terminatedSessionIds: terminatedSessions.sessionIds,
+        terminatedSessionCount: terminatedSessions.sessionIds.length,
+        archivedDataRef,
+        seedScenarioCode: trialEnvironment.seedScenarioCode,
+        seedScenarioVersion: trialEnvironment.seedScenarioVersion
+      }
+    });
+    trialEnvironment.latestResetEvidenceBundleId = resetEvidenceBundle.evidenceBundleId;
+    trialEnvironment.archivedDataRefs = [...trialEnvironment.archivedDataRefs, archivedDataRef];
+    trialEnvironment.resetHistory = [
+      ...trialEnvironment.resetHistory,
+      {
+        resetOrdinal: trialEnvironment.resetCount,
+        reasonCode,
+        terminatedSessionIds: terminatedSessions.sessionIds,
+        archivedDataRef,
+        evidenceBundleId: resetEvidenceBundle.evidenceBundleId,
+        resetAt: reseededAt
+      }
+    ];
     appendDomainEvent("trial.environment.reset", {
       companyId: trialEnvironment.companyId,
       trialEnvironmentProfileId,
       actorUserId: principal.userId,
-      reasonCode
+      reasonCode,
+      resetCount: trialEnvironment.resetCount,
+      evidenceBundleId: trialEnvironment.latestResetEvidenceBundleId,
+      terminatedSessionCount: terminatedSessions.sessionIds.length
     });
     appendAuditEvent({
       companyId: trialEnvironment.companyId,
@@ -546,7 +777,84 @@ export function createTenantControlEngine({
       entityId: trialEnvironmentProfileId,
       metadata: {
         reasonCode,
-        resetCount: trialEnvironment.resetCount
+        resetCount: trialEnvironment.resetCount,
+        terminatedSessionIds: terminatedSessions.sessionIds,
+        archivedDataRef,
+        evidenceBundleId: trialEnvironment.latestResetEvidenceBundleId
+      }
+    });
+    return copy(trialEnvironment);
+  }
+
+  function refreshTrialEnvironment({
+    sessionToken,
+    trialEnvironmentProfileId,
+    refreshPackCode = DEFAULT_TRIAL_REFRESH_PACK_CODE,
+    reasonCode = "manual_refresh"
+  } = {}) {
+    const trialEnvironment = requireTrialEnvironment(trialEnvironmentProfileId);
+    assertTrialEnvironmentIsolated(trialEnvironment);
+    const principal = authorizeCompanyAction({
+      sessionToken,
+      companyId: trialEnvironment.companyId,
+      action: "COMPANY_MANAGE",
+      objectType: "trial_environment_profile",
+      objectId: trialEnvironmentProfileId,
+      scopeCode: "trial_environment"
+    });
+    const refreshPack = resolveTrialRefreshPack(refreshPackCode);
+    const refreshedAt = nowIso();
+    const refreshManifest = materializeTrialRefreshPack({
+      trialEnvironment,
+      refreshPack,
+      refreshedAt
+    });
+    trialEnvironment.refreshCount += 1;
+    trialEnvironment.lastRefreshedAt = refreshedAt;
+    trialEnvironment.updatedAt = refreshedAt;
+    trialEnvironment.refreshHistory = [
+      ...trialEnvironment.refreshHistory,
+      {
+        refreshOrdinal: trialEnvironment.refreshCount,
+        refreshPackCode: refreshPack.refreshPackCode,
+        refreshPackVersion: TRIAL_REFRESH_PACK_VERSION,
+        refreshedAt,
+        manifest: refreshManifest
+      }
+    ];
+    const refreshEvidenceBundle = createTrialLifecycleEvidenceBundle({
+      trialEnvironment,
+      actorId: principal.userId,
+      bundleType: "trial_refresh",
+      title: `Trial refresh ${trialEnvironment.label}`,
+      metadata: {
+        reasonCode,
+        refreshCount: trialEnvironment.refreshCount,
+        refreshPackCode: refreshPack.refreshPackCode,
+        refreshPackVersion: TRIAL_REFRESH_PACK_VERSION,
+        manifest: refreshManifest
+      }
+    });
+    trialEnvironment.latestRefreshEvidenceBundleId = refreshEvidenceBundle.evidenceBundleId;
+    appendDomainEvent("trial.environment.refreshed", {
+      companyId: trialEnvironment.companyId,
+      trialEnvironmentProfileId,
+      actorUserId: principal.userId,
+      refreshPackCode: refreshPack.refreshPackCode,
+      refreshCount: trialEnvironment.refreshCount,
+      evidenceBundleId: refreshEvidenceBundle.evidenceBundleId
+    });
+    appendAuditEvent({
+      companyId: trialEnvironment.companyId,
+      actorId: principal.userId,
+      action: "tenant_control.trial_environment.refreshed",
+      entityType: "trial_environment_profile",
+      entityId: trialEnvironmentProfileId,
+      metadata: {
+        reasonCode,
+        refreshCount: trialEnvironment.refreshCount,
+        refreshPackCode: refreshPack.refreshPackCode,
+        evidenceBundleId: refreshEvidenceBundle.evidenceBundleId
       }
     });
     return copy(trialEnvironment);
@@ -1380,6 +1688,210 @@ export function createTenantControlEngine({
     return platform.snapshot();
   }
 
+  function resolveTrialSeedScenario(seedScenarioCode) {
+    const requestedScenarioCode = normalizeOptionalText(seedScenarioCode);
+    const canonicalScenarioCode =
+      (requestedScenarioCode && TRIAL_SEED_SCENARIO_ALIAS_CODES[requestedScenarioCode]) ||
+      requestedScenarioCode ||
+      DEFAULT_TRIAL_SEED_SCENARIO_CODE;
+    const scenario = TRIAL_SEED_SCENARIOS[canonicalScenarioCode];
+    if (!scenario) {
+      throw httpError(
+        400,
+        "trial_seed_scenario_not_supported",
+        `Unsupported trial seed scenario: ${canonicalScenarioCode}.`
+      );
+    }
+    return scenario;
+  }
+
+  function resolveTrialRefreshPack(refreshPackCode) {
+    const canonicalRefreshPackCode = normalizeOptionalText(refreshPackCode) || DEFAULT_TRIAL_REFRESH_PACK_CODE;
+    const refreshPack = TRIAL_REFRESH_PACKS[canonicalRefreshPackCode];
+    if (!refreshPack) {
+      throw httpError(400, "trial_refresh_pack_not_supported", `Unsupported trial refresh pack: ${canonicalRefreshPackCode}.`);
+    }
+    return refreshPack;
+  }
+
+  function materializeTrialSeedScenario({ companyId, scenario, seededAt, label = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedScenario = scenario || resolveTrialSeedScenario(null);
+    const manifest = {
+      seedCatalogRef: `${resolvedScenario.code}@${TRIAL_SEED_SCENARIO_VERSION}`,
+      label: normalizeOptionalText(label) || resolvedScenario.label,
+      legalFormCode: resolvedScenario.legalFormCode,
+      chartTemplateId: resolvedScenario.chartTemplateId,
+      vatSetup: {
+        vatScheme: resolvedScenario.vatScheme,
+        vatFilingPeriod: resolvedScenario.vatFilingPeriod
+      },
+      employees: resolvedScenario.employees.map((employeeCode, index) => ({
+        employeeCode,
+        employeeRef: `${resolvedCompanyId}:${resolvedScenario.code}:employee:${index + 1}`
+      })),
+      employments: resolvedScenario.employments.map((employmentCode, index) => ({
+        employmentCode,
+        employmentRef: `${resolvedCompanyId}:${resolvedScenario.code}:employment:${index + 1}`
+      })),
+      documents: resolvedScenario.documents.map((documentCode, index) => ({
+        documentCode,
+        documentRef: `${resolvedCompanyId}:${resolvedScenario.code}:document:${index + 1}`
+      })),
+      projects: resolvedScenario.projects.map((projectCode, index) => ({
+        projectCode,
+        projectRef: `${resolvedCompanyId}:${resolvedScenario.code}:project:${index + 1}`
+      })),
+      invoices: resolvedScenario.invoices.map((invoiceCode, index) => ({
+        invoiceCode,
+        invoiceRef: `${resolvedCompanyId}:${resolvedScenario.code}:invoice:${index + 1}`
+      })),
+      syntheticFeeds: resolvedScenario.syntheticFeeds.map((feedCode, index) => ({
+        feedCode,
+        feedRef: `${resolvedCompanyId}:${resolvedScenario.code}:feed:${index + 1}`
+      })),
+      workItems: resolvedScenario.workItems.map((workItemCode, index) => ({
+        workItemCode,
+        workItemRef: `${resolvedCompanyId}:${resolvedScenario.code}:work-item:${index + 1}`
+      })),
+      seededAt
+    };
+    return {
+      summary: {
+        seedCatalogRef: manifest.seedCatalogRef,
+        label: resolvedScenario.label,
+        legalFormCode: resolvedScenario.legalFormCode,
+        chartTemplateId: resolvedScenario.chartTemplateId,
+        vatScheme: resolvedScenario.vatScheme,
+        vatFilingPeriod: resolvedScenario.vatFilingPeriod,
+        employeeCount: manifest.employees.length,
+        employmentCount: manifest.employments.length,
+        documentCount: manifest.documents.length,
+        projectCount: manifest.projects.length,
+        invoiceCount: manifest.invoices.length,
+        syntheticFeedCount: manifest.syntheticFeeds.length,
+        workItemCount: manifest.workItems.length
+      },
+      manifest
+    };
+  }
+
+  function materializeTrialRefreshPack({ trialEnvironment, refreshPack, refreshedAt } = {}) {
+    const refreshOrdinal = Number(trialEnvironment?.refreshCount || 0) + 1;
+    return {
+      refreshPackCode: refreshPack.refreshPackCode,
+      refreshPackVersion: TRIAL_REFRESH_PACK_VERSION,
+      preserveMasterdata: refreshPack.preserveMasterdata === true,
+      resetProcessData: refreshPack.resetProcessData === true,
+      documents: refreshPack.appendDocuments.map((documentCode, index) => ({
+        documentCode,
+        documentRef: `${trialEnvironment.companyId}:${trialEnvironment.seedScenarioCode}:refresh:${refreshOrdinal}:document:${index + 1}`
+      })),
+      workItems: refreshPack.appendWorkItems.map((workItemCode, index) => ({
+        workItemCode,
+        workItemRef: `${trialEnvironment.companyId}:${trialEnvironment.seedScenarioCode}:refresh:${refreshOrdinal}:work-item:${index + 1}`
+      })),
+      refreshedAt
+    };
+  }
+
+  function terminateTrialSessions({ sessionToken, companyId } = {}) {
+    const authPlatform = requireOrgAuthPlatform();
+    if (typeof authPlatform.snapshot !== "function" || typeof authPlatform.revokeSession !== "function") {
+      return { sessionIds: [] };
+    }
+    const snapshot = authPlatform.snapshot();
+    const currentSessionId =
+      typeof authPlatform.inspectSession === "function"
+        ? authPlatform.inspectSession({ sessionToken }).session.sessionId
+        : null;
+    const targetSessionIds = (snapshot.authSessions || [])
+      .filter((session) => session.companyId === companyId)
+      .filter((session) => session.status === "active" || session.status === "pending_mfa")
+      .filter((session) => session.revokedAt == null)
+      .map((session) => session.sessionId)
+      .filter((sessionId) => sessionId !== currentSessionId);
+    for (const targetSessionId of targetSessionIds) {
+      authPlatform.revokeSession({
+        sessionToken,
+        targetSessionId
+      });
+    }
+    return {
+      sessionIds: targetSessionIds
+    };
+  }
+
+  function archiveTrialProcessState(trialEnvironment) {
+    return {
+      archiveRefId: `trial-archive:${trialEnvironment.trialEnvironmentProfileId}:reset:${trialEnvironment.resetCount + 1}`,
+      archivedAt: nowIso(),
+      retentionPolicyCode: trialEnvironment.trialDataRetentionPolicyCode || TRIAL_DATA_RETENTION_POLICY_CODE,
+      previousResetCount: trialEnvironment.resetCount,
+      previousRefreshCount: trialEnvironment.refreshCount,
+      previousResetEvidenceBundleId: normalizeOptionalText(trialEnvironment.latestResetEvidenceBundleId),
+      previousRefreshEvidenceBundleId: normalizeOptionalText(trialEnvironment.latestRefreshEvidenceBundleId)
+    };
+  }
+
+  function createTrialLifecycleEvidenceBundle({
+    trialEnvironment,
+    actorId,
+    bundleType,
+    title,
+    metadata = {}
+  } = {}) {
+    const evidenceDomain = getOptionalDomain("evidence");
+    const artifactRefs = [
+      {
+        artifactType: "trial_seed_manifest",
+        artifactRef: `trial-seed://${trialEnvironment.seedScenarioCode}@${trialEnvironment.seedScenarioVersion}`,
+        checksum: hashJson(trialEnvironment.seedScenarioManifest),
+        roleCode: "tenant_control",
+        metadata: {
+          seedScenarioCode: trialEnvironment.seedScenarioCode,
+          seedScenarioVersion: trialEnvironment.seedScenarioVersion
+        }
+      }
+    ];
+    if (evidenceDomain && typeof evidenceDomain.createFrozenEvidenceBundleSnapshot === "function") {
+      return evidenceDomain.createFrozenEvidenceBundleSnapshot({
+        companyId: trialEnvironment.companyId,
+        bundleType,
+        sourceObjectType: "trial_environment_profile",
+        sourceObjectId: trialEnvironment.trialEnvironmentProfileId,
+        sourceObjectVersion: `${bundleType}:${trialEnvironment.resetCount}:${trialEnvironment.refreshCount}`,
+        title,
+        retentionClass: "operational",
+        classificationCode: "restricted_internal",
+        metadata,
+        artifactRefs,
+        relatedObjectRefs: [
+          {
+            objectType: "trial_environment_profile",
+            objectId: trialEnvironment.trialEnvironmentProfileId,
+            relationCode: "subject"
+          }
+        ],
+        actorId,
+        previousEvidenceBundleId:
+          bundleType === "trial_reset"
+            ? trialEnvironment.latestResetEvidenceBundleId
+            : trialEnvironment.latestRefreshEvidenceBundleId,
+        environmentMode: trialEnvironment.mode
+      });
+    }
+    return {
+      evidenceBundleId: crypto.randomUUID(),
+      bundleType,
+      sourceObjectType: "trial_environment_profile",
+      sourceObjectId: trialEnvironment.trialEnvironmentProfileId,
+      metadata: copy(metadata),
+      artifactRefs,
+      environmentMode: trialEnvironment.mode
+    };
+  }
+
   function getOptionalDomain(domainKey) {
     return typeof getDomain === "function" ? getDomain(domainKey) || null : null;
   }
@@ -1712,6 +2224,10 @@ function nowIso(clock = () => new Date()) {
 
 function copy(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function hashJson(value) {
+  return crypto.createHash("sha256").update(JSON.stringify(copy(value))).digest("hex");
 }
 
 function httpError(statusCode, code, message) {

@@ -258,11 +258,27 @@ test("Phase 1 API routes tenant setup, trial and module lifecycles through tenan
     assert.equal(trialEnvironment.trialIsolationStatus, "isolated");
     assert.equal(trialEnvironment.blockedOperationClasses.includes("live_credentials"), true);
     assert.equal(trialEnvironment.providerPolicy.authProviders.length >= 2, true);
+    assert.equal(trialEnvironment.requestedSeedScenarioCode, "agency_trial_seed");
+    assert.equal(trialEnvironment.seedScenarioCode, "retainer_capacity_agency");
+    assert.equal(trialEnvironment.seedScenarioVersion, "2026.1");
+    assert.equal(trialEnvironment.seedScenarioSummary.documentCount > 0, true);
 
     const trialEnvironments = await requestJson(baseUrl, `/v1/trial/environments?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
     assert.equal(trialEnvironments.items.some((item) => item.trialEnvironmentProfileId === trialEnvironment.trialEnvironmentProfileId), true);
+
+    const refresh = await requestJson(baseUrl, `/v1/trial/environments/${trialEnvironment.trialEnvironmentProfileId}/refresh`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        refreshPackCode: "documents_and_work_items",
+        reasonCode: "refresh_for_demo"
+      }
+    });
+    assert.equal(refresh.refreshCount, 1);
+    assert.equal(refresh.refreshHistory.length, 1);
+    assert.equal(refresh.latestRefreshEvidenceBundleId != null, true);
 
     const reset = await requestJson(baseUrl, `/v1/trial/environments/${trialEnvironment.trialEnvironmentProfileId}/reset`, {
       method: "POST",
@@ -272,6 +288,9 @@ test("Phase 1 API routes tenant setup, trial and module lifecycles through tenan
       }
     });
     assert.equal(reset.resetCount, 1);
+    assert.equal(reset.refreshCount, 0);
+    assert.equal(reset.resetHistory.length, 1);
+    assert.equal(reset.latestResetEvidenceBundleId != null, true);
 
     const promotion = await requestJson(baseUrl, "/v1/trial/promotions", {
       method: "POST",

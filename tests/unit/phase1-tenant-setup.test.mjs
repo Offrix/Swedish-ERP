@@ -226,9 +226,22 @@ test("Phase 1 tenant setup flows through tenant-control with finance-ready state
     companyId: DEMO_IDS.companyId,
     seedScenarioCode: "agency_trial_seed"
   });
+  const secondAdminToken = loginWithStrongAuthOnPlatform({
+    platform,
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+  const secondAdminSession = platform.getDomain("orgAuth").inspectSession({
+    sessionToken: secondAdminToken
+  });
   assert.equal(trialEnvironment.mode, "trial");
   assert.equal(trialEnvironment.watermarkCode, "TRIAL");
   assert.equal(trialEnvironment.providerPolicyCode, "trial_safe_default");
+  assert.equal(trialEnvironment.requestedSeedScenarioCode, "agency_trial_seed");
+  assert.equal(trialEnvironment.seedScenarioCode, "retainer_capacity_agency");
+  assert.equal(trialEnvironment.seedScenarioVersion, "2026.1");
+  assert.equal(trialEnvironment.seedScenarioSummary.documentCount > 0, true);
+  assert.equal(trialEnvironment.trialDataRetentionPolicyCode, "trial_reset_archive_30d");
   assert.equal(trialEnvironment.liveCredentialPolicy, "blocked");
   assert.equal(trialEnvironment.supportsRealCredentials, false);
   assert.equal(trialEnvironment.supportsLegalEffect, false);
@@ -238,12 +251,31 @@ test("Phase 1 tenant setup flows through tenant-control with finance-ready state
   assert.equal(trialEnvironment.providerPolicy.authProviders.length >= 2, true);
   assert.equal(trialEnvironment.providerPolicy.adapters.submissions.supportsLegalEffect, false);
 
+  const refreshedTrialEnvironment = tenantControl.refreshTrialEnvironment({
+    sessionToken: adminToken,
+    trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
+    refreshPackCode: "documents_and_work_items",
+    reasonCode: "verification_refresh"
+  });
+  assert.equal(refreshedTrialEnvironment.refreshCount, 1);
+  assert.equal(refreshedTrialEnvironment.refreshHistory.length, 1);
+  assert.equal(refreshedTrialEnvironment.latestRefreshEvidenceBundleId != null, true);
+
   const resetTrialEnvironment = tenantControl.resetTrialEnvironment({
     sessionToken: adminToken,
     trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
     reasonCode: "verification_reset"
   });
   assert.equal(resetTrialEnvironment.resetCount, 1);
+  assert.equal(resetTrialEnvironment.refreshCount, 0);
+  assert.equal(resetTrialEnvironment.resetHistory.length, 1);
+  assert.equal(resetTrialEnvironment.archivedDataRefs.length, 1);
+  assert.equal(resetTrialEnvironment.latestResetEvidenceBundleId != null, true);
+  const authSnapshotAfterReset = platform.getDomain("orgAuth").snapshot();
+  const secondSession = authSnapshotAfterReset.authSessions.find(
+    (session) => session.sessionId === secondAdminSession.session.sessionId
+  );
+  assert.equal(secondSession.status, "revoked");
 
   const promotionPlan = tenantControl.promoteTrialToLive({
     sessionToken: adminToken,

@@ -344,6 +344,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/tenant/parallel-runs",
               "/v1/trial/environments",
               "/v1/trial/environments/:trialEnvironmentProfileId/reset",
+              "/v1/trial/environments/:trialEnvironmentProfileId/refresh",
               "/v1/trial/promotions",
               "/v1/onboarding/runs",
               "/v1/onboarding/runs/:runId",
@@ -1622,6 +1623,22 @@ async function handleRequest({ req, res, platform, flags }) {
       requireTenantControlDomain(platform).resetTrialEnvironment({
         sessionToken: readSessionToken(req, body),
         trialEnvironmentProfileId: trialEnvironmentResetMatch.trialEnvironmentProfileId,
+        reasonCode: body.reasonCode
+      })
+    );
+    return;
+  }
+
+  const trialEnvironmentRefreshMatch = matchPath(path, "/v1/trial/environments/:trialEnvironmentProfileId/refresh");
+  if (trialEnvironmentRefreshMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).refreshTrialEnvironment({
+        sessionToken: readSessionToken(req, body),
+        trialEnvironmentProfileId: trialEnvironmentRefreshMatch.trialEnvironmentProfileId,
+        refreshPackCode: body.refreshPackCode,
         reasonCode: body.reasonCode
       })
     );

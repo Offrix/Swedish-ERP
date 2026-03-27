@@ -516,7 +516,7 @@ Skapa en separat kÃ¤lla fÃ¶r tenant bootstrap, module activation, finance re
 - [x] 7.1 [NEW BUILD] **InfÃ¶r `domain-tenant-control`** â€” Nytt package Ã¤ger `TenantBootstrap`, `CompanySetupProfile`, `ModuleActivationProfile`, `GoLivePlan`, `TrialEnvironmentProfile`, `ParallelRunPlan`, `PromotionPlan`.
 - [x] 7.2 [HARDEN] **Bygg finance-ready bootstrap** â€” Legal form, accounting method, fiscal year, chart template, VAT profile, reporting obligation profile, role template och queue structure ska skapas i korrekt ordning.
 - [x] 7.3 [NEW BUILD] **Bygg trial/testkonto-isolering** â€” Trial tenants fÃ¥r eget mode, vattenmÃ¤rkning, fake/sandbox providers, blocked live credentials och skydd mot verkliga ekonomiska konsekvenser.
-- [ ] 7.4 [NEW BUILD] **Seed scenarios, reset och refresh** â€” Bygg deterministiska seed-scenarier per bolagstyp och reset/refresh utan att blanda trial-data med live-data.
+- [x] 7.4 [NEW BUILD] **Seed scenarios, reset och refresh** â€” Klar: canonical seed-katalog med åtta scenarier finns nu, legacy-alias mappas deterministiskt, refresh-pack kan fylla på processdata utan att röra masterdata, reset revokerar övriga öppna trial-sessioner, arkiverar process-state metadata och fryser evidence-bundles för reset/refresh innan scenariot reseedas.
 - [ ] 7.5 [MIGRATE] **Bygg upgrade trial->live** â€” Promotion skapar ny live tenant/company profile frÃ¥n godkÃ¤nd masterdata; trial ledger, receipts, provider refs och submissions fÃ¥r aldrig flyttas rakt in i live.
 
 **Delfasstatus**
