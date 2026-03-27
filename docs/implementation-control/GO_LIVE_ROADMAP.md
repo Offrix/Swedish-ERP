@@ -213,10 +213,11 @@ Flytta affÃ¤rssanningen frÃ¥n processminne till hÃ¥llbar persistence med i
 - Ingen regulated submission, payroll eller tax-account-kedja fÃ¥r byggas vidare pÃ¥ in-memory truth.
 
 **Delfasstatus**  
-- 2.2 verifierad 2026-03-26: command receipt/outbox/inbox ligger i samma commit och mutationruntime bÃ¤r nu bounded-context repository bundles, inte bara core-scope.
-- 2.3 verifierad 2026-03-26: job attempts bÃ¤r explicit attemptstatus och claim metadata, och claim expiry fÃ¶re start skapar nu syntetisk attempthistorik i stÃ¤llet fÃ¶r att fÃ¶rlora spÃ¥rbarhet.
-- 2.4 verifierad 2026-03-26: plattformen exponerar nu ett explicit durability-inventory fÃ¶r alla kritiska domÃ¤ner och fasen har en egen verifieringskedja fÃ¶r repositories, command log, durable snapshots och async job recovery.
-- 2.5 verifierad 2026-03-26: projection rebuild har nu en egen verifieringskedja och fokuserade tester fÃ¶r targeted full rebuild, checkpoint parity, failed rebuild utan source-of-truth-mutation och lyckad retry som rensar tidigare checkpoint-fel.
+- 2.1 återverifierad 2026-03-27: canonical repositories bär nu explicit optimistic concurrency, transaktionsbunden rollback över flera repositorygränser, bounded-context-scope utan nyckelkollisioner och verifierad Postgres-konfigurationskedja för durable repository store.
+- 2.2 återverifierad 2026-03-27: command receipt, outbox och inbox ligger fortsatt i samma commit, duplicate suppression hålls på idempotency-nivå och mutationruntime bär bounded-context repository bundles utan att förlora rollback-garantin.
+- 2.3 återverifierad 2026-03-27: job runtime bär explicit attemptlivscykel, retry policy, dead-letter och replay-planer; claim expiry före start skapar syntetisk attempthistorik och poison-pill-loopar stängs i dead-letter i stället för att försvinna tyst.
+- 2.4 återverifierad 2026-03-27: kritiska domäner kan rehydreras från durable snapshots, runtime diagnostics släpper inte igenom Map-only truth förrän durability inventory visar verklig snapshot-backed persistence, och plattformen exponerar nu per-domän durability inventory som fasgate.
+- 2.5 återverifierad 2026-03-27: projection rebuild bevarar source of truth och icke-målade projektioner, targeted full rebuild purgar bara rätt projectionsdokument och failed rebuild lämnar truth orörd tills lyckad retry rensar checkpoint-felet.
 
 **Delfaser**
 - [x] 2.1 [NEW BUILD] **InfÃ¶r canonical repositories** â€” Varje bounded context fÃ¥r repositorygrÃ¤nssnitt med Postgres-implementation och transaktionsbunden optimistic concurrency.
