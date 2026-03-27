@@ -167,3 +167,7 @@ CREATE TABLE IF NOT EXISTS close_reopen_requests (
 
 CREATE INDEX IF NOT EXISTS ix_close_reopen_requests_checklist
   ON close_reopen_requests (checklist_id, created_at DESC);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322130000_phase11_close_workbench')
+ON CONFLICT (migration_id) DO NOTHING;

@@ -108,6 +108,9 @@ GÃ¶ra de tvÃ¥ nya dokumenten till enda sanning, dÃ¶da felaktiga antaganden
 - [x] 0.4 [NEW BUILD] **Skapa full traceability** â€” Mappa varje kritisk punkt frÃ¥n FULL_SYSTEM_ANALYSIS, LEGACY_AND_REALITY_RECONCILIATION och COMPETITOR_AND_MARKET_REALITY till exakt roadmapfas, delfas och exit gate.
 - [x] 0.5 [OPERATIONALIZE] **InfÃ¶r hÃ¥rda stop-regler** â€” InfÃ¶r regler att shell-UI, demo-seeds, simulerade receipts, route-bredd och phase-etiketter aldrig fÃ¥r rÃ¤knas som produktmognad.
 
+**Delfasstatus**
+- 1.1 återverifierad 2026-03-27: alla migrationer självregistrerar nu exakt ett canonical `migration_id` som matchar filnamnet, och både Node- och PowerShell-validering failar på saknad, dubbel eller felaktig migrationsregistrering.
+
 **Exit gate**  
 - Alla Ã¤ldre dokument Ã¤r nedgraderade till icke-bindande om de inte uttryckligen stÃ¤mmer med denna roadmap. Produkten Ã¤r formellt definierad som generell svensk fÃ¶retagsplattform. CRM/projekt-benchmark utanfÃ¶r bygg Ã¤r lÃ¥st.
 

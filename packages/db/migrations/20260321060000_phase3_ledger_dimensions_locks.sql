@@ -88,3 +88,7 @@ END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS ux_journal_entries_company_correction_key
   ON journal_entries (company_id, correction_key)
   WHERE correction_key IS NOT NULL;
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260321060000_phase3_ledger_dimensions_locks')
+ON CONFLICT (migration_id) DO NOTHING;

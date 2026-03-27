@@ -60,3 +60,7 @@ CREATE INDEX IF NOT EXISTS ix_payroll_document_classification_payloads_case
 
 CREATE INDEX IF NOT EXISTS ix_payroll_document_classification_consumptions_intent
   ON payroll_document_classification_consumptions (treatment_intent_id, stage, pay_run_id);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260325032000_phase14_document_classification_payroll_bridge')
+ON CONFLICT (migration_id) DO NOTHING;

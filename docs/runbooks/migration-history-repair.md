@@ -25,6 +25,8 @@ VALUES ('YYYYMMDDHHMMSS_name')
 ON CONFLICT (migration_id) DO NOTHING;
 ```
 
+Every SQL migration file must contain exactly one canonical insert, and the `migration_id` must match the file basename exactly.
+
 ## Detection
 
 Run:

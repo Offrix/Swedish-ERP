@@ -223,3 +223,7 @@ CREATE TABLE IF NOT EXISTS core_mass_action_results (
 
 CREATE INDEX IF NOT EXISTS ix_core_mass_action_results_action
   ON core_mass_action_results (mass_action_id, client_company_id, status);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322120000_phase11_bureau_portfolio')
+ON CONFLICT (migration_id) DO NOTHING;

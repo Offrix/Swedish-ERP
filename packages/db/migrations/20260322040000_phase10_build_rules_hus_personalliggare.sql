@@ -323,3 +323,7 @@ CREATE TABLE IF NOT EXISTS attendance_audit_events (
 
 CREATE INDEX IF NOT EXISTS ix_attendance_audit_events_phase10_3_company
   ON attendance_audit_events (company_id, construction_site_id, created_at);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322040000_phase10_build_rules_hus_personalliggare')
+ON CONFLICT (migration_id) DO NOTHING;

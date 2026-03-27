@@ -83,6 +83,10 @@ CREATE TABLE IF NOT EXISTS project_cost_snapshots (
   UNIQUE (project_id, cutoff_date, snapshot_hash)
 );
 
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322020000_phase10_projects_budget_followup')
+ON CONFLICT (migration_id) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS project_wip_snapshots (
   project_wip_snapshot_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id UUID NOT NULL REFERENCES companies(company_id) ON DELETE CASCADE,

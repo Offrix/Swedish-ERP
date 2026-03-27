@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS restore_drills (
   recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322200000_phase14_resilience')
+ON CONFLICT (migration_id) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS chaos_scenarios (
   chaos_scenario_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id UUID NOT NULL REFERENCES companies(company_id) ON DELETE CASCADE,

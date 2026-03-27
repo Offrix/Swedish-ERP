@@ -82,3 +82,7 @@ SET render_payload_json = CASE
   ELSE jsonb_set(render_payload_json, '{totals,preliminaryTaxStatus}', '"pending"'::jsonb, true)
 END
 WHERE render_payload_json @> '{"totals":{"preliminaryTaxStatus":"phase8_2_pending"}}'::jsonb;
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260325033000_phase8_payroll_placeholder_cleanup')
+ON CONFLICT (migration_id) DO NOTHING;

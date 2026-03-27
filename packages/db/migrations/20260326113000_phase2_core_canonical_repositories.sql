@@ -19,3 +19,7 @@ CREATE INDEX IF NOT EXISTS core_domain_records_company_lookup_idx
 CREATE INDEX IF NOT EXISTS core_domain_records_correlation_lookup_idx
   ON core_domain_records (last_correlation_id)
   WHERE last_correlation_id IS NOT NULL;
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260326113000_phase2_core_canonical_repositories')
+ON CONFLICT (migration_id) DO NOTHING;

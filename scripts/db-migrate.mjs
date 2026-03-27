@@ -9,9 +9,13 @@ const composeFile = repoPath("infra", "docker", "docker-compose.yml");
 const migrationFiles = (await fs.readdir(migrationsDir))
   .filter((file) => file.endsWith(".sql"))
   .sort();
+const CANONICAL_MIGRATION_INSERT_PATTERN =
+  /INSERT\s+INTO\s+schema_migrations\s*\(\s*migration_id\s*\)\s*VALUES\s*\(\s*'([^']+)'\s*\)/giu;
 
-function validateMigrationSql(sql) {
+function validateMigrationSql(file, sql) {
   const errors = [];
+  const expectedMigrationId = path.basename(file, ".sql");
+  const migrationIdMatches = [...sql.matchAll(CANONICAL_MIGRATION_INSERT_PATTERN)].map((match) => match[1]);
 
   if (/schema_migrations\s*\(\s*version\s*,\s*description\s*\)/iu.test(sql)) {
     errors.push("uses legacy schema_migrations(version, description) columns");
@@ -26,6 +30,18 @@ function validateMigrationSql(sql) {
     !/INSERT\s+INTO\s+schema_migrations\s*\(\s*migration_id\s*\)/iu.test(sql)
   ) {
     errors.push("must insert into schema_migrations using the canonical migration_id column");
+  }
+
+  if (migrationIdMatches.length === 0) {
+    errors.push(`must register itself in schema_migrations using migration_id "${expectedMigrationId}"`);
+  } else if (migrationIdMatches.length > 1) {
+    errors.push(
+      `must register itself in schema_migrations exactly once; found ${migrationIdMatches.length} canonical inserts`
+    );
+  } else if (migrationIdMatches[0] !== expectedMigrationId) {
+    errors.push(
+      `must register itself in schema_migrations using migration_id "${expectedMigrationId}", found "${migrationIdMatches[0]}"`
+    );
   }
 
   return errors;
@@ -52,7 +68,7 @@ if (dockerCheck.code !== 0) {
 
 for (const file of migrationFiles) {
   const sql = await fs.readFile(path.join(migrationsDir, file), "utf8");
-  const validationErrors = validateMigrationSql(sql);
+  const validationErrors = validateMigrationSql(file, sql);
 
   if (validationErrors.length > 0) {
     console.error(`Migration failed validation: ${file}`);

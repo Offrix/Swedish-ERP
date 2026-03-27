@@ -30,3 +30,7 @@ CREATE INDEX IF NOT EXISTS ix_project_payroll_cost_allocations_snapshot
 
 CREATE INDEX IF NOT EXISTS ix_project_payroll_cost_allocations_project_period
   ON project_payroll_cost_allocations (project_id, reporting_period, cost_bucket_code);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260324190000_phase14_project_payroll_cost_allocations')
+ON CONFLICT (migration_id) DO NOTHING;

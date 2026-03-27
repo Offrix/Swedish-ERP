@@ -42,3 +42,7 @@ CREATE TABLE IF NOT EXISTS automation_overrides (
   accepted_outputs_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   overridden_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322180000_phase13_ai_automation')
+ON CONFLICT (migration_id) DO NOTHING;

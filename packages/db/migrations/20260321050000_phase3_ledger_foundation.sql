@@ -84,3 +84,7 @@ CREATE INDEX IF NOT EXISTS ix_journal_entries_company_source
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_journal_lines_entry_line_number
   ON journal_lines (journal_entry_id, line_number);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260321050000_phase3_ledger_foundation')
+ON CONFLICT (migration_id) DO NOTHING;

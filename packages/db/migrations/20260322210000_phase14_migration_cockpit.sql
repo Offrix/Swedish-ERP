@@ -74,3 +74,7 @@ CREATE TABLE IF NOT EXISTS migration_cutover_plans (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322210000_phase14_migration_cockpit')
+ON CONFLICT (migration_id) DO NOTHING;

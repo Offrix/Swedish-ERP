@@ -56,3 +56,7 @@ ALTER TABLE outbox_events
 
 CREATE INDEX IF NOT EXISTS outbox_events_command_receipt_idx
   ON outbox_events (command_receipt_id, recorded_at);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260326120000_phase2_command_log_outbox_inbox')
+ON CONFLICT (migration_id) DO NOTHING;

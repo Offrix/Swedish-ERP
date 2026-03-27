@@ -16,3 +16,7 @@ claim_expires_at = COALESCE(claim_expires_at, next_retry_at);
 
 CREATE INDEX IF NOT EXISTS ix_async_job_attempts_job_status
   ON async_job_attempts (job_id, status, attempt_no);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260326143000_phase2_async_job_attempt_lifecycle')
+ON CONFLICT (migration_id) DO NOTHING;

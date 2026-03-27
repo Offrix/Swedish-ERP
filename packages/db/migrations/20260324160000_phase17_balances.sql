@@ -103,3 +103,7 @@ CREATE TABLE IF NOT EXISTS balance_expiry_runs (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_balance_expiry_runs_idempotency
   ON balance_expiry_runs (company_id, idempotency_key)
   WHERE idempotency_key IS NOT NULL;
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260324160000_phase17_balances')
+ON CONFLICT (migration_id) DO NOTHING;

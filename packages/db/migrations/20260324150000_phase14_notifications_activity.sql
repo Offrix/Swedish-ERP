@@ -83,3 +83,7 @@ CREATE INDEX IF NOT EXISTS ix_activity_entries_company_object
 
 CREATE INDEX IF NOT EXISTS ix_activity_entries_company_visibility
   ON activity_entries (company_id, visibility_scope, occurred_at DESC);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260324150000_phase14_notifications_activity')
+ON CONFLICT (migration_id) DO NOTHING;

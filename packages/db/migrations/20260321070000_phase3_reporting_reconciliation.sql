@@ -186,3 +186,7 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS ix_reconciliation_signoffs_run_signed
   ON reconciliation_signoffs (reconciliation_run_id, signed_at);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260321070000_phase3_reporting_reconciliation')
+ON CONFLICT (migration_id) DO NOTHING;

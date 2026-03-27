@@ -100,3 +100,7 @@ CREATE TABLE IF NOT EXISTS async_job_replay_plans (
 
 CREATE INDEX IF NOT EXISTS ix_async_job_replay_plans_job
   ON async_job_replay_plans (job_id, status, created_at DESC);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322200500_phase14_job_runtime')
+ON CONFLICT (migration_id) DO NOTHING;

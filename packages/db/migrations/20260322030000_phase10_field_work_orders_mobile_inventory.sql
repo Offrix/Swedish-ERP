@@ -157,3 +157,7 @@ CREATE TABLE IF NOT EXISTS field_sync_envelopes (
 
 CREATE INDEX IF NOT EXISTS ix_field_sync_envelopes_phase10_2_status
   ON field_sync_envelopes (company_id, sync_status, created_at);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322030000_phase10_field_work_orders_mobile_inventory')
+ON CONFLICT (migration_id) DO NOTHING;

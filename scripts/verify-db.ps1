@@ -26,6 +26,12 @@ if ($bad.Count -gt 0) {
 $legacyFormatErrors = @()
 foreach ($file in $files) {
   $content = Get-Content -Path $file.FullName -Raw
+  $expectedMigrationId = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+  $canonicalMatches = [regex]::Matches(
+    $content,
+    "INSERT\s+INTO\s+schema_migrations\s*\(\s*migration_id\s*\)\s*VALUES\s*\(\s*'([^']+)'\s*\)",
+    [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+  )
 
   if ($content -match "schema_migrations\s*\(\s*version\s*,\s*description\s*\)") {
     $legacyFormatErrors += ($file.Name + ": legacy schema_migrations(version, description) columns")
@@ -37,6 +43,21 @@ foreach ($file in $files) {
 
   if ($content -match "INSERT\s+INTO\s+schema_migrations" -and $content -notmatch "INSERT\s+INTO\s+schema_migrations\s*\(\s*migration_id\s*\)") {
     $legacyFormatErrors += ($file.Name + ": schema_migrations inserts must use canonical migration_id column")
+  }
+
+  if ($canonicalMatches.Count -eq 0) {
+    $legacyFormatErrors += ($file.Name + ": must register itself exactly once in schema_migrations using migration_id '" + $expectedMigrationId + "'")
+    continue
+  }
+
+  if ($canonicalMatches.Count -gt 1) {
+    $legacyFormatErrors += ($file.Name + ": must register itself exactly once in schema_migrations; found " + $canonicalMatches.Count + " canonical inserts")
+    continue
+  }
+
+  $actualMigrationId = $canonicalMatches[0].Groups[1].Value
+  if ($actualMigrationId -ne $expectedMigrationId) {
+    $legacyFormatErrors += ($file.Name + ": must register migration_id '" + $expectedMigrationId + "', found '" + $actualMigrationId + "'")
   }
 }
 

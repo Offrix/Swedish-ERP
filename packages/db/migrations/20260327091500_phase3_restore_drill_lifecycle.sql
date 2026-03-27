@@ -43,3 +43,7 @@ ALTER TABLE chaos_scenarios
 
 CREATE INDEX IF NOT EXISTS idx_chaos_scenarios_restore_drill
   ON chaos_scenarios (restore_drill_id);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260327091500_phase3_restore_drill_lifecycle')
+ON CONFLICT (migration_id) DO NOTHING;

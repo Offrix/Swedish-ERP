@@ -99,3 +99,7 @@ CREATE TABLE IF NOT EXISTS async_dead_letters (
   replay_allowed BOOLEAN NOT NULL DEFAULT FALSE,
   risk_class TEXT NOT NULL
 );
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322170000_phase13_partner_integrations')
+ON CONFLICT (migration_id) DO NOTHING;

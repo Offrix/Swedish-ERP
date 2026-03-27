@@ -189,3 +189,7 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS ix_submission_action_queue_scope
   ON submission_action_queue (company_id, status, owner_queue, created_at);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322150000_phase12_tax_submission_engine')
+ON CONFLICT (migration_id) DO NOTHING;

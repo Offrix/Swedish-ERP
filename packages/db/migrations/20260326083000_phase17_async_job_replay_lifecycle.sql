@@ -15,3 +15,7 @@ UPDATE async_job_replay_plans
 SET status = 'scheduled',
     scheduled_at = COALESCE(scheduled_at, executed_at)
 WHERE status = 'executed';
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260326083000_phase17_async_job_replay_lifecycle')
+ON CONFLICT (migration_id) DO NOTHING;

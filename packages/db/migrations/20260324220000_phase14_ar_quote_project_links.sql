@@ -29,3 +29,7 @@ CREATE INDEX IF NOT EXISTS ix_customer_invoices_phase14_source_quote_version
 
 CREATE INDEX IF NOT EXISTS ix_customer_invoices_phase14_project_link
   ON customer_invoices (company_id, primary_project_id, project_link_status, status);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260324220000_phase14_ar_quote_project_links')
+ON CONFLICT (migration_id) DO NOTHING;

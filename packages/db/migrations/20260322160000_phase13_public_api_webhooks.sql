@@ -80,3 +80,7 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
   delivered_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322160000_phase13_public_api_webhooks')
+ON CONFLICT (migration_id) DO NOTHING;

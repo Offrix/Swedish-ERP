@@ -69,3 +69,7 @@ CREATE TABLE IF NOT EXISTS agreement_overrides (
 
 CREATE INDEX IF NOT EXISTS ix_agreement_overrides_assignment
   ON agreement_overrides (agreement_assignment_id, effective_from, created_at);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260324170000_phase18_collective_agreements')
+ON CONFLICT (migration_id) DO NOTHING;

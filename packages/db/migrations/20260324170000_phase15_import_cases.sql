@@ -79,3 +79,7 @@ CREATE TABLE IF NOT EXISTS import_case_corrections (
   created_by_actor_id TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260324170000_phase15_import_cases')
+ON CONFLICT (migration_id) DO NOTHING;

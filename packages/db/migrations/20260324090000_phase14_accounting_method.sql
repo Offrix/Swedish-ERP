@@ -82,3 +82,7 @@ CREATE TABLE IF NOT EXISTS accounting_method_year_end_catch_up_runs (
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_accounting_method_year_end_catch_up_snapshot
   ON accounting_method_year_end_catch_up_runs(company_id, fiscal_year_end_date, snapshot_hash);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260324090000_phase14_accounting_method')
+ON CONFLICT (migration_id) DO NOTHING;

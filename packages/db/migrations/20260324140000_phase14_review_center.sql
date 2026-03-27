@@ -95,3 +95,7 @@ CREATE INDEX IF NOT EXISTS ix_review_decisions_item
 
 CREATE INDEX IF NOT EXISTS ix_review_assignments_item
   ON review_assignments (review_item_id, assigned_at);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260324140000_phase14_review_center')
+ON CONFLICT (migration_id) DO NOTHING;

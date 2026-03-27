@@ -108,3 +108,7 @@ CREATE INDEX IF NOT EXISTS ix_document_classification_lines_case
 
 CREATE INDEX IF NOT EXISTS ix_document_classification_intents_case
   ON document_classification_treatment_intents (classification_case_id, status, target_domain_code);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260324160000_phase14_document_classification')
+ON CONFLICT (migration_id) DO NOTHING;

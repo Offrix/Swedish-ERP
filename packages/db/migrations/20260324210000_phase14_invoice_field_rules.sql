@@ -48,3 +48,7 @@ CREATE INDEX IF NOT EXISTS ix_customer_invoice_field_evaluations_invoice
 
 CREATE INDEX IF NOT EXISTS ix_customer_invoice_field_requirements_invoice
   ON customer_invoice_field_requirements (customer_invoice_id, scenario_code, field_code);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260324210000_phase14_invoice_field_rules')
+ON CONFLICT (migration_id) DO NOTHING;

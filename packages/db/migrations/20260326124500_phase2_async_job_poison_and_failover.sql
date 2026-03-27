@@ -11,3 +11,7 @@ ALTER TABLE async_job_dead_letters
 CREATE INDEX IF NOT EXISTS ix_async_job_dead_letters_poison
   ON async_job_dead_letters (poison_pill_detected, entered_at DESC)
   WHERE poison_pill_detected = TRUE;
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260326124500_phase2_async_job_poison_and_failover')
+ON CONFLICT (migration_id) DO NOTHING;

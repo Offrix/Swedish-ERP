@@ -22,3 +22,7 @@ CREATE INDEX IF NOT EXISTS ix_journal_entries_company_fiscal_period
 
 CREATE INDEX IF NOT EXISTS ix_journal_entries_company_method_profile
   ON journal_entries (company_id, accounting_method_profile_id);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260324110000_phase14_ledger_foundation_bridge')
+ON CONFLICT (migration_id) DO NOTHING;

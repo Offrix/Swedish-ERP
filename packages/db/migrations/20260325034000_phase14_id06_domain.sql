@@ -113,3 +113,7 @@ CREATE TABLE IF NOT EXISTS id06_evidence_bundles (
   exported_at TIMESTAMPTZ NOT NULL,
   created_by_actor_id TEXT NOT NULL
 );
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260325034000_phase14_id06_domain')
+ON CONFLICT (migration_id) DO NOTHING;

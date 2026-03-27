@@ -114,3 +114,7 @@ CREATE INDEX IF NOT EXISTS ix_report_export_jobs_company_snapshot
 
 CREATE INDEX IF NOT EXISTS ix_report_export_jobs_company_report
   ON report_export_jobs (company_id, report_code, created_at);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322110000_phase11_reporting_exports')
+ON CONFLICT (migration_id) DO NOTHING;

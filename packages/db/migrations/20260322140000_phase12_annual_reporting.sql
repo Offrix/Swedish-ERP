@@ -411,3 +411,7 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS ix_tax_declaration_packages_version
   ON tax_declaration_packages (annual_report_version_id, package_code);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322140000_phase12_annual_reporting')
+ON CONFLICT (migration_id) DO NOTHING;

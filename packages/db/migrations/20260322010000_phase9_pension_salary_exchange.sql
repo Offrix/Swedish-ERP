@@ -136,3 +136,7 @@ ALTER TABLE pension_events
   ADD COLUMN IF NOT EXISTS warning_codes_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS snapshot_hash TEXT,
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260322010000_phase9_pension_salary_exchange')
+ON CONFLICT (migration_id) DO NOTHING;

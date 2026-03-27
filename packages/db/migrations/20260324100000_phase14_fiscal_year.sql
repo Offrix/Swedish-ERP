@@ -71,3 +71,7 @@ CREATE TABLE IF NOT EXISTS fiscal_periods (
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_fiscal_periods_fiscal_year_code
   ON fiscal_periods(fiscal_year_id, period_code);
+
+INSERT INTO schema_migrations (migration_id)
+VALUES ('20260324100000_phase14_fiscal_year')
+ON CONFLICT (migration_id) DO NOTHING;
