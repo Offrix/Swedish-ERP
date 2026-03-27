@@ -202,8 +202,11 @@ const EXPLICIT_ROUTE_OVERRIDES = new Map([
 
 const SOURCE_ROUTE_FILES = Object.freeze([
   new URL("./server.mjs", import.meta.url),
-  new URL("./phase13-routes.mjs", import.meta.url),
-  new URL("./phase14-routes.mjs", import.meta.url)
+  ...fs
+    .readdirSync(fileURLToPath(new URL(".", import.meta.url)), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /^phase\d+(?:-[a-z0-9]+)*-routes\.mjs$/i.test(entry.name))
+    .map((entry) => new URL(`./${entry.name}`, import.meta.url))
+    .sort((left, right) => left.href.localeCompare(right.href))
 ]);
 
 const MUTATING_ROUTE_CONTRACTS = Object.freeze(buildRouteContracts());

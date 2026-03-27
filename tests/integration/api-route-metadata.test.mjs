@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import path from "node:path";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 
@@ -145,16 +146,16 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
 });
 
 test("api root metadata covers all parsed route patterns from server and phase14 route handlers", async () => {
-  const [serverSource, phase13Source, phase14Source] = await Promise.all([
-    fs.readFile("apps/api/src/server.mjs", "utf8"),
-    fs.readFile("apps/api/src/phase13-routes.mjs", "utf8"),
-    fs.readFile("apps/api/src/phase14-routes.mjs", "utf8")
-  ]);
-  const parsedRoutes = [
-    ...parseRoutesFromSource(serverSource),
-    ...parseRoutesFromSource(phase13Source),
-    ...parseRoutesFromSource(phase14Source)
+  const routeDirectoryEntries = await fs.readdir("apps/api/src", { withFileTypes: true });
+  const routeFiles = [
+    "apps/api/src/server.mjs",
+    ...routeDirectoryEntries
+      .filter((entry) => entry.isFile() && /^phase\d+(?:-[a-z0-9]+)*-routes\.mjs$/i.test(entry.name))
+      .map((entry) => path.join("apps/api/src", entry.name))
+      .sort()
   ];
+  const routeSources = await Promise.all(routeFiles.map((routeFile) => fs.readFile(routeFile, "utf8")));
+  const parsedRoutes = routeSources.flatMap((sourceText) => parseRoutesFromSource(sourceText));
 
   const server = createApiServer();
   await new Promise((resolve) => server.listen(0, resolve));
