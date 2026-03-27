@@ -99,6 +99,27 @@ test("Phase 1 API routes tenant setup, trial and module lifecycles through tenan
     );
     assert.equal(onboardingChecklist.checklist.every((item) => item.status === "completed"), true);
 
+    const onboardingAdminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: onboardingRun.companyId,
+      email: "api-owner@example.test"
+    });
+    const onboardingProfile = await requestJson(baseUrl, `/v1/tenant/bootstrap/profile?companyId=${onboardingRun.companyId}`, {
+      token: onboardingAdminToken
+    });
+    assert.equal(onboardingProfile.status, "finance_ready");
+    assert.equal(onboardingProfile.financeReadinessChecks.every((item) => item.status === "completed"), true);
+    assert.equal(onboardingProfile.financeBlueprintJson.legalFormCode, "AKTIEBOLAG");
+    assert.equal(onboardingProfile.financeBlueprintJson.accountingMethodCode, "FAKTURERINGSMETOD");
+    assert.equal(onboardingProfile.financeFoundationJson.status, "finance_ready");
+    assert.equal(onboardingProfile.financeFoundationJson.vatProfile.vatCodeCount > 0, true);
+    assert.deepEqual(onboardingProfile.financeFoundationJson.queueStructure.queueCodes, [
+      "finance_review",
+      "payroll_review",
+      "vat_decision_review"
+    ]);
+
     const tenantProfile = await requestJson(baseUrl, `/v1/org/tenant-setup/profile?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });

@@ -144,3 +144,36 @@ test("Step 8 change requests require permission where law requires it and activa
   assert.equal(activeYear.yearKind, "EXTENDED");
   assert.equal(activeYear.periods.length, 18);
 });
+
+test("Step 8 fiscal year status filtering accepts lowercase active status", () => {
+  const engine = createFiscalYearEngine({
+    seedDemo: false,
+    clock: () => new Date("2026-06-01T09:00:00Z")
+  });
+
+  const profile = engine.createFiscalYearProfile({
+    companyId: "company_status_filter",
+    legalFormCode: "AKTIEBOLAG",
+    actorId: "tester"
+  });
+  const fiscalYear = engine.createFiscalYear({
+    companyId: "company_status_filter",
+    fiscalYearProfileId: profile.fiscalYearProfileId,
+    startDate: "2026-01-01",
+    endDate: "2026-12-31",
+    approvalBasisCode: "BOOKKEEPING_ENTRY",
+    actorId: "tester"
+  });
+  engine.activateFiscalYear({
+    companyId: "company_status_filter",
+    fiscalYearId: fiscalYear.fiscalYearId,
+    actorId: "tester"
+  });
+
+  const activeYears = engine.listFiscalYears({
+    companyId: "company_status_filter",
+    status: "active"
+  });
+  assert.equal(activeYears.length, 1);
+  assert.equal(activeYears[0].status, "active");
+});

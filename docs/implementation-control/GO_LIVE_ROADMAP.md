@@ -440,7 +440,7 @@ GÃ¶ra all reglerad logik, baseline-versionering och providerspecifika format s
 **Blockerar UI-readiness**  
 - UI kan inte visa sÃ¤kra blockers, explanations eller receipts utan rulepack refs.
 
-## [ ] Fas 6 â€” Auth, identity, session trust, device trust och backoffice-boundaries
+## [x] Fas 6 â€” Auth, identity, session trust, device trust och backoffice-boundaries
 
 **MÃ¥l**  
 GÃ¶ra identitet, step-up, federation, impersonation och break-glass verkliga och separera customer-facing och backoffice-boundaries tekniskt.
@@ -457,14 +457,21 @@ GÃ¶ra identitet, step-up, federation, impersonation och break-glass verkliga o
 - Inga regulated submissions eller write-capable supportflÃ¶den fÃ¥r Ã¶ppnas innan step-up och backoffice-boundaries Ã¤r tvingande.
 
 **Delfaser**
-- [x] 6.1 [REPLACE] **Byt BankID-stub mot auth broker** â€” Klar: auth broker ersÃ¤tter stubben, Signicat-baserad BankID kÃ¶r i sandbox/production via broker, passkeys/TOTP lÃ¤nkas som lokala identity accounts, WorkOS-baserad federation har start/callback-routes, durable broker-state och runbook.
-- [x] 6.2 [NEW BUILD] **Session trust och challenge center** â€” Klar: `SessionRevision`, trustnivÃ¥er, fresh step-up, device trust, challenge completion receipts, action-specific TTL, challenge-center routes och durable restore finns nu i runtime och API.
-- [x] 6.3 [HARDEN] **Scope, queue och visibility enforcement** â€” Klar: review center queues/items, activity feeds och operational work items permission-trimmas nu server-side med viewer/team-scope, backoffice visibility gates och cross-team denial tests.
-- [x] 6.4 [NEW BUILD] **Impersonation, break-glass och access attestation** â€” Klar: impersonation och break-glass har nu explicit approve/start/end-livscykel, TTL/expiry, watermark-payloads, allowlistbunden aktivering, kvartalsvis access-review-fönster, stale-grant-detektion och runbooks för support- och incidentdrift.
-- [x] 6.5 [OPERATIONALIZE] **Sandbox/prod isolation fÃ¶r identitet** â€” Klar: auth har nu mode-katalog per provider, `/v1/auth/providers/isolation`, produktionsgating nÃ¤r auth-inventory saknas, federations-callbacks per mode och explicit testidentitetsseparation mellan non-production och production.
+- [x] 6.1 [REPLACE] **Byt BankID-stub mot auth broker** â€” Klar: auth broker ersÃ¤tter stubben, Signicat-baserad BankID kÃ¶r i sandbox/production via broker, passkeys/TOTP lÃ¤nkas som lokala identity accounts, WorkOS-baserad federation har start/callback-routes, durable broker-state och runbook. Ã…terverifierad 2026-03-27.
+- [x] 6.2 [NEW BUILD] **Session trust och challenge center** â€” Klar: `SessionRevision`, trustnivÃ¥er, fresh step-up, device trust, challenge completion receipts, action-specific TTL, challenge-center routes och durable restore finns nu i runtime och API. Ã…terverifierad 2026-03-27.
+- [x] 6.3 [HARDEN] **Scope, queue och visibility enforcement** â€” Klar: review center queues/items, activity feeds och operational work items permission-trimmas nu server-side med viewer/team-scope, backoffice visibility gates och cross-team denial tests. Ã…terverifierad 2026-03-27.
+- [x] 6.4 [NEW BUILD] **Impersonation, break-glass och access attestation** â€” Klar: impersonation och break-glass har nu explicit approve/start/end-livscykel, TTL/expiry, watermark-payloads, allowlistbunden aktivering, kvartalsvis access-review-fönster, stale-grant-detektion och runbooks för support- och incidentdrift. Återverifierad 2026-03-27.
+- [x] 6.5 [OPERATIONALIZE] **Sandbox/prod isolation fÃ¶r identitet** â€” Klar: auth har nu mode-katalog per provider, `/v1/auth/providers/isolation`, produktionsgating nÃ¤r auth-inventory saknas, federations-callbacks per mode och explicit testidentitetsseparation mellan non-production och production. Ã…terverifierad 2026-03-27.
 
 **Exit gate**  
 - BankID/passkeys/TOTP fungerar, enterprise federation kan anslutas via broker, backoffice-write krÃ¤ver korrekt approvals och step-up, och permissions Ã¤r server-side enforced.
+
+**Delfasstatus**
+- 6.1 återverifierad 2026-03-27
+- 6.2 återverifierad 2026-03-27
+- 6.3 återverifierad 2026-03-27
+- 6.4 återverifierad 2026-03-27
+- 6.5 återverifierad 2026-03-27
 
 **Test gate**  
 - BankID sandbox/prod isolation, passkey enroll/revoke, TOTP recovery, SSO login, impersonation denial tests, dual control tests, access review tests.
@@ -507,13 +514,14 @@ Skapa en separat kÃ¤lla fÃ¶r tenant bootstrap, module activation, finance re
 
 **Delfaser**
 - [x] 7.1 [NEW BUILD] **InfÃ¶r `domain-tenant-control`** â€” Nytt package Ã¤ger `TenantBootstrap`, `CompanySetupProfile`, `ModuleActivationProfile`, `GoLivePlan`, `TrialEnvironmentProfile`, `ParallelRunPlan`, `PromotionPlan`.
-- [ ] 7.2 [HARDEN] **Bygg finance-ready bootstrap** â€” Legal form, accounting method, fiscal year, chart template, VAT profile, reporting obligation profile, role template och queue structure ska skapas i korrekt ordning.
+- [x] 7.2 [HARDEN] **Bygg finance-ready bootstrap** â€” Legal form, accounting method, fiscal year, chart template, VAT profile, reporting obligation profile, role template och queue structure ska skapas i korrekt ordning.
 - [ ] 7.3 [NEW BUILD] **Bygg trial/testkonto-isolering** â€” Trial tenants fÃ¥r eget mode, vattenmÃ¤rkning, fake/sandbox providers, blocked live credentials och skydd mot verkliga ekonomiska konsekvenser.
 - [ ] 7.4 [NEW BUILD] **Seed scenarios, reset och refresh** â€” Bygg deterministiska seed-scenarier per bolagstyp och reset/refresh utan att blanda trial-data med live-data.
 - [ ] 7.5 [MIGRATE] **Bygg upgrade trial->live** â€” Promotion skapar ny live tenant/company profile frÃ¥n godkÃ¤nd masterdata; trial ledger, receipts, provider refs och submissions fÃ¥r aldrig flyttas rakt in i live.
 
 **Delfasstatus**
 - 7.1 Ã¥terverifierad 2026-03-27
+- 7.2 klar 2026-03-27
 
 **Exit gate**  
 - Tenant kan bli finance-ready eller trial-safe via samma orchestrator. Trial Ã¤r marknadsmÃ¤ssig, sÃ¤ker och isolerad. Promotion till live Ã¤r definierad och testad.

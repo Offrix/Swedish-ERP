@@ -174,10 +174,11 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     label: "Tenant control",
     packageName: "@swedish-erp/domain-tenant-control",
     dependsOn: ["orgAuth"],
-    create: ({ options, dependencies }) =>
+    create: ({ options, dependencies, getDomain }) =>
       createTenantControlPlatform({
         ...options,
-        orgAuthPlatform: dependencies.orgAuth
+        orgAuthPlatform: dependencies.orgAuth,
+        getDomain
       })
   }),
   createDomainDefinition({

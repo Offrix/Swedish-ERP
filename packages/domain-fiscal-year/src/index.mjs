@@ -879,7 +879,7 @@ function normalizeOptionalStatus(value, allowedValues, code) {
   if (value == null || value === "") {
     return null;
   }
-  return assertAllowed(normalizeCode(value, code), allowedValues, code);
+  return assertAllowed(requireText(String(value || ""), code).trim().toLowerCase(), allowedValues, code);
 }
 
 function normalizeCode(value, code) {

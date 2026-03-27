@@ -78,6 +78,65 @@ test("Phase 1 tenant setup flows through tenant-control with finance-ready state
     email: "owner@tenant-setup.test"
   });
   assert.ok(onboardingAdminToken);
+  const legalFormDomain = platform.getDomain("legalForm");
+  const accountingMethodDomain = platform.getDomain("accountingMethod");
+  const fiscalYearDomain = platform.getDomain("fiscalYear");
+  const ledgerDomain = platform.getDomain("ledger");
+  const vatDomain = platform.getDomain("vat");
+  const reviewCenterDomain = platform.getDomain("reviewCenter");
+  const financeReadiness = tenantControl.getFinanceReadinessValidation({
+    sessionToken: onboardingAdminToken,
+    companyId: onboardingRun.companyId
+  });
+  assert.equal(financeReadiness.status, "finance_ready");
+  assert.equal(financeReadiness.checks.every((item) => item.status === "completed"), true);
+  const canonicalProfile = tenantControl.getCompanySetupProfile({
+    sessionToken: onboardingAdminToken,
+    companyId: onboardingRun.companyId
+  });
+  assert.equal(canonicalProfile.financeBlueprintJson.legalFormCode, "AKTIEBOLAG");
+  assert.equal(canonicalProfile.financeBlueprintJson.accountingMethodCode, "FAKTURERINGSMETOD");
+  assert.equal(canonicalProfile.financeFoundationJson.status, "finance_ready");
+  assert.equal(canonicalProfile.financeFoundationJson.voucherSeriesCount > 0, true);
+  assert.equal(canonicalProfile.financeFoundationJson.vatProfile.vatCodeCount > 0, true);
+  assert.deepEqual(canonicalProfile.financeFoundationJson.queueStructure.queueCodes, [
+    "finance_review",
+    "payroll_review",
+    "vat_decision_review"
+  ]);
+  assert.equal(
+    legalFormDomain.listLegalFormProfiles({ companyId: onboardingRun.companyId }).some(
+      (profile) => profile.status === "active" && profile.legalFormCode === "AKTIEBOLAG"
+    ),
+    true
+  );
+  assert.equal(
+    legalFormDomain.listReportingObligationProfiles({ companyId: onboardingRun.companyId }).some(
+      (profile) => profile.status === "approved"
+    ),
+    true
+  );
+  assert.equal(
+    accountingMethodDomain.listMethodProfiles({ companyId: onboardingRun.companyId }).some(
+      (profile) => profile.status === "active" && profile.methodCode === "FAKTURERINGSMETOD"
+    ),
+    true
+  );
+  assert.equal(
+    Boolean(fiscalYearDomain.getActiveFiscalYearForDate({ companyId: onboardingRun.companyId, accountingDate: "2026-01-01" })),
+    true
+  );
+  assert.equal(ledgerDomain.listLedgerAccounts({ companyId: onboardingRun.companyId }).length > 0, true);
+  assert.equal(ledgerDomain.listVoucherSeries({ companyId: onboardingRun.companyId }).length > 0, true);
+  assert.equal(vatDomain.listVatCodes({ companyId: onboardingRun.companyId }).length > 0, true);
+  assert.equal(
+    reviewCenterDomain
+      .listReviewCenterQueues({ companyId: onboardingRun.companyId })
+      .map((queue) => String(queue.queueCode).toLowerCase())
+      .sort()
+      .join(","),
+    "finance_review,payroll_review,vat_decision_review"
+  );
 
   const adminToken = loginWithStrongAuthOnPlatform({
     platform,

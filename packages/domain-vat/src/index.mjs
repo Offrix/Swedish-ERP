@@ -252,6 +252,7 @@ export function createVatEngine({
     vatReviewQueueStatuses: VAT_REVIEW_QUEUE_STATUSES,
     vatBoxAmountTypes: VAT_BOX_AMOUNT_TYPES,
     vatPostingDirections: VAT_POSTING_DIRECTIONS,
+    installVatCatalog,
     listVatCodes,
     listVatRulePacks,
     evaluateVatDecision,
@@ -290,6 +291,35 @@ export function createVatEngine({
       .filter(Boolean)
       .sort((left, right) => left.vatCode.localeCompare(right.vatCode))
       .map(copy);
+  }
+
+  function installVatCatalog({ companyId, actorId = "system" } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const existingVatCodes = listVatCodes({ companyId: resolvedCompanyId });
+    if (existingVatCodes.length > 0) {
+      return {
+        companyId: resolvedCompanyId,
+        installedVatCodes: 0,
+        totalVatCodes: existingVatCodes.length,
+        reviewQueueCode: "vat_decision_review"
+      };
+    }
+
+    seedVatMasterdata(state, clock, resolvedCompanyId);
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      action: "vat.catalog.installed",
+      entityType: "vat_catalog",
+      entityId: resolvedCompanyId,
+      explanation: `Installed VAT catalog for ${resolvedCompanyId}.`
+    });
+    return {
+      companyId: resolvedCompanyId,
+      installedVatCodes: VAT_CODE_DEFINITIONS.length,
+      totalVatCodes: listVatCodes({ companyId: resolvedCompanyId }).length,
+      reviewQueueCode: "vat_decision_review"
+    };
   }
 
   function listVatRulePacks({ effectiveDate = null } = {}) {
@@ -908,9 +938,8 @@ function normalizeTransactionLine(transactionLine) {
   return normalized;
 }
 
-function seedVatMasterdata(state, clock) {
+function seedVatMasterdata(state, clock, companyId = DEMO_COMPANY_ID) {
   const now = new Date(clock()).toISOString();
-  const companyId = DEMO_COMPANY_ID;
   state.vatCodeIdsByCompany.set(companyId, []);
   for (const definition of VAT_CODE_DEFINITIONS) {
     const vatCodeId = crypto.randomUUID();
