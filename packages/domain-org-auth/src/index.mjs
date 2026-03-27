@@ -128,6 +128,89 @@ export const DEMO_APPROVER_EMAIL = "approver@example.test";
 export const DEMO_APPROVER_TOTP_SECRET = "KRSXG5DSNFXGOIDB";
 export const LOCAL_TOTP_PROVIDER_CODE = "local-totp";
 export const LOCAL_PASSKEY_PROVIDER_CODE = "local-passkey";
+export const AUTH_RUNTIME_MODE_CODES = Object.freeze(["trial", "sandbox_internal", "test", "pilot_parallel", "production"]);
+export const AUTH_IDENTITY_PROVIDER_CODES = Object.freeze([BANKID_PROVIDER_CODE, WORKOS_FEDERATION_PROVIDER_CODE]);
+
+const AUTH_IDENTITY_MODE_DEFAULTS = Object.freeze({
+  trial: Object.freeze({
+    callbackRootDomain: "trial-auth.swedish-erp.example.test",
+    providerEnvironmentRef: "trial_safe",
+    supportsLegalEffect: false,
+    testIdentities: Object.freeze({
+      [BANKID_PROVIDER_CODE]: Object.freeze([
+        Object.freeze({ identityType: "bankid_subject", label: "Trial BankID", value: DEMO_BANKID_SUBJECT })
+      ]),
+      [WORKOS_FEDERATION_PROVIDER_CODE]: Object.freeze([
+        Object.freeze({ identityType: "email", label: "Trial federation user", value: DEMO_APPROVER_EMAIL })
+      ])
+    })
+  }),
+  sandbox_internal: Object.freeze({
+    callbackRootDomain: "sandbox-auth.swedish-erp.example.test",
+    providerEnvironmentRef: "sandbox",
+    supportsLegalEffect: false,
+    testIdentities: Object.freeze({
+      [BANKID_PROVIDER_CODE]: Object.freeze([
+        Object.freeze({ identityType: "bankid_subject", label: "Sandbox BankID", value: DEMO_BANKID_SUBJECT })
+      ]),
+      [WORKOS_FEDERATION_PROVIDER_CODE]: Object.freeze([
+        Object.freeze({ identityType: "email", label: "Sandbox federation user", value: DEMO_APPROVER_EMAIL })
+      ])
+    })
+  }),
+  test: Object.freeze({
+    callbackRootDomain: "test-auth.swedish-erp.example.test",
+    providerEnvironmentRef: "test",
+    supportsLegalEffect: false,
+    testIdentities: Object.freeze({
+      [BANKID_PROVIDER_CODE]: Object.freeze([
+        Object.freeze({ identityType: "bankid_subject", label: "Test BankID", value: DEMO_BANKID_SUBJECT })
+      ]),
+      [WORKOS_FEDERATION_PROVIDER_CODE]: Object.freeze([
+        Object.freeze({ identityType: "email", label: "Test federation user", value: DEMO_APPROVER_EMAIL })
+      ])
+    })
+  }),
+  pilot_parallel: Object.freeze({
+    callbackRootDomain: "pilot-auth.swedish-erp.example.test",
+    providerEnvironmentRef: "pilot_parallel",
+    supportsLegalEffect: false,
+    testIdentities: Object.freeze({
+      [BANKID_PROVIDER_CODE]: Object.freeze([
+        Object.freeze({ identityType: "bankid_subject", label: "Pilot BankID", value: DEMO_BANKID_SUBJECT })
+      ]),
+      [WORKOS_FEDERATION_PROVIDER_CODE]: Object.freeze([
+        Object.freeze({ identityType: "email", label: "Pilot federation user", value: DEMO_APPROVER_EMAIL })
+      ])
+    })
+  }),
+  production: Object.freeze({
+    callbackRootDomain: "auth.swedish-erp.example.com",
+    providerEnvironmentRef: "production",
+    supportsLegalEffect: true,
+    testIdentities: Object.freeze({
+      [BANKID_PROVIDER_CODE]: Object.freeze([]),
+      [WORKOS_FEDERATION_PROVIDER_CODE]: Object.freeze([])
+    })
+  })
+});
+
+const AUTH_IDENTITY_PROVIDER_DEFINITIONS = Object.freeze({
+  [BANKID_PROVIDER_CODE]: Object.freeze({
+    providerCode: BANKID_PROVIDER_CODE,
+    brokerCode: "signicat",
+    callbackSubdomainPrefix: "bankid",
+    callbackPath: "/v1/auth/bankid/callback",
+    requiredManagedSecretTypes: Object.freeze(["oauth_client_secret", "webhook_signing_secret"])
+  }),
+  [WORKOS_FEDERATION_PROVIDER_CODE]: Object.freeze({
+    providerCode: WORKOS_FEDERATION_PROVIDER_CODE,
+    brokerCode: "workos",
+    callbackSubdomainPrefix: "federation",
+    callbackPath: "/v1/auth/federation/callback",
+    requiredManagedSecretTypes: Object.freeze(["oauth_client_secret", "webhook_signing_secret"])
+  })
+});
 
 const ACTION_CLASS_FRESHNESS_TTL_SECONDS = Object.freeze({
   identity_session_manage: 600,
@@ -149,13 +232,23 @@ const TRUST_LEVEL_FRESHNESS_TTL_SECONDS = Object.freeze({
 export function createOrgAuthPlatform({
   clock = () => new Date(),
   environmentMode = "test",
+  providerEnvironmentRef = environmentMode,
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
-  providerBaselineRegistry = null
+  providerBaselineRegistry = null,
+  resolveIdentityModeIsolation = null,
+  identityModeCatalog = null
 } = {}) {
   const providerBaselines =
     providerBaselineRegistry || createProviderBaselineRegistry({ clock, seedProviderBaselines: AUTH_PROVIDER_BASELINES });
+  const normalizedEnvironmentMode =
+    typeof environmentMode === "string" && AUTH_RUNTIME_MODE_CODES.includes(environmentMode.trim())
+      ? environmentMode.trim()
+      : "test";
+  const identityIsolationResolver = resolveIdentityModeIsolation;
+  const identityIsolationCatalog =
+    identityModeCatalog || buildDefaultIdentityModeCatalog({ providerEnvironmentRef });
   const state = {
     companies: new Map(),
     users: new Map(),
@@ -194,9 +287,11 @@ export function createOrgAuthPlatform({
     moduleDefinitions: new Map(),
     moduleActivations: new Map(),
     auditEvents: [],
+    environmentMode: normalizedEnvironmentMode,
+    providerEnvironmentRef: assertNonEmpty(providerEnvironmentRef, "provider_environment_ref_required"),
     authBroker: createAuthBroker({
       clock,
-      environmentMode: typeof environmentMode === "string" && environmentMode.trim().length > 0 ? environmentMode : "test"
+      environmentMode: normalizedEnvironmentMode
     })
   };
 
@@ -233,6 +328,7 @@ export function createOrgAuthPlatform({
     collectBankIdAuthentication,
     startFederationAuthentication,
     completeFederationAuthentication,
+    getIdentityIsolationSummary,
     createChallenge,
     completeChallenge,
     listChallenges,
@@ -1009,6 +1105,15 @@ export function createOrgAuthPlatform({
     if (!factor) {
       throw httpError(404, "bankid_identity_missing", "No BankID identity is enrolled for this company user.");
     }
+    const isolationSummary = evaluateIdentityModeIsolation({
+      state,
+      identityIsolationCatalog,
+      identityIsolationResolver,
+      sessionToken,
+      companyId: session.companyId,
+      providerCode: BANKID_PROVIDER_CODE
+    });
+    assertIdentityModeIsolationReady(isolationSummary, "BankID");
 
     const providerResult = state.authBroker.startBankIdChallenge({
       sessionId: session.sessionId,
@@ -1055,6 +1160,7 @@ export function createOrgAuthPlatform({
 
     return {
       ...providerResult,
+      identityIsolation: projectIdentityIsolationState(isolationSummary),
       providerBaselineId: providerBaselineRef.providerBaselineId,
       providerBaselineCode: providerBaselineRef.baselineCode,
       providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
@@ -1148,13 +1254,23 @@ export function createOrgAuthPlatform({
       sessionToken = loginResult.sessionToken;
     }
     const { session, principal } = requireSession(sessionToken, { allowPending: true });
+    const isolationSummary = evaluateIdentityModeIsolation({
+      state,
+      identityIsolationCatalog,
+      identityIsolationResolver,
+      sessionToken,
+      companyId: session.companyId,
+      providerCode: WORKOS_FEDERATION_PROVIDER_CODE
+    });
+    assertIdentityModeIsolationReady(isolationSummary, "Federation");
+    const resolvedRedirectUri = normalizeOptionalKeyPart(redirectUri) || isolationSummary.activeProfile.redirectUri;
     const providerResult = state.authBroker.startFederationAuthorization({
       companyId: session.companyId,
       companyUserId: session.companyUserId,
       userId: session.userId,
       connectionId,
       loginHint: loginHint || principal.email,
-      redirectUri
+      redirectUri: resolvedRedirectUri
     });
     const providerBaselineRef = resolveFederationProviderBaselineRef(providerBaselines, currentDate());
     const challenge = {
@@ -1194,6 +1310,7 @@ export function createOrgAuthPlatform({
       ...providerResult,
       sessionToken,
       session: publicSession(session),
+      identityIsolation: projectIdentityIsolationState(isolationSummary),
       providerBaselineId: providerBaselineRef.providerBaselineId,
       providerBaselineCode: providerBaselineRef.baselineCode,
       providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
@@ -1921,6 +2038,29 @@ export function createOrgAuthPlatform({
 
   function getFederationAuthorizationCodeForTesting(authRequestId) {
     return state.authBroker.getFederationAuthorizationCode(authRequestId);
+  }
+
+  function getIdentityIsolationSummary({ sessionToken, companyId } = {}) {
+    authorizeFromSession(sessionToken, ACTIONS.COMPANY_READ, {
+      companyId,
+      objectType: "auth_provider_isolation",
+      objectId: companyId,
+      scopeCode: "auth"
+    });
+    const providerSummaries = AUTH_IDENTITY_PROVIDER_CODES.map((providerCode) =>
+      evaluateIdentityModeIsolation({ state, identityIsolationCatalog, identityIsolationResolver, sessionToken, companyId, providerCode })
+    );
+    return {
+      companyId: assertNonEmpty(companyId, "company_id_required"),
+      environmentMode: state.environmentMode,
+      providerEnvironmentRef: state.providerEnvironmentRef,
+      generatedAt: nowIso(clock),
+      ready: providerSummaries.every((summary) => summary.ready),
+      providerCount: providerSummaries.length,
+      activeProfiles: providerSummaries.map(projectIdentityIsolationSummary),
+      modeCatalog: identityIsolationCatalog.map(projectIdentityModeCatalogEntry),
+      violations: providerSummaries.flatMap((summary) => summary.violations)
+    };
   }
 
   function authorizeFromSession(sessionToken, action, resource) {
@@ -3108,6 +3248,181 @@ function resolveFederationProviderBaselineRef(providerBaselines, now) {
       factorType: "federation"
     }
   });
+}
+
+function buildDefaultIdentityModeCatalog({ providerEnvironmentRef } = {}) {
+  const resolvedProviderEnvironmentRef = assertNonEmpty(providerEnvironmentRef, "provider_environment_ref_required");
+  return Object.freeze(
+    AUTH_RUNTIME_MODE_CODES.flatMap((runtimeMode) => {
+      const modeDefaults = AUTH_IDENTITY_MODE_DEFAULTS[runtimeMode];
+      return AUTH_IDENTITY_PROVIDER_CODES.map((providerCode) => {
+        const definition = AUTH_IDENTITY_PROVIDER_DEFINITIONS[providerCode];
+        const callbackDomain = `${definition.callbackSubdomainPrefix}.${modeDefaults.callbackRootDomain}`;
+        const redirectUri =
+          providerCode === WORKOS_FEDERATION_PROVIDER_CODE ? `https://${callbackDomain}${definition.callbackPath}` : null;
+        return Object.freeze({
+          runtimeMode,
+          providerEnvironmentRef: runtimeMode === "production" ? "production" : modeDefaults.providerEnvironmentRef || resolvedProviderEnvironmentRef,
+          supportsLegalEffect: modeDefaults.supportsLegalEffect,
+          providerCode,
+          brokerCode: definition.brokerCode,
+          credentialSecretRef: `vault://${runtimeMode}/${providerCode}/oauth-client-secret`,
+          webhookSecretRef: `vault://${runtimeMode}/${providerCode}/webhook-signing-secret`,
+          requiredManagedSecretTypes: [...definition.requiredManagedSecretTypes],
+          callbackDomain,
+          callbackPath: definition.callbackPath,
+          redirectUri,
+          allowsTestIdentities: runtimeMode !== "production",
+          testIdentities: [...(modeDefaults.testIdentities[providerCode] || [])]
+        });
+      });
+    })
+  );
+}
+
+function evaluateIdentityModeIsolation({
+  state,
+  identityIsolationCatalog,
+  identityIsolationResolver = null,
+  sessionToken,
+  companyId,
+  providerCode
+} = {}) {
+  const activeProfile = requireIdentityIsolationProfile({
+    identityIsolationCatalog,
+    runtimeMode: state.environmentMode,
+    providerCode
+  });
+  const modeCatalog = identityIsolationCatalog
+    .filter((entry) => entry.providerCode === providerCode)
+    .map(projectIdentityModeCatalogEntry);
+  const externalResolution =
+    typeof identityIsolationResolver === "function"
+      ? identityIsolationResolver({
+        sessionToken,
+        companyId,
+        runtimeMode: state.environmentMode,
+        providerEnvironmentRef: state.providerEnvironmentRef,
+        providerCode,
+        activeProfile: projectIdentityModeCatalogEntry(activeProfile),
+        modeCatalog
+      })
+      : null;
+  const violations = normalizeIdentityIsolationViolations(
+    externalResolution?.violations,
+    state.environmentMode
+  );
+  const ready = violations.every((violation) => violation.severity !== "blocking");
+  return {
+    providerCode,
+    runtimeMode: state.environmentMode,
+    providerEnvironmentRef: state.providerEnvironmentRef,
+    activeProfile,
+    modeCatalog,
+    inventory: normalizeIdentityIsolationInventory(externalResolution?.inventory),
+    violations,
+    ready
+  };
+}
+
+function requireIdentityIsolationProfile({ identityIsolationCatalog, runtimeMode, providerCode } = {}) {
+  const profile = identityIsolationCatalog.find(
+    (entry) => entry.runtimeMode === runtimeMode && entry.providerCode === providerCode
+  );
+  if (!profile) {
+    throw httpError(500, "auth_identity_mode_profile_missing", `No auth isolation profile is configured for ${providerCode}/${runtimeMode}.`);
+  }
+  return profile;
+}
+
+function normalizeIdentityIsolationInventory(inventory = {}) {
+  return {
+    managedSecretCount: Number.isInteger(inventory?.managedSecretCount) ? inventory.managedSecretCount : 0,
+    callbackSecretCount: Number.isInteger(inventory?.callbackSecretCount) ? inventory.callbackSecretCount : 0,
+    matchingCallbackCount: Number.isInteger(inventory?.matchingCallbackCount) ? inventory.matchingCallbackCount : 0,
+    certificateChainCount: Number.isInteger(inventory?.certificateChainCount) ? inventory.certificateChainCount : 0,
+    requiredManagedSecretTypes: Array.isArray(inventory?.requiredManagedSecretTypes) ? [...inventory.requiredManagedSecretTypes] : [],
+    configuredManagedSecretTypes: Array.isArray(inventory?.configuredManagedSecretTypes) ? [...inventory.configuredManagedSecretTypes] : []
+  };
+}
+
+function normalizeIdentityIsolationViolations(violations, runtimeMode) {
+  if (!Array.isArray(violations)) {
+    return [];
+  }
+  return violations.map((violation) => ({
+    providerCode: normalizeOptionalKeyPart(violation?.providerCode),
+    code: assertNonEmpty(violation?.code, "identity_isolation_violation_code_required"),
+    severity: normalizeIdentityIsolationSeverity(violation?.severity, runtimeMode),
+    detail: assertNonEmpty(violation?.detail, "identity_isolation_violation_detail_required")
+  }));
+}
+
+function normalizeIdentityIsolationSeverity(value, runtimeMode) {
+  if (value === "blocking" || value === "warning") {
+    return value;
+  }
+  return runtimeMode === "production" ? "blocking" : "warning";
+}
+
+function projectIdentityModeCatalogEntry(entry) {
+  return {
+    runtimeMode: entry.runtimeMode,
+    providerEnvironmentRef: entry.providerEnvironmentRef,
+    supportsLegalEffect: entry.supportsLegalEffect,
+    providerCode: entry.providerCode,
+    brokerCode: entry.brokerCode,
+    credentialSecretRef: entry.credentialSecretRef,
+    webhookSecretRef: entry.webhookSecretRef,
+    requiredManagedSecretTypes: [...entry.requiredManagedSecretTypes],
+    callbackDomain: entry.callbackDomain,
+    callbackPath: entry.callbackPath,
+    redirectUri: entry.redirectUri,
+    allowsTestIdentities: entry.allowsTestIdentities,
+    testIdentities: entry.testIdentities.map((identity) => ({ ...identity }))
+  };
+}
+
+function projectIdentityIsolationState(summary) {
+  return {
+    runtimeMode: summary.runtimeMode,
+    ready: summary.ready,
+    blockingViolationCount: summary.violations.filter((violation) => violation.severity === "blocking").length,
+    warningCount: summary.violations.filter((violation) => violation.severity !== "blocking").length,
+    activeProfile: projectIdentityModeCatalogEntry(summary.activeProfile),
+    violations: summary.violations.map((violation) => ({ ...violation }))
+  };
+}
+
+function projectIdentityIsolationSummary(summary) {
+  return {
+    providerCode: summary.providerCode,
+    runtimeMode: summary.runtimeMode,
+    providerEnvironmentRef: summary.providerEnvironmentRef,
+    ready: summary.ready,
+    activeProfile: projectIdentityModeCatalogEntry(summary.activeProfile),
+    inventory: { ...summary.inventory },
+    violations: summary.violations.map((violation) => ({ ...violation }))
+  };
+}
+
+function assertIdentityModeIsolationReady(summary, providerLabel) {
+  const blockingViolations = summary.violations.filter((violation) => violation.severity === "blocking");
+  if (blockingViolations.length === 0) {
+    return;
+  }
+  throw httpError(
+    409,
+    "auth_identity_mode_isolation_incomplete",
+    `${providerLabel} cannot start until identity mode isolation is complete.`,
+    {
+      details: {
+        providerCode: summary.providerCode,
+        runtimeMode: summary.runtimeMode,
+        violationCodes: blockingViolations.map((violation) => violation.code)
+      }
+    }
+  );
 }
 
 function buildIdentityAccountKey({ companyId, companyUserId, providerCode, factorType, providerSubject = null, credentialId = null }) {

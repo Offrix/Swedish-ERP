@@ -186,6 +186,7 @@ const HIGH_RISK_ROUTE_PREFIXES = Object.freeze([
 
 const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["POST /v1/auth/logout", override("auth", "identity_session_end", "authenticated", "self", "auth_session", "auth_session", null, false)],
+  ["GET /v1/auth/providers/isolation", { ...override("auth", "identity_provider_isolation_read", "strong_mfa", "company", "auth_provider_isolation", "auth_provider_isolation", "company.read", true), mutation: false }],
   ["POST /v1/auth/challenges", override("auth", "identity_step_up_start", "authenticated", "self", "auth_challenge", "auth_challenge", null, false)],
   ["POST /v1/auth/challenges/:challengeId/complete", override("auth", "identity_factor_verify", "authenticated", "self", "auth_challenge", "auth_challenge", null, false)],
   ["POST /v1/auth/devices/:deviceTrustRecordId/trust", override("auth", "identity_device_trust_manage", "mfa", "self", "device_trust_record", "device_trust_record", null, false)],

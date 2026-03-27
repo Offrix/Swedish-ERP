@@ -16,6 +16,9 @@ This runbook governs the broker-backed BankID and enterprise federation setup us
 - `production` runtime mode must use production broker credentials and production callback domains.
 - All non-production runtime modes must use sandbox credentials, sandbox callback domains and sandbox test identities.
 - Sandbox completion tokens and federation authorization codes must never be available in production mode.
+- `GET /v1/auth/providers/isolation` must show the active provider profile, callback domain and mode-specific test identity catalog before a mode is approved.
+- Production start of BankID or federation must be blocked until auth inventory contains the required managed secret types and a matching callback secret for the active provider/mode.
+- Callback secrets must match the provider-specific callback domain and callback path for the active mode; mismatched callback domains are a go-live blocker.
 
 ## Baseline pinning
 

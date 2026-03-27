@@ -162,3 +162,118 @@ test("Phase 6.1 durable auth broker state survives export/import for BankID and 
     true
   );
 });
+
+test("Phase 6.5 identity mode isolation exposes distinct mode catalog and provider callback domains", () => {
+  const platform = createOrgAuthPlatform({
+    clock: () => new Date("2026-03-27T12:00:00Z"),
+    environmentMode: "test",
+    providerEnvironmentRef: "test",
+    bootstrapScenarioCode: "test_default_demo",
+    resolveIdentityModeIsolation: ({ activeProfile }) => ({
+      inventory: {
+        managedSecretCount: activeProfile.requiredManagedSecretTypes.length,
+        callbackSecretCount: 1,
+        matchingCallbackCount: 1,
+        certificateChainCount: 0,
+        requiredManagedSecretTypes: activeProfile.requiredManagedSecretTypes,
+        configuredManagedSecretTypes: activeProfile.requiredManagedSecretTypes
+      },
+      violations: []
+    })
+  });
+
+  const login = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+  platform.verifyTotp({
+    sessionToken: login.sessionToken,
+    code: platform.getTotpCodeForTesting({
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    })
+  });
+  const bankIdStart = platform.startBankIdAuthentication({
+    sessionToken: login.sessionToken
+  });
+  platform.collectBankIdAuthentication({
+    sessionToken: login.sessionToken,
+    orderRef: bankIdStart.orderRef,
+    completionToken: platform.getBankIdCompletionTokenForTesting(bankIdStart.orderRef)
+  });
+
+  const summary = platform.getIdentityIsolationSummary({
+    sessionToken: login.sessionToken,
+    companyId: DEMO_IDS.companyId
+  });
+  const activeBankId = summary.activeProfiles.find((profile) => profile.providerCode === BANKID_PROVIDER_CODE);
+  const activeFederation = summary.activeProfiles.find((profile) => profile.providerCode === WORKOS_FEDERATION_PROVIDER_CODE);
+  const productionBankId = summary.modeCatalog.find(
+    (profile) => profile.runtimeMode === "production" && profile.providerCode === BANKID_PROVIDER_CODE
+  );
+  assert.equal(summary.environmentMode, "test");
+  assert.equal(summary.ready, true);
+  assert.equal(activeBankId.activeProfile.allowsTestIdentities, true);
+  assert.equal(activeBankId.activeProfile.testIdentities.length > 0, true);
+  assert.equal(activeFederation.activeProfile.redirectUri, `https://${activeFederation.activeProfile.callbackDomain}${activeFederation.activeProfile.callbackPath}`);
+  assert.notEqual(activeBankId.activeProfile.callbackDomain, productionBankId.callbackDomain);
+  assert.equal(productionBankId.testIdentities.length, 0);
+
+  const federationStart = platform.startFederationAuthentication({
+    sessionToken: login.sessionToken,
+    connectionId: "acme-sso"
+  });
+  const authUrl = new URL(federationStart.authorizationUrl);
+  assert.equal(authUrl.searchParams.get("redirect_uri"), activeFederation.activeProfile.redirectUri);
+});
+
+test("Phase 6.5 production BankID and federation start stay blocked until identity mode isolation is complete", () => {
+  const platform = createOrgAuthPlatform({
+    clock: () => new Date("2026-03-27T13:00:00Z"),
+    environmentMode: "production",
+    providerEnvironmentRef: "production",
+    bootstrapScenarioCode: "test_default_demo",
+    resolveIdentityModeIsolation: ({ activeProfile }) => ({
+      inventory: {
+        managedSecretCount: 0,
+        callbackSecretCount: 0,
+        matchingCallbackCount: 0,
+        certificateChainCount: 0,
+        requiredManagedSecretTypes: activeProfile.requiredManagedSecretTypes,
+        configuredManagedSecretTypes: []
+      },
+      violations: [
+        {
+          providerCode: activeProfile.providerCode,
+          code: "auth_provider_secret_missing",
+          severity: "blocking",
+          detail: "Missing production auth credentials."
+        }
+      ]
+    })
+  });
+
+  const login = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+  platform.verifyTotp({
+    sessionToken: login.sessionToken,
+    code: platform.getTotpCodeForTesting({
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    })
+  });
+
+  assert.throws(
+    () => platform.startBankIdAuthentication({ sessionToken: login.sessionToken }),
+    (error) => error?.code === "auth_identity_mode_isolation_incomplete"
+  );
+  assert.throws(
+    () => platform.startFederationAuthentication({
+      sessionToken: login.sessionToken,
+      connectionId: "acme-sso"
+    }),
+    (error) => error?.code === "auth_identity_mode_isolation_incomplete"
+  );
+});

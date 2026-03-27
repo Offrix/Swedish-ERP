@@ -1,7 +1,26 @@
-import { matchPath, readJsonBody, readSessionToken, writeJson } from "./route-helpers.mjs";
+import { authorizeCompanyAccess, matchPath, readJsonBody, readSessionToken, requireText, writeJson } from "./route-helpers.mjs";
 
 export async function tryHandlePhase6AuthRoutes({ req, res, path, platform }) {
   const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+
+  if (req.method === "GET" && path === "/v1/auth/providers/isolation") {
+    const companyId = requireText(requestUrl.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "auth_provider_isolation",
+      objectId: companyId,
+      scopeCode: "auth"
+    });
+    writeJson(res, 200, platform.getIdentityIsolationSummary({
+      sessionToken,
+      companyId
+    }));
+    return true;
+  }
 
   if (req.method === "GET" && path === "/v1/auth/challenges") {
     writeJson(res, 200, {

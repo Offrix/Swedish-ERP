@@ -306,6 +306,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/system/bootstrap/validate",
               "/v1/auth/login",
               "/v1/auth/logout",
+              "/v1/auth/providers/isolation",
               "/v1/auth/challenges",
               "/v1/auth/challenges/:challengeId/complete",
               "/v1/auth/devices",

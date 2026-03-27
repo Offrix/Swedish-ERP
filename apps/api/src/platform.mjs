@@ -742,13 +742,147 @@ export function createApiPlatform(options = {}) {
   const domains = {};
   const domainRegistry = [];
   const domainRegistryByKey = {};
+  const builtInIdentityModeIsolationResolver = ({
+    sessionToken,
+    companyId,
+    runtimeMode,
+    activeProfile,
+    providerCode
+  } = {}) => {
+    const corePlatform = domains.core;
+    const blockingMode = activeProfile?.supportsLegalEffect === true || runtimeMode === "pilot_parallel";
+    if (
+      !corePlatform
+      || typeof corePlatform.listManagedSecrets !== "function"
+      || typeof corePlatform.listCallbackSecrets !== "function"
+    ) {
+      return {
+        inventory: {},
+        violations: [
+          {
+            providerCode,
+            code: "auth_inventory_runtime_unavailable",
+            severity: blockingMode ? "blocking" : "warning",
+            detail: "Core secret inventory is not available to validate auth mode isolation."
+          }
+        ]
+      };
+    }
+
+    let managedSecrets;
+    let callbackSecrets;
+    let certificateChains;
+    try {
+      managedSecrets = corePlatform.listManagedSecrets({
+        sessionToken,
+        companyId,
+        mode: runtimeMode,
+        providerCode
+      });
+      callbackSecrets = corePlatform.listCallbackSecrets({
+        sessionToken,
+        companyId,
+        mode: runtimeMode,
+        providerCode
+      });
+      certificateChains =
+        typeof corePlatform.listCertificateChains === "function"
+          ? corePlatform.listCertificateChains({
+            sessionToken,
+            companyId,
+            mode: runtimeMode,
+            providerCode
+          })
+          : [];
+    } catch {
+      return {
+        inventory: {},
+        violations: [
+          {
+            providerCode,
+            code: "auth_inventory_runtime_unavailable",
+            severity: blockingMode ? "blocking" : "warning",
+            detail: "Core secret inventory could not be inspected with the current auth context."
+          }
+        ]
+      };
+    }
+    const configuredManagedSecretTypes = [...new Set(managedSecrets.map((record) => record.secretType))].sort();
+    const requiredManagedSecretTypes = [...new Set(activeProfile?.requiredManagedSecretTypes || [])].sort();
+    const missingSecretTypes = requiredManagedSecretTypes.filter((secretType) => !configuredManagedSecretTypes.includes(secretType));
+    const matchingCallbackCount = callbackSecrets.filter(
+      (record) => record.callbackDomain === activeProfile?.callbackDomain && record.callbackPath === activeProfile?.callbackPath
+    ).length;
+    const violations = [];
+
+    if (missingSecretTypes.length > 0) {
+      violations.push({
+        providerCode,
+        code: "auth_provider_secret_missing",
+        severity: blockingMode ? "blocking" : "warning",
+        detail: `${providerCode}/${runtimeMode} is missing required managed secret types: ${missingSecretTypes.join(", ")}.`
+      });
+    }
+    if (callbackSecrets.length === 0) {
+      violations.push({
+        providerCode,
+        code: "auth_provider_callback_secret_missing",
+        severity: blockingMode ? "blocking" : "warning",
+        detail: `${providerCode}/${runtimeMode} has no callback secret configured.`
+      });
+    }
+    if (matchingCallbackCount === 0) {
+      violations.push({
+        providerCode,
+        code: "auth_provider_callback_domain_mismatch",
+        severity: blockingMode ? "blocking" : "warning",
+        detail: `${providerCode}/${runtimeMode} does not have a callback secret bound to ${activeProfile.callbackDomain}${activeProfile.callbackPath}.`
+      });
+    }
+    if (activeProfile?.supportsLegalEffect === true && Array.isArray(activeProfile.testIdentities) && activeProfile.testIdentities.length > 0) {
+      violations.push({
+        providerCode,
+        code: "auth_provider_production_test_identity_forbidden",
+        severity: "blocking",
+        detail: `${providerCode}/${runtimeMode} still exposes test identities in a legal-effect environment.`
+      });
+    }
+    if (activeProfile?.supportsLegalEffect !== true && (!Array.isArray(activeProfile?.testIdentities) || activeProfile.testIdentities.length === 0)) {
+      violations.push({
+        providerCode,
+        code: "auth_provider_test_identity_missing",
+        severity: "warning",
+        detail: `${providerCode}/${runtimeMode} should expose explicit test identities for sandbox/trial verification.`
+      });
+    }
+
+    return {
+      inventory: {
+        managedSecretCount: managedSecrets.length,
+        callbackSecretCount: callbackSecrets.length,
+        matchingCallbackCount,
+        certificateChainCount: certificateChains.length,
+        requiredManagedSecretTypes,
+        configuredManagedSecretTypes
+      },
+      violations
+    };
+  };
+  const resolveIdentityModeIsolation =
+    typeof options.resolveIdentityModeIsolation === "function"
+      ? options.resolveIdentityModeIsolation
+      : builtInIdentityModeIsolationResolver;
+  const effectivePlatformOptions = Object.freeze({
+    ...platformOptions,
+    resolveIdentityModeIsolation
+  });
 
   for (const definition of API_DOMAIN_DEFINITIONS) {
     const dependencies = Object.fromEntries(
       definition.dependsOn.map((domainKey) => [domainKey, requireRegisteredDomain(domains, domainKey, definition.key)])
     );
       const platform = definition.create({
-        options: platformOptions,
+        options: effectivePlatformOptions,
         dependencies: Object.freeze(dependencies),
         domains: Object.freeze({ ...domains }),
         getDomain: (domainKey) => domains[domainKey] || null

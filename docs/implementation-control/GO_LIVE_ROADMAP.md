@@ -101,6 +101,13 @@ GÃ¶ra de tvÃ¥ nya dokumenten till enda sanning, dÃ¶da felaktiga antaganden
 **FÃ¥r inte kÃ¶ras parallellt med**  
 - Ingen implementation i reglerade flÃ¶den, auth, projects eller UI fÃ¥r starta innan denna fas Ã¤r signerad.
 
+**Delfasstatus**
+- 6.1 återverifierad 2026-03-27: auth broker ersätter fortsatt BankID-stubben med Signicat-baserad BankID i sandbox/production, lokala passkeys/TOTP som identity links, WorkOS-federation med start/callback och durable broker-state; riktade unit- och API-sviter håller grönt.
+- 6.2 återverifierad 2026-03-27: `SessionRevision`, trustnivåer, fresh step-up, device trust, challenge receipts, action-specific TTL och challenge-center-routes bär fortfarande riktig runtime i både authplattform och API.
+- 6.3 återverifierad 2026-03-27: review center, activity och operational work items permission-trimmas fortsatt server-side med viewer/team-scope, backoffice visibility gates och cross-team denial i riktade access-sviter.
+- 6.4 återverifierad 2026-03-27: impersonation, break-glass och access attestation håller fortsatt explicit approve/start/end-livscykel, TTL/expiry, watermarks, allowlists, stale-grant-detektion och policybunden supportdrift.
+- 6.5 återverifierad 2026-03-27: auth har nu faktisk mode-katalog per provider, `/v1/auth/providers/isolation`, produktionsgating när auth-inventory saknas, federations-callbacks per mode och explicit testidentitetsseparation mellan non-production och production.
+
 **Delfaser**
 - [x] 0.1 [REMOVE/DEPRECATE] **DÃ¶da byggcentriska narrativ** â€” Ta bort all styrning som behandlar produkten som byggprogram. Skriv in att field/personalliggare/ID06 Ã¤r vertikala pack ovanpÃ¥ generell fÃ¶retagsplattform.
 - [x] 0.2 [REWRITE] **LÃ¥s bindande produktkategori och benchmarkset** â€” Frys konkurrensbilden till finansplattformar, CRM-/projektplattformar, project-operations-ERP och bygg/field-vertikaler i exakt denna ordning.
@@ -333,9 +340,9 @@ Standardisera alla externa och interna kontrakt, bryta upp blandade route-filer 
 **Delfasstatus**  
 - 4.1 återverifierad 2026-03-27: standard request/success/error envelopes är nu bevisade mot bibelns fulla kontrakt över API, public API, partner API och webhook-ytor; feature-flag-block och 404 fallback går via canonical error envelopes i stället för success-path, och full svit plus riktade envelope-/webhook-/partner-/public-API-tester håller grönt.
 - 4.2 återverifierad 2026-03-27: action classes, trust levels, scope types och expected object version är fortsatt publicerade i route-contract registry för hela muterande route-ytan, och denial semantics är återbevisade både i route metadata och i riktade access-/desktop-only-/permission-sviter.
-- 4.3 klar 2026-03-27: `phase14-routes.mjs` är nu reducerad till orchestration plus hjälpfunktioner medan tax-account, balances, fiscal-year och collective-agreements ligger i egna routekataloger; `phase13-routes.mjs` är samtidigt rensad från duplicerade routeblock och delegerar nu endast till public-, partner-, job- och automation-kataloger. Full svit, lint, typecheck, build och security-scan håller grönt efter omsplitten.
-- 4.4 klar 2026-03-27: regulated submissions har brutits ut från generella integrationsytan till egen modul i `packages/domain-integrations/src/regulated-submissions.mjs`; `index.mjs` delegerar nu endast via modulen, och submission/receipt/replay/recovery-kedjan är återbevisad via riktade phase 12-, phase 13-, phase 17- och phase 48-sviter samt full verifiering.
-- 4.5 klar 2026-03-27: explicit contract-minimum-svit finns nu för fiscal-year, tax-account, balances och collective-agreements med canonical success envelopes, permission denials, conflict semantics och idempotency-bevis; collective-agreements fick verklig idempotens på muterande vägar och tax-account offset replay dedupas nu innan conflict-reglerna körs. Full svit, lint, typecheck, build och security-scan håller grönt efter härdningen.
+- 4.3 återverifierad 2026-03-27: `phase14-routes.mjs` är fortsatt ren orchestration plus hjälpfunktioner medan tax-account, balances, fiscal-year, review, resilience, migration och collective-agreements ligger i egna routekataloger; `phase13-routes.mjs` delegerar endast till public-, partner-, job- och automation-kataloger och bär inte längre egna duplicerade routeblock.
+- 4.4 återverifierad 2026-03-27: regulated submissions ligger fortsatt separerat från generella integrationsytan i `packages/domain-integrations/src/regulated-submissions.mjs`; `index.mjs` delegerar bara till modulen och riktade phase 12-API- och e2e-sviter bekräftar att envelope/attempt/receipt/replay/recovery-kedjan är verklig runtime.
+- 4.5 återverifierad 2026-03-27: contract-minimum-sviten för fiscal-year, tax-account, balances och collective-agreements är fortsatt grön med canonical success envelopes, permission denials, conflict semantics och idempotency-bevis; route metadata och surface-access-sviter visar att denial- och contract-gaten fortfarande håller.
 
 **Delfaser**
 - [x] 4.1 [NEW BUILD] **Standard request/success/error envelopes** â€” Alla routes, public API, partner API och webhooks anvÃ¤nder samma envelopeform, correlation-id, idempotency key och classification.
@@ -454,7 +461,7 @@ GÃ¶ra identitet, step-up, federation, impersonation och break-glass verkliga o
 - [x] 6.2 [NEW BUILD] **Session trust och challenge center** â€” Klar: `SessionRevision`, trustnivÃ¥er, fresh step-up, device trust, challenge completion receipts, action-specific TTL, challenge-center routes och durable restore finns nu i runtime och API.
 - [x] 6.3 [HARDEN] **Scope, queue och visibility enforcement** â€” Klar: review center queues/items, activity feeds och operational work items permission-trimmas nu server-side med viewer/team-scope, backoffice visibility gates och cross-team denial tests.
 - [x] 6.4 [NEW BUILD] **Impersonation, break-glass och access attestation** â€” Klar: impersonation och break-glass har nu explicit approve/start/end-livscykel, TTL/expiry, watermark-payloads, allowlistbunden aktivering, kvartalsvis access-review-fönster, stale-grant-detektion och runbooks för support- och incidentdrift.
-- [ ] 6.5 [OPERATIONALIZE] **Sandbox/prod isolation fÃ¶r identitet** â€” Separata credentials, callback-domÃ¤ner, webhook-hemligheter och testidentiteter per mode.
+- [x] 6.5 [OPERATIONALIZE] **Sandbox/prod isolation fÃ¶r identitet** â€” Klar: auth har nu mode-katalog per provider, `/v1/auth/providers/isolation`, produktionsgating nÃ¤r auth-inventory saknas, federations-callbacks per mode och explicit testidentitetsseparation mellan non-production och production.
 
 **Exit gate**  
 - BankID/passkeys/TOTP fungerar, enterprise federation kan anslutas via broker, backoffice-write krÃ¤ver korrekt approvals och step-up, och permissions Ã¤r server-side enforced.
