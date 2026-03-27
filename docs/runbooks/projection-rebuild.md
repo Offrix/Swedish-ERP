@@ -52,6 +52,7 @@ If rebuild fails:
 - checkpoint status becomes `failed`
 - `lastErrorCode` and `lastErrorMessage` must be populated
 - source-of-truth objects must remain unchanged
+- retry must create a new `SearchReindexRequest`; the failed request remains immutable for audit and the next successful rebuild must clear checkpoint error fields instead of overwriting history
 
 ## Go-Live Gate
 
@@ -61,3 +62,4 @@ Phase 2.5 is not complete until:
 - checkpoints exist per company and projection
 - rebuild is available through API and worker/runtime
 - tests prove parity after rebuild from empty read model
+- retry after failed rebuild is verified and does not mutate source-of-truth

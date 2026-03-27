@@ -190,7 +190,7 @@ GÃ¶ra boot, miljÃ¶lÃ¤gen, migrationslagret och startup-beteenden sanna och
 **Blockerar UI-readiness**  
 - UI-readiness blockeras av osÃ¤ker mode- och boot-sanning.
 
-## [ ] Fas 2 â€” Durable persistence, outbox, jobs, attempts, replay och dead-letter
+## [x] Fas 2 â€” Durable persistence, outbox, jobs, attempts, replay och dead-letter
 
 **MÃ¥l**  
 Flytta affÃ¤rssanningen frÃ¥n processminne till hÃ¥llbar persistence med idempotent command-logg, outbox, job attempts och replay/dead-letter.
@@ -209,6 +209,7 @@ Flytta affÃ¤rssanningen frÃ¥n processminne till hÃ¥llbar persistence med i
 - 2.2 verifierad 2026-03-26: command receipt/outbox/inbox ligger i samma commit och mutationruntime bÃ¤r nu bounded-context repository bundles, inte bara core-scope.
 - 2.3 verifierad 2026-03-26: job attempts bÃ¤r explicit attemptstatus och claim metadata, och claim expiry fÃ¶re start skapar nu syntetisk attempthistorik i stÃ¤llet fÃ¶r att fÃ¶rlora spÃ¥rbarhet.
 - 2.4 verifierad 2026-03-26: plattformen exponerar nu ett explicit durability-inventory fÃ¶r alla kritiska domÃ¤ner och fasen har en egen verifieringskedja fÃ¶r repositories, command log, durable snapshots och async job recovery.
+- 2.5 verifierad 2026-03-26: projection rebuild har nu en egen verifieringskedja och fokuserade tester fÃ¶r targeted full rebuild, checkpoint parity, failed rebuild utan source-of-truth-mutation och lyckad retry som rensar tidigare checkpoint-fel.
 
 **Delfaser**
 - [x] 2.1 [NEW BUILD] **InfÃ¶r canonical repositories** â€” Varje bounded context fÃ¥r repositorygrÃ¤nssnitt med Postgres-implementation och transaktionsbunden optimistic concurrency.
@@ -219,6 +220,9 @@ Flytta affÃ¤rssanningen frÃ¥n processminne till hÃ¥llbar persistence med i
 
 **Exit gate**  
 - Kritiska affÃ¤rsobjekt Ã¤r persistenta, replaybara och versionsstyrda. Jobs kan Ã¥terupptas efter processdÃ¶d. Dead-letter och replay Ã¤r operatÃ¶rsstyrda, inte ad hoc-scripts.
+
+**Fasstatus**  
+- Klar 2026-03-26 genom canonical repositories, transaktionsbunden command log/outbox, explicit attempt-livscykel, durability inventory fÃ¶r kritiska domÃ¤ner och verifierad projection rebuild parity inklusive fail/retry-kedja.
 
 **Test gate**  
 - Crash/restart-tester, concurrency/idempotency-tester, outbox-leverans med duplicate suppression, replay frÃ¥n poison-pill, projection rebuild frÃ¥n tom read model.
