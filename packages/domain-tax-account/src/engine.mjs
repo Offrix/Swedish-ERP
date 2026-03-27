@@ -433,6 +433,16 @@ export function createTaxAccountEngine({
     const resolvedOffsetAmount = normalizeMoney(offsetAmount, "tax_account_offset_amount_invalid");
     const resolvedOffsetReasonCode = normalizeCode(offsetReasonCode || "AGGREGATED_TAX_ACCOUNT_SETTLEMENT", "tax_account_offset_reason_code_required");
     const resolvedActorId = requireText(actorId, "actor_id_required");
+    const approvalKey = buildHash({
+      companyId: resolvedCompanyId,
+      taxAccountEventId: event.taxAccountEventId,
+      reconciliationItemId: item.reconciliationItemId,
+      offsetAmount: resolvedOffsetAmount,
+      offsetReasonCode: resolvedOffsetReasonCode
+    });
+    if (state.offsetIdByApprovalKey.has(approvalKey)) {
+      return copy(state.offsets.get(state.offsetIdByApprovalKey.get(approvalKey)));
+    }
 
     if (!isCreditEvent(event)) {
       throw createError(409, "tax_account_offset_requires_credit_event", "Only credit tax-account events may be approved as settlement offsets.");
@@ -445,17 +455,6 @@ export function createTaxAccountEngine({
     }
     if (resolvedOffsetAmount > remainingSettlementAmount) {
       throw createError(409, "tax_account_offset_exceeds_open_liability", "Offset exceeds the remaining open amount on the liability.");
-    }
-
-    const approvalKey = buildHash({
-      companyId: resolvedCompanyId,
-      taxAccountEventId: event.taxAccountEventId,
-      reconciliationItemId: item.reconciliationItemId,
-      offsetAmount: resolvedOffsetAmount,
-      offsetReasonCode: resolvedOffsetReasonCode
-    });
-    if (state.offsetIdByApprovalKey.has(approvalKey)) {
-      return copy(state.offsets.get(state.offsetIdByApprovalKey.get(approvalKey)));
     }
 
     const offset = Object.freeze({

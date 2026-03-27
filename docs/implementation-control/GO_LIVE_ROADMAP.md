@@ -315,7 +315,7 @@ GÃ¶ra audit och driftbevis fÃ¶rstaklassiga samt sÃ¤kra att systemet kan Ã
 **Blockerar UI-readiness**  
 - OperatÃ¶rsytor senare krÃ¤ver read models och auditdata som redan finns hÃ¤r.
 
-## [ ] Fas 4 â€” Canonical envelopes, error contracts, idempotens, permission resolution och route-dekomposition
+## [x] Fas 4 â€” Canonical envelopes, error contracts, idempotens, permission resolution och route-dekomposition
 
 **MÃ¥l**  
 Standardisera alla externa och interna kontrakt, bryta upp blandade route-filer och infÃ¶ra server-side permission resolution med action classes.
@@ -332,18 +332,23 @@ Standardisera alla externa och interna kontrakt, bryta upp blandade route-filer 
 
 **Delfasstatus**  
 - 4.1 återverifierad 2026-03-27: standard request/success/error envelopes är nu bevisade mot bibelns fulla kontrakt över API, public API, partner API och webhook-ytor; feature-flag-block och 404 fallback går via canonical error envelopes i stället för success-path, och full svit plus riktade envelope-/webhook-/partner-/public-API-tester håller grönt.
+- 4.2 återverifierad 2026-03-27: action classes, trust levels, scope types och expected object version är fortsatt publicerade i route-contract registry för hela muterande route-ytan, och denial semantics är återbevisade både i route metadata och i riktade access-/desktop-only-/permission-sviter.
 - 4.3 klar 2026-03-27: `phase14-routes.mjs` är nu reducerad till orchestration plus hjälpfunktioner medan tax-account, balances, fiscal-year och collective-agreements ligger i egna routekataloger; `phase13-routes.mjs` är samtidigt rensad från duplicerade routeblock och delegerar nu endast till public-, partner-, job- och automation-kataloger. Full svit, lint, typecheck, build och security-scan håller grönt efter omsplitten.
 - 4.4 klar 2026-03-27: regulated submissions har brutits ut från generella integrationsytan till egen modul i `packages/domain-integrations/src/regulated-submissions.mjs`; `index.mjs` delegerar nu endast via modulen, och submission/receipt/replay/recovery-kedjan är återbevisad via riktade phase 12-, phase 13-, phase 17- och phase 48-sviter samt full verifiering.
+- 4.5 klar 2026-03-27: explicit contract-minimum-svit finns nu för fiscal-year, tax-account, balances och collective-agreements med canonical success envelopes, permission denials, conflict semantics och idempotency-bevis; collective-agreements fick verklig idempotens på muterande vägar och tax-account offset replay dedupas nu innan conflict-reglerna körs. Full svit, lint, typecheck, build och security-scan håller grönt efter härdningen.
 
 **Delfaser**
 - [x] 4.1 [NEW BUILD] **Standard request/success/error envelopes** â€” Alla routes, public API, partner API och webhooks anvÃ¤nder samma envelopeform, correlation-id, idempotency key och classification.
 - [x] 4.2 [HARDEN] **Action classes och permission resolution** â€” Varje muterande route mÃ¤rks med required action class, trust level, scope type och expected object version. Route-contract registry tÃ¤cker nu hela POST/PUT/PATCH/DELETE-ytan och `authz/check` kan resolva public, self och company-scoped routes.
 - [x] 4.3 [REWRITE] **Dela upp `phase13-routes.mjs` och `phase14-routes.mjs`** â€” Skapa routekatalog per domÃ¤n/funktion: auth, public API, partner API, backoffice, migration, annual reporting, resilience, projects, submissions.
 - [x] 4.4 [NEW BUILD] **Etablera hard boundary fÃ¶r regulated submissions** â€” Transport, attempts, receipts och recovery separeras frÃ¥n generella integrationskopplingar. Antingen nytt package eller tydligt submodule med egna APIs.
-- [ ] 4.5 [OPERATIONALIZE] **Contract-test miniminivÃ¥** â€” Alla routefamiljer fÃ¥r golden envelopes, denial reasons, conflict semantics och idempotency-tests.
+- [x] 4.5 [OPERATIONALIZE] **Contract-test miniminivÃ¥** â€” Alla routefamiljer fÃ¥r golden envelopes, denial reasons, conflict semantics och idempotency-tests.
 
 **Exit gate**  
 - Blandade phase-rutter Ã¤r borta frÃ¥n bindande ytan. Alla routes och externa payloads fÃ¶ljer canonical envelopes, idempotens och permission resolution.
+
+**Fasstatus**  
+- Klar 2026-03-27 genom återbevisade canonical envelopes och permission contracts, verklig routekatalog-split, hard boundary för regulated submissions och explicit contract-minimum-svit för de extraherade routefamiljerna inklusive idempotenshärdning där den saknades.
 
 **Test gate**  
 - Contract tests fÃ¶r success/error envelopes, denial reasons, sequence handling och route auth. Snapshot tests fÃ¶r payload shape.

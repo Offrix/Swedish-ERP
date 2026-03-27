@@ -36,14 +36,18 @@ export function createCollectiveAgreementsEngine({
     agreementFamilies: new Map(),
     agreementFamilyIdsByCompany: new Map(),
     agreementFamilyIdByCode: new Map(),
+    agreementFamilyIdByIdempotencyKey: new Map(),
     agreementVersions: new Map(),
     agreementVersionIdsByCompany: new Map(),
     agreementVersionIdsByFamily: new Map(),
+    agreementVersionIdByIdempotencyKey: new Map(),
     agreementAssignments: new Map(),
     agreementAssignmentIdsByCompany: new Map(),
     agreementAssignmentIdsByEmployment: new Map(),
+    agreementAssignmentIdByIdempotencyKey: new Map(),
     agreementOverrides: new Map(),
     agreementOverrideIdsByAssignment: new Map(),
+    agreementOverrideIdByIdempotencyKey: new Map(),
     auditEvents: []
   };
 
@@ -75,9 +79,19 @@ export function createCollectiveAgreementsEngine({
     name,
     sectorCode = null,
     status = "active",
+    idempotencyKey = null,
     actorId = "system"
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedIdempotencyKey = normalizeOptionalText(idempotencyKey);
+    if (resolvedIdempotencyKey) {
+      const existingFamilyId = state.agreementFamilyIdByIdempotencyKey.get(
+        createIdempotencyLookupKey(resolvedCompanyId, "agreement_family_create", resolvedIdempotencyKey)
+      );
+      if (existingFamilyId) {
+        return presentAgreementFamily(state.agreementFamilies.get(existingFamilyId));
+      }
+    }
     const resolvedCode = normalizeCode(code, "agreement_family_code_required");
     if (getIndexValue(state.agreementFamilyIdByCode, resolvedCompanyId, resolvedCode)) {
       throw createError(409, "agreement_family_code_exists", "Agreement family code already exists.");
@@ -98,6 +112,12 @@ export function createCollectiveAgreementsEngine({
     state.agreementFamilies.set(record.agreementFamilyId, record);
     appendToIndex(state.agreementFamilyIdsByCompany, resolvedCompanyId, record.agreementFamilyId);
     setIndexValue(state.agreementFamilyIdByCode, resolvedCompanyId, resolvedCode, record.agreementFamilyId);
+    if (resolvedIdempotencyKey) {
+      state.agreementFamilyIdByIdempotencyKey.set(
+        createIdempotencyLookupKey(resolvedCompanyId, "agreement_family_create", resolvedIdempotencyKey),
+        record.agreementFamilyId
+      );
+    }
     return presentAgreementFamily(record);
   }
 
@@ -122,9 +142,19 @@ export function createCollectiveAgreementsEngine({
     rulepackCode = AGREEMENT_RULEPACK_CODE,
     rulepackVersion,
     ruleSet = {},
+    idempotencyKey = null,
     actorId = "system"
   } = {}) {
     const family = requireAgreementFamily(state, companyId, { agreementFamilyId, agreementFamilyCode });
+    const resolvedIdempotencyKey = normalizeOptionalText(idempotencyKey);
+    if (resolvedIdempotencyKey) {
+      const existingVersionId = state.agreementVersionIdByIdempotencyKey.get(
+        createIdempotencyLookupKey(family.companyId, "agreement_version_publish", resolvedIdempotencyKey)
+      );
+      if (existingVersionId) {
+        return presentAgreementVersion(state.agreementVersions.get(existingVersionId));
+      }
+    }
     const resolvedEffectiveFrom = normalizeRequiredDate(effectiveFrom, "agreement_version_effective_from_required");
     const resolvedEffectiveTo = effectiveTo ? normalizeRequiredDate(effectiveTo, "agreement_version_effective_to_invalid") : null;
     if (resolvedEffectiveTo && resolvedEffectiveTo < resolvedEffectiveFrom) {
@@ -152,6 +182,12 @@ export function createCollectiveAgreementsEngine({
     state.agreementVersions.set(record.agreementVersionId, record);
     appendToIndex(state.agreementVersionIdsByCompany, family.companyId, record.agreementVersionId);
     appendToIndex(state.agreementVersionIdsByFamily, family.agreementFamilyId, record.agreementVersionId);
+    if (resolvedIdempotencyKey) {
+      state.agreementVersionIdByIdempotencyKey.set(
+        createIdempotencyLookupKey(family.companyId, "agreement_version_publish", resolvedIdempotencyKey),
+        record.agreementVersionId
+      );
+    }
     markHistoricalVersions(state, family.agreementFamilyId, record.effectiveFrom);
     return presentAgreementVersion(record);
   }
@@ -183,9 +219,19 @@ export function createCollectiveAgreementsEngine({
     effectiveFrom,
     effectiveTo = null,
     assignmentReasonCode,
+    idempotencyKey = null,
     actorId = "system"
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedIdempotencyKey = normalizeOptionalText(idempotencyKey);
+    if (resolvedIdempotencyKey) {
+      const existingAssignmentId = state.agreementAssignmentIdByIdempotencyKey.get(
+        createIdempotencyLookupKey(resolvedCompanyId, "agreement_assignment_create", resolvedIdempotencyKey)
+      );
+      if (existingAssignmentId) {
+        return presentAgreementAssignment(state.agreementAssignments.get(existingAssignmentId));
+      }
+    }
     const resolvedEmployeeId = requireText(employeeId, "employee_id_required");
     const resolvedEmploymentId = requireText(employmentId, "employment_id_required");
     const version = requireAgreementVersion(state, resolvedCompanyId, agreementVersionId);
@@ -222,6 +268,12 @@ export function createCollectiveAgreementsEngine({
     state.agreementAssignments.set(record.agreementAssignmentId, record);
     appendToIndex(state.agreementAssignmentIdsByCompany, resolvedCompanyId, record.agreementAssignmentId);
     appendToIndex(state.agreementAssignmentIdsByEmployment, resolvedEmploymentId, record.agreementAssignmentId);
+    if (resolvedIdempotencyKey) {
+      state.agreementAssignmentIdByIdempotencyKey.set(
+        createIdempotencyLookupKey(resolvedCompanyId, "agreement_assignment_create", resolvedIdempotencyKey),
+        record.agreementAssignmentId
+      );
+    }
     return presentAgreementAssignment(record);
   }
 
@@ -252,9 +304,19 @@ export function createCollectiveAgreementsEngine({
     effectiveTo = null,
     reasonCode,
     approvedByActorId = null,
+    idempotencyKey = null,
     actorId = "system"
   } = {}) {
     const assignment = requireAgreementAssignment(state, companyId, agreementAssignmentId);
+    const resolvedIdempotencyKey = normalizeOptionalText(idempotencyKey);
+    if (resolvedIdempotencyKey) {
+      const existingOverrideId = state.agreementOverrideIdByIdempotencyKey.get(
+        createIdempotencyLookupKey(assignment.companyId, "agreement_override_create", resolvedIdempotencyKey)
+      );
+      if (existingOverrideId) {
+        return presentAgreementOverride(state.agreementOverrides.get(existingOverrideId));
+      }
+    }
     const resolvedEffectiveFrom = effectiveFrom ? normalizeRequiredDate(effectiveFrom, "agreement_override_effective_from_invalid") : assignment.effectiveFrom;
     const resolvedEffectiveTo = effectiveTo ? normalizeRequiredDate(effectiveTo, "agreement_override_effective_to_invalid") : assignment.effectiveTo;
     if (resolvedEffectiveTo && resolvedEffectiveTo < resolvedEffectiveFrom) {
@@ -279,6 +341,12 @@ export function createCollectiveAgreementsEngine({
     });
     state.agreementOverrides.set(record.agreementOverrideId, record);
     appendToIndex(state.agreementOverrideIdsByAssignment, assignment.agreementAssignmentId, record.agreementOverrideId);
+    if (resolvedIdempotencyKey) {
+      state.agreementOverrideIdByIdempotencyKey.set(
+        createIdempotencyLookupKey(assignment.companyId, "agreement_override_create", resolvedIdempotencyKey),
+        record.agreementOverrideId
+      );
+    }
     return presentAgreementOverride(record);
   }
 
@@ -369,6 +437,10 @@ function presentAgreementAssignment(record) {
 
 function presentAgreementOverride(record) {
   return copy(record);
+}
+
+function createIdempotencyLookupKey(companyId, actionCode, idempotencyKey) {
+  return `${requireText(companyId, "company_id_required")}::${requireText(actionCode, "agreement_action_code_required")}::${requireText(idempotencyKey, "idempotency_key_required")}`;
 }
 
 function requireAgreementFamily(state, companyId, { agreementFamilyId = null, agreementFamilyCode = null } = {}) {

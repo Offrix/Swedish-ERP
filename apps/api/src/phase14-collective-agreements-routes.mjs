@@ -55,6 +55,7 @@ export async function tryHandlePhase14CollectiveAgreementRoutes({ req, res, url,
         name: body.name,
         sectorCode: body.sectorCode ?? null,
         status: body.status ?? "active",
+        idempotencyKey: body.idempotencyKey ?? null,
         actorId: principal.userId
       })
     );
@@ -111,6 +112,7 @@ export async function tryHandlePhase14CollectiveAgreementRoutes({ req, res, url,
         rulepackCode: body.rulepackCode || undefined,
         rulepackVersion: body.rulepackVersion,
         ruleSet: body.ruleSet ?? {},
+        idempotencyKey: body.idempotencyKey ?? null,
         actorId: principal.userId
       })
     );
@@ -190,6 +192,7 @@ export async function tryHandlePhase14CollectiveAgreementRoutes({ req, res, url,
         effectiveFrom: body.effectiveFrom,
         effectiveTo: body.effectiveTo ?? null,
         assignmentReasonCode: body.assignmentReasonCode,
+        idempotencyKey: body.idempotencyKey ?? null,
         actorId: principal.userId
       })
     );
@@ -244,6 +247,7 @@ export async function tryHandlePhase14CollectiveAgreementRoutes({ req, res, url,
         effectiveTo: body.effectiveTo ?? null,
         reasonCode: body.reasonCode,
         approvedByActorId: body.approvedByActorId ?? principal.userId,
+        idempotencyKey: body.idempotencyKey ?? null,
         actorId: principal.userId
       })
     );
