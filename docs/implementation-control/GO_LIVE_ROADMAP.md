@@ -163,6 +163,7 @@ GÃ¶ra boot, miljÃ¶lÃ¤gen, migrationslagret och startup-beteenden sanna och
 **Delfasstatus**
 - 1.1 återverifierad 2026-03-27: alla migrationer självregistrerar nu exakt ett canonical `migration_id` som matchar filnamnet, och både Node- och PowerShell-validering failar på saknad, dubbel eller felaktig migrationsregistrering.
 - 1.2 återverifierad 2026-03-27: API, worker, desktop-web, field-mobile, dev-start och standardplattform väljer nu explicit runtime mode; starter-fallback till tyst `test`-mode är borttagen från bootvägarna och smoke/runtime-mode-sviten är grön.
+- 1.3 återverifierad 2026-03-27: implicit `test_default_demo`-boot är borttagen från API-plattformen; demo-fixturer tillåts nu bara via explicit `bootstrapScenarioCode`, och alla berörda e2e-, integrations- och enhetstester använder namngiven explicit demo-testplattform i stället för dold autoseed.
 
 **Exit gate**  
 - API och worker startar deterministiskt per miljÃ¶lÃ¤ge, migrationer Ã¤r rena och inga kritiska domÃ¤ner kan rÃ¥ka boota med demo-lÃ¤ge i production eller pilot.

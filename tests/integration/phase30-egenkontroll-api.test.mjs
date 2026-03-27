@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { DEMO_ADMIN_EMAIL } from "../../packages/domain-org-auth/src/index.mjs";
 import { readText, stopServer } from "../../scripts/lib/repo.mjs";
@@ -82,7 +82,7 @@ test("Step 30 API creates templates, instances, deviations and sign-off chains",
         sections: [
           {
             sectionCode: "prep",
-            label: "Förarbete",
+            label: "FÃ¶rarbete",
             points: [
               { pointCode: "site_signage", label: "Skyltning", evidenceRequiredFlag: false },
               { pointCode: "photo_required", label: "Fotobevis", evidenceRequiredFlag: true }
@@ -128,7 +128,7 @@ test("Step 30 API creates templates, instances, deviations and sign-off chains",
         companyId: COMPANY_ID,
         projectId: project.projectId,
         displayName: "Kontroll arbete",
-        description: "Egenkontroll för kabeldragning",
+        description: "Egenkontroll fÃ¶r kabeldragning",
         serviceTypeCode: "service",
         priorityCode: "normal",
         laborRateAmount: 0
@@ -190,7 +190,7 @@ test("Step 30 API creates templates, instances, deviations and sign-off chains",
         pointCode: "photo_required",
         severityCode: "major",
         title: "Foto saknade referensmarkering",
-        description: "Fältbilden saknade måttsättning vid första genomgången."
+        description: "FÃ¤ltbilden saknade mÃ¥ttsÃ¤ttning vid fÃ¶rsta genomgÃ¥ngen."
       }
     });
     assert.equal(deviation.status, "open");

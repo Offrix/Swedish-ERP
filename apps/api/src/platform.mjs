@@ -699,14 +699,8 @@ export function createApiPlatform(options = {}) {
   const bootstrapModePolicy =
     options.bootstrapModePolicy || createBootstrapModePolicy(runtimeModeProfile);
   const bootstrapSeeding = resolveBootstrapSeeding({
-    bootstrapMode:
-      options.bootstrapMode ||
-      (runtimeModeProfile.environmentMode === "test" && !options.bootstrapScenarioCode && options.seedDemo !== false
-        ? "scenario_seed"
-        : bootstrapModePolicy.defaultBootstrapMode),
-    bootstrapScenarioCode:
-      options.bootstrapScenarioCode ||
-      (runtimeModeProfile.environmentMode === "test" && options.seedDemo !== false ? "test_default_demo" : null),
+    bootstrapMode: options.bootstrapMode || bootstrapModePolicy.defaultBootstrapMode,
+    bootstrapScenarioCode: options.bootstrapScenarioCode || null,
     seedDemo: options.seedDemo
   });
   const platformOptions = Object.freeze({

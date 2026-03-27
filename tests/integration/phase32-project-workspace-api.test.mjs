@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
-import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { DEMO_ADMIN_EMAIL } from "../../packages/domain-org-auth/src/index.mjs";
 import { readText, stopServer } from "../../scripts/lib/repo.mjs";
 
@@ -381,7 +381,7 @@ test("Step 32 API exposes project workspace and deviation lifecycle across conne
           pointCode: "photo_marking",
           severityCode: "major",
           title: "Saknar foto",
-          description: "Fotobevis saknas i första körningen."
+          description: "Fotobevis saknas i fÃ¶rsta kÃ¶rningen."
         }
       }
     );

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 
 test("Phase 11.3 closes a month with checklist, blocks on hard stop, preserves reports and versions reopen", () => {

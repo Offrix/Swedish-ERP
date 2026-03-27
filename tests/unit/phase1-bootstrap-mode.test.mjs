@@ -32,6 +32,13 @@ test("phase 1.3 api platform keeps seeded test fixtures explicit and disables pr
     env: {},
     criticalDomainStateStoreKind: "memory"
   });
+  const explicitSeedPlatform = createApiPlatform({
+    clock: () => new Date("2026-03-26T08:10:00Z"),
+    runtimeMode: "test",
+    env: {},
+    bootstrapScenarioCode: "test_default_demo",
+    criticalDomainStateStoreKind: "memory"
+  });
   const productionPlatform = createApiPlatform({
     clock: () => new Date("2026-03-26T08:10:00Z"),
     runtimeMode: "production",
@@ -42,10 +49,12 @@ test("phase 1.3 api platform keeps seeded test fixtures explicit and disables pr
   try {
     assert.equal(testPlatform.bootstrapModePolicy.defaultBootstrapMode, "none");
     assert.equal(testPlatform.getRuntimeModeProfile().environmentMode, "test");
-    assert.equal(testPlatform.getCompanyProfile({ companyId: DEMO_IDS.companyId }).companyId, DEMO_IDS.companyId);
+    assert.equal(testPlatform.snapshot().companies.length, 0);
+    assert.equal(explicitSeedPlatform.getCompanyProfile({ companyId: DEMO_IDS.companyId }).companyId, DEMO_IDS.companyId);
     assert.equal(productionPlatform.snapshot().companies.length, 0);
   } finally {
     testPlatform.closeCriticalDomainStateStore?.();
+    explicitSeedPlatform.closeCriticalDomainStateStore?.();
     productionPlatform.closeCriticalDomainStateStore?.();
   }
 });

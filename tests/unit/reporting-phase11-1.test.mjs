@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 

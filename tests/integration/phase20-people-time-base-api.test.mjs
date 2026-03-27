@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
-import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
@@ -78,7 +78,7 @@ test("Step 20 API exposes employment snapshots, manual time approvals and unifie
       body: {
         companyId: DEMO_IDS.companyId,
         employmentTypeCode: "permanent",
-        jobTitle: "Fälttekniker",
+        jobTitle: "FÃ¤lttekniker",
         payModelCode: "hourly_salary",
         workerCategoryCode: "blue_collar",
         externalContractorRef: "vendor-55",

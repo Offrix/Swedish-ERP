@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { seedReportSnapshot } from "../helpers/reporting-fixtures.mjs";
 import { createSentWebhookDeliveryExecutor } from "../helpers/phase13-integrations-fixtures.mjs";

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
-import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { DEMO_ADMIN_EMAIL } from "../../packages/domain-org-auth/src/index.mjs";
 import { readText, stopServer } from "../../scripts/lib/repo.mjs";
 
@@ -480,7 +480,7 @@ test("Step 24 API exposes invoice field evaluation and blocks reverse-charge iss
         issueDate: "2026-03-24",
         dueDate: "2026-04-23",
         buyerVatNumber: "SE556677889901",
-        specialLegalText: "Omvänd betalningsskyldighet",
+        specialLegalText: "OmvÃ¤nd betalningsskyldighet",
         lines: [
           {
             itemId: reverseChargeItem.arItemId,

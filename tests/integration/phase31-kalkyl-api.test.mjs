@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { DEMO_ADMIN_EMAIL } from "../../packages/domain-org-auth/src/index.mjs";
 import { readText, stopServer } from "../../scripts/lib/repo.mjs";
@@ -146,7 +146,7 @@ test("Step 31 API creates estimates and converts them to quote payloads and proj
       body: {
         companyId: COMPANY_ID,
         assumptionCode: "MATERIAL_SLACK",
-        description: "Påslag för spillmaterial",
+        description: "PÃ¥slag fÃ¶r spillmaterial",
         impactAmount: 3000
       }
     });
