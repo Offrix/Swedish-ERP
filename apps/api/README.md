@@ -557,6 +557,8 @@ pnpm --filter @swedish-erp/api start
 - `POST /v1/ops/load-profiles`
 - `GET /v1/ops/restore-drills?companyId=...`
 - `POST /v1/ops/restore-drills`
+- `POST /v1/ops/restore-drills/:restoreDrillId/start`
+- `POST /v1/ops/restore-drills/:restoreDrillId/complete`
 - `GET /v1/ops/chaos-scenarios?companyId=...`
 - `POST /v1/ops/chaos-scenarios`
 - `GET /v1/migration/mapping-sets?companyId=...`

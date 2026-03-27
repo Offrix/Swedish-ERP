@@ -2551,11 +2551,50 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       sessionToken,
       companyId,
       drillCode: body.drillCode,
+      drillType: body.drillType,
       targetRtoMinutes: body.targetRtoMinutes,
       targetRpoMinutes: body.targetRpoMinutes,
       actualRtoMinutes: body.actualRtoMinutes,
       actualRpoMinutes: body.actualRpoMinutes,
       status: body.status,
+      scheduledFor: body.scheduledFor,
+      restorePlanId: body.restorePlanId,
+      verificationSummary: body.verificationSummary,
+      evidence: body.evidence
+    }));
+    return true;
+  }
+
+  const restoreDrillStartMatch = matchPath(path, "/v1/ops/restore-drills/:restoreDrillId/start");
+  if (req.method === "POST" && restoreDrillStartMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "restore_drill", objectId: restoreDrillStartMatch.restoreDrillId, scopeCode: "restore_drill" });
+    writeJson(res, 200, platform.startRestoreDrill({
+      sessionToken,
+      companyId,
+      restoreDrillId: restoreDrillStartMatch.restoreDrillId,
+      startedAt: body.startedAt
+    }));
+    return true;
+  }
+
+  const restoreDrillCompleteMatch = matchPath(path, "/v1/ops/restore-drills/:restoreDrillId/complete");
+  if (req.method === "POST" && restoreDrillCompleteMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "restore_drill", objectId: restoreDrillCompleteMatch.restoreDrillId, scopeCode: "restore_drill" });
+    writeJson(res, 200, platform.completeRestoreDrill({
+      sessionToken,
+      companyId,
+      restoreDrillId: restoreDrillCompleteMatch.restoreDrillId,
+      actualRtoMinutes: body.actualRtoMinutes,
+      actualRpoMinutes: body.actualRpoMinutes,
+      status: body.status,
+      verificationSummary: body.verificationSummary,
+      completedAt: body.completedAt,
       evidence: body.evidence
     }));
     return true;
@@ -2583,6 +2622,7 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       queueRecoverySeconds: body.queueRecoverySeconds,
       impactSummary: body.impactSummary,
       status: body.status,
+      restoreDrillId: body.restoreDrillId,
       evidence: body.evidence
     }));
     return true;

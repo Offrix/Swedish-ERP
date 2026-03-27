@@ -813,6 +813,8 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/ops/emergency-disables/:emergencyDisableId/release",
               "/v1/ops/load-profiles",
               "/v1/ops/restore-drills",
+              "/v1/ops/restore-drills/:restoreDrillId/start",
+              "/v1/ops/restore-drills/:restoreDrillId/complete",
               "/v1/ops/chaos-scenarios",
               "/v1/migration/mapping-sets",
               "/v1/migration/mapping-sets/:mappingSetId/approve",

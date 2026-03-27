@@ -5,8 +5,11 @@ export const FEATURE_FLAG_TYPES = Object.freeze(["release", "ops", "entitlement"
 export const FEATURE_FLAG_RISK_CLASSES = Object.freeze(["low", "medium", "high"]);
 export const EMERGENCY_DISABLE_STATUSES = Object.freeze(["active", "released"]);
 export const LOAD_PROFILE_STATUSES = Object.freeze(["draft", "passed", "failed"]);
-export const RESTORE_DRILL_STATUSES = Object.freeze(["planned", "passed", "failed"]);
+export const RESTORE_DRILL_TYPES = Object.freeze(["database_restore", "projection_rebuild", "worker_restart"]);
+export const RESTORE_DRILL_REQUIRED_TYPES = Object.freeze(["database_restore", "projection_rebuild", "worker_restart"]);
+export const RESTORE_DRILL_STATUSES = Object.freeze(["scheduled", "running", "passed", "failed"]);
 export const CHAOS_SCENARIO_STATUSES = Object.freeze(["planned", "executed", "failed"]);
+export const CHAOS_SCENARIO_REQUIRED_CODES = Object.freeze(["worker_restart"]);
 export const INCIDENT_SEVERITIES = Object.freeze(["low", "medium", "high", "critical"]);
 export const INCIDENT_STATUSES = Object.freeze(["open", "triaged", "mitigating", "stabilized", "resolved", "post_review", "closed"]);
 export const INCIDENT_SIGNAL_TYPES = Object.freeze([
@@ -147,6 +150,7 @@ export function createResilienceModule({
     featureFlagRiskClasses: FEATURE_FLAG_RISK_CLASSES,
     emergencyDisableStatuses: EMERGENCY_DISABLE_STATUSES,
     loadProfileStatuses: LOAD_PROFILE_STATUSES,
+    restoreDrillTypes: RESTORE_DRILL_TYPES,
     restoreDrillStatuses: RESTORE_DRILL_STATUSES,
     chaosScenarioStatuses: CHAOS_SCENARIO_STATUSES,
     incidentSeverities: INCIDENT_SEVERITIES,
@@ -163,7 +167,10 @@ export function createResilienceModule({
     recordLoadProfile,
     listLoadProfiles,
     recordRestoreDrill,
+    startRestoreDrill,
+    completeRestoreDrill,
     listRestoreDrills,
+    getRestoreDrillCoverageSummary,
     recordChaosScenario,
     listChaosScenarios,
     resolveRuntimeFlags,
@@ -510,11 +517,15 @@ export function createResilienceModule({
     sessionToken,
     companyId,
     drillCode,
+    drillType = null,
     targetRtoMinutes,
     targetRpoMinutes,
-    actualRtoMinutes,
-    actualRpoMinutes,
-    status = "passed",
+    actualRtoMinutes = null,
+    actualRpoMinutes = null,
+    status = null,
+    scheduledFor = null,
+    startedAt = null,
+    completedAt = null,
     restorePlanId = null,
     verificationSummary = null,
     evidence = {},
@@ -526,15 +537,39 @@ export function createResilienceModule({
     if (restorePlan && restorePlan.status === "draft") {
       throw error(409, "restore_plan_not_ready", "A restore plan must be approved before it can be referenced by a restore drill.");
     }
+    const resolvedStatus = normalizeRestoreDrillStatus(status, {
+      actualRtoMinutes,
+      actualRpoMinutes
+    });
+    const resolvedDrillType = normalizeRestoreDrillType({
+      drillType,
+      drillCode,
+      restorePlan
+    });
+    const resolvedActualRtoMinutes = normalizeOptionalPositiveInteger(actualRtoMinutes, "restore_drill_actual_rto_invalid");
+    const resolvedActualRpoMinutes = normalizeOptionalPositiveInteger(actualRpoMinutes, "restore_drill_actual_rpo_invalid");
+    if (["passed", "failed"].includes(resolvedStatus) && (resolvedActualRtoMinutes == null || resolvedActualRpoMinutes == null)) {
+      throw error(400, "restore_drill_actuals_required", "Restore drill completion requires actual RTO and RPO values.");
+    }
+    const resolvedStartedAt = resolvedStatus === "scheduled"
+      ? null
+      : normalizeIsoTimestamp(startedAt || nowIso(clock), "restore_drill_started_at_invalid");
+    const resolvedCompletedAt = ["passed", "failed"].includes(resolvedStatus)
+      ? normalizeIsoTimestamp(completedAt || nowIso(clock), "restore_drill_completed_at_invalid")
+      : null;
     const drill = {
       restoreDrillId: crypto.randomUUID(),
       companyId,
       drillCode: text(drillCode, "restore_drill_code_required"),
+      drillType: resolvedDrillType,
       targetRtoMinutes: normalizePositiveInteger(targetRtoMinutes, "restore_drill_target_rto_invalid"),
       targetRpoMinutes: normalizePositiveInteger(targetRpoMinutes, "restore_drill_target_rpo_invalid"),
-      actualRtoMinutes: normalizePositiveInteger(actualRtoMinutes, "restore_drill_actual_rto_invalid"),
-      actualRpoMinutes: normalizePositiveInteger(actualRpoMinutes, "restore_drill_actual_rpo_invalid"),
-      status: assertAllowed(status, RESTORE_DRILL_STATUSES, "restore_drill_status_invalid"),
+      actualRtoMinutes: resolvedActualRtoMinutes,
+      actualRpoMinutes: resolvedActualRpoMinutes,
+      status: resolvedStatus,
+      scheduledFor: normalizeOptionalIsoTimestamp(scheduledFor, "restore_drill_scheduled_for_invalid"),
+      startedAt: resolvedStartedAt,
+      completedAt: resolvedCompletedAt,
       restorePlanId: restorePlan?.restorePlanId || null,
       verificationSummary: optionalText(verificationSummary),
       evidence: clone(evidence || {}),
@@ -573,12 +608,135 @@ export function createResilienceModule({
     return clone(drill);
   }
 
+  function startRestoreDrill({
+    sessionToken,
+    companyId,
+    restoreDrillId,
+    startedAt = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const drill = requireRestoreDrill(companyId, restoreDrillId);
+    if (drill.status !== "scheduled") {
+      throw error(409, "restore_drill_not_scheduled", "Only scheduled restore drills can be started.");
+    }
+    drill.status = "running";
+    drill.startedAt = normalizeIsoTimestamp(startedAt || nowIso(clock), "restore_drill_started_at_invalid");
+    drill.updatedAt = nowIso(clock);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.restore_drill.started",
+      entityType: "restore_drill",
+      entityId: drill.restoreDrillId,
+      explanation: `Started restore drill ${drill.drillCode}.`
+    });
+    return clone(drill);
+  }
+
+  function completeRestoreDrill({
+    sessionToken,
+    companyId,
+    restoreDrillId,
+    actualRtoMinutes,
+    actualRpoMinutes,
+    status,
+    verificationSummary,
+    evidence = {},
+    completedAt = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const drill = requireRestoreDrill(companyId, restoreDrillId);
+    if (!["scheduled", "running"].includes(drill.status)) {
+      throw error(409, "restore_drill_not_executable", "Only scheduled or running restore drills can be completed.");
+    }
+    const resolvedStatus = assertAllowed(status, ["passed", "failed"], "restore_drill_completion_status_invalid");
+    drill.status = resolvedStatus;
+    drill.actualRtoMinutes = normalizePositiveInteger(actualRtoMinutes, "restore_drill_actual_rto_invalid");
+    drill.actualRpoMinutes = normalizePositiveInteger(actualRpoMinutes, "restore_drill_actual_rpo_invalid");
+    drill.startedAt = drill.startedAt || nowIso(clock);
+    drill.completedAt = normalizeIsoTimestamp(completedAt || nowIso(clock), "restore_drill_completed_at_invalid");
+    drill.verificationSummary = optionalText(verificationSummary);
+    drill.evidence = {
+      ...clone(drill.evidence || {}),
+      ...clone(evidence || {})
+    };
+    drill.updatedAt = nowIso(clock);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.restore_drill.completed",
+      entityType: "restore_drill",
+      entityId: drill.restoreDrillId,
+      explanation: `Completed restore drill ${drill.drillCode} with status ${drill.status}.`
+    });
+    if (drill.status === "failed") {
+      recordIncidentSignalInternal({
+        companyId,
+        signalType: "restore_drill_failed",
+        severity: "high",
+        summary: `Restore drill ${drill.drillCode} failed.`,
+        correlationId,
+        sourceObjectType: "restore_drill",
+        sourceObjectId: drill.restoreDrillId,
+        actorId: principal.userId,
+        metadata: {
+          restorePlanId: drill.restorePlanId,
+          drillType: drill.drillType,
+          actualRtoMinutes: drill.actualRtoMinutes,
+          targetRtoMinutes: drill.targetRtoMinutes,
+          actualRpoMinutes: drill.actualRpoMinutes,
+          targetRpoMinutes: drill.targetRpoMinutes
+        }
+      });
+    }
+    return clone(drill);
+  }
+
   function listRestoreDrills({ sessionToken, companyId } = {}) {
     authorize(sessionToken, companyId, "company.read");
     return [...state.restoreDrills.values()]
       .filter((drill) => drill.companyId === text(companyId, "company_id_required"))
-      .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt))
+      .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))
       .map(clone);
+  }
+
+  function getRestoreDrillCoverageSummary({ sessionToken, companyId } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const drills = [...state.restoreDrills.values()].filter((drill) => drill.companyId === resolvedCompanyId);
+    const chaosScenarios = [...state.chaosScenarios.values()].filter((scenario) => scenario.companyId === resolvedCompanyId);
+    const items = RESTORE_DRILL_REQUIRED_TYPES.map((drillType) => {
+      const matchingDrills = drills
+        .filter((drill) => drill.drillType === drillType)
+        .sort((left, right) => (right.completedAt || right.recordedAt).localeCompare(left.completedAt || left.recordedAt));
+      const latest = matchingDrills[0] || null;
+      const matchingScenario = drillType === "worker_restart"
+        ? chaosScenarios
+          .filter((scenario) => scenario.scenarioCode === "worker_restart" || scenario.restoreDrillId === latest?.restoreDrillId)
+          .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))[0] || null
+        : null;
+      return {
+        drillType,
+        required: true,
+        covered: latest?.status === "passed",
+        latestRestoreDrillId: latest?.restoreDrillId || null,
+        latestDrillCode: latest?.drillCode || null,
+        latestStatus: latest?.status || null,
+        latestCompletedAt: latest?.completedAt || null,
+        latestRestorePlanId: latest?.restorePlanId || null,
+        latestChaosScenarioId: matchingScenario?.chaosScenarioId || null,
+        latestChaosScenarioStatus: matchingScenario?.status || null
+      };
+    });
+    return {
+      items,
+      missingRestoreDrillTypes: items.filter((item) => !item.covered).map((item) => item.drillType),
+      workerRestartChaosCovered: items.find((item) => item.drillType === "worker_restart")?.latestChaosScenarioStatus === "executed"
+    };
   }
 
   function recordChaosScenario({
@@ -589,10 +747,13 @@ export function createResilienceModule({
     queueRecoverySeconds,
     impactSummary,
     status = "executed",
+    restoreDrillId = null,
     evidence = {},
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
+    const resolvedRestoreDrillId = optionalText(restoreDrillId);
+    const restoreDrill = resolvedRestoreDrillId ? requireRestoreDrill(companyId, resolvedRestoreDrillId) : null;
     const scenario = {
       chaosScenarioId: crypto.randomUUID(),
       companyId,
@@ -601,6 +762,7 @@ export function createResilienceModule({
       queueRecoverySeconds: normalizePositiveInteger(queueRecoverySeconds, "chaos_queue_recovery_invalid"),
       impactSummary: text(impactSummary, "chaos_impact_summary_required"),
       status: assertAllowed(status, CHAOS_SCENARIO_STATUSES, "chaos_scenario_status_invalid"),
+      restoreDrillId: restoreDrill?.restoreDrillId || null,
       evidence: clone(evidence || {}),
       recordedByUserId: principal.userId,
       recordedAt: nowIso(clock)
@@ -676,6 +838,7 @@ export function createResilienceModule({
     const incidents = listRuntimeIncidentsForCompany(resolvedCompanyId);
     const restorePlans = listRuntimeRestorePlansForCompany(resolvedCompanyId);
     const restoreDrills = [...state.restoreDrills.values()].filter((drill) => drill.companyId === resolvedCompanyId);
+    const restoreDrillCoverage = getRestoreDrillCoverageSummary({ sessionToken, companyId: resolvedCompanyId });
     const expiredFeatureFlags = [...state.featureFlags.values()]
       .filter((featureFlag) => featureFlag.companyId === resolvedCompanyId)
       .filter((featureFlag) => isFeatureFlagExpired(featureFlag, currentDateKey(clock)));
@@ -690,6 +853,7 @@ export function createResilienceModule({
       openIncidentCount: incidents.filter((incident) => !["resolved", "post_review", "closed"].includes(incident.status)).length,
       pendingRestorePlanCount: restorePlans.filter((plan) => ["draft", "approved", "executing"].includes(plan.status)).length,
       failedRestoreDrillCount: restoreDrills.filter((drill) => drill.status === "failed").length,
+      restoreDrillCoverage,
       expiredFeatureFlags: expiredFeatureFlags.slice(0, 5).map((featureFlag) => ({
         featureFlagId: featureFlag.featureFlagId,
         flagKey: featureFlag.flagKey,
@@ -700,7 +864,11 @@ export function createResilienceModule({
       })),
       recentIncidentSignals: signals.slice(0, 5).map(clone),
       recentIncidents: incidents.slice(0, 5).map(clone),
-      recentRestorePlans: restorePlans.slice(0, 5).map(clone)
+      recentRestorePlans: restorePlans.slice(0, 5).map(clone),
+      recentRestoreDrills: restoreDrills
+        .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))
+        .slice(0, 5)
+        .map(clone)
     };
   }
 
@@ -1542,6 +1710,14 @@ export function createResilienceModule({
     return restorePlan;
   }
 
+  function requireRestoreDrill(companyId, restoreDrillId) {
+    const restoreDrill = state.restoreDrills.get(text(restoreDrillId, "restore_drill_id_required"));
+    if (!restoreDrill || restoreDrill.companyId !== text(companyId, "company_id_required")) {
+      throw error(404, "restore_drill_not_found", "Restore drill was not found.");
+    }
+    return restoreDrill;
+  }
+
   function findOpenIncidentSignal({ companyId, signalType, sourceObjectType, sourceObjectId } = {}) {
     return [...state.incidentSignals.values()].find(
       (signal) =>
@@ -1716,6 +1892,11 @@ function normalizeIsoTimestamp(value, code) {
   return date.toISOString();
 }
 
+function normalizeOptionalIsoTimestamp(value, code) {
+  const resolved = optionalText(value);
+  return resolved ? normalizeIsoTimestamp(resolved, code) : null;
+}
+
 function normalizePositiveInteger(value, code) {
   const resolved = Number(value);
   if (!Number.isInteger(resolved) || resolved <= 0) {
@@ -1766,6 +1947,13 @@ function normalizeObjectRefs(values) {
   return refs;
 }
 
+function normalizeOptionalPositiveInteger(value, code) {
+  if (value == null || value === "") {
+    return null;
+  }
+  return normalizePositiveInteger(value, code);
+}
+
 function normalizeIncidentImpactScope(value) {
   if (!value || typeof value !== "object") {
     return null;
@@ -1783,8 +1971,8 @@ function normalizeIncidentImpactScope(value) {
   if (typeof value.regulatoryRisk === "boolean") {
     scope.regulatoryRisk = value.regulatoryRisk;
   }
-  const tenantCount = normalizeOptionalPositiveInteger(value.tenantCount);
-  const userCount = normalizeOptionalPositiveInteger(value.userCount);
+  const tenantCount = normalizeOptionalNonNegativeInteger(value.tenantCount);
+  const userCount = normalizeOptionalNonNegativeInteger(value.userCount);
   if (tenantCount != null) {
     scope.tenantCount = tenantCount;
   }
@@ -1855,7 +2043,7 @@ function normalizeStringArray(values) {
   return result;
 }
 
-function normalizeOptionalPositiveInteger(value) {
+function normalizeOptionalNonNegativeInteger(value) {
   if (value == null || value === "") {
     return null;
   }
@@ -1868,6 +2056,32 @@ function normalizeOptionalPositiveInteger(value) {
 
 function optionalText(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeRestoreDrillStatus(status, { actualRtoMinutes = null, actualRpoMinutes = null } = {}) {
+  const resolved = optionalText(status);
+  if (!resolved) {
+    return actualRtoMinutes != null || actualRpoMinutes != null ? "passed" : "scheduled";
+  }
+  if (resolved === "planned") {
+    return "scheduled";
+  }
+  return assertAllowed(resolved, RESTORE_DRILL_STATUSES, "restore_drill_status_invalid");
+}
+
+function normalizeRestoreDrillType({ drillType = null, drillCode = null, restorePlan = null } = {}) {
+  const resolved = optionalText(drillType);
+  if (resolved) {
+    return assertAllowed(resolved, RESTORE_DRILL_TYPES, "restore_drill_type_invalid");
+  }
+  const code = `${optionalText(drillCode) || ""} ${optionalText(restorePlan?.restoreScope) || ""}`.toLowerCase();
+  if (code.includes("projection") || code.includes("reindex")) {
+    return "projection_rebuild";
+  }
+  if (code.includes("worker") || code.includes("queue")) {
+    return "worker_restart";
+  }
+  return "database_restore";
 }
 
 function normalizeActorIds(values, code) {
