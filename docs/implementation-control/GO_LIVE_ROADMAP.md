@@ -453,7 +453,7 @@ GÃ¶ra identitet, step-up, federation, impersonation och break-glass verkliga o
 - [x] 6.1 [REPLACE] **Byt BankID-stub mot auth broker** â€” Klar: auth broker ersÃ¤tter stubben, Signicat-baserad BankID kÃ¶r i sandbox/production via broker, passkeys/TOTP lÃ¤nkas som lokala identity accounts, WorkOS-baserad federation har start/callback-routes, durable broker-state och runbook.
 - [x] 6.2 [NEW BUILD] **Session trust och challenge center** â€” Klar: `SessionRevision`, trustnivÃ¥er, fresh step-up, device trust, challenge completion receipts, action-specific TTL, challenge-center routes och durable restore finns nu i runtime och API.
 - [x] 6.3 [HARDEN] **Scope, queue och visibility enforcement** â€” Klar: review center queues/items, activity feeds och operational work items permission-trimmas nu server-side med viewer/team-scope, backoffice visibility gates och cross-team denial tests.
-- [ ] 6.4 [NEW BUILD] **Impersonation, break-glass och access attestation** â€” Implementera tidsbegrÃ¤nsade, vattenmÃ¤rkta sessions, dual approvals, allowlists och kvartalsvisa access reviews.
+- [x] 6.4 [NEW BUILD] **Impersonation, break-glass och access attestation** â€” Klar: impersonation och break-glass har nu explicit approve/start/end-livscykel, TTL/expiry, watermark-payloads, allowlistbunden aktivering, kvartalsvis access-review-fönster, stale-grant-detektion och runbooks för support- och incidentdrift.
 - [ ] 6.5 [OPERATIONALIZE] **Sandbox/prod isolation fÃ¶r identitet** â€” Separata credentials, callback-domÃ¤ner, webhook-hemligheter och testidentiteter per mode.
 
 **Exit gate**  

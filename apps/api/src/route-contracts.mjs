@@ -204,6 +204,8 @@ const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["POST /v1/org/delegations", override("org", "org_identity_admin", "strong_mfa", "company", "delegation", "delegation", "delegation.manage", false)],
   ["POST /v1/org/companies/:companyId/users", override("org", "org_identity_admin", "strong_mfa", "company", "company_user", "company_user", "company_user.write", true)],
   ["POST /v1/backoffice/support-cases/:supportCaseId/close", override("backoffice", "support_case_operate", "strong_mfa", "support_case", "support_case", "support_case", "company.manage", true)],
+  ["POST /v1/backoffice/impersonations/:sessionId/start", override("backoffice", "support_impersonation_start", "strong_mfa", "impersonation_session", "impersonation_session", "impersonation_session", "company.manage", true)],
+  ["POST /v1/backoffice/break-glass/:breakGlassId/start", override("backoffice", "break_glass_activate", "strong_mfa", "break_glass_session", "break_glass_session", "break_glass_session", "company.manage", true)],
   ["POST /v1/review-tasks/:reviewTaskId/approve", override("documents", "review_task_decide", "mfa", "review_task", "review_task", "review_task", "approval.approve", true)],
   ["POST /v1/review-center/items/:reviewItemId/approve", override("review", "review_center_decide", "mfa", "review_item", "review_item", "review_item", "approval.approve", true)],
   ["POST /v1/review-center/items/:reviewItemId/reject", override("review", "review_center_decide", "mfa", "review_item", "review_item", "review_item", "approval.approve", true)],

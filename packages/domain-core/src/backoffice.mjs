@@ -3,14 +3,15 @@ import crypto from "node:crypto";
 export const SUPPORT_CASE_STATUSES = Object.freeze(["open", "triaged", "in_progress", "waiting_customer", "resolved", "closed", "escalated", "reopened"]);
 export const SUPPORT_CASE_SEVERITIES = Object.freeze(["low", "medium", "high", "critical"]);
 export const IMPERSONATION_MODES = Object.freeze(["read_only", "limited_write"]);
-export const IMPERSONATION_STATES = Object.freeze(["requested", "approved", "active", "ended", "terminated", "denied"]);
+export const IMPERSONATION_STATES = Object.freeze(["requested", "approved", "active", "terminated", "expired", "denied"]);
 export const ACCESS_REVIEW_STATUSES = Object.freeze(["generated", "assigned", "in_review", "remediated", "signed_off", "archived"]);
-export const BREAK_GLASS_STATES = Object.freeze(["requested", "dual_approved", "active", "reviewed", "closed"]);
+export const BREAK_GLASS_STATES = Object.freeze(["requested", "dual_approved", "active", "ended"]);
 export const MANAGED_SECRET_TYPES = Object.freeze(["api_secret", "oauth_client_secret", "webhook_signing_secret", "certificate_private_key"]);
 export const MANAGED_SECRET_STATUSES = Object.freeze(["active", "dual_running", "retired"]);
 export const SECRET_ROTATION_RECORD_STATUSES = Object.freeze(["rotated", "failed", "revoked"]);
 export const CERTIFICATE_CHAIN_STATUSES = Object.freeze(["active", "renewal_due", "expired", "revoked"]);
 export const CALLBACK_SECRET_STATUSES = Object.freeze(["active", "dual_running", "retired"]);
+export const ACCESS_REVIEW_CADENCE_CODES = Object.freeze(["quarterly"]);
 export const ADMIN_DIAGNOSTIC_TYPES = Object.freeze([
   "list_async_jobs",
   "list_submission_queue",
@@ -94,6 +95,7 @@ export function createBackofficeModule({
     requestImpersonation,
     listImpersonationSessions,
     approveImpersonation,
+    activateImpersonation,
     terminateImpersonation,
     generateAccessReview,
     listAccessReviews,
@@ -101,6 +103,7 @@ export function createBackofficeModule({
     requestBreakGlass,
     listBreakGlassSessions,
     approveBreakGlass,
+    activateBreakGlass,
     closeBreakGlassSession,
     exportSupportCaseEvidenceBundle,
     exportBreakGlassEvidenceBundle,
@@ -790,6 +793,8 @@ export function createBackofficeModule({
     const targetCompanyUser = requireCompanyUser(companyId, targetCompanyUserId, orgAuthPlatform, error);
     const resolvedMode = assertAllowed(mode, IMPERSONATION_MODES, "impersonation_mode_invalid");
     const normalizedRestrictedActions = normalizeActions(restrictedActions);
+    const createdAt = nowIso(clock);
+    const expiresAt = addMinutes(createdAt, normalizePositiveInteger(expiresInMinutes, "impersonation_expiry_invalid"));
     if (resolvedMode === "read_only" && normalizedRestrictedActions.length > 0) {
       throw error(409, "impersonation_read_only_restricted_actions_forbidden", "Read-only impersonation cannot define restricted write actions.");
     }
@@ -809,11 +814,21 @@ export function createBackofficeModule({
       restrictedActions: normalizedRestrictedActions,
       approvalActorIds: [],
       status: "requested",
+      approvedAt: null,
+      activatedByUserId: null,
       startedAt: null,
-      expiresAt: addMinutes(nowIso(clock), normalizePositiveInteger(expiresInMinutes, "impersonation_expiry_invalid")),
+      expiresAt,
+      watermark: buildSessionWatermark({
+        sessionKind: "impersonation",
+        mode: resolvedMode,
+        referenceCode: supportCaseId,
+        targetCompanyUserId: targetCompanyUser.companyUserId,
+        expiresAt
+      }),
       endedAt: null,
-      createdAt: nowIso(clock),
-      updatedAt: nowIso(clock)
+      endReasonCode: null,
+      createdAt,
+      updatedAt: createdAt
     };
     state.impersonationSessions.set(session.sessionId, session);
     audit({
@@ -833,6 +848,7 @@ export function createBackofficeModule({
     const resolvedStatus = optionalText(status);
     return [...state.impersonationSessions.values()]
       .filter((session) => session.companyId === text(companyId, "company_id_required"))
+      .map((session) => expireImpersonationSessionIfNeeded(session, clock))
       .filter((session) => (resolvedStatus ? session.status === resolvedStatus : true))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       .map(clone);
@@ -858,11 +874,11 @@ export function createBackofficeModule({
       session,
       error
     });
-    session.status = "active";
+    session.status = "approved";
     session.approvedByUserId = principal.userId;
     session.approvalActorIds = approvalActorIds;
-    session.startedAt = nowIso(clock);
-    session.updatedAt = session.startedAt;
+    session.approvedAt = nowIso(clock);
+    session.updatedAt = session.approvedAt;
     audit({
       companyId,
       actorId: principal.userId,
@@ -871,6 +887,47 @@ export function createBackofficeModule({
       entityType: "impersonation_session",
       entityId: session.sessionId,
       explanation: `Approved impersonation ${session.sessionId}.`
+    });
+    return clone(session);
+  }
+
+  function activateImpersonation({
+    sessionToken,
+    companyId,
+    sessionId,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const session = requireImpersonationSession(companyId, sessionId);
+    if (session.status === "active" || session.status === "terminated") {
+      return clone(session);
+    }
+    if (session.status === "expired") {
+      throw error(409, "impersonation_session_expired", "Impersonation session has expired.");
+    }
+    if (session.status !== "approved") {
+      throw error(409, "impersonation_start_invalid_state", "Impersonation can only start after approval.");
+    }
+    const startedAt = nowIso(clock);
+    if (new Date(session.expiresAt) < new Date(startedAt)) {
+      session.status = "expired";
+      session.endedAt = startedAt;
+      session.endReasonCode = "expired";
+      session.updatedAt = startedAt;
+      throw error(409, "impersonation_session_expired", "Impersonation session has expired.");
+    }
+    session.status = "active";
+    session.activatedByUserId = principal.userId;
+    session.startedAt = startedAt;
+    session.updatedAt = startedAt;
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.impersonation.started",
+      entityType: "impersonation_session",
+      entityId: session.sessionId,
+      explanation: `Started impersonation ${session.sessionId}.`
     });
     return clone(session);
   }
@@ -884,10 +941,12 @@ export function createBackofficeModule({
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
     const session = requireImpersonationSession(companyId, sessionId);
-    if (!["active", "approved"].includes(session.status)) {
+    if (!["requested", "approved", "active", "expired"].includes(session.status)) {
       return clone(session);
     }
-    session.status = "ended";
+    if (session.status !== "expired") {
+      session.status = "terminated";
+    }
     session.endReasonCode = text(reasonCode, "impersonation_end_reason_required");
     session.endedAt = nowIso(clock);
     session.updatedAt = session.endedAt;
@@ -912,16 +971,25 @@ export function createBackofficeModule({
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
-    const findings = buildAccessReviewFindings(companyId, orgAuthPlatform);
+    const reviewPeriod = resolveQuarterlyReviewWindow(clock);
+    const findings = buildAccessReviewFindings(companyId, orgAuthPlatform, {
+      reviewPeriod,
+      clock
+    });
     const review = {
       reviewBatchId: crypto.randomUUID(),
       companyId,
       scopeType: text(scopeType, "access_review_scope_type_required"),
       scopeRef: optionalText(scopeRef) || companyId,
+      cadenceCode: ACCESS_REVIEW_CADENCE_CODES[0],
       generatedAt: nowIso(clock),
       dueAt: addDays(nowIso(clock).slice(0, 10), normalizePositiveInteger(dueInDays, "access_review_due_days_invalid")),
+      reviewPeriodStart: reviewPeriod.startDate,
+      reviewPeriodEnd: reviewPeriod.endDate,
+      staleGrantThresholdDate: reviewPeriod.staleGrantThresholdDate,
       status: findings.length > 0 ? "in_review" : "generated",
       findings,
+      coverageSummary: summarizeAccessReviewCoverage(companyId, orgAuthPlatform, findings),
       signedOffByUserId: null
     };
     state.accessReviewBatches.set(review.reviewBatchId, review);
@@ -987,23 +1055,40 @@ export function createBackofficeModule({
     incidentId,
     purposeCode,
     requestedActions = [],
+    expiresInMinutes = 30,
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
+    const createdAt = nowIso(clock);
+    const expiresAt = addMinutes(createdAt, normalizePositiveInteger(expiresInMinutes, "break_glass_expiry_invalid"));
+    const normalizedRequestedActions = normalizeActions(requestedActions);
+    if (normalizedRequestedActions.length === 0) {
+      throw error(400, "break_glass_requested_actions_required", "Break-glass requires at least one allowlisted action.");
+    }
     const request = {
       breakGlassId: crypto.randomUUID(),
       companyId,
       incidentId: text(incidentId, "break_glass_incident_id_required"),
       purposeCode: text(purposeCode, "break_glass_purpose_required"),
-      requestedActions: normalizeActions(requestedActions),
+      requestedActions: normalizedRequestedActions,
       requestedByUserId: principal.userId,
       approvals: [],
       status: "requested",
+      dualApprovedAt: null,
+      activatedByUserId: null,
       activatedAt: null,
-      reviewedAt: null,
-      closedAt: null,
-      createdAt: nowIso(clock),
-      updatedAt: nowIso(clock)
+      expiresAt,
+      watermark: buildSessionWatermark({
+        sessionKind: "break_glass",
+        mode: "critical",
+        referenceCode: incidentId,
+        targetCompanyUserId: null,
+        expiresAt
+      }),
+      endedAt: null,
+      endReasonCode: null,
+      createdAt,
+      updatedAt: createdAt
     };
     state.breakGlassSessions.set(request.breakGlassId, request);
     audit({
@@ -1022,6 +1107,7 @@ export function createBackofficeModule({
     authorize(sessionToken, companyId, "company.read");
     return [...state.breakGlassSessions.values()]
       .filter((session) => session.companyId === text(companyId, "company_id_required"))
+      .map((session) => expireBreakGlassSessionIfNeeded(session, clock))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       .map(clone);
   }
@@ -1034,7 +1120,7 @@ export function createBackofficeModule({
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
     const session = requireBreakGlass(companyId, breakGlassId);
-    if (session.status === "closed") {
+    if (session.status === "ended") {
       return clone(session);
     }
     if (principal.userId === session.requestedByUserId) {
@@ -1044,8 +1130,8 @@ export function createBackofficeModule({
       session.approvals.push(principal.userId);
     }
     if (session.approvals.length >= 2) {
-      session.status = "active";
-      session.activatedAt = nowIso(clock);
+      session.status = "dual_approved";
+      session.dualApprovedAt = nowIso(clock);
     }
     session.updatedAt = nowIso(clock);
     audit({
@@ -1060,7 +1146,7 @@ export function createBackofficeModule({
     return clone(session);
   }
 
-  function closeBreakGlassSession({
+  function activateBreakGlass({
     sessionToken,
     companyId,
     breakGlassId,
@@ -1068,28 +1154,63 @@ export function createBackofficeModule({
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
     const session = requireBreakGlass(companyId, breakGlassId);
-    if (session.status === "closed") {
+    if (session.status === "active" || session.status === "ended") {
       return clone(session);
     }
-    if (session.status === "active") {
-      session.status = "reviewed";
-      session.reviewedAt = nowIso(clock);
-      session.updatedAt = session.reviewedAt;
-    } else if (session.status === "reviewed") {
-      session.status = "closed";
-      session.closedAt = nowIso(clock);
-      session.updatedAt = session.closedAt;
-    } else {
-      throw error(409, "break_glass_close_invalid_state", "Break-glass can only be closed after activation and review.");
+    if (session.status !== "dual_approved") {
+      throw error(409, "break_glass_start_invalid_state", "Break-glass can only start after dual approval.");
     }
+    const activatedAt = nowIso(clock);
+    if (new Date(session.expiresAt) < new Date(activatedAt)) {
+      session.status = "ended";
+      session.endReasonCode = "expired";
+      session.endedAt = activatedAt;
+      session.updatedAt = activatedAt;
+      throw error(409, "break_glass_session_expired", "Break-glass session has expired.");
+    }
+    session.status = "active";
+    session.activatedAt = activatedAt;
+    session.activatedByUserId = principal.userId;
+    session.updatedAt = activatedAt;
     audit({
       companyId,
       actorId: principal.userId,
       correlationId,
-      action: "backoffice.break_glass.closed",
+      action: "backoffice.break_glass.started",
       entityType: "break_glass_session",
       entityId: session.breakGlassId,
-      explanation: `Closed break-glass ${session.breakGlassId}.`
+      explanation: `Started break-glass ${session.breakGlassId}.`
+    });
+    return clone(session);
+  }
+
+  function closeBreakGlassSession({
+    sessionToken,
+    companyId,
+    breakGlassId,
+    reasonCode = "manual_end",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const session = requireBreakGlass(companyId, breakGlassId);
+    if (session.status === "ended") {
+      return clone(session);
+    }
+    if (session.status !== "active") {
+      throw error(409, "break_glass_close_invalid_state", "Break-glass can only be closed after activation.");
+    }
+    session.status = "ended";
+    session.endReasonCode = text(reasonCode, "break_glass_end_reason_required");
+    session.endedAt = nowIso(clock);
+    session.updatedAt = session.endedAt;
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.break_glass.ended",
+      entityType: "break_glass_session",
+      entityId: session.breakGlassId,
+      explanation: `Ended break-glass ${session.breakGlassId}.`
     });
     return clone(session);
   }
@@ -1134,7 +1255,7 @@ export function createBackofficeModule({
     if (!session || session.companyId !== text(companyId, "company_id_required")) {
       throw error(404, "impersonation_session_not_found", "Impersonation session was not found.");
     }
-    return session;
+    return expireImpersonationSessionIfNeeded(session, clock);
   }
 
   function requireAccessReview(companyId, reviewBatchId) {
@@ -1150,7 +1271,7 @@ export function createBackofficeModule({
     if (!session || session.companyId !== text(companyId, "company_id_required")) {
       throw error(404, "break_glass_not_found", "Break-glass session was not found.");
     }
-    return session;
+    return expireBreakGlassSessionIfNeeded(session, clock);
   }
 
   function syncSupportCaseEvidenceBundle({ supportCase, actorId, correlationId }) {
@@ -1241,9 +1362,12 @@ export function createBackofficeModule({
       requestedByUserId: session.requestedByUserId,
       approvals: [...session.approvals],
       status: session.status,
+      dualApprovedAt: session.dualApprovedAt,
       activatedAt: session.activatedAt,
-      reviewedAt: session.reviewedAt,
-      closedAt: session.closedAt
+      expiresAt: session.expiresAt,
+      endedAt: session.endedAt,
+      endReasonCode: session.endReasonCode || null,
+      watermark: clone(session.watermark)
     };
     const bundle = evidencePlatform.createFrozenEvidenceBundleSnapshot({
       companyId: session.companyId,
@@ -1300,11 +1424,17 @@ export function createBackofficeModule({
   }
 }
 
-function buildAccessReviewFindings(companyId, orgAuthPlatform) {
+function buildAccessReviewFindings(companyId, orgAuthPlatform, { reviewPeriod, clock = () => new Date() } = {}) {
   const snapshot = orgAuthPlatform?.snapshot?.() || {};
   const companyUsers = Array.isArray(snapshot.companyUsers) ? snapshot.companyUsers.filter((companyUser) => companyUser.companyId === companyId) : [];
   const findings = [];
   const rolesByUser = new Map();
+  const activeDelegations = Array.isArray(snapshot.delegations)
+    ? snapshot.delegations.filter((delegation) => delegation.companyId === companyId && delegation.status === "active")
+    : [];
+  const activeObjectGrants = Array.isArray(snapshot.objectGrants)
+    ? snapshot.objectGrants.filter((grant) => grant.companyId === companyId && grant.status === "active")
+    : [];
   for (const companyUser of companyUsers) {
     if (!rolesByUser.has(companyUser.userId)) {
       rolesByUser.set(companyUser.userId, []);
@@ -1323,7 +1453,64 @@ function buildAccessReviewFindings(companyId, orgAuthPlatform) {
       findings.push(createFinding(companyId, userId, "access.multiple_admin_assignments", "medium", records));
     }
   }
+  const staleThresholdDate = reviewPeriod?.staleGrantThresholdDate || addDays(nowIso(clock).slice(0, 10), -90);
+  for (const delegation of activeDelegations) {
+    const delegationAgeAnchor = delegation.startsAt || delegation.createdAt || null;
+    if (delegationAgeAnchor && delegationAgeAnchor.slice(0, 10) <= staleThresholdDate) {
+      findings.push({
+        findingId: crypto.randomUUID(),
+        companyId,
+        userId: null,
+        findingCode: "access.stale_delegation",
+        severity: "high",
+        relatedCompanyUserIds: [delegation.fromCompanyUserId, delegation.toCompanyUserId],
+        relatedDelegationIds: [delegation.delegationId],
+        relatedObjectGrantIds: [],
+        decision: "pending",
+        remediationNote: null,
+        decidedByUserId: null,
+        decidedAt: null
+      });
+    }
+  }
+  for (const grant of activeObjectGrants) {
+    const grantAgeAnchor = grant.startsAt || grant.createdAt || null;
+    if (grantAgeAnchor && grantAgeAnchor.slice(0, 10) <= staleThresholdDate) {
+      findings.push({
+        findingId: crypto.randomUUID(),
+        companyId,
+        userId: null,
+        findingCode: "access.stale_object_grant",
+        severity: "medium",
+        relatedCompanyUserIds: [grant.companyUserId],
+        relatedDelegationIds: [],
+        relatedObjectGrantIds: [grant.objectGrantId],
+        decision: "pending",
+        remediationNote: null,
+        decidedByUserId: null,
+        decidedAt: null
+      });
+    }
+  }
   return findings;
+}
+
+function summarizeAccessReviewCoverage(companyId, orgAuthPlatform, findings) {
+  const snapshot = orgAuthPlatform?.snapshot?.() || {};
+  const companyUsers = Array.isArray(snapshot.companyUsers) ? snapshot.companyUsers.filter((companyUser) => companyUser.companyId === companyId) : [];
+  const activeDelegations = Array.isArray(snapshot.delegations)
+    ? snapshot.delegations.filter((delegation) => delegation.companyId === companyId && delegation.status === "active")
+    : [];
+  const activeObjectGrants = Array.isArray(snapshot.objectGrants)
+    ? snapshot.objectGrants.filter((grant) => grant.companyId === companyId && grant.status === "active")
+    : [];
+  return {
+    companyUserCount: companyUsers.length,
+    activeDelegationCount: activeDelegations.length,
+    activeObjectGrantCount: activeObjectGrants.length,
+    findingCount: findings.length,
+    pendingFindingCount: findings.filter((finding) => finding.decision === "pending").length
+  };
 }
 
 function createFinding(companyId, userId, findingCode, severity, records) {
@@ -1334,10 +1521,30 @@ function createFinding(companyId, userId, findingCode, severity, records) {
     findingCode,
     severity,
     relatedCompanyUserIds: records.map((record) => record.companyUserId),
+    relatedDelegationIds: [],
+    relatedObjectGrantIds: [],
     decision: "pending",
     remediationNote: null,
     decidedByUserId: null,
     decidedAt: null
+  };
+}
+
+function resolveQuarterlyReviewWindow(clock = () => new Date()) {
+  const now = new Date(clock());
+  const month = now.getUTCMonth();
+  const quarterIndex = Math.floor(month / 3);
+  const quarterStartMonth = quarterIndex * 3;
+  const quarterEndMonth = quarterStartMonth + 2;
+  const startDate = new Date(Date.UTC(now.getUTCFullYear(), quarterStartMonth, 1));
+  const endDate = new Date(Date.UTC(now.getUTCFullYear(), quarterEndMonth + 1, 0));
+  const staleGrantThresholdDate = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate()));
+  staleGrantThresholdDate.setUTCDate(staleGrantThresholdDate.getUTCDate() - 90);
+  return {
+    quarterCode: `${startDate.getUTCFullYear()}-Q${quarterIndex + 1}`,
+    startDate: startDate.toISOString().slice(0, 10),
+    endDate: endDate.toISOString().slice(0, 10),
+    staleGrantThresholdDate: staleGrantThresholdDate.toISOString().slice(0, 10)
   };
 }
 
@@ -1561,6 +1768,62 @@ function text(value, code) {
 
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function buildSessionWatermark({
+  sessionKind,
+  mode,
+  referenceCode,
+  targetCompanyUserId = null,
+  expiresAt
+} = {}) {
+  const resolvedKind = text(sessionKind, "session_watermark_kind_required");
+  const resolvedMode = text(mode, "session_watermark_mode_required");
+  const resolvedReferenceCode = text(referenceCode, "session_watermark_reference_required");
+  const resolvedExpiresAt = isoTimestamp(expiresAt, "session_watermark_expires_at_required");
+  const watermarkCode = resolvedKind === "break_glass" ? "BREAK-GLASS" : "SUPPORT-IMPERSONATION";
+  const labelSuffix = resolvedKind === "break_glass" ? resolvedReferenceCode : `${resolvedReferenceCode}${targetCompanyUserId ? `:${targetCompanyUserId}` : ""}`;
+  return {
+    watermarkCode,
+    label: `${watermarkCode}:${labelSuffix}`,
+    bannerText: resolvedKind === "break_glass"
+      ? `Emergency support session for incident ${resolvedReferenceCode}`
+      : `Support impersonation session for case ${resolvedReferenceCode}`,
+    severity: resolvedKind === "break_glass" ? "critical" : resolvedMode === "limited_write" ? "high" : "medium",
+    sessionKind: resolvedKind,
+    mode: resolvedMode,
+    referenceCode: resolvedReferenceCode,
+    targetCompanyUserId: optionalText(targetCompanyUserId),
+    expiresAt: resolvedExpiresAt
+  };
+}
+
+function expireImpersonationSessionIfNeeded(session, clock = () => new Date()) {
+  if (!session || ["terminated", "expired"].includes(session.status)) {
+    return session;
+  }
+  if (new Date(session.expiresAt) >= new Date(clock())) {
+    return session;
+  }
+  session.status = "expired";
+  session.endReasonCode = session.endReasonCode || "expired";
+  session.endedAt = session.endedAt || nowIso(clock);
+  session.updatedAt = session.endedAt;
+  return session;
+}
+
+function expireBreakGlassSessionIfNeeded(session, clock = () => new Date()) {
+  if (!session || session.status === "ended") {
+    return session;
+  }
+  if (new Date(session.expiresAt) >= new Date(clock())) {
+    return session;
+  }
+  session.status = "ended";
+  session.endReasonCode = session.endReasonCode || "expired";
+  session.endedAt = session.endedAt || nowIso(clock);
+  session.updatedAt = session.endedAt;
+  return session;
 }
 
 function normalizeStringList(values, code) {

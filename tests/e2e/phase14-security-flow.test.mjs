@@ -18,6 +18,7 @@ test("Phase 14.1 flow exposes backoffice routes and keeps dual-control on break-
     const root = await requestJson(baseUrl, "/");
     assert.equal(root.routes.includes("/v1/backoffice/support-cases"), true);
     assert.equal(root.routes.includes("/v1/backoffice/break-glass/:breakGlassId/approve"), true);
+    assert.equal(root.routes.includes("/v1/backoffice/break-glass/:breakGlassId/start"), true);
 
     const adminToken = await loginWithStrongAuth({
       baseUrl,
@@ -130,13 +131,21 @@ test("Phase 14.1 flow exposes backoffice routes and keeps dual-control on break-
         companyId: DEMO_IDS.companyId
       }
     });
-    assert.equal(secondApproval.status, "active");
-
-    const reviewed = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/close`, {
+    assert.equal(secondApproval.status, "dual_approved");
+    const started = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/start`, {
       method: "POST",
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(started.status, "active");
+    const reviewed = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/close`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "incident_resolved"
       }
     });
     const closed = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/close`, {
@@ -146,8 +155,8 @@ test("Phase 14.1 flow exposes backoffice routes and keeps dual-control on break-
         companyId: DEMO_IDS.companyId
       }
     });
-    assert.equal(reviewed.status, "reviewed");
-    assert.equal(closed.status, "closed");
+    assert.equal(reviewed.status, "ended");
+    assert.equal(closed.status, "ended");
   } finally {
     await stopServer(server);
   }

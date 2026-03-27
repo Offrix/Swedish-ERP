@@ -220,7 +220,7 @@ test("Phase 3.2 central evidence bundles cover support, break-glass, cutover and
     companyId: DEMO_IDS.companyId,
     breakGlassId: breakGlass.breakGlassId
   });
-  platform.closeBreakGlassSession({
+  platform.activateBreakGlass({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
     breakGlassId: breakGlass.breakGlassId
@@ -228,7 +228,8 @@ test("Phase 3.2 central evidence bundles cover support, break-glass, cutover and
   platform.closeBreakGlassSession({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
-    breakGlassId: breakGlass.breakGlassId
+    breakGlassId: breakGlass.breakGlassId,
+    reasonCode: "incident_resolved"
   });
   const breakGlassEvidence = platform.exportBreakGlassEvidenceBundle({
     sessionToken: adminToken,

@@ -5,8 +5,9 @@ import { DEMO_ADMIN_EMAIL, DEMO_APPROVER_EMAIL, DEMO_APPROVER_IDS, DEMO_IDS } fr
 import { loginWithStrongAuthOnPlatform, loginWithTotpOnPlatform } from "../helpers/platform-auth.mjs";
 
 test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-bound", () => {
+  let now = new Date("2026-03-22T19:30:00Z");
   const platform = createApiPlatform({
-    clock: () => new Date("2026-03-22T19:30:00Z")
+    clock: () => now
   });
   const adminToken = loginWithStrongAuthOnPlatform({
     platform,
@@ -71,6 +72,15 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
     toCompanyUserId: secondApprover.companyUserId,
     scopeCode: "break_glass_session",
     permissionCode: "company.manage"
+  });
+  platform.createDelegation({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    fromCompanyUserId: DEMO_IDS.companyUserId,
+    toCompanyUserId: secondApprover.companyUserId,
+    scopeCode: "support_case",
+    permissionCode: "company.manage",
+    startsAt: "2025-10-01T00:00:00.000Z"
   });
 
   const supportCase = platform.createSupportCase({
@@ -154,15 +164,23 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
     companyId: DEMO_IDS.companyId,
     sessionId: impersonation.sessionId
   });
-  assert.equal(impersonationApproved.status, "active");
+  assert.equal(impersonationApproved.status, "approved");
   assert.deepEqual(impersonationApproved.approvalActorIds, [DEMO_APPROVER_IDS.userId]);
+  assert.equal(impersonationApproved.watermark.watermarkCode, "SUPPORT-IMPERSONATION");
+  const impersonationStarted = platform.activateImpersonation({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    sessionId: impersonation.sessionId
+  });
+  assert.equal(impersonationStarted.status, "active");
+  assert.equal(impersonationStarted.activatedByUserId, DEMO_IDS.userId);
   const impersonationEnded = platform.terminateImpersonation({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
     sessionId: impersonation.sessionId,
     reasonCode: "case_resolved"
   });
-  assert.equal(impersonationEnded.status, "ended");
+  assert.equal(impersonationEnded.status, "terminated");
   assert.throws(
     () =>
       platform.requestImpersonation({
@@ -204,15 +222,22 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
     companyId: DEMO_IDS.companyId,
     sessionId: limitedWriteImpersonation.sessionId
   });
-  assert.equal(limitedWriteApproved.status, "active");
+  assert.equal(limitedWriteApproved.status, "approved");
   assert.deepEqual(limitedWriteApproved.approvalActorIds.sort(), [DEMO_APPROVER_IDS.userId, secondApprover.user.userId].sort());
+  const limitedWriteStarted = platform.activateImpersonation({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    sessionId: limitedWriteImpersonation.sessionId
+  });
+  assert.equal(limitedWriteStarted.status, "active");
+  assert.deepEqual(limitedWriteStarted.restrictedActions, ["jobs.retry"]);
   const limitedWriteEnded = platform.terminateImpersonation({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
     sessionId: limitedWriteImpersonation.sessionId,
     reasonCode: "case_resolved"
   });
-  assert.equal(limitedWriteEnded.status, "ended");
+  assert.equal(limitedWriteEnded.status, "terminated");
   const singleApproverWriteCase = platform.createSupportCase({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
@@ -244,6 +269,31 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
       }),
     (error) => error?.code === "impersonation_limited_write_dual_approval_required"
   );
+  const expiringImpersonation = platform.requestImpersonation({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    supportCaseId: singleApproverWriteCase.supportCaseId,
+    targetCompanyUserId: DEMO_APPROVER_IDS.companyUserId,
+    purposeCode: "support_read_only_expiring",
+    mode: "read_only",
+    expiresInMinutes: 1
+  });
+  platform.approveImpersonation({
+    sessionToken: approverToken,
+    companyId: DEMO_IDS.companyId,
+    sessionId: expiringImpersonation.sessionId
+  });
+  now = new Date("2026-03-22T19:32:00Z");
+  assert.throws(
+    () =>
+      platform.activateImpersonation({
+        sessionToken: adminToken,
+        companyId: DEMO_IDS.companyId,
+        sessionId: expiringImpersonation.sessionId
+      }),
+    (error) => error?.code === "impersonation_session_expired"
+  );
+  now = new Date("2026-03-22T19:33:00Z");
 
   const accessReview = platform.generateAccessReview({
     sessionToken: adminToken,
@@ -252,6 +302,12 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
   });
   const payrollFinding = accessReview.findings.find((finding) => finding.findingCode === "sod.admin_payroll_overlap");
   assert.ok(payrollFinding);
+  const staleDelegationFinding = accessReview.findings.find((finding) => finding.findingCode === "access.stale_delegation");
+  assert.ok(staleDelegationFinding);
+  assert.equal(accessReview.cadenceCode, "quarterly");
+  assert.equal(accessReview.reviewPeriodStart, "2026-01-01");
+  assert.equal(accessReview.reviewPeriodEnd, "2026-03-31");
+  assert.equal(accessReview.coverageSummary.activeDelegationCount >= 1, true);
   const reviewed = platform.recordAccessReviewDecision({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
@@ -289,19 +345,28 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
     companyId: DEMO_IDS.companyId,
     breakGlassId: breakGlass.breakGlassId
   });
-  assert.equal(secondApproval.status, "active");
-  const reviewedBreakGlass = platform.closeBreakGlassSession({
+  assert.equal(secondApproval.status, "dual_approved");
+  assert.equal(secondApproval.watermark.watermarkCode, "BREAK-GLASS");
+  const activeBreakGlass = platform.activateBreakGlass({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
     breakGlassId: breakGlass.breakGlassId
   });
-  assert.equal(reviewedBreakGlass.status, "reviewed");
+  assert.equal(activeBreakGlass.status, "active");
+  const endedBreakGlass = platform.closeBreakGlassSession({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    breakGlassId: breakGlass.breakGlassId,
+    reasonCode: "incident_resolved"
+  });
+  assert.equal(endedBreakGlass.status, "ended");
+  assert.equal(endedBreakGlass.endReasonCode, "incident_resolved");
   const closedBreakGlass = platform.closeBreakGlassSession({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
     breakGlassId: breakGlass.breakGlassId
   });
-  assert.equal(closedBreakGlass.status, "closed");
+  assert.equal(closedBreakGlass.status, "ended");
 
   const auditTrail = platform.listAuditTrail({
     sessionToken: adminToken,

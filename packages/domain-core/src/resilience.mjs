@@ -1147,7 +1147,7 @@ export function createResilienceModule({
     }
     const linkedBreakGlassSessions = listBreakGlassSessionsForIncident(companyId, incidentId);
     const unresolvedBreakGlassSessions = linkedBreakGlassSessions.filter(
-      (session) => !["reviewed", "closed"].includes(session.status)
+      (session) => session.status !== "ended"
     );
     if (unresolvedBreakGlassSessions.length > 0) {
       throw error(409, "runtime_incident_break_glass_review_pending", "All linked break-glass sessions must be reviewed before post-review can be completed.");

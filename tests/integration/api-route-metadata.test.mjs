@@ -60,6 +60,8 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/backoffice/review-center/sla-scan",
   "/v1/backoffice/incidents/:incidentId/post-review",
   "/v1/backoffice/incidents/:incidentId/status",
+  "/v1/backoffice/impersonations/:sessionId/start",
+  "/v1/backoffice/break-glass/:breakGlassId/start",
   "/v1/ops/observability",
   "/v1/ops/secrets",
   "/v1/ops/secrets/:managedSecretId/rotate",

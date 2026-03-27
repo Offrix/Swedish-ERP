@@ -188,6 +188,16 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     return true;
   }
 
+  const impersonationStartMatch = matchPath(path, "/v1/backoffice/impersonations/:sessionId/start");
+  if (req.method === "POST" && impersonationStartMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "impersonation_session", objectId: impersonationStartMatch.sessionId, scopeCode: "impersonation_session" });
+    writeJson(res, 200, platform.activateImpersonation({ sessionToken, companyId, sessionId: impersonationStartMatch.sessionId }));
+    return true;
+  }
+
   const impersonationEndMatch = matchPath(path, "/v1/backoffice/impersonations/:sessionId/end");
   if (req.method === "POST" && impersonationEndMatch) {
     const body = await readJsonBody(req);
@@ -249,7 +259,8 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
       companyId,
       incidentId: body.incidentId,
       purposeCode: body.purposeCode,
-      requestedActions: body.requestedActions
+      requestedActions: body.requestedActions,
+      expiresInMinutes: body.expiresInMinutes
     }));
     return true;
   }
@@ -273,13 +284,28 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     return true;
   }
 
+  const breakGlassStartMatch = matchPath(path, "/v1/backoffice/break-glass/:breakGlassId/start");
+  if (req.method === "POST" && breakGlassStartMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "break_glass_session", objectId: breakGlassStartMatch.breakGlassId, scopeCode: "break_glass_session" });
+    writeJson(res, 200, platform.activateBreakGlass({ sessionToken, companyId, breakGlassId: breakGlassStartMatch.breakGlassId }));
+    return true;
+  }
+
   const breakGlassCloseMatch = matchPath(path, "/v1/backoffice/break-glass/:breakGlassId/close");
   if (req.method === "POST" && breakGlassCloseMatch) {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "break_glass_session", objectId: breakGlassCloseMatch.breakGlassId, scopeCode: "break_glass_session" });
-    writeJson(res, 200, platform.closeBreakGlassSession({ sessionToken, companyId, breakGlassId: breakGlassCloseMatch.breakGlassId }));
+    writeJson(res, 200, platform.closeBreakGlassSession({
+      sessionToken,
+      companyId,
+      breakGlassId: breakGlassCloseMatch.breakGlassId,
+      reasonCode: body.reasonCode
+    }));
     return true;
   }
 

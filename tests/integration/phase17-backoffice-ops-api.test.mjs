@@ -484,15 +484,24 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
         companyId: DEMO_IDS.companyId
       }
     });
-    assert.equal(secondBreakGlassApproval.status, "active");
-    const reviewedBreakGlass = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/close`, {
+    assert.equal(secondBreakGlassApproval.status, "dual_approved");
+    const startedBreakGlass = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/start`, {
       method: "POST",
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId
       }
     });
-    assert.equal(reviewedBreakGlass.status, "reviewed");
+    assert.equal(startedBreakGlass.status, "active");
+    const reviewedBreakGlass = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/close`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "incident_resolved"
+      }
+    });
+    assert.equal(reviewedBreakGlass.status, "ended");
     const closedBreakGlass = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/close`, {
       method: "POST",
       token: adminToken,
@@ -500,7 +509,7 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
         companyId: DEMO_IDS.companyId
       }
     });
-    assert.equal(closedBreakGlass.status, "closed");
+    assert.equal(closedBreakGlass.status, "ended");
 
     const stabilizedIncident = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/status`, {
       method: "POST",

@@ -7,8 +7,9 @@ import { stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
 
 test("Phase 14.1 API enforces support, audit review, SoD findings and break-glass controls", async () => {
+  let now = new Date("2026-03-22T21:30:00Z");
   const platform = createApiPlatform({
-    clock: () => new Date("2026-03-22T21:30:00Z")
+    clock: () => now
   });
   const server = createApiServer({ platform });
   await new Promise((resolve) => server.listen(0, resolve));
@@ -127,6 +128,15 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       toCompanyUserId: secondApprover.companyUserId,
       scopeCode: "break_glass_session",
       permissionCode: "company.manage"
+    });
+    platform.createDelegation({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      fromCompanyUserId: DEMO_IDS.companyUserId,
+      toCompanyUserId: secondApprover.companyUserId,
+      scopeCode: "support_case",
+      permissionCode: "company.manage",
+      startsAt: "2025-10-01T00:00:00.000Z"
     });
 
     const supportCase = await requestJson(baseUrl, "/v1/backoffice/support-cases", {
@@ -247,8 +257,17 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
         companyId: DEMO_IDS.companyId
       }
     });
-    assert.equal(impersonationApproved.status, "active");
+    assert.equal(impersonationApproved.status, "approved");
     assert.deepEqual(impersonationApproved.approvalActorIds, [DEMO_APPROVER_IDS.userId]);
+    assert.equal(impersonationApproved.watermark.watermarkCode, "SUPPORT-IMPERSONATION");
+    const impersonationStarted = await requestJson(baseUrl, `/v1/backoffice/impersonations/${impersonation.sessionId}/start`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(impersonationStarted.status, "active");
     const impersonationEnded = await requestJson(baseUrl, `/v1/backoffice/impersonations/${impersonation.sessionId}/end`, {
       method: "POST",
       token: adminToken,
@@ -257,7 +276,7 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
         reasonCode: "case_resolved"
       }
     });
-    assert.equal(impersonationEnded.status, "ended");
+    assert.equal(impersonationEnded.status, "terminated");
     const limitedWriteMissingAllowlist = await requestJson(baseUrl, "/v1/backoffice/impersonations", {
       method: "POST",
       token: adminToken,
@@ -308,8 +327,17 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
         companyId: DEMO_IDS.companyId
       }
     });
-    assert.equal(limitedWriteApproved.status, "active");
+    assert.equal(limitedWriteApproved.status, "approved");
     assert.deepEqual(limitedWriteApproved.approvalActorIds.sort(), [DEMO_APPROVER_IDS.userId, secondApprover.user.userId].sort());
+    const limitedWriteStarted = await requestJson(baseUrl, `/v1/backoffice/impersonations/${limitedWriteImpersonation.sessionId}/start`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(limitedWriteStarted.status, "active");
+    assert.deepEqual(limitedWriteStarted.restrictedActions, ["jobs.retry"]);
     const limitedWriteEnded = await requestJson(baseUrl, `/v1/backoffice/impersonations/${limitedWriteImpersonation.sessionId}/end`, {
       method: "POST",
       token: adminToken,
@@ -318,7 +346,7 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
         reasonCode: "case_resolved"
       }
     });
-    assert.equal(limitedWriteEnded.status, "ended");
+    assert.equal(limitedWriteEnded.status, "terminated");
     const singleApproverWriteCase = await requestJson(baseUrl, "/v1/backoffice/support-cases", {
       method: "POST",
       token: adminToken,
@@ -360,6 +388,37 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       }
     });
     assert.equal(singleApproverDenied.error, "impersonation_limited_write_dual_approval_required");
+    const expiringImpersonation = await requestJson(baseUrl, "/v1/backoffice/impersonations", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        supportCaseId: singleApproverWriteCase.supportCaseId,
+        targetCompanyUserId: DEMO_APPROVER_IDS.companyUserId,
+        purposeCode: "support_read_only_expiring",
+        mode: "read_only",
+        expiresInMinutes: 1
+      }
+    });
+    await requestJson(baseUrl, `/v1/backoffice/impersonations/${expiringImpersonation.sessionId}/approve`, {
+      method: "POST",
+      token: approverToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    now = new Date("2026-03-22T21:32:30Z");
+    const expiredStartDenied = await requestJson(baseUrl, `/v1/backoffice/impersonations/${expiringImpersonation.sessionId}/start`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(expiredStartDenied.error, "impersonation_session_expired");
+    now = new Date("2026-03-22T21:33:00Z");
 
     const accessReview = await requestJson(baseUrl, "/v1/backoffice/access-reviews", {
       method: "POST",
@@ -374,6 +433,11 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
     });
     const payrollFinding = accessReview.findings.find((finding) => finding.findingCode === "sod.admin_payroll_overlap");
     assert.ok(payrollFinding);
+    const staleDelegationFinding = accessReview.findings.find((finding) => finding.findingCode === "access.stale_delegation");
+    assert.ok(staleDelegationFinding);
+    assert.equal(accessReview.cadenceCode, "quarterly");
+    assert.equal(accessReview.reviewPeriodStart, "2026-01-01");
+    assert.equal(accessReview.reviewPeriodEnd, "2026-03-31");
 
     const reviewed = await requestJson(baseUrl, `/v1/backoffice/access-reviews/${accessReview.reviewBatchId}/findings/${payrollFinding.findingId}`, {
       method: "POST",
@@ -423,17 +487,26 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
         companyId: DEMO_IDS.companyId
       }
     });
-    assert.equal(secondApproval.status, "active");
-
-    const reviewedBreakGlass = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/close`, {
+    assert.equal(secondApproval.status, "dual_approved");
+    assert.equal(secondApproval.watermark.watermarkCode, "BREAK-GLASS");
+    const startedBreakGlass = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/start`, {
       method: "POST",
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId
       }
     });
-    assert.equal(reviewedBreakGlass.status, "reviewed");
-
+    assert.equal(startedBreakGlass.status, "active");
+    const reviewedBreakGlass = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/close`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "incident_resolved"
+      }
+    });
+    assert.equal(reviewedBreakGlass.status, "ended");
+    assert.equal(reviewedBreakGlass.endReasonCode, "incident_resolved");
     const closedBreakGlass = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/close`, {
       method: "POST",
       token: adminToken,
@@ -441,7 +514,7 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
         companyId: DEMO_IDS.companyId
       }
     });
-    assert.equal(closedBreakGlass.status, "closed");
+    assert.equal(closedBreakGlass.status, "ended");
 
     const auditEvents = await requestJson(baseUrl, `/v1/backoffice/audit-events?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
