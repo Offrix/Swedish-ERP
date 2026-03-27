@@ -9,6 +9,7 @@ import { createReviewCenterEngine } from "../../packages/domain-review-center/sr
 import { createSearchEngine } from "../../packages/domain-search/src/index.mjs";
 import { createDocumentArchiveEngine } from "../../packages/document-engine/src/index.mjs";
 import { createNotificationsEngine } from "../../packages/domain-notifications/src/engine.mjs";
+import { createId06Engine } from "../../packages/domain-id06/src/index.mjs";
 
 test("Phase 3.1 canonical audit envelope carries integrity hash and legacy alias", () => {
   const audit = createAuditEnvelope({
@@ -211,6 +212,29 @@ test("Phase 3.1 notification audit uses the canonical envelope", () => {
   assert.equal(audit.result, "success");
 });
 
+test("Phase 3.1 id06 audit uses the canonical envelope", () => {
+  const engine = createId06Engine({
+    clock: () => new Date("2026-03-26T11:45:00Z")
+  });
+
+  engine.verifyCompany({
+    companyId: "company_phase3_id06",
+    orgNo: "556677-8899",
+    companyName: "Phase 3 ID06 AB",
+    actorId: "id06_user",
+    correlationId: "corr_id06"
+  });
+
+  const audit = engine.listAuditEvents({
+    companyId: "company_phase3_id06"
+  })[0];
+
+  assert.equal(isAuditEnvelope(audit), true);
+  assert.equal(audit.auditClass, "id06_action");
+  assert.equal(audit.correlationId, "corr_id06");
+  assert.equal(audit.result, "success");
+});
+
 test("Phase 3.1 canonical helper covers all remaining legacy audit writers", () => {
   const repoRoot = path.resolve("C:\\Users\\snobb\\Desktop\\Swedish ERP");
   const expectedFiles = [
@@ -235,6 +259,7 @@ test("Phase 3.1 canonical helper covers all remaining legacy audit writers", () 
     "packages/domain-projects/src/index.mjs",
     "packages/domain-kalkyl/src/index.mjs",
     "packages/domain-hus/src/index.mjs",
+    "packages/domain-id06/src/index.mjs",
     "packages/domain-document-classification/src/engine.mjs",
     "packages/domain-import-cases/src/engine.mjs"
   ];

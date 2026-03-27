@@ -256,7 +256,7 @@ Flytta affÃ¤rssanningen frÃ¥n processminne till hÃ¥llbar persistence med i
 **Blockerar UI-readiness**  
 - UI kan inte lita pÃ¥ versionsnummer, state machines eller feeds utan durable persistence.
 
-## [ ] Fas 3 â€” Audit, evidence, observability, restore drills och secret governance
+## [x] Fas 3 â€” Audit, evidence, observability, restore drills och secret governance
 
 **MÃ¥l**  
 GÃ¶ra audit och driftbevis fÃ¶rstaklassiga samt sÃ¤kra att systemet kan Ã¶vervakas, Ã¥terstÃ¤llas och opereras utan manuell databasmedicin.
@@ -272,9 +272,9 @@ GÃ¶ra audit och driftbevis fÃ¶rstaklassiga samt sÃ¤kra att systemet kan Ã
 - Ingen live providercredential eller signeringsnyckel fÃ¥r anvÃ¤ndas innan secret governance Ã¤r aktiv.
 
 **Delfasstatus**  
-- 3.1 återverifierad 2026-03-27: canonical audit envelope är fortsatt gemensam writer-form för auth, review, search, documents, activity, notifications och kvarvarande legacy-audit-writers, med verifierad integrity hash, audit-envelope-version, correlation-id, canonical `recordedAt`, deterministisk voucherkoppling och DSAM/A–Z-ledgergrunder som fortsatt grön under riktad 3.1-svit.
-- 3.2 omöppnad 2026-03-27: tidigare markering byggde för mycket på existerande runtime och riktade tester. Delfasen får inte räknas klar igen förrän evidence-pack-kraven i bibeln är mappade punkt för punkt till faktisk kod, runbook och exit gate.
-- 3.3 omöppnad 2026-03-27: tidigare markering byggde för mycket på existerande observability-runtime och riktade tester. Delfasen får inte räknas klar igen förrän full observability enligt bibeln är mappad punkt för punkt till faktisk kod, alarms, drilldown och exit gate.
+- 3.1 återverifierad 2026-03-27: canonical audit envelope är fortsatt gemensam writer-form för auth, review, search, documents, activity, notifications, id06 och kvarvarande legacy-audit-writers, med verifierad integrity hash, audit-envelope-version, correlation-id, canonical `recordedAt`, deterministisk voucherkoppling och DSAM/A–Z-ledgergrunder som fortsatt grön under riktad 3.1-svit.
+- 3.2 återverifierad 2026-03-27: evidence-pack-kraven i bibeln är nu mappade punkt för punkt till faktisk kod, runbook och exit gate; annual reporting, regulated submissions, support, break-glass, cutover och project exports använder central frozen evidence-bundle-kedja med checksum, supersession och arkivering av tidigare bundle.
+- 3.3 återverifierad 2026-03-27: full observability är nu mappad punkt för punkt till faktisk kod, alarms, drilldown och exit gate; provider health, projection lag, queue age, invariant alarms, structured logs och trace chains exponeras i samma company-scoped payload och håller under riktad runtime- och API-svit.
 - 3.4 återverifierad 2026-03-27: restore drills bär fortsatt verklig livscykel (`scheduled -> running -> passed|failed`) med explicit coverage för `database_restore`, `projection_rebuild` och `worker_restart`; riktad 3.4-svit samt resilience- och migration-cockpit-tester bekräftar restore-plan-koppling, chaos-signaler och rollbackdisciplin.
 - 3.5 återverifierad 2026-03-27: secrets, callback-hemligheter och certifikatkedjor är fortsatt formaliserade som egna runtime-objekt med mode-bunden vaultvalidering, rotationsposter, dual-running-overlap, certifikatsförnyelsefönster och observability-sammanfattning; riktad 3.5-svit bekräftar att rotation och certifikatsummering håller.
 
@@ -287,6 +287,9 @@ GÃ¶ra audit och driftbevis fÃ¶rstaklassiga samt sÃ¤kra att systemet kan Ã
 
 **Exit gate**  
 - Audit explorer, evidence packs och Ã¥terstÃ¤llningsrutiner fungerar i testad drift. Secrets Ã¤r isolerade per mode och provider.
+
+**Fasstatus**  
+- Klar 2026-03-27 genom återverifierad canonical audit envelope inklusive id06, central frozen evidence-bundle-kedja, full observability-payload, restore drill/chaos-coverage och mode-isolerad secret/certificate-runtime.
 
 **Test gate**  
 - Restore-from-backup, queue-lag alarms, secret rotation smoke tests, evidence checksum verification, chaos tests pÃ¥ worker/process restart.

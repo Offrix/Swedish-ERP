@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 
 export const ID06_COMPANY_VERIFICATION_STATUSES = Object.freeze(["requested", "verified", "failed", "expired"]);
 export const ID06_PERSON_VERIFICATION_STATUSES = Object.freeze(["requested", "verified", "failed", "expired"]);
@@ -578,18 +579,23 @@ export function createId06Engine({
   }
 
   function appendAuditEvent({ companyId, workplaceId = null, actorId, correlationId, action, entityType, entityId, explanation }) {
-    state.auditEvents.push({
-      auditEventId: crypto.randomUUID(),
-      companyId,
-      workplaceId,
-      actorId: requireText(actorId, "actor_id_required"),
-      correlationId: requireText(correlationId, "correlation_id_required"),
-      action: requireText(action, "id06_audit_action_required"),
-      entityType: requireText(entityType, "id06_audit_entity_type_required"),
-      entityId: requireText(entityId, "id06_audit_entity_id_required"),
-      createdAt: nowIso(clock),
-      explanation: requireText(explanation, "id06_audit_explanation_required")
-    });
+    state.auditEvents.push(
+      createAuditEnvelopeFromLegacyEvent({
+        auditClass: "id06_action",
+        event: {
+          auditEventId: crypto.randomUUID(),
+          companyId: requireText(companyId, "company_id_required"),
+          workplaceId,
+          actorId: requireText(actorId, "actor_id_required"),
+          correlationId: requireText(correlationId, "correlation_id_required"),
+          action: requireText(action, "id06_audit_action_required"),
+          entityType: requireText(entityType, "id06_audit_entity_type_required"),
+          entityId: requireText(entityId, "id06_audit_entity_id_required"),
+          createdAt: nowIso(clock),
+          explanation: requireText(explanation, "id06_audit_explanation_required")
+        }
+      })
+    );
   }
 }
 
