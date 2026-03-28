@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import http from "node:http";
 import { createDefaultApiPlatform } from "./platform.mjs";
+import { getMissionControlDashboard, listMissionControlDashboards } from "./mission-control.mjs";
 import { tryHandlePhase6AuthRoutes } from "./phase6-auth-routes.mjs";
 import { tryHandlePhase13Route } from "./phase13-routes.mjs";
 import { tryHandlePhase14Route } from "./phase14-routes.mjs";
@@ -484,13 +485,15 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/search/reindex",
               "/v1/search/documents",
               "/v1/search/documents/:searchDocumentId",
-              "/v1/object-profiles/contracts",
-              "/v1/object-profiles/:objectType/:objectId",
-              "/v1/workbenches/contracts",
-              "/v1/workbenches/:workbenchCode",
-              "/v1/saved-views",
-              "/v1/saved-views/compatibility-scan",
-              "/v1/saved-views/:savedViewId",
+                "/v1/object-profiles/contracts",
+                "/v1/object-profiles/:objectType/:objectId",
+                "/v1/workbenches/contracts",
+                "/v1/workbenches/:workbenchCode",
+                "/v1/mission-control/dashboards",
+                "/v1/mission-control/dashboards/:dashboardCode",
+                "/v1/saved-views",
+                "/v1/saved-views/compatibility-scan",
+                "/v1/saved-views/:savedViewId",
               "/v1/saved-views/:savedViewId/share",
               "/v1/saved-views/:savedViewId/archive",
               "/v1/saved-views/:savedViewId/repair",
@@ -3260,10 +3263,10 @@ async function handleRequest({ req, res, platform, flags }) {
       return;
     }
 
-  if (req.method === "GET" && path === "/v1/workbenches/contracts") {
-    const companyId = requireText(
-      url.searchParams.get("companyId"),
-      "company_id_required",
+    if (req.method === "GET" && path === "/v1/workbenches/contracts") {
+      const companyId = requireText(
+        url.searchParams.get("companyId"),
+        "company_id_required",
       "companyId query parameter is required."
     );
     authorizeCompanyAccess({
@@ -3276,14 +3279,72 @@ async function handleRequest({ req, res, platform, flags }) {
     });
     writeJson(res, 200, {
       items: platform.listWorkbenchContracts({ companyId })
-    });
-    return;
-  }
+      });
+      return;
+    }
 
-  const workbenchMatch = matchPath(path, "/v1/workbenches/:workbenchCode");
-  if (workbenchMatch && req.method === "GET") {
-    const companyId = requireText(
-      url.searchParams.get("companyId"),
+    if (req.method === "GET" && path === "/v1/mission-control/dashboards") {
+      const companyId = requireText(
+        url.searchParams.get("companyId"),
+        "company_id_required",
+        "companyId query parameter is required."
+      );
+      const principal = authorizeCompanyAccess({
+        platform,
+        sessionToken: readSessionToken(req),
+        companyId,
+        permissionCode: "company.read",
+        objectType: "mission_control_dashboard",
+        scopeCode: "mission_control"
+      });
+      assertDesktopSurfaceReadAccess({ principal });
+      writeJson(res, 200, {
+        items: listMissionControlDashboards({
+          platform,
+          sessionToken: readSessionToken(req),
+          companyId,
+          bureauOrgId: url.searchParams.get("bureauOrgId") || null,
+          clientCompanyId: url.searchParams.get("clientCompanyId") || null
+        })
+      });
+      return;
+    }
+
+    const missionControlDashboardMatch = matchPath(path, "/v1/mission-control/dashboards/:dashboardCode");
+    if (missionControlDashboardMatch && req.method === "GET") {
+      const companyId = requireText(
+        url.searchParams.get("companyId"),
+        "company_id_required",
+        "companyId query parameter is required."
+      );
+      const principal = authorizeCompanyAccess({
+        platform,
+        sessionToken: readSessionToken(req),
+        companyId,
+        permissionCode: "company.read",
+        objectType: "mission_control_dashboard",
+        scopeCode: "mission_control"
+      });
+      assertDesktopSurfaceReadAccess({ principal });
+      writeJson(
+        res,
+        200,
+        getMissionControlDashboard({
+          platform,
+          sessionToken: readSessionToken(req),
+          companyId,
+          dashboardCode: missionControlDashboardMatch.dashboardCode,
+          bureauOrgId: url.searchParams.get("bureauOrgId") || null,
+          clientCompanyId: url.searchParams.get("clientCompanyId") || null
+        })
+      );
+      return;
+    }
+
+    const workbenchMatch = matchPath(path, "/v1/workbenches/:workbenchCode");
+    if (workbenchMatch && req.method === "GET") {
+      const companyId = requireText(
+        url.searchParams.get("companyId"),
       "company_id_required",
       "companyId query parameter is required."
     );
