@@ -384,6 +384,30 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         error: "personalliggare_control_role_forbidden"
       },
       {
+        path: `/v1/id06/companies/verifications?companyId=${DEMO_IDS.companyId}`,
+        error: "id06_control_role_forbidden"
+      },
+      {
+        path: `/v1/id06/persons/verifications?companyId=${DEMO_IDS.companyId}`,
+        error: "id06_control_role_forbidden"
+      },
+      {
+        path: `/v1/id06/cards/statuses?companyId=${DEMO_IDS.companyId}&workplaceId=${personalliggareSite.workplaceId}`,
+        error: "id06_control_role_forbidden"
+      },
+      {
+        path: `/v1/id06/workplaces/${personalliggareSite.workplaceId}/bindings?companyId=${DEMO_IDS.companyId}`,
+        error: "id06_control_role_forbidden"
+      },
+      {
+        path: `/v1/id06/workplaces/${personalliggareSite.workplaceId}/work-passes?companyId=${DEMO_IDS.companyId}`,
+        error: "id06_control_role_forbidden"
+      },
+      {
+        path: `/v1/id06/audit-events?companyId=${DEMO_IDS.companyId}&workplaceId=${personalliggareSite.workplaceId}`,
+        error: "id06_control_role_forbidden"
+      },
+      {
         path: `/v1/projects/${project.projectId}/workspace?companyId=${DEMO_IDS.companyId}`,
         error: "project_workspace_role_forbidden"
       },

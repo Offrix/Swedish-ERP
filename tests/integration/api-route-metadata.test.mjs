@@ -150,6 +150,33 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/projects/:projectId/profitability-snapshots",
   "/v1/projects/portfolio/nodes",
   "/v1/projects/portfolio/summary",
+  "/v1/personalliggare/industry-packs",
+  "/v1/personalliggare/sites/:constructionSiteId/identity-snapshots",
+  "/v1/personalliggare/sites/:constructionSiteId/contractor-snapshots",
+  "/v1/personalliggare/sites/:constructionSiteId/kiosk-devices",
+  "/v1/personalliggare/sites/:constructionSiteId/exports",
+  "/v1/personalliggare/audit-events",
+  "/v1/id06/companies/verify",
+  "/v1/id06/companies/verifications",
+  "/v1/id06/persons/verify",
+  "/v1/id06/persons/verifications",
+  "/v1/id06/cards/validate",
+  "/v1/id06/cards/statuses",
+  "/v1/id06/workplaces/:workplaceId/bindings",
+  "/v1/id06/workplaces/:workplaceId/work-passes",
+  "/v1/id06/workplaces/:workplaceId/exports",
+  "/v1/id06/audit-events",
+  "/v1/egenkontroll/templates",
+  "/v1/egenkontroll/templates/:checklistTemplateId",
+  "/v1/egenkontroll/templates/:checklistTemplateId/activate",
+  "/v1/egenkontroll/instances",
+  "/v1/egenkontroll/instances/:checklistInstanceId",
+  "/v1/egenkontroll/instances/:checklistInstanceId/start",
+  "/v1/egenkontroll/instances/:checklistInstanceId/outcomes",
+  "/v1/egenkontroll/instances/:checklistInstanceId/deviations",
+  "/v1/egenkontroll/deviations/:checklistDeviationId/acknowledge",
+  "/v1/egenkontroll/deviations/:checklistDeviationId/resolve",
+  "/v1/egenkontroll/instances/:checklistInstanceId/signoffs",
   "/v1/field/operational-cases",
   "/v1/field/operational-cases/:operationalCaseId",
   "/v1/field/operational-cases/:operationalCaseId/material-reservations",
@@ -357,6 +384,48 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(fieldConflictResolveContract.requiredActionClass, "field_conflict_record_resolve");
     assert.equal(fieldConflictResolveContract.requiredTrustLevel, "strong_mfa");
     assert.equal(fieldConflictResolveContract.requiredScopeType, "project");
+
+    const personalliggareAttendanceRecordContract = payload.routeContracts.find(
+      (routeContract) =>
+        routeContract.method === "POST"
+        && routeContract.path === "/v1/personalliggare/sites/:constructionSiteId/attendance-events"
+    );
+    assert.ok(personalliggareAttendanceRecordContract);
+    assert.equal(personalliggareAttendanceRecordContract.requiredActionClass, "personalliggare_attendance_event_record");
+    assert.equal(personalliggareAttendanceRecordContract.requiredTrustLevel, "mfa");
+    assert.equal(personalliggareAttendanceRecordContract.requiredScopeType, "construction_site");
+
+    const id06CompanyVerifyContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/id06/companies/verify"
+    );
+    assert.ok(id06CompanyVerifyContract);
+    assert.equal(id06CompanyVerifyContract.requiredActionClass, "id06_company_verify");
+    assert.equal(id06CompanyVerifyContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(id06CompanyVerifyContract.requiredScopeType, "company");
+
+    const id06BindingCreateContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/id06/workplaces/:workplaceId/bindings"
+    );
+    assert.ok(id06BindingCreateContract);
+    assert.equal(id06BindingCreateContract.requiredActionClass, "id06_workplace_binding_create");
+    assert.equal(id06BindingCreateContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(id06BindingCreateContract.requiredScopeType, "workplace");
+
+    const egenkontrollTemplateActivateContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/egenkontroll/templates/:checklistTemplateId/activate"
+    );
+    assert.ok(egenkontrollTemplateActivateContract);
+    assert.equal(egenkontrollTemplateActivateContract.requiredActionClass, "egenkontroll_template_activate");
+    assert.equal(egenkontrollTemplateActivateContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(egenkontrollTemplateActivateContract.requiredScopeType, "checklist_template");
+
+    const egenkontrollSignoffContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/egenkontroll/instances/:checklistInstanceId/signoffs"
+    );
+    assert.ok(egenkontrollSignoffContract);
+    assert.equal(egenkontrollSignoffContract.requiredActionClass, "egenkontroll_signoff_record");
+    assert.equal(egenkontrollSignoffContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(egenkontrollSignoffContract.requiredScopeType, "checklist_instance");
 
     const uniqueCount = new Set(payload.routes).size;
     assert.equal(uniqueCount, payload.routes.length, "api root metadata should not contain duplicate route entries");

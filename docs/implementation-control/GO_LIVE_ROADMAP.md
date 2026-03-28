@@ -930,7 +930,7 @@ Bygga projektfältet som generell projekt- och uppdragsmotor för alla branscher
 - [x] 14.3 [NEW BUILD] **Billing models och WIP/profitability** — Fixed price, time & materials, milestone, retainer capacity, subscription service, advance invoice, hybrid change order och profitability från payroll/AP/material/travel/HUS/billing.
 - [x] 14.4 [NEW BUILD] **Resource, portfolio och riskstyrning** — Capacity reservations, assignment planning, skills/roles, project portfolio, risk register, status updates, budget vs actual vs forecast.
 - [x] 14.5 [HARDEN] **Field/service/work-order pack** - OperationalCase, DispatchAssignment, MaterialUsage, FieldEvidence, SignatureRecord, SyncEnvelope, ConflictRecord. Work orders ska vara optional pack.
-- [ ] 14.6 [HARDEN] **Personalliggare, ID06 och egenkontroll packs** — Attendance som separat sanning, ID06 identity graph, workplace bindings, checklist/signoff, construction pack som vertikal overlay.
+- [x] 14.6 [HARDEN] **Personalliggare, ID06 och egenkontroll packs** — Attendance som separat sanning, ID06 identity graph, workplace bindings, checklist/signoff, construction pack som vertikal overlay.
 - [ ] 14.7 [NEW BUILD] **Project trial/demo flows och migration** — Seed project scenarios, import from CRM/project tools, client-ready demo data, safe invoicing simulation och eventual live conversion path.
 
 **Exit gate**  
@@ -1266,7 +1266,6 @@ Bevisa att backend-kontrakten bär verkliga kundscenarier, låsa UI-kontrakt och
 ## Slutregel
 
 Denna roadmap är den enda bindande byggordningen. Ingen implementation, ingen featuregren och ingen UI-plan får köra utanför denna ordning utan uttrycklig ändring i detta dokument.
-
 
 
 
