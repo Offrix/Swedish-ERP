@@ -20,7 +20,7 @@ test("Step 27 migration adds banking statement and reconciliation runtime tables
   }
 });
 
-test("Step 27 API imports bank statement events, bridges tax account and resolves reconciliation cases", async () => {
+test("Step 27 API gates statement-driven payment and tax-account effects behind explicit approval", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-11-15T08:00:00Z")
   });
@@ -193,20 +193,55 @@ test("Step 27 API imports bank statement events, bridges tax account and resolve
     assert.equal(events.items.length, 3);
     assert.equal(events.items.some((event) => event.matchStatus === "matched_payment_order"), true);
     assert.equal(events.items.some((event) => event.matchStatus === "matched_tax_account"), true);
+    assert.equal(events.items.filter((event) => event.processingStatus === "reconciliation_required").length, 3);
 
     const taxAccountEvents = await requestJson(baseUrl, `/v1/tax-account/events?companyId=${COMPANY_ID}`, {
       token: sessionToken
     });
-    assert.equal(taxAccountEvents.items.some((event) => event.externalReference === "BANK-API-STEP27-TAX"), true);
+    assert.equal(taxAccountEvents.items.some((event) => event.externalReference === "BANK-API-STEP27-TAX"), false);
 
     const reconciliationCases = await requestJson(baseUrl, `/v1/banking/reconciliation-cases?companyId=${COMPANY_ID}&status=open`, {
       token: sessionToken
     });
-    assert.equal(reconciliationCases.items.length, 1);
+    assert.equal(reconciliationCases.items.length, 3);
+
+    const paymentGate = reconciliationCases.items.find((item) => item.caseTypeCode === "payment_order_posting_gate");
+    assert.ok(paymentGate);
+    const approvedPaymentGate = await requestJson(
+      baseUrl,
+      `/v1/banking/reconciliation-cases/${paymentGate.reconciliationCaseId}/resolve`,
+      {
+        method: "POST",
+        token: sessionToken,
+        body: {
+          companyId: COMPANY_ID,
+          resolutionCode: "approve_payment_order_statement",
+          resolutionNote: "Approved payment order settlement from statement."
+        }
+      }
+    );
+    assert.equal(approvedPaymentGate.executedActionCode, "approve_payment_order_statement");
+
+    const taxGate = reconciliationCases.items.find((item) => item.caseTypeCode === "tax_account_posting_gate");
+    assert.ok(taxGate);
+    const approvedTaxGate = await requestJson(
+      baseUrl,
+      `/v1/banking/reconciliation-cases/${taxGate.reconciliationCaseId}/resolve`,
+      {
+        method: "POST",
+        token: sessionToken,
+        body: {
+          companyId: COMPANY_ID,
+          resolutionCode: "approve_tax_account_statement_bridge",
+          resolutionNote: "Approved tax-account import from statement."
+        }
+      }
+    );
+    assert.equal(approvedTaxGate.executedActionCode, "approve_tax_account_statement_bridge");
 
     const resolved = await requestJson(
       baseUrl,
-      `/v1/banking/reconciliation-cases/${reconciliationCases.items[0].reconciliationCaseId}/resolve`,
+      `/v1/banking/reconciliation-cases/${reconciliationCases.items.find((item) => item.caseTypeCode === "unmatched_statement_event").reconciliationCaseId}/resolve`,
       {
         method: "POST",
         token: sessionToken,
@@ -221,10 +256,26 @@ test("Step 27 API imports bank statement events, bridges tax account and resolve
 
     const fetchedEvent = await requestJson(
       baseUrl,
-      `/v1/banking/statement-events/${reconciliationCases.items[0].bankStatementEventId}?companyId=${COMPANY_ID}`,
+      `/v1/banking/statement-events/${reconciliationCases.items.find((item) => item.caseTypeCode === "unmatched_statement_event").bankStatementEventId}?companyId=${COMPANY_ID}`,
       { token: sessionToken }
     );
     assert.equal(fetchedEvent.processingStatus, "processed");
+
+    const settlementLinks = await requestJson(baseUrl, `/v1/banking/settlement-links?companyId=${COMPANY_ID}`, {
+      token: sessionToken
+    });
+    assert.equal(settlementLinks.items.some((item) => item.paymentOrderId === paymentOrderId && item.status === "settled"), true);
+    assert.equal(settlementLinks.items.some((item) => item.liabilityObjectType === "tax_account_event" && item.status === "settled"), true);
+
+    const paymentBatches = await requestJson(baseUrl, `/v1/banking/payment-batches?companyId=${COMPANY_ID}`, {
+      token: sessionToken
+    });
+    assert.equal(paymentBatches.items[0].status, "settled");
+
+    const resolvedTaxAccountEvents = await requestJson(baseUrl, `/v1/tax-account/events?companyId=${COMPANY_ID}`, {
+      token: sessionToken
+    });
+    assert.equal(resolvedTaxAccountEvents.items.some((event) => event.externalReference === "BANK-API-STEP27-TAX"), true);
 
     const forbiddenEvents = await fetch(`${baseUrl}/v1/banking/statement-events?companyId=${COMPANY_ID}`, {
       headers: {

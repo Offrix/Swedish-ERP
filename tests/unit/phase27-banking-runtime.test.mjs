@@ -4,7 +4,7 @@ import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/d
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
-test("Step 27 banking runtime imports statement events, bridges tax account and opens reconciliation cases", () => {
+test("Step 27 banking runtime gates statement-driven payment and tax-account effects behind explicit approval", () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-10-10T08:00:00Z")
   });
@@ -118,6 +118,22 @@ test("Step 27 banking runtime imports statement events, bridges tax account and 
   });
   assert.equal(bookedImport.importedCount, 1);
   assert.equal(bookedImport.items[0].matchStatus, "matched_payment_order");
+  assert.equal(bookedImport.items[0].processingStatus, "reconciliation_required");
+  assert.equal(platform.getPaymentProposal({ companyId: COMPANY_ID, paymentProposalId: proposal.paymentProposalId }).status, "accepted_by_bank");
+  let openCases = platform.listBankReconciliationCases({
+    companyId: COMPANY_ID,
+    status: "open"
+  });
+  assert.equal(openCases.length, 1);
+  assert.equal(openCases[0].caseTypeCode, "payment_order_posting_gate");
+  const approvedPaymentGate = platform.resolveBankReconciliationCase({
+    companyId: COMPANY_ID,
+    reconciliationCaseId: openCases[0].reconciliationCaseId,
+    resolutionCode: "approve_payment_order_statement",
+    resolutionNote: "Confirmed payment order settlement from bank statement.",
+    actorId: "admin"
+  });
+  assert.equal(approvedPaymentGate.executedActionCode, "approve_payment_order_statement");
   assert.equal(platform.getPaymentProposal({ companyId: COMPANY_ID, paymentProposalId: proposal.paymentProposalId }).status, "settled");
 
   const replayImport = platform.importBankStatementEvents({
@@ -154,6 +170,25 @@ test("Step 27 banking runtime imports statement events, bridges tax account and 
     actorId: "admin"
   });
   assert.equal(taxImport.items[0].matchStatus, "matched_tax_account");
+  assert.equal(taxImport.items[0].processingStatus, "reconciliation_required");
+  assert.equal(
+    platform.listTaxAccountEvents({ companyId: COMPANY_ID }).some((event) => event.externalReference === "BANK-STMT-2701-TAX"),
+    false
+  );
+  openCases = platform.listBankReconciliationCases({
+    companyId: COMPANY_ID,
+    status: "open"
+  });
+  assert.equal(openCases.length, 1);
+  assert.equal(openCases[0].caseTypeCode, "tax_account_posting_gate");
+  const approvedTaxGate = platform.resolveBankReconciliationCase({
+    companyId: COMPANY_ID,
+    reconciliationCaseId: openCases[0].reconciliationCaseId,
+    resolutionCode: "approve_tax_account_statement_bridge",
+    resolutionNote: "Approved tax-account import from bank statement.",
+    actorId: "admin"
+  });
+  assert.equal(approvedTaxGate.executedActionCode, "approve_tax_account_statement_bridge");
   assert.equal(
     platform.listTaxAccountEvents({ companyId: COMPANY_ID }).some((event) => event.externalReference === "BANK-STMT-2701-TAX"),
     true
@@ -176,11 +211,12 @@ test("Step 27 banking runtime imports statement events, bridges tax account and 
   });
   assert.equal(unmatchedImport.items[0].processingStatus, "reconciliation_required");
 
-  const openCases = platform.listBankReconciliationCases({
+  openCases = platform.listBankReconciliationCases({
     companyId: COMPANY_ID,
     status: "open"
   });
   assert.equal(openCases.length, 1);
+  assert.equal(openCases[0].caseTypeCode, "unmatched_statement_event");
   const resolved = platform.resolveBankReconciliationCase({
     companyId: COMPANY_ID,
     reconciliationCaseId: openCases[0].reconciliationCaseId,

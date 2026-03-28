@@ -640,7 +640,7 @@ Knyta dokument, leverantÃ¶rer, kunder, bank och skattekonto till bokfÃ¶rings
 - [x] 9.3 [HARDEN] **VAT decision engine** â€” VAT source of truth, decision inputs/outputs, timing, lock/unlock, declaration basis och review boundaries.
 - [x] 9.4 [NEW BUILD] **Banking och payment rails** â€” Open banking, bankfiler, payment batches/orders, statement import, matchning, settlement liability mapping.
 - [x] 9.5 [HARDEN] **Tax account subledger** â€” SkattekontohÃ¤ndelser, import, klassificering, offset, discrepancy cases, liability match och reconciliation blockers.
-- [ ] 9.6 [HARDEN] **Document-posting gates** â€” Inget dokument, statement eller tax event bokas fÃ¶rrÃ¤n explicit affÃ¤rsdomÃ¤n har godkÃ¤nt sakobjektet.
+- [x] 9.6 [HARDEN] **Document-posting gates** â€” Inget dokument, statement eller tax event bokas fÃ¶rrÃ¤n explicit affÃ¤rsdomÃ¤n har godkÃ¤nt sakobjektet.
 
 **Exit gate**  
 - AR/AP/VAT/banking/tax account fungerar end-to-end med review, reconciliation och blockers. Inga fÃ¶rbjudna autopostningar finns kvar.

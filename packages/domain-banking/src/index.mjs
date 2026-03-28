@@ -4,12 +4,65 @@ import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 export const BANK_ACCOUNT_STATUSES = Object.freeze(["active", "blocked", "archived"]);
 export const PAYMENT_PROPOSAL_STATUSES = Object.freeze(["draft", "approved", "exported", "submitted", "accepted_by_bank", "partially_executed", "settled", "failed", "cancelled"]);
 export const PAYMENT_ORDER_STATUSES = Object.freeze(["prepared", "reserved", "sent", "accepted", "booked", "returned", "rejected"]);
+export const PAYMENT_BATCH_STATUSES = Object.freeze(["draft", "exported", "submitted", "accepted_by_bank", "partially_executed", "settled", "failed", "cancelled"]);
 export const BANK_PAYMENT_EVENT_TYPES = Object.freeze(["booked", "rejected", "returned"]);
 export const BANK_STATEMENT_EVENT_MATCH_STATUSES = Object.freeze(["matched_payment_order", "matched_tax_account", "reconciliation_required"]);
 export const BANK_STATEMENT_EVENT_PROCESSING_STATUSES = Object.freeze(["received", "processed", "reconciliation_required"]);
 export const BANK_RECONCILIATION_CASE_STATUSES = Object.freeze(["open", "in_review", "resolved", "written_off"]);
+export const BANK_RECONCILIATION_PENDING_ACTION_CODES = Object.freeze(["approve_payment_order_statement", "approve_tax_account_statement_bridge"]);
 export const BANK_STATEMENT_CATEGORY_CODES = Object.freeze(["generic", "tax_account"]);
 export const BANK_PAYMENT_ORDER_ACTIONS = Object.freeze(["booked", "rejected", "returned"]);
+export const PAYMENT_RAIL_CODES = Object.freeze(["open_banking", "iso20022_file", "bankgiro_file"]);
+export const PAYMENT_FILE_FORMAT_CODES = Object.freeze(["open_banking_api", "pain.001", "bankgiro_csv"]);
+export const STATEMENT_IMPORT_SOURCE_CODES = Object.freeze(["open_banking_sync", "camt053_file", "manual_statement"]);
+export const STATEMENT_IMPORT_STATUSES = Object.freeze(["processed", "reconciliation_required"]);
+export const SETTLEMENT_LIABILITY_LINK_STATUSES = Object.freeze(["pending", "matched", "settled", "returned", "rejected"]);
+export const SETTLEMENT_LIABILITY_OBJECT_TYPES = Object.freeze(["ap_open_item", "tax_account_event"]);
+
+const PAYMENT_RAIL_CONFIG_BY_CODE = Object.freeze({
+  open_banking: Object.freeze({
+    paymentRailCode: "open_banking",
+    paymentFileFormatCode: "open_banking_api",
+    providerCode: "enable_banking",
+    baselineCode: "SE-OPEN-BANKING-CORE",
+    deliveryMode: "api_dispatch"
+  }),
+  iso20022_file: Object.freeze({
+    paymentRailCode: "iso20022_file",
+    paymentFileFormatCode: "pain.001",
+    providerCode: "bank_file_channel",
+    baselineCode: "SE-BANK-FILE-FORMAT",
+    deliveryMode: "file_export"
+  }),
+  bankgiro_file: Object.freeze({
+    paymentRailCode: "bankgiro_file",
+    paymentFileFormatCode: "bankgiro_csv",
+    providerCode: "bank_file_channel",
+    baselineCode: "SE-BANK-FILE-FORMAT",
+    deliveryMode: "file_export"
+  })
+});
+
+const STATEMENT_IMPORT_SOURCE_CONFIG_BY_CODE = Object.freeze({
+  open_banking_sync: Object.freeze({
+    sourceChannelCode: "open_banking_sync",
+    fileFormatCode: "open_banking_api",
+    providerCode: "enable_banking",
+    baselineCode: "SE-OPEN-BANKING-CORE"
+  }),
+  camt053_file: Object.freeze({
+    sourceChannelCode: "camt053_file",
+    fileFormatCode: "camt.053",
+    providerCode: "bank_file_channel",
+    baselineCode: "SE-BANK-FILE-FORMAT"
+  }),
+  manual_statement: Object.freeze({
+    sourceChannelCode: "manual_statement",
+    fileFormatCode: "manual_statement",
+    providerCode: null,
+    baselineCode: null
+  })
+});
 
 export function createBankingPlatform(options = {}) {
   return createBankingEngine(options);
@@ -21,8 +74,10 @@ export function createBankingEngine({
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   apPlatform = null,
+  integrationsPlatform = null,
   taxAccountPlatform = null,
-  getTaxAccountPlatform = null
+  getTaxAccountPlatform = null,
+  getIntegrationsPlatform = null
 } = {}) {
   const state = {
     bankAccounts: new Map(),
@@ -31,6 +86,9 @@ export function createBankingEngine({
     paymentProposals: new Map(),
     paymentProposalIdsByCompany: new Map(),
     paymentProposalIdsByKey: new Map(),
+    paymentBatches: new Map(),
+    paymentBatchIdsByCompany: new Map(),
+    paymentBatchIdByProposal: new Map(),
     paymentOrders: new Map(),
     paymentOrderIdsByCompany: new Map(),
     paymentOrderIdsByProposal: new Map(),
@@ -39,8 +97,14 @@ export function createBankingEngine({
     bankStatementEvents: new Map(),
     bankStatementEventIdsByCompany: new Map(),
     bankStatementEventIdByIdentity: new Map(),
+    statementImports: new Map(),
+    statementImportIdsByCompany: new Map(),
     reconciliationCases: new Map(),
     reconciliationCaseIdsByCompany: new Map(),
+    settlementLiabilityLinks: new Map(),
+    settlementLiabilityLinkIdsByCompany: new Map(),
+    settlementLiabilityLinkIdByPaymentOrder: new Map(),
+    settlementLiabilityLinkIdByStatementEvent: new Map(),
     countersByCompany: new Map(),
     auditEvents: []
   };
@@ -53,21 +117,33 @@ export function createBankingEngine({
     bankAccountStatuses: BANK_ACCOUNT_STATUSES,
     paymentProposalStatuses: PAYMENT_PROPOSAL_STATUSES,
     paymentOrderStatuses: PAYMENT_ORDER_STATUSES,
+    paymentBatchStatuses: PAYMENT_BATCH_STATUSES,
+    paymentRailCodes: PAYMENT_RAIL_CODES,
+    paymentFileFormatCodes: PAYMENT_FILE_FORMAT_CODES,
     bankPaymentEventTypes: BANK_PAYMENT_EVENT_TYPES,
     bankStatementEventMatchStatuses: BANK_STATEMENT_EVENT_MATCH_STATUSES,
     bankStatementEventProcessingStatuses: BANK_STATEMENT_EVENT_PROCESSING_STATUSES,
     bankReconciliationCaseStatuses: BANK_RECONCILIATION_CASE_STATUSES,
+    bankReconciliationPendingActionCodes: BANK_RECONCILIATION_PENDING_ACTION_CODES,
+    statementImportSourceCodes: STATEMENT_IMPORT_SOURCE_CODES,
+    statementImportStatuses: STATEMENT_IMPORT_STATUSES,
+    settlementLiabilityLinkStatuses: SETTLEMENT_LIABILITY_LINK_STATUSES,
     listBankAccounts,
     getBankAccount,
     createBankAccount,
     listBankStatementEvents,
     getBankStatementEvent,
+    listStatementImports,
+    getStatementImport,
     importBankStatementEvents,
     listBankReconciliationCases,
     getBankReconciliationCase,
     resolveBankReconciliationCase,
     listPaymentProposals,
     getPaymentProposal,
+    listPaymentBatches,
+    getPaymentBatch,
+    listSettlementLiabilityLinks,
     createPaymentProposal,
     approvePaymentProposal,
     exportPaymentProposal,
@@ -184,10 +260,33 @@ export function createBankingEngine({
     return copy(requireBankStatementEventRecord(state, companyId, bankStatementEventId));
   }
 
+  function listStatementImports({ companyId, status = null, sourceChannelCode = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = status == null ? null : assertAllowed(status, STATEMENT_IMPORT_STATUSES, "statement_import_status_invalid");
+    const resolvedSourceChannelCode =
+      sourceChannelCode == null ? null : assertAllowed(sourceChannelCode, STATEMENT_IMPORT_SOURCE_CODES, "statement_import_source_invalid");
+    return (state.statementImportIdsByCompany.get(resolvedCompanyId) || [])
+      .map((statementImportId) => presentStatementImport(state, statementImportId))
+      .filter(Boolean)
+      .filter((statementImport) => (resolvedStatus ? statementImport.status === resolvedStatus : true))
+      .filter((statementImport) => (resolvedSourceChannelCode ? statementImport.sourceChannelCode === resolvedSourceChannelCode : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  function getStatementImport({ companyId, statementImportId } = {}) {
+    const statementImport = requireStatementImportRecord(state, companyId, statementImportId);
+    return presentStatementImport(state, statementImport.statementImportId);
+  }
+
   function importBankStatementEvents({
     companyId,
     bankAccountId,
     statementDate = null,
+    sourceChannelCode = "manual_statement",
+    sourceFileName = null,
+    providerCode = null,
+    providerReference = null,
+    statementFileFormatCode = null,
     events,
     actorId = "system",
     correlationId = crypto.randomUUID()
@@ -200,8 +299,47 @@ export function createBankingEngine({
     }
 
     const resolvedStatementDate = normalizeDate(statementDate || nowIso(clock).slice(0, 10), "statement_date_invalid");
+    const statementImportConfig = resolveStatementImportConfig({
+      sourceChannelCode,
+      statementFileFormatCode,
+      providerCode,
+      effectiveDate: resolvedStatementDate,
+      integrationsPlatform,
+      getIntegrationsPlatform
+    });
+    const statementImport = {
+      statementImportId: crypto.randomUUID(),
+      statementImportNo: nextScopedSequence(state, resolvedCompanyId, "statementImport", "STMT"),
+      companyId: resolvedCompanyId,
+      bankAccountId: bankAccount.bankAccountId,
+      statementDate: resolvedStatementDate,
+      sourceChannelCode: statementImportConfig.sourceChannelCode,
+      statementFileFormatCode: statementImportConfig.statementFileFormatCode,
+      providerCode: statementImportConfig.providerCode,
+      providerBaselineId: statementImportConfig.providerBaselineRef?.providerBaselineId || null,
+      providerBaselineCode: statementImportConfig.providerBaselineRef?.baselineCode || null,
+      providerBaselineVersion: statementImportConfig.providerBaselineRef?.providerBaselineVersion || null,
+      providerBaselineChecksum: statementImportConfig.providerBaselineRef?.providerBaselineChecksum || null,
+      providerReference: normalizeOptionalText(providerReference),
+      sourceFileName: normalizeOptionalText(sourceFileName),
+      status: "processed",
+      importedCount: 0,
+      duplicateCount: 0,
+      matchedPaymentOrderCount: 0,
+      matchedTaxAccountCount: 0,
+      reconciliationRequiredCount: 0,
+      eventCount: 0,
+      createdByActorId: resolvedActorId,
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.statementImports.set(statementImport.statementImportId, statementImport);
+    ensureCollection(state.statementImportIdsByCompany, resolvedCompanyId).push(statementImport.statementImportId);
     const importedEvents = [];
     let duplicateCount = 0;
+    let matchedPaymentOrderCount = 0;
+    let matchedTaxAccountCount = 0;
+    let reconciliationRequiredCount = 0;
     for (const rawEvent of events) {
       const normalized = normalizeBankStatementEventInput({
         bankAccount,
@@ -213,7 +351,8 @@ export function createBankingEngine({
         bankAccountId: bankAccount.bankAccountId,
         externalReference: normalized.externalReference,
         bookingDate: normalized.bookingDate,
-        amount: normalized.amount
+        amount: normalized.amount,
+        statementImportId: statementImport.statementImportId
       });
       const existingStatementEventId = state.bankStatementEventIdByIdentity.get(identityKey);
       if (existingStatementEventId) {
@@ -224,6 +363,7 @@ export function createBankingEngine({
 
       const statementEvent = {
         bankStatementEventId: crypto.randomUUID(),
+        statementImportId: statementImport.statementImportId,
         companyId: resolvedCompanyId,
         bankAccountId: bankAccount.bankAccountId,
         externalReference: normalized.externalReference,
@@ -233,6 +373,10 @@ export function createBankingEngine({
         counterpartyName: normalized.counterpartyName,
         referenceText: normalized.referenceText,
         statementCategoryCode: normalized.statementCategoryCode,
+        sourceChannelCode: statementImport.sourceChannelCode,
+        statementFileFormatCode: statementImport.statementFileFormatCode,
+        providerCode: statementImport.providerCode,
+        providerReference: statementImport.providerReference,
         linkedPaymentOrderId: normalized.linkedPaymentOrderId,
         paymentOrderAction: normalized.paymentOrderAction,
         matchStatus: "reconciliation_required",
@@ -256,12 +400,31 @@ export function createBankingEngine({
         taxAccountPlatform,
         getTaxAccountPlatform,
         bankAccount,
+        statementImport,
         actorId: resolvedActorId,
         correlationId,
         clock
       });
+      if (statementEvent.matchStatus === "matched_payment_order") {
+        matchedPaymentOrderCount += 1;
+      }
+      if (statementEvent.matchStatus === "matched_tax_account") {
+        matchedTaxAccountCount += 1;
+      }
+      if (statementEvent.processingStatus === "reconciliation_required") {
+        reconciliationRequiredCount += 1;
+      }
       importedEvents.push(copy(statementEvent));
     }
+
+    statementImport.importedCount = importedEvents.length - duplicateCount;
+    statementImport.duplicateCount = duplicateCount;
+    statementImport.matchedPaymentOrderCount = matchedPaymentOrderCount;
+    statementImport.matchedTaxAccountCount = matchedTaxAccountCount;
+    statementImport.reconciliationRequiredCount = reconciliationRequiredCount;
+    statementImport.eventCount = importedEvents.length;
+    statementImport.status = reconciliationRequiredCount > 0 ? "reconciliation_required" : "processed";
+    statementImport.updatedAt = nowIso(clock);
 
     pushAudit(state, clock, {
       companyId: resolvedCompanyId,
@@ -269,10 +432,11 @@ export function createBankingEngine({
       correlationId,
       action: "bank.statement_events.imported",
       entityType: "bank_statement_import",
-      entityId: bankAccount.bankAccountId,
+      entityId: statementImport.statementImportId,
       explanation: `Imported ${importedEvents.length - duplicateCount} bank statement events with ${duplicateCount} duplicates ignored.`
     });
     return copy({
+      statementImport: presentStatementImport(state, statementImport.statementImportId),
       bankAccountId: bankAccount.bankAccountId,
       statementDate: resolvedStatementDate,
       importedCount: importedEvents.length - duplicateCount,
@@ -308,20 +472,82 @@ export function createBankingEngine({
     if (!["open", "in_review"].includes(reconciliationCase.status)) {
       return copy(reconciliationCase);
     }
-    const resolvedResolutionCode = normalizeOptionalText(resolutionCode) || "resolved";
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const normalizedResolutionCode = normalizeOptionalText(resolutionCode);
+    if (reconciliationCase.pendingActionCode && !normalizedResolutionCode) {
+      throw createError(
+        400,
+        "bank_reconciliation_resolution_code_required",
+        "Approval-gated bank reconciliation cases require an explicit resolution code."
+      );
+    }
+    const resolvedResolutionCode = normalizedResolutionCode || "resolved";
+    const statementEvent = state.bankStatementEvents.get(reconciliationCase.bankStatementEventId);
+    if (reconciliationCase.pendingActionCode && !isAllowedPendingActionResolutionCode(reconciliationCase, resolvedResolutionCode)) {
+      throw createError(
+        409,
+        "bank_reconciliation_resolution_invalid",
+        `Unsupported resolution ${resolvedResolutionCode} for pending action ${reconciliationCase.pendingActionCode}.`
+      );
+    }
+
+    let executedActionCode = null;
+    if (reconciliationCase.pendingActionCode === "approve_payment_order_statement" && resolvedResolutionCode === "approve_payment_order_statement") {
+      executePaymentOrderStatementApproval({
+        state,
+        reconciliationCase,
+        statementEvent,
+        actorId: resolvedActorId,
+        correlationId,
+        clock
+      });
+      executedActionCode = resolvedResolutionCode;
+    } else if (
+      reconciliationCase.pendingActionCode === "approve_tax_account_statement_bridge" &&
+      resolvedResolutionCode === "approve_tax_account_statement_bridge"
+    ) {
+      executeTaxAccountStatementApproval({
+        state,
+        reconciliationCase,
+        statementEvent,
+        taxAccountPlatform,
+        getTaxAccountPlatform,
+        actorId: resolvedActorId,
+        clock
+      });
+      executedActionCode = resolvedResolutionCode;
+    }
+
     reconciliationCase.status = resolvedResolutionCode === "written_off" ? "written_off" : "resolved";
     reconciliationCase.resolutionCode = resolvedResolutionCode;
     reconciliationCase.resolutionNote = normalizeOptionalText(resolutionNote);
     reconciliationCase.resolvedAt = nowIso(clock);
-    reconciliationCase.resolvedByActorId = requireText(actorId, "actor_id_required");
+    reconciliationCase.resolvedByActorId = resolvedActorId;
+    reconciliationCase.executedActionCode = executedActionCode;
+    reconciliationCase.executedActionAt = executedActionCode ? reconciliationCase.resolvedAt : null;
     reconciliationCase.updatedAt = reconciliationCase.resolvedAt;
 
-    const statementEvent = state.bankStatementEvents.get(reconciliationCase.bankStatementEventId);
     if (statementEvent) {
+      if (reconciliationCase.pendingActionCode && !executedActionCode) {
+        if (reconciliationCase.pendingActionCode === "approve_payment_order_statement" && statementEvent.linkedPaymentOrderId) {
+          syncSettlementLiabilityLinkForPaymentOrder(state, clock, {
+            companyId: statementEvent.companyId,
+            paymentOrderId: statementEvent.linkedPaymentOrderId,
+            status: "pending",
+            settledAmount: 0,
+            clearBankStatementEventId: true,
+            clearBankPaymentEventId: true
+          });
+        }
+        statementEvent.failureReasonCode = resolvedResolutionCode;
+        statementEvent.updatedAt = reconciliationCase.updatedAt;
+      }
       statementEvent.processingStatus = "processed";
-      statementEvent.matchStatus = "reconciliation_required";
-      statementEvent.failureReasonCode = resolvedResolutionCode;
-      statementEvent.updatedAt = reconciliationCase.updatedAt;
+      if (!executedActionCode && !reconciliationCase.pendingActionCode) {
+        statementEvent.matchStatus = "reconciliation_required";
+        statementEvent.failureReasonCode = resolvedResolutionCode;
+        statementEvent.updatedAt = reconciliationCase.updatedAt;
+      }
     }
 
     pushAudit(state, clock, {
@@ -349,23 +575,39 @@ export function createBankingEngine({
   }) {
     if (statementEvent.linkedPaymentOrderId && statementEvent.paymentOrderAction) {
       try {
-        const paymentActionResult = applyStatementEventToPaymentOrder({
-          statementEvent,
+        requirePaymentOrderRecord(state, statementEvent.companyId, statementEvent.linkedPaymentOrderId);
+        const reconciliationCase = openBankReconciliationCase({
+          companyId: statementEvent.companyId,
+          bankAccountId: statementEvent.bankAccountId,
+          bankStatementEventId: statementEvent.bankStatementEventId,
+          caseTypeCode: "payment_order_posting_gate",
+          differenceAmount: statementEvent.amount,
+          reasonCode: "bank_statement_requires_domain_approval",
           actorId,
-          correlationId
+          pendingActionCode: "approve_payment_order_statement",
+          pendingTargetObjectType: "payment_order",
+          pendingTargetObjectId: statementEvent.linkedPaymentOrderId,
+          pendingPayload: {
+            paymentOrderAction: statementEvent.paymentOrderAction,
+            bookingDate: statementEvent.bookingDate,
+            bankEventId: statementEvent.externalReference
+          }
         });
         statementEvent.matchStatus = "matched_payment_order";
-        statementEvent.processingStatus = "processed";
+        statementEvent.processingStatus = "reconciliation_required";
         statementEvent.matchedObjectType = "payment_order";
         statementEvent.matchedObjectId = statementEvent.linkedPaymentOrderId;
         statementEvent.failureReasonCode = null;
+        statementEvent.reconciliationCaseId = reconciliationCase.reconciliationCaseId;
         statementEvent.updatedAt = nowIso(clock);
-
-        const order = state.paymentOrders.get(statementEvent.linkedPaymentOrderId);
-        if (order) {
-          order.lastStatementEventId = statementEvent.bankStatementEventId;
-        }
-        return paymentActionResult;
+        syncSettlementLiabilityLinkForPaymentOrder(state, clock, {
+          companyId: statementEvent.companyId,
+          paymentOrderId: statementEvent.linkedPaymentOrderId,
+          bankStatementEventId: statementEvent.bankStatementEventId,
+          status: "matched",
+          settledAmount: 0
+        });
+        return reconciliationCase;
       } catch (error) {
         const reconciliationCase = openBankReconciliationCase({
           companyId: statementEvent.companyId,
@@ -387,21 +629,36 @@ export function createBankingEngine({
 
     if (statementEvent.statementCategoryCode === "tax_account") {
       try {
-        const bridgeResult = bridgeStatementEventToTaxAccount({
-          statementEvent,
-          bankAccount,
+        assertTaxAccountStatementBridgeAvailable({
           taxAccountPlatform,
-          getTaxAccountPlatform,
-          actorId
+          getTaxAccountPlatform
+        });
+        const reconciliationCase = openBankReconciliationCase({
+          companyId: statementEvent.companyId,
+          bankAccountId: statementEvent.bankAccountId,
+          bankStatementEventId: statementEvent.bankStatementEventId,
+          caseTypeCode: "tax_account_posting_gate",
+          differenceAmount: statementEvent.amount,
+          reasonCode: "bank_statement_requires_domain_approval",
+          actorId,
+          pendingActionCode: "approve_tax_account_statement_bridge",
+          pendingTargetObjectType: "tax_account_event",
+          pendingTargetObjectId: null,
+          pendingPayload: {
+            statementCategoryCode: statementEvent.statementCategoryCode,
+            bookingDate: statementEvent.bookingDate,
+            bankEventId: statementEvent.externalReference
+          }
         });
         statementEvent.matchStatus = "matched_tax_account";
-        statementEvent.processingStatus = "processed";
-        statementEvent.matchedObjectType = "tax_account_event";
-        statementEvent.matchedObjectId = bridgeResult.taxAccountEventId;
-        statementEvent.taxAccountEventId = bridgeResult.taxAccountEventId;
+        statementEvent.processingStatus = "reconciliation_required";
+        statementEvent.reconciliationCaseId = reconciliationCase.reconciliationCaseId;
+        statementEvent.matchedObjectType = null;
+        statementEvent.matchedObjectId = null;
+        statementEvent.taxAccountEventId = null;
         statementEvent.failureReasonCode = null;
         statementEvent.updatedAt = nowIso(clock);
-        return bridgeResult;
+        return reconciliationCase;
       } catch (error) {
         const reconciliationCase = openBankReconciliationCase({
           companyId: statementEvent.companyId,
@@ -446,6 +703,7 @@ export function createBankingEngine({
           paymentOrderId: statementEvent.linkedPaymentOrderId,
           bankEventId: statementEvent.externalReference,
           bookedOn: statementEvent.bookingDate,
+          bankStatementEventId: statementEvent.bankStatementEventId,
           actorId,
           correlationId
         });
@@ -454,6 +712,7 @@ export function createBankingEngine({
           companyId: statementEvent.companyId,
           paymentOrderId: statementEvent.linkedPaymentOrderId,
           bankEventId: statementEvent.externalReference,
+          bankStatementEventId: statementEvent.bankStatementEventId,
           actorId,
           correlationId,
           reasonCode: "bank_statement_rejected"
@@ -464,6 +723,7 @@ export function createBankingEngine({
           paymentOrderId: statementEvent.linkedPaymentOrderId,
           bankEventId: statementEvent.externalReference,
           returnedOn: statementEvent.bookingDate,
+          bankStatementEventId: statementEvent.bankStatementEventId,
           actorId,
           correlationId
         });
@@ -509,6 +769,87 @@ export function createBankingEngine({
     };
   }
 
+  function executePaymentOrderStatementApproval({ state, reconciliationCase, statementEvent, actorId, correlationId, clock }) {
+    const resolvedStatementEvent =
+      statementEvent ||
+      state.bankStatementEvents.get(requireText(reconciliationCase.bankStatementEventId, "bank_statement_event_id_required"));
+    if (!resolvedStatementEvent) {
+      throw createError(404, "bank_statement_event_not_found", "Bank statement event was not found for reconciliation case.");
+    }
+    const paymentActionResult = applyStatementEventToPaymentOrder({
+      statementEvent: resolvedStatementEvent,
+      actorId,
+      correlationId
+    });
+    resolvedStatementEvent.matchStatus = "matched_payment_order";
+    resolvedStatementEvent.processingStatus = "processed";
+    resolvedStatementEvent.matchedObjectType = "payment_order";
+    resolvedStatementEvent.matchedObjectId = resolvedStatementEvent.linkedPaymentOrderId;
+    resolvedStatementEvent.failureReasonCode = null;
+    resolvedStatementEvent.updatedAt = nowIso(clock);
+    const order = state.paymentOrders.get(resolvedStatementEvent.linkedPaymentOrderId);
+    if (order) {
+      order.lastStatementEventId = resolvedStatementEvent.bankStatementEventId;
+    }
+    return paymentActionResult;
+  }
+
+  function executeTaxAccountStatementApproval({
+    state,
+    reconciliationCase,
+    statementEvent,
+    taxAccountPlatform,
+    getTaxAccountPlatform,
+    actorId,
+    clock
+  }) {
+    const resolvedStatementEvent =
+      statementEvent ||
+      state.bankStatementEvents.get(requireText(reconciliationCase.bankStatementEventId, "bank_statement_event_id_required"));
+    if (!resolvedStatementEvent) {
+      throw createError(404, "bank_statement_event_not_found", "Bank statement event was not found for reconciliation case.");
+    }
+    const bankAccount = requireBankAccountRecord(state, resolvedStatementEvent.companyId, resolvedStatementEvent.bankAccountId);
+    const bridgeResult = bridgeStatementEventToTaxAccount({
+      statementEvent: resolvedStatementEvent,
+      bankAccount,
+      taxAccountPlatform,
+      getTaxAccountPlatform,
+      actorId
+    });
+    resolvedStatementEvent.matchStatus = "matched_tax_account";
+    resolvedStatementEvent.processingStatus = "processed";
+    resolvedStatementEvent.matchedObjectType = "tax_account_event";
+    resolvedStatementEvent.matchedObjectId = bridgeResult.taxAccountEventId;
+    resolvedStatementEvent.taxAccountEventId = bridgeResult.taxAccountEventId;
+    resolvedStatementEvent.failureReasonCode = null;
+    resolvedStatementEvent.updatedAt = nowIso(clock);
+    if (bridgeResult.taxAccountEventId) {
+      upsertStatementSettlementLiabilityLink(state, clock, {
+        companyId: resolvedStatementEvent.companyId,
+        bankStatementEventId: resolvedStatementEvent.bankStatementEventId,
+        bankAccountId: resolvedStatementEvent.bankAccountId,
+        liabilityObjectType: "tax_account_event",
+        liabilityObjectId: bridgeResult.taxAccountEventId,
+        expectedAmount: Math.abs(resolvedStatementEvent.amount),
+        currencyCode: resolvedStatementEvent.currencyCode,
+        status: "settled"
+      });
+    }
+    return bridgeResult;
+  }
+
+  function assertTaxAccountStatementBridgeAvailable({ taxAccountPlatform, getTaxAccountPlatform }) {
+    const resolvedTaxAccountPlatform = resolveDeferredPlatform({
+      platform: taxAccountPlatform,
+      getter: getTaxAccountPlatform
+    });
+    if (!resolvedTaxAccountPlatform || typeof resolvedTaxAccountPlatform.importTaxAccountEvents !== "function") {
+      throw createError(409, "tax_account_platform_missing", "Tax account platform is required for tax-account statement events.");
+    }
+    return resolvedTaxAccountPlatform;
+  }
+
   function openBankReconciliationCase({
     companyId,
     bankAccountId,
@@ -516,7 +857,11 @@ export function createBankingEngine({
     caseTypeCode,
     differenceAmount,
     reasonCode,
-    actorId
+    actorId,
+    pendingActionCode = null,
+    pendingTargetObjectType = null,
+    pendingTargetObjectId = null,
+    pendingPayload = null
   }) {
     const reconciliationCase = {
       reconciliationCaseId: crypto.randomUUID(),
@@ -527,10 +872,23 @@ export function createBankingEngine({
       status: "open",
       differenceAmount: roundMoney(differenceAmount),
       reasonCode: requireText(reasonCode, "bank_reconciliation_reason_required"),
+      pendingActionCode:
+        pendingActionCode == null
+          ? null
+          : assertAllowed(
+              pendingActionCode,
+              BANK_RECONCILIATION_PENDING_ACTION_CODES,
+              "bank_reconciliation_pending_action_invalid"
+            ),
+      pendingTargetObjectType: normalizeOptionalText(pendingTargetObjectType),
+      pendingTargetObjectId: normalizeOptionalText(pendingTargetObjectId),
+      pendingPayload: pendingPayload == null ? null : copy(pendingPayload),
       resolutionCode: null,
       resolutionNote: null,
       resolvedAt: null,
       resolvedByActorId: null,
+      executedActionCode: null,
+      executedActionAt: null,
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
@@ -554,7 +912,62 @@ export function createBankingEngine({
     return presentPaymentProposal(state, proposal.paymentProposalId);
   }
 
-  function createPaymentProposal({ companyId, bankAccountId, apOpenItemIds, paymentDate = null, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+  function listPaymentBatches({ companyId, status = null, paymentRailCode = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = status == null ? null : assertAllowed(status, PAYMENT_BATCH_STATUSES, "payment_batch_status_invalid");
+    const resolvedPaymentRailCode =
+      paymentRailCode == null ? null : assertAllowed(paymentRailCode, PAYMENT_RAIL_CODES, "payment_rail_code_invalid");
+    return (state.paymentBatchIdsByCompany.get(resolvedCompanyId) || [])
+      .map((paymentBatchId) => presentPaymentBatch(state, paymentBatchId))
+      .filter(Boolean)
+      .filter((paymentBatch) => (resolvedStatus ? paymentBatch.status === resolvedStatus : true))
+      .filter((paymentBatch) => (resolvedPaymentRailCode ? paymentBatch.paymentRailCode === resolvedPaymentRailCode : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  function getPaymentBatch({ companyId, paymentBatchId } = {}) {
+    const paymentBatch = requirePaymentBatchRecord(state, companyId, paymentBatchId);
+    return presentPaymentBatch(state, paymentBatch.paymentBatchId);
+  }
+
+  function listSettlementLiabilityLinks({
+    companyId,
+    paymentOrderId = null,
+    bankStatementEventId = null,
+    liabilityObjectType = null,
+    status = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedLiabilityObjectType =
+      liabilityObjectType == null
+        ? null
+        : assertAllowed(liabilityObjectType, SETTLEMENT_LIABILITY_OBJECT_TYPES, "settlement_liability_object_type_invalid");
+    const resolvedStatus = status == null ? null : assertAllowed(status, SETTLEMENT_LIABILITY_LINK_STATUSES, "settlement_link_status_invalid");
+    const resolvedPaymentOrderId = normalizeOptionalText(paymentOrderId);
+    const resolvedBankStatementEventId = normalizeOptionalText(bankStatementEventId);
+    return (state.settlementLiabilityLinkIdsByCompany.get(resolvedCompanyId) || [])
+      .map((settlementLiabilityLinkId) => state.settlementLiabilityLinks.get(settlementLiabilityLinkId))
+      .filter(Boolean)
+      .filter((link) => (resolvedPaymentOrderId ? link.paymentOrderId === resolvedPaymentOrderId : true))
+      .filter((link) => (resolvedBankStatementEventId ? link.bankStatementEventId === resolvedBankStatementEventId : true))
+      .filter((link) => (resolvedLiabilityObjectType ? link.liabilityObjectType === resolvedLiabilityObjectType : true))
+      .filter((link) => (resolvedStatus ? link.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function createPaymentProposal({
+    companyId,
+    bankAccountId,
+    apOpenItemIds,
+    paymentDate = null,
+    paymentRailCode = "bankgiro_file",
+    paymentFileFormatCode = null,
+    providerCode = null,
+    providerReference = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
     ensureApPlatform(apPlatform);
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const bankAccount = requireBankAccountRecord(state, resolvedCompanyId, bankAccountId);
@@ -565,8 +978,23 @@ export function createBankingEngine({
       throw createError(400, "payment_proposal_open_items_required", "Payment proposal requires AP open items.");
     }
 
+    const resolvedPaymentDate = normalizeDate(paymentDate || nowIso(clock).slice(0, 10), "payment_date_invalid");
+    const railConfig = resolvePaymentRailConfig({
+      paymentRailCode,
+      paymentFileFormatCode,
+      providerCode,
+      effectiveDate: resolvedPaymentDate,
+      integrationsPlatform,
+      getIntegrationsPlatform
+    });
     const uniqueOpenItemIds = [...new Set(apOpenItemIds.map((value) => requireText(value, "ap_open_item_id_required")))].sort();
-    const sourceOpenItemSetHash = hashObject({ companyId: resolvedCompanyId, bankAccountId, paymentDate, apOpenItemIds: uniqueOpenItemIds });
+    const sourceOpenItemSetHash = hashObject({
+      companyId: resolvedCompanyId,
+      bankAccountId,
+      paymentDate: resolvedPaymentDate,
+      paymentRailCode: railConfig.paymentRailCode,
+      apOpenItemIds: uniqueOpenItemIds
+    });
     const scopedKey = toCompanyScopedKey(resolvedCompanyId, sourceOpenItemSetHash);
     if (state.paymentProposalIdsByKey.has(scopedKey)) {
       return presentPaymentProposal(state, state.paymentProposalIdsByKey.get(scopedKey));
@@ -577,8 +1005,17 @@ export function createBankingEngine({
       companyId: resolvedCompanyId,
       paymentProposalNo: nextScopedSequence(state, resolvedCompanyId, "paymentProposal", "PAY"),
       bankAccountId,
+      paymentBatchId: null,
+      paymentRailCode: railConfig.paymentRailCode,
+      paymentFileFormatCode: railConfig.paymentFileFormatCode,
+      providerCode: railConfig.providerCode,
+      providerBaselineId: railConfig.providerBaselineRef?.providerBaselineId || null,
+      providerBaselineCode: railConfig.providerBaselineRef?.baselineCode || null,
+      providerBaselineVersion: railConfig.providerBaselineRef?.providerBaselineVersion || null,
+      providerBaselineChecksum: railConfig.providerBaselineRef?.providerBaselineChecksum || null,
+      providerReference: normalizeOptionalText(providerReference),
       status: "draft",
-      paymentDate: normalizeDate(paymentDate || nowIso(clock).slice(0, 10), "payment_date_invalid"),
+      paymentDate: resolvedPaymentDate,
       currencyCode: bankAccount.currencyCode,
       totalAmount: 0,
       sourceOpenItemSetHash,
@@ -598,9 +1035,47 @@ export function createBankingEngine({
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
     };
+
+    const paymentBatch = {
+      paymentBatchId: crypto.randomUUID(),
+      paymentBatchNo: nextScopedSequence(state, resolvedCompanyId, "paymentBatch", "BATCH"),
+      companyId: resolvedCompanyId,
+      paymentProposalId: proposal.paymentProposalId,
+      bankAccountId,
+      paymentRailCode: railConfig.paymentRailCode,
+      paymentFileFormatCode: railConfig.paymentFileFormatCode,
+      providerCode: railConfig.providerCode,
+      providerBaselineId: railConfig.providerBaselineRef?.providerBaselineId || null,
+      providerBaselineCode: railConfig.providerBaselineRef?.baselineCode || null,
+      providerBaselineVersion: railConfig.providerBaselineRef?.providerBaselineVersion || null,
+      providerBaselineChecksum: railConfig.providerBaselineRef?.providerBaselineChecksum || null,
+      providerReference: normalizeOptionalText(providerReference),
+      deliveryMode: railConfig.deliveryMode,
+      status: "draft",
+      paymentDate: resolvedPaymentDate,
+      currencyCode: bankAccount.currencyCode,
+      totalAmount: 0,
+      orderCount: 0,
+      exportFileName: null,
+      exportPayload: null,
+      exportPayloadHash: null,
+      exportedAt: null,
+      submittedAt: null,
+      acceptedByBankAt: null,
+      settledAt: null,
+      failedAt: null,
+      cancelledAt: null,
+      createdByActorId: actorId,
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    proposal.paymentBatchId = paymentBatch.paymentBatchId;
     state.paymentProposals.set(proposal.paymentProposalId, proposal);
     ensureCollection(state.paymentProposalIdsByCompany, resolvedCompanyId).push(proposal.paymentProposalId);
     state.paymentProposalIdsByKey.set(scopedKey, proposal.paymentProposalId);
+    state.paymentBatches.set(paymentBatch.paymentBatchId, paymentBatch);
+    ensureCollection(state.paymentBatchIdsByCompany, resolvedCompanyId).push(paymentBatch.paymentBatchId);
+    state.paymentBatchIdByProposal.set(proposal.paymentProposalId, paymentBatch.paymentBatchId);
 
     for (const apOpenItemId of uniqueOpenItemIds) {
       const openItem = apPlatform.getApOpenItem({ companyId: resolvedCompanyId, apOpenItemId });
@@ -615,9 +1090,18 @@ export function createBankingEngine({
         paymentOrderId: crypto.randomUUID(),
         companyId: resolvedCompanyId,
         paymentProposalId: proposal.paymentProposalId,
+        paymentBatchId: paymentBatch.paymentBatchId,
+        bankAccountId: bankAccount.bankAccountId,
         apOpenItemId: openItem.apOpenItemId,
         supplierInvoiceId: invoice.supplierInvoiceId,
         supplierId: supplier.supplierId,
+        settlementLiabilityObjectType: "ap_open_item",
+        settlementLiabilityObjectId: openItem.apOpenItemId,
+        settlementLiabilitySourceDomain: "ap",
+        paymentRailCode: railConfig.paymentRailCode,
+        paymentFileFormatCode: railConfig.paymentFileFormatCode,
+        providerCode: railConfig.providerCode,
+        providerBaselineCode: railConfig.providerBaselineRef?.baselineCode || null,
         status: "prepared",
         payeeName: supplier.paymentRecipient || supplier.legalName,
         bankgiro: supplier.bankgiro,
@@ -643,6 +1127,20 @@ export function createBankingEngine({
       ensureCollection(state.paymentOrderIdsByCompany, resolvedCompanyId).push(order.paymentOrderId);
       ensureCollection(state.paymentOrderIdsByProposal, proposal.paymentProposalId).push(order.paymentOrderId);
       proposal.totalAmount = roundMoney(proposal.totalAmount + order.amount);
+      paymentBatch.totalAmount = roundMoney(paymentBatch.totalAmount + order.amount);
+      paymentBatch.orderCount += 1;
+      ensureSettlementLiabilityLinkRecord(state, clock, {
+        companyId: resolvedCompanyId,
+        paymentBatchId: paymentBatch.paymentBatchId,
+        paymentProposalId: proposal.paymentProposalId,
+        paymentOrderId: order.paymentOrderId,
+        liabilityObjectType: "ap_open_item",
+        liabilityObjectId: openItem.apOpenItemId,
+        relatedObjectType: "supplier_invoice",
+        relatedObjectId: invoice.supplierInvoiceId,
+        expectedAmount: order.amount,
+        currencyCode: order.currencyCode
+      });
     }
 
     pushAudit(state, clock, {
@@ -679,6 +1177,7 @@ export function createBankingEngine({
   function exportPaymentProposal({ companyId, paymentProposalId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
     ensureApPlatform(apPlatform);
     const proposal = requirePaymentProposalRecord(state, companyId, paymentProposalId);
+    const paymentBatch = requirePaymentBatchByProposalRecord(state, proposal);
     if (!["approved", "exported", "submitted", "accepted_by_bank", "partially_executed", "settled"].includes(proposal.status)) {
       throw createError(409, "payment_proposal_not_approved", "Payment proposal must be approved before export.");
     }
@@ -700,13 +1199,24 @@ export function createBankingEngine({
       }
     }
     const orders = listProposalOrderRecords(state, proposal.paymentProposalId);
-    const rows = orders.map((order) => [order.payeeName, order.bankgiro || order.plusgiro || order.iban || "", order.amount.toFixed(2), order.currencyCode, order.dueDate, order.paymentReference].join(";"));
+    const exportArtifact = buildPaymentBatchExportArtifact({
+      paymentBatch,
+      proposal,
+      bankAccount,
+      orders
+    });
     proposal.status = "exported";
     proposal.exportedAt = proposal.exportedAt || nowIso(clock);
-    proposal.exportFileName = `${proposal.paymentProposalNo}.csv`;
-    proposal.exportPayload = ["payee;account;amount;currency;due_date;reference", ...rows].join("\n");
+    proposal.exportFileName = exportArtifact.exportFileName;
+    proposal.exportPayload = exportArtifact.exportPayload;
     proposal.exportPayloadHash = hashObject({ paymentProposalId: proposal.paymentProposalId, exportPayload: proposal.exportPayload });
     proposal.updatedAt = nowIso(clock);
+    paymentBatch.status = "exported";
+    paymentBatch.exportedAt = proposal.exportedAt;
+    paymentBatch.exportFileName = exportArtifact.exportFileName;
+    paymentBatch.exportPayload = exportArtifact.exportPayload;
+    paymentBatch.exportPayloadHash = hashObject({ paymentBatchId: paymentBatch.paymentBatchId, exportPayload: exportArtifact.exportPayload });
+    paymentBatch.updatedAt = nowIso(clock);
     pushAudit(state, clock, {
       companyId: proposal.companyId,
       actorId,
@@ -721,12 +1231,16 @@ export function createBankingEngine({
 
   function submitPaymentProposal({ companyId, paymentProposalId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
     const proposal = requirePaymentProposalRecord(state, companyId, paymentProposalId);
+    const paymentBatch = requirePaymentBatchByProposalRecord(state, proposal);
     if (!["exported", "submitted", "accepted_by_bank", "partially_executed", "settled"].includes(proposal.status)) {
       throw createError(409, "payment_proposal_not_exported", "Payment proposal must be exported before submit.");
     }
     proposal.status = proposal.status === "settled" ? "settled" : "submitted";
     proposal.submittedAt = proposal.submittedAt || nowIso(clock);
     proposal.updatedAt = nowIso(clock);
+    paymentBatch.status = proposal.status === "settled" ? "settled" : "submitted";
+    paymentBatch.submittedAt = proposal.submittedAt;
+    paymentBatch.updatedAt = nowIso(clock);
     for (const order of listProposalOrderRecords(state, proposal.paymentProposalId)) {
       if (order.status === "reserved") {
         order.status = "sent";
@@ -747,12 +1261,16 @@ export function createBankingEngine({
 
   function acceptPaymentProposal({ companyId, paymentProposalId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
     const proposal = requirePaymentProposalRecord(state, companyId, paymentProposalId);
+    const paymentBatch = requirePaymentBatchByProposalRecord(state, proposal);
     if (!["submitted", "accepted_by_bank", "partially_executed", "settled"].includes(proposal.status)) {
       throw createError(409, "payment_proposal_not_submitted", "Payment proposal must be submitted before bank acceptance.");
     }
     proposal.status = proposal.status === "settled" ? "settled" : "accepted_by_bank";
     proposal.acceptedByBankAt = proposal.acceptedByBankAt || nowIso(clock);
     proposal.updatedAt = nowIso(clock);
+    paymentBatch.status = proposal.status === "settled" ? "settled" : "accepted_by_bank";
+    paymentBatch.acceptedByBankAt = proposal.acceptedByBankAt;
+    paymentBatch.updatedAt = nowIso(clock);
     for (const order of listProposalOrderRecords(state, proposal.paymentProposalId)) {
       if (order.status === "sent") {
         order.status = "accepted";
@@ -771,7 +1289,15 @@ export function createBankingEngine({
     return presentPaymentProposal(state, proposal.paymentProposalId);
   }
 
-  function bookPaymentOrder({ companyId, paymentOrderId, bankEventId, bookedOn = null, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+  function bookPaymentOrder({
+    companyId,
+    paymentOrderId,
+    bankEventId,
+    bookedOn = null,
+    bankStatementEventId = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
     ensureApPlatform(apPlatform);
     const order = requirePaymentOrderRecord(state, companyId, paymentOrderId);
     const proposal = requirePaymentProposalRecord(state, companyId, order.paymentProposalId);
@@ -801,11 +1327,27 @@ export function createBankingEngine({
     order.updatedAt = nowIso(clock);
     bankPaymentEvent.bankPaymentEvent.journalEntryId = settled.journalEntryId;
     bankPaymentEvent.bankPaymentEvent.status = "processed";
+    syncSettlementLiabilityLinkForPaymentOrder(state, clock, {
+      companyId: proposal.companyId,
+      paymentOrderId: order.paymentOrderId,
+      bankStatementEventId,
+      bankPaymentEventId: bankPaymentEvent.bankPaymentEvent.bankPaymentEventId,
+      status: "settled",
+      settledAmount: order.amount
+    });
     refreshProposalStatus(state, proposal.paymentProposalId, clock);
     return { paymentProposal: presentPaymentProposal(state, proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: false };
   }
 
-  function rejectPaymentOrder({ companyId, paymentOrderId, bankEventId, actorId = "system", correlationId = crypto.randomUUID(), reasonCode = "payment_rejected" } = {}) {
+  function rejectPaymentOrder({
+    companyId,
+    paymentOrderId,
+    bankEventId,
+    bankStatementEventId = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID(),
+    reasonCode = "payment_rejected"
+  } = {}) {
     ensureApPlatform(apPlatform);
     const order = requirePaymentOrderRecord(state, companyId, paymentOrderId);
     const proposal = requirePaymentProposalRecord(state, companyId, order.paymentProposalId);
@@ -832,11 +1374,27 @@ export function createBankingEngine({
     order.updatedAt = nowIso(clock);
     bankPaymentEvent.bankPaymentEvent.journalEntryId = released.journalEntryId;
     bankPaymentEvent.bankPaymentEvent.status = "processed";
+    syncSettlementLiabilityLinkForPaymentOrder(state, clock, {
+      companyId: proposal.companyId,
+      paymentOrderId: order.paymentOrderId,
+      bankStatementEventId,
+      bankPaymentEventId: bankPaymentEvent.bankPaymentEvent.bankPaymentEventId,
+      status: "rejected",
+      settledAmount: 0
+    });
     refreshProposalStatus(state, proposal.paymentProposalId, clock);
     return { paymentProposal: presentPaymentProposal(state, proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: false };
   }
 
-  function returnPaymentOrder({ companyId, paymentOrderId, bankEventId, returnedOn = null, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+  function returnPaymentOrder({
+    companyId,
+    paymentOrderId,
+    bankEventId,
+    returnedOn = null,
+    bankStatementEventId = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
     ensureApPlatform(apPlatform);
     const order = requirePaymentOrderRecord(state, companyId, paymentOrderId);
     const proposal = requirePaymentProposalRecord(state, companyId, order.paymentProposalId);
@@ -866,6 +1424,14 @@ export function createBankingEngine({
     order.updatedAt = nowIso(clock);
     bankPaymentEvent.bankPaymentEvent.journalEntryId = reopened.journalEntryId;
     bankPaymentEvent.bankPaymentEvent.status = "processed";
+    syncSettlementLiabilityLinkForPaymentOrder(state, clock, {
+      companyId: proposal.companyId,
+      paymentOrderId: order.paymentOrderId,
+      bankStatementEventId,
+      bankPaymentEventId: bankPaymentEvent.bankPaymentEvent.bankPaymentEventId,
+      status: "returned",
+      settledAmount: 0
+    });
     refreshProposalStatus(state, proposal.paymentProposalId, clock);
     return { paymentProposal: presentPaymentProposal(state, proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: false };
   }
@@ -873,8 +1439,11 @@ export function createBankingEngine({
   function snapshotBanking() {
     return copy({
       bankAccounts: [...state.bankAccounts.values()],
+      paymentBatches: [...state.paymentBatches.values()],
       bankStatementEvents: [...state.bankStatementEvents.values()],
+      statementImports: [...state.statementImports.values()],
       reconciliationCases: [...state.reconciliationCases.values()],
+      settlementLiabilityLinks: [...state.settlementLiabilityLinks.values()],
       paymentProposals: [...state.paymentProposals.values()],
       paymentOrders: [...state.paymentOrders.values()],
       bankPaymentEvents: [...state.bankPaymentEvents.values()],
@@ -919,11 +1488,67 @@ function validateOpenItemForProposal({ openItem, invoice, supplier, bankAccount,
 function presentPaymentProposal(state, paymentProposalId) {
   const proposal = state.paymentProposals.get(paymentProposalId);
   if (!proposal) return null;
-  return copy({ ...proposal, bankAccount: state.bankAccounts.get(proposal.bankAccountId) || null, orders: listProposalOrderRecords(state, paymentProposalId).map(copy) });
+  const paymentBatchId = proposal.paymentBatchId || state.paymentBatchIdByProposal.get(proposal.paymentProposalId) || null;
+  return copy({
+    ...proposal,
+    bankAccount: state.bankAccounts.get(proposal.bankAccountId) || null,
+    paymentBatch: paymentBatchId ? presentPaymentBatch(state, paymentBatchId) : null,
+    orders: listProposalOrderRecords(state, paymentProposalId).map(copy)
+  });
 }
 
 function listProposalOrderRecords(state, paymentProposalId) {
   return (state.paymentOrderIdsByProposal.get(paymentProposalId) || []).map((paymentOrderId) => state.paymentOrders.get(paymentOrderId)).filter(Boolean).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+function presentPaymentBatch(state, paymentBatchId) {
+  const paymentBatch = state.paymentBatches.get(paymentBatchId);
+  if (!paymentBatch) return null;
+  const proposal = state.paymentProposals.get(paymentBatch.paymentProposalId) || null;
+  return copy({
+    ...paymentBatch,
+    bankAccount: state.bankAccounts.get(paymentBatch.bankAccountId) || null,
+    proposal: proposal ? { paymentProposalId: proposal.paymentProposalId, paymentProposalNo: proposal.paymentProposalNo, status: proposal.status } : null,
+    orders: proposal ? listProposalOrderRecords(state, proposal.paymentProposalId).map(copy) : []
+  });
+}
+
+function presentStatementImport(state, statementImportId) {
+  const statementImport = state.statementImports.get(statementImportId);
+  if (!statementImport) return null;
+  const items = (state.bankStatementEventIdsByCompany.get(statementImport.companyId) || [])
+    .map((bankStatementEventId) => state.bankStatementEvents.get(bankStatementEventId))
+    .filter((event) => event?.statementImportId === statementImport.statementImportId)
+    .map(copy);
+  return copy({
+    ...statementImport,
+    bankAccount: state.bankAccounts.get(statementImport.bankAccountId) || null,
+    items
+  });
+}
+
+function requirePaymentBatchRecord(state, companyId, paymentBatchId) {
+  const paymentBatch = state.paymentBatches.get(requireText(paymentBatchId, "payment_batch_id_required"));
+  if (!paymentBatch || paymentBatch.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "payment_batch_not_found", "Payment batch was not found.");
+  }
+  return paymentBatch;
+}
+
+function requirePaymentBatchByProposalRecord(state, proposal) {
+  const paymentBatchId = proposal?.paymentBatchId || state.paymentBatchIdByProposal.get(proposal?.paymentProposalId);
+  if (!paymentBatchId) {
+    throw createError(404, "payment_batch_not_found", "Payment batch was not found for payment proposal.");
+  }
+  return requirePaymentBatchRecord(state, proposal.companyId, paymentBatchId);
+}
+
+function requireStatementImportRecord(state, companyId, statementImportId) {
+  const statementImport = state.statementImports.get(requireText(statementImportId, "statement_import_id_required"));
+  if (!statementImport || statementImport.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "statement_import_not_found", "Statement import was not found.");
+  }
+  return statementImport;
 }
 
 function upsertBankPaymentEvent(state, companyId, paymentOrderId, bankEventId, eventType, clock) {
@@ -963,6 +1588,306 @@ function refreshProposalStatus(state, paymentProposalId, clock) {
   else if (orders.some((order) => order.status === "reserved")) proposal.status = "exported";
   else proposal.status = proposal.approvedAt ? "approved" : "draft";
   proposal.updatedAt = nowIso(clock);
+  syncPaymentBatchStatus(state, proposal, clock);
+}
+
+function syncPaymentBatchStatus(state, proposal, clock) {
+  const paymentBatch = proposal ? state.paymentBatches.get(proposal.paymentBatchId || state.paymentBatchIdByProposal.get(proposal.paymentProposalId)) : null;
+  if (!paymentBatch) return;
+  const statusMap = {
+    draft: "draft",
+    approved: "draft",
+    exported: "exported",
+    submitted: "submitted",
+    accepted_by_bank: "accepted_by_bank",
+    partially_executed: "partially_executed",
+    settled: "settled",
+    failed: "failed",
+    cancelled: "cancelled"
+  };
+  paymentBatch.status = statusMap[proposal.status] || paymentBatch.status;
+  paymentBatch.totalAmount = proposal.totalAmount;
+  if (proposal.exportedAt) paymentBatch.exportedAt = proposal.exportedAt;
+  if (proposal.submittedAt) paymentBatch.submittedAt = proposal.submittedAt;
+  if (proposal.acceptedByBankAt) paymentBatch.acceptedByBankAt = proposal.acceptedByBankAt;
+  if (proposal.settledAt) paymentBatch.settledAt = proposal.settledAt;
+  if (proposal.failedAt) paymentBatch.failedAt = proposal.failedAt;
+  if (proposal.cancelledAt) paymentBatch.cancelledAt = proposal.cancelledAt;
+  paymentBatch.updatedAt = nowIso(clock);
+}
+
+function ensureSettlementLiabilityLinkRecord(
+  state,
+  clock,
+  {
+    companyId,
+    paymentBatchId,
+    paymentProposalId,
+    paymentOrderId,
+    liabilityObjectType,
+    liabilityObjectId,
+    relatedObjectType = null,
+    relatedObjectId = null,
+    expectedAmount,
+    currencyCode
+  }
+) {
+  const existingId = state.settlementLiabilityLinkIdByPaymentOrder.get(paymentOrderId);
+  if (existingId) {
+    return state.settlementLiabilityLinks.get(existingId);
+  }
+  const record = {
+    settlementLiabilityLinkId: crypto.randomUUID(),
+    companyId: requireText(companyId, "company_id_required"),
+    paymentBatchId: requireText(paymentBatchId, "payment_batch_id_required"),
+    paymentProposalId: requireText(paymentProposalId, "payment_proposal_id_required"),
+    paymentOrderId: requireText(paymentOrderId, "payment_order_id_required"),
+    bankStatementEventId: null,
+    bankPaymentEventId: null,
+    bankAccountId: null,
+    liabilityObjectType: assertAllowed(liabilityObjectType, SETTLEMENT_LIABILITY_OBJECT_TYPES, "settlement_liability_object_type_invalid"),
+    liabilityObjectId: requireText(liabilityObjectId, "settlement_liability_object_id_required"),
+    relatedObjectType: normalizeOptionalText(relatedObjectType),
+    relatedObjectId: normalizeOptionalText(relatedObjectId),
+    expectedAmount: roundMoney(expectedAmount),
+    settledAmount: 0,
+    currencyCode: normalizeUpperCode(currencyCode, "currency_code_required", 3),
+    status: "pending",
+    createdAt: nowIso(clock),
+    updatedAt: nowIso(clock)
+  };
+  state.settlementLiabilityLinks.set(record.settlementLiabilityLinkId, record);
+  ensureCollection(state.settlementLiabilityLinkIdsByCompany, record.companyId).push(record.settlementLiabilityLinkId);
+  state.settlementLiabilityLinkIdByPaymentOrder.set(record.paymentOrderId, record.settlementLiabilityLinkId);
+  return record;
+}
+
+function syncSettlementLiabilityLinkForPaymentOrder(
+  state,
+  clock,
+  {
+    companyId,
+    paymentOrderId,
+    bankStatementEventId = null,
+    bankPaymentEventId = null,
+    status,
+    settledAmount = null,
+    clearBankStatementEventId = false,
+    clearBankPaymentEventId = false
+  }
+) {
+  const linkId = state.settlementLiabilityLinkIdByPaymentOrder.get(requireText(paymentOrderId, "payment_order_id_required"));
+  if (!linkId) return null;
+  const link = state.settlementLiabilityLinks.get(linkId);
+  if (!link || link.companyId !== requireText(companyId, "company_id_required")) return null;
+  if (clearBankStatementEventId) {
+    link.bankStatementEventId = null;
+  } else {
+    link.bankStatementEventId = normalizeOptionalText(bankStatementEventId) || link.bankStatementEventId;
+  }
+  if (clearBankPaymentEventId) {
+    link.bankPaymentEventId = null;
+  } else {
+    link.bankPaymentEventId = normalizeOptionalText(bankPaymentEventId) || link.bankPaymentEventId;
+  }
+  link.status = assertAllowed(status, SETTLEMENT_LIABILITY_LINK_STATUSES, "settlement_link_status_invalid");
+  link.settledAmount = settledAmount == null ? link.settledAmount : roundMoney(settledAmount);
+  link.updatedAt = nowIso(clock);
+  return link;
+}
+
+function upsertStatementSettlementLiabilityLink(
+  state,
+  clock,
+  { companyId, bankStatementEventId, bankAccountId, liabilityObjectType, liabilityObjectId, expectedAmount, currencyCode, status }
+) {
+  const scopedKey = toCompanyScopedKey(requireText(companyId, "company_id_required"), requireText(bankStatementEventId, "bank_statement_event_id_required"));
+  const existingId = state.settlementLiabilityLinkIdByStatementEvent.get(scopedKey);
+  if (existingId) {
+    const existing = state.settlementLiabilityLinks.get(existingId);
+    existing.status = assertAllowed(status, SETTLEMENT_LIABILITY_LINK_STATUSES, "settlement_link_status_invalid");
+    existing.updatedAt = nowIso(clock);
+    return existing;
+  }
+  const record = {
+    settlementLiabilityLinkId: crypto.randomUUID(),
+    companyId: requireText(companyId, "company_id_required"),
+    paymentBatchId: null,
+    paymentProposalId: null,
+    paymentOrderId: null,
+    bankStatementEventId: requireText(bankStatementEventId, "bank_statement_event_id_required"),
+    bankPaymentEventId: null,
+    bankAccountId: requireText(bankAccountId, "bank_account_id_required"),
+    liabilityObjectType: assertAllowed(liabilityObjectType, SETTLEMENT_LIABILITY_OBJECT_TYPES, "settlement_liability_object_type_invalid"),
+    liabilityObjectId: requireText(liabilityObjectId, "settlement_liability_object_id_required"),
+    relatedObjectType: null,
+    relatedObjectId: null,
+    expectedAmount: roundMoney(expectedAmount),
+    settledAmount: roundMoney(expectedAmount),
+    currencyCode: normalizeUpperCode(currencyCode, "currency_code_required", 3),
+    status: assertAllowed(status, SETTLEMENT_LIABILITY_LINK_STATUSES, "settlement_link_status_invalid"),
+    createdAt: nowIso(clock),
+    updatedAt: nowIso(clock)
+  };
+  state.settlementLiabilityLinks.set(record.settlementLiabilityLinkId, record);
+  ensureCollection(state.settlementLiabilityLinkIdsByCompany, record.companyId).push(record.settlementLiabilityLinkId);
+  state.settlementLiabilityLinkIdByStatementEvent.set(scopedKey, record.settlementLiabilityLinkId);
+  return record;
+}
+
+function resolvePaymentRailConfig({
+  paymentRailCode = "bankgiro_file",
+  paymentFileFormatCode = null,
+  providerCode = null,
+  effectiveDate,
+  integrationsPlatform = null,
+  getIntegrationsPlatform = null
+} = {}) {
+  const railTemplate = PAYMENT_RAIL_CONFIG_BY_CODE[assertAllowed(paymentRailCode, PAYMENT_RAIL_CODES, "payment_rail_code_invalid")];
+  const resolvedPaymentFileFormatCode =
+    paymentFileFormatCode == null
+      ? railTemplate.paymentFileFormatCode
+      : assertAllowed(paymentFileFormatCode, PAYMENT_FILE_FORMAT_CODES, "payment_file_format_code_invalid");
+  const resolvedProviderCode = normalizeOptionalText(providerCode) || railTemplate.providerCode;
+  return {
+    paymentRailCode: railTemplate.paymentRailCode,
+    paymentFileFormatCode: resolvedPaymentFileFormatCode,
+    providerCode: resolvedProviderCode,
+    deliveryMode: railTemplate.deliveryMode,
+    providerBaselineRef: resolveProviderBaselineRef({
+      providerCode: resolvedProviderCode,
+      baselineCode: railTemplate.baselineCode,
+      effectiveDate,
+      integrationsPlatform,
+      getIntegrationsPlatform
+    })
+  };
+}
+
+function resolveStatementImportConfig({
+  sourceChannelCode = "manual_statement",
+  statementFileFormatCode = null,
+  providerCode = null,
+  effectiveDate,
+  integrationsPlatform = null,
+  getIntegrationsPlatform = null
+} = {}) {
+  const sourceTemplate =
+    STATEMENT_IMPORT_SOURCE_CONFIG_BY_CODE[assertAllowed(sourceChannelCode, STATEMENT_IMPORT_SOURCE_CODES, "statement_import_source_invalid")];
+  const resolvedProviderCode = normalizeOptionalText(providerCode) || sourceTemplate.providerCode;
+  return {
+    sourceChannelCode: sourceTemplate.sourceChannelCode,
+    statementFileFormatCode: normalizeOptionalText(statementFileFormatCode) || sourceTemplate.fileFormatCode,
+    providerCode: resolvedProviderCode,
+    providerBaselineRef:
+      sourceTemplate.baselineCode && resolvedProviderCode
+        ? resolveProviderBaselineRef({
+            providerCode: resolvedProviderCode,
+            baselineCode: sourceTemplate.baselineCode,
+            effectiveDate,
+            integrationsPlatform,
+            getIntegrationsPlatform
+          })
+        : null
+  };
+}
+
+function resolveProviderBaselineRef({ providerCode, baselineCode, effectiveDate, integrationsPlatform = null, getIntegrationsPlatform = null } = {}) {
+  if (!providerCode || !baselineCode) {
+    return null;
+  }
+  const integrationPlatform = resolveDeferredPlatform({
+    platform: integrationsPlatform,
+    getter: getIntegrationsPlatform
+  });
+  if (!integrationPlatform || typeof integrationPlatform.resolveProviderBaseline !== "function") {
+    return {
+      providerBaselineId: null,
+      baselineCode,
+      providerCode,
+      providerBaselineVersion: null,
+      providerBaselineChecksum: null
+    };
+  }
+  const providerBaseline = integrationPlatform.resolveProviderBaseline({
+    domain: "integrations",
+    jurisdiction: "SE",
+    providerCode,
+    baselineCode,
+    effectiveDate: normalizeDate(effectiveDate || new Date().toISOString().slice(0, 10), "provider_baseline_effective_date_invalid")
+  });
+  if (!providerBaseline) {
+    return null;
+  }
+  return {
+    providerBaselineId: providerBaseline.providerBaselineId,
+    baselineCode: providerBaseline.baselineCode,
+    providerCode: providerBaseline.providerCode,
+    providerBaselineVersion: providerBaseline.version,
+    providerBaselineChecksum: providerBaseline.checksum
+  };
+}
+
+function isAllowedPendingActionResolutionCode(reconciliationCase, resolutionCode) {
+  return resolutionCode === reconciliationCase.pendingActionCode || resolutionCode === "written_off";
+}
+
+function buildPaymentBatchExportArtifact({ paymentBatch, proposal, bankAccount, orders }) {
+  switch (paymentBatch.paymentRailCode) {
+    case "open_banking":
+      return {
+        exportFileName: `${paymentBatch.paymentBatchNo}.json`,
+        exportPayload: stableStringify({
+          paymentBatchId: paymentBatch.paymentBatchId,
+          paymentBatchNo: paymentBatch.paymentBatchNo,
+          paymentDate: proposal.paymentDate,
+          rail: paymentBatch.paymentRailCode,
+          providerCode: paymentBatch.providerCode,
+          bankAccount: {
+            bankAccountId: bankAccount.bankAccountId,
+            accountNumber: bankAccount.accountNumber,
+            iban: bankAccount.iban
+          },
+          orders: orders.map((order) => ({
+            paymentOrderId: order.paymentOrderId,
+            amount: order.amount,
+            currencyCode: order.currencyCode,
+            paymentReference: order.paymentReference,
+            payeeName: order.payeeName,
+            beneficiaryAccount: order.iban || order.bankgiro || order.plusgiro || null
+          }))
+        })
+      };
+    case "iso20022_file":
+      return {
+        exportFileName: `${paymentBatch.paymentBatchNo}.xml`,
+        exportPayload: [
+          `<PaymentBatch id="${paymentBatch.paymentBatchNo}" rail="iso20022_file" format="pain.001" paymentDate="${proposal.paymentDate}">`,
+          ...orders.map(
+            (order) =>
+              `  <PaymentOrder id="${order.paymentOrderId}" amount="${order.amount.toFixed(2)}" currency="${order.currencyCode}" dueDate="${order.dueDate}" account="${escapeXml(order.iban || order.bankgiro || order.plusgiro || "")}" reference="${escapeXml(order.paymentReference)}" payee="${escapeXml(order.payeeName)}" />`
+          ),
+          `</PaymentBatch>`
+        ].join("\n")
+      };
+    default: {
+      const rows = orders.map((order) =>
+        [order.payeeName, order.bankgiro || order.plusgiro || order.iban || "", order.amount.toFixed(2), order.currencyCode, order.dueDate, order.paymentReference].join(";")
+      );
+      return {
+        exportFileName: `${paymentBatch.paymentBatchNo}.csv`,
+        exportPayload: ["payee;account;amount;currency;due_date;reference", ...rows].join("\n")
+      };
+    }
+  }
+}
+
+function escapeXml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function requireBankAccountRecord(state, companyId, bankAccountId) {
