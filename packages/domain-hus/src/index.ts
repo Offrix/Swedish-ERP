@@ -68,16 +68,39 @@ export interface HusPaymentAllocationRef {
   readonly claimReductionAmount: number;
 }
 
+export interface HusBuyerAllocationRef {
+  readonly husCaseBuyerId: string;
+  readonly displayName: string;
+  readonly personalIdentityNumber: string;
+  readonly allocationPercent: number;
+  readonly requestedAmount: number;
+  readonly annualCapAmount: number;
+  readonly serviceTypeCapAmount: number;
+  readonly annualUsedAmountBeforeClaim: number;
+  readonly serviceTypeUsedAmountBeforeClaim: number;
+  readonly remainingAnnualCapAmountAfterClaim: number;
+  readonly remainingServiceTypeCapAmountAfterClaim: number;
+}
+
+export interface HusTransportProfileRef {
+  readonly transportType: "json" | "xml" | "direct_api";
+  readonly deliveryChannelCode: "legacy_json" | "signed_xml" | "direct_api";
+  readonly serializationFormatCode: "json" | "xml" | "canonical_json";
+  readonly supportsOfficialSubmission: boolean;
+}
+
 export interface HusClaimRef {
   readonly husClaimId: string;
   readonly companyId: string;
   readonly husCaseId: string;
   readonly versionNo: number;
   readonly requestedAmount: number;
-  readonly transportType: "json" | "xml";
+  readonly transportType: "json" | "xml" | "direct_api";
   readonly status: string;
   readonly submittedOn: string | null;
   readonly payloadHash: string | null;
   readonly claimReadinessStatus: HusClaimEligibilityStatus;
   readonly paymentAllocations: readonly HusPaymentAllocationRef[];
+  readonly buyerAllocations: readonly HusBuyerAllocationRef[];
+  readonly transportProfile: HusTransportProfileRef;
 }

@@ -20,7 +20,7 @@ export const HUS_CASE_STATES = Object.freeze([
 ]);
 export const HUS_SERVICE_TYPE_CODES = Object.freeze(["rot", "rut", "not_eligible"]);
 export const HUS_PAYMENT_CHANNELS = Object.freeze(["bank_transfer", "card", "swish", "plusgiro", "bankgiro"]);
-export const HUS_CLAIM_TRANSPORT_TYPES = Object.freeze(["json", "xml"]);
+export const HUS_CLAIM_TRANSPORT_TYPES = Object.freeze(["json", "xml", "direct_api"]);
 export const HUS_HOUSING_FORM_CODES = Object.freeze([
   "smallhouse",
   "owner_apartment",
@@ -48,7 +48,15 @@ const HUS_RULE_PACKS = Object.freeze([
     checksum: "hus-se-2025.1",
     sourceSnapshotDate: "2026-03-24",
     semanticChangeSummary: "Swedish HUS baseline for 2025 claims.",
-    machineReadableRules: Object.freeze({ ruleYear: 2025 }),
+    machineReadableRules: Object.freeze({
+      ruleYear: 2025,
+      annualCapAmount: 75000,
+      rotAnnualCapAmount: 50000,
+      rutAnnualCapAmount: 75000,
+      rotReductionRate: 0.5,
+      rutReductionRate: 0.5,
+      deadlineRollForwardWeekend: true
+    }),
     humanReadableExplanation: Object.freeze(["HUS decisions must pin the rule year that applied when the work was completed and the claim payload was created."]),
     testVectors: Object.freeze([]),
     migrationNotes: Object.freeze([])
@@ -64,7 +72,15 @@ const HUS_RULE_PACKS = Object.freeze([
     checksum: "hus-se-2026.1",
     sourceSnapshotDate: "2026-03-24",
     semanticChangeSummary: "Swedish HUS baseline for 2026 claims.",
-    machineReadableRules: Object.freeze({ ruleYear: 2026 }),
+    machineReadableRules: Object.freeze({
+      ruleYear: 2026,
+      annualCapAmount: 75000,
+      rotAnnualCapAmount: 50000,
+      rutAnnualCapAmount: 75000,
+      rotReductionRate: 0.3,
+      rutReductionRate: 0.5,
+      deadlineRollForwardWeekend: true
+    }),
     humanReadableExplanation: Object.freeze(["HUS decisions must pin the rule year that applied when the work was completed and the claim payload was created."]),
     testVectors: Object.freeze([]),
     migrationNotes: Object.freeze([])
@@ -302,10 +318,13 @@ export function createHusEngine({
     correlationId = crypto.randomUUID()
   } = {}) {
     const record = requireHusCase(companyId, husCaseId);
-    if (["claim_submitted", "paid_out", "closed"].includes(record.status)) {
-      throw createError(409, "hus_case_not_classifiable", "The HUS case can no longer be reclassified.");
+    if (hasLockedClaimFields(record)) {
+      throw createError(409, "hus_case_claim_fields_locked", "The HUS case has a locked claim lifecycle and can no longer be reclassified.");
     }
-    const normalizedLines = normalizeServiceLines(serviceLines, record.serviceTypeCode);
+    const normalizedLines = normalizeServiceLines(serviceLines, {
+      defaultServiceTypeCode: record.serviceTypeCode,
+      ruleYear: record.ruleYear
+    });
     const totals = summarizeServiceLines(normalizedLines);
     const normalizedBuyers = normalizeBuyers(buyers, totals.customerShareAmount, totals.preliminaryReductionAmount);
     record.serviceLines = normalizedLines;
@@ -381,6 +400,9 @@ export function createHusEngine({
     correlationId = crypto.randomUUID()
   } = {}) {
     const record = requireHusCase(companyId, husCaseId);
+    if (hasLockedClaimFields(record)) {
+      throw createError(409, "hus_case_claim_fields_locked", "Invoice-linked HUS fields are locked after a claim has been drafted.");
+    }
     const resolvedCustomerInvoiceId = normalizeOptionalText(customerInvoiceId) || record.customerInvoiceId;
     if (resolvedCustomerInvoiceId && arPlatform?.getInvoice) {
       arPlatform.getInvoice({ companyId: record.companyId, customerInvoiceId: resolvedCustomerInvoiceId });
@@ -535,6 +557,7 @@ export function createHusEngine({
       throw createError(409, "hus_claim_amount_exceeds_ready_amount", "Requested HUS claim amount exceeds currently claimable reduction.");
     }
     const paymentAllocations = allocateClaimAmountAcrossPayments(record, resolvedRequestedAmount);
+    const buyerAllocations = allocateClaimAmountAcrossBuyers(state, record, resolvedRequestedAmount);
     const rulePack = resolveHusRulePack({ effectiveDate: record.workCompletedOn, ruleYear: record.ruleYear });
     const claimRecord = {
       husClaimId: crypto.randomUUID(),
@@ -552,6 +575,10 @@ export function createHusEngine({
       payloadHash: null,
       claimReadinessStatus: readiness.status,
       paymentAllocations,
+      buyerAllocations,
+      transportProfile: buildHusTransportProfile({
+        transportType: requireEnum(HUS_CLAIM_TRANSPORT_TYPES, transportType, "hus_claim_transport_invalid")
+      }),
       versions: [],
       statusEvents: [],
       createdByActorId: requireText(actorId, "actor_id_required"),
@@ -618,6 +645,9 @@ export function createHusEngine({
     if (!Array.isArray(claimRecord.paymentAllocations) || claimRecord.paymentAllocations.length === 0) {
       throw createError(409, "hus_claim_payment_allocations_missing", "HUS claim submission requires locked payment allocations.");
     }
+    if (!Array.isArray(claimRecord.buyerAllocations) || claimRecord.buyerAllocations.length === 0) {
+      throw createError(409, "hus_claim_buyer_allocations_missing", "HUS claim submission requires locked buyer allocations.");
+    }
     for (const allocation of claimRecord.paymentAllocations) {
       const latestAllowedSubmissionDate = deadlineForPaymentDate(allocation.paidOn);
       if (resolvedSubmittedOn > latestAllowedSubmissionDate) {
@@ -672,6 +702,9 @@ export function createHusEngine({
     correlationId = crypto.randomUUID()
   } = {}) {
     const claimRecord = requireHusClaim(companyId, husClaimId);
+    if (claimRecord.status !== "claim_submitted") {
+      throw createError(409, "hus_claim_not_decidable", "Only submitted HUS claims can receive authority decisions.");
+    }
     const record = requireHusCase(companyId, claimRecord.husCaseId);
     const resolvedApprovedAmount = normalizeMoney(approvedAmount, "hus_decision_approved_amount_invalid");
     const resolvedRejectedAmount = normalizeMoney(
@@ -696,11 +729,18 @@ export function createHusEngine({
       requestedAmount: claimRecord.requestedAmount,
       approvedAmount: resolvedApprovedAmount,
       rejectedAmount: resolvedRejectedAmount,
+      buyerOutcomeAllocations: buildClaimBuyerDecisionAllocations(claimRecord, {
+        approvedAmount: resolvedApprovedAmount,
+        rejectedAmount: resolvedRejectedAmount
+      }),
       reasonCode: requireText(reasonCode, "hus_decision_reason_required"),
       rejectedOutcomeCode: requireText(rejectedOutcomeCode, "hus_rejected_outcome_required"),
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock)
     };
+    if (claimRecord.submittedOn && decision.decisionDate < claimRecord.submittedOn) {
+      throw createError(409, "hus_decision_before_submission", "HUS decisions cannot be recorded before the claim submission date.");
+    }
     record.decisions.push(decision);
     let differenceRecord = null;
     if (resolvedRejectedAmount > 0) {
@@ -827,6 +867,9 @@ export function createHusEngine({
       throw createError(409, "hus_claim_not_payable", "Only accepted HUS claims can be paid out.");
     }
     const record = requireHusCase(companyId, claimRecord.husCaseId);
+    if (record.decisionDifferences.some((item) => item.husClaimId === claimRecord.husClaimId && item.status === "open")) {
+      throw createError(409, "hus_claim_difference_unresolved", "Partial HUS decisions must resolve open decision differences before payout.");
+    }
     const payout = {
       husPayoutId: crypto.randomUUID(),
       husClaimId: claimRecord.husClaimId,
@@ -1093,6 +1136,10 @@ export function createHusEngine({
     if (!record.buyers.length) {
       blockerCodes.push("hus_buyers_missing");
     }
+    const buyerCapacities = buildBuyerCapacities(state, record, { excludeClaimId });
+    if (!buyerCapacities.some((buyer) => buyer.remainingClaimableAmount > MONEY_EPSILON)) {
+      blockerCodes.push("hus_buyer_annual_cap_exhausted");
+    }
     if (!record.customerPayments.length) {
       blockerCodes.push("hus_customer_payment_missing");
     }
@@ -1106,11 +1153,15 @@ export function createHusEngine({
     if (expiredRemainingCapacity > MONEY_EPSILON) {
       blockerCodes.push("hus_claim_deadline_passed");
     }
-    const claimableReductionAmount = roundMoney(
+    const paymentClaimableReductionAmount = roundMoney(
       paymentCapacities
         .filter((item) => resolvedAsOfDate <= item.latestAllowedSubmissionDate)
         .reduce((sum, item) => sum + item.remainingReductionAmount, 0)
     );
+    const buyerClaimableReductionAmount = roundMoney(
+      buyerCapacities.reduce((sum, buyer) => sum + buyer.remainingClaimableAmount, 0)
+    );
+    const claimableReductionAmount = roundMoney(Math.min(paymentClaimableReductionAmount, buyerClaimableReductionAmount));
     const paidRatio = record.customerShareAmount > 0 ? Math.min(1, roundMoney(record.paidCustomerAmount / record.customerShareAmount)) : 0;
     const status = blockerCodes.length > 0
       ? "blocked"
@@ -1123,9 +1174,12 @@ export function createHusEngine({
       status,
       blockerCodes: uniqueTexts(blockerCodes),
       claimableReductionAmount,
+      paymentClaimableReductionAmount,
+      buyerClaimableReductionAmount,
       paidRatio,
       asOfDate: resolvedAsOfDate,
-      paymentCapacities: paymentCapacities.map(copy)
+      paymentCapacities: paymentCapacities.map(copy),
+      buyerCapacities: buyerCapacities.map(copy)
     };
   }
 
@@ -1222,10 +1276,11 @@ function requireHusRecoveryCandidate(companyId, husRecoveryCandidateId) {
   }
 }
 
-function normalizeServiceLines(serviceLines, defaultServiceTypeCode) {
+function normalizeServiceLines(serviceLines, { defaultServiceTypeCode, ruleYear }) {
   if (!Array.isArray(serviceLines) || serviceLines.length === 0) {
     throw createError(400, "hus_service_lines_required", "At least one HUS service line is required.");
   }
+  const rulePack = resolveStaticHusRulePackByYear(ruleYear);
   return serviceLines.map((line, index) => {
     const serviceTypeCode = requireEnum(HUS_SERVICE_TYPE_CODES, line?.serviceTypeCode ?? defaultServiceTypeCode, "hus_service_line_type_invalid");
     const laborCostAmount = normalizeMoney(line?.laborCostAmount ?? 0, "hus_service_line_labor_invalid");
@@ -1235,7 +1290,12 @@ function normalizeServiceLines(serviceLines, defaultServiceTypeCode) {
     const adminAmount = normalizeMoney(line?.adminAmount ?? 0, "hus_service_line_admin_invalid");
     const otherAmount = normalizeMoney(line?.otherAmount ?? 0, "hus_service_line_other_invalid");
     const totalAmount = roundMoney(laborCostAmount + materialAmount + travelAmount + equipmentAmount + adminAmount + otherAmount);
-    const reductionRate = serviceTypeCode === "rot" ? 0.3 : serviceTypeCode === "rut" ? 0.5 : 0;
+    const reductionRate =
+      serviceTypeCode === "rot"
+        ? Number(rulePack.machineReadableRules?.rotReductionRate ?? 0.3)
+        : serviceTypeCode === "rut"
+          ? Number(rulePack.machineReadableRules?.rutReductionRate ?? 0.5)
+          : 0;
     return {
       husServiceLineId: crypto.randomUUID(),
       lineNo: index + 1,
@@ -1298,6 +1358,50 @@ function normalizeBuyers(buyers, customerShareAmount, preliminaryReductionAmount
     customerShareAmount: roundMoney(customerShareAmount * (buyer.allocationPercent / 100)),
     preliminaryReductionAmount: roundMoney(preliminaryReductionAmount * (buyer.allocationPercent / 100))
   }));
+}
+
+function buildBuyerCapacities(state, record, { excludeClaimId = null } = {}) {
+  return record.buyers.map((buyer) => {
+    const caseClaimedAmount = sumBuyerClaimUsageForCase(record, buyer.personalIdentityNumber, {
+      excludeClaimId
+    });
+    const annualUsage = summarizeBuyerAnnualUsage(
+      state,
+      record.companyId,
+      record.ruleYear,
+      buyer.personalIdentityNumber,
+      {
+        excludeClaimId,
+        serviceTypeCode: record.serviceTypeCode
+      }
+    );
+    const rulePack = resolveStaticHusRulePackByYear(record.ruleYear);
+    const annualCapAmount = Number(rulePack.machineReadableRules?.annualCapAmount ?? 75000);
+    const serviceTypeCapAmount = record.serviceTypeCode === "rot"
+      ? Number(rulePack.machineReadableRules?.rotAnnualCapAmount ?? 50000)
+      : Number(rulePack.machineReadableRules?.rutAnnualCapAmount ?? annualCapAmount);
+    const remainingAnnualCapAmount = roundMoney(Math.max(0, annualCapAmount - annualUsage.totalUsedAmount));
+    const remainingServiceTypeCapAmount = roundMoney(Math.max(0, serviceTypeCapAmount - annualUsage.serviceTypeUsedAmount));
+    const remainingCaseAmount = roundMoney(Math.max(0, buyer.preliminaryReductionAmount - caseClaimedAmount));
+    const remainingClaimableAmount = roundMoney(
+      Math.min(remainingCaseAmount, remainingAnnualCapAmount, remainingServiceTypeCapAmount)
+    );
+    return {
+      husCaseBuyerId: buyer.husCaseBuyerId,
+      displayName: buyer.displayName,
+      personalIdentityNumber: buyer.personalIdentityNumber,
+      allocationPercent: buyer.allocationPercent,
+      casePreliminaryReductionAmount: buyer.preliminaryReductionAmount,
+      caseClaimedAmount,
+      annualCapAmount,
+      serviceTypeCapAmount,
+      annualUsedAmount: annualUsage.totalUsedAmount,
+      serviceTypeUsedAmount: annualUsage.serviceTypeUsedAmount,
+      remainingAnnualCapAmount,
+      remainingServiceTypeCapAmount,
+      remainingClaimableAmount
+    };
+  });
 }
 
 function normalizePropertyProfile({
@@ -1470,6 +1574,82 @@ function allocateClaimAmountAcrossPayments(record, claimAmount) {
   return allocations;
 }
 
+function allocateClaimAmountAcrossBuyers(state, record, claimAmount) {
+  let remaining = roundMoney(claimAmount);
+  const buyerCapacities = buildBuyerCapacities(state, record);
+  const totalBuyerCapacity = roundMoney(buyerCapacities.reduce((sum, buyer) => sum + buyer.remainingClaimableAmount, 0));
+  if (remaining > totalBuyerCapacity + MONEY_EPSILON) {
+    throw createError(409, "hus_claim_buyer_capacity_exhausted", "HUS claim amount exceeds buyer allocation or yearly HUS cap capacity.");
+  }
+  const allocations = [];
+  const totalWeight = roundMoney(buyerCapacities.reduce((sum, buyer) => sum + buyer.remainingClaimableAmount, 0));
+  buyerCapacities.forEach((buyerCapacity, index) => {
+    if (remaining <= MONEY_EPSILON) {
+      return;
+    }
+    const provisionalAmount = index === buyerCapacities.length - 1
+      ? remaining
+      : roundMoney((claimAmount * buyerCapacity.remainingClaimableAmount) / Math.max(totalWeight, MONEY_EPSILON));
+    const allocatedAmount = roundMoney(Math.min(buyerCapacity.remainingClaimableAmount, provisionalAmount, remaining));
+    if (allocatedAmount <= MONEY_EPSILON) {
+      return;
+    }
+    allocations.push({
+      husCaseBuyerId: buyerCapacity.husCaseBuyerId,
+      displayName: buyerCapacity.displayName,
+      personalIdentityNumber: buyerCapacity.personalIdentityNumber,
+      allocationPercent: buyerCapacity.allocationPercent,
+      requestedAmount: allocatedAmount,
+      annualCapAmount: buyerCapacity.annualCapAmount,
+      serviceTypeCapAmount: buyerCapacity.serviceTypeCapAmount,
+      annualUsedAmountBeforeClaim: buyerCapacity.annualUsedAmount,
+      serviceTypeUsedAmountBeforeClaim: buyerCapacity.serviceTypeUsedAmount,
+      remainingAnnualCapAmountAfterClaim: roundMoney(Math.max(0, buyerCapacity.remainingAnnualCapAmount - allocatedAmount)),
+      remainingServiceTypeCapAmountAfterClaim: roundMoney(Math.max(0, buyerCapacity.remainingServiceTypeCapAmount - allocatedAmount))
+    });
+    remaining = roundMoney(Math.max(0, remaining - allocatedAmount));
+  });
+  if (remaining > MONEY_EPSILON) {
+    const sortedCapacities = [...buyerCapacities].sort((left, right) => right.remainingClaimableAmount - left.remainingClaimableAmount);
+    for (const buyerCapacity of sortedCapacities) {
+      if (remaining <= MONEY_EPSILON) {
+        break;
+      }
+      const allocation = allocations.find((item) => item.husCaseBuyerId === buyerCapacity.husCaseBuyerId);
+      const alreadyAllocatedAmount = allocation?.requestedAmount || 0;
+      const spareAmount = roundMoney(Math.max(0, buyerCapacity.remainingClaimableAmount - alreadyAllocatedAmount));
+      if (spareAmount <= MONEY_EPSILON) {
+        continue;
+      }
+      const topUpAmount = roundMoney(Math.min(spareAmount, remaining));
+      if (!allocation) {
+        allocations.push({
+          husCaseBuyerId: buyerCapacity.husCaseBuyerId,
+          displayName: buyerCapacity.displayName,
+          personalIdentityNumber: buyerCapacity.personalIdentityNumber,
+          allocationPercent: buyerCapacity.allocationPercent,
+          requestedAmount: topUpAmount,
+          annualCapAmount: buyerCapacity.annualCapAmount,
+          serviceTypeCapAmount: buyerCapacity.serviceTypeCapAmount,
+          annualUsedAmountBeforeClaim: buyerCapacity.annualUsedAmount,
+          serviceTypeUsedAmountBeforeClaim: buyerCapacity.serviceTypeUsedAmount,
+          remainingAnnualCapAmountAfterClaim: roundMoney(Math.max(0, buyerCapacity.remainingAnnualCapAmount - topUpAmount)),
+          remainingServiceTypeCapAmountAfterClaim: roundMoney(Math.max(0, buyerCapacity.remainingServiceTypeCapAmount - topUpAmount))
+        });
+      } else {
+        allocation.requestedAmount = roundMoney(allocation.requestedAmount + topUpAmount);
+        allocation.remainingAnnualCapAmountAfterClaim = roundMoney(Math.max(0, allocation.remainingAnnualCapAmountAfterClaim - topUpAmount));
+        allocation.remainingServiceTypeCapAmountAfterClaim = roundMoney(Math.max(0, allocation.remainingServiceTypeCapAmountAfterClaim - topUpAmount));
+      }
+      remaining = roundMoney(Math.max(0, remaining - topUpAmount));
+    }
+  }
+  if (remaining > MONEY_EPSILON) {
+    throw createError(409, "hus_claim_buyer_capacity_exhausted", "HUS claim amount exceeds buyer allocation or yearly HUS cap capacity.");
+  }
+  return allocations;
+}
+
 function buildClaimPayload(record, claimRecord, readiness) {
   return {
     husCaseId: record.husCaseId,
@@ -1489,10 +1669,14 @@ function buildClaimPayload(record, claimRecord, readiness) {
     buyers: record.buyers,
     customerPayments: record.customerPayments,
     paymentAllocations: claimRecord.paymentAllocations,
+    buyerAllocations: claimRecord.buyerAllocations,
+    transportProfile: claimRecord.transportProfile,
     requestedAmount: claimRecord.requestedAmount,
     transportType: claimRecord.transportType,
     claimReadinessStatus: readiness.status,
-    claimBlockerCodes: readiness.blockerCodes
+    claimBlockerCodes: readiness.blockerCodes,
+    buyerCapacities: readiness.buyerCapacities,
+    paymentCapacities: readiness.paymentCapacities
   };
 }
 
@@ -1510,6 +1694,111 @@ function comparePayments(left, right) {
   return left.paidOn.localeCompare(right.paidOn) || left.createdAt.localeCompare(right.createdAt);
 }
 
+function sumBuyerClaimUsageForCase(record, personalIdentityNumber, { excludeClaimId = null } = {}) {
+  return roundMoney(record.claims.reduce((sum, claim) => {
+    if (excludeClaimId && claim.husClaimId === excludeClaimId) {
+      return sum;
+    }
+    return sum + resolveBuyerUsageAmountForClaim(claim, record, personalIdentityNumber);
+  }, 0));
+}
+
+function summarizeBuyerAnnualUsage(state, companyId, ruleYear, personalIdentityNumber, { excludeClaimId = null, serviceTypeCode = null } = {}) {
+  let totalUsedAmount = 0;
+  let serviceTypeUsedAmount = 0;
+  for (const husCaseId of state.husCaseIdsByCompany.get(companyId) || []) {
+    const record = state.husCases.get(husCaseId);
+    if (!record || record.ruleYear !== ruleYear) {
+      continue;
+    }
+    for (const claim of record.claims) {
+      if (excludeClaimId && claim.husClaimId === excludeClaimId) {
+        continue;
+      }
+      const usedAmount = resolveBuyerUsageAmountForClaim(claim, record, personalIdentityNumber);
+      totalUsedAmount = roundMoney(totalUsedAmount + usedAmount);
+      if (serviceTypeCode && record.serviceTypeCode === serviceTypeCode) {
+        serviceTypeUsedAmount = roundMoney(serviceTypeUsedAmount + usedAmount);
+      }
+    }
+  }
+  return {
+    totalUsedAmount,
+    serviceTypeUsedAmount
+  };
+}
+
+function resolveBuyerUsageAmountForClaim(claim, record, personalIdentityNumber) {
+  const baseAllocation = resolveClaimBuyerAllocationAmount(claim, personalIdentityNumber);
+  if (baseAllocation <= MONEY_EPSILON) {
+    return 0;
+  }
+  if (claim.status === "claim_rejected") {
+    return 0;
+  }
+  const approvedAmount = resolveApprovedAmountForClaim(record, claim.husClaimId);
+  const recoveredAmount = resolveRecoveredAmountForClaim(record, claim.husClaimId);
+  if (approvedAmount > MONEY_EPSILON) {
+    const approvedBuyerAmount = roundMoney(baseAllocation * Math.min(1, approvedAmount / Math.max(claim.requestedAmount, MONEY_EPSILON)));
+    return roundMoney(Math.max(0, approvedBuyerAmount - recoveredAmount));
+  }
+  return baseAllocation;
+}
+
+function resolveClaimBuyerAllocationAmount(claim, personalIdentityNumber) {
+  if (Array.isArray(claim.buyerAllocations) && claim.buyerAllocations.length > 0) {
+    return roundMoney(
+      claim.buyerAllocations
+        .filter((allocation) => allocation.personalIdentityNumber === personalIdentityNumber)
+        .reduce((sum, allocation) => sum + Number(allocation.requestedAmount || 0), 0)
+    );
+  }
+  return 0;
+}
+
+function resolveApprovedAmountForClaim(record, husClaimId) {
+  return roundMoney(
+    record.decisions
+      .filter((decision) => decision.husClaimId === husClaimId)
+      .reduce((sum, decision) => sum + Number(decision.approvedAmount || 0), 0)
+  );
+}
+
+function resolveRecoveredAmountForClaim(record, husClaimId) {
+  const approvedAmount = resolveApprovedAmountForClaim(record, husClaimId);
+  if (approvedAmount <= MONEY_EPSILON) {
+    return 0;
+  }
+  const totalRecoveredAmount = roundMoney(
+    record.recoveries.reduce((sum, recovery) => sum + Number(recovery.recoveryAmount || 0), 0)
+  );
+  if (totalRecoveredAmount <= MONEY_EPSILON) {
+    return 0;
+  }
+  const totalApprovedAcrossCase = roundMoney(
+    record.decisions.reduce((sum, decision) => sum + Number(decision.approvedAmount || 0), 0)
+  );
+  if (totalApprovedAcrossCase <= MONEY_EPSILON) {
+    return 0;
+  }
+  return roundMoney(totalRecoveredAmount * (approvedAmount / totalApprovedAcrossCase));
+}
+
+function buildClaimBuyerDecisionAllocations(claimRecord, { approvedAmount, rejectedAmount }) {
+  const requestedAmount = Math.max(Number(claimRecord.requestedAmount || 0), MONEY_EPSILON);
+  return (claimRecord.buyerAllocations || []).map((allocation) => {
+    const requestedBuyerAmount = roundMoney(Number(allocation.requestedAmount || 0));
+    const weight = requestedBuyerAmount / requestedAmount;
+    return {
+      husCaseBuyerId: allocation.husCaseBuyerId,
+      personalIdentityNumber: allocation.personalIdentityNumber,
+      requestedAmount: requestedBuyerAmount,
+      approvedAmount: roundMoney(approvedAmount * weight),
+      rejectedAmount: roundMoney(rejectedAmount * weight)
+    };
+  });
+}
+
 function hasOpenDecisionDifferences(record) {
   return record.decisionDifferences.some((item) => item.status === "open");
 }
@@ -1522,13 +1811,22 @@ function findOpenRecoveryCandidate(record) {
   return record.recoveryCandidates.find((item) => item.status === "open") || null;
 }
 
+function hasLockedClaimFields(record) {
+  return record.claims.some((claim) => !["claim_rejected"].includes(claim.status));
+}
+
 function generateCaseReference(state, companyId, clock) {
   const count = (state.husCaseIdsByCompany.get(companyId) || []).length + 1;
   return `HUS-${todayDate(clock).slice(0, 4)}-${String(count).padStart(4, "0")}`;
 }
 
 function deadlineForPaymentDate(paidOn) {
-  return `${String(Number(String(paidOn).slice(0, 4)) + 1)}-01-31`;
+  const year = Number(String(paidOn).slice(0, 4)) + 1;
+  const deadline = new Date(Date.UTC(year, 0, 31));
+  while (deadline.getUTCDay() === 0 || deadline.getUTCDay() === 6) {
+    deadline.setUTCDate(deadline.getUTCDate() + 1);
+  }
+  return deadline.toISOString().slice(0, 10);
 }
 
 function appendToIndex(map, key, value) {
@@ -1555,6 +1853,34 @@ function hasAnyPropertyInput(input = {}) {
 
 function uniqueTexts(values) {
   return [...new Set((values || []).filter(Boolean))];
+}
+
+function resolveStaticHusRulePackByYear(ruleYear) {
+  return HUS_RULE_PACKS.find((rulePack) => Number(rulePack.machineReadableRules?.ruleYear) === Number(ruleYear))
+    || HUS_RULE_PACKS.at(-1);
+}
+
+function buildHusTransportProfile({ transportType }) {
+  return transportType === "direct_api"
+    ? {
+        transportType,
+        deliveryChannelCode: "direct_api",
+        serializationFormatCode: "canonical_json",
+        supportsOfficialSubmission: true
+      }
+    : transportType === "xml"
+      ? {
+          transportType,
+          deliveryChannelCode: "signed_xml",
+          serializationFormatCode: "xml",
+          supportsOfficialSubmission: true
+        }
+      : {
+          transportType,
+          deliveryChannelCode: "legacy_json",
+          serializationFormatCode: "json",
+          supportsOfficialSubmission: false
+        };
 }
 
 function normalizeIdentityNumber(value, code) {
