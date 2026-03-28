@@ -30,7 +30,17 @@ export interface BenefitDecision {
   readonly effectiveDate: string;
   readonly outputs: Record<string, unknown>;
   readonly warnings: readonly string[];
+  readonly reviewCodes: readonly string[];
   readonly explanation: readonly string[];
+}
+
+export interface BenefitOffsetBreakdown {
+  readonly employeePaidValue: number;
+  readonly netDeductionValue: number;
+  readonly totalOffsetValue: number;
+  readonly taxableValueBeforeOffsets: number;
+  readonly remainingTaxableValue: number;
+  readonly mixedOffsetMethods: boolean;
 }
 
 export interface BenefitValuationRecord {
@@ -48,9 +58,11 @@ export interface BenefitValuationRecord {
   readonly taxFreeValue: number;
   readonly employeePaidValue: number;
   readonly netDeductionValue: number;
+  readonly offsetBreakdown: BenefitOffsetBreakdown;
   readonly agiMappingCode: string;
   readonly ledgerAccountCode: string;
   readonly taxability: BenefitTaxability;
+  readonly reviewCodes: readonly string[];
   readonly cashSalaryRequiredForWithholding: boolean;
   readonly status: BenefitValuationStatus;
   readonly approvedAt: string | null;

@@ -280,7 +280,7 @@ export function createBenefitsEngine({
     return {
       events,
       payLinePayloads: events.flatMap((event) => event.postingIntents.map((intent) => copy(intent.payrollLinePayloadJson))),
-      warnings: events.flatMap((event) => event.valuation.decision.warnings).filter(Boolean)
+      warnings: [...new Set(events.flatMap((event) => event.valuation.decision.warnings).filter(Boolean))]
     };
   }
 
@@ -388,6 +388,12 @@ function valueBenefitEvent({ catalogItem, eventDraft, sourcePayload, employeePai
     inputs: normalizedInputs,
     resolvedMethod
   });
+  const reviewCodes = buildBenefitReviewCodes({
+    benefitCode: eventDraft.benefitCode,
+    warnings: evaluated.warnings,
+    employeePaidValue,
+    netDeductionValue
+  });
   const decision = {
     decisionCode: evaluated.decisionCode,
     inputsHash: buildSnapshotHash({
@@ -400,8 +406,15 @@ function valueBenefitEvent({ catalogItem, eventDraft, sourcePayload, employeePai
     effectiveDate: eventDraft.occurredOn,
     outputs: copy(evaluated.outputs),
     warnings: copy(evaluated.warnings),
+    reviewCodes: copy(reviewCodes),
     explanation: copy(evaluated.explanation)
   };
+  const offsetBreakdown = buildBenefitOffsetBreakdown({
+    employeePaidValue,
+    netDeductionValue,
+    taxableValueBeforeOffsets: evaluated.taxableValueBeforeOffsets,
+    taxableValue: evaluated.taxableValue
+  });
 
   return {
     benefitValuationId: crypto.randomUUID(),
@@ -418,12 +431,14 @@ function valueBenefitEvent({ catalogItem, eventDraft, sourcePayload, employeePai
     taxFreeValue: roundMoney(evaluated.taxFreeValue),
     employeePaidValue: roundMoney(employeePaidValue),
     netDeductionValue: roundMoney(netDeductionValue),
+    offsetBreakdown,
     agiMappingCode: evaluated.taxableValue > 0 ? catalogItem.defaultAgiMappingCode : "not_reported",
     ledgerAccountCode: evaluated.ledgerAccountCode || catalogItem.defaultLedgerAccountCode,
     taxability: resolveTaxability({
       taxableValue: evaluated.taxableValue,
       employerPaidValue: evaluated.employerPaidValue
     }),
+    reviewCodes: copy(reviewCodes),
     cashSalaryRequiredForWithholding: roundMoney(evaluated.taxableValue) > 0,
     status: BENEFIT_VALUATION_STATUSES[0],
     approvedAt: null,
@@ -1080,6 +1095,41 @@ function resolveTaxability({ taxableValue, employerPaidValue }) {
     return "partially_taxable";
   }
   return "taxable";
+}
+
+function buildBenefitOffsetBreakdown({ employeePaidValue = 0, netDeductionValue = 0, taxableValueBeforeOffsets = 0, taxableValue = 0 }) {
+  return {
+    employeePaidValue: roundMoney(employeePaidValue),
+    netDeductionValue: roundMoney(netDeductionValue),
+    totalOffsetValue: roundMoney(Number(employeePaidValue || 0) + Number(netDeductionValue || 0)),
+    taxableValueBeforeOffsets: roundMoney(taxableValueBeforeOffsets),
+    remainingTaxableValue: roundMoney(taxableValue),
+    mixedOffsetMethods: roundMoney(employeePaidValue) > 0 && roundMoney(netDeductionValue) > 0
+  };
+}
+
+function buildBenefitReviewCodes({ benefitCode, warnings = [], employeePaidValue = 0, netDeductionValue = 0 }) {
+  const reviewCodes = new Set();
+  for (const warning of warnings || []) {
+    switch (warning) {
+      case "benefit_car_missing_mileage_log":
+        reviewCodes.add("benefit_car_mileage_log_review");
+        break;
+      case "benefit_wellness_prior_events_may_need_reassessment":
+        reviewCodes.add("benefit_wellness_reassessment_review");
+        break;
+      default:
+        reviewCodes.add(`benefit_warning_${warning}`);
+        break;
+    }
+  }
+  if (roundMoney(employeePaidValue) > 0 && roundMoney(netDeductionValue) > 0) {
+    reviewCodes.add("benefit_mixed_offset_review");
+  }
+  if (benefitCode === "FUEL_BENEFIT" && roundMoney(netDeductionValue) > 0) {
+    reviewCodes.add("benefit_net_deduction_offset_review");
+  }
+  return [...reviewCodes].sort();
 }
 
 function seedCatalog(state, clock, companyId) {

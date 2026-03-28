@@ -3578,7 +3578,9 @@ function calculateEmploymentRun({
       benefitEventId: event.benefitEventId,
       benefitCode: event.benefitCode,
       taxableValue: event.valuation?.taxableValue || 0,
-      netDeductionValue: event.valuation?.netDeductionValue || 0
+      netDeductionValue: event.valuation?.netDeductionValue || 0,
+      offsetBreakdown: copy(event.valuation?.offsetBreakdown || null),
+      reviewCodes: copy(event.valuation?.reviewCodes || [])
     })),
     documentClassificationIntents: (documentClassificationPayloadBundle.payloads || []).map((payload) => ({
       documentClassificationPayrollPayloadId: payload.documentClassificationPayrollPayloadId,
@@ -3598,7 +3600,9 @@ function calculateEmploymentRun({
       taxFreeMileage: claim.valuation?.taxFreeMileage || 0,
       taxableMileage: claim.valuation?.taxableMileage || 0,
       expenseReimbursementAmount: claim.valuation?.expenseReimbursementAmount || 0,
-      advanceNetDeductionAmount: claim.valuation?.advanceNetDeductionAmount || 0
+      advanceNetDeductionAmount: claim.valuation?.advanceNetDeductionAmount || 0,
+      expenseSplit: copy(claim.valuation?.expenseSplit || null),
+      reviewCodes: copy(claim.valuation?.reviewCodes || [])
     })),
     pensionEnrollments: [],
     salaryExchangeAgreements: [],

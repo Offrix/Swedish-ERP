@@ -115,9 +115,36 @@ test("Phase 9.1 API manages catalog, benefit events, payroll mapping, posting an
       }
     });
     assert.equal(benefitEvent.valuation.taxableValue, 600);
+    assert.equal(benefitEvent.valuation.offsetBreakdown.totalOffsetValue, 0);
     assert.equal(benefitEvent.postingIntents.some((intent) => intent.ledgerAccountCode === "7230"), true);
     assert.equal(benefitEvent.agiMappings[0].reportableAmount, 600);
     assert.equal(benefitEvent.status, "valued");
+
+    const offsetFuelBenefit = await requestJson(baseUrl, "/v1/benefits/events", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employeeId: employee.employee.employeeId,
+        employmentId: employee.employment.employmentId,
+        benefitCode: "FUEL_BENEFIT",
+        reportingPeriod: "202603",
+        occurredOn: "2026-03-12",
+        sourceId: "phase9-fuel-offset-api-202603",
+        employeePaidValue: 100,
+        netDeductionValue: 400,
+        sourcePayload: {
+          vehicleContext: "benefit_car",
+          marketValuePrivateFuel: 2000,
+          fuelType: "liquid_fuel"
+        }
+      }
+    });
+    assert.equal(offsetFuelBenefit.valuation.offsetBreakdown.totalOffsetValue, 500);
+    assert.equal(offsetFuelBenefit.valuation.offsetBreakdown.mixedOffsetMethods, true);
+    assert.equal(offsetFuelBenefit.valuation.reviewCodes.includes("benefit_mixed_offset_review"), true);
+    assert.equal(offsetFuelBenefit.valuation.reviewCodes.includes("benefit_net_deduction_offset_review"), true);
 
     const approvedBenefitEvent = await requestJson(
       baseUrl,
@@ -140,7 +167,7 @@ test("Phase 9.1 API manages catalog, benefit events, payroll mapping, posting an
         token: sessionToken
       }
     );
-    assert.equal(listedEvents.items.length, 1);
+    assert.equal(listedEvents.items.length, 2);
 
     const fetchedEvent = await requestJson(
       baseUrl,

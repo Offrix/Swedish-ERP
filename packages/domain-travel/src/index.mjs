@@ -308,7 +308,7 @@ export function createTravelEngine({
     return {
       claims,
       payLinePayloads: claims.flatMap((claim) => claim.postingIntents.map((intent) => copy(intent.payrollLinePayloadJson)).filter(Boolean)),
-      warnings: claims.flatMap((claim) => claim.valuation.warnings || [])
+      warnings: [...new Set(claims.flatMap((claim) => claim.valuation.warnings || []))]
     };
   }
 
@@ -432,6 +432,12 @@ function valueTravelClaim({ state, claim, countrySegments, mealEvents, mileageLo
       .filter((row) => row.paymentMethod === "private_card" || row.paymentMethod === "cash")
       .reduce((sum, row) => sum + Number(row.amountSek || 0), 0)
   );
+  const privateCardExpenseAmount = roundMoney(
+    expenseRows.filter((row) => row.paymentMethod === "private_card").reduce((sum, row) => sum + Number(row.amountSek || 0), 0)
+  );
+  const cashExpenseAmount = roundMoney(
+    expenseRows.filter((row) => row.paymentMethod === "cash").reduce((sum, row) => sum + Number(row.amountSek || 0), 0)
+  );
   const companyCardExpenseAmount = roundMoney(
     expenseRows
       .filter((row) => row.paymentMethod === "company_card")
@@ -470,6 +476,15 @@ function valueTravelClaim({ state, claim, countrySegments, mealEvents, mileageLo
   if (preApprovalRequired && claim.preApproved !== true) {
     warnings.push("travel_preapproval_required");
   }
+  const expenseSplit = buildTravelExpenseSplit({
+    privateCardExpenseAmount,
+    cashExpenseAmount,
+    companyCardExpenseAmount
+  });
+  const reviewCodes = buildTravelReviewCodes({
+    warnings,
+    expenseSplit
+  });
 
   return {
     travelValuationId: crypto.randomUUID(),
@@ -488,6 +503,7 @@ function valueTravelClaim({ state, claim, countrySegments, mealEvents, mileageLo
     taxableMileage,
     expenseReimbursementAmount,
     companyCardExpenseAmount,
+    expenseSplit,
     travelAdvanceAmount,
     netTravelPayoutAmount,
     advanceNetDeductionAmount,
@@ -500,6 +516,7 @@ function valueTravelClaim({ state, claim, countrySegments, mealEvents, mileageLo
       travelAdvances
     }),
     warnings: [...new Set(warnings)],
+    reviewCodes,
     explanation: buildTravelExplanation({
       travelType,
       statutoryTaxFreeAllowed,
@@ -718,6 +735,48 @@ function buildTravelPostingIntents({
     }));
   }
   return intents;
+}
+
+function buildTravelExpenseSplit({ privateCardExpenseAmount = 0, cashExpenseAmount = 0, companyCardExpenseAmount = 0 }) {
+  const employeeOutlayExpenseAmount = roundMoney(Number(privateCardExpenseAmount || 0) + Number(cashExpenseAmount || 0));
+  const totalExpenseAmount = roundMoney(employeeOutlayExpenseAmount + Number(companyCardExpenseAmount || 0));
+  return {
+    privateCardExpenseAmount: roundMoney(privateCardExpenseAmount),
+    cashExpenseAmount: roundMoney(cashExpenseAmount),
+    employeeOutlayExpenseAmount,
+    companyCardExpenseAmount: roundMoney(companyCardExpenseAmount),
+    totalExpenseAmount,
+    mixedFundingSources: employeeOutlayExpenseAmount > 0 && roundMoney(companyCardExpenseAmount) > 0
+  };
+}
+
+function buildTravelReviewCodes({ warnings = [], expenseSplit = null }) {
+  const reviewCodes = new Set();
+  for (const warning of warnings || []) {
+    switch (warning) {
+      case "travel_preapproval_required":
+        reviewCodes.add("travel_preapproval_review");
+        break;
+      case "travel_allowance_excess_taxable":
+        reviewCodes.add("travel_allowance_taxable_review");
+        break;
+      case "travel_mileage_tax_free_denied_benefit_car_fuel":
+      case "travel_mileage_excess_taxable":
+        reviewCodes.add("travel_mileage_taxability_review");
+        break;
+      case "travel_overnight_missing":
+      case "travel_distance_rule_not_met":
+        reviewCodes.add("travel_allowance_eligibility_review");
+        break;
+      default:
+        reviewCodes.add(`travel_warning_${warning}`);
+        break;
+    }
+  }
+  if (expenseSplit?.mixedFundingSources) {
+    reviewCodes.add("travel_expense_split_review");
+  }
+  return [...reviewCodes].sort();
 }
 
 function createTravelPostingIntent({

@@ -37,6 +37,7 @@ test("Phase 9.1 values car and fuel benefits with the 2026 rule set", () => {
   assert.equal(carBenefit.valuation.taxableValue, 7968.5);
   assert.equal(carBenefit.valuation.decision.outputs.fullMonthApplied, true);
   assert.equal(carBenefit.valuation.decision.warnings.includes("benefit_car_missing_mileage_log"), true);
+  assert.equal(carBenefit.valuation.reviewCodes.includes("benefit_car_mileage_log_review"), true);
 
   const fuelBenefit = benefitsPlatform.createBenefitEvent({
     companyId: COMPANY_ID,
@@ -57,6 +58,8 @@ test("Phase 9.1 values car and fuel benefits with the 2026 rule set", () => {
   assert.equal(fuelBenefit.valuation.decision.decisionCode, "BENEFIT_FUEL_BENEFIT_CAR");
   assert.equal(fuelBenefit.valuation.taxableValueBeforeOffsets, 2400);
   assert.equal(fuelBenefit.valuation.taxableValue, 2000);
+  assert.equal(fuelBenefit.valuation.offsetBreakdown.totalOffsetValue, 400);
+  assert.equal(fuelBenefit.valuation.reviewCodes.includes("benefit_net_deduction_offset_review"), true);
   assert.equal(fuelBenefit.postingIntents.some((intent) => intent.processingStep === 13 && intent.amount === 400), true);
 });
 

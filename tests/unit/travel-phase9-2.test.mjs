@@ -49,6 +49,14 @@ test("Phase 9.2 values domestic travel, meal reduction, mileage and taxable exce
         amount: 140,
         currencyCode: "SEK",
         documentId: null
+      },
+      {
+        date: "2026-03-10",
+        expenseType: "taxi",
+        paymentMethod: "company_card",
+        amount: 600,
+        currencyCode: "SEK",
+        documentId: null
       }
     ],
     travelAdvances: [
@@ -66,9 +74,13 @@ test("Phase 9.2 values domestic travel, meal reduction, mileage and taxable exce
   assert.equal(claim.valuation.taxableTravelAllowance, 55);
   assert.equal(claim.valuation.taxFreeMileage, 950);
   assert.equal(claim.valuation.expenseReimbursementAmount, 140);
+  assert.equal(claim.valuation.expenseSplit.companyCardExpenseAmount, 600);
+  assert.equal(claim.valuation.expenseSplit.mixedFundingSources, true);
   assert.equal(claim.valuation.netTravelPayoutAmount, 1490);
   assert.equal(claim.travelDays.find((day) => day.date === "2026-03-11" && day.dayClassification === "full").mealReductionAmount, 105);
   assert.equal(claim.valuation.warnings.includes("travel_allowance_excess_taxable"), true);
+  assert.equal(claim.valuation.reviewCodes.includes("travel_allowance_taxable_review"), true);
+  assert.equal(claim.valuation.reviewCodes.includes("travel_expense_split_review"), true);
 });
 
 test("Phase 9.2 resolves foreign multi-country days using the longest 06-24 overlap", () => {

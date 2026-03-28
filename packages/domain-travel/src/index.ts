@@ -31,11 +31,20 @@ export interface TravelClaimValuation {
   readonly taxableMileage: number;
   readonly expenseReimbursementAmount: number;
   readonly companyCardExpenseAmount: number;
+  readonly expenseSplit: {
+    readonly privateCardExpenseAmount: number;
+    readonly cashExpenseAmount: number;
+    readonly employeeOutlayExpenseAmount: number;
+    readonly companyCardExpenseAmount: number;
+    readonly totalExpenseAmount: number;
+    readonly mixedFundingSources: boolean;
+  };
   readonly travelAdvanceAmount: number;
   readonly netTravelPayoutAmount: number;
   readonly advanceNetDeductionAmount: number;
   readonly sourceSnapshotHash: string;
   readonly warnings: readonly string[];
+  readonly reviewCodes: readonly string[];
   readonly explanation: readonly string[];
 }
 

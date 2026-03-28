@@ -124,6 +124,13 @@ test("Phase 9.2 API manages travel claims and carries them into payroll, posting
             paymentMethod: "private_card",
             amount: 140,
             currencyCode: "SEK"
+          },
+          {
+            date: "2026-03-10",
+            expenseType: "taxi",
+            paymentMethod: "company_card",
+            amount: 600,
+            currencyCode: "SEK"
           }
         ],
         travelAdvances: [
@@ -136,6 +143,9 @@ test("Phase 9.2 API manages travel claims and carries them into payroll, posting
     });
     assert.equal(claim.valuation.taxFreeTravelAllowance, 645);
     assert.equal(claim.valuation.taxableTravelAllowance, 55);
+    assert.equal(claim.valuation.expenseSplit.companyCardExpenseAmount, 600);
+    assert.equal(claim.valuation.expenseSplit.mixedFundingSources, true);
+    assert.equal(claim.valuation.reviewCodes.includes("travel_expense_split_review"), true);
     assert.equal(claim.postingIntents.some((intent) => intent.payrollLinePayloadJson.payItemCode === "EXPENSE_REIMBURSEMENT"), true);
 
     const listedClaims = await requestJson(
