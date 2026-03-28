@@ -194,6 +194,40 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     assert.equal(adminCombinedInbox.summary.totalCount, 2);
     assert.equal(adminCombinedInbox.summary.unreadCount, 2);
 
+    const adminDigest = await requestJson(baseUrl, "/v1/notifications/digests/build", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        recipientType: "user",
+        recipientId: DEMO_IDS.userId,
+        onlyUnread: true,
+        channelCode: "email"
+      }
+    });
+    assert.equal(adminDigest.recipientType, "user");
+    assert.equal(adminDigest.recipientId, DEMO_IDS.userId);
+    assert.equal(adminDigest.channelCode, "email");
+    assert.equal(adminDigest.notificationIds.includes(adminNotification.notificationId), true);
+
+    const adminDigestList = await requestJson(
+      baseUrl,
+      `/v1/notifications/digests?companyId=${DEMO_IDS.companyId}`,
+      { token: adminToken }
+    );
+    assert.equal(adminDigestList.items.some((item) => item.notificationDigestId === adminDigest.notificationDigestId), true);
+
+    const approverCannotReadAdminDigest = await requestJson(
+      baseUrl,
+      `/v1/notifications/digests/${adminDigest.notificationDigestId}?companyId=${DEMO_IDS.companyId}`,
+      {
+        token: approverToken,
+        expectedStatus: 403
+      }
+    );
+    assert.equal(approverCannotReadAdminDigest.error, "notification_recipient_scope_forbidden");
+
     const adminTeamInbox = await requestJson(
       baseUrl,
       `/v1/notifications?companyId=${DEMO_IDS.companyId}&recipientType=team&recipientId=${DEMO_TEAM_IDS.financeOps}`,
@@ -340,6 +374,13 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     );
     assert.equal(activityObjectRoute.items.length, 1);
     assert.equal(activityObjectRoute.items[0].summary, "Review item created for API integration test.");
+    const activityDetail = await requestJson(
+      baseUrl,
+      `/v1/activity/${activity.items[0].activityEntryId}?companyId=${DEMO_IDS.companyId}`,
+      { token: adminToken }
+    );
+    assert.equal(activityDetail.activityEntryId, activity.items[0].activityEntryId);
+    assert.equal(activityDetail.summary, "Review item created for API integration test.");
 
     const pagedActivityFirst = await requestJson(
       baseUrl,
@@ -358,6 +399,74 @@ test("Step 13 API exposes notifications and activity as separate read models", a
     assert.equal(pagedActivitySecond.items.length, 1);
     assert.equal(pagedActivitySecond.items[0].summary, "Older paged activity.");
     assert.equal(pagedActivitySecond.nextCursor, null);
+
+    const snoozedNotification = platform.createNotification({
+      companyId: DEMO_IDS.companyId,
+      recipientType: "team",
+      recipientId: DEMO_TEAM_IDS.financeOps,
+      categoryCode: "deadline_warning",
+      priorityCode: "critical",
+      sourceDomainCode: "CORE",
+      sourceObjectType: "work_item",
+      sourceObjectId: "team_deadline_snoozed_api",
+      title: "Critical snoozed deadline",
+      body: "Should release and escalate from backoffice routes.",
+      actorId: DEMO_IDS.userId
+    });
+    platform.deliverNotification({
+      companyId: DEMO_IDS.companyId,
+      notificationId: snoozedNotification.notificationId,
+      channelCode: "email",
+      actorId: DEMO_IDS.userId
+    });
+    platform.snoozeNotification({
+      companyId: DEMO_IDS.companyId,
+      notificationId: snoozedNotification.notificationId,
+      until: "2026-03-24T15:30:00Z",
+      actorId: DEMO_IDS.userId
+    });
+
+    const released = await requestJson(
+      baseUrl,
+      "/v1/backoffice/notifications/release-snoozed",
+      {
+        method: "POST",
+        token: adminToken,
+        expectedStatus: 200,
+        body: {
+          companyId: DEMO_IDS.companyId,
+          asOf: "2026-03-24T16:30:00Z"
+        }
+      }
+    );
+    assert.equal(released.totalCount, 1);
+    assert.equal(released.items[0].notificationId, snoozedNotification.notificationId);
+    assert.equal(released.items[0].status, "delivered");
+
+    const escalationScan = await requestJson(
+      baseUrl,
+      "/v1/backoffice/notifications/escalation-scan",
+      {
+        method: "POST",
+        token: adminToken,
+        expectedStatus: 200,
+        body: {
+          companyId: DEMO_IDS.companyId,
+          asOf: "2026-03-24T17:30:00Z",
+          escalationPolicyCode: "notification.default"
+        }
+      }
+    );
+    assert.equal(escalationScan.scan.createdCount >= 1, true);
+    assert.equal(escalationScan.activityEntries.length >= 1, true);
+
+    const escalations = await requestJson(
+      baseUrl,
+      `/v1/backoffice/notifications/escalations?companyId=${DEMO_IDS.companyId}&notificationId=${snoozedNotification.notificationId}`,
+      { token: adminToken }
+    );
+    assert.equal(escalations.items.length >= 1, true);
+    assert.equal(escalations.items[0].notificationId, snoozedNotification.notificationId);
   } finally {
     await stopServer(server);
   }

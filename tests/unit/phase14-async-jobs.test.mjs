@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { createDefaultJobHandlers, runWorkerBatch } from "../../apps/worker/src/worker.mjs";
-import { DEMO_ADMIN_EMAIL, DEMO_APPROVER_IDS, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import { DEMO_ADMIN_EMAIL, DEMO_APPROVER_IDS, DEMO_IDS, DEMO_TEAM_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { loginWithStrongAuthOnPlatform } from "../helpers/platform-auth.mjs";
 
 test("Phase 14 Step 4 async jobs support retry scheduling and completion", async () => {
@@ -772,8 +772,96 @@ test("Phase 14 Step 4 worker builds notification digests for scheduled delivery 
   assert.equal(completedJob.status, "succeeded");
   assert.equal(completedJob.lastResultCode, "notification_digest_built");
   assert.equal(attempts.length, 1);
+  assert.equal(typeof attempts[0].resultPayload.notificationDigestId, "string");
   assert.deepEqual(attempts[0].resultPayload.notificationIds, [unreadNotification.notificationId]);
   assert.equal(attempts[0].resultPayload.unreadCount, 1);
+});
+
+test("Phase 14 Step 4 worker releases snoozed notifications and records escalation scans", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-24T13:30:00Z")
+  });
+
+  const notification = platform.createNotification({
+    companyId: DEMO_IDS.companyId,
+    recipientType: "team",
+    recipientId: DEMO_TEAM_IDS.financeOps,
+    categoryCode: "deadline_warning",
+    priorityCode: "critical",
+    sourceDomainCode: "CORE",
+    sourceObjectType: "work_item",
+    sourceObjectId: "work-notify-snooze-job-1",
+    title: "Critical snoozed warning",
+    body: "Should be released and escalated by worker jobs.",
+    actorId: "system"
+  });
+  platform.deliverNotification({
+    companyId: DEMO_IDS.companyId,
+    notificationId: notification.notificationId,
+    channelCode: "email",
+    actorId: "system"
+  });
+  platform.snoozeNotification({
+    companyId: DEMO_IDS.companyId,
+    notificationId: notification.notificationId,
+    until: "2026-03-24T12:00:00Z",
+    actorId: DEMO_IDS.userId
+  });
+
+  const releaseJob = await platform.enqueueRuntimeJob({
+    companyId: DEMO_IDS.companyId,
+    jobType: "notifications.release_snoozed",
+    sourceObjectType: "notification_center",
+    sourceObjectId: DEMO_IDS.companyId,
+    idempotencyKey: "step4-notification-release-snoozed",
+    payload: {
+      companyId: DEMO_IDS.companyId,
+      asOf: "2026-03-24T13:30:00Z"
+    },
+    actorId: "system"
+  });
+  const releasedCount = await runWorkerBatch({
+    platform,
+    handlers: createDefaultJobHandlers({ logger: () => {} }),
+    logger: () => {},
+    workerId: "worker-step4-notifications-release"
+  });
+  assert.equal(releasedCount, 1);
+
+  const releasedJob = await platform.getRuntimeJob({ jobId: releaseJob.jobId });
+  const releasedNotification = platform.getNotification({
+    companyId: DEMO_IDS.companyId,
+    notificationId: notification.notificationId
+  });
+  assert.equal(releasedJob.status, "succeeded");
+  assert.equal(releasedJob.lastResultCode, "notifications_snooze_released");
+  assert.equal(releasedNotification.status, "delivered");
+
+  const escalationJob = await platform.enqueueRuntimeJob({
+    companyId: DEMO_IDS.companyId,
+    jobType: "notifications.escalation_scan",
+    sourceObjectType: "notification_center",
+    sourceObjectId: DEMO_IDS.companyId,
+    idempotencyKey: "step4-notification-escalation-scan",
+    payload: {
+      asOf: "2026-03-24T14:30:00Z",
+      escalationPolicyCode: "notification.default"
+    },
+    actorId: "system"
+  });
+  const escalatedCount = await runWorkerBatch({
+    platform,
+    handlers: createDefaultJobHandlers({ logger: () => {} }),
+    logger: () => {},
+    workerId: "worker-step4-notifications-escalation"
+  });
+  assert.equal(escalatedCount, 1);
+
+  const escalationJobState = await platform.getRuntimeJob({ jobId: escalationJob.jobId });
+  const escalationAttempts = await platform.listRuntimeJobAttempts({ jobId: escalationJob.jobId });
+  assert.equal(escalationJobState.status, "succeeded");
+  assert.equal(escalationJobState.lastResultCode, "notification_escalations_scanned");
+  assert.equal(escalationAttempts[0].resultPayload.createdCount, 1);
 });
 
 test("Phase 14 Step 4 worker runs saved-view compatibility scans", async () => {

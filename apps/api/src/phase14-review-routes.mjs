@@ -15,8 +15,10 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
     resolveNotificationRecipientTargets,
     listAccessibleNotifications,
     buildAccessibleNotificationSummary,
+    listAccessibleNotificationDigests,
     requireTextArray,
     assertNotificationReadAccess,
+    assertNotificationDigestReadAccess,
     assertActivityFeedFullReadAccess,
     parsePositiveInteger
   } = helpers;
@@ -66,6 +68,65 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
       notificationIds,
       actionCode: body.actionCode,
       actorId: principal.userId
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/notifications/digests") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification_digest", objectId: companyId, scopeCode: "notifications" });
+    const recipientType = optionalText(url.searchParams.get("recipientType"));
+    const recipientId = optionalText(url.searchParams.get("recipientId"));
+    const status = optionalText(url.searchParams.get("status"));
+    const categoryCode = optionalText(url.searchParams.get("categoryCode"));
+    const channelCode = optionalText(url.searchParams.get("channelCode"));
+    const targets = resolveNotificationRecipientTargets({ principal, recipientType, recipientId });
+    writeJson(res, 200, {
+      items: listAccessibleNotificationDigests({
+        platform,
+        companyId,
+        targets,
+        status,
+        categoryCode,
+        channelCode
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/notifications/digests/build") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification_digest", objectId: companyId, scopeCode: "notifications" });
+    const target = resolveNotificationRecipientTargets({
+      principal,
+      recipientType: optionalText(body.recipientType),
+      recipientId: optionalText(body.recipientId)
+    })[0];
+    writeJson(res, 201, platform.buildNotificationDigest({
+      companyId,
+      recipientType: target.recipientType,
+      recipientId: target.recipientId,
+      channelCode: body.channelCode || "in_app",
+      categoryCode: body.categoryCode || null,
+      onlyUnread: body.onlyUnread !== false,
+      generatedAt: body.generatedAt || null,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
+  const notificationDigestMatch = matchPath(path, "/v1/notifications/digests/:notificationDigestId");
+  if (req.method === "GET" && notificationDigestMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "notification_digest", objectId: notificationDigestMatch.notificationDigestId, scopeCode: "notifications" });
+    assertNotificationDigestReadAccess({ platform, principal, companyId, notificationDigestId: notificationDigestMatch.notificationDigestId });
+    writeJson(res, 200, platform.getNotificationDigest({
+      companyId,
+      notificationDigestId: notificationDigestMatch.notificationDigestId
     }));
     return true;
   }
@@ -168,6 +229,109 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
     return true;
   }
 
+  if (req.method === "POST" && path === "/v1/backoffice/notifications/release-snoozed") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "notification",
+      objectId: companyId,
+      scopeCode: "notifications"
+    });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, platform.releaseSnoozedNotifications({
+      companyId,
+      asOf: body.asOf || null,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/backoffice/notifications/escalations") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "notification_escalation",
+      objectId: companyId,
+      scopeCode: "notifications"
+    });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listNotificationEscalations({
+        companyId,
+        notificationId: optionalText(url.searchParams.get("notificationId")),
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/backoffice/notifications/escalation-scan") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "notification_escalation",
+      objectId: companyId,
+      scopeCode: "notifications"
+    });
+    assertBackofficeReadAccess({ principal });
+    const scan = platform.scanNotificationEscalations({
+      companyId,
+      asOf: body.asOf || null,
+      escalationPolicyCode: body.escalationPolicyCode || "notification.default",
+      actorId: principal.userId
+    });
+    const activityEntries = scan.items.map((escalation) => {
+      const notification = platform.getNotification({
+        companyId,
+        notificationId: escalation.notificationId
+      });
+      return platform.projectActivityEntry({
+        companyId,
+        objectType: "notification",
+        objectId: escalation.notificationId,
+        activityType: escalation.recurringBreach ? "notification_escalation_recurring" : "notification_escalated",
+        actorType: "system",
+        actorSnapshot: {
+          actorId: principal.userId,
+          actorLabel: "Backoffice notification escalation scan"
+        },
+        summary: escalation.recurringBreach
+          ? `Recurring notification escalation recorded for ${notification.title}.`
+          : `Notification escalation recorded for ${notification.title}.`,
+        occurredAt: scan.asOf,
+        sourceEventId: escalation.notificationEscalationId,
+        visibilityScope: "backoffice",
+        relatedObjects: [
+          {
+            relatedObjectType: notification.sourceObjectType,
+            relatedObjectId: notification.sourceObjectId,
+            relationCode: "source_object"
+          }
+        ],
+        actorId: principal.userId
+      });
+    });
+    writeJson(res, 200, {
+      scan,
+      activityEntries
+    });
+    return true;
+  }
+
   if (req.method === "GET" && path === "/v1/activity") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
@@ -208,6 +372,21 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
       relatedObjectId: optionalText(url.searchParams.get("relatedObjectId")),
       limit: parsePositiveInteger(url.searchParams.get("limit"), "activity_limit_invalid", "limit must be a positive integer.") || null,
       cursor: optionalText(url.searchParams.get("cursor")),
+      viewerUserId: principal.userId,
+      viewerTeamIds: resolvePrincipalTeamIds(principal),
+      viewerCanReadBackoffice: canReadBackofficeActivity({ principal })
+    }));
+    return true;
+  }
+
+  const activityEntryMatch = matchPath(path, "/v1/activity/:activityEntryId");
+  if (req.method === "GET" && activityEntryMatch && activityEntryMatch.activityEntryId !== "object") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "activity_entry", objectId: activityEntryMatch.activityEntryId, scopeCode: "activity" });
+    writeJson(res, 200, platform.getActivityEntry({
+      companyId,
+      activityEntryId: activityEntryMatch.activityEntryId,
       viewerUserId: principal.userId,
       viewerTeamIds: resolvePrincipalTeamIds(principal),
       viewerCanReadBackoffice: canReadBackofficeActivity({ principal })

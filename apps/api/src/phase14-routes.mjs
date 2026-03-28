@@ -196,8 +196,10 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
         resolveNotificationRecipientTargets,
         listAccessibleNotifications,
         buildAccessibleNotificationSummary,
+        listAccessibleNotificationDigests,
         requireTextArray,
         assertNotificationReadAccess,
+        assertNotificationDigestReadAccess,
         assertActivityFeedFullReadAccess,
         parsePositiveInteger
       }
@@ -321,6 +323,19 @@ function buildAccessibleNotificationSummary({ platform, companyId, targets, stat
   };
 }
 
+function listAccessibleNotificationDigests({ platform, companyId, targets, status = null, categoryCode = null, channelCode = null }) {
+  return sortNotificationDigestsByGeneratedAtDesc(dedupeNotificationDigests(
+    targets.flatMap((target) => platform.listNotificationDigests({
+      companyId,
+      recipientType: target.recipientType,
+      recipientId: target.recipientId,
+      status,
+      categoryCode,
+      channelCode
+    }))
+  ));
+}
+
 function assertNotificationReadAccess({ platform, principal, companyId, notificationId }) {
   const notification = platform.getNotification({ companyId, notificationId });
   if (notification.recipientType === "user" && notification.recipientId === principal.userId) {
@@ -330,6 +345,17 @@ function assertNotificationReadAccess({ platform, principal, companyId, notifica
     return;
   }
   throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification action is only allowed for the addressed user or one of the actor's active teams in this route.");
+}
+
+function assertNotificationDigestReadAccess({ platform, principal, companyId, notificationDigestId }) {
+  const digest = platform.getNotificationDigest({ companyId, notificationDigestId });
+  if (digest.recipientType === "user" && digest.recipientId === principal.userId) {
+    return;
+  }
+  if (digest.recipientType === "team" && resolvePrincipalTeamIds(principal).includes(digest.recipientId)) {
+    return;
+  }
+  throw createHttpError(403, "notification_recipient_scope_forbidden", "Notification digest is only visible for the addressed user or one of the actor's active teams in this route.");
 }
 
 function resolvePrincipalTeamIds(principal) {
@@ -355,6 +381,26 @@ function sortNotificationsByCreatedAtDesc(items) {
   return [...items].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt)
     || right.notificationId.localeCompare(left.notificationId)
+  );
+}
+
+function dedupeNotificationDigests(items) {
+  const seen = new Set();
+  const result = [];
+  for (const item of items) {
+    if (!item || seen.has(item.notificationDigestId)) {
+      continue;
+    }
+    seen.add(item.notificationDigestId);
+    result.push(item);
+  }
+  return result;
+}
+
+function sortNotificationDigestsByGeneratedAtDesc(items) {
+  return [...items].sort((left, right) =>
+    right.generatedAt.localeCompare(left.generatedAt)
+    || right.notificationDigestId.localeCompare(left.notificationDigestId)
   );
 }
 

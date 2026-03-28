@@ -327,6 +327,108 @@ test("Step 13 notifications build user and team digests from unread inbox state"
   assert.equal(teamDigest.unreadCount, 1);
   assert.equal(teamDigest.notificationIds.length, 1);
   assert.equal(teamDigest.recipientType, "team");
+  assert.equal(teamDigest.status, "built");
+
+  const persistedDigests = notifications.listNotificationDigests({
+    companyId,
+    recipientType: "user",
+    recipientId: "user_digest_1"
+  });
+  assert.equal(persistedDigests.length, 1);
+  assert.equal(persistedDigests[0].notificationDigestId, userDigest.notificationDigestId);
+});
+
+test("Step 13 notifications release snoozed items and build escalation history deterministically", () => {
+  const notifications = createNotificationsEngine({
+    clock: () => new Date("2026-03-25T10:00:00Z")
+  });
+  const companyId = "company_notify_escalation_1";
+
+  const snoozed = notifications.createNotification({
+    companyId,
+    recipientType: "user",
+    recipientId: "user_escalation_1",
+    categoryCode: "deadline_warning",
+    priorityCode: "medium",
+    sourceDomainCode: "CORE",
+    sourceObjectType: "work_item",
+    sourceObjectId: "work_snoozed_1",
+    title: "Snoozed notification",
+    body: "Should come back after snooze release.",
+    actorId: "system"
+  });
+  notifications.deliverNotification({
+    companyId,
+    notificationId: snoozed.notificationId,
+    channelCode: "in_app",
+    actorId: "system"
+  });
+  notifications.snoozeNotification({
+    companyId,
+    notificationId: snoozed.notificationId,
+    until: "2026-03-25T09:00:00Z",
+    actorId: "user_escalation_1"
+  });
+
+  const release = notifications.releaseSnoozedNotifications({
+    companyId,
+    asOf: "2026-03-25T10:00:00Z",
+    actorId: "worker_scheduler"
+  });
+  assert.equal(release.totalCount, 1);
+  assert.equal(release.items[0].status, "delivered");
+  assert.equal(release.items[0].snoozedUntil, null);
+
+  const stale = notifications.createNotification({
+    companyId,
+    recipientType: "team",
+    recipientId: "finance_ops",
+    categoryCode: "review_due",
+    priorityCode: "critical",
+    sourceDomainCode: "REVIEW_CENTER",
+    sourceObjectType: "review_item",
+    sourceObjectId: "review_escalation_1",
+    title: "Critical review notification",
+    body: "Should escalate after one hour.",
+    actorId: "system"
+  });
+  notifications.deliverNotification({
+    companyId,
+    notificationId: stale.notificationId,
+    channelCode: "email",
+    actorId: "system"
+  });
+
+  const firstScan = notifications.scanNotificationEscalations({
+    companyId,
+    asOf: "2026-03-25T11:00:00Z",
+    escalationPolicyCode: "notification.default",
+    actorId: "worker_scheduler"
+  });
+  assert.equal(firstScan.createdCount, 1);
+  assert.equal(firstScan.recurringCount, 0);
+  assert.equal(firstScan.items[0].breachLevel, 1);
+  assert.equal(firstScan.items[0].status, "open");
+
+  const recurringScan = notifications.scanNotificationEscalations({
+    companyId,
+    asOf: "2026-03-25T12:05:00Z",
+    escalationPolicyCode: "notification.default",
+    actorId: "worker_scheduler"
+  });
+  assert.equal(recurringScan.createdCount, 0);
+  assert.equal(recurringScan.recurringCount, 1);
+  assert.equal(recurringScan.items[0].breachLevel, 2);
+  assert.equal(recurringScan.items[0].recurringBreach, true);
+
+  const escalations = notifications.listNotificationEscalations({
+    companyId,
+    notificationId: stale.notificationId
+  });
+  assert.equal(escalations.length, 2);
+  assert.equal(escalations[0].breachLevel, 2);
+  assert.equal(escalations[0].status, "open");
+  assert.equal(escalations[1].status, "superseded");
 });
 
 test("Step 13 activity projects append-only entries and hides by policy without duplicates", () => {

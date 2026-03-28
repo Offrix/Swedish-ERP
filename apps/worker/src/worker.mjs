@@ -43,14 +43,44 @@ export function createDefaultJobHandlers({ logger = console.log } = {}) {
         companyId: job.companyId,
         recipientType: typeof job.payload?.recipientType === "string" ? job.payload.recipientType : "user",
         recipientId: job.payload?.recipientId,
+        channelCode: typeof job.payload?.channelCode === "string" ? job.payload.channelCode : "in_app",
         categoryCode: typeof job.payload?.categoryCode === "string" ? job.payload.categoryCode : null,
         onlyUnread: job.payload?.onlyUnread !== false,
-        generatedAt: typeof job.payload?.generatedAt === "string" ? job.payload.generatedAt : null
+        generatedAt: typeof job.payload?.generatedAt === "string" ? job.payload.generatedAt : null,
+        actorId: "worker_scheduler"
       });
       logger(`worker built notification digest for ${digest.recipientType}:${digest.recipientId} in job ${job.jobId}`);
       return {
         resultCode: "notification_digest_built",
         resultPayload: digest
+      };
+    },
+    "notifications.release_snoozed": async ({ job, platform }) => {
+      const result = platform.releaseSnoozedNotifications({
+        companyId: typeof job.payload?.companyId === "string" ? job.payload.companyId : null,
+        asOf: typeof job.payload?.asOf === "string" ? job.payload.asOf : null,
+        actorId: "worker_scheduler"
+      });
+      logger(`worker released ${result.totalCount} snoozed notifications for job ${job.jobId}`);
+      return {
+        resultCode: "notifications_snooze_released",
+        resultPayload: {
+          totalCount: result.totalCount,
+          notificationIds: result.items.map((item) => item.notificationId)
+        }
+      };
+    },
+    "notifications.escalation_scan": async ({ job, platform }) => {
+      const result = platform.scanNotificationEscalations({
+        companyId: job.companyId,
+        asOf: typeof job.payload?.asOf === "string" ? job.payload.asOf : null,
+        escalationPolicyCode: typeof job.payload?.escalationPolicyCode === "string" ? job.payload.escalationPolicyCode : "notification.default",
+        actorId: "worker_scheduler"
+      });
+      logger(`worker scanned notification escalations for ${result.scannedCount} notifications in job ${job.jobId}`);
+      return {
+        resultCode: "notification_escalations_scanned",
+        resultPayload: result
       };
     },
     "documents.ocr.requested": async ({ job, platform }) => {

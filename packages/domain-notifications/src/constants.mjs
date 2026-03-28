@@ -4,4 +4,6 @@ export const NOTIFICATION_RECIPIENT_TYPES = Object.freeze(["user", "team"]);
 export const NOTIFICATION_PRIORITY_CODES = Object.freeze(["low", "medium", "high", "critical"]);
 export const NOTIFICATION_CHANNEL_CODES = Object.freeze(["in_app", "email", "push"]);
 export const NOTIFICATION_DELIVERY_STATUSES = Object.freeze(["queued", "delivered", "failed", "cancelled"]);
-export const NOTIFICATION_ACTION_CODES = Object.freeze(["read", "acknowledge", "snooze", "cancel"]);
+export const NOTIFICATION_ACTION_CODES = Object.freeze(["read", "acknowledge", "snooze", "release_snooze", "cancel", "escalate"]);
+export const NOTIFICATION_DIGEST_STATUSES = Object.freeze(["built", "superseded"]);
+export const NOTIFICATION_ESCALATION_STATUSES = Object.freeze(["open", "superseded"]);

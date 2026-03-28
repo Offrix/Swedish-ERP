@@ -3,6 +3,8 @@ import {
   NOTIFICATION_ACTION_CODES,
   NOTIFICATION_CHANNEL_CODES,
   NOTIFICATION_DELIVERY_STATUSES,
+  NOTIFICATION_DIGEST_STATUSES,
+  NOTIFICATION_ESCALATION_STATUSES,
   NOTIFICATION_PRIORITY_CODES,
   NOTIFICATION_RECIPIENT_TYPES,
   NOTIFICATION_STATUSES
@@ -22,6 +24,12 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     deliveryIdsByNotification: new Map(),
     actions: new Map(),
     actionIdsByNotification: new Map(),
+    digests: new Map(),
+    digestIdsByCompany: new Map(),
+    digestIdByFingerprint: new Map(),
+    escalations: new Map(),
+    escalationIdsByCompany: new Map(),
+    escalationIdsByNotification: new Map(),
     auditEvents: []
   };
 
@@ -30,6 +38,8 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     notificationRecipientTypes: NOTIFICATION_RECIPIENT_TYPES,
     notificationPriorityCodes: NOTIFICATION_PRIORITY_CODES,
     notificationChannelCodes: NOTIFICATION_CHANNEL_CODES,
+    notificationDigestStatuses: NOTIFICATION_DIGEST_STATUSES,
+    notificationEscalationStatuses: NOTIFICATION_ESCALATION_STATUSES,
     createNotification,
     listNotifications,
     getNotificationInboxSummary,
@@ -38,12 +48,17 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     retryNotificationDelivery,
     bulkApplyNotificationAction,
     buildNotificationDigest,
+    listNotificationDigests,
+    getNotificationDigest,
     expireNotification,
     expireNotificationsDue,
+    releaseSnoozedNotifications,
     markNotificationRead,
     acknowledgeNotification,
     snoozeNotification,
     cancelNotification,
+    scanNotificationEscalations,
+    listNotificationEscalations,
     listNotificationAuditEvents,
     snapshotNotifications
   };
@@ -95,6 +110,7 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
       body: requireText(body, "notification_body_required"),
       status: "created",
       createdAt: nowIso(clock),
+      updatedAt: nowIso(clock),
       expiresAt: normalizeOptionalDateTime(expiresAt),
       deepLink: normalizeOptionalText(deepLink),
       lastReadAt: null,
@@ -130,7 +146,7 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
       .filter((notification) => (recipientId ? notification.recipientId === recipientId : true))
       .filter((notification) => (resolvedStatus ? notification.status === resolvedStatus : true))
       .filter((notification) => (resolvedCategoryCode ? notification.categoryCode === resolvedCategoryCode : true))
-      .filter((notification) => (onlyUnread ? !["read", "acknowledged"].includes(notification.status) : true))
+      .filter((notification) => (onlyUnread ? isNotificationUnread(notification) : true))
       .sort(compareNotifications);
   }
 
@@ -190,6 +206,7 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     state.deliveries.set(delivery.notificationDeliveryId, delivery);
     appendToIndex(state.deliveryIdsByNotification, notification.notificationId, delivery.notificationDeliveryId);
     notification.status = resolvedDeliveryStatus === "delivered" ? "delivered" : "queued";
+    notification.updatedAt = nowIso(clock);
     pushAudit(state, clock, {
       companyId: notification.companyId,
       actorId: requireText(actorId, "actor_id_required"),
@@ -244,13 +261,16 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     companyId,
     recipientType,
     recipientId,
+    channelCode = "in_app",
     categoryCode = null,
     onlyUnread = true,
-    generatedAt = null
+    generatedAt = null,
+    actorId = "system"
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedRecipientType = assertAllowed(normalizeEnumValue(recipientType, "notification_recipient_type_required"), NOTIFICATION_RECIPIENT_TYPES, "notification_recipient_type_invalid");
     const resolvedRecipientId = requireText(recipientId, "notification_recipient_id_required");
+    const resolvedChannelCode = assertAllowed(normalizeEnumValue(channelCode, "notification_channel_code_required"), NOTIFICATION_CHANNEL_CODES, "notification_channel_code_invalid");
     const items = listNotifications({
       companyId: resolvedCompanyId,
       recipientType: resolvedRecipientType,
@@ -265,21 +285,114 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
       categoryCode,
       onlyUnread
     });
-    return {
+    const resolvedGeneratedAt = normalizeOptionalDateTime(generatedAt) || nowIso(clock);
+    const resolvedCategoryCode = normalizeOptionalCode(categoryCode);
+    const fingerprint = buildDigestFingerprint({
       companyId: resolvedCompanyId,
       recipientType: resolvedRecipientType,
       recipientId: resolvedRecipientId,
-      generatedAt: normalizeOptionalDateTime(generatedAt) || nowIso(clock),
+      channelCode: resolvedChannelCode,
+      categoryCode: resolvedCategoryCode,
       onlyUnread,
-      categoryCode: normalizeOptionalCode(categoryCode),
+      notificationIds: items.map((item) => item.notificationId)
+    });
+    const existingDigestId = state.digestIdByFingerprint.get(fingerprint);
+    if (existingDigestId) {
+      const existingDigest = state.digests.get(existingDigestId);
+      if (existingDigest && existingDigest.status !== "superseded") {
+        return copy(existingDigest);
+      }
+    }
+
+    for (const digestId of state.digestIdsByCompany.get(resolvedCompanyId) || []) {
+      const existingDigest = state.digests.get(digestId);
+      if (!existingDigest || existingDigest.status === "superseded") {
+        continue;
+      }
+      if (
+        existingDigest.recipientType === resolvedRecipientType
+        && existingDigest.recipientId === resolvedRecipientId
+        && existingDigest.channelCode === resolvedChannelCode
+        && existingDigest.categoryCode === resolvedCategoryCode
+        && existingDigest.onlyUnread === onlyUnread
+      ) {
+        existingDigest.status = "superseded";
+        existingDigest.supersededAt = resolvedGeneratedAt;
+        existingDigest.updatedAt = resolvedGeneratedAt;
+      }
+    }
+
+    const digest = {
+      notificationDigestId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      recipientType: resolvedRecipientType,
+      recipientId: resolvedRecipientId,
+      channelCode: resolvedChannelCode,
+      categoryCode: resolvedCategoryCode,
+      onlyUnread,
+      generatedAt: resolvedGeneratedAt,
       totalCount: summary.totalCount,
       unreadCount: summary.unreadCount,
-      countsByPriority: summary.countsByPriority,
-      groups: summary.groups,
+      countsByPriority: copy(summary.countsByPriority),
+      groups: copy(summary.groups),
       notificationIds: items.map((item) => item.notificationId),
       newestCreatedAt: items[0]?.createdAt || null,
-      oldestCreatedAt: items.length > 0 ? items[items.length - 1].createdAt : null
+      oldestCreatedAt: items.length > 0 ? items[items.length - 1].createdAt : null,
+      status: "built",
+      fingerprint,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: resolvedGeneratedAt,
+      updatedAt: resolvedGeneratedAt,
+      supersededAt: null
     };
+    state.digests.set(digest.notificationDigestId, digest);
+    appendToIndex(state.digestIdsByCompany, resolvedCompanyId, digest.notificationDigestId);
+    state.digestIdByFingerprint.set(fingerprint, digest.notificationDigestId);
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId: digest.createdByActorId,
+      action: "notification.digest_built",
+      entityType: "notification_digest",
+      entityId: digest.notificationDigestId,
+      explanation: `Built notification digest for ${resolvedRecipientType} ${resolvedRecipientId} on ${resolvedChannelCode}.`
+    });
+    return copy(digest);
+  }
+
+  function listNotificationDigests({
+    companyId,
+    recipientType = null,
+    recipientId = null,
+    channelCode = null,
+    categoryCode = null,
+    status = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedRecipientType = recipientType == null ? null : assertAllowed(normalizeEnumValue(recipientType, "notification_recipient_type_required"), NOTIFICATION_RECIPIENT_TYPES, "notification_recipient_type_invalid");
+    const resolvedChannelCode = channelCode == null ? null : assertAllowed(normalizeEnumValue(channelCode, "notification_channel_code_required"), NOTIFICATION_CHANNEL_CODES, "notification_channel_code_invalid");
+    const resolvedStatus = status == null ? null : assertAllowed(normalizeEnumValue(status, "notification_digest_status_required"), NOTIFICATION_DIGEST_STATUSES, "notification_digest_status_invalid");
+    const resolvedCategoryCode = normalizeOptionalCode(categoryCode);
+    return (state.digestIdsByCompany.get(resolvedCompanyId) || [])
+      .map((digestId) => state.digests.get(digestId))
+      .filter(Boolean)
+      .map(copy)
+      .filter((digest) => (resolvedRecipientType ? digest.recipientType === resolvedRecipientType : true))
+      .filter((digest) => (recipientId ? digest.recipientId === recipientId : true))
+      .filter((digest) => (resolvedChannelCode ? digest.channelCode === resolvedChannelCode : true))
+      .filter((digest) => (resolvedCategoryCode ? digest.categoryCode === resolvedCategoryCode : true))
+      .filter((digest) => (resolvedStatus ? digest.status === resolvedStatus : true))
+      .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt) || right.notificationDigestId.localeCompare(left.notificationDigestId));
+  }
+
+  function getNotificationDigest({ companyId, notificationDigestId } = {}) {
+    const digest = state.digests.get(requireText(notificationDigestId, "notification_digest_id_required"));
+    if (!digest) {
+      throw createError(404, "notification_digest_not_found", "Notification digest was not found.");
+    }
+    if (companyId && digest.companyId !== companyId) {
+      throw createError(403, "cross_company_forbidden", "Notification digest belongs to another company.");
+    }
+    return copy(digest);
   }
 
   function expireNotification({ companyId, notificationId, actorId = "system", reasonCode = "expired" } = {}) {
@@ -288,6 +401,7 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
       return presentNotification(state, notification, { includeHistory: true });
     }
     notification.status = "expired";
+    notification.updatedAt = nowIso(clock);
     pushAudit(state, clock, {
       companyId: notification.companyId,
       actorId: requireText(actorId, "actor_id_required"),
@@ -320,6 +434,27 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     };
   }
 
+  function releaseSnoozedNotifications({ companyId = null, asOf = null, actorId = "system" } = {}) {
+    const resolvedCompanyId = normalizeOptionalText(companyId);
+    const cutoff = normalizeOptionalDateTime(asOf) || nowIso(clock);
+    const items = [...state.notifications.values()]
+      .filter((notification) => (resolvedCompanyId ? notification.companyId === resolvedCompanyId : true))
+      .filter((notification) => notification.status === "snoozed")
+      .filter((notification) => Boolean(notification.snoozedUntil) && notification.snoozedUntil <= cutoff)
+      .sort((left, right) => left.snoozedUntil.localeCompare(right.snoozedUntil))
+      .map((notification) => releaseSnoozedNotification({
+        state,
+        clock,
+        notification,
+        actorId
+      }));
+    return {
+      asOf: cutoff,
+      totalCount: items.length,
+      items
+    };
+  }
+
   function markNotificationRead({ companyId, notificationId, actorId = "system" } = {}) {
     const notification = requireNotification(state, companyId, notificationId);
     if (["cancelled", "expired"].includes(notification.status)) {
@@ -327,6 +462,7 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     }
     notification.status = notification.status === "acknowledged" ? "acknowledged" : "read";
     notification.lastReadAt = nowIso(clock);
+    notification.updatedAt = nowIso(clock);
     appendAction(state, clock, notification, { actionCode: "read", resultCode: "success", actedBy: requireText(actorId, "actor_id_required") });
     return presentNotification(state, notification, { includeHistory: true });
   }
@@ -338,6 +474,7 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     }
     notification.status = "acknowledged";
     notification.acknowledgedAt = nowIso(clock);
+    notification.updatedAt = nowIso(clock);
     appendAction(state, clock, notification, { actionCode: "acknowledge", resultCode: "success", actedBy: requireText(actorId, "actor_id_required") });
     return presentNotification(state, notification, { includeHistory: true });
   }
@@ -349,6 +486,7 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     }
     notification.status = "snoozed";
     notification.snoozedUntil = normalizeOptionalDateTime(until) || addHours(nowIso(clock), 4);
+    notification.updatedAt = nowIso(clock);
     appendAction(state, clock, notification, { actionCode: "snooze", resultCode: "success", actedBy: requireText(actorId, "actor_id_required") });
     return presentNotification(state, notification, { includeHistory: true });
   }
@@ -356,8 +494,68 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
   function cancelNotification({ companyId, notificationId, actorId = "system" } = {}) {
     const notification = requireNotification(state, companyId, notificationId);
     notification.status = "cancelled";
+    notification.updatedAt = nowIso(clock);
     appendAction(state, clock, notification, { actionCode: "cancel", resultCode: "success", actedBy: requireText(actorId, "actor_id_required") });
     return presentNotification(state, notification, { includeHistory: true });
+  }
+
+  function scanNotificationEscalations({ companyId, asOf = null, escalationPolicyCode = "notification.default", actorId = "system" } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedAsOf = normalizeOptionalDateTime(asOf) || nowIso(clock);
+    const resolvedPolicyCode = normalizeCode(escalationPolicyCode, "notification_escalation_policy_code_required");
+    const items = [];
+    let createdCount = 0;
+    let recurringCount = 0;
+
+    for (const notification of listNotificationsForEscalation(state, resolvedCompanyId)) {
+      const thresholdMinutes = resolveNotificationEscalationThresholdMinutes(notification.priorityCode);
+      const ageMinutes = calculateNotificationAgeMinutes(state, notification, resolvedAsOf);
+      if (ageMinutes < thresholdMinutes) {
+        continue;
+      }
+      const breachLevel = Math.max(1, Math.floor(ageMinutes / thresholdMinutes));
+      const existingEscalation = findNotificationEscalation(state, notification.notificationId, breachLevel);
+      if (existingEscalation) {
+        items.push(copy(existingEscalation));
+        continue;
+      }
+      if (breachLevel > 1) {
+        recurringCount += 1;
+      } else {
+        createdCount += 1;
+      }
+      const escalation = createNotificationEscalation({
+        state,
+        clock,
+        notification,
+        breachLevel,
+        thresholdMinutes,
+        triggeredAt: resolvedAsOf,
+        escalationPolicyCode: resolvedPolicyCode,
+        actorId
+      });
+      items.push(escalation);
+    }
+
+    return {
+      asOf: resolvedAsOf,
+      scannedCount: (state.notificationIdsByCompany.get(resolvedCompanyId) || []).length,
+      createdCount,
+      recurringCount,
+      items
+    };
+  }
+
+  function listNotificationEscalations({ companyId, notificationId = null, status = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = status == null ? null : assertAllowed(normalizeEnumValue(status, "notification_escalation_status_required"), NOTIFICATION_ESCALATION_STATUSES, "notification_escalation_status_invalid");
+    return (state.escalationIdsByCompany.get(resolvedCompanyId) || [])
+      .map((escalationId) => state.escalations.get(escalationId))
+      .filter(Boolean)
+      .map(copy)
+      .filter((escalation) => (notificationId ? escalation.notificationId === notificationId : true))
+      .filter((escalation) => (resolvedStatus ? escalation.status === resolvedStatus : true))
+      .sort((left, right) => right.triggeredAt.localeCompare(left.triggeredAt) || right.notificationEscalationId.localeCompare(left.notificationEscalationId));
   }
 
   function listNotificationAuditEvents({ companyId, notificationId = null } = {}) {
@@ -370,6 +568,8 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
       notifications: [...state.notifications.values()].map(copy),
       deliveries: [...state.deliveries.values()].map(copy),
       actions: [...state.actions.values()].map(copy),
+      digests: [...state.digests.values()].map(copy),
+      escalations: [...state.escalations.values()].map(copy),
       auditEvents: state.auditEvents.map(copy)
     };
   }
@@ -378,7 +578,7 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
 function presentNotification(state, notification, { includeHistory = false } = {}) {
   const result = {
     ...copy(notification),
-    unread: !["read", "acknowledged"].includes(notification.status)
+    unread: isNotificationUnread(notification)
   };
   if (includeHistory) {
     result.deliveries = (state.deliveryIdsByNotification.get(notification.notificationId) || []).map((deliveryId) => copy(state.deliveries.get(deliveryId))).filter(Boolean);
@@ -460,11 +660,143 @@ function ensureCategorySummary(categorySummaries, categoryCode) {
   return summary;
 }
 
+function isNotificationUnread(notification) {
+  return !["read", "acknowledged", "snoozed", "expired", "cancelled"].includes(notification.status);
+}
+
 function appendToIndex(index, key, value) {
   if (!index.has(key)) {
     index.set(key, []);
   }
   index.get(key).push(value);
+}
+
+function buildDigestFingerprint({ companyId, recipientType, recipientId, channelCode, categoryCode, onlyUnread, notificationIds }) {
+  return [
+    companyId,
+    recipientType,
+    recipientId,
+    channelCode,
+    categoryCode || "all",
+    onlyUnread ? "unread_only" : "all_items",
+    ...(Array.isArray(notificationIds) ? notificationIds : [])
+  ].join("::");
+}
+
+function releaseSnoozedNotification({ state, clock, notification, actorId }) {
+  notification.status = resolveReleasedNotificationStatus(state, notification);
+  notification.snoozedUntil = null;
+  notification.updatedAt = nowIso(clock);
+  appendAction(state, clock, notification, {
+    actionCode: "release_snooze",
+    resultCode: "success",
+    actedBy: requireText(actorId, "actor_id_required")
+  });
+  return presentNotification(state, notification, { includeHistory: true });
+}
+
+function resolveReleasedNotificationStatus(state, notification) {
+  const latestDelivery = (state.deliveryIdsByNotification.get(notification.notificationId) || [])
+    .map((deliveryId) => state.deliveries.get(deliveryId))
+    .filter(Boolean)
+    .sort((left, right) => right.attemptNo - left.attemptNo)[0] || null;
+  if (!latestDelivery) {
+    return "created";
+  }
+  return latestDelivery.status === "delivered" ? "delivered" : "queued";
+}
+
+function listNotificationsForEscalation(state, companyId) {
+  return (state.notificationIdsByCompany.get(companyId) || [])
+    .map((notificationId) => state.notifications.get(notificationId))
+    .filter(Boolean)
+    .filter((notification) => ["created", "queued", "delivered"].includes(notification.status));
+}
+
+function resolveNotificationEscalationThresholdMinutes(priorityCode) {
+  switch (priorityCode) {
+    case "critical":
+      return 60;
+    case "high":
+      return 240;
+    case "medium":
+      return 720;
+    default:
+      return 2880;
+  }
+}
+
+function calculateNotificationAgeMinutes(state, notification, asOf) {
+  const deliveries = (state.deliveryIdsByNotification.get(notification.notificationId) || [])
+    .map((deliveryId) => state.deliveries.get(deliveryId))
+    .filter(Boolean)
+    .sort((left, right) => right.attemptNo - left.attemptNo);
+  const effectiveStart = deliveries.find((delivery) => delivery.deliveredAt)?.deliveredAt || notification.createdAt;
+  return Math.max(0, Math.floor((Date.parse(asOf) - Date.parse(effectiveStart)) / 60000));
+}
+
+function findNotificationEscalation(state, notificationId, breachLevel) {
+  return (state.escalationIdsByNotification.get(notificationId) || [])
+    .map((escalationId) => state.escalations.get(escalationId))
+    .filter(Boolean)
+    .find((escalation) => escalation.breachLevel === breachLevel) || null;
+}
+
+function createNotificationEscalation({
+  state,
+  clock,
+  notification,
+  breachLevel,
+  thresholdMinutes,
+  triggeredAt,
+  escalationPolicyCode,
+  actorId
+}) {
+  const priorEscalations = (state.escalationIdsByNotification.get(notification.notificationId) || [])
+    .map((escalationId) => state.escalations.get(escalationId))
+    .filter(Boolean)
+    .filter((escalation) => escalation.status === "open");
+  for (const priorEscalation of priorEscalations) {
+    priorEscalation.status = "superseded";
+    priorEscalation.updatedAt = triggeredAt;
+  }
+  const escalation = {
+    notificationEscalationId: crypto.randomUUID(),
+    notificationId: notification.notificationId,
+    companyId: notification.companyId,
+    recipientType: notification.recipientType,
+    recipientId: notification.recipientId,
+    priorityCode: notification.priorityCode,
+    categoryCode: notification.categoryCode,
+    escalationPolicyCode,
+    thresholdMinutes,
+    breachLevel,
+    recurringBreach: breachLevel > 1,
+    status: "open",
+    triggeredAt,
+    createdByActorId: requireText(actorId, "actor_id_required"),
+    createdAt: triggeredAt,
+    updatedAt: triggeredAt
+  };
+  state.escalations.set(escalation.notificationEscalationId, escalation);
+  appendToIndex(state.escalationIdsByCompany, notification.companyId, escalation.notificationEscalationId);
+  appendToIndex(state.escalationIdsByNotification, notification.notificationId, escalation.notificationEscalationId);
+  pushAudit(state, clock, {
+    companyId: notification.companyId,
+    actorId: escalation.createdByActorId,
+    action: "notification.escalated",
+    entityType: "notification_escalation",
+    entityId: escalation.notificationEscalationId,
+    explanation: escalation.recurringBreach
+      ? `Recurring escalation created for notification ${notification.notificationId}.`
+      : `Escalation created for notification ${notification.notificationId}.`
+  });
+  appendAction(state, clock, notification, {
+    actionCode: "escalate",
+    resultCode: escalation.recurringBreach ? "recurring_breach" : "first_breach",
+    actedBy: escalation.createdByActorId
+  });
+  return copy(escalation);
 }
 
 function pushAudit(state, clock, {

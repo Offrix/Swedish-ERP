@@ -984,7 +984,7 @@ Materialisera read models, operator views och separata objektfamiljer som framti
 **Delfaser**
 - [x] 15.1 [HARDEN] **Reporting snapshots och metrics** — Trial balance, P&L, balance sheet, cashflow, open items, payroll reports, project portfolio, tax account summary och submission dashboards.
 - [x] 15.2 [HARDEN] **Search, object profiles och workbenches** — Permission-trimmade object profiles, blockers, sections, actions, workbench composition och saved views.
-- [ ] 15.3 [HARDEN] **Notifications och activity som egna familjer** — Recipient, channel, digest, snooze, escalation och append-only activity feeds.
+- [x] 15.3 [HARDEN] **Notifications och activity som egna familjer** — Recipient, channel, digest, snooze, escalation och append-only activity feeds.
 - [ ] 15.4 [HARDEN] **Work items, queues och ownership** — Queue grants, SLA, escalation, assignment, dual-control blockers och operator views.
 - [ ] 15.5 [NEW BUILD] **Project/finance/compliance mission control** — Portfolio dashboards, close blockers, payroll submission monitoring, cutover dashboards, trial conversion dashboard.
 
@@ -1267,7 +1267,6 @@ Bevisa att backend-kontrakten bär verkliga kundscenarier, låsa UI-kontrakt och
 ## Slutregel
 
 Denna roadmap är den enda bindande byggordningen. Ingen implementation, ingen featuregren och ingen UI-plan får köra utanför denna ordning utan uttrycklig ändring i detta dokument.
-
 
 
 
