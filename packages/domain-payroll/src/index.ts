@@ -127,6 +127,8 @@ export interface PayrollPayoutBatchLine {
   readonly amount: number;
   readonly currencyCode: string;
   readonly paymentReference: string;
+  readonly bankRailMode: string;
+  readonly watermarkCode: string | null;
 }
 
 export interface PayrollPayoutBatch {
@@ -136,6 +138,9 @@ export interface PayrollPayoutBatch {
   readonly reportingPeriod: string;
   readonly bankAccountId: string;
   readonly status: string;
+  readonly bankRailMode: string;
+  readonly executionBoundary: Record<string, unknown> | null;
+  readonly watermarkCode: string | null;
   readonly totalAmount: number;
   readonly paymentDate: string;
   readonly exportFileName: string;
@@ -148,6 +153,7 @@ export interface PayrollPayoutBatch {
   readonly providerBaselineRefs: readonly Record<string, unknown>[];
   readonly decisionSnapshotRefs: readonly Record<string, unknown>[];
   readonly lines: readonly PayrollPayoutBatchLine[];
+  readonly evidenceBundleId: string | null;
   readonly createdByActorId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -212,6 +218,9 @@ export interface AgiSubmissionVersion {
   readonly payloadHash: string;
   readonly payloadJson: Record<string, unknown>;
   readonly adapterPayloadJson: Record<string, unknown>;
+  readonly executionBoundary: Record<string, unknown> | null;
+  readonly trialGuard: Record<string, unknown> | null;
+  readonly evidenceBundleId: string | null;
   readonly changedEmployeeIds: readonly string[];
   readonly lockEmploymentIds: readonly string[];
   readonly validationErrors: readonly Record<string, unknown>[];
@@ -262,6 +271,11 @@ export interface PayslipSnapshot {
   readonly balances: Record<string, unknown>;
   readonly totals: Record<string, unknown>;
   readonly warnings: readonly Record<string, unknown>[];
+  readonly executionBoundary: Record<string, unknown> | null;
+  readonly watermark: Record<string, unknown> | null;
+  readonly agiPreview: Record<string, unknown> | null;
+  readonly postingIntentPreview: Record<string, unknown> | null;
+  readonly bankPaymentPreview: Record<string, unknown> | null;
   readonly generatedAt: string;
   readonly generatedByActorId: string;
   readonly regenerationNo: number;
@@ -523,6 +537,7 @@ export interface PayRunRef {
   readonly migrationSnapshot: Record<string, unknown> | null;
   readonly correctionOfPayRunId: string | null;
   readonly correctionReason: string | null;
+  readonly executionBoundary: Record<string, unknown> | null;
   readonly payrollInputSnapshotId: string | null;
   readonly payrollInputFingerprint: string;
   readonly payRunFingerprint: string;
@@ -561,6 +576,7 @@ export interface PayrollInputSnapshot {
   readonly migrationSnapshot: Record<string, unknown> | null;
   readonly correctionOfPayRunId: string | null;
   readonly correctionReason: string | null;
+  readonly executionBoundary: Record<string, unknown> | null;
   readonly sourceSnapshot: Record<string, unknown>;
   readonly agreementSnapshots: readonly Record<string, unknown>[];
   readonly balanceSnapshots: readonly Record<string, unknown>[];

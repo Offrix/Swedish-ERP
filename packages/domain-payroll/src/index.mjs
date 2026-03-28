@@ -302,6 +302,9 @@ export function createPayrollEngine({
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  environmentMode = "test",
+  supportsLegalEffect = false,
+  modeWatermarkCode = null,
   orgAuthPlatform = null,
   hrPlatform = null,
   timePlatform = null,
@@ -312,6 +315,8 @@ export function createPayrollEngine({
   pensionPlatform = null,
   ledgerPlatform = null,
   bankingPlatform = null,
+  tenantControlPlatform = null,
+  evidencePlatform = null,
   ruleRegistry = null,
   getCorePlatform = null
 } = {}) {
@@ -1434,6 +1439,13 @@ export function createPayrollEngine({
     actorId = "system"
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const executionBoundary = resolvePayrollExecutionBoundary({
+      companyId: resolvedCompanyId,
+      environmentMode,
+      supportsLegalEffect,
+      modeWatermarkCode,
+      tenantControlPlatform
+    });
     const payCalendar = requirePayCalendar(state, resolvedCompanyId, payCalendarId);
     const resolvedRunType = assertAllowed(runType, PAY_RUN_TYPES, "pay_run_type_invalid");
     const period = resolvePayrollPeriod({
@@ -1508,6 +1520,7 @@ export function createPayrollEngine({
       agreementSnapshotHash: "",
       postingIntentSnapshotHash: "",
       bankPaymentSnapshotHash: "",
+      executionBoundary: copy(executionBoundary),
       warningCodes: [],
       rulepackRefs: [],
       providerBaselineRefs: [],
@@ -1547,7 +1560,8 @@ export function createPayrollEngine({
       garnishmentDecisionSnapshots: [...normalizedGarnishmentDecisionSnapshots.values()],
       migrationSnapshot: migrationContext?.snapshot || null,
       correctionOfPayRunId: correctionSourceRun?.payRunId || null,
-      correctionReason: normalizeOptionalText(correctionReason)
+      correctionReason: normalizeOptionalText(correctionReason),
+      executionBoundary: copy(executionBoundary)
     };
     const agreementSnapshots = [];
     const balanceSnapshots = [];
@@ -1601,6 +1615,7 @@ export function createPayrollEngine({
         taxDecisionSnapshot,
         employerContributionDecisionSnapshot,
         garnishmentDecisionSnapshot,
+        executionBoundary,
         employmentTimeBase,
         agreementContext,
         hrPlatform,
@@ -1814,7 +1829,11 @@ export function createPayrollEngine({
       clock,
       orgAuthPlatform,
       hrPlatform,
-      timePlatform
+      timePlatform,
+      environmentMode,
+      supportsLegalEffect,
+      modeWatermarkCode,
+      tenantControlPlatform
     });
     persistAgiMaterialization(state, materialized);
     submission.currentVersionId = materialized.version.agiSubmissionVersionId;
@@ -1889,9 +1908,23 @@ export function createPayrollEngine({
   } = {}) {
     const submission = requireAgiSubmission(state, companyId, agiSubmissionId);
     const version = requireAgiSubmissionVersion(state, submission.currentVersionId);
+    const executionBoundary = normalizePayrollExecutionBoundary(
+      version.executionBoundary,
+      resolvePayrollExecutionBoundary({
+        companyId: submission.companyId,
+        environmentMode,
+        supportsLegalEffect,
+        modeWatermarkCode,
+        tenantControlPlatform
+      })
+    );
     if (version.state !== "ready_for_sign") {
       throw createError(409, "agi_submission_not_ready_for_sign", "AGI submission must be ready_for_sign before submit.");
     }
+    assertPayrollSubmissionModeAllowed({
+      requestedMode: mode,
+      executionBoundary
+    });
 
     appendAgiSignature(state, {
       version,
@@ -1908,7 +1941,9 @@ export function createPayrollEngine({
     version.state = "submitted";
     version.submittedAt = nowIso(clock);
     version.submittedByActorId = requireText(actorId, "actor_id_required");
-    version.submissionMode = requireText(mode, "agi_submission_mode_required");
+    version.submissionMode = executionBoundary.submissionModeCode;
+    version.executionBoundary = copy(executionBoundary);
+    version.trialGuard = buildPayrollTrialGuard(executionBoundary);
     version.updatedAt = version.submittedAt;
     submission.status = version.state;
     submission.updatedAt = version.submittedAt;
@@ -1925,7 +1960,8 @@ export function createPayrollEngine({
       simulatedOutcome,
       message: receiptMessage,
       actorId,
-      clock
+      clock,
+      executionBoundary
     });
     const normalizedReceiptErrors = normalizeAgiReceiptErrors(receiptErrors);
     if (normalizedReceiptErrors.length > 0) {
@@ -1948,6 +1984,58 @@ export function createPayrollEngine({
       previousVersion.supersededAt = version.updatedAt;
       previousVersion.updatedAt = version.updatedAt;
     }
+    version.evidenceBundleId = registerPayrollEvidenceBundle({
+      evidencePlatform,
+      executionBoundary,
+      companyId: version.companyId,
+      bundleType: "payroll_trial_submission",
+      sourceObjectType: "payroll_agi_submission",
+      sourceObjectId: version.agiSubmissionId,
+      sourceObjectVersion: version.payloadHash,
+      title: `Payroll AGI submission ${version.reportingPeriod}`,
+      actorId,
+      metadata: {
+        submissionMode: version.submissionMode,
+        receiptStatus: receipt.receiptStatus,
+        legalEffect: executionBoundary.supportsLegalEffect === true,
+        watermarkCode: executionBoundary.watermarkCode || null
+      },
+      artifactRefs: [
+        {
+          artifactType: "agi_payload",
+          artifactRef: `payload:${version.agiSubmissionVersionId}`,
+          checksum: version.payloadHash,
+          roleCode: "submission_payload",
+          metadata: {
+            payloadVersion: version.adapterPayloadJson?.payloadVersion || "agi-json-v1"
+          }
+        },
+        {
+          artifactType: "agi_receipt",
+          artifactRef: `receipt:${receipt.agiReceiptId}`,
+          checksum: buildSnapshotHash(receipt.payloadJson || {}),
+          roleCode: "submission_receipt",
+          metadata: {
+            receiptStatus: receipt.receiptStatus,
+            receiptCode: receipt.receiptCode
+          }
+        }
+      ],
+      sourceRefs: [
+        {
+          sourceType: "agi_submission_version",
+          sourceId: version.agiSubmissionVersionId
+        }
+      ],
+      relatedObjectRefs: [
+        {
+          objectType: "agi_receipt",
+          objectId: receipt.agiReceiptId
+        }
+      ]
+    });
+    version.updatedAt = nowIso(clock);
+    submission.updatedAt = version.updatedAt;
     return enrichAgiSubmission(state, submission);
   }
 
@@ -1969,7 +2057,11 @@ export function createPayrollEngine({
       clock,
       orgAuthPlatform,
       hrPlatform,
-      timePlatform
+      timePlatform,
+      environmentMode,
+      supportsLegalEffect,
+      modeWatermarkCode,
+      tenantControlPlatform
     });
     persistAgiMaterialization(state, materialized);
     submission.currentVersionId = materialized.version.agiSubmissionVersionId;
@@ -2105,16 +2197,28 @@ export function createPayrollEngine({
       throw createError(409, "payroll_posting_required", "Payroll posting must exist before payout export.");
     }
 
-    const companyBankAccount = resolvePayrollCompanyBankAccount({
+    const executionBoundary = normalizePayrollExecutionBoundary(
+      payRun.executionBoundary,
+      resolvePayrollExecutionBoundary({
+        companyId: payRun.companyId,
+        environmentMode,
+        supportsLegalEffect,
+        modeWatermarkCode,
+        tenantControlPlatform
+      })
+    );
+    const companyBankAccount = resolvePayrollSettlementRail({
       companyId: payRun.companyId,
       bankAccountId,
-      bankingPlatform
+      bankingPlatform,
+      executionBoundary
     });
     const batchModel = buildPayrollPayoutBatchModel({
       state,
       payRun,
       companyBankAccount,
-      hrPlatform
+      hrPlatform,
+      executionBoundary
     });
     const now = nowIso(clock);
     const record = {
@@ -2124,9 +2228,12 @@ export function createPayrollEngine({
       reportingPeriod: payRun.reportingPeriod,
       bankAccountId: companyBankAccount.bankAccountId,
       status: "exported",
+      bankRailMode: batchModel.bankRailMode,
+      executionBoundary: copy(executionBoundary),
+      watermarkCode: executionBoundary.watermarkCode || null,
       totalAmount: batchModel.totalAmount,
       paymentDate: payRun.payDate,
-      exportFileName: `PAYROLL-${payRun.reportingPeriod}-${payRun.payRunId.slice(0, 8)}.csv`,
+      exportFileName: batchModel.exportFileName,
       exportPayload: batchModel.exportPayload,
       exportPayloadHash: batchModel.payloadHash,
       payrollInputSnapshotId: payRun.payrollInputSnapshotId,
@@ -2136,6 +2243,7 @@ export function createPayrollEngine({
       providerBaselineRefs: copy(payRun.providerBaselineRefs || []),
       decisionSnapshotRefs: copy(payRun.decisionSnapshotRefs || []),
       lines: batchModel.lines.map(copy),
+      evidenceBundleId: null,
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: now,
       updatedAt: now,
@@ -2150,6 +2258,39 @@ export function createPayrollEngine({
     payRun.updatedAt = now;
     payRun.payoutBatchStatus = record.status;
     payRun.payoutBatchId = record.payrollPayoutBatchId;
+    record.evidenceBundleId = registerPayrollEvidenceBundle({
+      evidencePlatform,
+      executionBoundary,
+      companyId: record.companyId,
+      bundleType: "payroll_trial_payout_batch",
+      sourceObjectType: "payroll_payout_batch",
+      sourceObjectId: record.payrollPayoutBatchId,
+      sourceObjectVersion: record.exportPayloadHash,
+      title: `Payroll payout batch ${record.reportingPeriod}`,
+      actorId,
+      metadata: {
+        bankRailMode: record.bankRailMode,
+        legalEffect: executionBoundary.supportsLegalEffect === true,
+        watermarkCode: record.watermarkCode
+      },
+      artifactRefs: [
+        {
+          artifactType: "payout_export",
+          artifactRef: `payout:${record.payrollPayoutBatchId}`,
+          checksum: record.exportPayloadHash,
+          roleCode: "export_payload",
+          metadata: {
+            exportFileName: record.exportFileName
+          }
+        }
+      ],
+      sourceRefs: [
+        {
+          sourceType: "pay_run",
+          sourceId: record.payRunId
+        }
+      ]
+    });
     appendRunEvent(state, {
       payRunId: payRun.payRunId,
       companyId: payRun.companyId,
@@ -2170,13 +2311,22 @@ export function createPayrollEngine({
       throw createError(500, "ledger_platform_missing", "Ledger platform is required to match payroll payouts to bank.");
     }
     const payRun = requireApprovedPayRun(state, batch.companyId, batch.payRunId);
-    const companyBankAccount = resolvePayrollCompanyBankAccount({
+    const executionBoundary = normalizePayrollExecutionBoundary(
+      batch.executionBoundary,
+      payRun.executionBoundary || null
+    );
+    if (executionBoundary.trialGuardActive === true) {
+      assertTrialPayrollBankEventId(bankEventId);
+    }
+    const companyBankAccount = resolvePayrollSettlementRail({
       companyId: batch.companyId,
       bankAccountId: batch.bankAccountId,
-      bankingPlatform
+      bankingPlatform,
+      executionBoundary
     });
     const matchedDate = matchedOn ? normalizeRequiredDate(matchedOn, "payroll_payout_matched_on_invalid") : payRun.payDate;
-    if (roundMoney(batch.totalAmount) > 0) {
+    const skipLedgerMatchPosting = executionBoundary?.trialGuardActive === true && !companyBankAccount.sourceBankAccountId;
+    if (roundMoney(batch.totalAmount) > 0 && !skipLedgerMatchPosting) {
       const posted = ledgerPlatform.applyPostingIntent({
         companyId: batch.companyId,
         journalDate: matchedDate,
@@ -2474,6 +2624,38 @@ function resolvePayrollCompanyBankAccount({ companyId, bankAccountId = null, ban
   return selected;
 }
 
+function resolvePayrollSettlementRail({ companyId, bankAccountId = null, bankingPlatform = null, executionBoundary = null }) {
+  if (executionBoundary?.trialGuardActive === true) {
+    let preferredAccount = null;
+    try {
+      preferredAccount =
+        bankAccountId != null
+          ? resolvePayrollCompanyBankAccount({
+              companyId,
+              bankAccountId,
+              bankingPlatform
+            })
+          : bankingPlatform?.listBankAccounts?.({
+              companyId: requireText(companyId, "company_id_required"),
+              activeOnly: true
+            })?.[0] || null;
+    } catch {
+      preferredAccount = null;
+    }
+    return {
+      bankAccountId: `trial:${requireText(companyId, "company_id_required")}:payroll_rail`,
+      ledgerAccountNumber: preferredAccount?.ledgerAccountNumber || "1930",
+      railMode: "trial_non_live",
+      sourceBankAccountId: preferredAccount?.bankAccountId || null
+    };
+  }
+  return resolvePayrollCompanyBankAccount({
+    companyId,
+    bankAccountId,
+    bankingPlatform
+  });
+}
+
 function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
   const lines = (state.payRunLineIdsByRun.get(payRun.payRunId) || [])
     .map((payRunLineId) => state.payRunLines.get(payRunLineId))
@@ -2650,7 +2832,8 @@ function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
   };
 }
 
-function buildPayrollPayoutBatchModel({ state, payRun, companyBankAccount, hrPlatform }) {
+function buildPayrollPayoutBatchModel({ state, payRun, companyBankAccount, hrPlatform, executionBoundary = null }) {
+  const trialGuardActive = executionBoundary?.trialGuardActive === true;
   const payslips = (state.payslipIdsByRun.get(payRun.payRunId) || [])
     .map((payslipId) => state.payslips.get(payslipId))
     .filter(Boolean)
@@ -2668,26 +2851,35 @@ function buildPayrollPayoutBatchModel({ state, payRun, companyBankAccount, hrPla
         }) ||
         payslip.bankAccount ||
         null;
-      if (!bankAccount) {
+      if (!bankAccount && !trialGuardActive) {
         throw createError(409, "employee_bank_account_missing", `Employee ${payslip.employee.employeeId} is missing a payout account.`);
       }
+      const accountTarget = trialGuardActive
+        ? buildTrialSafePayrollAccountTarget({
+            reportingPeriod: payRun.reportingPeriod,
+            employeeId: payslip.employee.employeeId,
+            employmentId: payslip.employment.employmentId
+          })
+        : bankAccount?.iban ||
+          bankAccount?.bankgiro ||
+          bankAccount?.plusgiro ||
+          [bankAccount?.clearingNumber, bankAccount?.accountNumber].filter(Boolean).join(":") ||
+          bankAccount?.maskedAccountDisplay ||
+          null;
       return {
         payrollPayoutLineId: crypto.randomUUID(),
         employmentId: payslip.employment.employmentId,
         employeeId: payslip.employee.employeeId,
         employeeNumber: payslip.employee.employeeNumber || null,
         payeeName: payslip.employee.displayName,
-        payoutMethod: bankAccount.payoutMethod || null,
-        accountTarget:
-          bankAccount.iban ||
-          bankAccount.bankgiro ||
-          bankAccount.plusgiro ||
-          [bankAccount.clearingNumber, bankAccount.accountNumber].filter(Boolean).join(":") ||
-          bankAccount.maskedAccountDisplay,
-        employeeBankAccountId: bankAccount.employeeBankAccountId || null,
+        payoutMethod: trialGuardActive ? "trial_non_live_rail" : bankAccount?.payoutMethod || null,
+        accountTarget,
+        employeeBankAccountId: trialGuardActive ? null : bankAccount?.employeeBankAccountId || null,
         amount: netPayAmount,
         currencyCode: "SEK",
-        paymentReference: `LON ${payRun.reportingPeriod} ${payslip.employee.employeeNumber || payslip.employee.employeeId.slice(0, 8)}`
+        paymentReference: `LON ${payRun.reportingPeriod} ${payslip.employee.employeeNumber || payslip.employee.employeeId.slice(0, 8)}`,
+        bankRailMode: trialGuardActive ? "trial_non_live" : "standard",
+        watermarkCode: executionBoundary?.watermarkCode || null
       };
     })
     .filter(Boolean)
@@ -2698,11 +2890,14 @@ function buildPayrollPayoutBatchModel({ state, payRun, companyBankAccount, hrPla
   const exportPayload = ["employee_no;payee;account;amount;currency;reference", ...exportRows].join("\n");
   return {
     lines,
+    bankRailMode: trialGuardActive ? "trial_non_live" : "standard",
+    exportFileName: `${trialGuardActive ? "TRIAL-" : ""}PAYROLL-${payRun.reportingPeriod}-${payRun.payRunId.slice(0, 8)}.csv`,
     totalAmount: roundMoney(lines.reduce((sum, line) => sum + Number(line.amount || 0), 0)),
     exportPayload,
     payloadHash: buildSnapshotHash({
       payRunId: payRun.payRunId,
       bankAccountId: companyBankAccount.bankAccountId,
+      executionBoundary: copy(executionBoundary || null),
       exportPayload
     })
   };
@@ -2945,9 +3140,21 @@ function materializeAgiSubmissionVersion({
   clock,
   orgAuthPlatform,
   hrPlatform,
-  timePlatform
+  timePlatform,
+  environmentMode = "test",
+  supportsLegalEffect = false,
+  modeWatermarkCode = null,
+  tenantControlPlatform = null
 }) {
   const approvedRuns = collectApprovedPayRunsForPeriod(state, companyId, reportingPeriod);
+  const executionBoundary = derivePayrollExecutionBoundaryForApprovedRuns({
+    approvedRuns,
+    companyId,
+    environmentMode,
+    supportsLegalEffect,
+    modeWatermarkCode,
+    tenantControlPlatform
+  });
   const sourceSnapshotHash = buildAgiSourceSnapshotHash(approvedRuns);
   const companyContext = resolveCompanyComplianceContext(orgAuthPlatform, companyId);
   const materializedAt = nowIso(clock);
@@ -2999,6 +3206,7 @@ function materializeAgiSubmissionVersion({
     rulepackRefs: dedupePayrollRulepackRefs(approvedRuns.flatMap((run) => run.rulepackRefs || [])),
     providerBaselineRefs: dedupeProviderBaselineRefs(approvedRuns.flatMap((run) => run.providerBaselineRefs || [])),
     decisionSnapshotRefs: dedupeDecisionSnapshotRefs(approvedRuns.flatMap((run) => run.decisionSnapshotRefs || [])),
+    executionBoundary: copy(executionBoundary),
     totals: summarizeAgiEmployeeTotals(employees),
     employees: employees.map((employee) => copy(employee.payloadJson)),
     generatedAt: materializedAt,
@@ -3024,10 +3232,16 @@ function materializeAgiSubmissionVersion({
     payloadHash: buildSnapshotHash(payload),
     payloadJson: payload,
     adapterPayloadJson: {
-      mode: "test",
+      mode: executionBoundary.submissionModeCode,
       payloadVersion: "agi-json-v1",
+      legalEffect: executionBoundary.supportsLegalEffect === true,
+      watermarkCode: executionBoundary.watermarkCode || null,
+      providerPolicyCode: executionBoundary.providerPolicyCode || null,
       payload
     },
+    executionBoundary: copy(executionBoundary),
+    trialGuard: buildPayrollTrialGuard(executionBoundary),
+    evidenceBundleId: null,
     changedEmployeeIds,
     lockEmploymentIds: [...lockEmploymentIds].sort(),
     validationErrors: [],
@@ -3602,19 +3816,33 @@ function appendAgiSignature(state, { version, actorId, clock }) {
   appendToIndex(state.agiSignatureIdsByVersion, version.agiSubmissionVersionId, signature.agiSignatureId);
 }
 
-function appendAgiReceipt(state, { version, simulatedOutcome, message, actorId, clock }) {
+function appendAgiReceipt(state, { version, simulatedOutcome, message, actorId, clock, executionBoundary = null }) {
+  const boundary = normalizePayrollExecutionBoundary(executionBoundary, {
+    modeCode: "test",
+    environmentMode: "test",
+    supportsLegalEffect: false,
+    watermarkCode: null,
+    trialGuardActive: false,
+    submissionModeCode: "test"
+  });
   const receipt = {
     agiReceiptId: crypto.randomUUID(),
     agiSubmissionVersionId: version.agiSubmissionVersionId,
     companyId: version.companyId,
     receiptStatus: assertAllowed(simulatedOutcome, ["accepted", "partially_rejected", "rejected"], "agi_receipt_status_invalid"),
-    receiptCode: `test:${simulatedOutcome}`,
-    message: normalizeOptionalText(message) || `Test-mode AGI receipt: ${simulatedOutcome}.`,
+    receiptCode: `${boundary.submissionModeCode}:${simulatedOutcome}`,
+    message:
+      normalizeOptionalText(message)
+      || `${boundary.trialGuardActive ? "Trial" : boundary.supportsLegalEffect === true ? "Live" : "Non-live"} AGI receipt: ${simulatedOutcome}.`,
     receivedByActorId: requireText(actorId, "actor_id_required"),
     receivedAt: nowIso(clock),
     payloadJson: {
-      mode: "test",
-      outcome: simulatedOutcome
+      mode: boundary.submissionModeCode,
+      outcome: simulatedOutcome,
+      legalEffect: boundary.supportsLegalEffect === true,
+      watermarkCode: boundary.watermarkCode || null,
+      providerPolicyCode: boundary.providerPolicyCode || null,
+      executionBoundary: copy(boundary)
     }
   };
   state.agiReceipts.set(receipt.agiReceiptId, receipt);
@@ -3660,6 +3888,226 @@ function resolveReceiptOutcomeState(receiptStatus) {
     return "partially_rejected";
   }
   return "rejected";
+}
+
+function resolvePayrollExecutionBoundary({
+  companyId,
+  environmentMode = "test",
+  supportsLegalEffect = false,
+  modeWatermarkCode = null,
+  tenantControlPlatform = null
+}) {
+  const runtimeModeCode = normalizeOptionalText(environmentMode) || "test";
+  const runtimeWatermarkCode = normalizeOptionalText(modeWatermarkCode) || runtimeModeCode.toUpperCase();
+  const trialEnvironment = findLatestTrialEnvironmentForCompany(tenantControlPlatform, companyId);
+  if (trialEnvironment) {
+    assertPayrollTrialEnvironmentIsolated(trialEnvironment);
+    return {
+      boundaryCode: trialEnvironment.trialEnvironmentProfileId,
+      source: "trial_environment_profile",
+      modeCode: "trial",
+      environmentMode: "trial",
+      submissionModeCode: "trial",
+      trialGuardActive: true,
+      supportsLegalEffect: false,
+      watermarkCode: normalizeOptionalText(trialEnvironment.watermarkCode) || runtimeWatermarkCode || "TRIAL",
+      providerPolicyCode: normalizeOptionalText(trialEnvironment.providerPolicyCode) || "trial_safe_default",
+      providerEnvironmentRef:
+        normalizeOptionalText(trialEnvironment.providerPolicy?.adapters?.submissions?.providerEnvironmentRef)
+        || "trial_safe",
+      trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
+      trialIsolationStatus: trialEnvironment.trialIsolationStatus,
+      liveCredentialPolicy: trialEnvironment.liveCredentialPolicy || "blocked",
+      liveSubmissionPolicy: trialEnvironment.liveSubmissionPolicy || "blocked",
+      liveBankRailPolicy: trialEnvironment.liveBankRailPolicy || "blocked",
+      liveEconomicEffectPolicy: trialEnvironment.liveEconomicEffectPolicy || "blocked"
+    };
+  }
+  return {
+    boundaryCode: `runtime:${runtimeModeCode}`,
+    source: "runtime_mode",
+    modeCode: runtimeModeCode,
+    environmentMode: runtimeModeCode,
+    submissionModeCode: runtimeModeCode === "production" ? "live" : runtimeModeCode,
+    trialGuardActive: runtimeModeCode === "trial",
+    supportsLegalEffect: supportsLegalEffect === true,
+    watermarkCode: runtimeWatermarkCode || null,
+    providerPolicyCode: null,
+    providerEnvironmentRef: null,
+    trialEnvironmentProfileId: null,
+    trialIsolationStatus: runtimeModeCode === "trial" ? "runtime_trial_guard" : null,
+    liveCredentialPolicy: supportsLegalEffect === true ? "allowed" : "blocked",
+    liveSubmissionPolicy: supportsLegalEffect === true ? "allowed" : "blocked",
+    liveBankRailPolicy: runtimeModeCode === "trial" ? "blocked" : supportsLegalEffect === true ? "allowed" : "non_live",
+    liveEconomicEffectPolicy:
+      runtimeModeCode === "trial" ? "blocked" : supportsLegalEffect === true ? "allowed" : "non_live"
+  };
+}
+
+function normalizePayrollExecutionBoundary(boundary, fallbackBoundary = null) {
+  if (!boundary && !fallbackBoundary) {
+    return null;
+  }
+  return copy({
+    ...(fallbackBoundary ? copy(fallbackBoundary) : {}),
+    ...(boundary ? copy(boundary) : {})
+  });
+}
+
+function derivePayrollExecutionBoundaryForApprovedRuns({
+  approvedRuns,
+  companyId,
+  environmentMode = "test",
+  supportsLegalEffect = false,
+  modeWatermarkCode = null,
+  tenantControlPlatform = null
+}) {
+  const fallbackBoundary = resolvePayrollExecutionBoundary({
+    companyId,
+    environmentMode,
+    supportsLegalEffect,
+    modeWatermarkCode,
+    tenantControlPlatform
+  });
+  const storedBoundary = (approvedRuns || []).map((run) => run?.executionBoundary).find(Boolean) || null;
+  return normalizePayrollExecutionBoundary(storedBoundary, fallbackBoundary);
+}
+
+function findLatestTrialEnvironmentForCompany(tenantControlPlatform, companyId) {
+  if (!tenantControlPlatform || typeof tenantControlPlatform.snapshotTenantControl !== "function") {
+    return null;
+  }
+  const snapshot = tenantControlPlatform.snapshotTenantControl();
+  const entries = Array.isArray(snapshot?.trialEnvironmentProfiles) ? snapshot.trialEnvironmentProfiles : [];
+  return entries
+    .filter((entry) => entry.companyId === requireText(companyId, "company_id_required"))
+    .filter((entry) => entry.mode === "trial")
+    .filter((entry) => !["expired", "archived"].includes(entry.status))
+    .sort((left, right) => {
+      const leftKey = `${left.status === "active" ? "0" : "1"}:${left.updatedAt || left.createdAt || ""}:${left.trialEnvironmentProfileId}`;
+      const rightKey = `${right.status === "active" ? "0" : "1"}:${right.updatedAt || right.createdAt || ""}:${right.trialEnvironmentProfileId}`;
+      return rightKey.localeCompare(leftKey);
+    })[0] || null;
+}
+
+function assertPayrollTrialEnvironmentIsolated(trialEnvironment) {
+  if (!trialEnvironment || trialEnvironment.mode !== "trial") {
+    throw createError(409, "trial_environment_mode_invalid", "Trial environment must run in trial mode.");
+  }
+  if (trialEnvironment.supportsRealCredentials !== false || trialEnvironment.liveCredentialPolicy !== "blocked") {
+    throw createError(409, "trial_environment_live_credentials_not_blocked", "Trial environment must block live credentials.");
+  }
+  if (trialEnvironment.supportsLegalEffect !== false || trialEnvironment.liveSubmissionPolicy !== "blocked") {
+    throw createError(409, "trial_environment_legal_effect_not_blocked", "Trial environment must block legal effect.");
+  }
+  if (trialEnvironment.liveBankRailPolicy !== "blocked" || trialEnvironment.liveEconomicEffectPolicy !== "blocked") {
+    throw createError(
+      409,
+      "trial_environment_live_effect_not_blocked",
+      "Trial environment must block live bank rails and live economic effect."
+    );
+  }
+  if (normalizeOptionalText(trialEnvironment.providerPolicyCode) == null || trialEnvironment.trialIsolationStatus !== "isolated") {
+    throw createError(409, "trial_environment_not_isolated", "Trial environment isolation policy is incomplete.");
+  }
+}
+
+function assertPayrollSubmissionModeAllowed({ requestedMode, executionBoundary }) {
+  const normalizedRequestedMode = normalizeOptionalText(requestedMode);
+  if (!normalizedRequestedMode) {
+    return;
+  }
+  if (executionBoundary?.supportsLegalEffect === true) {
+    return;
+  }
+  if (["live", "production", "legal_effect"].includes(normalizedRequestedMode)) {
+    throw createError(409, "agi_submission_live_mode_blocked", "Live AGI submission mode is blocked in this runtime boundary.");
+  }
+}
+
+function buildPayrollTrialGuard(executionBoundary) {
+  if (!executionBoundary?.trialGuardActive) {
+    return null;
+  }
+  return {
+    modeCode: executionBoundary.modeCode,
+    legalEffect: false,
+    watermarkCode: executionBoundary.watermarkCode || null,
+    providerPolicyCode: executionBoundary.providerPolicyCode || null,
+    trialEnvironmentProfileId: executionBoundary.trialEnvironmentProfileId || null,
+    liveSubmissionPolicy: executionBoundary.liveSubmissionPolicy || "blocked",
+    liveBankRailPolicy: executionBoundary.liveBankRailPolicy || "blocked"
+  };
+}
+
+function buildPayrollWatermark(executionBoundary) {
+  if (!executionBoundary?.trialGuardActive) {
+    return null;
+  }
+  return {
+    watermarkCode: executionBoundary.watermarkCode || "TRIAL",
+    label: `${executionBoundary.watermarkCode || "TRIAL"} NON-LIVE`,
+    legalEffect: false,
+    displayText: `${executionBoundary.watermarkCode || "TRIAL"} - NO LEGAL EFFECT`
+  };
+}
+
+function buildTrialSafePayrollAccountTarget({ reportingPeriod, employeeId, employmentId }) {
+  return `trial://payroll/${normalizeReportingPeriod(reportingPeriod, "payroll_reporting_period_required")}/${String(employeeId).slice(0, 8)}/${String(employmentId).slice(0, 8)}`;
+}
+
+function assertTrialPayrollBankEventId(bankEventId) {
+  const resolvedBankEventId = requireText(bankEventId, "bank_event_id_required");
+  if (!/^(trial|sandbox|test):/u.test(resolvedBankEventId)) {
+    throw createError(
+      409,
+      "trial_bank_event_non_live_required",
+      "Trial payroll payout batches may only be matched against non-live bank events."
+    );
+  }
+}
+
+function registerPayrollEvidenceBundle({
+  evidencePlatform,
+  executionBoundary,
+  companyId,
+  bundleType,
+  sourceObjectType,
+  sourceObjectId,
+  sourceObjectVersion,
+  title,
+  actorId = "system",
+  metadata = {},
+  artifactRefs = [],
+  sourceRefs = [],
+  relatedObjectRefs = []
+}) {
+  if (executionBoundary?.trialGuardActive !== true || typeof evidencePlatform?.createFrozenEvidenceBundleSnapshot !== "function") {
+    return null;
+  }
+  const bundle = evidencePlatform.createFrozenEvidenceBundleSnapshot({
+    companyId,
+    bundleType,
+    sourceObjectType,
+    sourceObjectId,
+    sourceObjectVersion,
+    title,
+    retentionClass: "regulated",
+    classificationCode: "restricted_internal",
+    metadata: {
+      ...copy(metadata || {}),
+      watermarkCode: executionBoundary.watermarkCode || null,
+      legalEffect: false,
+      modeCode: executionBoundary.modeCode,
+      providerPolicyCode: executionBoundary.providerPolicyCode || null
+    },
+    artifactRefs,
+    sourceRefs,
+    relatedObjectRefs,
+    actorId,
+    environmentMode: executionBoundary.environmentMode || "trial"
+  });
+  return bundle?.evidenceBundleId || null;
 }
 
 function resolveCompanyComplianceContext(orgAuthPlatform, companyId) {
@@ -3775,9 +4223,31 @@ function buildPayrollPostingIntentPreview({
   };
 }
 
-function buildPayrollBankPaymentPreview({ reportingPeriod, payDate, employee, employment, primaryBankAccount, netPayAmount }) {
+function buildPayrollBankPaymentPreview({
+  reportingPeriod,
+  payDate,
+  employee,
+  employment,
+  primaryBankAccount,
+  netPayAmount,
+  executionBoundary = null
+}) {
   const normalizedNetPayAmount = netPayAmount == null ? null : roundMoney(netPayAmount);
   const requiresBankPayout = normalizedNetPayAmount != null && normalizedNetPayAmount > 0;
+  const trialGuardActive = executionBoundary?.trialGuardActive === true;
+  const accountTarget = requiresBankPayout
+    ? trialGuardActive
+      ? buildTrialSafePayrollAccountTarget({
+          reportingPeriod,
+          employeeId: employee.employeeId,
+          employmentId: employment.employmentId
+        })
+      : primaryBankAccount?.iban ||
+        primaryBankAccount?.bankgiro ||
+        primaryBankAccount?.plusgiro ||
+        primaryBankAccount?.maskedAccountDisplay ||
+        null
+    : null;
   const payload = {
     employeeId: employee.employeeId,
     employmentId: employment.employmentId,
@@ -3785,13 +4255,11 @@ function buildPayrollBankPaymentPreview({ reportingPeriod, payDate, employee, em
     payDate,
     netPayAmount: normalizedNetPayAmount,
     requiresBankPayout,
-    payoutReady: requiresBankPayout ? primaryBankAccount != null : true,
-    accountTarget:
-      primaryBankAccount?.iban ||
-      primaryBankAccount?.bankgiro ||
-      primaryBankAccount?.plusgiro ||
-      primaryBankAccount?.maskedAccountDisplay ||
-      null
+    payoutReady: requiresBankPayout ? (trialGuardActive ? true : primaryBankAccount != null) : true,
+    accountTarget,
+    bankRailMode: trialGuardActive ? "trial_non_live" : "standard",
+    legalEffect: executionBoundary?.supportsLegalEffect === true,
+    watermarkCode: executionBoundary?.watermarkCode || null
   };
   return {
     payload,
@@ -3800,7 +4268,8 @@ function buildPayrollBankPaymentPreview({ reportingPeriod, payDate, employee, em
       bankAccountPresent: primaryBankAccount != null,
       requiresBankPayout,
       payoutReady: payload.payoutReady,
-      netPayAmount: normalizedNetPayAmount
+      netPayAmount: normalizedNetPayAmount,
+      bankRailMode: payload.bankRailMode
     })
   };
 }
@@ -3855,6 +4324,7 @@ function calculateEmploymentRun({
   taxDecisionSnapshot = null,
   employerContributionDecisionSnapshot = null,
   garnishmentDecisionSnapshot = null,
+  executionBoundary = null,
   employmentTimeBase = null,
   agreementContext = null,
   hrPlatform,
@@ -3922,6 +4392,7 @@ function calculateEmploymentRun({
     pendingTimeEntries: employmentTimeBase?.pendingTimeEntries || [],
     externalBalanceSnapshots: employmentTimeBase?.balanceSnapshots || [],
     agreementOverlay,
+    executionBoundary: copy(executionBoundary),
     benefitEvents: (benefitPayloadBundle.events || []).map((event) => ({
       benefitEventId: event.benefitEventId,
       benefitCode: event.benefitCode,
@@ -4401,12 +4872,15 @@ function calculateEmploymentRun({
     employee,
     employment,
     primaryBankAccount,
-    netPayAmount: lineTotals.netPay
+    netPayAmount: lineTotals.netPay,
+    executionBoundary
   });
   steps[18] = bankPaymentPreview.step;
   payslipRenderPayload.agiPreview = agiPreview.payload;
   payslipRenderPayload.postingIntentPreview = postingIntentPreview.payload;
   payslipRenderPayload.bankPaymentPreview = bankPaymentPreview.payload;
+  payslipRenderPayload.executionBoundary = copy(executionBoundary);
+  payslipRenderPayload.watermark = buildPayrollWatermark(executionBoundary);
 
   return {
     employee,
@@ -6360,7 +6834,12 @@ function createStoredPayslip({ companyId, payRunId, period, runType, result, gen
     lines: result.lines,
     balances: result.payslipRenderPayload.balances,
     totals: result.payslipRenderPayload.totals,
-    warnings: result.warnings
+    warnings: result.warnings,
+    executionBoundary: result.payslipRenderPayload.executionBoundary || null,
+    watermark: result.payslipRenderPayload.watermark || null,
+    agiPreview: result.payslipRenderPayload.agiPreview || null,
+    postingIntentPreview: result.payslipRenderPayload.postingIntentPreview || null,
+    bankPaymentPreview: result.payslipRenderPayload.bankPaymentPreview || null
   });
   return {
     payslipId: crypto.randomUUID(),
@@ -6910,6 +7389,7 @@ function createPayrollInputSnapshotRecord({
     migrationSnapshot: copy(run.migrationSnapshot || null),
     correctionOfPayRunId: run.correctionOfPayRunId,
     correctionReason: run.correctionReason,
+    executionBoundary: copy(run.executionBoundary || null),
     sourceSnapshot: copy(sourceSnapshot || {}),
     agreementSnapshots: copy(agreementSnapshots || []),
     balanceSnapshots: copy(balanceSnapshots || []),
@@ -6969,6 +7449,7 @@ function buildPayRunFingerprint({ state, run }) {
     reportingPeriod: run.reportingPeriod,
     payDate: run.payDate,
     runType: run.runType,
+    executionBoundary: copy(run.executionBoundary || null),
     postingIntentSnapshotHash: run.postingIntentSnapshotHash || "",
     bankPaymentSnapshotHash: run.bankPaymentSnapshotHash || "",
     warningCodes: copy(run.warningCodes || []),

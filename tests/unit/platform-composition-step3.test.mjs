@@ -76,7 +76,20 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.equal(platform.getDomainRegistration("importCases")?.buildOrder > platform.getDomainRegistration("documentClassification")?.buildOrder, true);
   assert.deepEqual(
     platform.getDomainRegistration("payroll")?.dependsOn,
-    ["orgAuth", "hr", "time", "balances", "collectiveAgreements", "benefits", "travel", "pension", "ledger", "banking"]
+    [
+      "orgAuth",
+      "hr",
+      "time",
+      "balances",
+      "collectiveAgreements",
+      "benefits",
+      "travel",
+      "pension",
+      "ledger",
+      "banking",
+      "tenantControl",
+      "evidence"
+    ]
   );
   assert.deepEqual(
     platform.getDomainRegistration("annualReporting")?.dependsOn,
