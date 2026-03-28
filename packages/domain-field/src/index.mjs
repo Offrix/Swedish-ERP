@@ -16,6 +16,8 @@ export const FIELD_DISPATCH_STATUSES = Object.freeze(["planned", "accepted", "en
 export const FIELD_INVENTORY_LOCATION_TYPES = Object.freeze(["warehouse", "truck", "site"]);
 export const FIELD_SIGNATURE_STATUSES = Object.freeze(["pending", "captured", "voided"]);
 export const FIELD_SYNC_ENVELOPE_STATUSES = Object.freeze(["pending", "synced", "conflicted", "failed_terminal"]);
+export const FIELD_MATERIAL_RESERVATION_STATUSES = Object.freeze(["active", "released", "fulfilled", "cancelled"]);
+export const FIELD_CONFLICT_RECORD_STATUSES = Object.freeze(["open", "resolved", "dismissed"]);
 
 const FIELD_OFFLINE_POLICIES = Object.freeze([
   {
@@ -26,7 +28,7 @@ const FIELD_OFFLINE_POLICIES = Object.freeze([
   {
     objectType: "field_customer_signature",
     allowedMutationTypes: ["customer_signature.capture"],
-    mergeStrategy: "server_wins"
+    mergeStrategy: "manual_resolution"
   },
   {
     objectType: "field_work_order",
@@ -127,13 +129,20 @@ export function createFieldEngine({
     workOrderIdByNo: new Map(),
     dispatchAssignments: new Map(),
     dispatchIdsByWorkOrder: new Map(),
+    materialReservations: new Map(),
+    materialReservationIdsByWorkOrder: new Map(),
     materialWithdrawals: new Map(),
     materialWithdrawalIdsByWorkOrder: new Map(),
     customerSignatures: new Map(),
     signatureIdsByWorkOrder: new Map(),
+    fieldEvidence: new Map(),
+    fieldEvidenceIdsByWorkOrder: new Map(),
     syncEnvelopes: new Map(),
     syncEnvelopeIdsByCompany: new Map(),
     syncEnvelopeIdByClientMutation: new Map(),
+    conflictRecords: new Map(),
+    conflictRecordIdsByWorkOrder: new Map(),
+    conflictRecordIdsByCompany: new Map(),
     auditEvents: []
   };
 
@@ -323,24 +332,36 @@ export function createFieldEngine({
     return copy(record);
   }
 
-  function listWorkOrders({ companyId, status = null, employmentId = null, projectId = null } = {}) {
+  function listOperationalCases({ companyId, status = null, employmentId = null, projectId = null, packCode = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedStatus = normalizeOptionalText(status);
     const resolvedEmploymentId = normalizeOptionalText(employmentId);
     const resolvedProjectId = normalizeOptionalText(projectId);
+    const resolvedPackCode = normalizeOptionalText(packCode);
     return (state.workOrderIdsByCompany.get(resolvedCompanyId) || [])
       .map((workOrderId) => state.workOrders.get(workOrderId))
       .filter(Boolean)
-      .map((record) => enrichWorkOrder(state, record))
+      .map((record) => enrichOperationalCase(state, record))
       .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
       .filter((record) => (resolvedProjectId ? record.projectId === resolvedProjectId : true))
+      .filter((record) => (resolvedPackCode ? record.packCodes.includes(resolvedPackCode) : true))
       .filter((record) =>
         resolvedEmploymentId
           ? record.dispatchAssignments.some((assignment) => assignment.employmentId === resolvedEmploymentId && assignment.status !== "cancelled")
           : true
       )
-      .sort((left, right) => left.workOrderNo.localeCompare(right.workOrderNo))
+      .sort((left, right) => left.operationalCaseNo.localeCompare(right.operationalCaseNo))
       .map(copy);
+  }
+
+  function listWorkOrders({ companyId, status = null, employmentId = null, projectId = null } = {}) {
+    return listOperationalCases({
+      companyId,
+      status,
+      employmentId,
+      projectId,
+      packCode: "work_order"
+    }).map(copy);
   }
 
   function getProjectFieldSummary({ companyId, projectId } = {}) {
@@ -401,8 +422,115 @@ export function createFieldEngine({
     };
   }
 
+  function getOperationalCase({ companyId, operationalCaseId } = {}) {
+    return copy(enrichOperationalCase(state, requireOperationalCase(state, companyId, operationalCaseId)));
+  }
+
   function getWorkOrder({ companyId, workOrderId } = {}) {
-    return copy(enrichWorkOrder(state, requireWorkOrder(state, companyId, workOrderId)));
+    return copy(enrichOperationalCase(state, requireWorkOrder(state, companyId, workOrderId)));
+  }
+
+  function createOperationalCase({
+    companyId,
+    operationalCaseId = null,
+    operationalCaseNo = null,
+    projectId,
+    customerId = null,
+    displayName,
+    description = null,
+    caseTypeCode = "service_case",
+    packCodes = [],
+    serviceTypeCode = "service",
+    priorityCode = "normal",
+    scheduledStartAt = null,
+    scheduledEndAt = null,
+    laborItemId = null,
+    laborRateAmount = 0,
+    signatureRequired = false,
+    workOrderNo = null,
+    invoicingPolicyCode = "manual_review",
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const project = requireProject(projectsPlatform, resolvedCompanyId, projectId);
+    const resolvedPackCodes = normalizePackCodes(packCodes);
+    const hasWorkOrderPack = resolvedPackCodes.includes("work_order");
+    const resolvedOperationalCaseNo = requireText(
+      operationalCaseNo ||
+        workOrderNo ||
+        generateOperationalCaseNo(state, resolvedCompanyId, hasWorkOrderPack ? "WO" : "OC"),
+      "field_operational_case_no_required"
+    );
+    const scopedOperationalCaseKey = toCompanyScopedKey(resolvedCompanyId, resolvedOperationalCaseNo);
+    if (state.workOrderIdByNo.has(scopedOperationalCaseKey)) {
+      throw createError(409, "field_operational_case_no_not_unique", `Operational case ${resolvedOperationalCaseNo} already exists.`);
+    }
+    const resolvedCustomerId = normalizeOptionalText(customerId) || normalizeOptionalText(project.customerId);
+    if (resolvedCustomerId && arPlatform && typeof arPlatform.getCustomer === "function") {
+      arPlatform.getCustomer({ companyId: resolvedCompanyId, customerId: resolvedCustomerId });
+    }
+    if (laborItemId && arPlatform && typeof arPlatform.getItem === "function") {
+      arPlatform.getItem({ companyId: resolvedCompanyId, itemId: laborItemId });
+    }
+    const record = {
+      workOrderId: normalizeOptionalText(operationalCaseId) || crypto.randomUUID(),
+      operationalCaseId: null,
+      companyId: resolvedCompanyId,
+      operationalCaseNo: resolvedOperationalCaseNo,
+      workOrderNo: hasWorkOrderPack ? resolvedOperationalCaseNo : null,
+      projectId: project.projectId,
+      customerId: resolvedCustomerId,
+      displayName: requireText(displayName, "field_operational_case_name_required"),
+      description: normalizeOptionalText(description),
+      caseTypeCode: requireText(caseTypeCode, "field_operational_case_type_required"),
+      packCodes: resolvedPackCodes,
+      serviceTypeCode: requireText(serviceTypeCode, "field_operational_case_service_type_required"),
+      priorityCode: requireEnum(["low", "normal", "high", "urgent"], priorityCode, "field_operational_case_priority_invalid"),
+      status: hasWorkOrderPack ? "ready_for_dispatch" : "draft",
+      scheduledStartAt: normalizeOptionalDateTime(scheduledStartAt),
+      scheduledEndAt: normalizeOptionalDateTime(scheduledEndAt),
+      actualStartedAt: null,
+      actualEndedAt: null,
+      laborMinutes: 0,
+      laborItemId: normalizeOptionalText(laborItemId),
+      laborRateAmount: normalizeMoney(laborRateAmount, "field_operational_case_labor_rate_invalid"),
+      signatureRequired: signatureRequired === true,
+      signatureStatus: signatureRequired === true ? "pending" : "captured",
+      invoicingPolicyCode: requireEnum(["manual_review", "explicit_rule"], invoicingPolicyCode, "field_operational_case_invoicing_policy_invalid"),
+      customerInvoiceId: null,
+      versionNo: 1,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    record.operationalCaseId = record.workOrderId;
+    state.workOrders.set(record.workOrderId, record);
+    ensureCollection(state.workOrderIdsByCompany, record.companyId).push(record.workOrderId);
+    state.workOrderIdByNo.set(scopedOperationalCaseKey, record.workOrderId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId,
+      correlationId,
+      action: "field.operational_case.created",
+      entityType: "field_operational_case",
+      entityId: record.operationalCaseId,
+      projectId: record.projectId,
+      explanation: `Created operational case ${record.operationalCaseNo}.`
+    });
+    if (hasWorkOrderPack) {
+      pushAudit(state, clock, {
+        companyId: record.companyId,
+        actorId,
+        correlationId,
+        action: "field.work_order.created",
+        entityType: "field_work_order",
+        entityId: record.workOrderId,
+        projectId: record.projectId,
+        explanation: `Created work order ${record.workOrderNo}.`
+      });
+    }
+    return copy(enrichOperationalCase(state, record));
   }
 
   function createWorkOrder({
@@ -423,63 +551,28 @@ export function createFieldEngine({
     actorId = "system",
     correlationId = crypto.randomUUID()
   } = {}) {
-    const resolvedCompanyId = requireText(companyId, "company_id_required");
-    const project = requireProject(projectsPlatform, resolvedCompanyId, projectId);
-    const resolvedWorkOrderNo = requireText(
-      workOrderNo || generateWorkOrderNo(state, resolvedCompanyId),
-      "field_work_order_no_required"
-    );
-    const scopedWorkOrderKey = toCompanyScopedKey(resolvedCompanyId, resolvedWorkOrderNo);
-    if (state.workOrderIdByNo.has(scopedWorkOrderKey)) {
-      throw createError(409, "field_work_order_no_not_unique", `Work order ${resolvedWorkOrderNo} already exists.`);
-    }
-    const resolvedCustomerId = normalizeOptionalText(customerId) || normalizeOptionalText(project.customerId);
-    if (resolvedCustomerId && arPlatform && typeof arPlatform.getCustomer === "function") {
-      arPlatform.getCustomer({ companyId: resolvedCompanyId, customerId: resolvedCustomerId });
-    }
-    if (laborItemId && arPlatform && typeof arPlatform.getItem === "function") {
-      arPlatform.getItem({ companyId: resolvedCompanyId, itemId: laborItemId });
-    }
-    const record = {
-      workOrderId: normalizeOptionalText(workOrderId) || crypto.randomUUID(),
-      companyId: resolvedCompanyId,
-      workOrderNo: resolvedWorkOrderNo,
-      projectId: project.projectId,
-      customerId: resolvedCustomerId,
-      displayName: requireText(displayName, "field_work_order_name_required"),
-      description: normalizeOptionalText(description),
-      serviceTypeCode: requireText(serviceTypeCode, "field_work_order_service_type_required"),
-      priorityCode: requireEnum(["low", "normal", "high", "urgent"], priorityCode, "field_work_order_priority_invalid"),
-      status: "ready_for_dispatch",
-      scheduledStartAt: normalizeOptionalDateTime(scheduledStartAt),
-      scheduledEndAt: normalizeOptionalDateTime(scheduledEndAt),
-      actualStartedAt: null,
-      actualEndedAt: null,
-      laborMinutes: 0,
-      laborItemId: normalizeOptionalText(laborItemId),
-      laborRateAmount: normalizeMoney(laborRateAmount, "field_work_order_labor_rate_invalid"),
-      signatureRequired: signatureRequired === true,
-      signatureStatus: signatureRequired === true ? "pending" : "captured",
-      customerInvoiceId: null,
-      versionNo: 1,
-      createdByActorId: requireText(actorId, "actor_id_required"),
-      createdAt: nowIso(clock),
-      updatedAt: nowIso(clock)
-    };
-    state.workOrders.set(record.workOrderId, record);
-    ensureCollection(state.workOrderIdsByCompany, record.companyId).push(record.workOrderId);
-    state.workOrderIdByNo.set(scopedWorkOrderKey, record.workOrderId);
-    pushAudit(state, clock, {
-      companyId: record.companyId,
+    return createOperationalCase({
+      companyId,
+      operationalCaseId: workOrderId,
+      operationalCaseNo: workOrderNo,
+      workOrderNo,
+      projectId,
+      customerId,
+      displayName,
+      description,
+      caseTypeCode: "work_order",
+      packCodes: ["work_order"],
+      serviceTypeCode,
+      priorityCode,
+      scheduledStartAt,
+      scheduledEndAt,
+      laborItemId,
+      laborRateAmount,
+      signatureRequired,
+      invoicingPolicyCode: "manual_review",
       actorId,
-      correlationId,
-      action: "field.work_order.created",
-      entityType: "field_work_order",
-      entityId: record.workOrderId,
-      projectId: record.projectId,
-      explanation: `Created work order ${record.workOrderNo}.`
+      correlationId
     });
-    return copy(enrichWorkOrder(state, record));
   }
 
   function listDispatchAssignments({ companyId, workOrderId } = {}) {
@@ -567,12 +660,80 @@ export function createFieldEngine({
     return copy(assignment);
   }
 
+  function listMaterialReservations({ companyId, operationalCaseId } = {}) {
+    const operationalCase = requireOperationalCase(state, companyId, operationalCaseId);
+    return (state.materialReservationIdsByWorkOrder.get(operationalCase.operationalCaseId) || [])
+      .map((materialReservationId) => state.materialReservations.get(materialReservationId))
+      .filter(Boolean)
+      .map(copy);
+  }
+
+  function createMaterialReservation({
+    companyId,
+    operationalCaseId,
+    inventoryItemId,
+    inventoryLocationId,
+    quantity,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const operationalCase = requireOperationalCase(state, companyId, operationalCaseId);
+    const inventoryItem = requireInventoryItem(state, operationalCase.companyId, inventoryItemId);
+    const inventoryLocation = requireInventoryLocation(state, operationalCase.companyId, inventoryLocationId);
+    const balanceKey = toInventoryBalanceKey(inventoryItem.inventoryItemId, inventoryLocation.inventoryLocationId);
+    const inventoryBalance = state.inventoryBalances.get(balanceKey);
+    const resolvedQuantity = normalizeQuantity(quantity, "field_material_reservation_quantity_invalid");
+    if (!inventoryBalance || inventoryBalance.onHandQuantity - inventoryBalance.reservedQuantity < resolvedQuantity) {
+      throw createError(409, "field_material_reservation_insufficient_stock", "Insufficient stock for the requested material reservation.");
+    }
+    inventoryBalance.reservedQuantity = roundQuantity(inventoryBalance.reservedQuantity + resolvedQuantity);
+    inventoryBalance.updatedAt = nowIso(clock);
+    inventoryBalance.updatedByActorId = actorId;
+    const record = {
+      materialReservationId: crypto.randomUUID(),
+      operationalCaseId: operationalCase.operationalCaseId,
+      workOrderId: operationalCase.workOrderId,
+      companyId: operationalCase.companyId,
+      projectId: operationalCase.projectId,
+      inventoryItemId: inventoryItem.inventoryItemId,
+      inventoryLocationId: inventoryLocation.inventoryLocationId,
+      quantity: resolvedQuantity,
+      remainingQuantity: resolvedQuantity,
+      status: "active",
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      releasedAt: null,
+      releasedByActorId: null
+    };
+    state.materialReservations.set(record.materialReservationId, record);
+    ensureCollection(state.materialReservationIdsByWorkOrder, operationalCase.operationalCaseId).push(record.materialReservationId);
+    touchWorkOrder(clock, operationalCase);
+    pushAudit(state, clock, {
+      companyId: operationalCase.companyId,
+      actorId,
+      correlationId,
+      action: "field.material_reservation.created",
+      entityType: "field_material_reservation",
+      entityId: record.materialReservationId,
+      projectId: operationalCase.projectId,
+      explanation: `Reserved material for operational case ${operationalCase.operationalCaseNo}.`
+    });
+    return copy(record);
+  }
+
   function listMaterialWithdrawals({ companyId, workOrderId } = {}) {
     const workOrder = requireWorkOrder(state, companyId, workOrderId);
     return (state.materialWithdrawalIdsByWorkOrder.get(workOrder.workOrderId) || [])
       .map((materialWithdrawalId) => state.materialWithdrawals.get(materialWithdrawalId))
       .filter(Boolean)
       .map(copy);
+  }
+
+  function listMaterialUsages({ companyId, operationalCaseId } = {}) {
+    return listMaterialWithdrawals({ companyId, workOrderId: operationalCaseId }).map((record) => ({
+      ...copy(record),
+      materialUsageId: record.materialUsageId || record.materialWithdrawalId
+    }));
   }
 
   function createMaterialWithdrawal({
@@ -594,10 +755,25 @@ export function createFieldEngine({
     if (!inventoryBalance || inventoryBalance.onHandQuantity < resolvedQuantity) {
       throw createError(409, "field_inventory_insufficient_stock", "Insufficient stock for the requested material withdrawal.");
     }
+    let reservedToConsume = resolvedQuantity;
+    for (const materialReservation of listActiveReservationsForCase(state, workOrder.workOrderId, inventoryItem.inventoryItemId, inventoryLocation.inventoryLocationId)) {
+      if (reservedToConsume <= 0) {
+        break;
+      }
+      const consumedQuantity = Math.min(materialReservation.remainingQuantity, reservedToConsume);
+      materialReservation.remainingQuantity = roundQuantity(materialReservation.remainingQuantity - consumedQuantity);
+      if (materialReservation.remainingQuantity === 0) {
+        materialReservation.status = "fulfilled";
+      }
+      inventoryBalance.reservedQuantity = roundQuantity(Math.max(0, inventoryBalance.reservedQuantity - consumedQuantity));
+      reservedToConsume = roundQuantity(reservedToConsume - consumedQuantity);
+    }
     const record = {
       materialWithdrawalId: crypto.randomUUID(),
+      materialUsageId: null,
       companyId: workOrder.companyId,
       workOrderId: workOrder.workOrderId,
+      operationalCaseId: workOrder.operationalCaseId || workOrder.workOrderId,
       projectId: workOrder.projectId,
       inventoryItemId: inventoryItem.inventoryItemId,
       inventoryLocationId: inventoryLocation.inventoryLocationId,
@@ -608,12 +784,23 @@ export function createFieldEngine({
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock)
     };
+    record.materialUsageId = record.materialWithdrawalId;
     state.materialWithdrawals.set(record.materialWithdrawalId, record);
     ensureCollection(state.materialWithdrawalIdsByWorkOrder, workOrder.workOrderId).push(record.materialWithdrawalId);
     inventoryBalance.onHandQuantity = roundQuantity(inventoryBalance.onHandQuantity - resolvedQuantity);
     inventoryBalance.updatedAt = nowIso(clock);
     inventoryBalance.updatedByActorId = actorId;
     touchWorkOrder(clock, workOrder);
+    const evidence = recordFieldEvidence(state, clock, {
+      companyId: workOrder.companyId,
+      operationalCaseId: workOrder.operationalCaseId || workOrder.workOrderId,
+      projectId: workOrder.projectId,
+      evidenceTypeCode: "material_usage",
+      linkedObjectType: "field_material_usage",
+      linkedObjectId: record.materialUsageId,
+      actorId
+    });
+    record.fieldEvidenceId = evidence.fieldEvidenceId;
     pushAudit(state, clock, {
       companyId: workOrder.companyId,
       actorId,
@@ -627,12 +814,32 @@ export function createFieldEngine({
     return copy(record);
   }
 
+  function createMaterialUsage({ companyId, operationalCaseId, inventoryItemId, inventoryLocationId, quantity, sourceChannel = "api", actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+    return createMaterialWithdrawal({
+      companyId,
+      workOrderId: operationalCaseId,
+      inventoryItemId,
+      inventoryLocationId,
+      quantity,
+      sourceChannel,
+      actorId,
+      correlationId
+    });
+  }
+
   function listCustomerSignatures({ companyId, workOrderId } = {}) {
     const workOrder = requireWorkOrder(state, companyId, workOrderId);
     return (state.signatureIdsByWorkOrder.get(workOrder.workOrderId) || [])
       .map((fieldCustomerSignatureId) => state.customerSignatures.get(fieldCustomerSignatureId))
       .filter(Boolean)
       .map(copy);
+  }
+
+  function listSignatureRecords({ companyId, operationalCaseId } = {}) {
+    return listCustomerSignatures({ companyId, workOrderId: operationalCaseId }).map((record) => ({
+      ...copy(record),
+      signatureRecordId: record.signatureRecordId || record.fieldCustomerSignatureId
+    }));
   }
 
   function captureCustomerSignature({
@@ -647,8 +854,10 @@ export function createFieldEngine({
     const workOrder = requireWorkOrder(state, companyId, workOrderId);
     const record = {
       fieldCustomerSignatureId: crypto.randomUUID(),
+      signatureRecordId: null,
       companyId: workOrder.companyId,
       workOrderId: workOrder.workOrderId,
+      operationalCaseId: workOrder.operationalCaseId || workOrder.workOrderId,
       signerName: requireText(signerName, "field_signature_signer_required"),
       signedAt: requireText(normalizeOptionalDateTime(signedAt) || nowIso(clock), "field_signature_date_required"),
       signatureText: requireText(signatureText, "field_signature_text_required"),
@@ -657,10 +866,21 @@ export function createFieldEngine({
       capturedByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock)
     };
+    record.signatureRecordId = record.fieldCustomerSignatureId;
     state.customerSignatures.set(record.fieldCustomerSignatureId, record);
     ensureCollection(state.signatureIdsByWorkOrder, workOrder.workOrderId).push(record.fieldCustomerSignatureId);
     workOrder.signatureStatus = "captured";
     touchWorkOrder(clock, workOrder);
+    const evidence = recordFieldEvidence(state, clock, {
+      companyId: workOrder.companyId,
+      operationalCaseId: workOrder.operationalCaseId || workOrder.workOrderId,
+      projectId: workOrder.projectId,
+      evidenceTypeCode: "signature_capture",
+      linkedObjectType: "field_signature_record",
+      linkedObjectId: record.signatureRecordId,
+      actorId
+    });
+    record.fieldEvidenceId = evidence.fieldEvidenceId;
     pushAudit(state, clock, {
       companyId: workOrder.companyId,
       actorId,
@@ -716,6 +936,12 @@ export function createFieldEngine({
     const workOrder = requireWorkOrder(state, companyId, workOrderId);
     if (workOrder.status !== "completed") {
       throw createError(409, "field_work_order_not_completed", "Work order must be completed before invoicing.");
+    }
+    if (workOrder.invoicingPolicyCode !== "manual_review" && workOrder.invoicingPolicyCode !== "explicit_rule") {
+      throw createError(409, "field_operational_case_invoicing_policy_invalid", "Operational case is missing invoicing policy.");
+    }
+    if (listOpenConflictRecordsForCase(state, workOrder.workOrderId).length > 0) {
+      throw createError(409, "field_operational_case_open_conflicts", "Operational case has open conflicts that block invoice readiness.");
     }
     if (!arPlatform || typeof arPlatform.createInvoice !== "function" || typeof arPlatform.issueInvoice !== "function") {
       throw createError(500, "field_ar_platform_missing", "AR platform is required to invoice field work.");
@@ -817,6 +1043,7 @@ export function createFieldEngine({
       payloadJson: copy(payload),
       syncStatus: "pending",
       lastErrorCode: null,
+      conflictRecordId: null,
       createdAt: nowIso(clock),
       appliedAt: null
     };
@@ -866,6 +1093,39 @@ export function createFieldEngine({
         record.lastErrorCode = normalizeOptionalText(error?.code) || "field_sync_apply_failed";
       }
     }
+    if (record.syncStatus === "conflicted" || record.syncStatus === "failed_terminal") {
+      const conflictRecord = createConflictRecord(state, clock, {
+        companyId: record.companyId,
+        operationalCaseId: targetWorkOrder?.operationalCaseId || targetWorkOrder?.workOrderId || null,
+        projectId: targetWorkOrder?.projectId || null,
+        syncEnvelopeId: record.fieldSyncEnvelopeId,
+        conflictTypeCode: record.syncStatus === "conflicted" ? "version_conflict" : "apply_failure",
+        objectType: record.objectType,
+        mutationType: record.mutationType,
+        lastErrorCode: record.lastErrorCode,
+        actorId
+      });
+      record.conflictRecordId = conflictRecord.conflictRecordId;
+      record.fieldEvidenceId = recordFieldEvidence(state, clock, {
+        companyId: record.companyId,
+        operationalCaseId: targetWorkOrder?.operationalCaseId || targetWorkOrder?.workOrderId || null,
+        projectId: targetWorkOrder?.projectId || null,
+        evidenceTypeCode: "sync_conflict",
+        linkedObjectType: "field_conflict_record",
+        linkedObjectId: conflictRecord.conflictRecordId,
+        actorId
+      }).fieldEvidenceId;
+    } else {
+      record.fieldEvidenceId = recordFieldEvidence(state, clock, {
+        companyId: record.companyId,
+        operationalCaseId: targetWorkOrder?.operationalCaseId || targetWorkOrder?.workOrderId || null,
+        projectId: targetWorkOrder?.projectId || null,
+        evidenceTypeCode: "sync_receipt",
+        linkedObjectType: "field_sync_envelope",
+        linkedObjectId: record.fieldSyncEnvelopeId,
+        actorId
+      }).fieldEvidenceId;
+    }
     state.syncEnvelopes.set(record.fieldSyncEnvelopeId, record);
     ensureCollection(state.syncEnvelopeIdsByCompany, record.companyId).push(record.fieldSyncEnvelopeId);
     state.syncEnvelopeIdByClientMutation.set(scopedMutationKey, record.fieldSyncEnvelopeId);
@@ -892,6 +1152,61 @@ export function createFieldEngine({
       .map(copy);
   }
 
+  function listFieldEvidence({ companyId, operationalCaseId } = {}) {
+    const operationalCase = requireOperationalCase(state, companyId, operationalCaseId);
+    return (state.fieldEvidenceIdsByWorkOrder.get(operationalCase.operationalCaseId) || [])
+      .map((fieldEvidenceId) => state.fieldEvidence.get(fieldEvidenceId))
+      .filter(Boolean)
+      .map(copy);
+  }
+
+  function listConflictRecords({ companyId, operationalCaseId = null, status = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedOperationalCaseId = normalizeOptionalText(operationalCaseId);
+    const resolvedStatus = normalizeOptionalText(status);
+    const sourceIds = resolvedOperationalCaseId
+      ? state.conflictRecordIdsByWorkOrder.get(requireOperationalCase(state, resolvedCompanyId, resolvedOperationalCaseId).operationalCaseId) || []
+      : state.conflictRecordIdsByCompany.get(resolvedCompanyId) || [];
+    return sourceIds
+      .map((conflictRecordId) => state.conflictRecords.get(conflictRecordId))
+      .filter(Boolean)
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .map(copy);
+  }
+
+  function resolveConflictRecord({
+    companyId,
+    operationalCaseId,
+    conflictRecordId,
+    resolutionCode = "manual_review_completed",
+    notes = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const operationalCase = requireOperationalCase(state, companyId, operationalCaseId);
+    const conflictRecord = requireConflictRecord(state, operationalCase.companyId, operationalCase.operationalCaseId, conflictRecordId);
+    if (conflictRecord.status !== "open") {
+      throw createError(409, "field_conflict_record_not_open", "Conflict record is not open.");
+    }
+    conflictRecord.status = "resolved";
+    conflictRecord.resolutionCode = requireText(resolutionCode, "field_conflict_resolution_code_required");
+    conflictRecord.resolutionNotes = normalizeOptionalText(notes);
+    conflictRecord.resolvedAt = nowIso(clock);
+    conflictRecord.resolvedByActorId = requireText(actorId, "actor_id_required");
+    touchWorkOrder(clock, operationalCase);
+    pushAudit(state, clock, {
+      companyId: operationalCase.companyId,
+      actorId,
+      correlationId,
+      action: "field.conflict.resolved",
+      entityType: "field_conflict_record",
+      entityId: conflictRecord.conflictRecordId,
+      projectId: operationalCase.projectId,
+      explanation: `Resolved conflict record ${conflictRecord.conflictRecordId}.`
+    });
+    return copy(conflictRecord);
+  }
+
   function listFieldAuditEvents({ companyId, projectId = null, workOrderId = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedProjectId = normalizeOptionalText(projectId);
@@ -914,6 +1229,8 @@ export function createFieldEngine({
     fieldInventoryLocationTypes: FIELD_INVENTORY_LOCATION_TYPES,
     fieldSignatureStatuses: FIELD_SIGNATURE_STATUSES,
     fieldSyncEnvelopeStatuses: FIELD_SYNC_ENVELOPE_STATUSES,
+    fieldMaterialReservationStatuses: FIELD_MATERIAL_RESERVATION_STATUSES,
+    fieldConflictRecordStatuses: FIELD_CONFLICT_RECORD_STATUSES,
     listOfflinePolicies: () => FIELD_OFFLINE_POLICIES.map(copy),
     listInventoryLocations,
     createInventoryLocation,
@@ -921,6 +1238,9 @@ export function createFieldEngine({
     createInventoryItem,
     listInventoryBalances,
     createOrReplaceInventoryBalance,
+    listOperationalCases,
+    getOperationalCase,
+    createOperationalCase,
     listWorkOrders,
     getProjectFieldSummary,
     getWorkOrder,
@@ -929,8 +1249,13 @@ export function createFieldEngine({
     createDispatchAssignment,
     markDispatchEnRoute,
     markDispatchOnSite,
+    listMaterialReservations,
+    createMaterialReservation,
+    listMaterialUsages,
+    createMaterialUsage,
     listMaterialWithdrawals,
     createMaterialWithdrawal,
+    listSignatureRecords,
     listCustomerSignatures,
     captureCustomerSignature,
     completeWorkOrder,
@@ -938,6 +1263,9 @@ export function createFieldEngine({
     listMobileToday,
     syncOfflineEnvelope,
     listSyncEnvelopes,
+    listFieldEvidence,
+    listConflictRecords,
+    resolveConflictRecord,
     listFieldAuditEvents
   };
 }
@@ -963,22 +1291,52 @@ function enrichInventoryItem(state, record) {
   };
 }
 
-function enrichWorkOrder(state, record) {
+function enrichOperationalCase(state, record) {
+  const operationalCaseId = record.operationalCaseId || record.workOrderId;
+  const dispatchAssignments = (state.dispatchIdsByWorkOrder.get(record.workOrderId) || [])
+    .map((dispatchAssignmentId) => state.dispatchAssignments.get(dispatchAssignmentId))
+    .filter(Boolean)
+    .map(copy);
+  const materialReservations = (state.materialReservationIdsByWorkOrder.get(operationalCaseId) || [])
+    .map((materialReservationId) => state.materialReservations.get(materialReservationId))
+    .filter(Boolean)
+    .map(copy);
+  const materialWithdrawals = (state.materialWithdrawalIdsByWorkOrder.get(record.workOrderId) || [])
+    .map((materialWithdrawalId) => state.materialWithdrawals.get(materialWithdrawalId))
+    .filter(Boolean)
+    .map(copy);
+  const customerSignatures = (state.signatureIdsByWorkOrder.get(record.workOrderId) || [])
+    .map((fieldCustomerSignatureId) => state.customerSignatures.get(fieldCustomerSignatureId))
+    .filter(Boolean)
+    .map(copy);
+  const fieldEvidence = (state.fieldEvidenceIdsByWorkOrder.get(operationalCaseId) || [])
+    .map((fieldEvidenceId) => state.fieldEvidence.get(fieldEvidenceId))
+    .filter(Boolean)
+    .map(copy);
+  const conflictRecords = (state.conflictRecordIdsByWorkOrder.get(operationalCaseId) || [])
+    .map((conflictRecordId) => state.conflictRecords.get(conflictRecordId))
+    .filter(Boolean)
+    .map(copy);
   return {
     ...record,
-    dispatchAssignments: (state.dispatchIdsByWorkOrder.get(record.workOrderId) || [])
-      .map((dispatchAssignmentId) => state.dispatchAssignments.get(dispatchAssignmentId))
-      .filter(Boolean)
-      .map(copy),
-    materialWithdrawals: (state.materialWithdrawalIdsByWorkOrder.get(record.workOrderId) || [])
-      .map((materialWithdrawalId) => state.materialWithdrawals.get(materialWithdrawalId))
-      .filter(Boolean)
-      .map(copy),
-    customerSignatures: (state.signatureIdsByWorkOrder.get(record.workOrderId) || [])
-      .map((fieldCustomerSignatureId) => state.customerSignatures.get(fieldCustomerSignatureId))
-      .filter(Boolean)
-      .map(copy)
+    operationalCaseId,
+    operationalCaseNo: record.operationalCaseNo || record.workOrderNo,
+    packCodes: normalizePackCodes(record.packCodes),
+    dispatchAssignments,
+    materialReservations,
+    materialUsages: materialWithdrawals.map((usage) => ({ ...usage, materialUsageId: usage.materialUsageId || usage.materialWithdrawalId })),
+    materialWithdrawals,
+    signatureRecords: customerSignatures.map((signature) => ({ ...signature, signatureRecordId: signature.signatureRecordId || signature.fieldCustomerSignatureId })),
+    customerSignatures,
+    fieldEvidence,
+    conflictRecords,
+    openConflictCount: conflictRecords.filter((conflictRecord) => conflictRecord.status === "open").length,
+    invoiceReadyBlocked: conflictRecords.some((conflictRecord) => conflictRecord.status === "open")
   };
+}
+
+function enrichWorkOrder(state, record) {
+  return enrichOperationalCase(state, record);
 }
 
 function buildWorkOrderInvoiceLines({ state, arPlatform, companyId, workOrder }) {
@@ -1053,10 +1411,30 @@ function requireInventoryItem(state, companyId, inventoryItemId) {
   return record;
 }
 
-function requireWorkOrder(state, companyId, workOrderId) {
-  const record = state.workOrders.get(requireText(workOrderId, "field_work_order_id_required"));
+function requireOperationalCase(state, companyId, operationalCaseId) {
+  const record = state.workOrders.get(requireText(operationalCaseId, "field_operational_case_id_required"));
   if (!record || record.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "field_operational_case_not_found", "Operational case was not found.");
+  }
+  return record;
+}
+
+function requireWorkOrder(state, companyId, workOrderId) {
+  const record = requireOperationalCase(state, companyId, workOrderId);
+  if (!normalizePackCodes(record.packCodes).includes("work_order")) {
     throw createError(404, "field_work_order_not_found", "Work order was not found.");
+  }
+  return record;
+}
+
+function requireConflictRecord(state, companyId, operationalCaseId, conflictRecordId) {
+  const record = state.conflictRecords.get(requireText(conflictRecordId, "field_conflict_record_id_required"));
+  if (
+    !record ||
+    record.companyId !== requireText(companyId, "company_id_required") ||
+    record.operationalCaseId !== requireText(operationalCaseId, "field_operational_case_id_required")
+  ) {
+    throw createError(404, "field_conflict_record_not_found", "Conflict record was not found.");
   }
   return record;
 }
@@ -1079,9 +1457,99 @@ function touchWorkOrder(clock, workOrder) {
   workOrder.updatedAt = nowIso(clock);
 }
 
-function generateWorkOrderNo(state, companyId) {
+function generateOperationalCaseNo(state, companyId, prefix = "OC") {
   const nextIndex = (state.workOrderIdsByCompany.get(companyId) || []).length + 1;
-  return `WO-2026-${String(nextIndex).padStart(4, "0")}`;
+  return `${prefix}-2026-${String(nextIndex).padStart(4, "0")}`;
+}
+
+function generateWorkOrderNo(state, companyId) {
+  return generateOperationalCaseNo(state, companyId, "WO");
+}
+
+function normalizePackCodes(packCodes) {
+  const resolvedPackCodes = Array.isArray(packCodes)
+    ? packCodes.map((packCode) => normalizeOptionalText(packCode)).filter(Boolean)
+    : [];
+  return Array.from(new Set(resolvedPackCodes));
+}
+
+function listActiveReservationsForCase(state, operationalCaseId, inventoryItemId, inventoryLocationId) {
+  return (state.materialReservationIdsByWorkOrder.get(operationalCaseId) || [])
+    .map((materialReservationId) => state.materialReservations.get(materialReservationId))
+    .filter(Boolean)
+    .filter((record) => record.status === "active")
+    .filter((record) => record.inventoryItemId === inventoryItemId && record.inventoryLocationId === inventoryLocationId);
+}
+
+function createConflictRecord(state, clock, {
+  companyId,
+  operationalCaseId = null,
+  projectId = null,
+  syncEnvelopeId = null,
+  conflictTypeCode,
+  objectType,
+  mutationType,
+  lastErrorCode = null,
+  actorId = "system"
+} = {}) {
+  const record = {
+    conflictRecordId: crypto.randomUUID(),
+    companyId: requireText(companyId, "company_id_required"),
+    operationalCaseId: normalizeOptionalText(operationalCaseId),
+    projectId: normalizeOptionalText(projectId),
+    syncEnvelopeId: normalizeOptionalText(syncEnvelopeId),
+    conflictTypeCode: requireText(conflictTypeCode, "field_conflict_type_required"),
+    objectType: requireText(objectType, "field_conflict_object_type_required"),
+    mutationType: requireText(mutationType, "field_conflict_mutation_type_required"),
+    lastErrorCode: normalizeOptionalText(lastErrorCode),
+    status: "open",
+    createdAt: nowIso(clock),
+    createdByActorId: requireText(actorId, "actor_id_required"),
+    resolvedAt: null,
+    resolvedByActorId: null,
+    resolutionCode: null,
+    resolutionNotes: null
+  };
+  state.conflictRecords.set(record.conflictRecordId, record);
+  ensureCollection(state.conflictRecordIdsByCompany, record.companyId).push(record.conflictRecordId);
+  if (record.operationalCaseId) {
+    ensureCollection(state.conflictRecordIdsByWorkOrder, record.operationalCaseId).push(record.conflictRecordId);
+  }
+  return record;
+}
+
+function listOpenConflictRecordsForCase(state, operationalCaseId) {
+  return (state.conflictRecordIdsByWorkOrder.get(operationalCaseId) || [])
+    .map((conflictRecordId) => state.conflictRecords.get(conflictRecordId))
+    .filter(Boolean)
+    .filter((record) => record.status === "open");
+}
+
+function recordFieldEvidence(state, clock, {
+  companyId,
+  operationalCaseId = null,
+  projectId = null,
+  evidenceTypeCode,
+  linkedObjectType,
+  linkedObjectId,
+  actorId = "system"
+} = {}) {
+  const record = {
+    fieldEvidenceId: crypto.randomUUID(),
+    companyId: requireText(companyId, "company_id_required"),
+    operationalCaseId: normalizeOptionalText(operationalCaseId),
+    projectId: normalizeOptionalText(projectId),
+    evidenceTypeCode: requireText(evidenceTypeCode, "field_evidence_type_required"),
+    linkedObjectType: requireText(linkedObjectType, "field_evidence_object_type_required"),
+    linkedObjectId: requireText(linkedObjectId, "field_evidence_object_id_required"),
+    createdAt: nowIso(clock),
+    createdByActorId: requireText(actorId, "actor_id_required")
+  };
+  state.fieldEvidence.set(record.fieldEvidenceId, record);
+  if (record.operationalCaseId) {
+    ensureCollection(state.fieldEvidenceIdsByWorkOrder, record.operationalCaseId).push(record.fieldEvidenceId);
+  }
+  return record;
 }
 
 function seedFieldDemo(state, clock) {
@@ -1141,12 +1609,16 @@ function seedFieldDemo(state, clock) {
 
   const workOrder = {
     workOrderId: "00000000-0000-4000-8000-000000010331",
+    operationalCaseId: "00000000-0000-4000-8000-000000010331",
     companyId: DEMO_COMPANY_ID,
+    operationalCaseNo: "WO-2026-0001",
     workOrderNo: "WO-2026-0001",
     projectId: "00000000-0000-4000-8000-000000010101",
     customerId: "00000000-0000-4000-8000-000000005101",
     displayName: "Install site equipment",
     description: "Field demo work order",
+    caseTypeCode: "work_order",
+    packCodes: ["work_order"],
     serviceTypeCode: "installation",
     priorityCode: "high",
     status: "dispatched",
@@ -1159,6 +1631,7 @@ function seedFieldDemo(state, clock) {
     laborRateAmount: 1250,
     signatureRequired: true,
     signatureStatus: "pending",
+    invoicingPolicyCode: "manual_review",
     customerInvoiceId: null,
     versionNo: 1,
     createdByActorId: "field_seed",

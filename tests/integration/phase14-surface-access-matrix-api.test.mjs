@@ -452,6 +452,18 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         error: "field_control_role_forbidden"
       },
       {
+        path: `/v1/field/operational-cases/${fieldWorkOrder.workOrderId}/material-reservations?companyId=${DEMO_IDS.companyId}`,
+        error: "field_control_role_forbidden"
+      },
+      {
+        path: `/v1/field/operational-cases/${fieldWorkOrder.workOrderId}/evidence?companyId=${DEMO_IDS.companyId}`,
+        error: "field_control_role_forbidden"
+      },
+      {
+        path: `/v1/field/operational-cases/${fieldWorkOrder.workOrderId}/conflicts?companyId=${DEMO_IDS.companyId}`,
+        error: "field_control_role_forbidden"
+      },
+      {
         path: `/v1/field/audit-events?companyId=${DEMO_IDS.companyId}&workOrderId=${fieldWorkOrder.workOrderId}`,
         error: "field_control_role_forbidden"
       },

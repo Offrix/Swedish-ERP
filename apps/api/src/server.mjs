@@ -816,6 +816,12 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/field/inventory/locations",
               "/v1/field/inventory/items",
               "/v1/field/inventory/balances",
+              "/v1/field/operational-cases",
+              "/v1/field/operational-cases/:operationalCaseId",
+              "/v1/field/operational-cases/:operationalCaseId/material-reservations",
+              "/v1/field/operational-cases/:operationalCaseId/evidence",
+              "/v1/field/operational-cases/:operationalCaseId/conflicts",
+              "/v1/field/operational-cases/:operationalCaseId/conflicts/:conflictRecordId/resolve",
               "/v1/field/work-orders",
               "/v1/field/work-orders/:workOrderId",
               "/v1/field/work-orders/:workOrderId/dispatches",
@@ -14371,6 +14377,213 @@ async function handleRequest({ req, res, platform, flags }) {
       inventoryLocationId: body.inventoryLocationId,
       onHandQuantity: body.onHandQuantity ?? 0,
       reservedQuantity: body.reservedQuantity ?? 0,
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/field/operational-cases") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "field_operational_case",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listOperationalCases({
+        companyId,
+        status: url.searchParams.get("status") || null,
+        employmentId: url.searchParams.get("employmentId") || null,
+        projectId: url.searchParams.get("projectId") || null,
+        packCode: url.searchParams.get("packCode") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/field/operational-cases") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "field_operational_case",
+      scopeCode: "project"
+    });
+    writeJson(res, 201, platform.createOperationalCase({
+      companyId,
+      operationalCaseId: body.operationalCaseId ?? null,
+      operationalCaseNo: body.operationalCaseNo ?? null,
+      workOrderNo: body.workOrderNo ?? null,
+      projectId: body.projectId,
+      customerId: body.customerId ?? null,
+      displayName: body.displayName,
+      description: body.description ?? null,
+      caseTypeCode: body.caseTypeCode ?? "service_case",
+      packCodes: body.packCodes || [],
+      serviceTypeCode: body.serviceTypeCode ?? "service",
+      priorityCode: body.priorityCode ?? "normal",
+      scheduledStartAt: body.scheduledStartAt ?? null,
+      scheduledEndAt: body.scheduledEndAt ?? null,
+      laborItemId: body.laborItemId ?? null,
+      laborRateAmount: body.laborRateAmount ?? 0,
+      signatureRequired: body.signatureRequired === true,
+      invoicingPolicyCode: body.invoicingPolicyCode ?? "manual_review",
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const fieldOperationalCaseMatch = matchPath(path, "/v1/field/operational-cases/:operationalCaseId");
+  if (fieldOperationalCaseMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "field_operational_case",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, platform.getOperationalCase({
+      companyId,
+      operationalCaseId: fieldOperationalCaseMatch.operationalCaseId
+    }));
+    return;
+  }
+
+  const fieldOperationalCaseMaterialReservationsMatch = matchPath(path, "/v1/field/operational-cases/:operationalCaseId/material-reservations");
+  if (fieldOperationalCaseMaterialReservationsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "field_material_reservation",
+      scopeCode: "project"
+    });
+    assertFieldControlReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listMaterialReservations({
+        companyId,
+        operationalCaseId: fieldOperationalCaseMaterialReservationsMatch.operationalCaseId
+      })
+    });
+    return;
+  }
+
+  if (fieldOperationalCaseMaterialReservationsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "field_material_reservation",
+      scopeCode: "project"
+    });
+    writeJson(res, 201, platform.createMaterialReservation({
+      companyId,
+      operationalCaseId: fieldOperationalCaseMaterialReservationsMatch.operationalCaseId,
+      inventoryItemId: body.inventoryItemId,
+      inventoryLocationId: body.inventoryLocationId,
+      quantity: body.quantity,
+      actorId: principal.userId,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const fieldOperationalCaseEvidenceMatch = matchPath(path, "/v1/field/operational-cases/:operationalCaseId/evidence");
+  if (fieldOperationalCaseEvidenceMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "field_evidence",
+      scopeCode: "project"
+    });
+    assertFieldControlReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listFieldEvidence({
+        companyId,
+        operationalCaseId: fieldOperationalCaseEvidenceMatch.operationalCaseId
+      })
+    });
+    return;
+  }
+
+  const fieldOperationalCaseConflictsMatch = matchPath(path, "/v1/field/operational-cases/:operationalCaseId/conflicts");
+  if (fieldOperationalCaseConflictsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "field_conflict_record",
+      scopeCode: "project"
+    });
+    assertFieldControlReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listConflictRecords({
+        companyId,
+        operationalCaseId: fieldOperationalCaseConflictsMatch.operationalCaseId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  const fieldOperationalCaseConflictResolveMatch = matchPath(path, "/v1/field/operational-cases/:operationalCaseId/conflicts/:conflictRecordId/resolve");
+  if (fieldOperationalCaseConflictResolveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "field_conflict_record",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, platform.resolveConflictRecord({
+      companyId,
+      operationalCaseId: fieldOperationalCaseConflictResolveMatch.operationalCaseId,
+      conflictRecordId: fieldOperationalCaseConflictResolveMatch.conflictRecordId,
+      resolutionCode: body.resolutionCode ?? "manual_review_completed",
+      notes: body.notes ?? null,
       actorId: principal.userId,
       correlationId: body.correlationId || createCorrelationId()
     }));

@@ -150,6 +150,12 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/projects/:projectId/profitability-snapshots",
   "/v1/projects/portfolio/nodes",
   "/v1/projects/portfolio/summary",
+  "/v1/field/operational-cases",
+  "/v1/field/operational-cases/:operationalCaseId",
+  "/v1/field/operational-cases/:operationalCaseId/material-reservations",
+  "/v1/field/operational-cases/:operationalCaseId/evidence",
+  "/v1/field/operational-cases/:operationalCaseId/conflicts",
+  "/v1/field/operational-cases/:operationalCaseId/conflicts/:conflictRecordId/resolve",
   "/v1/payroll/garnishments",
   "/v1/payroll/garnishments/:garnishmentDecisionSnapshotId/approve",
   "/v1/payroll/garnishment-remittances",
@@ -333,6 +339,24 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(projectInvoiceReadinessAssessContract.requiredActionClass, "project_invoice_readiness_assess");
     assert.equal(projectInvoiceReadinessAssessContract.requiredTrustLevel, "strong_mfa");
     assert.equal(projectInvoiceReadinessAssessContract.requiredScopeType, "project");
+
+    const fieldOperationalCaseCreateContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/field/operational-cases"
+    );
+    assert.ok(fieldOperationalCaseCreateContract);
+    assert.equal(fieldOperationalCaseCreateContract.requiredActionClass, "field_operational_case_create");
+    assert.equal(fieldOperationalCaseCreateContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(fieldOperationalCaseCreateContract.requiredScopeType, "project");
+
+    const fieldConflictResolveContract = payload.routeContracts.find(
+      (routeContract) =>
+        routeContract.method === "POST"
+        && routeContract.path === "/v1/field/operational-cases/:operationalCaseId/conflicts/:conflictRecordId/resolve"
+    );
+    assert.ok(fieldConflictResolveContract);
+    assert.equal(fieldConflictResolveContract.requiredActionClass, "field_conflict_record_resolve");
+    assert.equal(fieldConflictResolveContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(fieldConflictResolveContract.requiredScopeType, "project");
 
     const uniqueCount = new Set(payload.routes).size;
     assert.equal(uniqueCount, payload.routes.length, "api root metadata should not contain duplicate route entries");
