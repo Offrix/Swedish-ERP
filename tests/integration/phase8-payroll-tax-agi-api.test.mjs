@@ -221,6 +221,16 @@ test("Phase 8.2 API manages statutory profiles and AGI submissions with correcti
         companyId: COMPANY_ID
       }
     });
+    await requestJson(baseUrl, `/v1/payroll/agi-submissions/${createdSubmission.agiSubmissionId}/validate`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 409,
+      body: {
+        companyId: COMPANY_ID
+      }
+    }).then((response) => {
+      assert.equal(response.error, "agi_version_immutable");
+    });
 
     const accepted = await requestJson(baseUrl, `/v1/payroll/agi-submissions/${createdSubmission.agiSubmissionId}/submit`, {
       method: "POST",
@@ -255,7 +265,7 @@ test("Phase 8.2 API manages statutory profiles and AGI submissions with correcti
           {
             employmentId: sink.employment.employmentId,
             payItemCode: "CORRECTION",
-            amount: 1800,
+            amount: 18000,
             originalPeriod: "202602",
             sourcePayRunId: regularRun.payRunId,
             sourceLineId: regularRun.lines.find((line) => line.employeeId === sink.employee.employeeId).payRunLineId

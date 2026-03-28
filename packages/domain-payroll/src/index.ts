@@ -447,6 +447,8 @@ export interface PayRunRef {
   readonly sourceSnapshotHash: string;
   readonly balanceSnapshotHash: string;
   readonly agreementSnapshotHash: string;
+  readonly postingIntentSnapshotHash: string;
+  readonly bankPaymentSnapshotHash: string;
   readonly warningCodes: readonly string[];
   readonly rulepackRefs: readonly Record<string, unknown>[];
   readonly providerBaselineRefs: readonly Record<string, unknown>[];

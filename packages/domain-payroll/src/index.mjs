@@ -1116,7 +1116,7 @@ export function createPayrollEngine({
       employmentIds,
       period,
       hrPlatform
-    });
+    }).sort((left, right) => left.employmentId.localeCompare(right.employmentId));
     const normalizedManualInputs = normalizeManualInputs({
       companyId: resolvedCompanyId,
       manualInputs,
@@ -1175,6 +1175,8 @@ export function createPayrollEngine({
       sourceSnapshotHash: "",
       balanceSnapshotHash: "",
       agreementSnapshotHash: "",
+      postingIntentSnapshotHash: "",
+      bankPaymentSnapshotHash: "",
       warningCodes: [],
       rulepackRefs: [],
       providerBaselineRefs: [],
@@ -1278,6 +1280,8 @@ export function createPayrollEngine({
     run.sourceSnapshotHash = buildSnapshotHash(sourceSnapshot);
     run.balanceSnapshotHash = buildSnapshotHash(balanceSnapshots);
     run.agreementSnapshotHash = buildSnapshotHash(agreementSnapshots);
+    run.postingIntentSnapshotHash = buildPayrollEmploymentPreviewHash(employmentResults, "postingIntentPreview");
+    run.bankPaymentSnapshotHash = buildPayrollEmploymentPreviewHash(employmentResults, "bankPaymentPreview");
     run.rulepackRefs = collectPayRunRulepackRefs(employmentResults);
     run.decisionSnapshotRefs = collectPayRunDecisionSnapshotRefs(run, employmentResults);
     const inputSnapshotRecord = createPayrollInputSnapshotRecord({
@@ -1488,6 +1492,7 @@ export function createPayrollEngine({
   function validateAgiSubmission({ companyId, agiSubmissionId } = {}) {
     const submission = requireAgiSubmission(state, companyId, agiSubmissionId);
     const version = requireAgiSubmissionVersion(state, submission.currentVersionId);
+    assertAgiVersionMutable(version, "validate");
     const validation = evaluateAgiValidation({
       state,
       submission,
@@ -1508,6 +1513,8 @@ export function createPayrollEngine({
 
   function markAgiSubmissionReadyForSign({ companyId, agiSubmissionId, actorId = "system" } = {}) {
     const submission = requireAgiSubmission(state, companyId, agiSubmissionId);
+    const currentVersion = requireAgiSubmissionVersion(state, submission.currentVersionId);
+    assertAgiVersionMutable(currentVersion, "ready_for_sign");
     validateAgiSubmission({ companyId, agiSubmissionId });
     const version = requireAgiSubmissionVersion(state, submission.currentVersionId);
     if ((version.validationErrors || []).length > 0) {
@@ -2703,7 +2710,13 @@ function collectApprovedPayRunsForPeriod(state, companyId, reportingPeriod) {
     .filter(Boolean)
     .filter((payRun) => payRun.reportingPeriod === reportingPeriod)
     .filter((payRun) => payRun.status === "approved")
-    .sort((left, right) => left.payDate.localeCompare(right.payDate) || left.createdAt.localeCompare(right.createdAt));
+    .sort(
+      (left, right) =>
+        left.payDate.localeCompare(right.payDate) ||
+        left.runType.localeCompare(right.runType) ||
+        left.createdAt.localeCompare(right.createdAt) ||
+        left.payRunId.localeCompare(right.payRunId)
+    );
 }
 
 function buildAgiSourceSnapshotHash(payRuns) {
@@ -2921,7 +2934,35 @@ function buildAgiEmployeeGroups({ state, companyId, reportingPeriod, approvedRun
     }
   }
 
-  return [...groups.values()].sort((left, right) => left.employee.employeeId.localeCompare(right.employee.employeeId));
+  for (const group of groups.values()) {
+    group.payslips.sort(
+      (left, right) =>
+        `${left?.payDate || ""}:${left?.employmentId || ""}:${left?.payslipId || ""}`.localeCompare(
+          `${right?.payDate || ""}:${right?.employmentId || ""}:${right?.payslipId || ""}`
+        )
+    );
+    group.lines.sort((left, right) => {
+      const leftKey = `${left.payRunId || ""}:${left.employmentId}:${left.displayOrder || 0}:${left.payItemCode}:${left.payRunLineId}`;
+      const rightKey = `${right.payRunId || ""}:${right.employmentId}:${right.displayOrder || 0}:${right.payItemCode}:${right.payRunLineId}`;
+      return leftKey.localeCompare(rightKey);
+    });
+    group.leaveSignals.sort((left, right) => {
+      const leftKey = `${left.employmentId || ""}:${left.workDate || ""}:${left.signalType || ""}`;
+      const rightKey = `${right.employmentId || ""}:${right.workDate || ""}:${right.signalType || ""}`;
+      return leftKey.localeCompare(rightKey);
+    });
+    group.leaveEntries.sort((left, right) => {
+      const leftKey = `${left.employmentId || ""}:${left.reportingPeriod || ""}:${left.leaveEntryId || ""}`;
+      const rightKey = `${right.employmentId || ""}:${right.reportingPeriod || ""}:${right.leaveEntryId || ""}`;
+      return leftKey.localeCompare(rightKey);
+    });
+  }
+
+  return [...groups.values()].sort((left, right) =>
+    `${left?.employee?.employeeId || ""}:${left?.employee?.identityValue || ""}`.localeCompare(
+      `${right?.employee?.employeeId || ""}:${right?.employee?.identityValue || ""}`
+    )
+  );
 }
 
 function materializeAgiEmployeeGroup({ companyId, reportingPeriod, group, createdAt }) {
@@ -3082,6 +3123,20 @@ function diffAgiEmployees(previousEmployees, currentEmployees) {
   return [...new Set([...previousByEmployee.keys(), ...currentByEmployee.keys()])]
     .filter((employeeId) => previousByEmployee.get(employeeId) !== currentByEmployee.get(employeeId))
     .sort();
+}
+
+function assertAgiVersionMutable(version, operationCode) {
+  if (!version) {
+    return;
+  }
+  if (["draft", "validated"].includes(version.state)) {
+    return;
+  }
+  throw createError(
+    409,
+    "agi_version_immutable",
+    `AGI version is immutable after leaving draft/validated state and cannot run ${operationCode}.`
+  );
 }
 
 function evaluateAgiValidation({ state, submission, version, orgAuthPlatform, timePlatform }) {
@@ -6073,6 +6128,37 @@ function createPayrollInputSnapshotRecord({
   };
 }
 
+function buildPayrollEmploymentPreviewHash(employmentResults = [], previewKey) {
+  return buildSnapshotHash(
+    (employmentResults || [])
+      .map((result) => ({
+        payload: sanitizePayrollPreviewPayloadForHash(copy(result?.payslipRenderPayload?.[previewKey] || null))
+      }))
+      .sort((left, right) => {
+        const leftKey = stableStringify(left.payload);
+        const rightKey = stableStringify(right.payload);
+        return leftKey.localeCompare(rightKey);
+      })
+  );
+}
+
+function sanitizePayrollPreviewPayloadForHash(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizePayrollPreviewPayloadForHash(entry));
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const sanitized = {};
+  for (const [key, candidate] of Object.entries(value)) {
+    if (key === "employeeId" || key === "employmentId" || key === "payRunId" || key === "payslipId") {
+      continue;
+    }
+    sanitized[key] = sanitizePayrollPreviewPayloadForHash(candidate);
+  }
+  return sanitized;
+}
+
 function buildPayRunFingerprint({ state, run }) {
   return buildSnapshotHash({
     payRunId: run.payRunId,
@@ -6081,6 +6167,8 @@ function buildPayRunFingerprint({ state, run }) {
     reportingPeriod: run.reportingPeriod,
     payDate: run.payDate,
     runType: run.runType,
+    postingIntentSnapshotHash: run.postingIntentSnapshotHash || "",
+    bankPaymentSnapshotHash: run.bankPaymentSnapshotHash || "",
     warningCodes: copy(run.warningCodes || []),
     rulepackRefs: copy(run.rulepackRefs || []),
     providerBaselineRefs: copy(run.providerBaselineRefs || []),
@@ -6513,6 +6601,10 @@ function normalizeManualInputs({ companyId, manualInputs, state }) {
         businessAreaCode: input.businessAreaCode ?? input.dimensionJson?.businessAreaCode
       })
     };
+  }).sort((left, right) => {
+    const leftKey = `${left.employmentId}:${left.processingStep}:${left.payItemCode}:${left.sourceType || ""}:${left.sourceId || ""}:${stableStringify(left.dimensionJson || {})}`;
+    const rightKey = `${right.employmentId}:${right.processingStep}:${right.payItemCode}:${right.sourceType || ""}:${right.sourceId || ""}:${stableStringify(right.dimensionJson || {})}`;
+    return leftKey.localeCompare(rightKey);
   });
 }
 
@@ -6540,6 +6632,10 @@ function normalizeRetroAdjustments({ companyId, retroAdjustments, state }) {
         businessAreaCode: adjustment.businessAreaCode ?? adjustment.dimensionJson?.businessAreaCode
       })
     };
+  }).sort((left, right) => {
+    const leftKey = `${left.employmentId}:${left.originalPeriod}:${left.payItemCode}:${left.sourcePayRunId || ""}:${left.sourceLineId || ""}:${stableStringify(left.dimensionJson || {})}`;
+    const rightKey = `${right.employmentId}:${right.originalPeriod}:${right.payItemCode}:${right.sourcePayRunId || ""}:${right.sourceLineId || ""}:${stableStringify(right.dimensionJson || {})}`;
+    return leftKey.localeCompare(rightKey);
   });
 }
 
@@ -6567,7 +6663,11 @@ function normalizeFinalPayAdjustments(finalPayAdjustments) {
       costCenterCode: adjustment.costCenterCode ?? adjustment.dimensionJson?.costCenterCode,
       businessAreaCode: adjustment.businessAreaCode ?? adjustment.dimensionJson?.businessAreaCode
     })
-  }));
+  })).sort((left, right) => {
+    const leftKey = `${left.employmentId}:${left.terminationDate}:${stableStringify(left.dimensionJson || {})}`;
+    const rightKey = `${right.employmentId}:${right.terminationDate}:${stableStringify(right.dimensionJson || {})}`;
+    return leftKey.localeCompare(rightKey);
+  });
 }
 
 function normalizeLeaveMappings(leavePayItemMappings) {
@@ -6580,7 +6680,11 @@ function normalizeLeaveMappings(leavePayItemMappings) {
     payItemCode: normalizeCode(mapping.payItemCode, "leave_mapping_pay_item_code_required"),
     unitRate: normalizeOptionalMoney(mapping.unitRate, "leave_mapping_unit_rate_invalid"),
     rateFactor: normalizeOptionalNumber(mapping.rateFactor, "leave_mapping_rate_factor_invalid")
-  }));
+  })).sort((left, right) => {
+    const leftKey = `${left.leaveTypeId || ""}:${left.leaveTypeCode || ""}:${left.payItemCode}`;
+    const rightKey = `${right.leaveTypeId || ""}:${right.leaveTypeCode || ""}:${right.payItemCode}`;
+    return leftKey.localeCompare(rightKey);
+  });
 }
 
 function normalizeStatutoryProfiles(statutoryProfiles) {
