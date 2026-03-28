@@ -7,6 +7,7 @@ export {
   SUBMISSION_RETRY_CLASSES,
   SUBMISSION_SIGNED_STATES,
   SUBMISSION_STATUSES,
+  SUBMISSION_TRANSPORT_SCENARIOS,
   createCanonicalSubmissionEvidencePackRef,
   createCanonicalSubmissionEnvelopeRef,
   createRegulatedSubmissionsModule

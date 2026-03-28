@@ -4457,8 +4457,8 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         submissionId: submissionSubmitMatch.submissionId,
         actorId: principal.userId,
-        mode: body.mode || "test",
-        simulatedTransportOutcome: body.simulatedTransportOutcome || "technical_ack",
+        mode: body.mode || platform.getRuntimeModeProfile?.().environmentMode || platform.environmentMode || "test",
+        transportScenarioCode: body.transportScenarioCode ?? body.simulatedTransportOutcome ?? null,
         providerReference: body.providerReference ?? null,
         message: body.message ?? null
       })
@@ -5695,7 +5695,7 @@ async function handleRequest({ req, res, platform, flags }) {
         actorId: principal.userId,
         reasonCode: body.reasonCode,
         idempotencyKey: body.idempotencyKey ?? null,
-        simulatedTransportOutcome: body.simulatedTransportOutcome ?? "technical_ack",
+        transportScenarioCode: body.transportScenarioCode ?? body.simulatedTransportOutcome ?? null,
         simulatedReceiptType: body.simulatedReceiptType ?? null,
         providerStatus: body.providerStatus ?? null,
         message: body.message ?? null,

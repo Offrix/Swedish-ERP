@@ -18,6 +18,12 @@ export type SubmissionAttemptStatus =
   | "failed"
   | "skipped";
 
+export type SubmissionTransportScenario =
+  | "technical_ack"
+  | "technical_nack"
+  | "transport_failed"
+  | "queued_only";
+
 export interface SubmissionAttemptRef {
   readonly submissionAttemptId: string;
   readonly submissionId: string;
@@ -31,6 +37,12 @@ export interface SubmissionAttemptRef {
   readonly payloadHash: string;
   readonly providerKey: string;
   readonly providerReference: string | null;
+  readonly transportAdapterCode?: string | null;
+  readonly transportRouteCode?: string | null;
+  readonly officialChannelCode?: string | null;
+  readonly fallbackCode?: string | null;
+  readonly fallbackActivated?: boolean;
+  readonly transportScenarioCode?: SubmissionTransportScenario | null;
   readonly receiptType: string | null;
   readonly queuedJobId: string | null;
   readonly replayReasonCode: string | null;

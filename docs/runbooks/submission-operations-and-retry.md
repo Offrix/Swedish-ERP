@@ -24,6 +24,7 @@ Detta runbook beskriver drift av generiska submissions till externa mottagare sa
 1. Identifiera submissionen.
    - sok pa submission-id, korrelations-id, bolag, period, mottagare och payload-hash
    - bekrafta att underlaget fortfarande ar giltigt och inte har ersatts av nyare version
+   - las `lastTransportPlan` och verifiera `transportAdapterCode`, `transportRouteCode`, `officialChannelCode` och eventuell `fallbackCode`
 2. Las senaste statuskedja.
    - `prepared`
    - `queued`
@@ -39,15 +40,18 @@ Detta runbook beskriver drift av generiska submissions till externa mottagare sa
    - om kvittens ar varning ska action queue fa uppgift nar policyn kraver atgard
    - om kvittens saknas efter timeout ska mottagarens inquiry- eller statuskontroll anvandas om den finns; annars markeras submissionen `unknown_outcome`
    - backoffice submission monitor ska kunna materialisera samma lage som work items, notifications och activity nar lag alerts kraver operatorsingrepp
+   - i live/pilot far ingen syntetisk teknisk receipt skapas; operator ska alltid utga fran adapterplanen och officiell kvittens eller dokumenterad fallback
 5. Valj operativ atgard.
    - transportfel utan mottagarbevis: retry med samma idempotensnyckel nar felet ar lost
    - domanfel: skapa action queue-post till ansvarig roll; ny submission far ske forst efter korrigerat underlag
    - osakert utfall: kontrollera om mottagaren redan registrerat underlaget innan ny sandning
    - replay av tekniskt stoppad jobbkedja ska ga via replay plan -> separat approval -> execute, aldrig som direkt databasatgard
+   - official fallback: om adapterplanen aktiverat `fallbackCode` ska operator folja den officiella fallback-vagen och sedan registrera mottagen kvittens manuellt eller via receipt collection
 6. Kor aterforsok.
    - dokumentera `retry_reason`
    - bibehall underlagslasning och payload-version
    - skapa ny transmissionsattempt men samma affarssubmission nar modellen kraver det
+   - icke-live far anvanda `transportScenarioCode` for adaptertestning; production/pilot far inte anvanda scenarioinjektion
 7. Manuell atgard.
    - om operator maste ladda upp komplettering, andra referens eller kontakta mottagare ska detta loggas i submissionens historik
    - submissionen far inte markeras `accepted` manuellt utan officiell kvittens eller definierad overrideprocess

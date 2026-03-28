@@ -31,6 +31,7 @@ export const SUBMISSION_ENVELOPE_STATES = Object.freeze([
   "abandoned"
 ]);
 export const SUBMISSION_ATTEMPT_STATUSES = Object.freeze(["queued", "running", "succeeded", "failed", "skipped"]);
+export const SUBMISSION_TRANSPORT_SCENARIOS = Object.freeze(["technical_ack", "technical_nack", "transport_failed", "queued_only"]);
 const SUBMISSION_ACTION_PRIORITIES = Object.freeze(["low", "normal", "high", "urgent"]);
 
 export function createRegulatedSubmissionsModule({ state, clock, evidencePlatform, getCorePlatform } = {}) {
@@ -43,6 +44,7 @@ export function createRegulatedSubmissionsModule({ state, clock, evidencePlatfor
     submissionActionStatuses: SUBMISSION_ACTION_STATUSES,
     submissionEnvelopeStates: SUBMISSION_ENVELOPE_STATES,
     submissionAttemptStatuses: SUBMISSION_ATTEMPT_STATUSES,
+    submissionTransportScenarios: SUBMISSION_TRANSPORT_SCENARIOS,
     prepareAuthoritySubmission(input) {
       return prepareAuthoritySubmission({ state, clock, evidencePlatform }, input);
     },
@@ -160,7 +162,9 @@ function prepareAuthoritySubmission({ state, clock, evidencePlatform }, input = 
     payloadJson: payload,
     correlationId: normalizeOptionalText(input.correlationId) || crypto.randomUUID(),
     transportJobId: null,
+    lastTransportJobId: null,
     transportRequestedAt: null,
+    lastTransportPlan: null,
     submittedAt: null,
     acceptedAt: null,
     finalizedAt: null,
@@ -261,7 +265,16 @@ function buildSubmissionEvidencePackPayload(state, submission) {
         artifactType: "submission_payload",
         payloadHash: submission.payloadHash,
         payloadVersion: submission.payloadVersion
-      }
+      },
+      ...(submission.lastTransportPlan
+        ? [
+            {
+              artifactType: "submission_transport_plan",
+              payloadHash: hashObject(submission.lastTransportPlan),
+              payloadVersion: submission.lastTransportPlan.transportRouteCode
+            }
+          ]
+        : [])
     ],
     attemptRefs: attempts.map((attempt) => buildAttemptRef(attempt)),
     correctionLinks: getCorrectionLinksForSubmission(state, submission.submissionId).map(clone),
@@ -289,6 +302,8 @@ function buildSubmissionEvidencePackPayload(state, submission) {
         supersededBySubmissionId: submission.supersededBySubmissionId || null,
         sourceObjectVersion: submission.sourceObjectVersion,
         transportJobId: submission.transportJobId,
+        lastTransportJobId: submission.lastTransportJobId || null,
+        lastTransportPlan: clone(submission.lastTransportPlan || null),
         createdByActorId: submission.createdByActorId,
         signedByActorId: submission.signedByActorId,
         correlationId: submission.correlationId,
@@ -397,10 +412,31 @@ function syncSubmissionEvidenceBundle({ state, evidencePlatform, submission }) {
 
 async function submitAuthoritySubmission(
   { state, clock, getCorePlatform },
-  { companyId, submissionId, actorId, mode = "test", simulatedTransportOutcome = "technical_ack", providerReference = null, message = null } = {}
+  {
+    companyId,
+    submissionId,
+    actorId,
+    mode = "test",
+    transportScenarioCode = null,
+    simulatedTransportOutcome = null,
+    providerReference = null,
+    message = null
+  } = {}
 ) {
   const submission = requireSubmission(state, companyId, submissionId);
+  const resolvedTransportScenarioCode = resolveRequestedTransportScenarioCode({
+    mode,
+    transportScenarioCode,
+    simulatedTransportOutcome
+  });
   if (submission.status === "submitted" && submission.transportJobId && !hasSubmissionTransportReceipt(state, submission.submissionId)) {
+    const queuedTransportPlan = resolveSubmissionTransportPlan({
+      submission,
+      mode: submission.dispatchMode || mode,
+      transportScenarioCode: resolvedTransportScenarioCode,
+      providerReference: submission.providerReference,
+      message: submission.dispatchMessage
+    });
     ensureSubmissionAttempt(state, {
       submission,
       clock,
@@ -411,6 +447,7 @@ async function submitAuthoritySubmission(
       legalEffect: (submission.dispatchMode || mode) !== "trial",
       payloadHash: submission.payloadHash,
       providerReference: submission.providerReference,
+      transportPlan: queuedTransportPlan,
       queuedJobId: submission.transportJobId,
       replayReasonCode: null,
       status: "queued"
@@ -431,6 +468,13 @@ async function submitAuthoritySubmission(
     providerReference,
     message
   });
+  const transportPlan = resolveSubmissionTransportPlan({
+    submission,
+    mode: submission.dispatchMode,
+    transportScenarioCode: resolvedTransportScenarioCode,
+    providerReference: submission.providerReference,
+    message: submission.dispatchMessage
+  });
 
   const corePlatform = resolveCorePlatform(getCorePlatform);
   if (corePlatform) {
@@ -443,14 +487,16 @@ async function submitAuthoritySubmission(
       payload: {
         submissionId: submission.submissionId,
         mode: submission.dispatchMode,
-        simulatedTransportOutcome: normalizeOptionalText(simulatedTransportOutcome) || "technical_ack",
+        transportScenarioCode: transportPlan.transportScenarioCode,
         providerReference: submission.providerReference,
         message: submission.dispatchMessage
       },
       actorId: requireText(actorId || "system", "actor_id_required")
     });
     submission.transportJobId = queuedJob.jobId;
+    submission.lastTransportJobId = queuedJob.jobId;
     submission.transportRequestedAt = submission.submittedAt;
+    submission.lastTransportPlan = clone(transportPlan);
     submission.updatedAt = submission.transportRequestedAt;
     ensureSubmissionAttempt(state, {
       submission,
@@ -462,6 +508,7 @@ async function submitAuthoritySubmission(
       legalEffect: submission.dispatchMode !== "trial",
       payloadHash: submission.payloadHash,
       providerReference: submission.providerReference,
+      transportPlan,
       queuedJobId: queuedJob.jobId,
       replayReasonCode: null,
       status: "queued"
@@ -480,7 +527,7 @@ async function submitAuthoritySubmission(
       submissionId,
       actorId,
       mode,
-      simulatedTransportOutcome,
+      transportScenarioCode: transportPlan.transportScenarioCode,
       providerReference,
       message,
       triggerCode: "initial_dispatch"
@@ -496,7 +543,8 @@ async function requestSubmissionReplay(
     actorId,
     reasonCode,
     idempotencyKey = null,
-    simulatedTransportOutcome = "technical_ack",
+    transportScenarioCode = null,
+    simulatedTransportOutcome = null,
     simulatedReceiptType = null,
     providerStatus = null,
     message = null,
@@ -510,6 +558,14 @@ async function requestSubmissionReplay(
   const corePlatform = resolveCorePlatform(getCorePlatform);
   const resolvedReasonCode = requireText(reasonCode, "submission_replay_reason_code_required");
   const targetJobType = hasSubmissionTransportReceipt(state, submission.submissionId) ? "submission.receipt.collect" : "submission.transport";
+  const resolvedTransportScenarioCode =
+    targetJobType === "submission.transport"
+      ? resolveRequestedTransportScenarioCode({
+          mode: submission.dispatchMode || "test",
+          transportScenarioCode,
+          simulatedTransportOutcome
+        })
+      : null;
   const resolvedIdempotencyKey =
     normalizeOptionalText(idempotencyKey) ||
     hashObject({
@@ -531,7 +587,7 @@ async function requestSubmissionReplay(
           ? {
               submissionId: submission.submissionId,
               mode: submission.dispatchMode || "test",
-              simulatedTransportOutcome: normalizeOptionalText(simulatedTransportOutcome) || "technical_ack",
+              transportScenarioCode: resolvedTransportScenarioCode,
               providerReference: submission.providerReference,
               message: normalizeOptionalText(message) || submission.dispatchMessage,
               replayReasonCode: resolvedReasonCode
@@ -556,6 +612,16 @@ async function requestSubmissionReplay(
       legalEffect: (submission.dispatchMode || "test") !== "trial",
       payloadHash: submission.payloadHash,
       providerReference: submission.providerReference,
+      transportPlan:
+        targetJobType === "submission.transport"
+          ? resolveSubmissionTransportPlan({
+              submission,
+              mode: submission.dispatchMode || "test",
+              transportScenarioCode: resolvedTransportScenarioCode,
+              providerReference: submission.providerReference,
+              message: normalizeOptionalText(message) || submission.dispatchMessage
+            })
+          : null,
       queuedJobId: queuedJob.jobId,
       replayReasonCode: resolvedReasonCode,
       status: "queued"
@@ -577,7 +643,7 @@ async function requestSubmissionReplay(
           submissionId,
           actorId,
           mode: submission.dispatchMode || "test",
-          simulatedTransportOutcome,
+          transportScenarioCode: resolvedTransportScenarioCode,
           providerReference: submission.providerReference,
           message,
           triggerCode: "replay",
@@ -755,7 +821,8 @@ function executeAuthoritySubmissionTransport(
     submissionId,
     actorId,
     mode = "test",
-    simulatedTransportOutcome = "technical_ack",
+    transportScenarioCode = null,
+    simulatedTransportOutcome = null,
     providerReference = null,
     message = null,
     requiredInput = [],
@@ -765,6 +832,18 @@ function executeAuthoritySubmissionTransport(
   } = {}
 ) {
   const submission = requireSubmission(state, companyId, submissionId);
+  const resolvedTransportScenarioCode = resolveRequestedTransportScenarioCode({
+    mode,
+    transportScenarioCode,
+    simulatedTransportOutcome
+  });
+  const transportPlan = resolveSubmissionTransportPlan({
+    submission,
+    mode,
+    transportScenarioCode: resolvedTransportScenarioCode,
+    providerReference,
+    message
+  });
   const attempt = ensureSubmissionAttempt(state, {
     submission,
     clock,
@@ -774,7 +853,8 @@ function executeAuthoritySubmissionTransport(
     mode,
     legalEffect: mode !== "trial",
     payloadHash: submission.payloadHash,
-    providerReference: normalizeOptionalText(providerReference) || submission.providerReference,
+    providerReference: transportPlan.providerReference || submission.providerReference,
+    transportPlan,
     queuedJobId: normalizeOptionalText(jobId),
     replayReasonCode: normalizeOptionalText(replayReasonCode),
     status: normalizeOptionalText(jobId) ? "queued" : "running"
@@ -784,7 +864,7 @@ function executeAuthoritySubmissionTransport(
     markSubmissionSubmitted(submission, {
       clock,
       mode,
-      providerReference,
+      providerReference: transportPlan.providerReference,
       message
     });
   }
@@ -814,16 +894,20 @@ function executeAuthoritySubmissionTransport(
       skipReasonCode: "submission_transport_already_recorded"
     };
   }
-  const outcome = normalizeOptionalText(simulatedTransportOutcome) || "technical_ack";
-  if (outcome === "transport_failed") {
+  submission.transportJobId = null;
+  submission.lastTransportJobId = normalizeOptionalText(jobId) || submission.lastTransportJobId;
+  submission.lastTransportPlan = clone(transportPlan);
+  submission.updatedAt = nowIso(clock);
+  if (transportPlan.resultCode === "transport_failed") {
     submission.status = "transport_failed";
     submission.updatedAt = nowIso(clock);
     finalizeSubmissionAttempt(attempt, {
       status: "failed",
       completedAt: submission.updatedAt,
       resultCode: "transport_failed",
-      messageText: normalizeOptionalText(message),
-      providerReference: submission.providerReference
+      messageText: transportPlan.messageText,
+      providerReference: transportPlan.providerReference || submission.providerReference,
+      transportPlan
     });
     createQueueItem(state, {
       submission,
@@ -840,30 +924,44 @@ function executeAuthoritySubmissionTransport(
     return enrichSubmission(state, submission);
   }
 
-  if (outcome === "technical_ack" || outcome === "technical_nack") {
+  if (transportPlan.technicalReceiptType) {
     registerSubmissionReceipt(
       { state, clock, evidencePlatform },
       {
         companyId,
         submissionId,
-        receiptType: outcome,
-        providerStatus: outcome,
-        rawReference: submission.providerReference,
-        message,
+        receiptType: transportPlan.technicalReceiptType,
+        providerStatus: transportPlan.technicalReceiptType,
+        rawReference: transportPlan.providerReference || submission.providerReference,
+        message: transportPlan.messageText,
         actorId,
         submissionAttemptId: attempt.submissionAttemptId,
         mode,
         legalEffect: mode !== "trial"
       }
     );
+  } else if (transportPlan.fallbackActivated === true || transportPlan.resultCode === "official_transport_queued") {
+    createQueueItem(state, {
+      submission,
+      actionType: "contact_provider",
+      priority: submission.priority,
+      ownerQueue: ownerQueueForSubmission(submission),
+      retryAfter: null,
+      slaDueAt: nowIso(clock),
+      requiredInput: transportPlan.requiredInput,
+      rootCauseCode: transportPlan.fallbackCode || "official_transport_pending",
+      clock
+    });
+    syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
   }
   finalizeSubmissionAttempt(attempt, {
     status: "succeeded",
     completedAt: nowIso(clock),
-    resultCode: outcome,
-    messageText: normalizeOptionalText(message),
-    providerReference: submission.providerReference,
-    receiptType: outcome
+    resultCode: transportPlan.resultCode,
+    messageText: transportPlan.messageText,
+    providerReference: transportPlan.providerReference || submission.providerReference,
+    receiptType: transportPlan.technicalReceiptType,
+    transportPlan
   });
   return enrichSubmission(state, submission);
 }
@@ -1197,6 +1295,10 @@ export function createCanonicalSubmissionEnvelopeRef(state, submission) {
     legalEffect: (submission.dispatchMode || "test") !== "trial",
     sourceEvidenceBundleId: submission.sourceEvidenceBundleId || null,
     currentEvidencePackId: submission.evidencePackId || null,
+    transportAdapterCode: submission.lastTransportPlan?.transportAdapterCode || null,
+    transportRouteCode: submission.lastTransportPlan?.transportRouteCode || null,
+    fallbackActivated: submission.lastTransportPlan?.fallbackActivated === true,
+    fallbackCode: submission.lastTransportPlan?.fallbackCode || null,
     receiptCount: getSubmissionReceipts(state, submission.submissionId).length,
     attemptCount: getSubmissionAttempts(state, submission.submissionId).length,
     correctionCount: getCorrectionLinksForSubmission(state, submission.submissionId).length,
@@ -1294,6 +1396,12 @@ function buildAttemptRef(attempt) {
     payloadHash: attempt.payloadHash,
     providerKey: attempt.providerKey,
     providerReference: attempt.providerReference,
+    transportAdapterCode: attempt.transportAdapterCode || null,
+    transportRouteCode: attempt.transportRouteCode || null,
+    officialChannelCode: attempt.officialChannelCode || null,
+    fallbackCode: attempt.fallbackCode || null,
+    fallbackActivated: attempt.fallbackActivated === true,
+    transportScenarioCode: attempt.transportScenarioCode || null,
     receiptType: attempt.receiptType,
     requestedAt: attempt.requestedAt,
     startedAt: attempt.startedAt,
@@ -1313,6 +1421,7 @@ function ensureSubmissionAttempt(
     legalEffect,
     payloadHash,
     providerReference,
+    transportPlan = null,
     queuedJobId = null,
     replayReasonCode = null,
     status = "queued"
@@ -1339,6 +1448,12 @@ function ensureSubmissionAttempt(
     payloadHash: submission.payloadHash || requireText(payloadHash, "submission_payload_hash_required"),
     providerKey: submission.providerKey,
     providerReference: normalizeOptionalText(providerReference),
+    transportAdapterCode: normalizeOptionalText(transportPlan?.transportAdapterCode),
+    transportRouteCode: normalizeOptionalText(transportPlan?.transportRouteCode),
+    officialChannelCode: normalizeOptionalText(transportPlan?.officialChannelCode),
+    fallbackCode: normalizeOptionalText(transportPlan?.fallbackCode),
+    fallbackActivated: transportPlan?.fallbackActivated === true,
+    transportScenarioCode: normalizeOptionalText(transportPlan?.transportScenarioCode),
     receiptType: null,
     queuedJobId: resolvedQueuedJobId,
     replayReasonCode: normalizeOptionalText(replayReasonCode),
@@ -1367,7 +1482,15 @@ function markSubmissionAttemptRunning(attempt, timestamp, queuedJobId = null) {
 
 function finalizeSubmissionAttempt(
   attempt,
-  { status, completedAt, resultCode = null, messageText = null, receiptType = null, providerReference = null }
+  {
+    status,
+    completedAt,
+    resultCode = null,
+    messageText = null,
+    receiptType = null,
+    providerReference = null,
+    transportPlan = null
+  }
 ) {
   if (!attempt) {
     return;
@@ -1378,6 +1501,14 @@ function finalizeSubmissionAttempt(
   attempt.messageText = normalizeOptionalText(messageText);
   attempt.receiptType = normalizeOptionalText(receiptType);
   attempt.providerReference = normalizeOptionalText(providerReference) || attempt.providerReference;
+  if (transportPlan) {
+    attempt.transportAdapterCode = normalizeOptionalText(transportPlan.transportAdapterCode) || attempt.transportAdapterCode;
+    attempt.transportRouteCode = normalizeOptionalText(transportPlan.transportRouteCode) || attempt.transportRouteCode;
+    attempt.officialChannelCode = normalizeOptionalText(transportPlan.officialChannelCode) || attempt.officialChannelCode;
+    attempt.fallbackCode = normalizeOptionalText(transportPlan.fallbackCode) || attempt.fallbackCode;
+    attempt.fallbackActivated = transportPlan.fallbackActivated === true;
+    attempt.transportScenarioCode = normalizeOptionalText(transportPlan.transportScenarioCode) || attempt.transportScenarioCode;
+  }
   attempt.updatedAt = completedAt;
 }
 
@@ -1440,6 +1571,146 @@ function markSubmissionSubmitted(submission, { clock, mode, providerReference = 
   submission.dispatchMode = requireText(mode, "submission_mode_required");
   submission.providerReference = normalizeOptionalText(providerReference);
   submission.dispatchMessage = normalizeOptionalText(message);
+}
+
+function resolveRequestedTransportScenarioCode({ mode, transportScenarioCode = null, simulatedTransportOutcome = null } = {}) {
+  const normalizedScenario = normalizeOptionalText(transportScenarioCode) || normalizeOptionalText(simulatedTransportOutcome);
+  const resolvedMode = normalizeExecutionMode(mode);
+  if (!normalizedScenario) {
+    return isLiveExecutionMode(resolvedMode) ? null : "technical_ack";
+  }
+  assertAllowed(normalizedScenario, SUBMISSION_TRANSPORT_SCENARIOS, "submission_transport_scenario_invalid");
+  if (isLiveExecutionMode(resolvedMode)) {
+    throw createError(
+      409,
+      "submission_transport_scenario_forbidden_in_live_mode",
+      "Explicit transport scenarios are only allowed in non-live execution modes."
+    );
+  }
+  return normalizedScenario;
+}
+
+function resolveSubmissionTransportPlan({ submission, mode, transportScenarioCode = null, providerReference = null, message = null } = {}) {
+  const resolvedMode = normalizeExecutionMode(mode);
+  const profile = resolveSubmissionTransportProfile(submission);
+  const resolvedProviderReference = normalizeOptionalText(providerReference) || submission.providerReference || buildFallbackProviderReference(submission, profile);
+  const resolvedMessage = normalizeOptionalText(message);
+  const scenarioCode = resolveRequestedTransportScenarioCode({
+    mode: resolvedMode,
+    transportScenarioCode
+  });
+  const fallbackActivated = isLiveExecutionMode(resolvedMode) || profile.forceOfficialFallback === true;
+  if (fallbackActivated) {
+    return {
+      transportAdapterCode: profile.transportAdapterCode,
+      transportRouteCode: profile.transportRouteCode,
+      officialChannelCode: profile.officialChannelCode,
+      fallbackCode: profile.fallbackCode,
+      fallbackActivated: true,
+      transportScenarioCode: null,
+      providerReference: resolvedProviderReference,
+      technicalReceiptType: null,
+      resultCode: "official_transport_queued",
+      messageText:
+        resolvedMessage
+        || `Submission dispatched through ${profile.transportAdapterCode} using official fallback ${profile.fallbackCode}.`,
+      requiredInput: clone(profile.requiredInput || [])
+    };
+  }
+
+  if (scenarioCode === "transport_failed") {
+    return {
+      transportAdapterCode: profile.transportAdapterCode,
+      transportRouteCode: profile.transportRouteCode,
+      officialChannelCode: profile.officialChannelCode,
+      fallbackCode: profile.fallbackCode,
+      fallbackActivated: false,
+      transportScenarioCode: scenarioCode,
+      providerReference: resolvedProviderReference,
+      technicalReceiptType: null,
+      resultCode: "transport_failed",
+      messageText: resolvedMessage || `Submission transport failed in ${resolvedMode} mode.`,
+      requiredInput: []
+    };
+  }
+
+  return {
+    transportAdapterCode: profile.transportAdapterCode,
+    transportRouteCode: profile.transportRouteCode,
+    officialChannelCode: profile.officialChannelCode,
+    fallbackCode: profile.fallbackCode,
+    fallbackActivated: false,
+    transportScenarioCode: scenarioCode,
+    providerReference: resolvedProviderReference,
+    technicalReceiptType: scenarioCode === "queued_only" ? null : scenarioCode,
+    resultCode: scenarioCode === "queued_only" ? "official_transport_queued" : scenarioCode,
+    messageText:
+      resolvedMessage
+      || `Submission dispatched through ${profile.transportAdapterCode} in ${resolvedMode} mode via ${profile.transportRouteCode}.`,
+    requiredInput: scenarioCode === "queued_only" ? clone(profile.requiredInput || []) : []
+  };
+}
+
+function resolveSubmissionTransportProfile(submission) {
+  const baselineCodes = new Set((submission.providerBaselineRefs || []).map((candidate) => candidate.baselineCode || candidate.providerBaselineCode).filter(Boolean));
+  if (submission.submissionType.startsWith("agi")) {
+    return {
+      transportAdapterCode: "skatteverket_agi_adapter",
+      transportRouteCode: "official_api",
+      officialChannelCode: "skatteverket_agi_api",
+      fallbackCode: "skatteverket_agi_file_upload",
+      requiredInput: ["official_submission_receipt"]
+    };
+  }
+  if (submission.submissionType.startsWith("vat")) {
+    return {
+      transportAdapterCode: "skatteverket_vat_adapter",
+      transportRouteCode: "official_api",
+      officialChannelCode: "skatteverket_vat_api",
+      fallbackCode: "skatteverket_vat_xml_upload",
+      requiredInput: ["official_submission_receipt"]
+    };
+  }
+  if (submission.submissionType.startsWith("hus")) {
+    const preferredRoute = normalizeOptionalText(submission.payloadJson?.transportType) || "direct_api";
+    return {
+      transportAdapterCode: "skatteverket_hus_adapter",
+      transportRouteCode: preferredRoute === "xml" ? "signed_xml_upload" : "official_api",
+      officialChannelCode: preferredRoute === "xml" ? "skatteverket_hus_xml" : "skatteverket_hus_api",
+      fallbackCode: "skatteverket_hus_signed_xml_fallback",
+      requiredInput: ["signed_hus_xml_receipt"]
+    };
+  }
+  if (submission.submissionType.startsWith("income_tax") || submission.submissionType.startsWith("annual")) {
+    const hasIxbrl = baselineCodes.has("SE-IXBRL-FILING");
+    const hasSru = baselineCodes.has("SE-SRU-FILE");
+    return {
+      transportAdapterCode: "annual_filing_adapter",
+      transportRouteCode: hasIxbrl ? "ixbrl_filing" : hasSru ? "sru_file_export" : "official_json_export",
+      officialChannelCode: hasIxbrl ? "bolagsverket_ixbrl" : hasSru ? "skatteverket_sru" : "skatteverket_annual_json",
+      fallbackCode: hasIxbrl ? "signed_ixbrl_upload" : hasSru ? "signed_sru_upload" : "signed_json_upload",
+      requiredInput: [hasIxbrl ? "ixbrl_receipt" : hasSru ? "sru_receipt" : "annual_declaration_receipt"]
+    };
+  }
+  return {
+    transportAdapterCode: "generic_authority_adapter",
+    transportRouteCode: "official_api",
+    officialChannelCode: "generic_authority_channel",
+    fallbackCode: "official_submission_fallback",
+    requiredInput: ["official_submission_receipt"]
+  };
+}
+
+function buildFallbackProviderReference(submission, profile) {
+  return `${profile.transportAdapterCode}:${submission.submissionId}:${submission.attemptNo}`;
+}
+
+function isLiveExecutionMode(mode) {
+  return ["production", "pilot"].includes(normalizeExecutionMode(mode));
+}
+
+function normalizeExecutionMode(mode) {
+  return normalizeOptionalText(mode) || "test";
 }
 
 function requireSubmission(state, companyId, submissionId) {

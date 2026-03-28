@@ -300,6 +300,62 @@ test("Phase 14 Step 4 worker runs submission transport jobs through the shared r
   );
 });
 
+test("Phase 13.3 worker keeps production submission transport on explicit official fallback path", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-24T10:37:00Z")
+  });
+
+  const submission = await platform.prepareAuthoritySubmission({
+    companyId: DEMO_IDS.companyId,
+    submissionType: "income_tax_return",
+    sourceObjectType: "tax_declaration_package",
+    sourceObjectId: "tax-package-13-3-worker",
+    providerKey: "skatteverket",
+    recipientId: "skatteverket:income-tax",
+    signedState: "signed",
+    actorId: "system",
+    payloadVersion: "1.0",
+    providerBaselineRefs: [
+      {
+        providerBaselineId: "annual-sru-export-se-2026.1",
+        providerCode: "skatteverket",
+        baselineCode: "SE-SRU-FILE",
+        providerBaselineVersion: "2026.1",
+        providerBaselineChecksum: "annual-sru-export-se-2026.1"
+      }
+    ],
+    payload: {
+      packageId: "tax-package-13-3-worker"
+    }
+  });
+
+  const dispatched = await platform.submitAuthoritySubmission({
+    companyId: DEMO_IDS.companyId,
+    submissionId: submission.submissionId,
+    actorId: "system",
+    mode: "production"
+  });
+  assert.equal(dispatched.transportQueued, true);
+
+  const processed = await runWorkerBatch({
+    platform,
+    handlers: createDefaultJobHandlers({ logger: () => {} }),
+    logger: () => {},
+    workerId: "worker-step4-submission-production-fallback"
+  });
+  assert.equal(processed, 1);
+
+  const refreshedSubmission = platform.getAuthoritySubmission({
+    companyId: DEMO_IDS.companyId,
+    submissionId: submission.submissionId
+  });
+  assert.equal(refreshedSubmission.status, "submitted");
+  assert.equal(refreshedSubmission.transportJobId, null);
+  assert.equal(refreshedSubmission.canonicalEnvelope.envelopeState, "awaiting_receipts");
+  assert.equal(refreshedSubmission.lastTransportPlan.fallbackActivated, true);
+  assert.equal(refreshedSubmission.actionQueueItems.some((item) => item.actionType === "contact_provider"), true);
+});
+
 test("Phase 14 Step 4 worker collects later submission receipts through the shared runtime", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-24T10:40:00Z")

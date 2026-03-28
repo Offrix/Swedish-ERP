@@ -81,7 +81,12 @@ export function createDefaultJobHandlers({ logger = console.log } = {}) {
           typeof job.payload?.mode === "string"
             ? job.payload.mode
             : platform.getRuntimeModeProfile?.().environmentMode || platform.environmentMode || "test",
-        simulatedTransportOutcome: typeof job.payload?.simulatedTransportOutcome === "string" ? job.payload.simulatedTransportOutcome : "technical_ack",
+        transportScenarioCode:
+          typeof job.payload?.transportScenarioCode === "string"
+            ? job.payload.transportScenarioCode
+            : typeof job.payload?.simulatedTransportOutcome === "string"
+              ? job.payload.simulatedTransportOutcome
+              : null,
         providerReference: typeof job.payload?.providerReference === "string" ? job.payload.providerReference : null,
         message: typeof job.payload?.message === "string" ? job.payload.message : null,
         requiredInput: Array.isArray(job.payload?.requiredInput) ? job.payload.requiredInput : []

@@ -5,6 +5,7 @@ import {
   SUBMISSION_ENVELOPE_STATES,
   SUBMISSION_RECEIPT_TYPES,
   SUBMISSION_STATUSES,
+  SUBMISSION_TRANSPORT_SCENARIOS,
   createRegulatedSubmissionsModule
 } from "../../packages/domain-regulated-submissions/src/index.mjs";
 import { createIntegrationPlatform } from "../../packages/domain-integrations/src/index.mjs";
@@ -36,6 +37,7 @@ test("Phase 13.2 exposes regulated submissions through canonical package boundar
   assert.equal(SUBMISSION_STATUSES.includes("submitted"), true);
   assert.equal(SUBMISSION_ENVELOPE_STATES.includes("queued"), true);
   assert.equal(SUBMISSION_ATTEMPT_STATUSES.includes("succeeded"), true);
+  assert.equal(SUBMISSION_TRANSPORT_SCENARIOS.includes("technical_ack"), true);
   assert.equal(SUBMISSION_RECEIPT_TYPES.includes("technical_ack"), true);
   assert.equal(typeof module.prepareAuthoritySubmission, "function");
   assert.equal(typeof module.registerSubmissionReceipt, "function");
@@ -112,4 +114,85 @@ test("Phase 13.2 canonical submission core persists attempts, canonical envelope
   assert.equal(attempts.length, 2);
   assert.equal(attempts[0].submissionAttemptNo, 1);
   assert.equal(attempts[1].submissionAttemptNo, 2);
+});
+
+test("Phase 13.3 submission transport resolves adapter metadata instead of live-path synthetic outcome injection", async () => {
+  const platform = createIntegrationPlatform({
+    clock: () => new Date("2026-03-28T12:30:00Z")
+  });
+
+  let submission = platform.prepareAuthoritySubmission({
+    companyId: "company-13-3",
+    submissionType: "agi_monthly",
+    sourceObjectType: "agi_submission_period",
+    sourceObjectId: "agi-period-2026-03",
+    payloadVersion: "phase13.3",
+    providerKey: "skatteverket",
+    recipientId: "skatteverket:agi",
+    payload: {
+      sourceObjectVersion: "agi-period-2026-03:v1"
+    },
+    actorId: "phase13-3-unit",
+    signedState: "not_required"
+  });
+
+  submission = await platform.submitAuthoritySubmission({
+    companyId: "company-13-3",
+    submissionId: submission.submissionId,
+    actorId: "phase13-3-unit",
+    mode: "test",
+    transportScenarioCode: "technical_ack"
+  });
+
+  assert.equal(submission.lastTransportPlan.transportAdapterCode, "skatteverket_agi_adapter");
+  assert.equal(submission.lastTransportPlan.transportRouteCode, "official_api");
+  assert.equal(submission.lastTransportPlan.fallbackActivated, false);
+  assert.equal(submission.attempts[0].transportAdapterCode, "skatteverket_agi_adapter");
+  assert.equal(submission.attempts[0].transportScenarioCode, "technical_ack");
+  assert.equal(submission.receipts[0].receiptType, "technical_ack");
+});
+
+test("Phase 13.3 production dispatch queues official fallback instead of fabricating technical receipts", async () => {
+  const platform = createIntegrationPlatform({
+    clock: () => new Date("2026-03-28T12:45:00Z")
+  });
+
+  let submission = platform.prepareAuthoritySubmission({
+    companyId: "company-13-3-live",
+    submissionType: "income_tax_return",
+    sourceObjectType: "tax_declaration_package",
+    sourceObjectId: "tax-package-13-3-live",
+    payloadVersion: "phase13.3-live",
+    providerKey: "skatteverket",
+    recipientId: "skatteverket:income-tax",
+    payload: {
+      sourceObjectVersion: "tax-package-13-3-live:v1"
+    },
+    providerBaselineRefs: [
+      {
+        providerBaselineId: "annual-sru-export-se-2026.1",
+        providerCode: "skatteverket",
+        baselineCode: "SE-SRU-FILE",
+        providerBaselineVersion: "2026.1",
+        providerBaselineChecksum: "annual-sru-export-se-2026.1"
+      }
+    ],
+    actorId: "phase13-3-unit",
+    signedState: "signed"
+  });
+
+  submission = await platform.submitAuthoritySubmission({
+    companyId: "company-13-3-live",
+    submissionId: submission.submissionId,
+    actorId: "phase13-3-unit",
+    mode: "production"
+  });
+
+  assert.equal(submission.status, "submitted");
+  assert.equal(submission.receipts.length, 0);
+  assert.equal(submission.canonicalEnvelope.envelopeState, "awaiting_receipts");
+  assert.equal(submission.lastTransportPlan.fallbackActivated, true);
+  assert.equal(submission.lastTransportPlan.fallbackCode, "signed_sru_upload");
+  assert.equal(submission.actionQueueItems.some((item) => item.actionType === "contact_provider"), true);
+  assert.equal(submission.attempts[0].fallbackActivated, true);
 });

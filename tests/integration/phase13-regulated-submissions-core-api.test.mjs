@@ -98,3 +98,84 @@ test("Phase 13.2 API exposes canonical submission attempts and evidence-pack sta
     await stopServer(server);
   }
 });
+
+test("Phase 13.3 API keeps production transport on official fallback path without synthetic technical receipts", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-28T15:20:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const created = await requestJson(baseUrl, "/v1/submissions", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        submissionType: "income_tax_return",
+        sourceObjectType: "tax_declaration_package",
+        sourceObjectId: "tax-package-phase13-3",
+        payloadVersion: "phase13.3",
+        providerKey: "skatteverket",
+        recipientId: "skatteverket:income-tax",
+        providerBaselineRefs: [
+          {
+            providerBaselineId: "annual-sru-export-se-2026.1",
+            providerCode: "skatteverket",
+            baselineCode: "SE-SRU-FILE",
+            providerBaselineVersion: "2026.1",
+            providerBaselineChecksum: "annual-sru-export-se-2026.1"
+          }
+        ],
+        payload: {
+          sourceObjectVersion: "tax-package-phase13-3:v1"
+        }
+      }
+    });
+
+    await requestJson(baseUrl, `/v1/submissions/${created.submissionId}/sign`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+
+    const queued = await requestJson(baseUrl, `/v1/submissions/${created.submissionId}/submit`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        mode: "production"
+      }
+    });
+    assert.equal(queued.transportQueued, true);
+
+    await runWorkerBatch({
+      platform,
+      logger: () => {},
+      workerId: "phase13-3-regulated-submission-core"
+    });
+
+    const submission = await requestJson(baseUrl, `/v1/submissions/${created.submissionId}?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(submission.status, "submitted");
+    assert.equal(submission.canonicalEnvelope.envelopeState, "awaiting_receipts");
+    assert.equal(submission.receipts.length, 0);
+    assert.equal(submission.lastTransportPlan.fallbackActivated, true);
+    assert.equal(submission.attempts[0].fallbackActivated, true);
+    assert.equal(submission.actionQueueItems.some((item) => item.actionType === "contact_provider"), true);
+  } finally {
+    await stopServer(server);
+  }
+});
