@@ -2,9 +2,13 @@ import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import {
   DEMO_COMPANY_ID,
+  IMPORT_CASE_APPLICATION_STATUSES,
+  IMPORT_CASE_BLOCKING_REASON_CODES,
   EU_COUNTRY_CODES,
   IMPORT_CASE_COMPLETENESS_STATUSES,
   IMPORT_CASE_COMPONENT_TYPES,
+  IMPORT_CASE_CORRECTION_REQUEST_REASON_CODES,
+  IMPORT_CASE_CORRECTION_REQUEST_STATUSES,
   IMPORT_CASE_DOCUMENT_ROLE_CODES,
   IMPORT_CASE_REVIEW_DECISION_TYPE,
   IMPORT_CASE_REVIEW_QUEUE_CODE,
@@ -26,7 +30,7 @@ import {
   roundMoney
 } from "./helpers.mjs";
 
-const ACTIVE_CASE_STATUSES = new Set(["opened", "collecting_documents", "ready_for_review", "approved", "posted"]);
+const ACTIVE_CASE_STATUSES = new Set(["opened", "collecting_documents", "ready_for_review", "approved", "applied", "posted"]);
 const MUTABLE_CASE_STATUSES = new Set(["opened", "collecting_documents", "ready_for_review"]);
 const COMPONENTS_IN_IMPORT_VAT_BASE = new Set([
   "GOODS",
@@ -60,6 +64,8 @@ export function createImportCasesEngine({
     components: new Map(),
     componentIdsByCase: new Map(),
     componentIdByDedupeKey: new Map(),
+    correctionRequests: new Map(),
+    correctionRequestIdsByCase: new Map(),
     corrections: new Map(),
     correctionIdsByCase: new Map(),
     auditEvents: []
@@ -83,6 +89,9 @@ export function createImportCasesEngine({
     addImportCaseComponent,
     recalculateImportCase,
     approveImportCase,
+    requestImportCaseCorrection,
+    decideImportCaseCorrectionRequest,
+    applyImportCase,
     correctImportCase,
     snapshotImportCases
   };
@@ -143,6 +152,14 @@ export function createImportCasesEngine({
       importVatBaseAmount: 0,
       importVatAmount: 0,
       componentTotalsJson: {},
+      applicationStatus: IMPORT_CASE_APPLICATION_STATUSES[0],
+      appliedTargetDomainCode: null,
+      appliedTargetObjectType: null,
+      appliedTargetObjectId: null,
+      appliedCommandKey: null,
+      appliedPayloadHash: null,
+      appliedAt: null,
+      appliedByActorId: null,
       correctedAt: null,
       correctedByActorId: null,
       correctedToImportCaseId: null,
@@ -287,9 +304,18 @@ export function createImportCasesEngine({
     const documentLinks = listCaseDocumentLinks(state, importCase.importCaseId);
     const components = listCaseComponents(state, importCase.importCaseId);
     const blockingReasonCodes = [];
+    const classificationCase = resolveLinkedClassificationCase({
+      documentClassificationPlatform,
+      importCase
+    });
+    const openCorrectionRequests = listOpenCorrectionRequests(state, importCase.importCaseId);
 
     if (!documentLinks.some((link) => link.roleCode === "PRIMARY_SUPPLIER_DOCUMENT")) {
       blockingReasonCodes.push("PRIMARY_SUPPLIER_DOCUMENT_MISSING");
+    }
+
+    if (components.length === 0) {
+      blockingReasonCodes.push("IMPORT_COMPONENTS_MISSING");
     }
 
     const customsEvidenceRequired = determineCustomsEvidenceRequirement(importCase, components);
@@ -297,25 +323,44 @@ export function createImportCasesEngine({
       blockingReasonCodes.push("CUSTOMS_EVIDENCE_MISSING");
     }
 
+    const importVatBaseAmount = calculateImportVatBase(components);
+    const importVatAmount = calculateImportVatAmount(components);
+    if (
+      importVatBaseAmount > 0 &&
+      importVatAmount <= 0 &&
+      customsEvidenceRequired &&
+      documentLinks.some((link) => link.roleCode === "CUSTOMS_EVIDENCE")
+    ) {
+      blockingReasonCodes.push("IMPORT_VAT_AMOUNT_MISSING");
+    }
+
+    if (classificationCase && !["approved", "dispatched"].includes(classificationCase.status)) {
+      blockingReasonCodes.push("SOURCE_CLASSIFICATION_NOT_APPROVED");
+    }
+
+    if (openCorrectionRequests.length > 0) {
+      blockingReasonCodes.push("OPEN_CORRECTION_REQUESTS");
+    }
+
     const completenessStatus = blockingReasonCodes.length > 0 ? "blocking" : "complete";
     const reviewRequired = completenessStatus === "blocking" || completenessStatus === "complete";
     const reviewRiskClass = blockingReasonCodes.length > 0 ? "high" : customsEvidenceRequired ? "medium" : "low";
 
     importCase.requiresCustomsEvidence = customsEvidenceRequired;
-    importCase.blockingReasonCodes = Object.freeze([...blockingReasonCodes]);
+    importCase.blockingReasonCodes = Object.freeze(filterAllowedBlockingReasonCodes(blockingReasonCodes));
     importCase.completenessStatus = completenessStatus;
     importCase.reviewRequired = reviewRequired;
     importCase.reviewRiskClass = reviewRiskClass;
-    importCase.importVatBaseAmount = calculateImportVatBase(components);
-    importCase.importVatAmount = calculateImportVatAmount(components);
+    importCase.importVatBaseAmount = importVatBaseAmount;
+    importCase.importVatAmount = importVatAmount;
     importCase.componentTotalsJson = aggregateComponentTotals(components);
     importCase.updatedAt = nowIso(clock);
 
-    if (!["approved", "posted", "corrected", "closed"].includes(importCase.status)) {
+    if (!["approved", "applied", "posted", "rejected", "corrected", "closed"].includes(importCase.status)) {
       importCase.status = completenessStatus === "complete" ? "ready_for_review" : "collecting_documents";
     }
 
-    if (reviewRequired && !["approved", "posted", "corrected", "closed"].includes(importCase.status)) {
+    if (reviewRequired && !["approved", "applied", "posted", "rejected", "corrected", "closed"].includes(importCase.status)) {
       createOrReuseReviewItem({
         importCase,
         customsEvidenceRequired,
@@ -337,7 +382,7 @@ export function createImportCasesEngine({
 
   function approveImportCase({ companyId, importCaseId, approvalNote = null, actorId = "system" } = {}) {
     const importCase = requireCase(state, companyId, importCaseId);
-    if (importCase.status === "approved") {
+    if (["approved", "applied"].includes(importCase.status)) {
       return presentCase(state, importCase);
     }
     if (!MUTABLE_CASE_STATUSES.has(importCase.status)) {
@@ -345,6 +390,13 @@ export function createImportCasesEngine({
     }
     if (importCase.completenessStatus !== "complete") {
       throw createError(409, "import_case_incomplete", "Import case must be complete before approval.");
+    }
+    if (listOpenCorrectionRequests(state, importCase.importCaseId).length > 0) {
+      throw createError(
+        409,
+        "import_case_open_correction_requests",
+        "Import case cannot be approved while correction requests are still open."
+      );
     }
 
     const resolvedActorId = requireText(actorId, "actor_id_required");
@@ -367,6 +419,205 @@ export function createImportCasesEngine({
       entityType: "import_case",
       entityId: importCase.importCaseId,
       explanation: `Approved import case ${importCase.caseReference}.`,
+      recordedAt: now
+    });
+    return presentCase(state, importCase);
+  }
+
+  function requestImportCaseCorrection({
+    companyId,
+    importCaseId,
+    reasonCode,
+    reasonNote = null,
+    actorId = "system"
+  } = {}) {
+    const importCase = requireCase(state, companyId, importCaseId);
+    if (["corrected", "closed"].includes(importCase.status)) {
+      throw createError(409, "import_case_not_correctable", "Import case cannot accept correction requests from its current status.");
+    }
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const correctionRequest = {
+      importCaseCorrectionRequestId: crypto.randomUUID(),
+      companyId: importCase.companyId,
+      importCaseId: importCase.importCaseId,
+      status: IMPORT_CASE_CORRECTION_REQUEST_STATUSES[0],
+      reasonCode: requireAllowedStatus(
+        reasonCode,
+        IMPORT_CASE_CORRECTION_REQUEST_REASON_CODES,
+        "import_case_correction_request_reason_invalid"
+      ),
+      reasonNote: normalizeOptionalText(reasonNote),
+      requestedByActorId: resolvedActorId,
+      requestedAt: nowIso(clock),
+      decidedAt: null,
+      decidedByActorId: null,
+      decisionCode: null,
+      decisionNote: null,
+      replacementImportCaseId: null
+    };
+    state.correctionRequests.set(correctionRequest.importCaseCorrectionRequestId, correctionRequest);
+    appendToIndex(state.correctionRequestIdsByCase, correctionRequest.importCaseId, correctionRequest.importCaseCorrectionRequestId);
+    pushAudit(state, {
+      companyId: importCase.companyId,
+      actorId: resolvedActorId,
+      action: "import_case.correction_requested",
+      entityType: "import_case_correction_request",
+      entityId: correctionRequest.importCaseCorrectionRequestId,
+      explanation: `Opened correction request for import case ${importCase.caseReference}.`,
+      recordedAt: correctionRequest.requestedAt
+    });
+    return recalculateImportCase({
+      companyId: importCase.companyId,
+      importCaseId: importCase.importCaseId,
+      actorId: resolvedActorId
+    });
+  }
+
+  function decideImportCaseCorrectionRequest({
+    companyId,
+    importCaseId,
+    importCaseCorrectionRequestId,
+    decisionCode,
+    decisionNote = null,
+    replacementCaseReference = null,
+    actorId = "system"
+  } = {}) {
+    const importCase = requireCase(state, companyId, importCaseId);
+    const correctionRequest = requireCorrectionRequest({
+      state,
+      companyId: importCase.companyId,
+      importCaseId: importCase.importCaseId,
+      importCaseCorrectionRequestId
+    });
+    if (correctionRequest.status !== "open") {
+      throw createError(409, "import_case_correction_request_closed", "Correction request is already closed.");
+    }
+    const resolvedDecisionCode = requireAllowedDecisionCode(decisionCode);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const now = nowIso(clock);
+    correctionRequest.status =
+      resolvedDecisionCode === "approve"
+        ? IMPORT_CASE_CORRECTION_REQUEST_STATUSES[1]
+        : IMPORT_CASE_CORRECTION_REQUEST_STATUSES[2];
+    correctionRequest.decisionCode = resolvedDecisionCode;
+    correctionRequest.decisionNote = normalizeOptionalText(decisionNote);
+    correctionRequest.decidedAt = now;
+    correctionRequest.decidedByActorId = resolvedActorId;
+
+    let correctionResult = null;
+    if (resolvedDecisionCode === "approve") {
+      correctionResult = correctImportCase({
+        companyId: importCase.companyId,
+        importCaseId: importCase.importCaseId,
+        replacementCaseReference: requireText(
+          replacementCaseReference,
+          "replacement_case_reference_required"
+        ),
+        actorId: resolvedActorId,
+        reasonCode: correctionRequest.reasonCode,
+        reasonNote: correctionRequest.reasonNote
+      });
+      correctionRequest.replacementImportCaseId = correctionResult.replacementCase.importCaseId;
+    }
+
+    pushAudit(state, {
+      companyId: importCase.companyId,
+      actorId: resolvedActorId,
+      action: "import_case.correction_request_decided",
+      entityType: "import_case_correction_request",
+      entityId: correctionRequest.importCaseCorrectionRequestId,
+      explanation: `${resolvedDecisionCode}d correction request for import case ${importCase.caseReference}.`,
+      recordedAt: now
+    });
+
+    return {
+      importCase:
+        correctionResult?.priorCase ||
+        recalculateImportCase({
+          companyId: importCase.companyId,
+          importCaseId: importCase.importCaseId,
+          actorId: resolvedActorId
+        }),
+      correctionRequest: copy(correctionRequest),
+      replacementCase: correctionResult?.replacementCase || null,
+      correction: correctionResult?.correction || null
+    };
+  }
+
+  function applyImportCase({
+    companyId,
+    importCaseId,
+    targetDomainCode,
+    targetObjectType,
+    targetObjectId,
+    appliedCommandKey,
+    payload = {},
+    actorId = "system"
+  } = {}) {
+    const importCase = requireCase(state, companyId, importCaseId);
+    if (!["approved", "applied", "posted"].includes(importCase.status)) {
+      throw createError(409, "import_case_not_applicable", "Import case must be approved before downstream apply.");
+    }
+    if (importCase.completenessStatus !== "complete") {
+      throw createError(409, "import_case_incomplete", "Import case must be complete before downstream apply.");
+    }
+    if (listOpenCorrectionRequests(state, importCase.importCaseId).length > 0) {
+      throw createError(
+        409,
+        "import_case_open_correction_requests",
+        "Import case cannot be applied while correction requests are still open."
+      );
+    }
+
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedTargetDomainCode = normalizeCode(targetDomainCode, "import_case_target_domain_required");
+    const resolvedTargetObjectType = normalizeCode(targetObjectType, "import_case_target_object_type_required");
+    const resolvedTargetObjectId = requireText(targetObjectId, "import_case_target_object_id_required");
+    const resolvedAppliedCommandKey = requireText(appliedCommandKey, "import_case_applied_command_key_required");
+    const payloadHash = buildHash({
+      targetDomainCode: resolvedTargetDomainCode,
+      targetObjectType: resolvedTargetObjectType,
+      targetObjectId: resolvedTargetObjectId,
+      appliedCommandKey: resolvedAppliedCommandKey,
+      payload: copy(payload || {})
+    });
+
+    if (importCase.applicationStatus === "applied") {
+      const sameApplication =
+        importCase.appliedTargetDomainCode === resolvedTargetDomainCode &&
+        importCase.appliedTargetObjectType === resolvedTargetObjectType &&
+        importCase.appliedTargetObjectId === resolvedTargetObjectId &&
+        importCase.appliedCommandKey === resolvedAppliedCommandKey &&
+        importCase.appliedPayloadHash === payloadHash;
+      if (sameApplication) {
+        return presentCase(state, importCase);
+      }
+      throw createError(
+        409,
+        "import_case_downstream_mapping_conflict",
+        "Import case is already applied to another downstream mapping."
+      );
+    }
+
+    const now = nowIso(clock);
+    importCase.status = "applied";
+    importCase.applicationStatus = IMPORT_CASE_APPLICATION_STATUSES[1];
+    importCase.appliedTargetDomainCode = resolvedTargetDomainCode;
+    importCase.appliedTargetObjectType = resolvedTargetObjectType;
+    importCase.appliedTargetObjectId = resolvedTargetObjectId;
+    importCase.appliedCommandKey = resolvedAppliedCommandKey;
+    importCase.appliedPayloadHash = payloadHash;
+    importCase.appliedAt = now;
+    importCase.appliedByActorId = resolvedActorId;
+    importCase.updatedAt = now;
+
+    pushAudit(state, {
+      companyId: importCase.companyId,
+      actorId: resolvedActorId,
+      action: "import_case.applied",
+      entityType: "import_case",
+      entityId: importCase.importCaseId,
+      explanation: `Applied import case ${importCase.caseReference} to ${resolvedTargetDomainCode}/${resolvedTargetObjectType}/${resolvedTargetObjectId}.`,
       recordedAt: now
     });
     return presentCase(state, importCase);
@@ -466,6 +717,7 @@ export function createImportCasesEngine({
       importCases: Array.from(state.cases.values()).filter(filterByCompany).map((importCase) => presentCase(state, importCase)),
       documentLinks: Array.from(state.documentLinks.values()).filter(filterByCompany).map(copy),
       components: Array.from(state.components.values()).filter(filterByCompany).map(copy),
+      correctionRequests: Array.from(state.correctionRequests.values()).filter(filterByCompany).map(copy),
       corrections: Array.from(state.corrections.values()).filter(filterByCompany).map(copy),
       auditEvents: state.auditEvents.filter(filterByCompany).map(copy),
       documentBridgeReady: documentPlatform != null,
@@ -740,11 +992,13 @@ export function createImportCasesEngine({
 function presentCase(state, importCase) {
   const documentLinks = listCaseDocumentLinks(state, importCase.importCaseId).map(copy);
   const components = listCaseComponents(state, importCase.importCaseId).map(copy);
+  const correctionRequests = listCaseCorrectionRequests(state, importCase.importCaseId).map(copy);
   const corrections = listCaseCorrections(state, importCase.importCaseId).map(copy);
   return {
     ...copy(importCase),
     documentLinks,
     components,
+    correctionRequests,
     corrections,
     completeness: {
       status: importCase.completenessStatus,
@@ -752,6 +1006,16 @@ function presentCase(state, importCase) {
       importVatBaseAmount: importCase.importVatBaseAmount,
       importVatAmount: importCase.importVatAmount,
       componentTotals: copy(importCase.componentTotalsJson)
+    },
+    downstreamApplication: {
+      applicationStatus: importCase.applicationStatus || IMPORT_CASE_APPLICATION_STATUSES[0],
+      targetDomainCode: importCase.appliedTargetDomainCode,
+      targetObjectType: importCase.appliedTargetObjectType,
+      targetObjectId: importCase.appliedTargetObjectId,
+      appliedCommandKey: importCase.appliedCommandKey,
+      appliedPayloadHash: importCase.appliedPayloadHash,
+      appliedAt: importCase.appliedAt,
+      appliedByActorId: importCase.appliedByActorId
     }
   };
 }
@@ -830,6 +1094,17 @@ function resolveSourceClassificationCase({ documentClassificationPlatform, compa
   });
 }
 
+function resolveLinkedClassificationCase({ documentClassificationPlatform, importCase }) {
+  if (!importCase.sourceClassificationCaseId) {
+    return null;
+  }
+  return resolveSourceClassificationCase({
+    documentClassificationPlatform,
+    companyId: importCase.companyId,
+    sourceClassificationCaseId: importCase.sourceClassificationCaseId
+  });
+}
+
 function normalizeInitialDocuments({ initialDocuments, classificationCase }) {
   const normalized = Array.isArray(initialDocuments) ? [...initialDocuments] : [];
   if (
@@ -866,6 +1141,18 @@ function listCaseCorrections(state, importCaseId) {
     .filter(Boolean);
 }
 
+function listCaseCorrectionRequests(state, importCaseId) {
+  return (state.correctionRequestIdsByCase.get(importCaseId) || [])
+    .map((importCaseCorrectionRequestId) => state.correctionRequests.get(importCaseCorrectionRequestId))
+    .filter(Boolean);
+}
+
+function listOpenCorrectionRequests(state, importCaseId) {
+  return listCaseCorrectionRequests(state, importCaseId).filter(
+    (correctionRequest) => correctionRequest.status === IMPORT_CASE_CORRECTION_REQUEST_STATUSES[0]
+  );
+}
+
 function requireCase(state, companyId, importCaseId) {
   const resolvedCompanyId = requireText(companyId, "company_id_required");
   const resolvedImportCaseId = requireText(importCaseId, "import_case_id_required");
@@ -874,6 +1161,20 @@ function requireCase(state, companyId, importCaseId) {
     throw createError(404, "import_case_not_found", "Import case was not found.");
   }
   return importCase;
+}
+
+function requireCorrectionRequest({ state, companyId, importCaseId, importCaseCorrectionRequestId }) {
+  const correctionRequest = state.correctionRequests.get(
+    requireText(importCaseCorrectionRequestId, "import_case_correction_request_id_required")
+  );
+  if (
+    !correctionRequest ||
+    correctionRequest.companyId !== requireText(companyId, "company_id_required") ||
+    correctionRequest.importCaseId !== requireText(importCaseId, "import_case_id_required")
+  ) {
+    throw createError(404, "import_case_correction_request_not_found", "Import case correction request was not found.");
+  }
+  return correctionRequest;
 }
 
 function requireMutableCase(state, companyId, importCaseId) {
@@ -886,10 +1187,15 @@ function requireMutableCase(state, companyId, importCaseId) {
 
 function requireAllowedStatus(value, allowedValues, errorCode) {
   const resolvedValue = normalizeCode(value, errorCode);
-  if (!allowedValues.includes(resolvedValue)) {
+  const canonicalValue = allowedValues.find((allowedValue) => normalizeCode(allowedValue, errorCode) === resolvedValue);
+  if (!canonicalValue) {
     throw createError(400, errorCode, `Value "${resolvedValue}" is not allowed.`);
   }
-  return resolvedValue;
+  return canonicalValue;
+}
+
+function requireAllowedDecisionCode(value) {
+  return requireAllowedStatus(value, ["approve", "reject"], "import_case_correction_request_decision_invalid");
 }
 
 function normalizeCurrencyCode(value) {
@@ -949,6 +1255,14 @@ function pushAudit(state, event) {
       event
     })
   );
+}
+
+function uniqueStrings(values) {
+  return [...new Set((Array.isArray(values) ? values : []).filter(Boolean))];
+}
+
+function filterAllowedBlockingReasonCodes(values) {
+  return uniqueStrings(values).filter((value) => IMPORT_CASE_BLOCKING_REASON_CODES.includes(value));
 }
 
 function seedDemoState() {

@@ -139,6 +139,12 @@ test("Step 15 import cases prevent document reuse across active cases and preser
         roleCode: "PRIMARY_SUPPLIER_DOCUMENT"
       }
     ],
+    initialComponents: [
+      {
+        componentType: "GOODS",
+        amount: 1000
+      }
+    ],
     actorId: "user_2"
   });
   assert.equal(firstCase.status, "ready_for_review");
@@ -177,4 +183,142 @@ test("Step 15 import cases prevent document reuse across active cases and preser
   assert.equal(correction.replacementCase.parentImportCaseId, firstCase.importCaseId);
   assert.equal(correction.replacementCase.documentLinks.length, 1);
   assert.equal(correction.replacementCase.documentLinks[0].documentId, supplierDocument.documentId);
+});
+
+test("Step 15 import cases create correction requests that block approval until explicitly rejected", () => {
+  const clock = () => new Date("2026-03-28T15:30:00Z");
+  const documentPlatform = createDocumentArchivePlatform({ clock });
+  const reviewCenterPlatform = createReviewCenterPlatform({ clock, seedDemo: true });
+  const importCases = createImportCasesEngine({
+    clock,
+    seedDemo: false,
+    documentPlatform,
+    reviewCenterPlatform
+  });
+
+  const supplierDocument = documentPlatform.createDocumentRecord({
+    companyId: DEMO_COMPANY_ID,
+    documentType: "supplier_invoice",
+    sourceReference: "import-supplier-0104-001",
+    actorId: "user_3"
+  });
+
+  const created = importCases.createImportCase({
+    companyId: DEMO_COMPANY_ID,
+    caseReference: "IMP-UNIT-0104-001",
+    goodsOriginCountry: "SE",
+    requiresCustomsEvidence: false,
+    initialDocuments: [{ documentId: supplierDocument.documentId, roleCode: "PRIMARY_SUPPLIER_DOCUMENT" }],
+    initialComponents: [{ componentType: "GOODS", amount: 5000 }],
+    actorId: "user_3"
+  });
+  assert.equal(created.status, "ready_for_review");
+
+  const correctionRequested = importCases.requestImportCaseCorrection({
+    companyId: DEMO_COMPANY_ID,
+    importCaseId: created.importCaseId,
+    reasonCode: "component_mapping_incorrect",
+    reasonNote: "Fel komponentstruktur.",
+    actorId: "user_3"
+  });
+  assert.equal(correctionRequested.completeness.status, "blocking");
+  assert.deepEqual(correctionRequested.completeness.blockingReasonCodes, ["OPEN_CORRECTION_REQUESTS"]);
+
+  assert.throws(
+    () =>
+      importCases.approveImportCase({
+        companyId: DEMO_COMPANY_ID,
+        importCaseId: created.importCaseId,
+        actorId: "user_3"
+      }),
+    (error) => error?.code === "import_case_incomplete"
+  );
+
+  const decision = importCases.decideImportCaseCorrectionRequest({
+    companyId: DEMO_COMPANY_ID,
+    importCaseId: created.importCaseId,
+    importCaseCorrectionRequestId: correctionRequested.correctionRequests[0].importCaseCorrectionRequestId,
+    decisionCode: "reject",
+    decisionNote: "Nuvarande mapping är korrekt.",
+    actorId: "user_4"
+  });
+  assert.equal(decision.correctionRequest.status, "rejected");
+  assert.equal(decision.importCase.completeness.status, "complete");
+  assert.equal(decision.importCase.correctionRequests[0].decisionCode, "reject");
+});
+
+test("Step 15 import cases apply downstream idempotently and conflict on divergent mappings", () => {
+  const clock = () => new Date("2026-03-28T16:00:00Z");
+  const documentPlatform = createDocumentArchivePlatform({ clock });
+  const reviewCenterPlatform = createReviewCenterPlatform({ clock, seedDemo: true });
+  const importCases = createImportCasesEngine({
+    clock,
+    seedDemo: false,
+    documentPlatform,
+    reviewCenterPlatform
+  });
+
+  const supplierDocument = documentPlatform.createDocumentRecord({
+    companyId: DEMO_COMPANY_ID,
+    documentType: "supplier_invoice",
+    sourceReference: "import-supplier-0104-002",
+    actorId: "user_5"
+  });
+
+  const created = importCases.createImportCase({
+    companyId: DEMO_COMPANY_ID,
+    caseReference: "IMP-UNIT-0104-002",
+    goodsOriginCountry: "SE",
+    requiresCustomsEvidence: false,
+    initialDocuments: [{ documentId: supplierDocument.documentId, roleCode: "PRIMARY_SUPPLIER_DOCUMENT" }],
+    initialComponents: [{ componentType: "GOODS", amount: 7000 }],
+    actorId: "user_5"
+  });
+
+  importCases.approveImportCase({
+    companyId: DEMO_COMPANY_ID,
+    importCaseId: created.importCaseId,
+    approvalNote: "Klar för downstream.",
+    actorId: "user_5"
+  });
+
+  const applied = importCases.applyImportCase({
+    companyId: DEMO_COMPANY_ID,
+    importCaseId: created.importCaseId,
+    targetDomainCode: "AP",
+    targetObjectType: "supplier_invoice",
+    targetObjectId: "ap_invoice_demo_001",
+    appliedCommandKey: "ap-apply-001",
+    payload: { lineCount: 1 },
+    actorId: "user_5"
+  });
+  assert.equal(applied.status, "applied");
+  assert.equal(applied.downstreamApplication.targetObjectId, "ap_invoice_demo_001");
+
+  const replay = importCases.applyImportCase({
+    companyId: DEMO_COMPANY_ID,
+    importCaseId: created.importCaseId,
+    targetDomainCode: "AP",
+    targetObjectType: "supplier_invoice",
+    targetObjectId: "ap_invoice_demo_001",
+    appliedCommandKey: "ap-apply-001",
+    payload: { lineCount: 1 },
+    actorId: "user_5"
+  });
+  assert.equal(replay.status, "applied");
+
+  assert.throws(
+    () =>
+      importCases.applyImportCase({
+        companyId: DEMO_COMPANY_ID,
+        importCaseId: created.importCaseId,
+        targetDomainCode: "AP",
+        targetObjectType: "supplier_invoice",
+        targetObjectId: "ap_invoice_demo_002",
+        appliedCommandKey: "ap-apply-002",
+        payload: { lineCount: 2 },
+        actorId: "user_5"
+      }),
+    (error) => error?.code === "import_case_downstream_mapping_conflict"
+  );
 });

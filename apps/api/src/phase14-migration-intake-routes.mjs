@@ -212,6 +212,98 @@ export async function tryHandlePhase14MigrationIntakeRoutes({ req, res, url, pat
     return true;
   }
 
+  const importCaseCorrectionRequestMatch = matchPath(path, "/v1/import-cases/:importCaseId/correction-requests");
+  if (req.method === "POST" && importCaseCorrectionRequestMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "import_case",
+      objectId: importCaseCorrectionRequestMatch.importCaseId,
+      scopeCode: "import_case"
+    });
+    writeJson(
+      res,
+      201,
+      platform.requestImportCaseCorrection({
+        companyId,
+        importCaseId: importCaseCorrectionRequestMatch.importCaseId,
+        reasonCode: body.reasonCode,
+        reasonNote: body.reasonNote || null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const importCaseCorrectionDecisionMatch = matchPath(
+    path,
+    "/v1/import-cases/:importCaseId/correction-requests/:importCaseCorrectionRequestId/decide"
+  );
+  if (req.method === "POST" && importCaseCorrectionDecisionMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "import_case",
+      objectId: importCaseCorrectionDecisionMatch.importCaseId,
+      scopeCode: "import_case"
+    });
+    writeJson(
+      res,
+      200,
+      platform.decideImportCaseCorrectionRequest({
+        companyId,
+        importCaseId: importCaseCorrectionDecisionMatch.importCaseId,
+        importCaseCorrectionRequestId: importCaseCorrectionDecisionMatch.importCaseCorrectionRequestId,
+        decisionCode: body.decisionCode,
+        decisionNote: body.decisionNote || null,
+        replacementCaseReference: body.replacementCaseReference || null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const importCaseApplyMatch = matchPath(path, "/v1/import-cases/:importCaseId/apply");
+  if (req.method === "POST" && importCaseApplyMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "import_case",
+      objectId: importCaseApplyMatch.importCaseId,
+      scopeCode: "import_case"
+    });
+    writeJson(
+      res,
+      200,
+      platform.applyImportCase({
+        companyId,
+        importCaseId: importCaseApplyMatch.importCaseId,
+        targetDomainCode: body.targetDomainCode,
+        targetObjectType: body.targetObjectType,
+        targetObjectId: body.targetObjectId,
+        appliedCommandKey: body.appliedCommandKey,
+        payload: body.payload || {},
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
   for (const [routePattern, decisionCode] of [
     ["/v1/review-center/items/:reviewItemId/approve", "approve"],
     ["/v1/review-center/items/:reviewItemId/reject", "reject"],

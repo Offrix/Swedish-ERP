@@ -118,7 +118,10 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/migration/acceptance-records",
   "/v1/migration/post-cutover-correction-cases",
   "/v1/migration/cutover-plans/:cutoverPlanId/signoffs",
-  "/v1/migration/cutover-plans/:cutoverPlanId/checklist/:itemCode"
+  "/v1/migration/cutover-plans/:cutoverPlanId/checklist/:itemCode",
+  "/v1/import-cases/:importCaseId/correction-requests",
+  "/v1/import-cases/:importCaseId/correction-requests/:importCaseCorrectionRequestId/decide",
+  "/v1/import-cases/:importCaseId/apply"
 ]);
 
 function parseRoutesFromSource(sourceText) {

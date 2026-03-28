@@ -5,6 +5,8 @@ export const IMPORT_CASE_STATUSES = Object.freeze([
   "collecting_documents",
   "ready_for_review",
   "approved",
+  "applied",
+  "rejected",
   "posted",
   "corrected",
   "closed"
@@ -38,7 +40,36 @@ export const IMPORT_CASE_VAT_RELEVANCE_CODES = Object.freeze([
 
 export const IMPORT_CASE_BLOCKING_REASON_CODES = Object.freeze([
   "PRIMARY_SUPPLIER_DOCUMENT_MISSING",
-  "CUSTOMS_EVIDENCE_MISSING"
+  "CUSTOMS_EVIDENCE_MISSING",
+  "IMPORT_COMPONENTS_MISSING",
+  "IMPORT_VAT_AMOUNT_MISSING",
+  "SOURCE_CLASSIFICATION_NOT_APPROVED",
+  "OPEN_CORRECTION_REQUESTS",
+  "IMPORT_CASE_REQUIRED",
+  "IMPORT_CASE_INCOMPLETE",
+  "IMPORT_CASE_NOT_APPROVED",
+  "DOWNSTREAM_MAPPING_CONFLICT"
+]);
+
+export const IMPORT_CASE_CORRECTION_REQUEST_STATUSES = Object.freeze([
+  "open",
+  "approved",
+  "rejected",
+  "superseded"
+]);
+
+export const IMPORT_CASE_CORRECTION_REQUEST_REASON_CODES = Object.freeze([
+  "classification_changed",
+  "missing_evidence",
+  "customs_data_incorrect",
+  "component_mapping_incorrect",
+  "downstream_rejected",
+  "manual_review_required"
+]);
+
+export const IMPORT_CASE_APPLICATION_STATUSES = Object.freeze([
+  "pending",
+  "applied"
 ]);
 
 export const IMPORT_CASE_RULEPACK_CODE = "RP-IMPORT-CASE-SE";

@@ -326,6 +326,16 @@ test("Phase 6.4 API blocks AP posting until linked import case is complete and a
           roleCode: "PRIMARY_SUPPLIER_DOCUMENT"
         }
       ],
+      initialComponents: [
+        {
+          componentType: "GOODS",
+          amount: 1000
+        },
+        {
+          componentType: "IMPORT_VAT",
+          amount: 250
+        }
+      ],
       actorId: "user-1"
     });
 

@@ -144,6 +144,16 @@ test("Step 26 AP stays blocked when a supplier invoice is both import-linked and
             documentId: sourceDocument.documentId,
             roleCode: "PRIMARY_SUPPLIER_DOCUMENT"
           }
+        ],
+        initialComponents: [
+          {
+            componentType: "GOODS",
+            amount: 1499
+          },
+          {
+            componentType: "IMPORT_VAT",
+            amount: 374.75
+          }
         ]
       }
     });
