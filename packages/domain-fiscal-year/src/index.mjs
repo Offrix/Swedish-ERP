@@ -185,6 +185,10 @@ export function createFiscalYearEngine({
     const profile = requireLatestFiscalYearProfile(state, resolvedCompanyId);
     const resolvedRequestedStartDate = normalizeMonthBoundaryStartDate(requestedStartDate, "requested_start_date_invalid");
     const resolvedRequestedEndDate = normalizeMonthBoundaryEndDate(requestedEndDate, "requested_end_date_invalid");
+    const resolvedReasonCode = normalizeCode(reasonCode, "reason_code_required");
+    const resolvedPermissionReference = normalizeOptionalText(permissionReference);
+    const resolvedGroupAlignmentStartDate = normalizeOptionalDate(groupAlignmentStartDate, "group_alignment_start_date_invalid");
+    const resolvedGroupAlignmentEndDate = normalizeOptionalDate(groupAlignmentEndDate, "group_alignment_end_date_invalid");
     const rulePack = resolveFiscalYearRulePack(resolvedRequestedStartDate);
     const yearKind = resolveFiscalYearKind(resolvedRequestedStartDate, resolvedRequestedEndDate);
     assertFiscalYearAllowedForProfile({
@@ -193,11 +197,23 @@ export function createFiscalYearEngine({
       endDate: resolvedRequestedEndDate,
       yearKind
     });
+    if (profile.groupAlignmentRequired || resolvedReasonCode === "GROUP_ALIGNMENT") {
+      if (!resolvedGroupAlignmentStartDate || !resolvedGroupAlignmentEndDate) {
+        throw createError(409, "group_alignment_reference_required", "Group-aligned fiscal-year requests must include the reference fiscal year.");
+      }
+    }
+    resolveOpenFiscalYearChangeRequestConflicts(state, resolvedCompanyId, {
+      requestedStartDate: resolvedRequestedStartDate,
+      requestedEndDate: resolvedRequestedEndDate,
+      replacementActorId: requireText(actorId, "actor_id_required"),
+      allowPendingPermissionReplacement: resolvedPermissionReference != null,
+      clock
+    });
     const currentFiscalYear = latestNonPlannedFiscalYear(state, resolvedCompanyId);
     const taxAgencyPermissionRequired = requiresTaxAgencyPermission({
       currentFiscalYear,
       requestedYearKind: yearKind,
-      reasonCode
+      reasonCode: resolvedReasonCode
     });
     const request = Object.freeze({
       changeRequestId: crypto.randomUUID(),
@@ -205,16 +221,16 @@ export function createFiscalYearEngine({
       requestedStartDate: resolvedRequestedStartDate,
       requestedEndDate: resolvedRequestedEndDate,
       yearKind,
-      reasonCode: normalizeCode(reasonCode, "reason_code_required"),
+      reasonCode: resolvedReasonCode,
       taxAgencyPermissionRequired,
-      permissionStatus: taxAgencyPermissionRequired ? (normalizeOptionalText(permissionReference) ? "granted" : "pending") : "not_required",
-      permissionReference: normalizeOptionalText(permissionReference),
+      permissionStatus: taxAgencyPermissionRequired ? (resolvedPermissionReference ? "granted" : "pending") : "not_required",
+      permissionReference: resolvedPermissionReference,
       rulepackId: rulePack.rulePackId,
       rulepackCode: rulePack.rulePackCode,
       rulepackVersion: rulePack.version,
       rulepackChecksum: rulePack.checksum,
-      groupAlignmentStartDate: normalizeOptionalDate(groupAlignmentStartDate, "group_alignment_start_date_invalid"),
-      groupAlignmentEndDate: normalizeOptionalDate(groupAlignmentEndDate, "group_alignment_end_date_invalid"),
+      groupAlignmentStartDate: resolvedGroupAlignmentStartDate,
+      groupAlignmentEndDate: resolvedGroupAlignmentEndDate,
       status: "submitted",
       approvedBy: null,
       approvedAt: null,
@@ -662,6 +678,43 @@ function assertNoFiscalYearOverlap(state, companyId, startDate, endDate) {
   );
   if (overlappingFiscalYear) {
     throw createError(409, "fiscal_year_overlap", "A fiscal year already overlaps the requested interval.");
+  }
+}
+
+function resolveOpenFiscalYearChangeRequestConflicts(
+  state,
+  companyId,
+  { requestedStartDate, requestedEndDate, replacementActorId, allowPendingPermissionReplacement = false, clock }
+) {
+  const duplicates = (state.changeRequestIdsByCompany.get(companyId) || [])
+    .map((changeRequestId) => state.changeRequests.get(changeRequestId))
+    .filter(Boolean)
+    .filter(
+      (request) =>
+        ["submitted", "under_review", "approved"].includes(request.status)
+        && request.requestedStartDate === requestedStartDate
+        && request.requestedEndDate === requestedEndDate
+    );
+  if (duplicates.length === 0) {
+    return;
+  }
+  const replaceablePendingDuplicates = duplicates.filter(
+    (request) => request.status === "submitted" && request.permissionStatus === "pending"
+  );
+  if (allowPendingPermissionReplacement && replaceablePendingDuplicates.length === duplicates.length) {
+    for (const request of replaceablePendingDuplicates) {
+      replaceFiscalYearChangeRequest(state, request.changeRequestId, {
+        status: "rejected",
+        decisionNote: "replaced_by_resubmitted_request",
+        approvedBy: replacementActorId,
+        approvedAt: nowIso(clock),
+        updatedAt: nowIso(clock)
+      });
+    }
+    return;
+  }
+  if (duplicates.length > 0) {
+    throw createError(409, "fiscal_year_change_request_duplicate", "An open fiscal-year change request already exists for the requested interval.");
   }
 }
 

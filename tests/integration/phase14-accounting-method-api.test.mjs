@@ -208,3 +208,74 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
     await stopServer(server);
   }
 });
+
+test("Step 7 API requires fiscal-year boundary metadata and supersedes earlier method change requests", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2027-01-05T09:00:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const missingBoundaryResponse = await fetch(`${baseUrl}/v1/accounting-method/change-requests`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        companyId: DEMO_IDS.companyId,
+        requestedMethodCode: "KONTANTMETOD",
+        requestedEffectiveFrom: "2027-01-01",
+        reasonCode: "METHOD_CHANGE"
+      })
+    });
+    const missingBoundaryPayload = await missingBoundaryResponse.json();
+    assert.equal(missingBoundaryResponse.status, 409);
+    assert.equal(missingBoundaryPayload.error, "method_change_request_fiscal_year_start_required");
+
+    const firstRequest = await requestJson(baseUrl, "/v1/accounting-method/change-requests", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        requestedMethodCode: "KONTANTMETOD",
+        requestedEffectiveFrom: "2027-01-01",
+        fiscalYearStartDate: "2027-01-01",
+        reasonCode: "METHOD_CHANGE"
+      }
+    });
+    const secondRequest = await requestJson(baseUrl, "/v1/accounting-method/change-requests", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        requestedMethodCode: "KONTANTMETOD",
+        requestedEffectiveFrom: "2027-01-01",
+        fiscalYearStartDate: "2027-01-01",
+        reasonCode: "METHOD_CHANGE_REVISED"
+      }
+    });
+    const history = await requestJson(baseUrl, `/v1/accounting-method/history?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    const superseded = history.changeRequests.find((request) => request.methodChangeRequestId === firstRequest.methodChangeRequestId);
+    const active = history.changeRequests.find((request) => request.methodChangeRequestId === secondRequest.methodChangeRequestId);
+
+    assert.equal(superseded.status, "superseded");
+    assert.equal(superseded.supersededByMethodChangeRequestId, secondRequest.methodChangeRequestId);
+    assert.equal(active.status, "submitted");
+  } finally {
+    await stopServer(server);
+  }
+});

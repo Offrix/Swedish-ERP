@@ -177,3 +177,77 @@ test("Step 8 fiscal year status filtering accepts lowercase active status", () =
   assert.equal(activeYears.length, 1);
   assert.equal(activeYears[0].status, "active");
 });
+
+test("Step 8 fiscal-year change requests require group-alignment references at submission when profile demands it", () => {
+  const engine = createFiscalYearEngine({
+    seedDemo: false,
+    clock: () => new Date("2027-07-01T09:00:00Z")
+  });
+
+  engine.createFiscalYearProfile({
+    companyId: "company_group_alignment_submission",
+    legalFormCode: "AKTIEBOLAG",
+    ownerTaxationCode: "LEGAL_PERSON_ONLY",
+    groupAlignmentRequired: true,
+    actorId: "tester"
+  });
+
+  assert.throws(
+    () =>
+      engine.submitFiscalYearChangeRequest({
+        companyId: "company_group_alignment_submission",
+        requestedStartDate: "2027-07-01",
+        requestedEndDate: "2028-06-30",
+        reasonCode: "GROUP_ALIGNMENT",
+        actorId: "tester"
+      }),
+    (error) => error?.code === "group_alignment_reference_required"
+  );
+});
+
+test("Step 8 fiscal year blocks duplicate open change requests for the same interval", () => {
+  const engine = createFiscalYearEngine({
+    seedDemo: false,
+    clock: () => new Date("2027-07-01T09:00:00Z")
+  });
+
+  engine.createFiscalYearProfile({
+    companyId: "company_duplicate_change_request",
+    legalFormCode: "AKTIEBOLAG",
+    actorId: "tester"
+  });
+  const initialYear = engine.createFiscalYear({
+    companyId: "company_duplicate_change_request",
+    startDate: "2026-01-01",
+    endDate: "2026-12-31",
+    approvalBasisCode: "BASELINE",
+    actorId: "tester"
+  });
+  engine.activateFiscalYear({
+    companyId: "company_duplicate_change_request",
+    fiscalYearId: initialYear.fiscalYearId,
+    actorId: "tester"
+  });
+
+  engine.submitFiscalYearChangeRequest({
+    companyId: "company_duplicate_change_request",
+    requestedStartDate: "2027-01-01",
+    requestedEndDate: "2028-06-30",
+    reasonCode: "YEAR_CHANGE",
+    permissionReference: "SKV-2027-0001",
+    actorId: "tester"
+  });
+
+  assert.throws(
+    () =>
+      engine.submitFiscalYearChangeRequest({
+        companyId: "company_duplicate_change_request",
+        requestedStartDate: "2027-01-01",
+        requestedEndDate: "2028-06-30",
+        reasonCode: "YEAR_CHANGE",
+        permissionReference: "SKV-2027-0002",
+        actorId: "tester"
+      }),
+    (error) => error?.code === "fiscal_year_change_request_duplicate"
+  );
+});

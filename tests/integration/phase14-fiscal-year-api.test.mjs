@@ -174,3 +174,87 @@ test("Step 8 API manages fiscal-year profiles, year changes, periods and active 
     await stopServer(server);
   }
 });
+
+test("Step 8 API requires group alignment references and blocks duplicate fiscal-year change requests", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2027-07-01T09:00:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const groupProfile = await requestJson(baseUrl, "/v1/fiscal-years/profiles", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        legalFormCode: "AKTIEBOLAG",
+        ownerTaxationCode: "LEGAL_PERSON_ONLY",
+        groupAlignmentRequired: true
+      }
+    });
+    assert.equal(groupProfile.groupAlignmentRequired, true);
+
+    const missingAlignmentResponse = await fetch(`${baseUrl}/v1/fiscal-years/change-requests`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        companyId: DEMO_IDS.companyId,
+        requestedStartDate: "2027-07-01",
+        requestedEndDate: "2028-06-30",
+        reasonCode: "GROUP_ALIGNMENT"
+      })
+    });
+    const missingAlignmentPayload = await missingAlignmentResponse.json();
+    assert.equal(missingAlignmentResponse.status, 409);
+    assert.equal(missingAlignmentPayload.error, "group_alignment_reference_required");
+
+    const firstRequest = await requestJson(baseUrl, "/v1/fiscal-years/change-requests", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        requestedStartDate: "2027-07-01",
+        requestedEndDate: "2028-06-30",
+        reasonCode: "GROUP_ALIGNMENT",
+        groupAlignmentStartDate: "2027-07-01",
+        groupAlignmentEndDate: "2028-06-30"
+      }
+    });
+    assert.equal(firstRequest.status, "submitted");
+
+    const duplicateResponse = await fetch(`${baseUrl}/v1/fiscal-years/change-requests`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        companyId: DEMO_IDS.companyId,
+        requestedStartDate: "2027-07-01",
+        requestedEndDate: "2028-06-30",
+        reasonCode: "GROUP_ALIGNMENT",
+        groupAlignmentStartDate: "2027-07-01",
+        groupAlignmentEndDate: "2028-06-30"
+      })
+    });
+    const duplicatePayload = await duplicateResponse.json();
+    assert.equal(duplicateResponse.status, 409);
+    assert.equal(duplicatePayload.error, "fiscal_year_change_request_duplicate");
+  } finally {
+    await stopServer(server);
+  }
+});

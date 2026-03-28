@@ -230,6 +230,13 @@ export function createAccountingMethodEngine({
     if (resolvedEffectiveTo && resolvedEffectiveTo <= resolvedEffectiveFrom) {
       throw createError(400, "method_profile_interval_invalid", "effectiveTo must be later than effectiveFrom.");
     }
+    if (!resolvedOnboardingOverride && resolvedFiscalYearStartDate == null) {
+      throw createError(
+        409,
+        "method_profile_fiscal_year_start_required",
+        "Method profiles require fiscalYearStartDate unless onboardingOverride is enabled."
+      );
+    }
     if (!resolvedOnboardingOverride && resolvedFiscalYearStartDate && resolvedEffectiveFrom !== resolvedFiscalYearStartDate) {
       throw createError(
         409,
@@ -450,6 +457,13 @@ export function createAccountingMethodEngine({
     const resolvedActorId = requireText(actorId, "actor_id_required");
     const resolvedOnboardingOverride = onboardingOverride === true;
 
+    if (!resolvedOnboardingOverride && resolvedFiscalYearStartDate == null) {
+      throw createError(
+        409,
+        "method_change_request_fiscal_year_start_required",
+        "Method change requests require fiscalYearStartDate unless onboardingOverride is enabled."
+      );
+    }
     if (!resolvedOnboardingOverride && resolvedFiscalYearStartDate && resolvedRequestedEffectiveFrom !== resolvedFiscalYearStartDate) {
       throw createError(
         409,
@@ -466,8 +480,9 @@ export function createAccountingMethodEngine({
       throw createError(409, "method_change_request_current_profile_missing", "A method change request requires an existing method profile unless onboardingOverride is enabled.");
     }
 
+    const methodChangeRequestId = crypto.randomUUID();
     const request = Object.freeze({
-      methodChangeRequestId: crypto.randomUUID(),
+      methodChangeRequestId,
       companyId: resolvedCompanyId,
       currentMethodCode: currentProfile?.methodCode || null,
       requestedMethodCode: resolvedRequestedMethodCode,
@@ -481,9 +496,23 @@ export function createAccountingMethodEngine({
       approvedBy: null,
       approvedAt: null,
       implementedAt: null,
+      supersededByMethodChangeRequestId: null,
       onboardingOverride: resolvedOnboardingOverride,
       updatedAt: nowIso(clock)
     });
+
+    const supersededRequests = (state.methodChangeRequestIdsByCompany.get(resolvedCompanyId) || [])
+      .map((requestId) => state.methodChangeRequests.get(requestId))
+      .filter(Boolean)
+      .filter((candidate) => ["submitted", "under_review", "approved"].includes(candidate.status))
+      .filter((candidate) => candidate.requestedEffectiveFrom === resolvedRequestedEffectiveFrom);
+    for (const candidate of supersededRequests) {
+      replaceMethodChangeRequest(state, candidate.methodChangeRequestId, {
+        status: "superseded",
+        supersededByMethodChangeRequestId: methodChangeRequestId,
+        updatedAt: nowIso(clock)
+      });
+    }
 
     state.methodChangeRequests.set(request.methodChangeRequestId, request);
     appendToIndex(state.methodChangeRequestIdsByCompany, resolvedCompanyId, request.methodChangeRequestId);

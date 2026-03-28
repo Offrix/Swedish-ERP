@@ -151,3 +151,94 @@ test("Step 7 year-end catch-up is idempotent and only allowed for cash method", 
     payablesAmount: 400
   });
 });
+
+test("Step 7 accounting method requires explicit fiscal-year boundary unless onboarding override is used", () => {
+  const engine = createAccountingMethodEngine({
+    seedDemo: false,
+    clock: () => new Date("2027-01-05T09:00:00Z")
+  });
+
+  const assessment = engine.assessCashMethodEligibility({
+    companyId: "company_boundary_rules",
+    annualNetTurnoverSek: 900_000,
+    legalFormCode: "AB"
+  });
+
+  assert.throws(
+    () =>
+      engine.submitMethodChangeRequest({
+        companyId: "company_boundary_rules",
+        requestedMethodCode: "KONTANTMETOD",
+        requestedEffectiveFrom: "2027-01-01",
+        reasonCode: "METHOD_CHANGE",
+        actorId: "tester"
+      }),
+    (error) => error?.code === "method_change_request_fiscal_year_start_required"
+  );
+
+  assert.throws(
+    () =>
+      engine.createMethodProfile({
+        companyId: "company_boundary_rules",
+        methodCode: "FAKTURERINGSMETOD",
+        effectiveFrom: "2026-01-01",
+        eligibilityAssessmentId: assessment.assessmentId,
+        actorId: "tester"
+      }),
+    (error) => error?.code === "method_profile_fiscal_year_start_required"
+  );
+});
+
+test("Step 7 accounting method supersedes older unresolved change requests for the same fiscal-year boundary", () => {
+  const engine = createAccountingMethodEngine({
+    seedDemo: false,
+    clock: () => new Date("2027-01-05T09:00:00Z")
+  });
+
+  const baselineAssessment = engine.assessCashMethodEligibility({
+    companyId: "company_request_supersession",
+    annualNetTurnoverSek: 1_100_000,
+    legalFormCode: "AB"
+  });
+  const baselineProfile = engine.createMethodProfile({
+    companyId: "company_request_supersession",
+    methodCode: "FAKTURERINGSMETOD",
+    effectiveFrom: "2026-01-01",
+    fiscalYearStartDate: "2026-01-01",
+    eligibilityAssessmentId: baselineAssessment.assessmentId,
+    onboardingOverride: true,
+    actorId: "tester"
+  });
+  engine.activateMethodProfile({
+    companyId: "company_request_supersession",
+    methodProfileId: baselineProfile.methodProfileId,
+    actorId: "tester"
+  });
+
+  const firstRequest = engine.submitMethodChangeRequest({
+    companyId: "company_request_supersession",
+    requestedMethodCode: "KONTANTMETOD",
+    requestedEffectiveFrom: "2027-01-01",
+    fiscalYearStartDate: "2027-01-01",
+    reasonCode: "METHOD_CHANGE",
+    actorId: "tester"
+  });
+  const replacementRequest = engine.submitMethodChangeRequest({
+    companyId: "company_request_supersession",
+    requestedMethodCode: "KONTANTMETOD",
+    requestedEffectiveFrom: "2027-01-01",
+    fiscalYearStartDate: "2027-01-01",
+    reasonCode: "METHOD_CHANGE_REVISED",
+    actorId: "tester"
+  });
+
+  const history = engine.getMethodHistory({
+    companyId: "company_request_supersession"
+  });
+  const superseded = history.changeRequests.find((request) => request.methodChangeRequestId === firstRequest.methodChangeRequestId);
+  const latest = history.changeRequests.find((request) => request.methodChangeRequestId === replacementRequest.methodChangeRequestId);
+
+  assert.equal(superseded.status, "superseded");
+  assert.equal(superseded.supersededByMethodChangeRequestId, replacementRequest.methodChangeRequestId);
+  assert.equal(latest.status, "submitted");
+});
