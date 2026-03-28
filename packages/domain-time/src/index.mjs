@@ -4,6 +4,7 @@ export const TIME_CLOCK_EVENT_TYPES = Object.freeze(["clock_in", "clock_out"]);
 export const TIME_BALANCE_TYPES = Object.freeze(["flex_minutes", "comp_minutes", "overtime_minutes"]);
 export const TIME_ENTRY_SOURCE_TYPES = Object.freeze(["manual", "clock", "import"]);
 export const TIME_ENTRY_STATUSES = Object.freeze(["draft", "submitted", "approved", "rejected"]);
+export const APPROVED_TIME_SET_STATUSES = Object.freeze(["approved", "locked"]);
 export const LEAVE_SIGNAL_TYPES = Object.freeze(["none", "parental_benefit", "temporary_parental_benefit"]);
 export const LEAVE_ENTRY_STATUSES = Object.freeze(["draft", "submitted", "approved", "rejected"]);
 export const LEAVE_SIGNAL_LOCK_STATES = Object.freeze(["ready_for_sign", "signed", "submitted"]);
@@ -31,6 +32,8 @@ export function createTimeEngine({
     timeEntryIdsByEmployment: new Map(),
     balanceTransactions: new Map(),
     balanceTransactionIdsByEmployment: new Map(),
+    approvedTimeSets: new Map(),
+    approvedTimeSetIdsByEmployment: new Map(),
     periodLocks: new Map(),
     periodLockIdsByEmployment: new Map(),
     leaveTypes: new Map(),
@@ -47,6 +50,10 @@ export function createTimeEngine({
     leaveSignalIdsByEmployee: new Map(),
     leaveSignalLocks: new Map(),
     leaveSignalLockIdsByEmployment: new Map(),
+    absenceDecisions: new Map(),
+    absenceDecisionIdByLeaveEntry: new Map(),
+    absenceDecisionIdsByEmployment: new Map(),
+    absenceDecisionIdsByEmployee: new Map(),
     countersByCompany: new Map()
   };
 
@@ -55,6 +62,7 @@ export function createTimeEngine({
     balanceTypes: TIME_BALANCE_TYPES,
     entrySourceTypes: TIME_ENTRY_SOURCE_TYPES,
     timeEntryStatuses: TIME_ENTRY_STATUSES,
+    approvedTimeSetStatuses: APPROVED_TIME_SET_STATUSES,
     leaveSignalTypes: LEAVE_SIGNAL_TYPES,
     leaveEntryStatuses: LEAVE_ENTRY_STATUSES,
     leaveSignalLockStates: LEAVE_SIGNAL_LOCK_STATES,
@@ -70,6 +78,8 @@ export function createTimeEngine({
     submitTimeEntry,
     approveTimeEntry,
     rejectTimeEntry,
+    listApprovedTimeSets,
+    approveTimeSet,
     listTimeBalances,
     getEmploymentTimeBase,
     listTimePeriodLocks,
@@ -85,7 +95,8 @@ export function createTimeEngine({
     rejectLeaveEntry,
     listLeaveSignals,
     listLeaveSignalLocks,
-    lockLeaveSignals
+    lockLeaveSignals,
+    listAbsenceDecisions
   };
 
   function listScheduleTemplates({ companyId } = {}) {
@@ -472,6 +483,105 @@ export function createTimeEngine({
     return enrichTimeEntry(entry);
   }
 
+  function listApprovedTimeSets({ companyId, employmentId } = {}) {
+    requireEmployment(companyId, employmentId, hrPlatform);
+    return (state.approvedTimeSetIdsByEmployment.get(employmentId) || [])
+      .map((approvedTimeSetId) => state.approvedTimeSets.get(approvedTimeSetId))
+      .filter(Boolean)
+      .sort((left, right) => left.startsOn.localeCompare(right.startsOn) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function approveTimeSet({
+    companyId,
+    employmentId,
+    startsOn,
+    endsOn,
+    note = null,
+    actorId = "system"
+  } = {}) {
+    const employment = requireEmployment(companyId, employmentId, hrPlatform);
+    const resolvedStartsOn = normalizeRequiredDate(startsOn, "approved_time_set_starts_on_required");
+    const resolvedEndsOn = normalizeRequiredDate(endsOn, "approved_time_set_ends_on_required");
+    if (resolvedEndsOn < resolvedStartsOn) {
+      throw createError(400, "approved_time_set_dates_invalid", "Approved time set end date cannot be earlier than start date.");
+    }
+
+    const entriesInRange = listTimeEntries({
+      companyId: employment.companyId,
+      employmentId: employment.employmentId
+    }).filter((entry) => entry.workDate >= resolvedStartsOn && entry.workDate <= resolvedEndsOn);
+    const pendingEntries = entriesInRange.filter((entry) => ["draft", "submitted"].includes(entry.status));
+    if (pendingEntries.length > 0) {
+      throw createError(409, "approved_time_set_pending_entries", "All time entries in the window must be approved or rejected before the time set can be approved.");
+    }
+    const approvedEntries = entriesInRange.filter((entry) => entry.status === "approved");
+    if (approvedEntries.length === 0) {
+      throw createError(409, "approved_time_set_entries_required", "At least one approved time entry is required to approve a time set.");
+    }
+
+    const timeBalances = listTimeBalances({
+      companyId: employment.companyId,
+      employmentId: employment.employmentId,
+      cutoffDate: resolvedEndsOn
+    });
+    const existing = listApprovedTimeSets({
+      companyId: employment.companyId,
+      employmentId: employment.employmentId
+    }).find((candidate) => candidate.startsOn === resolvedStartsOn && candidate.endsOn === resolvedEndsOn);
+    if (existing && existing.status === "locked") {
+      throw createError(409, "approved_time_set_locked", "Approved time set is already locked and cannot be replaced.");
+    }
+
+    const fingerprint = buildSnapshotHash({
+      startsOn: resolvedStartsOn,
+      endsOn: resolvedEndsOn,
+      entryIds: approvedEntries.map((entry) => entry.timeEntryId),
+      statuses: approvedEntries.map((entry) => entry.status),
+      updatedAt: approvedEntries.map((entry) => entry.updatedAt),
+      balanceSnapshotHash: timeBalances.snapshotHash
+    });
+    const effectiveStatus = isTimeWindowLocked({
+      state,
+      companyId: employment.companyId,
+      employmentId: employment.employmentId,
+      startsOn: resolvedStartsOn,
+      endsOn: resolvedEndsOn
+    })
+      ? "locked"
+      : "approved";
+
+    if (existing && existing.timeEntryFingerprint === fingerprint && existing.status === effectiveStatus) {
+      return existing;
+    }
+
+    const record = {
+      approvedTimeSetId: existing?.approvedTimeSetId || crypto.randomUUID(),
+      companyId: employment.companyId,
+      employeeId: employment.employeeId,
+      employmentId: employment.employmentId,
+      startsOn: resolvedStartsOn,
+      endsOn: resolvedEndsOn,
+      approvedEntryIds: approvedEntries.map((entry) => entry.timeEntryId),
+      approvedEntryCount: approvedEntries.length,
+      timeEntryFingerprint: fingerprint,
+      balanceSnapshotHash: timeBalances.snapshotHash,
+      status: effectiveStatus,
+      note: normalizeOptionalText(note),
+      approvedByActorId: requireText(actorId, "actor_id_required"),
+      approvedAt: nowIso(clock),
+      lockedAt: effectiveStatus === "locked" ? nowIso(clock) : null,
+      createdAt: existing?.createdAt || nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+
+    state.approvedTimeSets.set(record.approvedTimeSetId, record);
+    if (!existing) {
+      appendToIndex(state.approvedTimeSetIdsByEmployment, employment.employmentId, record.approvedTimeSetId);
+    }
+    return copy(record);
+  }
+
   function listTimeBalances({ companyId, employmentId, cutoffDate = null } = {}) {
     const employment = requireEmployment(companyId, employmentId, hrPlatform);
     const resolvedCutoffDate = cutoffDate ? normalizeRequiredDate(cutoffDate, "balance_cutoff_date_invalid") : "9999-12-31";
@@ -532,6 +642,10 @@ export function createTimeEngine({
       companyId: employment.companyId,
       employmentId: employment.employmentId
     }).filter((entry) => entry.status === "approved" && entry.workDate <= resolvedCutoffDate);
+    const approvedTimeSets = listApprovedTimeSets({
+      companyId: employment.companyId,
+      employmentId: employment.employmentId
+    }).filter((timeSet) => timeSet.startsOn <= resolvedCutoffDate);
     const pendingApprovals = listTimeEntries({
       companyId: employment.companyId,
       employmentId: employment.employmentId
@@ -574,6 +688,11 @@ export function createTimeEngine({
       timeBalances,
       balanceSnapshots,
       agreementOverlay,
+      approvedTimeSets,
+      activeApprovedTimeSet:
+        approvedTimeSets
+          .filter((timeSet) => timeSet.startsOn <= resolvedWorkDate && timeSet.endsOn >= resolvedWorkDate)
+          .sort((left, right) => right.startsOn.localeCompare(left.startsOn))[0] || null,
       approvedTimeEntries: approvedEntries.filter((entry) => entry.workDate === resolvedWorkDate),
       approvedTimeEntryCount: approvedEntries.length,
       pendingTimeEntries: pendingApprovals,
@@ -635,6 +754,24 @@ export function createTimeEngine({
 
     state.periodLocks.set(lock.timePeriodLockId, lock);
     appendToIndex(state.periodLockIdsByEmployment, resolvedEmployment ? resolvedEmployment.employmentId : "*", lock.timePeriodLockId);
+    const approvedTimeSetsToLock = resolvedEmployment
+      ? listApprovedTimeSets({
+          companyId: resolvedCompanyId,
+          employmentId: resolvedEmployment.employmentId
+        })
+      : Array.from(state.approvedTimeSets.values())
+          .filter((candidate) => candidate.companyId === resolvedCompanyId)
+          .map(copy);
+    for (const approvedTimeSet of approvedTimeSetsToLock) {
+      if (approvedTimeSet.startsOn >= resolvedStartsOn && approvedTimeSet.endsOn <= resolvedEndsOn) {
+        const mutable = state.approvedTimeSets.get(approvedTimeSet.approvedTimeSetId);
+        if (mutable && mutable.status !== "locked") {
+          mutable.status = "locked";
+          mutable.lockedAt = nowIso(clock);
+          mutable.updatedAt = mutable.lockedAt;
+        }
+      }
+    }
     return copy(lock);
   }
 
@@ -734,6 +871,11 @@ export function createTimeEngine({
       endDate
     });
     const resolvedReportingPeriod = normalizeOptionalReportingPeriod(reportingPeriod, "leave_reporting_period_invalid");
+    assertLeaveReportingBoundary({
+      leaveType,
+      reportingPeriod: resolvedReportingPeriod,
+      days: normalizedDays
+    });
 
     assertLeaveSignalsOpen({
       state,
@@ -824,6 +966,11 @@ export function createTimeEngine({
     });
 
     const nextDays = days === undefined ? entry.days : normalizeLeaveDays(days);
+    assertLeaveReportingBoundary({
+      leaveType,
+      reportingPeriod: nextReportingPeriod,
+      days: nextDays
+    });
     const { resolvedStartDate, resolvedEndDate } = resolveLeaveDateWindow({
       days: nextDays,
       startDate: startDate === undefined ? entry.startDate : startDate,
@@ -950,6 +1097,14 @@ export function createTimeEngine({
     entry.status = "approved";
     entry.approvedAt = nowIso(clock);
     entry.updatedAt = entry.approvedAt;
+    upsertAbsenceDecision({
+      state,
+      entry,
+      leaveType: requireLeaveType(entry.companyId, entry.leaveTypeId, state),
+      decisionStatus: "approved",
+      actorId,
+      clock
+    });
     appendLeaveEntryEvent({
       state,
       entry,
@@ -986,6 +1141,14 @@ export function createTimeEngine({
       leaveType: requireLeaveType(entry.companyId, entry.leaveTypeId, state),
       clock
     });
+    upsertAbsenceDecision({
+      state,
+      entry,
+      leaveType: requireLeaveType(entry.companyId, entry.leaveTypeId, state),
+      decisionStatus: "rejected",
+      actorId,
+      clock
+    });
     appendLeaveEntryEvent({
       state,
       entry,
@@ -995,6 +1158,30 @@ export function createTimeEngine({
       actorId
     });
     return enrichLeaveEntry(state, entry);
+  }
+
+  function listAbsenceDecisions({ companyId, employeeId = null, employmentId = null, reportingPeriod = null, decisionStatus = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    if (employeeId) {
+      requireEmployeeRecord(resolvedCompanyId, employeeId, hrPlatform);
+    }
+    if (employmentId) {
+      requireEmployment(resolvedCompanyId, employmentId, hrPlatform);
+    }
+    const ids =
+      employeeId != null
+        ? state.absenceDecisionIdsByEmployee.get(employeeId) || []
+        : Array.from(state.absenceDecisions.keys());
+
+    return ids
+      .map((absenceDecisionId) => state.absenceDecisions.get(absenceDecisionId))
+      .filter(Boolean)
+      .filter((candidate) => candidate.companyId === resolvedCompanyId)
+      .filter((candidate) => !employmentId || candidate.employmentId === employmentId)
+      .filter((candidate) => !reportingPeriod || candidate.reportingPeriod === reportingPeriod)
+      .filter((candidate) => !decisionStatus || candidate.decisionStatus === decisionStatus)
+      .sort((left, right) => left.startDate.localeCompare(right.startDate) || left.decidedAt.localeCompare(right.decidedAt))
+      .map(copy);
   }
 
   function listLeaveSignals({ companyId, employeeId = null, employmentId = null, reportingPeriod = null } = {}) {
@@ -1484,6 +1671,9 @@ function appendLeaveEntryEvent({ state, entry, eventType, status, note, actorId 
 function enrichLeaveEntry(state, entry) {
   return {
     ...copy(entry),
+    absenceDecision: state.absenceDecisionIdByLeaveEntry.has(entry.leaveEntryId)
+      ? copy(state.absenceDecisions.get(state.absenceDecisionIdByLeaveEntry.get(entry.leaveEntryId)))
+      : null,
     events: (state.leaveEntryEventIdsByEntry.get(entry.leaveEntryId) || [])
       .map((eventId) => state.leaveEntryEvents.get(eventId))
       .filter(Boolean)
@@ -1511,6 +1701,17 @@ function assertPeriodOpen({ state, companyId, employmentId, workDate }) {
   }
 }
 
+function isTimeWindowLocked({ state, companyId, employmentId, startsOn, endsOn }) {
+  const relevantLocks = [
+    ...(state.periodLockIdsByEmployment.get("*") || []),
+    ...(state.periodLockIdsByEmployment.get(employmentId) || [])
+  ]
+    .map((timePeriodLockId) => state.periodLocks.get(timePeriodLockId))
+    .filter(Boolean)
+    .filter((candidate) => candidate.companyId === companyId);
+  return relevantLocks.some((lock) => lock.startsOn <= startsOn && lock.endsOn >= endsOn);
+}
+
 function assertLeaveSignalsOpen({ state, companyId, employmentId, reportingPeriod = null }) {
   const resolvedReportingPeriod = normalizeOptionalReportingPeriod(reportingPeriod, "leave_reporting_period_invalid");
   if (!resolvedReportingPeriod) {
@@ -1528,6 +1729,58 @@ function assertLeaveSignalsOpen({ state, companyId, employmentId, reportingPerio
   if (relevantLocks.length > 0) {
     throw createError(409, "leave_signals_locked", "Leave signals are locked because AGI signing has already started or completed.");
   }
+}
+
+function assertLeaveReportingBoundary({ leaveType, reportingPeriod, days }) {
+  if (!leaveType || leaveType.signalType === "none") {
+    return;
+  }
+  const resolvedReportingPeriod = normalizeOptionalReportingPeriod(reportingPeriod, "leave_reporting_period_invalid");
+  if (!resolvedReportingPeriod) {
+    return;
+  }
+  const periodPrefix = `${resolvedReportingPeriod.slice(0, 4)}-${resolvedReportingPeriod.slice(4, 6)}`;
+  for (const day of days) {
+    if (!String(day.date).startsWith(periodPrefix)) {
+      throw createError(
+        409,
+        "leave_reporting_period_boundary_invalid",
+        "AGI-sensitive leave days must stay inside the selected reporting period."
+      );
+    }
+  }
+}
+
+function upsertAbsenceDecision({ state, entry, leaveType, decisionStatus, actorId, clock }) {
+  const existingDecisionId = state.absenceDecisionIdByLeaveEntry.get(entry.leaveEntryId) || null;
+  const record = {
+    absenceDecisionId: existingDecisionId || crypto.randomUUID(),
+    companyId: entry.companyId,
+    employeeId: entry.employeeId,
+    employmentId: entry.employmentId,
+    leaveEntryId: entry.leaveEntryId,
+    leaveTypeId: entry.leaveTypeId,
+    leaveTypeCode: leaveType.leaveTypeCode,
+    decisionStatus: requireText(decisionStatus, "absence_decision_status_required"),
+    reportingPeriod: entry.reportingPeriod,
+    signalType: leaveType.signalType,
+    agiSensitive: leaveType.signalType !== "none",
+    boundaryValidated: leaveType.signalType === "none" || Boolean(entry.reportingPeriod),
+    startDate: entry.startDate,
+    endDate: entry.endDate,
+    signalCompleteness: copy(entry.signalCompleteness),
+    decidedByActorId: requireText(actorId, "actor_id_required"),
+    decidedAt: nowIso(clock),
+    createdAt: existingDecisionId ? state.absenceDecisions.get(existingDecisionId)?.createdAt || nowIso(clock) : nowIso(clock),
+    updatedAt: nowIso(clock)
+  };
+  state.absenceDecisions.set(record.absenceDecisionId, record);
+  state.absenceDecisionIdByLeaveEntry.set(entry.leaveEntryId, record.absenceDecisionId);
+  if (!existingDecisionId) {
+    appendToIndex(state.absenceDecisionIdsByEmployment, entry.employmentId, record.absenceDecisionId);
+    appendToIndex(state.absenceDecisionIdsByEmployee, entry.employeeId, record.absenceDecisionId);
+  }
+  return copy(record);
 }
 
 function buildSnapshotHash(payload) {

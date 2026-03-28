@@ -29,6 +29,29 @@ test("Phase 7.2 direct platform records clock events, links time to project/acti
     startDate: "2026-01-01",
     actorId: "unit-test"
   });
+  const manager = hrPlatform.createEmployee({
+    companyId: COMPANY_ID,
+    givenName: "Maja",
+    familyName: "Tidchef",
+    actorId: "unit-test"
+  });
+  const managerEmployment = hrPlatform.createEmployment({
+    companyId: COMPANY_ID,
+    employeeId: manager.employeeId,
+    employmentTypeCode: "permanent",
+    jobTitle: "Team lead",
+    payModelCode: "monthly_salary",
+    startDate: "2024-01-01",
+    actorId: "unit-test"
+  });
+  hrPlatform.assignEmploymentManager({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    managerEmploymentId: managerEmployment.employmentId,
+    validFrom: "2026-01-01",
+    actorId: "unit-test"
+  });
 
   const scheduleTemplate = timePlatform.createScheduleTemplate({
     companyId: COMPANY_ID,
@@ -95,6 +118,46 @@ test("Phase 7.2 direct platform records clock events, links time to project/acti
   assert.equal(entry.scheduledMinutes, 480);
   assert.equal(entry.flexDeltaMinutes, 60);
 
+  const pendingEntry = timePlatform.createTimeEntry({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    workDate: "2026-03-03",
+    sourceType: "manual",
+    workedMinutes: 480,
+    approvalMode: "manual",
+    actorId: "unit-test"
+  });
+  assert.equal(pendingEntry.status, "draft");
+  assert.throws(
+    () =>
+      timePlatform.approveTimeSet({
+        companyId: COMPANY_ID,
+        employmentId: employment.employmentId,
+        startsOn: "2026-03-01",
+        endsOn: "2026-03-31",
+        actorId: "unit-test"
+      }),
+    (error) => {
+      assert.equal(error.code, "approved_time_set_pending_entries");
+      return true;
+    }
+  );
+  timePlatform.approveTimeEntry({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    timeEntryId: pendingEntry.timeEntryId,
+    actorId: "unit-test"
+  });
+  const approvedTimeSet = timePlatform.approveTimeSet({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
+    actorId: "unit-test"
+  });
+  assert.equal(approvedTimeSet.approvedEntryCount, 2);
+  assert.equal(approvedTimeSet.status, "approved");
+
   const firstBalance = timePlatform.listTimeBalances({
     companyId: COMPANY_ID,
     employmentId: employment.employmentId,
@@ -106,7 +169,7 @@ test("Phase 7.2 direct platform records clock events, links time to project/acti
     cutoffDate: "2026-03-31"
   });
 
-  assert.equal(firstBalance.balances.flex_minutes, 60);
+  assert.equal(firstBalance.balances.flex_minutes, 540);
   assert.equal(firstBalance.balances.comp_minutes, 15);
   assert.equal(firstBalance.balances.overtime_minutes, 30);
   assert.equal(firstBalance.snapshotHash, secondBalance.snapshotHash);
@@ -119,6 +182,12 @@ test("Phase 7.2 direct platform records clock events, links time to project/acti
     reasonCode: "payroll_cutoff",
     actorId: "unit-test"
   });
+  const approvedTimeSets = timePlatform.listApprovedTimeSets({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId
+  });
+  assert.equal(approvedTimeSets.length, 1);
+  assert.equal(approvedTimeSets[0].status, "locked");
 
   assert.throws(
     () =>

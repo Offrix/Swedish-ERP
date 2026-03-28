@@ -83,6 +83,39 @@ test("Phase 7.2 API records schedules, clock events, time entries, balances and 
         startDate: "2026-01-01"
       }
     });
+    const manager = await requestJson(baseUrl, "/v1/hr/employees", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        givenName: "Maja",
+        familyName: "Tidchef"
+      }
+    });
+    const managerEmployment = await requestJson(baseUrl, `/v1/hr/employees/${manager.employeeId}/employments`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentTypeCode: "permanent",
+        jobTitle: "Team lead",
+        payModelCode: "monthly_salary",
+        startDate: "2024-01-01"
+      }
+    });
+    await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/manager-assignments`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: employment.employmentId,
+        managerEmploymentId: managerEmployment.employmentId,
+        validFrom: "2026-01-01"
+      }
+    });
 
     const scheduleTemplate = await requestJson(baseUrl, "/v1/time/schedule-templates", {
       method: "POST",
@@ -163,6 +196,67 @@ test("Phase 7.2 API records schedules, clock events, time entries, balances and 
     assert.equal(entry.projectId, "project-7-2-api");
     assert.equal(entry.activityCode, "onsite_service");
 
+    const pendingEntry = await requestJson(baseUrl, "/v1/time/entries", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: employment.employmentId,
+        workDate: "2026-03-03",
+        workedMinutes: 480,
+        approvalMode: "manual",
+        activityCode: "backoffice"
+      }
+    });
+    const blockedApprovedSetResponse = await fetch(`${baseUrl}/v1/time/approved-sets`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${sessionToken}`
+      },
+      body: JSON.stringify({
+        companyId: COMPANY_ID,
+        employmentId: employment.employmentId,
+        startsOn: "2026-03-01",
+        endsOn: "2026-03-31"
+      })
+    });
+    const blockedApprovedSetPayload = await blockedApprovedSetResponse.json();
+    assert.equal(blockedApprovedSetResponse.status, 409);
+    assert.equal(blockedApprovedSetPayload.error, "approved_time_set_pending_entries");
+    await requestJson(baseUrl, `/v1/time/entries/${pendingEntry.timeEntryId}/approve`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 200,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: employment.employmentId
+      }
+    });
+    const approvedSet = await requestJson(baseUrl, "/v1/time/approved-sets", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: employment.employmentId,
+        startsOn: "2026-03-01",
+        endsOn: "2026-03-31"
+      }
+    });
+    assert.equal(approvedSet.approvedEntryCount, 2);
+    assert.equal(approvedSet.status, "approved");
+    const timeBase = await requestJson(
+      baseUrl,
+      `/v1/time/employment-base?companyId=${COMPANY_ID}&employmentId=${employment.employmentId}&workDate=2026-03-02&cutoffDate=2026-03-31`,
+      {
+        token: sessionToken
+      }
+    );
+    assert.equal(timeBase.approvedTimeSets.length, 1);
+    assert.equal(timeBase.activeApprovedTimeSet.approvedTimeSetId, approvedSet.approvedTimeSetId);
+
     const balances = await requestJson(
       baseUrl,
       `/v1/time/balances?companyId=${COMPANY_ID}&employmentId=${employment.employmentId}&cutoffDate=2026-03-31`,
@@ -178,7 +272,7 @@ test("Phase 7.2 API records schedules, clock events, time entries, balances and 
       }
     );
 
-    assert.equal(balances.balances.flex_minutes, 60);
+    assert.equal(balances.balances.flex_minutes, 540);
     assert.equal(balances.balances.overtime_minutes, 30);
     assert.equal(balances.snapshotHash, repeatedBalances.snapshotHash);
 
@@ -203,6 +297,23 @@ test("Phase 7.2 API records schedules, clock events, time entries, balances and 
       }
     );
     assert.equal(locks.items.length, 1);
+    const approvedSets = await requestJson(
+      baseUrl,
+      `/v1/time/approved-sets?companyId=${COMPANY_ID}&employmentId=${employment.employmentId}`,
+      {
+        token: sessionToken
+      }
+    );
+    assert.equal(approvedSets.items.length, 1);
+    assert.equal(approvedSets.items[0].status, "locked");
+    const lockedTimeBase = await requestJson(
+      baseUrl,
+      `/v1/time/employment-base?companyId=${COMPANY_ID}&employmentId=${employment.employmentId}&workDate=2026-03-10&cutoffDate=2026-03-31`,
+      {
+        token: sessionToken
+      }
+    );
+    assert.equal(lockedTimeBase.activeApprovedTimeSet.status, "locked");
 
     const lockedResponse = await fetch(`${baseUrl}/v1/time/entries`, {
       method: "POST",

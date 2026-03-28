@@ -646,6 +646,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/time/entries/:timeEntryId/approve",
               "/v1/time/entries/:timeEntryId/reject",
               "/v1/time/employment-base",
+              "/v1/time/approved-sets",
               "/v1/time/schedule-templates",
               "/v1/time/schedule-assignments",
               "/v1/time/period-locks",
@@ -668,6 +669,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/hr/leave-entries/:leaveEntryId",
               "/v1/hr/leave-entries/:leaveEntryId/approve",
               "/v1/hr/leave-entries/:leaveEntryId/reject",
+              "/v1/hr/absence-decisions",
               "/v1/hr/leave-signals",
               "/v1/hr/leave-signal-locks",
               "/v1/hr/employee-portal/me",
@@ -7986,6 +7988,60 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/time/approved-sets") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const employmentId = requireText(
+      url.searchParams.get("employmentId"),
+      "employment_id_required",
+      "employmentId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "time_entry",
+      scopeCode: "time"
+    });
+    writeJson(res, 200, {
+      items: platform.listApprovedTimeSets({
+        companyId,
+        employmentId
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/time/approved-sets") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "time_entry",
+      scopeCode: "time"
+    });
+    writeJson(
+      res,
+      201,
+      platform.approveTimeSet({
+        companyId,
+        employmentId: body.employmentId,
+        startsOn: body.startsOn,
+        endsOn: body.endsOn,
+        note: body.note || null,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/time/balances") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -8232,6 +8288,32 @@ async function handleRequest({ req, res, platform, flags }) {
         actorId: principal.userId
       })
     );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/hr/absence-decisions") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "leave_entry",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listAbsenceDecisions({
+        companyId,
+        employeeId: url.searchParams.get("employeeId") || null,
+        employmentId: url.searchParams.get("employmentId") || null,
+        reportingPeriod: url.searchParams.get("reportingPeriod") || null,
+        decisionStatus: url.searchParams.get("decisionStatus") || null
+      })
+    });
     return;
   }
 

@@ -52,7 +52,9 @@ Fasen ar verifierad forst nar foljande ar grona:
 - en anstalld kan skapa och skicka franvaro via employee portal utan att domanregler ligger i UI
 - chefsgodkannande knyts till aktiv manager assignment och blockerar obehoriga approvers
 - admin och anstalld ser samma historik med events och signaler fran olika vyer
+- absence decisions materialiseras for godkanda och avvisade franvarorader
 - AGI-kanslig franvaro blockerar submit eller uppdatering om reporting period eller extent saknas
+- AGI-kanslig franvaro far inte korsa reporting period-gransen
 - AGI-liknande lock blockerar sena andringar efter `ready_for_sign`, `signed` eller `submitted`
 - baseline-seed visar godkand franvaro med signaler och demo-seed visar avslag, korrigerad portalhistorik och signeringslas
 

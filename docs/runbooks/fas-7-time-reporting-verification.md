@@ -9,6 +9,7 @@ This runbook verifies FAS 7.2 Tidrapportering, schema och saldon:
 - schedule templates and assignments
 - time entries linked to project and activity
 - reproducible balances for flex, comp and overtime
+- approved time sets with locked fingerprints per payroll window
 - period locking for time
 
 ## Preconditions
@@ -48,6 +49,7 @@ This runbook verifies FAS 7.2 Tidrapportering, schema och saldon:
 - a time entry can carry both `projectId` and `activityCode`
 - schedule assignments resolve the planned minutes for the work date
 - balances for flex, comp and overtime are reproducible for the same cutoff date
+- approved time sets reject pending entries, materialize on employment base and flip to `locked` when the period is locked
 - a locked period rejects new time entries and new clock events
 - the Phase 7.2 feature flag returns `503 feature_disabled` when turned off
 
@@ -73,6 +75,7 @@ FAS 7.2 can be marked complete only when:
 - all targeted tests are green
 - migration and both seed streams complete without manual patches
 - balances are reproducible for the same cutoff date
+- approved time sets exist as governed payroll inputs and are locked by period close
 - period locking blocks new mutations inside the locked range
 - docs, gates, prompts and verify script are updated in the same change
 

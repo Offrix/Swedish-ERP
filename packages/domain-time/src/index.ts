@@ -5,6 +5,7 @@ export type TimeEntryStatus = "draft" | "submitted" | "approved" | "rejected";
 export type LeaveSignalType = "none" | "parental_benefit" | "temporary_parental_benefit";
 export type LeaveEntryStatus = "draft" | "submitted" | "approved" | "rejected";
 export type LeaveSignalLockState = "ready_for_sign" | "signed" | "submitted";
+export type ApprovedTimeSetStatus = "approved" | "locked";
 
 export interface TimeScheduleTemplateDay {
   readonly weekday: number;
@@ -129,6 +130,26 @@ export interface TimeBalanceSnapshot {
   readonly transactions: readonly TimeBalanceTransaction[];
 }
 
+export interface ApprovedTimeSet {
+  readonly approvedTimeSetId: string;
+  readonly companyId: string;
+  readonly employeeId: string;
+  readonly employmentId: string;
+  readonly startsOn: string;
+  readonly endsOn: string;
+  readonly approvedEntryIds: readonly string[];
+  readonly approvedEntryCount: number;
+  readonly timeEntryFingerprint: string;
+  readonly balanceSnapshotHash: string;
+  readonly status: ApprovedTimeSetStatus;
+  readonly note: string | null;
+  readonly approvedByActorId: string;
+  readonly approvedAt: string;
+  readonly lockedAt: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface EmploymentTimeBase {
   readonly companyId: string;
   readonly employeeId: string;
@@ -143,6 +164,8 @@ export interface EmploymentTimeBase {
     snapshot: Record<string, unknown> | null;
   }[];
   readonly agreementOverlay: Record<string, unknown> | null;
+  readonly approvedTimeSets: readonly ApprovedTimeSet[];
+  readonly activeApprovedTimeSet: ApprovedTimeSet | null;
   readonly approvedTimeEntries: readonly TimeEntry[];
   readonly approvedTimeEntryCount: number;
   readonly pendingTimeEntries: readonly TimeEntry[];
@@ -214,6 +237,28 @@ export interface LeaveSignal {
   readonly createdAt: string;
 }
 
+export interface AbsenceDecision {
+  readonly absenceDecisionId: string;
+  readonly companyId: string;
+  readonly employeeId: string;
+  readonly employmentId: string;
+  readonly leaveEntryId: string;
+  readonly leaveTypeId: string;
+  readonly leaveTypeCode: string;
+  readonly decisionStatus: "approved" | "rejected";
+  readonly reportingPeriod: string | null;
+  readonly signalType: LeaveSignalType;
+  readonly agiSensitive: boolean;
+  readonly boundaryValidated: boolean;
+  readonly startDate: string;
+  readonly endDate: string;
+  readonly signalCompleteness: LeaveSignalCompleteness;
+  readonly decidedByActorId: string;
+  readonly decidedAt: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface LeaveEntry {
   readonly leaveEntryId: string;
   readonly companyId: string;
@@ -240,6 +285,7 @@ export interface LeaveEntry {
   readonly updatedAt: string;
   readonly events: readonly LeaveEntryEvent[];
   readonly signals: readonly LeaveSignal[];
+  readonly absenceDecision: AbsenceDecision | null;
 }
 
 export interface LeaveSignalLock {

@@ -154,6 +154,29 @@ test("Phase 7.3 API supports employee portal leave flow, manager approval and AG
     });
     assert.equal(portalProfile.employee.employeeId, employee.employeeId);
 
+    const invalidBoundaryResponse = await fetch(`${baseUrl}/v1/hr/employee-portal/me/leave-entries`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${portalToken}`
+      },
+      body: JSON.stringify({
+        companyId: COMPANY_ID,
+        employmentId: employeeEmployment.employmentId,
+        leaveTypeId: leaveType.leaveTypeId,
+        reportingPeriod: "202603",
+        days: [
+          {
+            date: "2026-04-01",
+            extentPercent: 100
+          }
+        ]
+      })
+    });
+    const invalidBoundaryPayload = await invalidBoundaryResponse.json();
+    assert.equal(invalidBoundaryResponse.status, 409);
+    assert.equal(invalidBoundaryPayload.error, "leave_reporting_period_boundary_invalid");
+
     const leaveEntry = await requestJson(baseUrl, "/v1/hr/employee-portal/me/leave-entries", {
       method: "POST",
       token: portalToken,
@@ -216,6 +239,7 @@ test("Phase 7.3 API supports employee portal leave flow, manager approval and AG
     });
     assert.equal(approved.status, "approved");
     assert.equal(approved.events.some((event) => event.eventType === "approved"), true);
+    assert.equal(approved.absenceDecision.decisionStatus, "approved");
 
     const adminSignals = await requestJson(
       baseUrl,
@@ -225,6 +249,16 @@ test("Phase 7.3 API supports employee portal leave flow, manager approval and AG
       }
     );
     assert.equal(adminSignals.items.length, 2);
+    const approvedAbsenceDecisions = await requestJson(
+      baseUrl,
+      `/v1/hr/absence-decisions?companyId=${COMPANY_ID}&employmentId=${employeeEmployment.employmentId}&reportingPeriod=202603`,
+      {
+        token: adminToken
+      }
+    );
+    assert.equal(approvedAbsenceDecisions.items.length, 1);
+    assert.equal(approvedAbsenceDecisions.items[0].decisionStatus, "approved");
+    assert.equal(approvedAbsenceDecisions.items[0].boundaryValidated, true);
 
     await requestJson(baseUrl, "/v1/hr/leave-signal-locks", {
       method: "POST",
@@ -268,6 +302,52 @@ test("Phase 7.3 API supports employee portal leave flow, manager approval and AG
     assert.equal(finalPortalView.leaveEntries.length, 1);
     assert.equal(finalPortalView.leaveEntries[0].events.length, 3);
     assert.equal(finalPortalView.leaveSignals.length, 2);
+
+    const aprilEntry = await requestJson(baseUrl, "/v1/hr/employee-portal/me/leave-entries", {
+      method: "POST",
+      token: portalToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: employeeEmployment.employmentId,
+        leaveTypeId: leaveType.leaveTypeId,
+        reportingPeriod: "202604",
+        days: [
+          {
+            date: "2026-04-10",
+            extentPercent: 100
+          }
+        ],
+        note: "Portal-created April leave"
+      }
+    });
+    await requestJson(baseUrl, `/v1/hr/employee-portal/me/leave-entries/${aprilEntry.leaveEntryId}/submit`, {
+      method: "POST",
+      token: portalToken,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+    const rejected = await requestJson(baseUrl, `/v1/hr/leave-entries/${aprilEntry.leaveEntryId}/reject`, {
+      method: "POST",
+      token: managerToken,
+      body: {
+        companyId: COMPANY_ID,
+        reason: "Need corrected medical evidence"
+      }
+    });
+    assert.equal(rejected.status, "rejected");
+    assert.equal(rejected.absenceDecision.decisionStatus, "rejected");
+
+    const allAbsenceDecisions = await requestJson(
+      baseUrl,
+      `/v1/hr/absence-decisions?companyId=${COMPANY_ID}&employmentId=${employeeEmployment.employmentId}`,
+      {
+        token: adminToken
+      }
+    );
+    assert.equal(allAbsenceDecisions.items.length, 2);
+    assert.equal(allAbsenceDecisions.items.some((decision) => decision.decisionStatus === "rejected"), true);
   } finally {
     await stopServer(server);
   }

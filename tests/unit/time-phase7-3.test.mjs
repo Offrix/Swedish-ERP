@@ -64,6 +64,23 @@ test("Phase 7.3 direct platform enforces signal completeness, manager approval, 
     signalType: "parental_benefit",
     actorId: "unit-test"
   });
+  assert.throws(
+    () =>
+      timePlatform.createLeaveEntry({
+        companyId: COMPANY_ID,
+        employmentId: employeeEmployment.employmentId,
+        leaveTypeId: parentalLeave.leaveTypeId,
+        reportingPeriod: "202603",
+        days: [
+          {
+            date: "2026-04-01",
+            extentPercent: 100
+          }
+        ],
+        actorId: "unit-test"
+      }),
+    /reporting period/i
+  );
 
   const incompleteEntry = timePlatform.createLeaveEntry({
     companyId: COMPANY_ID,
@@ -126,6 +143,14 @@ test("Phase 7.3 direct platform enforces signal completeness, manager approval, 
   assert.equal(finalEntry.events.at(-1).eventType, "approved");
   assert.equal(finalEntry.signals.length, 2);
   assert.equal(finalEntry.signals[0].signalType, "parental_benefit");
+  const approvedAbsenceDecisions = timePlatform.listAbsenceDecisions({
+    companyId: COMPANY_ID,
+    employmentId: employeeEmployment.employmentId,
+    reportingPeriod: "202603"
+  });
+  assert.equal(approvedAbsenceDecisions.length, 1);
+  assert.equal(approvedAbsenceDecisions[0].decisionStatus, "approved");
+  assert.equal(approvedAbsenceDecisions[0].boundaryValidated, true);
 
   const lateDraft = timePlatform.createLeaveEntry({
     companyId: COMPANY_ID,
@@ -170,6 +195,36 @@ test("Phase 7.3 direct platform enforces signal completeness, manager approval, 
       }),
     /locked/i
   );
+  const rejectedEntry = timePlatform.createLeaveEntry({
+    companyId: COMPANY_ID,
+    employmentId: employeeEmployment.employmentId,
+    leaveTypeId: parentalLeave.leaveTypeId,
+    reportingPeriod: "202604",
+    days: [
+      {
+        date: "2026-04-10",
+        extentPercent: 100
+      }
+    ],
+    actorId: "unit-test"
+  });
+  timePlatform.submitLeaveEntry({
+    companyId: COMPANY_ID,
+    leaveEntryId: rejectedEntry.leaveEntryId,
+    actorId: "employee-user"
+  });
+  timePlatform.rejectLeaveEntry({
+    companyId: COMPANY_ID,
+    leaveEntryId: rejectedEntry.leaveEntryId,
+    reason: "Need corrected medical evidence",
+    actorId: "manager-user"
+  });
+  const allAbsenceDecisions = timePlatform.listAbsenceDecisions({
+    companyId: COMPANY_ID,
+    employmentId: employeeEmployment.employmentId
+  });
+  assert.equal(allAbsenceDecisions.length, 2);
+  assert.equal(allAbsenceDecisions.some((decision) => decision.decisionStatus === "rejected"), true);
 
   const adminView = timePlatform.getLeaveEntry({
     companyId: COMPANY_ID,
