@@ -153,6 +153,37 @@ test("Phase 7.1 API supports multiple employments, contract history, employee do
         termsDocumentId: document.documentId
       }
     });
+    await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/placements`, {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: firstEmployment.employmentId,
+        validFrom: "2025-01-01",
+        organizationUnitCode: "people-ops",
+        businessUnitCode: "services",
+        departmentCode: "payroll",
+        costCenterCode: "CC-700",
+        serviceLineCode: "PAYROLL",
+        workplaceCode: "STHLM"
+      }
+    });
+    await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/salary-bases`, {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: firstEmployment.employmentId,
+        validFrom: "2025-01-01",
+        salaryBasisCode: "FULL_TIME_MONTHLY",
+        payModelCode: "monthly_salary",
+        employmentRatePercent: 100,
+        standardWeeklyHours: 40,
+        ordinaryHoursPerMonth: 173.33
+      }
+    });
 
     await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/manager-assignments`, {
       method: "POST",
@@ -194,9 +225,30 @@ test("Phase 7.1 API supports multiple employments, contract history, employee do
     const employeeState = await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}?companyId=${COMPANY_ID}`, {
       token: adminSessionToken
     });
+    const snapshot = await requestJson(
+      baseUrl,
+      `/v1/hr/employees/${employee.employeeId}/employments/${firstEmployment.employmentId}/snapshot?companyId=${COMPANY_ID}&snapshotDate=2026-01-15`,
+      {
+        token: adminSessionToken
+      }
+    );
     const contracts = await requestJson(
       baseUrl,
       `/v1/hr/employees/${employee.employeeId}/contracts?companyId=${COMPANY_ID}&employmentId=${firstEmployment.employmentId}`,
+      {
+        token: adminSessionToken
+      }
+    );
+    const placements = await requestJson(
+      baseUrl,
+      `/v1/hr/employees/${employee.employeeId}/placements?companyId=${COMPANY_ID}&employmentId=${firstEmployment.employmentId}`,
+      {
+        token: adminSessionToken
+      }
+    );
+    const salaryBases = await requestJson(
+      baseUrl,
+      `/v1/hr/employees/${employee.employeeId}/salary-bases?companyId=${COMPANY_ID}&employmentId=${firstEmployment.employmentId}`,
       {
         token: adminSessionToken
       }
@@ -208,6 +260,11 @@ test("Phase 7.1 API supports multiple employments, contract history, employee do
     assert.equal(employeeState.employments.length, 2);
     assert.equal(employeeState.identityValueMasked.endsWith("9876"), true);
     assert.equal(contracts.items.length, 2);
+    assert.equal(placements.items.length, 1);
+    assert.equal(salaryBases.items.length, 1);
+    assert.equal(snapshot.activePlacement.costCenterCode, "CC-700");
+    assert.equal(snapshot.activeSalaryBasis.salaryBasisCode, "FULL_TIME_MONTHLY");
+    assert.equal(snapshot.completeness.readyForPayrollInputs, true);
     assert.equal(audits.items.some((candidate) => candidate.action === "hr.employee.sensitive_fields_logged"), true);
     assert.equal(audits.items.some((candidate) => candidate.action === "hr.employee_bank_account.recorded"), true);
   } finally {

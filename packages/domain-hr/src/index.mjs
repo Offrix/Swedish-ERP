@@ -25,6 +25,10 @@ export function createHrEngine({
     employmentIdsByCompany: new Map(),
     employmentIdsByEmployee: new Map(),
     employmentIdsByCompanyNo: new Map(),
+    employmentPlacements: new Map(),
+    placementIdsByEmployment: new Map(),
+    employmentSalaryBases: new Map(),
+    salaryBasisIdsByEmployment: new Map(),
     employmentContracts: new Map(),
     contractIdsByEmployment: new Map(),
     managerAssignments: new Map(),
@@ -56,6 +60,10 @@ export function createHrEngine({
     listEmployments,
     getEmployment,
     createEmployment,
+    listEmploymentPlacements,
+    recordEmploymentPlacement,
+    listEmploymentSalaryBases,
+    recordEmploymentSalaryBasis,
     listEmploymentContracts,
     addEmploymentContract,
     listManagerAssignments,
@@ -96,6 +104,18 @@ export function createHrEngine({
     const resolvedSnapshotDate = snapshotDate
       ? normalizeRequiredDate(snapshotDate, "employment_snapshot_date_invalid")
       : nowIso(clock).slice(0, 10);
+    const activePlacement = resolveActiveEmploymentPlacement({
+      companyId: employment.companyId,
+      employeeId: employment.employeeId,
+      employmentId: employment.employmentId,
+      snapshotDate: resolvedSnapshotDate
+    });
+    const activeSalaryBasis = resolveActiveEmploymentSalaryBasis({
+      companyId: employment.companyId,
+      employeeId: employment.employeeId,
+      employmentId: employment.employmentId,
+      snapshotDate: resolvedSnapshotDate
+    });
     const activeContract = resolveActiveEmploymentContract({
       companyId: employment.companyId,
       employeeId: employment.employeeId,
@@ -120,9 +140,18 @@ export function createHrEngine({
         employeeId: employment.employeeId
       }),
       employment: enrichEmployment(employment),
+      activePlacement,
+      activeSalaryBasis,
       activeContract,
       activeManagerAssignment,
-      primaryBankAccount
+      primaryBankAccount,
+      completeness: {
+        hasActivePlacement: Boolean(activePlacement),
+        hasActiveSalaryBasis: Boolean(activeSalaryBasis),
+        hasActiveContract: Boolean(activeContract),
+        hasActiveManagerAssignment: Boolean(activeManagerAssignment),
+        readyForPayrollInputs: Boolean(activePlacement && activeSalaryBasis && activeContract)
+      }
     };
   }
 
@@ -322,6 +351,177 @@ export function createHrEngine({
     return enrichEmployment(record);
   }
 
+  function listEmploymentPlacements({ companyId, employeeId, employmentId } = {}) {
+    requireEmploymentRecord(state, companyId, employeeId, employmentId);
+    return (state.placementIdsByEmployment.get(employmentId) || [])
+      .map((placementId) => state.employmentPlacements.get(placementId))
+      .filter(Boolean)
+      .sort((left, right) => left.validFrom.localeCompare(right.validFrom) || left.placementVersion - right.placementVersion)
+      .map(copy);
+  }
+
+  function recordEmploymentPlacement({
+    companyId,
+    employeeId,
+    employmentId,
+    validFrom,
+    validTo = null,
+    organizationUnitCode = null,
+    businessUnitCode = null,
+    departmentCode = null,
+    costCenterCode = null,
+    serviceLineCode = null,
+    workplaceCode = null,
+    changeReasonCode = null,
+    reviewReference = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const employment = requireEmploymentRecord(state, companyId, employeeId, employmentId);
+    const resolvedValidFrom = normalizeRequiredDate(validFrom, "employment_placement_valid_from_required");
+    const resolvedValidTo = normalizeOptionalDate(validTo, "employment_placement_valid_to_invalid");
+    assertDateWindow(resolvedValidFrom, resolvedValidTo, "employment_placement_dates_invalid", "Placement end date cannot be earlier than the start date.");
+    assertNoEffectiveDateOverlap({
+      intervals: listEmploymentPlacements({
+        companyId: employment.companyId,
+        employeeId: employment.employeeId,
+        employmentId: employment.employmentId
+      }),
+      validFrom: resolvedValidFrom,
+      validTo: resolvedValidTo,
+      code: "employment_placement_overlaps",
+      message: "Employment placement windows may not overlap."
+    });
+
+    const existingPlacements = listEmploymentPlacements({
+      companyId: employment.companyId,
+      employeeId: employment.employeeId,
+      employmentId: employment.employmentId
+    });
+    const record = {
+      employmentPlacementId: crypto.randomUUID(),
+      companyId: employment.companyId,
+      employeeId: employment.employeeId,
+      employmentId: employment.employmentId,
+      placementVersion: existingPlacements.length + 1,
+      validFrom: resolvedValidFrom,
+      validTo: resolvedValidTo,
+      organizationUnitCode: normalizeOptionalText(organizationUnitCode),
+      businessUnitCode: normalizeOptionalText(businessUnitCode),
+      departmentCode: normalizeOptionalText(departmentCode),
+      costCenterCode: normalizeOptionalText(costCenterCode),
+      serviceLineCode: normalizeOptionalText(serviceLineCode),
+      workplaceCode: normalizeOptionalText(workplaceCode),
+      changeReasonCode: normalizeOptionalText(changeReasonCode),
+      reviewReference: normalizeOptionalText(reviewReference),
+      reviewRequired: resolvedValidFrom < nowIso(clock).slice(0, 10),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock)
+    };
+    if (!record.organizationUnitCode && !record.departmentCode && !record.costCenterCode && !record.serviceLineCode) {
+      throw createError(400, "employment_placement_scope_required", "Placement must define at least one governed organization or dimension field.");
+    }
+
+    state.employmentPlacements.set(record.employmentPlacementId, record);
+    appendToIndex(state.placementIdsByEmployment, employment.employmentId, record.employmentPlacementId);
+
+    pushAudit(state, clock, {
+      companyId: employment.companyId,
+      actorId,
+      correlationId,
+      action: "hr.employment_placement.recorded",
+      entityType: "hr_employment",
+      entityId: employment.employmentId,
+      explanation: `Recorded placement version ${record.placementVersion} for employment ${employment.employmentNo}.`
+    });
+
+    return copy(record);
+  }
+
+  function listEmploymentSalaryBases({ companyId, employeeId, employmentId } = {}) {
+    requireEmploymentRecord(state, companyId, employeeId, employmentId);
+    return (state.salaryBasisIdsByEmployment.get(employmentId) || [])
+      .map((salaryBasisId) => state.employmentSalaryBases.get(salaryBasisId))
+      .filter(Boolean)
+      .sort((left, right) => left.validFrom.localeCompare(right.validFrom) || left.salaryBasisVersion - right.salaryBasisVersion)
+      .map(copy);
+  }
+
+  function recordEmploymentSalaryBasis({
+    companyId,
+    employeeId,
+    employmentId,
+    validFrom,
+    validTo = null,
+    salaryBasisCode,
+    payModelCode = null,
+    employmentRatePercent = 100,
+    standardWeeklyHours = null,
+    ordinaryHoursPerMonth = null,
+    fullTimeEquivalent = 1,
+    changeReasonCode = null,
+    reviewReference = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const employment = requireEmploymentRecord(state, companyId, employeeId, employmentId);
+    const resolvedValidFrom = normalizeRequiredDate(validFrom, "employment_salary_basis_valid_from_required");
+    const resolvedValidTo = normalizeOptionalDate(validTo, "employment_salary_basis_valid_to_invalid");
+    assertDateWindow(resolvedValidFrom, resolvedValidTo, "employment_salary_basis_dates_invalid", "Salary basis end date cannot be earlier than the start date.");
+    assertNoEffectiveDateOverlap({
+      intervals: listEmploymentSalaryBases({
+        companyId: employment.companyId,
+        employeeId: employment.employeeId,
+        employmentId: employment.employmentId
+      }),
+      validFrom: resolvedValidFrom,
+      validTo: resolvedValidTo,
+      code: "employment_salary_basis_overlaps",
+      message: "Salary basis windows may not overlap."
+    });
+
+    const existingSalaryBases = listEmploymentSalaryBases({
+      companyId: employment.companyId,
+      employeeId: employment.employeeId,
+      employmentId: employment.employmentId
+    });
+    const record = {
+      employmentSalaryBasisId: crypto.randomUUID(),
+      companyId: employment.companyId,
+      employeeId: employment.employeeId,
+      employmentId: employment.employmentId,
+      salaryBasisVersion: existingSalaryBases.length + 1,
+      validFrom: resolvedValidFrom,
+      validTo: resolvedValidTo,
+      salaryBasisCode: requireText(salaryBasisCode, "employment_salary_basis_code_required"),
+      payModelCode: normalizeOptionalText(payModelCode) || employment.payModelCode,
+      employmentRatePercent: normalizePercent(employmentRatePercent, "employment_rate_percent_invalid"),
+      standardWeeklyHours: normalizeOptionalDecimal(standardWeeklyHours, "employment_standard_weekly_hours_invalid"),
+      ordinaryHoursPerMonth: normalizeOptionalDecimal(ordinaryHoursPerMonth, "employment_ordinary_hours_per_month_invalid"),
+      fullTimeEquivalent: normalizeOptionalDecimal(fullTimeEquivalent, "employment_fte_invalid"),
+      changeReasonCode: normalizeOptionalText(changeReasonCode),
+      reviewReference: normalizeOptionalText(reviewReference),
+      reviewRequired: resolvedValidFrom < nowIso(clock).slice(0, 10),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock)
+    };
+
+    state.employmentSalaryBases.set(record.employmentSalaryBasisId, record);
+    appendToIndex(state.salaryBasisIdsByEmployment, employment.employmentId, record.employmentSalaryBasisId);
+
+    pushAudit(state, clock, {
+      companyId: employment.companyId,
+      actorId,
+      correlationId,
+      action: "hr.employment_salary_basis.recorded",
+      entityType: "hr_employment",
+      entityId: employment.employmentId,
+      explanation: `Recorded salary basis version ${record.salaryBasisVersion} for employment ${employment.employmentNo}.`
+    });
+
+    return copy(record);
+  }
+
   function listEmploymentContracts({ companyId, employeeId, employmentId } = {}) {
     requireEmploymentRecord(state, companyId, employeeId, employmentId);
     return (state.contractIdsByEmployment.get(employmentId) || [])
@@ -344,20 +544,27 @@ export function createHrEngine({
     collectiveAgreementCode = null,
     salaryRevisionReason = null,
     termsDocumentId = null,
+    changeReasonCode = null,
+    reviewReference = null,
     actorId = "system",
     correlationId = crypto.randomUUID()
   } = {}) {
     const employment = requireEmploymentRecord(state, companyId, employeeId, employmentId);
     const resolvedValidFrom = normalizeRequiredDate(validFrom, "employment_contract_valid_from_required");
     const resolvedValidTo = normalizeOptionalDate(validTo, "employment_contract_valid_to_invalid");
-    if (resolvedValidTo && resolvedValidTo < resolvedValidFrom) {
-      throw createError(400, "employment_contract_dates_invalid", "Contract end date cannot be earlier than the start date.");
-    }
+    assertDateWindow(resolvedValidFrom, resolvedValidTo, "employment_contract_dates_invalid", "Contract end date cannot be earlier than the start date.");
 
     const existingContracts = listEmploymentContracts({
       companyId: employment.companyId,
       employeeId: employment.employeeId,
       employmentId: employment.employmentId
+    });
+    assertNoEffectiveDateOverlap({
+      intervals: existingContracts,
+      validFrom: resolvedValidFrom,
+      validTo: resolvedValidTo,
+      code: "employment_contract_overlaps",
+      message: "Employment contract windows may not overlap."
     });
     const contractVersion = existingContracts.length + 1;
     const record = {
@@ -375,6 +582,9 @@ export function createHrEngine({
       collectiveAgreementCode: normalizeOptionalText(collectiveAgreementCode),
       salaryRevisionReason: normalizeOptionalText(salaryRevisionReason),
       termsDocumentId: normalizeOptionalText(termsDocumentId),
+      changeReasonCode: normalizeOptionalText(changeReasonCode),
+      reviewReference: normalizeOptionalText(reviewReference),
+      reviewRequired: resolvedValidFrom < nowIso(clock).slice(0, 10),
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock)
     };
@@ -415,6 +625,8 @@ export function createHrEngine({
     managerEmploymentId,
     validFrom,
     validTo = null,
+    changeReasonCode = null,
+    reviewReference = null,
     actorId = "system",
     correlationId = crypto.randomUUID()
   } = {}) {
@@ -429,9 +641,18 @@ export function createHrEngine({
 
     const resolvedValidFrom = normalizeRequiredDate(validFrom, "employment_manager_valid_from_required");
     const resolvedValidTo = normalizeOptionalDate(validTo, "employment_manager_valid_to_invalid");
-    if (resolvedValidTo && resolvedValidTo < resolvedValidFrom) {
-      throw createError(400, "employment_manager_dates_invalid", "Manager assignment end date cannot be earlier than the start date.");
-    }
+    assertDateWindow(resolvedValidFrom, resolvedValidTo, "employment_manager_dates_invalid", "Manager assignment end date cannot be earlier than the start date.");
+    assertNoEffectiveDateOverlap({
+      intervals: listManagerAssignments({
+        companyId: employment.companyId,
+        employeeId: employment.employeeId,
+        employmentId: employment.employmentId
+      }),
+      validFrom: resolvedValidFrom,
+      validTo: resolvedValidTo,
+      code: "employment_manager_overlaps",
+      message: "Manager assignment windows may not overlap."
+    });
 
     const assignment = {
       employmentManagerAssignmentId: crypto.randomUUID(),
@@ -442,6 +663,9 @@ export function createHrEngine({
       managerEmployeeId: managerEmployment.employeeId,
       validFrom: resolvedValidFrom,
       validTo: resolvedValidTo,
+      changeReasonCode: normalizeOptionalText(changeReasonCode),
+      reviewReference: normalizeOptionalText(reviewReference),
+      reviewRequired: resolvedValidFrom < nowIso(clock).slice(0, 10),
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock)
     };
@@ -677,6 +901,16 @@ export function createHrEngine({
   function enrichEmployment(employment) {
     return {
       ...copy(employment),
+      placements: listEmploymentPlacements({
+        companyId: employment.companyId,
+        employeeId: employment.employeeId,
+        employmentId: employment.employmentId
+      }),
+      salaryBases: listEmploymentSalaryBases({
+        companyId: employment.companyId,
+        employeeId: employment.employeeId,
+        employmentId: employment.employmentId
+      }),
       contracts: listEmploymentContracts({
         companyId: employment.companyId,
         employeeId: employment.employeeId,
@@ -688,6 +922,18 @@ export function createHrEngine({
         employmentId: employment.employmentId
       }),
       activeContract: resolveActiveEmploymentContract({
+        companyId: employment.companyId,
+        employeeId: employment.employeeId,
+        employmentId: employment.employmentId,
+        snapshotDate: nowIso(clock).slice(0, 10)
+      }),
+      activePlacement: resolveActiveEmploymentPlacement({
+        companyId: employment.companyId,
+        employeeId: employment.employeeId,
+        employmentId: employment.employmentId,
+        snapshotDate: nowIso(clock).slice(0, 10)
+      }),
+      activeSalaryBasis: resolveActiveEmploymentSalaryBasis({
         companyId: employment.companyId,
         employeeId: employment.employeeId,
         employmentId: employment.employmentId,
@@ -714,6 +960,38 @@ export function createHrEngine({
           (left, right) =>
             right.validFrom.localeCompare(left.validFrom) ||
             right.contractVersion - left.contractVersion
+        )[0] || null
+    );
+  }
+
+  function resolveActiveEmploymentPlacement({ companyId, employeeId, employmentId, snapshotDate }) {
+    return (
+      listEmploymentPlacements({
+        companyId,
+        employeeId,
+        employmentId
+      })
+        .filter((placement) => placement.validFrom <= snapshotDate && (!placement.validTo || placement.validTo >= snapshotDate))
+        .sort(
+          (left, right) =>
+            right.validFrom.localeCompare(left.validFrom) ||
+            right.placementVersion - left.placementVersion
+        )[0] || null
+    );
+  }
+
+  function resolveActiveEmploymentSalaryBasis({ companyId, employeeId, employmentId, snapshotDate }) {
+    return (
+      listEmploymentSalaryBases({
+        companyId,
+        employeeId,
+        employmentId
+      })
+        .filter((salaryBasis) => salaryBasis.validFrom <= snapshotDate && (!salaryBasis.validTo || salaryBasis.validTo >= snapshotDate))
+        .sort(
+          (left, right) =>
+            right.validFrom.localeCompare(left.validFrom) ||
+            right.salaryBasisVersion - left.salaryBasisVersion
         )[0] || null
     );
   }
@@ -826,6 +1104,42 @@ function validatePayoutMethod(payoutMethod, details) {
   if (payoutMethod === "iban" && (!details.iban || !details.bic)) {
     throw createError(400, "employee_bank_iban_required", "IBAN payout requires both IBAN and BIC.");
   }
+}
+
+function assertDateWindow(validFrom, validTo, errorCode, message) {
+  if (validTo && validTo < validFrom) {
+    throw createError(400, errorCode, message);
+  }
+}
+
+function assertNoEffectiveDateOverlap({ intervals = [], validFrom, validTo, code, message }) {
+  const candidateTo = validTo || "9999-12-31";
+  for (const interval of intervals) {
+    const intervalFrom = interval.validFrom;
+    const intervalTo = interval.validTo || "9999-12-31";
+    if (intervalFrom <= candidateTo && validFrom <= intervalTo) {
+      throw createError(409, code, message);
+    }
+  }
+}
+
+function normalizeOptionalDecimal(value, errorCode) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) {
+    throw createError(400, errorCode, "Decimal value is invalid.");
+  }
+  return Math.round(number * 10000) / 10000;
+}
+
+function normalizePercent(value, errorCode) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0 || number > 100) {
+    throw createError(400, errorCode, "Percent must be greater than 0 and at most 100.");
+  }
+  return Math.round(number * 100) / 100;
 }
 
 function wouldCreateManagerCycle(state, employmentId, managerEmploymentId) {

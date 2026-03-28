@@ -100,6 +100,36 @@ test("Step 20 API exposes employment snapshots, manual time approvals and unifie
         collectiveAgreementCode: "ALMEGA_SERVICE"
       }
     });
+    await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/placements`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        employmentId: employment.employmentId,
+        validFrom: "2026-01-01",
+        organizationUnitCode: "field-ops",
+        businessUnitCode: "service",
+        departmentCode: "field",
+        costCenterCode: "CC-SERVICE",
+        serviceLineCode: "SERVICE"
+      }
+    });
+    await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/salary-bases`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        employmentId: employment.employmentId,
+        validFrom: "2026-01-01",
+        salaryBasisCode: "SERVICE_HOURLY_FULLTIME",
+        payModelCode: "hourly_salary",
+        employmentRatePercent: 100,
+        standardWeeklyHours: 40,
+        ordinaryHoursPerMonth: 173.33
+      }
+    });
     await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/manager-assignments`, {
       method: "POST",
       token: adminToken,
@@ -239,7 +269,10 @@ test("Step 20 API exposes employment snapshots, manual time approvals and unifie
       }
     );
     assert.equal(employmentSnapshot.employment.workerCategoryCode, "blue_collar");
+    assert.equal(employmentSnapshot.activePlacement.costCenterCode, "CC-SERVICE");
+    assert.equal(employmentSnapshot.activeSalaryBasis.salaryBasisCode, "SERVICE_HOURLY_FULLTIME");
     assert.equal(employmentSnapshot.activeContract.collectiveAgreementCode, "ALMEGA_SERVICE");
+    assert.equal(employmentSnapshot.completeness.readyForPayrollInputs, true);
 
     const timeBase = await requestJson(
       baseUrl,

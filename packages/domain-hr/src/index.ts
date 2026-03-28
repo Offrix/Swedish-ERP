@@ -46,18 +46,73 @@ export interface HrEmployment {
   readonly updatedAt: string;
 }
 
+export interface HrEmploymentPlacement {
+  readonly employmentPlacementId: string;
+  readonly companyId: string;
+  readonly employeeId: string;
+  readonly employmentId: string;
+  readonly placementVersion: number;
+  readonly validFrom: string;
+  readonly validTo: string | null;
+  readonly organizationUnitCode: string | null;
+  readonly businessUnitCode: string | null;
+  readonly departmentCode: string | null;
+  readonly costCenterCode: string | null;
+  readonly serviceLineCode: string | null;
+  readonly workplaceCode: string | null;
+  readonly changeReasonCode: string | null;
+  readonly reviewReference: string | null;
+  readonly reviewRequired: boolean;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+}
+
+export interface HrEmploymentSalaryBasis {
+  readonly employmentSalaryBasisId: string;
+  readonly companyId: string;
+  readonly employeeId: string;
+  readonly employmentId: string;
+  readonly salaryBasisVersion: number;
+  readonly validFrom: string;
+  readonly validTo: string | null;
+  readonly salaryBasisCode: string;
+  readonly payModelCode: string;
+  readonly employmentRatePercent: number;
+  readonly standardWeeklyHours: number | null;
+  readonly ordinaryHoursPerMonth: number | null;
+  readonly fullTimeEquivalent: number | null;
+  readonly changeReasonCode: string | null;
+  readonly reviewReference: string | null;
+  readonly reviewRequired: boolean;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+}
+
 export interface HrEmploymentSnapshot {
   readonly snapshotDate: string;
   readonly employee: HrEmployee;
   readonly employment: HrEmployment & {
+    readonly placements: readonly HrEmploymentPlacement[];
+    readonly salaryBases: readonly HrEmploymentSalaryBasis[];
     readonly contracts: readonly HrEmploymentContract[];
     readonly managerAssignments: readonly HrManagerAssignment[];
+    readonly activePlacement: HrEmploymentPlacement | null;
+    readonly activeSalaryBasis: HrEmploymentSalaryBasis | null;
     readonly activeContract: HrEmploymentContract | null;
     readonly activeManagerAssignment: HrManagerAssignment | null;
   };
+  readonly activePlacement: HrEmploymentPlacement | null;
+  readonly activeSalaryBasis: HrEmploymentSalaryBasis | null;
   readonly activeContract: HrEmploymentContract | null;
   readonly activeManagerAssignment: HrManagerAssignment | null;
   readonly primaryBankAccount: HrEmployeeBankAccount | null;
+  readonly completeness: {
+    readonly hasActivePlacement: boolean;
+    readonly hasActiveSalaryBasis: boolean;
+    readonly hasActiveContract: boolean;
+    readonly hasActiveManagerAssignment: boolean;
+    readonly readyForPayrollInputs: boolean;
+  };
 }
 
 export interface HrEmploymentContract {
@@ -75,6 +130,9 @@ export interface HrEmploymentContract {
   readonly collectiveAgreementCode: string | null;
   readonly salaryRevisionReason: string | null;
   readonly termsDocumentId: string | null;
+  readonly changeReasonCode: string | null;
+  readonly reviewReference: string | null;
+  readonly reviewRequired: boolean;
   readonly createdByActorId: string;
   readonly createdAt: string;
 }
@@ -88,6 +146,9 @@ export interface HrManagerAssignment {
   readonly managerEmployeeId: string;
   readonly validFrom: string;
   readonly validTo: string | null;
+  readonly changeReasonCode: string | null;
+  readonly reviewReference: string | null;
+  readonly reviewRequired: boolean;
   readonly createdByActorId: string;
   readonly createdAt: string;
 }

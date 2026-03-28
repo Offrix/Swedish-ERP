@@ -113,6 +113,33 @@ test("Phase 7.1 direct platform supports multiple employments, preserves contrac
     actorId: "unit-test",
     correlationId: "hr-unit-contract-2"
   });
+  const placement = hrPlatform.recordEmploymentPlacement({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentId: firstEmployment.employmentId,
+    validFrom: "2025-01-01",
+    organizationUnitCode: "people-ops",
+    businessUnitCode: "services",
+    departmentCode: "hr",
+    costCenterCode: "CC-100",
+    serviceLineCode: "PAYROLL",
+    workplaceCode: "STO",
+    actorId: "unit-test",
+    correlationId: "hr-unit-placement-1"
+  });
+  const salaryBasis = hrPlatform.recordEmploymentSalaryBasis({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentId: firstEmployment.employmentId,
+    validFrom: "2025-01-01",
+    salaryBasisCode: "FULL_TIME_MONTHLY",
+    payModelCode: "monthly_salary",
+    employmentRatePercent: 100,
+    standardWeeklyHours: 40,
+    ordinaryHoursPerMonth: 173.33,
+    actorId: "unit-test",
+    correlationId: "hr-unit-salary-basis-1"
+  });
 
   hrPlatform.assignEmploymentManager({
     companyId: COMPANY_ID,
@@ -162,6 +189,12 @@ test("Phase 7.1 direct platform supports multiple employments, preserves contrac
     companyId: COMPANY_ID,
     employeeId: employee.employeeId
   });
+  const snapshot = hrPlatform.getEmploymentSnapshot({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentId: firstEmployment.employmentId,
+    snapshotDate: "2026-01-15"
+  });
 
   assert.equal(employments.length, 2);
   assert.equal(employments.some((candidate) => candidate.employmentId === secondEmployment.employmentId), true);
@@ -171,4 +204,22 @@ test("Phase 7.1 direct platform supports multiple employments, preserves contrac
   assert.equal(linkedDocuments.length, 1);
   assert.equal(audits.some((candidate) => candidate.action === "hr.employee.sensitive_fields_logged"), true);
   assert.equal(audits.some((candidate) => candidate.action === "hr.employee_bank_account.recorded"), true);
+  assert.equal(placement.costCenterCode, "CC-100");
+  assert.equal(salaryBasis.standardWeeklyHours, 40);
+  assert.equal(snapshot.activePlacement.serviceLineCode, "PAYROLL");
+  assert.equal(snapshot.activeSalaryBasis.salaryBasisCode, "FULL_TIME_MONTHLY");
+  assert.equal(snapshot.completeness.readyForPayrollInputs, true);
+  assert.throws(
+    () =>
+      hrPlatform.recordEmploymentPlacement({
+        companyId: COMPANY_ID,
+        employeeId: employee.employeeId,
+        employmentId: firstEmployment.employmentId,
+        validFrom: "2025-06-01",
+        organizationUnitCode: "duplicate",
+        actorId: "unit-test",
+        correlationId: "hr-unit-placement-overlap"
+      }),
+    (error) => error?.code === "employment_placement_overlaps"
+  );
 });

@@ -678,6 +678,8 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/hr/employees/:employeeId",
               "/v1/hr/employees/:employeeId/employments",
               "/v1/hr/employees/:employeeId/employments/:employmentId/snapshot",
+              "/v1/hr/employees/:employeeId/placements",
+              "/v1/hr/employees/:employeeId/salary-bases",
               "/v1/hr/employees/:employeeId/contracts",
               "/v1/hr/employees/:employeeId/manager-assignments",
               "/v1/hr/employees/:employeeId/bank-accounts",
@@ -8694,6 +8696,136 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  const hrPlacementsMatch = matchPath(path, "/v1/hr/employees/:employeeId/placements");
+  if (hrPlacementsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const employmentId = requireText(
+      url.searchParams.get("employmentId"),
+      "employment_id_required",
+      "employmentId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employment",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listEmploymentPlacements({
+        companyId,
+        employeeId: hrPlacementsMatch.employeeId,
+        employmentId
+      })
+    });
+    return;
+  }
+
+  if (hrPlacementsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "employment",
+      scopeCode: "hr"
+    });
+    writeJson(
+      res,
+      201,
+      platform.recordEmploymentPlacement({
+        companyId,
+        employeeId: hrPlacementsMatch.employeeId,
+        employmentId: body.employmentId,
+        validFrom: body.validFrom,
+        validTo: body.validTo || null,
+        organizationUnitCode: body.organizationUnitCode || null,
+        businessUnitCode: body.businessUnitCode || null,
+        departmentCode: body.departmentCode || null,
+        costCenterCode: body.costCenterCode || null,
+        serviceLineCode: body.serviceLineCode || null,
+        workplaceCode: body.workplaceCode || null,
+        changeReasonCode: body.changeReasonCode || null,
+        reviewReference: body.reviewReference || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const hrSalaryBasesMatch = matchPath(path, "/v1/hr/employees/:employeeId/salary-bases");
+  if (hrSalaryBasesMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const employmentId = requireText(
+      url.searchParams.get("employmentId"),
+      "employment_id_required",
+      "employmentId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "employment",
+      scopeCode: "hr"
+    });
+    writeJson(res, 200, {
+      items: platform.listEmploymentSalaryBases({
+        companyId,
+        employeeId: hrSalaryBasesMatch.employeeId,
+        employmentId
+      })
+    });
+    return;
+  }
+
+  if (hrSalaryBasesMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "employment",
+      scopeCode: "hr"
+    });
+    writeJson(
+      res,
+      201,
+      platform.recordEmploymentSalaryBasis({
+        companyId,
+        employeeId: hrSalaryBasesMatch.employeeId,
+        employmentId: body.employmentId,
+        validFrom: body.validFrom,
+        validTo: body.validTo || null,
+        salaryBasisCode: body.salaryBasisCode,
+        payModelCode: body.payModelCode || null,
+        employmentRatePercent: body.employmentRatePercent ?? 100,
+        standardWeeklyHours: body.standardWeeklyHours ?? null,
+        ordinaryHoursPerMonth: body.ordinaryHoursPerMonth ?? null,
+        fullTimeEquivalent: body.fullTimeEquivalent ?? 1,
+        changeReasonCode: body.changeReasonCode || null,
+        reviewReference: body.reviewReference || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   const hrContractsMatch = matchPath(path, "/v1/hr/employees/:employeeId/contracts");
   if (hrContractsMatch && req.method === "GET") {
     const companyId = requireText(
@@ -8751,6 +8883,8 @@ async function handleRequest({ req, res, platform, flags }) {
         collectiveAgreementCode: body.collectiveAgreementCode || null,
         salaryRevisionReason: body.salaryRevisionReason || null,
         termsDocumentId: body.termsDocumentId || null,
+        changeReasonCode: body.changeReasonCode || null,
+        reviewReference: body.reviewReference || null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
@@ -8809,6 +8943,8 @@ async function handleRequest({ req, res, platform, flags }) {
         managerEmploymentId: body.managerEmploymentId,
         validFrom: body.validFrom,
         validTo: body.validTo || null,
+        changeReasonCode: body.changeReasonCode || null,
+        reviewReference: body.reviewReference || null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })

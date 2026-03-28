@@ -85,6 +85,30 @@ test("Step 20 builds a unified people and time base with approvals, balance sync
     collectiveAgreementCode: "ALMEGA_FIELD",
     actorId: "hr-admin"
   });
+  hrPlatform.recordEmploymentPlacement({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    validFrom: "2026-01-01",
+    organizationUnitCode: "field-ops",
+    businessUnitCode: "service",
+    departmentCode: "field",
+    costCenterCode: "CC-FIELD",
+    serviceLineCode: "INSTALL",
+    actorId: "hr-admin"
+  });
+  hrPlatform.recordEmploymentSalaryBasis({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    validFrom: "2026-01-01",
+    salaryBasisCode: "FIELD_HOURLY_FULLTIME",
+    payModelCode: "hourly_salary",
+    employmentRatePercent: 100,
+    standardWeeklyHours: 40,
+    ordinaryHoursPerMonth: 173.33,
+    actorId: "hr-admin"
+  });
   hrPlatform.assignEmploymentManager({
     companyId: COMPANY_ID,
     employeeId: employee.employeeId,
@@ -195,8 +219,11 @@ test("Step 20 builds a unified people and time base with approvals, balance sync
   });
   assert.equal(snapshot.employment.workerCategoryCode, "blue_collar");
   assert.equal(snapshot.employment.payrollMigrationAnchorRef, "migration-anchor-17");
+  assert.equal(snapshot.activePlacement.costCenterCode, "CC-FIELD");
+  assert.equal(snapshot.activeSalaryBasis.salaryBasisCode, "FIELD_HOURLY_FULLTIME");
   assert.equal(snapshot.activeContract.collectiveAgreementCode, "ALMEGA_FIELD");
   assert.equal(snapshot.activeManagerAssignment.managerEmploymentId, managerEmployment.employmentId);
+  assert.equal(snapshot.completeness.readyForPayrollInputs, true);
 
   const timeBase = timePlatform.getEmploymentTimeBase({
     companyId: COMPANY_ID,
