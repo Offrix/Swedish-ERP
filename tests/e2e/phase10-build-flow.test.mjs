@@ -94,7 +94,7 @@ test("Phase 10.3 e2e covers field-mobile shell, build routes and deterministic o
       token: sessionToken,
       body: {
         companyId: COMPANY_ID,
-        nextStatus: "quoted"
+        nextStatus: "priced"
       }
     });
     await requestJson(enabledBaseUrl, `/v1/projects/${project.projectId}/change-orders/${changeOrder.projectChangeOrderId}/status`, {
@@ -104,6 +104,17 @@ test("Phase 10.3 e2e covers field-mobile shell, build routes and deterministic o
         companyId: COMPANY_ID,
         nextStatus: "approved",
         customerApprovedAt: "2026-03-18"
+      }
+    });
+    await requestJson(enabledBaseUrl, `/v1/projects/${project.projectId}/change-orders/${changeOrder.projectChangeOrderId}/status`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: COMPANY_ID,
+        nextStatus: "applied",
+        effectiveDate: "2026-03-19",
+        billingPlanFrequencyCode: "one_off",
+        billingPlanTriggerCode: "change_order_approval"
       }
     });
 

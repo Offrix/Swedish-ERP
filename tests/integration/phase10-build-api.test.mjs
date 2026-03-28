@@ -113,7 +113,7 @@ test("Phase 10.3 API handles change orders, build VAT, HUS and personalliggare f
       token: sessionToken,
       body: {
         companyId: COMPANY_ID,
-        nextStatus: "quoted"
+        nextStatus: "priced"
       }
     });
     const approved = await requestJson(
@@ -130,6 +130,24 @@ test("Phase 10.3 API handles change orders, build VAT, HUS and personalliggare f
       }
     );
     assert.equal(approved.status, "approved");
+    const applied = await requestJson(
+      baseUrl,
+      `/v1/projects/${project.projectId}/change-orders/${changeOrder.projectChangeOrderId}/status`,
+      {
+        method: "POST",
+        token: sessionToken,
+        body: {
+          companyId: COMPANY_ID,
+          nextStatus: "applied",
+          effectiveDate: "2026-03-19",
+          billingPlanFrequencyCode: "one_off",
+          billingPlanTriggerCode: "change_order_approval"
+        }
+      }
+    );
+    assert.equal(applied.status, "applied");
+    assert.ok(applied.appliedRevenuePlanId);
+    assert.ok(applied.appliedBillingPlanId);
 
     const vatAssessment = await requestJson(baseUrl, `/v1/projects/${project.projectId}/build-vat-decisions`, {
       method: "POST",

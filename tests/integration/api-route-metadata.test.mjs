@@ -138,6 +138,9 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/projects/:projectId/revenue-plans/:projectRevenuePlanId/approve",
   "/v1/projects/:projectId/billing-plans",
   "/v1/projects/:projectId/status-updates",
+  "/v1/projects/:projectId/profitability-adjustments",
+  "/v1/projects/:projectId/profitability-adjustments/:projectProfitabilityAdjustmentId/decide",
+  "/v1/projects/:projectId/invoice-readiness-assessments",
   "/v1/projects/:projectId/profitability-snapshots",
   "/v1/payroll/garnishments",
   "/v1/payroll/garnishments/:garnishmentDecisionSnapshotId/approve",
@@ -272,6 +275,32 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(projectQuoteHandoffContract.requiredActionClass, "project_quote_handoff_create");
     assert.equal(projectQuoteHandoffContract.requiredTrustLevel, "strong_mfa");
     assert.equal(projectQuoteHandoffContract.requiredScopeType, "company");
+
+    const projectProfitabilityAdjustmentCreateContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/profitability-adjustments"
+    );
+    assert.ok(projectProfitabilityAdjustmentCreateContract);
+    assert.equal(projectProfitabilityAdjustmentCreateContract.requiredActionClass, "project_profitability_adjustment_create");
+    assert.equal(projectProfitabilityAdjustmentCreateContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectProfitabilityAdjustmentCreateContract.requiredScopeType, "project");
+
+    const projectProfitabilityAdjustmentDecisionContract = payload.routeContracts.find(
+      (routeContract) =>
+        routeContract.method === "POST"
+        && routeContract.path === "/v1/projects/:projectId/profitability-adjustments/:projectProfitabilityAdjustmentId/decide"
+    );
+    assert.ok(projectProfitabilityAdjustmentDecisionContract);
+    assert.equal(projectProfitabilityAdjustmentDecisionContract.requiredActionClass, "project_profitability_adjustment_decide");
+    assert.equal(projectProfitabilityAdjustmentDecisionContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectProfitabilityAdjustmentDecisionContract.requiredScopeType, "project");
+
+    const projectInvoiceReadinessAssessContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/invoice-readiness-assessments"
+    );
+    assert.ok(projectInvoiceReadinessAssessContract);
+    assert.equal(projectInvoiceReadinessAssessContract.requiredActionClass, "project_invoice_readiness_assess");
+    assert.equal(projectInvoiceReadinessAssessContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectInvoiceReadinessAssessContract.requiredScopeType, "project");
 
     const uniqueCount = new Set(payload.routes).size;
     assert.equal(uniqueCount, payload.routes.length, "api root metadata should not contain duplicate route entries");

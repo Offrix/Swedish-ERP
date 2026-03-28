@@ -736,6 +736,9 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/projects/:projectId/revenue-plans/:projectRevenuePlanId/approve",
               "/v1/projects/:projectId/billing-plans",
               "/v1/projects/:projectId/status-updates",
+              "/v1/projects/:projectId/profitability-adjustments",
+              "/v1/projects/:projectId/profitability-adjustments/:projectProfitabilityAdjustmentId/decide",
+              "/v1/projects/:projectId/invoice-readiness-assessments",
               "/v1/projects/:projectId/profitability-snapshots",
               "/v1/projects/:projectId/workspace",
               "/v1/projects/:projectId/deviations",
@@ -11422,6 +11425,141 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  const projectProfitabilityAdjustmentsMatch = matchPath(path, "/v1/projects/:projectId/profitability-adjustments");
+  if (projectProfitabilityAdjustmentsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_profitability_adjustment",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectProfitabilityAdjustments({
+        companyId,
+        projectId: projectProfitabilityAdjustmentsMatch.projectId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (projectProfitabilityAdjustmentsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_profitability_adjustment",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectProfitabilityAdjustment({
+        companyId,
+        projectId: projectProfitabilityAdjustmentsMatch.projectId,
+        projectProfitabilityAdjustmentId: body.projectProfitabilityAdjustmentId ?? null,
+        impactCode: body.impactCode,
+        amount: body.amount,
+        effectiveDate: body.effectiveDate,
+        reasonCode: body.reasonCode,
+        note: body.note ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectProfitabilityAdjustmentDecisionMatch = matchPath(path, "/v1/projects/:projectId/profitability-adjustments/:projectProfitabilityAdjustmentId/decide");
+  if (projectProfitabilityAdjustmentDecisionMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_profitability_adjustment",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.decideProjectProfitabilityAdjustment({
+        companyId,
+        projectId: projectProfitabilityAdjustmentDecisionMatch.projectId,
+        projectProfitabilityAdjustmentId: projectProfitabilityAdjustmentDecisionMatch.projectProfitabilityAdjustmentId,
+        decision: body.decision,
+        rejectionReason: body.rejectionReason ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectInvoiceReadinessAssessmentsMatch = matchPath(path, "/v1/projects/:projectId/invoice-readiness-assessments");
+  if (projectInvoiceReadinessAssessmentsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_invoice_readiness_assessment",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectInvoiceReadinessAssessments({
+        companyId,
+        projectId: projectInvoiceReadinessAssessmentsMatch.projectId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (projectInvoiceReadinessAssessmentsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_invoice_readiness_assessment",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.materializeProjectInvoiceReadinessAssessment({
+        companyId,
+        projectId: projectInvoiceReadinessAssessmentsMatch.projectId,
+        cutoffDate: body.cutoffDate,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   const projectProfitabilitySnapshotsMatch = matchPath(path, "/v1/projects/:projectId/profitability-snapshots");
   if (projectProfitabilitySnapshotsMatch && req.method === "GET") {
     const companyId = requireText(
@@ -11955,6 +12093,9 @@ async function handleRequest({ req, res, platform, flags }) {
         projectChangeOrderId: projectChangeOrderStatusMatch.projectChangeOrderId,
         nextStatus: body.nextStatus,
         customerApprovedAt: body.customerApprovedAt ?? null,
+        effectiveDate: body.effectiveDate ?? null,
+        billingPlanFrequencyCode: body.billingPlanFrequencyCode ?? null,
+        billingPlanTriggerCode: body.billingPlanTriggerCode ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })

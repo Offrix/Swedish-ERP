@@ -8,7 +8,15 @@ import {
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
 export const PROJECT_STATUSES = Object.freeze(["draft", "active", "on_hold", "closed", "archived"]);
-export const PROJECT_BILLING_MODEL_CODES = Object.freeze(["time_and_material", "fixed_price", "milestone"]);
+export const PROJECT_BILLING_MODEL_CODES = Object.freeze([
+  "time_and_material",
+  "fixed_price",
+  "milestone",
+  "retainer_capacity",
+  "subscription_service",
+  "advance_invoice",
+  "hybrid_change_order"
+]);
 export const PROJECT_REVENUE_RECOGNITION_MODEL_CODES = Object.freeze([
   "billing_equals_revenue",
   "over_time",
@@ -33,6 +41,9 @@ export const PROJECT_WORK_LOG_STATUSES = Object.freeze(["recorded", "approved", 
 export const PROJECT_REVENUE_PLAN_STATUSES = Object.freeze(["draft", "approved", "superseded"]);
 export const PROJECT_BILLING_PLAN_STATUSES = Object.freeze(["draft", "active", "superseded", "cancelled"]);
 export const PROJECT_STATUS_UPDATE_HEALTH_CODES = Object.freeze(["green", "amber", "red"]);
+export const PROJECT_PROFITABILITY_ADJUSTMENT_STATUSES = Object.freeze(["pending_review", "approved", "rejected"]);
+export const PROJECT_PROFITABILITY_ADJUSTMENT_IMPACT_CODES = Object.freeze(["revenue", "cost", "margin"]);
+export const PROJECT_INVOICE_READINESS_STATUSES = Object.freeze(["ready", "review_required", "blocked"]);
 export const PROJECT_BUDGET_LINE_KINDS = Object.freeze(["cost", "revenue"]);
 export const PROJECT_BUDGET_CATEGORY_CODES = Object.freeze([
   "labor",
@@ -46,7 +57,7 @@ export const PROJECT_BUDGET_CATEGORY_CODES = Object.freeze([
 ]);
 export const PROJECT_RESOURCE_ALLOCATION_STATUSES = Object.freeze(["planned", "confirmed", "released"]);
 export const PROJECT_SNAPSHOT_STATUSES = Object.freeze(["materialized", "review_required"]);
-export const PROJECT_CHANGE_ORDER_STATUSES = Object.freeze(["draft", "quoted", "approved", "rejected", "cancelled", "invoiced"]);
+export const PROJECT_CHANGE_ORDER_STATUSES = Object.freeze(["draft", "priced", "approved", "applied", "rejected", "cancelled"]);
 export const PROJECT_CHANGE_ORDER_SCOPE_CODES = Object.freeze(["change", "addition", "deduction"]);
 export const PROJECT_DEVIATION_STATUSES = Object.freeze(["open", "acknowledged", "in_progress", "resolved", "closed"]);
 export const PROJECT_DEVIATION_SEVERITY_CODES = Object.freeze(["minor", "major", "critical"]);
@@ -61,6 +72,7 @@ export function createProjectEngine({
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   arPlatform = null,
+  apPlatform = null,
   hrPlatform = null,
   timePlatform = null,
   payrollPlatform = null,
@@ -130,6 +142,9 @@ export function createProjectEngine({
     projectRevenuePlanStatuses: PROJECT_REVENUE_PLAN_STATUSES,
     projectBillingPlanStatuses: PROJECT_BILLING_PLAN_STATUSES,
     projectStatusUpdateHealthCodes: PROJECT_STATUS_UPDATE_HEALTH_CODES,
+    projectProfitabilityAdjustmentStatuses: PROJECT_PROFITABILITY_ADJUSTMENT_STATUSES,
+    projectProfitabilityAdjustmentImpactCodes: PROJECT_PROFITABILITY_ADJUSTMENT_IMPACT_CODES,
+    projectInvoiceReadinessStatuses: PROJECT_INVOICE_READINESS_STATUSES,
     projectBudgetLineKinds: PROJECT_BUDGET_LINE_KINDS,
     projectBudgetCategoryCodes: PROJECT_BUDGET_CATEGORY_CODES,
     projectResourceAllocationStatuses: PROJECT_RESOURCE_ALLOCATION_STATUSES,
@@ -163,6 +178,11 @@ export function createProjectEngine({
     createProjectBillingPlan,
     listProjectStatusUpdates,
     createProjectStatusUpdate,
+    listProjectProfitabilityAdjustments,
+    createProjectProfitabilityAdjustment,
+    decideProjectProfitabilityAdjustment,
+    listProjectInvoiceReadinessAssessments,
+    materializeProjectInvoiceReadinessAssessment,
     convertQuoteToProject,
     listProjectProfitabilitySnapshots,
     materializeProjectProfitabilitySnapshot,
@@ -229,8 +249,11 @@ export function createProjectEngine({
     const quoteLinks = listProjectQuoteLinks({ companyId: project.companyId, projectId: project.projectId });
     const billingPlans = listProjectBillingPlans({ companyId: project.companyId, projectId: project.projectId });
     const statusUpdates = listProjectStatusUpdates({ companyId: project.companyId, projectId: project.projectId });
+    const profitabilityAdjustments = listProjectProfitabilityAdjustments({ companyId: project.companyId, projectId: project.projectId });
+    const invoiceReadinessAssessments = listProjectInvoiceReadinessAssessments({ companyId: project.companyId, projectId: project.projectId });
     const currentBillingPlan = billingPlans.filter((record) => record.status === "active").pop() || billingPlans.at(-1) || null;
     const latestStatusUpdate = statusUpdates.at(-1) || null;
+    const currentInvoiceReadinessAssessment = selectWorkspaceSnapshot(invoiceReadinessAssessments, cutoffDate, "assessedAt");
     const customerContext = summarizeProjectCustomerContext({
       project,
       opportunityLinks,
@@ -296,6 +319,12 @@ export function createProjectEngine({
     if (revenuePlans.filter((record) => record.status === "approved").length === 0) {
       warningCodes.push("approved_revenue_plan_missing");
     }
+    if (currentInvoiceReadinessAssessment?.status === "blocked") {
+      warningCodes.push("invoice_readiness_blocked");
+    }
+    if (currentInvoiceReadinessAssessment?.status === "review_required") {
+      warningCodes.push("invoice_readiness_review_required");
+    }
     if (personalliggareSummary.alertCount > 0) {
       warningCodes.push("personalliggare_attention_required");
     }
@@ -323,11 +352,14 @@ export function createProjectEngine({
       currentForecastSnapshotId: currentForecastSnapshot?.projectForecastSnapshotId || null,
       currentProfitabilitySnapshotId: currentProfitabilitySnapshot?.projectProfitabilitySnapshotId || null,
       currentBillingPlanId: currentBillingPlan?.projectBillingPlanId || null,
+      currentInvoiceReadinessAssessmentId: currentInvoiceReadinessAssessment?.projectInvoiceReadinessAssessmentId || null,
       latestEstimateVersionId: kalkylSummary.latestEstimateVersionId,
       latestEstimateStatus: kalkylSummary.latestEstimateStatus,
       opportunityLinkCount: opportunityLinks.length,
       quoteLinkCount: quoteLinks.length,
       billingPlanCount: billingPlans.length,
+      profitabilityAdjustmentCount: profitabilityAdjustments.length,
+      invoiceReadinessAssessmentCount: invoiceReadinessAssessments.length,
       engagementCount: engagements.length,
       workModelCount: workModels.length,
       workPackageCount: workPackages.length,
@@ -356,6 +388,7 @@ export function createProjectEngine({
       currentForecastSnapshot: currentForecastSnapshot ? copy(currentForecastSnapshot) : null,
       currentProfitabilitySnapshot: currentProfitabilitySnapshot ? copy(currentProfitabilitySnapshot) : null,
       currentBillingPlan: currentBillingPlan ? copy(currentBillingPlan) : null,
+      currentInvoiceReadinessAssessment: currentInvoiceReadinessAssessment ? copy(currentInvoiceReadinessAssessment) : null,
       projectOpportunityLinks: opportunityLinks.map(copy),
       projectQuoteLinks: quoteLinks.map(copy),
       projectEngagements: engagements.map(copy),
@@ -365,6 +398,8 @@ export function createProjectEngine({
       projectRevenuePlans: revenuePlans.map(copy),
       projectBillingPlans: billingPlans.map(copy),
       projectStatusUpdates: statusUpdates.map(copy),
+      projectProfitabilityAdjustments: profitabilityAdjustments.map(copy),
+      projectInvoiceReadinessAssessments: invoiceReadinessAssessments.map(copy),
       complianceIndicatorStrip: buildWorkspaceIndicatorStrip({
         currentBudgetVersion,
         currentCostSnapshot,
@@ -378,7 +413,8 @@ export function createProjectEngine({
         kalkylSummary,
         openProjectDeviationCount: openProjectDeviations.length,
         engagementCount: engagements.length,
-        approvedRevenuePlanCount: revenuePlans.filter((record) => record.status === "approved").length
+        approvedRevenuePlanCount: revenuePlans.filter((record) => record.status === "approved").length,
+        currentInvoiceReadinessAssessment
       }),
       projectDeviations: openProjectDeviations.map(copy)
     };
@@ -470,6 +506,8 @@ export function createProjectEngine({
       quoteLinks: [],
       billingPlans: [],
       statusUpdates: [],
+      profitabilityAdjustments: [],
+      invoiceReadinessAssessments: [],
       changeOrders: [],
       buildVatAssessments: [],
       createdByActorId: requireText(actorId, "actor_id_required"),
@@ -1176,6 +1214,164 @@ export function createProjectEngine({
     return copy(record);
   }
 
+  function listProjectProfitabilityAdjustments({ companyId, projectId, status = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    return (project.profitabilityAdjustments || [])
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort((left, right) => left.effectiveDate.localeCompare(right.effectiveDate) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function createProjectProfitabilityAdjustment({
+    companyId,
+    projectId,
+    projectProfitabilityAdjustmentId = null,
+    impactCode,
+    amount,
+    effectiveDate,
+    reasonCode,
+    note = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const record = {
+      projectProfitabilityAdjustmentId: normalizeOptionalText(projectProfitabilityAdjustmentId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      impactCode: assertAllowed(impactCode, PROJECT_PROFITABILITY_ADJUSTMENT_IMPACT_CODES, "project_profitability_adjustment_impact_invalid"),
+      amount: normalizeMoney(amount, "project_profitability_adjustment_amount_invalid"),
+      effectiveDate: normalizeRequiredDate(effectiveDate, "project_profitability_adjustment_effective_date_required"),
+      reasonCode: normalizeCode(reasonCode, "project_profitability_adjustment_reason_required"),
+      note: normalizeOptionalText(note),
+      status: "pending_review",
+      approvedAt: null,
+      approvedByActorId: null,
+      rejectedAt: null,
+      rejectedByActorId: null,
+      rejectionReason: null,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    project.profitabilityAdjustments.push(record);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.profitability_adjustment.created",
+      entityType: "project_profitability_adjustment",
+      entityId: record.projectProfitabilityAdjustmentId,
+      projectId: record.projectId,
+      explanation: `Opened ${record.impactCode} profitability adjustment for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function decideProjectProfitabilityAdjustment({
+    companyId,
+    projectId,
+    projectProfitabilityAdjustmentId,
+    decision,
+    rejectionReason = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const record = requireProjectProfitabilityAdjustment(project, projectProfitabilityAdjustmentId);
+    if (record.status !== "pending_review") {
+      return copy(record);
+    }
+    const resolvedDecision = assertAllowed(decision, ["approved", "rejected"], "project_profitability_adjustment_decision_invalid");
+    record.status = resolvedDecision;
+    record.updatedAt = nowIso(clock);
+    if (resolvedDecision === "approved") {
+      record.approvedAt = nowIso(clock);
+      record.approvedByActorId = requireText(actorId, "actor_id_required");
+      record.rejectedAt = null;
+      record.rejectedByActorId = null;
+      record.rejectionReason = null;
+    } else {
+      record.rejectedAt = nowIso(clock);
+      record.rejectedByActorId = requireText(actorId, "actor_id_required");
+      record.rejectionReason = requireText(rejectionReason, "project_profitability_adjustment_rejection_reason_required");
+      record.approvedAt = null;
+      record.approvedByActorId = null;
+    }
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: `project.profitability_adjustment.${resolvedDecision}`,
+      entityType: "project_profitability_adjustment",
+      entityId: record.projectProfitabilityAdjustmentId,
+      projectId: record.projectId,
+      explanation: `${resolvedDecision === "approved" ? "Approved" : "Rejected"} profitability adjustment for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectInvoiceReadinessAssessments({ companyId, projectId, status = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    return (project.invoiceReadinessAssessments || [])
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort((left, right) => left.cutoffDate.localeCompare(right.cutoffDate) || left.assessedAt.localeCompare(right.assessedAt))
+      .map(copy);
+  }
+
+  function materializeProjectInvoiceReadinessAssessment({
+    companyId,
+    projectId,
+    cutoffDate,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const assessment = buildProjectInvoiceReadinessAssessment({
+      state,
+      project,
+      cutoffDate,
+      arPlatform,
+      apPlatform,
+      hrPlatform,
+      timePlatform,
+      payrollPlatform,
+      husPlatform: resolvePlatform(getHusPlatform, husPlatform),
+      clock
+    });
+    const existing = listProjectInvoiceReadinessAssessments({ companyId: project.companyId, projectId: project.projectId }).find(
+      (candidate) => candidate.snapshotHash === assessment.snapshotHash
+    );
+    if (existing) {
+      return existing;
+    }
+    const record = {
+      projectInvoiceReadinessAssessmentId: crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      ...assessment,
+      assessedByActorId: requireText(actorId, "actor_id_required"),
+      assessedAt: nowIso(clock)
+    };
+    project.invoiceReadinessAssessments.push(record);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.assessedByActorId,
+      correlationId,
+      action: "project.invoice_readiness.assessed",
+      entityType: "project_invoice_readiness_assessment",
+      entityId: record.projectInvoiceReadinessAssessmentId,
+      projectId: record.projectId,
+      explanation: `Assessed invoice readiness for ${project.projectCode} at ${record.cutoffDate}.`
+    });
+    return copy(record);
+  }
+
   function convertQuoteToProject({
     companyId,
     sourceQuoteId,
@@ -1379,9 +1575,11 @@ export function createProjectEngine({
       project,
       cutoffDate,
       arPlatform,
+      apPlatform,
       hrPlatform,
       timePlatform,
-      payrollPlatform
+      payrollPlatform,
+      husPlatform: resolvePlatform(getHusPlatform, husPlatform)
     });
     const approvedRevenuePlan = listProjectRevenuePlans({
       companyId: project.companyId,
@@ -1399,7 +1597,7 @@ export function createProjectEngine({
       billedRevenueAmount: model.billedRevenueAmount,
       recognizedRevenueAmount: model.recognizedRevenueAmount,
       actualCostAmount: model.actualCostAmount,
-      currentMarginAmount: roundMoney(model.recognizedRevenueAmount - model.actualCostAmount),
+      currentMarginAmount: model.currentMarginAmount,
       forecastMarginAmount: model.forecastMarginAmount,
       workPackageCount: listProjectWorkPackages({ companyId: project.companyId, projectId: project.projectId }).length,
       deliveryMilestoneCount: listProjectDeliveryMilestones({ companyId: project.companyId, projectId: project.projectId }).length,
@@ -1417,6 +1615,7 @@ export function createProjectEngine({
         billedRevenueAmount: model.billedRevenueAmount,
         recognizedRevenueAmount: model.recognizedRevenueAmount,
         actualCostAmount: model.actualCostAmount,
+        currentMarginAmount: model.currentMarginAmount,
         forecastMarginAmount: model.forecastMarginAmount,
         approvedRevenuePlanId: approvedRevenuePlan?.projectRevenuePlanId || null
       }),
@@ -1622,9 +1821,11 @@ export function createProjectEngine({
       project,
       cutoffDate,
       arPlatform,
+      apPlatform,
       hrPlatform,
       timePlatform,
-      payrollPlatform
+      payrollPlatform,
+      husPlatform: resolvePlatform(getHusPlatform, husPlatform)
     });
     const existing = listProjectCostSnapshots({ companyId: project.companyId, projectId: project.projectId }).find(
       (candidate) => candidate.snapshotHash === model.snapshotHash
@@ -1696,9 +1897,11 @@ export function createProjectEngine({
       project,
       cutoffDate,
       arPlatform,
+      apPlatform,
       hrPlatform,
       timePlatform,
-      payrollPlatform
+      payrollPlatform,
+      husPlatform: resolvePlatform(getHusPlatform, husPlatform)
     });
     const existing = listProjectWipSnapshots({ companyId: project.companyId, projectId: project.projectId }).find(
       (candidate) => candidate.snapshotHash === model.snapshotHash
@@ -1759,9 +1962,11 @@ export function createProjectEngine({
       project,
       cutoffDate,
       arPlatform,
+      apPlatform,
       hrPlatform,
       timePlatform,
-      payrollPlatform
+      payrollPlatform,
+      husPlatform: resolvePlatform(getHusPlatform, husPlatform)
     });
     const existing = listProjectForecastSnapshots({ companyId: project.companyId, projectId: project.projectId }).find(
       (candidate) => candidate.snapshotHash === model.snapshotHash
@@ -1842,6 +2047,12 @@ export function createProjectEngine({
       scheduleImpactMinutes: normalizeWholeNumber(scheduleImpactMinutes, "project_change_order_schedule_invalid"),
       customerApprovalRequiredFlag: customerApprovalRequiredFlag === true,
       customerApprovedAt: null,
+      pricedAt: null,
+      pricedByActorId: null,
+      appliedAt: null,
+      appliedByActorId: null,
+      appliedRevenuePlanId: null,
+      appliedBillingPlanId: null,
       status: "draft",
       quoteReference: normalizeOptionalText(quoteReference),
       createdByActorId: requireText(actorId, "actor_id_required"),
@@ -1869,6 +2080,9 @@ export function createProjectEngine({
     projectChangeOrderId,
     nextStatus,
     customerApprovedAt = null,
+    effectiveDate = null,
+    billingPlanFrequencyCode = null,
+    billingPlanTriggerCode = null,
     actorId = "system",
     correlationId = crypto.randomUUID()
   } = {}) {
@@ -1876,11 +2090,41 @@ export function createProjectEngine({
     const record = requireProjectChangeOrder(project, projectChangeOrderId);
     const resolvedNextStatus = assertAllowed(nextStatus, PROJECT_CHANGE_ORDER_STATUSES, "project_change_order_status_invalid");
     assertProjectChangeOrderTransition(record.status, resolvedNextStatus);
+    if (resolvedNextStatus === "priced") {
+      record.pricedAt = nowIso(clock);
+      record.pricedByActorId = requireText(actorId, "actor_id_required");
+    }
     if (resolvedNextStatus === "approved" && record.customerApprovalRequiredFlag) {
       record.customerApprovedAt = normalizeRequiredDate(
         customerApprovedAt || new Date(clock()).toISOString().slice(0, 10),
         "project_change_order_customer_approval_required"
       );
+    }
+    if (resolvedNextStatus === "applied") {
+      const appliedOutcome = applyProjectChangeOrder({
+        state,
+        project,
+        record,
+        effectiveDate,
+        billingPlanFrequencyCode,
+        billingPlanTriggerCode,
+        actorId,
+        correlationId,
+        clock,
+        createProjectRevenuePlan,
+        approveProjectRevenuePlan,
+        createProjectBillingPlan,
+        listProjectRevenuePlans,
+        listProjectBillingPlans
+      });
+      record.appliedAt = appliedOutcome.appliedAt;
+      record.appliedByActorId = requireText(actorId, "actor_id_required");
+      record.appliedRevenuePlanId = appliedOutcome.appliedRevenuePlanId;
+      record.appliedBillingPlanId = appliedOutcome.appliedBillingPlanId;
+      if (project.billingModelCode !== "hybrid_change_order") {
+        project.billingModelCode = "hybrid_change_order";
+      }
+      project.contractValueAmount = roundMoney(project.contractValueAmount + Number(record.revenueImpactAmount || 0));
     }
     record.status = resolvedNextStatus;
     record.updatedAt = nowIso(clock);
@@ -1895,6 +2139,30 @@ export function createProjectEngine({
       projectId: project.projectId,
       explanation: `Project change order ${record.projectChangeOrderId} moved to ${record.status}.`
     });
+    if (resolvedNextStatus === "approved") {
+      pushAudit(state, clock, {
+        companyId: project.companyId,
+        actorId: requireText(actorId, "actor_id_required"),
+        correlationId,
+        action: "project.change_order.approved",
+        entityType: "project_change_order",
+        entityId: record.projectChangeOrderId,
+        projectId: project.projectId,
+        explanation: `Approved project change order ${record.projectChangeOrderId}.`
+      });
+    }
+    if (resolvedNextStatus === "applied") {
+      pushAudit(state, clock, {
+        companyId: project.companyId,
+        actorId: requireText(actorId, "actor_id_required"),
+        correlationId,
+        action: "project.change_order.applied",
+        entityType: "project_change_order",
+        entityId: record.projectChangeOrderId,
+        projectId: project.projectId,
+        explanation: `Applied project change order ${record.projectChangeOrderId} to commercial chain.`
+      });
+    }
     return copy(record);
   }
 
@@ -2165,7 +2433,7 @@ export function createProjectEngine({
         .map(copy);
   }
 
-  function exportProjectEvidenceBundle({
+function exportProjectEvidenceBundle({
     companyId,
     projectId,
     cutoffDate = null,
@@ -2204,8 +2472,11 @@ export function createProjectEngine({
       projectRevenuePlans: copy(workspace.projectRevenuePlans || []),
       projectBillingPlans: copy(workspace.projectBillingPlans || []),
       projectStatusUpdates: copy(workspace.projectStatusUpdates || []),
+      projectProfitabilityAdjustments: copy(workspace.projectProfitabilityAdjustments || []),
+      projectInvoiceReadinessAssessments: copy(workspace.projectInvoiceReadinessAssessments || []),
       currentProfitabilitySnapshot: copy(workspace.currentProfitabilitySnapshot),
       currentBillingPlan: copy(workspace.currentBillingPlan),
+      currentInvoiceReadinessAssessment: copy(workspace.currentInvoiceReadinessAssessment),
       complianceIndicatorStrip: copy(workspace.complianceIndicatorStrip),
       projectDeviations: copy(workspace.projectDeviations),
       fieldSummary: copy(workspace.fieldSummary),
@@ -2240,7 +2511,8 @@ export function createProjectEngine({
           ["project_wip_snapshot", workspace.currentWipSnapshotId],
           ["project_forecast_snapshot", workspace.currentForecastSnapshotId],
           ["project_profitability_snapshot", workspace.currentProfitabilitySnapshotId],
-          ["project_billing_plan", workspace.currentBillingPlanId]
+          ["project_billing_plan", workspace.currentBillingPlanId],
+          ["project_invoice_readiness_assessment", workspace.currentInvoiceReadinessAssessmentId]
         ]
           .filter(([, artifactRef]) => artifactRef)
           .map(([artifactType, artifactRef]) => ({
@@ -2277,7 +2549,20 @@ export function createProjectEngine({
       relatedObjectRefs: workspace.projectDeviations.map((deviation) => ({
         objectType: "project_deviation",
         objectId: deviation.projectDeviationId
-      })),
+      })).concat(
+        (workspace.projectProfitabilityAdjustments || []).map((adjustment) => ({
+          objectType: "project_profitability_adjustment",
+          objectId: adjustment.projectProfitabilityAdjustmentId
+        })),
+        workspace.currentInvoiceReadinessAssessment
+          ? [
+              {
+                objectType: "project_invoice_readiness_assessment",
+                objectId: workspace.currentInvoiceReadinessAssessment.projectInvoiceReadinessAssessmentId
+              }
+            ]
+          : []
+      ),
       actorId,
       correlationId
     });
@@ -2329,15 +2614,22 @@ function resolvePlatform(getter, directPlatform) {
   return typeof getter === "function" ? getter() || directPlatform || null : directPlatform || null;
 }
 
-function selectWorkspaceSnapshot(records, cutoffDate) {
+function selectWorkspaceSnapshot(records, cutoffDate, dateField = "cutoffDate") {
   if (!Array.isArray(records) || records.length === 0) {
     return null;
   }
   if (!cutoffDate) {
     return copy(records[records.length - 1]);
   }
-  const exact = records.find((record) => record.cutoffDate === cutoffDate);
-  return copy(exact || records[records.length - 1]);
+  const candidates = records
+    .filter((record) => normalizeOptionalText(record?.[dateField]))
+    .sort((left, right) => String(left[dateField]).localeCompare(String(right[dateField])));
+  const exact = candidates.find((record) => record[dateField] === cutoffDate);
+  if (exact) {
+    return copy(exact);
+  }
+  const latestEligible = [...candidates].reverse().find((record) => String(record[dateField]) <= cutoffDate);
+  return copy(latestEligible || candidates.at(-1) || records[records.length - 1]);
 }
 
 function summarizeFieldWorkspace({ companyId, projectId, fieldPlatform }) {
@@ -2479,6 +2771,7 @@ function buildWorkspaceIndicatorStrip({
   currentWipSnapshot,
   currentForecastSnapshot,
   currentProfitabilitySnapshot,
+  currentInvoiceReadinessAssessment,
   fieldSummary,
   husSummary,
   personalliggareSummary,
@@ -2503,6 +2796,18 @@ function buildWorkspaceIndicatorStrip({
       indicatorCode: "commercial_core",
       status: engagementCount > 0 && approvedRevenuePlanCount > 0 ? "ok" : "warning",
       count: engagementCount + approvedRevenuePlanCount
+    },
+    {
+      indicatorCode: "invoice_readiness",
+      status:
+        currentInvoiceReadinessAssessment?.status === "blocked"
+          ? "warning"
+          : currentInvoiceReadinessAssessment?.status === "review_required"
+            ? "warning"
+            : currentInvoiceReadinessAssessment
+              ? "ok"
+              : "warning",
+      count: currentInvoiceReadinessAssessment ? 1 : 0
     },
     {
       indicatorCode: "field",
@@ -2541,7 +2846,7 @@ function buildScopedProjectDeviationKey(companyId, projectId) {
   return `${companyId}:${projectId}`;
 }
 
-function buildProjectMetricsModel({ state, project, cutoffDate, arPlatform, hrPlatform, timePlatform, payrollPlatform }) {
+function buildProjectMetricsModel({ state, project, cutoffDate, arPlatform, apPlatform, hrPlatform, timePlatform, payrollPlatform, husPlatform }) {
   const resolvedCutoffDate = normalizeRequiredDate(cutoffDate, "project_cutoff_date_required");
   const reportingPeriod = toReportingPeriodFromDate(resolvedCutoffDate);
   const budgetVersion = findLatestBudgetVersion(state, project.projectId);
@@ -2572,20 +2877,52 @@ function buildProjectMetricsModel({ state, project, cutoffDate, arPlatform, hrPl
     aliases,
     arPlatform
   });
+  const apSummary = collectApSummary({
+    companyId: project.companyId,
+    cutoffDate: resolvedCutoffDate,
+    aliases,
+    apPlatform
+  });
+  const profitabilityAdjustmentSummary = collectApprovedProjectProfitabilityAdjustments({
+    project,
+    cutoffDate: resolvedCutoffDate
+  });
+  const husProfitabilitySummary = collectHusProfitabilitySummary({
+    companyId: project.companyId,
+    projectId: project.projectId,
+    cutoffDate: resolvedCutoffDate,
+    husPlatform
+  });
   const approvedValueAmount = calculateApprovedValueAmount({
     project,
+    cutoffDate: resolvedCutoffDate,
     reportingPeriod,
     budgetSummary,
     timeSummary,
-    state
+    state,
+    billingSummary
   });
-  const recognizedRevenueAmount =
+  const baseRecognizedRevenueAmount =
     project.revenueRecognitionModelCode === "billing_equals_revenue"
       ? billingSummary.billedRevenueAmount
       : approvedValueAmount;
+  const recognizedRevenueAmount = roundMoney(
+    baseRecognizedRevenueAmount +
+    profitabilityAdjustmentSummary.revenueAdjustmentAmount +
+    husProfitabilitySummary.husAdjustmentAmount
+  );
   const explanationCodes = [];
   if (project.billingModelCode === "time_and_material" && timeSummary.actualMinutes > 0 && approvedValueAmount === 0) {
     explanationCodes.push("rate_missing_review");
+  }
+  if (apSummary.invoiceCount > 0) {
+    explanationCodes.push("ap_costs_included");
+  }
+  if (husProfitabilitySummary.husAdjustmentAmount !== 0) {
+    explanationCodes.push("hus_adjustment_included");
+  }
+  if (profitabilityAdjustmentSummary.adjustmentCount > 0) {
+    explanationCodes.push("manual_adjustment_included");
   }
   if (approvedValueAmount < billingSummary.billedRevenueAmount) {
     explanationCodes.push("deferred_revenue_balance");
@@ -2596,9 +2933,18 @@ function buildProjectMetricsModel({ state, project, cutoffDate, arPlatform, hrPl
   );
   const remainingBudgetCostAmount = budgetSummary.futureCostAmount;
   const remainingBudgetRevenueAmount = budgetSummary.futureRevenueAmount;
-  const forecastCostAtCompletionAmount = roundMoney(payrollSummary.actualCostAmount + remainingBudgetCostAmount);
+  const actualCostAmount = roundMoney(
+    payrollSummary.actualCostAmount +
+    apSummary.actualCostAmount +
+    profitabilityAdjustmentSummary.costAdjustmentAmount
+  );
+  const forecastCostAtCompletionAmount = roundMoney(actualCostAmount + remainingBudgetCostAmount);
   const forecastRevenueAtCompletionAmount = roundMoney(recognizedRevenueAmount + remainingBudgetRevenueAmount);
-  const currentMarginAmount = roundMoney(recognizedRevenueAmount - payrollSummary.actualCostAmount);
+  const currentMarginAmount = roundMoney(
+    recognizedRevenueAmount -
+    actualCostAmount +
+    profitabilityAdjustmentSummary.marginAdjustmentAmount
+  );
   const forecastMarginAmount = roundMoney(forecastRevenueAtCompletionAmount - forecastCostAtCompletionAmount);
   const resourceLoadPercent = roundPercentage(
     timeSummary.plannedMinutesToDate === 0 ? 0 : (timeSummary.actualMinutes / timeSummary.plannedMinutesToDate) * 100
@@ -2607,7 +2953,7 @@ function buildProjectMetricsModel({ state, project, cutoffDate, arPlatform, hrPl
   const snapshotHash = hashObject({
     projectId: project.projectId,
     cutoffDate: resolvedCutoffDate,
-    actualCostAmount: payrollSummary.actualCostAmount,
+    actualCostAmount,
     actualMinutes: timeSummary.actualMinutes,
     approvedValueAmount,
     billedRevenueAmount: billingSummary.billedRevenueAmount,
@@ -2616,6 +2962,14 @@ function buildProjectMetricsModel({ state, project, cutoffDate, arPlatform, hrPl
     remainingBudgetRevenueAmount,
     resourceLoadPercent,
     explanationCodes,
+    apCostHash: hashObject(apSummary.lines.map((line) => ({
+      supplierInvoiceId: line.supplierInvoiceId,
+      supplierInvoiceLineId: line.supplierInvoiceLineId,
+      costBucketCode: line.costBucketCode,
+      amount: line.amount
+    }))),
+    profitabilityAdjustmentHash: profitabilityAdjustmentSummary.snapshotHash,
+    husAdjustmentAmount: husProfitabilitySummary.husAdjustmentAmount,
     payrollAllocationHash: hashObject(
       payrollSummary.payrollAllocations.map((allocation) => ({
         payRunId: allocation.payRunId,
@@ -2636,7 +2990,7 @@ function buildProjectMetricsModel({ state, project, cutoffDate, arPlatform, hrPl
     projectId: project.projectId,
     cutoffDate: resolvedCutoffDate,
     reportingPeriod,
-    actualCostAmount: payrollSummary.actualCostAmount,
+    actualCostAmount,
     actualMinutes: timeSummary.actualMinutes,
     billedRevenueAmount: billingSummary.billedRevenueAmount,
     recognizedRevenueAmount,
@@ -2650,14 +3004,24 @@ function buildProjectMetricsModel({ state, project, cutoffDate, arPlatform, hrPl
     currentMarginAmount,
     forecastMarginAmount,
     resourceLoadPercent,
-    costBreakdown: payrollSummary.costBreakdown,
+    costBreakdown: mergeProjectCostBreakdown(payrollSummary.costBreakdown, apSummary.costBreakdown),
     payrollAllocations: payrollSummary.payrollAllocations,
+    apAllocations: apSummary.lines,
+    approvedAdjustmentAmount: profitabilityAdjustmentSummary.netAdjustmentAmount,
+    manualRevenueAdjustmentAmount: profitabilityAdjustmentSummary.revenueAdjustmentAmount,
+    manualCostAdjustmentAmount: profitabilityAdjustmentSummary.costAdjustmentAmount,
+    marginAdjustmentAmount: profitabilityAdjustmentSummary.marginAdjustmentAmount,
+    husAdjustmentAmount: husProfitabilitySummary.husAdjustmentAmount,
     sourceCounts: {
       payRuns: payrollSummary.payRunCount,
       payRunLines: payrollSummary.payRunLineCount,
       payrollAllocations: payrollSummary.payrollAllocationCount,
       timeEntries: timeSummary.entryCount,
-      invoices: billingSummary.invoiceCount
+      invoices: billingSummary.invoiceCount,
+      supplierInvoices: apSummary.invoiceCount,
+      supplierInvoiceLines: apSummary.lineCount,
+      profitabilityAdjustments: profitabilityAdjustmentSummary.adjustmentCount,
+      husCases: husProfitabilitySummary.caseCount
     },
     explanationCodes,
     snapshotStatus,
@@ -2717,14 +3081,7 @@ function collectPayrollSummary({ companyId, reportingPeriod, cutoffDate, aliases
   const payRuns = payrollPlatform?.listPayRuns ? payrollPlatform.listPayRuns({ companyId }) : [];
   const includedPayRuns = new Set();
   const includedPayRunLines = new Set();
-  const costBreakdown = {
-    salaryAmount: 0,
-    benefitAmount: 0,
-    pensionAmount: 0,
-    travelAmount: 0,
-    employerContributionAmount: 0,
-    otherAmount: 0
-  };
+  const costBreakdown = createExtendedProjectCostBreakdown();
   const payrollAllocations = [];
 
   for (const payRun of payRuns) {
@@ -2877,7 +3234,304 @@ function collectBillingSummary({ companyId, cutoffDate, aliases, arPlatform }) {
   };
 }
 
-function calculateApprovedValueAmount({ project, reportingPeriod, budgetSummary, timeSummary, state }) {
+function collectApSummary({ companyId, cutoffDate, aliases, apPlatform }) {
+  const invoices = apPlatform?.listSupplierInvoices ? apPlatform.listSupplierInvoices({ companyId }) : [];
+  const costBreakdown = createExtendedProjectCostBreakdown();
+  const lines = [];
+  let invoiceCount = 0;
+  for (const invoice of invoices) {
+    if (invoice.status !== "posted") {
+      continue;
+    }
+    if ((invoice.invoiceDate || "9999-12-31") > cutoffDate) {
+      continue;
+    }
+    let matchedInvoice = false;
+    for (const line of invoice.lines || []) {
+      if (!matchesProjectDimension(line.dimensionsJson, aliases)) {
+        continue;
+      }
+      const amount = roundMoney((invoice.invoiceType === "credit_note" ? -1 : 1) * Number(line.netAmount || 0));
+      if (amount === 0) {
+        continue;
+      }
+      const costBucketCode = resolveApCostBucketCode(line);
+      appendCostBreakdownAmount(costBreakdown, costBucketCode, amount);
+      lines.push({
+        supplierInvoiceId: invoice.supplierInvoiceId,
+        supplierInvoiceLineId: line.supplierInvoiceLineId || null,
+        costBucketCode,
+        amount,
+        expenseAccountNumber: line.expenseAccountNumber || null,
+        invoiceDate: invoice.invoiceDate
+      });
+      matchedInvoice = true;
+    }
+    if (matchedInvoice) {
+      invoiceCount += 1;
+    }
+  }
+  return {
+    actualCostAmount: roundMoney(lines.reduce((sum, line) => sum + Number(line.amount || 0), 0)),
+    costBreakdown,
+    invoiceCount,
+    lineCount: lines.length,
+    lines
+  };
+}
+
+function createExtendedProjectCostBreakdown() {
+  return {
+    salaryAmount: 0,
+    benefitAmount: 0,
+    pensionAmount: 0,
+    travelAmount: 0,
+    employerContributionAmount: 0,
+    materialAmount: 0,
+    subcontractorAmount: 0,
+    equipmentAmount: 0,
+    overheadAmount: 0,
+    otherAmount: 0
+  };
+}
+
+function mergeProjectCostBreakdown(left = {}, right = {}) {
+  const merged = createExtendedProjectCostBreakdown();
+  for (const key of Object.keys(merged)) {
+    merged[key] = roundMoney(Number(left?.[key] || 0) + Number(right?.[key] || 0));
+  }
+  return merged;
+}
+
+function resolveApCostBucketCode(line) {
+  const explicitBucket = normalizeOptionalText(line?.dimensionsJson?.projectCostBucketCode);
+  if (explicitBucket) {
+    const resolvedExplicitBucket = normalizeCode(explicitBucket, "project_ap_cost_bucket_invalid").toLowerCase();
+    if (
+      new Set(["material", "subcontractor", "equipment", "overhead", "travel", "other"]).has(resolvedExplicitBucket)
+    ) {
+      return resolvedExplicitBucket;
+    }
+  }
+  const accountNumber = String(line?.expenseAccountNumber || "").trim();
+  if (/^58/.test(accountNumber)) {
+    return "travel";
+  }
+  if (/^(40|41|49)/.test(accountNumber)) {
+    return "material";
+  }
+  if (/^(42|44|45|46)/.test(accountNumber)) {
+    return "subcontractor";
+  }
+  if (/^(52|54|55|56|57)/.test(accountNumber)) {
+    return "equipment";
+  }
+  if (/^(50|51|53|59|69|70)/.test(accountNumber)) {
+    return "overhead";
+  }
+  return "other";
+}
+
+function collectApprovedProjectProfitabilityAdjustments({ project, cutoffDate }) {
+  const approved = (project.profitabilityAdjustments || [])
+    .filter((record) => record.status === "approved")
+    .filter((record) => record.effectiveDate <= cutoffDate);
+  const revenueAdjustmentAmount = roundMoney(
+    approved.filter((record) => record.impactCode === "revenue").reduce((sum, record) => sum + Number(record.amount || 0), 0)
+  );
+  const costAdjustmentAmount = roundMoney(
+    approved.filter((record) => record.impactCode === "cost").reduce((sum, record) => sum + Number(record.amount || 0), 0)
+  );
+  const marginAdjustmentAmount = roundMoney(
+    approved.filter((record) => record.impactCode === "margin").reduce((sum, record) => sum + Number(record.amount || 0), 0)
+  );
+  return {
+    adjustmentCount: approved.length,
+    revenueAdjustmentAmount,
+    costAdjustmentAmount,
+    marginAdjustmentAmount,
+    netAdjustmentAmount: roundMoney(revenueAdjustmentAmount - costAdjustmentAmount + marginAdjustmentAmount),
+    snapshotHash: hashObject(
+      approved.map((record) => ({
+        projectProfitabilityAdjustmentId: record.projectProfitabilityAdjustmentId,
+        status: record.status,
+        impactCode: record.impactCode,
+        amount: record.amount,
+        effectiveDate: record.effectiveDate
+      }))
+    )
+  };
+}
+
+function collectHusProfitabilitySummary({ companyId, projectId, cutoffDate, husPlatform }) {
+  const cases = husPlatform?.listHusCases ? husPlatform.listHusCases({ companyId }).filter((record) => record.projectId === projectId) : [];
+  let payoutAmount = 0;
+  let recoveryAmount = 0;
+  for (const record of cases) {
+    for (const payout of record.payouts || []) {
+      if ((payout.payoutDate || "9999-12-31") <= cutoffDate) {
+        payoutAmount = roundMoney(payoutAmount + Number(payout.payoutAmount || 0));
+      }
+    }
+    for (const recovery of record.recoveries || []) {
+      if ((recovery.recoveryDate || "9999-12-31") <= cutoffDate) {
+        recoveryAmount = roundMoney(recoveryAmount + Number(recovery.recoveryAmount || 0));
+      }
+    }
+  }
+  return {
+    caseCount: cases.length,
+    husAdjustmentAmount: roundMoney(payoutAmount - recoveryAmount),
+    payoutAmount,
+    recoveryAmount
+  };
+}
+
+function resolveEligibleBillingPlanAmount({ project, cutoffDate, billingPlan }) {
+  if (!billingPlan) {
+    return 0;
+  }
+  return roundMoney(
+    (billingPlan.lines || [])
+      .filter((line) => (line.plannedInvoiceDate || "9999-12-31") <= cutoffDate)
+      .filter((line) => isBillingPlanLineEligibleForProject(project, line))
+      .reduce((sum, line) => sum + Number(line.amount || 0), 0)
+  );
+}
+
+function isBillingPlanLineEligibleForProject(project, line) {
+  if (!line.projectDeliveryMilestoneId) {
+    return true;
+  }
+  const milestone = (project.deliveryMilestones || []).find((record) => record.projectDeliveryMilestoneId === line.projectDeliveryMilestoneId);
+  if (!milestone) {
+    return false;
+  }
+  return ["achieved", "accepted"].includes(milestone.status);
+}
+
+function buildProjectInvoiceReadinessAssessment({
+  state,
+  project,
+  cutoffDate,
+  arPlatform,
+  apPlatform,
+  hrPlatform,
+  timePlatform,
+  payrollPlatform,
+  husPlatform
+}) {
+  const resolvedCutoffDate = normalizeRequiredDate(cutoffDate, "project_invoice_readiness_cutoff_date_required");
+  const model = buildProjectMetricsModel({
+    state,
+    project,
+    cutoffDate: resolvedCutoffDate,
+    arPlatform,
+    apPlatform,
+    hrPlatform,
+    timePlatform,
+    payrollPlatform,
+    husPlatform
+  });
+  const activeBillingPlan = (project.billingPlans || []).filter((record) => record.status === "active").pop() || null;
+  const approvedRevenuePlan = [...(state.projectRevenuePlanIdsByProject.get(project.projectId) || [])]
+    .map((projectRevenuePlanId) => state.projectRevenuePlans.get(projectRevenuePlanId))
+    .filter(Boolean)
+    .filter((record) => record.status === "approved")
+    .sort((left, right) => left.versionNo - right.versionNo)
+    .pop() || null;
+  const eligibleBillingPlanAmount = resolveEligibleBillingPlanAmount({
+    project,
+    cutoffDate: resolvedCutoffDate,
+    billingPlan: activeBillingPlan
+  });
+  const pendingManualAdjustments = (project.profitabilityAdjustments || []).filter(
+    (record) => record.status === "pending_review" && record.effectiveDate <= resolvedCutoffDate
+  );
+  const unresolvedCommercialChangeOrders = (project.changeOrders || []).filter(
+    (record) => ["draft", "priced", "approved"].includes(record.status)
+  );
+  const latestStatusUpdate = (project.statusUpdates || [])
+    .filter((record) => record.statusDate <= resolvedCutoffDate)
+    .sort((left, right) => left.statusDate.localeCompare(right.statusDate) || left.createdAt.localeCompare(right.createdAt))
+    .pop() || null;
+
+  const blockerCodes = [];
+  const reviewCodes = [];
+
+  if (!approvedRevenuePlan) {
+    blockerCodes.push("approved_revenue_plan_missing");
+  }
+  if (!activeBillingPlan) {
+    blockerCodes.push("active_billing_plan_missing");
+  }
+  if (["retainer_capacity", "subscription_service", "advance_invoice", "hybrid_change_order"].includes(project.billingModelCode)) {
+    if (eligibleBillingPlanAmount <= 0) {
+      blockerCodes.push("billing_plan_line_not_yet_eligible");
+    }
+  }
+  if (unresolvedCommercialChangeOrders.some((record) => record.status === "approved")) {
+    reviewCodes.push("approved_change_order_pending_apply");
+  }
+  if (pendingManualAdjustments.length > 0) {
+    reviewCodes.push("profitability_adjustment_pending_review");
+  }
+  if (latestStatusUpdate?.healthCode === "red") {
+    reviewCodes.push("project_status_red");
+  }
+  if (model.actualCostAmount > 0 && model.approvedValueAmount === 0 && blockerCodes.length === 0) {
+    reviewCodes.push("costs_present_without_approved_value");
+  }
+  if (model.deferredRevenueAmount > 0) {
+    reviewCodes.push("deferred_revenue_balance");
+  }
+
+  const status = blockerCodes.length > 0 ? "blocked" : reviewCodes.length > 0 ? "review_required" : "ready";
+  const unbilledApprovedValueAmount = roundMoney(Math.max(0, model.approvedValueAmount - model.billedRevenueAmount));
+  const invoiceReadyAmount =
+    status === "blocked"
+      ? 0
+      : roundMoney(
+          Math.max(
+            0,
+            ["retainer_capacity", "subscription_service", "advance_invoice", "hybrid_change_order"].includes(project.billingModelCode)
+              ? eligibleBillingPlanAmount
+              : unbilledApprovedValueAmount
+          )
+        );
+
+  return {
+    cutoffDate: resolvedCutoffDate,
+    status,
+    blockerCodes,
+    reviewCodes,
+    approvedRevenuePlanId: approvedRevenuePlan?.projectRevenuePlanId || null,
+    activeBillingPlanId: activeBillingPlan?.projectBillingPlanId || null,
+    invoiceReadyAmount,
+    eligibleBillingPlanAmount: roundMoney(eligibleBillingPlanAmount),
+    unbilledApprovedValueAmount,
+    approvedValueAmount: model.approvedValueAmount,
+    billedRevenueAmount: model.billedRevenueAmount,
+    actualCostAmount: model.actualCostAmount,
+    currentMarginAmount: model.currentMarginAmount,
+    pendingManualAdjustmentCount: pendingManualAdjustments.length,
+    unresolvedChangeOrderCount: unresolvedCommercialChangeOrders.length,
+    snapshotHash: hashObject({
+      projectId: project.projectId,
+      cutoffDate: resolvedCutoffDate,
+      status,
+      blockerCodes,
+      reviewCodes,
+      approvedRevenuePlanId: approvedRevenuePlan?.projectRevenuePlanId || null,
+      activeBillingPlanId: activeBillingPlan?.projectBillingPlanId || null,
+      invoiceReadyAmount,
+      unbilledApprovedValueAmount,
+      currentMarginAmount: model.currentMarginAmount
+    })
+  };
+}
+
+function calculateApprovedValueAmount({ project, cutoffDate, reportingPeriod, budgetSummary, timeSummary, state, billingSummary }) {
   if (project.billingModelCode === "time_and_material") {
     let total = 0;
     for (const entry of timeSummary.entries) {
@@ -2891,6 +3545,18 @@ function calculateApprovedValueAmount({ project, reportingPeriod, budgetSummary,
   }
   if (project.billingModelCode === "fixed_price" || project.billingModelCode === "milestone") {
     return budgetSummary.currentRevenueAmount;
+  }
+  if (["retainer_capacity", "subscription_service", "advance_invoice", "hybrid_change_order"].includes(project.billingModelCode)) {
+    const activeBillingPlan = (project.billingPlans || []).filter((record) => record.status === "active").pop() || null;
+    const eligibleBillingPlanAmount = resolveEligibleBillingPlanAmount({
+      project,
+      cutoffDate,
+      billingPlan: activeBillingPlan
+    });
+    if (project.billingModelCode === "advance_invoice") {
+      return Math.max(eligibleBillingPlanAmount, billingSummary.billedRevenueAmount);
+    }
+    return eligibleBillingPlanAmount;
   }
   return 0;
 }
@@ -3286,6 +3952,22 @@ function appendCostBreakdownAmount(costBreakdown, costBucketCode, amount) {
     costBreakdown.employerContributionAmount = roundMoney(costBreakdown.employerContributionAmount + amount);
     return;
   }
+  if (costBucketCode === "material") {
+    costBreakdown.materialAmount = roundMoney(costBreakdown.materialAmount + amount);
+    return;
+  }
+  if (costBucketCode === "subcontractor") {
+    costBreakdown.subcontractorAmount = roundMoney(costBreakdown.subcontractorAmount + amount);
+    return;
+  }
+  if (costBucketCode === "equipment") {
+    costBreakdown.equipmentAmount = roundMoney(costBreakdown.equipmentAmount + amount);
+    return;
+  }
+  if (costBucketCode === "overhead") {
+    costBreakdown.overheadAmount = roundMoney(costBreakdown.overheadAmount + amount);
+    return;
+  }
   costBreakdown.otherAmount = roundMoney(costBreakdown.otherAmount + amount);
 }
 
@@ -3444,14 +4126,28 @@ function requireProjectChangeOrder(project, projectChangeOrderId) {
   return record;
 }
 
+function requireProjectProfitabilityAdjustment(project, projectProfitabilityAdjustmentId) {
+  const resolvedProjectProfitabilityAdjustmentId = requireText(
+    projectProfitabilityAdjustmentId,
+    "project_profitability_adjustment_id_required"
+  );
+  const record = (project.profitabilityAdjustments || []).find(
+    (candidate) => candidate.projectProfitabilityAdjustmentId === resolvedProjectProfitabilityAdjustmentId
+  );
+  if (!record) {
+    throw createError(404, "project_profitability_adjustment_not_found", "Project profitability adjustment was not found.");
+  }
+  return record;
+}
+
 function assertProjectChangeOrderTransition(currentStatus, nextStatus) {
   const allowed = {
-    draft: new Set(["quoted", "cancelled"]),
-    quoted: new Set(["approved", "rejected", "cancelled"]),
-    approved: new Set(["invoiced", "cancelled"]),
+    draft: new Set(["priced", "cancelled"]),
+    priced: new Set(["approved", "rejected", "cancelled"]),
+    approved: new Set(["applied", "cancelled"]),
     rejected: new Set(),
     cancelled: new Set(),
-    invoiced: new Set()
+    applied: new Set()
   };
   if (currentStatus === nextStatus) {
     return;
@@ -3463,6 +4159,80 @@ function assertProjectChangeOrderTransition(currentStatus, nextStatus) {
       `Project change order cannot move from ${currentStatus} to ${nextStatus}.`
     );
   }
+}
+
+function applyProjectChangeOrder({
+  project,
+  record,
+  effectiveDate,
+  billingPlanFrequencyCode,
+  billingPlanTriggerCode,
+  actorId,
+  correlationId,
+  clock,
+  createProjectRevenuePlan,
+  approveProjectRevenuePlan,
+  createProjectBillingPlan
+}) {
+  const resolvedEffectiveDate = normalizeRequiredDate(
+    effectiveDate || record.customerApprovedAt || new Date(clock()).toISOString().slice(0, 10),
+    "project_change_order_effective_date_required"
+  );
+  const resolvedActorId = requireText(actorId, "actor_id_required");
+  let appliedRevenuePlanId = null;
+  let appliedBillingPlanId = null;
+
+  if (Number(record.revenueImpactAmount || 0) !== 0) {
+    const createdRevenuePlan = createProjectRevenuePlan({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      versionLabel: `change-order-${record.projectChangeOrderId.slice(0, 8)}`,
+      lines: [
+        {
+          recognitionDate: resolvedEffectiveDate,
+          triggerTypeCode: "change_order",
+          amount: record.revenueImpactAmount,
+          note: record.title
+        }
+      ],
+      actorId: resolvedActorId,
+      correlationId
+    });
+    const approvedRevenuePlan = approveProjectRevenuePlan({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      projectRevenuePlanId: createdRevenuePlan.projectRevenuePlanId,
+      actorId: resolvedActorId,
+      correlationId
+    });
+    appliedRevenuePlanId = approvedRevenuePlan.projectRevenuePlanId;
+
+    const createdBillingPlan = createProjectBillingPlan({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      frequencyCode: billingPlanFrequencyCode || "one_off",
+      triggerCode: billingPlanTriggerCode || "change_order_approval",
+      startsOn: resolvedEffectiveDate,
+      status: "active",
+      lines: [
+        {
+          plannedInvoiceDate: resolvedEffectiveDate,
+          amount: record.revenueImpactAmount,
+          triggerCode: billingPlanTriggerCode || "change_order_approval",
+          note: record.title
+        }
+      ],
+      actorId: resolvedActorId,
+      correlationId
+    });
+    appliedBillingPlanId = createdBillingPlan.projectBillingPlanId;
+  }
+
+  return {
+    appliedAt: nowIso(clock),
+    appliedRevenuePlanId,
+    appliedBillingPlanId
+  };
 }
 
 function requireProjectQuoteLink(project, projectQuoteLinkId) {

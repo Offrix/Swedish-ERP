@@ -494,11 +494,12 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "projects",
     label: "Projects",
     packageName: "@swedish-erp/domain-projects",
-    dependsOn: ["ar", "hr", "time", "payroll", "vat", "evidence"],
+    dependsOn: ["ar", "ap", "hr", "time", "payroll", "vat", "evidence"],
     create: ({ options, dependencies, getDomain }) =>
       createProjectsPlatform({
         ...options,
         arPlatform: dependencies.ar,
+        apPlatform: dependencies.ap,
         hrPlatform: dependencies.hr,
         timePlatform: dependencies.time,
         payrollPlatform: dependencies.payroll,

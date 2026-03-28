@@ -52,14 +52,14 @@ test("Phase 10.3 project change orders and build VAT assessments remain determin
   });
   assert.equal(changeOrder.status, "draft");
 
-  const quoted = projectsPlatform.transitionProjectChangeOrderStatus({
+  const priced = projectsPlatform.transitionProjectChangeOrderStatus({
     companyId: COMPANY_ID,
     projectId: project.projectId,
     projectChangeOrderId: changeOrder.projectChangeOrderId,
-    nextStatus: "quoted",
+    nextStatus: "priced",
     actorId: "unit-test"
   });
-  assert.equal(quoted.status, "quoted");
+  assert.equal(priced.status, "priced");
 
   const approved = projectsPlatform.transitionProjectChangeOrderStatus({
     companyId: COMPANY_ID,
@@ -71,6 +71,20 @@ test("Phase 10.3 project change orders and build VAT assessments remain determin
   });
   assert.equal(approved.status, "approved");
   assert.equal(approved.customerApprovedAt, "2026-03-18");
+
+  const applied = projectsPlatform.transitionProjectChangeOrderStatus({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    projectChangeOrderId: changeOrder.projectChangeOrderId,
+    nextStatus: "applied",
+    effectiveDate: "2026-03-19",
+    billingPlanFrequencyCode: "one_off",
+    billingPlanTriggerCode: "change_order_approval",
+    actorId: "unit-test"
+  });
+  assert.equal(applied.status, "applied");
+  assert.ok(applied.appliedRevenuePlanId);
+  assert.ok(applied.appliedBillingPlanId);
 
   const vatAssessment = projectsPlatform.createProjectBuildVatAssessment({
     companyId: COMPANY_ID,

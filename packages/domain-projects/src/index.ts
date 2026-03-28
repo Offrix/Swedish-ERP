@@ -1,5 +1,12 @@
 export type ProjectStatus = "draft" | "active" | "on_hold" | "closed" | "archived";
-export type ProjectBillingModelCode = "time_and_material" | "fixed_price" | "milestone";
+export type ProjectBillingModelCode =
+  | "time_and_material"
+  | "fixed_price"
+  | "milestone"
+  | "retainer_capacity"
+  | "subscription_service"
+  | "advance_invoice"
+  | "hybrid_change_order";
 export type ProjectRevenueRecognitionModelCode = "billing_equals_revenue" | "over_time" | "deferred_until_milestone";
 export type ProjectEngagementStatus = "draft" | "active" | "paused" | "closed" | "cancelled";
 export type ProjectWorkModelCode =
@@ -19,6 +26,9 @@ export type ProjectWorkLogStatus = "recorded" | "approved" | "rejected";
 export type ProjectRevenuePlanStatus = "draft" | "approved" | "superseded";
 export type ProjectBillingPlanStatus = "draft" | "active" | "superseded" | "cancelled";
 export type ProjectStatusUpdateHealthCode = "green" | "amber" | "red";
+export type ProjectProfitabilityAdjustmentStatus = "pending_review" | "approved" | "rejected";
+export type ProjectProfitabilityAdjustmentImpactCode = "revenue" | "cost" | "margin";
+export type ProjectInvoiceReadinessStatus = "ready" | "review_required" | "blocked";
 export type ProjectBudgetLineKind = "cost" | "revenue";
 export type ProjectBudgetCategoryCode =
   | "labor"
@@ -253,6 +263,50 @@ export interface ProjectCustomerContextRef {
   readonly activeQuoteRef: string | null;
 }
 
+export interface ProjectProfitabilityAdjustmentRef {
+  readonly projectProfitabilityAdjustmentId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly impactCode: ProjectProfitabilityAdjustmentImpactCode;
+  readonly amount: number;
+  readonly effectiveDate: string;
+  readonly reasonCode: string;
+  readonly note: string | null;
+  readonly status: ProjectProfitabilityAdjustmentStatus;
+  readonly approvedAt: string | null;
+  readonly approvedByActorId: string | null;
+  readonly rejectedAt: string | null;
+  readonly rejectedByActorId: string | null;
+  readonly rejectionReason: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ProjectInvoiceReadinessAssessmentRef {
+  readonly projectInvoiceReadinessAssessmentId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly cutoffDate: string;
+  readonly status: ProjectInvoiceReadinessStatus;
+  readonly blockerCodes: readonly string[];
+  readonly reviewCodes: readonly string[];
+  readonly approvedRevenuePlanId: string | null;
+  readonly activeBillingPlanId: string | null;
+  readonly invoiceReadyAmount: number;
+  readonly eligibleBillingPlanAmount: number;
+  readonly unbilledApprovedValueAmount: number;
+  readonly approvedValueAmount: number;
+  readonly billedRevenueAmount: number;
+  readonly actualCostAmount: number;
+  readonly currentMarginAmount: number;
+  readonly pendingManualAdjustmentCount: number;
+  readonly unresolvedChangeOrderCount: number;
+  readonly snapshotHash: string;
+  readonly assessedByActorId: string;
+  readonly assessedAt: string;
+}
+
 export interface ProjectProfitabilitySnapshotRef {
   readonly projectProfitabilitySnapshotId: string;
   readonly companyId: string;
@@ -339,6 +393,10 @@ export interface ProjectCostSnapshotRef {
     readonly pensionAmount: number;
     readonly travelAmount: number;
     readonly employerContributionAmount: number;
+    readonly materialAmount: number;
+    readonly subcontractorAmount: number;
+    readonly equipmentAmount: number;
+    readonly overheadAmount: number;
     readonly otherAmount: number;
   };
   readonly sourceCounts: {
@@ -347,6 +405,10 @@ export interface ProjectCostSnapshotRef {
     readonly payrollAllocations: number;
     readonly timeEntries: number;
     readonly invoices: number;
+    readonly supplierInvoices: number;
+    readonly supplierInvoiceLines: number;
+    readonly profitabilityAdjustments: number;
+    readonly husCases: number;
   };
   readonly snapshotHash: string;
   readonly createdByActorId: string;
