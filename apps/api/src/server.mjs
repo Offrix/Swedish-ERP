@@ -722,8 +722,11 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/kalkyl/estimates/:estimateVersionId/approve",
               "/v1/kalkyl/estimates/:estimateVersionId/convert-to-quote",
               "/v1/kalkyl/estimates/:estimateVersionId/convert-to-project-budget",
+              "/v1/projects/quote-handoffs",
               "/v1/projects",
               "/v1/projects/:projectId",
+              "/v1/projects/:projectId/opportunity-links",
+              "/v1/projects/:projectId/quote-links",
               "/v1/projects/:projectId/engagements",
               "/v1/projects/:projectId/work-models",
               "/v1/projects/:projectId/work-packages",
@@ -731,6 +734,8 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/projects/:projectId/work-logs",
               "/v1/projects/:projectId/revenue-plans",
               "/v1/projects/:projectId/revenue-plans/:projectRevenuePlanId/approve",
+              "/v1/projects/:projectId/billing-plans",
+              "/v1/projects/:projectId/status-updates",
               "/v1/projects/:projectId/profitability-snapshots",
               "/v1/projects/:projectId/workspace",
               "/v1/projects/:projectId/deviations",
@@ -10725,6 +10730,45 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "POST" && path === "/v1/projects/quote-handoffs") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.convertQuoteToProject({
+        companyId,
+        sourceQuoteId: body.sourceQuoteId,
+        sourceQuoteVersionId: body.sourceQuoteVersionId ?? null,
+        projectId: body.projectId ?? null,
+        projectCode: body.projectCode ?? null,
+        projectReferenceCode: body.projectReferenceCode ?? null,
+        displayName: body.displayName ?? null,
+        startsOn: body.startsOn ?? null,
+        endsOn: body.endsOn ?? null,
+        billingModelCode: body.billingModelCode ?? "fixed_price",
+        revenueRecognitionModelCode: body.revenueRecognitionModelCode ?? "over_time",
+        workModelCode: body.workModelCode ?? "milestone_only",
+        billingPlanFrequencyCode: body.billingPlanFrequencyCode ?? "one_off",
+        billingPlanTriggerCode: body.billingPlanTriggerCode ?? "quote_acceptance",
+        externalSystemCode: body.externalSystemCode ?? "internal_ar",
+        externalOpportunityId: body.externalOpportunityId ?? null,
+        externalOpportunityRef: body.externalOpportunityRef ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   const projectMatch = matchPath(path, "/v1/projects/:projectId");
   if (projectMatch && req.method === "GET") {
     const companyId = requireText(
@@ -10775,6 +10819,117 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         projectId: projectWorkspaceMatch.projectId,
         cutoffDate: url.searchParams.get("cutoffDate") || null
+      })
+    );
+    return;
+  }
+
+  const projectOpportunityLinksMatch = matchPath(path, "/v1/projects/:projectId/opportunity-links");
+  if (projectOpportunityLinksMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_opportunity_link",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectOpportunityLinks({
+        companyId,
+        projectId: projectOpportunityLinksMatch.projectId
+      })
+    });
+    return;
+  }
+
+  if (projectOpportunityLinksMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_opportunity_link",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectOpportunityLink({
+        companyId,
+        projectId: projectOpportunityLinksMatch.projectId,
+        projectOpportunityLinkId: body.projectOpportunityLinkId ?? null,
+        externalSystemCode: body.externalSystemCode,
+        externalOpportunityId: body.externalOpportunityId,
+        externalOpportunityRef: body.externalOpportunityRef ?? null,
+        stageCode: body.stageCode ?? "accepted",
+        customerId: body.customerId ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectQuoteLinksMatch = matchPath(path, "/v1/projects/:projectId/quote-links");
+  if (projectQuoteLinksMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_quote_link",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectQuoteLinks({
+        companyId,
+        projectId: projectQuoteLinksMatch.projectId
+      })
+    });
+    return;
+  }
+
+  if (projectQuoteLinksMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_quote_link",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectQuoteLink({
+        companyId,
+        projectId: projectQuoteLinksMatch.projectId,
+        projectQuoteLinkId: body.projectQuoteLinkId ?? null,
+        sourceQuoteId: body.sourceQuoteId ?? null,
+        sourceQuoteVersionId: body.sourceQuoteVersionId ?? null,
+        externalSystemCode: body.externalSystemCode ?? "internal_ar",
+        externalQuoteRef: body.externalQuoteRef ?? null,
+        acceptedOn: body.acceptedOn ?? null,
+        customerId: body.customerId ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
       })
     );
     return;
@@ -11144,6 +11299,122 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         projectId: projectRevenuePlanApproveMatch.projectId,
         projectRevenuePlanId: projectRevenuePlanApproveMatch.projectRevenuePlanId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectBillingPlansMatch = matchPath(path, "/v1/projects/:projectId/billing-plans");
+  if (projectBillingPlansMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_billing_plan",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectBillingPlans({
+        companyId,
+        projectId: projectBillingPlansMatch.projectId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (projectBillingPlansMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_billing_plan",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectBillingPlan({
+        companyId,
+        projectId: projectBillingPlansMatch.projectId,
+        projectBillingPlanId: body.projectBillingPlanId ?? null,
+        projectQuoteLinkId: body.projectQuoteLinkId ?? null,
+        frequencyCode: body.frequencyCode ?? "one_off",
+        triggerCode: body.triggerCode ?? "manual",
+        startsOn: body.startsOn ?? null,
+        endsOn: body.endsOn ?? null,
+        status: body.status ?? "draft",
+        lines: body.lines || [],
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectStatusUpdatesMatch = matchPath(path, "/v1/projects/:projectId/status-updates");
+  if (projectStatusUpdatesMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_status_update",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectStatusUpdates({
+        companyId,
+        projectId: projectStatusUpdatesMatch.projectId
+      })
+    });
+    return;
+  }
+
+  if (projectStatusUpdatesMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_status_update",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectStatusUpdate({
+        companyId,
+        projectId: projectStatusUpdatesMatch.projectId,
+        projectStatusUpdateId: body.projectStatusUpdateId ?? null,
+        statusDate: body.statusDate ?? null,
+        healthCode: body.healthCode,
+        progressPercent: body.progressPercent ?? 0,
+        blockerCodes: Array.isArray(body.blockerCodes) ? body.blockerCodes : [],
+        atRiskReason: body.atRiskReason ?? null,
+        note: body.note ?? null,
+        sourceSystemCode: body.sourceSystemCode ?? "project_core",
+        externalStatusRef: body.externalStatusRef ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })

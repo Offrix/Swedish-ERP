@@ -31,6 +31,8 @@ export const PROJECT_WORK_PACKAGE_STATUSES = Object.freeze(["draft", "active", "
 export const PROJECT_DELIVERY_MILESTONE_STATUSES = Object.freeze(["planned", "ready", "achieved", "accepted", "cancelled"]);
 export const PROJECT_WORK_LOG_STATUSES = Object.freeze(["recorded", "approved", "rejected"]);
 export const PROJECT_REVENUE_PLAN_STATUSES = Object.freeze(["draft", "approved", "superseded"]);
+export const PROJECT_BILLING_PLAN_STATUSES = Object.freeze(["draft", "active", "superseded", "cancelled"]);
+export const PROJECT_STATUS_UPDATE_HEALTH_CODES = Object.freeze(["green", "amber", "red"]);
 export const PROJECT_BUDGET_LINE_KINDS = Object.freeze(["cost", "revenue"]);
 export const PROJECT_BUDGET_CATEGORY_CODES = Object.freeze([
   "labor",
@@ -126,6 +128,8 @@ export function createProjectEngine({
     projectDeliveryMilestoneStatuses: PROJECT_DELIVERY_MILESTONE_STATUSES,
     projectWorkLogStatuses: PROJECT_WORK_LOG_STATUSES,
     projectRevenuePlanStatuses: PROJECT_REVENUE_PLAN_STATUSES,
+    projectBillingPlanStatuses: PROJECT_BILLING_PLAN_STATUSES,
+    projectStatusUpdateHealthCodes: PROJECT_STATUS_UPDATE_HEALTH_CODES,
     projectBudgetLineKinds: PROJECT_BUDGET_LINE_KINDS,
     projectBudgetCategoryCodes: PROJECT_BUDGET_CATEGORY_CODES,
     projectResourceAllocationStatuses: PROJECT_RESOURCE_ALLOCATION_STATUSES,
@@ -138,6 +142,10 @@ export function createProjectEngine({
     getProject,
     getProjectWorkspace,
     createProject,
+    listProjectOpportunityLinks,
+    createProjectOpportunityLink,
+    listProjectQuoteLinks,
+    createProjectQuoteLink,
     listProjectEngagements,
     createProjectEngagement,
     listProjectWorkModels,
@@ -151,6 +159,11 @@ export function createProjectEngine({
     listProjectRevenuePlans,
     createProjectRevenuePlan,
     approveProjectRevenuePlan,
+    listProjectBillingPlans,
+    createProjectBillingPlan,
+    listProjectStatusUpdates,
+    createProjectStatusUpdate,
+    convertQuoteToProject,
     listProjectProfitabilitySnapshots,
     materializeProjectProfitabilitySnapshot,
     listProjectBudgetVersions,
@@ -212,6 +225,18 @@ export function createProjectEngine({
     const workPackages = listProjectWorkPackages({ companyId: project.companyId, projectId: project.projectId });
     const deliveryMilestones = listProjectDeliveryMilestones({ companyId: project.companyId, projectId: project.projectId });
     const revenuePlans = listProjectRevenuePlans({ companyId: project.companyId, projectId: project.projectId });
+    const opportunityLinks = listProjectOpportunityLinks({ companyId: project.companyId, projectId: project.projectId });
+    const quoteLinks = listProjectQuoteLinks({ companyId: project.companyId, projectId: project.projectId });
+    const billingPlans = listProjectBillingPlans({ companyId: project.companyId, projectId: project.projectId });
+    const statusUpdates = listProjectStatusUpdates({ companyId: project.companyId, projectId: project.projectId });
+    const currentBillingPlan = billingPlans.filter((record) => record.status === "active").pop() || billingPlans.at(-1) || null;
+    const latestStatusUpdate = statusUpdates.at(-1) || null;
+    const customerContext = summarizeProjectCustomerContext({
+      project,
+      opportunityLinks,
+      quoteLinks,
+      arPlatform
+    });
     const payrollAllocations = currentCostSnapshot
       ? listProjectPayrollCostAllocations({
           companyId: project.companyId,
@@ -297,8 +322,12 @@ export function createProjectEngine({
       currentWipSnapshotId: currentWipSnapshot?.projectWipSnapshotId || null,
       currentForecastSnapshotId: currentForecastSnapshot?.projectForecastSnapshotId || null,
       currentProfitabilitySnapshotId: currentProfitabilitySnapshot?.projectProfitabilitySnapshotId || null,
+      currentBillingPlanId: currentBillingPlan?.projectBillingPlanId || null,
       latestEstimateVersionId: kalkylSummary.latestEstimateVersionId,
       latestEstimateStatus: kalkylSummary.latestEstimateStatus,
+      opportunityLinkCount: opportunityLinks.length,
+      quoteLinkCount: quoteLinks.length,
+      billingPlanCount: billingPlans.length,
       engagementCount: engagements.length,
       workModelCount: workModels.length,
       workPackageCount: workPackages.length,
@@ -319,16 +348,23 @@ export function createProjectEngine({
       personalliggareSummary,
       egenkontrollSummary,
       kalkylSummary,
+      customerContext,
+      latestStatusUpdate: latestStatusUpdate ? copy(latestStatusUpdate) : null,
       currentBudgetVersion: currentBudgetVersion ? copy(currentBudgetVersion) : null,
       currentCostSnapshot: currentCostSnapshot ? copy(currentCostSnapshot) : null,
       currentWipSnapshot: currentWipSnapshot ? copy(currentWipSnapshot) : null,
       currentForecastSnapshot: currentForecastSnapshot ? copy(currentForecastSnapshot) : null,
       currentProfitabilitySnapshot: currentProfitabilitySnapshot ? copy(currentProfitabilitySnapshot) : null,
+      currentBillingPlan: currentBillingPlan ? copy(currentBillingPlan) : null,
+      projectOpportunityLinks: opportunityLinks.map(copy),
+      projectQuoteLinks: quoteLinks.map(copy),
       projectEngagements: engagements.map(copy),
       projectWorkModels: workModels.map(copy),
       projectWorkPackages: workPackages.map(copy),
       projectDeliveryMilestones: deliveryMilestones.map(copy),
       projectRevenuePlans: revenuePlans.map(copy),
+      projectBillingPlans: billingPlans.map(copy),
+      projectStatusUpdates: statusUpdates.map(copy),
       complianceIndicatorStrip: buildWorkspaceIndicatorStrip({
         currentBudgetVersion,
         currentCostSnapshot,
@@ -430,6 +466,10 @@ export function createProjectEngine({
       revenueRecognitionModelCode: resolvedRevenueRecognitionModelCode,
       contractValueAmount: normalizeMoney(contractValueAmount, "project_contract_value_invalid"),
       dimensionJson: normalizeDimensions(dimensionJson),
+      opportunityLinks: [],
+      quoteLinks: [],
+      billingPlans: [],
+      statusUpdates: [],
       changeOrders: [],
       buildVatAssessments: [],
       createdByActorId: requireText(actorId, "actor_id_required"),
@@ -450,6 +490,138 @@ export function createProjectEngine({
       entityId: record.projectId,
       projectId: record.projectId,
       explanation: `Created project ${record.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectOpportunityLinks({ companyId, projectId } = {}) {
+    return copy(requireProject(state, companyId, projectId).opportunityLinks || []).sort((left, right) =>
+      left.createdAt.localeCompare(right.createdAt) || left.projectOpportunityLinkId.localeCompare(right.projectOpportunityLinkId)
+    );
+  }
+
+  function createProjectOpportunityLink({
+    companyId,
+    projectId,
+    projectOpportunityLinkId = null,
+    externalSystemCode,
+    externalOpportunityId,
+    externalOpportunityRef = null,
+    stageCode = "accepted",
+    customerId = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedCustomerId = normalizeOptionalText(customerId) || project.customerId || null;
+    if (resolvedCustomerId && arPlatform?.getCustomer) {
+      arPlatform.getCustomer({
+        companyId: project.companyId,
+        customerId: resolvedCustomerId
+      });
+    }
+    const duplicate = (project.opportunityLinks || []).find(
+      (record) =>
+        record.externalSystemCode === normalizeCode(externalSystemCode, "project_opportunity_external_system_required")
+        && record.externalOpportunityId === requireText(externalOpportunityId, "project_opportunity_external_id_required")
+    );
+    if (duplicate) {
+      return copy(duplicate);
+    }
+    const record = {
+      projectOpportunityLinkId: normalizeOptionalText(projectOpportunityLinkId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      customerId: resolvedCustomerId,
+      externalSystemCode: normalizeCode(externalSystemCode, "project_opportunity_external_system_required"),
+      externalOpportunityId: requireText(externalOpportunityId, "project_opportunity_external_id_required"),
+      externalOpportunityRef: normalizeOptionalText(externalOpportunityRef),
+      stageCode: normalizeCode(stageCode, "project_opportunity_stage_required"),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    project.opportunityLinks.push(record);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.opportunity_link.created",
+      entityType: "project_opportunity_link",
+      entityId: record.projectOpportunityLinkId,
+      projectId: record.projectId,
+      explanation: `Linked opportunity ${record.externalOpportunityId} to ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectQuoteLinks({ companyId, projectId } = {}) {
+    return copy(requireProject(state, companyId, projectId).quoteLinks || []).sort((left, right) =>
+      left.createdAt.localeCompare(right.createdAt) || left.projectQuoteLinkId.localeCompare(right.projectQuoteLinkId)
+    );
+  }
+
+  function createProjectQuoteLink({
+    companyId,
+    projectId,
+    projectQuoteLinkId = null,
+    sourceQuoteId = null,
+    sourceQuoteVersionId = null,
+    externalSystemCode = "internal_ar",
+    externalQuoteRef = null,
+    acceptedOn = null,
+    customerId = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const quote = normalizeOptionalText(sourceQuoteId)
+      ? requireProjectSourceQuote({ arPlatform, companyId: project.companyId, sourceQuoteId })
+      : null;
+    const quoteVersion = quote
+      ? selectProjectSourceQuoteVersion({ quote, sourceQuoteVersionId })
+      : null;
+    const resolvedCustomerId = normalizeOptionalText(customerId) || quote?.customerId || project.customerId || null;
+    const duplicate = (project.quoteLinks || []).find(
+      (record) =>
+        (quote && record.sourceQuoteId === quote.quoteId && record.sourceQuoteVersionId === quoteVersion.quoteVersionId)
+        || (!quote && record.externalSystemCode === normalizeCode(externalSystemCode, "project_quote_external_system_required")
+          && record.externalQuoteRef === requireText(externalQuoteRef, "project_quote_external_ref_required"))
+    );
+    if (duplicate) {
+      return copy(duplicate);
+    }
+    const record = {
+      projectQuoteLinkId: normalizeOptionalText(projectQuoteLinkId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      customerId: resolvedCustomerId,
+      sourceQuoteId: quote?.quoteId || null,
+      sourceQuoteVersionId: quoteVersion?.quoteVersionId || null,
+      quoteNo: quote?.quoteNo || null,
+      quoteTitle: quoteVersion?.title || null,
+      quoteStatus: quoteVersion?.status || null,
+      acceptedOn: normalizeOptionalDate(acceptedOn, "project_quote_link_accepted_on_invalid") || quoteVersion?.acceptedAt?.slice(0, 10) || null,
+      externalSystemCode: normalizeCode(externalSystemCode, "project_quote_external_system_required"),
+      externalQuoteRef: normalizeOptionalText(externalQuoteRef) || quote?.quoteNo || null,
+      totalAmount: quoteVersion ? normalizeMoney(quoteVersion.totalAmount, "project_quote_total_invalid") : null,
+      currencyCode: quoteVersion?.currencyCode || project.currencyCode,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    project.quoteLinks.push(record);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.quote_link.created",
+      entityType: "project_quote_link",
+      entityId: record.projectQuoteLinkId,
+      projectId: record.projectId,
+      explanation: `Linked quote ${record.externalQuoteRef || record.sourceQuoteId} to ${project.projectCode}.`
     });
     return copy(record);
   }
@@ -864,6 +1036,325 @@ export function createProjectEngine({
       explanation: `Approved revenue plan version ${record.versionNo} for ${project.projectCode}.`
     });
     return copy(record);
+  }
+
+  function listProjectBillingPlans({ companyId, projectId, status = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    return (project.billingPlans || [])
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .slice()
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.projectBillingPlanId.localeCompare(right.projectBillingPlanId))
+      .map(copy);
+  }
+
+  function createProjectBillingPlan({
+    companyId,
+    projectId,
+    projectBillingPlanId = null,
+    projectQuoteLinkId = null,
+    frequencyCode = "one_off",
+    triggerCode = "manual",
+    startsOn = null,
+    endsOn = null,
+    status = "draft",
+    lines = [],
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const quoteLink = normalizeOptionalText(projectQuoteLinkId)
+      ? requireProjectQuoteLink(project, projectQuoteLinkId)
+      : null;
+    const resolvedStartsOn = normalizeRequiredDate(startsOn || project.startsOn, "project_billing_plan_start_required");
+    const resolvedEndsOn = normalizeOptionalDate(endsOn || project.endsOn, "project_billing_plan_end_invalid");
+    if (resolvedEndsOn && resolvedEndsOn < resolvedStartsOn) {
+      throw createError(400, "project_billing_plan_date_range_invalid", "Billing plan end date cannot be earlier than start date.");
+    }
+    const normalizedLines = normalizeBillingPlanLines({
+      lines,
+      defaultPlannedInvoiceDate: quoteLink?.acceptedOn || resolvedStartsOn,
+      defaultAmount: quoteLink?.totalAmount || project.contractValueAmount,
+      project
+    });
+    const resolvedStatus = assertAllowed(status, PROJECT_BILLING_PLAN_STATUSES, "project_billing_plan_status_invalid");
+    if (resolvedStatus === "active") {
+      for (const candidate of project.billingPlans || []) {
+        if (candidate.status === "active") {
+          candidate.status = "superseded";
+          candidate.updatedAt = nowIso(clock);
+        }
+      }
+    }
+    const record = {
+      projectBillingPlanId: normalizeOptionalText(projectBillingPlanId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      projectQuoteLinkId: quoteLink?.projectQuoteLinkId || null,
+      frequencyCode: normalizeCode(frequencyCode, "project_billing_plan_frequency_required"),
+      triggerCode: normalizeCode(triggerCode, "project_billing_plan_trigger_required"),
+      startsOn: resolvedStartsOn,
+      endsOn: resolvedEndsOn,
+      status: resolvedStatus,
+      currencyCode: project.currencyCode,
+      lines: normalizedLines,
+      totalPlannedAmount: roundMoney(normalizedLines.reduce((sum, line) => sum + Number(line.amount || 0), 0)),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    project.billingPlans.push(record);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.billing_plan.created",
+      entityType: "project_billing_plan",
+      entityId: record.projectBillingPlanId,
+      projectId: record.projectId,
+      explanation: `Created ${record.status} billing plan for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectStatusUpdates({ companyId, projectId } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    return (project.statusUpdates || [])
+      .slice()
+      .sort((left, right) => left.statusDate.localeCompare(right.statusDate) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function createProjectStatusUpdate({
+    companyId,
+    projectId,
+    projectStatusUpdateId = null,
+    statusDate = null,
+    healthCode,
+    progressPercent = 0,
+    blockerCodes = [],
+    atRiskReason = null,
+    note = null,
+    sourceSystemCode = "project_core",
+    externalStatusRef = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedHealthCode = assertAllowed(healthCode, PROJECT_STATUS_UPDATE_HEALTH_CODES, "project_status_update_health_invalid");
+    const resolvedProgressPercent = normalizePercentage(progressPercent, "project_status_update_progress_invalid");
+    const resolvedBlockerCodes = uniqueTexts(blockerCodes).map((code) => normalizeCode(code, "project_status_update_blocker_code_invalid"));
+    const record = {
+      projectStatusUpdateId: normalizeOptionalText(projectStatusUpdateId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      statusDate: normalizeRequiredDate(statusDate || new Date(clock()).toISOString().slice(0, 10), "project_status_update_date_required"),
+      healthCode: resolvedHealthCode,
+      progressPercent: resolvedProgressPercent,
+      blockerCodes: resolvedBlockerCodes,
+      atRiskReason: normalizeOptionalText(atRiskReason),
+      note: normalizeOptionalText(note),
+      sourceSystemCode: normalizeCode(sourceSystemCode, "project_status_update_source_system_required"),
+      externalStatusRef: normalizeOptionalText(externalStatusRef),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    project.statusUpdates.push(record);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.status_update.created",
+      entityType: "project_status_update",
+      entityId: record.projectStatusUpdateId,
+      projectId: record.projectId,
+      explanation: `Recorded ${record.healthCode} status update for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function convertQuoteToProject({
+    companyId,
+    sourceQuoteId,
+    sourceQuoteVersionId = null,
+    projectId = null,
+    projectCode = null,
+    projectReferenceCode = null,
+    displayName = null,
+    startsOn = null,
+    endsOn = null,
+    billingModelCode = "fixed_price",
+    revenueRecognitionModelCode = "over_time",
+    workModelCode = "milestone_only",
+    billingPlanFrequencyCode = "one_off",
+    billingPlanTriggerCode = "quote_acceptance",
+    externalSystemCode = "internal_ar",
+    externalOpportunityId = null,
+    externalOpportunityRef = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const quote = requireProjectSourceQuote({
+      arPlatform,
+      companyId,
+      sourceQuoteId
+    });
+    const quoteVersion = selectProjectSourceQuoteVersion({
+      quote,
+      sourceQuoteVersionId
+    });
+    const existingProject = findProjectByQuoteLink({
+      state,
+      companyId,
+      sourceQuoteId: quote.quoteId,
+      sourceQuoteVersionId: quoteVersion.quoteVersionId
+    });
+    if (existingProject) {
+      return {
+        project: copy(existingProject),
+        quoteLink: listProjectQuoteLinks({ companyId, projectId: existingProject.projectId }).find(
+          (record) => record.sourceQuoteId === quote.quoteId && record.sourceQuoteVersionId === quoteVersion.quoteVersionId
+        ) || null
+      };
+    }
+    const project = createProject({
+      companyId,
+      projectId,
+      projectCode,
+      projectReferenceCode,
+      displayName: displayName || quoteVersion.title,
+      customerId: quote.customerId,
+      startsOn: startsOn || quoteVersion.acceptedAt?.slice(0, 10) || quoteVersion.validUntil,
+      endsOn,
+      currencyCode: quoteVersion.currencyCode,
+      status: "active",
+      billingModelCode,
+      revenueRecognitionModelCode,
+      contractValueAmount: quoteVersion.totalAmount,
+      actorId,
+      correlationId
+    });
+    const opportunityLink =
+      normalizeOptionalText(externalOpportunityId)
+        ? createProjectOpportunityLink({
+            companyId: project.companyId,
+            projectId: project.projectId,
+            externalSystemCode,
+            externalOpportunityId,
+            externalOpportunityRef,
+            customerId: quote.customerId,
+            stageCode: "accepted",
+            actorId,
+            correlationId
+          })
+        : null;
+    const quoteLink = createProjectQuoteLink({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      sourceQuoteId: quote.quoteId,
+      sourceQuoteVersionId: quoteVersion.quoteVersionId,
+      externalSystemCode,
+      externalQuoteRef: quote.quoteNo,
+      acceptedOn: quoteVersion.acceptedAt?.slice(0, 10) || startsOn || project.startsOn,
+      customerId: quote.customerId,
+      actorId,
+      correlationId
+    });
+    const engagement = createProjectEngagement({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      displayName: quoteVersion.title,
+      customerId: quote.customerId,
+      workModelCode,
+      startsOn: project.startsOn,
+      endsOn: project.endsOn,
+      status: "active",
+      externalOpportunityRef: externalOpportunityRef || externalOpportunityId,
+      externalQuoteRef: quote.quoteNo,
+      actorId,
+      correlationId
+    });
+    const workModel = createProjectWorkModel({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      projectEngagementId: engagement.projectEngagementId,
+      modelCode: workModelCode,
+      title: `${quoteVersion.title} work model`,
+      operationalPackCode: ["work_order", "service_order", "construction_stage"].includes(workModelCode) ? "field_optional" : "general_core",
+      requiresWorkOrders: ["work_order", "service_order", "construction_stage"].includes(workModelCode),
+      requiresMilestones: ["milestone_only", "construction_stage", "fixed_scope"].includes(workModelCode),
+      actorId,
+      correlationId
+    });
+    const revenuePlan = createProjectRevenuePlan({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      versionLabel: `Quote ${quote.quoteNo} handoff`,
+      lines: [
+        {
+          recognitionDate: project.startsOn,
+          triggerTypeCode: "quote_acceptance",
+          amount: quoteVersion.totalAmount,
+          note: `Generated from accepted quote ${quote.quoteNo}.`
+        }
+      ],
+      actorId,
+      correlationId
+    });
+    const approvedRevenuePlan = approveProjectRevenuePlan({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      projectRevenuePlanId: revenuePlan.projectRevenuePlanId,
+      actorId,
+      correlationId
+    });
+    const billingPlan = createProjectBillingPlan({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      projectQuoteLinkId: quoteLink.projectQuoteLinkId,
+      frequencyCode: billingPlanFrequencyCode,
+      triggerCode: billingPlanTriggerCode,
+      startsOn: project.startsOn,
+      endsOn: project.endsOn,
+      status: "active",
+      actorId,
+      correlationId
+    });
+    const statusUpdate = createProjectStatusUpdate({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      statusDate: project.startsOn,
+      healthCode: "green",
+      progressPercent: 0,
+      note: `Created from accepted quote ${quote.quoteNo}.`,
+      sourceSystemCode: externalSystemCode,
+      externalStatusRef: quote.quoteId,
+      actorId,
+      correlationId
+    });
+    pushAudit(state, clock, {
+      companyId: project.companyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "project.quote_handoff.completed",
+      entityType: "project",
+      entityId: project.projectId,
+      projectId: project.projectId,
+      explanation: `Converted accepted quote ${quote.quoteNo} into project ${project.projectCode}.`
+    });
+    return {
+      project,
+      opportunityLink,
+      quoteLink,
+      engagement,
+      workModel,
+      revenuePlan: approvedRevenuePlan,
+      billingPlan,
+      statusUpdate
+    };
   }
 
   function listProjectProfitabilitySnapshots({ companyId, projectId } = {}) {
@@ -1703,12 +2194,18 @@ export function createProjectEngine({
       revenueRecognitionModelCode: project.revenueRecognitionModelCode,
       cutoffDate: normalizeOptionalText(cutoffDate),
       warningCodes: [...workspace.warningCodes],
+      customerContext: copy(workspace.customerContext),
+      projectOpportunityLinks: copy(workspace.projectOpportunityLinks || []),
+      projectQuoteLinks: copy(workspace.projectQuoteLinks || []),
       projectEngagements: copy(workspace.projectEngagements || []),
       projectWorkModels: copy(workspace.projectWorkModels || []),
       projectWorkPackages: copy(workspace.projectWorkPackages || []),
       projectDeliveryMilestones: copy(workspace.projectDeliveryMilestones || []),
       projectRevenuePlans: copy(workspace.projectRevenuePlans || []),
+      projectBillingPlans: copy(workspace.projectBillingPlans || []),
+      projectStatusUpdates: copy(workspace.projectStatusUpdates || []),
       currentProfitabilitySnapshot: copy(workspace.currentProfitabilitySnapshot),
+      currentBillingPlan: copy(workspace.currentBillingPlan),
       complianceIndicatorStrip: copy(workspace.complianceIndicatorStrip),
       projectDeviations: copy(workspace.projectDeviations),
       fieldSummary: copy(workspace.fieldSummary),
@@ -1742,7 +2239,8 @@ export function createProjectEngine({
           ["project_cost_snapshot", workspace.currentCostSnapshotId],
           ["project_wip_snapshot", workspace.currentWipSnapshotId],
           ["project_forecast_snapshot", workspace.currentForecastSnapshotId],
-          ["project_profitability_snapshot", workspace.currentProfitabilitySnapshotId]
+          ["project_profitability_snapshot", workspace.currentProfitabilitySnapshotId],
+          ["project_billing_plan", workspace.currentBillingPlanId]
         ]
           .filter(([, artifactRef]) => artifactRef)
           .map(([artifactType, artifactRef]) => ({
@@ -2967,6 +3465,97 @@ function assertProjectChangeOrderTransition(currentStatus, nextStatus) {
   }
 }
 
+function requireProjectQuoteLink(project, projectQuoteLinkId) {
+  const record = (project.quoteLinks || []).find(
+    (candidate) => candidate.projectQuoteLinkId === requireText(projectQuoteLinkId, "project_quote_link_id_required")
+  );
+  if (!record) {
+    throw createError(404, "project_quote_link_not_found", "Project quote link was not found.");
+  }
+  return record;
+}
+
+function requireProjectSourceQuote({ arPlatform, companyId, sourceQuoteId }) {
+  if (!arPlatform?.getQuote) {
+    throw createError(503, "ar_quote_runtime_unavailable", "AR quote runtime is required for project quote handoff.");
+  }
+  return arPlatform.getQuote({
+    companyId: requireText(companyId, "company_id_required"),
+    quoteId: requireText(sourceQuoteId, "project_source_quote_id_required")
+  });
+}
+
+function selectProjectSourceQuoteVersion({ quote, sourceQuoteVersionId = null }) {
+  const targetVersionId = normalizeOptionalText(sourceQuoteVersionId) || quote.currentVersionId;
+  const version = (quote.versions || []).find((candidate) => candidate.quoteVersionId === targetVersionId);
+  if (!version) {
+    throw createError(404, "project_source_quote_version_not_found", "Quote version was not found for project handoff.");
+  }
+  if (!["accepted", "converted"].includes(version.status)) {
+    throw createError(409, "project_source_quote_not_accepted", "Only accepted or converted quote versions may create a project handoff.");
+  }
+  return version;
+}
+
+function findProjectByQuoteLink({ state, companyId, sourceQuoteId, sourceQuoteVersionId }) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  for (const projectId of state.projectIdsByCompany.get(resolvedCompanyId) || []) {
+    const project = state.projects.get(projectId);
+    if (!project) {
+      continue;
+    }
+    const linked = (project.quoteLinks || []).some(
+      (record) => record.sourceQuoteId === sourceQuoteId && record.sourceQuoteVersionId === sourceQuoteVersionId
+    );
+    if (linked) {
+      return copy(project);
+    }
+  }
+  return null;
+}
+
+function normalizeBillingPlanLines({ lines, defaultPlannedInvoiceDate, defaultAmount, project }) {
+  const sourceLines = Array.isArray(lines) && lines.length > 0
+    ? lines
+    : [
+        {
+          plannedInvoiceDate: defaultPlannedInvoiceDate || project.startsOn,
+          amount: defaultAmount || 0
+        }
+      ];
+  return sourceLines.map((line) => {
+    if (!line || typeof line !== "object") {
+      throw createError(400, "project_billing_plan_line_invalid", "Billing plan lines must be objects.");
+    }
+    return {
+      projectBillingPlanLineId: crypto.randomUUID(),
+      plannedInvoiceDate: normalizeRequiredDate(line.plannedInvoiceDate, "project_billing_plan_date_required"),
+      amount: normalizeMoney(line.amount, "project_billing_plan_amount_invalid"),
+      triggerCode: normalizeCode(line.triggerCode || "manual", "project_billing_plan_line_trigger_required"),
+      note: normalizeOptionalText(line.note),
+      projectWorkPackageId: normalizeOptionalText(line.projectWorkPackageId),
+      projectDeliveryMilestoneId: normalizeOptionalText(line.projectDeliveryMilestoneId),
+      sourceQuoteVersionId: normalizeOptionalText(line.sourceQuoteVersionId)
+    };
+  });
+}
+
+function summarizeProjectCustomerContext({ project, opportunityLinks, quoteLinks, arPlatform }) {
+  const customer = project.customerId && arPlatform?.getCustomer
+    ? arPlatform.getCustomer({
+        companyId: project.companyId,
+        customerId: project.customerId
+      })
+    : null;
+  return {
+    customerId: project.customerId,
+    customerNo: customer?.customerNo || null,
+    customerName: customer?.legalName || null,
+    activeOpportunityRef: opportunityLinks.at(-1)?.externalOpportunityRef || opportunityLinks.at(-1)?.externalOpportunityId || null,
+    activeQuoteRef: quoteLinks.at(-1)?.externalQuoteRef || quoteLinks.at(-1)?.quoteNo || null
+  };
+}
+
 function normalizeRevenuePlanLines(lines) {
   if (!Array.isArray(lines) || lines.length === 0) {
     throw createError(400, "project_revenue_plan_lines_required", "Revenue plans require at least one line.");
@@ -3011,6 +3600,18 @@ function calculateRevenuePlanAmountAtCutoff(revenuePlan, cutoffDate) {
       .filter((line) => line.recognitionDate <= cutoffDate)
       .reduce((sum, line) => sum + Number(line.amount || 0), 0)
   );
+}
+
+function normalizePercentage(value, code) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+    throw createError(400, code, "Percentage must be between 0 and 100.");
+  }
+  return Math.round(parsed * 100) / 100;
+}
+
+function uniqueTexts(values) {
+  return [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))];
 }
 
 function resolveProjectBuildVatCodeCandidate({ reverseChargeFlag, vatRate }) {

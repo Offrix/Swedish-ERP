@@ -126,6 +126,9 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/import-cases/:importCaseId/correction-requests",
   "/v1/import-cases/:importCaseId/correction-requests/:importCaseCorrectionRequestId/decide",
   "/v1/import-cases/:importCaseId/apply",
+  "/v1/projects/quote-handoffs",
+  "/v1/projects/:projectId/opportunity-links",
+  "/v1/projects/:projectId/quote-links",
   "/v1/projects/:projectId/engagements",
   "/v1/projects/:projectId/work-models",
   "/v1/projects/:projectId/work-packages",
@@ -133,6 +136,8 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/projects/:projectId/work-logs",
   "/v1/projects/:projectId/revenue-plans",
   "/v1/projects/:projectId/revenue-plans/:projectRevenuePlanId/approve",
+  "/v1/projects/:projectId/billing-plans",
+  "/v1/projects/:projectId/status-updates",
   "/v1/projects/:projectId/profitability-snapshots",
   "/v1/payroll/garnishments",
   "/v1/payroll/garnishments/:garnishmentDecisionSnapshotId/approve",
@@ -259,6 +264,14 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(projectProfitabilitySnapshotContract.requiredActionClass, "project_profitability_snapshot_materialize");
     assert.equal(projectProfitabilitySnapshotContract.requiredTrustLevel, "strong_mfa");
     assert.equal(projectProfitabilitySnapshotContract.requiredScopeType, "project");
+
+    const projectQuoteHandoffContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/quote-handoffs"
+    );
+    assert.ok(projectQuoteHandoffContract);
+    assert.equal(projectQuoteHandoffContract.requiredActionClass, "project_quote_handoff_create");
+    assert.equal(projectQuoteHandoffContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectQuoteHandoffContract.requiredScopeType, "company");
 
     const uniqueCount = new Set(payload.routes).size;
     assert.equal(uniqueCount, payload.routes.length, "api root metadata should not contain duplicate route entries");

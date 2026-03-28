@@ -17,6 +17,8 @@ export type ProjectWorkPackageStatus = "draft" | "active" | "completed" | "cance
 export type ProjectDeliveryMilestoneStatus = "planned" | "ready" | "achieved" | "accepted" | "cancelled";
 export type ProjectWorkLogStatus = "recorded" | "approved" | "rejected";
 export type ProjectRevenuePlanStatus = "draft" | "approved" | "superseded";
+export type ProjectBillingPlanStatus = "draft" | "active" | "superseded" | "cancelled";
+export type ProjectStatusUpdateHealthCode = "green" | "amber" | "red";
 export type ProjectBudgetLineKind = "cost" | "revenue";
 export type ProjectBudgetCategoryCode =
   | "labor"
@@ -65,6 +67,40 @@ export interface ProjectEngagementRef {
   readonly status: ProjectEngagementStatus;
   readonly externalOpportunityRef: string | null;
   readonly externalQuoteRef: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ProjectOpportunityLinkRef {
+  readonly projectOpportunityLinkId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly customerId: string | null;
+  readonly externalSystemCode: string;
+  readonly externalOpportunityId: string;
+  readonly externalOpportunityRef: string | null;
+  readonly stageCode: string;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ProjectQuoteLinkRef {
+  readonly projectQuoteLinkId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly customerId: string | null;
+  readonly sourceQuoteId: string | null;
+  readonly sourceQuoteVersionId: string | null;
+  readonly quoteNo: string | null;
+  readonly quoteTitle: string | null;
+  readonly quoteStatus: string | null;
+  readonly acceptedOn: string | null;
+  readonly externalSystemCode: string;
+  readonly externalQuoteRef: string | null;
+  readonly totalAmount: number | null;
+  readonly currencyCode: string;
   readonly createdByActorId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -161,6 +197,60 @@ export interface ProjectRevenuePlanRef {
   readonly createdByActorId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+export interface ProjectBillingPlanLineRef {
+  readonly projectBillingPlanLineId: string;
+  readonly plannedInvoiceDate: string;
+  readonly amount: number;
+  readonly triggerCode: string;
+  readonly note: string | null;
+  readonly projectWorkPackageId: string | null;
+  readonly projectDeliveryMilestoneId: string | null;
+  readonly sourceQuoteVersionId: string | null;
+}
+
+export interface ProjectBillingPlanRef {
+  readonly projectBillingPlanId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly projectQuoteLinkId: string | null;
+  readonly frequencyCode: string;
+  readonly triggerCode: string;
+  readonly startsOn: string;
+  readonly endsOn: string | null;
+  readonly status: ProjectBillingPlanStatus;
+  readonly currencyCode: string;
+  readonly lines: readonly ProjectBillingPlanLineRef[];
+  readonly totalPlannedAmount: number;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ProjectStatusUpdateRef {
+  readonly projectStatusUpdateId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly statusDate: string;
+  readonly healthCode: ProjectStatusUpdateHealthCode;
+  readonly progressPercent: number;
+  readonly blockerCodes: readonly string[];
+  readonly atRiskReason: string | null;
+  readonly note: string | null;
+  readonly sourceSystemCode: string;
+  readonly externalStatusRef: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ProjectCustomerContextRef {
+  readonly customerId: string | null;
+  readonly customerNo: string | null;
+  readonly customerName: string | null;
+  readonly activeOpportunityRef: string | null;
+  readonly activeQuoteRef: string | null;
 }
 
 export interface ProjectProfitabilitySnapshotRef {
