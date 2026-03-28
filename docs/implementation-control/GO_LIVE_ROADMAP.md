@@ -569,11 +569,14 @@ Bygga den svenska bokfÃ¶ringskÃ¤rnan som resten av systemet vilar pÃ¥: leg
 - AR/AP/VAT/payroll/posting fÃ¥r inte Ã¶ppnas innan ledger/posting recipe-engine Ã¤r canonical.
 
 **Delfaser**
-- [ ] 8.1 [HARDEN] **Legal form profiles och reporting obligations** â€” Aktiebolag, ekonomisk fÃ¶rening, enskild firma, handels-/kommanditbolag med effective-dated obligations och signatory classes.
+- [x] 8.1 [HARDEN] **Legal form profiles och reporting obligations** â€” Klar: legal-form-motorn validerar nu signatory/filing/declaration-profiler per bolagsform, partnerships med årsredovisningsplikt får egen filing-profile, declaration-resolution följer godkänd reporting obligation i stället för legal-form-default och nya annual obligations kan supersedera tidigare godkända profiler utan att öppna dubbla drafts.
 - [ ] 8.2 [HARDEN] **Accounting method och fiscal year** â€” Kontant/faktureringsmetod, brutet rÃ¤kenskapsÃ¥r, periodstater, lÃ¥s, reopen-request och Ã¥rsskiftesskydd.
 - [ ] 8.3 [NEW BUILD] **Voucher series, chart governance och dimensionsdisciplin** â€” Serier, dimensionsset, cost centers, service lines och project dimensions ska vara lÃ¥sta och versionsstyrda.
 - [ ] 8.4 [HARDEN] **Posting recipe engine** â€” Signal-till-bokning-matris implementeras: AR/AP/payroll/bank/tax account/HUS/year-end adjustments.
 - [ ] 8.5 [OPERATIONALIZE] **Close, reopen, reversal och correction engine** â€” Close blockers, signoff, reopen impact analysis, reversal/correction replacement och Ã¥terlÃ¥sning.
+
+**Delfasstatus**
+- 8.1 klar 2026-03-28: legal-form- och annual-obligation-kedjan stoppar nu ogiltiga Bolagsverket-/årsredovisningskombinationer, declaration-profile använder den godkända reporting obligationens filing profile och revised annual obligations supersederar tidigare approved versioner deterministiskt; unit- och API-sviter samt fullsvit är återgrönade.
 
 **Exit gate**  
 - Ledger Ã¤r enda bokfÃ¶ringssanning. PeriodlÃ¥s, reopen, correction och legal-form-profiler fungerar och Ã¤r versionsstyrda.

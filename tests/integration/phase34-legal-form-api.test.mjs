@@ -132,6 +132,59 @@ test("Step 34-35 API creates legal-form profiles, approves obligations and expos
   }
 });
 
+test("Step 34 API rejects invalid legal-form reporting obligation combinations", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-24T12:00:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const soleTraderProfile = await requestJson(`${baseUrl}/v1/legal-forms/profiles`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        legalFormCode: "ENSKILD_NARINGSVERKSAMHET",
+        effectiveFrom: "2025-01-01",
+        effectiveTo: "2025-12-31"
+      }
+    });
+
+    const invalidObligation = await fetch(`${baseUrl}/v1/legal-forms/reporting-obligations`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        companyId: DEMO_IDS.companyId,
+        legalFormProfileId: soleTraderProfile.legalFormProfileId,
+        fiscalYearKey: "2025",
+        requiresAnnualReport: false,
+        requiresYearEndAccounts: true,
+        requiresBolagsverketFiling: true,
+        requiresTaxDeclarationPackage: true
+      })
+    });
+    const invalidPayload = await invalidObligation.json();
+
+    assert.equal(invalidObligation.status, 409, JSON.stringify(invalidPayload));
+    assert.equal(invalidPayload.error, "sole_trader_bolagsverket_filing_not_supported");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 function prepareAccounting(platform, companyId) {
   platform.installLedgerCatalog({
     companyId,

@@ -231,6 +231,7 @@ export function createLegalFormEngine({
       updatedAt: nowIso(clock),
       supersededByProfileId: null
     });
+    assertLegalFormProfileConsistency(profile);
     state.legalFormProfiles.set(profile.legalFormProfileId, profile);
     appendToIndex(state.legalFormProfileIdsByCompany, resolvedCompanyId, profile.legalFormProfileId);
     pushAudit(state, clock, {
@@ -351,7 +352,9 @@ export function createLegalFormEngine({
       requiresTaxDeclarationPackage: requiresTaxDeclarationPackage !== false,
       declarationProfileCode: resolvedDeclarationProfileCode,
       signatoryClassCode: resolvedSignatoryClassCode,
-      filingProfileCode: legalFormProfile.filingProfileCode,
+      filingProfileCode: resolveObligationFilingProfileCode(legalFormProfile.legalFormCode, {
+        requiresAnnualReport: requiresAnnualReport === true
+      }),
       packageFamilyCode:
         normalizeOptionalText(packageFamilyCode) ||
         defaultPackageFamilyCode(legalFormProfile.legalFormCode, {
@@ -487,7 +490,7 @@ export function createLegalFormEngine({
       companyId: legalFormProfile.companyId,
       legalFormProfileId: legalFormProfile.legalFormProfileId,
       legalFormCode: legalFormProfile.legalFormCode,
-      filingProfileCode: legalFormProfile.filingProfileCode,
+      filingProfileCode: reportingObligation.filingProfileCode,
       declarationProfileCode: reportingObligation.declarationProfileCode,
       reportingObligationProfileId: reportingObligation.reportingObligationProfileId,
       packageFamilyCode: reportingObligation.packageFamilyCode,
@@ -613,8 +616,20 @@ function resolveAnnualObligationEffectiveDate(legalFormProfile, fiscalYearKey) {
 }
 
 function assertObligationConsistency(profile) {
+  if (profile.signatoryClassCode !== defaultSignatoryClassCode(profile.legalFormCode)) {
+    throw createError(409, "signatory_class_invalid_for_legal_form", "Signatory class does not match the legal form.");
+  }
   if (profile.legalFormCode === "ENSKILD_NARINGSVERKSAMHET" && profile.requiresAnnualReport) {
     throw createError(409, "sole_trader_annual_report_not_supported", "Sole traders cannot default to annual-report filing.");
+  }
+  if (profile.legalFormCode === "ENSKILD_NARINGSVERKSAMHET" && profile.requiresBolagsverketFiling) {
+    throw createError(409, "sole_trader_bolagsverket_filing_not_supported", "Sole traders cannot require Bolagsverket filing.");
+  }
+  if (["AKTIEBOLAG", "EKONOMISK_FORENING"].includes(profile.legalFormCode) && profile.requiresAnnualReport !== true) {
+    throw createError(409, "annual_report_required_for_legal_person", "AB and economic associations require annual reporting.");
+  }
+  if (["AKTIEBOLAG", "EKONOMISK_FORENING"].includes(profile.legalFormCode) && profile.requiresBolagsverketFiling !== true) {
+    throw createError(409, "bolagsverket_filing_required_for_legal_person", "AB and economic associations require Bolagsverket filing.");
   }
   if (["AKTIEBOLAG", "EKONOMISK_FORENING"].includes(profile.legalFormCode) && profile.declarationProfileCode !== "INK2") {
     throw createError(409, "ink2_required_for_legal_person", "AB and economic associations must use INK2 declaration profiles.");
@@ -622,8 +637,25 @@ function assertObligationConsistency(profile) {
   if (["HANDELSBOLAG", "KOMMANDITBOLAG"].includes(profile.legalFormCode) && profile.declarationProfileCode !== "INK4") {
     throw createError(409, "ink4_required_for_partnership", "HB and KB must use INK4 declaration profiles.");
   }
+  if (
+    ["HANDELSBOLAG", "KOMMANDITBOLAG"].includes(profile.legalFormCode)
+    && profile.requiresBolagsverketFiling
+    && profile.requiresAnnualReport !== true
+  ) {
+    throw createError(
+      409,
+      "partnership_bolagsverket_requires_annual_report",
+      "Partnership Bolagsverket filing requires an annual-report obligation."
+    );
+  }
   if (profile.legalFormCode === "ENSKILD_NARINGSVERKSAMHET" && profile.declarationProfileCode !== "NE") {
     throw createError(409, "ne_required_for_sole_trader", "Sole traders must use the NE declaration profile.");
+  }
+  if (
+    profile.filingProfileCode
+    !== resolveObligationFilingProfileCode(profile.legalFormCode, { requiresAnnualReport: profile.requiresAnnualReport === true })
+  ) {
+    throw createError(409, "filing_profile_invalid_for_reporting_obligation", "Filing profile does not match legal-form annual obligations.");
   }
 }
 
@@ -641,7 +673,7 @@ function assertNoReportingObligationDuplication(state, obligation) {
     (candidate) =>
       candidate.legalFormProfileId === obligation.legalFormProfileId &&
       candidate.fiscalYearKey === obligation.fiscalYearKey &&
-      candidate.status !== "superseded"
+      candidate.status === "draft"
   );
   if (duplicate) {
     throw createError(
@@ -715,6 +747,13 @@ function defaultFilingProfileCode(legalFormCode) {
   }
 }
 
+function resolveObligationFilingProfileCode(legalFormCode, { requiresAnnualReport = false } = {}) {
+  if (["HANDELSBOLAG", "KOMMANDITBOLAG"].includes(legalFormCode)) {
+    return requiresAnnualReport ? "PARTNERSHIP_ANNUAL_REPORT_AND_INK4" : "PARTNERSHIP_INK4";
+  }
+  return defaultFilingProfileCode(legalFormCode);
+}
+
 function defaultPackageFamilyCode(legalFormCode, { requiresAnnualReport }) {
   switch (legalFormCode) {
     case "AKTIEBOLAG":
@@ -745,6 +784,27 @@ function defaultSignatoryClassCode(legalFormCode) {
     default:
       throw createError(400, "signatory_class_unsupported", "Unsupported legal form for signatory class.");
   }
+}
+
+function assertLegalFormProfileConsistency(profile) {
+  if (profile.declarationProfileCode !== defaultDeclarationProfileCode(profile.legalFormCode)) {
+    throw createError(409, "declaration_profile_invalid_for_legal_form", "Declaration profile does not match the legal form.");
+  }
+  if (profile.signatoryClassCode !== defaultSignatoryClassCode(profile.legalFormCode)) {
+    throw createError(409, "signatory_class_invalid_for_legal_form", "Signatory class does not match the legal form.");
+  }
+  if (
+    !allowedFilingProfileCodesFor(profile.legalFormCode).includes(profile.filingProfileCode)
+  ) {
+    throw createError(409, "filing_profile_invalid_for_legal_form", "Filing profile does not match the legal form.");
+  }
+}
+
+function allowedFilingProfileCodesFor(legalFormCode) {
+  if (["HANDELSBOLAG", "KOMMANDITBOLAG"].includes(legalFormCode)) {
+    return Object.freeze(["PARTNERSHIP_INK4", "PARTNERSHIP_ANNUAL_REPORT_AND_INK4"]);
+  }
+  return Object.freeze([defaultFilingProfileCode(legalFormCode)]);
 }
 
 function intervalsOverlap(leftStart, leftEnd, rightStart, rightEnd) {
