@@ -14,6 +14,23 @@ export const PROJECT_REVENUE_RECOGNITION_MODEL_CODES = Object.freeze([
   "over_time",
   "deferred_until_milestone"
 ]);
+export const PROJECT_ENGAGEMENT_STATUSES = Object.freeze(["draft", "active", "paused", "closed", "cancelled"]);
+export const PROJECT_WORK_MODEL_CODES = Object.freeze([
+  "time_only",
+  "milestone_only",
+  "retainer_capacity",
+  "fixed_scope",
+  "subscription_service",
+  "field_service_optional",
+  "service_order",
+  "work_order",
+  "construction_stage",
+  "internal_delivery"
+]);
+export const PROJECT_WORK_PACKAGE_STATUSES = Object.freeze(["draft", "active", "completed", "cancelled"]);
+export const PROJECT_DELIVERY_MILESTONE_STATUSES = Object.freeze(["planned", "ready", "achieved", "accepted", "cancelled"]);
+export const PROJECT_WORK_LOG_STATUSES = Object.freeze(["recorded", "approved", "rejected"]);
+export const PROJECT_REVENUE_PLAN_STATUSES = Object.freeze(["draft", "approved", "superseded"]);
 export const PROJECT_BUDGET_LINE_KINDS = Object.freeze(["cost", "revenue"]);
 export const PROJECT_BUDGET_CATEGORY_CODES = Object.freeze([
   "labor",
@@ -62,6 +79,20 @@ export function createProjectEngine({
     projects: new Map(),
     projectIdsByCompany: new Map(),
     projectIdByAlias: new Map(),
+    projectEngagements: new Map(),
+    projectEngagementIdsByProject: new Map(),
+    projectWorkModels: new Map(),
+    projectWorkModelIdsByProject: new Map(),
+    projectWorkPackages: new Map(),
+    projectWorkPackageIdsByProject: new Map(),
+    projectDeliveryMilestones: new Map(),
+    projectDeliveryMilestoneIdsByProject: new Map(),
+    projectWorkLogs: new Map(),
+    projectWorkLogIdsByProject: new Map(),
+    projectRevenuePlans: new Map(),
+    projectRevenuePlanIdsByProject: new Map(),
+    projectProfitabilitySnapshots: new Map(),
+    projectProfitabilitySnapshotIdsByProject: new Map(),
     budgetVersions: new Map(),
     budgetVersionIdsByProject: new Map(),
     resourceAllocations: new Map(),
@@ -89,6 +120,12 @@ export function createProjectEngine({
     projectStatuses: PROJECT_STATUSES,
     projectBillingModelCodes: PROJECT_BILLING_MODEL_CODES,
     projectRevenueRecognitionModelCodes: PROJECT_REVENUE_RECOGNITION_MODEL_CODES,
+    projectEngagementStatuses: PROJECT_ENGAGEMENT_STATUSES,
+    projectWorkModelCodes: PROJECT_WORK_MODEL_CODES,
+    projectWorkPackageStatuses: PROJECT_WORK_PACKAGE_STATUSES,
+    projectDeliveryMilestoneStatuses: PROJECT_DELIVERY_MILESTONE_STATUSES,
+    projectWorkLogStatuses: PROJECT_WORK_LOG_STATUSES,
+    projectRevenuePlanStatuses: PROJECT_REVENUE_PLAN_STATUSES,
     projectBudgetLineKinds: PROJECT_BUDGET_LINE_KINDS,
     projectBudgetCategoryCodes: PROJECT_BUDGET_CATEGORY_CODES,
     projectResourceAllocationStatuses: PROJECT_RESOURCE_ALLOCATION_STATUSES,
@@ -101,6 +138,21 @@ export function createProjectEngine({
     getProject,
     getProjectWorkspace,
     createProject,
+    listProjectEngagements,
+    createProjectEngagement,
+    listProjectWorkModels,
+    createProjectWorkModel,
+    listProjectWorkPackages,
+    createProjectWorkPackage,
+    listProjectDeliveryMilestones,
+    createProjectDeliveryMilestone,
+    listProjectWorkLogs,
+    recordProjectWorkLog,
+    listProjectRevenuePlans,
+    createProjectRevenuePlan,
+    approveProjectRevenuePlan,
+    listProjectProfitabilitySnapshots,
+    materializeProjectProfitabilitySnapshot,
     listProjectBudgetVersions,
     createProjectBudgetVersion,
     listProjectResourceAllocations,
@@ -151,6 +203,15 @@ export function createProjectEngine({
       listProjectForecastSnapshots({ companyId: project.companyId, projectId: project.projectId }),
       cutoffDate
     );
+    const currentProfitabilitySnapshot = selectWorkspaceSnapshot(
+      listProjectProfitabilitySnapshots({ companyId: project.companyId, projectId: project.projectId }),
+      cutoffDate
+    );
+    const engagements = listProjectEngagements({ companyId: project.companyId, projectId: project.projectId });
+    const workModels = listProjectWorkModels({ companyId: project.companyId, projectId: project.projectId });
+    const workPackages = listProjectWorkPackages({ companyId: project.companyId, projectId: project.projectId });
+    const deliveryMilestones = listProjectDeliveryMilestones({ companyId: project.companyId, projectId: project.projectId });
+    const revenuePlans = listProjectRevenuePlans({ companyId: project.companyId, projectId: project.projectId });
     const payrollAllocations = currentCostSnapshot
       ? listProjectPayrollCostAllocations({
           companyId: project.companyId,
@@ -201,6 +262,15 @@ export function createProjectEngine({
     if (!currentForecastSnapshot) {
       warningCodes.push("forecast_snapshot_missing");
     }
+    if (engagements.length === 0) {
+      warningCodes.push("engagement_missing");
+    }
+    if (workModels.length === 0) {
+      warningCodes.push("work_model_missing");
+    }
+    if (revenuePlans.filter((record) => record.status === "approved").length === 0) {
+      warningCodes.push("approved_revenue_plan_missing");
+    }
     if (personalliggareSummary.alertCount > 0) {
       warningCodes.push("personalliggare_attention_required");
     }
@@ -226,8 +296,14 @@ export function createProjectEngine({
       currentCostSnapshotId: currentCostSnapshot?.projectCostSnapshotId || null,
       currentWipSnapshotId: currentWipSnapshot?.projectWipSnapshotId || null,
       currentForecastSnapshotId: currentForecastSnapshot?.projectForecastSnapshotId || null,
+      currentProfitabilitySnapshotId: currentProfitabilitySnapshot?.projectProfitabilitySnapshotId || null,
       latestEstimateVersionId: kalkylSummary.latestEstimateVersionId,
       latestEstimateStatus: kalkylSummary.latestEstimateStatus,
+      engagementCount: engagements.length,
+      workModelCount: workModels.length,
+      workPackageCount: workPackages.length,
+      deliveryMilestoneCount: deliveryMilestones.length,
+      approvedRevenuePlanCount: revenuePlans.filter((record) => record.status === "approved").length,
       openWorkOrderCount: fieldSummary.openWorkOrderCount,
       husCaseCount: husSummary.totalCaseCount,
       personalliggareAlertCount: personalliggareSummary.alertCount,
@@ -247,17 +323,26 @@ export function createProjectEngine({
       currentCostSnapshot: currentCostSnapshot ? copy(currentCostSnapshot) : null,
       currentWipSnapshot: currentWipSnapshot ? copy(currentWipSnapshot) : null,
       currentForecastSnapshot: currentForecastSnapshot ? copy(currentForecastSnapshot) : null,
+      currentProfitabilitySnapshot: currentProfitabilitySnapshot ? copy(currentProfitabilitySnapshot) : null,
+      projectEngagements: engagements.map(copy),
+      projectWorkModels: workModels.map(copy),
+      projectWorkPackages: workPackages.map(copy),
+      projectDeliveryMilestones: deliveryMilestones.map(copy),
+      projectRevenuePlans: revenuePlans.map(copy),
       complianceIndicatorStrip: buildWorkspaceIndicatorStrip({
         currentBudgetVersion,
         currentCostSnapshot,
         currentWipSnapshot,
         currentForecastSnapshot,
+        currentProfitabilitySnapshot,
         fieldSummary,
         husSummary,
         personalliggareSummary,
         egenkontrollSummary,
         kalkylSummary,
-        openProjectDeviationCount: openProjectDeviations.length
+        openProjectDeviationCount: openProjectDeviations.length,
+        engagementCount: engagements.length,
+        approvedRevenuePlanCount: revenuePlans.filter((record) => record.status === "approved").length
       }),
       projectDeviations: openProjectDeviations.map(copy)
     };
@@ -365,6 +450,505 @@ export function createProjectEngine({
       entityId: record.projectId,
       projectId: record.projectId,
       explanation: `Created project ${record.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectEngagements({ companyId, projectId, status = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    return (state.projectEngagementIdsByProject.get(project.projectId) || [])
+      .map((engagementId) => state.projectEngagements.get(engagementId))
+      .filter(Boolean)
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.engagementCode.localeCompare(right.engagementCode))
+      .map(copy);
+  }
+
+  function createProjectEngagement({
+    companyId,
+    projectId,
+    projectEngagementId = null,
+    engagementCode = null,
+    displayName,
+    customerId = null,
+    workModelCode,
+    startsOn,
+    endsOn = null,
+    status = "draft",
+    externalOpportunityRef = null,
+    externalQuoteRef = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStartsOn = normalizeRequiredDate(startsOn || project.startsOn, "project_engagement_start_date_required");
+    const resolvedEndsOn = normalizeOptionalDate(endsOn, "project_engagement_end_date_invalid");
+    if (resolvedEndsOn && resolvedEndsOn < resolvedStartsOn) {
+      throw createError(400, "project_engagement_date_range_invalid", "Engagement end date cannot be earlier than the start date.");
+    }
+    const record = {
+      projectEngagementId: normalizeOptionalText(projectEngagementId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      engagementCode: requireText(engagementCode || `${project.projectCode}-ENG-${String((state.projectEngagementIdsByProject.get(project.projectId) || []).length + 1).padStart(2, "0")}`, "project_engagement_code_required"),
+      displayName: requireText(displayName, "project_engagement_display_name_required"),
+      customerId: normalizeOptionalText(customerId) || project.customerId || null,
+      workModelCode: assertAllowed(workModelCode, PROJECT_WORK_MODEL_CODES, "project_work_model_invalid"),
+      startsOn: resolvedStartsOn,
+      endsOn: resolvedEndsOn,
+      status: assertAllowed(status, PROJECT_ENGAGEMENT_STATUSES, "project_engagement_status_invalid"),
+      externalOpportunityRef: normalizeOptionalText(externalOpportunityRef),
+      externalQuoteRef: normalizeOptionalText(externalQuoteRef),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.projectEngagements.set(record.projectEngagementId, record);
+    appendToIndex(state.projectEngagementIdsByProject, project.projectId, record.projectEngagementId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.engagement.created",
+      entityType: "project_engagement",
+      entityId: record.projectEngagementId,
+      projectId: record.projectId,
+      explanation: `Created engagement ${record.engagementCode} for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectWorkModels({ companyId, projectId } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    return (state.projectWorkModelIdsByProject.get(project.projectId) || [])
+      .map((workModelId) => state.projectWorkModels.get(workModelId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.projectWorkModelId.localeCompare(right.projectWorkModelId))
+      .map(copy);
+  }
+
+  function createProjectWorkModel({
+    companyId,
+    projectId,
+    projectWorkModelId = null,
+    projectEngagementId = null,
+    modelCode,
+    title,
+    operationalPackCode = "general_core",
+    requiresWorkOrders = false,
+    requiresMilestones = false,
+    requiresAttendance = false,
+    requiresId06 = false,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const engagement =
+      normalizeOptionalText(projectEngagementId)
+        ? requireProjectEngagement(state, project.companyId, project.projectId, projectEngagementId)
+        : null;
+    const record = {
+      projectWorkModelId: normalizeOptionalText(projectWorkModelId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      projectEngagementId: engagement?.projectEngagementId || null,
+      modelCode: assertAllowed(modelCode, PROJECT_WORK_MODEL_CODES, "project_work_model_invalid"),
+      title: requireText(title, "project_work_model_title_required"),
+      operationalPackCode: requireText(operationalPackCode, "project_operational_pack_code_required"),
+      requiresWorkOrders: requiresWorkOrders === true,
+      requiresMilestones: requiresMilestones === true,
+      requiresAttendance: requiresAttendance === true,
+      requiresId06: requiresId06 === true,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.projectWorkModels.set(record.projectWorkModelId, record);
+    appendToIndex(state.projectWorkModelIdsByProject, project.projectId, record.projectWorkModelId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.work_model.created",
+      entityType: "project_work_model",
+      entityId: record.projectWorkModelId,
+      projectId: record.projectId,
+      explanation: `Created work model ${record.modelCode} for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectWorkPackages({ companyId, projectId, status = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    return (state.projectWorkPackageIdsByProject.get(project.projectId) || [])
+      .map((workPackageId) => state.projectWorkPackages.get(workPackageId))
+      .filter(Boolean)
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.workPackageCode.localeCompare(right.workPackageCode))
+      .map(copy);
+  }
+
+  function createProjectWorkPackage({
+    companyId,
+    projectId,
+    projectWorkPackageId = null,
+    projectEngagementId = null,
+    projectWorkModelId = null,
+    workPackageCode = null,
+    title,
+    description = null,
+    startsOn,
+    endsOn = null,
+    status = "draft",
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const engagement =
+      normalizeOptionalText(projectEngagementId)
+        ? requireProjectEngagement(state, project.companyId, project.projectId, projectEngagementId)
+        : null;
+    const workModel =
+      normalizeOptionalText(projectWorkModelId)
+        ? requireProjectWorkModel(state, project.companyId, project.projectId, projectWorkModelId)
+        : null;
+    const resolvedStartsOn = normalizeRequiredDate(startsOn || project.startsOn, "project_work_package_start_date_required");
+    const resolvedEndsOn = normalizeOptionalDate(endsOn, "project_work_package_end_date_invalid");
+    if (resolvedEndsOn && resolvedEndsOn < resolvedStartsOn) {
+      throw createError(400, "project_work_package_date_range_invalid", "Work package end date cannot be earlier than the start date.");
+    }
+    const record = {
+      projectWorkPackageId: normalizeOptionalText(projectWorkPackageId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      projectEngagementId: engagement?.projectEngagementId || null,
+      projectWorkModelId: workModel?.projectWorkModelId || null,
+      workPackageCode: requireText(workPackageCode || `${project.projectCode}-WP-${String((state.projectWorkPackageIdsByProject.get(project.projectId) || []).length + 1).padStart(2, "0")}`, "project_work_package_code_required"),
+      title: requireText(title, "project_work_package_title_required"),
+      description: normalizeOptionalText(description),
+      startsOn: resolvedStartsOn,
+      endsOn: resolvedEndsOn,
+      status: assertAllowed(status, PROJECT_WORK_PACKAGE_STATUSES, "project_work_package_status_invalid"),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.projectWorkPackages.set(record.projectWorkPackageId, record);
+    appendToIndex(state.projectWorkPackageIdsByProject, project.projectId, record.projectWorkPackageId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.work_package.created",
+      entityType: "project_work_package",
+      entityId: record.projectWorkPackageId,
+      projectId: record.projectId,
+      explanation: `Created work package ${record.workPackageCode} for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectDeliveryMilestones({ companyId, projectId, status = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    return (state.projectDeliveryMilestoneIdsByProject.get(project.projectId) || [])
+      .map((milestoneId) => state.projectDeliveryMilestones.get(milestoneId))
+      .filter(Boolean)
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort((left, right) => left.targetDate.localeCompare(right.targetDate) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function createProjectDeliveryMilestone({
+    companyId,
+    projectId,
+    projectDeliveryMilestoneId = null,
+    projectWorkPackageId = null,
+    title,
+    targetDate,
+    plannedRevenueAmount = 0,
+    status = "planned",
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const workPackage =
+      normalizeOptionalText(projectWorkPackageId)
+        ? requireProjectWorkPackage(state, project.companyId, project.projectId, projectWorkPackageId)
+        : null;
+    const record = {
+      projectDeliveryMilestoneId: normalizeOptionalText(projectDeliveryMilestoneId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      projectWorkPackageId: workPackage?.projectWorkPackageId || null,
+      title: requireText(title, "project_delivery_milestone_title_required"),
+      targetDate: normalizeRequiredDate(targetDate, "project_delivery_milestone_target_date_required"),
+      plannedRevenueAmount: normalizeMoney(plannedRevenueAmount, "project_delivery_milestone_revenue_invalid"),
+      status: assertAllowed(status, PROJECT_DELIVERY_MILESTONE_STATUSES, "project_delivery_milestone_status_invalid"),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.projectDeliveryMilestones.set(record.projectDeliveryMilestoneId, record);
+    appendToIndex(state.projectDeliveryMilestoneIdsByProject, project.projectId, record.projectDeliveryMilestoneId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.delivery_milestone.created",
+      entityType: "project_delivery_milestone",
+      entityId: record.projectDeliveryMilestoneId,
+      projectId: record.projectId,
+      explanation: `Created delivery milestone ${record.projectDeliveryMilestoneId} for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectWorkLogs({ companyId, projectId, workDate = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedWorkDate = normalizeOptionalDate(workDate, "project_work_log_date_invalid");
+    return (state.projectWorkLogIdsByProject.get(project.projectId) || [])
+      .map((workLogId) => state.projectWorkLogs.get(workLogId))
+      .filter(Boolean)
+      .filter((record) => (resolvedWorkDate ? record.workDate === resolvedWorkDate : true))
+      .sort((left, right) => left.workDate.localeCompare(right.workDate) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function recordProjectWorkLog({
+    companyId,
+    projectId,
+    projectWorkLogId = null,
+    projectWorkPackageId = null,
+    projectDeliveryMilestoneId = null,
+    employmentId = null,
+    workDate,
+    minutes,
+    description,
+    billableFlag = true,
+    status = "approved",
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const workPackage =
+      normalizeOptionalText(projectWorkPackageId)
+        ? requireProjectWorkPackage(state, project.companyId, project.projectId, projectWorkPackageId)
+        : null;
+    const deliveryMilestone =
+      normalizeOptionalText(projectDeliveryMilestoneId)
+        ? requireProjectDeliveryMilestone(state, project.companyId, project.projectId, projectDeliveryMilestoneId)
+        : null;
+    if (employmentId) {
+      findEmploymentContextByEmploymentId({
+        companyId: project.companyId,
+        employmentId,
+        hrPlatform
+      });
+    }
+    const record = {
+      projectWorkLogId: normalizeOptionalText(projectWorkLogId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      projectWorkPackageId: workPackage?.projectWorkPackageId || null,
+      projectDeliveryMilestoneId: deliveryMilestone?.projectDeliveryMilestoneId || null,
+      employmentId: normalizeOptionalText(employmentId),
+      workDate: normalizeRequiredDate(workDate, "project_work_log_date_required"),
+      minutes: normalizeWholeNumber(minutes, "project_work_log_minutes_invalid"),
+      description: requireText(description, "project_work_log_description_required"),
+      billableFlag: billableFlag !== false,
+      status: assertAllowed(status, PROJECT_WORK_LOG_STATUSES, "project_work_log_status_invalid"),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.projectWorkLogs.set(record.projectWorkLogId, record);
+    appendToIndex(state.projectWorkLogIdsByProject, project.projectId, record.projectWorkLogId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.work_log.recorded",
+      entityType: "project_work_log",
+      entityId: record.projectWorkLogId,
+      projectId: record.projectId,
+      explanation: `Recorded project work log ${record.projectWorkLogId} for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectRevenuePlans({ companyId, projectId, status = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    return (state.projectRevenuePlanIdsByProject.get(project.projectId) || [])
+      .map((projectRevenuePlanId) => state.projectRevenuePlans.get(projectRevenuePlanId))
+      .filter(Boolean)
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort((left, right) => left.versionNo - right.versionNo)
+      .map(copy);
+  }
+
+  function createProjectRevenuePlan({
+    companyId,
+    projectId,
+    projectRevenuePlanId = null,
+    versionLabel,
+    lines,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const normalizedLines = normalizeRevenuePlanLines(lines);
+    const versionNo = nextProjectRevenuePlanVersionNo(state, project.projectId);
+    const record = {
+      projectRevenuePlanId: normalizeOptionalText(projectRevenuePlanId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      versionNo,
+      versionLabel: requireText(versionLabel, "project_revenue_plan_version_label_required"),
+      status: "draft",
+      lines: normalizedLines,
+      totals: summarizeRevenuePlanLines(normalizedLines),
+      approvedAt: null,
+      approvedByActorId: null,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.projectRevenuePlans.set(record.projectRevenuePlanId, record);
+    appendToIndex(state.projectRevenuePlanIdsByProject, project.projectId, record.projectRevenuePlanId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.revenue_plan.created",
+      entityType: "project_revenue_plan",
+      entityId: record.projectRevenuePlanId,
+      projectId: record.projectId,
+      explanation: `Created revenue plan version ${record.versionNo} for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function approveProjectRevenuePlan({
+    companyId,
+    projectId,
+    projectRevenuePlanId,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const record = requireProjectRevenuePlan(state, project.companyId, project.projectId, projectRevenuePlanId);
+    if (record.status === "approved") {
+      return copy(record);
+    }
+    for (const candidate of listProjectRevenuePlans({ companyId: project.companyId, projectId: project.projectId, status: "approved" })) {
+      const mutableCandidate = state.projectRevenuePlans.get(candidate.projectRevenuePlanId);
+      mutableCandidate.status = "superseded";
+      mutableCandidate.updatedAt = nowIso(clock);
+    }
+    record.status = "approved";
+    record.approvedAt = nowIso(clock);
+    record.approvedByActorId = requireText(actorId, "actor_id_required");
+    record.updatedAt = record.approvedAt;
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.approvedByActorId,
+      correlationId,
+      action: "project.revenue_plan.approved",
+      entityType: "project_revenue_plan",
+      entityId: record.projectRevenuePlanId,
+      projectId: record.projectId,
+      explanation: `Approved revenue plan version ${record.versionNo} for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectProfitabilitySnapshots({ companyId, projectId } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    return (state.projectProfitabilitySnapshotIdsByProject.get(project.projectId) || [])
+      .map((snapshotId) => state.projectProfitabilitySnapshots.get(snapshotId))
+      .filter(Boolean)
+      .sort((left, right) => left.cutoffDate.localeCompare(right.cutoffDate) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function materializeProjectProfitabilitySnapshot({
+    companyId,
+    projectId,
+    cutoffDate,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const model = buildProjectMetricsModel({
+      state,
+      project,
+      cutoffDate,
+      arPlatform,
+      hrPlatform,
+      timePlatform,
+      payrollPlatform
+    });
+    const approvedRevenuePlan = listProjectRevenuePlans({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      status: "approved"
+    }).pop() || null;
+    const plannedRevenueAmount = approvedRevenuePlan ? calculateRevenuePlanAmountAtCutoff(approvedRevenuePlan, model.cutoffDate) : 0;
+    const record = {
+      projectProfitabilitySnapshotId: crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      cutoffDate: model.cutoffDate,
+      reportingPeriod: model.reportingPeriod,
+      plannedRevenueAmount,
+      billedRevenueAmount: model.billedRevenueAmount,
+      recognizedRevenueAmount: model.recognizedRevenueAmount,
+      actualCostAmount: model.actualCostAmount,
+      currentMarginAmount: roundMoney(model.recognizedRevenueAmount - model.actualCostAmount),
+      forecastMarginAmount: model.forecastMarginAmount,
+      workPackageCount: listProjectWorkPackages({ companyId: project.companyId, projectId: project.projectId }).length,
+      deliveryMilestoneCount: listProjectDeliveryMilestones({ companyId: project.companyId, projectId: project.projectId }).length,
+      openDeviationCount: listProjectDeviations({ companyId: project.companyId, projectId: project.projectId }).filter((record) => !["resolved", "closed"].includes(record.status)).length,
+      approvedRevenuePlanId: approvedRevenuePlan?.projectRevenuePlanId || null,
+      sourceSnapshotRefs: {
+        costSnapshotId: listProjectCostSnapshots({ companyId: project.companyId, projectId: project.projectId }).at(-1)?.projectCostSnapshotId || null,
+        wipSnapshotId: listProjectWipSnapshots({ companyId: project.companyId, projectId: project.projectId }).at(-1)?.projectWipSnapshotId || null,
+        forecastSnapshotId: listProjectForecastSnapshots({ companyId: project.companyId, projectId: project.projectId }).at(-1)?.projectForecastSnapshotId || null
+      },
+      snapshotHash: hashObject({
+        projectId: project.projectId,
+        cutoffDate: model.cutoffDate,
+        plannedRevenueAmount,
+        billedRevenueAmount: model.billedRevenueAmount,
+        recognizedRevenueAmount: model.recognizedRevenueAmount,
+        actualCostAmount: model.actualCostAmount,
+        forecastMarginAmount: model.forecastMarginAmount,
+        approvedRevenuePlanId: approvedRevenuePlan?.projectRevenuePlanId || null
+      }),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock)
+    };
+    const existing = listProjectProfitabilitySnapshots({ companyId: project.companyId, projectId: project.projectId }).find(
+      (candidate) => candidate.snapshotHash === record.snapshotHash
+    );
+    if (existing) {
+      return existing;
+    }
+    state.projectProfitabilitySnapshots.set(record.projectProfitabilitySnapshotId, record);
+    appendToIndex(state.projectProfitabilitySnapshotIdsByProject, project.projectId, record.projectProfitabilitySnapshotId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.profitability.materialized",
+      entityType: "project_profitability_snapshot",
+      entityId: record.projectProfitabilitySnapshotId,
+      projectId: record.projectId,
+      explanation: `Materialized profitability snapshot for ${project.projectCode} at ${record.cutoffDate}.`
     });
     return copy(record);
   }
@@ -1119,6 +1703,12 @@ export function createProjectEngine({
       revenueRecognitionModelCode: project.revenueRecognitionModelCode,
       cutoffDate: normalizeOptionalText(cutoffDate),
       warningCodes: [...workspace.warningCodes],
+      projectEngagements: copy(workspace.projectEngagements || []),
+      projectWorkModels: copy(workspace.projectWorkModels || []),
+      projectWorkPackages: copy(workspace.projectWorkPackages || []),
+      projectDeliveryMilestones: copy(workspace.projectDeliveryMilestones || []),
+      projectRevenuePlans: copy(workspace.projectRevenuePlans || []),
+      currentProfitabilitySnapshot: copy(workspace.currentProfitabilitySnapshot),
       complianceIndicatorStrip: copy(workspace.complianceIndicatorStrip),
       projectDeviations: copy(workspace.projectDeviations),
       fieldSummary: copy(workspace.fieldSummary),
@@ -1151,7 +1741,8 @@ export function createProjectEngine({
           ["project_budget_snapshot", workspace.budgetVersionId],
           ["project_cost_snapshot", workspace.currentCostSnapshotId],
           ["project_wip_snapshot", workspace.currentWipSnapshotId],
-          ["project_forecast_snapshot", workspace.currentForecastSnapshotId]
+          ["project_forecast_snapshot", workspace.currentForecastSnapshotId],
+          ["project_profitability_snapshot", workspace.currentProfitabilitySnapshotId]
         ]
           .filter(([, artifactRef]) => artifactRef)
           .map(([artifactType, artifactRef]) => ({
@@ -1389,12 +1980,15 @@ function buildWorkspaceIndicatorStrip({
   currentCostSnapshot,
   currentWipSnapshot,
   currentForecastSnapshot,
+  currentProfitabilitySnapshot,
   fieldSummary,
   husSummary,
   personalliggareSummary,
   egenkontrollSummary,
   kalkylSummary,
-  openProjectDeviationCount
+  openProjectDeviationCount,
+  engagementCount,
+  approvedRevenuePlanCount
 }) {
   return [
     {
@@ -1404,8 +1998,13 @@ function buildWorkspaceIndicatorStrip({
     },
     {
       indicatorCode: "snapshots",
-      status: currentCostSnapshot && currentWipSnapshot && currentForecastSnapshot ? "ok" : "warning",
-      count: [currentCostSnapshot, currentWipSnapshot, currentForecastSnapshot].filter(Boolean).length
+      status: currentCostSnapshot && currentWipSnapshot && currentForecastSnapshot && currentProfitabilitySnapshot ? "ok" : "warning",
+      count: [currentCostSnapshot, currentWipSnapshot, currentForecastSnapshot, currentProfitabilitySnapshot].filter(Boolean).length
+    },
+    {
+      indicatorCode: "commercial_core",
+      status: engagementCount > 0 && approvedRevenuePlanCount > 0 ? "ok" : "warning",
+      count: engagementCount + approvedRevenuePlanCount
     },
     {
       indicatorCode: "field",
@@ -2298,6 +2897,46 @@ function requireProject(state, companyId, projectId) {
   return record;
 }
 
+function requireProjectEngagement(state, companyId, projectId, projectEngagementId) {
+  const record = state.projectEngagements.get(requireText(projectEngagementId, "project_engagement_id_required"));
+  if (!record || record.companyId !== requireText(companyId, "company_id_required") || record.projectId !== requireText(projectId, "project_id_required")) {
+    throw createError(404, "project_engagement_not_found", "Project engagement was not found.");
+  }
+  return record;
+}
+
+function requireProjectWorkModel(state, companyId, projectId, projectWorkModelId) {
+  const record = state.projectWorkModels.get(requireText(projectWorkModelId, "project_work_model_id_required"));
+  if (!record || record.companyId !== requireText(companyId, "company_id_required") || record.projectId !== requireText(projectId, "project_id_required")) {
+    throw createError(404, "project_work_model_not_found", "Project work model was not found.");
+  }
+  return record;
+}
+
+function requireProjectWorkPackage(state, companyId, projectId, projectWorkPackageId) {
+  const record = state.projectWorkPackages.get(requireText(projectWorkPackageId, "project_work_package_id_required"));
+  if (!record || record.companyId !== requireText(companyId, "company_id_required") || record.projectId !== requireText(projectId, "project_id_required")) {
+    throw createError(404, "project_work_package_not_found", "Project work package was not found.");
+  }
+  return record;
+}
+
+function requireProjectDeliveryMilestone(state, companyId, projectId, projectDeliveryMilestoneId) {
+  const record = state.projectDeliveryMilestones.get(requireText(projectDeliveryMilestoneId, "project_delivery_milestone_id_required"));
+  if (!record || record.companyId !== requireText(companyId, "company_id_required") || record.projectId !== requireText(projectId, "project_id_required")) {
+    throw createError(404, "project_delivery_milestone_not_found", "Project delivery milestone was not found.");
+  }
+  return record;
+}
+
+function requireProjectRevenuePlan(state, companyId, projectId, projectRevenuePlanId) {
+  const record = state.projectRevenuePlans.get(requireText(projectRevenuePlanId, "project_revenue_plan_id_required"));
+  if (!record || record.companyId !== requireText(companyId, "company_id_required") || record.projectId !== requireText(projectId, "project_id_required")) {
+    throw createError(404, "project_revenue_plan_not_found", "Project revenue plan was not found.");
+  }
+  return record;
+}
+
 function requireProjectChangeOrder(project, projectChangeOrderId) {
   const resolvedProjectChangeOrderId = requireText(projectChangeOrderId, "project_change_order_id_required");
   const record = (project.changeOrders || []).find((candidate) => candidate.projectChangeOrderId === resolvedProjectChangeOrderId);
@@ -2326,6 +2965,52 @@ function assertProjectChangeOrderTransition(currentStatus, nextStatus) {
       `Project change order cannot move from ${currentStatus} to ${nextStatus}.`
     );
   }
+}
+
+function normalizeRevenuePlanLines(lines) {
+  if (!Array.isArray(lines) || lines.length === 0) {
+    throw createError(400, "project_revenue_plan_lines_required", "Revenue plans require at least one line.");
+  }
+  return lines.map((line) => normalizeRevenuePlanLine(line));
+}
+
+function normalizeRevenuePlanLine(line) {
+  if (!line || typeof line !== "object") {
+    throw createError(400, "project_revenue_plan_line_invalid", "Each revenue plan line must be an object.");
+  }
+  return {
+    projectRevenuePlanLineId: crypto.randomUUID(),
+    recognitionDate: normalizeRequiredDate(line.recognitionDate, "project_revenue_plan_recognition_date_required"),
+    triggerTypeCode: normalizeCode(line.triggerTypeCode || "manual", "project_revenue_plan_trigger_type_required"),
+    amount: normalizeMoney(line.amount, "project_revenue_plan_amount_invalid"),
+    note: normalizeOptionalText(line.note),
+    projectWorkPackageId: normalizeOptionalText(line.projectWorkPackageId),
+    projectDeliveryMilestoneId: normalizeOptionalText(line.projectDeliveryMilestoneId)
+  };
+}
+
+function summarizeRevenuePlanLines(lines) {
+  return {
+    plannedRevenueAmount: roundMoney((lines || []).reduce((sum, line) => sum + Number(line.amount || 0), 0))
+  };
+}
+
+function nextProjectRevenuePlanVersionNo(state, projectId) {
+  return (
+    (state.projectRevenuePlanIdsByProject.get(projectId) || [])
+      .map((projectRevenuePlanId) => state.projectRevenuePlans.get(projectRevenuePlanId))
+      .filter(Boolean)
+      .sort((left, right) => left.versionNo - right.versionNo)
+      .pop()?.versionNo || 0
+  ) + 1;
+}
+
+function calculateRevenuePlanAmountAtCutoff(revenuePlan, cutoffDate) {
+  return roundMoney(
+    (revenuePlan.lines || [])
+      .filter((line) => line.recognitionDate <= cutoffDate)
+      .reduce((sum, line) => sum + Number(line.amount || 0), 0)
+  );
 }
 
 function resolveProjectBuildVatCodeCandidate({ reverseChargeFlag, vatRate }) {

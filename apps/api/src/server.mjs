@@ -724,6 +724,14 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/kalkyl/estimates/:estimateVersionId/convert-to-project-budget",
               "/v1/projects",
               "/v1/projects/:projectId",
+              "/v1/projects/:projectId/engagements",
+              "/v1/projects/:projectId/work-models",
+              "/v1/projects/:projectId/work-packages",
+              "/v1/projects/:projectId/delivery-milestones",
+              "/v1/projects/:projectId/work-logs",
+              "/v1/projects/:projectId/revenue-plans",
+              "/v1/projects/:projectId/revenue-plans/:projectRevenuePlanId/approve",
+              "/v1/projects/:projectId/profitability-snapshots",
               "/v1/projects/:projectId/workspace",
               "/v1/projects/:projectId/deviations",
               "/v1/projects/:projectId/deviations/:projectDeviationId/assign",
@@ -10767,6 +10775,427 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         projectId: projectWorkspaceMatch.projectId,
         cutoffDate: url.searchParams.get("cutoffDate") || null
+      })
+    );
+    return;
+  }
+
+  const projectEngagementsMatch = matchPath(path, "/v1/projects/:projectId/engagements");
+  if (projectEngagementsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_engagement",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectEngagements({
+        companyId,
+        projectId: projectEngagementsMatch.projectId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (projectEngagementsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_engagement",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectEngagement({
+        companyId,
+        projectId: projectEngagementsMatch.projectId,
+        projectEngagementId: body.projectEngagementId ?? null,
+        engagementCode: body.engagementCode ?? null,
+        displayName: body.displayName,
+        customerId: body.customerId ?? null,
+        workModelCode: body.workModelCode,
+        startsOn: body.startsOn ?? null,
+        endsOn: body.endsOn ?? null,
+        status: body.status ?? "draft",
+        externalOpportunityRef: body.externalOpportunityRef ?? null,
+        externalQuoteRef: body.externalQuoteRef ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectWorkModelsMatch = matchPath(path, "/v1/projects/:projectId/work-models");
+  if (projectWorkModelsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_work_model",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectWorkModels({
+        companyId,
+        projectId: projectWorkModelsMatch.projectId
+      })
+    });
+    return;
+  }
+
+  if (projectWorkModelsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_work_model",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectWorkModel({
+        companyId,
+        projectId: projectWorkModelsMatch.projectId,
+        projectWorkModelId: body.projectWorkModelId ?? null,
+        projectEngagementId: body.projectEngagementId ?? null,
+        modelCode: body.modelCode,
+        title: body.title,
+        operationalPackCode: body.operationalPackCode ?? "general_core",
+        requiresWorkOrders: body.requiresWorkOrders === true,
+        requiresMilestones: body.requiresMilestones === true,
+        requiresAttendance: body.requiresAttendance === true,
+        requiresId06: body.requiresId06 === true,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectWorkPackagesMatch = matchPath(path, "/v1/projects/:projectId/work-packages");
+  if (projectWorkPackagesMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_work_package",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectWorkPackages({
+        companyId,
+        projectId: projectWorkPackagesMatch.projectId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (projectWorkPackagesMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_work_package",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectWorkPackage({
+        companyId,
+        projectId: projectWorkPackagesMatch.projectId,
+        projectWorkPackageId: body.projectWorkPackageId ?? null,
+        projectEngagementId: body.projectEngagementId ?? null,
+        projectWorkModelId: body.projectWorkModelId ?? null,
+        workPackageCode: body.workPackageCode ?? null,
+        title: body.title,
+        description: body.description ?? null,
+        startsOn: body.startsOn ?? null,
+        endsOn: body.endsOn ?? null,
+        status: body.status ?? "draft",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectDeliveryMilestonesMatch = matchPath(path, "/v1/projects/:projectId/delivery-milestones");
+  if (projectDeliveryMilestonesMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_delivery_milestone",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectDeliveryMilestones({
+        companyId,
+        projectId: projectDeliveryMilestonesMatch.projectId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (projectDeliveryMilestonesMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_delivery_milestone",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectDeliveryMilestone({
+        companyId,
+        projectId: projectDeliveryMilestonesMatch.projectId,
+        projectDeliveryMilestoneId: body.projectDeliveryMilestoneId ?? null,
+        projectWorkPackageId: body.projectWorkPackageId ?? null,
+        title: body.title,
+        targetDate: body.targetDate,
+        plannedRevenueAmount: body.plannedRevenueAmount ?? 0,
+        status: body.status ?? "planned",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectWorkLogsMatch = matchPath(path, "/v1/projects/:projectId/work-logs");
+  if (projectWorkLogsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_work_log",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectWorkLogs({
+        companyId,
+        projectId: projectWorkLogsMatch.projectId,
+        workDate: url.searchParams.get("workDate") || null
+      })
+    });
+    return;
+  }
+
+  if (projectWorkLogsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_work_log",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.recordProjectWorkLog({
+        companyId,
+        projectId: projectWorkLogsMatch.projectId,
+        projectWorkLogId: body.projectWorkLogId ?? null,
+        projectWorkPackageId: body.projectWorkPackageId ?? null,
+        projectDeliveryMilestoneId: body.projectDeliveryMilestoneId ?? null,
+        employmentId: body.employmentId ?? null,
+        workDate: body.workDate,
+        minutes: body.minutes,
+        description: body.description,
+        billableFlag: body.billableFlag !== false,
+        status: body.status ?? "approved",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectRevenuePlansMatch = matchPath(path, "/v1/projects/:projectId/revenue-plans");
+  if (projectRevenuePlansMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_revenue_plan",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectRevenuePlans({
+        companyId,
+        projectId: projectRevenuePlansMatch.projectId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (projectRevenuePlansMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_revenue_plan",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectRevenuePlan({
+        companyId,
+        projectId: projectRevenuePlansMatch.projectId,
+        projectRevenuePlanId: body.projectRevenuePlanId ?? null,
+        versionLabel: body.versionLabel,
+        lines: body.lines || [],
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectRevenuePlanApproveMatch = matchPath(path, "/v1/projects/:projectId/revenue-plans/:projectRevenuePlanId/approve");
+  if (projectRevenuePlanApproveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_revenue_plan",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveProjectRevenuePlan({
+        companyId,
+        projectId: projectRevenuePlanApproveMatch.projectId,
+        projectRevenuePlanId: projectRevenuePlanApproveMatch.projectRevenuePlanId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectProfitabilitySnapshotsMatch = matchPath(path, "/v1/projects/:projectId/profitability-snapshots");
+  if (projectProfitabilitySnapshotsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_profitability_snapshot",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectProfitabilitySnapshots({
+        companyId,
+        projectId: projectProfitabilitySnapshotsMatch.projectId
+      })
+    });
+    return;
+  }
+
+  if (projectProfitabilitySnapshotsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_profitability_snapshot",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.materializeProjectProfitabilitySnapshot({
+        companyId,
+        projectId: projectProfitabilitySnapshotsMatch.projectId,
+        cutoffDate: body.cutoffDate,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
       })
     );
     return;
