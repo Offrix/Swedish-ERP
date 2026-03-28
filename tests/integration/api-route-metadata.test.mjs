@@ -127,6 +127,10 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/import-cases/:importCaseId/correction-requests/:importCaseCorrectionRequestId/decide",
   "/v1/import-cases/:importCaseId/apply",
   "/v1/projects/quote-handoffs",
+  "/v1/projects/trial-scenarios",
+  "/v1/projects/trial-scenarios/:scenarioCode/materialize",
+  "/v1/projects/import-batches",
+  "/v1/projects/import-batches/:projectImportBatchId/commit",
   "/v1/projects/:projectId/opportunity-links",
   "/v1/projects/:projectId/quote-links",
   "/v1/projects/:projectId/engagements",
@@ -147,9 +151,11 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/projects/:projectId/profitability-adjustments",
   "/v1/projects/:projectId/profitability-adjustments/:projectProfitabilityAdjustmentId/decide",
   "/v1/projects/:projectId/invoice-readiness-assessments",
+  "/v1/projects/:projectId/invoice-simulations",
   "/v1/projects/:projectId/profitability-snapshots",
   "/v1/projects/portfolio/nodes",
   "/v1/projects/portfolio/summary",
+  "/v1/projects/:projectId/live-conversion-plans",
   "/v1/personalliggare/industry-packs",
   "/v1/personalliggare/sites/:constructionSiteId/identity-snapshots",
   "/v1/personalliggare/sites/:constructionSiteId/contractor-snapshots",
@@ -341,6 +347,30 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(projectQuoteHandoffContract.requiredTrustLevel, "strong_mfa");
     assert.equal(projectQuoteHandoffContract.requiredScopeType, "company");
 
+    const projectTrialScenarioContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/trial-scenarios/:scenarioCode/materialize"
+    );
+    assert.ok(projectTrialScenarioContract);
+    assert.equal(projectTrialScenarioContract.requiredActionClass, "project_trial_scenario_materialize");
+    assert.equal(projectTrialScenarioContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectTrialScenarioContract.requiredScopeType, "company");
+
+    const projectImportBatchCreateContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/import-batches"
+    );
+    assert.ok(projectImportBatchCreateContract);
+    assert.equal(projectImportBatchCreateContract.requiredActionClass, "project_import_batch_create");
+    assert.equal(projectImportBatchCreateContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectImportBatchCreateContract.requiredScopeType, "company");
+
+    const projectImportBatchCommitContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/import-batches/:projectImportBatchId/commit"
+    );
+    assert.ok(projectImportBatchCommitContract);
+    assert.equal(projectImportBatchCommitContract.requiredActionClass, "project_import_batch_commit");
+    assert.equal(projectImportBatchCommitContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectImportBatchCommitContract.requiredScopeType, "company");
+
     const projectProfitabilityAdjustmentCreateContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/profitability-adjustments"
     );
@@ -366,6 +396,22 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(projectInvoiceReadinessAssessContract.requiredActionClass, "project_invoice_readiness_assess");
     assert.equal(projectInvoiceReadinessAssessContract.requiredTrustLevel, "strong_mfa");
     assert.equal(projectInvoiceReadinessAssessContract.requiredScopeType, "project");
+
+    const projectInvoiceSimulationCreateContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/invoice-simulations"
+    );
+    assert.ok(projectInvoiceSimulationCreateContract);
+    assert.equal(projectInvoiceSimulationCreateContract.requiredActionClass, "project_invoice_simulation_create");
+    assert.equal(projectInvoiceSimulationCreateContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectInvoiceSimulationCreateContract.requiredScopeType, "project");
+
+    const projectLiveConversionPlanCreateContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/live-conversion-plans"
+    );
+    assert.ok(projectLiveConversionPlanCreateContract);
+    assert.equal(projectLiveConversionPlanCreateContract.requiredActionClass, "project_live_conversion_plan_create");
+    assert.equal(projectLiveConversionPlanCreateContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectLiveConversionPlanCreateContract.requiredScopeType, "project");
 
     const fieldOperationalCaseCreateContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/field/operational-cases"

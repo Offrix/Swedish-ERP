@@ -923,6 +923,7 @@ Bygga projektfältet som generell projekt- och uppdragsmotor för alla branscher
 - 14.3 klar 2026-03-28: project profitability bär nu riktiga billing models for `fixed_price`, `time_and_material`, `milestone`, `retainer_capacity`, `subscription_service`, `advance_invoice` och `hybrid_change_order`, AP/HUS/approved manual adjustments matar cost- och profitability snapshots, `ProjectProfitabilityAdjustment` och `ProjectInvoiceReadinessAssessment` är first-class runtime/API-objekt, workspace/evidence bundle publicerar dem, change orders går nu `draft -> priced -> approved -> applied` och applied change orders superseder commercial chain via ny approved `RevenuePlan` och active `BillingPlan`; se `docs/runbooks/fas-14-3-project-billing-profitability-verification.md`.
 - 14.4 klar 2026-03-28: `ProjectCapacityReservation`, `ProjectAssignmentPlan`, `ProjectRisk` och company-wide project portfolio är nu first-class runtime/API-objekt, workspace/evidence bundle bär capacity/risk/portfolio-data, `status-updates` driver portfolio health, budget-vs-actual-vs-forecast materialiseras per projekt och i portfolio-summary, risk/warning-codes blockerar inte tyst och project API publicerar portfolio-, reservation-, assignment- och risk-routes med starka project-scope contracts; se `docs/runbooks/fas-14-4-resource-portfolio-risk-verification.md`.
 - 14.5 klar 2026-03-28: field-packet bar nu first-class `OperationalCase`, `MaterialReservation`, `MaterialUsage`, `FieldEvidence` och `ConflictRecord` ovanpa optional `work_order`-pack, work orders lacker inte langre in som universell modell, sync-policys anvander inte `server_wins` pa reglerade eller kostnadsdrivande objekt, invoice readiness blockeras av oppna conflicts och nya operational-case-routes publicerar reservations-, evidence- och conflict-resolution-floden med egna contracts; se `docs/runbooks/fas-14-5-field-operational-pack-verification.md`.
+- 14.7 klar 2026-03-28: project trial/demo-flöden är nu first-class runtime/API med publicerad scenariokatalog, scenario-materialisering till kanoniska project-commercial-objekt, governed CRM/project-importbatcher, trial-safe invoice simulations utan legal effekt, portable live conversion plans, workspace/evidence bundle som bär trial/import/simulation/conversion-objekt och verifieringsrunbook för end-to-end trial till live-promotion; se `docs/runbooks/fas-14-7-project-trial-demo-verification.md`.
 
 **Delfaser**
 - [x] 14.1 [HARDEN] **General project-commercial core** — Project, Engagement, WorkModel, WorkPackage, DeliveryMilestone, WorkLog, CostAllocation, RevenuePlan, ProfitabilitySnapshot, ProjectDeviation, ProjectEvidenceBundle.
@@ -931,7 +932,7 @@ Bygga projektfältet som generell projekt- och uppdragsmotor för alla branscher
 - [x] 14.4 [NEW BUILD] **Resource, portfolio och riskstyrning** — Capacity reservations, assignment planning, skills/roles, project portfolio, risk register, status updates, budget vs actual vs forecast.
 - [x] 14.5 [HARDEN] **Field/service/work-order pack** - OperationalCase, DispatchAssignment, MaterialUsage, FieldEvidence, SignatureRecord, SyncEnvelope, ConflictRecord. Work orders ska vara optional pack.
 - [x] 14.6 [HARDEN] **Personalliggare, ID06 och egenkontroll packs** — Attendance som separat sanning, ID06 identity graph, workplace bindings, checklist/signoff, construction pack som vertikal overlay.
-- [ ] 14.7 [NEW BUILD] **Project trial/demo flows och migration** — Seed project scenarios, import from CRM/project tools, client-ready demo data, safe invoicing simulation och eventual live conversion path.
+- [x] 14.7 [NEW BUILD] **Project trial/demo flows och migration** — Seed project scenarios, import from CRM/project tools, client-ready demo data, safe invoicing simulation och eventual live conversion path.
 
 **Exit gate**  
 - Project core fungerar för konsult, byrå, service, installation, maintenance, construction, campaign och supportprogram utan att tvinga byggsemantik på alla. Profitability är verklig. Field/personalliggare/ID06 är layer-packs.
@@ -1266,7 +1267,6 @@ Bevisa att backend-kontrakten bär verkliga kundscenarier, låsa UI-kontrakt och
 ## Slutregel
 
 Denna roadmap är den enda bindande byggordningen. Ingen implementation, ingen featuregren och ingen UI-plan får köra utanför denna ordning utan uttrycklig ändring i detta dokument.
-
 
 
 

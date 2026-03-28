@@ -6,6 +6,169 @@ import {
 } from "../../domain-core/src/state-snapshots.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const PROJECT_TRIAL_SCENARIO_VERSION = "2026.1";
+const PROJECT_LIVE_CONVERSION_VERSION = "2026.1";
+const PROJECT_IMPORT_SOURCE_SYSTEM_CODES = Object.freeze([
+  "hubspot",
+  "teamleader",
+  "monday",
+  "asana",
+  "clickup",
+  "zoho",
+  "odoo"
+]);
+const PROJECT_TRIAL_SCENARIOS = Object.freeze({
+  consulting_time_and_milestone: Object.freeze({
+    scenarioCode: "consulting_time_and_milestone",
+    tenantSeedScenarioCode: "consulting_time_and_milestone",
+    label: "Consulting time and milestone",
+    description: "Client-ready consulting project with milestone billing and time-based delivery proof.",
+    sortOrder: 10,
+    segmentCode: "consulting",
+    customerLegalName: "Consulting Trial Customer AB",
+    projectDisplayName: "Consulting delivery demo",
+    engagementDisplayName: "Consulting delivery engagement",
+    workModelTitle: "Consulting milestone delivery",
+    workPackageCode: "DISCOVERY_AND_DELIVERY",
+    workPackageTitle: "Discovery and delivery",
+    workPackageDescription: "Demo package for consulting discovery and delivery.",
+    milestoneTitle: "Milestone acceptance",
+    milestoneOffsetDays: 14,
+    deliveryWindowDays: 30,
+    contractValueAmount: 85000,
+    workModelCode: "milestone_only",
+    operationalPackCode: "general_core",
+    billingModelCode: "milestone",
+    revenueRecognitionModelCode: "over_time",
+    billingPlanFrequencyCode: "one_off",
+    billingPlanTriggerCode: "milestone_acceptance",
+    requiresMilestones: true,
+    requiresWorkOrders: false,
+    requiresAttendance: false,
+    requiresId06: false,
+    initialProgressPercent: 20,
+    demoSummaryText: "Consulting trial scenario materialized for milestone delivery.",
+    revenuePlanLines: Object.freeze([
+      Object.freeze({ offsetDays: 14, triggerTypeCode: "milestone_acceptance", amount: 85000, note: "Milestone revenue", useMilestone: true })
+    ]),
+    billingPlanLines: Object.freeze([
+      Object.freeze({ offsetDays: 14, triggerCode: "milestone_acceptance", amount: 85000, note: "Milestone invoice", useMilestone: true })
+    ])
+  }),
+  retainer_capacity_agency: Object.freeze({
+    scenarioCode: "retainer_capacity_agency",
+    tenantSeedScenarioCode: "retainer_capacity_agency",
+    label: "Retainer capacity agency",
+    description: "Agency/retainer project with recurring billing and safe demo capacity delivery.",
+    sortOrder: 20,
+    segmentCode: "agency",
+    customerLegalName: "Agency Trial Customer AB",
+    projectDisplayName: "Agency retainer demo",
+    engagementDisplayName: "Retainer capacity engagement",
+    workModelTitle: "Retainer capacity model",
+    workPackageCode: "MONTHLY_CAPACITY",
+    workPackageTitle: "Monthly capacity pool",
+    workPackageDescription: "Recurring retained capacity for trial customers.",
+    milestoneTitle: "Monthly checkpoint",
+    milestoneOffsetDays: 28,
+    deliveryWindowDays: 31,
+    contractValueAmount: 64000,
+    workModelCode: "retainer_capacity",
+    operationalPackCode: "general_core",
+    billingModelCode: "retainer_capacity",
+    revenueRecognitionModelCode: "over_time",
+    billingPlanFrequencyCode: "monthly",
+    billingPlanTriggerCode: "period_start",
+    requiresMilestones: false,
+    requiresWorkOrders: false,
+    requiresAttendance: false,
+    requiresId06: false,
+    initialProgressPercent: 10,
+    demoSummaryText: "Agency retainer scenario ready for recurring invoice simulation.",
+    revenuePlanLines: Object.freeze([
+      Object.freeze({ offsetDays: 0, triggerTypeCode: "period_start", amount: 32000, note: "Month 1 revenue", useMilestone: false }),
+      Object.freeze({ offsetDays: 31, triggerTypeCode: "period_start", amount: 32000, note: "Month 2 revenue", useMilestone: false })
+    ]),
+    billingPlanLines: Object.freeze([
+      Object.freeze({ offsetDays: 0, triggerCode: "period_start", amount: 32000, note: "Retainer month 1", useMilestone: false }),
+      Object.freeze({ offsetDays: 31, triggerCode: "period_start", amount: 32000, note: "Retainer month 2", useMilestone: false })
+    ])
+  }),
+  project_service_with_field_pack: Object.freeze({
+    scenarioCode: "project_service_with_field_pack",
+    tenantSeedScenarioCode: "project_service_with_field_pack",
+    label: "Project service with field pack",
+    description: "Service/field project with optional operational overlay and safe invoice preview.",
+    sortOrder: 30,
+    segmentCode: "service",
+    customerLegalName: "Field Trial Customer AB",
+    projectDisplayName: "Field service demo",
+    engagementDisplayName: "Field service engagement",
+    workModelTitle: "Service order optional field pack",
+    workPackageCode: "FIELD_DELIVERY",
+    workPackageTitle: "Field delivery package",
+    workPackageDescription: "Operational field work layered onto general project core.",
+    milestoneTitle: "Service completion checkpoint",
+    milestoneOffsetDays: 7,
+    deliveryWindowDays: 14,
+    contractValueAmount: 42000,
+    workModelCode: "service_order",
+    operationalPackCode: "field_service",
+    billingModelCode: "time_and_material",
+    revenueRecognitionModelCode: "billing_equals_revenue",
+    billingPlanFrequencyCode: "one_off",
+    billingPlanTriggerCode: "service_completion",
+    requiresMilestones: false,
+    requiresWorkOrders: true,
+    requiresAttendance: false,
+    requiresId06: false,
+    initialProgressPercent: 35,
+    demoSummaryText: "Field-service trial scenario created without legal effect.",
+    revenuePlanLines: Object.freeze([
+      Object.freeze({ offsetDays: 7, triggerTypeCode: "service_completion", amount: 42000, note: "Service completion revenue", useMilestone: false })
+    ]),
+    billingPlanLines: Object.freeze([
+      Object.freeze({ offsetDays: 7, triggerCode: "service_completion", amount: 42000, note: "Service completion invoice", useMilestone: false })
+    ])
+  }),
+  construction_service_pack: Object.freeze({
+    scenarioCode: "construction_service_pack",
+    tenantSeedScenarioCode: "construction_service_pack",
+    label: "Construction service pack",
+    description: "Construction/service project with vertical pack semantics but general core source of truth.",
+    sortOrder: 40,
+    segmentCode: "construction",
+    customerLegalName: "Construction Trial Customer AB",
+    projectDisplayName: "Construction service demo",
+    engagementDisplayName: "Construction engagement",
+    workModelTitle: "Construction stage delivery",
+    workPackageCode: "SITE_EXECUTION",
+    workPackageTitle: "Site execution package",
+    workPackageDescription: "Construction execution layered onto general project core.",
+    milestoneTitle: "Site stage acceptance",
+    milestoneOffsetDays: 21,
+    deliveryWindowDays: 45,
+    contractValueAmount: 145000,
+    workModelCode: "construction_stage",
+    operationalPackCode: "construction_overlay",
+    billingModelCode: "fixed_price",
+    revenueRecognitionModelCode: "over_time",
+    billingPlanFrequencyCode: "one_off",
+    billingPlanTriggerCode: "milestone_acceptance",
+    requiresMilestones: true,
+    requiresWorkOrders: true,
+    requiresAttendance: true,
+    requiresId06: true,
+    initialProgressPercent: 15,
+    demoSummaryText: "Construction trial scenario created with vertical packs but no legal effect.",
+    revenuePlanLines: Object.freeze([
+      Object.freeze({ offsetDays: 21, triggerTypeCode: "milestone_acceptance", amount: 145000, note: "Stage acceptance revenue", useMilestone: true })
+    ]),
+    billingPlanLines: Object.freeze([
+      Object.freeze({ offsetDays: 21, triggerCode: "milestone_acceptance", amount: 145000, note: "Stage acceptance invoice", useMilestone: true })
+    ])
+  })
+});
 
 export const PROJECT_STATUSES = Object.freeze(["draft", "active", "on_hold", "closed", "archived"]);
 export const PROJECT_BILLING_MODEL_CODES = Object.freeze([
@@ -66,6 +229,10 @@ export const PROJECT_CHANGE_ORDER_STATUSES = Object.freeze(["draft", "priced", "
 export const PROJECT_CHANGE_ORDER_SCOPE_CODES = Object.freeze(["change", "addition", "deduction"]);
 export const PROJECT_DEVIATION_STATUSES = Object.freeze(["open", "acknowledged", "in_progress", "resolved", "closed"]);
 export const PROJECT_DEVIATION_SEVERITY_CODES = Object.freeze(["minor", "major", "critical"]);
+export const PROJECT_TRIAL_SCENARIO_RUN_STATUSES = Object.freeze(["materialized", "archived"]);
+export const PROJECT_IMPORT_BATCH_STATUSES = Object.freeze(["draft", "committed", "superseded", "cancelled"]);
+export const PROJECT_INVOICE_SIMULATION_STATUSES = Object.freeze(["materialized", "superseded"]);
+export const PROJECT_LIVE_CONVERSION_PLAN_STATUSES = Object.freeze(["draft", "ready", "blocked", "superseded", "cancelled"]);
 
 export function createProjectsPlatform(options = {}) {
   return createProjectEngine(options);
@@ -128,6 +295,15 @@ export function createProjectEngine({
     projectDeviations: new Map(),
     projectDeviationIdsByCompany: new Map(),
     projectDeviationIdsByProject: new Map(),
+    projectTrialScenarioRuns: new Map(),
+    projectTrialScenarioRunIdsByCompany: new Map(),
+    projectTrialScenarioRunIdsByProject: new Map(),
+    projectImportBatches: new Map(),
+    projectImportBatchIdsByCompany: new Map(),
+    projectInvoiceSimulations: new Map(),
+    projectInvoiceSimulationIdsByProject: new Map(),
+    projectLiveConversionPlans: new Map(),
+    projectLiveConversionPlanIdsByProject: new Map(),
     auditEvents: []
   };
 
@@ -163,10 +339,19 @@ export function createProjectEngine({
     projectChangeOrderScopeCodes: PROJECT_CHANGE_ORDER_SCOPE_CODES,
     projectDeviationStatuses: PROJECT_DEVIATION_STATUSES,
     projectDeviationSeverityCodes: PROJECT_DEVIATION_SEVERITY_CODES,
+    projectTrialScenarioRunStatuses: PROJECT_TRIAL_SCENARIO_RUN_STATUSES,
+    projectImportBatchStatuses: PROJECT_IMPORT_BATCH_STATUSES,
+    projectInvoiceSimulationStatuses: PROJECT_INVOICE_SIMULATION_STATUSES,
+    projectLiveConversionPlanStatuses: PROJECT_LIVE_CONVERSION_PLAN_STATUSES,
     listProjects,
     getProject,
     getProjectWorkspace,
     createProject,
+    listProjectTrialScenarios,
+    materializeProjectTrialScenario,
+    listProjectImportBatches,
+    createProjectImportBatch,
+    commitProjectImportBatch,
     listProjectOpportunityLinks,
     createProjectOpportunityLink,
     listProjectQuoteLinks,
@@ -193,6 +378,10 @@ export function createProjectEngine({
     decideProjectProfitabilityAdjustment,
     listProjectInvoiceReadinessAssessments,
     materializeProjectInvoiceReadinessAssessment,
+    listProjectInvoiceSimulations,
+    createProjectInvoiceSimulation,
+    listProjectLiveConversionPlans,
+    createProjectLiveConversionPlan,
     convertQuoteToProject,
     listProjectProfitabilitySnapshots,
     materializeProjectProfitabilitySnapshot,
@@ -246,6 +435,13 @@ export function createProjectEngine({
 
   function getProject({ companyId, projectId } = {}) {
     return copy(requireProject(state, companyId, projectId));
+  }
+
+  function listProjectTrialScenarios({ companyId } = {}) {
+    requireText(companyId, "company_id_required");
+    return Object.values(PROJECT_TRIAL_SCENARIOS)
+      .map((scenario) => copy(scenario))
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.scenarioCode.localeCompare(right.scenarioCode));
   }
 
   function getProjectWorkspace({ companyId, projectId, cutoffDate = null } = {}) {
@@ -321,7 +517,24 @@ export function createProjectEngine({
       companyId: project.companyId,
       projectId: project.projectId
     });
+    const projectTrialScenarioRuns = listProjectTrialScenarioRuns({
+      companyId: project.companyId,
+      projectId: project.projectId
+    });
+    const projectImportBatches = listProjectImportBatches({
+      companyId: project.companyId
+    }).filter((batch) => (batch.importedProjectIds || []).includes(project.projectId));
+    const projectInvoiceSimulations = listProjectInvoiceSimulations({
+      companyId: project.companyId,
+      projectId: project.projectId
+    });
+    const projectLiveConversionPlans = listProjectLiveConversionPlans({
+      companyId: project.companyId,
+      projectId: project.projectId
+    });
     const openProjectDeviations = projectDeviations.filter((deviation) => !["resolved", "closed"].includes(deviation.status));
+    const currentProjectInvoiceSimulation = projectInvoiceSimulations.at(-1) || null;
+    const currentProjectLiveConversionPlan = projectLiveConversionPlans.at(-1) || null;
     const resourceCapacitySummary = buildProjectResourceCapacitySummary({
       currentCostSnapshot,
       capacityReservations,
@@ -394,6 +607,12 @@ export function createProjectEngine({
     if (resourceCapacitySummary.uncoveredAssignmentMinutes > 0) {
       warningCodes.push("capacity_assignment_gap");
     }
+    if (currentProjectInvoiceSimulation && currentProjectInvoiceSimulation.warningCodes.length > 0) {
+      warningCodes.push("invoice_simulation_attention_required");
+    }
+    if (currentProjectLiveConversionPlan?.status === "blocked") {
+      warningCodes.push("live_conversion_blocked");
+    }
     return {
       projectId: project.projectId,
       projectCode: project.projectCode,
@@ -426,6 +645,10 @@ export function createProjectEngine({
       workPackageCount: workPackages.length,
       deliveryMilestoneCount: deliveryMilestones.length,
       approvedRevenuePlanCount: revenuePlans.filter((record) => record.status === "approved").length,
+      trialScenarioRunCount: projectTrialScenarioRuns.length,
+      importBatchCount: projectImportBatches.length,
+      invoiceSimulationCount: projectInvoiceSimulations.length,
+      liveConversionPlanCount: projectLiveConversionPlans.length,
       openWorkOrderCount: fieldSummary.openWorkOrderCount,
       husCaseCount: husSummary.totalCaseCount,
       personalliggareAlertCount: personalliggareSummary.alertCount,
@@ -453,6 +676,8 @@ export function createProjectEngine({
       currentProfitabilitySnapshot: currentProfitabilitySnapshot ? copy(currentProfitabilitySnapshot) : null,
       currentBillingPlan: currentBillingPlan ? copy(currentBillingPlan) : null,
       currentInvoiceReadinessAssessment: currentInvoiceReadinessAssessment ? copy(currentInvoiceReadinessAssessment) : null,
+      currentProjectInvoiceSimulation: currentProjectInvoiceSimulation ? copy(currentProjectInvoiceSimulation) : null,
+      currentProjectLiveConversionPlan: currentProjectLiveConversionPlan ? copy(currentProjectLiveConversionPlan) : null,
       projectOpportunityLinks: opportunityLinks.map(copy),
       projectQuoteLinks: quoteLinks.map(copy),
       projectEngagements: engagements.map(copy),
@@ -467,6 +692,10 @@ export function createProjectEngine({
       projectRisks: projectRisks.map(copy),
       projectProfitabilityAdjustments: profitabilityAdjustments.map(copy),
       projectInvoiceReadinessAssessments: invoiceReadinessAssessments.map(copy),
+      projectTrialScenarioRuns: projectTrialScenarioRuns.map(copy),
+      projectImportBatches: projectImportBatches.map(copy),
+      projectInvoiceSimulations: projectInvoiceSimulations.map(copy),
+      projectLiveConversionPlans: projectLiveConversionPlans.map(copy),
       complianceIndicatorStrip: buildWorkspaceIndicatorStrip({
         currentBudgetVersion,
         currentCostSnapshot,
@@ -600,6 +829,454 @@ export function createProjectEngine({
       explanation: `Created project ${record.projectCode}.`
     });
     return copy(record);
+  }
+
+  function listProjectTrialScenarioRuns({ companyId, projectId = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedProjectId = normalizeOptionalText(projectId);
+    const ids = resolvedProjectId
+      ? state.projectTrialScenarioRunIdsByProject.get(requireProject(state, resolvedCompanyId, resolvedProjectId).projectId) || []
+      : state.projectTrialScenarioRunIdsByCompany.get(resolvedCompanyId) || [];
+    return ids
+      .map((projectTrialScenarioRunId) => state.projectTrialScenarioRuns.get(projectTrialScenarioRunId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.projectTrialScenarioRunId.localeCompare(right.projectTrialScenarioRunId))
+      .map(copy);
+  }
+
+  function materializeProjectTrialScenario({
+    companyId,
+    scenarioCode,
+    projectTrialScenarioRunId = null,
+    projectCode = null,
+    projectReferenceCode = null,
+    trialEnvironmentProfileId = null,
+    startsOn = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const scenario = requireProjectTrialScenarioDefinition(scenarioCode);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const projectStartDate = normalizeOptionalDate(startsOn, "project_trial_scenario_starts_on_invalid") || currentDateString(clock);
+    const customerId = ensureProjectScenarioCustomer({
+      companyId: resolvedCompanyId,
+      scenario,
+      actorId: resolvedActorId
+    });
+    const project = createProject({
+      companyId: resolvedCompanyId,
+      projectCode: projectCode || generateProjectCode(state, resolvedCompanyId),
+      projectReferenceCode: projectReferenceCode || `trial-${toProjectSlug(`${scenario.scenarioCode}-${projectStartDate}`)}`,
+      displayName: scenario.projectDisplayName,
+      customerId,
+      startsOn: projectStartDate,
+      endsOn: null,
+      currencyCode: "SEK",
+      status: "active",
+      billingModelCode: scenario.billingModelCode,
+      revenueRecognitionModelCode: scenario.revenueRecognitionModelCode,
+      contractValueAmount: scenario.contractValueAmount,
+      actorId: resolvedActorId,
+      correlationId
+    });
+    const engagement = createProjectEngagement({
+      companyId: resolvedCompanyId,
+      projectId: project.projectId,
+      displayName: scenario.engagementDisplayName,
+      customerId,
+      workModelCode: scenario.workModelCode,
+      startsOn: projectStartDate,
+      status: "active",
+      actorId: resolvedActorId,
+      correlationId
+    });
+    const workModel = createProjectWorkModel({
+      companyId: resolvedCompanyId,
+      projectId: project.projectId,
+      projectEngagementId: engagement.projectEngagementId,
+      modelCode: scenario.workModelCode,
+      title: scenario.workModelTitle,
+      operationalPackCode: scenario.operationalPackCode,
+      requiresWorkOrders: scenario.requiresWorkOrders === true,
+      requiresMilestones: scenario.requiresMilestones === true,
+      requiresAttendance: scenario.requiresAttendance === true,
+      requiresId06: scenario.requiresId06 === true,
+      actorId: resolvedActorId,
+      correlationId
+    });
+    const workPackage = createProjectWorkPackage({
+      companyId: resolvedCompanyId,
+      projectId: project.projectId,
+      projectEngagementId: engagement.projectEngagementId,
+      projectWorkModelId: workModel.projectWorkModelId,
+      workPackageCode: scenario.workPackageCode,
+      title: scenario.workPackageTitle,
+      description: scenario.workPackageDescription,
+      startsOn: projectStartDate,
+      endsOn: addDaysToDate(projectStartDate, scenario.deliveryWindowDays),
+      status: "active",
+      actorId: resolvedActorId,
+      correlationId
+    });
+    const deliveryMilestone = createProjectDeliveryMilestone({
+      companyId: resolvedCompanyId,
+      projectId: project.projectId,
+      projectWorkPackageId: workPackage.projectWorkPackageId,
+      title: scenario.milestoneTitle,
+      targetDate: addDaysToDate(projectStartDate, scenario.milestoneOffsetDays),
+      plannedRevenueAmount: scenario.contractValueAmount,
+      status: scenario.requiresMilestones ? "ready" : "planned",
+      actorId: resolvedActorId,
+      correlationId
+    });
+    const revenuePlan = approveProjectRevenuePlan({
+      companyId: resolvedCompanyId,
+      projectId: project.projectId,
+      projectRevenuePlanId: createProjectRevenuePlan({
+        companyId: resolvedCompanyId,
+        projectId: project.projectId,
+        versionLabel: `${scenario.label} demo revenue`,
+        lines: scenario.revenuePlanLines.map((line) => ({
+          recognitionDate: addDaysToDate(projectStartDate, line.offsetDays),
+          triggerTypeCode: line.triggerTypeCode,
+          amount: line.amount,
+          note: line.note,
+          projectWorkPackageId: workPackage.projectWorkPackageId,
+          projectDeliveryMilestoneId: line.useMilestone ? deliveryMilestone.projectDeliveryMilestoneId : null
+        })),
+        actorId: resolvedActorId,
+        correlationId
+      }).projectRevenuePlanId,
+      actorId: resolvedActorId,
+      correlationId
+    });
+    const billingPlan = createProjectBillingPlan({
+      companyId: resolvedCompanyId,
+      projectId: project.projectId,
+      frequencyCode: scenario.billingPlanFrequencyCode,
+      triggerCode: scenario.billingPlanTriggerCode,
+      startsOn: projectStartDate,
+      status: "active",
+      lines: scenario.billingPlanLines.map((line) => ({
+        plannedInvoiceDate: addDaysToDate(projectStartDate, line.offsetDays),
+        amount: line.amount,
+        triggerCode: line.triggerCode,
+        note: line.note,
+        projectWorkPackageId: workPackage.projectWorkPackageId,
+        projectDeliveryMilestoneId: line.useMilestone ? deliveryMilestone.projectDeliveryMilestoneId : null
+      })),
+      actorId: resolvedActorId,
+      correlationId
+    });
+    const statusUpdate = createProjectStatusUpdate({
+      companyId: resolvedCompanyId,
+      projectId: project.projectId,
+      statusDate: projectStartDate,
+      healthCode: "green",
+      progressPercent: scenario.initialProgressPercent,
+      blockerCodes: [],
+      note: scenario.demoSummaryText,
+      sourceSystemCode: "project_trial_scenario",
+      externalStatusRef: scenario.scenarioCode,
+      actorId: resolvedActorId,
+      correlationId
+    });
+    const record = {
+      projectTrialScenarioRunId: projectTrialScenarioRunId || crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      projectId: project.projectId,
+      scenarioCode: scenario.scenarioCode,
+      label: scenario.label,
+      trialEnvironmentProfileId: normalizeOptionalText(trialEnvironmentProfileId),
+      tenantSeedScenarioCode: scenario.tenantSeedScenarioCode,
+      supportsLegalEffect: false,
+      legalEffectFlag: false,
+      clientReadyFlag: true,
+      safeInvoicingSimulationFlag: true,
+      sourceManifestVersion: PROJECT_TRIAL_SCENARIO_VERSION,
+      sourceManifestHash: hashObject({
+        scenarioCode: scenario.scenarioCode,
+        projectId: project.projectId,
+        startsOn: projectStartDate
+      }),
+      createdObjectRefs: [
+        { objectType: "project", objectId: project.projectId },
+        { objectType: "project_engagement", objectId: engagement.projectEngagementId },
+        { objectType: "project_work_model", objectId: workModel.projectWorkModelId },
+        { objectType: "project_work_package", objectId: workPackage.projectWorkPackageId },
+        { objectType: "project_delivery_milestone", objectId: deliveryMilestone.projectDeliveryMilestoneId },
+        { objectType: "project_revenue_plan", objectId: revenuePlan.projectRevenuePlanId },
+        { objectType: "project_billing_plan", objectId: billingPlan.projectBillingPlanId },
+        { objectType: "project_status_update", objectId: statusUpdate.projectStatusUpdateId }
+      ],
+      status: "materialized",
+      createdByActorId: resolvedActorId,
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.projectTrialScenarioRuns.set(record.projectTrialScenarioRunId, record);
+    appendToIndex(state.projectTrialScenarioRunIdsByCompany, record.companyId, record.projectTrialScenarioRunId);
+    appendToIndex(state.projectTrialScenarioRunIdsByProject, record.projectId, record.projectTrialScenarioRunId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "project.trial_scenario.materialized",
+      entityType: "project_trial_scenario_run",
+      entityId: record.projectTrialScenarioRunId,
+      projectId: record.projectId,
+      metadata: {
+        scenarioCode: record.scenarioCode,
+        trialEnvironmentProfileId: record.trialEnvironmentProfileId,
+        createdObjectCount: record.createdObjectRefs.length
+      }
+    });
+    return copy({
+      ...record,
+      project,
+      engagement,
+      workModel,
+      workPackage,
+      deliveryMilestone,
+      revenuePlan,
+      billingPlan,
+      statusUpdate
+    });
+  }
+
+  function listProjectImportBatches({ companyId, status = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = normalizeOptionalText(status);
+    return (state.projectImportBatchIdsByCompany.get(resolvedCompanyId) || [])
+      .map((projectImportBatchId) => state.projectImportBatches.get(projectImportBatchId))
+      .filter(Boolean)
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.projectImportBatchId.localeCompare(right.projectImportBatchId))
+      .map(copy);
+  }
+
+  function createProjectImportBatch({
+    companyId,
+    projectImportBatchId = null,
+    sourceSystemCode,
+    batchTypeCode = "project_migration",
+    importModeCode = "trial_seed",
+    sourceExportCapturedAt = null,
+    sourcePayload = [],
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedSourceSystemCode = normalizeImportSourceSystemCode(sourceSystemCode);
+    const normalizedPayload = normalizeProjectImportPayload(sourcePayload, { clock });
+    const record = {
+      projectImportBatchId: projectImportBatchId || crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      sourceSystemCode: resolvedSourceSystemCode,
+      batchTypeCode: normalizeCode(batchTypeCode, "project_import_batch_type_required").toLowerCase(),
+      importModeCode: normalizeCode(importModeCode, "project_import_mode_required").toLowerCase(),
+      sourceExportCapturedAt: normalizeOptionalDate(sourceExportCapturedAt, "project_import_export_captured_at_invalid"),
+      sourcePayload: normalizedPayload,
+      payloadHash: hashObject(normalizedPayload),
+      payloadRecordCount: normalizedPayload.length,
+      importedProjectIds: [],
+      importedProjectRefs: [],
+      warningCodes: normalizedPayload.length === 0 ? ["empty_payload"] : [],
+      status: "draft",
+      committedAt: null,
+      committedByActorId: null,
+      createdByActorId: resolvedActorId,
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.projectImportBatches.set(record.projectImportBatchId, record);
+    appendToIndex(state.projectImportBatchIdsByCompany, record.companyId, record.projectImportBatchId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "project.import_batch.created",
+      entityType: "project_import_batch",
+      entityId: record.projectImportBatchId,
+      metadata: {
+        sourceSystemCode: record.sourceSystemCode,
+        payloadRecordCount: record.payloadRecordCount,
+        importModeCode: record.importModeCode
+      }
+    });
+    return copy(record);
+  }
+
+  function commitProjectImportBatch({
+    companyId,
+    projectImportBatchId,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const batch = requireProjectImportBatch(companyId, projectImportBatchId);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    if (batch.status === "committed") {
+      return copy(batch);
+    }
+    if (batch.status !== "draft") {
+      throw createError(409, "project_import_batch_not_committable", "Project import batch cannot be committed.");
+    }
+    const importedProjectRefs = [];
+    for (const record of batch.sourcePayload) {
+      const customerId = ensureImportedProjectCustomer({
+        companyId: batch.companyId,
+        importRecord: record,
+        actorId: resolvedActorId
+      });
+      const project = createProject({
+        companyId: batch.companyId,
+        projectCode: record.projectCode || generateProjectCode(state, batch.companyId),
+        projectReferenceCode: record.projectReferenceCode || `import-${toProjectSlug(`${record.sourceSystemCode}-${record.externalProjectId}`)}`,
+        displayName: record.displayName,
+        customerId,
+        startsOn: record.startsOn,
+        endsOn: record.endsOn,
+        status: "active",
+        billingModelCode: record.billingModelCode,
+        revenueRecognitionModelCode: record.revenueRecognitionModelCode,
+        contractValueAmount: record.contractValueAmount,
+        actorId: resolvedActorId,
+        correlationId
+      });
+      const engagement = createProjectEngagement({
+        companyId: batch.companyId,
+        projectId: project.projectId,
+        displayName: record.engagementDisplayName,
+        customerId,
+        workModelCode: record.workModelCode,
+        startsOn: record.startsOn,
+        endsOn: record.endsOn,
+        status: "active",
+        externalOpportunityRef: record.externalOpportunityRef,
+        externalQuoteRef: record.externalQuoteRef,
+        actorId: resolvedActorId,
+        correlationId
+      });
+      const workModel = createProjectWorkModel({
+        companyId: batch.companyId,
+        projectId: project.projectId,
+        projectEngagementId: engagement.projectEngagementId,
+        modelCode: record.workModelCode,
+        title: record.workModelTitle,
+        operationalPackCode: record.operationalPackCode,
+        requiresWorkOrders: record.requiresWorkOrders === true,
+        requiresMilestones: record.requiresMilestones === true,
+        requiresAttendance: record.requiresAttendance === true,
+        requiresId06: record.requiresId06 === true,
+        actorId: resolvedActorId,
+        correlationId
+      });
+      if (record.externalOpportunityId) {
+        createProjectOpportunityLink({
+          companyId: batch.companyId,
+          projectId: project.projectId,
+          externalSystemCode: batch.sourceSystemCode,
+          externalOpportunityId: record.externalOpportunityId,
+          externalOpportunityRef: record.externalOpportunityRef,
+          customerId,
+          actorId: resolvedActorId,
+          correlationId
+        });
+      }
+      if (record.externalQuoteRef || record.sourceQuoteId) {
+        createProjectQuoteLink({
+          companyId: batch.companyId,
+          projectId: project.projectId,
+          sourceQuoteId: record.sourceQuoteId,
+          externalSystemCode: batch.sourceSystemCode,
+          externalQuoteRef: record.externalQuoteRef,
+          acceptedOn: record.quoteAcceptedOn,
+          customerId,
+          actorId: resolvedActorId,
+          correlationId
+        });
+      }
+      const workPackage = createProjectWorkPackage({
+        companyId: batch.companyId,
+        projectId: project.projectId,
+        projectEngagementId: engagement.projectEngagementId,
+        projectWorkModelId: workModel.projectWorkModelId,
+        workPackageCode: record.workPackageCode,
+        title: record.workPackageTitle,
+        description: record.workPackageDescription,
+        startsOn: record.startsOn,
+        endsOn: record.endsOn,
+        status: "active",
+        actorId: resolvedActorId,
+        correlationId
+      });
+      if (record.deliveryMilestoneTitle) {
+        createProjectDeliveryMilestone({
+          companyId: batch.companyId,
+          projectId: project.projectId,
+          projectWorkPackageId: workPackage.projectWorkPackageId,
+          title: record.deliveryMilestoneTitle,
+          targetDate: record.deliveryMilestoneDate || record.startsOn,
+          plannedRevenueAmount: record.contractValueAmount,
+          status: record.requiresMilestones ? "ready" : "planned",
+          actorId: resolvedActorId,
+          correlationId
+        });
+      }
+      if (record.billingPlanLines.length > 0) {
+        createProjectBillingPlan({
+          companyId: batch.companyId,
+          projectId: project.projectId,
+          frequencyCode: record.billingPlanFrequencyCode,
+          triggerCode: record.billingPlanTriggerCode,
+          startsOn: record.startsOn,
+          status: "active",
+          lines: record.billingPlanLines,
+          actorId: resolvedActorId,
+          correlationId
+        });
+      }
+      createProjectStatusUpdate({
+        companyId: batch.companyId,
+        projectId: project.projectId,
+        statusDate: record.startsOn,
+        healthCode: "green",
+        progressPercent: 0,
+        blockerCodes: [],
+        note: `Imported from ${batch.sourceSystemCode}`,
+        sourceSystemCode: batch.sourceSystemCode,
+        externalStatusRef: record.externalProjectId,
+        actorId: resolvedActorId,
+        correlationId
+      });
+      importedProjectRefs.push({
+        projectId: project.projectId,
+        projectCode: project.projectCode,
+        externalProjectId: record.externalProjectId,
+        sourceSystemCode: batch.sourceSystemCode
+      });
+    }
+    batch.status = "committed";
+    batch.importedProjectIds = importedProjectRefs.map((record) => record.projectId);
+    batch.importedProjectRefs = importedProjectRefs;
+    batch.committedAt = nowIso(clock);
+    batch.committedByActorId = resolvedActorId;
+    batch.updatedAt = batch.committedAt;
+    pushAudit(state, clock, {
+      companyId: batch.companyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "project.import_batch.committed",
+      entityType: "project_import_batch",
+      entityId: batch.projectImportBatchId,
+      metadata: {
+        sourceSystemCode: batch.sourceSystemCode,
+        importedProjectCount: batch.importedProjectIds.length
+      }
+    });
+    return copy(batch);
   }
 
   function listProjectOpportunityLinks({ companyId, projectId } = {}) {
@@ -1441,6 +2118,197 @@ export function createProjectEngine({
       entityId: record.projectInvoiceReadinessAssessmentId,
       projectId: record.projectId,
       explanation: `Assessed invoice readiness for ${project.projectCode} at ${record.cutoffDate}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectInvoiceSimulations({ companyId, projectId } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    return (state.projectInvoiceSimulationIdsByProject.get(project.projectId) || [])
+      .map((projectInvoiceSimulationId) => state.projectInvoiceSimulations.get(projectInvoiceSimulationId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.projectInvoiceSimulationId.localeCompare(right.projectInvoiceSimulationId))
+      .map(copy);
+  }
+
+  function createProjectInvoiceSimulation({
+    companyId,
+    projectId,
+    projectInvoiceSimulationId = null,
+    cutoffDate = null,
+    simulationModeCode = "trial_safe_preview",
+    includeChangeOrders = true,
+    includeBillingPlan = true,
+    includeWorkLogs = true,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedCutoffDate = normalizeOptionalDate(cutoffDate, "project_invoice_simulation_cutoff_invalid") || currentDateString(clock);
+    const invoiceReadinessAssessments = listProjectInvoiceReadinessAssessments({
+      companyId: project.companyId,
+      projectId: project.projectId
+    });
+    const currentReadinessAssessment = selectWorkspaceSnapshot(invoiceReadinessAssessments, resolvedCutoffDate, "assessedAt");
+    const simulation = buildProjectInvoiceSimulation({
+      state,
+      project,
+      cutoffDate: resolvedCutoffDate,
+      simulationModeCode,
+      includeChangeOrders,
+      includeBillingPlan,
+      includeWorkLogs,
+      currentReadinessAssessment
+    });
+    const record = {
+      projectInvoiceSimulationId: projectInvoiceSimulationId || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      simulationModeCode: normalizeCode(simulationModeCode, "project_invoice_simulation_mode_required").toLowerCase(),
+      cutoffDate: resolvedCutoffDate,
+      status: "materialized",
+      legalEffectFlag: false,
+      supportsLegalEffect: false,
+      providerDispatchAllowedFlag: false,
+      currencyCode: project.currencyCode,
+      sourceSummary: simulation.sourceSummary,
+      warningCodes: simulation.warningCodes,
+      blockingIssueCodes: simulation.blockingIssueCodes,
+      lines: simulation.lines,
+      totals: simulation.totals,
+      previewInvoiceRef: simulation.previewInvoiceRef,
+      readinessStatus: currentReadinessAssessment?.status || null,
+      createdByActorId: resolvedActorId,
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.projectInvoiceSimulations.set(record.projectInvoiceSimulationId, record);
+    appendToIndex(state.projectInvoiceSimulationIdsByProject, record.projectId, record.projectInvoiceSimulationId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "project.invoice_simulation.materialized",
+      entityType: "project_invoice_simulation",
+      entityId: record.projectInvoiceSimulationId,
+      projectId: record.projectId,
+      metadata: {
+        cutoffDate: record.cutoffDate,
+        totalAmount: record.totals.totalAmount,
+        warningCodes: record.warningCodes
+      }
+    });
+    return copy(record);
+  }
+
+  function listProjectLiveConversionPlans({ companyId, projectId } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    return (state.projectLiveConversionPlanIdsByProject.get(project.projectId) || [])
+      .map((projectLiveConversionPlanId) => state.projectLiveConversionPlans.get(projectLiveConversionPlanId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.projectLiveConversionPlanId.localeCompare(right.projectLiveConversionPlanId))
+      .map(copy);
+  }
+
+  function createProjectLiveConversionPlan({
+    companyId,
+    projectId,
+    projectLiveConversionPlanId = null,
+    trialEnvironmentProfileId = null,
+    projectTrialScenarioRunId = null,
+    projectImportBatchId = null,
+    projectInvoiceSimulationId = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const trialScenarioRun = projectTrialScenarioRunId
+      ? requireProjectTrialScenarioRun(project.companyId, project.projectId, projectTrialScenarioRunId)
+      : (listProjectTrialScenarioRuns({ companyId: project.companyId, projectId: project.projectId }).at(-1) || null);
+    const importBatch = projectImportBatchId
+      ? requireProjectImportBatch(project.companyId, projectImportBatchId)
+      : findLatestProjectImportBatchForProject({ companyId: project.companyId, projectId: project.projectId });
+    const invoiceSimulation = projectInvoiceSimulationId
+      ? requireProjectInvoiceSimulation(project.companyId, project.projectId, projectInvoiceSimulationId)
+      : (listProjectInvoiceSimulations({ companyId: project.companyId, projectId: project.projectId }).at(-1) || null);
+    const portableDataBundle = buildProjectLiveConversionPortableBundle({
+      state,
+      project,
+      trialScenarioRun,
+      importBatch
+    });
+    const blockingIssueCodes = [];
+    const warningCodes = [];
+    if (!project.customerId) {
+      blockingIssueCodes.push("customer_missing");
+    }
+    if ((portableDataBundle.billingPlans || []).length === 0) {
+      blockingIssueCodes.push("billing_plan_missing");
+    }
+    if ((portableDataBundle.workModels || []).length === 0) {
+      blockingIssueCodes.push("work_model_missing");
+    }
+    if (!invoiceSimulation) {
+      warningCodes.push("invoice_simulation_missing");
+    }
+    if (project.status !== "active") {
+      warningCodes.push("project_not_active");
+    }
+    const record = {
+      projectLiveConversionPlanId: projectLiveConversionPlanId || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      trialEnvironmentProfileId: normalizeOptionalText(trialEnvironmentProfileId),
+      sourceProjectTrialScenarioRunId: trialScenarioRun?.projectTrialScenarioRunId || null,
+      sourceProjectImportBatchId: importBatch?.projectImportBatchId || null,
+      sourceProjectInvoiceSimulationId: invoiceSimulation?.projectInvoiceSimulationId || null,
+      status: blockingIssueCodes.length > 0 ? "blocked" : "ready",
+      carryOverPolicyCode: "portable_project_masterdata_only",
+      portableObjectTypes: [
+        "project",
+        "project_engagement",
+        "project_work_model",
+        "project_work_package",
+        "project_delivery_milestone",
+        "project_billing_plan",
+        "project_status_update",
+        "project_budget_version",
+        "project_resource_allocation"
+      ],
+      forbiddenArtifactCodes: [
+        "project_invoice_simulation",
+        "trial_receipt",
+        "trial_provider_ref",
+        "project_import_source_payload",
+        "trial_evidence_bundle"
+      ],
+      requiresTrialPromotion: normalizeOptionalText(trialEnvironmentProfileId) != null,
+      recommendationCode: normalizeOptionalText(trialEnvironmentProfileId) ? "trial_to_live_promotion" : "project_bundle_import",
+      blockingIssueCodes,
+      warningCodes,
+      portableDataBundle,
+      sourceSnapshotHash: hashObject(portableDataBundle),
+      createdByActorId: resolvedActorId,
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.projectLiveConversionPlans.set(record.projectLiveConversionPlanId, record);
+    appendToIndex(state.projectLiveConversionPlanIdsByProject, record.projectId, record.projectLiveConversionPlanId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "project.live_conversion_plan.created",
+      entityType: "project_live_conversion_plan",
+      entityId: record.projectLiveConversionPlanId,
+      projectId: record.projectId,
+      metadata: {
+        status: record.status,
+        recommendationCode: record.recommendationCode,
+        blockingIssueCodes: record.blockingIssueCodes
+      }
     });
     return copy(record);
   }
@@ -3033,9 +3901,15 @@ function exportProjectEvidenceBundle({
       projectRisks: copy(workspace.projectRisks || []),
       projectProfitabilityAdjustments: copy(workspace.projectProfitabilityAdjustments || []),
       projectInvoiceReadinessAssessments: copy(workspace.projectInvoiceReadinessAssessments || []),
+      projectTrialScenarioRuns: copy(workspace.projectTrialScenarioRuns || []),
+      projectImportBatches: copy(workspace.projectImportBatches || []),
+      projectInvoiceSimulations: copy(workspace.projectInvoiceSimulations || []),
+      projectLiveConversionPlans: copy(workspace.projectLiveConversionPlans || []),
       currentProfitabilitySnapshot: copy(workspace.currentProfitabilitySnapshot),
       currentBillingPlan: copy(workspace.currentBillingPlan),
       currentInvoiceReadinessAssessment: copy(workspace.currentInvoiceReadinessAssessment),
+      currentProjectInvoiceSimulation: copy(workspace.currentProjectInvoiceSimulation),
+      currentProjectLiveConversionPlan: copy(workspace.currentProjectLiveConversionPlan),
       budgetActualForecastSummary: copy(workspace.budgetActualForecastSummary),
       resourceCapacitySummary: copy(workspace.resourceCapacitySummary),
       currentPortfolioNode: copy(workspace.currentPortfolioNode),
@@ -3106,6 +3980,26 @@ function exportProjectEvidenceBundle({
             severityCode: risk.severityCode
           }),
           roleCode: risk.severityCode
+        })),
+        ...(workspace.projectInvoiceSimulations || []).map((simulation) => ({
+          artifactType: "project_invoice_simulation",
+          artifactRef: simulation.projectInvoiceSimulationId,
+          checksum: hashObject({
+            projectInvoiceSimulationId: simulation.projectInvoiceSimulationId,
+            cutoffDate: simulation.cutoffDate,
+            totalAmount: simulation.totals?.totalAmount || 0
+          }),
+          roleCode: "trial_safe_preview"
+        })),
+        ...(workspace.projectLiveConversionPlans || []).map((plan) => ({
+          artifactType: "project_live_conversion_plan",
+          artifactRef: plan.projectLiveConversionPlanId,
+          checksum: hashObject({
+            projectLiveConversionPlanId: plan.projectLiveConversionPlanId,
+            status: plan.status,
+            sourceSnapshotHash: plan.sourceSnapshotHash
+          }),
+          roleCode: plan.status
         }))
       ],
       auditRefs: projectAuditEvents.map((event) => ({
@@ -3139,6 +4033,14 @@ function exportProjectEvidenceBundle({
           objectType: "project_risk",
           objectId: risk.projectRiskId
         })),
+        (workspace.projectInvoiceSimulations || []).map((simulation) => ({
+          objectType: "project_invoice_simulation",
+          objectId: simulation.projectInvoiceSimulationId
+        })),
+        (workspace.projectLiveConversionPlans || []).map((plan) => ({
+          objectType: "project_live_conversion_plan",
+          objectId: plan.projectLiveConversionPlanId
+        })),
         workspace.currentInvoiceReadinessAssessment
           ? [
               {
@@ -3168,6 +4070,279 @@ function exportProjectEvidenceBundle({
 
   function importDurableState(snapshot) {
     applyDurableStateSnapshot(state, snapshot);
+  }
+
+  function requireProjectTrialScenarioDefinition(scenarioCode) {
+    const resolvedScenarioCode = normalizeOptionalText(scenarioCode);
+    const definition = resolvedScenarioCode ? PROJECT_TRIAL_SCENARIOS[resolvedScenarioCode] || null : null;
+    if (!definition) {
+      throw createError(404, "project_trial_scenario_not_found", "Project trial scenario was not found.");
+    }
+    return definition;
+  }
+
+  function ensureProjectScenarioCustomer({ companyId, scenario, actorId }) {
+    if (!arPlatform?.createCustomer) {
+      return null;
+    }
+    return arPlatform.createCustomer({
+      companyId,
+      legalName: scenario.customerLegalName,
+      organizationNumber: nextProjectSyntheticOrgNumber(companyId, scenario.scenarioCode),
+      countryCode: "SE",
+      languageCode: "SV",
+      currencyCode: "SEK",
+      paymentTermsCode: "NET30",
+      invoiceDeliveryMethod: "pdf_email",
+      reminderProfileCode: "standard",
+      billingAddress: {
+        line1: "Trialgatan 1",
+        postalCode: "11157",
+        city: "Stockholm",
+        countryCode: "SE"
+      },
+      deliveryAddress: {
+        line1: "Trialgatan 1",
+        postalCode: "11157",
+        city: "Stockholm",
+        countryCode: "SE"
+      },
+      actorId
+    }).customerId;
+  }
+
+  function ensureImportedProjectCustomer({ companyId, importRecord, actorId }) {
+    if (!importRecord.customerLegalName || !arPlatform?.createCustomer) {
+      return null;
+    }
+    return arPlatform.createCustomer({
+      companyId,
+      legalName: importRecord.customerLegalName,
+      organizationNumber: importRecord.customerOrganizationNumber || nextProjectSyntheticOrgNumber(companyId, importRecord.externalProjectId),
+      countryCode: "SE",
+      languageCode: "SV",
+      currencyCode: "SEK",
+      paymentTermsCode: "NET30",
+      invoiceDeliveryMethod: "pdf_email",
+      reminderProfileCode: "standard",
+      billingAddress: {
+        line1: "Importgatan 1",
+        postalCode: "11157",
+        city: "Stockholm",
+        countryCode: "SE"
+      },
+      deliveryAddress: {
+        line1: "Importgatan 1",
+        postalCode: "11157",
+        city: "Stockholm",
+        countryCode: "SE"
+      },
+      actorId
+    }).customerId;
+  }
+
+  function requireProjectImportBatch(companyId, projectImportBatchId) {
+    const record = state.projectImportBatches.get(requireText(projectImportBatchId, "project_import_batch_id_required"));
+    if (!record || record.companyId !== requireText(companyId, "company_id_required")) {
+      throw createError(404, "project_import_batch_not_found", "Project import batch was not found.");
+    }
+    return record;
+  }
+
+  function requireProjectTrialScenarioRun(companyId, projectId, projectTrialScenarioRunId) {
+    const record = state.projectTrialScenarioRuns.get(requireText(projectTrialScenarioRunId, "project_trial_scenario_run_id_required"));
+    if (
+      !record
+      || record.companyId !== requireText(companyId, "company_id_required")
+      || record.projectId !== requireText(projectId, "project_id_required")
+    ) {
+      throw createError(404, "project_trial_scenario_run_not_found", "Project trial scenario run was not found.");
+    }
+    return record;
+  }
+
+  function requireProjectInvoiceSimulation(companyId, projectId, projectInvoiceSimulationId) {
+    const record = state.projectInvoiceSimulations.get(requireText(projectInvoiceSimulationId, "project_invoice_simulation_id_required"));
+    if (
+      !record
+      || record.companyId !== requireText(companyId, "company_id_required")
+      || record.projectId !== requireText(projectId, "project_id_required")
+    ) {
+      throw createError(404, "project_invoice_simulation_not_found", "Project invoice simulation was not found.");
+    }
+    return record;
+  }
+
+  function findLatestProjectImportBatchForProject({ companyId, projectId }) {
+    return listProjectImportBatches({ companyId })
+      .filter((record) => (record.importedProjectIds || []).includes(projectId))
+      .at(-1) || null;
+  }
+
+  function buildProjectInvoiceSimulation({
+    state,
+    project,
+    cutoffDate,
+    simulationModeCode,
+    includeChangeOrders,
+    includeBillingPlan,
+    includeWorkLogs,
+    currentReadinessAssessment
+  }) {
+    const lines = [];
+    const warningCodes = [];
+    const blockingIssueCodes = [];
+    const billingPlans = includeBillingPlan
+      ? listProjectBillingPlans({ companyId: project.companyId, projectId: project.projectId })
+      : [];
+    const activeBillingPlans = billingPlans.filter((record) => record.status === "active");
+    if (activeBillingPlans.length > 0) {
+      for (const billingPlan of activeBillingPlans) {
+        for (const line of billingPlan.lines || []) {
+          if (line.plannedInvoiceDate <= cutoffDate) {
+            lines.push({
+              sourceType: "billing_plan",
+              sourceId: billingPlan.projectBillingPlanId,
+              description: line.note || `Planned invoice ${line.plannedInvoiceDate}`,
+              quantity: 1,
+              unitCode: "each",
+              unitPriceAmount: roundMoney(line.amount),
+              lineAmount: roundMoney(line.amount),
+              plannedInvoiceDate: line.plannedInvoiceDate
+            });
+          }
+        }
+      }
+    }
+    if (includeWorkLogs && ["time_and_material", "retainer_capacity"].includes(project.billingModelCode)) {
+      const workLogs = listProjectWorkLogs({ companyId: project.companyId, projectId: project.projectId })
+        .filter((record) => record.billableFlag !== false && record.status === "approved" && record.workDate <= cutoffDate);
+      for (const workLog of workLogs) {
+        const billRateAmount = resolveProjectBillRateForDate({
+          state,
+          projectId: project.projectId,
+          workDate: workLog.workDate
+        });
+        if (billRateAmount == null) {
+          warningCodes.push("bill_rate_missing_for_work_log");
+          continue;
+        }
+        const hours = roundMoney(Number(workLog.minutes || 0) / 60);
+        lines.push({
+          sourceType: "work_log",
+          sourceId: workLog.projectWorkLogId,
+          description: workLog.description,
+          quantity: hours,
+          unitCode: "hour",
+          unitPriceAmount: billRateAmount,
+          lineAmount: roundMoney(hours * billRateAmount),
+          plannedInvoiceDate: workLog.workDate
+        });
+      }
+    }
+    if (lines.length === 0 && project.billingModelCode === "milestone") {
+      const milestones = listProjectDeliveryMilestones({ companyId: project.companyId, projectId: project.projectId })
+        .filter((record) => ["ready", "achieved", "accepted"].includes(record.status) && record.targetDate <= cutoffDate);
+      for (const milestone of milestones) {
+        lines.push({
+          sourceType: "delivery_milestone",
+          sourceId: milestone.projectDeliveryMilestoneId,
+          description: milestone.title,
+          quantity: 1,
+          unitCode: "each",
+          unitPriceAmount: roundMoney(milestone.plannedRevenueAmount),
+          lineAmount: roundMoney(milestone.plannedRevenueAmount),
+          plannedInvoiceDate: milestone.targetDate
+        });
+      }
+    }
+    if (includeChangeOrders) {
+      const changeOrders = listProjectChangeOrders({ companyId: project.companyId, projectId: project.projectId })
+        .filter((record) => ["approved", "applied"].includes(record.status))
+        .filter((record) => (record.appliedAt || record.updatedAt || record.createdAt).slice(0, 10) <= cutoffDate)
+        .filter((record) => Number(record.revenueImpactAmount || 0) !== 0);
+      for (const changeOrder of changeOrders) {
+        lines.push({
+          sourceType: "change_order",
+          sourceId: changeOrder.projectChangeOrderId,
+          description: changeOrder.title,
+          quantity: 1,
+          unitCode: "each",
+          unitPriceAmount: roundMoney(changeOrder.revenueImpactAmount),
+          lineAmount: roundMoney(changeOrder.revenueImpactAmount),
+          plannedInvoiceDate: (changeOrder.appliedAt || changeOrder.updatedAt || changeOrder.createdAt).slice(0, 10)
+        });
+      }
+    }
+    if (lines.length === 0) {
+      blockingIssueCodes.push("invoice_source_missing");
+    }
+    if (currentReadinessAssessment?.status === "blocked") {
+      blockingIssueCodes.push("invoice_readiness_blocked");
+    }
+    if (currentReadinessAssessment?.status === "review_required") {
+      warningCodes.push("invoice_readiness_review_required");
+    }
+    const totalAmount = roundMoney(lines.reduce((sum, line) => sum + Number(line.lineAmount || 0), 0));
+    return {
+      sourceSummary: {
+        simulationModeCode: normalizeCode(simulationModeCode, "project_invoice_simulation_mode_required").toLowerCase(),
+        billingPlanLineCount: lines.filter((line) => line.sourceType === "billing_plan").length,
+        workLogLineCount: lines.filter((line) => line.sourceType === "work_log").length,
+        changeOrderLineCount: lines.filter((line) => line.sourceType === "change_order").length,
+        milestoneLineCount: lines.filter((line) => line.sourceType === "delivery_milestone").length
+      },
+      warningCodes: uniqueTexts(warningCodes),
+      blockingIssueCodes: uniqueTexts(blockingIssueCodes),
+      lines,
+      totals: {
+        totalAmount,
+        lineCount: lines.length
+      },
+      previewInvoiceRef: `SIM-${project.projectCode}-${cutoffDate.replaceAll("-", "")}`
+    };
+  }
+
+  function buildProjectLiveConversionPortableBundle({ state, project, trialScenarioRun, importBatch }) {
+    const projectWorkspace = getProjectWorkspace({
+      companyId: project.companyId,
+      projectId: project.projectId
+    });
+    return {
+      version: PROJECT_LIVE_CONVERSION_VERSION,
+      projectMasterdata: {
+        projectId: project.projectId,
+        projectCode: project.projectCode,
+        projectReferenceCode: project.projectReferenceCode,
+        displayName: project.displayName,
+        customerId: project.customerId,
+        billingModelCode: project.billingModelCode,
+        revenueRecognitionModelCode: project.revenueRecognitionModelCode,
+        contractValueAmount: project.contractValueAmount,
+        status: project.status
+      },
+      engagements: copy(projectWorkspace.projectEngagements || []),
+      workModels: copy(projectWorkspace.projectWorkModels || []),
+      workPackages: copy(projectWorkspace.projectWorkPackages || []),
+      deliveryMilestones: copy(projectWorkspace.projectDeliveryMilestones || []),
+      billingPlans: copy(projectWorkspace.projectBillingPlans || []),
+      statusUpdates: copy(projectWorkspace.projectStatusUpdates || []),
+      budgetVersions: projectWorkspace.currentBudgetVersion ? [copy(projectWorkspace.currentBudgetVersion)] : [],
+      resourceAllocations: listProjectResourceAllocations({
+        companyId: project.companyId,
+        projectId: project.projectId
+      }),
+      sourceRefs: {
+        projectTrialScenarioRunId: trialScenarioRun?.projectTrialScenarioRunId || null,
+        projectImportBatchId: importBatch?.projectImportBatchId || null
+      },
+      forbiddenCarryOverCodes: [
+        "project_invoice_simulation",
+        "audit_event",
+        "trial_receipt",
+        "provider_ref"
+      ]
+    };
   }
 }
 
@@ -5475,6 +6650,124 @@ function normalizeReportingPeriod(value, code) {
 function toReportingPeriodFromDate(dateValue) {
   const resolvedDate = normalizeRequiredDate(dateValue, "project_cutoff_date_required");
   return `${resolvedDate.slice(0, 4)}${resolvedDate.slice(5, 7)}`;
+}
+
+function currentDateString(clock) {
+  return new Date(clock()).toISOString().slice(0, 10);
+}
+
+function addDaysToDate(dateValue, days) {
+  const resolvedDate = normalizeRequiredDate(dateValue, "project_date_required");
+  const value = new Date(`${resolvedDate}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + Number(days || 0));
+  return value.toISOString().slice(0, 10);
+}
+
+function normalizeImportSourceSystemCode(value) {
+  const normalized = normalizeCode(value, "project_import_source_system_required").toLowerCase();
+  if (!PROJECT_IMPORT_SOURCE_SYSTEM_CODES.includes(normalized)) {
+    throw createError(400, "project_import_source_system_unsupported", `Unsupported import source system ${normalized}.`);
+  }
+  return normalized;
+}
+
+function normalizeProjectImportPayload(sourcePayload, { clock }) {
+  return (Array.isArray(sourcePayload) ? sourcePayload : []).map((item, index) => {
+    const externalProjectId = normalizeOptionalText(item?.externalProjectId) || `row-${index + 1}`;
+    const startsOn = normalizeOptionalDate(item?.startsOn, "project_import_starts_on_invalid") || currentDateString(clock);
+    const endsOn = normalizeOptionalDate(item?.endsOn, "project_import_ends_on_invalid");
+    const workModelCode = assertAllowed(item?.workModelCode || "time_only", PROJECT_WORK_MODEL_CODES, "project_import_work_model_invalid");
+    const billingModelCode = assertAllowed(item?.billingModelCode || "time_and_material", PROJECT_BILLING_MODEL_CODES, "project_import_billing_model_invalid");
+    const revenueRecognitionModelCode = assertAllowed(
+      item?.revenueRecognitionModelCode || "billing_equals_revenue",
+      PROJECT_REVENUE_RECOGNITION_MODEL_CODES,
+      "project_import_revenue_recognition_invalid"
+    );
+    return {
+      externalProjectId,
+      sourceSystemCode: normalizeImportSourceSystemCode(item?.sourceSystemCode || item?.externalSystemCode || "hubspot"),
+      displayName: requireText(item?.displayName || item?.projectName || `Imported project ${index + 1}`, "project_import_display_name_required"),
+      projectCode: normalizeOptionalText(item?.projectCode),
+      projectReferenceCode: normalizeOptionalText(item?.projectReferenceCode),
+      customerLegalName: normalizeOptionalText(item?.customerLegalName || item?.customer?.legalName),
+      customerOrganizationNumber: normalizeOptionalText(item?.customerOrganizationNumber || item?.customer?.organizationNumber),
+      engagementDisplayName: normalizeOptionalText(item?.engagementDisplayName) || "Imported engagement",
+      workModelCode,
+      workModelTitle: normalizeOptionalText(item?.workModelTitle) || `Imported ${workModelCode}`,
+      operationalPackCode: normalizeOptionalText(item?.operationalPackCode) || "general_core",
+      requiresWorkOrders: item?.requiresWorkOrders === true,
+      requiresMilestones: item?.requiresMilestones === true,
+      requiresAttendance: item?.requiresAttendance === true,
+      requiresId06: item?.requiresId06 === true,
+      billingModelCode,
+      revenueRecognitionModelCode,
+      startsOn,
+      endsOn,
+      contractValueAmount: normalizeMoney(item?.contractValueAmount || 0, "project_import_contract_value_invalid"),
+      externalOpportunityId: normalizeOptionalText(item?.externalOpportunityId),
+      externalOpportunityRef: normalizeOptionalText(item?.externalOpportunityRef),
+      sourceQuoteId: normalizeOptionalText(item?.sourceQuoteId),
+      externalQuoteRef: normalizeOptionalText(item?.externalQuoteRef),
+      quoteAcceptedOn: normalizeOptionalDate(item?.quoteAcceptedOn, "project_import_quote_accepted_on_invalid"),
+      workPackageCode: normalizeOptionalText(item?.workPackageCode) || `WP-${index + 1}`,
+      workPackageTitle: normalizeOptionalText(item?.workPackageTitle) || "Imported work package",
+      workPackageDescription: normalizeOptionalText(item?.workPackageDescription),
+      deliveryMilestoneTitle: normalizeOptionalText(item?.deliveryMilestoneTitle),
+      deliveryMilestoneDate: normalizeOptionalDate(item?.deliveryMilestoneDate, "project_import_delivery_milestone_date_invalid"),
+      billingPlanFrequencyCode: normalizeCode(item?.billingPlanFrequencyCode || "one_off", "project_import_billing_frequency_required").toLowerCase(),
+      billingPlanTriggerCode: normalizeCode(item?.billingPlanTriggerCode || "manual", "project_import_billing_trigger_required").toLowerCase(),
+      billingPlanLines: normalizeImportedBillingPlanLines(item?.billingPlanLines, startsOn)
+    };
+  });
+}
+
+function normalizeImportedBillingPlanLines(lines, startsOn) {
+  return (Array.isArray(lines) ? lines : []).map((line, index) => ({
+    plannedInvoiceDate: normalizeOptionalDate(line?.plannedInvoiceDate, "project_import_billing_line_date_invalid") || addDaysToDate(startsOn, index * 14),
+    amount: normalizeMoney(line?.amount || 0, "project_import_billing_line_amount_invalid"),
+    triggerCode: normalizeCode(line?.triggerCode || "manual", "project_import_billing_line_trigger_required").toLowerCase(),
+    note: normalizeOptionalText(line?.note),
+    projectWorkPackageId: null,
+    projectDeliveryMilestoneId: null,
+    sourceQuoteVersionId: normalizeOptionalText(line?.sourceQuoteVersionId)
+  })).filter((line) => Number(line.amount || 0) !== 0);
+}
+
+function nextProjectSyntheticOrgNumber(companyId, seed) {
+  const source = `${companyId}:${seed}`;
+  let checksumSeed = 0;
+  for (const character of source) {
+    checksumSeed = ((checksumSeed * 31) + character.charCodeAt(0)) % 1000000;
+  }
+  const baseDigits = `556${String(checksumSeed).padStart(6, "0")}`;
+  const checkDigit = calculateSwedishOrgNumberCheckDigit(baseDigits);
+  return `${baseDigits}${checkDigit}`;
+}
+
+function calculateSwedishOrgNumberCheckDigit(baseDigits) {
+  const normalized = requireText(baseDigits, "project_org_number_base_required").replace(/\D/g, "");
+  if (normalized.length !== 9) {
+    throw createError(400, "project_org_number_base_invalid", "Project synthetic organization number base must contain exactly 9 digits.");
+  }
+  let sum = 0;
+  for (let index = 0; index < normalized.length; index += 1) {
+    let digit = Number(normalized[index]);
+    digit *= index % 2 === 0 ? 2 : 1;
+    if (digit > 9) {
+      digit -= 9;
+    }
+    sum += digit;
+  }
+  return String((10 - (sum % 10)) % 10);
+}
+
+function resolveProjectBillRateForDate({ state, projectId, workDate }) {
+  const reportingPeriod = toReportingPeriodFromDate(workDate);
+  const allocation = (state.resourceAllocationIdsByProject.get(projectId) || [])
+    .map((projectResourceAllocationId) => state.resourceAllocations.get(projectResourceAllocationId))
+    .filter(Boolean)
+    .find((record) => record.reportingPeriod === reportingPeriod);
+  return allocation ? roundMoney(allocation.billRateAmount) : null;
 }
 
 function requireText(value, code) {

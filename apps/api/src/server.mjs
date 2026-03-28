@@ -723,6 +723,10 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/kalkyl/estimates/:estimateVersionId/convert-to-quote",
               "/v1/kalkyl/estimates/:estimateVersionId/convert-to-project-budget",
               "/v1/projects/quote-handoffs",
+              "/v1/projects/trial-scenarios",
+              "/v1/projects/trial-scenarios/:scenarioCode/materialize",
+              "/v1/projects/import-batches",
+              "/v1/projects/import-batches/:projectImportBatchId/commit",
               "/v1/projects",
               "/v1/projects/:projectId",
               "/v1/projects/:projectId/opportunity-links",
@@ -739,6 +743,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/projects/:projectId/profitability-adjustments",
               "/v1/projects/:projectId/profitability-adjustments/:projectProfitabilityAdjustmentId/decide",
               "/v1/projects/:projectId/invoice-readiness-assessments",
+              "/v1/projects/:projectId/invoice-simulations",
               "/v1/projects/:projectId/profitability-snapshots",
               "/v1/projects/portfolio/nodes",
               "/v1/projects/portfolio/summary",
@@ -761,6 +766,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/projects/:projectId/change-orders",
               "/v1/projects/:projectId/change-orders/:projectChangeOrderId/status",
               "/v1/projects/:projectId/build-vat-decisions",
+              "/v1/projects/:projectId/live-conversion-plans",
               "/v1/projects/:projectId/audit-events",
               "/v1/hus/cases",
               "/v1/hus/cases/:husCaseId",
@@ -10786,6 +10792,137 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/projects/trial-scenarios") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectTrialScenarios({
+        companyId
+      })
+    });
+    return;
+  }
+
+  const projectTrialScenarioMaterializeMatch = matchPath(path, "/v1/projects/trial-scenarios/:scenarioCode/materialize");
+  if (projectTrialScenarioMaterializeMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_trial_scenario_run",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.materializeProjectTrialScenario({
+        companyId,
+        scenarioCode: projectTrialScenarioMaterializeMatch.scenarioCode,
+        projectTrialScenarioRunId: body.projectTrialScenarioRunId ?? null,
+        projectCode: body.projectCode ?? null,
+        projectReferenceCode: body.projectReferenceCode ?? null,
+        trialEnvironmentProfileId: body.trialEnvironmentProfileId ?? null,
+        startsOn: body.startsOn ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/projects/import-batches") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_import_batch",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectImportBatches({
+        companyId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/projects/import-batches") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_import_batch",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectImportBatch({
+        companyId,
+        projectImportBatchId: body.projectImportBatchId ?? null,
+        sourceSystemCode: body.sourceSystemCode,
+        batchTypeCode: body.batchTypeCode ?? "project_migration",
+        importModeCode: body.importModeCode ?? "trial_seed",
+        sourceExportCapturedAt: body.sourceExportCapturedAt ?? null,
+        sourcePayload: body.sourcePayload || [],
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectImportBatchCommitMatch = matchPath(path, "/v1/projects/import-batches/:projectImportBatchId/commit");
+  if (projectImportBatchCommitMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_import_batch",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.commitProjectImportBatch({
+        companyId,
+        projectImportBatchId: projectImportBatchCommitMatch.projectImportBatchId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/projects/portfolio/nodes") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -11620,6 +11757,61 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         projectId: projectInvoiceReadinessAssessmentsMatch.projectId,
         cutoffDate: body.cutoffDate,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectInvoiceSimulationsMatch = matchPath(path, "/v1/projects/:projectId/invoice-simulations");
+  if (projectInvoiceSimulationsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_invoice_simulation",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectInvoiceSimulations({
+        companyId,
+        projectId: projectInvoiceSimulationsMatch.projectId
+      })
+    });
+    return;
+  }
+
+  if (projectInvoiceSimulationsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_invoice_simulation",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectInvoiceSimulation({
+        companyId,
+        projectId: projectInvoiceSimulationsMatch.projectId,
+        projectInvoiceSimulationId: body.projectInvoiceSimulationId ?? null,
+        cutoffDate: body.cutoffDate ?? null,
+        simulationModeCode: body.simulationModeCode ?? "trial_safe_preview",
+        includeChangeOrders: body.includeChangeOrders !== false,
+        includeBillingPlan: body.includeBillingPlan !== false,
+        includeWorkLogs: body.includeWorkLogs !== false,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
@@ -12498,6 +12690,60 @@ async function handleRequest({ req, res, platform, flags }) {
         lineAmountExVat: body.lineAmountExVat,
         vatRate: body.vatRate ?? 25,
         goodsOrServices: body.goodsOrServices ?? "services",
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectLiveConversionPlansMatch = matchPath(path, "/v1/projects/:projectId/live-conversion-plans");
+  if (projectLiveConversionPlansMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_live_conversion_plan",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectLiveConversionPlans({
+        companyId,
+        projectId: projectLiveConversionPlansMatch.projectId
+      })
+    });
+    return;
+  }
+
+  if (projectLiveConversionPlansMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_live_conversion_plan",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectLiveConversionPlan({
+        companyId,
+        projectId: projectLiveConversionPlansMatch.projectId,
+        projectLiveConversionPlanId: body.projectLiveConversionPlanId ?? null,
+        trialEnvironmentProfileId: body.trialEnvironmentProfileId ?? null,
+        projectTrialScenarioRunId: body.projectTrialScenarioRunId ?? null,
+        projectImportBatchId: body.projectImportBatchId ?? null,
+        projectInvoiceSimulationId: body.projectInvoiceSimulationId ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
