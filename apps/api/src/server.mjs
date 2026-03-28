@@ -389,10 +389,19 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/fiscal-years/periods/lookup",
               "/v1/fiscal-years/periods/:periodId/reopen",
               "/v1/fiscal-years/history",
+              "/v1/tax-account/liabilities",
+              "/v1/tax-account/liabilities/:reconciliationItemId",
               "/v1/tax-account/events",
+              "/v1/tax-account/events/:taxAccountEventId/classify",
               "/v1/tax-account/imports",
+              "/v1/tax-account/offset-suggestions",
               "/v1/tax-account/reconciliations",
               "/v1/tax-account/offsets",
+              "/v1/tax-account/discrepancy-cases",
+              "/v1/tax-account/discrepancy-cases/:discrepancyCaseId",
+              "/v1/tax-account/discrepancy-cases/:discrepancyCaseId/review",
+              "/v1/tax-account/discrepancy-cases/:discrepancyCaseId/resolve",
+              "/v1/tax-account/discrepancy-cases/:discrepancyCaseId/waive",
               "/v1/notifications",
               "/v1/notifications/bulk-actions",
               "/v1/notifications/:notificationId",
@@ -536,8 +545,12 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/vat/decisions",
               "/v1/vat/decisions/:vatDecisionId",
               "/v1/vat/review-queue",
+              "/v1/vat/review-queue/:vatReviewQueueItemId/resolve",
+              "/v1/vat/declaration-basis",
               "/v1/vat/declaration-runs",
               "/v1/vat/declaration-runs/:vatDeclarationRunId",
+              "/v1/vat/period-locks",
+              "/v1/vat/period-locks/:vatPeriodLockId/unlock",
               "/v1/vat/periodic-statements",
               "/v1/vat/periodic-statements/:vatPeriodicStatementRunId",
               "/v1/ar/customers",
@@ -598,12 +611,17 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/ap/open-items/:apOpenItemId/payment-preparation",
               "/v1/banking/accounts",
               "/v1/banking/accounts/:bankAccountId",
+              "/v1/banking/statement-imports",
+              "/v1/banking/statement-imports/:statementImportId",
               "/v1/banking/statement-events",
               "/v1/banking/statement-events/import",
               "/v1/banking/statement-events/:bankStatementEventId",
               "/v1/banking/reconciliation-cases",
               "/v1/banking/reconciliation-cases/:reconciliationCaseId",
               "/v1/banking/reconciliation-cases/:reconciliationCaseId/resolve",
+              "/v1/banking/settlement-links",
+              "/v1/banking/payment-batches",
+              "/v1/banking/payment-batches/:paymentBatchId",
               "/v1/banking/payment-proposals",
               "/v1/banking/payment-proposals/:paymentProposalId",
               "/v1/banking/payment-proposals/:paymentProposalId/approve",
@@ -4655,6 +4673,60 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  const vatReviewQueueResolveMatch = matchPath(path, "/v1/vat/review-queue/:vatReviewQueueItemId/resolve");
+  if (vatReviewQueueResolveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "vat_review_queue_item",
+      scopeCode: "vat"
+    });
+    writeJson(
+      res,
+      200,
+      platform.resolveVatReviewQueueItem({
+        companyId,
+        vatReviewQueueItemId: vatReviewQueueResolveMatch.vatReviewQueueItemId,
+        vatCode: body.vatCode,
+        resolutionCode: body.resolutionCode || "manual_vat_resolution",
+        resolutionNote: body.resolutionNote || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/vat/declaration-basis") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "vat_declaration_basis",
+      scopeCode: "vat"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getVatDeclarationBasis({
+        companyId,
+        fromDate: requireText(url.searchParams.get("fromDate"), "from_date_required", "fromDate is required."),
+        toDate: requireText(url.searchParams.get("toDate"), "to_date_required", "toDate is required.")
+      })
+    );
+    return;
+  }
+
   if (req.method === "POST" && path === "/v1/vat/declaration-runs") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
@@ -4676,6 +4748,82 @@ async function handleRequest({ req, res, platform, flags }) {
         previousSubmissionId: body.previousSubmissionId || null,
         correctionReason: body.correctionReason || null,
         signer: body.signer || principal.userId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/vat/period-locks") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "vat_period_lock",
+      scopeCode: "vat"
+    });
+    writeJson(res, 200, {
+      items: platform.listVatPeriodLocks({
+        companyId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/vat/period-locks") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "vat_period_lock",
+      scopeCode: "vat"
+    });
+    writeJson(
+      res,
+      201,
+      platform.lockVatPeriod({
+        companyId,
+        fromDate: body.fromDate,
+        toDate: body.toDate,
+        reasonCode: body.reasonCode,
+        basisSnapshotHash: body.basisSnapshotHash || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const vatPeriodUnlockMatch = matchPath(path, "/v1/vat/period-locks/:vatPeriodLockId/unlock");
+  if (vatPeriodUnlockMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "vat_period_lock",
+      scopeCode: "vat"
+    });
+    writeJson(
+      res,
+      200,
+      platform.unlockVatPeriod({
+        companyId,
+        vatPeriodLockId: vatPeriodUnlockMatch.vatPeriodLockId,
+        reasonCode: body.reasonCode,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
@@ -6872,6 +7020,58 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/banking/statement-imports") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "statement_import",
+      scopeCode: "bank"
+    });
+    assertFinanceOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listStatementImports({
+        companyId,
+        status: url.searchParams.get("status") || null,
+        sourceChannelCode: url.searchParams.get("sourceChannelCode") || null
+      })
+    });
+    return;
+  }
+
+  const statementImportMatch = matchPath(path, "/v1/banking/statement-imports/:statementImportId");
+  if (statementImportMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "statement_import",
+      scopeCode: "bank"
+    });
+    assertFinanceOperationsAccess({ principal });
+    writeJson(
+      res,
+      200,
+      platform.getStatementImport({
+        companyId,
+        statementImportId: statementImportMatch.statementImportId
+      })
+    );
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/banking/statement-events") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -7022,6 +7222,85 @@ async function handleRequest({ req, res, platform, flags }) {
         resolutionNote: body.resolutionNote || null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/banking/settlement-links") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "settlement_liability_link",
+      scopeCode: "bank"
+    });
+    assertFinanceOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listSettlementLiabilityLinks({
+        companyId,
+        paymentOrderId: url.searchParams.get("paymentOrderId") || null,
+        bankStatementEventId: url.searchParams.get("bankStatementEventId") || null,
+        liabilityObjectType: url.searchParams.get("liabilityObjectType") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/banking/payment-batches") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payment_batch",
+      scopeCode: "bank"
+    });
+    assertFinanceOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listPaymentBatches({
+        companyId,
+        status: url.searchParams.get("status") || null,
+        paymentRailCode: url.searchParams.get("paymentRailCode") || null
+      })
+    });
+    return;
+  }
+
+  const paymentBatchMatch = matchPath(path, "/v1/banking/payment-batches/:paymentBatchId");
+  if (paymentBatchMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payment_batch",
+      scopeCode: "bank"
+    });
+    assertFinanceOperationsAccess({ principal });
+    writeJson(
+      res,
+      200,
+      platform.getPaymentBatch({
+        companyId,
+        paymentBatchId: paymentBatchMatch.paymentBatchId
       })
     );
     return;

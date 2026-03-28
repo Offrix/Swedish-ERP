@@ -97,6 +97,23 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/submissions/:submissionId/evidence-pack",
   "/v1/submissions/:submissionId/replay",
   "/v1/submissions/:submissionId/corrections",
+  "/v1/vat/review-queue/:vatReviewQueueItemId/resolve",
+  "/v1/vat/period-locks",
+  "/v1/vat/period-locks/:vatPeriodLockId/unlock",
+  "/v1/tax-account/liabilities",
+  "/v1/tax-account/liabilities/:reconciliationItemId",
+  "/v1/tax-account/events/:taxAccountEventId/classify",
+  "/v1/tax-account/offset-suggestions",
+  "/v1/tax-account/discrepancy-cases",
+  "/v1/tax-account/discrepancy-cases/:discrepancyCaseId",
+  "/v1/tax-account/discrepancy-cases/:discrepancyCaseId/review",
+  "/v1/tax-account/discrepancy-cases/:discrepancyCaseId/resolve",
+  "/v1/tax-account/discrepancy-cases/:discrepancyCaseId/waive",
+  "/v1/banking/statement-imports",
+  "/v1/banking/statement-imports/:statementImportId",
+  "/v1/banking/payment-batches",
+  "/v1/banking/payment-batches/:paymentBatchId",
+  "/v1/banking/settlement-links",
   "/v1/migration/acceptance-records",
   "/v1/migration/post-cutover-correction-cases",
   "/v1/migration/cutover-plans/:cutoverPlanId/signoffs",
@@ -179,6 +196,30 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(closeRelockContract.requiredActionClass, "close_reopen_request_relock");
     assert.equal(closeRelockContract.requiredTrustLevel, "strong_mfa");
     assert.equal(closeRelockContract.requiredScopeType, "close_reopen_request");
+
+    const vatReviewResolveContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/vat/review-queue/:vatReviewQueueItemId/resolve"
+    );
+    assert.ok(vatReviewResolveContract);
+    assert.equal(vatReviewResolveContract.requiredActionClass, "vat_review_resolve");
+    assert.equal(vatReviewResolveContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(vatReviewResolveContract.requiredScopeType, "vat_review_queue_item");
+
+    const taxAccountClassifyContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/tax-account/events/:taxAccountEventId/classify"
+    );
+    assert.ok(taxAccountClassifyContract);
+    assert.equal(taxAccountClassifyContract.requiredActionClass, "tax_account_event_classify");
+    assert.equal(taxAccountClassifyContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(taxAccountClassifyContract.requiredScopeType, "company");
+
+    const taxAccountWaiveContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/tax-account/discrepancy-cases/:discrepancyCaseId/waive"
+    );
+    assert.ok(taxAccountWaiveContract);
+    assert.equal(taxAccountWaiveContract.requiredActionClass, "tax_account_discrepancy_waive");
+    assert.equal(taxAccountWaiveContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(taxAccountWaiveContract.requiredScopeType, "company");
 
     const uniqueCount = new Set(payload.routes).size;
     assert.equal(uniqueCount, payload.routes.length, "api root metadata should not contain duplicate route entries");

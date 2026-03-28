@@ -629,15 +629,17 @@ Knyta dokument, leverantÃ¶rer, kunder, bank och skattekonto till bokfÃ¶rings
 - Ingen automatisk posting frÃ¥n OCR, statement import eller tax account discrepancy detection utan blockerande gates.
 
 **Delfasstatus**
-  - 9.1 klar 2026-03-28: AR-kedjan Ã¤r nu Ã¥terverifierad end-to-end med kundfakturor, kreditnotor, abonnemang, payment links, allocations, reskontra, legal invoice-readiness och revenue dimensions som bÃ¤rs hela vÃ¤gen till ledgerpostning med governed dimensionkrav.
-  - 9.2 klar 2026-03-28: AP-kedjan bÃ¤r nu first-class leverantÃ¶rskredit med `AP_CREDIT_NOTE`, explicit payment-preparation per open item, blockerad proposal/export fÃ¶r kredit/open-item <= 0 och governed allocation review-gates som stoppar posting tills ledgerkrÃ¤vda dimensioner finns och Ã¤r giltiga.
+- 9.1 klar 2026-03-28: AR-kedjan Ã¤r nu Ã¥terverifierad end-to-end med kundfakturor, kreditnotor, abonnemang, payment links, allocations, reskontra, legal invoice-readiness och revenue dimensions som bÃ¤rs hela vÃ¤gen till ledgerpostning med governed dimensionkrav.
+- 9.2 klar 2026-03-28: AP-kedjan bÃ¤r nu first-class leverantÃ¶rskredit med `AP_CREDIT_NOTE`, explicit payment-preparation per open item, blockerad proposal/export fÃ¶r kredit/open-item <= 0 och governed allocation review-gates som stoppar posting tills ledgerkrÃ¤vda dimensioner finns och Ã¤r giltiga.
+- 9.3 klar 2026-03-28: VAT-kedjan bÃ¤r nu first-class declaration basis med blocker codes, review-resolution som muterar verkligt momsbeslut, periodlÃ¥s/unlock fÃ¶r deklarationsfÃ¶nster och route-/auditkedja som blockerar nya momsbeslut tills perioden uttryckligen lÃ¥sts upp igen.
+- 9.4 klar 2026-03-28: banking bÃ¤r nu first-class `PaymentBatch`, `StatementImport` och `SettlementLiabilityLink` med open-banking- och bankfilrails, baseline-spÃ¥rning, read-routes, explicit statement-importmetadata och end-to-end settlement mapping mot bÃ¥de AP-open items och tax-account-events.
 
 **Delfaser**
 - [x] 9.1 [HARDEN] **AR end-to-end** â€” Kundfakturor, kreditnotor, abonnemang, collection/payment links, allocations, reskontra, invoice readiness och revenue dimensions.
-  - [x] 9.2 [HARDEN] **AP end-to-end** â€” LeverantÃ¶rsfakturor, krediter, attest, matchning, payment prep och cost allocations med review gates.
-- [ ] 9.3 [HARDEN] **VAT decision engine** â€” VAT source of truth, decision inputs/outputs, timing, lock/unlock, declaration basis och review boundaries.
-- [ ] 9.4 [NEW BUILD] **Banking och payment rails** â€” Open banking, bankfiler, payment batches/orders, statement import, matchning, settlement liability mapping.
-- [ ] 9.5 [HARDEN] **Tax account subledger** â€” SkattekontohÃ¤ndelser, import, klassificering, offset, discrepancy cases, liability match och reconciliation blockers.
+- [x] 9.2 [HARDEN] **AP end-to-end** â€” LeverantÃ¶rsfakturor, krediter, attest, matchning, payment prep och cost allocations med review gates.
+- [x] 9.3 [HARDEN] **VAT decision engine** â€” VAT source of truth, decision inputs/outputs, timing, lock/unlock, declaration basis och review boundaries.
+- [x] 9.4 [NEW BUILD] **Banking och payment rails** â€” Open banking, bankfiler, payment batches/orders, statement import, matchning, settlement liability mapping.
+- [x] 9.5 [HARDEN] **Tax account subledger** â€” SkattekontohÃ¤ndelser, import, klassificering, offset, discrepancy cases, liability match och reconciliation blockers.
 - [ ] 9.6 [HARDEN] **Document-posting gates** â€” Inget dokument, statement eller tax event bokas fÃ¶rrÃ¤n explicit affÃ¤rsdomÃ¤n har godkÃ¤nt sakobjektet.
 
 **Exit gate**  

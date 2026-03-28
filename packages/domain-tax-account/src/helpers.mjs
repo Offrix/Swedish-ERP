@@ -112,7 +112,12 @@ export function normalizeOptionalStatus(value, allowedValues, code) {
   if (value == null || value === "") {
     return null;
   }
-  return assertAllowed(normalizeCode(value, code), allowedValues, code);
+  const resolved = requireText(String(value), code);
+  const matchedValue = allowedValues.find((allowedValue) => allowedValue.toLowerCase() === resolved.toLowerCase());
+  if (!matchedValue) {
+    throw createError(400, code, `${resolved} is not allowed.`);
+  }
+  return matchedValue;
 }
 
 export function normalizeOptionalAllowedCode(value, allowedValues, code) {
@@ -295,6 +300,10 @@ export function normalizeImportedEvent(rawEvent, { companyId, importBatchId, imp
     mappedTargetObjectId: null,
     mappedLiabilityTypeCode: null,
     mappedByRuleCode: null,
+    classificationCode: null,
+    classificationApprovedByActorId: null,
+    classificationApprovedAt: null,
+    classificationResolutionNote: null,
     ledgerPostingStatus: "pending",
     createdByActorId: actorId,
     createdAt: nowIso(clock),

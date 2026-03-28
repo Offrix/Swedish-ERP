@@ -105,6 +105,7 @@ export function createTaxAccountEngine({
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   bankingPlatform = null,
+  ledgerPlatform = null,
   ruleRegistry = null
 } = {}) {
   const rules = ruleRegistry || createRulePackRegistry({
@@ -150,13 +151,20 @@ export function createTaxAccountEngine({
     importTaxAccountEvents,
     listTaxAccountEvents,
     getTaxAccountEvent,
+    classifyTaxAccountEvent,
     createTaxAccountReconciliation,
     listTaxAccountReconciliations,
     getTaxAccountReconciliation,
+    listTaxAccountOffsetSuggestions,
+    approveOffsetSuggestion,
     approveTaxAccountOffset,
     listTaxAccountOffsets,
+    listTaxAccountDifferenceCases,
     listOpenTaxAccountDifferenceCases,
+    getTaxAccountDifferenceCase,
+    reviewTaxAccountDifferenceCase,
     resolveTaxAccountDifferenceCase,
+    waiveTaxAccountDifferenceCase,
     getTaxAccountBalance,
     snapshotTaxAccount,
     exportDurableState,
@@ -504,6 +512,181 @@ export function createTaxAccountEngine({
     return copy(run);
   }
 
+  function listTaxAccountOffsetSuggestions({ companyId, reconciliationRunId = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedReconciliationRunId = normalizeOptionalText(reconciliationRunId);
+    if (resolvedReconciliationRunId) {
+      return getTaxAccountReconciliation({
+        companyId: resolvedCompanyId,
+        reconciliationRunId: resolvedReconciliationRunId
+      }).suggestedOffsets.map(copy);
+    }
+
+    const suggestions = [];
+    const seenKeys = new Set();
+    const mutableCreditEvents = listMutableEventsForCompany(state, resolvedCompanyId).filter((event) => isCreditEvent(event));
+    for (const event of mutableCreditEvents) {
+      const rulePack = resolveTaxAccountOffsetRulePack(event.eventDate);
+      for (const suggestion of buildSuggestedOffsetsForEvent(state, event, rulePack)) {
+        const dedupeKey = buildHash({
+          taxAccountEventId: suggestion.taxAccountEventId,
+          reconciliationItemId: suggestion.reconciliationItemId,
+          offsetAmount: suggestion.offsetAmount,
+          offsetReasonCode: suggestion.offsetReasonCode
+        });
+        if (seenKeys.has(dedupeKey)) {
+          continue;
+        }
+        seenKeys.add(dedupeKey);
+        suggestions.push(copy(suggestion));
+      }
+    }
+
+    return suggestions.sort((left, right) => {
+      const eventOrder = left.taxAccountEventId.localeCompare(right.taxAccountEventId);
+      if (eventOrder !== 0) {
+        return eventOrder;
+      }
+      return left.priority - right.priority;
+    });
+  }
+
+  function classifyTaxAccountEvent({
+    companyId,
+    taxAccountEventId,
+    liabilityTypeCode = null,
+    reconciliationItemId = null,
+    sourceObjectType = null,
+    sourceObjectId = null,
+    periodKey = null,
+    differenceCaseId = null,
+    classificationCode = "manual_finance_classification",
+    resolutionNote = null,
+    actorId = "system"
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const event = requireTaxAccountEvent(state, resolvedCompanyId, taxAccountEventId);
+    if (isCreditEvent(event)) {
+      throw createError(
+        409,
+        "tax_account_credit_event_requires_offset_approval",
+        "Credit tax-account events must be settled through approved offsets, not manual classification."
+      );
+    }
+
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedClassificationCode = normalizeCode(classificationCode, "tax_account_classification_code_required");
+    const resolvedResolutionNote = normalizeOptionalText(resolutionNote);
+    const resolvedDifferenceCaseId = normalizeOptionalText(differenceCaseId);
+    const item =
+      reconciliationItemId == null || reconciliationItemId === ""
+        ? null
+        : requireReconciliationItem(state, resolvedCompanyId, reconciliationItemId);
+    const resolvedLiabilityTypeCode = item
+      ? item.liabilityTypeCode
+      : liabilityTypeCode == null
+        ? event.liabilityTypeCode
+        : assertAllowed(normalizeCode(liabilityTypeCode, "liability_type_code_required"), TAX_ACCOUNT_LIABILITY_TYPES, "liability_type_code_invalid");
+    const resolvedSourceObjectType = normalizeOptionalText(sourceObjectType) || item?.sourceObjectType || event.sourceObjectType;
+    const resolvedSourceObjectId = normalizeOptionalText(sourceObjectId) || item?.sourceObjectId || event.sourceObjectId;
+    const resolvedPeriodKey = normalizeOptionalText(periodKey) || item?.periodKey || event.periodKey;
+    const classificationTimestamp = nowIso(clock);
+
+    if (event.mappedTargetObjectId && event.mappedTargetObjectId !== item?.reconciliationItemId) {
+      throw createError(
+        409,
+        "tax_account_event_already_mapped",
+        "Tax-account event is already mapped to another reconciliation target."
+      );
+    }
+
+    if (item) {
+      const alreadyApplied = event.mappedTargetObjectId === item.reconciliationItemId;
+      if (isAssessmentEvent(event) && !alreadyApplied) {
+        const nextAssessedAmount = roundMoney(item.assessedAmount + event.amount);
+        updateReconciliationItem(state, item.reconciliationItemId, {
+          assessedAmount: nextAssessedAmount,
+          status: determineReconciliationItemStatus({
+            expectedAmount: item.expectedAmount,
+            assessedAmount: nextAssessedAmount,
+            settledAmount: item.settledAmount
+          }),
+          updatedAt: classificationTimestamp
+        });
+      }
+    }
+
+    const mappedEvent = updateTaxAccountEvent(state, event.taxAccountEventId, {
+      liabilityTypeCode: resolvedLiabilityTypeCode,
+      sourceObjectType: resolvedSourceObjectType,
+      sourceObjectId: resolvedSourceObjectId,
+      periodKey: resolvedPeriodKey,
+      mappingStatus: "mapped",
+      reconciliationStatus: item
+        ? determineManualClassificationReconciliationStatus({
+            state,
+            event,
+            item
+          })
+        : "unmatched",
+      mappedTargetObjectType: item ? "tax_account_reconciliation_item" : null,
+      mappedTargetObjectId: item?.reconciliationItemId || null,
+      mappedLiabilityTypeCode: resolvedLiabilityTypeCode,
+      mappedByRuleCode: resolvedClassificationCode,
+      classificationCode: resolvedClassificationCode,
+      classificationApprovedByActorId: resolvedActorId,
+      classificationApprovedAt: classificationTimestamp,
+      classificationResolutionNote: resolvedResolutionNote,
+      updatedAt: classificationTimestamp
+    });
+
+    let linkedDifferenceCase = null;
+    if (resolvedDifferenceCaseId) {
+      const differenceCase = requireDifferenceCase(state, resolvedCompanyId, resolvedDifferenceCaseId);
+      if (differenceCase.taxAccountEventId && differenceCase.taxAccountEventId !== event.taxAccountEventId) {
+        throw createError(
+          409,
+          "tax_account_difference_case_event_mismatch",
+          "Discrepancy case is linked to another tax-account event."
+        );
+      }
+      linkedDifferenceCase = updateDifferenceCase(state, differenceCase.discrepancyCaseId, {
+        status: "resolved",
+        updatedAt: classificationTimestamp,
+        reviewedAt: differenceCase.reviewedAt || classificationTimestamp,
+        reviewedByActorId: differenceCase.reviewedByActorId || resolvedActorId,
+        reviewNote: differenceCase.reviewNote || resolvedResolutionNote,
+        resolvedAt: classificationTimestamp,
+        resolvedByActorId: resolvedActorId,
+        resolutionNote: resolvedResolutionNote || `Resolved by ${resolvedClassificationCode}.`
+      });
+      pushAudit(state, clock, {
+        companyId: resolvedCompanyId,
+        actorId: resolvedActorId,
+        action: "tax_account.difference_case_resolved",
+        entityType: "tax_account_difference_case",
+        entityId: linkedDifferenceCase.discrepancyCaseId,
+        explanation: `Resolved tax-account discrepancy case ${linkedDifferenceCase.discrepancyCaseId} during manual classification.`
+      });
+    }
+
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      action: "tax_account.event.classified_and_approved",
+      entityType: "tax_account_event",
+      entityId: mappedEvent.taxAccountEventId,
+      explanation: `Manually classified tax-account event ${mappedEvent.taxAccountEventId} with ${resolvedClassificationCode}.`
+    });
+
+    return copy({
+      event: presentTaxAccountEvent(state, mappedEvent),
+      reconciliationItem: item ? getExpectedTaxLiability({ companyId: resolvedCompanyId, reconciliationItemId: item.reconciliationItemId }) : null,
+      differenceCase: linkedDifferenceCase ? copy(linkedDifferenceCase) : null,
+      balance: getTaxAccountBalance({ companyId: resolvedCompanyId })
+    });
+  }
+
   function approveTaxAccountOffset({
     companyId,
     taxAccountEventId,
@@ -589,6 +772,15 @@ export function createTaxAccountEngine({
       updatedAt: nowIso(clock)
     });
 
+    if (nextEventRemaining === 0) {
+      resolveOpenDifferenceCasesForEvent(state, clock, {
+        companyId: resolvedCompanyId,
+        taxAccountEventId: event.taxAccountEventId,
+        actorId: resolvedActorId,
+        resolutionNote: `Resolved through approved offset ${offset.taxAccountOffsetId}.`
+      });
+    }
+
     pushAudit(state, clock, {
       companyId: resolvedCompanyId,
       actorId: resolvedActorId,
@@ -600,6 +792,10 @@ export function createTaxAccountEngine({
     return copy(offset);
   }
 
+  function approveOffsetSuggestion(input = {}) {
+    return approveTaxAccountOffset(input);
+  }
+
   function listTaxAccountOffsets({ companyId } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return (state.offsetIdsByCompany.get(resolvedCompanyId) || [])
@@ -609,23 +805,68 @@ export function createTaxAccountEngine({
       .map(copy);
   }
 
-  function listOpenTaxAccountDifferenceCases({ companyId } = {}) {
+  function listTaxAccountDifferenceCases({ companyId, status = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = normalizeOptionalStatus(
+      status,
+      TAX_ACCOUNT_DIFFERENCE_CASE_STATUSES,
+      "tax_account_difference_case_status_invalid"
+    );
     return (state.discrepancyCaseIdsByCompany.get(resolvedCompanyId) || [])
       .map((caseId) => state.discrepancyCases.get(caseId))
       .filter(Boolean)
-      .filter((differenceCase) => !["resolved", "closed"].includes(differenceCase.status))
+      .filter((differenceCase) => (resolvedStatus ? differenceCase.status === resolvedStatus : true))
       .sort((left, right) => left.detectedAt.localeCompare(right.detectedAt))
       .map(copy);
   }
 
+  function listOpenTaxAccountDifferenceCases({ companyId } = {}) {
+    return listTaxAccountDifferenceCases({ companyId }).filter(
+      (differenceCase) => !["resolved", "waived"].includes(differenceCase.status)
+    );
+  }
+
+  function getTaxAccountDifferenceCase({ companyId, discrepancyCaseId } = {}) {
+    return copy(requireDifferenceCase(state, companyId, discrepancyCaseId));
+  }
+
+  function reviewTaxAccountDifferenceCase({ companyId, discrepancyCaseId, reviewNote = null, actorId = "system" } = {}) {
+    const differenceCase = requireDifferenceCase(state, companyId, discrepancyCaseId);
+    if (differenceCase.status === "resolved" || differenceCase.status === "waived") {
+      throw createError(409, "tax_account_difference_case_closed", "Closed discrepancy cases cannot be reviewed.");
+    }
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const reviewedCase = updateDifferenceCase(state, discrepancyCaseId, {
+      status: "reviewed",
+      updatedAt: nowIso(clock),
+      reviewedAt: nowIso(clock),
+      reviewedByActorId: resolvedActorId,
+      reviewNote: normalizeOptionalText(reviewNote)
+    });
+    pushAudit(state, clock, {
+      companyId: reviewedCase.companyId,
+      actorId: resolvedActorId,
+      action: "tax_account.difference_case_reviewed",
+      entityType: "tax_account_difference_case",
+      entityId: reviewedCase.discrepancyCaseId,
+      explanation: `Reviewed tax-account discrepancy case ${reviewedCase.discrepancyCaseId}.`
+    });
+    return copy(reviewedCase);
+  }
+
   function resolveTaxAccountDifferenceCase({ companyId, discrepancyCaseId, resolutionNote, actorId = "system" } = {}) {
     const differenceCase = requireDifferenceCase(state, companyId, discrepancyCaseId);
+    if (differenceCase.status === "waived") {
+      throw createError(409, "tax_account_difference_case_waived", "Waived discrepancy cases cannot be resolved.");
+    }
     const resolvedActorId = requireText(actorId, "actor_id_required");
     const resolvedResolutionNote = requireText(resolutionNote, "tax_account_difference_resolution_note_required");
     const resolvedCase = updateDifferenceCase(state, discrepancyCaseId, {
       status: "resolved",
       updatedAt: nowIso(clock),
+      reviewedAt: differenceCase.reviewedAt || nowIso(clock),
+      reviewedByActorId: differenceCase.reviewedByActorId || resolvedActorId,
+      reviewNote: differenceCase.reviewNote || resolvedResolutionNote,
       resolvedAt: nowIso(clock),
       resolvedByActorId: resolvedActorId,
       resolutionNote: resolvedResolutionNote
@@ -641,6 +882,41 @@ export function createTaxAccountEngine({
     return copy(resolvedCase);
   }
 
+  function waiveTaxAccountDifferenceCase({
+    companyId,
+    discrepancyCaseId,
+    waiverReasonCode,
+    resolutionNote = null,
+    actorId = "system"
+  } = {}) {
+    const differenceCase = requireDifferenceCase(state, companyId, discrepancyCaseId);
+    if (differenceCase.status === "resolved") {
+      throw createError(409, "tax_account_difference_case_resolved", "Resolved discrepancy cases cannot be waived.");
+    }
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedWaiverReasonCode = normalizeCode(waiverReasonCode, "tax_account_difference_waiver_reason_code_required");
+    const waivedCase = updateDifferenceCase(state, discrepancyCaseId, {
+      status: "waived",
+      updatedAt: nowIso(clock),
+      reviewedAt: differenceCase.reviewedAt || nowIso(clock),
+      reviewedByActorId: differenceCase.reviewedByActorId || resolvedActorId,
+      reviewNote: differenceCase.reviewNote || normalizeOptionalText(resolutionNote),
+      waivedAt: nowIso(clock),
+      waivedByActorId: resolvedActorId,
+      waiverReasonCode: resolvedWaiverReasonCode,
+      resolutionNote: normalizeOptionalText(resolutionNote)
+    });
+    pushAudit(state, clock, {
+      companyId: waivedCase.companyId,
+      actorId: resolvedActorId,
+      action: "tax_account.difference_case_waived",
+      entityType: "tax_account_difference_case",
+      entityId: waivedCase.discrepancyCaseId,
+      explanation: `Waived tax-account discrepancy case ${waivedCase.discrepancyCaseId}.`
+    });
+    return copy(waivedCase);
+  }
+
   function getTaxAccountBalance({ companyId } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const events = (state.eventIdsByCompany.get(resolvedCompanyId) || []).map((eventId) => state.events.get(eventId)).filter(Boolean);
@@ -648,13 +924,14 @@ export function createTaxAccountEngine({
       .map((itemId) => state.reconciliationItems.get(itemId))
       .filter(Boolean)
       .map(presentReconciliationItem);
+    const openDifferenceCases = listOpenTaxAccountDifferenceCases({ companyId: resolvedCompanyId });
     const creditBalance = roundMoney(
       events.filter((event) => event.effectDirection === "credit").reduce((sum, event) => sum + event.amount, 0)
     );
     const debitBalance = roundMoney(
       events.filter((event) => event.effectDirection === "debit").reduce((sum, event) => sum + event.amount, 0)
     );
-    return copy({
+    const balance = {
       creditBalance,
       debitBalance,
       netBalance: roundMoney(creditBalance - debitBalance),
@@ -664,8 +941,12 @@ export function createTaxAccountEngine({
           .reduce((sum, event) => sum + remainingCreditAmountForEvent(state, event.taxAccountEventId), 0)
       ),
       openSettlementAmount: roundMoney(items.reduce((sum, item) => sum + item.remainingSettlementAmount, 0)),
-      openDifferenceCaseCount: listOpenTaxAccountDifferenceCases({ companyId: resolvedCompanyId }).length
-    });
+      openDifferenceCaseCount: openDifferenceCases.length,
+      blockerCodes: openDifferenceCases.length > 0 ? ["tax_account_open_discrepancy"] : [],
+      readyForClose: openDifferenceCases.length === 0,
+      readyForFiling: openDifferenceCases.length === 0
+    };
+    return copy(balance);
   }
 
   function snapshotTaxAccount({ companyId } = {}) {
@@ -677,7 +958,8 @@ export function createTaxAccountEngine({
       events: listTaxAccountEvents({ companyId: resolvedCompanyId }),
       reconciliationItems: listExpectedTaxLiabilities({ companyId: resolvedCompanyId }),
       offsets: listTaxAccountOffsets({ companyId: resolvedCompanyId }),
-      discrepancies: listOpenTaxAccountDifferenceCases({ companyId: resolvedCompanyId }),
+      offsetSuggestions: listTaxAccountOffsetSuggestions({ companyId: resolvedCompanyId }),
+      discrepancies: listTaxAccountDifferenceCases({ companyId: resolvedCompanyId }),
       reconciliations: listTaxAccountReconciliations({ companyId: resolvedCompanyId }),
       balance: getTaxAccountBalance({ companyId: resolvedCompanyId }),
       auditEvents: state.auditEvents.filter((event) => event.companyId === resolvedCompanyId).map(copy),
@@ -830,6 +1112,17 @@ function buildSuggestedOffsetsForEvent(state, event, rulePack) {
   return suggestions;
 }
 
+function determineManualClassificationReconciliationStatus({ state, event, item }) {
+  if (!item) {
+    return "unmatched";
+  }
+  if (isAssessmentEvent(event)) {
+    const presentedItem = presentReconciliationItem(state.reconciliationItems.get(item.reconciliationItemId) || item);
+    return presentedItem.remainingAssessmentAmount === 0 ? "closed" : "partially_matched";
+  }
+  return "closed";
+}
+
 function listOffsetEligibleItems(state, companyId) {
   return (state.reconciliationItemIdsByCompany.get(companyId) || [])
     .map((itemId) => state.reconciliationItems.get(itemId))
@@ -875,7 +1168,10 @@ function openDifferenceCase(
   });
   const existingId = state.discrepancyCaseIdByKey.get(caseKey);
   if (existingId) {
-    return state.discrepancyCases.get(existingId);
+    const existingCase = state.discrepancyCases.get(existingId);
+    if (existingCase && !["resolved", "waived"].includes(existingCase.status)) {
+      return existingCase;
+    }
   }
 
   const now = nowIso(clock);
@@ -891,9 +1187,15 @@ function openDifferenceCase(
     explanation: requireText(explanation, "tax_account_difference_explanation_required"),
     detectedAt: now,
     updatedAt: now,
+    reviewedAt: null,
+    reviewedByActorId: null,
+    reviewNote: null,
     resolvedAt: null,
     resolvedByActorId: null,
-    resolutionNote: null
+    resolutionNote: null,
+    waivedAt: null,
+    waivedByActorId: null,
+    waiverReasonCode: null
   });
   state.discrepancyCases.set(differenceCase.discrepancyCaseId, differenceCase);
   appendToIndex(state.discrepancyCaseIdsByCompany, resolvedCompanyId, differenceCase.discrepancyCaseId);
@@ -907,6 +1209,44 @@ function openDifferenceCase(
     explanation: differenceCase.explanation
   });
   return differenceCase;
+}
+
+function resolveOpenDifferenceCasesForEvent(
+  state,
+  clock,
+  { companyId, taxAccountEventId, actorId, resolutionNote }
+) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const resolvedEventId = requireText(taxAccountEventId, "tax_account_event_id_required");
+  const resolvedActorId = requireText(actorId, "actor_id_required");
+  const resolvedResolutionNote = requireText(resolutionNote, "tax_account_difference_resolution_note_required");
+  for (const differenceCaseId of state.discrepancyCaseIdsByCompany.get(resolvedCompanyId) || []) {
+    const differenceCase = state.discrepancyCases.get(differenceCaseId);
+    if (!differenceCase || differenceCase.taxAccountEventId !== resolvedEventId) {
+      continue;
+    }
+    if (["resolved", "waived"].includes(differenceCase.status)) {
+      continue;
+    }
+    const resolvedCase = updateDifferenceCase(state, differenceCase.discrepancyCaseId, {
+      status: "resolved",
+      updatedAt: nowIso(clock),
+      reviewedAt: differenceCase.reviewedAt || nowIso(clock),
+      reviewedByActorId: differenceCase.reviewedByActorId || resolvedActorId,
+      reviewNote: differenceCase.reviewNote || resolvedResolutionNote,
+      resolvedAt: nowIso(clock),
+      resolvedByActorId: resolvedActorId,
+      resolutionNote: resolvedResolutionNote
+    });
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      action: "tax_account.difference_case_resolved",
+      entityType: "tax_account_difference_case",
+      entityId: resolvedCase.discrepancyCaseId,
+      explanation: `Resolved tax-account discrepancy case ${resolvedCase.discrepancyCaseId} after event settlement.`
+    });
+  }
 }
 
 function updateTaxAccountEvent(state, taxAccountEventId, updates) {

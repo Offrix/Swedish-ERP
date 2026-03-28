@@ -1,7 +1,7 @@
 export type TaxAccountEventEffectDirection = "credit" | "debit";
 export type TaxAccountEventMappingStatus = "imported" | "mapped" | "posted_to_ledger" | "reconciled" | "corrected";
 export type TaxAccountEventReconciliationStatus = "imported" | "unmatched" | "partially_matched" | "matched" | "closed";
-export type TaxAccountDifferenceCaseStatus = "open" | "under_review" | "resolved" | "escalated" | "closed";
+export type TaxAccountDifferenceCaseStatus = "open" | "reviewed" | "resolved" | "waived";
 export type TaxAccountReconciliationItemStatus = "open" | "assessment_matched" | "partially_offset" | "settled";
 
 export interface TaxAccountImportBatch {
@@ -40,6 +40,10 @@ export interface TaxAccountEvent {
   readonly mappedTargetObjectId: string | null;
   readonly mappedLiabilityTypeCode: string | null;
   readonly mappedByRuleCode: string | null;
+  readonly classificationCode?: string | null;
+  readonly classificationApprovedByActorId?: string | null;
+  readonly classificationApprovedAt?: string | null;
+  readonly classificationResolutionNote?: string | null;
   readonly ledgerPostingStatus: "pending" | "posted";
   readonly createdByActorId: string;
   readonly createdAt: string;
@@ -83,6 +87,18 @@ export interface TaxAccountOffset {
   readonly createdAt: string;
 }
 
+export interface TaxAccountBalance {
+  readonly creditBalance: number;
+  readonly debitBalance: number;
+  readonly netBalance: number;
+  readonly openCreditAmount: number;
+  readonly openSettlementAmount: number;
+  readonly openDifferenceCaseCount: number;
+  readonly blockerCodes: readonly string[];
+  readonly readyForClose: boolean;
+  readonly readyForFiling: boolean;
+}
+
 export interface TaxAccountDifferenceCase {
   readonly discrepancyCaseId: string;
   readonly companyId: string;
@@ -95,9 +111,15 @@ export interface TaxAccountDifferenceCase {
   readonly explanation: string;
   readonly detectedAt: string;
   readonly updatedAt: string;
+  readonly reviewedAt?: string | null;
+  readonly reviewedByActorId?: string | null;
+  readonly reviewNote?: string | null;
   readonly resolvedAt: string | null;
   readonly resolvedByActorId: string | null;
   readonly resolutionNote: string | null;
+  readonly waivedAt?: string | null;
+  readonly waivedByActorId?: string | null;
+  readonly waiverReasonCode?: string | null;
 }
 
 export interface TaxAccountSuggestedOffset {
@@ -105,20 +127,17 @@ export interface TaxAccountSuggestedOffset {
   readonly reconciliationItemId: string;
   readonly offsetAmount: number;
   readonly offsetReasonCode: string;
+  readonly rulepackId: string;
+  readonly rulepackCode: string;
+  readonly rulepackVersion: string;
+  readonly rulepackChecksum: string;
   readonly priority: number;
 }
 
 export interface TaxAccountReconciliationRun {
   readonly reconciliationRunId: string;
   readonly companyId: string;
-  readonly summary: {
-    readonly creditBalance: number;
-    readonly debitBalance: number;
-    readonly netBalance: number;
-    readonly openCreditAmount: number;
-    readonly openSettlementAmount: number;
-    readonly openDifferenceCaseCount: number;
-  };
+  readonly summary: TaxAccountBalance;
   readonly eventIdsReviewed: readonly string[];
   readonly suggestedOffsets: readonly TaxAccountSuggestedOffset[];
   readonly discrepancyCaseIds: readonly string[];
