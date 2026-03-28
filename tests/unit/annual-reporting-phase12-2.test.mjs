@@ -73,10 +73,34 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
   assert.equal(authorityOverview.specialPayrollTax.specialPayrollTaxAmount > 0, true);
   assert.equal(authorityOverview.legalFormCode, "AKTIEBOLAG");
   assert.equal(authorityOverview.declarationProfileCode, "INK2");
+  assert.throws(
+    () =>
+      platform.createTaxDeclarationPackage({
+        companyId: COMPANY_ID,
+        packageId: annualPackage.packageId,
+        actorId: DEMO_IDS.userId
+      }),
+    (error) => error?.code === "annual_report_version_not_locked_for_filing"
+  );
+  assert.throws(
+    () =>
+      platform.inviteAnnualReportSignatory({
+        companyId: COMPANY_ID,
+        packageId: annualPackage.packageId,
+        versionId: annualPackage.currentVersion.versionId,
+        companyUserId: DEMO_IDS.companyUserId,
+        signatoryRole: "partner_signatory"
+      }),
+    (error) => error?.code === "annual_report_signatory_role_invalid_for_class"
+  );
+
+  const signedAnnualPackage = signAnnualPackage(platform, annualPackage);
+  assert.equal(typeof signedAnnualPackage.currentVersion.lockedAt, "string");
+  assert.equal(signedAnnualPackage.currentVersion.signoffHash, signedAnnualPackage.currentVersion.checksum);
 
   const taxPackage = platform.createTaxDeclarationPackage({
     companyId: COMPANY_ID,
-    packageId: annualPackage.packageId,
+    packageId: signedAnnualPackage.packageId,
     actorId: DEMO_IDS.userId
   });
   assert.equal(taxPackage.exports.length, 6);
@@ -117,10 +141,14 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
     taxPackage.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
     ["RP-ANNUAL-FILING-SE", "RP-LEGAL-FORM-SE"]
   );
+  assert.equal(taxPackage.signatoryClassCode, "BOARD_OR_CEO");
+  assert.equal(taxPackage.filingProfileCode, "AB_ANNUAL_REPORT_AND_INK2");
+  assert.equal(taxPackage.annualReportVersionChecksum, signedAnnualPackage.currentVersion.checksum);
+  assert.equal(taxPackage.annualReportVersionSignoffHash, signedAnnualPackage.currentVersion.checksum);
 
   const second = platform.createTaxDeclarationPackage({
     companyId: COMPANY_ID,
-    packageId: annualPackage.packageId,
+    packageId: signedAnnualPackage.packageId,
     actorId: DEMO_IDS.userId
   });
   assert.equal(second.taxDeclarationPackageId, taxPackage.taxDeclarationPackageId);
@@ -488,6 +516,87 @@ test("Phase 12.2 submission queue items carry explicit SLA timestamps for correc
   assert.equal(submission.actionQueueItems[0].slaDueAt, submission.actionQueueItems[0].createdAt);
 });
 
+test("Phase 13.5 submission reconciliation opens recovery and blocks replay after material reject", async () => {
+  const integrationPlatform = createIntegrationPlatform({
+    clock: () => FIXED_NOW
+  });
+
+  let submission = integrationPlatform.prepareAuthoritySubmission({
+    companyId: "company-13-5",
+    submissionType: "agi_monthly",
+    sourceObjectType: "agi_submission_period",
+    sourceObjectId: "agi-period-2026-04",
+    sourceObjectVersion: "agi:v1",
+    periodId: "2026-04",
+    providerKey: "skatteverket",
+    recipientId: "skatteverket:agi",
+    payloadVersion: "phase13.5-company-v1",
+    payload: {
+      sourceObjectVersion: "agi:v1",
+      checksum: "agi-v1"
+    },
+    actorId: "phase13-5-unit",
+    signedState: "not_required"
+  });
+
+  submission = await integrationPlatform.submitAuthoritySubmission({
+    companyId: "company-13-5",
+    submissionId: submission.submissionId,
+    actorId: "phase13-5-unit",
+    simulatedTransportOutcome: "technical_ack"
+  });
+  submission = integrationPlatform.registerSubmissionReceipt({
+    companyId: "company-13-5",
+    submissionId: submission.submissionId,
+    receiptType: "business_nack",
+    requiredInput: ["correct_agi_values"],
+    actorId: "phase13-5-unit"
+  });
+
+  assert.equal(submission.status, "domain_rejected");
+  assert.equal(submission.recoveries.length, 1);
+  assert.equal(submission.recoveries[0].requiredActionCode, "collect_more_data");
+  assert.equal(submission.currentEvidencePack.recoveryRefs.length, 1);
+  assert.equal(submission.currentEvidencePack.reconciliationSummary.reconciliationStateCode, "correction_required");
+
+  const reconciliation = integrationPlatform.getSubmissionReconciliation({
+    companyId: "company-13-5",
+    submissionId: submission.submissionId
+  });
+  assert.equal(reconciliation.technicalReceiptStateCode, "acknowledged");
+  assert.equal(reconciliation.materialReceiptStateCode, "rejected");
+  assert.equal(reconciliation.correctionRequired, true);
+  assert.equal(reconciliation.replayAllowed, false);
+
+  await assert.rejects(
+    () =>
+      integrationPlatform.requestSubmissionReplay({
+        companyId: "company-13-5",
+        submissionId: submission.submissionId,
+        actorId: "phase13-5-unit",
+        reasonCode: "illegal_retry_after_material_reject",
+        simulatedReceiptType: "business_ack"
+      }),
+    (error) => error?.code === "submission_replay_requires_correction"
+  );
+
+  const correction = integrationPlatform.openSubmissionCorrection({
+    companyId: "company-13-5",
+    submissionId: submission.submissionId,
+    actorId: "phase13-5-unit",
+    reasonCode: "agi_values_corrected",
+    sourceObjectVersion: "agi:v2",
+    payloadVersion: "phase13.5-company-v2",
+    payload: {
+      sourceObjectVersion: "agi:v2",
+      checksum: "agi-v2"
+    },
+    idempotencyKey: "phase13-5-correction-v2"
+  });
+  assert.equal(correction.previousSubmission.recoveries[0].status, "auto_resolved");
+  assert.equal(correction.previousSubmission.recoveries[0].resolutionCode, "correction_spawned");
+});
+
 function materializeVatOverview(platform) {
   platform.evaluateVatDecision({
     companyId: COMPANY_ID,
@@ -539,6 +648,23 @@ function materializeVatOverview(platform) {
     toDate: "2026-03-31",
     actorId: "phase12-2-unit",
     signer: "phase12-2-signer"
+  });
+}
+
+function signAnnualPackage(platform, annualPackage) {
+  platform.inviteAnnualReportSignatory({
+    companyId: COMPANY_ID,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    companyUserId: DEMO_IDS.companyUserId,
+    signatoryRole: "ceo"
+  });
+  return platform.signAnnualReportVersion({
+    companyId: COMPANY_ID,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    actorId: DEMO_IDS.userId,
+    comment: "Annual package signed for filing."
   });
 }
 

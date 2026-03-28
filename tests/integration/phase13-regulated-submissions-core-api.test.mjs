@@ -114,6 +114,7 @@ test("Phase 13.3 API keeps production transport on official fallback path withou
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
     });
+    const taxPackage = prepareSignedTaxDeclarationPackage(platform);
 
     const created = await requestJson(baseUrl, "/v1/submissions", {
       method: "POST",
@@ -123,22 +124,9 @@ test("Phase 13.3 API keeps production transport on official fallback path withou
         companyId: DEMO_IDS.companyId,
         submissionType: "income_tax_return",
         sourceObjectType: "tax_declaration_package",
-        sourceObjectId: "tax-package-phase13-3",
-        payloadVersion: "phase13.3",
+        sourceObjectId: taxPackage.taxDeclarationPackageId,
         providerKey: "skatteverket",
-        recipientId: "skatteverket:income-tax",
-        providerBaselineRefs: [
-          {
-            providerBaselineId: "annual-sru-export-se-2026.1",
-            providerCode: "skatteverket",
-            baselineCode: "SE-SRU-FILE",
-            providerBaselineVersion: "2026.1",
-            providerBaselineChecksum: "annual-sru-export-se-2026.1"
-          }
-        ],
-        payload: {
-          sourceObjectVersion: "tax-package-phase13-3:v1"
-        }
+        recipientId: "skatteverket:income-tax"
       }
     });
 
@@ -179,3 +167,80 @@ test("Phase 13.3 API keeps production transport on official fallback path withou
     await stopServer(server);
   }
 });
+
+function prepareSignedTaxDeclarationPackage(platform) {
+  platform.installLedgerCatalog({
+    companyId: DEMO_IDS.companyId,
+    actorId: "phase13-3-api"
+  });
+  const period = platform.ensureAccountingYearPeriod({
+    companyId: DEMO_IDS.companyId,
+    fiscalYear: 2026,
+    actorId: "phase13-3-api"
+  });
+  const created = platform.createJournalEntry({
+    companyId: DEMO_IDS.companyId,
+    journalDate: "2026-01-20",
+    voucherSeriesCode: "A",
+    sourceType: "MANUAL_JOURNAL",
+    sourceId: "phase13-3-api-income",
+    actorId: "phase13-3-api",
+    idempotencyKey: "phase13-3-api-income",
+    lines: [
+      { accountNumber: "1510", debitAmount: 9400 },
+      { accountNumber: "3010", creditAmount: 9400 }
+    ]
+  });
+  platform.validateJournalEntry({
+    companyId: DEMO_IDS.companyId,
+    journalEntryId: created.journalEntry.journalEntryId,
+    actorId: "phase13-3-api"
+  });
+  platform.postJournalEntry({
+    companyId: DEMO_IDS.companyId,
+    journalEntryId: created.journalEntry.journalEntryId,
+    actorId: "phase13-3-api"
+  });
+  platform.lockAccountingPeriod({
+    companyId: DEMO_IDS.companyId,
+    accountingPeriodId: period.accountingPeriodId,
+    status: "hard_closed",
+    actorId: "phase13-3-close-requester",
+    reasonCode: "annual_reporting_ready",
+    approvedByActorId: DEMO_IDS.userId,
+    approvedByRoleCode: "company_admin"
+  });
+  const annualPackage = platform.createAnnualReportPackage({
+    companyId: DEMO_IDS.companyId,
+    accountingPeriodId: period.accountingPeriodId,
+    profileCode: "k2",
+    actorId: DEMO_IDS.userId,
+    textSections: {
+      management_report: "Phase 13.3 API package",
+      accounting_policies: "K2 baseline"
+    },
+    noteSections: {
+      notes_bundle: "Phase 13.3 notes",
+      simplified_notes: "Phase 13.3 simplified notes"
+    }
+  });
+  platform.inviteAnnualReportSignatory({
+    companyId: DEMO_IDS.companyId,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    companyUserId: DEMO_IDS.companyUserId,
+    signatoryRole: "ceo"
+  });
+  const signedPackage = platform.signAnnualReportVersion({
+    companyId: DEMO_IDS.companyId,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    actorId: DEMO_IDS.userId,
+    comment: "Signed annual package for regulated submission fallback."
+  });
+  return platform.createTaxDeclarationPackage({
+    companyId: DEMO_IDS.companyId,
+    packageId: signedPackage.packageId,
+    actorId: DEMO_IDS.userId
+  });
+}

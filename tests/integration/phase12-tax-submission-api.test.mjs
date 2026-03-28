@@ -273,6 +273,51 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
     assert.equal(queueItem.actionType, "collect_more_data");
     assert.equal(queueItem.ownerQueue, "tax_operator");
 
+    const reconciliation = await requestJson(
+      `${baseUrl}/v1/submissions/${retried.submission.submissionId}/reconciliation?companyId=${DEMO_IDS.companyId}`,
+      {
+        token: adminToken
+      }
+    );
+    assert.equal(reconciliation.materialReceiptStateCode, "rejected");
+    assert.equal(reconciliation.correctionRequired, true);
+    assert.equal(reconciliation.replayAllowed, false);
+
+    const recoveries = await requestJson(
+      `${baseUrl}/v1/submissions/${retried.submission.submissionId}/recoveries?companyId=${DEMO_IDS.companyId}`,
+      {
+        token: adminToken
+      }
+    );
+    assert.equal(recoveries.items.length, 1);
+    assert.equal(recoveries.items[0].requiredActionCode, "collect_more_data");
+
+    const replayAfterReject = await requestJson(`${baseUrl}/v1/submissions/${retried.submission.submissionId}/replay`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "illegal_retry_after_material_reject",
+        simulatedReceiptType: "business_ack"
+      }
+    });
+    assert.equal(replayAfterReject.error, "submission_replay_requires_correction");
+
+    const resolvedRecovery = await requestJson(
+      `${baseUrl}/v1/submissions/${retried.submission.submissionId}/recoveries/${recoveries.items[0].submissionRecoveryId}/resolve`,
+      {
+        method: "POST",
+        token: adminToken,
+        body: {
+          companyId: DEMO_IDS.companyId,
+          resolutionCode: "manual_investigation_opened",
+          note: "Operator anchored the recovery to a manual correction track."
+        }
+      }
+    );
+    assert.equal(resolvedRecovery.status, "resolved");
+
     const resolved = await requestJson(`${baseUrl}/v1/submissions/action-queue/${queueItem.queueItemId}/resolve`, {
       method: "POST",
       token: adminToken,
@@ -331,15 +376,8 @@ test("Phase 12.2 API opens submission corrections with preserved receipt evidenc
         submissionType: "income_tax_return",
         sourceObjectType: "tax_declaration_package",
         sourceObjectId: taxPackage.taxDeclarationPackageId,
-        sourceObjectVersion: "api-tax-package:v1",
         providerKey: "skatteverket",
         recipientId: "skatteverket:income-tax",
-        payloadVersion: "phase12.2",
-        payload: {
-          exportCode: "ink2_support_json",
-          sourceObjectVersion: "api-tax-package:v1",
-          checksum: "api-tax-package-checksum-v1"
-        },
         idempotencyKey: "phase12-api-correction-original"
       }
     });
@@ -442,7 +480,104 @@ test("Phase 12.2 API opens submission corrections with preserved receipt evidenc
   }
 });
 
+test("Phase 13.4 API blocks unsigned and stale annual filing payloads", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-28T09:30:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+    const unsignedPackage = prepareUnsignedAnnualPackage(platform);
+
+    const unsignedResponse = await fetch(`${baseUrl}/v1/submissions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({
+        companyId: DEMO_IDS.companyId,
+        submissionType: "annual_report_submission",
+        sourceObjectType: "annual_report_package",
+        sourceObjectId: unsignedPackage.packageId,
+        providerKey: "bolagsverket",
+        recipientId: "bolagsverket:annual-report",
+        signedState: "not_required",
+        retryClass: "manual_only"
+      })
+    });
+    const unsignedPayload = await unsignedResponse.json();
+    assert.equal(unsignedResponse.status, 409);
+    assert.equal(unsignedPayload.error, "annual_report_version_not_locked_for_submission");
+
+    const annualPackage = signAnnualPackage(platform, unsignedPackage);
+    const queuedSubmission = await requestJson(`${baseUrl}/v1/submissions`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        submissionType: "annual_report_submission",
+        sourceObjectType: "annual_report_package",
+        sourceObjectId: annualPackage.packageId,
+        providerKey: "bolagsverket",
+        recipientId: "bolagsverket:annual-report",
+        signedState: "not_required",
+        retryClass: "manual_only",
+        idempotencyKey: "phase13-4-annual-report-stale"
+      }
+    });
+    assert.equal(queuedSubmission.payloadJson.signoffHash, annualPackage.currentVersion.checksum);
+
+    const revisedPackage = platform.createAnnualReportVersion({
+      companyId: DEMO_IDS.companyId,
+      packageId: annualPackage.packageId,
+      actorId: DEMO_IDS.userId,
+      textSections: {
+        management_report: "Phase 13.4 revised management report",
+        accounting_policies: "K3 policies",
+        material_events: "Updated note"
+      },
+      noteSections: {
+        notes_bundle: "Phase 13.4 revised notes",
+        cash_flow_commentary: "Cashflow note",
+        related_party_commentary: "Related party note"
+      }
+    });
+    signAnnualPackage(platform, revisedPackage);
+
+    const staleSubmit = await fetch(`${baseUrl}/v1/submissions/${queuedSubmission.submissionId}/submit`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({
+        companyId: DEMO_IDS.companyId,
+        simulatedTransportOutcome: "technical_ack"
+      })
+    });
+    const stalePayload = await staleSubmit.json();
+    assert.equal(staleSubmit.status, 409);
+    assert.equal(stalePayload.error, "annual_report_submission_version_mismatch");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 function prepareAnnualPackage(platform) {
+  return signAnnualPackage(platform, prepareUnsignedAnnualPackage(platform));
+}
+
+function prepareUnsignedAnnualPackage(platform) {
   platform.installLedgerCatalog({
     companyId: DEMO_IDS.companyId,
     actorId: "phase12-2-api"
@@ -499,6 +634,23 @@ function prepareAnnualPackage(platform) {
       cash_flow_commentary: "Cashflow note",
       related_party_commentary: "Related party note"
     }
+  });
+}
+
+function signAnnualPackage(platform, annualPackage) {
+  platform.inviteAnnualReportSignatory({
+    companyId: DEMO_IDS.companyId,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    companyUserId: DEMO_IDS.companyUserId,
+    signatoryRole: "ceo"
+  });
+  return platform.signAnnualReportVersion({
+    companyId: DEMO_IDS.companyId,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    actorId: DEMO_IDS.userId,
+    comment: "Signed annual package for API flow."
   });
 }
 

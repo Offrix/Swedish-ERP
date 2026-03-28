@@ -5,6 +5,13 @@ export const ANNUAL_REPORT_PROFILE_CODES = Object.freeze(["k1", "k2", "k3"]);
 export const ANNUAL_REPORT_PACKAGE_STATUSES = Object.freeze(["draft", "ready_for_signature", "signed", "submitted", "locked", "superseded"]);
 export const ANNUAL_REPORT_SIGNATORY_STATUSES = Object.freeze(["invited", "signed", "declined", "superseded"]);
 export const TAX_DECLARATION_PACKAGE_STATUSES = Object.freeze(["ready", "submitted", "accepted", "rejected", "superseded"]);
+export const ANNUAL_REPORT_SIGNATORY_ROLE_CODES = Object.freeze([
+  "board_member",
+  "ceo",
+  "association_signatory",
+  "owner_proprietor",
+  "partner_signatory"
+]);
 export const ANNUAL_REPORTING_PROVIDER_BASELINES = Object.freeze([
   Object.freeze({
     providerBaselineId: "annual-declaration-json-se-2026.1",
@@ -305,10 +312,13 @@ function createAnnualReportVersion(context, input = {}) {
     companyId,
     versionNo: nextVersionNo(state, annualPackage.packageId),
     profileCode: annualPackage.profileCode,
+    legalFormProfileId: annualPackage.legalFormProfileId,
     legalFormCode: annualContext.legalFormCode,
+    reportingObligationProfileId: annualPackage.reportingObligationProfileId,
     declarationProfileCode: annualContext.declarationProfileCode,
     packageFamilyCode: annualContext.packageFamilyCode,
     signatoryClassCode: annualContext.signatoryClassCode,
+    filingProfileCode: annualContext.filingProfileCode,
     packageStatus: "draft",
     accountingPeriodId: accountingPeriod.accountingPeriodId,
     balanceSheetReportSnapshotId: payload.balanceSheet.reportSnapshotId,
@@ -328,6 +338,8 @@ function createAnnualReportVersion(context, input = {}) {
     updatedAt: now,
     supersedesVersionId: currentVersion?.versionId || null,
     lockedAt: null,
+    signoffHash: null,
+    signoffCompletedAt: null,
     submittedAt: null
   };
   payload.evidencePack.versionId = version.versionId;
@@ -370,6 +382,8 @@ function createAnnualReportVersion(context, input = {}) {
       profileCode: version.profileCode,
       legalFormCode: version.legalFormCode,
       declarationProfileCode: version.declarationProfileCode,
+      filingProfileCode: version.filingProfileCode,
+      signatoryClassCode: version.signatoryClassCode,
       packageFamilyCode: version.packageFamilyCode,
       rulepackRefs: version.rulepackRefs,
       providerBaselineRefs: version.providerBaselineRefs,
@@ -384,16 +398,26 @@ function inviteAnnualReportSignatory({ state, orgAuthPlatform, clock }, input = 
   const companyId = text(input.companyId, "company_id_required");
   const annualPackage = requirePackage(state, companyId, input.packageId);
   const version = requireVersion(state, annualPackage.packageId, input.versionId);
+  if (version.versionId !== annualPackage.currentVersionId) {
+    throw error(409, "annual_report_signatory_version_not_current", "Only the current annual-report version can receive signatories.");
+  }
   if (version.packageStatus === "superseded") {
     throw error(409, "annual_report_version_superseded", "Superseded annual-report versions cannot receive new signatories.");
   }
+  if (version.lockedAt || ["signed", "submitted", "locked"].includes(version.packageStatus)) {
+    throw error(409, "annual_report_version_locked_for_signatory_changes", "Locked annual-report versions cannot receive new signatories.");
+  }
   const companyUser = requireCompanyUser(orgAuthPlatform, companyId, input.companyUserId);
+  const resolvedSignatoryRole = assertAnnualSignatoryRole({
+    signatoryRole: input.signatoryRole,
+    signatoryClassCode: annualPackage.signatoryClassCode
+  });
   const existing = [...state.signatories.values()].find(
     (candidate) =>
       candidate.packageId === annualPackage.packageId &&
       candidate.versionId === version.versionId &&
       candidate.companyUserId === companyUser.companyUserId &&
-      candidate.signatoryRole === text(input.signatoryRole, "annual_report_signatory_role_required") &&
+      candidate.signatoryRole === resolvedSignatoryRole &&
       candidate.status !== "superseded"
   );
   if (existing) {
@@ -403,13 +427,13 @@ function inviteAnnualReportSignatory({ state, orgAuthPlatform, clock }, input = 
   const signatory = {
     signatoryId: crypto.randomUUID(),
     packageId: annualPackage.packageId,
-    versionId: version.versionId,
-    companyId,
-    companyUserId: companyUser.companyUserId,
-    userId: companyUser.userId,
-    signatoryRole: text(input.signatoryRole, "annual_report_signatory_role_required"),
-    status: "invited",
-    invitedAt: now,
+      versionId: version.versionId,
+      companyId,
+      companyUserId: companyUser.companyUserId,
+      userId: companyUser.userId,
+      signatoryRole: resolvedSignatoryRole,
+      status: "invited",
+      invitedAt: now,
     signedAt: null,
     comment: null,
     updatedAt: now
@@ -429,6 +453,12 @@ function signAnnualReportVersion({ state, orgAuthPlatform, clock }, input = {}) 
   const companyId = text(input.companyId, "company_id_required");
   const annualPackage = requirePackage(state, companyId, input.packageId);
   const version = requireVersion(state, annualPackage.packageId, input.versionId);
+  if (version.versionId !== annualPackage.currentVersionId) {
+    throw error(409, "annual_report_version_not_current", "Only the current annual-report version can be signed.");
+  }
+  if (version.lockedAt) {
+    return materializePackage(state, annualPackage);
+  }
   const user = ensureUserExists(orgAuthPlatform, text(input.actorId, "actor_id_required"));
   const signatories = [...state.signatories.values()].filter(
     (candidate) => candidate.packageId === annualPackage.packageId && candidate.versionId === version.versionId && candidate.status !== "superseded"
@@ -448,9 +478,15 @@ function signAnnualReportVersion({ state, orgAuthPlatform, clock }, input = {}) 
   signatory.comment = normalizeText(input.comment);
   signatory.signedAt = now;
   signatory.updatedAt = now;
-  const allSigned = signatories.every((candidate) => candidate.signatoryId === signatory.signatoryId || candidate.status === "signed");
-  if (allSigned) {
+  const currentSignatories = [...state.signatories.values()].filter(
+    (candidate) => candidate.packageId === annualPackage.packageId && candidate.versionId === version.versionId && candidate.status !== "superseded"
+  );
+  const allSigned = currentSignatories.every((candidate) => candidate.status === "signed");
+  if (allSigned && annualSignoffSatisfied({ annualPackage, signatories: currentSignatories })) {
     version.packageStatus = "signed";
+    version.lockedAt = now;
+    version.signoffHash = version.checksum;
+    version.signoffCompletedAt = now;
     version.updatedAt = now;
     annualPackage.status = "signed";
     annualPackage.updatedAt = now;
@@ -497,6 +533,7 @@ function createTaxDeclarationPackage(context, input = {}) {
   const version = requireVersion(state, annualPackage.packageId, input.versionId || annualPackage.currentVersionId);
   const actorId = text(input.actorId, "actor_id_required");
   ensureUserExists(orgAuthPlatform, actorId);
+  assertAnnualVersionLockedForFiling({ state, annualPackage, version });
   const accountingPeriod = requireHardClosedPeriod(ledgerPlatform, companyId, annualPackage.accountingPeriodId);
   const model = buildTaxDeclarationPackageModel({
     orgAuthPlatform,
@@ -529,10 +566,15 @@ function createTaxDeclarationPackage(context, input = {}) {
     fiscalYear: annualPackage.fiscalYear,
     packageCode: `annual_tax_bundle_${annualPackage.declarationProfileCode.toLowerCase()}`,
     declarationProfileCode: annualPackage.declarationProfileCode,
+    signatoryClassCode: annualPackage.signatoryClassCode,
+    filingProfileCode: annualPackage.filingProfileCode,
     packageFamilyCode: annualPackage.packageFamilyCode,
     status: "ready",
     sourceFingerprint: model.sourceFingerprint,
     outputChecksum: model.outputChecksum,
+    annualReportVersionChecksum: version.checksum,
+    annualReportVersionLockedAt: version.lockedAt,
+    annualReportVersionSignoffHash: version.signoffHash,
     authorityOverview: model.authorityOverview,
     evidencePackId: annualPackage.currentEvidencePackId,
     rulepackRefs: clone(model.rulepackRefs || version.rulepackRefs || annualPackage.rulepackRefs || []),
@@ -553,6 +595,8 @@ function createTaxDeclarationPackage(context, input = {}) {
     {
       taxDeclarationPackageId: record.taxDeclarationPackageId,
       exportCodes: record.exports.map((entry) => entry.exportCode),
+      filingProfileCode: record.filingProfileCode,
+      signatoryClassCode: record.signatoryClassCode,
       rulepackRefs: record.rulepackRefs,
       providerBaselineRefs: record.providerBaselineRefs
     },
@@ -666,11 +710,16 @@ function buildTaxDeclarationPackageModel({
     providerBaselineRefs,
     sourceFingerprint: hashPayload({
       annualReportVersionId: version.versionId,
+      annualReportVersionChecksum: version.checksum,
+      annualReportVersionSignoffHash: version.signoffHash,
+      annualReportVersionLockedAt: version.lockedAt,
       balanceSheetReportSnapshotId: balanceSheet.reportSnapshotId,
       balanceSheetHash: balanceSheet.contentHash,
       incomeStatementReportSnapshotId: incomeStatement.reportSnapshotId,
       incomeStatementHash: incomeStatement.contentHash,
       declarationProfileCode: annualPackage.declarationProfileCode,
+      filingProfileCode: annualPackage.filingProfileCode,
+      signatoryClassCode: annualPackage.signatoryClassCode,
       packageFamilyCode: annualPackage.packageFamilyCode,
       rulepackRefs,
       providerBaselineRefs,
@@ -699,8 +748,13 @@ function buildDeclarationSupportPayload({ annualPackage, version, company, balan
     annualReportVersionId: version.versionId,
     legalFormCode: annualPackage.legalFormCode,
     declarationProfileCode: annualPackage.declarationProfileCode,
+    filingProfileCode: annualPackage.filingProfileCode,
+    signatoryClassCode: annualPackage.signatoryClassCode,
     packageFamilyCode: annualPackage.packageFamilyCode,
     profileCode: annualPackage.profileCode,
+    annualReportVersionChecksum: version.checksum,
+    annualReportVersionLockedAt: version.lockedAt,
+    annualReportVersionSignoffHash: version.signoffHash,
     balanceSheet,
     incomeStatement,
     specialPayrollTaxSupport: authorityOverview.specialPayrollTax
@@ -1033,7 +1087,8 @@ function candidateVersion(payload) {
     rulepackRefs: payload.evidencePack.rulepackRefs,
     providerBaselineRefs: payload.evidencePack.providerBaselineRefs,
     sourceFingerprint: payload.sourceFingerprint,
-    checksum: payload.checksum
+    checksum: payload.checksum,
+    signoffHash: null
   };
 }
 
@@ -1489,6 +1544,57 @@ function requireVersion(state, packageId, versionId) {
     throw error(404, "annual_report_version_not_found", "Annual-report version was not found.");
   }
   return record;
+}
+
+function assertAnnualVersionLockedForFiling({ state, annualPackage, version }) {
+  const signatories = [...state.signatories.values()].filter(
+    (candidate) => candidate.packageId === annualPackage.packageId && candidate.versionId === version.versionId && candidate.status !== "superseded"
+  );
+  if (version.packageStatus !== "signed" || !version.lockedAt || version.signoffHash !== version.checksum) {
+    throw error(409, "annual_report_version_not_locked_for_filing", "Annual-report filing requires a locked package hash and completed signoff.");
+  }
+  if (!annualSignoffSatisfied({ annualPackage, signatories })) {
+    throw error(409, "annual_report_signatory_chain_incomplete", "Annual-report filing requires a complete signatory chain.");
+  }
+}
+
+function annualSignoffSatisfied({ annualPackage, signatories }) {
+  const signedRoles = signatories.filter((candidate) => candidate.status === "signed").map((candidate) => candidate.signatoryRole);
+  if (signedRoles.length === 0) {
+    return false;
+  }
+  const allowedRoles = allowedAnnualSignatoryRolesForClass(annualPackage.signatoryClassCode);
+  if (signatories.some((candidate) => !allowedRoles.includes(candidate.signatoryRole))) {
+    return false;
+  }
+  return signedRoles.some((roleCode) => allowedRoles.includes(roleCode));
+}
+
+function assertAnnualSignatoryRole({ signatoryRole, signatoryClassCode }) {
+  const normalizedRole = text(signatoryRole, "annual_report_signatory_role_required").trim().toLowerCase();
+  if (!ANNUAL_REPORT_SIGNATORY_ROLE_CODES.includes(normalizedRole)) {
+    throw error(400, "annual_report_signatory_role_invalid", "Annual-report signatory role was invalid.");
+  }
+  const allowedRoles = allowedAnnualSignatoryRolesForClass(signatoryClassCode);
+  if (!allowedRoles.includes(normalizedRole)) {
+    throw error(409, "annual_report_signatory_role_invalid_for_class", "The signatory role does not match the annual-report signatory class.");
+  }
+  return normalizedRole;
+}
+
+function allowedAnnualSignatoryRolesForClass(signatoryClassCode) {
+  switch (signatoryClassCode) {
+    case "BOARD_OR_CEO":
+      return Object.freeze(["board_member", "ceo"]);
+    case "ASSOCIATION_SIGNATORY":
+      return Object.freeze(["association_signatory"]);
+    case "OWNER_PROPRIETOR":
+      return Object.freeze(["owner_proprietor"]);
+    case "PARTNER_SIGNATORY":
+      return Object.freeze(["partner_signatory"]);
+    default:
+      throw error(409, "annual_report_signatory_class_unsupported", "Unsupported annual-report signatory class.");
+  }
 }
 
 function requireCompanyUser(orgAuthPlatform, companyId, companyUserId) {

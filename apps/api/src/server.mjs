@@ -544,6 +544,9 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/submissions/:submissionId/corrections",
               "/v1/submissions/:submissionId/attempts",
               "/v1/submissions/:submissionId/receipts",
+              "/v1/submissions/:submissionId/recoveries",
+              "/v1/submissions/:submissionId/recoveries/:recoveryId/resolve",
+              "/v1/submissions/:submissionId/reconciliation",
               "/v1/submissions/:submissionId/evidence-pack",
               "/v1/submissions/:submissionId/replay",
               "/v1/submissions/:submissionId/retry",
@@ -4450,6 +4453,15 @@ async function handleRequest({ req, res, platform, flags }) {
       scopeCode: "annual_reporting"
     });
     assertAnnualOperationsAccess({ principal });
+    const submissionBeforeDispatch = platform.getAuthoritySubmission({
+      companyId,
+      submissionId: submissionSubmitMatch.submissionId
+    });
+    assertSubmissionSourceReadyForDispatch({
+      platform,
+      companyId,
+      submission: submissionBeforeDispatch
+    });
     writeJson(
       res,
       200,
@@ -4467,6 +4479,9 @@ async function handleRequest({ req, res, platform, flags }) {
   }
 
   const submissionReceiptMatch = matchPath(path, "/v1/submissions/:submissionId/receipts");
+  const submissionRecoveryMatch = matchPath(path, "/v1/submissions/:submissionId/recoveries");
+  const submissionRecoveryResolveMatch = matchPath(path, "/v1/submissions/:submissionId/recoveries/:recoveryId/resolve");
+  const submissionReconciliationMatch = matchPath(path, "/v1/submissions/:submissionId/reconciliation");
   const submissionAttemptMatch = matchPath(path, "/v1/submissions/:submissionId/attempts");
   if (submissionAttemptMatch && req.method === "GET") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "Company id is required.");
@@ -4530,6 +4545,73 @@ async function handleRequest({ req, res, platform, flags }) {
         message: body.message ?? null,
         isFinal: body.isFinal ?? null,
         requiredInput: Array.isArray(body.requiredInput) ? body.requiredInput : [],
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+  if (submissionRecoveryMatch && req.method === "GET") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listSubmissionRecoveries({
+        companyId,
+        submissionId: submissionRecoveryMatch.submissionId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+  if (submissionReconciliationMatch && req.method === "GET") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(
+      res,
+      200,
+      platform.getSubmissionReconciliation({
+        companyId,
+        submissionId: submissionReconciliationMatch.submissionId
+      })
+    );
+    return;
+  }
+  if (submissionRecoveryResolveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(
+      res,
+      200,
+      platform.resolveSubmissionRecovery({
+        companyId,
+        submissionId: submissionRecoveryResolveMatch.submissionId,
+        recoveryId: submissionRecoveryResolveMatch.recoveryId,
+        resolutionCode: body.resolutionCode,
+        note: body.note ?? null,
         actorId: principal.userId
       })
     );
@@ -14669,6 +14751,12 @@ function buildSubmissionPayloadFromSource({ platform, companyId, sourceObjectTyp
       companyId,
       taxDeclarationPackageId: resolvedSourceId
     });
+    const annualPackage = platform.getAnnualReportPackage({
+      companyId,
+      packageId: taxPackage.annualReportPackageId
+    });
+    const annualVersion = (annualPackage.versions || []).find((candidate) => candidate.versionId === taxPackage.annualReportVersionId) || null;
+    assertAnnualVersionLockedForSubmissionSource({ annualPackage, annualVersion });
     return {
       sourceObjectType: resolvedSourceType,
       sourceObjectId: resolvedSourceId,
@@ -14676,8 +14764,13 @@ function buildSubmissionPayloadFromSource({ platform, companyId, sourceObjectTyp
       taxDeclarationPackageId: taxPackage.taxDeclarationPackageId,
       annualReportPackageId: taxPackage.annualReportPackageId,
       annualReportVersionId: taxPackage.annualReportVersionId,
+      annualReportVersionChecksum: annualVersion?.checksum || null,
+      annualReportVersionLockedAt: annualVersion?.lockedAt || null,
+      annualReportVersionSignoffHash: annualVersion?.signoffHash || null,
       packageCode: taxPackage.packageCode,
       declarationProfileCode: taxPackage.declarationProfileCode,
+      signatoryClassCode: taxPackage.signatoryClassCode || annualPackage.signatoryClassCode,
+      filingProfileCode: taxPackage.filingProfileCode || annualPackage.filingProfileCode,
       packageFamilyCode: taxPackage.packageFamilyCode,
       fiscalYear: taxPackage.fiscalYear,
       outputChecksum: taxPackage.outputChecksum,
@@ -14692,23 +14785,84 @@ function buildSubmissionPayloadFromSource({ platform, companyId, sourceObjectTyp
       companyId,
       packageId: resolvedSourceId
     });
+    assertAnnualVersionLockedForSubmissionSource({
+      annualPackage,
+      annualVersion: annualPackage.currentVersion || null
+    });
     return {
       sourceObjectType: resolvedSourceType,
       sourceObjectId: resolvedSourceId,
       sourceObjectVersion: annualPackage.currentVersion?.versionId || annualPackage.currentVersion?.checksum || null,
       packageId: annualPackage.packageId,
       fiscalYear: annualPackage.fiscalYear,
+      legalFormProfileId: annualPackage.legalFormProfileId,
       legalFormCode: annualPackage.legalFormCode,
+      reportingObligationProfileId: annualPackage.reportingObligationProfileId,
       declarationProfileCode: annualPackage.declarationProfileCode,
+      signatoryClassCode: annualPackage.signatoryClassCode,
+      filingProfileCode: annualPackage.filingProfileCode,
       packageFamilyCode: annualPackage.packageFamilyCode,
       profileCode: annualPackage.profileCode,
       status: annualPackage.status,
       currentVersionId: annualPackage.currentVersion?.versionId || null,
+      currentVersionLockedAt: annualPackage.currentVersion?.lockedAt || null,
       checksum: annualPackage.currentVersion?.checksum || null,
+      signoffHash: annualPackage.currentVersion?.signoffHash || null,
+      sourceFingerprint: annualPackage.currentVersion?.sourceFingerprint || null,
       evidencePackId: annualPackage.currentEvidencePack?.evidencePackId || null
     };
   }
   throw createHttpError(400, "submission_source_object_unsupported", "Automatic payload building is only supported for annual-reporting source objects.");
+}
+
+function assertSubmissionSourceReadyForDispatch({ platform, companyId, submission }) {
+  if (submission.sourceObjectType === "annual_report_package") {
+    const annualPackage = platform.getAnnualReportPackage({
+      companyId,
+      packageId: submission.sourceObjectId
+    });
+    assertAnnualVersionLockedForSubmissionSource({
+      annualPackage,
+      annualVersion: annualPackage.currentVersion || null
+    });
+    if (submission.payloadJson?.currentVersionId !== annualPackage.currentVersion.versionId) {
+      throw createHttpError(409, "annual_report_submission_version_mismatch", "Annual-report submission no longer matches the current locked package version.");
+    }
+    if (submission.payloadJson?.checksum !== annualPackage.currentVersion.checksum || submission.payloadJson?.signoffHash !== annualPackage.currentVersion.signoffHash) {
+      throw createHttpError(409, "annual_report_submission_hash_mismatch", "Annual-report submission payload no longer matches the locked package hash.");
+    }
+    return;
+  }
+  if (submission.sourceObjectType === "tax_declaration_package") {
+    const taxPackage = platform.getTaxDeclarationPackage({
+      companyId,
+      taxDeclarationPackageId: submission.sourceObjectId
+    });
+    const annualPackage = platform.getAnnualReportPackage({
+      companyId,
+      packageId: taxPackage.annualReportPackageId
+    });
+    const annualVersion = (annualPackage.versions || []).find((candidate) => candidate.versionId === taxPackage.annualReportVersionId) || null;
+    assertAnnualVersionLockedForSubmissionSource({ annualPackage, annualVersion });
+    if (submission.payloadJson?.outputChecksum !== taxPackage.outputChecksum) {
+      throw createHttpError(409, "tax_declaration_submission_hash_mismatch", "Tax declaration submission payload no longer matches the locked declaration package output.");
+    }
+    if (submission.payloadJson?.annualReportVersionId !== taxPackage.annualReportVersionId) {
+      throw createHttpError(409, "tax_declaration_submission_version_mismatch", "Tax declaration submission no longer matches the annual-report version it was prepared from.");
+    }
+  }
+}
+
+function assertAnnualVersionLockedForSubmissionSource({ annualPackage, annualVersion }) {
+  if (!annualVersion) {
+    throw createHttpError(409, "annual_report_version_missing_for_submission_source", "Annual-report submission source version was not found.");
+  }
+  if (annualVersion.packageStatus !== "signed" || !annualVersion.lockedAt || annualVersion.signoffHash !== annualVersion.checksum) {
+    throw createHttpError(409, "annual_report_version_not_locked_for_submission", "Annual-report submissions require a signed and locked package version.");
+  }
+  if (annualPackage.status !== "signed" && annualPackage.status !== "locked") {
+    throw createHttpError(409, "annual_report_package_not_signed", "Annual-report package must be signed before filings can be prepared or submitted.");
+  }
 }
 
 function matchPath(actualPath, template) {

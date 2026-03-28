@@ -198,7 +198,7 @@ function prepareAnnualPackage(platform) {
     approvedByActorId: DEMO_IDS.userId,
     approvedByRoleCode: "company_admin"
   });
-  return platform.createAnnualReportPackage({
+  const annualPackage = platform.createAnnualReportPackage({
     companyId: DEMO_IDS.companyId,
     accountingPeriodId: period.accountingPeriodId,
     profileCode: "k2",
@@ -211,6 +211,20 @@ function prepareAnnualPackage(platform) {
       notes_bundle: "Phase 12.2 E2E notes",
       simplified_notes: "Simplified notes"
     }
+  });
+  platform.inviteAnnualReportSignatory({
+    companyId: DEMO_IDS.companyId,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    companyUserId: DEMO_IDS.companyUserId,
+    signatoryRole: "ceo"
+  });
+  return platform.signAnnualReportVersion({
+    companyId: DEMO_IDS.companyId,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    actorId: DEMO_IDS.userId,
+    comment: "Signed annual package for E2E flow."
   });
 }
 

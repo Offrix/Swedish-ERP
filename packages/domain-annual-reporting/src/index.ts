@@ -7,6 +7,8 @@ export interface AnnualReportVersionRef {
   readonly packageId: string;
   readonly versionId: string;
   readonly checksum: string;
+  readonly lockedAt?: string | null;
+  readonly signoffHash?: string | null;
 }
 
 export interface AnnualReportPackageRef {
@@ -61,7 +63,12 @@ export interface TaxDeclarationPackageRef {
   readonly fiscalYear: string;
   readonly packageCode: string;
   readonly declarationProfileCode: string;
+  readonly signatoryClassCode?: string;
+  readonly filingProfileCode?: string;
   readonly packageFamilyCode: string;
   readonly status: TaxDeclarationPackageStatus;
   readonly outputChecksum: string;
+  readonly annualReportVersionChecksum?: string;
+  readonly annualReportVersionLockedAt?: string | null;
+  readonly annualReportVersionSignoffHash?: string | null;
 }

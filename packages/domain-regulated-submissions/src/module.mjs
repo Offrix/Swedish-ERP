@@ -17,6 +17,7 @@ export const SUBMISSION_RECEIPT_TYPES = Object.freeze(["technical_ack", "busines
 export const SUBMISSION_RETRY_CLASSES = Object.freeze(["automatic", "manual_only", "forbidden"]);
 export const SUBMISSION_ACTION_TYPES = Object.freeze(["retry", "collect_more_data", "correct_payload", "contact_provider", "close_as_duplicate"]);
 export const SUBMISSION_ACTION_STATUSES = Object.freeze(["open", "claimed", "waiting_input", "resolved", "closed", "auto_resolved"]);
+export const SUBMISSION_RECOVERY_STATUSES = Object.freeze(["open", "monitoring", "resolved", "auto_resolved"]);
 export const SUBMISSION_ENVELOPE_STATES = Object.freeze([
   "draft",
   "locked",
@@ -63,6 +64,12 @@ export function createRegulatedSubmissionsModule({ state, clock, evidencePlatfor
     listSubmissionReceipts(input) {
       return listSubmissionReceipts({ state }, input);
     },
+    listSubmissionRecoveries(input) {
+      return listSubmissionRecoveries({ state }, input);
+    },
+    getSubmissionReconciliation(input) {
+      return getSubmissionReconciliation({ state }, input);
+    },
     getSubmissionEvidencePack(input) {
       return getSubmissionEvidencePack({ state, evidencePlatform }, input);
     },
@@ -89,6 +96,9 @@ export function createRegulatedSubmissionsModule({ state, clock, evidencePlatfor
     },
     retryAuthoritySubmission(input) {
       return retryAuthoritySubmission({ state, clock, evidencePlatform }, input);
+    },
+    resolveSubmissionRecovery(input) {
+      return resolveSubmissionRecovery({ state, clock, evidencePlatform }, input);
     },
     resolveSubmissionQueueItem(input) {
       return resolveSubmissionQueueItem({ state, clock }, input);
@@ -239,7 +249,9 @@ function getSubmissionEvidencePack({ state, evidencePlatform }, { companyId, sub
 function buildSubmissionEvidencePackPayload(state, submission) {
   const attempts = getSubmissionAttempts(state, submission.submissionId);
   const receipts = getSubmissionReceipts(state, submission.submissionId);
+  const recoveries = getSubmissionRecoveries(state, submission.submissionId);
   const queueItems = getSubmissionQueueItems(state, submission.submissionId);
+  const reconciliationSummary = buildSubmissionReconciliation(state, submission);
   return {
     submissionEvidencePackId: submission.evidencePackId || `submission-evidence:${submission.submissionId}`,
     submissionId: submission.submissionId,
@@ -279,6 +291,8 @@ function buildSubmissionEvidencePackPayload(state, submission) {
     attemptRefs: attempts.map((attempt) => buildAttemptRef(attempt)),
     correctionLinks: getCorrectionLinksForSubmission(state, submission.submissionId).map(clone),
     receiptRefs: receipts.map((receipt) => buildReceiptRef(receipt)),
+    recoveryRefs: recoveries.map((recovery) => buildRecoveryRef(recovery)),
+    reconciliationSummary,
     preservedPriorReceiptRefs:
       submission.correctionOfSubmissionId && state.submissions.get(submission.correctionOfSubmissionId)
         ? getSubmissionReceipts(state, submission.correctionOfSubmissionId).map((receipt) => buildReceiptRef(receipt))
@@ -387,6 +401,10 @@ function syncSubmissionEvidenceBundle({ state, evidencePlatform, submission }) {
             }
           ]
         : []),
+      ...payload.recoveryRefs.map((recovery) => ({
+        objectType: "submission_recovery",
+        objectId: recovery.submissionRecoveryId
+      })),
       ...payload.operatorActions.map((action) => ({
         objectType: "submission_action_queue_item",
         objectId: action.queueItemId
@@ -554,6 +572,9 @@ async function requestSubmissionReplay(
   const submission = requireSubmission(state, companyId, submissionId);
   if (["finalized", "superseded"].includes(submission.status)) {
     throw createError(409, "submission_replay_not_allowed", "Replay is not allowed for finalized or superseded submissions.");
+  }
+  if (submission.status === "domain_rejected") {
+    throw createError(409, "submission_replay_requires_correction", "Materially rejected submissions must open a correction instead of replay.");
   }
   const corePlatform = resolveCorePlatform(getCorePlatform);
   const resolvedReasonCode = requireText(reasonCode, "submission_replay_reason_code_required");
@@ -793,6 +814,11 @@ function openSubmissionCorrection(
   previous.supersededBySubmissionId = correction.submissionId;
   previous.updatedAt = timestamp;
   autoResolveQueueItems(state, previous.submissionId, "correction_spawned", previous.updatedAt);
+  autoResolveSubmissionRecoveries(state, previous.submissionId, {
+    resolutionCode: "correction_spawned",
+    actorId,
+    timestamp: previous.updatedAt
+  });
   syncSubmissionEvidenceBundle({ state, evidencePlatform, submission: previous });
 
   const correctionLink =
@@ -918,6 +944,18 @@ function executeAuthoritySubmissionTransport(
       slaDueAt: addMinutesIso(submission.updatedAt, 15),
       requiredInput: [],
       rootCauseCode: "transport_failed",
+      clock
+    });
+    ensureSubmissionRecovery(state, {
+      submission,
+      recoveryTypeCode: "technical_transport_recovery",
+      reasonCode: "transport_failed",
+      requiredActionCode: "retry_same_payload",
+      correctionRequired: false,
+      replayAllowed: submission.retryClass !== "forbidden",
+      latestReceiptType: null,
+      latestProviderStatus: "transport_failed",
+      actorId,
       clock
     });
     syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
@@ -1132,12 +1170,22 @@ function registerSubmissionReceipt(
       submission.acceptedAt = receipt.receivedAt;
     }
     submission.updatedAt = receipt.receivedAt;
+    autoResolveSubmissionRecoveries(state, submission.submissionId, {
+      resolutionCode: normalizedType === "business_ack" ? "material_receipt_received" : "technical_receipt_received",
+      actorId,
+      timestamp: receipt.receivedAt
+    });
   } else if (normalizedType === "final_ack") {
     submission.status = "finalized";
     submission.acceptedAt = submission.acceptedAt || receipt.receivedAt;
     submission.finalizedAt = receipt.receivedAt;
     submission.updatedAt = receipt.receivedAt;
     autoResolveQueueItems(state, submission.submissionId, "receipt_final_ack", receipt.receivedAt);
+    autoResolveSubmissionRecoveries(state, submission.submissionId, {
+      resolutionCode: "final_receipt_received",
+      actorId,
+      timestamp: receipt.receivedAt
+    });
   } else if (normalizedType === "technical_nack") {
     submission.status = "transport_failed";
     submission.updatedAt = receipt.receivedAt;
@@ -1152,6 +1200,18 @@ function registerSubmissionReceipt(
         rootCauseCode: "technical_nack",
         clock
       });
+      ensureSubmissionRecovery(state, {
+        submission,
+        recoveryTypeCode: "technical_transport_recovery",
+        reasonCode: "technical_nack",
+        requiredActionCode: "retry_same_payload",
+        correctionRequired: false,
+        replayAllowed: submission.retryClass !== "forbidden",
+        latestReceiptType: normalizedType,
+        latestProviderStatus: receipt.providerStatus,
+        actorId,
+        clock
+      });
     } else if (normalizedType === "business_nack") {
     submission.status = "domain_rejected";
     submission.updatedAt = receipt.receivedAt;
@@ -1164,6 +1224,18 @@ function registerSubmissionReceipt(
         slaDueAt: receipt.receivedAt,
         requiredInput: Array.isArray(requiredInput) ? requiredInput : [],
         rootCauseCode: "business_nack",
+        clock
+      });
+      ensureSubmissionRecovery(state, {
+        submission,
+        recoveryTypeCode: "material_correction_recovery",
+        reasonCode: "business_nack",
+        requiredActionCode: Array.isArray(requiredInput) && requiredInput.length > 0 ? "collect_more_data" : "open_correction",
+        correctionRequired: true,
+        replayAllowed: false,
+        latestReceiptType: normalizedType,
+        latestProviderStatus: receipt.providerStatus,
+        actorId,
         clock
       });
     }
@@ -1203,6 +1275,11 @@ function retryAuthoritySubmission({ state, clock, evidencePlatform }, { companyI
   previous.status = "retry_pending";
   previous.updatedAt = nowIso(clock);
   autoResolveQueueItems(state, previous.submissionId, "retry_spawned", previous.updatedAt);
+  autoResolveSubmissionRecoveries(state, previous.submissionId, {
+    resolutionCode: "retry_spawned",
+    actorId,
+    timestamp: previous.updatedAt
+  });
 
   const retried = prepareAuthoritySubmission(
     { state, clock },
@@ -1262,6 +1339,40 @@ function resolveSubmissionQueueItem(
   return clone(queueItem);
 }
 
+function listSubmissionRecoveries({ state }, { companyId, submissionId, status = null } = {}) {
+  const submission = requireSubmission(state, companyId, submissionId);
+  return getSubmissionRecoveries(state, submission.submissionId)
+    .filter((recovery) => (status ? recovery.status === status : true))
+    .map(clone);
+}
+
+function getSubmissionReconciliation({ state }, { companyId, submissionId } = {}) {
+  const submission = requireSubmission(state, companyId, submissionId);
+  return clone(buildSubmissionReconciliation(state, submission));
+}
+
+function resolveSubmissionRecovery(
+  { state, clock, evidencePlatform },
+  { companyId, submissionId, recoveryId, resolutionCode, actorId = "system", note = null } = {}
+) {
+  const submission = requireSubmission(state, companyId, submissionId);
+  const recovery = state.submissionRecoveries?.get(requireText(recoveryId, "submission_recovery_id_required"));
+  if (!recovery || recovery.companyId !== submission.companyId || recovery.submissionId !== submission.submissionId) {
+    throw createError(404, "submission_recovery_not_found", "Submission recovery was not found.");
+  }
+  if (!["open", "monitoring"].includes(recovery.status)) {
+    return clone(recovery);
+  }
+  recovery.status = "resolved";
+  recovery.resolutionCode = requireText(resolutionCode, "submission_recovery_resolution_code_required");
+  recovery.note = normalizeOptionalText(note);
+  recovery.resolvedAt = nowIso(clock);
+  recovery.resolvedByActorId = requireText(actorId || "system", "actor_id_required");
+  recovery.updatedAt = recovery.resolvedAt;
+  syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
+  return clone(recovery);
+}
+
 function enrichSubmission(state, submission) {
   return clone({
     ...submission,
@@ -1269,6 +1380,8 @@ function enrichSubmission(state, submission) {
     attempts: getSubmissionAttempts(state, submission.submissionId).map(clone),
     correctionLinks: getCorrectionLinksForSubmission(state, submission.submissionId).map(clone),
     receipts: getSubmissionReceipts(state, submission.submissionId).map(clone),
+    recoveries: getSubmissionRecoveries(state, submission.submissionId).map(clone),
+    reconciliation: buildSubmissionReconciliation(state, submission),
     actionQueueItems: getSubmissionQueueItems(state, submission.submissionId).map(clone),
     currentEvidencePack: clone(state.submissionEvidencePacks?.get(submission.submissionId) || null)
   });
@@ -1301,6 +1414,8 @@ export function createCanonicalSubmissionEnvelopeRef(state, submission) {
     fallbackCode: submission.lastTransportPlan?.fallbackCode || null,
     receiptCount: getSubmissionReceipts(state, submission.submissionId).length,
     attemptCount: getSubmissionAttempts(state, submission.submissionId).length,
+    recoveryCount: getSubmissionRecoveries(state, submission.submissionId).length,
+    openRecoveryCount: getSubmissionRecoveries(state, submission.submissionId).filter((recovery) => ["open", "monitoring"].includes(recovery.status)).length,
     correctionCount: getCorrectionLinksForSubmission(state, submission.submissionId).length,
     createdAt: submission.createdAt,
     updatedAt: submission.updatedAt
@@ -1334,6 +1449,8 @@ export function createCanonicalSubmissionEvidencePackRef(payload = {}) {
     attemptRefs: clone(payload.attemptRefs || []),
     correctionLinks: clone(payload.correctionLinks || []),
     receiptRefs: clone(payload.receiptRefs || []),
+    recoveryRefs: clone(payload.recoveryRefs || []),
+    reconciliationSummary: clone(payload.reconciliationSummary || null),
     preservedPriorReceiptRefs: clone(payload.preservedPriorReceiptRefs || []),
     operatorActions: clone(payload.operatorActions || []),
     auditRefs: clone(payload.auditRefs || []),
@@ -1753,6 +1870,13 @@ function getSubmissionQueueItems(state, submissionId) {
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
+function getSubmissionRecoveries(state, submissionId) {
+  return (state.submissionRecoveryIdsBySubmission?.get(submissionId) || [])
+    .map((recoveryId) => state.submissionRecoveries?.get(recoveryId))
+    .filter(Boolean)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
 function getCorrectionLinksForSubmission(state, submissionId) {
   return [
     ...(state.correctionLinkIdsByOriginalSubmission.get(submissionId) || []),
@@ -1814,6 +1938,157 @@ function buildReceiptRef(receipt) {
     receivedAt: receipt.receivedAt,
     isFinal: receipt.isFinal
   };
+}
+
+function buildRecoveryRef(recovery) {
+  return {
+    submissionRecoveryId: recovery.submissionRecoveryId,
+    submissionId: recovery.submissionId,
+    recoveryTypeCode: recovery.recoveryTypeCode,
+    reasonCode: recovery.reasonCode,
+    status: recovery.status,
+    requiredActionCode: recovery.requiredActionCode,
+    correctionRequired: recovery.correctionRequired === true,
+    replayAllowed: recovery.replayAllowed === true,
+    latestReceiptType: recovery.latestReceiptType || null,
+    latestProviderStatus: recovery.latestProviderStatus || null,
+    resolutionCode: recovery.resolutionCode || null,
+    createdAt: recovery.createdAt,
+    updatedAt: recovery.updatedAt,
+    resolvedAt: recovery.resolvedAt || null
+  };
+}
+
+function buildSubmissionReconciliation(state, submission) {
+  const receipts = getSubmissionReceipts(state, submission.submissionId);
+  const openRecoveries = getSubmissionRecoveries(state, submission.submissionId).filter((recovery) => ["open", "monitoring"].includes(recovery.status));
+  const openQueueItems = getSubmissionQueueItems(state, submission.submissionId).filter((queueItem) => ["open", "claimed", "waiting_input"].includes(queueItem.status));
+  const technicalReceipt = receipts.find((receipt) => receipt.receiptType === "technical_ack" || receipt.receiptType === "technical_nack") || null;
+  const materialReceipt =
+    [...receipts]
+      .reverse()
+      .find((receipt) => ["business_ack", "business_nack", "final_ack"].includes(receipt.receiptType)) || null;
+  let technicalReceiptStateCode = "missing";
+  if (technicalReceipt?.receiptType === "technical_ack") {
+    technicalReceiptStateCode = "acknowledged";
+  } else if (technicalReceipt?.receiptType === "technical_nack") {
+    technicalReceiptStateCode = "rejected";
+  }
+  let materialReceiptStateCode = "not_received";
+  if (materialReceipt?.receiptType === "business_ack") {
+    materialReceiptStateCode = "accepted";
+  } else if (materialReceipt?.receiptType === "business_nack") {
+    materialReceiptStateCode = "rejected";
+  } else if (materialReceipt?.receiptType === "final_ack") {
+    materialReceiptStateCode = "finalized";
+  }
+  const correctionRequired = submission.status === "domain_rejected";
+  const replayAllowed = ["signed", "submitted", "received", "transport_failed"].includes(submission.status);
+  const retryAllowed = submission.status === "transport_failed" && submission.retryClass !== "forbidden";
+  let reconciliationStateCode = "open";
+  if (submission.status === "finalized") {
+    reconciliationStateCode = "resolved";
+  } else if (submission.status === "domain_rejected") {
+    reconciliationStateCode = "correction_required";
+  } else if (submission.status === "transport_failed") {
+    reconciliationStateCode = "retry_required";
+  } else if (!technicalReceipt) {
+    reconciliationStateCode = "awaiting_technical_receipt";
+  } else if (!materialReceipt) {
+    reconciliationStateCode = "awaiting_material_receipt";
+  } else if (openRecoveries.length > 0) {
+    reconciliationStateCode = "recovery_open";
+  }
+  return {
+    submissionId: submission.submissionId,
+    correctionChainId: submission.correctionChainId || submission.rootSubmissionId,
+    technicalReceiptStateCode,
+    materialReceiptStateCode,
+    reconciliationStateCode,
+    latestReceiptType: receipts.length > 0 ? receipts[receipts.length - 1].receiptType : null,
+    latestProviderStatus: receipts.length > 0 ? receipts[receipts.length - 1].providerStatus : null,
+    correctionRequired,
+    replayAllowed,
+    retryAllowed,
+    openRecoveryCount: openRecoveries.length,
+    openQueueItemCount: openQueueItems.length,
+    outstandingActionCodes: [...new Set(openQueueItems.map((queueItem) => queueItem.actionType))],
+    currentEvidencePackId: submission.evidencePackId || null
+  };
+}
+
+function ensureSubmissionRecovery(
+  state,
+  {
+    submission,
+    recoveryTypeCode,
+    reasonCode,
+    requiredActionCode,
+    correctionRequired,
+    replayAllowed,
+    latestReceiptType = null,
+    latestProviderStatus = null,
+    actorId = "system",
+    clock
+  }
+) {
+  const existing = getSubmissionRecoveries(state, submission.submissionId).find(
+    (recovery) =>
+      ["open", "monitoring"].includes(recovery.status) &&
+      recovery.recoveryTypeCode === recoveryTypeCode &&
+      recovery.reasonCode === reasonCode
+  );
+  if (existing) {
+    existing.requiredActionCode = requireText(requiredActionCode, "submission_recovery_required_action_code_required");
+    existing.correctionRequired = correctionRequired === true;
+    existing.replayAllowed = replayAllowed === true;
+    existing.latestReceiptType = normalizeOptionalText(latestReceiptType);
+    existing.latestProviderStatus = normalizeOptionalText(latestProviderStatus);
+    existing.updatedAt = nowIso(clock);
+    return existing;
+  }
+  const createdAt = nowIso(clock);
+  const recovery = {
+    submissionRecoveryId: crypto.randomUUID(),
+    submissionId: submission.submissionId,
+    companyId: submission.companyId,
+    correctionChainId: submission.correctionChainId || submission.rootSubmissionId,
+    sourceObjectType: submission.sourceObjectType,
+    sourceObjectId: submission.sourceObjectId,
+    sourceObjectVersion: submission.sourceObjectVersion,
+    recoveryTypeCode: requireText(recoveryTypeCode, "submission_recovery_type_code_required"),
+    reasonCode: requireText(reasonCode, "submission_recovery_reason_code_required"),
+    requiredActionCode: requireText(requiredActionCode, "submission_recovery_required_action_code_required"),
+    correctionRequired: correctionRequired === true,
+    replayAllowed: replayAllowed === true,
+    latestReceiptType: normalizeOptionalText(latestReceiptType),
+    latestProviderStatus: normalizeOptionalText(latestProviderStatus),
+    status: correctionRequired === true ? "open" : "monitoring",
+    createdByActorId: requireText(actorId || "system", "actor_id_required"),
+    createdAt,
+    updatedAt: createdAt,
+    resolvedAt: null,
+    resolvedByActorId: null,
+    resolutionCode: null,
+    note: null
+  };
+  state.submissionRecoveries?.set(recovery.submissionRecoveryId, recovery);
+  appendToIndex(state.submissionRecoveryIdsBySubmission, submission.submissionId, recovery.submissionRecoveryId);
+  return recovery;
+}
+
+function autoResolveSubmissionRecoveries(state, submissionId, { resolutionCode, actorId = "system", timestamp }) {
+  const resolvedAt = normalizeOptionalText(timestamp) || new Date().toISOString();
+  for (const recovery of getSubmissionRecoveries(state, submissionId)) {
+    if (!["open", "monitoring"].includes(recovery.status)) {
+      continue;
+    }
+    recovery.status = "auto_resolved";
+    recovery.resolutionCode = requireText(resolutionCode, "submission_recovery_resolution_code_required");
+    recovery.resolvedAt = resolvedAt;
+    recovery.resolvedByActorId = requireText(actorId || "system", "actor_id_required");
+    recovery.updatedAt = resolvedAt;
+  }
 }
 
 function createCorrectionLink(
