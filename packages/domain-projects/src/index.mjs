@@ -56,6 +56,11 @@ export const PROJECT_BUDGET_CATEGORY_CODES = Object.freeze([
   "revenue"
 ]);
 export const PROJECT_RESOURCE_ALLOCATION_STATUSES = Object.freeze(["planned", "confirmed", "released"]);
+export const PROJECT_CAPACITY_RESERVATION_STATUSES = Object.freeze(["draft", "approved", "released", "cancelled"]);
+export const PROJECT_ASSIGNMENT_PLAN_STATUSES = Object.freeze(["draft", "approved", "in_progress", "completed", "cancelled"]);
+export const PROJECT_RISK_STATUSES = Object.freeze(["open", "mitigating", "accepted", "closed"]);
+export const PROJECT_RISK_SEVERITY_CODES = Object.freeze(["low", "medium", "high", "critical"]);
+export const PROJECT_RISK_PROBABILITY_CODES = Object.freeze(["low", "medium", "high"]);
 export const PROJECT_SNAPSHOT_STATUSES = Object.freeze(["materialized", "review_required"]);
 export const PROJECT_CHANGE_ORDER_STATUSES = Object.freeze(["draft", "priced", "approved", "applied", "rejected", "cancelled"]);
 export const PROJECT_CHANGE_ORDER_SCOPE_CODES = Object.freeze(["change", "addition", "deduction"]);
@@ -148,6 +153,11 @@ export function createProjectEngine({
     projectBudgetLineKinds: PROJECT_BUDGET_LINE_KINDS,
     projectBudgetCategoryCodes: PROJECT_BUDGET_CATEGORY_CODES,
     projectResourceAllocationStatuses: PROJECT_RESOURCE_ALLOCATION_STATUSES,
+    projectCapacityReservationStatuses: PROJECT_CAPACITY_RESERVATION_STATUSES,
+    projectAssignmentPlanStatuses: PROJECT_ASSIGNMENT_PLAN_STATUSES,
+    projectRiskStatuses: PROJECT_RISK_STATUSES,
+    projectRiskSeverityCodes: PROJECT_RISK_SEVERITY_CODES,
+    projectRiskProbabilityCodes: PROJECT_RISK_PROBABILITY_CODES,
     projectSnapshotStatuses: PROJECT_SNAPSHOT_STATUSES,
     projectChangeOrderStatuses: PROJECT_CHANGE_ORDER_STATUSES,
     projectChangeOrderScopeCodes: PROJECT_CHANGE_ORDER_SCOPE_CODES,
@@ -190,6 +200,17 @@ export function createProjectEngine({
     createProjectBudgetVersion,
     listProjectResourceAllocations,
     createProjectResourceAllocation,
+    listProjectCapacityReservations,
+    createProjectCapacityReservation,
+    transitionProjectCapacityReservationStatus,
+    listProjectAssignmentPlans,
+    createProjectAssignmentPlan,
+    transitionProjectAssignmentPlanStatus,
+    listProjectRisks,
+    createProjectRisk,
+    transitionProjectRiskStatus,
+    listProjectPortfolioNodes,
+    getProjectPortfolioSummary,
     listProjectCostSnapshots,
     listProjectPayrollCostAllocations,
     materializeProjectCostSnapshot,
@@ -249,10 +270,14 @@ export function createProjectEngine({
     const quoteLinks = listProjectQuoteLinks({ companyId: project.companyId, projectId: project.projectId });
     const billingPlans = listProjectBillingPlans({ companyId: project.companyId, projectId: project.projectId });
     const statusUpdates = listProjectStatusUpdates({ companyId: project.companyId, projectId: project.projectId });
+    const currentStatusUpdate = selectWorkspaceSnapshot(statusUpdates, cutoffDate, "statusDate");
     const profitabilityAdjustments = listProjectProfitabilityAdjustments({ companyId: project.companyId, projectId: project.projectId });
     const invoiceReadinessAssessments = listProjectInvoiceReadinessAssessments({ companyId: project.companyId, projectId: project.projectId });
+    const capacityReservations = listProjectCapacityReservations({ companyId: project.companyId, projectId: project.projectId });
+    const assignmentPlans = listProjectAssignmentPlans({ companyId: project.companyId, projectId: project.projectId });
+    const projectRisks = listProjectRisks({ companyId: project.companyId, projectId: project.projectId });
+    const openProjectRisks = projectRisks.filter((risk) => risk.status !== "closed");
     const currentBillingPlan = billingPlans.filter((record) => record.status === "active").pop() || billingPlans.at(-1) || null;
-    const latestStatusUpdate = statusUpdates.at(-1) || null;
     const currentInvoiceReadinessAssessment = selectWorkspaceSnapshot(invoiceReadinessAssessments, cutoffDate, "assessedAt");
     const customerContext = summarizeProjectCustomerContext({
       project,
@@ -297,6 +322,32 @@ export function createProjectEngine({
       projectId: project.projectId
     });
     const openProjectDeviations = projectDeviations.filter((deviation) => !["resolved", "closed"].includes(deviation.status));
+    const resourceCapacitySummary = buildProjectResourceCapacitySummary({
+      currentCostSnapshot,
+      capacityReservations,
+      assignmentPlans,
+      resourceAllocations: listProjectResourceAllocations({ companyId: project.companyId, projectId: project.projectId })
+    });
+    const budgetActualForecastSummary = buildProjectBudgetActualForecastSummary({
+      currentBudgetVersion,
+      currentCostSnapshot,
+      currentForecastSnapshot,
+      currentProfitabilitySnapshot
+    });
+    const currentPortfolioNode = buildProjectPortfolioNode({
+      state,
+      companyId: project.companyId,
+      project,
+      cutoffDate,
+      currentBudgetVersion,
+      currentCostSnapshot,
+      currentForecastSnapshot,
+      currentProfitabilitySnapshot,
+      currentInvoiceReadinessAssessment,
+      currentStatusUpdate,
+      openProjectRisks,
+      resourceCapacitySummary
+    });
     const warningCodes = [];
     if (!currentBudgetVersion) {
       warningCodes.push("budget_missing");
@@ -337,6 +388,12 @@ export function createProjectEngine({
     if (husSummary.attentionCount > 0) {
       warningCodes.push("hus_attention_required");
     }
+    if (openProjectRisks.some((risk) => ["high", "critical"].includes(risk.severityCode))) {
+      warningCodes.push("project_risk_attention_required");
+    }
+    if (resourceCapacitySummary.uncoveredAssignmentMinutes > 0) {
+      warningCodes.push("capacity_assignment_gap");
+    }
     return {
       projectId: project.projectId,
       projectCode: project.projectCode,
@@ -360,6 +417,10 @@ export function createProjectEngine({
       billingPlanCount: billingPlans.length,
       profitabilityAdjustmentCount: profitabilityAdjustments.length,
       invoiceReadinessAssessmentCount: invoiceReadinessAssessments.length,
+      capacityReservationCount: capacityReservations.length,
+      assignmentPlanCount: assignmentPlans.length,
+      openProjectRiskCount: openProjectRisks.length,
+      criticalProjectRiskCount: openProjectRisks.filter((risk) => risk.severityCode === "critical").length,
       engagementCount: engagements.length,
       workModelCount: workModels.length,
       workPackageCount: workPackages.length,
@@ -375,13 +436,16 @@ export function createProjectEngine({
         actualMinutes: currentCostSnapshot?.actualMinutes || 0,
         payrollAllocationCount: payrollAllocations.length
       },
+      budgetActualForecastSummary,
+      resourceCapacitySummary,
+      currentPortfolioNode,
       fieldSummary,
       husSummary,
       personalliggareSummary,
       egenkontrollSummary,
       kalkylSummary,
       customerContext,
-      latestStatusUpdate: latestStatusUpdate ? copy(latestStatusUpdate) : null,
+      latestStatusUpdate: currentStatusUpdate ? copy(currentStatusUpdate) : null,
       currentBudgetVersion: currentBudgetVersion ? copy(currentBudgetVersion) : null,
       currentCostSnapshot: currentCostSnapshot ? copy(currentCostSnapshot) : null,
       currentWipSnapshot: currentWipSnapshot ? copy(currentWipSnapshot) : null,
@@ -398,6 +462,9 @@ export function createProjectEngine({
       projectRevenuePlans: revenuePlans.map(copy),
       projectBillingPlans: billingPlans.map(copy),
       projectStatusUpdates: statusUpdates.map(copy),
+      projectCapacityReservations: capacityReservations.map(copy),
+      projectAssignmentPlans: assignmentPlans.map(copy),
+      projectRisks: projectRisks.map(copy),
       projectProfitabilityAdjustments: profitabilityAdjustments.map(copy),
       projectInvoiceReadinessAssessments: invoiceReadinessAssessments.map(copy),
       complianceIndicatorStrip: buildWorkspaceIndicatorStrip({
@@ -506,6 +573,9 @@ export function createProjectEngine({
       quoteLinks: [],
       billingPlans: [],
       statusUpdates: [],
+      capacityReservations: [],
+      assignmentPlans: [],
+      risks: [],
       profitabilityAdjustments: [],
       invoiceReadinessAssessments: [],
       changeOrders: [],
@@ -1199,6 +1269,9 @@ export function createProjectEngine({
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
     };
+    if (!Array.isArray(project.statusUpdates)) {
+      project.statusUpdates = [];
+    }
     project.statusUpdates.push(record);
     project.updatedAt = nowIso(clock);
     pushAudit(state, clock, {
@@ -1762,6 +1835,489 @@ export function createProjectEngine({
       explanation: `Created resource allocation for employment ${record.employmentId} in ${record.reportingPeriod}.`
     });
     return copy(record);
+  }
+
+  function listProjectCapacityReservations({ companyId, projectId, status = null, employmentId = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    const resolvedEmploymentId = normalizeOptionalText(employmentId);
+    return (project.capacityReservations || [])
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .filter((record) => (resolvedEmploymentId ? record.employmentId === resolvedEmploymentId : true))
+      .sort((left, right) => left.startsOn.localeCompare(right.startsOn) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function createProjectCapacityReservation({
+    companyId,
+    projectId,
+    projectCapacityReservationId = null,
+    employmentId = null,
+    roleCode,
+    skillCodes = [],
+    startsOn,
+    endsOn,
+    reservedMinutes,
+    billableMinutes = null,
+    note = null,
+    status = "draft",
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedEmploymentId = normalizeOptionalText(employmentId);
+    if (resolvedEmploymentId) {
+      findEmploymentContextByEmploymentId({
+        companyId: project.companyId,
+        employmentId: resolvedEmploymentId,
+        hrPlatform
+      });
+    }
+    const resolvedStartsOn = normalizeRequiredDate(startsOn, "project_capacity_reservation_start_required");
+    const resolvedEndsOn = normalizeRequiredDate(endsOn, "project_capacity_reservation_end_required");
+    if (resolvedEndsOn < resolvedStartsOn) {
+      throw createError(400, "project_capacity_reservation_range_invalid", "Capacity reservation end date cannot be earlier than start date.");
+    }
+    const resolvedReservedMinutes = normalizeWholeNumber(reservedMinutes, "project_capacity_reservation_minutes_invalid");
+    if (resolvedReservedMinutes <= 0) {
+      throw createError(400, "project_capacity_reservation_minutes_invalid", "Capacity reservation minutes must be greater than zero.");
+    }
+    const record = {
+      projectCapacityReservationId: normalizeOptionalText(projectCapacityReservationId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      employmentId: resolvedEmploymentId,
+      roleCode: normalizeCode(roleCode, "project_capacity_reservation_role_required"),
+      skillCodes: uniqueTexts(skillCodes).map((code) => normalizeCode(code, "project_capacity_reservation_skill_invalid")),
+      startsOn: resolvedStartsOn,
+      endsOn: resolvedEndsOn,
+      reservedMinutes: resolvedReservedMinutes,
+      billableMinutes:
+        billableMinutes == null
+          ? resolvedReservedMinutes
+          : normalizeWholeNumber(billableMinutes, "project_capacity_reservation_billable_minutes_invalid"),
+      note: normalizeOptionalText(note),
+      status: assertAllowed(status, PROJECT_CAPACITY_RESERVATION_STATUSES, "project_capacity_reservation_status_invalid"),
+      approvedAt: null,
+      approvedByActorId: null,
+      releasedAt: null,
+      releasedByActorId: null,
+      cancelledAt: null,
+      cancelledByActorId: null,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    if (!Array.isArray(project.capacityReservations)) {
+      project.capacityReservations = [];
+    }
+    project.capacityReservations.push(record);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: project.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.capacity_reservation.created",
+      entityType: "project_capacity_reservation",
+      entityId: record.projectCapacityReservationId,
+      projectId: project.projectId,
+      explanation: `Created ${record.status} capacity reservation for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function transitionProjectCapacityReservationStatus({
+    companyId,
+    projectId,
+    projectCapacityReservationId,
+    nextStatus,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const record = requireProjectCapacityReservation(project, projectCapacityReservationId);
+    const resolvedNextStatus = assertAllowed(
+      nextStatus,
+      PROJECT_CAPACITY_RESERVATION_STATUSES,
+      "project_capacity_reservation_status_invalid"
+    );
+    assertProjectCapacityReservationTransition(record.status, resolvedNextStatus);
+    if (resolvedNextStatus === "approved") {
+      record.approvedAt = nowIso(clock);
+      record.approvedByActorId = requireText(actorId, "actor_id_required");
+    }
+    if (resolvedNextStatus === "released") {
+      record.releasedAt = nowIso(clock);
+      record.releasedByActorId = requireText(actorId, "actor_id_required");
+    }
+    if (resolvedNextStatus === "cancelled") {
+      record.cancelledAt = nowIso(clock);
+      record.cancelledByActorId = requireText(actorId, "actor_id_required");
+    }
+    record.status = resolvedNextStatus;
+    record.updatedAt = nowIso(clock);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: project.companyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "project.capacity_reservation.status_changed",
+      entityType: "project_capacity_reservation",
+      entityId: record.projectCapacityReservationId,
+      projectId: project.projectId,
+      explanation: `Capacity reservation ${record.projectCapacityReservationId} moved to ${record.status}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectAssignmentPlans({ companyId, projectId, status = null, employmentId = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    const resolvedEmploymentId = normalizeOptionalText(employmentId);
+    return (project.assignmentPlans || [])
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .filter((record) => (resolvedEmploymentId ? record.employmentId === resolvedEmploymentId : true))
+      .sort((left, right) => left.startsOn.localeCompare(right.startsOn) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function createProjectAssignmentPlan({
+    companyId,
+    projectId,
+    projectAssignmentPlanId = null,
+    employmentId = null,
+    projectWorkPackageId = null,
+    projectCapacityReservationId = null,
+    roleCode,
+    skillCodes = [],
+    startsOn,
+    endsOn,
+    plannedMinutes,
+    billableMinutes = null,
+    deliveryModeCode = "hybrid",
+    note = null,
+    status = "draft",
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedEmploymentId = normalizeOptionalText(employmentId);
+    if (resolvedEmploymentId) {
+      findEmploymentContextByEmploymentId({
+        companyId: project.companyId,
+        employmentId: resolvedEmploymentId,
+        hrPlatform
+      });
+    }
+    const resolvedWorkPackageId = normalizeOptionalText(projectWorkPackageId);
+    if (resolvedWorkPackageId) {
+      requireProjectWorkPackage(state, project.companyId, project.projectId, resolvedWorkPackageId);
+    }
+    const resolvedCapacityReservationId = normalizeOptionalText(projectCapacityReservationId);
+    const capacityReservation = resolvedCapacityReservationId ? requireProjectCapacityReservation(project, resolvedCapacityReservationId) : null;
+    const resolvedRoleCode = normalizeCode(roleCode, "project_assignment_plan_role_required");
+    if (capacityReservation) {
+      if (capacityReservation.roleCode !== resolvedRoleCode) {
+        throw createError(409, "project_assignment_plan_role_mismatch", "Assignment role must match the linked capacity reservation.");
+      }
+      if (resolvedEmploymentId && capacityReservation.employmentId && capacityReservation.employmentId !== resolvedEmploymentId) {
+        throw createError(409, "project_assignment_plan_employment_mismatch", "Assignment employment must match the linked capacity reservation.");
+      }
+    }
+    const resolvedStartsOn = normalizeRequiredDate(startsOn, "project_assignment_plan_start_required");
+    const resolvedEndsOn = normalizeRequiredDate(endsOn, "project_assignment_plan_end_required");
+    if (resolvedEndsOn < resolvedStartsOn) {
+      throw createError(400, "project_assignment_plan_range_invalid", "Assignment end date cannot be earlier than start date.");
+    }
+    const resolvedPlannedMinutes = normalizeWholeNumber(plannedMinutes, "project_assignment_plan_minutes_invalid");
+    if (resolvedPlannedMinutes <= 0) {
+      throw createError(400, "project_assignment_plan_minutes_invalid", "Assignment planned minutes must be greater than zero.");
+    }
+    const record = {
+      projectAssignmentPlanId: normalizeOptionalText(projectAssignmentPlanId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      employmentId: resolvedEmploymentId,
+      projectWorkPackageId: resolvedWorkPackageId,
+      projectCapacityReservationId: resolvedCapacityReservationId,
+      roleCode: resolvedRoleCode,
+      skillCodes: uniqueTexts(skillCodes).map((code) => normalizeCode(code, "project_assignment_plan_skill_invalid")),
+      startsOn: resolvedStartsOn,
+      endsOn: resolvedEndsOn,
+      plannedMinutes: resolvedPlannedMinutes,
+      billableMinutes:
+        billableMinutes == null
+          ? resolvedPlannedMinutes
+          : normalizeWholeNumber(billableMinutes, "project_assignment_plan_billable_minutes_invalid"),
+      deliveryModeCode: normalizeCode(deliveryModeCode, "project_assignment_plan_delivery_mode_required"),
+      note: normalizeOptionalText(note),
+      status: assertAllowed(status, PROJECT_ASSIGNMENT_PLAN_STATUSES, "project_assignment_plan_status_invalid"),
+      approvedAt: null,
+      approvedByActorId: null,
+      startedAt: null,
+      startedByActorId: null,
+      completedAt: null,
+      completedByActorId: null,
+      cancelledAt: null,
+      cancelledByActorId: null,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    if (!Array.isArray(project.assignmentPlans)) {
+      project.assignmentPlans = [];
+    }
+    project.assignmentPlans.push(record);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: project.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.assignment_plan.created",
+      entityType: "project_assignment_plan",
+      entityId: record.projectAssignmentPlanId,
+      projectId: project.projectId,
+      explanation: `Created ${record.status} assignment plan for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function transitionProjectAssignmentPlanStatus({
+    companyId,
+    projectId,
+    projectAssignmentPlanId,
+    nextStatus,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const record = requireProjectAssignmentPlan(project, projectAssignmentPlanId);
+    const resolvedNextStatus = assertAllowed(nextStatus, PROJECT_ASSIGNMENT_PLAN_STATUSES, "project_assignment_plan_status_invalid");
+    assertProjectAssignmentPlanTransition(record.status, resolvedNextStatus);
+    if (resolvedNextStatus === "approved") {
+      if (record.projectCapacityReservationId) {
+        const linkedReservation = requireProjectCapacityReservation(project, record.projectCapacityReservationId);
+        if (linkedReservation.status !== "approved") {
+          throw createError(
+            409,
+            "project_assignment_plan_capacity_not_approved",
+            "Assignment plans linked to a capacity reservation require an approved reservation before approval."
+          );
+        }
+      }
+      record.approvedAt = nowIso(clock);
+      record.approvedByActorId = requireText(actorId, "actor_id_required");
+    }
+    if (resolvedNextStatus === "in_progress") {
+      record.startedAt = nowIso(clock);
+      record.startedByActorId = requireText(actorId, "actor_id_required");
+    }
+    if (resolvedNextStatus === "completed") {
+      record.completedAt = nowIso(clock);
+      record.completedByActorId = requireText(actorId, "actor_id_required");
+    }
+    if (resolvedNextStatus === "cancelled") {
+      record.cancelledAt = nowIso(clock);
+      record.cancelledByActorId = requireText(actorId, "actor_id_required");
+    }
+    record.status = resolvedNextStatus;
+    record.updatedAt = nowIso(clock);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: project.companyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "project.assignment_plan.status_changed",
+      entityType: "project_assignment_plan",
+      entityId: record.projectAssignmentPlanId,
+      projectId: project.projectId,
+      explanation: `Assignment plan ${record.projectAssignmentPlanId} moved to ${record.status}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectRisks({ companyId, projectId, status = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    return (project.risks || [])
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort((left, right) => left.identifiedOn.localeCompare(right.identifiedOn) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function createProjectRisk({
+    companyId,
+    projectId,
+    projectRiskId = null,
+    title,
+    description = null,
+    categoryCode = "delivery",
+    severityCode,
+    probabilityCode,
+    ownerEmployeeId = null,
+    mitigationPlan = null,
+    dueDate = null,
+    identifiedOn = null,
+    sourceProjectStatusUpdateId = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedOwnerEmployeeId = normalizeOptionalText(ownerEmployeeId);
+    if (resolvedOwnerEmployeeId) {
+      findEmploymentContextByEmployeeId({
+        companyId: project.companyId,
+        employeeId: resolvedOwnerEmployeeId,
+        hrPlatform
+      });
+    }
+    const resolvedStatusUpdateId = normalizeOptionalText(sourceProjectStatusUpdateId);
+    if (resolvedStatusUpdateId) {
+      requireProjectStatusUpdate(project, resolvedStatusUpdateId);
+    }
+    const record = {
+      projectRiskId: normalizeOptionalText(projectRiskId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      title: requireText(title, "project_risk_title_required"),
+      description: normalizeOptionalText(description),
+      categoryCode: normalizeCode(categoryCode, "project_risk_category_required"),
+      severityCode: assertAllowed(severityCode, PROJECT_RISK_SEVERITY_CODES, "project_risk_severity_invalid"),
+      probabilityCode: assertAllowed(probabilityCode, PROJECT_RISK_PROBABILITY_CODES, "project_risk_probability_invalid"),
+      status: "open",
+      ownerEmployeeId: resolvedOwnerEmployeeId,
+      mitigationPlan: normalizeOptionalText(mitigationPlan),
+      dueDate: normalizeOptionalDate(dueDate, "project_risk_due_date_invalid"),
+      identifiedOn: normalizeRequiredDate(identifiedOn || new Date(clock()).toISOString().slice(0, 10), "project_risk_identified_on_required"),
+      sourceProjectStatusUpdateId: resolvedStatusUpdateId,
+      acceptedAt: null,
+      closedAt: null,
+      closedByActorId: null,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    if (!Array.isArray(project.risks)) {
+      project.risks = [];
+    }
+    project.risks.push(record);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: project.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.risk.created",
+      entityType: "project_risk",
+      entityId: record.projectRiskId,
+      projectId: project.projectId,
+      explanation: `Created ${record.severityCode}/${record.probabilityCode} risk for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function transitionProjectRiskStatus({
+    companyId,
+    projectId,
+    projectRiskId,
+    nextStatus,
+    mitigationPlan = undefined,
+    dueDate = undefined,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const record = requireProjectRisk(project, projectRiskId);
+    const resolvedNextStatus = assertAllowed(nextStatus, PROJECT_RISK_STATUSES, "project_risk_status_invalid");
+    assertProjectRiskTransition(record.status, resolvedNextStatus);
+    if (mitigationPlan !== undefined) {
+      record.mitigationPlan = normalizeOptionalText(mitigationPlan);
+    }
+    if (dueDate !== undefined) {
+      record.dueDate = normalizeOptionalDate(dueDate, "project_risk_due_date_invalid");
+    }
+    if (resolvedNextStatus === "accepted") {
+      record.acceptedAt = nowIso(clock);
+    }
+    if (resolvedNextStatus === "closed") {
+      record.closedAt = nowIso(clock);
+      record.closedByActorId = requireText(actorId, "actor_id_required");
+    }
+    record.status = resolvedNextStatus;
+    record.updatedAt = nowIso(clock);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: project.companyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "project.risk.status_changed",
+      entityType: "project_risk",
+      entityId: record.projectRiskId,
+      projectId: project.projectId,
+      explanation: `Project risk ${record.projectRiskId} moved to ${record.status}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectPortfolioNodes({ companyId, status = null, healthCode = null, atRiskOnly = false, cutoffDate = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = normalizeOptionalText(status);
+    const resolvedHealthCode = normalizeOptionalText(healthCode);
+    return listProjects({ companyId: resolvedCompanyId, status: resolvedStatus })
+      .map((project) =>
+        buildProjectPortfolioNode({
+          state,
+          companyId: resolvedCompanyId,
+          project,
+          cutoffDate
+        })
+      )
+      .filter((node) => (resolvedHealthCode ? node.healthCode === resolvedHealthCode : true))
+      .filter((node) => (atRiskOnly ? node.atRiskFlag === true : true))
+      .sort((left, right) => left.projectCode.localeCompare(right.projectCode) || left.projectId.localeCompare(right.projectId))
+      .map(copy);
+  }
+
+  function getProjectPortfolioSummary({ companyId, cutoffDate = null } = {}) {
+    const nodes = listProjectPortfolioNodes({ companyId, cutoffDate });
+    const roleDemandMap = new Map();
+    const skillDemandMap = new Map();
+    const employmentCapacityMap = new Map();
+    for (const node of nodes) {
+      for (const item of node.roleDemand || []) {
+        accumulatePortfolioDemand(roleDemandMap, item.roleCode, item);
+      }
+      for (const item of node.skillDemand || []) {
+        accumulatePortfolioDemand(skillDemandMap, item.skillCode, item);
+      }
+      for (const item of node.employmentCapacity || []) {
+        accumulatePortfolioDemand(employmentCapacityMap, item.employmentId, item);
+      }
+    }
+    return {
+      companyId: requireText(companyId, "company_id_required"),
+      totalProjectCount: nodes.length,
+      activeProjectCount: nodes.filter((node) => node.projectStatus === "active").length,
+      atRiskProjectCount: nodes.filter((node) => node.atRiskFlag === true).length,
+      blockedProjectCount: nodes.filter((node) => node.blockerCount > 0).length,
+      totalOpenRiskCount: nodes.reduce((sum, node) => sum + node.openRiskCount, 0),
+      totalHighRiskCount: nodes.reduce((sum, node) => sum + node.highRiskCount, 0),
+      totalCriticalRiskCount: nodes.reduce((sum, node) => sum + node.criticalRiskCount, 0),
+      totalBudgetCostAmount: roundMoney(nodes.reduce((sum, node) => sum + node.budgetCostAmount, 0)),
+      totalBudgetRevenueAmount: roundMoney(nodes.reduce((sum, node) => sum + node.budgetRevenueAmount, 0)),
+      totalActualCostAmount: roundMoney(nodes.reduce((sum, node) => sum + node.actualCostAmount, 0)),
+      totalBilledRevenueAmount: roundMoney(nodes.reduce((sum, node) => sum + node.billedRevenueAmount, 0)),
+      totalForecastCostAtCompletionAmount: roundMoney(nodes.reduce((sum, node) => sum + node.forecastCostAtCompletionAmount, 0)),
+      totalForecastRevenueAtCompletionAmount: roundMoney(nodes.reduce((sum, node) => sum + node.forecastRevenueAtCompletionAmount, 0)),
+      totalCurrentMarginAmount: roundMoney(nodes.reduce((sum, node) => sum + node.currentMarginAmount, 0)),
+      totalForecastMarginAmount: roundMoney(nodes.reduce((sum, node) => sum + node.forecastMarginAmount, 0)),
+      totalReservedMinutes: nodes.reduce((sum, node) => sum + node.reservedMinutes, 0),
+      totalAssignedMinutes: nodes.reduce((sum, node) => sum + node.assignedMinutes, 0),
+      totalActualMinutes: nodes.reduce((sum, node) => sum + node.actualMinutes, 0),
+      roleDemand: [...roleDemandMap.values()].sort((left, right) => String(left.roleCode).localeCompare(String(right.roleCode))),
+      skillDemand: [...skillDemandMap.values()].sort((left, right) => String(left.skillCode).localeCompare(String(right.skillCode))),
+      employmentCapacity: [...employmentCapacityMap.values()].sort((left, right) => String(left.employmentId).localeCompare(String(right.employmentId))),
+      items: nodes
+    };
   }
 
   function listProjectCostSnapshots({ companyId, projectId } = {}) {
@@ -2472,11 +3028,17 @@ function exportProjectEvidenceBundle({
       projectRevenuePlans: copy(workspace.projectRevenuePlans || []),
       projectBillingPlans: copy(workspace.projectBillingPlans || []),
       projectStatusUpdates: copy(workspace.projectStatusUpdates || []),
+      projectCapacityReservations: copy(workspace.projectCapacityReservations || []),
+      projectAssignmentPlans: copy(workspace.projectAssignmentPlans || []),
+      projectRisks: copy(workspace.projectRisks || []),
       projectProfitabilityAdjustments: copy(workspace.projectProfitabilityAdjustments || []),
       projectInvoiceReadinessAssessments: copy(workspace.projectInvoiceReadinessAssessments || []),
       currentProfitabilitySnapshot: copy(workspace.currentProfitabilitySnapshot),
       currentBillingPlan: copy(workspace.currentBillingPlan),
       currentInvoiceReadinessAssessment: copy(workspace.currentInvoiceReadinessAssessment),
+      budgetActualForecastSummary: copy(workspace.budgetActualForecastSummary),
+      resourceCapacitySummary: copy(workspace.resourceCapacitySummary),
+      currentPortfolioNode: copy(workspace.currentPortfolioNode),
       complianceIndicatorStrip: copy(workspace.complianceIndicatorStrip),
       projectDeviations: copy(workspace.projectDeviations),
       fieldSummary: copy(workspace.fieldSummary),
@@ -2512,7 +3074,8 @@ function exportProjectEvidenceBundle({
           ["project_forecast_snapshot", workspace.currentForecastSnapshotId],
           ["project_profitability_snapshot", workspace.currentProfitabilitySnapshotId],
           ["project_billing_plan", workspace.currentBillingPlanId],
-          ["project_invoice_readiness_assessment", workspace.currentInvoiceReadinessAssessmentId]
+          ["project_invoice_readiness_assessment", workspace.currentInvoiceReadinessAssessmentId],
+          ["project_status_update", workspace.latestStatusUpdate?.projectStatusUpdateId || null]
         ]
           .filter(([, artifactRef]) => artifactRef)
           .map(([artifactType, artifactRef]) => ({
@@ -2533,6 +3096,16 @@ function exportProjectEvidenceBundle({
             severityCode: deviation.severityCode
           }),
           roleCode: deviation.severityCode
+        })),
+        ...(workspace.projectRisks || []).map((risk) => ({
+          artifactType: "project_risk",
+          artifactRef: risk.projectRiskId,
+          checksum: hashObject({
+            projectRiskId: risk.projectRiskId,
+            status: risk.status,
+            severityCode: risk.severityCode
+          }),
+          roleCode: risk.severityCode
         }))
       ],
       auditRefs: projectAuditEvents.map((event) => ({
@@ -2553,6 +3126,18 @@ function exportProjectEvidenceBundle({
         (workspace.projectProfitabilityAdjustments || []).map((adjustment) => ({
           objectType: "project_profitability_adjustment",
           objectId: adjustment.projectProfitabilityAdjustmentId
+        })),
+        (workspace.projectCapacityReservations || []).map((reservation) => ({
+          objectType: "project_capacity_reservation",
+          objectId: reservation.projectCapacityReservationId
+        })),
+        (workspace.projectAssignmentPlans || []).map((assignmentPlan) => ({
+          objectType: "project_assignment_plan",
+          objectId: assignmentPlan.projectAssignmentPlanId
+        })),
+        (workspace.projectRisks || []).map((risk) => ({
+          objectType: "project_risk",
+          objectId: risk.projectRiskId
         })),
         workspace.currentInvoiceReadinessAssessment
           ? [
@@ -2594,6 +3179,45 @@ function requireProjectDeviation(state, companyId, projectId, projectDeviationId
   return record;
 }
 
+function requireProjectStatusUpdate(project, projectStatusUpdateId) {
+  const record = (project.statusUpdates || []).find(
+    (candidate) => candidate.projectStatusUpdateId === requireText(projectStatusUpdateId, "project_status_update_id_required")
+  );
+  if (!record) {
+    throw createError(404, "project_status_update_not_found", "Project status update was not found.");
+  }
+  return record;
+}
+
+function requireProjectCapacityReservation(project, projectCapacityReservationId) {
+  const record = (project.capacityReservations || []).find(
+    (candidate) =>
+      candidate.projectCapacityReservationId === requireText(projectCapacityReservationId, "project_capacity_reservation_id_required")
+  );
+  if (!record) {
+    throw createError(404, "project_capacity_reservation_not_found", "Project capacity reservation was not found.");
+  }
+  return record;
+}
+
+function requireProjectAssignmentPlan(project, projectAssignmentPlanId) {
+  const record = (project.assignmentPlans || []).find(
+    (candidate) => candidate.projectAssignmentPlanId === requireText(projectAssignmentPlanId, "project_assignment_plan_id_required")
+  );
+  if (!record) {
+    throw createError(404, "project_assignment_plan_not_found", "Project assignment plan was not found.");
+  }
+  return record;
+}
+
+function requireProjectRisk(project, projectRiskId) {
+  const record = (project.risks || []).find((candidate) => candidate.projectRiskId === requireText(projectRiskId, "project_risk_id_required"));
+  if (!record) {
+    throw createError(404, "project_risk_not_found", "Project risk was not found.");
+  }
+  return record;
+}
+
 function assertProjectDeviationTransition(currentStatus, nextStatus) {
   const allowed = {
     open: ["acknowledged", "in_progress", "resolved", "closed"],
@@ -2607,6 +3231,56 @@ function assertProjectDeviationTransition(currentStatus, nextStatus) {
   }
   if (!allowed[currentStatus]?.includes(nextStatus)) {
     throw createError(409, "project_deviation_transition_invalid", `Cannot move project deviation from ${currentStatus} to ${nextStatus}.`);
+  }
+}
+
+function assertProjectCapacityReservationTransition(currentStatus, nextStatus) {
+  const allowed = {
+    draft: ["approved", "cancelled"],
+    approved: ["released", "cancelled"],
+    released: [],
+    cancelled: []
+  };
+  if (currentStatus === nextStatus) {
+    return;
+  }
+  if (!allowed[currentStatus]?.includes(nextStatus)) {
+    throw createError(
+      409,
+      "project_capacity_reservation_transition_invalid",
+      `Cannot move project capacity reservation from ${currentStatus} to ${nextStatus}.`
+    );
+  }
+}
+
+function assertProjectAssignmentPlanTransition(currentStatus, nextStatus) {
+  const allowed = {
+    draft: ["approved", "cancelled"],
+    approved: ["in_progress", "cancelled"],
+    in_progress: ["completed", "cancelled"],
+    completed: [],
+    cancelled: []
+  };
+  if (currentStatus === nextStatus) {
+    return;
+  }
+  if (!allowed[currentStatus]?.includes(nextStatus)) {
+    throw createError(409, "project_assignment_plan_transition_invalid", `Cannot move project assignment plan from ${currentStatus} to ${nextStatus}.`);
+  }
+}
+
+function assertProjectRiskTransition(currentStatus, nextStatus) {
+  const allowed = {
+    open: ["mitigating", "accepted", "closed"],
+    mitigating: ["accepted", "closed"],
+    accepted: ["closed"],
+    closed: []
+  };
+  if (currentStatus === nextStatus) {
+    return;
+  }
+  if (!allowed[currentStatus]?.includes(nextStatus)) {
+    throw createError(409, "project_risk_transition_invalid", `Cannot move project risk from ${currentStatus} to ${nextStatus}.`);
   }
 }
 
@@ -2763,6 +3437,314 @@ function summarizeKalkylWorkspace({ companyId, projectId, kalkylPlatform }) {
     latestEstimateStatus: latestEstimate?.status || null,
     latestEstimateTotals: latestEstimate?.totals || null
   };
+}
+
+function buildProjectBudgetActualForecastSummary({
+  currentBudgetVersion,
+  currentCostSnapshot,
+  currentForecastSnapshot,
+  currentProfitabilitySnapshot
+}) {
+  const budgetCostAmount = Number(currentBudgetVersion?.totals?.costAmount || 0);
+  const budgetRevenueAmount = Number(currentBudgetVersion?.totals?.revenueAmount || 0);
+  const actualCostAmount = Number(currentCostSnapshot?.actualCostAmount || 0);
+  const billedRevenueAmount = Number(currentCostSnapshot?.billedRevenueAmount || 0);
+  const forecastCostAtCompletionAmount = Number(currentForecastSnapshot?.forecastCostAtCompletionAmount || actualCostAmount || 0);
+  const forecastRevenueAtCompletionAmount = Number(currentForecastSnapshot?.forecastRevenueAtCompletionAmount || billedRevenueAmount || 0);
+  const currentMarginAmount = Number(currentProfitabilitySnapshot?.currentMarginAmount || billedRevenueAmount - actualCostAmount);
+  const forecastMarginAmount = Number(currentForecastSnapshot?.forecastMarginAmount || currentProfitabilitySnapshot?.forecastMarginAmount || 0);
+  return {
+    budgetCostAmount: roundMoney(budgetCostAmount),
+    budgetRevenueAmount: roundMoney(budgetRevenueAmount),
+    actualCostAmount: roundMoney(actualCostAmount),
+    billedRevenueAmount: roundMoney(billedRevenueAmount),
+    forecastCostAtCompletionAmount: roundMoney(forecastCostAtCompletionAmount),
+    forecastRevenueAtCompletionAmount: roundMoney(forecastRevenueAtCompletionAmount),
+    currentMarginAmount: roundMoney(currentMarginAmount),
+    forecastMarginAmount: roundMoney(forecastMarginAmount),
+    budgetCostVarianceAmount: roundMoney(actualCostAmount - budgetCostAmount),
+    budgetRevenueVarianceAmount: roundMoney(forecastRevenueAtCompletionAmount - budgetRevenueAmount)
+  };
+}
+
+function buildProjectResourceCapacitySummary({
+  currentCostSnapshot,
+  capacityReservations = [],
+  assignmentPlans = [],
+  resourceAllocations = []
+}) {
+  const activeReservations = capacityReservations.filter((record) => !["released", "cancelled"].includes(record.status));
+  const activeAssignments = assignmentPlans.filter((record) => record.status !== "cancelled");
+  const reservedMinutes = activeReservations.reduce((sum, record) => sum + Number(record.reservedMinutes || 0), 0);
+  const assignedMinutes = activeAssignments.reduce((sum, record) => sum + Number(record.plannedMinutes || 0), 0);
+  const actualMinutes = Number(currentCostSnapshot?.actualMinutes || 0);
+  const plannedAllocationMinutes = resourceAllocations
+    .filter((record) => record.status !== "released")
+    .reduce((sum, record) => sum + Number(record.plannedMinutes || 0), 0);
+  const uncoveredAssignmentMinutes = Math.max(assignedMinutes - reservedMinutes, 0);
+  const unusedReservedMinutes = Math.max(reservedMinutes - assignedMinutes, 0);
+  const resourceLoadPercent =
+    reservedMinutes > 0
+      ? normalizePercentage(Math.min((actualMinutes / reservedMinutes) * 100, 100), "project_resource_capacity_percent_invalid")
+      : 0;
+  return {
+    reservedMinutes,
+    assignedMinutes,
+    actualMinutes,
+    plannedAllocationMinutes,
+    uncoveredAssignmentMinutes,
+    unusedReservedMinutes,
+    resourceLoadPercent,
+    reservationCount: activeReservations.length,
+    assignmentCount: activeAssignments.length
+  };
+}
+
+function buildProjectPortfolioNode({
+  state,
+  companyId,
+  project,
+  cutoffDate = null,
+  currentBudgetVersion = null,
+  currentCostSnapshot = null,
+  currentForecastSnapshot = null,
+  currentProfitabilitySnapshot = null,
+  currentInvoiceReadinessAssessment = null,
+  currentStatusUpdate = null,
+  openProjectRisks = null,
+  resourceCapacitySummary = null
+}) {
+  const resolvedProject = project;
+  if (!resolvedProject) {
+    throw createError(500, "project_required", "Project is required when building portfolio node.");
+  }
+  const budgetVersion = currentBudgetVersion || findLatestBudgetVersion(state, resolvedProject.projectId);
+  const costSnapshot =
+    currentCostSnapshot || selectWorkspaceSnapshot(listProjectCostSnapshotsForState(state, resolvedProject), cutoffDate);
+  const forecastSnapshot =
+    currentForecastSnapshot || selectWorkspaceSnapshot(listProjectForecastSnapshotsForState(state, resolvedProject), cutoffDate);
+  const profitabilitySnapshot =
+    currentProfitabilitySnapshot || selectWorkspaceSnapshot(listProjectProfitabilitySnapshotsForState(state, resolvedProject), cutoffDate);
+  const statusUpdate =
+    currentStatusUpdate || selectWorkspaceSnapshot((resolvedProject.statusUpdates || []).slice().sort(compareStatusUpdates), cutoffDate, "statusDate");
+  const risks = openProjectRisks || (resolvedProject.risks || []).filter((risk) => risk.status !== "closed");
+  const invoiceReadinessAssessment =
+    currentInvoiceReadinessAssessment
+    || selectWorkspaceSnapshot((resolvedProject.invoiceReadinessAssessments || []).slice().sort(compareAssessedAt), cutoffDate, "assessedAt");
+  const capacitySummary =
+    resourceCapacitySummary
+    || buildProjectResourceCapacitySummary({
+      currentCostSnapshot: costSnapshot,
+      capacityReservations: resolvedProject.capacityReservations || [],
+      assignmentPlans: resolvedProject.assignmentPlans || [],
+      resourceAllocations: (state.resourceAllocationIdsByProject.get(resolvedProject.projectId) || [])
+        .map((allocationId) => state.resourceAllocations.get(allocationId))
+        .filter(Boolean)
+    });
+  const budgetActualForecastSummary = buildProjectBudgetActualForecastSummary({
+    currentBudgetVersion: budgetVersion,
+    currentCostSnapshot: costSnapshot,
+    currentForecastSnapshot: forecastSnapshot,
+    currentProfitabilitySnapshot: profitabilitySnapshot
+  });
+  const blockerCount = Number(statusUpdate?.blockerCodes?.length || 0);
+  const highRiskCount = risks.filter((risk) => risk.severityCode === "high").length;
+  const criticalRiskCount = risks.filter((risk) => risk.severityCode === "critical").length;
+  const overdueReferenceDate = normalizeOptionalText(cutoffDate) || new Date().toISOString().slice(0, 10);
+  const overdueRiskCount = risks.filter((risk) => risk.dueDate && risk.dueDate < overdueReferenceDate).length;
+  const healthCode = resolveProjectPortfolioHealthCode({
+    statusUpdate,
+    blockerCount,
+    highRiskCount,
+    criticalRiskCount,
+    invoiceReadinessAssessment
+  });
+  const atRiskFlag = healthCode !== "green" || criticalRiskCount > 0 || overdueRiskCount > 0;
+  return {
+    projectId: resolvedProject.projectId,
+    projectCode: resolvedProject.projectCode,
+    projectReferenceCode: resolvedProject.projectReferenceCode,
+    displayName: resolvedProject.displayName,
+    projectStatus: resolvedProject.status,
+    customerId: resolvedProject.customerId,
+    projectManagerEmployeeId: resolvedProject.projectManagerEmployeeId,
+    billingModelCode: resolvedProject.billingModelCode,
+    healthCode,
+    progressPercent: Number(statusUpdate?.progressPercent || 0),
+    blockerCount,
+    openRiskCount: risks.length,
+    highRiskCount,
+    criticalRiskCount,
+    overdueRiskCount,
+    atRiskFlag,
+    budgetCostAmount: budgetActualForecastSummary.budgetCostAmount,
+    budgetRevenueAmount: budgetActualForecastSummary.budgetRevenueAmount,
+    actualCostAmount: budgetActualForecastSummary.actualCostAmount,
+    billedRevenueAmount: budgetActualForecastSummary.billedRevenueAmount,
+    forecastCostAtCompletionAmount: budgetActualForecastSummary.forecastCostAtCompletionAmount,
+    forecastRevenueAtCompletionAmount: budgetActualForecastSummary.forecastRevenueAtCompletionAmount,
+    currentMarginAmount: budgetActualForecastSummary.currentMarginAmount,
+    forecastMarginAmount: budgetActualForecastSummary.forecastMarginAmount,
+    reservedMinutes: capacitySummary.reservedMinutes,
+    assignedMinutes: capacitySummary.assignedMinutes,
+    actualMinutes: capacitySummary.actualMinutes,
+    uncoveredAssignmentMinutes: capacitySummary.uncoveredAssignmentMinutes,
+    unusedReservedMinutes: capacitySummary.unusedReservedMinutes,
+    resourceLoadPercent: Number(forecastSnapshot?.resourceLoadPercent || capacitySummary.resourceLoadPercent || 0),
+    latestStatusUpdateId: statusUpdate?.projectStatusUpdateId || null,
+    latestStatusDate: statusUpdate?.statusDate || null,
+    currentForecastSnapshotId: forecastSnapshot?.projectForecastSnapshotId || null,
+    currentProfitabilitySnapshotId: profitabilitySnapshot?.projectProfitabilitySnapshotId || null,
+    currentInvoiceReadinessAssessmentId: invoiceReadinessAssessment?.projectInvoiceReadinessAssessmentId || null,
+    roleDemand: summarizeDemandByRole(resolvedProject),
+    skillDemand: summarizeDemandBySkill(resolvedProject),
+    employmentCapacity: summarizeEmploymentCapacity(resolvedProject, capacitySummary.actualMinutes)
+  };
+}
+
+function resolveProjectPortfolioHealthCode({ statusUpdate, blockerCount, highRiskCount, criticalRiskCount, invoiceReadinessAssessment }) {
+  if (criticalRiskCount > 0 || invoiceReadinessAssessment?.status === "blocked") {
+    return "red";
+  }
+  if (statusUpdate?.healthCode === "red") {
+    return "red";
+  }
+  if (highRiskCount > 0 || blockerCount > 0 || invoiceReadinessAssessment?.status === "review_required") {
+    return "amber";
+  }
+  return statusUpdate?.healthCode || "green";
+}
+
+function summarizeDemandByRole(project) {
+  const demand = new Map();
+  for (const reservation of project.capacityReservations || []) {
+    if (["released", "cancelled"].includes(reservation.status)) {
+      continue;
+    }
+    appendDemandSummary(demand, reservation.roleCode, {
+      roleCode: reservation.roleCode,
+      reservedMinutes: Number(reservation.reservedMinutes || 0),
+      assignedMinutes: 0,
+      projectCount: 1
+    });
+  }
+  for (const assignment of project.assignmentPlans || []) {
+    if (assignment.status === "cancelled") {
+      continue;
+    }
+    appendDemandSummary(demand, assignment.roleCode, {
+      roleCode: assignment.roleCode,
+      reservedMinutes: 0,
+      assignedMinutes: Number(assignment.plannedMinutes || 0),
+      projectCount: 1
+    });
+  }
+  return [...demand.values()].sort((left, right) => left.roleCode.localeCompare(right.roleCode));
+}
+
+function summarizeDemandBySkill(project) {
+  const demand = new Map();
+  for (const reservation of project.capacityReservations || []) {
+    if (["released", "cancelled"].includes(reservation.status)) {
+      continue;
+    }
+    for (const skillCode of reservation.skillCodes || []) {
+      appendDemandSummary(demand, skillCode, {
+        skillCode,
+        reservedMinutes: Number(reservation.reservedMinutes || 0),
+        assignedMinutes: 0,
+        projectCount: 1
+      });
+    }
+  }
+  for (const assignment of project.assignmentPlans || []) {
+    if (assignment.status === "cancelled") {
+      continue;
+    }
+    for (const skillCode of assignment.skillCodes || []) {
+      appendDemandSummary(demand, skillCode, {
+        skillCode,
+        reservedMinutes: 0,
+        assignedMinutes: Number(assignment.plannedMinutes || 0),
+        projectCount: 1
+      });
+    }
+  }
+  return [...demand.values()].sort((left, right) => left.skillCode.localeCompare(right.skillCode));
+}
+
+function summarizeEmploymentCapacity(project, actualMinutes) {
+  const capacity = new Map();
+  const employmentIds = new Set([
+    ...(project.capacityReservations || []).map((record) => record.employmentId).filter(Boolean),
+    ...(project.assignmentPlans || []).map((record) => record.employmentId).filter(Boolean)
+  ]);
+  for (const employmentId of employmentIds) {
+    appendDemandSummary(capacity, employmentId, {
+      employmentId,
+      reservedMinutes: (project.capacityReservations || [])
+        .filter((record) => record.employmentId === employmentId && !["released", "cancelled"].includes(record.status))
+        .reduce((sum, record) => sum + Number(record.reservedMinutes || 0), 0),
+      assignedMinutes: (project.assignmentPlans || [])
+        .filter((record) => record.employmentId === employmentId && record.status !== "cancelled")
+        .reduce((sum, record) => sum + Number(record.plannedMinutes || 0), 0),
+      actualMinutes: 0,
+      projectCount: 1
+    });
+  }
+  return [...capacity.values()].sort((left, right) => left.employmentId.localeCompare(right.employmentId));
+}
+
+function appendDemandSummary(map, key, values) {
+  const existing = map.get(key) || {
+    ...values,
+    reservedMinutes: 0,
+    assignedMinutes: 0,
+    actualMinutes: 0,
+    projectCount: 0
+  };
+  existing.reservedMinutes += Number(values.reservedMinutes || 0);
+  existing.assignedMinutes += Number(values.assignedMinutes || 0);
+  existing.actualMinutes += Number(values.actualMinutes || 0);
+  existing.projectCount += Number(values.projectCount || 0);
+  map.set(key, existing);
+}
+
+function accumulatePortfolioDemand(map, key, item) {
+  appendDemandSummary(map, key, item);
+}
+
+function listProjectCostSnapshotsForState(state, project) {
+  return (state.costSnapshotIdsByProject.get(project.projectId) || [])
+    .map((snapshotId) => state.costSnapshots.get(snapshotId))
+    .filter(Boolean)
+    .sort(compareCutoffDate);
+}
+
+function listProjectForecastSnapshotsForState(state, project) {
+  return (state.forecastSnapshotIdsByProject.get(project.projectId) || [])
+    .map((snapshotId) => state.forecastSnapshots.get(snapshotId))
+    .filter(Boolean)
+    .sort(compareCutoffDate);
+}
+
+function listProjectProfitabilitySnapshotsForState(state, project) {
+  return (state.projectProfitabilitySnapshotIdsByProject.get(project.projectId) || [])
+    .map((snapshotId) => state.projectProfitabilitySnapshots.get(snapshotId))
+    .filter(Boolean)
+    .sort(compareCutoffDate);
+}
+
+function compareCutoffDate(left, right) {
+  return String(left.cutoffDate).localeCompare(String(right.cutoffDate)) || String(left.createdAt).localeCompare(String(right.createdAt));
+}
+
+function compareStatusUpdates(left, right) {
+  return String(left.statusDate).localeCompare(String(right.statusDate)) || String(left.createdAt).localeCompare(String(right.createdAt));
+}
+
+function compareAssessedAt(left, right) {
+  return String(left.assessedAt).localeCompare(String(right.assessedAt));
 }
 
 function buildWorkspaceIndicatorStrip({
@@ -3714,6 +4696,17 @@ function seedProjectDemo(state, clock) {
     revenueRecognitionModelCode: "billing_equals_revenue",
     contractValueAmount: 180000,
     dimensionJson: {},
+    opportunityLinks: [],
+    quoteLinks: [],
+    billingPlans: [],
+    statusUpdates: [],
+    capacityReservations: [],
+    assignmentPlans: [],
+    risks: [],
+    profitabilityAdjustments: [],
+    invoiceReadinessAssessments: [],
+    changeOrders: [],
+    buildVatAssessments: [],
     createdByActorId: "system",
     createdAt: nowIso(clock),
     updatedAt: nowIso(clock)
@@ -3734,6 +4727,17 @@ function seedProjectDemo(state, clock) {
     revenueRecognitionModelCode: "over_time",
     contractValueAmount: 260000,
     dimensionJson: {},
+    opportunityLinks: [],
+    quoteLinks: [],
+    billingPlans: [],
+    statusUpdates: [],
+    capacityReservations: [],
+    assignmentPlans: [],
+    risks: [],
+    profitabilityAdjustments: [],
+    invoiceReadinessAssessments: [],
+    changeOrders: [],
+    buildVatAssessments: [],
     createdByActorId: "system",
     createdAt: nowIso(clock),
     updatedAt: nowIso(clock)

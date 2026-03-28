@@ -68,6 +68,66 @@ test("Step 32 project workspace aggregates field, HUS, personalliggare, egenkont
     activityCode: "INSTALLATION",
     actorId: "unit-test"
   });
+  const reservation = projectsPlatform.createProjectCapacityReservation({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    employmentId: employment.employmentId,
+    roleCode: "project_consultant",
+    skillCodes: ["installation"],
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
+    reservedMinutes: 960,
+    billableMinutes: 960,
+    actorId: "unit-test"
+  });
+  projectsPlatform.transitionProjectCapacityReservationStatus({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    projectCapacityReservationId: reservation.projectCapacityReservationId,
+    nextStatus: "approved",
+    actorId: "unit-test"
+  });
+  const assignmentPlan = projectsPlatform.createProjectAssignmentPlan({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    employmentId: employment.employmentId,
+    projectCapacityReservationId: reservation.projectCapacityReservationId,
+    roleCode: "project_consultant",
+    skillCodes: ["installation"],
+    startsOn: "2026-03-10",
+    endsOn: "2026-03-25",
+    plannedMinutes: 900,
+    billableMinutes: 900,
+    actorId: "unit-test"
+  });
+  projectsPlatform.transitionProjectAssignmentPlanStatus({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    projectAssignmentPlanId: assignmentPlan.projectAssignmentPlanId,
+    nextStatus: "approved",
+    actorId: "unit-test"
+  });
+  projectsPlatform.createProjectStatusUpdate({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    statusDate: "2026-03-21",
+    healthCode: "amber",
+    progressPercent: 55,
+    blockerCodes: ["field_material_pending"],
+    actorId: "unit-test"
+  });
+  projectsPlatform.createProjectRisk({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    title: "Field evidence may delay closure",
+    categoryCode: "delivery",
+    severityCode: "high",
+    probabilityCode: "medium",
+    ownerEmployeeId: employee.employeeId,
+    mitigationPlan: "Daily sync with field team",
+    dueDate: "2026-03-28",
+    actorId: "unit-test"
+  });
 
   const payCalendar = payrollPlatform.listPayCalendars({ companyId: COMPANY_ID })[0];
   const payRun = payrollPlatform.createPayRun({
@@ -255,9 +315,15 @@ test("Step 32 project workspace aggregates field, HUS, personalliggare, egenkont
   assert.equal(workspace.currentCostSnapshot !== null, true);
   assert.equal(workspace.currentWipSnapshot !== null, true);
   assert.equal(workspace.currentForecastSnapshot !== null, true);
+  assert.equal(workspace.capacityReservationCount, 1);
+  assert.equal(workspace.assignmentPlanCount, 1);
+  assert.equal(workspace.openProjectRiskCount, 1);
+  assert.equal(workspace.currentPortfolioNode.atRiskFlag, true);
+  assert.equal(workspace.resourceCapacitySummary.reservedMinutes, 960);
   assert.equal(workspace.projectDeviations.length, 0);
   assert.equal(workspace.warningCodes.includes("field_pending_signatures"), true);
   assert.equal(workspace.warningCodes.includes("personalliggare_attention_required"), true);
+  assert.equal(workspace.warningCodes.includes("project_risk_attention_required"), true);
   assert.equal(workspace.warningCodes.includes("egenkontroll_open_deviations"), true);
   assert.equal(
     workspace.complianceIndicatorStrip.some(

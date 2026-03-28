@@ -138,10 +138,18 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/projects/:projectId/revenue-plans/:projectRevenuePlanId/approve",
   "/v1/projects/:projectId/billing-plans",
   "/v1/projects/:projectId/status-updates",
+  "/v1/projects/:projectId/capacity-reservations",
+  "/v1/projects/:projectId/capacity-reservations/:projectCapacityReservationId/status",
+  "/v1/projects/:projectId/assignment-plans",
+  "/v1/projects/:projectId/assignment-plans/:projectAssignmentPlanId/status",
+  "/v1/projects/:projectId/risks",
+  "/v1/projects/:projectId/risks/:projectRiskId/status",
   "/v1/projects/:projectId/profitability-adjustments",
   "/v1/projects/:projectId/profitability-adjustments/:projectProfitabilityAdjustmentId/decide",
   "/v1/projects/:projectId/invoice-readiness-assessments",
   "/v1/projects/:projectId/profitability-snapshots",
+  "/v1/projects/portfolio/nodes",
+  "/v1/projects/portfolio/summary",
   "/v1/payroll/garnishments",
   "/v1/payroll/garnishments/:garnishmentDecisionSnapshotId/approve",
   "/v1/payroll/garnishment-remittances",
@@ -259,6 +267,30 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(projectRevenuePlanApproveContract.requiredActionClass, "project_revenue_plan_approve");
     assert.equal(projectRevenuePlanApproveContract.requiredTrustLevel, "strong_mfa");
     assert.equal(projectRevenuePlanApproveContract.requiredScopeType, "project");
+
+    const projectCapacityReservationContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/capacity-reservations"
+    );
+    assert.ok(projectCapacityReservationContract);
+    assert.equal(projectCapacityReservationContract.requiredActionClass, "project_capacity_reservation_create");
+    assert.equal(projectCapacityReservationContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectCapacityReservationContract.requiredScopeType, "project");
+
+    const projectAssignmentPlanStatusContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/assignment-plans/:projectAssignmentPlanId/status"
+    );
+    assert.ok(projectAssignmentPlanStatusContract);
+    assert.equal(projectAssignmentPlanStatusContract.requiredActionClass, "project_assignment_plan_status");
+    assert.equal(projectAssignmentPlanStatusContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectAssignmentPlanStatusContract.requiredScopeType, "project");
+
+    const projectRiskStatusContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/risks/:projectRiskId/status"
+    );
+    assert.ok(projectRiskStatusContract);
+    assert.equal(projectRiskStatusContract.requiredActionClass, "project_risk_status");
+    assert.equal(projectRiskStatusContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectRiskStatusContract.requiredScopeType, "project");
 
     const projectProfitabilitySnapshotContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/profitability-snapshots"

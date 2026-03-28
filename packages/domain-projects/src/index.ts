@@ -41,6 +41,11 @@ export type ProjectBudgetCategoryCode =
   | "revenue";
 export type ProjectBudgetVersionStatus = "approved";
 export type ProjectResourceAllocationStatus = "planned" | "confirmed" | "released";
+export type ProjectCapacityReservationStatus = "draft" | "approved" | "released" | "cancelled";
+export type ProjectAssignmentPlanStatus = "draft" | "approved" | "in_progress" | "completed" | "cancelled";
+export type ProjectRiskStatus = "open" | "mitigating" | "accepted" | "closed";
+export type ProjectRiskSeverityCode = "low" | "medium" | "high" | "critical";
+export type ProjectRiskProbabilityCode = "low" | "medium" | "high";
 export type ProjectSnapshotStatus = "materialized" | "review_required";
 
 export interface ProjectRef {
@@ -375,6 +380,82 @@ export interface ProjectResourceAllocationRef {
   readonly status: ProjectResourceAllocationStatus;
   readonly createdByActorId: string;
   readonly createdAt: string;
+}
+
+export interface ProjectCapacityReservationRef {
+  readonly projectCapacityReservationId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly employmentId: string | null;
+  readonly roleCode: string;
+  readonly skillCodes: readonly string[];
+  readonly startsOn: string;
+  readonly endsOn: string;
+  readonly reservedMinutes: number;
+  readonly billableMinutes: number;
+  readonly note: string | null;
+  readonly status: ProjectCapacityReservationStatus;
+  readonly approvedAt: string | null;
+  readonly approvedByActorId: string | null;
+  readonly releasedAt: string | null;
+  readonly releasedByActorId: string | null;
+  readonly cancelledAt: string | null;
+  readonly cancelledByActorId: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ProjectAssignmentPlanRef {
+  readonly projectAssignmentPlanId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly employmentId: string | null;
+  readonly projectWorkPackageId: string | null;
+  readonly projectCapacityReservationId: string | null;
+  readonly roleCode: string;
+  readonly skillCodes: readonly string[];
+  readonly startsOn: string;
+  readonly endsOn: string;
+  readonly plannedMinutes: number;
+  readonly billableMinutes: number;
+  readonly deliveryModeCode: string;
+  readonly note: string | null;
+  readonly status: ProjectAssignmentPlanStatus;
+  readonly approvedAt: string | null;
+  readonly approvedByActorId: string | null;
+  readonly startedAt: string | null;
+  readonly startedByActorId: string | null;
+  readonly completedAt: string | null;
+  readonly completedByActorId: string | null;
+  readonly cancelledAt: string | null;
+  readonly cancelledByActorId: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ProjectRiskRef {
+  readonly projectRiskId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly title: string;
+  readonly description: string | null;
+  readonly categoryCode: string;
+  readonly severityCode: ProjectRiskSeverityCode;
+  readonly probabilityCode: ProjectRiskProbabilityCode;
+  readonly status: ProjectRiskStatus;
+  readonly ownerEmployeeId: string | null;
+  readonly mitigationPlan: string | null;
+  readonly dueDate: string | null;
+  readonly identifiedOn: string;
+  readonly sourceProjectStatusUpdateId: string | null;
+  readonly acceptedAt: string | null;
+  readonly closedAt: string | null;
+  readonly closedByActorId: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
 }
 
 export interface ProjectCostSnapshotRef {

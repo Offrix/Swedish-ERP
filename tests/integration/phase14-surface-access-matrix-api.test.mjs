@@ -400,6 +400,18 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         error: "project_workspace_role_forbidden"
       },
       {
+        path: `/v1/projects/${project.projectId}/capacity-reservations?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/projects/${project.projectId}/assignment-plans?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/projects/${project.projectId}/risks?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
         path: `/v1/projects/${project.projectId}/payroll-cost-allocations?companyId=${DEMO_IDS.companyId}`,
         error: "project_workspace_role_forbidden"
       },
@@ -421,6 +433,14 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
       },
       {
         path: `/v1/projects/${project.projectId}/build-vat-decisions?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/projects/portfolio/nodes?companyId=${DEMO_IDS.companyId}`,
+        error: "project_workspace_role_forbidden"
+      },
+      {
+        path: `/v1/projects/portfolio/summary?companyId=${DEMO_IDS.companyId}`,
         error: "project_workspace_role_forbidden"
       },
       {
