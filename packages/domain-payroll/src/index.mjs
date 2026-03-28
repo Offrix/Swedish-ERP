@@ -15,6 +15,15 @@ export const PAYROLL_FREQUENCY_CODES = Object.freeze(["monthly"]);
 export const PAYROLL_TAX_MODES = Object.freeze(["pending", "manual_rate", "sink"]);
 export const PAYROLL_TAX_DECISION_TYPES = Object.freeze(["tabell", "jamkning", "engangsskatt", "sink", "emergency_manual"]);
 export const PAYROLL_TAX_DECISION_STATUSES = Object.freeze(["draft", "approved", "superseded"]);
+export const PAYROLL_EMPLOYER_CONTRIBUTION_DECISION_TYPES = Object.freeze([
+  "full",
+  "reduced_age_pension_only",
+  "temporary_youth_reduction",
+  "vaxa",
+  "no_contribution",
+  "emergency_manual"
+]);
+export const PAYROLL_EMPLOYER_CONTRIBUTION_DECISION_STATUSES = Object.freeze(["draft", "approved", "superseded"]);
 export const AGI_SUBMISSION_STATES = Object.freeze([
   "draft",
   "validated",
@@ -270,6 +279,9 @@ export function createPayrollEngine({
     taxDecisionSnapshots: new Map(),
     taxDecisionSnapshotIdsByCompany: new Map(),
     taxDecisionSnapshotIdsByEmployment: new Map(),
+    employerContributionDecisionSnapshots: new Map(),
+    employerContributionDecisionSnapshotIdsByCompany: new Map(),
+    employerContributionDecisionSnapshotIdsByEmployment: new Map(),
     payRunEvents: new Map(),
     payRunEventIdsByRun: new Map(),
     payrollExceptions: new Map(),
@@ -338,6 +350,9 @@ export function createPayrollEngine({
     listTaxDecisionSnapshots,
     createTaxDecisionSnapshot,
     approveTaxDecisionSnapshot,
+    listEmployerContributionDecisionSnapshots,
+    createEmployerContributionDecisionSnapshot,
+    approveEmployerContributionDecisionSnapshot,
     listEmploymentStatutoryProfiles,
     upsertEmploymentStatutoryProfile,
     listPayRuns,
@@ -704,6 +719,150 @@ export function createPayrollEngine({
     return copy(record);
   }
 
+  function listEmployerContributionDecisionSnapshots({
+    companyId,
+    employmentId = null,
+    status = null,
+    decisionType = null,
+    effectiveDate = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = status
+      ? assertAllowed(status, PAYROLL_EMPLOYER_CONTRIBUTION_DECISION_STATUSES, "employer_contribution_decision_snapshot_status_invalid")
+      : null;
+    const resolvedDecisionType = decisionType
+      ? assertAllowed(
+        decisionType,
+        PAYROLL_EMPLOYER_CONTRIBUTION_DECISION_TYPES,
+        "employer_contribution_decision_snapshot_type_invalid"
+      )
+      : null;
+    const ids = employmentId
+      ? state.employerContributionDecisionSnapshotIdsByEmployment.get(
+        buildPayrollEmploymentKey(resolvedCompanyId, requireText(employmentId, "employment_id_required"))
+      ) || []
+      : state.employerContributionDecisionSnapshotIdsByCompany.get(resolvedCompanyId) || [];
+    return ids
+      .map((employerContributionDecisionSnapshotId) => state.employerContributionDecisionSnapshots.get(employerContributionDecisionSnapshotId))
+      .filter(Boolean)
+      .filter((candidate) => (resolvedStatus ? candidate.status === resolvedStatus : true))
+      .filter((candidate) => (resolvedDecisionType ? candidate.decisionType === resolvedDecisionType : true))
+      .filter((candidate) => (effectiveDate ? decisionSnapshotCoversDate(candidate, effectiveDate) : true))
+      .sort(
+        (left, right) =>
+          left.employmentId.localeCompare(right.employmentId) ||
+          left.validFrom.localeCompare(right.validFrom) ||
+          left.createdAt.localeCompare(right.createdAt)
+      )
+      .map(copy);
+  }
+
+  function createEmployerContributionDecisionSnapshot({
+    companyId,
+    employmentId,
+    decisionType,
+    ageBucket,
+    legalBasisCode,
+    validFrom,
+    validTo = null,
+    baseLimit = null,
+    fullRate,
+    reducedRate = null,
+    specialConditions = {},
+    decisionSource,
+    decisionReference,
+    evidenceRef,
+    reasonCode = null,
+    actorId = "system"
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedEmploymentId = requireText(employmentId, "employment_id_required");
+    if (hrPlatform) {
+      const matches = resolveEmploymentScope({
+        companyId: resolvedCompanyId,
+        employmentIds: [resolvedEmploymentId],
+        period: { startsOn: "1900-01-01", endsOn: "2999-12-31" },
+        hrPlatform
+      });
+      if (matches.length !== 1) {
+        throw createError(404, "employment_not_found", "Employment was not found for employer contribution decision snapshot.");
+      }
+    }
+    const normalized = normalizeEmployerContributionDecisionSnapshot({
+      employmentId: resolvedEmploymentId,
+      decisionType,
+      ageBucket,
+      legalBasisCode,
+      validFrom,
+      validTo,
+      baseLimit,
+      fullRate,
+      reducedRate,
+      specialConditions,
+      decisionSource,
+      decisionReference,
+      evidenceRef,
+      reasonCode
+    });
+    const requiresDualReview = normalized.decisionType === "vaxa" || normalized.decisionType === "emergency_manual";
+    const status = requiresDualReview ? "draft" : "approved";
+    const now = nowIso(clock);
+    const record = {
+      employerContributionDecisionSnapshotId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      ...normalized,
+      status,
+      requiresDualReview,
+      approvedAt: status === "approved" ? now : null,
+      approvedByActorId: status === "approved" ? requireText(actorId, "actor_id_required") : null,
+      supersededAt: null,
+      supersededBySnapshotId: null,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: now,
+      updatedAt: now
+    };
+    state.employerContributionDecisionSnapshots.set(record.employerContributionDecisionSnapshotId, record);
+    appendToIndex(
+      state.employerContributionDecisionSnapshotIdsByCompany,
+      resolvedCompanyId,
+      record.employerContributionDecisionSnapshotId
+    );
+    appendToIndex(
+      state.employerContributionDecisionSnapshotIdsByEmployment,
+      buildPayrollEmploymentKey(resolvedCompanyId, resolvedEmploymentId),
+      record.employerContributionDecisionSnapshotId
+    );
+    if (status === "approved") {
+      supersedeOverlappingEmployerContributionDecisionSnapshots(state, record);
+    }
+    return copy(record);
+  }
+
+  function approveEmployerContributionDecisionSnapshot({
+    companyId,
+    employerContributionDecisionSnapshotId,
+    actorId = "system"
+  } = {}) {
+    const record = requireEmployerContributionDecisionSnapshot(state, companyId, employerContributionDecisionSnapshotId);
+    if (record.status === "approved") {
+      return copy(record);
+    }
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    if (record.requiresDualReview && record.createdByActorId === resolvedActorId) {
+      throw createError(
+        409,
+        "employer_contribution_decision_snapshot_dual_review_required",
+        "Employer contribution decisions of this type require approval by a different actor."
+      );
+    }
+    record.status = "approved";
+    record.approvedAt = nowIso(clock);
+    record.approvedByActorId = resolvedActorId;
+    record.updatedAt = record.approvedAt;
+    supersedeOverlappingEmployerContributionDecisionSnapshots(state, record);
+    return copy(record);
+  }
+
   function listEmploymentStatutoryProfiles({ companyId, employmentId = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const ids = employmentId
@@ -938,6 +1097,7 @@ export function createPayrollEngine({
     leavePayItemMappings = [],
     statutoryProfiles = [],
     taxDecisionSnapshots = [],
+    employerContributionDecisionSnapshots = [],
     migrationBatchId = null,
     correctionOfPayRunId = null,
     correctionReason = null,
@@ -974,6 +1134,9 @@ export function createPayrollEngine({
       overrideProfiles: statutoryProfiles
     });
     const normalizedTaxDecisionSnapshots = normalizeTaxDecisionSnapshots(taxDecisionSnapshots);
+    const normalizedEmployerContributionDecisionSnapshots = normalizeEmployerContributionDecisionSnapshots(
+      employerContributionDecisionSnapshots
+    );
     const migrationContext = resolvePayrollMigrationContext({
       companyId: resolvedCompanyId,
       sessionToken,
@@ -1047,6 +1210,7 @@ export function createPayrollEngine({
       leavePayItemMappings: normalizedLeaveMappings,
       statutoryProfiles: [...normalizedStatutoryProfiles.values()],
       taxDecisionSnapshots: [...normalizedTaxDecisionSnapshots.values()],
+      employerContributionDecisionSnapshots: [...normalizedEmployerContributionDecisionSnapshots.values()],
       migrationSnapshot: migrationContext?.snapshot || null,
       correctionOfPayRunId: correctionSourceRun?.payRunId || null,
       correctionReason: normalizeOptionalText(correctionReason)
@@ -1075,6 +1239,13 @@ export function createPayrollEngine({
         runType: run.runType,
         overrideSnapshots: normalizedTaxDecisionSnapshots
       });
+      const employerContributionDecisionSnapshot = selectEmployerContributionDecisionSnapshot({
+        state,
+        companyId: resolvedCompanyId,
+        employmentId: employment.employmentId,
+        effectiveDate: period.payDate,
+        overrideSnapshots: normalizedEmployerContributionDecisionSnapshots
+      });
       const result = calculateEmploymentRun({
         state,
         rules,
@@ -1087,6 +1258,7 @@ export function createPayrollEngine({
         leavePayItemMappings: normalizedLeaveMappings,
         statutoryProfile: normalizedStatutoryProfiles.get(employment.employmentId) || null,
         taxDecisionSnapshot,
+        employerContributionDecisionSnapshot,
         employmentTimeBase,
         agreementContext,
         hrPlatform,
@@ -3279,6 +3451,7 @@ function calculateEmploymentRun({
   leavePayItemMappings,
   statutoryProfile,
   taxDecisionSnapshot = null,
+  employerContributionDecisionSnapshot = null,
   employmentTimeBase = null,
   agreementContext = null,
   hrPlatform,
@@ -3612,7 +3785,8 @@ function calculateEmploymentRun({
     contributionBase: employerContributionBase,
     employee,
     statutoryProfile,
-    payDate: period.payDate
+    payDate: period.payDate,
+    employerContributionDecisionSnapshot
   });
   steps[12] = employerContributionPreview.step;
 
@@ -4419,7 +4593,14 @@ function resolveTaxDecisionSnapshotAmount({ taxDecisionSnapshot, taxableBase, si
   return null;
 }
 
-function buildEmployerContributionPreview({ rules, contributionBase, employee, statutoryProfile, payDate }) {
+function buildEmployerContributionPreview({
+  rules,
+  contributionBase,
+  employee,
+  statutoryProfile,
+  payDate,
+  employerContributionDecisionSnapshot = null
+}) {
   const effectiveDate = normalizeRequiredDate(payDate, "pay_run_pay_date_invalid");
   const rulePack = rules.resolveRulePack({
     rulePackCode: PAYROLL_EMPLOYER_CONTRIBUTION_RULE_PACK_CODE,
@@ -4428,65 +4609,243 @@ function buildEmployerContributionPreview({ rules, contributionBase, employee, s
     effectiveDate
   });
   const machineRules = rulePack.machineReadableRules.contributionClasses || {};
-  const contributionClassCode = resolveEmployerContributionClassCode({
-    employee,
+  const normalizedContributionBase = roundMoney(Math.max(0, contributionBase || 0));
+  const effectiveDecisionContext = resolveEffectiveEmployerContributionDecisionContext({
+    employerContributionDecisionSnapshot,
     statutoryProfile,
     effectiveDate,
+    employee,
+    rulePack,
     machineRules
   });
-  const classDefinition = machineRules[contributionClassCode] || machineRules.full;
-  const normalizedContributionBase = roundMoney(Math.max(0, contributionBase || 0));
-  const calculation = calculateEmployerContributionAmount({
-    contributionClassCode,
-    classDefinition,
-    machineRules,
-    contributionBase: normalizedContributionBase,
-    effectiveDate,
-    employee
-  });
-  const decisionObject = {
-    decision_code: "PAYROLL_EMPLOYER_CONTRIBUTION",
+  const decisionObjectBase = {
     inputs_hash: buildSnapshotHash({
       contributionBase: normalizedContributionBase,
+      payDate: effectiveDate,
       employeeId: employee?.employeeId || null,
-      contributionClassCode,
-      statutoryProfile: statutoryProfile || null
+      employerContributionDecisionSnapshot: employerContributionDecisionSnapshot || null,
+      statutoryProfile: statutoryProfile || null,
+      effectiveDecisionContext
     }),
     rule_pack_id: rulePack.rulePackId,
     rule_pack_code: rulePack.rulePackCode,
     rule_pack_version: rulePack.version,
     rule_pack_checksum: rulePack.checksum,
     effective_date: effectiveDate,
-    outputs: {
-      contributionBase: normalizedContributionBase,
-      contributionClassCode,
-      ratePercent: calculation.ratePercent,
-      employerContributionPreviewAmount: calculation.amount,
-      ...calculation.outputs
-    },
     warnings: [],
+    outputs: {
+      contributionBase: normalizedContributionBase
+    }
+  };
+
+  if (!effectiveDecisionContext) {
+    const decisionObject = {
+      ...decisionObjectBase,
+      decision_code: "PAYROLL_EMPLOYER_CONTRIBUTION_PENDING",
+      outputs: {
+        ...decisionObjectBase.outputs,
+        employerContributionPreviewAmount: null,
+        status: "pending"
+      },
+      warnings: ["payroll_employer_contribution_profile_missing"],
+      explanation: ["No effective employer contribution decision could be resolved for the pay date."]
+    };
+    return {
+      amount: null,
+      status: "pending",
+      decisionObject,
+      step: createPendingStep(12, {
+        status: "pending",
+        contributionBase: normalizedContributionBase,
+        decisionObject
+      })
+    };
+  }
+
+  if (
+    effectiveDecisionContext.sourceType === "employer_contribution_decision_snapshot"
+    && effectiveDecisionContext.status !== "approved"
+  ) {
+    const decisionObject = {
+      ...decisionObjectBase,
+      decision_code: "PAYROLL_EMPLOYER_CONTRIBUTION_DECISION_NOT_APPROVED",
+      decision_snapshot_id: effectiveDecisionContext.employerContributionDecisionSnapshotId || null,
+      outputs: {
+        ...decisionObjectBase.outputs,
+        decisionType: effectiveDecisionContext.decisionType,
+        employerContributionPreviewAmount: null,
+        status: "pending"
+      },
+      warnings: ["employer_contribution_decision_snapshot_not_approved"],
+      explanation: ["Approved employer contribution decision snapshot is required before payroll calculation."]
+    };
+    return {
+      amount: null,
+      status: "pending",
+      decisionObject,
+      step: createPendingStep(12, {
+        status: "pending",
+        contributionBase: normalizedContributionBase,
+        decisionObject
+      })
+    };
+  }
+
+  const calculation = calculateEmployerContributionDecisionAmount({
+    decisionContext: effectiveDecisionContext,
+    contributionBase: normalizedContributionBase
+  });
+  const contributionClassCode =
+    effectiveDecisionContext.contributionClassCode
+    || mapEmployerContributionDecisionTypeToClassCode(effectiveDecisionContext.decisionType);
+  const decisionObject = {
+    ...decisionObjectBase,
+    decision_code: resolveEmployerContributionDecisionCode(effectiveDecisionContext.decisionType),
+    decision_snapshot_id: effectiveDecisionContext.employerContributionDecisionSnapshotId || null,
+    outputs: {
+      ...decisionObjectBase.outputs,
+      contributionClassCode,
+      decisionType: effectiveDecisionContext.decisionType,
+      ageBucket: effectiveDecisionContext.ageBucket || null,
+      legalBasisCode: effectiveDecisionContext.legalBasisCode || null,
+      fullRatePercent: effectiveDecisionContext.fullRate,
+      reducedRatePercent: effectiveDecisionContext.reducedRate,
+      baseLimit: effectiveDecisionContext.baseLimit,
+      specialConditions: copy(effectiveDecisionContext.specialConditions || {}),
+      ratePercent: calculation.netRatePercent,
+      grossRatePercent: calculation.grossRatePercent,
+      employerContributionPreviewAmount: calculation.amount,
+      grossContributionAmount: calculation.grossContributionAmount,
+      referenceFullContributionAmount: calculation.referenceFullContributionAmount,
+      netEmployerContributionAmount: calculation.netContributionAmount,
+      taxAccountReliefAmount: calculation.taxAccountReliefAmount,
+      taxAccountConsequence: calculation.taxAccountConsequence,
+      contributionComponents: calculation.components,
+      ...calculation.compatibilityOutputs
+    },
     explanation: [
       `rulePackId=${rulePack.rulePackId}`,
       `rulePackChecksum=${rulePack.checksum}`,
+      `decisionType=${effectiveDecisionContext.decisionType}`,
       `contributionClassCode=${contributionClassCode}`,
-      `ratePercent=${calculation.ratePercent}`,
+      `netRatePercent=${calculation.netRatePercent}`,
       `contributionBase=${normalizedContributionBase}`,
       ...calculation.explanation
     ]
   };
+  const status =
+    effectiveDecisionContext.sourceType === "employer_contribution_decision_snapshot"
+      ? "resolved_decision_snapshot"
+      : "resolved_rule_pack";
   return {
     amount: calculation.amount,
-    status: "resolved_rule_pack",
+    status,
     decisionObject,
     step: createCompletedStep(12, {
       rulePackId: rulePack.rulePackId,
       rulePackChecksum: rulePack.checksum,
       contributionClassCode,
-      ratePercent: calculation.ratePercent,
+      decisionType: effectiveDecisionContext.decisionType,
+      ratePercent: calculation.netRatePercent,
       contributionBase: normalizedContributionBase,
       employerContributionPreviewAmount: calculation.amount,
+      taxAccountReliefAmount: calculation.taxAccountReliefAmount,
       decisionObject
     })
+  };
+}
+
+function resolveEffectiveEmployerContributionDecisionContext({
+  employerContributionDecisionSnapshot = null,
+  statutoryProfile,
+  effectiveDate,
+  employee,
+  rulePack,
+  machineRules
+}) {
+  if (employerContributionDecisionSnapshot && decisionSnapshotCoversDate(employerContributionDecisionSnapshot, effectiveDate)) {
+    return {
+      ...copy(employerContributionDecisionSnapshot),
+      sourceType: "employer_contribution_decision_snapshot",
+      contributionClassCode:
+        employerContributionDecisionSnapshot.contributionClassCode
+        || mapEmployerContributionDecisionTypeToClassCode(employerContributionDecisionSnapshot.decisionType)
+    };
+  }
+  return buildAutomaticEmployerContributionDecisionContext({
+    employee,
+    statutoryProfile,
+    effectiveDate,
+    rulePack,
+    machineRules
+  });
+}
+
+function buildAutomaticEmployerContributionDecisionContext({
+  employee,
+  statutoryProfile,
+  effectiveDate,
+  rulePack,
+  machineRules
+}) {
+  const contributionClassCode = resolveEmployerContributionClassCode({
+    employee,
+    statutoryProfile,
+    effectiveDate,
+    machineRules
+  });
+  const classDefinition = machineRules[contributionClassCode] || machineRules.full || {};
+  const fullRate = roundMoney(
+    classDefinition?.standardRatePercent
+      ?? machineRules.full?.ratePercent
+      ?? classDefinition?.ratePercent
+      ?? 0
+  );
+  const reducedRate = roundMoney(
+    classDefinition?.reducedRatePercent
+      ?? classDefinition?.ratePercent
+      ?? fullRate
+  );
+  const ageBucket = resolveEmployerContributionAgeBucket({ employee, effectiveDate, contributionClassCode });
+  const legalBasisCode = resolveEmployerContributionLegalBasisCode(contributionClassCode);
+  const specialConditions = {
+    autoDerived: true,
+    sourceType: normalizeOptionalText(statutoryProfile?.contributionClassCode) ? "legacy_statutory_profile" : "rule_pack_auto"
+  };
+  if (contributionClassCode === "temporary_youth_reduction") {
+    specialConditions.eligibleAgeYears = copy(classDefinition.eligibleAgeYears || {});
+    specialConditions.eligibilityFrom = classDefinition.eligibilityFrom || null;
+    specialConditions.eligibilityTo = classDefinition.eligibilityTo || null;
+  }
+  if (contributionClassCode === "no_contribution") {
+    specialConditions.eligibilityBirthYearOnOrBefore = classDefinition.eligibilityBirthYearOnOrBefore ?? null;
+  }
+  return {
+    companyId: employee?.companyId || null,
+    employmentId: employee?.employmentId || null,
+    employerContributionDecisionSnapshotId: null,
+    decisionType: mapEmployerContributionClassCodeToDecisionType(contributionClassCode),
+    contributionClassCode,
+    ageBucket,
+    legalBasisCode,
+    validFrom: rulePack.effectiveFrom,
+    validTo: rulePack.effectiveTo || null,
+    baseLimit:
+      contributionClassCode === "temporary_youth_reduction"
+        ? normalizeRequiredMoney(classDefinition.thresholdAmount ?? 0, "payroll_employer_contribution_threshold_invalid")
+        : null,
+    fullRate,
+    reducedRate: contributionClassCode === "full" ? null : reducedRate,
+    specialConditions,
+    decisionSource: normalizeOptionalText(statutoryProfile?.contributionClassCode) ? "legacy_statutory_profile" : "rule_pack_auto",
+    decisionReference: rulePack.rulePackId,
+    evidenceRef: `rulepack:${rulePack.rulePackId}`,
+    reasonCode: null,
+    status: "approved",
+    requiresDualReview: false,
+    approvedAt: null,
+    approvedByActorId: null,
+    sourceType: normalizeOptionalText(statutoryProfile?.contributionClassCode) ? "legacy_statutory_profile" : "rule_pack_auto"
   };
 }
 
@@ -4500,6 +4859,11 @@ function resolveEmployerContributionClassCode({ employee, statutoryProfile, effe
   if (explicitClassCode && explicitClassCode !== "full") {
     return explicitClassCode;
   }
+  const payoutYear = Number(String(effectiveDate).slice(0, 4));
+  const ageAtYearStart = birthYear == null ? null : payoutYear - birthYear;
+  if (ageAtYearStart != null && ageAtYearStart >= 67) {
+    return "reduced_age_pension_only";
+  }
   const youthClassDefinition = machineRules.temporary_youth_reduction;
   if (isYouthReductionEligible({ classDefinition: youthClassDefinition, birthYear, effectiveDate })) {
     return "temporary_youth_reduction";
@@ -4507,68 +4871,250 @@ function resolveEmployerContributionClassCode({ employee, statutoryProfile, effe
   return explicitClassCode || "full";
 }
 
-function calculateEmployerContributionAmount({
-  contributionClassCode,
-  classDefinition,
-  machineRules,
-  contributionBase,
-  effectiveDate,
-  employee
-}) {
-  if (contributionClassCode !== "temporary_youth_reduction") {
-    const ratePercent = roundMoney(classDefinition?.ratePercent || 0);
-    return {
-      amount: roundMoney(contributionBase * (ratePercent / 100)),
-      ratePercent,
-      outputs: {},
-      explanation: []
-    };
-  }
-
-  const birthYear = employee?.dateOfBirth ? Number(String(employee.dateOfBirth).slice(0, 4)) : null;
-  if (!isYouthReductionEligible({ classDefinition, birthYear, effectiveDate })) {
-    const fallbackRatePercent = roundMoney(machineRules.full?.ratePercent || 0);
-    return {
-      amount: roundMoney(contributionBase * (fallbackRatePercent / 100)),
-      ratePercent: fallbackRatePercent,
-      outputs: {
-        thresholdAmount: normalizeRequiredMoney(classDefinition?.thresholdAmount ?? 0, "payroll_employer_contribution_threshold_invalid"),
-        reducedContributionBase: 0,
-        overflowContributionBase: contributionBase
-      },
-      explanation: ["temporaryYouthReductionApplied=false"]
-    };
-  }
-
-  const thresholdAmount = normalizeRequiredMoney(classDefinition?.thresholdAmount ?? 0, "payroll_employer_contribution_threshold_invalid");
-  const reducedRatePercent = roundMoney(classDefinition?.reducedRatePercent || 0);
-  const standardRatePercent = roundMoney(classDefinition?.standardRatePercent ?? machineRules.full?.ratePercent ?? 0);
-  const reducedContributionBase = roundMoney(Math.min(contributionBase, thresholdAmount));
-  const overflowContributionBase = roundMoney(Math.max(0, contributionBase - reducedContributionBase));
-  const amount = roundMoney(
-    reducedContributionBase * (reducedRatePercent / 100) + overflowContributionBase * (standardRatePercent / 100)
+function calculateEmployerContributionDecisionAmount({ decisionContext, contributionBase }) {
+  const normalizedContributionBase = roundMoney(Math.max(0, contributionBase || 0));
+  const fullRatePercent = roundMoney(
+    decisionContext.fullRate
+      ?? decisionContext.reducedRate
+      ?? 0
   );
-  const effectiveRatePercent = contributionBase > 0 ? roundMoney((amount / contributionBase) * 100) : 0;
-  return {
-    amount,
-    ratePercent: effectiveRatePercent,
-    outputs: {
-      thresholdAmount,
-      reducedContributionBase,
-      overflowContributionBase,
+  const reducedRatePercent = decisionContext.reducedRate == null ? null : roundMoney(decisionContext.reducedRate);
+  const baseLimit = decisionContext.baseLimit == null ? null : normalizeRequiredMoney(
+    decisionContext.baseLimit,
+    "employer_contribution_decision_snapshot_base_limit_invalid"
+  );
+  let components = [];
+  let taxAccountConsequence = null;
+
+  if (decisionContext.decisionType === "temporary_youth_reduction") {
+    components = buildSplitEmployerContributionComponents({
+      contributionBase: normalizedContributionBase,
+      reducedRatePercent: reducedRatePercent ?? fullRatePercent,
+      fullRatePercent,
+      baseLimit,
+      reducedComponentCode: "temporary_youth_reduction_band",
+      overflowComponentCode: "standard_overflow_band"
+    });
+  } else if (decisionContext.decisionType === "vaxa") {
+    components = buildSplitEmployerContributionComponents({
+      contributionBase: normalizedContributionBase,
+      reducedRatePercent: reducedRatePercent ?? fullRatePercent,
+      fullRatePercent,
+      baseLimit,
+      reducedComponentCode: "vaxa_reduced_band",
+      overflowComponentCode: "standard_overflow_band"
+    });
+    const vaxaBase = roundMoney(components.filter((component) => component.componentCode === "vaxa_reduced_band").reduce((sum, component) => sum + component.baseAmount, 0));
+    const vaxaAmount = roundMoney(components.filter((component) => component.componentCode === "vaxa_reduced_band").reduce((sum, component) => sum + component.amount, 0));
+    const referenceBandAmount = roundMoney(vaxaBase * (fullRatePercent / 100));
+    const reliefAmount = roundMoney(Math.max(0, referenceBandAmount - vaxaAmount));
+    if (reliefAmount > 0) {
+      taxAccountConsequence = {
+        consequenceTypeCode: "vaxa_relief_credit",
+        liabilityTypeCode: "employer_contributions",
+        bookingTimingCode: "tax_account_assessment",
+        creditAmount: reliefAmount,
+        referenceBaseAmount: vaxaBase,
+        reducedRatePercent: reducedRatePercent ?? null,
+        fullRatePercent,
+        legalBasisCode: decisionContext.legalBasisCode || null
+      };
+    }
+  } else if (decisionContext.decisionType === "reduced_age_pension_only") {
+    components = [
+      buildEmployerContributionComponent({
+        componentCode: "age_pension_only",
+        baseAmount: normalizedContributionBase,
+        ratePercent: reducedRatePercent ?? fullRatePercent
+      })
+    ];
+  } else if (decisionContext.decisionType === "no_contribution") {
+    components = [
+      buildEmployerContributionComponent({
+        componentCode: "no_contribution",
+        baseAmount: normalizedContributionBase,
+        ratePercent: 0
+      })
+    ];
+  } else if (decisionContext.decisionType === "emergency_manual" && baseLimit != null && reducedRatePercent != null) {
+    components = buildSplitEmployerContributionComponents({
+      contributionBase: normalizedContributionBase,
       reducedRatePercent,
-      overflowRatePercent: standardRatePercent,
-      eligibilityFrom: classDefinition.eligibilityFrom,
-      eligibilityTo: classDefinition.eligibilityTo
+      fullRatePercent,
+      baseLimit,
+      reducedComponentCode: "manual_reduced_band",
+      overflowComponentCode: "manual_overflow_band"
+    });
+  } else {
+    const manualOrFullRate = reducedRatePercent ?? fullRatePercent;
+    components = [
+      buildEmployerContributionComponent({
+        componentCode:
+          decisionContext.decisionType === "emergency_manual"
+            ? "manual_contribution"
+            : "standard_contribution",
+        baseAmount: normalizedContributionBase,
+        ratePercent: manualOrFullRate
+      })
+    ];
+  }
+
+  const netContributionAmount = roundMoney(components.reduce((sum, component) => sum + component.amount, 0));
+  const referenceFullContributionAmount = roundMoney(normalizedContributionBase * (fullRatePercent / 100));
+  const taxAccountReliefAmount = roundMoney(Math.max(0, Number(taxAccountConsequence?.creditAmount || 0)));
+  const grossContributionAmount =
+    decisionContext.decisionType === "vaxa"
+      ? referenceFullContributionAmount
+      : netContributionAmount;
+  const netRatePercent = normalizedContributionBase > 0 ? roundMoney((netContributionAmount / normalizedContributionBase) * 100) : 0;
+  const grossRatePercent = normalizedContributionBase > 0 ? roundMoney((grossContributionAmount / normalizedContributionBase) * 100) : 0;
+  const reducedContributionBase = roundMoney(
+    components
+      .filter((component) => component.componentCode !== "standard_overflow_band")
+      .reduce((sum, component) => sum + component.baseAmount, 0)
+  );
+  const overflowContributionBase = roundMoney(
+    components
+      .filter((component) => component.componentCode === "standard_overflow_band" || component.componentCode === "manual_overflow_band")
+      .reduce((sum, component) => sum + component.baseAmount, 0)
+  );
+  return {
+    amount: netContributionAmount,
+    netContributionAmount,
+    grossContributionAmount,
+    referenceFullContributionAmount,
+    taxAccountReliefAmount,
+    taxAccountConsequence,
+    netRatePercent,
+    grossRatePercent,
+    components,
+    compatibilityOutputs: {
+      thresholdAmount: baseLimit,
+      reducedContributionBase: baseLimit == null ? null : reducedContributionBase,
+      overflowContributionBase: baseLimit == null ? null : overflowContributionBase,
+      reducedRatePercent,
+      overflowRatePercent: baseLimit == null ? null : fullRatePercent
     },
     explanation: [
-      "temporaryYouthReductionApplied=true",
-      `reducedContributionBase=${reducedContributionBase}`,
-      `overflowContributionBase=${overflowContributionBase}`,
-      `reducedRatePercent=${reducedRatePercent}`,
-      `overflowRatePercent=${standardRatePercent}`
+      `grossContributionAmount=${grossContributionAmount}`,
+      `netContributionAmount=${netContributionAmount}`,
+      `referenceFullContributionAmount=${referenceFullContributionAmount}`,
+      `taxAccountReliefAmount=${taxAccountReliefAmount}`
     ]
   };
+}
+
+function buildSplitEmployerContributionComponents({
+  contributionBase,
+  reducedRatePercent,
+  fullRatePercent,
+  baseLimit,
+  reducedComponentCode,
+  overflowComponentCode
+}) {
+  const thresholdAmount = normalizeRequiredMoney(baseLimit ?? 0, "employer_contribution_decision_snapshot_base_limit_invalid");
+  const reducedContributionBase = roundMoney(Math.min(contributionBase, thresholdAmount));
+  const overflowContributionBase = roundMoney(Math.max(0, contributionBase - reducedContributionBase));
+  return [
+    buildEmployerContributionComponent({
+      componentCode: reducedComponentCode,
+      baseAmount: reducedContributionBase,
+      ratePercent: reducedRatePercent
+    }),
+    buildEmployerContributionComponent({
+      componentCode: overflowComponentCode,
+      baseAmount: overflowContributionBase,
+      ratePercent: fullRatePercent
+    })
+  ].filter((component) => component.baseAmount > 0 || component.amount > 0);
+}
+
+function buildEmployerContributionComponent({ componentCode, baseAmount, ratePercent }) {
+  const normalizedBaseAmount = roundMoney(Math.max(0, baseAmount || 0));
+  const normalizedRatePercent = roundMoney(Math.max(0, ratePercent || 0));
+  return {
+    componentCode,
+    baseAmount: normalizedBaseAmount,
+    ratePercent: normalizedRatePercent,
+    amount: roundMoney(normalizedBaseAmount * (normalizedRatePercent / 100))
+  };
+}
+
+function resolveEmployerContributionDecisionCode(decisionType) {
+  switch (decisionType) {
+    case "temporary_youth_reduction":
+      return "PAYROLL_EMPLOYER_CONTRIBUTION_TEMPORARY_YOUTH_REDUCTION";
+    case "reduced_age_pension_only":
+      return "PAYROLL_EMPLOYER_CONTRIBUTION_REDUCED_AGE_PENSION_ONLY";
+    case "vaxa":
+      return "PAYROLL_EMPLOYER_CONTRIBUTION_VAXA";
+    case "no_contribution":
+      return "PAYROLL_EMPLOYER_CONTRIBUTION_NONE";
+    case "emergency_manual":
+      return "PAYROLL_EMPLOYER_CONTRIBUTION_EMERGENCY_MANUAL";
+    default:
+      return "PAYROLL_EMPLOYER_CONTRIBUTION_FULL";
+  }
+}
+
+function mapEmployerContributionDecisionTypeToClassCode(decisionType) {
+  switch (decisionType) {
+    case "reduced_age_pension_only":
+      return "reduced_age_pension_only";
+    case "temporary_youth_reduction":
+      return "temporary_youth_reduction";
+    case "vaxa":
+      return "vaxa";
+    case "no_contribution":
+      return "no_contribution";
+    default:
+      return "full";
+  }
+}
+
+function mapEmployerContributionClassCodeToDecisionType(contributionClassCode) {
+  switch (contributionClassCode) {
+    case "reduced_age_pension_only":
+      return "reduced_age_pension_only";
+    case "temporary_youth_reduction":
+      return "temporary_youth_reduction";
+    case "no_contribution":
+      return "no_contribution";
+    default:
+      return "full";
+  }
+}
+
+function resolveEmployerContributionLegalBasisCode(contributionClassCode) {
+  switch (contributionClassCode) {
+    case "reduced_age_pension_only":
+      return "se_age_pension_only_year_start_67_plus";
+    case "temporary_youth_reduction":
+      return "se_temporary_youth_reduction_2026_2027";
+    case "no_contribution":
+      return "se_no_contribution_birth_year_on_or_before_1937";
+    default:
+      return "se_full_employer_contribution";
+  }
+}
+
+function resolveEmployerContributionAgeBucket({ employee, effectiveDate, contributionClassCode }) {
+  const birthYear = employee?.dateOfBirth ? Number(String(employee.dateOfBirth).slice(0, 4)) : null;
+  if (birthYear == null) {
+    return contributionClassCode === "no_contribution" ? "birth_year_on_or_before_1937" : "standard";
+  }
+  const payoutYear = Number(String(effectiveDate).slice(0, 4));
+  const ageAtYearStart = payoutYear - birthYear;
+  if (contributionClassCode === "no_contribution") {
+    return "birth_year_on_or_before_1937";
+  }
+  if (ageAtYearStart >= 67) {
+    return "year_start_67_plus";
+  }
+  if (ageAtYearStart >= 19 && ageAtYearStart <= 23) {
+    return "year_start_19_23";
+  }
+  return "standard";
 }
 
 function isYouthReductionEligible({ classDefinition, birthYear, effectiveDate }) {
@@ -5323,6 +5869,20 @@ function requireTaxDecisionSnapshot(state, companyId, taxDecisionSnapshotId) {
   return record;
 }
 
+function requireEmployerContributionDecisionSnapshot(state, companyId, employerContributionDecisionSnapshotId) {
+  const record = state.employerContributionDecisionSnapshots.get(
+    requireText(employerContributionDecisionSnapshotId, "employer_contribution_decision_snapshot_id_required")
+  );
+  if (!record || record.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(
+      404,
+      "employer_contribution_decision_snapshot_not_found",
+      "Employer contribution decision snapshot was not found."
+    );
+  }
+  return record;
+}
+
 function decisionSnapshotCoversDate(snapshot, effectiveDate) {
   const resolvedDate = normalizeRequiredDate(effectiveDate, "tax_decision_snapshot_effective_date_invalid");
   return snapshot.validFrom <= resolvedDate && (!snapshot.validTo || snapshot.validTo >= resolvedDate);
@@ -5344,6 +5904,29 @@ function supersedeOverlappingTaxDecisionSnapshots(state, approvedSnapshot) {
     candidate.status = "superseded";
     candidate.supersededAt = approvedSnapshot.approvedAt || approvedSnapshot.updatedAt;
     candidate.supersededBySnapshotId = approvedSnapshot.taxDecisionSnapshotId;
+    candidate.updatedAt = candidate.supersededAt;
+  }
+}
+
+function supersedeOverlappingEmployerContributionDecisionSnapshots(state, approvedSnapshot) {
+  const scopeKey = buildPayrollEmploymentKey(approvedSnapshot.companyId, approvedSnapshot.employmentId);
+  for (const employerContributionDecisionSnapshotId of state.employerContributionDecisionSnapshotIdsByEmployment.get(scopeKey) || []) {
+    const candidate = state.employerContributionDecisionSnapshots.get(employerContributionDecisionSnapshotId);
+    if (
+      !candidate
+      || candidate.employerContributionDecisionSnapshotId === approvedSnapshot.employerContributionDecisionSnapshotId
+    ) {
+      continue;
+    }
+    if (candidate.status !== "approved" || candidate.decisionType !== approvedSnapshot.decisionType) {
+      continue;
+    }
+    if (!intervalsOverlap(candidate.validFrom, candidate.validTo, approvedSnapshot.validFrom, approvedSnapshot.validTo)) {
+      continue;
+    }
+    candidate.status = "superseded";
+    candidate.supersededAt = approvedSnapshot.approvedAt || approvedSnapshot.updatedAt;
+    candidate.supersededBySnapshotId = approvedSnapshot.employerContributionDecisionSnapshotId;
     candidate.updatedAt = candidate.supersededAt;
   }
 }
@@ -5392,10 +5975,54 @@ function selectTaxDecisionSnapshot({
   return null;
 }
 
+function selectEmployerContributionDecisionSnapshot({
+  state,
+  companyId,
+  employmentId,
+  effectiveDate,
+  overrideSnapshots = new Map()
+}) {
+  const override = overrideSnapshots.get(employmentId) || null;
+  if (override && decisionSnapshotCoversDate(override, effectiveDate)) {
+    return {
+      ...copy(override),
+      employerContributionDecisionSnapshotId: override.employerContributionDecisionSnapshotId || buildSnapshotHash({
+        companyId,
+        employmentId,
+        effectiveDate,
+        decisionType: override.decisionType,
+        decisionReference: override.decisionReference,
+        evidenceRef: override.evidenceRef
+      }),
+      companyId,
+      status:
+        override.status
+        || (override.decisionType === "vaxa" || override.decisionType === "emergency_manual" ? "draft" : "approved")
+    };
+  }
+  const candidates = listApprovedEmployerContributionDecisionSnapshotsForEmployment(
+    state,
+    companyId,
+    employmentId,
+    effectiveDate
+  );
+  return candidates.length > 0 ? copy(candidates[candidates.length - 1]) : null;
+}
+
 function listApprovedTaxDecisionSnapshotsForEmployment(state, companyId, employmentId, effectiveDate) {
   const scopeKey = buildPayrollEmploymentKey(requireText(companyId, "company_id_required"), requireText(employmentId, "employment_id_required"));
   return (state.taxDecisionSnapshotIdsByEmployment.get(scopeKey) || [])
     .map((taxDecisionSnapshotId) => state.taxDecisionSnapshots.get(taxDecisionSnapshotId))
+    .filter(Boolean)
+    .filter((candidate) => candidate.status === "approved")
+    .filter((candidate) => decisionSnapshotCoversDate(candidate, effectiveDate))
+    .sort((left, right) => left.validFrom.localeCompare(right.validFrom) || left.createdAt.localeCompare(right.createdAt));
+}
+
+function listApprovedEmployerContributionDecisionSnapshotsForEmployment(state, companyId, employmentId, effectiveDate) {
+  const scopeKey = buildPayrollEmploymentKey(requireText(companyId, "company_id_required"), requireText(employmentId, "employment_id_required"));
+  return (state.employerContributionDecisionSnapshotIdsByEmployment.get(scopeKey) || [])
+    .map((employerContributionDecisionSnapshotId) => state.employerContributionDecisionSnapshots.get(employerContributionDecisionSnapshotId))
     .filter(Boolean)
     .filter((candidate) => candidate.status === "approved")
     .filter((candidate) => decisionSnapshotCoversDate(candidate, effectiveDate))
@@ -6098,6 +6725,108 @@ function normalizeTaxDecisionSnapshot(snapshot = {}) {
   return normalized;
 }
 
+function normalizeEmployerContributionDecisionSnapshots(employerContributionDecisionSnapshots) {
+  const map = new Map();
+  if (!Array.isArray(employerContributionDecisionSnapshots)) {
+    return map;
+  }
+  for (const snapshot of employerContributionDecisionSnapshots) {
+    const normalized = normalizeEmployerContributionDecisionSnapshot(snapshot);
+    map.set(normalized.employmentId, normalized);
+  }
+  return map;
+}
+
+function normalizeEmployerContributionDecisionSnapshot(snapshot = {}) {
+  const decisionType = assertAllowed(
+    normalizeOptionalText(snapshot.decisionType),
+    PAYROLL_EMPLOYER_CONTRIBUTION_DECISION_TYPES,
+    "employer_contribution_decision_snapshot_type_invalid"
+  );
+  const validFrom = normalizeRequiredDate(
+    snapshot.validFrom,
+    "employer_contribution_decision_snapshot_valid_from_invalid"
+  );
+  const validTo = normalizeOptionalDate(snapshot.validTo, "employer_contribution_decision_snapshot_valid_to_invalid");
+  if (validTo && validTo < validFrom) {
+    throw createError(
+      400,
+      "employer_contribution_decision_snapshot_interval_invalid",
+      "Employer contribution decision validity interval is invalid."
+    );
+  }
+  const normalized = {
+    employmentId: requireText(snapshot.employmentId, "employer_contribution_decision_snapshot_employment_id_required"),
+    decisionType,
+    ageBucket: requireText(snapshot.ageBucket, "employer_contribution_decision_snapshot_age_bucket_required"),
+    legalBasisCode: requireText(snapshot.legalBasisCode, "employer_contribution_decision_snapshot_legal_basis_required"),
+    validFrom,
+    validTo,
+    baseLimit: normalizeOptionalMoney(
+      snapshot.baseLimit,
+      "employer_contribution_decision_snapshot_base_limit_invalid"
+    ),
+    fullRate: normalizeRequiredPercentage(snapshot.fullRate, "employer_contribution_decision_snapshot_full_rate_invalid"),
+    reducedRate: normalizeOptionalPercentage(
+      snapshot.reducedRate,
+      "employer_contribution_decision_snapshot_reduced_rate_invalid"
+    ),
+    specialConditions: normalizeOptionalJsonObject(
+      snapshot.specialConditions,
+      "employer_contribution_decision_snapshot_special_conditions_invalid"
+    ),
+    decisionSource: requireText(snapshot.decisionSource, "employer_contribution_decision_snapshot_decision_source_required"),
+    decisionReference: requireText(
+      snapshot.decisionReference,
+      "employer_contribution_decision_snapshot_decision_reference_required"
+    ),
+    evidenceRef: requireText(snapshot.evidenceRef, "employer_contribution_decision_snapshot_evidence_ref_required"),
+    reasonCode: normalizeOptionalText(snapshot.reasonCode)
+  };
+
+  if (decisionType === "temporary_youth_reduction" || decisionType === "vaxa") {
+    if (normalized.reducedRate == null || normalized.baseLimit == null) {
+      throw createError(
+        400,
+        "employer_contribution_decision_snapshot_split_fields_required",
+        "Split employer contribution decisions require reducedRate and baseLimit."
+      );
+    }
+  }
+
+  if (decisionType === "reduced_age_pension_only" && normalized.reducedRate == null) {
+    throw createError(
+      400,
+      "employer_contribution_decision_snapshot_reduced_rate_required",
+      "Reduced employer contribution decisions require reducedRate."
+    );
+  }
+
+  if (decisionType === "no_contribution") {
+    normalized.reducedRate = 0;
+    normalized.fullRate = 0;
+  }
+
+  if (decisionType === "emergency_manual") {
+    if (!normalized.reasonCode) {
+      throw createError(
+        400,
+        "employer_contribution_decision_snapshot_reason_required",
+        "Emergency manual employer contribution decisions require reasonCode."
+      );
+    }
+    if (normalized.reducedRate == null && normalized.fullRate == null) {
+      throw createError(
+        400,
+        "employer_contribution_decision_snapshot_rate_required",
+        "Emergency manual employer contribution decisions require a rate."
+      );
+    }
+  }
+
+  return normalized;
+}
+
 function normalizeStatutoryProfile(profile = {}) {
   const taxMode = assertAllowed(normalizeOptionalText(profile.taxMode) || "pending", PAYROLL_TAX_MODES, "statutory_profile_tax_mode_invalid");
   const sinkValidFrom = normalizeOptionalDate(profile.sinkValidFrom, "statutory_profile_sink_valid_from_invalid");
@@ -6618,6 +7347,31 @@ function normalizeOptionalNumber(value, code) {
     throw createError(400, code, `${value} must be numeric.`);
   }
   return numeric;
+}
+
+function normalizeOptionalPercentage(value, code) {
+  if (value == null || value === "") {
+    return null;
+  }
+  return normalizeRequiredPercentage(value, code);
+}
+
+function normalizeRequiredPercentage(value, code) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0 || numeric > 100) {
+    throw createError(400, code, `${value} must be a percentage between 0 and 100.`);
+  }
+  return roundMoney(numeric);
+}
+
+function normalizeOptionalJsonObject(value, code) {
+  if (value == null || value === "") {
+    return {};
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw createError(400, code, "Expected a JSON object.");
+  }
+  return copy(value);
 }
 
 function normalizeIntegerInRange(value, min, max, code) {

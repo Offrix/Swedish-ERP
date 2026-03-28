@@ -808,6 +808,8 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/payroll/pay-calendars/:payCalendarId",
               "/v1/payroll/tax-decisions",
               "/v1/payroll/tax-decisions/:taxDecisionSnapshotId/approve",
+              "/v1/payroll/employer-contribution-decisions",
+              "/v1/payroll/employer-contribution-decisions/:employerContributionDecisionSnapshotId/approve",
               "/v1/payroll/pay-runs",
               "/v1/payroll/pay-runs/:payRunId",
               "/v1/payroll/pay-runs/:payRunId/exceptions",
@@ -9280,6 +9282,96 @@ async function handleRequest({ req, res, platform, flags }) {
         reasonCode: body.reasonCode ?? null,
         sinkRatePercent: body.sinkRatePercent ?? null,
         sinkSeaIncome: body.sinkSeaIncome === true,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/payroll/employer-contribution-decisions") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listEmployerContributionDecisionSnapshots({
+        companyId,
+        employmentId: url.searchParams.get("employmentId") || null,
+        status: url.searchParams.get("status") || null,
+        decisionType: url.searchParams.get("decisionType") || null,
+        effectiveDate: url.searchParams.get("effectiveDate") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/payroll/employer-contribution-decisions") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createEmployerContributionDecisionSnapshot({
+        companyId,
+        employmentId: body.employmentId,
+        decisionType: body.decisionType,
+        ageBucket: body.ageBucket,
+        legalBasisCode: body.legalBasisCode,
+        validFrom: body.validFrom,
+        validTo: body.validTo ?? null,
+        baseLimit: body.baseLimit ?? null,
+        fullRate: body.fullRate,
+        reducedRate: body.reducedRate ?? null,
+        specialConditions: body.specialConditions ?? {},
+        decisionSource: body.decisionSource,
+        decisionReference: body.decisionReference,
+        evidenceRef: body.evidenceRef,
+        reasonCode: body.reasonCode ?? null,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const employerContributionDecisionApproveMatch = matchPath(
+    path,
+    "/v1/payroll/employer-contribution-decisions/:employerContributionDecisionSnapshotId/approve"
+  );
+  if (employerContributionDecisionApproveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveEmployerContributionDecisionSnapshot({
+        companyId,
+        employerContributionDecisionSnapshotId:
+          employerContributionDecisionApproveMatch.employerContributionDecisionSnapshotId,
         actorId: principal.userId
       })
     );

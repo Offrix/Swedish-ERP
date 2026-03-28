@@ -332,6 +332,40 @@ export interface TaxDecisionSnapshot {
   readonly updatedAt: string;
 }
 
+export interface EmployerContributionDecisionSnapshot {
+  readonly employerContributionDecisionSnapshotId: string;
+  readonly companyId: string;
+  readonly employmentId: string;
+  readonly decisionType:
+    | "full"
+    | "reduced_age_pension_only"
+    | "temporary_youth_reduction"
+    | "vaxa"
+    | "no_contribution"
+    | "emergency_manual";
+  readonly ageBucket: string;
+  readonly legalBasisCode: string;
+  readonly validFrom: string;
+  readonly validTo: string | null;
+  readonly baseLimit: number | null;
+  readonly fullRate: number;
+  readonly reducedRate: number | null;
+  readonly specialConditions: Record<string, unknown>;
+  readonly decisionSource: string;
+  readonly decisionReference: string;
+  readonly evidenceRef: string;
+  readonly reasonCode: string | null;
+  readonly status: "draft" | "approved" | "superseded";
+  readonly requiresDualReview: boolean;
+  readonly approvedAt: string | null;
+  readonly approvedByActorId: string | null;
+  readonly supersededAt: string | null;
+  readonly supersededBySnapshotId: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface DocumentClassificationPayrollConsumption {
   readonly documentClassificationPayrollConsumptionId: string;
   readonly documentClassificationPayrollPayloadId: string;
