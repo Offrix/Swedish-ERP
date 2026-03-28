@@ -300,6 +300,38 @@ export interface PayrollException {
   readonly resolutionNote: string | null;
 }
 
+export interface TaxDecisionSnapshot {
+  readonly taxDecisionSnapshotId: string;
+  readonly companyId: string;
+  readonly employmentId: string;
+  readonly decisionType: "tabell" | "jamkning" | "engangsskatt" | "sink" | "emergency_manual";
+  readonly incomeYear: number;
+  readonly validFrom: string;
+  readonly validTo: string | null;
+  readonly municipalityCode: string | null;
+  readonly tableCode: string | null;
+  readonly columnCode: string | null;
+  readonly adjustmentFixedAmount: number | null;
+  readonly adjustmentPercentage: number | null;
+  readonly withholdingRatePercent: number | null;
+  readonly withholdingFixedAmount: number | null;
+  readonly decisionSource: string;
+  readonly decisionReference: string;
+  readonly evidenceRef: string;
+  readonly reasonCode: string | null;
+  readonly sinkRatePercent: number | null;
+  readonly sinkSeaIncome: boolean;
+  readonly status: "draft" | "approved" | "superseded";
+  readonly requiresDualReview: boolean;
+  readonly approvedAt: string | null;
+  readonly approvedByActorId: string | null;
+  readonly supersededAt: string | null;
+  readonly supersededBySnapshotId: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface DocumentClassificationPayrollConsumption {
   readonly documentClassificationPayrollConsumptionId: string;
   readonly documentClassificationPayrollPayloadId: string;

@@ -13,6 +13,8 @@ export const PAYROLL_EXCEPTION_STATUSES = Object.freeze(["open", "resolved", "wa
 export const PAYROLL_EXCEPTION_SEVERITIES = Object.freeze(["info", "warning", "error"]);
 export const PAYROLL_FREQUENCY_CODES = Object.freeze(["monthly"]);
 export const PAYROLL_TAX_MODES = Object.freeze(["pending", "manual_rate", "sink"]);
+export const PAYROLL_TAX_DECISION_TYPES = Object.freeze(["tabell", "jamkning", "engangsskatt", "sink", "emergency_manual"]);
+export const PAYROLL_TAX_DECISION_STATUSES = Object.freeze(["draft", "approved", "superseded"]);
 export const AGI_SUBMISSION_STATES = Object.freeze([
   "draft",
   "validated",
@@ -265,6 +267,9 @@ export function createPayrollEngine({
     payrollInputSnapshots: new Map(),
     payrollInputSnapshotIdsByCompany: new Map(),
     payrollInputSnapshotIdByRun: new Map(),
+    taxDecisionSnapshots: new Map(),
+    taxDecisionSnapshotIdsByCompany: new Map(),
+    taxDecisionSnapshotIdsByEmployment: new Map(),
     payRunEvents: new Map(),
     payRunEventIdsByRun: new Map(),
     payrollExceptions: new Map(),
@@ -330,6 +335,9 @@ export function createPayrollEngine({
     listPayCalendars,
     getPayCalendar,
     createPayCalendar,
+    listTaxDecisionSnapshots,
+    createTaxDecisionSnapshot,
+    approveTaxDecisionSnapshot,
     listEmploymentStatutoryProfiles,
     upsertEmploymentStatutoryProfile,
     listPayRuns,
@@ -553,6 +561,146 @@ export function createPayrollEngine({
     state.payCalendars.set(record.payCalendarId, record);
     appendToIndex(state.payCalendarIdsByCompany, resolvedCompanyId, record.payCalendarId);
     setIndexValue(state.payCalendarIdsByCode, resolvedCompanyId, resolvedCode, record.payCalendarId);
+    return copy(record);
+  }
+
+  function listTaxDecisionSnapshots({ companyId, employmentId = null, status = null, decisionType = null, effectiveDate = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = status
+      ? assertAllowed(status, PAYROLL_TAX_DECISION_STATUSES, "tax_decision_snapshot_status_invalid")
+      : null;
+    const resolvedDecisionType = decisionType
+      ? assertAllowed(decisionType, PAYROLL_TAX_DECISION_TYPES, "tax_decision_snapshot_type_invalid")
+      : null;
+    const ids = employmentId
+      ? state.taxDecisionSnapshotIdsByEmployment.get(buildPayrollEmploymentKey(resolvedCompanyId, requireText(employmentId, "employment_id_required"))) || []
+      : state.taxDecisionSnapshotIdsByCompany.get(resolvedCompanyId) || [];
+    return ids
+      .map((taxDecisionSnapshotId) => state.taxDecisionSnapshots.get(taxDecisionSnapshotId))
+      .filter(Boolean)
+      .filter((candidate) => (resolvedStatus ? candidate.status === resolvedStatus : true))
+      .filter((candidate) => (resolvedDecisionType ? candidate.decisionType === resolvedDecisionType : true))
+      .filter((candidate) => (effectiveDate ? decisionSnapshotCoversDate(candidate, effectiveDate) : true))
+      .sort(
+        (left, right) =>
+          left.employmentId.localeCompare(right.employmentId) ||
+          left.validFrom.localeCompare(right.validFrom) ||
+          left.createdAt.localeCompare(right.createdAt)
+      )
+      .map(copy);
+  }
+
+  function createTaxDecisionSnapshot({
+    companyId,
+    employmentId,
+    decisionType,
+    incomeYear,
+    validFrom,
+    validTo = null,
+    municipalityCode = null,
+    tableCode = null,
+    columnCode = null,
+    adjustmentFixedAmount = null,
+    adjustmentPercentage = null,
+    withholdingRatePercent = null,
+    withholdingFixedAmount = null,
+    decisionSource,
+    decisionReference,
+    evidenceRef,
+    reasonCode = null,
+    sinkRatePercent = null,
+    sinkSeaIncome = false,
+    actorId = "system"
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedEmploymentId = requireText(employmentId, "employment_id_required");
+    if (hrPlatform) {
+      const matches = resolveEmploymentScope({
+        companyId: resolvedCompanyId,
+        employmentIds: [resolvedEmploymentId],
+        period: { startsOn: "1900-01-01", endsOn: "2999-12-31" },
+        hrPlatform
+      });
+      if (matches.length !== 1) {
+        throw createError(404, "employment_not_found", "Employment was not found for tax decision snapshot.");
+      }
+    }
+    const normalized = normalizeTaxDecisionSnapshot({
+      employmentId: resolvedEmploymentId,
+      decisionType,
+      incomeYear,
+      validFrom,
+      validTo,
+      municipalityCode,
+      tableCode,
+      columnCode,
+      adjustmentFixedAmount,
+      adjustmentPercentage,
+      withholdingRatePercent,
+      withholdingFixedAmount,
+      decisionSource,
+      decisionReference,
+      evidenceRef,
+      reasonCode,
+      sinkRatePercent,
+      sinkSeaIncome
+    });
+    const requiresDualReview = normalized.decisionType === "emergency_manual";
+    const status = requiresDualReview ? "draft" : "approved";
+    const now = nowIso(clock);
+    const record = {
+      taxDecisionSnapshotId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      ...normalized,
+      status,
+      requiresDualReview,
+      approvedAt: status === "approved" ? now : null,
+      approvedByActorId: status === "approved" ? requireText(actorId, "actor_id_required") : null,
+      supersededAt: null,
+      supersededBySnapshotId: null,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: now,
+      updatedAt: now
+    };
+    state.taxDecisionSnapshots.set(record.taxDecisionSnapshotId, record);
+    appendToIndex(state.taxDecisionSnapshotIdsByCompany, resolvedCompanyId, record.taxDecisionSnapshotId);
+    appendToIndex(
+      state.taxDecisionSnapshotIdsByEmployment,
+      buildPayrollEmploymentKey(resolvedCompanyId, resolvedEmploymentId),
+      record.taxDecisionSnapshotId
+    );
+    if (status === "approved") {
+      supersedeOverlappingTaxDecisionSnapshots(state, record);
+    }
+    return copy(record);
+  }
+
+  function approveTaxDecisionSnapshot({ companyId, taxDecisionSnapshotId, actorId = "system" } = {}) {
+    const record = requireTaxDecisionSnapshot(state, companyId, taxDecisionSnapshotId);
+    if (record.status === "approved") {
+      return copy(record);
+    }
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    if (record.decisionType !== "emergency_manual") {
+      record.status = "approved";
+      record.approvedAt = nowIso(clock);
+      record.approvedByActorId = resolvedActorId;
+      record.updatedAt = record.approvedAt;
+      supersedeOverlappingTaxDecisionSnapshots(state, record);
+      return copy(record);
+    }
+    if (record.createdByActorId === resolvedActorId) {
+      throw createError(
+        409,
+        "tax_decision_snapshot_dual_review_required",
+        "Emergency manual tax decisions require approval by a different actor."
+      );
+    }
+    record.status = "approved";
+    record.approvedAt = nowIso(clock);
+    record.approvedByActorId = resolvedActorId;
+    record.updatedAt = record.approvedAt;
+    supersedeOverlappingTaxDecisionSnapshots(state, record);
     return copy(record);
   }
 
@@ -789,6 +937,7 @@ export function createPayrollEngine({
     finalPayAdjustments = [],
     leavePayItemMappings = [],
     statutoryProfiles = [],
+    taxDecisionSnapshots = [],
     migrationBatchId = null,
     correctionOfPayRunId = null,
     correctionReason = null,
@@ -824,6 +973,7 @@ export function createPayrollEngine({
       baseProfiles: listEmploymentStatutoryProfiles({ companyId: resolvedCompanyId }),
       overrideProfiles: statutoryProfiles
     });
+    const normalizedTaxDecisionSnapshots = normalizeTaxDecisionSnapshots(taxDecisionSnapshots);
     const migrationContext = resolvePayrollMigrationContext({
       companyId: resolvedCompanyId,
       sessionToken,
@@ -896,6 +1046,7 @@ export function createPayrollEngine({
       finalPayAdjustments: normalizedFinalPayAdjustments,
       leavePayItemMappings: normalizedLeaveMappings,
       statutoryProfiles: [...normalizedStatutoryProfiles.values()],
+      taxDecisionSnapshots: [...normalizedTaxDecisionSnapshots.values()],
       migrationSnapshot: migrationContext?.snapshot || null,
       correctionOfPayRunId: correctionSourceRun?.payRunId || null,
       correctionReason: normalizeOptionalText(correctionReason)
@@ -916,6 +1067,14 @@ export function createPayrollEngine({
         period,
         collectiveAgreementsPlatform
       });
+      const taxDecisionSnapshot = selectTaxDecisionSnapshot({
+        state,
+        companyId: resolvedCompanyId,
+        employmentId: employment.employmentId,
+        effectiveDate: period.payDate,
+        runType: run.runType,
+        overrideSnapshots: normalizedTaxDecisionSnapshots
+      });
       const result = calculateEmploymentRun({
         state,
         rules,
@@ -927,6 +1086,7 @@ export function createPayrollEngine({
         finalPayAdjustments: normalizedFinalPayAdjustments.filter((item) => item.employmentId === employment.employmentId),
         leavePayItemMappings: normalizedLeaveMappings,
         statutoryProfile: normalizedStatutoryProfiles.get(employment.employmentId) || null,
+        taxDecisionSnapshot,
         employmentTimeBase,
         agreementContext,
         hrPlatform,
@@ -3118,6 +3278,7 @@ function calculateEmploymentRun({
   finalPayAdjustments,
   leavePayItemMappings,
   statutoryProfile,
+  taxDecisionSnapshot = null,
   employmentTimeBase = null,
   agreementContext = null,
   hrPlatform,
@@ -3441,6 +3602,7 @@ function calculateEmploymentRun({
     payDate: period.payDate,
     employee,
     statutoryProfile,
+    taxDecisionSnapshot,
     warnings
   });
   steps[11] = taxPreview.step;
@@ -3874,7 +4036,7 @@ function createStepLinesFromManualInputs({ processingStep, employment, inputs, s
     });
 }
 
-function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfile, warnings }) {
+function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfile, taxDecisionSnapshot = null, warnings }) {
   const resolvedPayDate = normalizeRequiredDate(payDate, "pay_run_pay_date_invalid");
   const rulePack = rules.resolveRulePack({
     rulePackCode: PAYROLL_TAX_RULE_PACK_CODE,
@@ -3883,7 +4045,8 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
     effectiveDate: resolvedPayDate
   });
   const normalizedTaxableBase = roundMoney(Math.max(0, taxableBase || 0));
-  const effectiveProfile = resolveEffectiveTaxProfile({
+  const effectiveTaxContext = resolveEffectiveTaxDecisionContext({
+    taxDecisionSnapshot,
     statutoryProfile,
     effectiveDate: resolvedPayDate,
     rulePack
@@ -3893,8 +4056,9 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
       taxableBase: normalizedTaxableBase,
       payDate: resolvedPayDate,
       employeeId: employee?.employeeId || null,
+      taxDecisionSnapshot: taxDecisionSnapshot || null,
       statutoryProfile: statutoryProfile || null,
-      effectiveProfile
+      effectiveTaxContext
     }),
     rule_pack_id: rulePack.rulePackId,
     rule_pack_code: rulePack.rulePackCode,
@@ -3907,8 +4071,13 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
     }
   };
 
-  if (!effectiveProfile || effectiveProfile.taxMode === "pending") {
-    warnings.push(createWarning("payroll_tax_profile_missing", "Preliminary tax requires a complete statutory profile or SINK decision."));
+  if (!effectiveTaxContext || effectiveTaxContext.decisionType === "pending") {
+    warnings.push(
+      createWarning(
+        "payroll_tax_profile_missing",
+        "Preliminary tax requires an approved tax decision snapshot or compatible statutory fallback."
+      )
+    );
     const decisionObject = {
       ...decisionObjectBase,
       decision_code: "PAYROLL_TAX_PROFILE_MISSING",
@@ -3934,9 +4103,124 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
     };
   }
 
-  if (effectiveProfile.taxMode === "manual_rate") {
-    const taxRatePercent = effectiveProfile.taxRatePercent;
-    const manualRateReasonCode = effectiveProfile.manualRateReasonCode;
+  if (effectiveTaxContext.sourceType === "tax_decision_snapshot") {
+    if (effectiveTaxContext.status !== "approved") {
+      warnings.push(createWarning("tax_decision_snapshot_not_approved", "Tax decision snapshot must be approved before payroll calculation."));
+      const decisionObject = {
+        ...decisionObjectBase,
+        decision_code: "PAYROLL_TAX_DECISION_NOT_APPROVED",
+        outputs: {
+          ...decisionObjectBase.outputs,
+          preliminaryTax: null,
+          taxFieldCode: "preliminary_tax",
+          status: "pending"
+        },
+        warnings: ["tax_decision_snapshot_not_approved"],
+        explanation: ["Approved TaxDecisionSnapshot is required before payroll calculation."]
+      };
+      return {
+        amount: null,
+        status: "pending",
+        taxFieldCode: "preliminary_tax",
+        decisionObject,
+        step: createPendingStep(11, {
+          status: "pending",
+          taxableBase: normalizedTaxableBase,
+          decisionObject
+        })
+      };
+    }
+    const snapshotAmount = resolveTaxDecisionSnapshotAmount({
+      taxDecisionSnapshot: effectiveTaxContext,
+      taxableBase: normalizedTaxableBase,
+      sinkDefaults: rulePack.machineReadableRules?.sink || {}
+    });
+    if (snapshotAmount == null) {
+      warnings.push(createWarning("tax_decision_snapshot_incomplete", "Tax decision snapshot could not resolve a withholding amount."));
+      const decisionObject = {
+        ...decisionObjectBase,
+        decision_code: "PAYROLL_TAX_DECISION_INCOMPLETE",
+        outputs: {
+          ...decisionObjectBase.outputs,
+          preliminaryTax: null,
+          taxFieldCode: effectiveTaxContext.decisionType === "sink" ? "sink_tax" : "preliminary_tax",
+          status: "pending"
+        },
+        warnings: ["tax_decision_snapshot_incomplete"],
+        explanation: [
+          `decisionType=${effectiveTaxContext.decisionType}`,
+          "The snapshot did not carry enough withholding instructions for this payroll calculation."
+        ]
+      };
+      return {
+        amount: null,
+        status: "pending",
+        taxFieldCode: effectiveTaxContext.decisionType === "sink" ? "sink_tax" : "preliminary_tax",
+        decisionObject,
+        step: createPendingStep(11, {
+          status: "pending",
+          taxableBase: normalizedTaxableBase,
+          decisionObject
+        })
+      };
+    }
+    const taxFieldCode = effectiveTaxContext.decisionType === "sink" ? "sink_tax" : "preliminary_tax";
+    const decisionCodeByType = {
+      tabell: "PAYROLL_TAX_TABLE",
+      jamkning: "PAYROLL_TAX_ADJUSTMENT",
+      engangsskatt: "PAYROLL_TAX_ONE_TIME",
+      sink: effectiveTaxContext.sinkSeaIncome ? "PAYROLL_TAX_SINK_SEA_INCOME" : "PAYROLL_TAX_SINK",
+      emergency_manual: "PAYROLL_TAX_EMERGENCY_MANUAL"
+    };
+    const decisionObject = {
+      ...decisionObjectBase,
+      decision_code: decisionCodeByType[effectiveTaxContext.decisionType] || "PAYROLL_TAX_DECISION",
+      outputs: {
+        ...decisionObjectBase.outputs,
+        decisionType: effectiveTaxContext.decisionType,
+        taxMode: effectiveTaxContext.decisionType === "sink" ? "sink" : effectiveTaxContext.decisionType,
+        taxFieldCode,
+        preliminaryTax: snapshotAmount,
+        municipalityCode: effectiveTaxContext.municipalityCode || null,
+        tableCode: effectiveTaxContext.tableCode || null,
+        columnCode: effectiveTaxContext.columnCode || null,
+        adjustmentFixedAmount: effectiveTaxContext.adjustmentFixedAmount ?? null,
+        adjustmentPercentage: effectiveTaxContext.adjustmentPercentage ?? null,
+        withholdingRatePercent: effectiveTaxContext.withholdingRatePercent ?? null,
+        withholdingFixedAmount: effectiveTaxContext.withholdingFixedAmount ?? null,
+        sinkRatePercent: effectiveTaxContext.sinkRatePercent ?? null,
+        sinkSeaIncome: effectiveTaxContext.sinkSeaIncome === true,
+        decisionSource: effectiveTaxContext.decisionSource,
+        decisionReference: effectiveTaxContext.decisionReference,
+        evidenceRef: effectiveTaxContext.evidenceRef,
+        reasonCode: effectiveTaxContext.reasonCode ?? null
+      },
+      explanation: [
+        `decisionType=${effectiveTaxContext.decisionType}`,
+        `decisionSource=${effectiveTaxContext.decisionSource}`,
+        `decisionReference=${effectiveTaxContext.decisionReference}`,
+        `taxableBase=${normalizedTaxableBase}`
+      ]
+    };
+    return {
+      amount: snapshotAmount,
+      status: effectiveTaxContext.decisionType === "emergency_manual" ? "resolved_emergency_manual" : `resolved_${effectiveTaxContext.decisionType}`,
+      taxFieldCode,
+      decisionObject,
+      step: createCompletedStep(11, {
+        decisionType: effectiveTaxContext.decisionType,
+        preliminaryTax: snapshotAmount,
+        taxFieldCode,
+        decisionReference: effectiveTaxContext.decisionReference,
+        decisionSource: effectiveTaxContext.decisionSource,
+        decisionObject
+      })
+    };
+  }
+
+  if (effectiveTaxContext.taxMode === "manual_rate") {
+    const taxRatePercent = effectiveTaxContext.taxRatePercent;
+    const manualRateReasonCode = effectiveTaxContext.manualRateReasonCode;
     if (taxRatePercent == null) {
       warnings.push(createWarning("payroll_tax_rate_missing", "Manual-rate tax mode requires taxRatePercent."));
       const decisionObject = {
@@ -3969,14 +4253,14 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
       decision_code: "PAYROLL_TAX_MANUAL_RATE",
       outputs: {
         ...decisionObjectBase.outputs,
-        taxMode: effectiveProfile.taxMode,
+        taxMode: effectiveTaxContext.taxMode,
         taxRatePercent,
         manualRateReasonCode,
         taxFieldCode: "preliminary_tax",
         preliminaryTax: amount
       },
       explanation: [
-        `taxMode=${effectiveProfile.taxMode}`,
+        `taxMode=${effectiveTaxContext.taxMode}`,
         `taxRatePercent=${taxRatePercent}`,
         `manualRateReasonCode=${manualRateReasonCode}`,
         `taxableBase=${normalizedTaxableBase}`
@@ -3984,61 +4268,61 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
     };
     return {
       amount,
-      status: effectiveProfile.fallbackApplied ? "resolved_fallback_manual_rate" : "resolved_manual_rate",
+      status: effectiveTaxContext.fallbackApplied ? "resolved_fallback_manual_rate" : "resolved_manual_rate",
       taxFieldCode: "preliminary_tax",
       decisionObject,
       step: createCompletedStep(11, {
-        taxMode: effectiveProfile.taxMode,
+        taxMode: effectiveTaxContext.taxMode,
         taxRatePercent,
         manualRateReasonCode,
         preliminaryTax: amount,
         taxFieldCode: "preliminary_tax",
-        fallbackApplied: effectiveProfile.fallbackApplied === true,
+        fallbackApplied: effectiveTaxContext.fallbackApplied === true,
         decisionObject
       })
     };
   }
 
-  if (effectiveProfile.taxMode === "sink") {
-    const sinkRatePercent = effectiveProfile.sinkRatePercent;
+  if (effectiveTaxContext.taxMode === "sink") {
+    const sinkRatePercent = effectiveTaxContext.sinkRatePercent;
     const amount = roundMoney(normalizedTaxableBase * (sinkRatePercent / 100));
     const decisionObject = {
       ...decisionObjectBase,
-      decision_code: effectiveProfile.sinkSeaIncome ? "PAYROLL_TAX_SINK_SEA_INCOME" : "PAYROLL_TAX_SINK",
+      decision_code: effectiveTaxContext.sinkSeaIncome ? "PAYROLL_TAX_SINK_SEA_INCOME" : "PAYROLL_TAX_SINK",
       outputs: {
         ...decisionObjectBase.outputs,
         taxMode: "sink",
         taxFieldCode: "sink_tax",
         sinkRatePercent,
-        sinkSeaIncome: effectiveProfile.sinkSeaIncome,
-        sinkDecisionType: effectiveProfile.sinkDecisionType,
+        sinkSeaIncome: effectiveTaxContext.sinkSeaIncome,
+        sinkDecisionType: effectiveTaxContext.sinkDecisionType,
         preliminaryTax: amount
       },
       explanation: [
         `taxMode=sink`,
         `sinkRatePercent=${sinkRatePercent}`,
-        `sinkSeaIncome=${effectiveProfile.sinkSeaIncome === true}`,
+        `sinkSeaIncome=${effectiveTaxContext.sinkSeaIncome === true}`,
         `taxableBase=${normalizedTaxableBase}`
       ]
     };
     return {
       amount,
-      status: effectiveProfile.sinkSeaIncome ? "resolved_sink_sea_income" : "resolved_sink",
+      status: effectiveTaxContext.sinkSeaIncome ? "resolved_sink_sea_income" : "resolved_sink",
       taxFieldCode: "sink_tax",
       decisionObject,
       step: createCompletedStep(11, {
         taxMode: "sink",
         sinkRatePercent,
-        sinkSeaIncome: effectiveProfile.sinkSeaIncome === true,
+        sinkSeaIncome: effectiveTaxContext.sinkSeaIncome === true,
         preliminaryTax: amount,
         taxFieldCode: "sink_tax",
-        fallbackApplied: effectiveProfile.fallbackApplied === true,
+        fallbackApplied: effectiveTaxContext.fallbackApplied === true,
         decisionObject
       })
     };
   }
 
-  warnings.push(createWarning("payroll_tax_mode_invalid", `Unsupported tax mode ${effectiveProfile.taxMode}.`));
+  warnings.push(createWarning("payroll_tax_mode_invalid", `Unsupported tax mode ${effectiveTaxContext.taxMode || effectiveTaxContext.decisionType}.`));
   const decisionObject = {
     ...decisionObjectBase,
     decision_code: "PAYROLL_TAX_MODE_INVALID",
@@ -4049,7 +4333,7 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
       status: "pending"
     },
     warnings: ["payroll_tax_mode_invalid"],
-    explanation: [`Unsupported tax mode ${effectiveProfile.taxMode}.`]
+    explanation: [`Unsupported tax mode ${effectiveTaxContext.taxMode || effectiveTaxContext.decisionType}.`]
   };
   return {
     amount: null,
@@ -4062,6 +4346,77 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
       decisionObject
     })
   };
+}
+
+function resolveEffectiveTaxDecisionContext({ taxDecisionSnapshot = null, statutoryProfile, effectiveDate, rulePack }) {
+  if (taxDecisionSnapshot && decisionSnapshotCoversDate(taxDecisionSnapshot, effectiveDate)) {
+    return {
+      ...copy(taxDecisionSnapshot),
+      sourceType: "tax_decision_snapshot"
+    };
+  }
+  const effectiveProfile = resolveEffectiveTaxProfile({
+    statutoryProfile,
+    effectiveDate,
+    rulePack
+  });
+  if (!effectiveProfile) {
+    return null;
+  }
+  return {
+    ...copy(effectiveProfile),
+    sourceType: "legacy_statutory_profile",
+    decisionType:
+      effectiveProfile.taxMode === "manual_rate"
+        ? "emergency_manual"
+        : effectiveProfile.taxMode === "sink"
+          ? "sink"
+          : "pending",
+    decisionSource: "legacy_statutory_profile",
+    decisionReference: effectiveProfile.employmentId || null,
+    evidenceRef: effectiveProfile.sinkDecisionDocumentId || null,
+    reasonCode: effectiveProfile.manualRateReasonCode || null
+  };
+}
+
+function resolveTaxDecisionSnapshotAmount({ taxDecisionSnapshot, taxableBase, sinkDefaults = {} }) {
+  if (!taxDecisionSnapshot) {
+    return null;
+  }
+  if (taxDecisionSnapshot.decisionType === "sink") {
+    const sinkRatePercent = taxDecisionSnapshot.sinkRatePercent ?? (taxDecisionSnapshot.sinkSeaIncome ? sinkDefaults.seaIncomeRatePercent : sinkDefaults.standardRatePercent);
+    return sinkRatePercent == null ? null : roundMoney(taxableBase * (sinkRatePercent / 100));
+  }
+  if (taxDecisionSnapshot.decisionType === "engangsskatt" || taxDecisionSnapshot.decisionType === "emergency_manual") {
+    return taxDecisionSnapshot.withholdingRatePercent == null ? null : roundMoney(taxableBase * (taxDecisionSnapshot.withholdingRatePercent / 100));
+  }
+  if (taxDecisionSnapshot.decisionType === "tabell") {
+    if (taxDecisionSnapshot.withholdingFixedAmount != null) {
+      return roundMoney(taxDecisionSnapshot.withholdingFixedAmount);
+    }
+    if (taxDecisionSnapshot.withholdingRatePercent != null) {
+      return roundMoney(taxableBase * (taxDecisionSnapshot.withholdingRatePercent / 100));
+    }
+    return null;
+  }
+  if (taxDecisionSnapshot.decisionType === "jamkning") {
+    let amount = null;
+    if (taxDecisionSnapshot.withholdingFixedAmount != null) {
+      amount = roundMoney(taxDecisionSnapshot.withholdingFixedAmount);
+    } else if (taxDecisionSnapshot.withholdingRatePercent != null) {
+      amount = roundMoney(taxableBase * (taxDecisionSnapshot.withholdingRatePercent / 100));
+    } else if (taxDecisionSnapshot.adjustmentPercentage != null) {
+      amount = roundMoney(taxableBase * (taxDecisionSnapshot.adjustmentPercentage / 100));
+    }
+    if (amount == null) {
+      return null;
+    }
+    if (taxDecisionSnapshot.adjustmentFixedAmount != null) {
+      amount = roundMoney(amount + taxDecisionSnapshot.adjustmentFixedAmount);
+    }
+    return Math.max(0, roundMoney(amount));
+  }
+  return null;
 }
 
 function buildEmployerContributionPreview({ rules, contributionBase, employee, statutoryProfile, payDate }) {
@@ -4960,6 +5315,93 @@ function buildPayrollEmploymentKey(companyId, employmentId) {
   return `${companyId}:${employmentId}`;
 }
 
+function requireTaxDecisionSnapshot(state, companyId, taxDecisionSnapshotId) {
+  const record = state.taxDecisionSnapshots.get(requireText(taxDecisionSnapshotId, "tax_decision_snapshot_id_required"));
+  if (!record || record.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "tax_decision_snapshot_not_found", "Tax decision snapshot was not found.");
+  }
+  return record;
+}
+
+function decisionSnapshotCoversDate(snapshot, effectiveDate) {
+  const resolvedDate = normalizeRequiredDate(effectiveDate, "tax_decision_snapshot_effective_date_invalid");
+  return snapshot.validFrom <= resolvedDate && (!snapshot.validTo || snapshot.validTo >= resolvedDate);
+}
+
+function supersedeOverlappingTaxDecisionSnapshots(state, approvedSnapshot) {
+  const scopeKey = buildPayrollEmploymentKey(approvedSnapshot.companyId, approvedSnapshot.employmentId);
+  for (const taxDecisionSnapshotId of state.taxDecisionSnapshotIdsByEmployment.get(scopeKey) || []) {
+    const candidate = state.taxDecisionSnapshots.get(taxDecisionSnapshotId);
+    if (!candidate || candidate.taxDecisionSnapshotId === approvedSnapshot.taxDecisionSnapshotId) {
+      continue;
+    }
+    if (candidate.status !== "approved" || candidate.decisionType !== approvedSnapshot.decisionType) {
+      continue;
+    }
+    if (!intervalsOverlap(candidate.validFrom, candidate.validTo, approvedSnapshot.validFrom, approvedSnapshot.validTo)) {
+      continue;
+    }
+    candidate.status = "superseded";
+    candidate.supersededAt = approvedSnapshot.approvedAt || approvedSnapshot.updatedAt;
+    candidate.supersededBySnapshotId = approvedSnapshot.taxDecisionSnapshotId;
+    candidate.updatedAt = candidate.supersededAt;
+  }
+}
+
+function intervalsOverlap(leftFrom, leftTo, rightFrom, rightTo) {
+  const leftEnd = leftTo || "9999-12-31";
+  const rightEnd = rightTo || "9999-12-31";
+  return leftFrom <= rightEnd && rightFrom <= leftEnd;
+}
+
+function selectTaxDecisionSnapshot({
+  state,
+  companyId,
+  employmentId,
+  effectiveDate,
+  runType,
+  overrideSnapshots = new Map()
+}) {
+  const override = overrideSnapshots.get(employmentId) || null;
+  if (override && decisionSnapshotCoversDate(override, effectiveDate)) {
+    return {
+      ...copy(override),
+      taxDecisionSnapshotId: override.taxDecisionSnapshotId || buildSnapshotHash({
+        companyId,
+        employmentId,
+        effectiveDate,
+        decisionType: override.decisionType,
+        decisionReference: override.decisionReference,
+        evidenceRef: override.evidenceRef
+      }),
+      companyId,
+      status: override.status || (override.decisionType === "emergency_manual" ? "draft" : "approved")
+    };
+  }
+  const candidates = listApprovedTaxDecisionSnapshotsForEmployment(state, companyId, employmentId, effectiveDate);
+  const preferredTypes =
+    runType === "extra" || runType === "correction" || runType === "final"
+      ? ["engangsskatt", "sink", "jamkning", "tabell", "emergency_manual"]
+      : ["sink", "jamkning", "tabell", "engangsskatt", "emergency_manual"];
+  for (const decisionType of preferredTypes) {
+    const match = candidates.find((candidate) => candidate.decisionType === decisionType);
+    if (match) {
+      return copy(match);
+    }
+  }
+  return null;
+}
+
+function listApprovedTaxDecisionSnapshotsForEmployment(state, companyId, employmentId, effectiveDate) {
+  const scopeKey = buildPayrollEmploymentKey(requireText(companyId, "company_id_required"), requireText(employmentId, "employment_id_required"));
+  return (state.taxDecisionSnapshotIdsByEmployment.get(scopeKey) || [])
+    .map((taxDecisionSnapshotId) => state.taxDecisionSnapshots.get(taxDecisionSnapshotId))
+    .filter(Boolean)
+    .filter((candidate) => candidate.status === "approved")
+    .filter((candidate) => decisionSnapshotCoversDate(candidate, effectiveDate))
+    .sort((left, right) => left.validFrom.localeCompare(right.validFrom) || left.createdAt.localeCompare(right.createdAt));
+}
+
 function createPayrollInputSnapshotRecord({
   run,
   sourceSnapshot,
@@ -5524,6 +5966,136 @@ function normalizeStatutoryProfiles(statutoryProfiles) {
     map.set(normalized.employmentId, normalized);
   }
   return map;
+}
+
+function normalizeTaxDecisionSnapshots(taxDecisionSnapshots) {
+  const map = new Map();
+  if (!Array.isArray(taxDecisionSnapshots)) {
+    return map;
+  }
+  for (const snapshot of taxDecisionSnapshots) {
+    const normalized = normalizeTaxDecisionSnapshot(snapshot);
+    map.set(normalized.employmentId, normalized);
+  }
+  return map;
+}
+
+function normalizeTaxDecisionSnapshot(snapshot = {}) {
+  const decisionType = assertAllowed(
+    normalizeOptionalText(snapshot.decisionType),
+    PAYROLL_TAX_DECISION_TYPES,
+    "tax_decision_snapshot_type_invalid"
+  );
+  const validFrom = normalizeRequiredDate(snapshot.validFrom, "tax_decision_snapshot_valid_from_invalid");
+  const validTo = normalizeOptionalDate(snapshot.validTo, "tax_decision_snapshot_valid_to_invalid");
+  if (validTo && validTo < validFrom) {
+    throw createError(400, "tax_decision_snapshot_interval_invalid", "Tax decision validity interval is invalid.");
+  }
+  const normalized = {
+    employmentId: requireText(snapshot.employmentId, "tax_decision_snapshot_employment_id_required"),
+    decisionType,
+    incomeYear: normalizeIntegerInRange(snapshot.incomeYear, 2000, 2100, "tax_decision_snapshot_income_year_invalid"),
+    validFrom,
+    validTo,
+    municipalityCode: normalizeOptionalText(snapshot.municipalityCode),
+    tableCode: normalizeOptionalText(snapshot.tableCode),
+    columnCode: normalizeOptionalText(snapshot.columnCode),
+    adjustmentFixedAmount: normalizeOptionalMoney(
+      snapshot.adjustmentFixedAmount,
+      "tax_decision_snapshot_adjustment_fixed_amount_invalid"
+    ),
+    adjustmentPercentage: normalizeOptionalNumber(
+      snapshot.adjustmentPercentage,
+      "tax_decision_snapshot_adjustment_percentage_invalid"
+    ),
+    withholdingRatePercent: normalizeOptionalNumber(
+      snapshot.withholdingRatePercent,
+      "tax_decision_snapshot_withholding_rate_invalid"
+    ),
+    withholdingFixedAmount: normalizeOptionalMoney(
+      snapshot.withholdingFixedAmount,
+      "tax_decision_snapshot_withholding_fixed_amount_invalid"
+    ),
+    decisionSource: requireText(snapshot.decisionSource, "tax_decision_snapshot_decision_source_required"),
+    decisionReference: requireText(snapshot.decisionReference, "tax_decision_snapshot_decision_reference_required"),
+    evidenceRef: requireText(snapshot.evidenceRef, "tax_decision_snapshot_evidence_ref_required"),
+    reasonCode: normalizeOptionalText(snapshot.reasonCode),
+    sinkRatePercent: normalizeOptionalNumber(snapshot.sinkRatePercent, "tax_decision_snapshot_sink_rate_invalid"),
+    sinkSeaIncome: snapshot.sinkSeaIncome === true
+  };
+
+  if (decisionType === "tabell") {
+    if (!normalized.municipalityCode || !normalized.tableCode || !normalized.columnCode) {
+      throw createError(
+        400,
+        "tax_decision_snapshot_table_fields_required",
+        "Table tax decisions require municipalityCode, tableCode and columnCode."
+      );
+    }
+    if (normalized.withholdingRatePercent == null && normalized.withholdingFixedAmount == null) {
+      throw createError(
+        400,
+        "tax_decision_snapshot_table_withholding_required",
+        "Table tax decisions require withholdingRatePercent or withholdingFixedAmount."
+      );
+    }
+  }
+
+  if (decisionType === "jamkning") {
+    if (normalized.adjustmentFixedAmount == null && normalized.adjustmentPercentage == null) {
+      throw createError(
+        400,
+        "tax_decision_snapshot_adjustment_required",
+        "Jämkning decisions require adjustmentFixedAmount or adjustmentPercentage."
+      );
+    }
+    if (
+      normalized.withholdingRatePercent == null &&
+      normalized.withholdingFixedAmount == null &&
+      (!normalized.tableCode || !normalized.columnCode)
+    ) {
+      throw createError(
+        400,
+        "tax_decision_snapshot_jamkning_withholding_required",
+        "Jämkning decisions require a withholding instruction or table reference."
+      );
+    }
+  }
+
+  if (decisionType === "engangsskatt" && normalized.withholdingRatePercent == null) {
+    throw createError(
+      400,
+      "tax_decision_snapshot_one_time_rate_required",
+      "Engångsskatt decisions require withholdingRatePercent."
+    );
+  }
+
+  if (decisionType === "sink" && normalized.sinkRatePercent == null) {
+    throw createError(
+      400,
+      "tax_decision_snapshot_sink_rate_required",
+      "SINK decisions require sinkRatePercent."
+    );
+  }
+
+  if (decisionType === "emergency_manual") {
+    if (normalized.withholdingRatePercent == null) {
+      throw createError(
+        400,
+        "tax_decision_snapshot_emergency_rate_required",
+        "Emergency manual tax decisions require withholdingRatePercent."
+      );
+    }
+    if (!normalized.reasonCode) {
+      throw createError(
+        400,
+        "tax_decision_snapshot_emergency_reason_required",
+        "Emergency manual tax decisions require reasonCode."
+      );
+    }
+  }
+
+  return normalized;
 }
 
 function normalizeStatutoryProfile(profile = {}) {

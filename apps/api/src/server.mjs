@@ -806,6 +806,8 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/payroll/pay-items/:payItemId",
               "/v1/payroll/pay-calendars",
               "/v1/payroll/pay-calendars/:payCalendarId",
+              "/v1/payroll/tax-decisions",
+              "/v1/payroll/tax-decisions/:taxDecisionSnapshotId/approve",
               "/v1/payroll/pay-runs",
               "/v1/payroll/pay-runs/:payRunId",
               "/v1/payroll/pay-runs/:payRunId/exceptions",
@@ -9218,6 +9220,96 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/payroll/tax-decisions") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listTaxDecisionSnapshots({
+        companyId,
+        employmentId: url.searchParams.get("employmentId") || null,
+        status: url.searchParams.get("status") || null,
+        decisionType: url.searchParams.get("decisionType") || null,
+        effectiveDate: url.searchParams.get("effectiveDate") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/payroll/tax-decisions") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createTaxDecisionSnapshot({
+        companyId,
+        employmentId: body.employmentId,
+        decisionType: body.decisionType,
+        incomeYear: body.incomeYear,
+        validFrom: body.validFrom,
+        validTo: body.validTo ?? null,
+        municipalityCode: body.municipalityCode ?? null,
+        tableCode: body.tableCode ?? null,
+        columnCode: body.columnCode ?? null,
+        adjustmentFixedAmount: body.adjustmentFixedAmount ?? null,
+        adjustmentPercentage: body.adjustmentPercentage ?? null,
+        withholdingRatePercent: body.withholdingRatePercent ?? null,
+        withholdingFixedAmount: body.withholdingFixedAmount ?? null,
+        decisionSource: body.decisionSource,
+        decisionReference: body.decisionReference,
+        evidenceRef: body.evidenceRef,
+        reasonCode: body.reasonCode ?? null,
+        sinkRatePercent: body.sinkRatePercent ?? null,
+        sinkSeaIncome: body.sinkSeaIncome === true,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const taxDecisionApproveMatch = matchPath(path, "/v1/payroll/tax-decisions/:taxDecisionSnapshotId/approve");
+  if (taxDecisionApproveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveTaxDecisionSnapshot({
+        companyId,
+        taxDecisionSnapshotId: taxDecisionApproveMatch.taxDecisionSnapshotId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
   if (req.method === "POST" && path === "/v1/payroll/statutory-profiles") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
@@ -13292,6 +13384,7 @@ async function handleRequest({ req, res, platform, flags }) {
         finalPayAdjustments: Array.isArray(body.finalPayAdjustments) ? body.finalPayAdjustments : [],
         leavePayItemMappings: Array.isArray(body.leavePayItemMappings) ? body.leavePayItemMappings : [],
         statutoryProfiles: Array.isArray(body.statutoryProfiles) ? body.statutoryProfiles : [],
+        taxDecisionSnapshots: Array.isArray(body.taxDecisionSnapshots) ? body.taxDecisionSnapshots : [],
         migrationBatchId: body.migrationBatchId || null,
         correctionOfPayRunId: body.correctionOfPayRunId || null,
         correctionReason: body.correctionReason || null,

@@ -800,7 +800,7 @@ Bygga svensk produktionssÃ¤ker lÃ¶n med tabellskatt/jÃ¤mkning/SINK, employ
 - AGI-submission, live payroll eller bank payment batch fÃ¥r inte Ã¶ppnas innan preliminÃ¤rskatt och garnishment Ã¤r korrekt.
 
 **Delfaser**
-- [ ] 12.1 [REPLACE] **Byt `manual_rate` som standard** â€” InfÃ¶r `TaxDecisionSnapshot` med tabell, jÃ¤mkning, engÃ¥ngsskatt, SINK och emergency manual endast med dual review.
+- [x] 12.1 [REPLACE] **Byt `manual_rate` som standard** â€” InfÃ¶r `TaxDecisionSnapshot` med tabell, jÃ¤mkning, engÃ¥ngsskatt, SINK och emergency manual endast med dual review.
 - [ ] 12.2 [HARDEN] **Employer contributions och vÃ¤xa-stÃ¶d** â€” Implementera Ã¥lderslogik, reducerade nivÃ¥er, blandade component-split och vÃ¤xa-stÃ¶d via skattekonto/decision snapshots.
 - [ ] 12.3 [HARDEN] **Pay run engine och AGI constituents** â€” Fingerprints, ordering, posting intents, payment batch, immutable AGI version, changed-employee flags.
 - [ ] 12.4 [HARDEN] **Benefits, net deductions, travel, mileage** â€” Skatteklassificering, nettolÃ¶neavdrag, traktamente, milersÃ¤ttning, expense split och review codes.

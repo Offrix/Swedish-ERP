@@ -1,0 +1,68 @@
+# Payroll Tax Decisions Verification
+
+## Scope
+
+This runbook verifies roadmap subphase `12.1 Replace manual_rate as standard`.
+
+The gate is only green when:
+
+- payroll can consume approved `TaxDecisionSnapshot` objects
+- supported decision types work:
+  - `tabell`
+  - `jamkning`
+  - `engangsskatt`
+  - `sink`
+  - `emergency_manual`
+- `emergency_manual` requires approval by a different actor
+- pay runs no longer depend on free-form manual rate as the primary happy path
+
+## Official baseline
+
+Validate against official Skatteverket guidance before changing decision semantics:
+
+- ordinary salary uses tax table or adjustment decision
+- one-time payouts use one-time tax rules
+- SINK requires a valid decision; SINK is 22.5 percent from the current official baseline
+
+## Targeted verification
+
+Run:
+
+```powershell
+node --test C:\Users\snobb\Desktop\Swedish ERP\tests\unit\phase12-tax-decision-snapshots.test.mjs
+node --test C:\Users\snobb\Desktop\Swedish ERP\tests\integration\phase12-tax-decision-snapshots-api.test.mjs
+```
+
+Expected:
+
+- all tests green
+- regular pay run can resolve `tabell`
+- adjusted decision can resolve `jamkning`
+- extra pay run can resolve `engangsskatt`
+- `emergency_manual` is created as `draft` and same-actor approval is rejected
+
+## Full verification
+
+Run:
+
+```powershell
+node scripts/run-tests.mjs all
+node scripts/lint.mjs
+node scripts/typecheck.mjs
+node scripts/build.mjs
+node scripts/security-scan.mjs
+```
+
+Expected:
+
+- full suite green
+- lint green
+- typecheck green
+- build green
+- security green
+
+## Failure handling
+
+- If pay runs still require legacy `manual_rate` on the primary path, do not mark `12.1` complete.
+- If `emergency_manual` can be self-approved, treat that as a blocker.
+- If a decision snapshot is not time-bound or evidence-linked, treat the implementation as incomplete.
