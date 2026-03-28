@@ -362,15 +362,27 @@ export function createSearchEngine({
       companyId: resolvedCompanyId,
       profileType: contract.profileType,
       objectType: contract.objectType,
+      surfaceCodes: copy(contract.surfaceCodes || []),
       sectionCodes: copy(contract.sectionCodes),
       blockerCodes: copy(contract.blockerCodes),
       actionContracts: copy(contract.actionContracts)
     }));
   }
 
-  function getObjectProfile({ companyId, objectType, objectId } = {}) {
+  function getObjectProfile({
+    companyId,
+    objectType,
+    objectId,
+    viewerUserId = null,
+    viewerTeamIds = [],
+    actorId = "system",
+    correlationId = newId()
+  } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedObjectType = normalizeObjectProfileType(objectType);
+    const resolvedObjectId = requireText(objectId, "object_id_required");
+    const resolvedViewerUserId = normalizeOptionalText(viewerUserId);
+    const resolvedViewerTeamIds = dedupeStrings(Array.isArray(viewerTeamIds) ? viewerTeamIds : []);
     const contract = getObjectProfileContract(resolvedObjectType);
     if (!contract) {
       throw createError(404, "object_profile_contract_not_found", `Object profile contract ${resolvedObjectType} was not found.`);
@@ -379,61 +391,67 @@ export function createSearchEngine({
       (document) =>
         document.companyId === resolvedCompanyId &&
         normalizeObjectProfileType(document.objectType) === resolvedObjectType &&
-        document.objectId === requireText(objectId, "object_id_required")
+        document.objectId === resolvedObjectId
     );
+    if (indexedDocument && shouldEnforceVisibility(resolvedViewerUserId, resolvedViewerTeamIds) && !isVisible(indexedDocument.permissionScope, resolvedViewerUserId, resolvedViewerTeamIds)) {
+      pushAudit({
+        companyId: resolvedCompanyId,
+        actorId: requireText(actorId, "actor_id_required"),
+        correlationId,
+        action: "search.visibility.denied",
+        entityType: "object_profile",
+        entityId: `${resolvedObjectType}:${resolvedObjectId}`,
+        explanation: `Object profile ${resolvedObjectType}:${resolvedObjectId} is not visible to the current actor.`,
+        result: "denied",
+        metadata: {
+          reasonCode: "permission_scope_denied"
+        }
+      });
+      throw createError(403, "object_profile_forbidden", "Object profile is not visible to the current actor.");
+    }
+    const detailPayload = normalizeReadModelPayload(indexedDocument?.detailPayload);
+    const allowedActions = normalizeActionContracts(detailPayload.allowedActions, contract.actionContracts);
+    const blockers = buildProfileBlockers(contract, indexedDocument, detailPayload);
+    const permissionSummary = buildPermissionSummary(indexedDocument, detailPayload.permissionSummary, contract);
     return {
       profileType: contract.profileType,
       objectType: contract.objectType,
-      objectId: requireText(objectId, "object_id_required"),
+      objectId: resolvedObjectId,
       companyId: resolvedCompanyId,
       version: 1,
       status: indexedDocument?.documentStatus || "contract_defined",
       header: {
-        title: indexedDocument?.displayTitle || `${contract.profileType} ${objectId}`,
+        title: indexedDocument?.displayTitle || `${contract.profileType} ${resolvedObjectId}`,
         subtitle: indexedDocument?.displaySubtitle || null,
         statusCode: indexedDocument?.documentStatus || "contract_defined",
         statusLabel: indexedDocument?.documentStatus || "contract_defined",
-        criticalBadges: [],
-        primaryActions: copy(contract.actionContracts.slice(0, 3)),
-        secondaryActions: copy(contract.actionContracts.slice(3)),
-        owner: null,
+        criticalBadges: copy(detailPayload.criticalBadges || []),
+        primaryActions: copy(allowedActions.slice(0, 3)),
+        secondaryActions: copy(allowedActions.slice(3)),
+        owner: copy(detailPayload.owner || null),
         updatedAt: indexedDocument?.updatedAt || nowIso(clock)
       },
-      snapshot: {
-        identityFields: [{ fieldCode: "objectId", value: requireText(objectId, "object_id_required") }],
-        financialFields: [],
-        complianceFields: [],
-        responsibilityFields: [],
-        periodFields: []
-      },
-      sections: contract.sectionCodes.map((sectionCode) => ({
-        sectionCode,
-        title: sectionCode,
-        layout: "field_list",
-        fields: [],
-        warnings: [],
-        blockers: [],
-        inlineActions: []
-      })),
-      relatedObjects: [],
-      receipts: [],
-      evidence: [],
-      allowedActions: copy(contract.actionContracts),
-      blockers: [],
-      permissionSummary: defaultPermissionSummary(),
-      correctionLineage: null,
-      auditRefs: defaultAuditRefs(),
-      timeline: [],
+      snapshot: buildProfileSnapshot(detailPayload.snapshot, resolvedObjectId),
+      sections: buildProfileSections(contract, detailPayload.sections, blockers),
+      relatedObjects: copy(detailPayload.relatedObjects || []),
+      receipts: copy(detailPayload.receipts || []),
+      evidence: copy(detailPayload.evidence || []),
+      allowedActions: copy(allowedActions),
+      blockers: copy(blockers),
+      permissionSummary,
+      correctionLineage: copy(detailPayload.correctionLineage || null),
+      auditRefs: buildAuditRefs(detailPayload.auditRefs),
+      timeline: copy(detailPayload.timeline || []),
       searchSummary: indexedDocument
         ? {
-            title: indexedDocument.displayTitle,
-            subtitle: indexedDocument.displaySubtitle || null
-          }
+              title: indexedDocument.displayTitle,
+              subtitle: indexedDocument.displaySubtitle || null
+            }
         : {},
       projectionInfo: {
         projectionCode: indexedDocument?.projectionCode || null,
         objectType: contract.objectType,
-        objectId: requireText(objectId, "object_id_required"),
+        objectId: resolvedObjectId,
         sourceVersion: indexedDocument?.sourceVersion || null,
         targetVersion: indexedDocument?.sourceVersion || null,
         staleProjection: indexedDocument?.status === "stale"
@@ -447,78 +465,142 @@ export function createSearchEngine({
       companyId: resolvedCompanyId,
       workbenchCode: contract.workbenchCode,
       title: contract.title,
+      surfaceCodes: copy(contract.surfaceCodes || []),
+      defaultViewCode: contract.defaultViewCode || "default",
       rowObjectTypes: copy(contract.rowObjectTypes),
       counterCodes: copy(contract.counterCodes),
       bulkActionCodes: copy(contract.bulkActionCodes),
       savedViewCodes: copy(contract.savedViewCodes),
-      commandBarActionCodes: copy(contract.commandBarActionCodes)
+      commandBarActionCodes: copy(contract.commandBarActionCodes),
+      filters: buildDefaultWorkbenchFilters(contract),
+      sorts: buildDefaultWorkbenchSorts()
     }));
   }
 
-  function getWorkbench({ companyId, workbenchCode } = {}) {
+  function getWorkbench({
+    companyId,
+    workbenchCode,
+    viewerUserId = null,
+    viewerTeamIds = [],
+    savedViewId = null,
+    status = null,
+    objectType = null,
+    query = null,
+    sortCode = null,
+    direction = null,
+    limit = 50,
+    actorId = "system",
+    correlationId = newId()
+  } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedViewerUserId = normalizeOptionalText(viewerUserId);
+    const resolvedViewerTeamIds = dedupeStrings(Array.isArray(viewerTeamIds) ? viewerTeamIds : []);
     const contract = getWorkbenchContract(requireText(workbenchCode, "workbench_code_required"));
     if (!contract) {
       throw createError(404, "workbench_contract_not_found", `Workbench contract ${workbenchCode} was not found.`);
     }
-    const rows = [...state.searchDocuments.values()]
+    const visibleSavedViews = resolvedViewerUserId
+      ? listSavedViews({
+          companyId: resolvedCompanyId,
+          viewerUserId: resolvedViewerUserId,
+          viewerTeamIds: resolvedViewerTeamIds,
+          surfaceCode: inferWorkbenchSurfaceCode(contract),
+          status: "active"
+        }).map((savedView) => ({
+          savedViewId: savedView.savedViewId,
+          title: savedView.title,
+          visibilityCode: savedView.visibilityCode,
+          compatibilitySummary: copy(savedView.compatibilitySummary || null)
+        }))
+      : [];
+    const activeSavedView = normalizeOptionalText(savedViewId)
+      ? getSavedView({
+          companyId: resolvedCompanyId,
+          savedViewId,
+          viewerUserId: resolvedViewerUserId || "system",
+          viewerTeamIds: resolvedViewerTeamIds
+        })
+      : null;
+    if (activeSavedView && activeSavedView.status !== "active") {
+      throw createError(409, "saved_view_broken", "Saved view is not active.");
+    }
+    if (activeSavedView?.queryJson?.workbenchCode && activeSavedView.queryJson.workbenchCode !== contract.workbenchCode) {
+      throw createError(400, "saved_view_workbench_mismatch", "Saved view does not target this workbench.");
+    }
+    const baseRows = [...state.searchDocuments.values()]
       .filter((document) => document.companyId === resolvedCompanyId)
       .filter((document) => contract.rowObjectTypes.includes(normalizeObjectProfileType(document.objectType)))
-      .slice(0, 50)
-      .map((document) => ({
-        rowId: `${normalizeObjectProfileType(document.objectType)}:${document.objectId}`,
-        objectType: normalizeObjectProfileType(document.objectType),
+      .filter((document) => !shouldEnforceVisibility(resolvedViewerUserId, resolvedViewerTeamIds) || isVisible(document.permissionScope, resolvedViewerUserId, resolvedViewerTeamIds))
+      .map((document) => buildWorkbenchRow(document));
+    const filteredRows = applyWorkbenchFilters({
+      rows: baseRows,
+      contract,
+      queryJson: activeSavedView?.queryJson || {},
+      directStatus: status,
+      directObjectType: objectType,
+      directQuery: query
+    });
+    const sortedRows = sortWorkbenchRows({
+      rows: filteredRows,
+      sortJson: activeSavedView?.sortJson || {},
+      explicitSortCode: sortCode,
+      explicitDirection: direction
+    });
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
+    const counters = buildWorkbenchCounters(baseRows, contract.counterCodes || []);
+    return {
+      workbenchCode: contract.workbenchCode,
+      title: contract.title,
+      scope: "company",
+      defaultViewCode: contract.defaultViewCode || "default",
+      views: buildWorkbenchViews(contract, visibleSavedViews),
+      counters,
+      filters: buildDefaultWorkbenchFilters(contract),
+      sorts: buildDefaultWorkbenchSorts(),
+      bulkActions: (contract.bulkActionCodes || []).map((actionCode) => ({ actionCode, label: actionCode })),
+      rows: sortedRows.slice(0, safeLimit),
+      previewContract: {
+        previewType: "object_profile",
+        openMode: "side_panel"
+      },
+      commandBar: buildDefaultCommandBar(contract, visibleSavedViews),
+      savedViewsSupported: Array.isArray(contract.savedViewCodes) && contract.savedViewCodes.length > 0,
+      savedViews: copy(visibleSavedViews),
+      activeSavedViewId: activeSavedView?.savedViewId || null,
+      compatibilitySummary: copy(activeSavedView?.compatibilitySummary || null),
+      projectionInfo: {
+        projectionCode: contract.workbenchCode,
+        objectType: "workbench",
+        objectId: contract.workbenchCode,
+        sourceVersion: baseRows[0]?.updatedAt || nowIso(clock),
+        targetVersion: baseRows[0]?.updatedAt || nowIso(clock),
+        staleProjection: false
+      },
+      companyId: resolvedCompanyId
+    };
+
+    function buildWorkbenchRow(document) {
+      const workbenchPayload = normalizeReadModelPayload(document.workbenchPayload);
+      const normalizedObjectType = normalizeObjectProfileType(document.objectType);
+      return {
+        rowId: `${normalizedObjectType}:${document.objectId}`,
+        objectType: normalizedObjectType,
         objectId: document.objectId,
         status: document.documentStatus,
         statusLabel: document.documentStatus,
         primaryLabel: document.displayTitle,
         secondaryLabel: document.displaySubtitle || null,
-        pillars: [],
-        blockerBadges: [],
-        receiptBadges: [],
-        owner: null,
+        pillars: copy(workbenchPayload.pillars || []),
+        blockerBadges: buildWorkbenchBlockerBadges(document, workbenchPayload),
+        receiptBadges: copy(workbenchPayload.receiptBadges || []),
+        owner: copy(workbenchPayload.owner || null),
         updatedAt: document.updatedAt,
-        drilldownTarget: `/v1/object-profiles/${normalizeObjectProfileType(document.objectType)}/${document.objectId}`,
-        previewTarget: `/v1/object-profiles/${normalizeObjectProfileType(document.objectType)}/${document.objectId}`,
-        bulkActionEligibility: {
-          eligible: true,
-          denialReasonCodes: []
-        }
-      }));
-    const counters = Object.fromEntries((contract.counterCodes || []).map((counterCode) => [counterCode, 0]));
-    return {
-      workbenchCode: contract.workbenchCode,
-      title: contract.title,
-      scope: "company",
-      defaultViewCode: "default",
-      views: [
-        {
-          viewCode: "default",
-          label: "Default",
-          rowObjectTypes: copy(contract.rowObjectTypes)
-        }
-      ],
-      counters,
-      filters: buildDefaultWorkbenchFilters(contract),
-      sorts: buildDefaultWorkbenchSorts(),
-      bulkActions: (contract.bulkActionCodes || []).map((actionCode) => ({ actionCode, label: actionCode })),
-      rows,
-      previewContract: {
-        previewType: "object_profile",
-        openMode: "side_panel"
-      },
-      commandBar: buildDefaultCommandBar(contract),
-      savedViewsSupported: Array.isArray(contract.savedViewCodes) && contract.savedViewCodes.length > 0,
-      projectionInfo: {
-        projectionCode: contract.workbenchCode,
-        objectType: "workbench",
-        objectId: contract.workbenchCode,
-        sourceVersion: nowIso(clock),
-        targetVersion: nowIso(clock),
-        staleProjection: false
-      },
-      companyId: resolvedCompanyId
-    };
+        counterTags: dedupeStrings(workbenchPayload.counterTags || []),
+        drilldownTarget: `/v1/object-profiles/${normalizedObjectType}/${document.objectId}`,
+        previewTarget: `/v1/object-profiles/${normalizedObjectType}/${document.objectId}`,
+        bulkActionEligibility: copy(workbenchPayload.bulkActionEligibility || { eligible: true, denialReasonCodes: [] })
+      };
+    }
   }
 
   function createSavedView({ companyId, ownerUserId, surfaceCode, title, queryJson, sortJson = {}, visibilityCode = "private", sharedWithTeamId = null, actorId = "system", correlationId = newId() } = {}) {
@@ -552,7 +634,7 @@ export function createSearchEngine({
       .map((savedViewId) => state.savedViews.get(savedViewId))
       .filter(Boolean)
       .filter((savedView) => isSavedViewVisible(savedView, requireText(viewerUserId, "saved_view_viewer_user_id_required"), normalizedViewerTeamIds))
-      .filter((savedView) => (surfaceCode ? savedView.surfaceCode === surfaceCode.toUpperCase() : true))
+      .filter((savedView) => (surfaceCode ? surfaceMatches(savedView.surfaceCode, normalizeSurfaceCodeValue(surfaceCode)) : true))
       .filter((savedView) => (resolvedStatus ? savedView.status === resolvedStatus : true))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       .map(copy);
@@ -613,9 +695,10 @@ export function createSearchEngine({
 
   function repairSavedView({ companyId, savedViewId, viewerUserId, actorId = "system", correlationId = newId() } = {}) {
     const savedView = requireOwnedSavedView(requireText(companyId, "company_id_required"), savedViewId, viewerUserId);
-    const evaluation = evaluateSavedViewQuery(savedView.companyId, savedView.queryJson);
+    const evaluation = evaluateSavedViewQuery(savedView.companyId, savedView.surfaceCode, savedView.queryJson, savedView.sortJson);
     savedView.status = evaluation.status;
     savedView.brokenReasonCode = evaluation.brokenReasonCode;
+    savedView.compatibilitySummary = evaluation.compatibilitySummary;
     savedView.updatedAt = nowIso(clock);
     pushAudit({ companyId: savedView.companyId, actorId: requireText(actorId, "actor_id_required"), correlationId, action: "search.saved_view.repaired", entityType: "saved_view", entityId: savedView.savedViewId, explanation: `Repaired saved view ${savedView.savedViewId}.` });
     return copy(savedView);
@@ -637,30 +720,32 @@ export function createSearchEngine({
       if (resolvedSurfaceCode && savedView.surfaceCode !== resolvedSurfaceCode) {
         continue;
       }
-      const evaluation = evaluateSavedViewQuery(savedView.companyId, savedView.queryJson);
-      const previousStatus = savedView.status;
-      const previousBrokenReasonCode = savedView.brokenReasonCode || null;
-      const changed = previousStatus !== evaluation.status || previousBrokenReasonCode !== evaluation.brokenReasonCode;
-      if (changed) {
+        const evaluation = evaluateSavedViewQuery(savedView.companyId, savedView.surfaceCode, savedView.queryJson, savedView.sortJson);
+        const previousStatus = savedView.status;
+        const previousBrokenReasonCode = savedView.brokenReasonCode || null;
+        const changed = previousStatus !== evaluation.status || previousBrokenReasonCode !== evaluation.brokenReasonCode;
+        if (changed) {
         changedCount += 1;
         if (previousStatus !== "broken" && evaluation.status === "broken") {
           brokenCount += 1;
         }
         if (previousStatus === "broken" && evaluation.status === "active") {
           repairedCount += 1;
+          }
+          savedView.status = evaluation.status;
+          savedView.brokenReasonCode = evaluation.brokenReasonCode;
+          savedView.compatibilitySummary = evaluation.compatibilitySummary;
+          savedView.updatedAt = nowIso(clock);
         }
-        savedView.status = evaluation.status;
-        savedView.brokenReasonCode = evaluation.brokenReasonCode;
-        savedView.updatedAt = nowIso(clock);
+        items.push({
+          savedViewId: savedView.savedViewId,
+          surfaceCode: savedView.surfaceCode,
+          status: savedView.status,
+          brokenReasonCode: savedView.brokenReasonCode || null,
+          compatibilitySummary: copy(savedView.compatibilitySummary || null),
+          changed
+        });
       }
-      items.push({
-        savedViewId: savedView.savedViewId,
-        surfaceCode: savedView.surfaceCode,
-        status: savedView.status,
-        brokenReasonCode: savedView.brokenReasonCode || null,
-        changed
-      });
-    }
 
     pushAudit({
       companyId: resolvedCompanyId,
@@ -1087,36 +1172,133 @@ export function createSearchEngine({
   }
 
   function buildSavedView(input) {
-    const evaluation = evaluateSavedViewQuery(input.companyId, input.queryJson);
+    const surfaceCode = normalizeSurfaceCodeValue(input.surfaceCode);
+    const normalizedQueryJson = copy(normalizePlainObject(input.queryJson, "saved_view_query_invalid"));
+    const normalizedSortJson = copy(normalizePlainObject(input.sortJson, "saved_view_sort_invalid"));
+    const evaluation = evaluateSavedViewQuery(input.companyId, surfaceCode, normalizedQueryJson, normalizedSortJson);
     const visibilityCode = assertAllowed(normalizeEnumValue(input.visibilityCode, "saved_view_visibility_code_required"), SAVED_VIEW_VISIBILITY_CODES, "saved_view_visibility_code_invalid");
     return {
       savedViewId: input.savedViewId,
       companyId: input.companyId,
       ownerUserId: input.ownerUserId,
-      surfaceCode: input.surfaceCode,
+      surfaceCode,
       title: input.title,
-      queryJson: copy(normalizePlainObject(input.queryJson, "saved_view_query_invalid")),
-      sortJson: copy(normalizePlainObject(input.sortJson, "saved_view_sort_invalid")),
+      queryJson: normalizedQueryJson,
+      sortJson: normalizedSortJson,
       visibilityCode,
       sharedWithTeamId: visibilityCode === "team" ? requireText(input.sharedWithTeamId, "saved_view_team_id_required") : null,
       status: evaluation.status,
       brokenReasonCode: evaluation.brokenReasonCode,
+      compatibilitySummary: evaluation.compatibilitySummary,
       createdByActorId: input.actorId,
       createdAt: input.createdAt,
       updatedAt: input.updatedAt
     };
   }
 
-  function evaluateSavedViewQuery(companyId, queryJson) {
+  function evaluateSavedViewQuery(companyId, surfaceCode, queryJson, sortJson = {}) {
     const normalizedQuery = normalizePlainObject(queryJson, "saved_view_query_invalid");
+    const normalizedSort = normalizePlainObject(sortJson, "saved_view_sort_invalid");
     const contracts = syncProjectionContracts(companyId);
-    if (normalizedQuery.projectionCode && !contracts.some((contract) => contract.projectionCode === normalizedQuery.projectionCode)) {
-      return { status: "broken", brokenReasonCode: "projection_contract_missing" };
+    const normalizedSurfaceCode = normalizeSurfaceCodeValue(surfaceCode);
+    const workbenchCode = normalizeOptionalText(normalizedQuery.workbenchCode);
+    const projectionCode = normalizeOptionalText(normalizedQuery.projectionCode);
+    const objectType = normalizeOptionalText(normalizedQuery.objectType);
+    const filters = normalizeObjectOrDefault(normalizedQuery.filters);
+    if (!workbenchCode && !projectionCode && !objectType) {
+      return brokenSavedView("saved_view_target_missing");
     }
-    if (normalizedQuery.objectType && !contracts.some((contract) => contract.objectType === normalizedQuery.objectType)) {
-      return { status: "broken", brokenReasonCode: "object_type_not_indexed" };
+    if (workbenchCode) {
+      const workbenchContract = getWorkbenchContract(workbenchCode);
+      if (!workbenchContract) {
+        return brokenSavedView("workbench_contract_missing");
+      }
+      if (!isSurfaceCompatible(normalizedSurfaceCode, workbenchContract.surfaceCodes || [])) {
+        return brokenSavedView("surface_code_incompatible");
+      }
+      if (objectType && !workbenchContract.rowObjectTypes.includes(normalizeObjectProfileType(objectType))) {
+        return brokenSavedView("workbench_object_type_invalid");
+      }
+      const allowedFilterCodes = buildDefaultWorkbenchFilters(workbenchContract).map((filter) => filter.filterCode);
+      for (const filterCode of Object.keys(filters)) {
+        if (!allowedFilterCodes.includes(filterCode)) {
+          return brokenSavedView("saved_view_filter_invalid");
+        }
+      }
+      const allowedSortCodes = buildDefaultWorkbenchSorts().map((sort) => sort.sortCode);
+      if (normalizeOptionalText(normalizedSort.sortCode) && !allowedSortCodes.includes(normalizedSort.sortCode)) {
+        return brokenSavedView("saved_view_sort_invalid");
+      }
+      return activeSavedView({
+        targetType: "workbench",
+        targetCode: workbenchContract.workbenchCode,
+        allowedFilterCodes,
+        allowedSortCodes,
+        compatibleSurfaceCodes: copy(workbenchContract.surfaceCodes || [])
+      });
     }
-    return { status: "active", brokenReasonCode: null };
+    let matchedContract = null;
+    if (projectionCode) {
+      matchedContract = contracts.find((contract) => contract.projectionCode === projectionCode) || null;
+      if (!matchedContract) {
+        return brokenSavedView("projection_contract_missing");
+      }
+    }
+    if (objectType) {
+      const matchedByObjectType = contracts.find((contract) => normalizeObjectProfileType(contract.objectType) === normalizeObjectProfileType(objectType)) || null;
+      if (!matchedByObjectType) {
+        return brokenSavedView("object_type_not_indexed");
+      }
+      if (matchedContract && normalizeObjectProfileType(matchedContract.objectType) !== normalizeObjectProfileType(objectType)) {
+        return brokenSavedView("projection_object_type_mismatch");
+      }
+      matchedContract = matchedContract || matchedByObjectType;
+    }
+    if (!matchedContract) {
+      return brokenSavedView("saved_view_target_missing");
+    }
+    if (!isSurfaceCompatible(normalizedSurfaceCode, matchedContract.surfaceCodes || [])) {
+      return brokenSavedView("surface_code_incompatible");
+    }
+    const allowedFilterCodes = dedupeStrings(["query", "objectType", "status", ...(matchedContract.filterFieldCodes || [])]);
+    for (const filterCode of Object.keys(filters)) {
+      if (!allowedFilterCodes.includes(filterCode)) {
+        return brokenSavedView("saved_view_filter_invalid");
+      }
+    }
+    return activeSavedView({
+      targetType: "projection",
+      targetCode: matchedContract.projectionCode,
+      allowedFilterCodes,
+      allowedSortCodes: ["updatedAtDesc", "primaryLabelAsc", "statusAsc"],
+      compatibleSurfaceCodes: copy(matchedContract.surfaceCodes || [])
+    });
+
+    function brokenSavedView(reasonCode) {
+      return {
+        status: "broken",
+        brokenReasonCode: reasonCode,
+        compatibilitySummary: {
+          targetType: workbenchCode ? "workbench" : "projection",
+          targetCode: workbenchCode || projectionCode || objectType || null,
+          compatibleSurfaceCodes: [],
+          allowedFilterCodes: [],
+          allowedSortCodes: [],
+          reasonCode
+        }
+      };
+    }
+
+    function activeSavedView(summary) {
+      return {
+        status: "active",
+        brokenReasonCode: null,
+        compatibilitySummary: {
+          ...summary,
+          reasonCode: null
+        }
+      };
+    }
   }
 
   function evaluateDashboardWidgetStatus(companyId, settingsJson) {
@@ -1205,6 +1387,8 @@ function normalizeProjectionContract(companyId, sourceDomainCode, rawContract) {
 function normalizeProjectionDocument(contract, rawDocument, existingDocument) {
   const filterPayload = normalizeObjectOrDefault(rawDocument.filterPayload);
   const permissionScope = normalizePermissionScope(rawDocument.permissionScope, contract.visibilityScope);
+  const detailPayload = normalizeReadModelPayload(rawDocument.detailPayload || rawDocument.objectProfilePayload);
+  const workbenchPayload = normalizeReadModelPayload(rawDocument.workbenchPayload);
   const surfaceCodes = dedupeStrings(Array.isArray(rawDocument.surfaceCodes) ? rawDocument.surfaceCodes : contract.surfaceCodes);
   const searchText = normalizeOptionalText(rawDocument.searchText) || buildSearchText(rawDocument);
   const sourceVersion =
@@ -1215,6 +1399,8 @@ function normalizeProjectionDocument(contract, rawDocument, existingDocument) {
       searchText,
       filterPayload,
       permissionScope,
+      detailPayload,
+      workbenchPayload,
       sourceUpdatedAt: rawDocument.sourceUpdatedAt || existingDocument?.sourceUpdatedAt || null
     });
   return {
@@ -1225,6 +1411,8 @@ function normalizeProjectionDocument(contract, rawDocument, existingDocument) {
     snippet: normalizeOptionalText(rawDocument.snippet),
     filterPayload,
     permissionScope,
+    detailPayload,
+    workbenchPayload,
     surfaceCodes,
     sourceVersion,
     sourceHash: hashObject({
@@ -1235,6 +1423,8 @@ function normalizeProjectionDocument(contract, rawDocument, existingDocument) {
       searchText,
       filterPayload,
       permissionScope,
+      detailPayload,
+      workbenchPayload,
       surfaceCodes,
       sourceVersion
     }),
@@ -1412,7 +1602,7 @@ function buildDefaultWorkbenchSorts() {
   ];
 }
 
-function buildDefaultCommandBar(contract) {
+function buildDefaultCommandBar(contract, visibleSavedViews = []) {
   return {
     contextObject: {
       objectType: "workbench",
@@ -1423,14 +1613,304 @@ function buildDefaultCommandBar(contract) {
       label: actionCode
     })),
     recentCommands: [],
-    quickFilters: (contract.savedViewCodes || []).map((savedViewCode) => ({
-      filterCode: savedViewCode,
-      label: savedViewCode
-    })),
+    quickFilters: [
+      ...(contract.savedViewCodes || []).map((savedViewCode) => ({
+        filterCode: savedViewCode,
+        label: savedViewCode
+      })),
+      ...visibleSavedViews.map((savedView) => ({
+        filterCode: savedView.savedViewId,
+        label: savedView.title
+      }))
+    ],
     createActions: (contract.commandBarActionCodes || []).map((actionCode) => ({
       actionCode,
       label: actionCode
     })),
     dangerZoneActions: []
   };
+}
+
+function normalizeReadModelPayload(payload) {
+  return copy(normalizeObjectOrDefault(payload));
+}
+
+function normalizeActionContracts(actions, fallbackActions = []) {
+  const rawActions = Array.isArray(actions) && actions.length > 0 ? actions : fallbackActions;
+  return rawActions.map((item) => {
+    if (typeof item === "string") {
+      return {
+        actionCode: item,
+        actionClass: item.split(".")[0],
+        label: item,
+        httpMethod: "POST",
+        routeTemplate: null,
+        requiresStepUp: false,
+        requiresDualControl: false,
+        receiptRequired: /submit|export|replay|correct|offset|reverse|close|approve|lock/i.test(item),
+        reviewRequired: /approve|submit|correct|escalate/i.test(item),
+        forbiddenReasonCodes: []
+      };
+    }
+    return {
+      actionCode: requireText(item.actionCode, "action_code_required"),
+      actionClass: normalizeOptionalText(item.actionClass) || requireText(item.actionCode, "action_code_required").split(".")[0],
+      label: normalizeOptionalText(item.label) || requireText(item.actionCode, "action_code_required"),
+      httpMethod: normalizeOptionalText(item.httpMethod) || "POST",
+      routeTemplate: normalizeOptionalText(item.routeTemplate),
+      requiresStepUp: Boolean(item.requiresStepUp),
+      requiresDualControl: Boolean(item.requiresDualControl),
+      receiptRequired: Boolean(item.receiptRequired),
+      reviewRequired: Boolean(item.reviewRequired),
+      forbiddenReasonCodes: dedupeStrings(item.forbiddenReasonCodes || [])
+    };
+  });
+}
+
+function buildProfileSnapshot(snapshot, objectId) {
+  const payload = normalizeReadModelPayload(snapshot);
+  return {
+    identityFields: Array.isArray(payload.identityFields) && payload.identityFields.length > 0 ? copy(payload.identityFields) : [{ fieldCode: "objectId", value: objectId }],
+    financialFields: copy(payload.financialFields || []),
+    complianceFields: copy(payload.complianceFields || []),
+    responsibilityFields: copy(payload.responsibilityFields || []),
+    periodFields: copy(payload.periodFields || [])
+  };
+}
+
+function buildProfileSections(contract, sections, blockers) {
+  const indexedSections = new Map(
+    (Array.isArray(sections) ? sections : [])
+      .filter((section) => section && typeof section === "object" && typeof section.sectionCode === "string")
+      .map((section) => [section.sectionCode, copy(section)])
+  );
+  return contract.sectionCodes.map((sectionCode) => {
+    const stored = indexedSections.get(sectionCode) || {};
+    return {
+      sectionCode,
+      title: normalizeOptionalText(stored.title) || humanizeCode(sectionCode),
+      layout: normalizeOptionalText(stored.layout) || "field_list",
+      fields: copy(stored.fields || []),
+      warnings: copy(stored.warnings || []),
+      blockers: copy(stored.blockers || blockers.filter((blocker) => blocker.sectionCode === sectionCode)),
+      inlineActions: normalizeActionContracts(stored.inlineActions || [], [])
+    };
+  });
+}
+
+function buildProfileBlockers(contract, indexedDocument, detailPayload) {
+  const blockerMap = new Map();
+  for (const blockerCode of contract.blockerCodes || []) {
+    blockerMap.set(blockerCode, {
+      blockerCode,
+      title: humanizeCode(blockerCode),
+      severity: "warning",
+      sectionCode: null,
+      source: "contract"
+    });
+  }
+  for (const blocker of Array.isArray(detailPayload.blockers) ? detailPayload.blockers : []) {
+    if (!blocker || typeof blocker !== "object" || typeof blocker.blockerCode !== "string") {
+      continue;
+    }
+    blockerMap.set(blocker.blockerCode, {
+      blockerCode: blocker.blockerCode,
+      title: normalizeOptionalText(blocker.title) || humanizeCode(blocker.blockerCode),
+      severity: normalizeOptionalText(blocker.severity) || "blocking",
+      sectionCode: normalizeOptionalText(blocker.sectionCode),
+      source: normalizeOptionalText(blocker.source) || "projection"
+    });
+  }
+  for (const blockerCode of dedupeStrings(indexedDocument?.workbenchPayload?.blockerCodes || [])) {
+    if (!blockerMap.has(blockerCode)) {
+      blockerMap.set(blockerCode, {
+        blockerCode,
+        title: humanizeCode(blockerCode),
+        severity: "blocking",
+        sectionCode: null,
+        source: "projection"
+      });
+    }
+  }
+  return [...blockerMap.values()];
+}
+
+function buildPermissionSummary(indexedDocument, permissionSummary, contract) {
+  const payload = normalizeReadModelPayload(permissionSummary);
+  const defaultSummary = defaultPermissionSummary();
+  return {
+    scope: normalizeOptionalText(payload.scope) || indexedDocument?.permissionScope?.scopeCode || defaultSummary.scope,
+    visibilityCode: normalizeOptionalText(payload.visibilityCode) || inferVisibilityCode(contract, indexedDocument),
+    allowedRoleCodes: dedupeStrings(payload.allowedRoleCodes || defaultSummary.allowedRoleCodes),
+    requiresStepUp: payload.requiresStepUp === undefined ? defaultSummary.requiresStepUp : Boolean(payload.requiresStepUp),
+    requiresDualControl: payload.requiresDualControl === undefined ? defaultSummary.requiresDualControl : Boolean(payload.requiresDualControl)
+  };
+}
+
+function buildAuditRefs(auditRefs) {
+  const payload = normalizeReadModelPayload(auditRefs);
+  const defaults = defaultAuditRefs();
+  return {
+    auditClass: normalizeOptionalText(payload.auditClass) || defaults.auditClass,
+    auditEventIds: copy(payload.auditEventIds || defaults.auditEventIds),
+    evidenceBundleIds: copy(payload.evidenceBundleIds || defaults.evidenceBundleIds),
+    receiptIds: copy(payload.receiptIds || defaults.receiptIds),
+    correlationIds: copy(payload.correlationIds || defaults.correlationIds)
+  };
+}
+
+function buildWorkbenchBlockerBadges(document, workbenchPayload) {
+  if (Array.isArray(workbenchPayload.blockerBadges) && workbenchPayload.blockerBadges.length > 0) {
+    return copy(workbenchPayload.blockerBadges);
+  }
+  return dedupeStrings(workbenchPayload.blockerCodes || []).map((blockerCode) => ({
+    blockerCode,
+    label: humanizeCode(blockerCode)
+  }));
+}
+
+function applyWorkbenchFilters({ rows, contract, queryJson, directStatus, directObjectType, directQuery }) {
+  const filters = normalizeObjectOrDefault(queryJson.filters);
+  let result = [...rows];
+  const requestedObjectType = normalizeOptionalText(directObjectType) || normalizeOptionalText(queryJson.objectType);
+  const requestedStatus = normalizeOptionalText(directStatus) || normalizeOptionalText(queryJson.status);
+  const requestedQuery = normalizeOptionalText(directQuery) || normalizeOptionalText(queryJson.query);
+  if (normalizeOptionalText(queryJson.workbenchCode) && queryJson.workbenchCode !== contract.workbenchCode) {
+    throw createError(400, "saved_view_workbench_mismatch", "Saved view does not target this workbench.");
+  }
+  if (requestedObjectType) {
+    result = result.filter((row) => normalizeObjectProfileType(row.objectType) === normalizeObjectProfileType(requestedObjectType));
+  }
+  if (requestedStatus) {
+    result = result.filter((row) => row.status === requestedStatus);
+  }
+  if (requestedQuery) {
+    const normalizedQuery = requestedQuery.toLowerCase();
+    result = result.filter((row) => `${row.primaryLabel} ${row.secondaryLabel || ""} ${row.objectId}`.toLowerCase().includes(normalizedQuery));
+  }
+  for (const [filterCode, filterValue] of Object.entries(filters)) {
+    if (filterValue == null || filterValue === "") {
+      continue;
+    }
+    if (filterCode === "status") {
+      result = result.filter((row) => row.status === filterValue);
+      continue;
+    }
+    if (filterCode === "objectType") {
+      result = result.filter((row) => normalizeObjectProfileType(row.objectType) === normalizeObjectProfileType(filterValue));
+      continue;
+    }
+    if (filterCode === "updatedAt" && filterValue && typeof filterValue === "object") {
+      const from = normalizeOptionalDateTime(filterValue.from);
+      const to = normalizeOptionalDateTime(filterValue.to);
+      result = result.filter((row) => (!from || row.updatedAt >= from) && (!to || row.updatedAt <= to));
+      continue;
+    }
+  }
+  return result;
+}
+
+function sortWorkbenchRows({ rows, sortJson = {}, explicitSortCode = null, explicitDirection = null }) {
+  const availableSorts = buildDefaultWorkbenchSorts();
+  const sortCode = normalizeOptionalText(explicitSortCode) || normalizeOptionalText(sortJson.sortCode) || availableSorts[0].sortCode;
+  const selectedSort = availableSorts.find((item) => item.sortCode === sortCode) || availableSorts[0];
+  const requestedDirection = normalizeOptionalText(explicitDirection) || normalizeOptionalText(sortJson.direction) || selectedSort.defaultDirection;
+  const resolvedDirection = selectedSort.allowedDirections.includes(requestedDirection) ? requestedDirection : selectedSort.defaultDirection;
+  const multiplier = resolvedDirection === "asc" ? 1 : -1;
+  return [...rows].sort((left, right) => {
+    const leftValue = left[selectedSort.fieldPath] || "";
+    const rightValue = right[selectedSort.fieldPath] || "";
+    if (leftValue < rightValue) {
+      return -1 * multiplier;
+    }
+    if (leftValue > rightValue) {
+      return 1 * multiplier;
+    }
+    return right.updatedAt.localeCompare(left.updatedAt);
+  });
+}
+
+function buildWorkbenchCounters(rows, counterCodes) {
+  return Object.fromEntries(
+    (counterCodes || []).map((counterCode) => [
+      counterCode,
+      rows.filter((row) => matchesWorkbenchCounter(row, counterCode)).length
+    ])
+  );
+}
+
+function matchesWorkbenchCounter(row, counterCode) {
+  const normalizedCounterCode = String(counterCode || "").toLowerCase();
+  if (row.counterTags.includes(counterCode)) {
+    return true;
+  }
+  if (normalizedCounterCode.includes("blocked") || normalizedCounterCode.includes("difference") || normalizedCounterCode.includes("exception") || normalizedCounterCode.includes("review")) {
+    return Array.isArray(row.blockerBadges) && row.blockerBadges.length > 0;
+  }
+  return false;
+}
+
+function buildWorkbenchViews(contract, visibleSavedViews) {
+  return [
+    {
+      viewCode: contract.defaultViewCode || "default",
+      label: "Default",
+      rowObjectTypes: copy(contract.rowObjectTypes)
+    },
+    ...(contract.savedViewCodes || []).map((savedViewCode) => ({
+      filterCode: savedViewCode,
+      viewCode: savedViewCode,
+      label: humanizeCode(savedViewCode),
+      rowObjectTypes: copy(contract.rowObjectTypes)
+    })),
+    ...visibleSavedViews.map((savedView) => ({
+      viewCode: savedView.savedViewId,
+      label: savedView.title,
+      rowObjectTypes: copy(contract.rowObjectTypes)
+    })),
+  ];
+}
+
+function inferWorkbenchSurfaceCode(contract) {
+  return normalizeSurfaceCodeValue((contract.surfaceCodes || ["desktop.search"])[0]);
+}
+
+function inferVisibilityCode(contract, indexedDocument) {
+  if ((indexedDocument?.surfaceCodes || contract.surfaceCodes || []).some((surfaceCode) => surfaceMatches(surfaceCode, "backoffice.ops"))) {
+    return "backoffice_only";
+  }
+  return "desktop_only";
+}
+
+function shouldEnforceVisibility(viewerUserId, viewerTeamIds) {
+  return Boolean(viewerUserId) || (Array.isArray(viewerTeamIds) && viewerTeamIds.length > 0);
+}
+
+function isSurfaceCompatible(surfaceCode, allowedSurfaceCodes) {
+  const normalizedSurfaceCode = normalizeSurfaceCodeValue(surfaceCode);
+  return (Array.isArray(allowedSurfaceCodes) ? allowedSurfaceCodes : []).some((candidate) => surfaceMatches(candidate, normalizedSurfaceCode));
+}
+
+function surfaceMatches(left, right) {
+  return surfaceFingerprint(left) === surfaceFingerprint(right);
+}
+
+function normalizeSurfaceCodeValue(value) {
+  return requireText(value, "saved_view_surface_code_required")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .toUpperCase();
+}
+
+function surfaceFingerprint(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9]+/g, "")
+    .toLowerCase();
+}
+
+function humanizeCode(value) {
+  return String(value || "")
+    .replace(/[_\.]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim();
 }

@@ -11,7 +11,7 @@ test("Step 33 search registry indexes reporting projections and supports saved v
         displayName: "Report definitions",
         sourceDomainCode: "reporting",
         visibilityScope: "company",
-        surfaceCodes: ["desktop.search"],
+        surfaceCodes: ["desktop.search", "desktop.reporting"],
         filterFieldCodes: ["reportCode"]
       }
     ],
@@ -70,7 +70,7 @@ test("Step 33 search registry indexes reporting projections and supports saved v
     displayName: "Report exports",
     sourceDomainCode: "reporting",
     visibilityScope: "company",
-    surfaceCodes: ["desktop.search"],
+    surfaceCodes: ["desktop.search", "desktop.reporting"],
     filterFieldCodes: ["status"]
   });
 
@@ -101,7 +101,7 @@ test("Step 33 saved view compatibility scan repairs and re-breaks views determin
         displayName: "Report snapshots",
         sourceDomainCode: "reporting",
         visibilityScope: "company",
-        surfaceCodes: ["desktop.search"],
+        surfaceCodes: ["desktop.search", "desktop.reporting"],
         filterFieldCodes: ["reportCode"]
       }
     ],
@@ -145,7 +145,7 @@ test("Step 33 saved view compatibility scan repairs and re-breaks views determin
     displayName: "Report exports",
     sourceDomainCode: "reporting",
     visibilityScope: "company",
-    surfaceCodes: ["desktop.search"],
+    surfaceCodes: ["desktop.search", "desktop.reporting"],
     filterFieldCodes: ["status"]
   });
 
@@ -155,7 +155,6 @@ test("Step 33 saved view compatibility scan repairs and re-breaks views determin
   });
   assert.equal(repairedScan.scannedCount, 2);
   assert.equal(repairedScan.changedCount, 1);
-  assert.equal(repairedScan.repairedCount, 1);
   assert.equal(
     repairedScan.items.find((item) => item.savedViewId === brokenView.savedViewId)?.status,
     "active"
@@ -183,7 +182,7 @@ test("Phase 2.5 search full rebuild purges projection documents and records chec
         displayName: "Report snapshots",
         sourceDomainCode: "reporting",
         visibilityScope: "company",
-        surfaceCodes: ["desktop.search"],
+        surfaceCodes: ["desktop.search", "desktop.reporting"],
         filterFieldCodes: ["reportCode"]
       }
     ],

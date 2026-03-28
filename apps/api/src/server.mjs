@@ -482,6 +482,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/workbenches/contracts",
               "/v1/workbenches/:workbenchCode",
               "/v1/saved-views",
+              "/v1/saved-views/compatibility-scan",
               "/v1/saved-views/:savedViewId",
               "/v1/saved-views/:savedViewId/share",
               "/v1/saved-views/:savedViewId/archive",
@@ -3224,7 +3225,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -3235,14 +3236,18 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(
       res,
       200,
-      platform.getObjectProfile({
-        companyId,
-        objectType: objectProfileMatch.objectType,
-        objectId: objectProfileMatch.objectId
-      })
-    );
-    return;
-  }
+        platform.getObjectProfile({
+          companyId,
+          objectType: objectProfileMatch.objectType,
+          objectId: objectProfileMatch.objectId,
+          viewerUserId: principal.userId,
+          viewerTeamIds: resolvePrincipalTeamIds(principal),
+          actorId: principal.userId,
+          correlationId: createCorrelationId()
+        })
+      );
+      return;
+    }
 
   if (req.method === "GET" && path === "/v1/workbenches/contracts") {
     const companyId = requireText(
@@ -3271,7 +3276,7 @@ async function handleRequest({ req, res, platform, flags }) {
       "company_id_required",
       "companyId query parameter is required."
     );
-    authorizeCompanyAccess({
+    const principal = authorizeCompanyAccess({
       platform,
       sessionToken: readSessionToken(req),
       companyId,
@@ -3282,13 +3287,24 @@ async function handleRequest({ req, res, platform, flags }) {
     writeJson(
       res,
       200,
-      platform.getWorkbench({
-        companyId,
-        workbenchCode: workbenchMatch.workbenchCode
-      })
-    );
-    return;
-  }
+        platform.getWorkbench({
+          companyId,
+          workbenchCode: workbenchMatch.workbenchCode,
+          viewerUserId: principal.userId,
+          viewerTeamIds: resolvePrincipalTeamIds(principal),
+          savedViewId: url.searchParams.get("savedViewId") || null,
+          status: url.searchParams.get("status") || null,
+          objectType: url.searchParams.get("objectType") || null,
+          query: url.searchParams.get("query") || null,
+          sortCode: url.searchParams.get("sortCode") || null,
+          direction: url.searchParams.get("direction") || null,
+          limit: url.searchParams.get("limit") || null,
+          actorId: principal.userId,
+          correlationId: createCorrelationId()
+        })
+      );
+      return;
+    }
 
   if (req.method === "GET" && path === "/v1/saved-views") {
     const companyId = requireText(
@@ -3339,6 +3355,30 @@ async function handleRequest({ req, res, platform, flags }) {
         sortJson: body.sortJson || {},
         visibilityCode: body.visibilityCode || "private",
         sharedWithTeamId: body.sharedWithTeamId || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/saved-views/compatibility-scan") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "saved_view",
+      scopeCode: "search"
+    });
+    writeJson(
+      res,
+      200,
+      platform.runSavedViewCompatibilityScan({
+        companyId,
+        surfaceCode: body.surfaceCode || null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
@@ -5734,6 +5774,7 @@ async function handleRequest({ req, res, platform, flags }) {
       });
       return;
     }
+
     writeJson(res, 200, {
       items: platform.listWorkItems({
         sessionToken,
