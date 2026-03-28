@@ -1,10 +1,5 @@
-const targets = [
-  { name: "api", url: process.env.API_HEALTH_URL || "http://localhost:4000/healthz" },
-  { name: "desktop-web", url: process.env.DESKTOP_HEALTH_URL || "http://localhost:4001/healthz" },
-  { name: "field-mobile", url: process.env.FIELD_HEALTH_URL || "http://localhost:4002/healthz" }
-];
-
-let failed = false;
+import process from "node:process";
+import { isMainModule } from "./lib/repo.mjs";
 
 function describeFetchError(error) {
   const message = error?.message || "unknown error";
@@ -18,21 +13,37 @@ function describeFetchError(error) {
   return `fetch failed: ${message}`;
 }
 
-for (const target of targets) {
-  try {
-    const response = await fetch(target.url);
-    if (!response.ok) {
-      failed = true;
-      console.error(`${target.name}: ${response.status} at ${target.url}`);
-      continue;
+export async function runHealthcheck({
+  env = process.env,
+  stdout = process.stdout,
+  stderr = process.stderr
+} = {}) {
+  const resolvedTargets = [
+    { name: "api", url: env.API_HEALTH_URL || "http://localhost:4000/healthz" },
+    { name: "desktop-web", url: env.DESKTOP_HEALTH_URL || "http://localhost:4001/healthz" },
+    { name: "field-mobile", url: env.FIELD_HEALTH_URL || "http://localhost:4002/healthz" }
+  ];
+  let localFailed = false;
+
+  for (const target of resolvedTargets) {
+    try {
+      const response = await fetch(target.url);
+      if (!response.ok) {
+        localFailed = true;
+        stderr.write(`${target.name}: ${response.status} at ${target.url}\n`);
+        continue;
+      }
+      stdout.write(`${target.name}: ok (${target.url})\n`);
+    } catch (error) {
+      localFailed = true;
+      stderr.write(`${target.name}: ${describeFetchError(error)} at ${target.url}\n`);
     }
-    console.log(`${target.name}: ok (${target.url})`);
-  } catch (error) {
-    failed = true;
-    console.error(`${target.name}: ${describeFetchError(error)} at ${target.url}`);
   }
+
+  return { exitCode: localFailed ? 1 : 0 };
 }
 
-if (failed) {
-  process.exit(1);
+if (isMainModule(import.meta.url)) {
+  const result = await runHealthcheck();
+  process.exitCode = result.exitCode;
 }

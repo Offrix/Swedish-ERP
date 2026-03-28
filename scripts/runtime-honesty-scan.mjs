@@ -1,8 +1,9 @@
 import process from "node:process";
 import { createApiPlatform } from "../apps/api/src/platform.mjs";
+import { isMainModule } from "./lib/repo.mjs";
 
-function printUsage() {
-  process.stdout.write(`Usage: node scripts/runtime-honesty-scan.mjs [options]
+export function printUsage(output = process.stdout) {
+  output.write(`Usage: node scripts/runtime-honesty-scan.mjs [options]
 
 Options:
   --mode <runtime-mode>                         Runtime mode to evaluate.
@@ -22,7 +23,7 @@ Options:
 `);
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const parsed = {
     mode: null,
     surface: "api",
@@ -101,7 +102,7 @@ function parseArgs(argv) {
   return parsed;
 }
 
-function validateExpectations({
+export function validateExpectations({
   diagnostics,
   expectedFindings,
   expectedCategories,
@@ -140,7 +141,7 @@ function validateExpectations({
   return failures;
 }
 
-function buildOutput({ args, diagnostics, failures }) {
+export function buildOutput({ args, diagnostics, failures }) {
   return {
     runtimeMode: diagnostics.runtimeModeProfile.environmentMode,
     startupSurface: diagnostics.startupSurface,
@@ -156,11 +157,16 @@ function buildOutput({ args, diagnostics, failures }) {
   };
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+export async function runRuntimeHonestyScan({
+  argv = process.argv.slice(2),
+  env = process.env,
+  stdout = process.stdout,
+  stderr = process.stderr
+} = {}) {
+  const args = parseArgs(argv);
   if (args.help) {
-    printUsage();
-    return;
+    printUsage(stdout);
+    return { exitCode: 0, output: null, failures: [] };
   }
   if (!args.mode) {
     throw new Error("Missing required argument: --mode");
@@ -170,7 +176,7 @@ async function main() {
   }
 
   const platform = createApiPlatform({
-    env: { ...process.env, ERP_RUNTIME_MODE: args.mode },
+    env: { ...env, ERP_RUNTIME_MODE: args.mode },
     runtimeMode: args.mode,
     enforceExplicitRuntimeMode: true,
     criticalDomainStateStoreKind: args.criticalDomainStateStoreKind || undefined,
@@ -200,9 +206,9 @@ async function main() {
     const output = buildOutput({ args, diagnostics, failures });
 
     if (args.json) {
-      process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+      stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     } else {
-      process.stdout.write(
+      stdout.write(
         [
           `runtimeMode=${output.runtimeMode}`,
           `startupSurface=${output.startupSurface}`,
@@ -213,23 +219,24 @@ async function main() {
           `warnings=${output.summary.warningCount}`
         ].join(" ")
       );
-      process.stdout.write("\n");
+      stdout.write("\n");
       for (const finding of output.findings) {
-        process.stdout.write(
+        stdout.write(
           `- ${finding.findingCode} [${finding.severityCode}] ${finding.summary}\n`
         );
       }
       if (failures.length > 0) {
-        process.stdout.write(`validationFailures=${failures.length}\n`);
+        stdout.write(`validationFailures=${failures.length}\n`);
       }
     }
 
     if (failures.length > 0) {
       for (const failure of failures) {
-        process.stderr.write(`${failure}\n`);
+        stderr.write(`${failure}\n`);
       }
-      process.exitCode = 1;
+      return { exitCode: 1, output, failures };
     }
+    return { exitCode: 0, output, failures };
   } finally {
     if (typeof platform.closeCriticalDomainStateStore === "function") {
       platform.closeCriticalDomainStateStore();
@@ -237,4 +244,7 @@ async function main() {
   }
 }
 
-await main();
+if (isMainModule(import.meta.url)) {
+  const result = await runRuntimeHonestyScan();
+  process.exitCode = result.exitCode;
+}

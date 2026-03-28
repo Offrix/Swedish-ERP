@@ -283,7 +283,7 @@ const POSTING_RECIPES_BY_CODE = new Map(POSTING_RECIPE_DEFINITIONS.map((recipe) 
 export const REQUIRED_ENGINE_ACCOUNTS = Object.freeze({
   customerInvoices: Object.freeze(["1210", "2610", "2620", "2630", "3010-3490", "2650"]),
   supplierInvoices: Object.freeze(["2410", "2640", "4010-6990", "2650"]),
-  payroll: Object.freeze(["7010-7390", "2710", "2730", "2740", "7110-7160"]),
+  payroll: Object.freeze(["7010-7390", "2710", "2720", "2730", "2740", "7110-7160"]),
   pension: Object.freeze(["7130-7160", "2740", "2760"]),
   travel: Object.freeze(["5330_or_7310"]),
   rotRut: Object.freeze(["3070", "3080", "2560"]),

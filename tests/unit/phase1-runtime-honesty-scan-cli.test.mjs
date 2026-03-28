@@ -1,16 +1,38 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { runRuntimeHonestyScan } from "../../scripts/runtime-honesty-scan.mjs";
 
-const WORKSPACE_ROOT = "C:\\Users\\snobb\\Desktop\\Swedish ERP";
-const SCRIPT_PATH = path.join(WORKSPACE_ROOT, "scripts", "runtime-honesty-scan.mjs");
+function createMemoryStream() {
+  let buffer = "";
+  return {
+    stream: {
+      write(chunk) {
+        buffer += String(chunk);
+      }
+    },
+    read() {
+      return buffer;
+    }
+  };
+}
+
+async function runScan(argv) {
+  const stdout = createMemoryStream();
+  const stderr = createMemoryStream();
+  const result = await runRuntimeHonestyScan({
+    argv,
+    stdout: stdout.stream,
+    stderr: stderr.stream
+  });
+  return {
+    status: result.exitCode,
+    stdout: stdout.read(),
+    stderr: stderr.read()
+  };
+}
 
 test("phase 1.5 runtime honesty scan CLI reports protected runtime blockers", () => {
-  const result = spawnSync(
-    process.execPath,
-    [
-      SCRIPT_PATH,
+  return runScan([
       "--mode",
       "production",
       "--surface",
@@ -32,33 +54,25 @@ test("phase 1.5 runtime honesty scan CLI reports protected runtime blockers", ()
       "--require-startup-blocked",
       "--require-blocking",
       "--json"
-    ],
-    {
-      cwd: WORKSPACE_ROOT,
-      encoding: "utf8"
-    }
-  );
-
-  assert.equal(result.status, 0, result.stderr);
-  const payload = JSON.parse(result.stdout);
-  assert.equal(payload.runtimeMode, "production");
-  assert.equal(payload.startupAllowed, false);
-  assert.ok(payload.summary.blockingCount >= 1);
-  assert.equal(
-    payload.findings.some((finding) => finding.findingCode === "missing_persistent_store"),
-    true
-  );
-  assert.equal(
-    payload.findings.some((finding) => finding.findingCode === "seed_demo_forbidden"),
-    false
-  );
+    ]).then((result) => {
+      assert.equal(result.status, 0, result.stderr);
+      const payload = JSON.parse(result.stdout);
+      assert.equal(payload.runtimeMode, "production");
+      assert.equal(payload.startupAllowed, false);
+      assert.ok(payload.summary.blockingCount >= 1);
+      assert.equal(
+        payload.findings.some((finding) => finding.findingCode === "missing_persistent_store"),
+        true
+      );
+      assert.equal(
+        payload.findings.some((finding) => finding.findingCode === "seed_demo_forbidden"),
+        false
+      );
+    });
 });
 
 test("phase 1.5 runtime honesty scan CLI fails when an expected finding is missing", () => {
-  const result = spawnSync(
-    process.execPath,
-    [
-      SCRIPT_PATH,
+  return runScan([
       "--mode",
       "production",
       "--surface",
@@ -70,22 +84,14 @@ test("phase 1.5 runtime honesty scan CLI fails when an expected finding is missi
       "--expect-finding",
       "does_not_exist",
       "--json"
-    ],
-    {
-      cwd: WORKSPACE_ROOT,
-      encoding: "utf8"
-    }
-  );
-
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /Missing expected finding: does_not_exist/u);
+    ]).then((result) => {
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /Missing expected finding: does_not_exist/u);
+    });
 });
 
 test("phase 1.5 runtime honesty scan CLI reports protected demo data when explicit seeding leaks into production", () => {
-  const result = spawnSync(
-    process.execPath,
-    [
-      SCRIPT_PATH,
+  return runScan([
       "--mode",
       "production",
       "--surface",
@@ -106,34 +112,26 @@ test("phase 1.5 runtime honesty scan CLI reports protected demo data when explic
       "--require-startup-blocked",
       "--require-blocking",
       "--json"
-    ],
-    {
-      cwd: WORKSPACE_ROOT,
-      encoding: "utf8"
-    }
-  );
-
-  assert.equal(result.status, 0, result.stderr);
-  const payload = JSON.parse(result.stdout);
-  assert.equal(payload.runtimeMode, "production");
-  assert.equal(payload.startupAllowed, false);
-  assert.equal(
-    payload.findings.some(
-      (finding) => finding.findingCode === "demo_data_present_in_protected_mode"
-    ),
-    true
-  );
-  assert.equal(
-    payload.findings.some((finding) => finding.findingCode === "seed_demo_forbidden"),
-    true
-  );
+    ]).then((result) => {
+      assert.equal(result.status, 0, result.stderr);
+      const payload = JSON.parse(result.stdout);
+      assert.equal(payload.runtimeMode, "production");
+      assert.equal(payload.startupAllowed, false);
+      assert.equal(
+        payload.findings.some(
+          (finding) => finding.findingCode === "demo_data_present_in_protected_mode"
+        ),
+        true
+      );
+      assert.equal(
+        payload.findings.some((finding) => finding.findingCode === "seed_demo_forbidden"),
+        true
+      );
+    });
 });
 
 test("phase 1.5 runtime honesty scan CLI can boot sqlite-backed critical truth without explicit file path", () => {
-  const result = spawnSync(
-    process.execPath,
-    [
-      SCRIPT_PATH,
+  return runScan([
       "--mode",
       "test",
       "--surface",
@@ -141,15 +139,10 @@ test("phase 1.5 runtime honesty scan CLI can boot sqlite-backed critical truth w
       "--critical-domain-state-store-kind",
       "sqlite",
       "--json"
-    ],
-    {
-      cwd: WORKSPACE_ROOT,
-      encoding: "utf8"
-    }
-  );
-
-  assert.equal(result.status, 0, result.stderr);
-  const payload = JSON.parse(result.stdout);
-  assert.equal(payload.runtimeMode, "test");
-  assert.ok(payload.summary.totalCount >= 1);
+    ]).then((result) => {
+      assert.equal(result.status, 0, result.stderr);
+      const payload = JSON.parse(result.stdout);
+      assert.equal(payload.runtimeMode, "test");
+      assert.ok(payload.summary.totalCount >= 1);
+    });
 });

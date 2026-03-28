@@ -1,4 +1,4 @@
-﻿# GO_LIVE_ROADMAP
+# GO_LIVE_ROADMAP
 
 Status: Bindande byggordning frÃ¥n nuvarande zip-lÃ¤ge till go-live.  
 Datum: 2026-03-26  
@@ -805,7 +805,7 @@ Bygga svensk produktionssÃ¤ker lÃ¶n med tabellskatt/jÃ¤mkning/SINK, employ
 - [x] 12.3 [HARDEN] **Pay run engine och AGI constituents** â€” Fingerprints, ordering, posting intents, payment batch, immutable AGI version, changed-employee flags.
 - [x] 12.4 [HARDEN] **Benefits, net deductions, travel, mileage** â€” Skatteklassificering, nettolÃ¶neavdrag, traktamente, milersÃ¤ttning, expense split och review codes.
 - [x] 12.5 [HARDEN] **Pension och salary exchange** â€” Policy, effective dating, pension basis, special payroll tax, provider export instruction.
-- [ ] 12.6 [NEW BUILD] **Kronofogden/lÃ¶neutmÃ¤tning** â€” Decision snapshots, fÃ¶rbehÃ¥llsbelopp, protected amount, remittance liability, payment order och audit chain.
+- [x] 12.6 [NEW BUILD] **Kronofogden/lÃ¶neutmÃ¤tning** â€” Decision snapshots, fÃ¶rbehÃ¥llsbelopp, protected amount, remittance liability, payment order och audit chain.
 - [ ] 12.7 [OPERATIONALIZE] **Payroll trial guards** â€” Trial mode fÃ¥r producera hela pay-run/AGI-kedjan men endast mot non-live receipts, non-live bank rails och watermarked evidence.
 
 **Exit gate**  

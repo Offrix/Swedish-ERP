@@ -810,6 +810,13 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/payroll/tax-decisions/:taxDecisionSnapshotId/approve",
               "/v1/payroll/employer-contribution-decisions",
               "/v1/payroll/employer-contribution-decisions/:employerContributionDecisionSnapshotId/approve",
+              "/v1/payroll/garnishments",
+              "/v1/payroll/garnishments/:garnishmentDecisionSnapshotId/approve",
+              "/v1/payroll/garnishment-remittances",
+              "/v1/payroll/garnishment-remittances/:remittanceInstructionId",
+              "/v1/payroll/garnishment-remittances/:remittanceInstructionId/settle",
+              "/v1/payroll/garnishment-remittances/:remittanceInstructionId/return",
+              "/v1/payroll/garnishment-remittances/:remittanceInstructionId/correct",
               "/v1/payroll/pay-runs",
               "/v1/payroll/pay-runs/:payRunId",
               "/v1/payroll/pay-runs/:payRunId/exceptions",
@@ -9396,6 +9403,229 @@ async function handleRequest({ req, res, platform, flags }) {
       platform.approveTaxDecisionSnapshot({
         companyId,
         taxDecisionSnapshotId: taxDecisionApproveMatch.taxDecisionSnapshotId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/payroll/garnishments") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listGarnishmentDecisionSnapshots({
+        companyId,
+        employmentId: url.searchParams.get("employmentId") || null,
+        status: url.searchParams.get("status") || null,
+        decisionType: url.searchParams.get("decisionType") || null,
+        effectiveDate: url.searchParams.get("effectiveDate") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/payroll/garnishments") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createGarnishmentDecisionSnapshot({
+        companyId,
+        employmentId: body.employmentId,
+        decisionType: body.decisionType,
+        incomeYear: body.incomeYear,
+        validFrom: body.validFrom,
+        validTo: body.validTo ?? null,
+        deductionModelCode: body.deductionModelCode ?? "max_above_protected_amount",
+        fixedDeductionAmount: body.fixedDeductionAmount ?? null,
+        maximumWithheldAmount: body.maximumWithheldAmount ?? null,
+        protectedAmountAmount: body.protectedAmountAmount,
+        householdProfile: body.householdProfile,
+        housingCostAmount: body.housingCostAmount ?? null,
+        additionalAllowanceAmount: body.additionalAllowanceAmount ?? null,
+        authorityCaseReference: body.authorityCaseReference,
+        remittanceRecipientName: body.remittanceRecipientName ?? "Kronofogden",
+        remittanceMethodCode: body.remittanceMethodCode ?? "bankgiro",
+        remittanceBankgiro: body.remittanceBankgiro ?? null,
+        remittancePlusgiro: body.remittancePlusgiro ?? null,
+        remittanceOcrReference: body.remittanceOcrReference ?? null,
+        decisionSource: body.decisionSource,
+        decisionReference: body.decisionReference,
+        evidenceRef: body.evidenceRef,
+        reasonCode: body.reasonCode ?? null,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const garnishmentDecisionApproveMatch = matchPath(path, "/v1/payroll/garnishments/:garnishmentDecisionSnapshotId/approve");
+  if (garnishmentDecisionApproveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveGarnishmentDecisionSnapshot({
+        companyId,
+        garnishmentDecisionSnapshotId: garnishmentDecisionApproveMatch.garnishmentDecisionSnapshotId,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/payroll/garnishment-remittances") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listRemittanceInstructions({
+        companyId,
+        payRunId: url.searchParams.get("payRunId") || null,
+        employmentId: url.searchParams.get("employmentId") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  const remittanceInstructionMatch = matchPath(path, "/v1/payroll/garnishment-remittances/:remittanceInstructionId");
+  if (remittanceInstructionMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getRemittanceInstruction({
+        companyId,
+        remittanceInstructionId: remittanceInstructionMatch.remittanceInstructionId
+      })
+    );
+    return;
+  }
+
+  const remittanceSettleMatch = matchPath(path, "/v1/payroll/garnishment-remittances/:remittanceInstructionId/settle");
+  if (remittanceSettleMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.settleRemittanceInstruction({
+        companyId,
+        remittanceInstructionId: remittanceSettleMatch.remittanceInstructionId,
+        settledOn: body.settledOn ?? null,
+        paymentOrderReference: body.paymentOrderReference,
+        bankEventId: body.bankEventId ?? null,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const remittanceReturnMatch = matchPath(path, "/v1/payroll/garnishment-remittances/:remittanceInstructionId/return");
+  if (remittanceReturnMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.returnRemittanceInstruction({
+        companyId,
+        remittanceInstructionId: remittanceReturnMatch.remittanceInstructionId,
+        reasonCode: body.reasonCode,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const remittanceCorrectMatch = matchPath(path, "/v1/payroll/garnishment-remittances/:remittanceInstructionId/correct");
+  if (remittanceCorrectMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.correctRemittanceInstruction({
+        companyId,
+        remittanceInstructionId: remittanceCorrectMatch.remittanceInstructionId,
+        correctedAmount: body.correctedAmount,
+        correctionReasonCode: body.correctionReasonCode,
         actorId: principal.userId
       })
     );

@@ -121,7 +121,14 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/migration/cutover-plans/:cutoverPlanId/checklist/:itemCode",
   "/v1/import-cases/:importCaseId/correction-requests",
   "/v1/import-cases/:importCaseId/correction-requests/:importCaseCorrectionRequestId/decide",
-  "/v1/import-cases/:importCaseId/apply"
+  "/v1/import-cases/:importCaseId/apply",
+  "/v1/payroll/garnishments",
+  "/v1/payroll/garnishments/:garnishmentDecisionSnapshotId/approve",
+  "/v1/payroll/garnishment-remittances",
+  "/v1/payroll/garnishment-remittances/:remittanceInstructionId",
+  "/v1/payroll/garnishment-remittances/:remittanceInstructionId/settle",
+  "/v1/payroll/garnishment-remittances/:remittanceInstructionId/return",
+  "/v1/payroll/garnishment-remittances/:remittanceInstructionId/correct"
 ]);
 
 function parseRoutesFromSource(sourceText) {

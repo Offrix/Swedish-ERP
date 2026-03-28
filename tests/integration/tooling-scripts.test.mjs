@@ -1,21 +1,53 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { commandResult } from "../../scripts/lib/repo.mjs";
+import { runDoctor } from "../../scripts/doctor.mjs";
+import { runHealthcheck } from "../../scripts/healthcheck.mjs";
 
-const testDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(testDir, "..", "..");
+function createMemoryStream() {
+  let buffer = "";
+  return {
+    stream: {
+      write(chunk) {
+        buffer += String(chunk);
+      }
+    },
+    read() {
+      return buffer;
+    }
+  };
+}
 
-async function runScript(scriptRelativePath, { env = {} } = {}) {
-  return commandResult("node", [scriptRelativePath], {
-    cwd: repoRoot,
+async function runDoctorScript() {
+  const stdout = createMemoryStream();
+  const stderr = createMemoryStream();
+  const result = await runDoctor({
+    stdout: stdout.stream,
+    stderr: stderr.stream
+  });
+  return {
+    code: result.exitCode,
+    stdout: stdout.read(),
+    stderr: stderr.read()
+  };
+}
+
+async function runHealthcheckScript(env) {
+  const stdout = createMemoryStream();
+  const stderr = createMemoryStream();
+  const result = await runHealthcheck({
     env: {
       ...process.env,
       ...env
-    }
+    },
+    stdout: stdout.stream,
+    stderr: stderr.stream
   });
+  return {
+    code: result.exitCode,
+    stdout: stdout.read(),
+    stderr: stderr.read()
+  };
 }
 
 async function startHealthServer() {
@@ -45,7 +77,7 @@ async function startHealthServer() {
 }
 
 test("doctor validates the toolchain including pnpm availability", async () => {
-  const result = await runScript("scripts/doctor.mjs");
+  const result = await runDoctorScript();
 
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /node:\s+v24\.14\.0/u);
@@ -58,12 +90,10 @@ test("healthcheck succeeds when all configured targets answer /healthz", async (
   const field = await startHealthServer();
 
   try {
-    const result = await runScript("scripts/healthcheck.mjs", {
-      env: {
-        API_HEALTH_URL: api.url,
-        DESKTOP_HEALTH_URL: desktop.url,
-        FIELD_HEALTH_URL: field.url
-      }
+    const result = await runHealthcheckScript({
+      API_HEALTH_URL: api.url,
+      DESKTOP_HEALTH_URL: desktop.url,
+      FIELD_HEALTH_URL: field.url
     });
 
     assert.equal(result.code, 0, result.stderr || result.stdout);
@@ -80,12 +110,10 @@ test("healthcheck succeeds when all configured targets answer /healthz", async (
 });
 
 test("healthcheck reports unreachable services with actionable wording", async () => {
-  const result = await runScript("scripts/healthcheck.mjs", {
-    env: {
-      API_HEALTH_URL: "http://127.0.0.1:65530/healthz",
-      DESKTOP_HEALTH_URL: "http://127.0.0.1:65531/healthz",
-      FIELD_HEALTH_URL: "http://127.0.0.1:65532/healthz"
-    }
+  const result = await runHealthcheckScript({
+    API_HEALTH_URL: "http://127.0.0.1:65530/healthz",
+    DESKTOP_HEALTH_URL: "http://127.0.0.1:65531/healthz",
+    FIELD_HEALTH_URL: "http://127.0.0.1:65532/healthz"
   });
 
   assert.equal(result.code, 1);

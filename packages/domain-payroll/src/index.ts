@@ -366,6 +366,88 @@ export interface EmployerContributionDecisionSnapshot {
   readonly updatedAt: string;
 }
 
+export interface GarnishmentDecisionSnapshot {
+  readonly garnishmentDecisionSnapshotId: string;
+  readonly companyId: string;
+  readonly employmentId: string;
+  readonly decisionType: "authority_order" | "manual_override";
+  readonly incomeYear: number;
+  readonly validFrom: string;
+  readonly validTo: string | null;
+  readonly deductionModelCode: "max_above_protected_amount" | "fixed_amount";
+  readonly fixedDeductionAmount: number | null;
+  readonly maximumWithheldAmount: number | null;
+  readonly protectedAmountAmount: number;
+  readonly householdProfile: Record<string, unknown>;
+  readonly householdTypeCode: "single_adult" | "cohabiting_adults";
+  readonly householdAdultCount: number;
+  readonly householdChildCount: number;
+  readonly housingCostAmount: number | null;
+  readonly additionalAllowanceAmount: number | null;
+  readonly protectedAmountBaseline: Record<string, unknown>;
+  readonly authorityCaseReference: string;
+  readonly remittanceRecipientName: string;
+  readonly remittanceMethodCode: string;
+  readonly remittanceBankgiro: string | null;
+  readonly remittancePlusgiro: string | null;
+  readonly remittanceOcrReference: string | null;
+  readonly decisionSource: string;
+  readonly decisionReference: string;
+  readonly evidenceRef: string;
+  readonly reasonCode: string | null;
+  readonly status: "draft" | "approved" | "superseded";
+  readonly requiresDualReview: boolean;
+  readonly approvedAt: string | null;
+  readonly approvedByActorId: string | null;
+  readonly supersededAt: string | null;
+  readonly supersededBySnapshotId: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface RemittanceInstruction {
+  readonly remittanceInstructionId: string;
+  readonly companyId: string;
+  readonly payRunId: string;
+  readonly reportingPeriod: string;
+  readonly payDate: string;
+  readonly employmentId: string;
+  readonly employeeId: string;
+  readonly garnishmentDecisionSnapshotId: string | null;
+  readonly amount: number;
+  readonly protectedAmountAmount: number;
+  readonly cashAfterTax: number;
+  readonly availableAboveProtected: number;
+  readonly authorityCaseReference: string | null;
+  readonly remittanceRecipientName: string;
+  readonly remittanceMethodCode: string;
+  readonly remittanceBankgiro: string | null;
+  readonly remittancePlusgiro: string | null;
+  readonly remittanceOcrReference: string | null;
+  readonly protectedAmountBaseline: Record<string, unknown>;
+  readonly householdProfile: Record<string, unknown>;
+  readonly paymentOrderState: string;
+  readonly paymentOrderReference: string;
+  readonly paymentOrderPayload: Record<string, unknown>;
+  readonly status: "payment_order_ready" | "settled" | "returned" | "corrected";
+  readonly sourceSnapshotHash: string;
+  readonly payRunFingerprint: string;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly settledAt: string | null;
+  readonly settledByActorId: string | null;
+  readonly returnedAt: string | null;
+  readonly returnedByActorId: string | null;
+  readonly returnReasonCode: string | null;
+  readonly correctedAmount: number | null;
+  readonly corrections: readonly Record<string, unknown>[];
+  readonly bankEventId: string | null;
+  readonly payRun: Record<string, unknown> | null;
+  readonly decisionSnapshot: GarnishmentDecisionSnapshot | null;
+}
+
 export interface DocumentClassificationPayrollConsumption {
   readonly documentClassificationPayrollConsumptionId: string;
   readonly documentClassificationPayrollPayloadId: string;
@@ -458,6 +540,8 @@ export interface PayRunRef {
   readonly calculationSteps: readonly PayrollStepSummary[];
   readonly exceptions: readonly PayrollException[];
   readonly lines: readonly PayRunLine[];
+  readonly remittanceInstructions: readonly RemittanceInstruction[];
+  readonly remittanceSummary: Record<string, number>;
   readonly payslips: readonly PayslipSnapshot[];
 }
 

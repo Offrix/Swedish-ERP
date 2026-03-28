@@ -24,6 +24,16 @@ export const PAYROLL_EMPLOYER_CONTRIBUTION_DECISION_TYPES = Object.freeze([
   "emergency_manual"
 ]);
 export const PAYROLL_EMPLOYER_CONTRIBUTION_DECISION_STATUSES = Object.freeze(["draft", "approved", "superseded"]);
+export const PAYROLL_GARNISHMENT_DECISION_TYPES = Object.freeze(["authority_order", "manual_override"]);
+export const PAYROLL_GARNISHMENT_DECISION_STATUSES = Object.freeze(["draft", "approved", "superseded"]);
+export const PAYROLL_GARNISHMENT_DEDUCTION_MODEL_CODES = Object.freeze(["max_above_protected_amount", "fixed_amount"]);
+export const PAYROLL_GARNISHMENT_HOUSEHOLD_TYPE_CODES = Object.freeze(["single_adult", "cohabiting_adults"]);
+export const PAYROLL_GARNISHMENT_REMITTANCE_STATUSES = Object.freeze([
+  "payment_order_ready",
+  "settled",
+  "returned",
+  "corrected"
+]);
 export const AGI_SUBMISSION_STATES = Object.freeze([
   "draft",
   "validated",
@@ -52,6 +62,7 @@ export const PAYROLL_CALCULATION_BASES = Object.freeze([
 ]);
 const PAYROLL_EMPLOYER_CONTRIBUTION_RULE_PACK_CODE = "SE-EMPLOYER-CONTRIBUTIONS";
 const PAYROLL_TAX_RULE_PACK_CODE = "SE-PAYROLL-TAX";
+const PAYROLL_GARNISHMENT_RULE_PACK_CODE = "SE-GARNISHMENT";
 const PAYROLL_EXCEPTION_RULES = Object.freeze({
   employment_contract_missing: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
   payroll_tax_profile_missing: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
@@ -76,6 +87,11 @@ const PAYROLL_EXCEPTION_RULES = Object.freeze({
   }),
   salary_exchange_threshold_warning: Object.freeze({ severity: "warning", blocking: false, resolutionPolicy: "manual_review" }),
   salary_exchange_social_insurance_review_required: Object.freeze({
+    severity: "warning",
+    blocking: false,
+    resolutionPolicy: "manual_review"
+  }),
+  garnishment_dual_review_required: Object.freeze({
     severity: "warning",
     blocking: false,
     resolutionPolicy: "manual_review"
@@ -201,6 +217,42 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
     ],
     testVectors: [{ vectorId: "payroll-manual-rate-2026" }, { vectorId: "payroll-sink-2026" }, { vectorId: "payroll-sink-sea-2026" }],
     migrationNotes: ["Phase 8.2 uses this tax pack for AGI-ready payroll tax decisions."]
+  },
+  {
+    rulePackId: "payroll-garnishment-se-2026.1",
+    rulePackCode: PAYROLL_GARNISHMENT_RULE_PACK_CODE,
+    domain: "payroll",
+    jurisdiction: "SE",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    version: "2026.1",
+    checksum: "phase12-payroll-garnishment-se-2026-1",
+    sourceSnapshotDate: "2025-12-01",
+    semanticChangeSummary: "Pins 2026 Kronofogden normalbelopp and payroll-side garnishment processing after preliminary tax.",
+    machineReadableRules: {
+      calculationStageCode: "after_preliminary_tax",
+      normalAmountByHouseholdType: {
+        single_adult: 6243,
+        cohabiting_adults: 10314
+      },
+      childNormalAmountsByAgeBucket: {
+        "0_6": 3336,
+        "7_10": 4004,
+        "11_14": 4672,
+        "15_plus": 5339
+      },
+      manualOverrideRequiresDualReview: true,
+      remittanceModeCode: "monthly_employer_remittance"
+    },
+    humanReadableExplanation: [
+      "Garnishment is calculated after preliminary tax and may never reduce cash salary below the protected amount in the approved decision snapshot.",
+      "Payroll keeps the approved decision snapshot, household baseline and remittance audit chain for each affected pay run."
+    ],
+    testVectors: [
+      { vectorId: "garnishment-max-above-protected-2026" },
+      { vectorId: "garnishment-fixed-cap-2026" }
+    ],
+    migrationNotes: ["Phase 12.6 introduces first-class garnishment decisions and remittance instructions."]
   }
 ]);
 
@@ -282,6 +334,13 @@ export function createPayrollEngine({
     employerContributionDecisionSnapshots: new Map(),
     employerContributionDecisionSnapshotIdsByCompany: new Map(),
     employerContributionDecisionSnapshotIdsByEmployment: new Map(),
+    garnishmentDecisionSnapshots: new Map(),
+    garnishmentDecisionSnapshotIdsByCompany: new Map(),
+    garnishmentDecisionSnapshotIdsByEmployment: new Map(),
+    remittanceInstructions: new Map(),
+    remittanceInstructionIdsByCompany: new Map(),
+    remittanceInstructionIdsByRun: new Map(),
+    remittanceInstructionIdsByEmployment: new Map(),
     payRunEvents: new Map(),
     payRunEventIdsByRun: new Map(),
     payrollExceptions: new Map(),
@@ -353,6 +412,14 @@ export function createPayrollEngine({
     listEmployerContributionDecisionSnapshots,
     createEmployerContributionDecisionSnapshot,
     approveEmployerContributionDecisionSnapshot,
+    listGarnishmentDecisionSnapshots,
+    createGarnishmentDecisionSnapshot,
+    approveGarnishmentDecisionSnapshot,
+    listRemittanceInstructions,
+    getRemittanceInstruction,
+    settleRemittanceInstruction,
+    returnRemittanceInstruction,
+    correctRemittanceInstruction,
     listEmploymentStatutoryProfiles,
     upsertEmploymentStatutoryProfile,
     listPayRuns,
@@ -863,6 +930,262 @@ export function createPayrollEngine({
     return copy(record);
   }
 
+  function listGarnishmentDecisionSnapshots({ companyId, employmentId = null, status = null, decisionType = null, effectiveDate = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = status
+      ? assertAllowed(status, PAYROLL_GARNISHMENT_DECISION_STATUSES, "garnishment_decision_snapshot_status_invalid")
+      : null;
+    const resolvedDecisionType = decisionType
+      ? assertAllowed(decisionType, PAYROLL_GARNISHMENT_DECISION_TYPES, "garnishment_decision_snapshot_type_invalid")
+      : null;
+    const ids = employmentId
+      ? state.garnishmentDecisionSnapshotIdsByEmployment.get(buildPayrollEmploymentKey(resolvedCompanyId, requireText(employmentId, "employment_id_required"))) || []
+      : state.garnishmentDecisionSnapshotIdsByCompany.get(resolvedCompanyId) || [];
+    return ids
+      .map((garnishmentDecisionSnapshotId) => state.garnishmentDecisionSnapshots.get(garnishmentDecisionSnapshotId))
+      .filter(Boolean)
+      .filter((candidate) => (resolvedStatus ? candidate.status === resolvedStatus : true))
+      .filter((candidate) => (resolvedDecisionType ? candidate.decisionType === resolvedDecisionType : true))
+      .filter((candidate) => (effectiveDate ? decisionSnapshotCoversDate(candidate, effectiveDate) : true))
+      .sort(
+        (left, right) =>
+          left.employmentId.localeCompare(right.employmentId) ||
+          left.validFrom.localeCompare(right.validFrom) ||
+          left.createdAt.localeCompare(right.createdAt)
+      )
+      .map(copy);
+  }
+
+  function createGarnishmentDecisionSnapshot({
+    companyId,
+    employmentId,
+    decisionType,
+    incomeYear,
+    validFrom,
+    validTo = null,
+    deductionModelCode = "max_above_protected_amount",
+    fixedDeductionAmount = null,
+    maximumWithheldAmount = null,
+    protectedAmountAmount,
+    householdProfile,
+    housingCostAmount = null,
+    additionalAllowanceAmount = null,
+    authorityCaseReference,
+    remittanceRecipientName = "Kronofogden",
+    remittanceMethodCode = "bankgiro",
+    remittanceBankgiro = null,
+    remittancePlusgiro = null,
+    remittanceOcrReference = null,
+    decisionSource,
+    decisionReference,
+    evidenceRef,
+    reasonCode = null,
+    actorId = "system"
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedEmploymentId = requireText(employmentId, "employment_id_required");
+    if (hrPlatform) {
+      const matches = resolveEmploymentScope({
+        companyId: resolvedCompanyId,
+        employmentIds: [resolvedEmploymentId],
+        period: { startsOn: "1900-01-01", endsOn: "2999-12-31" },
+        hrPlatform
+      });
+      if (matches.length !== 1) {
+        throw createError(404, "employment_not_found", "Employment was not found for garnishment decision snapshot.");
+      }
+    }
+    const normalized = normalizeGarnishmentDecisionSnapshot({
+      employmentId: resolvedEmploymentId,
+      decisionType,
+      incomeYear,
+      validFrom,
+      validTo,
+      deductionModelCode,
+      fixedDeductionAmount,
+      maximumWithheldAmount,
+      protectedAmountAmount,
+      householdProfile,
+      housingCostAmount,
+      additionalAllowanceAmount,
+      authorityCaseReference,
+      remittanceRecipientName,
+      remittanceMethodCode,
+      remittanceBankgiro,
+      remittancePlusgiro,
+      remittanceOcrReference,
+      decisionSource,
+      decisionReference,
+      evidenceRef,
+      reasonCode,
+      rules
+    });
+    const requiresDualReview = normalized.decisionType === "manual_override";
+    const status = requiresDualReview ? "draft" : "approved";
+    const now = nowIso(clock);
+    const record = {
+      garnishmentDecisionSnapshotId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      ...normalized,
+      status,
+      requiresDualReview,
+      approvedAt: status === "approved" ? now : null,
+      approvedByActorId: status === "approved" ? requireText(actorId, "actor_id_required") : null,
+      supersededAt: null,
+      supersededBySnapshotId: null,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: now,
+      updatedAt: now
+    };
+    state.garnishmentDecisionSnapshots.set(record.garnishmentDecisionSnapshotId, record);
+    appendToIndex(state.garnishmentDecisionSnapshotIdsByCompany, resolvedCompanyId, record.garnishmentDecisionSnapshotId);
+    appendToIndex(
+      state.garnishmentDecisionSnapshotIdsByEmployment,
+      buildPayrollEmploymentKey(resolvedCompanyId, resolvedEmploymentId),
+      record.garnishmentDecisionSnapshotId
+    );
+    if (status === "approved") {
+      supersedeOverlappingGarnishmentDecisionSnapshots(state, record);
+    }
+    return copy(record);
+  }
+
+  function approveGarnishmentDecisionSnapshot({ companyId, garnishmentDecisionSnapshotId, actorId = "system" } = {}) {
+    const record = requireGarnishmentDecisionSnapshot(state, companyId, garnishmentDecisionSnapshotId);
+    if (record.status === "approved") {
+      return copy(record);
+    }
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    if (record.requiresDualReview && record.createdByActorId === resolvedActorId) {
+      throw createError(
+        409,
+        "garnishment_decision_snapshot_dual_review_required",
+        "Manual garnishment overrides require approval by a different actor."
+      );
+    }
+    record.status = "approved";
+    record.approvedAt = nowIso(clock);
+    record.approvedByActorId = resolvedActorId;
+    record.updatedAt = record.approvedAt;
+    supersedeOverlappingGarnishmentDecisionSnapshots(state, record);
+    return copy(record);
+  }
+
+  function listRemittanceInstructions({ companyId, payRunId = null, employmentId = null, status = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = status
+      ? assertAllowed(status, PAYROLL_GARNISHMENT_REMITTANCE_STATUSES, "remittance_instruction_status_invalid")
+      : null;
+    let ids = state.remittanceInstructionIdsByCompany.get(resolvedCompanyId) || [];
+    if (payRunId) {
+      const scoped = new Set(state.remittanceInstructionIdsByRun.get(requireText(payRunId, "pay_run_id_required")) || []);
+      ids = ids.filter((remittanceInstructionId) => scoped.has(remittanceInstructionId));
+    }
+    if (employmentId) {
+      const scoped = new Set(
+        state.remittanceInstructionIdsByEmployment.get(
+          buildPayrollEmploymentKey(resolvedCompanyId, requireText(employmentId, "employment_id_required"))
+        ) || []
+      );
+      ids = ids.filter((remittanceInstructionId) => scoped.has(remittanceInstructionId));
+    }
+    return ids
+      .map((remittanceInstructionId) => state.remittanceInstructions.get(remittanceInstructionId))
+      .filter(Boolean)
+      .filter((candidate) => (resolvedStatus ? candidate.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.employmentId.localeCompare(right.employmentId))
+      .map((record) => presentRemittanceInstruction(state, record));
+  }
+
+  function getRemittanceInstruction({ companyId, remittanceInstructionId } = {}) {
+    return presentRemittanceInstruction(state, requireRemittanceInstruction(state, companyId, remittanceInstructionId));
+  }
+
+  function settleRemittanceInstruction({
+    companyId,
+    remittanceInstructionId,
+    settledOn = null,
+    paymentOrderReference,
+    bankEventId = null,
+    actorId = "system"
+  } = {}) {
+    const record = requireRemittanceInstruction(state, companyId, remittanceInstructionId);
+    if (record.status === "settled") {
+      return presentRemittanceInstruction(state, record);
+    }
+    record.status = "settled";
+    record.paymentOrderState = "settled";
+    record.paymentOrderReference = requireText(paymentOrderReference, "remittance_instruction_payment_order_reference_required");
+    record.bankEventId = normalizeOptionalText(bankEventId);
+    record.settledAt = settledOn ? normalizeRequiredDate(settledOn, "remittance_instruction_settled_on_invalid") : nowIso(clock);
+    record.settledByActorId = requireText(actorId, "actor_id_required");
+    record.updatedAt = nowIso(clock);
+    appendRunEvent(state, {
+      payRunId: record.payRunId,
+      companyId: record.companyId,
+      eventType: "garnishment_remittance_settled",
+      actorId,
+      note: `Settled garnishment remittance ${record.remittanceInstructionId}.`,
+      recordedAt: record.updatedAt
+    });
+    return presentRemittanceInstruction(state, record);
+  }
+
+  function returnRemittanceInstruction({
+    companyId,
+    remittanceInstructionId,
+    reasonCode,
+    actorId = "system"
+  } = {}) {
+    const record = requireRemittanceInstruction(state, companyId, remittanceInstructionId);
+    record.status = "returned";
+    record.paymentOrderState = "returned";
+    record.returnReasonCode = requireText(reasonCode, "remittance_instruction_return_reason_required");
+    record.returnedAt = nowIso(clock);
+    record.returnedByActorId = requireText(actorId, "actor_id_required");
+    record.updatedAt = record.returnedAt;
+    appendRunEvent(state, {
+      payRunId: record.payRunId,
+      companyId: record.companyId,
+      eventType: "garnishment_remittance_returned",
+      actorId,
+      note: `Returned garnishment remittance ${record.remittanceInstructionId}.`,
+      recordedAt: record.updatedAt
+    });
+    return presentRemittanceInstruction(state, record);
+  }
+
+  function correctRemittanceInstruction({
+    companyId,
+    remittanceInstructionId,
+    correctedAmount,
+    correctionReasonCode,
+    actorId = "system"
+  } = {}) {
+    const record = requireRemittanceInstruction(state, companyId, remittanceInstructionId);
+    const correction = {
+      remittanceCorrectionId: crypto.randomUUID(),
+      correctedAmount: normalizeRequiredMoney(correctedAmount, "remittance_instruction_corrected_amount_required"),
+      correctionReasonCode: requireText(correctionReasonCode, "remittance_instruction_correction_reason_required"),
+      correctedAt: nowIso(clock),
+      correctedByActorId: requireText(actorId, "actor_id_required")
+    };
+    record.status = "corrected";
+    record.paymentOrderState = "corrected";
+    record.correctedAmount = correction.correctedAmount;
+    record.corrections = [...copy(record.corrections || []), correction];
+    record.updatedAt = correction.correctedAt;
+    appendRunEvent(state, {
+      payRunId: record.payRunId,
+      companyId: record.companyId,
+      eventType: "garnishment_remittance_corrected",
+      actorId,
+      note: `Corrected garnishment remittance ${record.remittanceInstructionId}.`,
+      recordedAt: record.updatedAt
+    });
+    return presentRemittanceInstruction(state, record);
+  }
+
   function listEmploymentStatutoryProfiles({ companyId, employmentId = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const ids = employmentId
@@ -1055,6 +1378,12 @@ export function createPayrollEngine({
     payRun.status = "approved";
     payRun.approvedAt = nowIso(clock);
     payRun.updatedAt = payRun.approvedAt;
+    ensurePayRunRemittanceInstructions({
+      state,
+      payRun,
+      actorId,
+      clock
+    });
     appendRunEvent(state, {
       payRunId: payRun.payRunId,
       companyId: payRun.companyId,
@@ -1098,6 +1427,7 @@ export function createPayrollEngine({
     statutoryProfiles = [],
     taxDecisionSnapshots = [],
     employerContributionDecisionSnapshots = [],
+    garnishmentDecisionSnapshots = [],
     migrationBatchId = null,
     correctionOfPayRunId = null,
     correctionReason = null,
@@ -1137,6 +1467,7 @@ export function createPayrollEngine({
     const normalizedEmployerContributionDecisionSnapshots = normalizeEmployerContributionDecisionSnapshots(
       employerContributionDecisionSnapshots
     );
+    const normalizedGarnishmentDecisionSnapshots = normalizeGarnishmentDecisionSnapshots(garnishmentDecisionSnapshots);
     const migrationContext = resolvePayrollMigrationContext({
       companyId: resolvedCompanyId,
       sessionToken,
@@ -1213,6 +1544,7 @@ export function createPayrollEngine({
       statutoryProfiles: [...normalizedStatutoryProfiles.values()],
       taxDecisionSnapshots: [...normalizedTaxDecisionSnapshots.values()],
       employerContributionDecisionSnapshots: [...normalizedEmployerContributionDecisionSnapshots.values()],
+      garnishmentDecisionSnapshots: [...normalizedGarnishmentDecisionSnapshots.values()],
       migrationSnapshot: migrationContext?.snapshot || null,
       correctionOfPayRunId: correctionSourceRun?.payRunId || null,
       correctionReason: normalizeOptionalText(correctionReason)
@@ -1248,6 +1580,13 @@ export function createPayrollEngine({
         effectiveDate: period.payDate,
         overrideSnapshots: normalizedEmployerContributionDecisionSnapshots
       });
+      const garnishmentDecisionSnapshot = selectGarnishmentDecisionSnapshot({
+        state,
+        companyId: resolvedCompanyId,
+        employmentId: employment.employmentId,
+        effectiveDate: period.payDate,
+        overrideSnapshots: normalizedGarnishmentDecisionSnapshots
+      });
       const result = calculateEmploymentRun({
         state,
         rules,
@@ -1261,6 +1600,7 @@ export function createPayrollEngine({
         statutoryProfile: normalizedStatutoryProfiles.get(employment.employmentId) || null,
         taxDecisionSnapshot,
         employerContributionDecisionSnapshot,
+        garnishmentDecisionSnapshot,
         employmentTimeBase,
         agreementContext,
         hrPlatform,
@@ -2161,7 +2501,7 @@ function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
     }
     if (line.compensationBucket === "net_deduction") {
       journalLines.push({
-        accountNumber: "2750",
+        accountNumber: requireText(line.ledgerAccountCode || "2750", "payroll_net_deduction_ledger_account_required"),
         debitAmount: 0,
         creditAmount: amount,
         dimensionJson: dimensions
@@ -2768,6 +3108,13 @@ function collectPayRunDecisionSnapshotRefs(run, employmentResults = []) {
           employeeId,
           snapshotTypeCode: "payroll_employer_contribution_decision",
           decisionObject: totals.employerContributionDecision
+        }),
+        buildPayrollDecisionSnapshotRef({
+          payRunId: run.payRunId,
+          employmentId,
+          employeeId,
+          snapshotTypeCode: "payroll_garnishment_decision",
+          decisionObject: totals.garnishmentDecision
         })
       ].filter(Boolean);
     })
@@ -3507,6 +3854,7 @@ function calculateEmploymentRun({
   statutoryProfile,
   taxDecisionSnapshot = null,
   employerContributionDecisionSnapshot = null,
+  garnishmentDecisionSnapshot = null,
   employmentTimeBase = null,
   agreementContext = null,
   hrPlatform,
@@ -3604,6 +3952,8 @@ function calculateEmploymentRun({
       expenseSplit: copy(claim.valuation?.expenseSplit || null),
       reviewCodes: copy(claim.valuation?.reviewCodes || [])
     })),
+    garnishmentDecisionSnapshot: null,
+    garnishmentComputation: null,
     pensionEnrollments: [],
     salaryExchangeAgreements: [],
     pensionEvents: [],
@@ -3859,8 +4209,29 @@ function calculateEmploymentRun({
     employerContributionDecisionSnapshot
   });
   steps[12] = employerContributionPreview.step;
+  const grossAfterDeductions = roundMoney(
+    lines
+      .filter((line) => line.compensationBucket === "gross_addition" || line.compensationBucket === "gross_deduction")
+      .reduce((sum, line) => sum + directionalAmount(line), 0)
+  );
+  const garnishmentPreview = buildGarnishmentPreview({
+    rules,
+    grossAfterDeductions,
+    preliminaryTaxAmount: taxPreview.amount,
+    payDate: period.payDate,
+    employee,
+    garnishmentDecisionSnapshot,
+    warnings
+  });
+  sourceSnapshot.garnishmentDecisionSnapshot = garnishmentPreview.snapshot || null;
+  sourceSnapshot.garnishmentComputation = garnishmentPreview.payload || null;
 
   const netDeductionLines = [
+    ...createGeneratedGarnishmentLines({
+      employment,
+      preview: garnishmentPreview,
+      state
+    }),
     ...createStepLinesFromPayloads({
       processingStep: 13,
       employment,
@@ -3934,6 +4305,11 @@ function calculateEmploymentRun({
       .filter((line) => line.payItemCode === "PENSION_SPECIAL_PAYROLL_TAX")
       .reduce((sum, line) => sum + Math.abs(line.amount || 0), 0)
   );
+  const garnishmentAmount = roundMoney(
+    lines
+      .filter((line) => line.payItemCode === "GARNISHMENT")
+      .reduce((sum, line) => sum + Math.abs(line.amount || 0), 0)
+  );
   if (taxableBenefitAmount > 0 && lineTotals.grossAfterDeductions <= 0) {
     warnings.push(
       createWarning(
@@ -3951,6 +4327,7 @@ function calculateEmploymentRun({
     taxFreeAllowanceAmount,
     expenseReimbursementAmount,
     pensionPremiumAmount,
+    garnishmentAmount,
     salaryExchangeGrossDeductionAmount,
     pensionSpecialPayrollTaxAmount
   });
@@ -3979,6 +4356,8 @@ function calculateEmploymentRun({
       employerContributionPreviewAmount: employerContributionPreview.amount,
       employerContributionPreviewStatus: employerContributionPreview.status,
       employerContributionDecision: employerContributionPreview.decisionObject,
+      garnishmentAmount,
+      garnishmentDecision: garnishmentPreview.decisionObject,
       taxableBenefitAmount,
       taxFreeAllowanceAmount,
       expenseReimbursementAmount,
@@ -4822,6 +5201,337 @@ function buildEmployerContributionPreview({
       taxAccountReliefAmount: calculation.taxAccountReliefAmount,
       decisionObject
     })
+  };
+}
+
+function buildGarnishmentPreview({
+  rules,
+  grossAfterDeductions,
+  preliminaryTaxAmount,
+  payDate,
+  employee,
+  garnishmentDecisionSnapshot = null,
+  warnings
+}) {
+  if (!garnishmentDecisionSnapshot) {
+    return {
+      amount: 0,
+      status: "not_applicable",
+      decisionObject: null,
+      payload: null,
+      snapshot: null
+    };
+  }
+  const effectiveDate = normalizeRequiredDate(payDate, "pay_run_pay_date_invalid");
+  const rulePack = rules.resolveRulePack({
+    rulePackCode: PAYROLL_GARNISHMENT_RULE_PACK_CODE,
+    domain: "payroll",
+    jurisdiction: "SE",
+    effectiveDate
+  });
+  const normalizedGrossAfterDeductions = roundMoney(Math.max(0, grossAfterDeductions || 0));
+  const decisionObjectBase = {
+    inputs_hash: buildSnapshotHash({
+      grossAfterDeductions: normalizedGrossAfterDeductions,
+      preliminaryTaxAmount,
+      payDate: effectiveDate,
+      employeeId: employee?.employeeId || null,
+      garnishmentDecisionSnapshot
+    }),
+    rule_pack_id: rulePack.rulePackId,
+    rule_pack_code: rulePack.rulePackCode,
+    rule_pack_version: rulePack.version,
+    rule_pack_checksum: rulePack.checksum,
+    effective_date: effectiveDate,
+    warnings: [],
+    outputs: {
+      grossAfterDeductions: normalizedGrossAfterDeductions,
+      preliminaryTaxAmount: preliminaryTaxAmount == null ? null : roundMoney(preliminaryTaxAmount)
+    }
+  };
+  if (garnishmentDecisionSnapshot.status !== "approved") {
+    warnings.push(
+      createWarning(
+        "garnishment_dual_review_required",
+        "Approved garnishment decision snapshot is required before payroll can withhold payroll garnishment."
+      )
+    );
+    const decisionObject = {
+      ...decisionObjectBase,
+      decision_code: "PAYROLL_GARNISHMENT_DECISION_NOT_APPROVED",
+      decision_snapshot_id: garnishmentDecisionSnapshot.garnishmentDecisionSnapshotId || null,
+      outputs: {
+        ...decisionObjectBase.outputs,
+        status: "pending",
+        garnishmentAmount: 0
+      },
+      warnings: ["garnishment_dual_review_required"],
+      explanation: ["Approved garnishment decision snapshot is required before withholding."]
+    };
+    return {
+      amount: 0,
+      status: "pending",
+      decisionObject,
+      payload: null,
+      snapshot: copy(garnishmentDecisionSnapshot)
+    };
+  }
+  if (preliminaryTaxAmount == null) {
+    const decisionObject = {
+      ...decisionObjectBase,
+      decision_code: "PAYROLL_GARNISHMENT_TAX_REQUIRED",
+      decision_snapshot_id: garnishmentDecisionSnapshot.garnishmentDecisionSnapshotId || null,
+      outputs: {
+        ...decisionObjectBase.outputs,
+        status: "pending",
+        garnishmentAmount: 0
+      },
+      warnings: ["payroll_tax_profile_missing"],
+      explanation: ["Preliminary tax must be resolved before garnishment can be calculated."]
+    };
+    return {
+      amount: 0,
+      status: "pending",
+      decisionObject,
+      payload: null,
+      snapshot: copy(garnishmentDecisionSnapshot)
+    };
+  }
+  const cashAfterTax = roundMoney(Math.max(0, normalizedGrossAfterDeductions - preliminaryTaxAmount));
+  const protectedAmount = roundMoney(garnishmentDecisionSnapshot.protectedAmountAmount || 0);
+  const availableAboveProtected = roundMoney(Math.max(0, cashAfterTax - protectedAmount));
+  const uncappedAmount =
+    garnishmentDecisionSnapshot.deductionModelCode === "fixed_amount"
+      ? Math.min(roundMoney(garnishmentDecisionSnapshot.fixedDeductionAmount || 0), availableAboveProtected)
+      : availableAboveProtected;
+  const garnishmentAmount = roundMoney(
+    Math.max(
+      0,
+      garnishmentDecisionSnapshot.maximumWithheldAmount == null
+        ? uncappedAmount
+        : Math.min(uncappedAmount, roundMoney(garnishmentDecisionSnapshot.maximumWithheldAmount))
+    )
+  );
+  const payload = {
+    garnishmentDecisionSnapshotId: garnishmentDecisionSnapshot.garnishmentDecisionSnapshotId,
+    authorityCaseReference: garnishmentDecisionSnapshot.authorityCaseReference,
+    protectedAmountAmount: protectedAmount,
+    cashAfterTax,
+    availableAboveProtected,
+    deductionModelCode: garnishmentDecisionSnapshot.deductionModelCode,
+    maximumWithheldAmount: garnishmentDecisionSnapshot.maximumWithheldAmount,
+    fixedDeductionAmount: garnishmentDecisionSnapshot.fixedDeductionAmount,
+    calculatedAmount: garnishmentAmount,
+    remittanceRecipientName: garnishmentDecisionSnapshot.remittanceRecipientName,
+    remittanceMethodCode: garnishmentDecisionSnapshot.remittanceMethodCode,
+    remittanceBankgiro: garnishmentDecisionSnapshot.remittanceBankgiro,
+    remittancePlusgiro: garnishmentDecisionSnapshot.remittancePlusgiro,
+    remittanceOcrReference: garnishmentDecisionSnapshot.remittanceOcrReference,
+    protectedAmountBaseline: copy(garnishmentDecisionSnapshot.protectedAmountBaseline || {})
+  };
+  const decisionObject = {
+    ...decisionObjectBase,
+    decision_code: "PAYROLL_GARNISHMENT_RESOLVED",
+    decision_snapshot_id: garnishmentDecisionSnapshot.garnishmentDecisionSnapshotId,
+    outputs: {
+      ...decisionObjectBase.outputs,
+      status: "resolved_decision_snapshot",
+      decisionType: garnishmentDecisionSnapshot.decisionType,
+      deductionModelCode: garnishmentDecisionSnapshot.deductionModelCode,
+      protectedAmountAmount: protectedAmount,
+      cashAfterTax,
+      availableAboveProtected,
+      garnishmentAmount,
+      authorityCaseReference: garnishmentDecisionSnapshot.authorityCaseReference,
+      garnishmentDecisionSnapshotId: garnishmentDecisionSnapshot.garnishmentDecisionSnapshotId,
+      protectedAmountBaseline: copy(garnishmentDecisionSnapshot.protectedAmountBaseline || {}),
+      householdProfile: copy(garnishmentDecisionSnapshot.householdProfile || {}),
+      remittanceRecipientName: garnishmentDecisionSnapshot.remittanceRecipientName,
+      remittanceMethodCode: garnishmentDecisionSnapshot.remittanceMethodCode,
+      remittanceBankgiro: garnishmentDecisionSnapshot.remittanceBankgiro,
+      remittancePlusgiro: garnishmentDecisionSnapshot.remittancePlusgiro,
+      remittanceOcrReference: garnishmentDecisionSnapshot.remittanceOcrReference
+    },
+    explanation: [
+      `rulePackId=${rulePack.rulePackId}`,
+      `rulePackChecksum=${rulePack.checksum}`,
+      `deductionModelCode=${garnishmentDecisionSnapshot.deductionModelCode}`,
+      `cashAfterTax=${cashAfterTax}`,
+      `protectedAmount=${protectedAmount}`,
+      `availableAboveProtected=${availableAboveProtected}`
+    ]
+  };
+  return {
+    amount: garnishmentAmount,
+    status: "resolved_decision_snapshot",
+    decisionObject,
+    payload,
+    snapshot: copy(garnishmentDecisionSnapshot)
+  };
+}
+
+function createGeneratedGarnishmentLines({ employment, preview, state }) {
+  if (!preview || roundMoney(preview.amount || 0) <= 0) {
+    return [];
+  }
+  const payItem = getRequiredPayItemByCode(state, employment.companyId, "GARNISHMENT");
+  return [
+    createPayLine({
+      payItem,
+      employment,
+      amount: preview.amount,
+      sourceType: "garnishment_decision_snapshot",
+      sourceId: preview.snapshot?.garnishmentDecisionSnapshotId || null,
+      note: preview.payload?.authorityCaseReference || "Garnishment withholding",
+      processingStep: 13,
+      overrides: {
+        ledgerAccountCode: "2720"
+      }
+    })
+  ];
+}
+
+function ensurePayRunRemittanceInstructions({ state, payRun, actorId = "system", clock }) {
+  const existingByEmploymentId = new Map(
+    (state.remittanceInstructionIdsByRun.get(payRun.payRunId) || [])
+      .map((remittanceInstructionId) => state.remittanceInstructions.get(remittanceInstructionId))
+      .filter(Boolean)
+      .map((record) => [record.employmentId, record])
+  );
+  for (const payslipId of state.payslipIdsByRun.get(payRun.payRunId) || []) {
+    const payslip = state.payslips.get(payslipId);
+    if (!payslip) {
+      continue;
+    }
+    const totals = payslip.renderPayload?.totals || {};
+    const garnishmentAmount = roundMoney(totals.garnishmentAmount || 0);
+    const garnishmentDecision = totals.garnishmentDecision || null;
+    if (!garnishmentDecision || garnishmentAmount <= 0) {
+      continue;
+    }
+    const existing = existingByEmploymentId.get(payslip.renderPayload?.employment?.employmentId || null);
+    if (existing) {
+      continue;
+    }
+    const record = buildRemittanceInstructionRecord({
+      state,
+      payRun,
+      payslip,
+      garnishmentDecision,
+      actorId,
+      clock
+    });
+    state.remittanceInstructions.set(record.remittanceInstructionId, record);
+    appendToIndex(state.remittanceInstructionIdsByCompany, record.companyId, record.remittanceInstructionId);
+    appendToIndex(state.remittanceInstructionIdsByRun, record.payRunId, record.remittanceInstructionId);
+    appendToIndex(
+      state.remittanceInstructionIdsByEmployment,
+      buildPayrollEmploymentKey(record.companyId, record.employmentId),
+      record.remittanceInstructionId
+    );
+    appendRunEvent(state, {
+      payRunId: payRun.payRunId,
+      companyId: payRun.companyId,
+      eventType: "garnishment_remittance_created",
+      actorId,
+      note: `Created garnishment remittance ${record.remittanceInstructionId}.`,
+      recordedAt: record.createdAt
+    });
+  }
+}
+
+function buildRemittanceInstructionRecord({ state, payRun, payslip, garnishmentDecision, actorId = "system", clock }) {
+  const totals = payslip.renderPayload?.totals || {};
+  const amount = roundMoney(totals.garnishmentAmount || 0);
+  const employment = payslip.renderPayload?.employment || {};
+  const employee = payslip.renderPayload?.employee || {};
+  const decisionSnapshot = garnishmentDecision.outputs || {};
+  const referenceSeed = {
+    payRunId: payRun.payRunId,
+    employmentId: employment.employmentId || null,
+    authorityCaseReference: decisionSnapshot.authorityCaseReference || null,
+    amount
+  };
+  const createdAt = nowIso(clock);
+  return {
+    remittanceInstructionId: crypto.randomUUID(),
+    companyId: payRun.companyId,
+    payRunId: payRun.payRunId,
+    reportingPeriod: payRun.reportingPeriod,
+    payDate: payRun.payDate,
+    employmentId: requireText(employment.employmentId, "remittance_instruction_employment_id_required"),
+    employeeId: requireText(employee.employeeId, "remittance_instruction_employee_id_required"),
+    garnishmentDecisionSnapshotId: garnishmentDecision.decision_snapshot_id || null,
+    amount,
+    protectedAmountAmount: roundMoney(decisionSnapshot.protectedAmountAmount || 0),
+    cashAfterTax: roundMoney(decisionSnapshot.cashAfterTax || 0),
+    availableAboveProtected: roundMoney(decisionSnapshot.availableAboveProtected || 0),
+    authorityCaseReference: normalizeOptionalText(decisionSnapshot.authorityCaseReference),
+    remittanceRecipientName: normalizeOptionalText(decisionSnapshot.remittanceRecipientName) || "Kronofogden",
+    remittanceMethodCode: normalizeOptionalText(decisionSnapshot.remittanceMethodCode) || "bankgiro",
+    remittanceBankgiro: normalizeOptionalText(decisionSnapshot.remittanceBankgiro),
+    remittancePlusgiro: normalizeOptionalText(decisionSnapshot.remittancePlusgiro),
+    remittanceOcrReference: normalizeOptionalText(decisionSnapshot.remittanceOcrReference),
+    protectedAmountBaseline: copy(decisionSnapshot.protectedAmountBaseline || {}),
+    householdProfile: copy(decisionSnapshot.householdProfile || {}),
+    paymentOrderState: "payment_order_ready",
+    paymentOrderReference: `KFM-${buildSnapshotHash(referenceSeed).slice(0, 12).toUpperCase()}`,
+    paymentOrderPayload: {
+      payeeName: normalizeOptionalText(decisionSnapshot.remittanceRecipientName) || "Kronofogden",
+      paymentDate: payRun.payDate,
+      amount,
+      methodCode: normalizeOptionalText(decisionSnapshot.remittanceMethodCode) || "bankgiro",
+      bankgiro: normalizeOptionalText(decisionSnapshot.remittanceBankgiro),
+      plusgiro: normalizeOptionalText(decisionSnapshot.remittancePlusgiro),
+      ocrReference: normalizeOptionalText(decisionSnapshot.remittanceOcrReference),
+      message: normalizeOptionalText(decisionSnapshot.authorityCaseReference) || `Payroll remittance ${payRun.reportingPeriod}`
+    },
+    status: "payment_order_ready",
+    sourceSnapshotHash: payRun.sourceSnapshotHash,
+    payRunFingerprint: payRun.payRunFingerprint,
+    createdByActorId: requireText(actorId, "actor_id_required"),
+    createdAt,
+    updatedAt: createdAt,
+    settledAt: null,
+    settledByActorId: null,
+    returnedAt: null,
+    returnedByActorId: null,
+    returnReasonCode: null,
+    correctedAmount: null,
+    corrections: [],
+    bankEventId: null
+  };
+}
+
+function presentRemittanceInstruction(state, record) {
+  if (!record) {
+    return null;
+  }
+  const payRun = state.payRuns.get(record.payRunId) || null;
+  const decisionSnapshot = record.garnishmentDecisionSnapshotId
+    ? state.garnishmentDecisionSnapshots.get(record.garnishmentDecisionSnapshotId) || null
+    : null;
+  return copy({
+    ...record,
+    payRun: payRun ? {
+      payRunId: payRun.payRunId,
+      reportingPeriod: payRun.reportingPeriod,
+      payDate: payRun.payDate,
+      runType: payRun.runType,
+      status: payRun.status
+    } : null,
+    decisionSnapshot: decisionSnapshot ? copy(decisionSnapshot) : null
+  });
+}
+
+function summarizeRemittanceInstructions(records = []) {
+  return {
+    totalCount: records.length,
+    paymentOrderReadyCount: records.filter((record) => record.status === "payment_order_ready").length,
+    settledCount: records.filter((record) => record.status === "settled").length,
+    returnedCount: records.filter((record) => record.status === "returned").length,
+    correctedCount: records.filter((record) => record.status === "corrected").length,
+    totalAmount: roundMoney(records.reduce((sum, record) => sum + Number(record.amount || 0), 0))
   };
 }
 
@@ -5953,6 +6663,26 @@ function requireEmployerContributionDecisionSnapshot(state, companyId, employerC
   return record;
 }
 
+function requireGarnishmentDecisionSnapshot(state, companyId, garnishmentDecisionSnapshotId) {
+  const record = state.garnishmentDecisionSnapshots.get(
+    requireText(garnishmentDecisionSnapshotId, "garnishment_decision_snapshot_id_required")
+  );
+  if (!record || record.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "garnishment_decision_snapshot_not_found", "Garnishment decision snapshot was not found.");
+  }
+  return record;
+}
+
+function requireRemittanceInstruction(state, companyId, remittanceInstructionId) {
+  const record = state.remittanceInstructions.get(
+    requireText(remittanceInstructionId, "remittance_instruction_id_required")
+  );
+  if (!record || record.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "remittance_instruction_not_found", "Remittance instruction was not found.");
+  }
+  return record;
+}
+
 function decisionSnapshotCoversDate(snapshot, effectiveDate) {
   const resolvedDate = normalizeRequiredDate(effectiveDate, "tax_decision_snapshot_effective_date_invalid");
   return snapshot.validFrom <= resolvedDate && (!snapshot.validTo || snapshot.validTo >= resolvedDate);
@@ -5997,6 +6727,26 @@ function supersedeOverlappingEmployerContributionDecisionSnapshots(state, approv
     candidate.status = "superseded";
     candidate.supersededAt = approvedSnapshot.approvedAt || approvedSnapshot.updatedAt;
     candidate.supersededBySnapshotId = approvedSnapshot.employerContributionDecisionSnapshotId;
+    candidate.updatedAt = candidate.supersededAt;
+  }
+}
+
+function supersedeOverlappingGarnishmentDecisionSnapshots(state, approvedSnapshot) {
+  const scopeKey = buildPayrollEmploymentKey(approvedSnapshot.companyId, approvedSnapshot.employmentId);
+  for (const garnishmentDecisionSnapshotId of state.garnishmentDecisionSnapshotIdsByEmployment.get(scopeKey) || []) {
+    const candidate = state.garnishmentDecisionSnapshots.get(garnishmentDecisionSnapshotId);
+    if (!candidate || candidate.garnishmentDecisionSnapshotId === approvedSnapshot.garnishmentDecisionSnapshotId) {
+      continue;
+    }
+    if (candidate.status !== "approved" || candidate.decisionType !== approvedSnapshot.decisionType) {
+      continue;
+    }
+    if (!intervalsOverlap(candidate.validFrom, candidate.validTo, approvedSnapshot.validFrom, approvedSnapshot.validTo)) {
+      continue;
+    }
+    candidate.status = "superseded";
+    candidate.supersededAt = approvedSnapshot.approvedAt || approvedSnapshot.updatedAt;
+    candidate.supersededBySnapshotId = approvedSnapshot.garnishmentDecisionSnapshotId;
     candidate.updatedAt = candidate.supersededAt;
   }
 }
@@ -6079,6 +6829,33 @@ function selectEmployerContributionDecisionSnapshot({
   return candidates.length > 0 ? copy(candidates[candidates.length - 1]) : null;
 }
 
+function selectGarnishmentDecisionSnapshot({
+  state,
+  companyId,
+  employmentId,
+  effectiveDate,
+  overrideSnapshots = new Map()
+}) {
+  const override = overrideSnapshots.get(employmentId) || null;
+  if (override && decisionSnapshotCoversDate(override, effectiveDate)) {
+    return {
+      ...copy(override),
+      garnishmentDecisionSnapshotId: override.garnishmentDecisionSnapshotId || buildSnapshotHash({
+        companyId,
+        employmentId,
+        effectiveDate,
+        decisionType: override.decisionType,
+        decisionReference: override.decisionReference,
+        evidenceRef: override.evidenceRef
+      }),
+      companyId,
+      status: override.status || (override.decisionType === "manual_override" ? "draft" : "approved")
+    };
+  }
+  const candidates = listApprovedGarnishmentDecisionSnapshotsForEmployment(state, companyId, employmentId, effectiveDate);
+  return candidates.length > 0 ? copy(candidates[candidates.length - 1]) : null;
+}
+
 function listApprovedTaxDecisionSnapshotsForEmployment(state, companyId, employmentId, effectiveDate) {
   const scopeKey = buildPayrollEmploymentKey(requireText(companyId, "company_id_required"), requireText(employmentId, "employment_id_required"));
   return (state.taxDecisionSnapshotIdsByEmployment.get(scopeKey) || [])
@@ -6093,6 +6870,16 @@ function listApprovedEmployerContributionDecisionSnapshotsForEmployment(state, c
   const scopeKey = buildPayrollEmploymentKey(requireText(companyId, "company_id_required"), requireText(employmentId, "employment_id_required"));
   return (state.employerContributionDecisionSnapshotIdsByEmployment.get(scopeKey) || [])
     .map((employerContributionDecisionSnapshotId) => state.employerContributionDecisionSnapshots.get(employerContributionDecisionSnapshotId))
+    .filter(Boolean)
+    .filter((candidate) => candidate.status === "approved")
+    .filter((candidate) => decisionSnapshotCoversDate(candidate, effectiveDate))
+    .sort((left, right) => left.validFrom.localeCompare(right.validFrom) || left.createdAt.localeCompare(right.createdAt));
+}
+
+function listApprovedGarnishmentDecisionSnapshotsForEmployment(state, companyId, employmentId, effectiveDate) {
+  const scopeKey = buildPayrollEmploymentKey(requireText(companyId, "company_id_required"), requireText(employmentId, "employment_id_required"));
+  return (state.garnishmentDecisionSnapshotIdsByEmployment.get(scopeKey) || [])
+    .map((garnishmentDecisionSnapshotId) => state.garnishmentDecisionSnapshots.get(garnishmentDecisionSnapshotId))
     .filter(Boolean)
     .filter((candidate) => candidate.status === "approved")
     .filter((candidate) => decisionSnapshotCoversDate(candidate, effectiveDate))
@@ -6239,6 +7026,11 @@ function enrichPayRun(state, payRun) {
   const payrollInputSnapshot = payRun.payrollInputSnapshotId
     ? state.payrollInputSnapshots.get(payRun.payrollInputSnapshotId) || null
     : null;
+  const remittanceInstructions = (state.remittanceInstructionIdsByRun.get(payRun.payRunId) || [])
+    .map((remittanceInstructionId) => state.remittanceInstructions.get(remittanceInstructionId))
+    .filter(Boolean)
+    .sort((left, right) => left.employmentId.localeCompare(right.employmentId) || left.createdAt.localeCompare(right.createdAt))
+    .map((record) => presentRemittanceInstruction(state, record));
   return {
     ...copy(payRun),
     payrollInputSnapshot: payrollInputSnapshot ? copy(payrollInputSnapshot) : null,
@@ -6249,16 +7041,18 @@ function enrichPayRun(state, payRun) {
       .filter(Boolean)
       .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt))
       .map(copy),
-    lines: (state.payRunLineIdsByRun.get(payRun.payRunId) || [])
-      .map((lineId) => state.payRunLines.get(lineId))
-      .filter(Boolean)
-      .sort((left, right) => left.employmentId.localeCompare(right.employmentId) || left.displayOrder - right.displayOrder)
-      .map(copy),
-    payslips: (state.payslipIdsByRun.get(payRun.payRunId) || [])
-      .map((payslipId) => state.payslips.get(payslipId))
-      .filter(Boolean)
-      .sort((left, right) => left.employeeId.localeCompare(right.employeeId))
-      .map(enrichPayslip)
+      lines: (state.payRunLineIdsByRun.get(payRun.payRunId) || [])
+        .map((lineId) => state.payRunLines.get(lineId))
+        .filter(Boolean)
+        .sort((left, right) => left.employmentId.localeCompare(right.employmentId) || left.displayOrder - right.displayOrder)
+        .map(copy),
+      remittanceInstructions,
+      remittanceSummary: summarizeRemittanceInstructions(remittanceInstructions),
+      payslips: (state.payslipIdsByRun.get(payRun.payRunId) || [])
+        .map((payslipId) => state.payslips.get(payslipId))
+        .filter(Boolean)
+        .sort((left, right) => left.employeeId.localeCompare(right.employeeId))
+        .map(enrichPayslip)
   };
 }
 
@@ -6596,6 +7390,13 @@ function normalizeManualInputs({ companyId, manualInputs, state }) {
   return manualInputs.map((input) => {
     const resolvedEmploymentId = requireText(input.employmentId, "payroll_input_employment_id_required");
     const payItemCode = normalizeCode(input.payItemCode, "payroll_input_pay_item_code_required");
+    if (payItemCode === "GARNISHMENT") {
+      throw createError(
+        409,
+        "garnishment_manual_input_forbidden",
+        "Manual GARNISHMENT lines are forbidden. Use an approved garnishment decision snapshot instead."
+      );
+    }
     const payItem = requirePayItemByCode(state, companyId, payItemCode);
     const processingStep = normalizeProcessingStep(input.processingStep, payItem.compensationBucket);
     return {
@@ -6946,6 +7747,198 @@ function normalizeEmployerContributionDecisionSnapshot(snapshot = {}) {
   return normalized;
 }
 
+function normalizeGarnishmentDecisionSnapshots(garnishmentDecisionSnapshots) {
+  const map = new Map();
+  if (!Array.isArray(garnishmentDecisionSnapshots)) {
+    return map;
+  }
+  for (const snapshot of garnishmentDecisionSnapshots) {
+    const normalized = normalizeGarnishmentDecisionSnapshot(snapshot);
+    map.set(normalized.employmentId, normalized);
+  }
+  return map;
+}
+
+function normalizeGarnishmentDecisionSnapshot(snapshot = {}) {
+  const decisionType = assertAllowed(
+    normalizeOptionalText(snapshot.decisionType),
+    PAYROLL_GARNISHMENT_DECISION_TYPES,
+    "garnishment_decision_snapshot_type_invalid"
+  );
+  const validFrom = normalizeRequiredDate(snapshot.validFrom, "garnishment_decision_snapshot_valid_from_invalid");
+  const validTo = normalizeOptionalDate(snapshot.validTo, "garnishment_decision_snapshot_valid_to_invalid");
+  if (validTo && validTo < validFrom) {
+    throw createError(
+      400,
+      "garnishment_decision_snapshot_interval_invalid",
+      "Garnishment decision validity interval is invalid."
+    );
+  }
+  const deductionModelCode = assertAllowed(
+    normalizeOptionalText(snapshot.deductionModelCode) || "max_above_protected_amount",
+    PAYROLL_GARNISHMENT_DEDUCTION_MODEL_CODES,
+    "garnishment_decision_snapshot_deduction_model_invalid"
+  );
+  const householdProfile = normalizeGarnishmentHouseholdProfile(snapshot.householdProfile);
+  const remittanceMethodCode = assertAllowed(
+    normalizeOptionalText(snapshot.remittanceMethodCode) || "bankgiro",
+    ["bankgiro", "plusgiro", "manual"],
+    "garnishment_decision_snapshot_remittance_method_invalid"
+  );
+  const normalized = {
+    employmentId: requireText(snapshot.employmentId, "garnishment_decision_snapshot_employment_id_required"),
+    decisionType,
+    incomeYear: normalizeIntegerInRange(snapshot.incomeYear, 2000, 2100, "garnishment_decision_snapshot_income_year_invalid"),
+    validFrom,
+    validTo,
+    deductionModelCode,
+    fixedDeductionAmount: normalizeOptionalMoney(
+      snapshot.fixedDeductionAmount,
+      "garnishment_decision_snapshot_fixed_deduction_amount_invalid"
+    ),
+    maximumWithheldAmount: normalizeOptionalMoney(
+      snapshot.maximumWithheldAmount,
+      "garnishment_decision_snapshot_maximum_withheld_amount_invalid"
+    ),
+    protectedAmountAmount: normalizeRequiredMoney(
+      snapshot.protectedAmountAmount,
+      "garnishment_decision_snapshot_protected_amount_required"
+    ),
+    householdProfile,
+    householdTypeCode: householdProfile.householdTypeCode,
+    householdAdultCount: householdProfile.householdAdultCount,
+    householdChildCount: householdProfile.householdChildCount,
+    housingCostAmount: normalizeOptionalMoney(snapshot.housingCostAmount, "garnishment_decision_snapshot_housing_cost_invalid"),
+    additionalAllowanceAmount: normalizeOptionalMoney(
+      snapshot.additionalAllowanceAmount,
+      "garnishment_decision_snapshot_additional_allowance_invalid"
+    ),
+    authorityCaseReference: requireText(
+      snapshot.authorityCaseReference,
+      "garnishment_decision_snapshot_authority_case_reference_required"
+    ),
+    remittanceRecipientName: requireText(
+      snapshot.remittanceRecipientName || "Kronofogden",
+      "garnishment_decision_snapshot_remittance_recipient_required"
+    ),
+    remittanceMethodCode,
+    remittanceBankgiro: normalizeOptionalText(snapshot.remittanceBankgiro),
+    remittancePlusgiro: normalizeOptionalText(snapshot.remittancePlusgiro),
+    remittanceOcrReference: normalizeOptionalText(snapshot.remittanceOcrReference),
+    decisionSource: requireText(snapshot.decisionSource, "garnishment_decision_snapshot_decision_source_required"),
+    decisionReference: requireText(snapshot.decisionReference, "garnishment_decision_snapshot_decision_reference_required"),
+    evidenceRef: requireText(snapshot.evidenceRef, "garnishment_decision_snapshot_evidence_ref_required"),
+    reasonCode: normalizeOptionalText(snapshot.reasonCode),
+    protectedAmountBaseline: deriveGarnishmentProtectedAmountBaseline({
+      rules: snapshot.rules || null,
+      incomeYear: snapshot.incomeYear,
+      householdProfile,
+      housingCostAmount: snapshot.housingCostAmount,
+      additionalAllowanceAmount: snapshot.additionalAllowanceAmount,
+      protectedAmountAmount: snapshot.protectedAmountAmount
+    })
+  };
+
+  if (deductionModelCode === "fixed_amount" && normalized.fixedDeductionAmount == null) {
+    throw createError(
+      400,
+      "garnishment_decision_snapshot_fixed_amount_required",
+      "Fixed amount garnishment decisions require fixedDeductionAmount."
+    );
+  }
+  if (decisionType === "manual_override" && !normalized.reasonCode) {
+    throw createError(
+      400,
+      "garnishment_decision_snapshot_reason_required",
+      "Manual garnishment overrides require reasonCode."
+    );
+  }
+  if (remittanceMethodCode === "bankgiro" && !normalized.remittanceBankgiro) {
+    throw createError(
+      400,
+      "garnishment_decision_snapshot_bankgiro_required",
+      "Bankgiro remittance requires remittanceBankgiro."
+    );
+  }
+  if (remittanceMethodCode === "plusgiro" && !normalized.remittancePlusgiro) {
+    throw createError(
+      400,
+      "garnishment_decision_snapshot_plusgiro_required",
+      "Plusgiro remittance requires remittancePlusgiro."
+    );
+  }
+  return normalized;
+}
+
+function normalizeGarnishmentHouseholdProfile(profile = {}) {
+  const householdTypeCode = assertAllowed(
+    normalizeOptionalText(profile.householdTypeCode),
+    PAYROLL_GARNISHMENT_HOUSEHOLD_TYPE_CODES,
+    "garnishment_decision_snapshot_household_type_invalid"
+  );
+  const childAgeBandCounts = {
+    age_0_6: normalizeNonNegativeInteger(profile.childAgeBandCounts?.age_0_6 ?? 0, "garnishment_child_age_0_6_invalid"),
+    age_7_10: normalizeNonNegativeInteger(profile.childAgeBandCounts?.age_7_10 ?? 0, "garnishment_child_age_7_10_invalid"),
+    age_11_14: normalizeNonNegativeInteger(profile.childAgeBandCounts?.age_11_14 ?? 0, "garnishment_child_age_11_14_invalid"),
+    age_15_plus: normalizeNonNegativeInteger(profile.childAgeBandCounts?.age_15_plus ?? 0, "garnishment_child_age_15_plus_invalid")
+  };
+  return {
+    householdTypeCode,
+    householdAdultCount: householdTypeCode === "cohabiting_adults" ? 2 : 1,
+    householdChildCount: Object.values(childAgeBandCounts).reduce((sum, value) => sum + value, 0),
+    childAgeBandCounts
+  };
+}
+
+function deriveGarnishmentProtectedAmountBaseline({
+  rules = null,
+  incomeYear,
+  householdProfile,
+  housingCostAmount = null,
+  additionalAllowanceAmount = null,
+  protectedAmountAmount
+}) {
+  const yearStart = `${String(normalizeIntegerInRange(incomeYear, 2000, 2100, "garnishment_decision_snapshot_income_year_invalid"))}-01-01`;
+  const rulePack = rules
+    ? rules.resolveRulePack({
+        rulePackCode: PAYROLL_GARNISHMENT_RULE_PACK_CODE,
+        domain: "payroll",
+        jurisdiction: "SE",
+        effectiveDate: yearStart
+      })
+    : null;
+  const machineRules = rulePack?.machineReadableRules || {};
+  const adultBaseAmount = roundMoney(
+    Number(machineRules.normalAmountByHouseholdType?.[householdProfile.householdTypeCode] || 0)
+  );
+  const childAgeBandCounts = copy(householdProfile.childAgeBandCounts || {});
+  const childNormalAmount = roundMoney(
+    Object.entries(childAgeBandCounts).reduce((sum, [ageBandCode, count]) => {
+      const amount = Number(machineRules.childNormalAmountByAgeBand?.[ageBandCode] || 0);
+      return sum + amount * Number(count || 0);
+    }, 0)
+  );
+  const resolvedHousingCostAmount = roundMoney(Number(housingCostAmount || 0));
+  const resolvedAdditionalAllowanceAmount = roundMoney(Number(additionalAllowanceAmount || 0));
+  return {
+    rulePackId: rulePack?.rulePackId || null,
+    rulePackCode: rulePack?.rulePackCode || PAYROLL_GARNISHMENT_RULE_PACK_CODE,
+    rulePackVersion: rulePack?.version || null,
+    householdTypeCode: householdProfile.householdTypeCode,
+    householdAdultCount: householdProfile.householdAdultCount,
+    householdChildCount: householdProfile.householdChildCount,
+    childAgeBandCounts,
+    adultBaseAmount,
+    childNormalAmount,
+    housingCostAmount: resolvedHousingCostAmount,
+    additionalAllowanceAmount: resolvedAdditionalAllowanceAmount,
+    derivedProtectedAmountAmount: roundMoney(
+      adultBaseAmount + childNormalAmount + resolvedHousingCostAmount + resolvedAdditionalAllowanceAmount
+    ),
+    decisionProtectedAmountAmount: roundMoney(protectedAmountAmount || 0)
+  };
+}
+
 function normalizeStatutoryProfile(profile = {}) {
   const taxMode = assertAllowed(normalizeOptionalText(profile.taxMode) || "pending", PAYROLL_TAX_MODES, "statutory_profile_tax_mode_invalid");
   const sinkValidFrom = normalizeOptionalDate(profile.sinkValidFrom, "statutory_profile_sink_valid_from_invalid");
@@ -7213,10 +8206,11 @@ function resolveDefaultLedgerAccountCode(payItemCode) {
       case "PENSION_SPECIAL_PAYROLL_TAX":
         return "7120";
       case "NET_DEDUCTION":
-      case "GARNISHMENT":
       case "ADVANCE":
       case "RECLAIM":
         return "2750";
+      case "GARNISHMENT":
+        return "2720";
     default:
       return "7090";
   }
@@ -7499,6 +8493,10 @@ function normalizeIntegerInRange(value, min, max, code) {
     throw createError(400, code, `${value} must be an integer between ${min} and ${max}.`);
   }
   return numeric;
+}
+
+function normalizeNonNegativeInteger(value, code) {
+  return normalizeIntegerInRange(value, 0, 999, code);
 }
 
 function assertAllowed(value, allowedValues, code) {
