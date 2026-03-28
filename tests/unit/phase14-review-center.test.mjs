@@ -86,6 +86,25 @@ test("Step 12 review center creates queues, deduplicates items and records final
   });
   assert.equal(reclaimed.status, "claimed");
 
+  const reassigned = engine.reassignReviewCenterItem({
+    companyId,
+    reviewItemId: firstItem.reviewItemId,
+    assignedUserId: "reviewer_2",
+    assignedTeamId: "tax_ops",
+    actorId: "reviewer_1",
+    reasonCode: "specialist_required"
+  });
+  assert.equal(reassigned.status, "open");
+  assert.equal(reassigned.currentAssignment.assignedUserId, "reviewer_2");
+  assert.equal(reassigned.currentAssignment.assignedTeamId, "tax_ops");
+
+  const claimedBySpecialist = engine.claimReviewCenterItem({
+    companyId,
+    reviewItemId: firstItem.reviewItemId,
+    actorId: "reviewer_2"
+  });
+  assert.equal(claimedBySpecialist.currentAssignment.assignedUserId, "reviewer_2");
+
   const escalated = engine.decideReviewCenterItem({
     companyId,
     reviewItemId: firstItem.reviewItemId,
@@ -93,7 +112,7 @@ test("Step 12 review center creates queues, deduplicates items and records final
     reasonCode: "requires_tax_reconciliation_owner",
     targetQueueCode: seniorQueue.queueCode,
     note: "Escalated to specialist queue.",
-    actorId: "reviewer_1"
+    actorId: "reviewer_2"
   });
   assert.equal(escalated.status, "escalated");
   assert.equal(escalated.queueCode, seniorQueue.queueCode);

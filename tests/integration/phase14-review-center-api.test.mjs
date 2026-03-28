@@ -90,6 +90,12 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
       actorId: DEMO_IDS.userId
     });
 
+    const root = await requestJson(baseUrl, "/", { token: adminToken });
+    assert.equal(root.routes.includes("/v1/review-center/items/:reviewItemId/start"), true);
+    assert.equal(root.routes.includes("/v1/review-center/items/:reviewItemId/request-more-input"), true);
+    assert.equal(root.routes.includes("/v1/review-center/items/:reviewItemId/reassign"), true);
+    assert.equal(root.routes.includes("/v1/review-center/items/:reviewItemId/close"), true);
+
     const queues = await requestJson(
       baseUrl,
       `/v1/review-center/queues?companyId=${DEMO_IDS.companyId}`,
@@ -171,9 +177,70 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
     });
     assert.equal(adminDecideForbidden.error, "review_center_assignment_required");
 
-    const approved = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/approve`, {
+    const started = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/start`, {
       method: "POST",
       token: approverToken,
+      expectedStatus: 200,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(started.status, "in_review");
+
+    const waitingInput = await requestJson(
+      baseUrl,
+      `/v1/review-center/items/${seeded.reviewItemId}/request-more-input`,
+      {
+        method: "POST",
+        token: approverToken,
+        expectedStatus: 200,
+        body: {
+          companyId: DEMO_IDS.companyId,
+          reasonCode: "missing_person_link",
+          note: "Need explicit handoff before approval."
+        }
+      }
+    );
+    assert.equal(waitingInput.status, "waiting_input");
+    assert.equal(waitingInput.waitingInputReasonCode, "MISSING_PERSON_LINK");
+
+    const reclaimed = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/claim`, {
+      method: "POST",
+      token: approverToken,
+      expectedStatus: 200,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(reclaimed.status, "claimed");
+
+    const reassigned = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/reassign`, {
+      method: "POST",
+      token: approverToken,
+      expectedStatus: 200,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        assignedUserId: DEMO_IDS.userId,
+        reasonCode: "queue_rebalance"
+      }
+    });
+    assert.equal(reassigned.status, "open");
+    assert.equal(reassigned.currentAssignment.assignedUserId, DEMO_IDS.userId);
+
+    const adminClaimed = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/claim`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 200,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(adminClaimed.status, "claimed");
+    assert.equal(adminClaimed.currentAssignment.assignedUserId, DEMO_IDS.userId);
+
+    const approved = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/approve`, {
+      method: "POST",
+      token: adminToken,
       expectedStatus: 200,
       body: {
         companyId: DEMO_IDS.companyId,
@@ -188,6 +255,17 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
     assert.equal(approved.status, "approved");
     assert.equal(approved.latestDecision.decisionCode, "approve");
 
+    const closed = await requestJson(baseUrl, `/v1/review-center/items/${seeded.reviewItemId}/close`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 200,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        note: "Downstream outcome consumed."
+      }
+    });
+    assert.equal(closed.status, "closed");
+
     const payrollItems = await requestJson(
       baseUrl,
       `/v1/review-center/items?companyId=${DEMO_IDS.companyId}&queueCode=PAYROLL_REVIEW&status=open`,
@@ -200,8 +278,11 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
       `/v1/review-center/items/${seeded.reviewItemId}?companyId=${DEMO_IDS.companyId}`,
       { token: adminToken }
     );
+    assert.equal(fetched.status, "closed");
     assert.equal(fetched.latestDecision.reasonCode, "CLASSIFICATION_CONFIRMED");
-    assert.equal(fetched.currentAssignment.assignedUserId, DEMO_APPROVER_IDS.userId);
+    assert.equal(fetched.currentAssignment.assignedUserId, DEMO_IDS.userId);
+    assert.equal(fetched.assignmentHistory.length >= 4, true);
+    assert.equal(fetched.decisionHistory.length, 1);
   } finally {
     await stopServer(server);
   }

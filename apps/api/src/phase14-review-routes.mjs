@@ -289,6 +289,74 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
     return true;
   }
 
+  const reviewCenterStartMatch = matchPath(path, "/v1/review-center/items/:reviewItemId/start");
+  if (req.method === "POST" && reviewCenterStartMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: reviewCenterStartMatch.reviewItemId, scopeCode: "review_center" });
+    assertReviewCenterActionAccess({
+      platform,
+      principal,
+      companyId,
+      reviewItemId: reviewCenterStartMatch.reviewItemId,
+      operation: "start"
+    });
+    writeJson(res, 200, platform.startReviewCenterItem({
+      companyId,
+      reviewItemId: reviewCenterStartMatch.reviewItemId,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
+  const reviewCenterRequestMoreInputMatch = matchPath(path, "/v1/review-center/items/:reviewItemId/request-more-input");
+  if (req.method === "POST" && reviewCenterRequestMoreInputMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: reviewCenterRequestMoreInputMatch.reviewItemId, scopeCode: "review_center" });
+    assertReviewCenterActionAccess({
+      platform,
+      principal,
+      companyId,
+      reviewItemId: reviewCenterRequestMoreInputMatch.reviewItemId,
+      operation: "request_more_input"
+    });
+    writeJson(res, 200, platform.requestReviewMoreInput({
+      companyId,
+      reviewItemId: reviewCenterRequestMoreInputMatch.reviewItemId,
+      reasonCode: body.reasonCode,
+      note: body.note || null,
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
+  const reviewCenterReassignMatch = matchPath(path, "/v1/review-center/items/:reviewItemId/reassign");
+  if (req.method === "POST" && reviewCenterReassignMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: reviewCenterReassignMatch.reviewItemId, scopeCode: "review_center" });
+    assertReviewCenterActionAccess({
+      platform,
+      principal,
+      companyId,
+      reviewItemId: reviewCenterReassignMatch.reviewItemId,
+      operation: "reassign"
+    });
+    writeJson(res, 200, platform.reassignReviewCenterItem({
+      companyId,
+      reviewItemId: reviewCenterReassignMatch.reviewItemId,
+      assignedUserId: body.assignedUserId || null,
+      assignedTeamId: body.assignedTeamId || null,
+      reasonCode: body.reasonCode || "reassign",
+      actorId: principal.userId
+    }));
+    return true;
+  }
+
   const reviewCenterDecideMatch = matchPath(path, "/v1/review-center/items/:reviewItemId/decide");
   if (req.method === "POST" && reviewCenterDecideMatch) {
     const body = await readJsonBody(req);
@@ -316,6 +384,28 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
       actorId: principal.userId,
       viewerUserId: principal.userId,
       viewerTeamIds: resolvePrincipalTeamIds(principal)
+    }));
+    return true;
+  }
+
+  const reviewCenterCloseMatch = matchPath(path, "/v1/review-center/items/:reviewItemId/close");
+  if (req.method === "POST" && reviewCenterCloseMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: reviewCenterCloseMatch.reviewItemId, scopeCode: "review_center" });
+    assertReviewCenterActionAccess({
+      platform,
+      principal,
+      companyId,
+      reviewItemId: reviewCenterCloseMatch.reviewItemId,
+      operation: "close"
+    });
+    writeJson(res, 200, platform.closeReviewCenterItem({
+      companyId,
+      reviewItemId: reviewCenterCloseMatch.reviewItemId,
+      note: body.note || null,
+      actorId: principal.userId
     }));
     return true;
   }
