@@ -589,11 +589,13 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/ap/invoices",
               "/v1/ap/invoices/ingest",
               "/v1/ap/invoices/:supplierInvoiceId",
+              "/v1/ap/invoices/:supplierInvoiceId/credits",
               "/v1/ap/invoices/:supplierInvoiceId/approve",
               "/v1/ap/invoices/:supplierInvoiceId/match",
               "/v1/ap/invoices/:supplierInvoiceId/post",
               "/v1/ap/open-items",
               "/v1/ap/open-items/:apOpenItemId",
+              "/v1/ap/open-items/:apOpenItemId/payment-preparation",
               "/v1/banking/accounts",
               "/v1/banking/accounts/:bankAccountId",
               "/v1/banking/statement-events",
@@ -6665,6 +6667,36 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  const apInvoiceCreditMatch = matchPath(path, "/v1/ap/invoices/:supplierInvoiceId/credits");
+  if (apInvoiceCreditMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ap_supplier_invoice",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createSupplierCreditNote({
+        companyId,
+        supplierInvoiceId: apInvoiceCreditMatch.supplierInvoiceId,
+        externalInvoiceRef: body.externalInvoiceRef,
+        invoiceDate: body.invoiceDate,
+        dueDate: body.dueDate,
+        creditReasonCode: body.creditReasonCode,
+        lines: body.lines,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   const apInvoicePost = matchPath(path, "/v1/ap/invoices/:supplierInvoiceId/post");
   if (apInvoicePost && req.method === "POST") {
     const body = await readJsonBody(req);
@@ -6734,6 +6766,32 @@ async function handleRequest({ req, res, platform, flags }) {
       platform.getApOpenItem({
         companyId,
         apOpenItemId: apOpenItemMatch.apOpenItemId
+      })
+    );
+    return;
+  }
+
+  const apPaymentPreparationMatch = matchPath(path, "/v1/ap/open-items/:apOpenItemId/payment-preparation");
+  if (apPaymentPreparationMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ap_open_item",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getApPaymentPreparation({
+        companyId,
+        apOpenItemId: apPaymentPreparationMatch.apOpenItemId
       })
     );
     return;

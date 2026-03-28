@@ -27,6 +27,7 @@ export const AP_SUPPLIER_INVOICE_STATUSES = Object.freeze([
   "credited",
   "voided"
 ]);
+export const AP_SUPPLIER_INVOICE_TYPES = Object.freeze(["standard", "credit_note"]);
 export const AP_SUPPLIER_INVOICE_DUPLICATE_STATUSES = Object.freeze([
   "not_checked",
   "exact_duplicate",
@@ -39,6 +40,7 @@ export const AP_MATCH_MODES = Object.freeze(["none", "two_way", "three_way"]);
 const DEFAULT_PURCHASE_ORDER_PREFIX = "PO";
 const DEFAULT_SUPPLIER_PREFIX = "SUP";
 const DEFAULT_INVOICE_PREFIX = "APINV";
+const DEFAULT_CREDIT_NOTE_PREFIX = "APCRN";
 const DEFAULT_LIABILITY_ACCOUNT_BY_REGION = Object.freeze({
   SE: "2410",
   EU: "2420",
@@ -150,6 +152,7 @@ export function createApEngine({
     purchaseOrderStatuses: AP_PURCHASE_ORDER_STATUSES,
     receiptTargetTypes: AP_RECEIPT_TARGET_TYPES,
     supplierInvoiceStatuses: AP_SUPPLIER_INVOICE_STATUSES,
+    supplierInvoiceTypes: AP_SUPPLIER_INVOICE_TYPES,
     duplicateStatuses: AP_SUPPLIER_INVOICE_DUPLICATE_STATUSES,
     matchModes: AP_MATCH_MODES,
     listSuppliers,
@@ -171,7 +174,9 @@ export function createApEngine({
     getSupplierInvoice,
     listApOpenItems,
     getApOpenItem,
+    getApPaymentPreparation,
     ingestSupplierInvoice,
+    createSupplierCreditNote,
     runSupplierInvoiceMatch,
     approveSupplierInvoice,
     postSupplierInvoice,
@@ -839,6 +844,54 @@ export function createApEngine({
     return copy(requireApOpenItemRecord(state, companyId, apOpenItemId));
   }
 
+  function getApPaymentPreparation({ companyId, apOpenItemId } = {}) {
+    const openItem = requireApOpenItemRecord(state, companyId, apOpenItemId);
+    const invoice = requireSupplierInvoiceRecord(state, openItem.companyId, openItem.supplierInvoiceId);
+    const supplier = requireSupplierRecord(state, invoice.companyId, invoice.supplierId);
+    return buildApPaymentPreparation({ openItem, invoice, supplier });
+  }
+
+  function createSupplierCreditNote({
+    companyId,
+    supplierInvoiceId,
+    externalInvoiceRef = null,
+    invoiceDate = null,
+    dueDate = null,
+    creditReasonCode = null,
+    lines = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const originalInvoice = requireSupplierInvoiceRecord(state, companyId, supplierInvoiceId);
+    if (originalInvoice.invoiceType === "credit_note") {
+      throw createError(409, "credit_note_source_invalid", "Credit notes cannot be created from an existing AP credit note.");
+    }
+    const supplier = requireSupplierRecord(state, originalInvoice.companyId, originalInvoice.supplierId);
+    const lineInputs = buildCreditNoteLineInputs({ originalInvoice, lines });
+    return ingestSupplierInvoice({
+      companyId: originalInvoice.companyId,
+      supplierId: supplier.supplierId,
+      purchaseOrderId: originalInvoice.purchaseOrderId,
+      documentId: null,
+      classificationCaseId: null,
+      importCaseId: null,
+      requiresImportCase: false,
+      invoiceType: "credit_note",
+      originalSupplierInvoiceId: originalInvoice.supplierInvoiceId,
+      creditReasonCode,
+      sourceChannel: "manual",
+      externalInvoiceRef:
+        externalInvoiceRef || `${originalInvoice.externalInvoiceRef}-CR`,
+      invoiceDate: invoiceDate || nowIso(clock).slice(0, 10),
+      dueDate: dueDate || invoiceDate || nowIso(clock).slice(0, 10),
+      currencyCode: originalInvoice.currencyCode,
+      paymentReference: originalInvoice.paymentReference,
+      lines: lineInputs,
+      actorId,
+      correlationId
+    });
+  }
+
   function ingestSupplierInvoice({
     companyId,
     supplierId = null,
@@ -850,6 +903,9 @@ export function createApEngine({
     importCaseId = null,
     requiresImportCase = null,
     sourceChannel = "manual",
+    invoiceType = "standard",
+    originalSupplierInvoiceId = null,
+    creditReasonCode = null,
     externalInvoiceRef = null,
     invoiceDate = null,
     dueDate = null,
@@ -880,6 +936,19 @@ export function createApEngine({
       purchaseOrderId,
       purchaseOrderNo: purchaseOrderNo || documentContext?.purchaseOrderReference || null
     });
+    const originalSupplierInvoice = originalSupplierInvoiceId
+      ? requireSupplierInvoiceRecord(state, resolvedCompanyId, originalSupplierInvoiceId)
+      : null;
+    const resolvedInvoiceType = assertAllowed(invoiceType, AP_SUPPLIER_INVOICE_TYPES, "supplier_invoice_type_invalid");
+    if (resolvedInvoiceType === "credit_note" && !originalSupplierInvoice && supplier.allowCreditWithoutLink !== true) {
+      throw createError(409, "credit_link_missing", "Supplier credit notes require a valid original supplier invoice unless supplier policy allows unlinked credits.");
+    }
+    if (originalSupplierInvoice && originalSupplierInvoice.supplierId !== supplier.supplierId) {
+      throw createError(409, "credit_supplier_mismatch", "Credit note must reference a supplier invoice from the same supplier.");
+    }
+    if (originalSupplierInvoice && originalSupplierInvoice.invoiceType === "credit_note") {
+      throw createError(409, "credit_link_invalid", "Original supplier invoice may not itself be a credit note.");
+    }
     const normalizedExternalInvoiceRef = requireText(
       externalInvoiceRef || documentContext?.externalInvoiceRef || documentContext?.invoiceNumber,
       "supplier_invoice_external_ref_required"
@@ -902,7 +971,9 @@ export function createApEngine({
       documentContext,
       supplier,
       purchaseOrder: linkedPurchaseOrder,
+      invoiceType: resolvedInvoiceType,
       companyId: resolvedCompanyId,
+      ledgerPlatform,
       vatPlatform,
       actorId,
       correlationId
@@ -914,6 +985,9 @@ export function createApEngine({
     const netAmount = roundMoney(normalizedLines.reduce((sum, line) => sum + line.netAmount, 0));
     const vatAmount = roundMoney(normalizedLines.reduce((sum, line) => sum + line.vatAmount, 0));
     const grossAmount = roundMoney(netAmount + vatAmount);
+    if (resolvedInvoiceType === "credit_note" && originalSupplierInvoice && grossAmount > originalSupplierInvoice.grossAmount) {
+      throw createError(409, "credit_amount_exceeds_original", "Supplier credit note exceeds the original supplier invoice amount.");
+    }
     const documentHash = buildInvoiceDocumentHash({
       documentContext,
       fallbackValue: {
@@ -925,6 +999,8 @@ export function createApEngine({
     });
     const fingerprintHash = buildSupplierInvoiceFingerprint({
       supplierId: supplier.supplierId,
+      invoiceType: resolvedInvoiceType,
+      originalSupplierInvoiceId: originalSupplierInvoice?.supplierInvoiceId || null,
       externalInvoiceRef: normalizedExternalInvoiceRef,
       invoiceDate: resolvedInvoiceDate,
       grossAmount,
@@ -985,6 +1061,9 @@ export function createApEngine({
       duplicateCheckStatus: nearDuplicate ? "suspect_duplicate" : "cleared",
       duplicateFingerprintHash: fingerprintHash,
       duplicateOfSupplierInvoiceId: nearDuplicate?.supplierInvoiceId || null,
+      invoiceType: resolvedInvoiceType,
+      originalSupplierInvoiceId: originalSupplierInvoice?.supplierInvoiceId || null,
+      creditReasonCode: normalizeOptionalText(creditReasonCode),
       classificationCaseId: normalizeOptionalText(classificationCaseId),
       classificationCaseStatus: null,
       classificationReviewReasonCodes: [],
@@ -1375,23 +1454,26 @@ export function createApEngine({
       supplier
     });
     const groupedJournalLines = mergeJournalLines(journalLines);
+    const isCreditNote = invoice.invoiceType === "credit_note";
     const posted = ledgerPlatform.applyPostingIntent({
       companyId: invoice.companyId,
       journalDate: invoice.invoiceDate,
-      recipeCode: "AP_INVOICE",
-      postingSignalCode: "ap.invoice.posted",
-      voucherSeriesPurposeCode: "AP_INVOICE",
+      recipeCode: isCreditNote ? "AP_CREDIT_NOTE" : "AP_INVOICE",
+      postingSignalCode: isCreditNote ? "ap.credit_note.posted" : "ap.invoice.posted",
+      voucherSeriesPurposeCode: isCreditNote ? "AP_CREDIT_NOTE" : "AP_INVOICE",
       fallbackVoucherSeriesCode: "E",
-      sourceType: "AP_INVOICE",
+      sourceType: isCreditNote ? "AP_CREDIT_NOTE" : "AP_INVOICE",
       sourceId: invoice.supplierInvoiceId,
       sourceObjectVersion: invoice.duplicateFingerprintHash,
       actorId,
-      idempotencyKey: `ap_invoice_post:${invoice.supplierInvoiceId}:${invoice.duplicateFingerprintHash}`,
-      description: `Supplier invoice ${invoice.externalInvoiceRef}`,
+      idempotencyKey: `${isCreditNote ? "ap_credit_note_post" : "ap_invoice_post"}:${invoice.supplierInvoiceId}:${invoice.duplicateFingerprintHash}`,
+      description: `${isCreditNote ? "Supplier credit note" : "Supplier invoice"} ${invoice.externalInvoiceRef}`,
       metadataJson: {
         pipelineStage: "ap_supplier_invoice_posting",
         documentId: invoice.documentId,
-        supplierInvoiceNo: invoice.supplierInvoiceNo
+        supplierInvoiceNo: invoice.supplierInvoiceNo,
+        invoiceType: invoice.invoiceType || "standard",
+        originalSupplierInvoiceId: invoice.originalSupplierInvoiceId || null
       },
       lines: groupedJournalLines
     });
@@ -1415,8 +1497,8 @@ export function createApEngine({
       apOpenItemId: crypto.randomUUID(),
       companyId: invoice.companyId,
       supplierInvoiceId: invoice.supplierInvoiceId,
-      originalAmount: invoice.grossAmount,
-      openAmount: invoice.grossAmount,
+      originalAmount: isCreditNote ? roundMoney(0 - invoice.grossAmount) : invoice.grossAmount,
+      openAmount: isCreditNote ? roundMoney(0 - invoice.grossAmount) : invoice.grossAmount,
       reservedAmount: 0,
       paidAmount: 0,
       dueOn: invoice.dueDate,
@@ -1453,7 +1535,9 @@ export function createApEngine({
           continue;
         }
         const purchaseOrderLine = requirePurchaseOrderLine(purchaseOrder, line.purchaseOrderMatchedLineId);
-        purchaseOrderLine.invoicedQuantity = roundQuantity(purchaseOrderLine.invoicedQuantity + line.quantity);
+        purchaseOrderLine.invoicedQuantity = roundQuantity(
+          Math.max(0, purchaseOrderLine.invoicedQuantity + (isCreditNote ? 0 - line.quantity : line.quantity))
+        );
       }
       purchaseOrder.updatedAt = nowIso(clock);
     }
@@ -1468,7 +1552,7 @@ export function createApEngine({
       action: "ap.supplier_invoice.posted",
       entityType: "ap_supplier_invoice",
       entityId: invoice.supplierInvoiceId,
-      explanation: `Posted supplier invoice ${invoice.externalInvoiceRef}.`
+      explanation: `${isCreditNote ? "Posted supplier credit note" : "Posted supplier invoice"} ${invoice.externalInvoiceRef}.`
     });
     return presentSupplierInvoice(state, invoice);
   }
@@ -1514,6 +1598,9 @@ export function createApEngine({
     openItem.updatedAt = nowIso(clock);
     if (invoice.status !== "posted") {
       throw createError(409, "supplier_invoice_not_posted", "Only posted supplier invoices can enter payment proposals.");
+    }
+    if (invoice.invoiceType === "credit_note" || Number(openItem.openAmount || 0) <= 0) {
+      throw createError(409, "credit_note_not_payable", "Supplier credit notes and non-positive AP balances cannot enter payment proposals.");
     }
     if (invoice.reviewRequired || supplier.paymentBlocked === true || invoice.paymentHold === true) {
       throw createError(409, "payment_hold_active", "Supplier invoice is blocked from payment until risk or review is cleared.");
@@ -2027,10 +2114,13 @@ function refreshSupplierInvoiceControls({
     ...(invoice.status === "posted" ? [] : ["invoice_not_posted"]),
     ...(invoice.reviewRequired ? ["review_required"] : []),
     ...(invoice.paymentHoldReasonCodes || []),
+    ...(invoice.invoiceType === "credit_note" ? ["credit_note_not_payable"] : []),
     ...(hasSupplierPaymentDetails(supplier) ? [] : ["supplier_payment_details_missing"])
   ]);
   invoice.paymentReadinessStatus =
-    invoice.paymentReadinessReasonCodes.length === 0
+    invoice.invoiceType === "credit_note"
+      ? "not_applicable"
+      : invoice.paymentReadinessReasonCodes.length === 0
       ? "ready"
       : invoice.status === "posted"
         ? "blocked"
@@ -2388,7 +2478,9 @@ function normalizeSupplierInvoiceLines({
   documentContext,
   supplier,
   purchaseOrder,
+  invoiceType = "standard",
   companyId,
+  ledgerPlatform,
   vatPlatform,
   actorId,
   correlationId
@@ -2444,6 +2536,7 @@ function normalizeSupplierInvoiceLines({
       companyId,
       supplier,
       line,
+      invoiceType,
       netAmount,
       quantity,
       purchaseOrderLine,
@@ -2451,9 +2544,16 @@ function normalizeSupplierInvoiceLines({
       actorId,
       correlationId
     });
+    const allocationRequirements = collectApLineAllocationRequirements({
+      ledgerPlatform,
+      companyId,
+      expenseAccountNumber,
+      dimensionsJson
+    });
     const reviewQueueCodes = uniqueStrings([
       ...(expenseAccountNumber ? [] : ["coding_required"]),
-      ...(vatProposal.reviewRequired ? vatProposal.reviewQueueCodes : [])
+      ...(vatProposal.reviewRequired ? vatProposal.reviewQueueCodes : []),
+      ...(allocationRequirements.reviewRequired ? ["allocation_review_required"] : [])
     ]);
 
     return {
@@ -2465,6 +2565,10 @@ function normalizeSupplierInvoiceLines({
       netAmount,
       expenseAccountNumber,
       dimensionsJson,
+      allocationRequiredFieldCodes: allocationRequirements.requiredFieldCodes,
+      allocationMissingFieldCodes: allocationRequirements.missingFieldCodes,
+      allocationInvalidFieldCodes: allocationRequirements.invalidFieldCodes,
+      allocationReviewRequired: allocationRequirements.reviewRequired,
       goodsOrServices: normalizeOptionalText(line.goodsOrServices)?.toLowerCase() === "goods" ? "goods" : "services",
       importCaseRequired: line.importCaseRequired === true,
       reverseChargeFlag: line.reverseChargeFlag === true || supplier.reverseChargeDefault === true,
@@ -2490,6 +2594,7 @@ function buildApVatProposal({
   companyId,
   supplier,
   line,
+  invoiceType = "standard",
   netAmount,
   quantity,
   purchaseOrderLine,
@@ -2519,7 +2624,7 @@ function buildApVatProposal({
     actorId,
     correlationId,
     transactionLine: {
-      source_type: "AP_INVOICE",
+      source_type: invoiceType === "credit_note" ? "AP_CREDIT_NOTE" : "AP_INVOICE",
       source_id: `${supplier.supplierId}:${line.description}:${quantity}`,
       supply_type: "purchase",
       seller_country: supplier.countryCode,
@@ -2532,7 +2637,8 @@ function buildApVatProposal({
       buyer_is_taxable_person: true,
       construction_service_flag: line.constructionServiceFlag === true,
       vat_code_candidate: vatCodeCandidate,
-      deduction_ratio: line.deductionRatio == null ? 1 : line.deductionRatio
+      deduction_ratio: line.deductionRatio == null ? 1 : line.deductionRatio,
+      credit_note_flag: invoiceType === "credit_note"
     }
   });
   const vatDecision = vatEvaluation.vatDecision;
@@ -2612,6 +2718,144 @@ function buildReviewVatProposal(reviewQueueCode, explanation) {
     vatDecisionId: null,
     vatReviewQueueItemId: null
   };
+}
+
+function collectApLineAllocationRequirements({ ledgerPlatform, companyId, expenseAccountNumber, dimensionsJson = {} }) {
+  if (!expenseAccountNumber || !ledgerPlatform || typeof ledgerPlatform.listLedgerAccounts !== "function") {
+    return {
+      requiredFieldCodes: [],
+      missingFieldCodes: [],
+      invalidFieldCodes: [],
+      reviewRequired: false
+    };
+  }
+  const account = ledgerPlatform
+    .listLedgerAccounts({ companyId })
+    .find((candidate) => candidate.accountNumber === expenseAccountNumber);
+  const catalog =
+    typeof ledgerPlatform.listLedgerDimensions === "function" ? ledgerPlatform.listLedgerDimensions({ companyId }) : null;
+  const requiredFieldCodes = new Set();
+  const missingFieldCodes = new Set();
+  const invalidFieldCodes = new Set();
+  for (const requiredDimensionKey of account?.requiredDimensionKeys || []) {
+    const fieldCode = mapDimensionKeyToApFieldCode(requiredDimensionKey);
+    if (!fieldCode) {
+      continue;
+    }
+    requiredFieldCodes.add(fieldCode);
+    const value = normalizeOptionalText(dimensionsJson?.[requiredDimensionKey]);
+    if (!value) {
+      missingFieldCodes.add(fieldCode);
+      continue;
+    }
+    if (!ledgerDimensionValueExists({ catalog, dimensionKey: requiredDimensionKey, value })) {
+      invalidFieldCodes.add(fieldCode);
+    }
+  }
+  return {
+    requiredFieldCodes: [...requiredFieldCodes].sort(),
+    missingFieldCodes: [...missingFieldCodes].sort(),
+    invalidFieldCodes: [...invalidFieldCodes].sort(),
+    reviewRequired: missingFieldCodes.size > 0 || invalidFieldCodes.size > 0
+  };
+}
+
+function mapDimensionKeyToApFieldCode(dimensionKey) {
+  const mapping = {
+    projectId: "project_id",
+    costCenterCode: "cost_center_code",
+    businessAreaCode: "business_area_code",
+    serviceLineCode: "service_line_code"
+  };
+  return mapping[dimensionKey] || null;
+}
+
+function ledgerDimensionValueExists({ catalog, dimensionKey, value }) {
+  if (!catalog || !value) {
+    return false;
+  }
+  const bucketKey =
+    dimensionKey === "projectId"
+      ? "projects"
+      : dimensionKey === "costCenterCode"
+        ? "costCenters"
+        : dimensionKey === "businessAreaCode"
+          ? "businessAreas"
+          : dimensionKey === "serviceLineCode"
+            ? "serviceLines"
+            : null;
+  if (!bucketKey || !Array.isArray(catalog[bucketKey])) {
+    return false;
+  }
+  return catalog[bucketKey].some((entry) => entry.code === value && entry.status === "active");
+}
+
+function buildCreditNoteLineInputs({ originalInvoice, lines = null }) {
+  if (Array.isArray(lines) && lines.length > 0) {
+    return lines;
+  }
+  return (originalInvoice.lines || []).map((line) => ({
+    description: line.description,
+    quantity: line.quantity,
+    unitPrice: line.unitPrice,
+    expenseAccountNumber: line.expenseAccountNumber,
+    dimensionsJson: copy(line.dimensionsJson || {}),
+    goodsOrServices: line.goodsOrServices,
+    importCaseRequired: line.importCaseRequired === true,
+    reverseChargeFlag: line.reverseChargeFlag === true,
+    constructionServiceFlag: line.constructionServiceFlag === true,
+    deductionRatio: line.deductionRatio,
+    vatCode: line.vatCode,
+    receiptRequired: line.receiptRequired === true,
+    purchaseOrderLineId: line.purchaseOrderLineId || null,
+    purchaseOrderLineReference: line.purchaseOrderLineReference || null
+  }));
+}
+
+function buildApPaymentPreparation({ openItem, invoice, supplier }) {
+  const blockerCodes = uniqueStrings([
+    ...(openItem.status === "open" ? [] : [`open_item_${openItem.status}`]),
+    ...(invoice.paymentReadinessReasonCodes || []),
+    ...(invoice.invoiceType === "credit_note" ? ["credit_note_not_payable"] : []),
+    ...(Number(openItem.openAmount || 0) > 0 ? [] : ["non_positive_open_amount"]),
+    ...(hasSupplierPaymentDetails(supplier) ? [] : ["supplier_payment_details_missing"])
+  ]);
+  const status =
+    invoice.invoiceType === "credit_note" || Number(openItem.openAmount || 0) <= 0
+      ? "not_applicable"
+      : blockerCodes.length === 0
+        ? "ready"
+        : "blocked";
+  return copy({
+    apPaymentPreparationId: hashObject({
+      companyId: openItem.companyId,
+      apOpenItemId: openItem.apOpenItemId,
+      status,
+      blockerCodes
+    }),
+    companyId: openItem.companyId,
+    apOpenItemId: openItem.apOpenItemId,
+    supplierInvoiceId: invoice.supplierInvoiceId,
+    supplierId: supplier.supplierId,
+    invoiceType: invoice.invoiceType || "standard",
+    status,
+    blockerCodes,
+    reviewRequired: invoice.reviewRequired === true,
+    paymentHold: invoice.paymentHold === true,
+    amount: openItem.openAmount,
+    currencyCode: openItem.currencyCode,
+    dueOn: openItem.dueOn,
+    payeeName: supplier.paymentRecipient || supplier.legalName,
+    bankgiro: supplier.bankgiro || null,
+    plusgiro: supplier.plusgiro || null,
+    iban: supplier.iban || null,
+    bic: supplier.bic || null,
+    sourceStatus: {
+      openItemStatus: openItem.status,
+      invoiceStatus: invoice.status,
+      paymentReadinessStatus: invoice.paymentReadinessStatus || null
+    }
+  });
 }
 
 function resolvePurchaseOrderForInvoice({ state, companyId, purchaseOrderId = null, purchaseOrderNo = null }) {
@@ -2697,29 +2941,42 @@ function resolveToleranceProfile(toleranceProfileCode) {
 
 function buildSupplierInvoiceJournalLines({ invoice, supplier }) {
   const lines = [];
+  const isCreditNote = invoice.invoiceType === "credit_note";
   for (const invoiceLine of invoice.lines) {
     if (!invoiceLine.expenseAccountNumber) {
       throw createError(409, "supplier_invoice_line_account_required", "Supplier invoice line account is required before posting.");
     }
     lines.push({
       accountNumber: invoiceLine.expenseAccountNumber,
-      debitAmount: invoiceLine.netAmount,
-      creditAmount: 0,
+      debitAmount: isCreditNote ? 0 : invoiceLine.netAmount,
+      creditAmount: isCreditNote ? invoiceLine.netAmount : 0,
       dimensionJson: copy(invoiceLine.dimensionsJson || {})
     });
     for (const vatPostingEntry of invoiceLine.vatProposal.postingEntries || []) {
       lines.push({
         accountNumber: resolveVatAccountNumber(vatPostingEntry, invoiceLine.vatProposal),
-        debitAmount: vatPostingEntry.direction === "debit" ? Number(vatPostingEntry.amount || 0) : 0,
-        creditAmount: vatPostingEntry.direction === "credit" ? Number(vatPostingEntry.amount || 0) : 0,
+        debitAmount: isCreditNote
+          ? vatPostingEntry.direction === "credit"
+            ? Math.abs(Number(vatPostingEntry.amount || 0))
+            : 0
+          : vatPostingEntry.direction === "debit"
+            ? Math.abs(Number(vatPostingEntry.amount || 0))
+            : 0,
+        creditAmount: isCreditNote
+          ? vatPostingEntry.direction === "debit"
+            ? Math.abs(Number(vatPostingEntry.amount || 0))
+            : 0
+          : vatPostingEntry.direction === "credit"
+            ? Math.abs(Number(vatPostingEntry.amount || 0))
+            : 0,
         dimensionJson: copy(invoiceLine.dimensionsJson || {})
       });
     }
   }
   lines.push({
     accountNumber: resolveLiabilityAccountNumber(supplier),
-    debitAmount: 0,
-    creditAmount: invoice.grossAmount,
+    debitAmount: isCreditNote ? invoice.grossAmount : 0,
+    creditAmount: isCreditNote ? 0 : invoice.grossAmount,
     dimensionJson: {}
   });
   return lines;
@@ -2821,6 +3078,8 @@ function postApLifecycleJournal({
 
 function buildSupplierInvoiceFingerprint({
   supplierId,
+  invoiceType = "standard",
+  originalSupplierInvoiceId = null,
   externalInvoiceRef,
   invoiceDate,
   grossAmount,
@@ -2830,6 +3089,8 @@ function buildSupplierInvoiceFingerprint({
 }) {
   return hashObject({
     supplierId,
+    invoiceType: assertAllowed(invoiceType, AP_SUPPLIER_INVOICE_TYPES, "supplier_invoice_type_invalid"),
+    originalSupplierInvoiceId: normalizeOptionalText(originalSupplierInvoiceId),
     externalInvoiceRef: requireText(externalInvoiceRef, "supplier_invoice_external_ref_required").toUpperCase(),
     invoiceDate,
     grossAmount: roundMoney(grossAmount),

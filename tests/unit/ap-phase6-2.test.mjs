@@ -240,3 +240,132 @@ test("Phase 6.2 blocks posting when 3-way matching finds receipt variance", () =
     /approved without open variances/i
   );
 });
+
+test("Phase 9.2 blocks AP posting for missing governed allocation dimensions and carries approved allocations into journals", () => {
+  const clock = () => new Date("2026-03-28T09:00:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const vat = createVatPlatform({ clock, ledgerPlatform: ledger });
+  const ap = createApEngine({
+    clock,
+    seedDemo: false,
+    vatPlatform: vat,
+    ledgerPlatform: ledger
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
+    actorId: "user-1"
+  });
+  ledger.upsertLedgerDimensionValue({
+    companyId: COMPANY_ID,
+    dimensionType: "serviceLines",
+    code: "SL-OPS",
+    label: "Operations",
+    locked: false,
+    sourceDomain: "ap",
+    actorId: "user-1"
+  });
+  ledger.upsertLedgerAccount({
+    companyId: COMPANY_ID,
+    accountNumber: "5410",
+    accountName: "Forbrukningsinventarier",
+    accountClass: "5",
+    requiredDimensionKeys: ["serviceLineCode"],
+    locked: false,
+    changeReasonCode: "phase_9_2_ap_allocation_dimensions",
+    actorId: "user-1"
+  });
+
+  const supplier = ap.createSupplier({
+    companyId: COMPANY_ID,
+    legalName: "Allocation Supplier AB",
+    countryCode: "SE",
+    currencyCode: "SEK",
+    paymentTermsCode: "NET30",
+    bankgiro: "7000-7000",
+    paymentRecipient: "Allocation Supplier AB",
+    defaultExpenseAccountNumber: "5410",
+    defaultVatCode: "VAT_SE_DOMESTIC_25",
+    requiresPo: false,
+    actorId: "user-1"
+  });
+
+  const missingAllocationInvoice = ap.ingestSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierId: supplier.supplierId,
+    externalInvoiceRef: "ALLOC-MISSING-001",
+    invoiceDate: "2026-03-28",
+    dueDate: "2026-04-27",
+    sourceChannel: "api",
+    lines: [
+      {
+        description: "Managed services",
+        quantity: 1,
+        unitPrice: 1000,
+        expenseAccountNumber: "5410",
+        vatCode: "VAT_SE_DOMESTIC_25"
+      }
+    ],
+    actorId: "user-1"
+  });
+  assert.equal(missingAllocationInvoice.reviewRequired, true);
+  assert.equal(missingAllocationInvoice.reviewQueueCodes.includes("allocation_review_required"), true);
+  assert.deepEqual(missingAllocationInvoice.lines[0].allocationRequiredFieldCodes, ["service_line_code"]);
+  assert.deepEqual(missingAllocationInvoice.lines[0].allocationMissingFieldCodes, ["service_line_code"]);
+
+  const matchedMissing = ap.runSupplierInvoiceMatch({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: missingAllocationInvoice.supplierInvoiceId,
+    actorId: "user-1"
+  });
+  assert.equal(matchedMissing.invoice.reviewRequired, true);
+  assert.throws(
+    () =>
+      ap.postSupplierInvoice({
+        companyId: COMPANY_ID,
+        supplierInvoiceId: missingAllocationInvoice.supplierInvoiceId,
+        actorId: "user-1"
+      }),
+    /approved without open variances/i
+  );
+
+  const dimensionedInvoice = ap.ingestSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierId: supplier.supplierId,
+    externalInvoiceRef: "ALLOC-READY-001",
+    invoiceDate: "2026-03-28",
+    dueDate: "2026-04-27",
+    sourceChannel: "api",
+    lines: [
+      {
+        description: "Managed services",
+        quantity: 1,
+        unitPrice: 1000,
+        expenseAccountNumber: "5410",
+        vatCode: "VAT_SE_DOMESTIC_25",
+        dimensionsJson: {
+          serviceLineCode: "SL-OPS"
+        }
+      }
+    ],
+    actorId: "user-1"
+  });
+  const matchedReady = ap.runSupplierInvoiceMatch({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: dimensionedInvoice.supplierInvoiceId,
+    actorId: "user-1"
+  });
+  assert.equal(matchedReady.invoice.reviewRequired, false);
+  const posted = ap.postSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: dimensionedInvoice.supplierInvoiceId,
+    actorId: "user-1"
+  });
+  const journal = ledger.getJournalEntry({
+    companyId: COMPANY_ID,
+    journalEntryId: posted.journalEntryId
+  });
+  const expenseLine = journal.lines.find((line) => line.accountNumber === "5410");
+  assert.equal(expenseLine.dimensionJson.serviceLineCode, "SL-OPS");
+});

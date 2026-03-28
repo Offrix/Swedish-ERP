@@ -206,6 +206,130 @@ test("Phase 6.3 e2e flow moves a supplier invoice from approval to bank return a
   }
 });
 
+test("Phase 9.2 e2e flow creates a supplier credit note and keeps it outside live payment prep", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-11-08T08:00:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true,
+      phase5ArEnabled: true,
+      phase6ApEnabled: true
+    }
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminSessionToken = await loginWithRequiredFactors({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    await requestJson(baseUrl, "/v1/ledger/chart/install", {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: { companyId: COMPANY_ID }
+    });
+
+    const supplier = await requestJson(baseUrl, "/v1/ap/suppliers", {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        legalName: "E2E Credit Supplier AB",
+        countryCode: "SE",
+        currencyCode: "SEK",
+        paymentTermsCode: "NET30",
+        paymentRecipient: "E2E Credit Supplier AB",
+        bankgiro: "7777-1212",
+        defaultExpenseAccountNumber: "5410",
+        defaultVatCode: "VAT_SE_DOMESTIC_25",
+        requiresPo: false
+      }
+    });
+
+    const invoice = await requestJson(baseUrl, "/v1/ap/invoices/ingest", {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        supplierId: supplier.supplierId,
+        externalInvoiceRef: "E2E-CREDIT-001",
+        invoiceDate: "2026-11-08",
+        dueDate: "2026-12-08",
+        sourceChannel: "api",
+        lines: [
+          {
+            description: "Consulting block",
+            quantity: 1,
+            unitPrice: 1000,
+            expenseAccountNumber: "5410",
+            vatCode: "VAT_SE_DOMESTIC_25"
+          }
+        ]
+      }
+    });
+    await requestJson(baseUrl, `/v1/ap/invoices/${invoice.supplierInvoiceId}/match`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+    const posted = await requestJson(baseUrl, `/v1/ap/invoices/${invoice.supplierInvoiceId}/post`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+
+    const credit = await requestJson(baseUrl, `/v1/ap/invoices/${posted.supplierInvoiceId}/credits`, {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        externalInvoiceRef: "E2E-CREDIT-001-CN",
+        invoiceDate: "2026-11-09",
+        dueDate: "2026-11-09",
+        creditReasonCode: "quality_claim"
+      }
+    });
+    await requestJson(baseUrl, `/v1/ap/invoices/${credit.supplierInvoiceId}/match`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+    const postedCredit = await requestJson(baseUrl, `/v1/ap/invoices/${credit.supplierInvoiceId}/post`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+
+    const paymentPreparation = await requestJson(
+      baseUrl,
+      `/v1/ap/open-items/${postedCredit.apOpenItemId}/payment-preparation?companyId=${COMPANY_ID}`,
+      {
+        token: adminSessionToken
+      }
+    );
+    assert.equal(paymentPreparation.invoiceType, "credit_note");
+    assert.equal(paymentPreparation.status, "not_applicable");
+    assert.equal(paymentPreparation.blockerCodes.includes("credit_note_not_payable"), true);
+  } finally {
+    await stopServer(server);
+  }
+});
+
 async function loginWithRequiredFactors({ baseUrl, platform, companyId, email }) {
   const started = await requestJson(baseUrl, "/v1/auth/login", {
     method: "POST",

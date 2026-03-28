@@ -17,7 +17,7 @@ export const DEFAULT_VOUCHER_SERIES_PURPOSE_MAP = Object.freeze({
   B: Object.freeze(["AR_INVOICE", "AR_DUNNING"]),
   C: Object.freeze(["AR_CREDIT_NOTE"]),
   D: Object.freeze(["AR_PAYMENT"]),
-  E: Object.freeze(["AP_INVOICE", "AP_PAYMENT"]),
+  E: Object.freeze(["AP_INVOICE", "AP_CREDIT_NOTE", "AP_PAYMENT"]),
   H: Object.freeze(["PAYROLL_RUN", "PAYROLL_CORRECTION", "PAYROLL_PAYOUT_MATCH"]),
   I: Object.freeze(["VAT_SETTLEMENT"]),
   V: Object.freeze(["LEDGER_REVERSAL", "AR_WRITEOFF"]),
@@ -135,6 +135,16 @@ export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
     defaultVoucherSeriesPurposeCode: "AP_INVOICE",
     fallbackVoucherSeriesCode: "E",
     defaultSignalCode: "ap.invoice.posted"
+  }),
+  Object.freeze({
+    recipeCode: "AP_CREDIT_NOTE",
+    version: "2026.1",
+    sourceDomain: "ap",
+    journalType: "operational_posting",
+    allowedSourceTypes: Object.freeze(["AP_CREDIT_NOTE"]),
+    defaultVoucherSeriesPurposeCode: "AP_CREDIT_NOTE",
+    fallbackVoucherSeriesCode: "E",
+    defaultSignalCode: "ap.credit_note.posted"
   }),
   Object.freeze({
     recipeCode: "AP_PAYMENT_RESERVE",

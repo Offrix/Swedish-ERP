@@ -348,6 +348,108 @@ test("Phase 6.4 direct platform flow blocks person-linked AP documents from post
   assert.equal(rematched.invoice.reviewRequired, true);
 });
 
+test("Phase 9.2 direct platform flow posts AP credit notes with dedicated recipe and exposes non-payable payment prep", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-10-28T08:00:00Z")
+  });
+  platform.installLedgerCatalog({
+    companyId: COMPANY_ID,
+    actorId: "system"
+  });
+
+  const adminSessionToken = await loginWithRequiredFactors({ platform, companyId: COMPANY_ID, email: DEMO_ADMIN_EMAIL });
+  assert.ok(adminSessionToken);
+
+  const supplier = platform.createSupplier({
+    companyId: COMPANY_ID,
+    legalName: "Credit Supplier AB",
+    countryCode: "SE",
+    currencyCode: "SEK",
+    paymentTermsCode: "NET30",
+    paymentRecipient: "Credit Supplier AB",
+    bankgiro: "6666-6666",
+    defaultExpenseAccountNumber: "5410",
+    defaultVatCode: "VAT_SE_DOMESTIC_25",
+    requiresPo: false,
+    actorId: "admin"
+  });
+
+  const original = platform.ingestSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierId: supplier.supplierId,
+    externalInvoiceRef: "SUP-9201",
+    invoiceDate: "2026-10-28",
+    dueDate: "2026-11-27",
+    sourceChannel: "api",
+    lines: [
+      {
+        description: "Office services",
+        quantity: 1,
+        unitPrice: 1000,
+        expenseAccountNumber: "5410",
+        vatCode: "VAT_SE_DOMESTIC_25"
+      }
+    ],
+    actorId: "admin"
+  });
+  platform.runSupplierInvoiceMatch({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: original.supplierInvoiceId,
+    actorId: "admin"
+  });
+  const postedOriginal = platform.postSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: original.supplierInvoiceId,
+    actorId: "admin"
+  });
+
+  const credit = platform.createSupplierCreditNote({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: postedOriginal.supplierInvoiceId,
+    externalInvoiceRef: "SUP-9201-CR",
+    invoiceDate: "2026-10-29",
+    dueDate: "2026-10-29",
+    creditReasonCode: "supplier_price_adjustment",
+    actorId: "admin"
+  });
+  assert.equal(credit.invoiceType, "credit_note");
+  assert.equal(credit.originalSupplierInvoiceId, postedOriginal.supplierInvoiceId);
+
+  const matchedCredit = platform.runSupplierInvoiceMatch({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: credit.supplierInvoiceId,
+    actorId: "admin"
+  });
+  assert.equal(matchedCredit.invoice.reviewRequired, false);
+
+  const postedCredit = platform.postSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: credit.supplierInvoiceId,
+    actorId: "admin"
+  });
+  const creditJournal = platform.getJournalEntry({
+    companyId: COMPANY_ID,
+    journalEntryId: postedCredit.journalEntryId
+  });
+  assert.equal(creditJournal.sourceType, "AP_CREDIT_NOTE");
+  assert.equal(creditJournal.metadataJson.postingRecipeCode, "AP_CREDIT_NOTE");
+  assert.equal(sumCredits(creditJournal, "5410"), 1000);
+  assert.equal(sumCredits(creditJournal, "2640"), 250);
+  assert.equal(sumDebits(creditJournal, "2410"), 1250);
+
+  const creditOpenItem = platform.getApOpenItem({
+    companyId: COMPANY_ID,
+    apOpenItemId: postedCredit.apOpenItemId
+  });
+  assert.equal(creditOpenItem.openAmount, -1250);
+  const paymentPreparation = platform.getApPaymentPreparation({
+    companyId: COMPANY_ID,
+    apOpenItemId: creditOpenItem.apOpenItemId
+  });
+  assert.equal(paymentPreparation.status, "not_applicable");
+  assert.equal(paymentPreparation.blockerCodes.includes("credit_note_not_payable"), true);
+});
+
 async function loginWithRequiredFactors({ platform, companyId, email }) {
   const started = platform.startLogin({
     companyId,

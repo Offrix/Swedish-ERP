@@ -269,6 +269,166 @@ test("Phase 6.3 API blocks unauthorized payments, books payouts correctly and re
   }
 });
 
+test("Phase 9.2 API creates AP credit notes and exposes non-payable payment preparation", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-10-03T08:00:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true,
+      phase5ArEnabled: true,
+      phase6ApEnabled: true
+    }
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminSessionToken = await loginWithRequiredFactors({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    await requestJson(baseUrl, "/v1/ledger/chart/install", {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: { companyId: COMPANY_ID }
+    });
+
+    const supplier = await requestJson(baseUrl, "/v1/ap/suppliers", {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        legalName: "API Credit Supplier AB",
+        countryCode: "SE",
+        currencyCode: "SEK",
+        paymentTermsCode: "NET30",
+        bankgiro: "1212-1212",
+        paymentRecipient: "API Credit Supplier AB",
+        defaultExpenseAccountNumber: "5410",
+        defaultVatCode: "VAT_SE_DOMESTIC_25",
+        requiresPo: false
+      }
+    });
+
+    const original = await requestJson(baseUrl, "/v1/ap/invoices/ingest", {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        supplierId: supplier.supplierId,
+        externalInvoiceRef: "API-CR-001",
+        invoiceDate: "2026-10-03",
+        dueDate: "2026-11-02",
+        sourceChannel: "api",
+        lines: [
+          {
+            description: "Managed service",
+            quantity: 1,
+            unitPrice: 1000,
+            expenseAccountNumber: "5410",
+            vatCode: "VAT_SE_DOMESTIC_25"
+          }
+        ]
+      }
+    });
+    await requestJson(baseUrl, `/v1/ap/invoices/${original.supplierInvoiceId}/match`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+    const postedOriginal = await requestJson(baseUrl, `/v1/ap/invoices/${original.supplierInvoiceId}/post`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+
+    const credit = await requestJson(baseUrl, `/v1/ap/invoices/${postedOriginal.supplierInvoiceId}/credits`, {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        externalInvoiceRef: "API-CR-001-CN",
+        invoiceDate: "2026-10-04",
+        dueDate: "2026-10-04",
+        creditReasonCode: "supplier_rebate"
+      }
+    });
+    assert.equal(credit.invoiceType, "credit_note");
+    assert.equal(credit.originalSupplierInvoiceId, postedOriginal.supplierInvoiceId);
+
+    await requestJson(baseUrl, `/v1/ap/invoices/${credit.supplierInvoiceId}/match`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+    const postedCredit = await requestJson(baseUrl, `/v1/ap/invoices/${credit.supplierInvoiceId}/post`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+
+    const creditJournal = platform.getJournalEntry({
+      companyId: COMPANY_ID,
+      journalEntryId: postedCredit.journalEntryId
+    });
+    assert.equal(creditJournal.metadataJson.postingRecipeCode, "AP_CREDIT_NOTE");
+    assert.equal(sumDebits(creditJournal, "2410"), 1250);
+    assert.equal(sumCredits(creditJournal, "5410"), 1000);
+
+    const paymentPreparation = await requestJson(
+      baseUrl,
+      `/v1/ap/open-items/${postedCredit.apOpenItemId}/payment-preparation?companyId=${COMPANY_ID}`,
+      {
+        token: adminSessionToken
+      }
+    );
+    assert.equal(paymentPreparation.status, "not_applicable");
+    assert.equal(paymentPreparation.blockerCodes.includes("credit_note_not_payable"), true);
+
+    const bankAccount = await requestJson(baseUrl, "/v1/banking/accounts", {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        bankName: "Nordea",
+        ledgerAccountNumber: "1110",
+        accountNumber: "555500001234",
+        currencyCode: "SEK",
+        isDefault: true
+      }
+    });
+    const blockedProposal = await requestJson(baseUrl, "/v1/banking/payment-proposals", {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 409,
+      body: {
+        companyId: COMPANY_ID,
+        bankAccountId: bankAccount.bankAccountId,
+        apOpenItemIds: [postedCredit.apOpenItemId],
+        paymentDate: "2026-10-04"
+      }
+    });
+    assert.equal(blockedProposal.error, "credit_note_not_payable");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 async function loginWithRequiredFactors({ baseUrl, platform, companyId, email }) {
   const started = await requestJson(baseUrl, "/v1/auth/login", {
     method: "POST",

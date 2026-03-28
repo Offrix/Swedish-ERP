@@ -18,6 +18,7 @@ export type ApSupplierInvoiceStatus =
   | "paid"
   | "credited"
   | "voided";
+export type ApSupplierInvoiceType = "standard" | "credit_note";
 export type ApDuplicateStatus = "not_checked" | "exact_duplicate" | "suspect_duplicate" | "cleared";
 export type ApMatchMode = "none" | "two_way" | "three_way";
 export type ApMatchVarianceStatus = "open" | "accepted" | "corrected" | "closed";
@@ -154,6 +155,10 @@ export interface ApSupplierInvoiceLine {
   readonly netAmount: number;
   readonly expenseAccountNumber: string | null;
   readonly dimensionsJson: Record<string, string>;
+  readonly allocationRequiredFieldCodes: readonly string[];
+  readonly allocationMissingFieldCodes: readonly string[];
+  readonly allocationInvalidFieldCodes: readonly string[];
+  readonly allocationReviewRequired: boolean;
   readonly goodsOrServices: "goods" | "services";
   readonly reverseChargeFlag: boolean;
   readonly constructionServiceFlag: boolean;
@@ -239,6 +244,10 @@ export interface ApOpenItem {
   readonly status: string;
   readonly paymentHold: boolean;
   readonly paymentHoldReasonCodes: readonly string[];
+  readonly paymentReadinessStatus?: string | null;
+  readonly paymentReadinessReasonCodes?: readonly string[];
+  readonly importCaseId?: string | null;
+  readonly classificationCaseId?: string | null;
   readonly paymentProposalId: string | null;
   readonly paymentOrderId: string | null;
   readonly lastPaymentOrderId: string | null;
@@ -264,6 +273,9 @@ export interface ApSupplierInvoice {
   readonly documentId: string | null;
   readonly documentVersionId: string | null;
   readonly sourceChannel: string;
+  readonly invoiceType: ApSupplierInvoiceType;
+  readonly originalSupplierInvoiceId: string | null;
+  readonly creditReasonCode: string | null;
   readonly externalInvoiceRef: string;
   readonly invoiceDate: string;
   readonly dueDate: string;
@@ -285,6 +297,8 @@ export interface ApSupplierInvoice {
   readonly approvalSteps: readonly ApSupplierInvoiceApprovalStep[];
   readonly paymentHold: boolean;
   readonly paymentHoldReasonCodes: readonly string[];
+  readonly paymentReadinessStatus?: string | null;
+  readonly paymentReadinessReasonCodes?: readonly string[];
   readonly lines: readonly ApSupplierInvoiceLine[];
   readonly latestMatchRunId: string | null;
   readonly journalEntryId: string | null;
@@ -298,6 +312,32 @@ export interface ApSupplierInvoice {
   readonly paidAt: string | null;
   readonly variances?: readonly ApSupplierInvoiceVariance[];
   readonly matchRun?: ApSupplierInvoiceMatchRun | null;
+}
+
+export interface ApPaymentPreparation {
+  readonly apPaymentPreparationId: string;
+  readonly companyId: string;
+  readonly apOpenItemId: string;
+  readonly supplierInvoiceId: string;
+  readonly supplierId: string;
+  readonly invoiceType: ApSupplierInvoiceType;
+  readonly status: string;
+  readonly blockerCodes: readonly string[];
+  readonly reviewRequired: boolean;
+  readonly paymentHold: boolean;
+  readonly amount: number;
+  readonly currencyCode: string;
+  readonly dueOn: string;
+  readonly payeeName: string;
+  readonly bankgiro: string | null;
+  readonly plusgiro: string | null;
+  readonly iban: string | null;
+  readonly bic: string | null;
+  readonly sourceStatus: {
+    readonly openItemStatus: string;
+    readonly invoiceStatus: string;
+    readonly paymentReadinessStatus: string | null;
+  };
 }
 
 export interface ApImportBatchItem {

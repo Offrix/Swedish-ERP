@@ -606,7 +606,11 @@ export function createBankingEngine({
       const openItem = apPlatform.getApOpenItem({ companyId: resolvedCompanyId, apOpenItemId });
       const invoice = apPlatform.getSupplierInvoice({ companyId: resolvedCompanyId, supplierInvoiceId: openItem.supplierInvoiceId });
       const supplier = apPlatform.getSupplier({ companyId: resolvedCompanyId, supplierId: invoice.supplierId });
-      validateOpenItemForProposal({ openItem, invoice, supplier, bankAccount });
+      const paymentPreparation =
+        typeof apPlatform.getApPaymentPreparation === "function"
+          ? apPlatform.getApPaymentPreparation({ companyId: resolvedCompanyId, apOpenItemId })
+          : null;
+      validateOpenItemForProposal({ openItem, invoice, supplier, bankAccount, paymentPreparation });
       const order = {
         paymentOrderId: crypto.randomUUID(),
         companyId: resolvedCompanyId,
@@ -887,9 +891,19 @@ function ensureApPlatform(apPlatform) {
   }
 }
 
-function validateOpenItemForProposal({ openItem, invoice, supplier, bankAccount }) {
+function validateOpenItemForProposal({ openItem, invoice, supplier, bankAccount, paymentPreparation = null }) {
   if (openItem.status !== "open") throw createError(409, "ap_open_item_not_open", "Only open AP items can be selected.");
   if (invoice.status !== "posted") throw createError(409, "supplier_invoice_not_posted", "Only posted supplier invoices can be paid.");
+  if (Number(openItem.openAmount || 0) <= 0 || invoice.invoiceType === "credit_note") {
+    throw createError(409, "credit_note_not_payable", "Supplier credit notes and non-positive AP balances cannot be turned into payment proposals.");
+  }
+  if (paymentPreparation && paymentPreparation.status !== "ready") {
+    throw createError(
+      409,
+      "payment_not_ready",
+      `Supplier invoice is not payment-ready: ${(paymentPreparation.blockerCodes || []).join(", ")}.`
+    );
+  }
   if (invoice.paymentReadinessStatus && invoice.paymentReadinessStatus !== "ready") {
     throw createError(
       409,
