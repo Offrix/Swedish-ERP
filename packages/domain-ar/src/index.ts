@@ -94,6 +94,9 @@ export interface ArItem {
   readonly standardPrice: number;
   readonly revenueAccountNumber: string;
   readonly vatCode: string;
+  readonly costCenterCode: string | null;
+  readonly businessAreaCode: string | null;
+  readonly serviceLineCode: string | null;
   readonly recurringFlag: boolean;
   readonly projectBoundFlag: boolean;
   readonly createdAt: string;
@@ -131,6 +134,9 @@ export interface ArCommercialLine {
   readonly itemId: string | null;
   readonly itemCode: string | null;
   readonly projectId: string | null;
+  readonly costCenterCode: string | null;
+  readonly businessAreaCode: string | null;
+  readonly serviceLineCode: string | null;
   readonly description: string;
   readonly quantity: number;
   readonly unitCode: string;

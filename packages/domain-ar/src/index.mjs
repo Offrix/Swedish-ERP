@@ -434,6 +434,9 @@ export function createArEngine({
     standardPrice,
     revenueAccountNumber,
     vatCode,
+    costCenterCode = null,
+    businessAreaCode = null,
+    serviceLineCode = null,
     recurringFlag = false,
     projectBoundFlag = false,
     actorId = "system",
@@ -462,6 +465,9 @@ export function createArEngine({
       standardPrice: normalizeMoney(standardPrice, "ar_item_standard_price_invalid"),
       revenueAccountNumber: normalizeAccountNumber(revenueAccountNumber),
       vatCode: resolvedVatCode,
+      costCenterCode: normalizeOptionalText(costCenterCode),
+      businessAreaCode: normalizeOptionalText(businessAreaCode),
+      serviceLineCode: normalizeOptionalText(serviceLineCode),
       recurringFlag: recurringFlag === true,
       projectBoundFlag: projectBoundFlag === true,
       createdAt: nowIso(clock),
@@ -1181,6 +1187,7 @@ export function createArEngine({
       state,
       clock,
       vatPlatform,
+      ledgerPlatform,
       invoice: record,
       customer,
       originalInvoice,
@@ -1223,6 +1230,7 @@ export function createArEngine({
       state,
       clock,
       vatPlatform,
+      ledgerPlatform,
       invoice,
       customer,
       originalInvoice,
@@ -1263,7 +1271,8 @@ export function createArEngine({
       vatPlatform,
       companyId: invoice.companyId,
       invoice,
-      customer
+      customer,
+      ledgerPlatform
     });
     const posted = ledgerPlatform.applyPostingIntent({
       companyId: invoice.companyId,
@@ -3225,17 +3234,20 @@ function normalizeCommercialLine({ state, vatPlatform, companyId, currencyCode, 
   const description = requireText(line.description || item?.description || `Line ${lineNumber}`, "commercial_line_description_required");
   const revenueAccountNumber = normalizeAccountNumber(line.revenueAccountNumber || item?.revenueAccountNumber);
   const vatCode = ensureVatCodeExists(vatPlatform, companyId, line.vatCode || item?.vatCode);
-    return {
-      lineId: crypto.randomUUID(),
-      lineNumber,
-      itemId: item?.arItemId || null,
-      itemCode: item?.itemCode || normalizeOptionalText(line.itemCode),
-      projectId: normalizeOptionalText(line.projectId),
-      description,
-      quantity,
-      unitCode: requireText(line.unitCode || item?.unitCode || "ea", "commercial_line_unit_required"),
-      unitPrice,
-      lineAmount: roundMoney(quantity * unitPrice),
+  return {
+    lineId: crypto.randomUUID(),
+    lineNumber,
+    itemId: item?.arItemId || null,
+    itemCode: item?.itemCode || normalizeOptionalText(line.itemCode),
+    projectId: normalizeOptionalText(line.projectId),
+    costCenterCode: normalizeOptionalText(line.costCenterCode || item?.costCenterCode),
+    businessAreaCode: normalizeOptionalText(line.businessAreaCode || item?.businessAreaCode),
+    serviceLineCode: normalizeOptionalText(line.serviceLineCode || item?.serviceLineCode),
+    description,
+    quantity,
+    unitCode: requireText(line.unitCode || item?.unitCode || "ea", "commercial_line_unit_required"),
+    unitPrice,
+    lineAmount: roundMoney(quantity * unitPrice),
     revenueAccountNumber,
     vatCode,
     recurringFlag: line.recurringFlag === true || item?.recurringFlag === true,
@@ -3394,7 +3406,7 @@ function calculateVatAmount(vatRate, netAmount) {
   return roundMoney(Number(netAmount || 0) * (vatRate / 100));
 }
 
-function buildInvoiceJournalLines({ vatPlatform, companyId, invoice, customer }) {
+function buildInvoiceJournalLines({ vatPlatform, companyId, invoice, customer, ledgerPlatform = null }) {
   const sourceType = resolveInvoiceSourceType(invoice.invoiceType);
   const receivableAccountNumber = resolveCustomerReceivableAccount(customer);
   const journalLines = [];
@@ -3407,7 +3419,11 @@ function buildInvoiceJournalLines({ vatPlatform, companyId, invoice, customer })
     const vatAmount = calculateVatAmount(vatRate, line.lineAmount);
     const vatAccountNumber = resolveOutputVatAccountNumber(vatRate);
     if (invoice.invoiceType === "credit_note") {
-      journalLines.push(createJournalLine(line.revenueAccountNumber, lineNumber, line.lineAmount, 0, sourceType, invoice.customerInvoiceId));
+      journalLines.push(
+        createJournalLine(line.revenueAccountNumber, lineNumber, line.lineAmount, 0, sourceType, invoice.customerInvoiceId, {
+          dimensionJson: buildRevenueDimensionJson({ companyId, ledgerPlatform, line })
+        })
+      );
       totalDebit += line.lineAmount;
       lineNumber += 1;
       if (vatAmount > 0 && vatAccountNumber) {
@@ -3418,7 +3434,11 @@ function buildInvoiceJournalLines({ vatPlatform, companyId, invoice, customer })
       continue;
     }
 
-    journalLines.push(createJournalLine(line.revenueAccountNumber, lineNumber, 0, line.lineAmount, sourceType, invoice.customerInvoiceId));
+    journalLines.push(
+      createJournalLine(line.revenueAccountNumber, lineNumber, 0, line.lineAmount, sourceType, invoice.customerInvoiceId, {
+        dimensionJson: buildRevenueDimensionJson({ companyId, ledgerPlatform, line })
+      })
+    );
     totalCredit += line.lineAmount;
     lineNumber += 1;
     if (vatAmount > 0 && vatAccountNumber) {
@@ -3444,6 +3464,7 @@ function evaluateInvoiceFieldRulesSnapshot({
   state,
   clock,
   vatPlatform,
+  ledgerPlatform,
   invoice,
   customer,
   originalInvoice = null,
@@ -3477,6 +3498,17 @@ function evaluateInvoiceFieldRulesSnapshot({
   }
   if ((invoice.lines || []).some((line) => !line.vatCode)) {
     missingFieldCodes.push("line_vat_code");
+  }
+  const governedDimensionRequirements = collectInvoiceDimensionRequirements({
+    ledgerPlatform,
+    companyId: invoice.companyId,
+    invoiceLines: invoice.lines || []
+  });
+  for (const requiredFieldCode of governedDimensionRequirements.requiredFieldCodes) {
+    if (governedDimensionRequirements.missingFieldCodes.has(requiredFieldCode)) {
+      missingFieldCodes.push(requiredFieldCode);
+    }
+    requiredFieldCodes.push(requiredFieldCode);
   }
   if (invoice.invoiceType === "credit_note") {
     if (!invoice.originalInvoiceId || !originalInvoice) {
@@ -3542,6 +3574,13 @@ function evaluateInvoiceFieldRulesSnapshot({
       invoiceType: invoice.invoiceType,
       customerCountryCode: customer.countryCode,
       invoiceLineVatCodes: (invoice.lines || []).map((line) => line.vatCode),
+      revenueDimensions: (invoice.lines || []).map((line) => ({
+        lineId: line.lineId,
+        projectId: line.projectId || null,
+        costCenterCode: line.costCenterCode || null,
+        businessAreaCode: line.businessAreaCode || null,
+        serviceLineCode: line.serviceLineCode || null
+      })),
       husCaseId: invoice.husCaseId || null,
       originalInvoiceId: invoice.originalInvoiceId || null
     }
@@ -3599,8 +3638,8 @@ function collectRequiredInvoiceFieldCodes({ scenarioCode, invoice, customer, vat
   return [...new Set(requiredFieldCodes)].sort();
 }
 
-function createJournalLine(accountNumber, lineNumber, debitAmount, creditAmount, sourceType, sourceId) {
-  return {
+function createJournalLine(accountNumber, lineNumber, debitAmount, creditAmount, sourceType, sourceId, { dimensionJson = null } = {}) {
+  const record = {
     accountNumber,
     debitAmount: roundMoney(debitAmount),
     creditAmount: roundMoney(creditAmount),
@@ -3608,6 +3647,76 @@ function createJournalLine(accountNumber, lineNumber, debitAmount, creditAmount,
     sourceId,
     lineNumber
   };
+  if (dimensionJson && Object.keys(dimensionJson).length > 0) {
+    record.dimensionJson = dimensionJson;
+  }
+  return record;
+}
+
+function buildRevenueDimensionJson({ companyId, ledgerPlatform, line }) {
+  const dimensionJson = {};
+  if (line.projectId && ledgerProjectDimensionExists({ companyId, ledgerPlatform, projectId: line.projectId })) {
+    dimensionJson.projectId = line.projectId;
+  }
+  if (line.costCenterCode) {
+    dimensionJson.costCenterCode = line.costCenterCode;
+  }
+  if (line.businessAreaCode) {
+    dimensionJson.businessAreaCode = line.businessAreaCode;
+  }
+  if (line.serviceLineCode) {
+    dimensionJson.serviceLineCode = line.serviceLineCode;
+  }
+  return Object.keys(dimensionJson).length > 0 ? dimensionJson : null;
+}
+
+function ledgerProjectDimensionExists({ companyId, ledgerPlatform, projectId }) {
+  if (!projectId || !ledgerPlatform || typeof ledgerPlatform.listLedgerDimensions !== "function") {
+    return false;
+  }
+  const catalog = ledgerPlatform.listLedgerDimensions({ companyId });
+  return Array.isArray(catalog?.projects) && catalog.projects.some((value) => value.code === projectId && value.status === "active");
+}
+
+function collectInvoiceDimensionRequirements({ ledgerPlatform, companyId, invoiceLines }) {
+  if (!ledgerPlatform || typeof ledgerPlatform.listLedgerAccounts !== "function" || !Array.isArray(invoiceLines) || invoiceLines.length === 0) {
+    return {
+      requiredFieldCodes: [],
+      missingFieldCodes: new Set()
+    };
+  }
+  const accountsByNumber = new Map(
+    ledgerPlatform.listLedgerAccounts({ companyId }).map((account) => [account.accountNumber, account])
+  );
+  const requiredFieldCodes = new Set();
+  const missingFieldCodes = new Set();
+  for (const line of invoiceLines) {
+    const account = accountsByNumber.get(line.revenueAccountNumber);
+    for (const requiredDimensionKey of account?.requiredDimensionKeys || []) {
+      const fieldCode = mapDimensionKeyToInvoiceFieldCode(requiredDimensionKey);
+      if (!fieldCode) {
+        continue;
+      }
+      requiredFieldCodes.add(fieldCode);
+      if (!line?.[requiredDimensionKey]) {
+        missingFieldCodes.add(fieldCode);
+      }
+    }
+  }
+  return {
+    requiredFieldCodes: [...requiredFieldCodes].sort(),
+    missingFieldCodes
+  };
+}
+
+function mapDimensionKeyToInvoiceFieldCode(dimensionKey) {
+  const mapping = {
+    projectId: "project_id",
+    costCenterCode: "cost_center_code",
+    businessAreaCode: "business_area_code",
+    serviceLineCode: "service_line_code"
+  };
+  return mapping[dimensionKey] || null;
 }
 
 function resolveInvoiceSourceType(invoiceType) {

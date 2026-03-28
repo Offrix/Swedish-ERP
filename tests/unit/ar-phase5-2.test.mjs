@@ -457,6 +457,100 @@ test("Step 24 blocks export and HUS invoices until legal overlays are complete",
   assert.equal(passableHusEvaluation.status, "passed");
 });
 
+test("Phase 9.1 carries governed revenue dimensions into AR invoice journals and blocks missing required dimensions", () => {
+  const clock = () => new Date("2026-03-28T14:00:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const integrations = createIntegrationEngine({ clock });
+  const ar = createArEngine({
+    clock,
+    seedDemo: false,
+    ledgerPlatform: ledger,
+    integrationPlatform: integrations
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
+  ledger.upsertLedgerDimensionValue({
+    companyId: COMPANY_ID,
+    dimensionType: "serviceLines",
+    code: "SL-CONSULT",
+    label: "Consulting delivery",
+    locked: false,
+    sourceDomain: "ar",
+    actorId: "user-1"
+  });
+  ledger.upsertLedgerAccount({
+    companyId: COMPANY_ID,
+    accountNumber: "3010",
+    accountName: "Sales within Sweden, 25% VAT",
+    accountClass: "3",
+    requiredDimensionKeys: ["serviceLineCode"],
+    locked: false,
+    changeReasonCode: "phase_9_1_revenue_dimensions",
+    actorId: "user-1"
+  });
+
+  const customer = createCustomer(ar);
+  const item = createItem(ar, {
+    serviceLineCode: "SL-CONSULT"
+  });
+  const dimensionedInvoice = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-03-28",
+    dueDate: "2026-04-27",
+    lines: [{ itemId: item.arItemId, quantity: 1, unitPrice: 1500, projectId: "project-demo-alpha" }],
+    actorId: "user-1"
+  });
+  assert.equal(dimensionedInvoice.invoiceFieldEvaluation.status, "passed");
+
+  const issued = ar.issueInvoice({
+    companyId: COMPANY_ID,
+    customerInvoiceId: dimensionedInvoice.customerInvoiceId,
+    actorId: "user-1"
+  });
+  const revenueLine = ledger
+    .getJournalEntry({
+      companyId: COMPANY_ID,
+      journalEntryId: issued.journalEntryId
+    })
+    .lines.find((line) => line.accountNumber === "3010");
+  assert.equal(revenueLine.dimensionJson.projectId, "project-demo-alpha");
+  assert.equal(revenueLine.dimensionJson.serviceLineCode, "SL-CONSULT");
+
+  const itemMissingDimension = createItem(ar, {
+    itemCode: "SVC-NODIM",
+    description: "Missing governed service line",
+    itemType: "service",
+    unitCode: "hour",
+    standardPrice: 1200,
+    revenueAccountNumber: "3010",
+    vatCode: "VAT_SE_DOMESTIC_25"
+  });
+  const blockedInvoice = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-03-28",
+    dueDate: "2026-04-27",
+    lines: [{ itemId: itemMissingDimension.arItemId, quantity: 1, unitPrice: 1200 }],
+    actorId: "user-1"
+  });
+
+  assert.equal(blockedInvoice.invoiceFieldEvaluation.status, "blocked");
+  assert.equal(blockedInvoice.invoiceFieldEvaluation.requiredFieldCodes.includes("service_line_code"), true);
+  assert.equal(blockedInvoice.invoiceFieldEvaluation.missingFieldCodes.includes("service_line_code"), true);
+  assert.throws(
+    () =>
+      ar.issueInvoice({
+        companyId: COMPANY_ID,
+        customerInvoiceId: blockedInvoice.customerInvoiceId,
+        actorId: "user-1"
+      }),
+    (error) => error?.code === "invoice_issue_blocked"
+  );
+});
+
 function createCustomer(ar, overrides = {}) {
   return ar.createCustomer({
     companyId: COMPANY_ID,

@@ -628,8 +628,11 @@ Knyta dokument, leverantÃ¶rer, kunder, bank och skattekonto till bokfÃ¶rings
 **FÃ¥r inte kÃ¶ras parallellt med**  
 - Ingen automatisk posting frÃ¥n OCR, statement import eller tax account discrepancy detection utan blockerande gates.
 
+**Delfasstatus**
+- 9.1 klar 2026-03-28: AR-kedjan Ã¤r nu Ã¥terverifierad end-to-end med kundfakturor, kreditnotor, abonnemang, payment links, allocations, reskontra, legal invoice-readiness och revenue dimensions som bÃ¤rs hela vÃ¤gen till ledgerpostning med governed dimensionkrav.
+
 **Delfaser**
-- [ ] 9.1 [HARDEN] **AR end-to-end** â€” Kundfakturor, kreditnotor, abonnemang, collection/payment links, allocations, reskontra, invoice readiness och revenue dimensions.
+- [x] 9.1 [HARDEN] **AR end-to-end** â€” Kundfakturor, kreditnotor, abonnemang, collection/payment links, allocations, reskontra, invoice readiness och revenue dimensions.
 - [ ] 9.2 [HARDEN] **AP end-to-end** â€” LeverantÃ¶rsfakturor, krediter, attest, matchning, payment prep och cost allocations med review gates.
 - [ ] 9.3 [HARDEN] **VAT decision engine** â€” VAT source of truth, decision inputs/outputs, timing, lock/unlock, declaration basis och review boundaries.
 - [ ] 9.4 [NEW BUILD] **Banking och payment rails** â€” Open banking, bankfiler, payment batches/orders, statement import, matchning, settlement liability mapping.

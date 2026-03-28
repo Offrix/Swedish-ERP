@@ -516,6 +516,219 @@ test("Step 24 API exposes invoice field evaluation and blocks reverse-charge iss
   }
 });
 
+test("Phase 9.1 API carries governed revenue dimensions into issued AR journals and blocks missing dimension readiness", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-28T14:30:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true,
+      phase5ArEnabled: true
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const sessionToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    await requestJson(baseUrl, "/v1/ledger/chart/install", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+
+    await requestJson(baseUrl, "/v1/ledger/dimensions/serviceLines", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        code: "SL-CONSULT",
+        label: "Consulting delivery",
+        locked: false,
+        sourceDomain: "ar"
+      }
+    });
+
+    await requestJson(baseUrl, "/v1/ledger/accounts", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        accountNumber: "3010",
+        accountName: "Sales within Sweden, 25% VAT",
+        accountClass: "3",
+        requiredDimensionKeys: ["serviceLineCode"],
+        locked: false,
+        changeReasonCode: "phase_9_1_revenue_dimensions"
+      }
+    });
+
+    const customer = await requestJson(baseUrl, "/v1/ar/customers", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        legalName: "Revenue Dimensions Customer AB",
+        organizationNumber: "5566778899",
+        countryCode: "SE",
+        languageCode: "SV",
+        currencyCode: "SEK",
+        paymentTermsCode: "NET30",
+        invoiceDeliveryMethod: "pdf_email",
+        reminderProfileCode: "standard",
+        billingAddress: {
+          line1: "Dimensionsgatan 1",
+          postalCode: "11157",
+          city: "Stockholm",
+          countryCode: "SE"
+        },
+        deliveryAddress: {
+          line1: "Dimensionsgatan 1",
+          postalCode: "11157",
+          city: "Stockholm",
+          countryCode: "SE"
+        }
+      }
+    });
+
+    const dimensionedItem = await requestJson(baseUrl, "/v1/ar/items", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        itemCode: "API-DIM-001",
+        description: "Consulting revenue",
+        itemType: "service",
+        unitCode: "hour",
+        standardPrice: 1500,
+        revenueAccountNumber: "3010",
+        vatCode: "VAT_SE_DOMESTIC_25",
+        serviceLineCode: "SL-CONSULT"
+      }
+    });
+
+    const passableInvoice = await requestJson(baseUrl, "/v1/ar/invoices", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        customerId: customer.customerId,
+        invoiceType: "standard",
+        issueDate: "2026-03-28",
+        dueDate: "2026-04-27",
+        lines: [
+          {
+            itemId: dimensionedItem.arItemId,
+            quantity: 1,
+            unitPrice: 1500,
+            projectId: "project-demo-alpha"
+          }
+        ]
+      }
+    });
+
+    const issued = await requestJson(baseUrl, `/v1/ar/invoices/${passableInvoice.customerInvoiceId}/issue`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+    const revenueLine = platform
+      .getJournalEntry({
+        companyId: COMPANY_ID,
+        journalEntryId: issued.journalEntryId
+      })
+      .lines.find((line) => line.accountNumber === "3010");
+    assert.equal(revenueLine.dimensionJson.projectId, "project-demo-alpha");
+    assert.equal(revenueLine.dimensionJson.serviceLineCode, "SL-CONSULT");
+
+    const missingDimensionItem = await requestJson(baseUrl, "/v1/ar/items", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        itemCode: "API-DIM-002",
+        description: "Missing service line",
+        itemType: "service",
+        unitCode: "hour",
+        standardPrice: 1200,
+        revenueAccountNumber: "3010",
+        vatCode: "VAT_SE_DOMESTIC_25"
+      }
+    });
+
+    const blockedInvoice = await requestJson(baseUrl, "/v1/ar/invoices", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        customerId: customer.customerId,
+        invoiceType: "standard",
+        issueDate: "2026-03-28",
+        dueDate: "2026-04-27",
+        lines: [
+          {
+            itemId: missingDimensionItem.arItemId,
+            quantity: 1,
+            unitPrice: 1200
+          }
+        ]
+      }
+    });
+
+    const blockedEvaluation = await requestJson(
+      baseUrl,
+      `/v1/ar/invoices/${blockedInvoice.customerInvoiceId}/field-evaluation?companyId=${COMPANY_ID}`,
+      {
+        token: sessionToken
+      }
+    );
+    assert.equal(blockedEvaluation.status, "blocked");
+    assert.equal(blockedEvaluation.requiredFieldCodes.includes("service_line_code"), true);
+    assert.equal(blockedEvaluation.missingFieldCodes.includes("service_line_code"), true);
+
+    const blockedIssue = await fetch(`${baseUrl}/v1/ar/invoices/${blockedInvoice.customerInvoiceId}/issue`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${sessionToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        companyId: COMPANY_ID
+      })
+    });
+    const blockedPayload = await blockedIssue.json();
+    assert.equal(blockedIssue.status, 409);
+    assert.equal(blockedPayload.error, "invoice_issue_blocked");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
   const started = await requestJson(baseUrl, "/v1/auth/login", {
     method: "POST",

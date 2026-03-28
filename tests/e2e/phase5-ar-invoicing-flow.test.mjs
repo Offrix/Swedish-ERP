@@ -67,6 +67,32 @@ test("Phase 5.2 AR invoicing routes toggle cleanly and the end-to-end flow cover
         companyId: COMPANY_ID
       }
     });
+    await requestJson(enabledBaseUrl, "/v1/ledger/dimensions/serviceLines", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        code: "SL-MANAGED",
+        label: "Managed services",
+        locked: false,
+        sourceDomain: "ar"
+      }
+    });
+    await requestJson(enabledBaseUrl, "/v1/ledger/accounts", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        accountNumber: "3310",
+        accountName: "Subscription revenue",
+        accountClass: "3",
+        requiredDimensionKeys: ["serviceLineCode"],
+        locked: false,
+        changeReasonCode: "phase_9_1_subscription_dimensions"
+      }
+    });
 
     const customer = await requestJson(enabledBaseUrl, "/v1/ar/customers", {
       method: "POST",
@@ -124,7 +150,8 @@ test("Phase 5.2 AR invoicing routes toggle cleanly and the end-to-end flow cover
         standardPrice: 4200,
         revenueAccountNumber: "3310",
         vatCode: "VAT_SE_DOMESTIC_25",
-        recurringFlag: true
+        recurringFlag: true,
+        serviceLineCode: "SL-MANAGED"
       }
     });
 
@@ -178,6 +205,13 @@ test("Phase 5.2 AR invoicing routes toggle cleanly and the end-to-end flow cover
     });
     assert.match(issued.invoiceNumber, /^INV-/);
     assert.equal(issued.status, "issued");
+    const revenueLine = enabledPlatform
+      .getJournalEntry({
+        companyId: COMPANY_ID,
+        journalEntryId: issued.journalEntryId
+      })
+      .lines.find((line) => line.accountNumber === "3310");
+    assert.equal(revenueLine.dimensionJson.serviceLineCode, "SL-MANAGED");
 
     const delivered = await requestJson(enabledBaseUrl, `/v1/ar/invoices/${invoice.customerInvoiceId}/deliver`, {
       method: "POST",
