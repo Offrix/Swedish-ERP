@@ -58,6 +58,8 @@ export function createDocumentClassificationEngine({
     activeCaseIdByDocument: new Map(),
     treatmentLines: new Map(),
     treatmentLineIdsByCase: new Map(),
+    extractionProjections: new Map(),
+    extractionProjectionIdsByCase: new Map(),
     personLinks: new Map(),
     personLinkIdsByCase: new Map(),
     treatmentIntents: new Map(),
@@ -110,7 +112,15 @@ export function createDocumentClassificationEngine({
       sourceOcrRunId: input.sourceOcrRunId
     });
     const extractedFields = copy(Object.keys(input.extractedFields || {}).length > 0 ? input.extractedFields : latestOcrRun?.extractedFieldsJson || {});
-    const lineInputs = normalizeLineInputs(input.lineInputs, extractedFields);
+    const rawLineInputs =
+      Array.isArray(input.lineInputs) && input.lineInputs.length > 0
+        ? input.lineInputs
+        : deriveSuggestedLineInputs({
+            documentRecord,
+            latestOcrRun,
+            extractedFields
+          });
+    const lineInputs = normalizeLineInputs(rawLineInputs, extractedFields);
     if (lineInputs.length === 0) {
       throw createError(400, "classification_line_inputs_required", "At least one classification line input is required.");
     }
@@ -345,6 +355,7 @@ export function createDocumentClassificationEngine({
     return {
       cases: Array.from(state.cases.values()).filter(filterCompany).map((item) => presentCase(state, item)),
       treatmentLines: Array.from(state.treatmentLines.values()).filter(filterCompany).map(copy),
+      extractionProjections: Array.from(state.extractionProjections.values()).filter(filterCompany).map(copy),
       personLinks: Array.from(state.personLinks.values()).filter(filterCompany).map(copy),
       treatmentIntents: Array.from(state.treatmentIntents.values()).filter(filterCompany).map((item) => presentIntent(state, item)),
       corrections: Array.from(state.corrections.values()).filter(filterCompany).map(copy),
@@ -408,6 +419,7 @@ function buildCaseRecord({
 
 function materializeCaseArtifacts({ classificationCase, lineInputs }) {
   const treatmentLines = [];
+  const extractionProjections = [];
   const personLinks = [];
   const treatmentIntents = [];
 
@@ -434,6 +446,13 @@ function materializeCaseArtifacts({ classificationCase, lineInputs }) {
       createdAt: classificationCase.createdAt,
       updatedAt: classificationCase.createdAt
     });
+    extractionProjections.push(
+      buildExtractionProjection({
+        classificationCase,
+        treatmentLineId,
+        lineInput
+      })
+    );
     if (personLinkId) {
       personLinks.push({
         personLinkId,
@@ -469,7 +488,7 @@ function materializeCaseArtifacts({ classificationCase, lineInputs }) {
     });
   }
 
-  return { treatmentLines, personLinks, treatmentIntents };
+  return { treatmentLines, extractionProjections, personLinks, treatmentIntents };
 }
 
 function persistCaseArtifacts({ state, classificationCase, materialized, companyId, documentId }) {
@@ -480,6 +499,14 @@ function persistCaseArtifacts({ state, classificationCase, materialized, company
   for (const line of materialized.treatmentLines) {
     state.treatmentLines.set(line.treatmentLineId, line);
     appendToIndex(state.treatmentLineIdsByCase, line.classificationCaseId, line.treatmentLineId);
+  }
+  for (const extractionProjection of materialized.extractionProjections) {
+    state.extractionProjections.set(extractionProjection.extractionProjectionId, extractionProjection);
+    appendToIndex(
+      state.extractionProjectionIdsByCase,
+      extractionProjection.classificationCaseId,
+      extractionProjection.extractionProjectionId
+    );
   }
   for (const personLink of materialized.personLinks) {
     state.personLinks.set(personLink.personLinkId, personLink);
@@ -538,6 +565,49 @@ function maybeCreateReviewItem({ reviewCenterPlatform, classificationCase }) {
   });
   classificationCase.reviewItemId = reviewItem.reviewItemId;
   return reviewItem;
+}
+
+function buildExtractionProjection({ classificationCase, treatmentLineId, lineInput }) {
+  const extractionFamilyCode = deriveExtractionFamilyCode(lineInput);
+  const candidateObjectType = deriveCandidateObjectType(lineInput);
+  const documentRoleCode = deriveDocumentRoleCode(lineInput);
+  return {
+    extractionProjectionId: crypto.randomUUID(),
+    classificationCaseId: classificationCase.classificationCaseId,
+    treatmentLineId,
+    companyId: classificationCase.companyId,
+    documentId: classificationCase.documentId,
+    sourceOcrRunId: classificationCase.sourceOcrRunId,
+    extractionFamilyCode,
+    candidateObjectType,
+    targetDomainCode: lineInput.targetDomainCode,
+    documentRoleCode,
+    attachmentRoleCode: "primary_document",
+    requiresReview: lineInput.requiresReview,
+    reviewRiskClass: lineInput.reviewRiskClass,
+    reviewReasonCodes: Object.freeze([...lineInput.reviewReasonCodes]),
+    normalizedFieldsJson: buildNormalizedExtractionFields({ classificationCase, lineInput, extractionFamilyCode }),
+    attachmentRefs: Object.freeze([
+      `document:${classificationCase.documentId}`,
+      ...(classificationCase.sourceOcrRunId ? [`ocr_run:${classificationCase.sourceOcrRunId}`] : [])
+    ]),
+    payloadHash: crypto
+      .createHash("sha256")
+      .update(
+        JSON.stringify({
+          classificationCaseId: classificationCase.classificationCaseId,
+          treatmentLineId,
+          extractionFamilyCode,
+          candidateObjectType,
+          targetDomainCode: lineInput.targetDomainCode,
+          factsJson: lineInput.factsJson,
+          reviewReasonCodes: lineInput.reviewReasonCodes
+        })
+      )
+      .digest("hex"),
+    createdAt: classificationCase.createdAt,
+    updatedAt: classificationCase.createdAt
+  };
 }
 
 function settleLinkedReviewItem({ reviewCenterPlatform, classificationCase, actorId, approvalNote }) {
@@ -816,12 +886,14 @@ function derivePayrollReportingPeriod({ clock, sourcePayload, classificationCase
 
 function presentCase(state, classificationCase) {
   const treatmentLines = listCaseTreatmentLines(state, classificationCase.classificationCaseId).map(copy);
+  const extractionProjections = listCaseExtractionProjections(state, classificationCase.classificationCaseId).map(copy);
   const personLinks = listCasePersonLinks(state, classificationCase.classificationCaseId).map(copy);
   const treatmentIntents = listCaseIntents(state, classificationCase.classificationCaseId).map((intent) => presentIntent(state, intent));
   const corrections = listCaseCorrections(state, classificationCase.classificationCaseId).map(copy);
   return {
     ...copy(classificationCase),
     treatmentLines,
+    extractionProjections,
     personLinks,
     treatmentIntents,
     corrections,
@@ -859,6 +931,162 @@ function summarizeIntentStatuses(intents) {
     if (intent.status === "failed") summary.failedCount += 1;
   }
   return summary;
+}
+
+function deriveSuggestedLineInputs({ documentRecord, latestOcrRun, extractedFields }) {
+  const suggestedDocumentType = normalizeOptionalText(
+    latestOcrRun?.suggestedDocumentType || documentRecord?.documentType || "unknown"
+  );
+  const extractedText = normalizeOptionalText(latestOcrRun?.extractedText || "");
+  const totalAmount = readExtractedMoney(
+    extractedFields.totalAmount ||
+      extractedFields.netAmount ||
+      extractedFields.grossAmount ||
+      documentRecord?.metadataJson?.totalAmount
+  );
+  const currencyCode = normalizeOptionalText(
+    readExtractedFieldValue(extractedFields.currencyCode) || documentRecord?.metadataJson?.currencyCode || "SEK"
+  );
+
+  if (suggestedDocumentType === "supplier_invoice") {
+    return [
+      {
+        lineType: "document_total",
+        sourceLineKey: "ocr_supplier_invoice_total",
+        description: normalizeOptionalText(readExtractedFieldValue(extractedFields.invoiceNumber))
+          ? `Supplier invoice ${readExtractedFieldValue(extractedFields.invoiceNumber)}`
+          : "Supplier invoice candidate",
+        amount: totalAmount ?? 0,
+        currencyCode,
+        treatmentCode: "COMPANY_COST",
+        targetDomainCode: "AP",
+        factsJson: {
+          supplierName: readExtractedFieldValue(extractedFields.counterparty),
+          invoiceNumber: readExtractedFieldValue(extractedFields.invoiceNumber),
+          invoiceDate: readExtractedFieldValue(extractedFields.invoiceDate),
+          dueDate: readExtractedFieldValue(extractedFields.dueDate),
+          totalAmount,
+          vatAmount: readExtractedMoney(extractedFields.vatAmount),
+          paymentReference: readExtractedFieldValue(extractedFields.reference),
+          purchaseOrderReference: readExtractedFieldValue(extractedFields.purchaseOrderReference),
+          currencyCode
+        }
+      }
+    ];
+  }
+
+  if (suggestedDocumentType === "expense_receipt") {
+    if (looksLikeWellnessOrBenefit({ extractedFields, extractedText })) {
+      return [
+        {
+          lineType: "document_total",
+          sourceLineKey: "ocr_benefit_receipt_total",
+          description: "Benefit or wellness receipt candidate",
+          amount: totalAmount ?? 0,
+          currencyCode,
+          treatmentCode: deriveBenefitTreatmentCode({ extractedFields, extractedText }),
+          targetDomainCode: "BENEFITS",
+          reviewReasonCodes: collectDerivedReviewReasonCodes({
+            targetDomainCode: "BENEFITS",
+            extractedFields,
+            extractedText
+          }),
+          factsJson: {
+            benefitCode: deriveBenefitCode({ extractedFields, extractedText }),
+            activityType: readExtractedFieldValue(extractedFields.activityType),
+            activityDate:
+              readExtractedFieldValue(extractedFields.activityDate) ||
+              readExtractedFieldValue(extractedFields.receiptDate),
+            vendorName:
+              readExtractedFieldValue(extractedFields.vendorName) ||
+              readExtractedFieldValue(extractedFields.storeName) ||
+              readExtractedFieldValue(extractedFields.counterparty),
+            reimbursementAmount: totalAmount,
+            equalTermsOffered: true,
+            providedAsGiftCard: false,
+            carryOverFromPriorYear: false,
+            calendarYearGrantedBeforeEvent: 0
+          }
+        }
+      ];
+    }
+
+    if (looksLikeTravelExpense({ extractedFields, extractedText })) {
+      return [
+        {
+          lineType: "document_total",
+          sourceLineKey: "ocr_travel_receipt_total",
+          description: "Travel expense candidate",
+          amount: totalAmount ?? 0,
+          currencyCode,
+          treatmentCode: "REIMBURSABLE_OUTLAY",
+          targetDomainCode: "TRAVEL",
+          reviewReasonCodes: collectDerivedReviewReasonCodes({
+            targetDomainCode: "TRAVEL",
+            extractedFields,
+            extractedText
+          }),
+          factsJson: {
+            expenseType: deriveTravelExpenseType({ extractedFields, extractedText }),
+            expenseDate:
+              readExtractedFieldValue(extractedFields.expenseDate) ||
+              readExtractedFieldValue(extractedFields.receiptDate),
+            vendorName:
+              readExtractedFieldValue(extractedFields.vendorName) ||
+              readExtractedFieldValue(extractedFields.storeName),
+            paymentMethod: deriveTravelPaymentMethod({ extractedFields, extractedText }),
+            amount: totalAmount,
+            currencyCode,
+            hasReceiptSupport: true
+          }
+        }
+      ];
+    }
+
+    return [
+      {
+        lineType: "document_total",
+        sourceLineKey: "ocr_payroll_receipt_total",
+        description: "Expense receipt candidate",
+        amount: totalAmount ?? 0,
+        currencyCode,
+        treatmentCode: "REIMBURSABLE_OUTLAY",
+        targetDomainCode: "PAYROLL",
+        reviewReasonCodes: ["PERSON_LINK_MISSING"],
+        factsJson: {
+          expenseDate: readExtractedFieldValue(extractedFields.receiptDate),
+          vendorName:
+            readExtractedFieldValue(extractedFields.vendorName) ||
+            readExtractedFieldValue(extractedFields.storeName),
+          reimbursementAmount: totalAmount,
+          currencyCode
+        }
+      }
+    ];
+  }
+
+  return [
+    {
+      lineType: "document_total",
+      sourceLineKey: "ocr_attachment_candidate",
+      description: normalizeOptionalText(readExtractedFieldValue(extractedFields.contractTitle))
+        ? `Attachment candidate ${readExtractedFieldValue(extractedFields.contractTitle)}`
+        : "Attachment candidate",
+      amount: totalAmount ?? 0,
+      currencyCode,
+      treatmentCode: "UNKNOWN",
+      targetDomainCode: "REVIEW_CENTER",
+      reviewReasonCodes: ["ATTACHMENT_HANDOFF_REQUIRED", "TREATMENT_UNKNOWN"],
+      factsJson: {
+        contractTitle: readExtractedFieldValue(extractedFields.contractTitle),
+        counterparty:
+          readExtractedFieldValue(extractedFields.counterparty) ||
+          readExtractedFieldValue(extractedFields.storeName),
+        effectiveDate: readExtractedFieldValue(extractedFields.effectiveDate),
+        attachmentCategory: suggestedDocumentType || "unknown"
+      }
+    }
+  ];
 }
 
 function normalizeLineInputs(lineInputs, extractedFields) {
@@ -918,10 +1146,13 @@ function determineLineReviewRequirement({ treatmentCode, targetDomainCode, facts
   if (["ASSET_CANDIDATE", "IMPORT_CANDIDATE", "UNKNOWN"].includes(treatmentCode)) {
     return true;
   }
-  if (targetDomainCode === "BENEFITS" || targetDomainCode === "PAYROLL") {
+  if (targetDomainCode === "BENEFITS" || targetDomainCode === "PAYROLL" || targetDomainCode === "TRAVEL") {
     if (!person?.employeeId || !person?.employmentId) {
       return true;
     }
+  }
+  if (targetDomainCode === "AR") {
+    return true;
   }
   if (treatmentCode === "WELLNESS_ALLOWANCE") {
     return !isDeterministicWellnessFacts({ factsJson, amount });
@@ -934,8 +1165,11 @@ function determineRiskClass({ treatmentCode, requiresReview, reviewReasonCodes, 
   if (["PRIVATE_RECEIVABLE", "NET_SALARY_DEDUCTION", "TAXABLE_BENEFIT"].includes(treatmentCode)) {
     risk = pickHighestRisk(risk, "high");
   }
-  if (!person && ["BENEFITS", "PAYROLL"].includes(deriveTargetDomainCode(treatmentCode))) {
+  if (!person && ["BENEFITS", "PAYROLL", "TRAVEL"].includes(deriveTargetDomainCode(treatmentCode))) {
     risk = pickHighestRisk(risk, "critical");
+  }
+  if (["AR"].includes(deriveTargetDomainCode(treatmentCode))) {
+    risk = pickHighestRisk(risk, "medium");
   }
   if (reviewReasonCodes.includes("DOCUMENT_TOTAL_SPLIT_MISMATCH")) {
     risk = pickHighestRisk(risk, "high");
@@ -963,8 +1197,10 @@ function collectReviewProfile({ lineInputs, documentRecord }) {
       reviewReasonCodes.add(reasonCode);
     }
     reviewRiskClass = pickHighestRisk(reviewRiskClass, line.reviewRiskClass);
-    if (line.targetDomainCode === "PAYROLL" || line.targetDomainCode === "BENEFITS") {
+    if (["PAYROLL", "BENEFITS", "TRAVEL"].includes(line.targetDomainCode)) {
       reviewQueueCode = "PAYROLL_REVIEW";
+    } else if (["AP", "AR"].includes(line.targetDomainCode)) {
+      reviewQueueCode = "FINANCE_REVIEW";
     }
   }
   return {
@@ -1032,6 +1268,206 @@ function deriveTargetDomainCode(treatmentCode) {
   }
 }
 
+function deriveExtractionFamilyCode(lineInput) {
+  if (lineInput.targetDomainCode === "AP") {
+    return lineInput.treatmentCode === "IMPORT_CANDIDATE" ? "IMPORT_CASE_CANDIDATE" : "AP_SUPPLIER_INVOICE";
+  }
+  if (lineInput.targetDomainCode === "AR") {
+    return "AR_SUPPORTING_ATTACHMENT";
+  }
+  if (lineInput.targetDomainCode === "BENEFITS") {
+    return "BENEFIT_EVENT_CANDIDATE";
+  }
+  if (lineInput.targetDomainCode === "TRAVEL") {
+    return "TRAVEL_EXPENSE_CANDIDATE";
+  }
+  if (lineInput.targetDomainCode === "PAYROLL") {
+    return "PAYROLL_DOCUMENT_SUPPORT";
+  }
+  return "ATTACHMENT_SUPPORT";
+}
+
+function deriveCandidateObjectType(lineInput) {
+  if (lineInput.targetDomainCode === "AP") {
+    return lineInput.treatmentCode === "IMPORT_CANDIDATE" ? "import_case" : "ap_supplier_invoice";
+  }
+  if (lineInput.targetDomainCode === "AR") {
+    return "ar_supporting_attachment";
+  }
+  if (lineInput.targetDomainCode === "BENEFITS") {
+    return "benefit_event";
+  }
+  if (lineInput.targetDomainCode === "TRAVEL") {
+    return "travel_claim_candidate";
+  }
+  if (lineInput.targetDomainCode === "PAYROLL") {
+    return "payroll_document_support";
+  }
+  return "document_attachment";
+}
+
+function deriveDocumentRoleCode(lineInput) {
+  if (lineInput.targetDomainCode === "AP") {
+    return lineInput.treatmentCode === "IMPORT_CANDIDATE" ? "CUSTOMS_EVIDENCE" : "PRIMARY_SUPPLIER_DOCUMENT";
+  }
+  if (lineInput.targetDomainCode === "AR") {
+    return "AR_SUPPORTING_DOCUMENT";
+  }
+  if (lineInput.targetDomainCode === "BENEFITS") {
+    return "BENEFIT_RECEIPT";
+  }
+  if (lineInput.targetDomainCode === "TRAVEL") {
+    return "TRAVEL_RECEIPT";
+  }
+  if (lineInput.targetDomainCode === "PAYROLL") {
+    return "PAYROLL_SUPPORTING_DOCUMENT";
+  }
+  return "OTHER_SUPPORTING_DOCUMENT";
+}
+
+function buildNormalizedExtractionFields({ classificationCase, lineInput, extractionFamilyCode }) {
+  const factsJson = copy(lineInput.factsJson || {});
+  return {
+    extractionFamilyCode,
+    scenarioCode: lineInput.scenarioCode,
+    treatmentCode: lineInput.treatmentCode,
+    targetDomainCode: lineInput.targetDomainCode,
+    amount: lineInput.amount,
+    vatAmount: lineInput.vatAmount,
+    currencyCode: lineInput.currencyCode,
+    description: lineInput.description,
+    sourceDocumentType: classificationCase.sourceDocumentType,
+    sourceDocumentStatus: classificationCase.sourceDocumentStatus,
+    factsJson
+  };
+}
+
+function readExtractedFieldValue(field) {
+  if (field == null) {
+    return null;
+  }
+  if (typeof field === "object" && !Array.isArray(field) && "value" in field) {
+    return normalizeOptionalText(field.value);
+  }
+  return normalizeOptionalText(field);
+}
+
+function readExtractedMoney(field) {
+  const value = readExtractedFieldValue(field);
+  if (value == null) {
+    return null;
+  }
+  return normalizeOptionalMoney(value, "classification_extracted_money_invalid");
+}
+
+function collectDerivedReviewReasonCodes({ targetDomainCode, extractedFields, extractedText }) {
+  const reasons = [];
+  if (targetDomainCode === "BENEFITS" && !readExtractedFieldValue(extractedFields.activityDate)) {
+    reasons.push("WELLNESS_FACTS_MISSING");
+  }
+  if (
+    targetDomainCode === "TRAVEL" &&
+    !(
+      readExtractedFieldValue(extractedFields.receiptDate) ||
+      readExtractedFieldValue(extractedFields.expenseDate)
+    )
+  ) {
+    reasons.push("TRAVEL_FACTS_MISSING");
+  }
+  if (targetDomainCode === "AR") {
+    reasons.push("AR_HANDOFF_REQUIRED");
+  }
+  if (targetDomainCode === "REVIEW_CENTER" && normalizeOptionalText(extractedText)) {
+    reasons.push("ATTACHMENT_HANDOFF_REQUIRED");
+  }
+  return reasons;
+}
+
+function looksLikeWellnessOrBenefit({ extractedFields, extractedText }) {
+  const mergedText = [
+    readExtractedFieldValue(extractedFields.benefitCode),
+    readExtractedFieldValue(extractedFields.activityType),
+    readExtractedFieldValue(extractedFields.vendorName),
+    readExtractedFieldValue(extractedFields.storeName),
+    extractedText
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return /(wellness|friskv|gym|massage|health insurance|sjukv|insurance|f[öo]rm[åa]n)/i.test(mergedText);
+}
+
+function deriveBenefitTreatmentCode({ extractedFields, extractedText }) {
+  const mergedText = [
+    readExtractedFieldValue(extractedFields.benefitCode),
+    readExtractedFieldValue(extractedFields.activityType),
+    extractedText
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return /(insurance|sjukv)/i.test(mergedText) ? "TAXABLE_BENEFIT" : "WELLNESS_ALLOWANCE";
+}
+
+function deriveBenefitCode({ extractedFields, extractedText }) {
+  const explicit = readExtractedFieldValue(extractedFields.benefitCode);
+  if (explicit) {
+    return explicit;
+  }
+  return /(insurance|sjukv)/i.test(normalizeOptionalText(extractedText) || "")
+    ? "HEALTH_INSURANCE"
+    : "WELLNESS_ALLOWANCE";
+}
+
+function looksLikeTravelExpense({ extractedFields, extractedText }) {
+  const mergedText = [
+    readExtractedFieldValue(extractedFields.expenseType),
+    readExtractedFieldValue(extractedFields.vendorName),
+    readExtractedFieldValue(extractedFields.storeName),
+    extractedText
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return /(hotel|taxi|uber|flight|train|travel|resa|traktamente|mileage|mile|kilometer|km|parking|lodging)/i.test(
+    mergedText
+  );
+}
+
+function deriveTravelExpenseType({ extractedFields, extractedText }) {
+  const mergedText = [
+    readExtractedFieldValue(extractedFields.expenseType),
+    readExtractedFieldValue(extractedFields.vendorName),
+    readExtractedFieldValue(extractedFields.storeName),
+    normalizeOptionalText(extractedText)
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (/hotel|lodging/.test(mergedText)) return "lodging";
+  if (/taxi|uber|train|flight/.test(mergedText)) return "transport";
+  if (/parking/.test(mergedText)) return "parking";
+  if (/mileage|kilometer| km /.test(` ${mergedText} `)) return "mileage";
+  return "other";
+}
+
+function deriveTravelPaymentMethod({ extractedFields, extractedText }) {
+  const mergedText = [
+    readExtractedFieldValue(extractedFields.paymentMethod),
+    normalizeOptionalText(extractedText)
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (/company card|foretagskort/.test(mergedText)) {
+    return "company_card";
+  }
+  if (/cash|kontant/.test(mergedText)) {
+    return "cash";
+  }
+  return "private_card";
+}
+
 function isDeterministicWellnessFacts({ factsJson, amount }) {
   return Boolean(
     factsJson &&
@@ -1070,6 +1506,12 @@ function resolveOcrSnapshot({ documentPlatform, companyId, documentId, sourceOcr
 function listCaseTreatmentLines(state, classificationCaseId) {
   return (state.treatmentLineIdsByCase.get(classificationCaseId) || [])
     .map((treatmentLineId) => state.treatmentLines.get(treatmentLineId))
+    .filter(Boolean);
+}
+
+function listCaseExtractionProjections(state, classificationCaseId) {
+  return (state.extractionProjectionIdsByCase.get(classificationCaseId) || [])
+    .map((extractionProjectionId) => state.extractionProjections.get(extractionProjectionId))
     .filter(Boolean);
 }
 

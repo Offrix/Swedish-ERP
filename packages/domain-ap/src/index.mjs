@@ -2200,7 +2200,7 @@ function assessInvoiceClassificationCase(classificationCase) {
   const targetDomainCodes = uniqueStrings(treatmentIntents.map((intent) => intent.targetDomainCode));
   const personLinkedDocumentFlag =
     (Array.isArray(classificationCase.personLinks) && classificationCase.personLinks.length > 0) ||
-    targetDomainCodes.some((code) => ["PAYROLL", "BENEFITS"].includes(code)) ||
+    targetDomainCodes.some((code) => ["PAYROLL", "BENEFITS", "TRAVEL"].includes(code)) ||
     treatmentCodes.some((code) =>
       ["PRIVATE_RECEIVABLE", "NET_SALARY_DEDUCTION", "TAXABLE_BENEFIT", "WELLNESS_ALLOWANCE"].includes(code)
     );
@@ -2208,7 +2208,7 @@ function assessInvoiceClassificationCase(classificationCase) {
   const personLinkedDocumentBlocked =
     personLinkedDocumentFlag &&
     (classificationPending ||
-      targetDomainCodes.some((code) => ["PAYROLL", "BENEFITS"].includes(code)) ||
+      targetDomainCodes.some((code) => ["PAYROLL", "BENEFITS", "TRAVEL"].includes(code)) ||
       treatmentCodes.some((code) =>
         ["PRIVATE_RECEIVABLE", "NET_SALARY_DEDUCTION", "TAXABLE_BENEFIT", "WELLNESS_ALLOWANCE"].includes(code)
       ));

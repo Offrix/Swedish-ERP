@@ -15,6 +15,9 @@ Detta dokument sammanfattar resultatet av `P2-03`.
 - Langre OCR-korningar kan ga via async callback-route i stallet for att latenstesta som synkrona lokala stubbar.
 - Low-confidence eller lag providerkvalitet leder till blockerande review i stallet for att slappa igenom forslaget.
 - Omkorning supersederar tidigare OCR-run i stallet for att mutera historiskt resultat.
+- Klassificeringskedjan materialiserar nu canonical `ExtractionProjection` med `extractionFamilyCode`, `candidateObjectType`, `documentRoleCode`, `targetDomainCode`, `normalizedFieldsJson`, `attachmentRefs` och `payloadHash`.
+- OCR-falt kan nu auto-derivera downstream-kandidater for AP, travel, benefits, payroll-support och review-center attachments nar manuell line input saknas.
+- Person- och finance-kansliga dokument stoppas i review- eller downstream-gating i stallet for att slinka vidare som vanliga kostnadsunderlag.
 
 ## Verifieringskommandon
 
@@ -41,6 +44,8 @@ pnpm run seed:demo -- --dry-run
 - lag provider confidence eller quality skapar reviewkrav
 - OCR-rutter kan stangas av med `PHASE2_OCR_REVIEW_ENABLED=false`
 - review task och OCR-run ar sparbara per dokument och bolag
+- extraction projections ar sparbara per klassificeringscase och refererar tillbaka till dokument och OCR-run
+- AP-kedjan blockerar nu travel- och andra personkopplade klassificeringsfall i stallet for att slappa igenom dem som vanliga leverantorsfakturor
 
 ## Lokal databasverifiering
 

@@ -3,8 +3,17 @@ import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
-import { stopServer } from "../../scripts/lib/repo.mjs";
+import { readText, stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
+
+test("Step 14 migration adds extraction projection storage for document classification", async () => {
+  const migration = await readText("packages/db/migrations/20260328143000_phase10_document_extraction_projections.sql");
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS\s+document_classification_extraction_projections/);
+  assert.match(migration, /extraction_family_code\s+TEXT\s+NOT\s+NULL/);
+  assert.match(migration, /candidate_object_type\s+TEXT\s+NOT\s+NULL/);
+  assert.match(migration, /attachment_refs_json\s+JSONB\s+NOT\s+NULL\s+DEFAULT\s+'\[\]'::jsonb/);
+  assert.match(migration, /payload_hash\s+TEXT\s+NOT\s+NULL/);
+});
 
 test("Step 14 API exposes document classification creation, approval and dispatch", async () => {
   const platform = createApiPlatform({
@@ -312,6 +321,85 @@ test("Step 14 API dispatches private spend into payroll net deduction flow", asy
     assert.equal(Boolean(deductionLine), true);
     assert.equal(deductionLine.payItemCode, "NET_DEDUCTION");
     assert.equal(deductionLine.sourceType, "document_classification_private_receivable");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("Step 14 API derives canonical extraction projections when classification is opened without explicit line inputs", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-28T11:00:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const supplierDocument = platform.createDocumentRecord({
+      companyId: DEMO_IDS.companyId,
+      documentType: "supplier_invoice",
+      sourceReference: "api-derived-supplier-001",
+      actorId: DEMO_IDS.userId,
+      metadataJson: {
+        totalAmount: 1250
+      }
+    });
+
+    const supplierCase = await requestJson(baseUrl, `/v1/documents/${supplierDocument.documentId}/classification-cases`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        extractedFields: {
+          counterparty: { value: "Demo Leverantor AB", confidence: 0.97 },
+          invoiceNumber: { value: "SUP-API-001", confidence: 0.95 },
+          invoiceDate: { value: "2026-03-28", confidence: 0.92 },
+          dueDate: { value: "2026-04-27", confidence: 0.91 },
+          totalAmount: { value: "1250.00", confidence: 0.98 },
+          currencyCode: { value: "SEK", confidence: 0.99 }
+        }
+      }
+    });
+    assert.equal(supplierCase.treatmentIntents[0].targetDomainCode, "AP");
+    assert.equal(supplierCase.extractionProjections[0].extractionFamilyCode, "AP_SUPPLIER_INVOICE");
+    assert.equal(supplierCase.extractionProjections[0].candidateObjectType, "ap_supplier_invoice");
+
+    const travelDocument = platform.createDocumentRecord({
+      companyId: DEMO_IDS.companyId,
+      documentType: "expense_receipt",
+      sourceReference: "api-derived-travel-001",
+      actorId: DEMO_IDS.userId,
+      metadataJson: {
+        totalAmount: 899
+      }
+    });
+
+    const travelCase = await requestJson(baseUrl, `/v1/documents/${travelDocument.documentId}/classification-cases`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        extractedFields: {
+          storeName: { value: "Grand Hotel", confidence: 0.95 },
+          receiptDate: { value: "2026-03-28", confidence: 0.93 },
+          totalAmount: { value: "899.00", confidence: 0.97 }
+        }
+      }
+    });
+    assert.equal(travelCase.status, "under_review");
+    assert.equal(travelCase.reviewQueueCode, "PAYROLL_REVIEW");
+    assert.equal(travelCase.treatmentIntents[0].targetDomainCode, "TRAVEL");
+    assert.equal(travelCase.extractionProjections[0].extractionFamilyCode, "TRAVEL_EXPENSE_CANDIDATE");
+    assert.equal(travelCase.extractionProjections[0].normalizedFieldsJson.factsJson.expenseType, "lodging");
   } finally {
     await stopServer(server);
   }

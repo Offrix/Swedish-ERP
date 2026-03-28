@@ -331,3 +331,91 @@ test("Step 14 document classification dispatches payroll intents into pay runs w
   });
   assert.equal(afterConsumption.payloads.length, 0);
 });
+
+test("Step 14 document classification derives AP extraction projection from OCR fields when line inputs are omitted", () => {
+  const clock = () => new Date("2026-03-28T10:00:00Z");
+  const documentPlatform = createDocumentArchivePlatform({ clock });
+  const reviewCenterPlatform = createReviewCenterPlatform({ clock, seedDemo: true });
+  const classification = createDocumentClassificationEngine({
+    clock,
+    seedDemo: false,
+    documentPlatform,
+    reviewCenterPlatform
+  });
+
+  const document = documentPlatform.createDocumentRecord({
+    companyId: DEMO_COMPANY_ID,
+    documentType: "supplier_invoice",
+    sourceReference: "supplier-derived-001",
+    actorId: "user_ocr",
+    metadataJson: {
+      totalAmount: 1250
+    }
+  });
+
+  const created = classification.createClassificationCase({
+    companyId: DEMO_COMPANY_ID,
+    documentId: document.documentId,
+    actorId: "user_ocr",
+    extractedFields: {
+      counterparty: { value: "Demo Leverantor AB", confidence: 0.97 },
+      invoiceNumber: { value: "SUP-2026-001", confidence: 0.96 },
+      invoiceDate: { value: "2026-03-28", confidence: 0.93 },
+      dueDate: { value: "2026-04-27", confidence: 0.91 },
+      totalAmount: { value: "1250.00", confidence: 0.98 },
+      currencyCode: { value: "SEK", confidence: 0.99 }
+    }
+  });
+
+  assert.equal(created.status, "suggested");
+  assert.equal(created.requiresReview, false);
+  assert.equal(created.treatmentLines.length, 1);
+  assert.equal(created.treatmentLines[0].treatmentCode, "COMPANY_COST");
+  assert.equal(created.treatmentIntents[0].targetDomainCode, "AP");
+  assert.equal(created.extractionProjections.length, 1);
+  assert.equal(created.extractionProjections[0].extractionFamilyCode, "AP_SUPPLIER_INVOICE");
+  assert.equal(created.extractionProjections[0].candidateObjectType, "ap_supplier_invoice");
+  assert.equal(created.extractionProjections[0].documentRoleCode, "PRIMARY_SUPPLIER_DOCUMENT");
+  assert.equal(created.extractionProjections[0].normalizedFieldsJson.factsJson.invoiceNumber, "SUP-2026-001");
+});
+
+test("Step 14 document classification derives travel extraction projection and review from OCR receipt heuristics", () => {
+  const clock = () => new Date("2026-03-28T10:30:00Z");
+  const documentPlatform = createDocumentArchivePlatform({ clock });
+  const reviewCenterPlatform = createReviewCenterPlatform({ clock, seedDemo: true });
+  const classification = createDocumentClassificationEngine({
+    clock,
+    seedDemo: false,
+    documentPlatform,
+    reviewCenterPlatform
+  });
+
+  const document = documentPlatform.createDocumentRecord({
+    companyId: DEMO_COMPANY_ID,
+    documentType: "expense_receipt",
+    sourceReference: "travel-derived-001",
+    actorId: "user_travel",
+    metadataJson: {
+      totalAmount: 899
+    }
+  });
+
+  const created = classification.createClassificationCase({
+    companyId: DEMO_COMPANY_ID,
+    documentId: document.documentId,
+    actorId: "user_travel",
+    extractedFields: {
+      storeName: { value: "Grand Hotel", confidence: 0.95 },
+      receiptDate: { value: "2026-03-28", confidence: 0.93 },
+      totalAmount: { value: "899.00", confidence: 0.97 }
+    }
+  });
+
+  assert.equal(created.status, "under_review");
+  assert.equal(created.reviewQueueCode, "PAYROLL_REVIEW");
+  assert.equal(created.treatmentLines[0].targetDomainCode, "TRAVEL");
+  assert.equal(created.treatmentLines[0].treatmentCode, "REIMBURSABLE_OUTLAY");
+  assert.equal(created.extractionProjections[0].extractionFamilyCode, "TRAVEL_EXPENSE_CANDIDATE");
+  assert.equal(created.extractionProjections[0].candidateObjectType, "travel_claim_candidate");
+  assert.equal(created.extractionProjections[0].normalizedFieldsJson.factsJson.expenseType, "lodging");
+});

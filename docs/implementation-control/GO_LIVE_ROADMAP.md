@@ -687,11 +687,12 @@ GÃ¶ra document-to-decision-kedjan verklig: originaldokument, OCR, klassificeri
 **Delfasstatus**
 - 10.1 klar 2026-03-28: dokumentkedjan bÃ¤r nu explicit `retentionClassCode`, `sourceFingerprint`, `checksumAlgorithm`, `checksumSha256`, `originalDocumentVersionId`, `latestDocumentVersionId` och `evidenceRefs`, med canonical migrationsregistrering och lÃ¤srutter fÃ¶r dokument- och versionskedjan.
 - 10.2 klar 2026-03-28: OCR-stubben Ã¤r nu ersatt med Google Document AI-baserad adapterkedja med explicita profiler, provider-baselines, sync-vs-async processing mode, page limits, operation refs, callback-route, rerun-supersede, provider confidence/quality och blockerande low-confidence review i stÃ¤llet fÃ¶r falsk lokal textract-stub.
+- 10.3 klar 2026-03-28: classification/extraction-pipelinen materialiserar nu canonical `ExtractionProjection`-objekt med `extractionFamilyCode`, `candidateObjectType`, `documentRoleCode`, `targetDomainCode`, `normalizedFieldsJson`, `attachmentRefs` och `payloadHash`, auto-deriverar AP-, travel-, benefits-, payroll- och attachmentkandidater från OCR-fält när line inputs saknas och blockerar person- eller finance-känsliga dokument från att glida vidare utan korrekt review- och downstream-gating.
 
 **Delfaser**
 - [x] 10.1 [HARDEN] **Originaldokument och versionskedja** â€” Original, hash, checksum, source fingerprint, retention class och evidence refs.
 - [x] 10.2 [REPLACE] **Byt OCR-stub mot riktig provider** â€” Google Document AI eller vald baseline-adapter med confidence, rerun, page limits, async callback och low-confidence review.
-- [ ] 10.3 [HARDEN] **Classification/extraction pipeline** â€” Canonical extraction model fÃ¶r AP, AR, payroll underlag, benefits/travel och attachments.
+- [x] 10.3 [HARDEN] **Classification/extraction pipeline** â€” Canonical extraction model fÃ¶r AP, AR, payroll underlag, benefits/travel och attachments.
 - [ ] 10.4 [HARDEN] **Import cases och blocker codes** â€” Completeness, blocking reasons, correction requests, human decisions och replay-safe mapping till downstream domain.
 - [ ] 10.5 [OPERATIONALIZE] **Review center queues/SLA/escalation** â€” Riskklass, queue ownership, SLA, claim/start/reassign/decide/close och audit.
 
@@ -1239,6 +1240,7 @@ Bevisa att backend-kontrakten bÃ¤r verkliga kundscenarier, lÃ¥sa UI-kontrakt
 ## Slutregel
 
 Denna roadmap Ã¤r den enda bindande byggordningen. Ingen implementation, ingen featuregren och ingen UI-plan fÃ¥r kÃ¶ra utanfÃ¶r denna ordning utan uttrycklig Ã¤ndring i detta dokument.
+
 
 
 

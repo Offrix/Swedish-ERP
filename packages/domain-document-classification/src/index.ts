@@ -9,6 +9,28 @@ export type ClassificationCaseStatus =
 
 export type TreatmentIntentStatus = "draft" | "approved" | "dispatched" | "realized" | "reversed" | "failed";
 
+export interface ExtractionProjection {
+  readonly extractionProjectionId: string;
+  readonly classificationCaseId: string;
+  readonly treatmentLineId: string;
+  readonly companyId: string;
+  readonly documentId: string;
+  readonly sourceOcrRunId: string | null;
+  readonly extractionFamilyCode: string;
+  readonly candidateObjectType: string;
+  readonly targetDomainCode: string;
+  readonly documentRoleCode: string;
+  readonly attachmentRoleCode: string;
+  readonly requiresReview: boolean;
+  readonly reviewRiskClass: "low" | "medium" | "high" | "critical";
+  readonly reviewReasonCodes: readonly string[];
+  readonly normalizedFieldsJson: Record<string, unknown>;
+  readonly attachmentRefs: readonly string[];
+  readonly payloadHash: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface ClassificationCase {
   readonly classificationCaseId: string;
   readonly companyId: string;
@@ -23,6 +45,7 @@ export interface ClassificationCase {
   readonly reviewItemId: string | null;
   readonly totalAmount: number;
   readonly currencyCode: string;
+  readonly extractionProjections?: readonly ExtractionProjection[];
   readonly createdByActorId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
