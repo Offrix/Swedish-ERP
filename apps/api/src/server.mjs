@@ -9826,6 +9826,7 @@ async function handleRequest({ req, res, platform, flags }) {
         employeeId: body.employeeId ?? null,
         employmentId: body.employmentId ?? null,
         monthlyGrossSalary: body.monthlyGrossSalary,
+        effectiveDate: body.effectiveDate ?? null,
         exchangeMode: body.exchangeMode ?? "fixed_amount",
         exchangeValue: body.exchangeValue,
         employerMarkupPercent: body.employerMarkupPercent ?? null,

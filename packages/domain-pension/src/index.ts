@@ -39,12 +39,18 @@ export interface PensionEnrollmentRef {
 }
 
 export interface SalaryExchangeSimulation {
+  readonly policyVersionRef: string;
+  readonly policyEffectiveFrom: string;
+  readonly policyEffectiveTo: string | null;
+  readonly minimumMonthlyExchangeAmount: number;
+  readonly maximumExchangeShare: number;
   readonly exchangedAmount: number;
   readonly employerMarkupPercent: number;
   readonly employerMarkupAmount: number;
   readonly employerPensionContributionAmount: number;
   readonly projectedCashSalaryAfterExchange: number;
   readonly thresholdAmount: number;
+  readonly specialPayrollTaxRatePercent: number;
   readonly warnings: readonly string[];
   readonly blockingIssues: readonly string[];
 }
@@ -61,6 +67,12 @@ export interface SalaryExchangeAgreementRef {
   readonly exchangeValue: number;
   readonly employerMarkupPercent: number;
   readonly thresholdAmount: number;
+  readonly policyVersionRef: string;
+  readonly policyEffectiveFrom: string;
+  readonly policyEffectiveTo: string | null;
+  readonly minimumMonthlyExchangeAmount: number;
+  readonly maximumExchangeShare: number;
+  readonly specialPayrollTaxRatePercent: number;
   readonly basisTreatmentCode: SalaryExchangeBasisTreatment;
   readonly providerCode: PensionProviderCode;
   readonly preview: SalaryExchangeSimulation;
@@ -80,6 +92,11 @@ export interface PensionBasisSnapshotRef {
   readonly pensionableBaseAfterExchange: number;
   readonly totalPensionPremiumAmount: number;
   readonly specialPayrollTaxAmount: number;
+  readonly policyVersionRef: string;
+  readonly policyEffectiveFrom: string;
+  readonly policyEffectiveTo: string | null;
+  readonly specialPayrollTaxRatePercent: number;
+  readonly basisTreatmentCode: SalaryExchangeBasisTreatment;
   readonly warningCodes: readonly string[];
   readonly snapshotHash: string;
   readonly payrollConsumptions: readonly PensionPayrollConsumptionRecord[];
@@ -157,12 +174,26 @@ export interface PensionReportLineRef {
   readonly payloadJson: Record<string, unknown>;
 }
 
+export interface PensionProviderExportInstructionRef {
+  readonly instructionVersionRef: string;
+  readonly providerCode: PensionProviderCode;
+  readonly effectiveFrom: string;
+  readonly effectiveTo: string | null;
+  readonly transportModeCode: string;
+  readonly payloadFormatCode: string;
+  readonly submissionChannelCode: string;
+  readonly legalEffectMode: string;
+  readonly reportDueStrategy: string;
+  readonly invoiceDueDayOfNextMonth: number | null;
+}
+
 export interface PensionReportRef {
   readonly pensionReportId: string;
   readonly companyId: string;
   readonly reportingPeriod: string;
   readonly providerCode: PensionProviderCode;
   readonly reportStatus: PensionReportStatus;
+  readonly providerExportInstruction: PensionProviderExportInstructionRef;
   readonly dueDate: string | null;
   readonly invoiceDueDate: string | null;
   readonly totals: Record<string, unknown>;

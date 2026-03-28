@@ -2,11 +2,6 @@ import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
-const SALARY_EXCHANGE_THRESHOLD_2026 = 56087;
-const SALARY_EXCHANGE_MINIMUM_MONTHLY_AMOUNT = 500;
-const SALARY_EXCHANGE_MAX_SHARE = 0.2;
-const SALARY_EXCHANGE_DEFAULT_MARKUP_PERCENT = 5.8;
-const SPECIAL_PAYROLL_TAX_RATE_PERCENT_2026 = 24.26;
 const PAYROLL_CONSUMPTION_STAGES = Object.freeze(["calculated", "approved"]);
 const PENSION_PAYROLL_SOURCE_TYPES = Object.freeze(["pension_event", "salary_exchange_agreement", "pension_basis_snapshot"]);
 
@@ -17,15 +12,58 @@ const SALARY_EXCHANGE_STATUSES = Object.freeze(["draft", "active", "paused", "st
 const SALARY_EXCHANGE_MODES = Object.freeze(["fixed_amount", "percent_of_gross"]);
 const BASIS_TREATMENT_CODES = Object.freeze(["maintain_pre_exchange", "reduce_with_exchange"]);
 const REPORT_STATUSES = Object.freeze(["draft", "ready", "submitted", "corrected"]);
-const PENSION_PROVIDER_POLICY_REGISTRY = Object.freeze({
-  collectum: Object.freeze({
+const SALARY_EXCHANGE_POLICY_REGISTRY = Object.freeze([
+  createSalaryExchangePolicySeed({
+    policyVersionRef: "se_salary_exchange_policy_2026_v1",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: "2026-12-31",
+    minimumRemainingCashSalaryAmount: 56087,
+    minimumMonthlyExchangeAmount: 500,
+    maximumExchangeShare: 0.2,
+    defaultEmployerMarkupPercent: 5.8,
+    specialPayrollTaxRatePercent: 24.26,
+    minimumEmploymentTypeCode: "permanent"
+  })
+]);
+
+const PENSION_PROVIDER_EXPORT_INSTRUCTION_REGISTRY = Object.freeze([
+  createProviderExportInstructionSeed({
+    instructionVersionRef: "collectum_export_instruction_2026_v1",
+    providerCode: "collectum",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    transportModeCode: "manual_portal_upload",
+    payloadFormatCode: "collectum_salary_change_export_v1",
+    submissionChannelCode: "provider_portal",
+    legalEffectMode: "provider_portal_receipt",
+    reportDueStrategy: "manual_policy_window",
     invoiceDueDayOfNextMonth: 15
   }),
-  fora: Object.freeze({
-    reportDueStrategy: "end_of_next_month"
+  createProviderExportInstructionSeed({
+    instructionVersionRef: "fora_export_instruction_2026_v1",
+    providerCode: "fora",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    transportModeCode: "manual_portal_upload",
+    payloadFormatCode: "fora_monthly_wage_export_v1",
+    submissionChannelCode: "provider_portal",
+    legalEffectMode: "provider_portal_receipt",
+    reportDueStrategy: "end_of_next_month",
+    invoiceDueDayOfNextMonth: null
   }),
-  custom: Object.freeze({})
-});
+  createProviderExportInstructionSeed({
+    instructionVersionRef: "custom_export_instruction_2026_v1",
+    providerCode: "custom",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    transportModeCode: "manual_evidence_pack",
+    payloadFormatCode: "custom_pension_export_v1",
+    submissionChannelCode: "backoffice_managed",
+    legalEffectMode: "manual_confirmation_required",
+    reportDueStrategy: "manual_policy_window",
+    invoiceDueDayOfNextMonth: null
+  })
+]);
 
 const PLAN_CATALOG_SEED = Object.freeze([
   createPlanSeed("ITP1", "collectum", "itp1", "ITP 1", "monthly_gross_salary", "PENSION_PREMIUM"),
@@ -234,50 +272,61 @@ export function createPensionEngine({
     employeeId = null,
     employmentId = null,
     monthlyGrossSalary,
+    effectiveDate = null,
     exchangeMode = "fixed_amount",
     exchangeValue,
-    employerMarkupPercent = SALARY_EXCHANGE_DEFAULT_MARKUP_PERCENT,
-    thresholdAmount = SALARY_EXCHANGE_THRESHOLD_2026,
+    employerMarkupPercent = null,
+    thresholdAmount = null,
     exceptionDecisionReference = null
   } = {}) {
+    const resolvedEffectiveDate = normalizeOptionalDate(effectiveDate, "salary_exchange_effective_date_invalid") || currentIsoDate(clock);
+    const policy = resolveSalaryExchangePolicyForDate(resolvedEffectiveDate);
     const resolvedMonthlyGrossSalary = normalizeMoney(monthlyGrossSalary, "salary_exchange_monthly_salary_invalid");
     const resolvedExchangeMode = assertAllowed(exchangeMode, SALARY_EXCHANGE_MODES, "salary_exchange_mode_invalid");
     const resolvedExchangeValue = normalizeMoney(exchangeValue, "salary_exchange_value_invalid");
-    const resolvedEmployerMarkupPercent =
-      normalizeOptionalMoney(employerMarkupPercent, "salary_exchange_markup_invalid") ?? SALARY_EXCHANGE_DEFAULT_MARKUP_PERCENT;
-    const resolvedThresholdAmount =
-      normalizeOptionalMoney(thresholdAmount, "salary_exchange_threshold_invalid") ?? SALARY_EXCHANGE_THRESHOLD_2026;
+    const resolvedEmployerMarkupPercent = normalizeOptionalMoney(employerMarkupPercent, "salary_exchange_markup_invalid");
+    const resolvedThresholdAmount = normalizeOptionalMoney(thresholdAmount, "salary_exchange_threshold_invalid");
     const warnings = [];
     const blockingIssues = [];
     const exchangedAmount =
       resolvedExchangeMode === "percent_of_gross"
         ? roundMoney(resolvedMonthlyGrossSalary * (resolvedExchangeValue / 100))
         : roundMoney(resolvedExchangeValue);
-    const maxAllowedAmount = roundMoney(resolvedMonthlyGrossSalary * SALARY_EXCHANGE_MAX_SHARE);
-    if (exchangedAmount < SALARY_EXCHANGE_MINIMUM_MONTHLY_AMOUNT) {
+    const effectiveEmployerMarkupPercent =
+      resolvedEmployerMarkupPercent == null ? policy.defaultEmployerMarkupPercent : resolvedEmployerMarkupPercent;
+    const effectiveThresholdAmount =
+      resolvedThresholdAmount == null ? policy.minimumRemainingCashSalaryAmount : resolvedThresholdAmount;
+    const maxAllowedAmount = roundMoney(resolvedMonthlyGrossSalary * policy.maximumExchangeShare);
+    if (exchangedAmount < policy.minimumMonthlyExchangeAmount) {
       blockingIssues.push("salary_exchange_minimum_violation");
     }
     if (exchangedAmount > maxAllowedAmount && !normalizeOptionalText(exceptionDecisionReference)) {
       blockingIssues.push("salary_exchange_percentage_limit_violation");
     }
     const projectedCashSalaryAfterExchange = roundMoney(resolvedMonthlyGrossSalary - exchangedAmount);
-    if (projectedCashSalaryAfterExchange < resolvedThresholdAmount) {
+    if (projectedCashSalaryAfterExchange < effectiveThresholdAmount) {
       warnings.push("salary_exchange_threshold_warning");
     }
     if (companyId && employeeId && employmentId && hrPlatform?.getEmployment) {
       const employment = assertEmploymentLink({ hrPlatform, companyId, employeeId, employmentId });
-      if (employment.employmentTypeCode !== "permanent") {
+      if (employment.employmentTypeCode !== policy.minimumEmploymentTypeCode) {
         blockingIssues.push("salary_exchange_requires_permanent_employment");
       }
     }
     warnings.push("salary_exchange_social_insurance_review_required");
     return Object.freeze({
+      policyVersionRef: policy.policyVersionRef,
+      policyEffectiveFrom: policy.effectiveFrom,
+      policyEffectiveTo: policy.effectiveTo,
+      minimumMonthlyExchangeAmount: policy.minimumMonthlyExchangeAmount,
+      maximumExchangeShare: policy.maximumExchangeShare,
       exchangedAmount,
-      employerMarkupPercent: resolvedEmployerMarkupPercent,
-      employerMarkupAmount: roundMoney(exchangedAmount * (resolvedEmployerMarkupPercent / 100)),
-      employerPensionContributionAmount: roundMoney(exchangedAmount * (1 + resolvedEmployerMarkupPercent / 100)),
+      employerMarkupPercent: effectiveEmployerMarkupPercent,
+      employerMarkupAmount: roundMoney(exchangedAmount * (effectiveEmployerMarkupPercent / 100)),
+      employerPensionContributionAmount: roundMoney(exchangedAmount * (1 + effectiveEmployerMarkupPercent / 100)),
       projectedCashSalaryAfterExchange,
-      thresholdAmount: resolvedThresholdAmount,
+      thresholdAmount: effectiveThresholdAmount,
+      specialPayrollTaxRatePercent: policy.specialPayrollTaxRatePercent,
       warnings,
       blockingIssues
     });
@@ -291,8 +340,8 @@ export function createPensionEngine({
     endsOn = null,
     exchangeMode = "fixed_amount",
     exchangeValue,
-    employerMarkupPercent = SALARY_EXCHANGE_DEFAULT_MARKUP_PERCENT,
-    thresholdAmount = SALARY_EXCHANGE_THRESHOLD_2026,
+    employerMarkupPercent = null,
+    thresholdAmount = null,
     basisTreatmentCode = "maintain_pre_exchange",
     providerCode = null,
     status = "active",
@@ -312,6 +361,7 @@ export function createPensionEngine({
     });
     const resolvedStartsOn = normalizeRequiredDate(startsOn, "salary_exchange_start_required");
     const resolvedEndsOn = normalizeOptionalDate(endsOn, "salary_exchange_end_invalid");
+    const policy = resolveSalaryExchangePolicyForDate(resolvedStartsOn);
     if (resolvedEndsOn && resolvedEndsOn < resolvedStartsOn) {
       throw createError(400, "salary_exchange_dates_invalid", "Salary exchange end date cannot be earlier than the start date.");
     }
@@ -330,6 +380,7 @@ export function createPensionEngine({
       employeeId: resolvedEmployeeId,
       employmentId: resolvedEmploymentId,
       monthlyGrossSalary: resolveEmploymentMonthlySalary({ hrPlatform, employment }),
+      effectiveDate: resolvedStartsOn,
       exchangeMode,
       exchangeValue,
       employerMarkupPercent,
@@ -349,10 +400,14 @@ export function createPensionEngine({
       status: assertAllowed(status, SALARY_EXCHANGE_STATUSES, "salary_exchange_status_invalid"),
       exchangeMode: assertAllowed(exchangeMode, SALARY_EXCHANGE_MODES, "salary_exchange_mode_invalid"),
       exchangeValue: normalizeMoney(exchangeValue, "salary_exchange_value_invalid"),
-      employerMarkupPercent:
-        normalizeOptionalMoney(employerMarkupPercent, "salary_exchange_markup_invalid") ?? SALARY_EXCHANGE_DEFAULT_MARKUP_PERCENT,
-      thresholdAmount:
-        normalizeOptionalMoney(thresholdAmount, "salary_exchange_threshold_invalid") ?? SALARY_EXCHANGE_THRESHOLD_2026,
+      employerMarkupPercent: preview.employerMarkupPercent,
+      thresholdAmount: preview.thresholdAmount,
+      policyVersionRef: policy.policyVersionRef,
+      policyEffectiveFrom: policy.effectiveFrom,
+      policyEffectiveTo: policy.effectiveTo,
+      minimumMonthlyExchangeAmount: policy.minimumMonthlyExchangeAmount,
+      maximumExchangeShare: policy.maximumExchangeShare,
+      specialPayrollTaxRatePercent: policy.specialPayrollTaxRatePercent,
       basisTreatmentCode: assertAllowed(basisTreatmentCode, BASIS_TREATMENT_CODES, "salary_exchange_basis_treatment_invalid"),
       providerCode: assertAllowed(
         normalizeOptionalText(providerCode) || resolveAgreementProviderCode(state, resolvedCompanyId, resolvedEmploymentId),
@@ -440,6 +495,10 @@ export function createPensionEngine({
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedReportingPeriod = normalizeReportingPeriod(reportingPeriod, "reporting_period_required");
     const resolvedProviderCode = assertAllowed(providerCode, PENSION_PROVIDER_CODES, "pension_report_provider_invalid");
+    const exportInstruction = resolveProviderExportInstructionForPeriod({
+      providerCode: resolvedProviderCode,
+      reportingPeriod: resolvedReportingPeriod
+    });
     const events = listPensionEvents({ companyId: resolvedCompanyId, reportingPeriod: resolvedReportingPeriod }).filter(
       (candidate) => candidate.providerCode === resolvedProviderCode
     );
@@ -452,7 +511,7 @@ export function createPensionEngine({
       employmentId: event.employmentId,
       reportingBasisAmount: event.reportBasisAmount,
       contributionAmount: event.contributionAmount,
-      payloadJson: buildReportLinePayload(event, resolvedReportingPeriod)
+      payloadJson: buildReportLinePayload(event, resolvedReportingPeriod, exportInstruction)
     }));
     const totals = {
       lineCount: lines.length,
@@ -472,8 +531,9 @@ export function createPensionEngine({
       reportingPeriod: resolvedReportingPeriod,
       providerCode: resolvedProviderCode,
       reportStatus: "draft",
-      dueDate: resolveReportDueDate(resolvedProviderCode, resolvedReportingPeriod),
-      invoiceDueDate: resolveInvoiceDueDate(resolvedProviderCode, resolvedReportingPeriod),
+      providerExportInstruction: copy(exportInstruction),
+      dueDate: resolveReportDueDate(exportInstruction, resolvedReportingPeriod),
+      invoiceDueDate: resolveInvoiceDueDate(exportInstruction, resolvedReportingPeriod),
       totals,
       lines,
       payloadHash,
@@ -582,6 +642,7 @@ export function createPensionEngine({
     const resolvedReportingPeriod = normalizeReportingPeriod(reportingPeriod, "reporting_period_required");
     const resolvedPeriodStartsOn = normalizeRequiredDate(periodStartsOn, "period_starts_on_required");
     const resolvedPeriodEndsOn = normalizeRequiredDate(periodEndsOn, "period_ends_on_required");
+    const salaryExchangePolicy = resolveSalaryExchangePolicyForDate(resolvedPeriodStartsOn);
 
     assertEmploymentLink({
       hrPlatform,
@@ -623,6 +684,7 @@ export function createPensionEngine({
         employeeId: resolvedEmployeeId,
         employmentId: resolvedEmploymentId,
         monthlyGrossSalary: baseGrossSalary,
+        effectiveDate: resolvedPeriodStartsOn,
         exchangeMode: activeAgreement.exchangeMode,
         exchangeValue: activeAgreement.exchangeValue,
         employerMarkupPercent: activeAgreement.employerMarkupPercent,
@@ -662,6 +724,11 @@ export function createPensionEngine({
       pensionableBaseAfterExchange: resolvedPensionableBaseAfterExchange,
       totalPensionPremiumAmount: 0,
       specialPayrollTaxAmount: 0,
+      policyVersionRef: salaryExchangePolicy.policyVersionRef,
+      policyEffectiveFrom: salaryExchangePolicy.effectiveFrom,
+      policyEffectiveTo: salaryExchangePolicy.effectiveTo,
+      specialPayrollTaxRatePercent: salaryExchangePolicy.specialPayrollTaxRatePercent,
+      basisTreatmentCode: activeAgreement?.basisTreatmentCode || "maintain_pre_exchange",
       warningCodes: warnings,
       actorId
     });
@@ -766,7 +833,7 @@ export function createPensionEngine({
     }
 
     const totalPensionPremiumAmount = roundMoney(events.reduce((sum, event) => sum + Number(event.contributionAmount || 0), 0));
-    const specialPayrollTaxAmount = roundMoney(totalPensionPremiumAmount * (SPECIAL_PAYROLL_TAX_RATE_PERCENT_2026 / 100));
+    const specialPayrollTaxAmount = roundMoney(totalPensionPremiumAmount * ((salaryExchangePolicy.specialPayrollTaxRatePercent || 0) / 100));
     if (specialPayrollTaxAmount > 0) {
       payLinePayloads.push({
         processingStep: 9,
@@ -893,6 +960,56 @@ function createPlanSeed(planCode, providerCode, collectiveAgreementCode, display
   });
 }
 
+function createSalaryExchangePolicySeed({
+  policyVersionRef,
+  effectiveFrom,
+  effectiveTo = null,
+  minimumRemainingCashSalaryAmount,
+  minimumMonthlyExchangeAmount,
+  maximumExchangeShare,
+  defaultEmployerMarkupPercent,
+  specialPayrollTaxRatePercent,
+  minimumEmploymentTypeCode
+}) {
+  return Object.freeze({
+    policyVersionRef,
+    effectiveFrom,
+    effectiveTo,
+    minimumRemainingCashSalaryAmount,
+    minimumMonthlyExchangeAmount,
+    maximumExchangeShare,
+    defaultEmployerMarkupPercent,
+    specialPayrollTaxRatePercent,
+    minimumEmploymentTypeCode
+  });
+}
+
+function createProviderExportInstructionSeed({
+  instructionVersionRef,
+  providerCode,
+  effectiveFrom,
+  effectiveTo = null,
+  transportModeCode,
+  payloadFormatCode,
+  submissionChannelCode,
+  legalEffectMode,
+  reportDueStrategy,
+  invoiceDueDayOfNextMonth
+}) {
+  return Object.freeze({
+    instructionVersionRef,
+    providerCode,
+    effectiveFrom,
+    effectiveTo,
+    transportModeCode,
+    payloadFormatCode,
+    submissionChannelCode,
+    legalEffectMode,
+    reportDueStrategy,
+    invoiceDueDayOfNextMonth
+  });
+}
+
 function seedPlanCatalog(state, { companyId, clock }) {
   const resolvedCompanyId = requireText(companyId, "company_id_required");
   if ((state.planIdsByCompany.get(resolvedCompanyId) || []).length > 0) {
@@ -1006,6 +1123,16 @@ function resolveAgreementCollectiveAgreementCode(state, companyId, employmentId)
   return activeEnrollment?.collectiveAgreementCode || "supplementary";
 }
 
+function resolveSalaryExchangePolicyForDate(effectiveDate) {
+  const resolvedDate = normalizeRequiredDate(effectiveDate, "salary_exchange_effective_date_required");
+  const policy =
+    SALARY_EXCHANGE_POLICY_REGISTRY.find((candidate) => isDateWithinWindow(resolvedDate, candidate.effectiveFrom, candidate.effectiveTo)) || null;
+  if (!policy) {
+    throw createError(409, "salary_exchange_policy_not_found", `No salary exchange policy exists for ${resolvedDate}.`);
+  }
+  return policy;
+}
+
 function defaultContributionBasisCode(planCode) {
   switch (planCode) {
     case "ITP2":
@@ -1048,10 +1175,12 @@ function resolvePayItemCodeForPlan(planCode) {
   return "PENSION_PREMIUM";
 }
 
-function buildReportLinePayload(event, reportingPeriod) {
+function buildReportLinePayload(event, reportingPeriod, exportInstruction) {
   if (event.planCode === "ITP1") {
     return {
       reportingPeriod,
+      instructionVersionRef: exportInstruction.instructionVersionRef,
+      exportLineCode: "collectum_itp1_monthly_salary",
       reportType: "monthly_gross_salary",
       monthlyGrossSalary: event.reportBasisAmount,
       pensionableSalary: event.pensionableSalary,
@@ -1061,6 +1190,8 @@ function buildReportLinePayload(event, reportingPeriod) {
   if (event.planCode === "ITP2") {
     return {
       reportingPeriod,
+      instructionVersionRef: exportInstruction.instructionVersionRef,
+      exportLineCode: "collectum_itp2_annual_pensionable_salary",
       reportType: "annual_pensionable_salary",
       annualPensionableSalary: event.reportBasisAmount,
       contributionAmount: event.contributionAmount
@@ -1069,36 +1200,55 @@ function buildReportLinePayload(event, reportingPeriod) {
   if (event.planCode === "FORA") {
     return {
       reportingPeriod,
+      instructionVersionRef: exportInstruction.instructionVersionRef,
+      exportLineCode: "fora_monthly_wage_report",
       reportType: "monthly_wage_report",
       wageAmount: event.reportBasisAmount,
       contributionAmount: event.contributionAmount,
-      dueDate: resolveReportDueDate("fora", reportingPeriod)
+      dueDate: resolveReportDueDate(exportInstruction, reportingPeriod)
     };
   }
   return {
     reportingPeriod,
+    instructionVersionRef: exportInstruction.instructionVersionRef,
+    exportLineCode: event.salaryExchangeFlag ? "salary_exchange_supplementary_premium" : "supplementary_premium",
     reportType: "supplementary_premium",
     contributionAmount: event.contributionAmount,
     salaryExchangeFlag: event.salaryExchangeFlag
   };
 }
 
-function resolveReportDueDate(providerCode, reportingPeriod) {
-  const providerPolicy = PENSION_PROVIDER_POLICY_REGISTRY[providerCode] || null;
-  if (providerPolicy?.reportDueStrategy === "end_of_next_month") {
+function resolveProviderExportInstructionForPeriod({ providerCode, reportingPeriod }) {
+  const resolvedProviderCode = assertAllowed(providerCode, PENSION_PROVIDER_CODES, "pension_report_provider_invalid");
+  const effectiveDate = `${reportingPeriod.slice(0, 4)}-${reportingPeriod.slice(4, 6)}-01`;
+  const instruction =
+    PENSION_PROVIDER_EXPORT_INSTRUCTION_REGISTRY.find(
+      (candidate) => candidate.providerCode === resolvedProviderCode && isDateWithinWindow(effectiveDate, candidate.effectiveFrom, candidate.effectiveTo)
+    ) || null;
+  if (!instruction) {
+    throw createError(
+      409,
+      "pension_provider_export_instruction_not_found",
+      `No pension provider export instruction exists for ${resolvedProviderCode} ${reportingPeriod}.`
+    );
+  }
+  return instruction;
+}
+
+function resolveReportDueDate(exportInstruction, reportingPeriod) {
+  if (exportInstruction?.reportDueStrategy === "end_of_next_month") {
     return endOfNextMonth(reportingPeriod);
   }
   return null;
 }
 
-function resolveInvoiceDueDate(providerCode, reportingPeriod) {
-  const providerPolicy = PENSION_PROVIDER_POLICY_REGISTRY[providerCode] || null;
-  if (Number.isInteger(providerPolicy?.invoiceDueDayOfNextMonth)) {
+function resolveInvoiceDueDate(exportInstruction, reportingPeriod) {
+  if (Number.isInteger(exportInstruction?.invoiceDueDayOfNextMonth)) {
     const year = Number(reportingPeriod.slice(0, 4));
     const month = Number(reportingPeriod.slice(4, 6));
     const nextMonth = month === 12 ? 1 : month + 1;
     const nextYear = month === 12 ? year + 1 : year;
-    return `${String(nextYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-${String(providerPolicy.invoiceDueDayOfNextMonth).padStart(2, "0")}`;
+    return `${String(nextYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-${String(exportInstruction.invoiceDueDayOfNextMonth).padStart(2, "0")}`;
   }
   return null;
 }
@@ -1125,6 +1275,11 @@ function upsertBasisSnapshot({
   pensionableBaseAfterExchange,
   totalPensionPremiumAmount,
   specialPayrollTaxAmount,
+  policyVersionRef,
+  policyEffectiveFrom,
+  policyEffectiveTo,
+  specialPayrollTaxRatePercent,
+  basisTreatmentCode,
   warningCodes,
   actorId
 }) {
@@ -1139,6 +1294,11 @@ function upsertBasisSnapshot({
     pensionableBaseAfterExchange,
     totalPensionPremiumAmount,
     specialPayrollTaxAmount,
+    policyVersionRef: requireText(policyVersionRef, "salary_exchange_policy_version_required"),
+    policyEffectiveFrom: normalizeRequiredDate(policyEffectiveFrom, "salary_exchange_policy_effective_from_required"),
+    policyEffectiveTo: normalizeOptionalDate(policyEffectiveTo, "salary_exchange_policy_effective_to_invalid"),
+    specialPayrollTaxRatePercent: normalizeMoney(specialPayrollTaxRatePercent, "pension_special_payroll_tax_rate_invalid"),
+    basisTreatmentCode: assertAllowed(basisTreatmentCode, BASIS_TREATMENT_CODES, "salary_exchange_basis_treatment_invalid"),
     warningCodes: uniqueStrings(warningCodes)
   };
   const snapshotHash = buildSnapshotHash(payload);
@@ -1366,6 +1526,14 @@ function roundMoney(value) {
 
 function nowIso(clock) {
   return clock().toISOString();
+}
+
+function currentIsoDate(clock) {
+  return nowIso(clock).slice(0, 10);
+}
+
+function isDateWithinWindow(dateValue, effectiveFrom, effectiveTo) {
+  return effectiveFrom <= dateValue && (!effectiveTo || dateValue <= effectiveTo);
 }
 
 function buildSnapshotHash(payload) {

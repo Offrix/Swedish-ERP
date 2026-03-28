@@ -130,8 +130,10 @@ test("Phase 9.3 API manages pension enrollments, salary exchange, reports and re
       }
     });
     assert.equal(simulation.exchangedAmount, 3000);
+    assert.equal(simulation.policyVersionRef, "se_salary_exchange_policy_2026_v1");
+    assert.equal(simulation.specialPayrollTaxRatePercent, 24.26);
 
-    await requestJson(baseUrl, "/v1/pension/salary-exchange-agreements", {
+    const agreement = await requestJson(baseUrl, "/v1/pension/salary-exchange-agreements", {
       method: "POST",
       token: sessionToken,
       expectedStatus: 201,
@@ -144,6 +146,8 @@ test("Phase 9.3 API manages pension enrollments, salary exchange, reports and re
         exchangeValue: 3000
       }
     });
+    assert.equal(agreement.policyVersionRef, "se_salary_exchange_policy_2026_v1");
+    assert.equal(agreement.maximumExchangeShare, 0.2);
 
     const payCalendar = (
       await requestJson(baseUrl, `/v1/payroll/pay-calendars?companyId=${COMPANY_ID}`, {
@@ -201,6 +205,8 @@ test("Phase 9.3 API manages pension enrollments, salary exchange, reports and re
       }
     });
     assert.equal(report.totals.contributionAmount, 7599);
+    assert.equal(report.providerExportInstruction.instructionVersionRef, "collectum_export_instruction_2026_v1");
+    assert.equal(report.lines.every((line) => line.payloadJson.instructionVersionRef === "collectum_export_instruction_2026_v1"), true);
 
     const reconciliation = await requestJson(baseUrl, "/v1/pension/reconciliations", {
       method: "POST",

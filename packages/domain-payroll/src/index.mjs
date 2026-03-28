@@ -3757,14 +3757,25 @@ function calculateEmploymentRun({
     status: agreement.status,
     exchangeMode: agreement.exchangeMode,
     exchangeValue: agreement.exchangeValue,
-    thresholdAmount: agreement.thresholdAmount
+    thresholdAmount: agreement.thresholdAmount,
+    policyVersionRef: agreement.policyVersionRef,
+    policyEffectiveFrom: agreement.policyEffectiveFrom,
+    policyEffectiveTo: agreement.policyEffectiveTo,
+    minimumMonthlyExchangeAmount: agreement.minimumMonthlyExchangeAmount,
+    maximumExchangeShare: agreement.maximumExchangeShare,
+    specialPayrollTaxRatePercent: agreement.specialPayrollTaxRatePercent
   }));
   sourceSnapshot.pensionBasisSnapshots = (pensionPayloadBundle.basisSnapshots || []).map((snapshot) => ({
     pensionBasisSnapshotId: snapshot.pensionBasisSnapshotId,
     salaryExchangeAmount: snapshot.salaryExchangeAmount,
     pensionableBaseAfterExchange: snapshot.pensionableBaseAfterExchange,
     totalPensionPremiumAmount: snapshot.totalPensionPremiumAmount,
-    specialPayrollTaxAmount: snapshot.specialPayrollTaxAmount
+    specialPayrollTaxAmount: snapshot.specialPayrollTaxAmount,
+    policyVersionRef: snapshot.policyVersionRef,
+    policyEffectiveFrom: snapshot.policyEffectiveFrom,
+    policyEffectiveTo: snapshot.policyEffectiveTo,
+    specialPayrollTaxRatePercent: snapshot.specialPayrollTaxRatePercent,
+    basisTreatmentCode: snapshot.basisTreatmentCode
   }));
   sourceSnapshot.pensionEvents = (pensionPayloadBundle.events || []).map((event) => ({
     pensionEventId: event.pensionEventId,

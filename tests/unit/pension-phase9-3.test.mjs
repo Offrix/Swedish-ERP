@@ -49,10 +49,15 @@ test("Phase 9.3 warns when salary exchange pushes cash salary under the 2026 thr
   });
 
   assert.equal(payloadBundle.warnings.includes("salary_exchange_threshold_warning"), true);
+  assert.equal(payloadBundle.activeAgreements[0].policyVersionRef, "se_salary_exchange_policy_2026_v1");
+  assert.equal(payloadBundle.activeAgreements[0].minimumMonthlyExchangeAmount, 500);
+  assert.equal(payloadBundle.activeAgreements[0].maximumExchangeShare, 0.2);
   assert.equal(payloadBundle.payLinePayloads.some((line) => line.payItemCode === "SALARY_EXCHANGE_GROSS_DEDUCTION" && line.amount === 1000), true);
   assert.equal(payloadBundle.payLinePayloads.some((line) => line.payItemCode === "PENSION_PREMIUM" && line.amount === 2475), true);
   assert.equal(payloadBundle.payLinePayloads.some((line) => line.payItemCode === "EXTRA_PENSION_PREMIUM" && line.amount === 1058), true);
   assert.equal(payloadBundle.payLinePayloads.some((line) => line.payItemCode === "PENSION_SPECIAL_PAYROLL_TAX"), true);
+  assert.equal(payloadBundle.basisSnapshots[0].policyVersionRef, "se_salary_exchange_policy_2026_v1");
+  assert.equal(payloadBundle.basisSnapshots[0].specialPayrollTaxRatePercent, 24.26);
 });
 
 test("Phase 9.3 carries pension, extra pension and salary exchange into payroll and posting", () => {
@@ -144,7 +149,11 @@ test("Phase 9.3 carries pension, extra pension and salary exchange into payroll 
     pensionEvents.find((event) => event.eventCode === "salary_exchange_pension_premium").payrollDispatchStatus.totalCount,
     0
   );
+  assert.equal(salaryExchangeAgreement.policyVersionRef, "se_salary_exchange_policy_2026_v1");
+  assert.equal(salaryExchangeAgreement.specialPayrollTaxRatePercent, 24.26);
   assert.equal(salaryExchangeAgreement.payrollDispatchStatus.approvedCount, 2);
+  assert.equal(basisSnapshot.policyVersionRef, "se_salary_exchange_policy_2026_v1");
+  assert.equal(basisSnapshot.basisTreatmentCode, "maintain_pre_exchange");
   assert.equal(basisSnapshot.payrollDispatchStatus.approvedCount, 1);
 
   const posting = payrollPlatform.createPayrollPosting({
@@ -172,6 +181,9 @@ test("Phase 9.3 carries pension, extra pension and salary exchange into payroll 
     actorId: "unit-test"
   });
   assert.equal(report.totals.contributionAmount, 7599);
+  assert.equal(report.providerExportInstruction.instructionVersionRef, "collectum_export_instruction_2026_v1");
+  assert.equal(report.providerExportInstruction.transportModeCode, "manual_portal_upload");
+  assert.equal(report.lines.every((line) => line.payloadJson.instructionVersionRef === "collectum_export_instruction_2026_v1"), true);
   assert.equal(reconciliation.status, "matched");
 });
 
@@ -230,7 +242,12 @@ test("Phase 9.3 generates ITP2 annual salary and Fora monthly wage reporting pay
   const itp2Line = collectumReport.lines.find((line) => line.planCode === "ITP2");
   const foraLine = foraReport.lines.find((line) => line.planCode === "FORA");
   assert.equal(itp2Line.payloadJson.annualPensionableSalary, 840000);
+  assert.equal(itp2Line.payloadJson.exportLineCode, "collectum_itp2_annual_pensionable_salary");
+  assert.equal(collectumReport.providerExportInstruction.instructionVersionRef, "collectum_export_instruction_2026_v1");
+  assert.equal(collectumReport.invoiceDueDate, "2026-04-15");
   assert.equal(foraLine.payloadJson.wageAmount, 70000);
+  assert.equal(foraLine.payloadJson.exportLineCode, "fora_monthly_wage_report");
+  assert.equal(foraReport.providerExportInstruction.instructionVersionRef, "fora_export_instruction_2026_v1");
   assert.equal(foraReport.dueDate, "2026-04-30");
 });
 
