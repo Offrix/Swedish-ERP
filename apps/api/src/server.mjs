@@ -434,6 +434,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/payroll/migrations/:payrollMigrationBatchId/finalize",
               "/v1/payroll/migrations/:payrollMigrationBatchId/rollback",
               "/v1/ledger/dimensions",
+              "/v1/ledger/dimensions/:dimensionType",
               "/v1/ledger/voucher-series",
               "/v1/ledger/journal-entries",
               "/v1/ledger/journal-entries/:journalEntryId",
@@ -2087,6 +2088,37 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "POST" && path === "/v1/ledger/accounts") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.upsertLedgerAccount({
+        companyId,
+        accountNumber: body.accountNumber,
+        accountName: body.accountName,
+        accountClass: body.accountClass,
+        status: body.status ?? null,
+        allowManualPosting: body.allowManualPosting,
+        requiredDimensionKeys: Array.isArray(body.requiredDimensionKeys) ? body.requiredDimensionKeys : [],
+        locked: body.locked,
+        changeReasonCode: body.changeReasonCode ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   if (req.method === "GET" && path === "/v1/ledger/accounting-periods") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -2122,6 +2154,37 @@ async function handleRequest({ req, res, platform, flags }) {
       scopeCode: "ledger"
     });
     writeJson(res, 200, platform.listLedgerDimensions({ companyId }));
+    return;
+  }
+
+  const ledgerDimensionMatch = matchPath(path, "/v1/ledger/dimensions/:dimensionType");
+  if (ledgerDimensionMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.upsertLedgerDimensionValue({
+        companyId,
+        dimensionType: ledgerDimensionMatch.dimensionType,
+        code: body.code,
+        label: body.label,
+        status: body.status ?? null,
+        locked: body.locked,
+        sourceDomain: body.sourceDomain ?? "ledger",
+        changeReasonCode: body.changeReasonCode ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
     return;
   }
 
@@ -2168,6 +2231,8 @@ async function handleRequest({ req, res, platform, flags }) {
         purposeCodes: Array.isArray(body.purposeCodes) ? body.purposeCodes : null,
         importedSequencePreservationEnabled:
           body.importedSequencePreservationEnabled == null ? null : body.importedSequencePreservationEnabled === true,
+        locked: body.locked,
+        changeReasonCode: body.changeReasonCode ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })

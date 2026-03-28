@@ -10,6 +10,8 @@ export const DEFAULT_LEDGER_CURRENCY = "SEK";
 export const DEFAULT_CHART_TEMPLATE_ID = "DSAM-2026";
 export const DEFAULT_VOUCHER_SERIES_CODES = Object.freeze("ABCDEFGHIJKLMNOPQRSTUVWXYZ".split(""));
 export const VOUCHER_SERIES_STATUSES = Object.freeze(["active", "paused", "archived"]);
+export const LEDGER_ACCOUNT_STATUSES = Object.freeze(["active", "archived"]);
+export const DIMENSION_VALUE_STATUSES = Object.freeze(["active", "archived"]);
 export const DEFAULT_VOUCHER_SERIES_PURPOSE_MAP = Object.freeze({
   A: Object.freeze(["LEDGER_MANUAL", "LEDGER_CORRECTION"]),
   B: Object.freeze(["AR_INVOICE", "AR_DUNNING"]),
@@ -1614,7 +1616,20 @@ export const DSAM_ACCOUNTS = Object.freeze([
 ]);
 
 const DEMO_LEDGER_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
-const DIMENSION_KEYS = Object.freeze(["projectId", "costCenterCode", "businessAreaCode"]);
+const DIMENSION_TYPES = Object.freeze(["projects", "costCenters", "businessAreas", "serviceLines"]);
+const DIMENSION_KEYS = Object.freeze(["projectId", "costCenterCode", "businessAreaCode", "serviceLineCode"]);
+const DIMENSION_KEY_TO_CATALOG_KEY = Object.freeze({
+  projectId: "projects",
+  costCenterCode: "costCenters",
+  businessAreaCode: "businessAreas",
+  serviceLineCode: "serviceLines"
+});
+const DIMENSION_TYPE_CONFIG = Object.freeze({
+  projects: Object.freeze({ valueKey: "projectId", codePrefix: "PRJ" }),
+  costCenters: Object.freeze({ valueKey: "costCenterCode", codePrefix: "CC" }),
+  businessAreas: Object.freeze({ valueKey: "businessAreaCode", codePrefix: "BA" }),
+  serviceLines: Object.freeze({ valueKey: "serviceLineCode", codePrefix: "SL" })
+});
 const LOCKED_PERIOD_STATUSES = Object.freeze(["soft_locked", "hard_closed"]);
 const DEMO_DIMENSION_CATALOG = Object.freeze({
   projects: Object.freeze([
@@ -1628,6 +1643,11 @@ const DEMO_DIMENSION_CATALOG = Object.freeze({
   businessAreas: Object.freeze([
     { code: "BA-SERVICES", label: "Services", status: "active" },
     { code: "BA-FIELD", label: "Field", status: "active" }
+  ]),
+  serviceLines: Object.freeze([
+    { code: "SL-SERVICE", label: "Service work", status: "active" },
+    { code: "SL-INSTALL", label: "Installation work", status: "active" },
+    { code: "SL-ROT", label: "ROT labor", status: "active" }
   ])
 });
 
@@ -1668,6 +1688,7 @@ export function createLedgerEngine({
     installLedgerCatalog,
     ensureAccountingYearPeriod,
     listLedgerAccounts,
+    upsertLedgerAccount,
     listVoucherSeries,
     getVoucherSeries,
     upsertVoucherSeries,
@@ -1675,6 +1696,7 @@ export function createLedgerEngine({
     resolveVoucherSeriesForPurpose,
     listAccountingPeriods,
     listLedgerDimensions,
+    upsertLedgerDimensionValue,
     lockAccountingPeriod,
     reopenAccountingPeriod,
     createJournalEntry,
@@ -1711,9 +1733,16 @@ export function createLedgerEngine({
         accountName: definition.accountName,
         accountClass: definition.accountClass,
         status: "active",
+        governanceVersion: 1,
+        locked: true,
+        systemManaged: true,
+        allowManualPosting: true,
+        requiredDimensionKeys: [],
         metadataJson: {
           chartTemplateId,
-          seedSource: "accounting_foundation_24_2"
+          seedSource: "accounting_foundation_24_2",
+          chartGovernanceStatus: "published",
+          lastChangeReasonCode: "chart_install"
         },
         createdAt: now,
         updatedAt: now
@@ -1737,6 +1766,10 @@ export function createLedgerEngine({
         status: "active",
         purposeCodes: defaultSeriesPurposeCodes(seriesCode),
         importedSequencePreservationEnabled: true,
+        profileVersion: 1,
+        locked: true,
+        systemManaged: true,
+        changeReasonCode: "chart_install",
         createdAt: now,
         updatedAt: now
       };
@@ -1775,6 +1808,83 @@ export function createLedgerEngine({
       .map(copy);
   }
 
+  function upsertLedgerAccount({
+    companyId,
+    accountNumber,
+    accountName,
+    accountClass,
+    status = null,
+    allowManualPosting = null,
+    requiredDimensionKeys = null,
+    locked = null,
+    changeReasonCode = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedAccountNumber = normalizeAccountNumber(accountNumber);
+    const now = nowIso();
+    const key = toCompanyScopedKey(resolvedCompanyId, resolvedAccountNumber);
+    const existingAccountId = state.accountIdsByCompanyNumber.get(key);
+    const existing = existingAccountId ? state.accounts.get(existingAccountId) : null;
+    const hasUsage = existing ? accountHasUsage({ companyId: resolvedCompanyId, accountId: existing.accountId }) : false;
+
+    if (existing && hasUsage && !changeReasonCode) {
+      throw httpError(
+        409,
+        "ledger_account_change_reason_required",
+        `Ledger account ${resolvedAccountNumber} requires a change reason after it has been used in journals.`
+      );
+    }
+
+    const record = existing || {
+      accountId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      accountNumber: resolvedAccountNumber,
+      createdAt: now,
+      metadataJson: {}
+    };
+
+    const resolvedAccountClass = normalizeAccountClass(accountClass ?? existing?.accountClass);
+    if (existing && hasUsage && resolvedAccountClass !== existing.accountClass) {
+      throw httpError(
+        409,
+        "ledger_account_class_locked_after_use",
+        `Ledger account ${resolvedAccountNumber} cannot change account class after it has been used in journals.`
+      );
+    }
+
+    record.accountName = normalizeLedgerLabel(accountName ?? existing?.accountName, "account_name_required");
+    record.accountClass = resolvedAccountClass;
+    record.status = normalizeLedgerAccountStatus(status ?? existing?.status ?? "active");
+    record.allowManualPosting = allowManualPosting == null ? existing?.allowManualPosting ?? true : allowManualPosting === true;
+    record.requiredDimensionKeys = normalizeRequiredDimensionKeys(requiredDimensionKeys ?? existing?.requiredDimensionKeys ?? []);
+    record.locked = locked == null ? existing?.locked ?? true : locked === true;
+    record.systemManaged = existing?.systemManaged ?? false;
+    record.governanceVersion = (existing?.governanceVersion || 0) + 1;
+    record.metadataJson = {
+      ...(existing?.metadataJson || {}),
+      chartGovernanceStatus: "published",
+      lastChangeReasonCode: changeReasonCode || existing?.metadataJson?.lastChangeReasonCode || (existing ? "governance_update" : "custom_account_create")
+    };
+    record.updatedAt = now;
+
+    state.accounts.set(record.accountId, record);
+    state.accountIdsByCompanyNumber.set(key, record.accountId);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: existing ? "ledger.account.updated" : "ledger.account.created",
+      entityType: "ledger_account",
+      entityId: record.accountId,
+      explanation: `${existing ? "Updated" : "Created"} ledger account ${record.accountNumber}.`
+    });
+
+    return copy(record);
+  }
+
   function listVoucherSeries({ companyId } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return [...state.voucherSeries.values()]
@@ -1795,6 +1905,8 @@ export function createLedgerEngine({
     status = null,
     purposeCodes = null,
     importedSequencePreservationEnabled = null,
+    locked = null,
+    changeReasonCode = null,
     actorId = "system",
     correlationId = crypto.randomUUID()
   } = {}) {
@@ -1802,10 +1914,28 @@ export function createLedgerEngine({
     const resolvedSeriesCode = normalizeSeriesCode(seriesCode, "voucher_series_code_required");
     const now = nowIso();
     const existing = findVoucherSeries(state, resolvedCompanyId, resolvedSeriesCode);
+    const hasUsage = existing ? voucherSeriesHasUsage({ companyId: resolvedCompanyId, voucherSeriesId: existing.voucherSeriesId }) : false;
     const resolvedStatus = normalizeVoucherSeriesStatus(status ?? existing?.status ?? "active");
     const resolvedPurposeCodes = normalizeVoucherSeriesPurposeCodes(
       purposeCodes ?? existing?.purposeCodes ?? defaultSeriesPurposeCodes(resolvedSeriesCode)
     );
+
+    if (existing && hasUsage) {
+      if (!changeReasonCode) {
+        throw httpError(
+          409,
+          "voucher_series_change_reason_required",
+          `Voucher series ${resolvedSeriesCode} requires a change reason after it has been used in journals.`
+        );
+      }
+      if (JSON.stringify(resolvedPurposeCodes) !== JSON.stringify(existing.purposeCodes || [])) {
+        throw httpError(
+          409,
+          "voucher_series_purposes_locked_after_use",
+          `Voucher series ${resolvedSeriesCode} cannot change purpose mapping after it has been used in journals.`
+        );
+      }
+    }
 
     ensureVoucherSeriesPurposeAvailability({
       state,
@@ -1834,6 +1964,10 @@ export function createLedgerEngine({
       importedSequencePreservationEnabled == null
         ? existing?.importedSequencePreservationEnabled ?? true
         : Boolean(importedSequencePreservationEnabled);
+    record.profileVersion = (existing?.profileVersion || 0) + 1;
+    record.locked = locked == null ? existing?.locked ?? true : locked === true;
+    record.systemManaged = existing?.systemManaged ?? false;
+    record.changeReasonCode = changeReasonCode || existing?.changeReasonCode || (existing ? "governance_update" : "series_create");
     record.updatedAt = now;
 
     state.voucherSeries.set(record.voucherSeriesId, record);
@@ -2008,6 +2142,82 @@ export function createLedgerEngine({
     return copy(ensureDimensionCatalog(requireText(companyId, "company_id_required")));
   }
 
+  function upsertLedgerDimensionValue({
+    companyId,
+    dimensionType,
+    code,
+    label,
+    status = null,
+    locked = null,
+    sourceDomain = "ledger",
+    changeReasonCode = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedDimensionType = normalizeDimensionType(dimensionType);
+    const catalog = ensureDimensionCatalog(resolvedCompanyId);
+    const resolvedCode = normalizeDimensionValueCode(code, resolvedDimensionType);
+    const existing = catalog[resolvedDimensionType].find((value) => value.code === resolvedCode) || null;
+    const hasUsage = existing
+      ? dimensionValueHasUsage({
+          companyId: resolvedCompanyId,
+          dimensionType: resolvedDimensionType,
+          code: resolvedCode
+        })
+      : false;
+
+    if (existing && hasUsage && !changeReasonCode) {
+      throw httpError(
+        409,
+        "dimension_value_change_reason_required",
+        `Dimension value ${resolvedCode} requires a change reason after it has been used in journals.`
+      );
+    }
+
+    const now = nowIso();
+    const record = existing || {
+      dimensionValueId: crypto.randomUUID(),
+      code: resolvedCode,
+      dimensionType: resolvedDimensionType,
+      createdAt: now
+    };
+    record.label = normalizeLedgerLabel(label ?? existing?.label, "dimension_label_required");
+    record.status = normalizeDimensionValueStatus(status ?? existing?.status ?? "active");
+    record.locked = locked == null ? existing?.locked ?? true : locked === true;
+    record.sourceDomain = requireText(sourceDomain || existing?.sourceDomain || "ledger", "dimension_source_domain_required");
+    record.dimensionType = resolvedDimensionType;
+    record.version = (existing?.version || 0) + 1;
+    record.updatedAt = now;
+    record.changeReasonCode = changeReasonCode || existing?.changeReasonCode || (existing ? "catalog_update" : "catalog_create");
+
+    if (existing) {
+      const index = catalog[resolvedDimensionType].findIndex((value) => value.code === resolvedCode);
+      catalog[resolvedDimensionType][index] = record;
+    } else {
+      catalog[resolvedDimensionType].push(record);
+      catalog[resolvedDimensionType].sort((left, right) => left.code.localeCompare(right.code));
+    }
+    catalog.catalogVersion += 1;
+    catalog.updatedAt = now;
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: existing ? "ledger.dimension_value.updated" : "ledger.dimension_value.created",
+      entityType: "ledger_dimension_value",
+      entityId: record.dimensionValueId,
+      explanation: `${existing ? "Updated" : "Created"} ${resolvedDimensionType} value ${record.code}.`
+    });
+
+    return copy({
+      catalogVersion: catalog.catalogVersion,
+      dimensionType: resolvedDimensionType,
+      dimensionValue: record
+    });
+  }
+
   function lockAccountingPeriod({
     companyId,
     accountingPeriodId,
@@ -2169,6 +2379,7 @@ export function createLedgerEngine({
     const accountingPeriod = accountingContext.accountingPeriod;
     const normalizedMetadata = normalizeMetadata(metadataJson, importedFlag);
     ensurePeriodAllowsEntryCreation(accountingPeriod, normalizedMetadata);
+    const dimensionCatalog = ensureDimensionCatalog(resolvedCompanyId);
 
     const journalEntryId = crypto.randomUUID();
     const draftLines = normalizeJournalLines({
@@ -2179,6 +2390,7 @@ export function createLedgerEngine({
       sourceId: resolvedSourceId,
       entryCurrencyCode: normalizeCurrencyCode(currencyCode),
       metadataJson: normalizedMetadata,
+      dimensionCatalogVersion: dimensionCatalog.catalogVersion,
       lines
     });
     const totals = calculateTotals(draftLines);
@@ -2192,6 +2404,8 @@ export function createLedgerEngine({
       companyId: resolvedCompanyId,
       voucherSeriesId: resolvedVoucherSeries.voucherSeriesId,
       voucherSeriesCode: resolvedVoucherSeries.seriesCode,
+      voucherSeriesProfileVersion: resolvedVoucherSeries.profileVersion || 1,
+      dimensionCatalogVersion: dimensionCatalog.catalogVersion,
       accountingPeriodId: accountingPeriod.accountingPeriodId,
       fiscalYearId: accountingContext.fiscalYear?.fiscalYearId || accountingPeriod.fiscalYearId || null,
       fiscalPeriodId: accountingContext.fiscalPeriod?.periodId || accountingPeriod.fiscalPeriodId || null,
@@ -2600,6 +2814,32 @@ export function createLedgerEngine({
     }
   }
 
+  function voucherSeriesHasUsage({ companyId, voucherSeriesId }) {
+    return [...state.journalEntries.values()].some(
+      (entry) => entry.companyId === companyId && entry.voucherSeriesId === voucherSeriesId
+    );
+  }
+
+  function accountHasUsage({ companyId, accountId }) {
+    for (const lines of state.journalLinesByEntryId.values()) {
+      if (lines.some((line) => line.companyId === companyId && line.accountId === accountId)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function dimensionValueHasUsage({ companyId, dimensionType, code }) {
+    const resolvedDimensionType = normalizeDimensionType(dimensionType);
+    const valueKey = DIMENSION_TYPE_CONFIG[resolvedDimensionType].valueKey;
+    for (const lines of state.journalLinesByEntryId.values()) {
+      if (lines.some((line) => line.companyId === companyId && line.dimensionJson?.[valueKey] === code)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function resolveAccountingContext({ companyId, journalDate } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedJournalDate = normalizeDate(journalDate, "journal_date_required");
@@ -2789,9 +3029,13 @@ export function createLedgerEngine({
     if (!state.dimensionCatalogsByCompanyId.has(companyId)) {
       state.dimensionCatalogsByCompanyId.set(companyId, {
         companyId,
-        projects: copy(DEMO_DIMENSION_CATALOG.projects),
-        costCenters: copy(DEMO_DIMENSION_CATALOG.costCenters),
-        businessAreas: copy(DEMO_DIMENSION_CATALOG.businessAreas)
+        catalogVersion: 1,
+        projects: createCatalogEntries(DEMO_DIMENSION_CATALOG.projects, "projects"),
+        costCenters: createCatalogEntries(DEMO_DIMENSION_CATALOG.costCenters, "costCenters"),
+        businessAreas: createCatalogEntries(DEMO_DIMENSION_CATALOG.businessAreas, "businessAreas"),
+        serviceLines: createCatalogEntries(DEMO_DIMENSION_CATALOG.serviceLines, "serviceLines"),
+        createdAt: nowIso(),
+        updatedAt: nowIso()
       });
     }
     return state.dimensionCatalogsByCompanyId.get(companyId);
@@ -2888,7 +3132,7 @@ export function createLedgerEngine({
     }
 
     for (const line of lines) {
-      requireAccount(entry.companyId, line.accountNumber);
+      const account = requireAccount(entry.companyId, line.accountNumber);
       if (!isPositiveMoney(line.debitAmount) && !isPositiveMoney(line.creditAmount)) {
         throw httpError(400, "journal_line_amount_required", "Each journal line requires a debit or credit amount.");
       }
@@ -2899,6 +3143,8 @@ export function createLedgerEngine({
         throw httpError(400, "journal_line_exchange_rate_required", "Foreign-currency lines require a positive exchange rate.");
       }
       ensureRequiredDimensions({
+        account,
+        catalog: ensureDimensionCatalog(entry.companyId),
         companyId: entry.companyId,
         accountNumber: line.accountNumber,
         dimensionJson: line.dimensionJson,
@@ -2915,11 +3161,22 @@ export function createLedgerEngine({
     entry.totalCredit = totals.totalCredit;
   }
 
-  function normalizeJournalLines({ companyId, journalEntryId, actorId, sourceType, sourceId, entryCurrencyCode, metadataJson, lines }) {
+  function normalizeJournalLines({
+    companyId,
+    journalEntryId,
+    actorId,
+    sourceType,
+    sourceId,
+    entryCurrencyCode,
+    metadataJson,
+    dimensionCatalogVersion,
+    lines
+  }) {
     if (!Array.isArray(lines) || lines.length === 0) {
       throw httpError(400, "journal_lines_required", "Journal entry lines are required.");
     }
 
+    const catalog = ensureDimensionCatalog(companyId);
     return lines.map((line, index) => {
       const account = requireAccount(companyId, line.accountNumber);
       const lineSourceType = line.sourceType ? assertPostingSourceType(line.sourceType) : sourceType;
@@ -2931,6 +3188,8 @@ export function createLedgerEngine({
         throw httpError(400, "journal_line_exchange_rate_required", "Foreign-currency lines require a positive exchange rate.");
       }
       const dimensionJson = normalizeDimensionJson({
+        account,
+        catalog,
         companyId,
         accountNumber: account.accountNumber,
         dimensionJson: line.dimensionJson || {},
@@ -2945,11 +3204,13 @@ export function createLedgerEngine({
         accountId: account.accountId,
         accountNumber: account.accountNumber,
         accountName: account.accountName,
+        accountVersion: account.governanceVersion || 1,
         debitAmount,
         creditAmount,
         currencyCode,
         exchangeRate,
         dimensionJson,
+        dimensionCatalogVersion: dimensionCatalogVersion || 1,
         sourceType: lineSourceType,
         sourceId: requireText(line.sourceId || sourceId, "line_source_id_required"),
         actorId,
@@ -2964,7 +3225,11 @@ export function createLedgerEngine({
     if (!accountId) {
       throw httpError(404, "account_not_found", `Account ${accountNumber} was not found for the company.`);
     }
-    return state.accounts.get(accountId);
+    const account = state.accounts.get(accountId);
+    if (!account || account.status !== "active") {
+      throw httpError(409, "ledger_account_not_active", `Ledger account ${accountNumber} is not active for new postings.`);
+    }
+    return account;
   }
 
   function presentJournalEntry(entry) {
@@ -3018,9 +3283,13 @@ function seedDemoState(state, clock) {
   }
   state.dimensionCatalogsByCompanyId.set(DEMO_LEDGER_COMPANY_ID, {
     companyId: DEMO_LEDGER_COMPANY_ID,
-    projects: copy(DEMO_DIMENSION_CATALOG.projects),
-    costCenters: copy(DEMO_DIMENSION_CATALOG.costCenters),
-    businessAreas: copy(DEMO_DIMENSION_CATALOG.businessAreas)
+    catalogVersion: 1,
+    projects: createCatalogEntries(DEMO_DIMENSION_CATALOG.projects, "projects"),
+    costCenters: createCatalogEntries(DEMO_DIMENSION_CATALOG.costCenters, "costCenters"),
+    businessAreas: createCatalogEntries(DEMO_DIMENSION_CATALOG.businessAreas, "businessAreas"),
+    serviceLines: createCatalogEntries(DEMO_DIMENSION_CATALOG.serviceLines, "serviceLines"),
+    createdAt: now,
+    updatedAt: now
   });
 }
 
@@ -3044,6 +3313,22 @@ function defaultSeriesDescription(seriesCode) {
 
 function defaultSeriesPurposeCodes(seriesCode) {
   return copy(DEFAULT_VOUCHER_SERIES_PURPOSE_MAP[seriesCode] || []);
+}
+
+function createCatalogEntries(values = [], dimensionType) {
+  return values.map((value) => ({
+    dimensionValueId: crypto.randomUUID(),
+    code: value.code,
+    label: value.label,
+    status: value.status || "active",
+    locked: true,
+    sourceDomain: "ledger_seed",
+    version: 1,
+    changeReasonCode: "catalog_seed",
+    dimensionType,
+    createdAt: null,
+    updatedAt: null
+  }));
 }
 
 function assertPostingSourceType(sourceType) {
@@ -3100,6 +3385,81 @@ function normalizeVoucherSeriesPurposeCodes(values) {
     throw httpError(400, "voucher_series_purpose_codes_invalid", "Voucher series purpose codes must be an array.");
   }
   return [...new Set(values.map((value) => normalizeVoucherSeriesPurposeCode(value)))].sort();
+}
+
+function normalizeAccountNumber(value) {
+  const normalized = requireText(value, "account_number_required");
+  if (!/^[1-8][0-9]{3}$/.test(normalized)) {
+    throw httpError(400, "account_number_invalid", "Ledger account numbers must be four digits in BAS-style range 1000-8999.");
+  }
+  return normalized;
+}
+
+function normalizeAccountClass(value) {
+  const normalized = requireText(value, "account_class_required");
+  if (!/^[1-8]$/.test(normalized)) {
+    throw httpError(400, "account_class_invalid", "Ledger account class must be a single digit between 1 and 8.");
+  }
+  return normalized;
+}
+
+function normalizeLedgerAccountStatus(value) {
+  const normalized = requireText(value, "ledger_account_status_required");
+  if (!LEDGER_ACCOUNT_STATUSES.includes(normalized)) {
+    throw httpError(400, "ledger_account_status_invalid", `Unsupported ledger account status ${normalized}.`);
+  }
+  return normalized;
+}
+
+function normalizeDimensionValueStatus(value) {
+  const normalized = requireText(value, "dimension_value_status_required");
+  if (!DIMENSION_VALUE_STATUSES.includes(normalized)) {
+    throw httpError(400, "dimension_value_status_invalid", `Unsupported dimension value status ${normalized}.`);
+  }
+  return normalized;
+}
+
+function normalizeLedgerLabel(value, code) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    throw httpError(400, code, `${code} is required.`);
+  }
+  return normalized;
+}
+
+function normalizeRequiredDimensionKeys(values) {
+  if (!Array.isArray(values)) {
+    throw httpError(400, "required_dimension_keys_invalid", "Required dimension keys must be an array.");
+  }
+  return [...new Set(values.map((value) => {
+    const normalized = requireText(value, "dimension_key_required");
+    if (!DIMENSION_KEYS.includes(normalized)) {
+      throw httpError(400, "dimension_key_invalid", `Unsupported ledger dimension ${normalized}.`);
+    }
+    return normalized;
+  }))].sort();
+}
+
+function normalizeDimensionType(value) {
+  const normalized = requireText(value, "dimension_type_required");
+  if (!DIMENSION_TYPES.includes(normalized)) {
+    throw httpError(400, "dimension_type_invalid", `Unsupported ledger dimension type ${normalized}.`);
+  }
+  return normalized;
+}
+
+function normalizeDimensionValueCode(value, dimensionType) {
+  const resolvedDimensionType = normalizeDimensionType(dimensionType);
+  const rawValue = requireText(value, "dimension_value_code_required");
+  const normalized = resolvedDimensionType === "projects" ? rawValue : rawValue.toUpperCase();
+  const prefix = DIMENSION_TYPE_CONFIG[resolvedDimensionType].codePrefix;
+  if (!new RegExp(`^${prefix}-[A-Z0-9_-]{2,32}$`).test(normalized) && resolvedDimensionType !== "projects") {
+    throw httpError(400, "dimension_value_code_invalid", `Dimension values for ${resolvedDimensionType} must use ${prefix}-prefixed codes.`);
+  }
+  if (resolvedDimensionType === "projects" && !/^[a-z0-9_-]{3,64}$/i.test(normalized)) {
+    throw httpError(400, "dimension_value_code_invalid", "Project dimension codes must be 3-64 characters.");
+  }
+  return normalized;
 }
 
 function normalizePositiveInteger(value, code) {
@@ -3246,7 +3606,7 @@ function normalizeOptionalText(value) {
   return normalized.length > 0 ? normalized : null;
 }
 
-function normalizeDimensionJson({ companyId, accountNumber, dimensionJson, sourceType, metadataJson }) {
+function normalizeDimensionJson({ account, catalog, companyId, accountNumber, dimensionJson, sourceType, metadataJson }) {
   if (!dimensionJson || typeof dimensionJson !== "object" || Array.isArray(dimensionJson)) {
     throw httpError(400, "dimension_json_invalid", "Dimension data must be an object.");
   }
@@ -3264,6 +3624,8 @@ function normalizeDimensionJson({ companyId, accountNumber, dimensionJson, sourc
   }
 
   ensureRequiredDimensions({
+    account,
+    catalog,
     companyId,
     accountNumber,
     dimensionJson: normalized,
@@ -3273,9 +3635,7 @@ function normalizeDimensionJson({ companyId, accountNumber, dimensionJson, sourc
   return normalized;
 }
 
-function ensureRequiredDimensions({ companyId, accountNumber, dimensionJson, sourceType, metadataJson }) {
-  const catalog = ensureDimensionCatalogForValidation(companyId);
-
+function ensureRequiredDimensions({ account, catalog, companyId, accountNumber, dimensionJson, sourceType, metadataJson }) {
   if (dimensionJson.projectId) {
     requireDimensionValue(catalog.projects, "projectId", dimensionJson.projectId);
   }
@@ -3285,19 +3645,23 @@ function ensureRequiredDimensions({ companyId, accountNumber, dimensionJson, sou
   if (dimensionJson.businessAreaCode) {
     requireDimensionValue(catalog.businessAreas, "businessAreaCode", dimensionJson.businessAreaCode);
   }
+  if (dimensionJson.serviceLineCode) {
+    requireDimensionValue(catalog.serviceLines, "serviceLineCode", dimensionJson.serviceLineCode);
+  }
 
   if (requiresProjectDimension({ accountNumber, sourceType, metadataJson }) && !dimensionJson.projectId) {
     throw httpError(400, "project_dimension_required", "Project-cost postings require a project dimension.");
   }
-}
 
-function ensureDimensionCatalogForValidation(companyId) {
-  return {
-    companyId,
-    projects: copy(DEMO_DIMENSION_CATALOG.projects),
-    costCenters: copy(DEMO_DIMENSION_CATALOG.costCenters),
-    businessAreas: copy(DEMO_DIMENSION_CATALOG.businessAreas)
-  };
+  for (const requiredDimensionKey of account?.requiredDimensionKeys || []) {
+    if (!dimensionJson[requiredDimensionKey]) {
+      throw httpError(
+        400,
+        "required_dimension_missing",
+        `Ledger account ${account.accountNumber} requires dimension ${requiredDimensionKey} for new postings.`
+      );
+    }
+  }
 }
 
 function requireDimensionValue(values, dimensionKey, code) {
