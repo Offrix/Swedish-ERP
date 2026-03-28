@@ -1,15 +1,15 @@
 ﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
-# FAS 4.3 VAT reporting verification
+# FAS 4.3 och 9.3 VAT reporting och declaration-basis verification
 
 ## Syfte
 
-Denna runbook verifierar att FAS 4.3 levererar OSS/IOSS-klassificering, periodisk sammanstallning och reproducerbart momsdeklarationsunderlag som kan jamforas mot ledger-evidens.
+Denna runbook verifierar att FAS 4.3 och 9.3 levererar OSS/IOSS-klassificering, periodisk sammanstallning, reproducerbart momsdeklarationsunderlag, review-resolutioner och styrda momsperiodlås som kan jamforas mot ledger-evidens.
 
 ## Nar den anvands
 
-- efter implementation av FAS 4.3
-- fore commit eller push av FAS 4.3
-- vid regressionskontroll av OSS, IOSS, EU-lista eller momsrapporteringsunderlag
+- efter implementation av FAS 4.3 eller 9.3
+- fore commit eller push av VAT reporting eller VAT decision engine-hardening
+- vid regressionskontroll av OSS, IOSS, EU-lista, momsrapporteringsunderlag, declaration basis eller momsperiodlås
 
 ## Forkrav
 
@@ -32,6 +32,9 @@ Denna runbook verifierar att FAS 4.3 levererar OSS/IOSS-klassificering, periodis
 11. Om lokal infra ar tillganglig, kor `node scripts/db-migrate.mjs`.
 12. Om lokal infra ar tillganglig, kor `node scripts/db-seed.mjs`.
 13. Om lokal infra ar tillganglig, kor `node scripts/db-seed.mjs --demo`.
+14. Verifiera att `GET /v1/vat/declaration-basis` blockerar perioder med oppna review-items eller ledger mismatch.
+15. Verifiera att `POST /v1/vat/review-queue/:vatReviewQueueItemId/resolve` faktiskt gor beslutet deklarerbart och inte bara stanger kon.
+16. Verifiera att `POST /v1/vat/period-locks` blockerar nya momsbeslut i den lasta perioden och att unlock kraver uttrycklig orsak.
 
 ## Verifiering
 
@@ -41,6 +44,9 @@ Denna runbook verifierar att FAS 4.3 levererar OSS/IOSS-klassificering, periodis
 - periodisk sammanstallning kan materialiseras flera ganger utan att forsta originalkorningsresultatet
 - momsdeklarationsunderlag kan jamforas mot relevanta ledger-rader for samma underlag
 - rattelsekorningar sparar previous submission, correction reason och andrade boxbelopp
+- declaration basis visar oppna review blockers innan signoff
+- manuell review-resolution skapar deklarerbart momsbeslut med spårbar audit
+- periodlas hindrar nya momsbeslut tills explicit unlock har gjorts
 
 ## Vanliga fel
 
@@ -54,6 +60,10 @@ Denna runbook verifierar att FAS 4.3 levererar OSS/IOSS-klassificering, periodis
   Kontrollera att rattelsekorningen refererar till en tidigare periodic statement-run i samma bolag.
 - `ledger_totals_do_not_match`
   Kontrollera att relevanta ledger-rader finns for samma `sourceType` och `sourceId` som momsbeslutet.
+- `vat_declaration_basis_blocked`
+  Kontrollera oppna review-items, odeklarerbara momsbeslut och ledger mismatch for perioden.
+- `vat_period_locked`
+  Kontrollera om perioden redan ar last och maste lasas upp innan nytt beslut eller review-resolution goras.
 
 ## Aterstallning
 
@@ -77,5 +87,7 @@ Denna runbook verifierar att FAS 4.3 levererar OSS/IOSS-klassificering, periodis
 - [ ] B2C-distansforsaljning landar ratt
 - [ ] EU-lista kan skapas om och om igen
 - [ ] Momsrapport stammer mot ledgern
+- [ ] Declaration basis blir gron for perioden forst efter review-resolution och matchande ledger-evidens
+- [ ] Periodlas blockerar nya momsbeslut tills unlock ar gjord
 - [ ] migration, seeds, tester och verifieringsscript ar grona
 

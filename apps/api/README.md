@@ -270,7 +270,12 @@ Canonical request envelopes may be sent as:
 - `GET /v1/banking/accounts?companyId=...`
 - `POST /v1/banking/accounts`
 - `GET /v1/banking/accounts/:bankAccountId?companyId=...`
+- `GET /v1/banking/statement-imports?companyId=...`
+- `GET /v1/banking/statement-imports/:statementImportId?companyId=...`
 - `GET /v1/banking/payment-proposals?companyId=...`
+- `GET /v1/banking/payment-batches?companyId=...`
+- `GET /v1/banking/payment-batches/:paymentBatchId?companyId=...`
+- `GET /v1/banking/settlement-links?companyId=...`
 - `POST /v1/banking/payment-proposals`
 - `GET /v1/banking/payment-proposals/:paymentProposalId?companyId=...`
 - `POST /v1/banking/payment-proposals/:paymentProposalId/approve`

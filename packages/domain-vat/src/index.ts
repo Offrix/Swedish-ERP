@@ -57,6 +57,7 @@ export interface VatDecisionRecord {
   readonly reviewQueueItemId: string | null;
   readonly createdByActorId: string;
   readonly createdAt: string;
+  readonly updatedAt?: string;
 }
 
 export interface VatDecisionBoxAmount {
@@ -110,6 +111,12 @@ export interface VatReviewQueueItem {
   readonly explanation: readonly string[];
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly resolutionCode?: string | null;
+  readonly resolutionNote?: string | null;
+  readonly resolvedVatCode?: string | null;
+  readonly resolvedVatDecisionId?: string | null;
+  readonly resolvedByActorId?: string | null;
+  readonly resolvedAt?: string | null;
 }
 
 export interface VatTransactionLine {
@@ -216,6 +223,48 @@ export interface VatDeclarationRun {
   readonly changedAmounts: readonly VatDeclarationAmountChange[];
   readonly signer: string;
   readonly submittedAt: string;
+  readonly sourceSnapshotHash: string;
+  readonly periodLockId?: string | null;
+}
+
+export interface VatPeriodLock {
+  readonly vatPeriodLockId: string;
+  readonly companyId: string;
+  readonly fromDate: string;
+  readonly toDate: string;
+  readonly status: "locked" | "unlocked";
+  readonly reasonCode: string;
+  readonly basisSnapshotHash: string;
+  readonly blockerCodes: readonly string[];
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly unlockedByActorId: string | null;
+  readonly unlockedAt: string | null;
+  readonly unlockReasonCode: string | null;
+}
+
+export interface VatDeclarationBasis {
+  readonly companyId: string;
+  readonly fromDate: string;
+  readonly toDate: string;
+  readonly decisionCount: number;
+  readonly decidedDecisionCount: number;
+  readonly reviewRequiredDecisionCount: number;
+  readonly regularDecisionCount: number;
+  readonly ossDecisionCount: number;
+  readonly iossDecisionCount: number;
+  readonly declarationBoxSummary: readonly VatDeclarationBoxSummary[];
+  readonly ossSummary: readonly VatSpecialSchemeSummaryRow[];
+  readonly iossSummary: readonly VatSpecialSchemeSummaryRow[];
+  readonly ledgerComparison: VatDeclarationLedgerComparison;
+  readonly openReviewQueueItemCount: number;
+  readonly openReviewQueueItems: readonly VatReviewQueueItem[];
+  readonly reviewBoundaryCodes: readonly string[];
+  readonly blockerCodes: readonly string[];
+  readonly readyForLock: boolean;
+  readonly readyForDeclaration: boolean;
+  readonly activePeriodLock: VatPeriodLock | null;
   readonly sourceSnapshotHash: string;
 }
 

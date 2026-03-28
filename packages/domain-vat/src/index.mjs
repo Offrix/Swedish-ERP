@@ -8,6 +8,7 @@ import {
 
 export const VAT_DECISION_STATUSES = Object.freeze(["decided", "review_required"]);
 export const VAT_REVIEW_QUEUE_STATUSES = Object.freeze(["open", "resolved", "waived"]);
+export const VAT_PERIOD_LOCK_STATUSES = Object.freeze(["locked", "unlocked"]);
 export const VAT_BOX_AMOUNT_TYPES = Object.freeze(["taxable_base", "output_vat", "input_vat"]);
 export const VAT_POSTING_DIRECTIONS = Object.freeze(["debit", "credit"]);
 
@@ -212,6 +213,45 @@ const VAT_CODE_BY_ID = Object.freeze(
   }, {})
 );
 
+const VAT_SCENARIO_BY_CODE = Object.freeze({
+  VAT_SE_DOMESTIC_25: { decisionCategory: "domestic_standard_sale", invoiceTextRequirements: [] },
+  VAT_SE_DOMESTIC_12: { decisionCategory: "domestic_standard_sale", invoiceTextRequirements: [] },
+  VAT_SE_DOMESTIC_6: { decisionCategory: "domestic_standard_sale", invoiceTextRequirements: [] },
+  VAT_SE_EXEMPT: { decisionCategory: "domestic_exempt_sale", invoiceTextRequirements: [] },
+  VAT_SE_RC_BUILD_SELL: {
+    decisionCategory: "construction_reverse_charge_sale",
+    invoiceTextRequirements: ["buyer_vat_number_required", "reverse_charge_invoice_text_required"]
+  },
+  VAT_SE_RC_BUILD_PURCHASE: { decisionCategory: "construction_reverse_charge_purchase", invoiceTextRequirements: [] },
+  VAT_SE_EU_GOODS_B2B: { decisionCategory: "eu_goods_b2b_sale", invoiceTextRequirements: ["buyer_vat_number_required"] },
+  VAT_SE_EU_SERVICES_B2B: {
+    decisionCategory: "eu_services_b2b_sale",
+    invoiceTextRequirements: ["buyer_vat_number_required", "reverse_charge_invoice_text_required"]
+  },
+  VAT_SE_EU_B2C_OSS: { decisionCategory: "eu_b2c_oss_sale", invoiceTextRequirements: [] },
+  VAT_SE_EU_B2C_IOSS: { decisionCategory: "eu_b2c_ioss_sale", invoiceTextRequirements: [] },
+  VAT_SE_EXPORT_GOODS_0: { decisionCategory: "export_goods_sale", invoiceTextRequirements: [] },
+  VAT_SE_EXPORT_SERVICE_0: { decisionCategory: "export_services_sale", invoiceTextRequirements: [] },
+  VAT_SE_IMPORT_GOODS: { decisionCategory: "import_goods_purchase", invoiceTextRequirements: [] },
+  VAT_SE_NON_EU_SERVICE_PURCHASE_RC: {
+    decisionCategory: "non_eu_service_purchase_reverse_charge",
+    invoiceTextRequirements: []
+  },
+  VAT_SE_EU_GOODS_PURCHASE_RC: { decisionCategory: "eu_goods_purchase_reverse_charge", invoiceTextRequirements: [] },
+  VAT_SE_EU_SERVICES_PURCHASE_RC: {
+    decisionCategory: "eu_services_purchase_reverse_charge",
+    invoiceTextRequirements: []
+  },
+  VAT_SE_DOMESTIC_GOODS_PURCHASE_RC: {
+    decisionCategory: "domestic_goods_purchase_reverse_charge",
+    invoiceTextRequirements: []
+  },
+  VAT_SE_DOMESTIC_SERVICES_PURCHASE_RC: {
+    decisionCategory: "domestic_services_purchase_reverse_charge",
+    invoiceTextRequirements: []
+  }
+});
+
 export function createVatPlatform(options = {}) {
   return createVatEngine(options);
 }
@@ -236,6 +276,8 @@ export function createVatEngine({
     vatDecisionIdsByReplayKey: new Map(),
     vatReviewQueueItems: new Map(),
     vatReviewQueueIdsByCompany: new Map(),
+    vatPeriodLocks: new Map(),
+    vatPeriodLockIdsByCompany: new Map(),
     vatDeclarationRuns: new Map(),
     vatDeclarationRunIdsByCompany: new Map(),
     vatPeriodicStatementRuns: new Map(),
@@ -250,6 +292,7 @@ export function createVatEngine({
   const engine = {
     vatDecisionStatuses: VAT_DECISION_STATUSES,
     vatReviewQueueStatuses: VAT_REVIEW_QUEUE_STATUSES,
+    vatPeriodLockStatuses: VAT_PERIOD_LOCK_STATUSES,
     vatBoxAmountTypes: VAT_BOX_AMOUNT_TYPES,
     vatPostingDirections: VAT_POSTING_DIRECTIONS,
     installVatCatalog,
@@ -258,6 +301,11 @@ export function createVatEngine({
     evaluateVatDecision,
     getVatDecision,
     listVatReviewQueue,
+    resolveVatReviewQueueItem,
+    getVatDeclarationBasis,
+    listVatPeriodLocks,
+    lockVatPeriod,
+    unlockVatPeriod,
     createVatDeclarationRun,
     getVatDeclarationRun,
     createVatPeriodicStatementRun,
@@ -344,6 +392,18 @@ export function createVatEngine({
     const resolvedActorId = requireText(actorId, "actor_id_required");
     const normalizedLine = normalizeTransactionLine(transactionLine);
     const effectiveDate = normalizedLine.tax_date || normalizedLine.invoice_date;
+    const blockingPeriodLock = findLockedVatPeriodForDate({
+      state,
+      companyId: resolvedCompanyId,
+      effectiveDate
+    });
+    if (blockingPeriodLock) {
+      throw createError(
+        409,
+        "vat_period_locked",
+        `VAT period ${blockingPeriodLock.fromDate}..${blockingPeriodLock.toDate} is locked and does not allow new VAT decisions.`
+      );
+    }
     const rulePack = ruleRegistry.resolveRulePack({
       rulePackCode: VAT_RULE_PACK_CODE,
       domain: "vat",
@@ -464,6 +524,236 @@ export function createVatEngine({
       .map(copy);
   }
 
+  function resolveVatReviewQueueItem({
+    companyId,
+    vatReviewQueueItemId,
+    vatCode,
+    resolutionCode = "manual_vat_resolution",
+    resolutionNote = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const reviewQueueItem = requireVatReviewQueueItemForCompany({
+      companyId: resolvedCompanyId,
+      vatReviewQueueItemId
+    });
+    if (reviewQueueItem.status !== "open") {
+      throw createError(409, "vat_review_queue_item_not_open", "Only open VAT review queue items can be resolved.");
+    }
+
+    const vatDecision = requireVatDecisionByReviewQueueItem(reviewQueueItem.vatReviewQueueItemId);
+    const blockingPeriodLock = findLockedVatPeriodForDate({
+      state,
+      companyId: resolvedCompanyId,
+      effectiveDate: vatDecision.effectiveDate
+    });
+    if (blockingPeriodLock) {
+      throw createError(
+        409,
+        "vat_period_locked",
+        `VAT period ${blockingPeriodLock.fromDate}..${blockingPeriodLock.toDate} is locked and cannot accept review resolutions.`
+      );
+    }
+
+    const resolvedVatCode = requireText(vatCode, "vat_code_required").toUpperCase();
+    const resolvedOutputs = buildResolvedVatOutputs(vatDecision.transactionLine, resolvedVatCode);
+    const now = nowIso();
+
+    vatDecision.vatCode = resolvedVatCode;
+    vatDecision.decisionCode = resolvedVatCode;
+    vatDecision.status = "decided";
+    vatDecision.declarationBoxCodes = resolvedOutputs.declarationBoxCodes;
+    vatDecision.declarationBoxAmounts = resolvedOutputs.declarationBoxAmounts;
+    vatDecision.postingEntries = resolvedOutputs.postingEntries;
+    vatDecision.bookingTemplateCode = resolvedOutputs.bookingTemplateCode;
+    vatDecision.decisionCategory = resolvedOutputs.decisionCategory;
+    vatDecision.invoiceTextRequirements = resolvedOutputs.invoiceTextRequirements;
+    vatDecision.outputs = resolvedOutputs;
+    vatDecision.warnings = [
+      {
+        code: "manual_vat_resolution_applied",
+        message: `Manual VAT resolution ${resolutionCode} applied with VAT code ${resolvedVatCode}.`
+      }
+    ];
+    vatDecision.explanation = [
+      ...vatDecision.explanation.filter((entry) => !String(entry).includes("Decision routed to manual review")),
+      `manual_resolution_code=${normalizeLowerString(resolutionCode) || "manual_vat_resolution"}`,
+      `resolved_vat_code=${resolvedVatCode}`,
+      `resolved_by_actor_id=${resolvedActorId}`
+    ];
+    vatDecision.updatedAt = now;
+
+    reviewQueueItem.status = "resolved";
+    reviewQueueItem.resolutionCode = normalizeLowerString(resolutionCode) || "manual_vat_resolution";
+    reviewQueueItem.resolutionNote = typeof resolutionNote === "string" && resolutionNote.trim().length > 0 ? resolutionNote.trim() : null;
+    reviewQueueItem.resolvedVatCode = resolvedVatCode;
+    reviewQueueItem.resolvedVatDecisionId = vatDecision.vatDecisionId;
+    reviewQueueItem.resolvedByActorId = resolvedActorId;
+    reviewQueueItem.resolvedAt = now;
+    reviewQueueItem.updatedAt = now;
+
+    state.vatDecisionIdsByReplayKey.set(
+      toReplayKey(resolvedCompanyId, vatDecision.transactionLine, vatDecision.rulePackId),
+      vatDecision.vatDecisionId
+    );
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "vat.review_queue.resolved",
+      entityType: "vat_review_queue_item",
+      entityId: reviewQueueItem.vatReviewQueueItemId,
+      explanation: `Resolved VAT review queue item ${reviewQueueItem.vatReviewQueueItemId} to ${resolvedVatCode}.`
+    });
+
+    return {
+      vatDecision: copy(vatDecision),
+      reviewQueueItem: copy(reviewQueueItem)
+    };
+  }
+
+  function getVatDeclarationBasis({ companyId, fromDate, toDate } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedFromDate = normalizeDate(fromDate, "from_date_invalid");
+    const resolvedToDate = normalizeDate(toDate, "to_date_invalid");
+    assertDateRange(resolvedFromDate, resolvedToDate, "vat_declaration_basis_date_range_invalid");
+    return materializeVatDeclarationBasis({
+      state,
+      ledger,
+      companyId: resolvedCompanyId,
+      fromDate: resolvedFromDate,
+      toDate: resolvedToDate
+    });
+  }
+
+  function listVatPeriodLocks({ companyId, status = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.vatPeriodLockIdsByCompany.get(resolvedCompanyId) || [])
+      .map((vatPeriodLockId) => state.vatPeriodLocks.get(vatPeriodLockId))
+      .filter(Boolean)
+      .filter((item) => (status ? item.status === status : true))
+      .sort((left, right) => left.fromDate.localeCompare(right.fromDate))
+      .map(copy);
+  }
+
+  function lockVatPeriod({
+    companyId,
+    fromDate,
+    toDate,
+    reasonCode,
+    basisSnapshotHash = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedFromDate = normalizeDate(fromDate, "from_date_invalid");
+    const resolvedToDate = normalizeDate(toDate, "to_date_invalid");
+    assertDateRange(resolvedFromDate, resolvedToDate, "vat_period_lock_date_range_invalid");
+
+    const overlappingLocks = listLockedVatPeriodsForRange({
+      state,
+      companyId: resolvedCompanyId,
+      fromDate: resolvedFromDate,
+      toDate: resolvedToDate
+    });
+    const exactLock = overlappingLocks.find(
+      (candidate) => candidate.fromDate === resolvedFromDate && candidate.toDate === resolvedToDate
+    );
+    if (exactLock) {
+      return copy(exactLock);
+    }
+    if (overlappingLocks.length > 0) {
+      throw createError(409, "vat_period_lock_overlap", "VAT period overlaps an already locked VAT declaration period.");
+    }
+
+    const basis = buildVatDeclarationBasis({
+      state,
+      ledger,
+      companyId: resolvedCompanyId,
+      fromDate: resolvedFromDate,
+      toDate: resolvedToDate
+    });
+    if (basis.blockerCodes.length > 0) {
+      throw createError(
+        409,
+        "vat_period_lock_blocked",
+        `VAT period cannot be locked while blockers remain: ${basis.blockerCodes.join(", ")}.`
+      );
+    }
+    if (basisSnapshotHash && basisSnapshotHash !== basis.sourceSnapshotHash) {
+      throw createError(409, "vat_declaration_basis_stale", "VAT declaration basis snapshot hash no longer matches current state.");
+    }
+
+    const now = nowIso();
+    const periodLock = {
+      vatPeriodLockId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      fromDate: resolvedFromDate,
+      toDate: resolvedToDate,
+      status: "locked",
+      reasonCode: requireText(reasonCode, "vat_period_lock_reason_required"),
+      basisSnapshotHash: basis.sourceSnapshotHash,
+      blockerCodes: [],
+      createdByActorId: resolvedActorId,
+      createdAt: now,
+      updatedAt: now,
+      unlockedByActorId: null,
+      unlockedAt: null,
+      unlockReasonCode: null
+    };
+
+    state.vatPeriodLocks.set(periodLock.vatPeriodLockId, periodLock);
+    ensureCollection(state.vatPeriodLockIdsByCompany, resolvedCompanyId).push(periodLock.vatPeriodLockId);
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "vat.period.locked",
+      entityType: "vat_period_lock",
+      entityId: periodLock.vatPeriodLockId,
+      explanation: `Locked VAT period ${resolvedFromDate}..${resolvedToDate}.`
+    });
+    return copy(periodLock);
+  }
+
+  function unlockVatPeriod({
+    companyId,
+    vatPeriodLockId,
+    reasonCode,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const periodLock = requireVatPeriodLockForCompany({
+      companyId: resolvedCompanyId,
+      vatPeriodLockId
+    });
+    if (periodLock.status === "unlocked") {
+      return copy(periodLock);
+    }
+    const now = nowIso();
+    periodLock.status = "unlocked";
+    periodLock.unlockedByActorId = resolvedActorId;
+    periodLock.unlockedAt = now;
+    periodLock.unlockReasonCode = requireText(reasonCode, "vat_period_unlock_reason_required");
+    periodLock.updatedAt = now;
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "vat.period.unlocked",
+      entityType: "vat_period_lock",
+      entityId: periodLock.vatPeriodLockId,
+      explanation: `Unlocked VAT period ${periodLock.fromDate}..${periodLock.toDate}.`
+    });
+    return copy(periodLock);
+  }
+
   function createVatDeclarationRun({
     companyId,
     fromDate,
@@ -478,6 +768,20 @@ export function createVatEngine({
     const resolvedFromDate = normalizeDate(fromDate, "from_date_invalid");
     const resolvedToDate = normalizeDate(toDate, "to_date_invalid");
     assertDateRange(resolvedFromDate, resolvedToDate, "vat_declaration_run_date_range_invalid");
+    const basis = buildVatDeclarationBasis({
+      state,
+      ledger,
+      companyId: resolvedCompanyId,
+      fromDate: resolvedFromDate,
+      toDate: resolvedToDate
+    });
+    if (basis.blockerCodes.length > 0) {
+      throw createError(
+        409,
+        "vat_declaration_basis_blocked",
+        `VAT declaration basis is blocked by: ${basis.blockerCodes.join(", ")}.`
+      );
+    }
     const decisions = collectDecidedVatDecisions({
       state,
       companyId: resolvedCompanyId,
@@ -487,7 +791,6 @@ export function createVatEngine({
     const regularDecisions = decisions.filter((decision) => decision.outputs.reportingChannel === "regular_vat_return");
     const ossDecisions = decisions.filter((decision) => decision.outputs.reportingChannel === "oss");
     const iossDecisions = decisions.filter((decision) => decision.outputs.reportingChannel === "ioss");
-    const declarationBoxSummary = summarizeDecisionBoxAmounts(regularDecisions);
     const previousRun = previousSubmissionId
       ? requireVatDeclarationRunForCompany({
           companyId: resolvedCompanyId,
@@ -495,29 +798,25 @@ export function createVatEngine({
         })
       : null;
     const changes = previousRun
-      ? diffDeclarationBoxSummaries(previousRun.declarationBoxSummary || [], declarationBoxSummary)
+      ? diffDeclarationBoxSummaries(previousRun.declarationBoxSummary || [], basis.declarationBoxSummary)
       : { changedBoxes: [], changedAmounts: [] };
     const run = {
       vatDeclarationRunId: crypto.randomUUID(),
       companyId: resolvedCompanyId,
       fromDate: resolvedFromDate,
       toDate: resolvedToDate,
-      declarationBoxSummary,
-      ossSummary: summarizeOssIossDecisions(ossDecisions, "oss"),
-      iossSummary: summarizeOssIossDecisions(iossDecisions, "ioss"),
-      ledgerComparison: compareDeclarationWithLedger({ ledger, companyId: resolvedCompanyId, decisions: regularDecisions }),
+      declarationBoxSummary: basis.declarationBoxSummary,
+      ossSummary: basis.ossSummary,
+      iossSummary: basis.iossSummary,
+      ledgerComparison: basis.ledgerComparison,
       previousSubmissionId: previousRun?.vatDeclarationRunId || null,
       correctionReason,
       changedBoxes: changes.changedBoxes,
       changedAmounts: changes.changedAmounts,
       signer: requireText(signer || actorId, "signer_required"),
       submittedAt: nowIso(),
-      sourceSnapshotHash: hashObject({
-        companyId: resolvedCompanyId,
-        fromDate: resolvedFromDate,
-        toDate: resolvedToDate,
-        vatDecisionIds: decisions.map((decision) => decision.vatDecisionId)
-      })
+      sourceSnapshotHash: basis.sourceSnapshotHash,
+      periodLockId: basis.activePeriodLock?.vatPeriodLockId || null
     };
     state.vatDeclarationRuns.set(run.vatDeclarationRunId, run);
     ensureCollection(state.vatDeclarationRunIdsByCompany, resolvedCompanyId).push(run.vatDeclarationRunId);
@@ -555,6 +854,20 @@ export function createVatEngine({
     const resolvedFromDate = normalizeDate(fromDate, "from_date_invalid");
     const resolvedToDate = normalizeDate(toDate, "to_date_invalid");
     assertDateRange(resolvedFromDate, resolvedToDate, "vat_periodic_statement_run_date_range_invalid");
+    const basis = buildVatDeclarationBasis({
+      state,
+      ledger,
+      companyId: resolvedCompanyId,
+      fromDate: resolvedFromDate,
+      toDate: resolvedToDate
+    });
+    if (basis.blockerCodes.length > 0) {
+      throw createError(
+        409,
+        "vat_periodic_statement_basis_blocked",
+        `VAT periodic statement basis is blocked by: ${basis.blockerCodes.join(", ")}.`
+      );
+    }
     const decisions = collectDecidedVatDecisions({
       state,
       companyId: resolvedCompanyId,
@@ -577,12 +890,7 @@ export function createVatEngine({
       lines,
       previousSubmissionId: previousRun?.vatPeriodicStatementRunId || null,
       correctionReason,
-      sourceSnapshotHash: hashObject({
-        companyId: resolvedCompanyId,
-        fromDate: resolvedFromDate,
-        toDate: resolvedToDate,
-        lines
-      }),
+      sourceSnapshotHash: basis.sourceSnapshotHash,
       generatedAt: nowIso(),
       generatedByActorId: actorId
     };
@@ -624,6 +932,7 @@ export function createVatEngine({
       vatCodes: [...state.vatCodes.values()],
       vatDecisions: [...state.vatDecisions.values()],
       vatReviewQueueItems: [...state.vatReviewQueueItems.values()],
+      vatPeriodLocks: [...state.vatPeriodLocks.values()],
       vatDeclarationRuns: [...state.vatDeclarationRuns.values()],
       vatPeriodicStatementRuns: [...state.vatPeriodicStatementRuns.values()],
       vatRulePacks: ruleRegistry.listRulePacks({ domain: "vat", jurisdiction: "SE" }),
@@ -666,6 +975,30 @@ export function createVatEngine({
       throw createError(404, "vat_periodic_statement_run_not_found", "VAT periodic statement run was not found.");
     }
     return run;
+  }
+
+  function requireVatReviewQueueItemForCompany({ companyId, vatReviewQueueItemId }) {
+    const item = state.vatReviewQueueItems.get(requireText(vatReviewQueueItemId, "vat_review_queue_item_id_required"));
+    if (!item || item.companyId !== companyId) {
+      throw createError(404, "vat_review_queue_item_not_found", "VAT review queue item was not found.");
+    }
+    return item;
+  }
+
+  function requireVatDecisionByReviewQueueItem(vatReviewQueueItemId) {
+    const decision = [...state.vatDecisions.values()].find((candidate) => candidate.reviewQueueItemId === vatReviewQueueItemId);
+    if (!decision) {
+      throw createError(404, "vat_decision_not_found", "VAT decision for review queue item was not found.");
+    }
+    return decision;
+  }
+
+  function requireVatPeriodLockForCompany({ companyId, vatPeriodLockId }) {
+    const lock = state.vatPeriodLocks.get(requireText(vatPeriodLockId, "vat_period_lock_id_required"));
+    if (!lock || lock.companyId !== companyId) {
+      throw createError(404, "vat_period_lock_not_found", "VAT period lock was not found.");
+    }
+    return lock;
   }
 
   function nowIso() {
@@ -1240,6 +1573,22 @@ function acceptScenario(vatCode, decisionCategory, invoiceTextRequirements = [])
   };
 }
 
+function buildResolvedVatOutputs(normalizedLine, vatCode) {
+  const resolvedVatCode = requireText(vatCode, "vat_code_required").toUpperCase();
+  if (resolvedVatCode === "VAT_REVIEW_REQUIRED") {
+    throw createError(400, "vat_resolution_code_invalid", "Manual VAT resolution must choose a supported VAT code.");
+  }
+  const scenario = VAT_SCENARIO_BY_CODE[resolvedVatCode];
+  if (!scenario) {
+    throw createError(400, "vat_resolution_code_invalid", `Unsupported VAT code ${resolvedVatCode} for manual resolution.`);
+  }
+  return buildScenarioOutputs(normalizedLine, {
+    vatCode: resolvedVatCode,
+    decisionCategory: scenario.decisionCategory,
+    invoiceTextRequirements: copy(scenario.invoiceTextRequirements || [])
+  });
+}
+
 function reviewScenario(reviewReasonCode, warningMessage) {
   return {
     ok: false,
@@ -1476,33 +1825,51 @@ function compareDeclarationWithLedger({ ledger, companyId, decisions }) {
       actualCredit: 0
     };
   }
-  const sourceKeys = new Set(decisions.map((decision) => `${decision.sourceType}:${decision.sourceId}`));
+  const sourceKeys = [...new Set(decisions.map((decision) => `${decision.sourceType}:${decision.sourceId}`))];
+  const sourceKeySet = new Set(sourceKeys);
   const snapshot = ledger.snapshotLedger();
   const matchedEntries = snapshot.journalEntries.filter(
-    (entry) => entry.companyId === companyId && sourceKeys.has(`${entry.sourceType}:${entry.sourceId}`)
+    (entry) => entry.companyId === companyId && sourceKeySet.has(`${entry.sourceType}:${entry.sourceId}`)
   );
-  const remainingActualLines = matchedEntries.flatMap((entry) =>
-    entry.lines
-      .map((line) => {
-        if (Number(line.debitAmount || 0) > 0) {
-          return { direction: "debit", amount: roundMoney(line.debitAmount) };
-        }
-        if (Number(line.creditAmount || 0) > 0) {
-          return { direction: "credit", amount: roundMoney(line.creditAmount) };
-        }
-        return null;
-      })
-      .filter(Boolean)
-  );
+
+  const actualLinesBySource = new Map();
+  for (const entry of matchedEntries) {
+    const sourceKey = `${entry.sourceType}:${entry.sourceId}`;
+    if (!actualLinesBySource.has(sourceKey)) {
+      actualLinesBySource.set(sourceKey, []);
+    }
+    actualLinesBySource.get(sourceKey).push(
+      ...entry.lines
+        .map((line) => {
+          if (Number(line.debitAmount || 0) > 0) {
+            return { direction: "debit", amount: roundMoney(line.debitAmount) };
+          }
+          if (Number(line.creditAmount || 0) > 0) {
+            return { direction: "credit", amount: roundMoney(line.creditAmount) };
+          }
+          return null;
+        })
+        .filter(Boolean)
+    );
+  }
+
   let actualDebit = 0;
   let actualCredit = 0;
+  let missingSourceKeyCount = 0;
   let unmatchedExpectedLineCount = 0;
-  for (const decision of decisions) {
-    for (const postingEntry of decision.postingEntries || []) {
-      const index = remainingActualLines.findIndex(
-        (line) => line.direction === postingEntry.direction && line.amount === roundMoney(postingEntry.amount)
-      );
-      if (index === -1) {
+  for (const sourceKey of sourceKeys) {
+    const sourceDecisions = decisions.filter((decision) => `${decision.sourceType}:${decision.sourceId}` === sourceKey);
+    const remainingActualLines = [...(actualLinesBySource.get(sourceKey) || [])];
+    if (remainingActualLines.length === 0) {
+      missingSourceKeyCount += 1;
+      continue;
+    }
+    for (const decision of sourceDecisions) {
+      for (const postingEntry of decision.postingEntries || []) {
+        const index = remainingActualLines.findIndex(
+          (line) => line.direction === postingEntry.direction && line.amount === roundMoney(postingEntry.amount)
+        );
+        if (index === -1) {
         unmatchedExpectedLineCount += 1;
         continue;
       }
@@ -1514,17 +1881,22 @@ function compareDeclarationWithLedger({ ledger, companyId, decisions }) {
       }
     }
   }
+  }
+  let reason = null;
+  if (unmatchedExpectedLineCount > 0) {
+    reason = "ledger_totals_do_not_match";
+  } else if (missingSourceKeyCount > 0) {
+    reason = "ledger_evidence_missing";
+  }
   return {
     matched: unmatchedExpectedLineCount === 0 && expectedDebit === actualDebit && expectedCredit === actualCredit,
-    reason:
-      unmatchedExpectedLineCount === 0 && expectedDebit === actualDebit && expectedCredit === actualCredit
-        ? null
-        : "ledger_totals_do_not_match",
+    reason,
     expectedDebit,
     expectedCredit,
     actualDebit,
     actualCredit,
     matchedEntryCount: matchedEntries.length,
+    missingSourceKeyCount,
     unmatchedExpectedLineCount
   };
 }
@@ -1536,6 +1908,132 @@ function collectDecidedVatDecisions({ state, companyId, fromDate, toDate }) {
     .filter((decision) => decision.status === "decided")
     .filter((decision) => decision.effectiveDate >= fromDate && decision.effectiveDate <= toDate)
     .map(copy);
+}
+
+function collectVatDecisionsForPeriod({ state, companyId, fromDate, toDate }) {
+  return (state.vatDecisionIdsByCompany.get(companyId) || [])
+    .map((decisionId) => state.vatDecisions.get(decisionId))
+    .filter(Boolean)
+    .filter((decision) => decision.effectiveDate >= fromDate && decision.effectiveDate <= toDate)
+    .map(copy);
+}
+
+function collectOpenVatReviewQueueItemsForPeriod({ state, companyId, decisions }) {
+  return decisions
+    .filter((decision) => decision.status === "review_required" && decision.reviewQueueItemId)
+    .map((decision) => state.vatReviewQueueItems.get(decision.reviewQueueItemId))
+    .filter(Boolean)
+    .filter((reviewQueueItem) => reviewQueueItem.companyId === companyId && reviewQueueItem.status === "open")
+    .map(copy);
+}
+
+function buildVatDeclarationBasis({ state, ledger, companyId, fromDate, toDate }) {
+  const periodDecisions = collectVatDecisionsForPeriod({ state, companyId, fromDate, toDate });
+  const decidedDecisions = periodDecisions.filter((decision) => decision.status === "decided");
+  const regularDecisions = decidedDecisions.filter((decision) => decision.outputs.reportingChannel === "regular_vat_return");
+  const ossDecisions = decidedDecisions.filter((decision) => decision.outputs.reportingChannel === "oss");
+  const iossDecisions = decidedDecisions.filter((decision) => decision.outputs.reportingChannel === "ioss");
+  const openReviewQueueItems = collectOpenVatReviewQueueItemsForPeriod({
+    state,
+    companyId,
+    decisions: periodDecisions
+  });
+  const ledgerComparison = compareDeclarationWithLedger({ ledger, companyId, decisions: regularDecisions });
+  const blockerCodes = [];
+  const reviewBoundaryCodes = [];
+
+  if (openReviewQueueItems.length > 0) {
+    blockerCodes.push("open_review_queue_items");
+    reviewBoundaryCodes.push("uncertain_vat_requires_review");
+  }
+
+  if (ledgerComparison.reason === "ledger_totals_do_not_match" && regularDecisions.length > 0) {
+    blockerCodes.push("ledger_mismatch_requires_review");
+    reviewBoundaryCodes.push("ledger_mismatch_requires_review");
+  }
+  if (ledgerComparison.reason === "ledger_evidence_missing" && regularDecisions.length > 0) {
+    reviewBoundaryCodes.push("ledger_evidence_missing");
+  }
+
+  const activePeriodLock = findExactLockedVatPeriod({
+    state,
+    companyId,
+    fromDate,
+    toDate
+  });
+
+  return {
+    companyId,
+    fromDate,
+    toDate,
+    decisionCount: periodDecisions.length,
+    decidedDecisionCount: decidedDecisions.length,
+    reviewRequiredDecisionCount: periodDecisions.length - decidedDecisions.length,
+    regularDecisionCount: regularDecisions.length,
+    ossDecisionCount: ossDecisions.length,
+    iossDecisionCount: iossDecisions.length,
+    declarationBoxSummary: summarizeDecisionBoxAmounts(regularDecisions),
+    ossSummary: summarizeOssIossDecisions(ossDecisions, "oss"),
+    iossSummary: summarizeOssIossDecisions(iossDecisions, "ioss"),
+    ledgerComparison,
+    openReviewQueueItemCount: openReviewQueueItems.length,
+    openReviewQueueItems,
+    reviewBoundaryCodes: [...new Set(reviewBoundaryCodes)],
+    blockerCodes: [...new Set(blockerCodes)],
+    readyForLock: blockerCodes.length === 0,
+    readyForDeclaration: blockerCodes.length === 0,
+    activePeriodLock: activePeriodLock ? copy(activePeriodLock) : null,
+    sourceSnapshotHash: hashObject({
+      companyId,
+      fromDate,
+      toDate,
+      decisions: periodDecisions.map((decision) => ({
+        vatDecisionId: decision.vatDecisionId,
+        status: decision.status,
+        vatCode: decision.vatCode,
+        effectiveDate: decision.effectiveDate,
+        inputsHash: decision.inputsHash
+      })),
+      openReviewQueueItemIds: openReviewQueueItems.map((item) => item.vatReviewQueueItemId),
+      lockId: activePeriodLock?.vatPeriodLockId || null
+    })
+  };
+}
+
+function materializeVatDeclarationBasis({ state, ledger, companyId, fromDate, toDate }) {
+  const basis = buildVatDeclarationBasis({ state, ledger, companyId, fromDate, toDate });
+  return copy(basis);
+}
+
+function listLockedVatPeriodsForRange({ state, companyId, fromDate, toDate }) {
+  return [...state.vatPeriodLocks.values()]
+    .filter((candidate) => candidate.companyId === companyId && candidate.status === "locked")
+    .filter((candidate) => rangesOverlap(candidate.fromDate, candidate.toDate, fromDate, toDate))
+    .map(copy);
+}
+
+function findExactLockedVatPeriod({ state, companyId, fromDate, toDate }) {
+  return [...state.vatPeriodLocks.values()].find(
+    (candidate) =>
+      candidate.companyId === companyId
+      && candidate.status === "locked"
+      && candidate.fromDate === fromDate
+      && candidate.toDate === toDate
+  );
+}
+
+function findLockedVatPeriodForDate({ state, companyId, effectiveDate }) {
+  return [...state.vatPeriodLocks.values()].find(
+    (candidate) =>
+      candidate.companyId === companyId
+      && candidate.status === "locked"
+      && candidate.fromDate <= effectiveDate
+      && candidate.toDate >= effectiveDate
+  );
+}
+
+function rangesOverlap(leftFrom, leftTo, rightFrom, rightTo) {
+  return leftFrom <= rightTo && rightFrom <= leftTo;
 }
 
 function sumPostingDirection(decisions, direction) {
