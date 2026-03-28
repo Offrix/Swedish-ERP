@@ -507,7 +507,11 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/bureau/mass-actions",
               "/v1/bureau/work-items",
               "/v1/work-items",
+              "/v1/work-items/queues",
               "/v1/work-items/:workItemId/claim",
+              "/v1/work-items/:workItemId/assign",
+              "/v1/work-items/:workItemId/escalate",
+              "/v1/work-items/:workItemId/dual-approve",
               "/v1/work-items/:workItemId/resolve",
               "/v1/backoffice/review-center/sla-scan",
               "/v1/close/workbench",
@@ -5798,6 +5802,31 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/work-items/queues") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      permissionCode: "company.read",
+      objectType: "operational_queue",
+      scopeCode: "backoffice"
+    });
+    assertDesktopSurfaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listOperationalWorkItemQueues({
+        sessionToken,
+        companyId
+      })
+    });
+    return;
+  }
+
   const workItemClaimMatch = matchPath(path, "/v1/work-items/:workItemId/claim");
   if (workItemClaimMatch && req.method === "POST") {
     const body = await readJsonBody(req);
@@ -5837,6 +5866,102 @@ async function handleRequest({ req, res, platform, flags }) {
       })
     );
     return;
+  }
+
+  const workItemAssignMatch = matchPath(path, "/v1/work-items/:workItemId/assign");
+  if (workItemAssignMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    if (body.companyId) {
+      const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+      const sessionToken = readSessionToken(req, body);
+      const principal = authorizeCompanyAccess({
+        platform,
+        sessionToken,
+        companyId,
+        permissionCode: "company.manage",
+        objectType: "operational_work_item",
+        objectId: workItemAssignMatch.workItemId,
+        scopeCode: "backoffice"
+      });
+      assertDesktopSurfaceReadAccess({ principal });
+      writeJson(
+        res,
+        200,
+        platform.assignOperationalWorkItem({
+          sessionToken,
+          companyId,
+          workItemId: workItemAssignMatch.workItemId,
+          ownerCompanyUserId: body.ownerCompanyUserId ?? null,
+          ownerTeamId: body.ownerTeamId ?? null,
+          reasonCode: body.reasonCode ?? "manual_assignment",
+          correlationId: body.correlationId || createCorrelationId()
+        })
+      );
+      return;
+    }
+  }
+
+  const workItemEscalateMatch = matchPath(path, "/v1/work-items/:workItemId/escalate");
+  if (workItemEscalateMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    if (body.companyId) {
+      const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+      const sessionToken = readSessionToken(req, body);
+      const principal = authorizeCompanyAccess({
+        platform,
+        sessionToken,
+        companyId,
+        permissionCode: "company.manage",
+        objectType: "operational_work_item",
+        objectId: workItemEscalateMatch.workItemId,
+        scopeCode: "backoffice"
+      });
+      assertDesktopSurfaceReadAccess({ principal });
+      writeJson(
+        res,
+        200,
+        platform.escalateOperationalWorkItem({
+          sessionToken,
+          companyId,
+          workItemId: workItemEscalateMatch.workItemId,
+          reasonCode: body.reasonCode,
+          escalationNote: body.escalationNote ?? null,
+          correlationId: body.correlationId || createCorrelationId()
+        })
+      );
+      return;
+    }
+  }
+
+  const workItemDualApproveMatch = matchPath(path, "/v1/work-items/:workItemId/dual-approve");
+  if (workItemDualApproveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    if (body.companyId) {
+      const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+      const sessionToken = readSessionToken(req, body);
+      const principal = authorizeCompanyAccess({
+        platform,
+        sessionToken,
+        companyId,
+        permissionCode: "company.manage",
+        objectType: "operational_work_item",
+        objectId: workItemDualApproveMatch.workItemId,
+        scopeCode: "backoffice"
+      });
+      assertDesktopSurfaceReadAccess({ principal });
+      writeJson(
+        res,
+        200,
+        platform.approveOperationalWorkItemDualControl({
+          sessionToken,
+          companyId,
+          workItemId: workItemDualApproveMatch.workItemId,
+          note: body.note ?? null,
+          correlationId: body.correlationId || createCorrelationId()
+        })
+      );
+      return;
+    }
   }
 
   const submissionReplayMatch = matchPath(path, "/v1/submissions/:submissionId/replay");

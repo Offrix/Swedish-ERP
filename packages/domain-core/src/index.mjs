@@ -480,7 +480,11 @@ export function createCoreEngine({
     claimWorkItem,
     resolveWorkItem,
       listOperationalWorkItems,
+      listOperationalWorkItemQueues,
       claimOperationalWorkItem,
+      assignOperationalWorkItem,
+      escalateOperationalWorkItem,
+      approveOperationalWorkItemDualControl,
       resolveOperationalWorkItem,
       upsertOperationalWorkItem,
       createComment,
@@ -1073,7 +1077,99 @@ export function createCoreEngine({
       .filter((workItem) => !statusFilter || workItem.status === statusFilter)
       .filter((workItem) => !sourceFilter || workItem.sourceType === sourceFilter)
       .sort((left, right) => left.deadlineAt.localeCompare(right.deadlineAt) || left.createdAt.localeCompare(right.createdAt))
-      .map(clone);
+      .map((workItem) => presentOperationalWorkItem(workItem));
+  }
+
+  function listOperationalWorkItemQueues({
+    sessionToken,
+    companyId
+  } = {}) {
+    const principal = authorizeCompany(sessionToken, companyId, "company.read");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const queueSummaries = new Map();
+    for (const workItem of [...state.operationalWorkItems.values()]
+      .filter((candidate) => candidate.companyId === resolvedCompanyId)
+      .filter((candidate) => canPrincipalSeeOperationalWorkItem(principal, candidate))) {
+      const grantState = resolveOperationalQueueGrantState({
+        companyId: workItem.companyId,
+        queueCode: workItem.queueCode
+      });
+      const key = workItem.queueCode;
+      const existing = queueSummaries.get(key) || {
+        queueCode: workItem.queueCode,
+        ownerTeamIds: [],
+        queueGrantManaged: grantState.managed,
+        queueGrantCompanyUserIds: grantState.companyUserIds,
+        escalationPolicyCodes: [],
+        openCount: 0,
+        acknowledgedCount: 0,
+        escalatedCount: 0,
+        blockedCount: 0,
+        waitingExternalCount: 0,
+        unresolvedCount: 0,
+        overdueCount: 0,
+        dualControlBlockedCount: 0,
+        claimedCount: 0,
+        assignedCount: 0,
+        totalEscalationCount: 0,
+        oldestOpenAgeMinutes: 0,
+        slaDueAt: null
+      };
+      const isActive = isOperationalWorkItemActive(workItem);
+      const isOverdue = isOperationalWorkItemOverdue(workItem);
+      const dualControlBlocked = workItem.dualControlRequired === true && workItem.dualControlStatus !== "approved";
+      if (workItem.ownerTeamId && !existing.ownerTeamIds.includes(workItem.ownerTeamId)) {
+        existing.ownerTeamIds.push(workItem.ownerTeamId);
+      }
+      if (workItem.escalationPolicyCode && !existing.escalationPolicyCodes.includes(workItem.escalationPolicyCode)) {
+        existing.escalationPolicyCodes.push(workItem.escalationPolicyCode);
+      }
+      if (workItem.ownerCompanyUserId) {
+        existing.assignedCount += 1;
+      }
+      if (workItem.claimedByCompanyUserId) {
+        existing.claimedCount += 1;
+      }
+      if (isActive) {
+        existing.unresolvedCount += 1;
+        if (!existing.slaDueAt || existing.slaDueAt.localeCompare(workItem.deadlineAt) > 0) {
+          existing.slaDueAt = workItem.deadlineAt;
+        }
+        existing.oldestOpenAgeMinutes = Math.max(existing.oldestOpenAgeMinutes, diffMinutes(workItem.createdAt, now()));
+      }
+      if (isOverdue) {
+        existing.overdueCount += 1;
+      }
+      if (dualControlBlocked || workItem.status === "blocked") {
+        existing.blockedCount += 1;
+      }
+      if (dualControlBlocked) {
+        existing.dualControlBlockedCount += 1;
+      }
+      if (workItem.status === "waiting_external") {
+        existing.waitingExternalCount += 1;
+      }
+      if (workItem.status === "open") {
+        existing.openCount += 1;
+      }
+      if (workItem.status === "acknowledged") {
+        existing.acknowledgedCount += 1;
+      }
+      if (workItem.status === "escalated") {
+        existing.escalatedCount += 1;
+      }
+      existing.totalEscalationCount += Number(workItem.escalationCount || 0);
+      queueSummaries.set(key, existing);
+    }
+    return [...queueSummaries.values()]
+      .map((summary) => ({
+        ...summary,
+        ownerTeamIds: [...summary.ownerTeamIds].sort(),
+        queueGrantCompanyUserIds: [...summary.queueGrantCompanyUserIds].sort(),
+        escalationPolicyCodes: [...summary.escalationPolicyCodes].sort(),
+        oldestOpenAgeHours: Number((summary.oldestOpenAgeMinutes / 60).toFixed(2))
+      }))
+      .sort((left, right) => left.queueCode.localeCompare(right.queueCode));
   }
 
   function claimOperationalWorkItem({
@@ -1113,7 +1209,162 @@ export function createCoreEngine({
       entityId: workItem.workItemId,
       explanation: `Claimed operational work item ${workItem.workItemId}.`
     });
-    return clone(workItem);
+    return presentOperationalWorkItem(workItem);
+  }
+
+  function assignOperationalWorkItem({
+    sessionToken,
+    companyId,
+    workItemId,
+    ownerCompanyUserId = null,
+    ownerTeamId = null,
+    reasonCode = "manual_assignment",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorizeCompany(sessionToken, companyId, "company.manage");
+    const workItem = requireOperationalWorkItem(companyId, workItemId);
+    assertOperationalWorkItemVisible(principal, workItem);
+    if (["resolved", "closed"].includes(workItem.status)) {
+      throw error(409, "operational_work_item_not_assignable", "Resolved operational work items cannot be reassigned.");
+    }
+    const nextOwnerCompanyUserId = norm(ownerCompanyUserId);
+    const nextOwnerTeamId = norm(ownerTeamId);
+    if (!nextOwnerCompanyUserId && !nextOwnerTeamId) {
+      throw error(400, "operational_work_item_assignment_target_required", "Assignment requires an ownerCompanyUserId or ownerTeamId.");
+    }
+    if (nextOwnerCompanyUserId) {
+      requireCompanyUserInOrgAuth(companyId, nextOwnerCompanyUserId);
+      assertOperationalQueueGrantAssignee({
+        companyId,
+        queueCode: workItem.queueCode,
+        companyUserId: nextOwnerCompanyUserId
+      });
+    }
+    if (nextOwnerTeamId) {
+      requireCompanyTeamInOrgAuth(companyId, nextOwnerTeamId);
+      assertOperationalQueueGrantTeamAssignment({
+        workItem,
+        ownerTeamId: nextOwnerTeamId
+      });
+    }
+    const previousStatus = workItem.status;
+    const assignedAt = now();
+    workItem.ownerCompanyUserId = nextOwnerCompanyUserId;
+    workItem.ownerTeamId = nextOwnerTeamId;
+    workItem.claimedAt = null;
+    workItem.claimedByCompanyUserId = null;
+    if (workItem.status !== "open") {
+      workItem.status = "open";
+      workItem.statusHistory.push({
+        fromStatus: previousStatus,
+        toStatus: "open",
+        actorId: principal.userId,
+        reasonCode: text(reasonCode, "operational_work_item_assignment_reason_required"),
+        changedAt: assignedAt
+      });
+    }
+    workItem.updatedAt = assignedAt;
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "core.operational_work_item.assigned",
+      entityType: "operational_work_item",
+      entityId: workItem.workItemId,
+      explanation: `Assigned operational work item ${workItem.workItemId}.`
+    });
+    return presentOperationalWorkItem(workItem);
+  }
+
+  function escalateOperationalWorkItem({
+    sessionToken,
+    companyId,
+    workItemId,
+    reasonCode,
+    escalationNote = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorizeCompany(sessionToken, companyId, "company.manage");
+    const workItem = requireOperationalWorkItem(companyId, workItemId);
+    assertOperationalWorkItemVisible(principal, workItem);
+    if (["resolved", "closed"].includes(workItem.status)) {
+      throw error(409, "operational_work_item_not_escalatable", "Resolved operational work items cannot be escalated.");
+    }
+    const escalatedAt = now();
+    const resolvedReasonCode = text(reasonCode, "operational_work_item_escalation_reason_required");
+    if (workItem.status !== "escalated") {
+      workItem.statusHistory.push({
+        fromStatus: workItem.status,
+        toStatus: "escalated",
+        actorId: principal.userId,
+        reasonCode: resolvedReasonCode,
+        changedAt: escalatedAt
+      });
+      workItem.status = "escalated";
+    }
+    workItem.escalationCount = Number(workItem.escalationCount || 0) + 1;
+    workItem.lastEscalatedAt = escalatedAt;
+    workItem.lastEscalationReasonCode = resolvedReasonCode;
+    workItem.updatedAt = escalatedAt;
+    if (escalationNote) {
+      workItem.metadataJson = {
+        ...clone(workItem.metadataJson || {}),
+        latestEscalationNote: norm(escalationNote)
+      };
+    }
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "core.operational_work_item.escalated",
+      entityType: "operational_work_item",
+      entityId: workItem.workItemId,
+      explanation: `Escalated operational work item ${workItem.workItemId}.`
+    });
+    return presentOperationalWorkItem(workItem);
+  }
+
+  function approveOperationalWorkItemDualControl({
+    sessionToken,
+    companyId,
+    workItemId,
+    note = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorizeCompany(sessionToken, companyId, "company.manage");
+    const workItem = requireOperationalWorkItem(companyId, workItemId);
+    assertOperationalWorkItemVisible(principal, workItem);
+    if (workItem.dualControlRequired !== true) {
+      throw error(409, "operational_work_item_dual_control_not_required", "Operational work item does not require dual control.");
+    }
+    if (!principal.companyUserId) {
+      throw error(403, "operational_work_item_dual_control_actor_invalid", "Dual-control approval requires a company user identity.");
+    }
+    const conflictingActorIds = new Set([workItem.ownerCompanyUserId, workItem.claimedByCompanyUserId].filter(Boolean));
+    if (conflictingActorIds.has(principal.companyUserId)) {
+      throw error(409, "operational_work_item_dual_control_self_approval_forbidden", "The same company user cannot approve and execute a dual-control work item.");
+    }
+    const approvedAt = now();
+    workItem.dualControlStatus = "approved";
+    workItem.dualApprovedAt = approvedAt;
+    workItem.dualApprovedByCompanyUserId = principal.companyUserId;
+    workItem.updatedAt = approvedAt;
+    if (note) {
+      workItem.metadataJson = {
+        ...clone(workItem.metadataJson || {}),
+        dualControlApprovalNote: norm(note)
+      };
+    }
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "core.operational_work_item.dual_control_approved",
+      entityType: "operational_work_item",
+      entityId: workItem.workItemId,
+      explanation: `Recorded dual-control approval for ${workItem.workItemId}.`
+    });
+    return presentOperationalWorkItem(workItem);
   }
 
   function resolveOperationalWorkItem({
@@ -1129,6 +1380,12 @@ export function createCoreEngine({
     assertOperationalWorkItemVisible(principal, workItem);
     if (workItem.status === "closed") {
       throw error(409, "operational_work_item_already_closed", "Closed operational work items cannot be resolved again.");
+    }
+    if (workItem.dualControlRequired === true && workItem.dualControlStatus !== "approved") {
+      throw error(409, "operational_work_item_dual_control_required", "Operational work item requires a distinct dual-control approval before resolution.");
+    }
+    if (workItem.dualControlRequired === true && workItem.dualApprovedByCompanyUserId && workItem.dualApprovedByCompanyUserId === principal.companyUserId) {
+      throw error(409, "operational_work_item_dual_control_separation_required", "The dual-control approver cannot also resolve the operational work item.");
     }
     if (workItem.status !== "resolved") {
       const resolvedAt = now();
@@ -1152,11 +1409,11 @@ export function createCoreEngine({
         action: "core.operational_work_item.resolved",
         entityType: "operational_work_item",
         entityId: workItem.workItemId,
-        explanation: `Resolved operational work item ${workItem.workItemId} with ${workItem.resolutionCode}.`
-      });
+          explanation: `Resolved operational work item ${workItem.workItemId} with ${workItem.resolutionCode}.`
+        });
+      }
+      return presentOperationalWorkItem(workItem);
     }
-    return clone(workItem);
-  }
 
   function createComment({ sessionToken, bureauOrgId, objectType, objectId, visibility = "internal", body, mentionCompanyUserIds = [], createAssignment = false, correlationId = crypto.randomUUID() } = {}) {
     const principal = authorize(sessionToken, bureauOrgId, "company.read");
@@ -1293,6 +1550,7 @@ export function createCoreEngine({
     const resolvedDeadlineAt = timestamp(deadlineAt, "operational_work_item_deadline_invalid");
     const resolvedPriority = assertAllowed(norm(priority), OPERATIONAL_WORK_ITEM_PRIORITIES, "operational_work_item_priority_invalid");
     const resolvedStatus = text(status, "operational_work_item_status_required");
+    const dualControlRequired = blockerScope === "dual_control" || metadata?.dualControlRequired === true;
     const existing = [...state.operationalWorkItems.values()].find((workItem) => workItem.sourceKey === resolvedSourceKey);
     if (existing) {
       const previousStatus = existing.status;
@@ -1306,6 +1564,12 @@ export function createCoreEngine({
       existing.blockerScope = text(blockerScope, "operational_work_item_blocker_scope_required");
       existing.escalationPolicyCode = norm(escalationPolicyCode);
       existing.metadataJson = clone(metadata || {});
+      existing.dualControlRequired = dualControlRequired;
+      if (!dualControlRequired) {
+        existing.dualControlStatus = "not_required";
+        existing.dualApprovedAt = null;
+        existing.dualApprovedByCompanyUserId = null;
+      }
       const updatedAt = now();
       const shouldReopenClosedItem = !statusProvided && ["resolved", "closed"].includes(existing.status);
       if (statusProvided || shouldReopenClosedItem) {
@@ -1319,12 +1583,22 @@ export function createCoreEngine({
             changedAt: updatedAt
           });
           existing.status = nextStatus;
+          if (nextStatus === "escalated") {
+            existing.escalationCount = Number(existing.escalationCount || 0) + 1;
+            existing.lastEscalatedAt = updatedAt;
+            existing.lastEscalationReasonCode = reasonCode;
+          }
         }
         if (!["resolved", "closed"].includes(existing.status)) {
           existing.resolvedAt = null;
           existing.resolvedByCompanyUserId = null;
           existing.resolutionCode = null;
           existing.completionNote = null;
+          if (existing.dualControlRequired === true) {
+            existing.dualControlStatus = "pending";
+            existing.dualApprovedAt = null;
+            existing.dualApprovedByCompanyUserId = null;
+          }
           if (existing.status === "open") {
             existing.claimedAt = null;
             existing.claimedByCompanyUserId = null;
@@ -1352,6 +1626,13 @@ export function createCoreEngine({
       blockerScope: text(blockerScope, "operational_work_item_blocker_scope_required"),
       status: resolvedStatus,
       escalationPolicyCode: norm(escalationPolicyCode),
+      escalationCount: resolvedStatus === "escalated" ? 1 : 0,
+      lastEscalatedAt: resolvedStatus === "escalated" ? createdAt : null,
+      lastEscalationReasonCode: resolvedStatus === "escalated" ? reasonCode : null,
+      dualControlRequired,
+      dualControlStatus: dualControlRequired ? "pending" : "not_required",
+      dualApprovedAt: null,
+      dualApprovedByCompanyUserId: null,
       claimedAt: null,
       claimedByCompanyUserId: null,
       resolvedAt: null,
@@ -1374,7 +1655,7 @@ export function createCoreEngine({
       entityId: workItem.workItemId,
       explanation: `Created operational work item ${workItem.workItemId} for ${resolvedSourceType}:${resolvedSourceId}.`
     });
-    return clone(workItem);
+    return presentOperationalWorkItem(workItem);
   }
 
   function transitionWorkItem(sourceType, sourceId, nextStatus, actorId, reasonCode) {
@@ -1414,19 +1695,127 @@ function assertOperationalWorkItemVisible(principal, workItem) {
 function canPrincipalSeeOperationalWorkItem(principal, workItem) {
   const viewerCompanyUserId = norm(principal?.companyUserId);
   const viewerTeamIds = resolvePrincipalTeamIds(principal);
-  if (!workItem?.ownerCompanyUserId && !workItem?.ownerTeamId) {
-    return true;
-  }
   if (viewerCompanyUserId && workItem.ownerCompanyUserId === viewerCompanyUserId) {
     return true;
   }
+  const grantState = resolveOperationalQueueGrantState({
+    companyId: workItem?.companyId,
+    queueCode: workItem?.queueCode
+  });
+  if (grantState.managed) {
+    return Boolean(viewerCompanyUserId && grantState.companyUserIds.includes(viewerCompanyUserId));
+  }
+  if (!workItem?.ownerCompanyUserId && !workItem?.ownerTeamId) {
+    return true;
+  }
   return Boolean(workItem?.ownerTeamId && viewerTeamIds.includes(workItem.ownerTeamId));
+}
+
+function isOperationalWorkItemActive(workItem) {
+  return !["resolved", "closed"].includes(workItem?.status);
+}
+
+function isOperationalWorkItemOverdue(workItem) {
+  return isOperationalWorkItemActive(workItem) && typeof workItem?.deadlineAt === "string" && workItem.deadlineAt.localeCompare(now()) <= 0;
+}
+
+function presentOperationalWorkItem(workItem) {
+  const grantState = resolveOperationalQueueGrantState({
+    companyId: workItem.companyId,
+    queueCode: workItem.queueCode
+  });
+  return {
+    ...clone(workItem),
+    slaDueAt: workItem.deadlineAt,
+    isOverdue: isOperationalWorkItemOverdue(workItem),
+    dualControlBlocked: workItem.dualControlRequired === true && workItem.dualControlStatus !== "approved",
+    queueGrantManaged: grantState.managed,
+    queueGrantCompanyUserIds: grantState.companyUserIds
+  };
+}
+
+function resolveOperationalQueueGrantState({ companyId, queueCode }) {
+  const resolvedCompanyId = norm(companyId);
+  const resolvedQueueCode = norm(queueCode);
+  if (!resolvedCompanyId || !resolvedQueueCode || !orgAuthPlatform || typeof orgAuthPlatform.snapshot !== "function") {
+    return { managed: false, companyUserIds: [] };
+  }
+  const snapshot = orgAuthPlatform.snapshot();
+  const nowIso = now();
+  const grantObjectIds = new Set([
+    resolvedQueueCode,
+    `${resolvedCompanyId}:${resolvedQueueCode}`,
+    `queue:${resolvedQueueCode}`,
+    `operational_queue:${resolvedQueueCode}`
+  ]);
+  const companyUserIds = [...new Set((snapshot?.objectGrants || [])
+    .filter((grant) => grant?.companyId === resolvedCompanyId)
+    .filter((grant) => grant?.status === "active")
+    .filter((grant) => !grant.startsAt || grant.startsAt.localeCompare(nowIso) <= 0)
+    .filter((grant) => !grant.endsAt || grant.endsAt.localeCompare(nowIso) >= 0)
+    .filter((grant) => ["company.read", "company.manage"].includes(grant.permissionCode))
+    .filter((grant) => ["operational_queue", "queue_grant", "queue"].includes(norm(grant.objectType)))
+    .filter((grant) => grantObjectIds.has(norm(grant.objectId)))
+    .map((grant) => norm(grant.companyUserId))
+    .filter(Boolean))]
+    .sort();
+  return {
+    managed: companyUserIds.length > 0,
+    companyUserIds
+  };
+}
+
+function assertOperationalQueueGrantAssignee({ companyId, queueCode, companyUserId }) {
+  const grantState = resolveOperationalQueueGrantState({ companyId, queueCode });
+  if (grantState.managed && !grantState.companyUserIds.includes(norm(companyUserId))) {
+    throw error(409, "operational_work_item_queue_grant_required", "Assignment target lacks the required queue grant.");
+  }
+}
+
+function assertOperationalQueueGrantTeamAssignment({ workItem, ownerTeamId }) {
+  const grantState = resolveOperationalQueueGrantState({
+    companyId: workItem.companyId,
+    queueCode: workItem.queueCode
+  });
+  if (!grantState.managed) {
+    return;
+  }
+  if (norm(workItem.ownerTeamId) === norm(ownerTeamId)) {
+    return;
+  }
+  throw error(409, "operational_work_item_team_queue_grant_required", "Grant-managed queues cannot be reassigned to another team without explicit queue grants.");
+}
+
+function requireCompanyUserInOrgAuth(companyId, companyUserId) {
+  const snapshot = orgAuthPlatform && typeof orgAuthPlatform.snapshot === "function" ? orgAuthPlatform.snapshot() : null;
+  const companyUser = (snapshot?.companyUsers || []).find(
+    (candidate) => candidate.companyId === text(companyId, "company_id_required") && candidate.companyUserId === text(companyUserId, "company_user_id_required")
+  );
+  if (!companyUser) {
+    throw error(404, "company_user_not_found", "Company user was not found inside the current company.");
+  }
+  return companyUser;
+}
+
+function requireCompanyTeamInOrgAuth(companyId, teamId) {
+  const snapshot = orgAuthPlatform && typeof orgAuthPlatform.snapshot === "function" ? orgAuthPlatform.snapshot() : null;
+  const team = (snapshot?.teams || []).find(
+    (candidate) => candidate.companyId === text(companyId, "company_id_required") && candidate.teamId === text(teamId, "team_id_required")
+  );
+  if (!team) {
+    throw error(404, "team_not_found", "Team was not found inside the current company.");
+  }
+  return team;
 }
 
 function resolvePrincipalTeamIds(principal) {
   return Array.isArray(principal?.teamIds)
     ? [...new Set(principal.teamIds.filter((teamId) => typeof teamId === "string" && teamId.trim().length > 0).map((teamId) => teamId.trim()))]
     : [];
+}
+
+function diffMinutes(fromTimestamp, toTimestamp) {
+  return Math.max(0, Math.round((Date.parse(toTimestamp) - Date.parse(fromTimestamp)) / 60000));
 }
 
 function deriveDeadline({ clientCompanyId, blockerScope, targetDate, deadlineAt, purpose }) {

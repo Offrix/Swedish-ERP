@@ -73,6 +73,13 @@ export interface OperationalWorkItem {
   readonly blockerScope: string;
   readonly status: string;
   readonly escalationPolicyCode: string | null;
+  readonly escalationCount: number;
+  readonly lastEscalatedAt: string | null;
+  readonly lastEscalationReasonCode: string | null;
+  readonly dualControlRequired: boolean;
+  readonly dualControlStatus: "not_required" | "pending" | "approved";
+  readonly dualApprovedAt: string | null;
+  readonly dualApprovedByCompanyUserId: string | null;
   readonly claimedAt: string | null;
   readonly claimedByCompanyUserId: string | null;
   readonly resolvedAt: string | null;
@@ -83,6 +90,11 @@ export interface OperationalWorkItem {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly metadataJson: Record<string, unknown>;
+  readonly slaDueAt?: string;
+  readonly isOverdue?: boolean;
+  readonly dualControlBlocked?: boolean;
+  readonly queueGrantManaged?: boolean;
+  readonly queueGrantCompanyUserIds?: readonly string[];
   readonly statusHistory: readonly OperationalWorkItemStatusTransition[];
 }
 

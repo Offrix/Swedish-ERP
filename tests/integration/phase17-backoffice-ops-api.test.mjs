@@ -649,3 +649,221 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     await stopServer(server);
   }
 });
+
+test("Step 15.4 API hardens operational queue grants, assignment, escalation and dual-control work items", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-27T14:00:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const secondAdmin = platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "phase15-second-admin@example.test",
+      displayName: "Phase 15 Second Admin",
+      roleCode: "company_admin",
+      requiresMfa: false
+    });
+    const secondAdminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: "phase15-second-admin@example.test"
+    });
+
+    const payrollAdmin = platform.createCompanyUser({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      email: "phase15-payroll-admin@example.test",
+      displayName: "Phase 15 Payroll Admin",
+      roleCode: "payroll_admin",
+      requiresMfa: false
+    });
+
+    const queueWorkItem = platform.upsertOperationalWorkItem({
+      companyId: DEMO_IDS.companyId,
+      queueCode: "PAYROLL_EXCEPTION_QUEUE",
+      ownerTeamId: "payroll_ops",
+      sourceType: "payroll_exception",
+      sourceId: "phase15-queue-1",
+      title: "Payroll exception requires operator view",
+      summary: "Grant-managed queue should surface only to explicitly granted operators.",
+      priority: "high",
+      deadlineAt: "2026-03-27T13:00:00Z",
+      actorId: DEMO_IDS.userId
+    });
+
+    const hiddenBeforeGrant = await requestJson(
+      baseUrl,
+      `/v1/work-items?companyId=${DEMO_IDS.companyId}&queueCode=PAYROLL_EXCEPTION_QUEUE`,
+      { token: adminToken }
+    );
+    assert.equal(hiddenBeforeGrant.items.length, 0);
+
+    for (const grant of [
+      { companyUserId: DEMO_IDS.companyUserId, permissionCode: "company.read" },
+      { companyUserId: DEMO_IDS.companyUserId, permissionCode: "company.manage" },
+      { companyUserId: payrollAdmin.companyUserId, permissionCode: "company.read" },
+      { companyUserId: payrollAdmin.companyUserId, permissionCode: "company.manage" }
+    ]) {
+      await requestJson(baseUrl, "/v1/org/object-grants", {
+        method: "POST",
+        token: adminToken,
+        expectedStatus: 201,
+        body: {
+          companyId: DEMO_IDS.companyId,
+          companyUserId: grant.companyUserId,
+          permissionCode: grant.permissionCode,
+          objectType: "operational_queue",
+          objectId: "PAYROLL_EXCEPTION_QUEUE"
+        }
+      });
+    }
+
+    const visibleAfterGrant = await requestJson(
+      baseUrl,
+      `/v1/work-items?companyId=${DEMO_IDS.companyId}&queueCode=PAYROLL_EXCEPTION_QUEUE`,
+      { token: adminToken }
+    );
+    assert.equal(visibleAfterGrant.items.length, 1);
+    assert.equal(visibleAfterGrant.items[0].workItemId, queueWorkItem.workItemId);
+    assert.equal(visibleAfterGrant.items[0].queueGrantManaged, true);
+    assert.equal(visibleAfterGrant.items[0].isOverdue, true);
+
+    const queueViews = await requestJson(
+      baseUrl,
+      `/v1/work-items/queues?companyId=${DEMO_IDS.companyId}`,
+      { token: adminToken }
+    );
+    const payrollQueueView = queueViews.items.find((item) => item.queueCode === "PAYROLL_EXCEPTION_QUEUE");
+    assert.ok(payrollQueueView);
+    assert.equal(payrollQueueView.queueGrantManaged, true);
+    assert.equal(payrollQueueView.openCount, 1);
+    assert.equal(payrollQueueView.overdueCount, 1);
+
+    const assignWithoutGrant = await requestJson(baseUrl, `/v1/work-items/${queueWorkItem.workItemId}/assign`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        ownerCompanyUserId: secondAdmin.companyUserId
+      }
+    });
+    assert.equal(assignWithoutGrant.error, "operational_work_item_queue_grant_required");
+
+    const assigned = await requestJson(baseUrl, `/v1/work-items/${queueWorkItem.workItemId}/assign`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        ownerCompanyUserId: payrollAdmin.companyUserId,
+        reasonCode: "grant_based_assignment"
+      }
+    });
+    assert.equal(assigned.ownerCompanyUserId, payrollAdmin.companyUserId);
+    assert.equal(assigned.status, "open");
+
+    const escalated = await requestJson(baseUrl, `/v1/work-items/${queueWorkItem.workItemId}/escalate`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "operator_backlog",
+        escalationNote: "Payroll queue breached operator SLA."
+      }
+    });
+    assert.equal(escalated.status, "escalated");
+    assert.equal(escalated.escalationCount, 1);
+
+    const queueViewsAfterEscalation = await requestJson(
+      baseUrl,
+      `/v1/work-items/queues?companyId=${DEMO_IDS.companyId}`,
+      { token: adminToken }
+    );
+    const escalatedQueueView = queueViewsAfterEscalation.items.find((item) => item.queueCode === "PAYROLL_EXCEPTION_QUEUE");
+    assert.ok(escalatedQueueView);
+    assert.equal(escalatedQueueView.escalatedCount, 1);
+    assert.equal(escalatedQueueView.assignedCount, 1);
+
+    const dualControlItem = platform.upsertOperationalWorkItem({
+      companyId: DEMO_IDS.companyId,
+      queueCode: "CUTOVER_APPROVAL_QUEUE",
+      ownerTeamId: "finance_ops",
+      ownerCompanyUserId: DEMO_IDS.companyUserId,
+      sourceType: "cutover",
+      sourceId: "phase15-dual-control-1",
+      title: "Cutover approval requires dual control",
+      priority: "critical",
+      deadlineAt: "2026-03-27T18:00:00Z",
+      blockerScope: "dual_control",
+      actorId: DEMO_IDS.userId
+    });
+
+    const claimed = await requestJson(baseUrl, `/v1/work-items/${dualControlItem.workItemId}/claim`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(claimed.status, "acknowledged");
+    assert.equal(claimed.dualControlBlocked, true);
+
+    const selfDualApproveForbidden = await requestJson(baseUrl, `/v1/work-items/${dualControlItem.workItemId}/dual-approve`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        note: "Self approval is forbidden."
+      }
+    });
+    assert.equal(selfDualApproveForbidden.error, "operational_work_item_dual_control_self_approval_forbidden");
+
+    const resolveBeforeApproval = await requestJson(baseUrl, `/v1/work-items/${dualControlItem.workItemId}/resolve`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        resolutionCode: "cutover_ready"
+      }
+    });
+    assert.equal(resolveBeforeApproval.error, "operational_work_item_dual_control_required");
+
+    const dualApproved = await requestJson(baseUrl, `/v1/work-items/${dualControlItem.workItemId}/dual-approve`, {
+      method: "POST",
+      token: secondAdminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        note: "Independent reviewer approved cutover."
+      }
+    });
+    assert.equal(dualApproved.dualControlStatus, "approved");
+    assert.equal(dualApproved.dualApprovedByCompanyUserId, secondAdmin.companyUserId);
+
+    const resolved = await requestJson(baseUrl, `/v1/work-items/${dualControlItem.workItemId}/resolve`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        resolutionCode: "cutover_ready",
+        completionNote: "Dual-control gate passed."
+      }
+    });
+    assert.equal(resolved.status, "resolved");
+  } finally {
+    await stopServer(server);
+  }
+});

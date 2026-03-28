@@ -61,7 +61,11 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/ledger/journal-entries/:journalEntryId/post",
   "/v1/ar/invoice-series",
   "/v1/work-items",
+  "/v1/work-items/queues",
   "/v1/work-items/:workItemId/claim",
+  "/v1/work-items/:workItemId/assign",
+  "/v1/work-items/:workItemId/escalate",
+  "/v1/work-items/:workItemId/dual-approve",
   "/v1/work-items/:workItemId/resolve",
   "/v1/notifications/:notificationId/acknowledge",
   "/v1/activity/object/:objectType/:objectId",
@@ -246,15 +250,39 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     const supportCaseCloseContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/backoffice/support-cases/:supportCaseId/close"
     );
-    assert.ok(supportCaseCloseContract);
-    assert.equal(supportCaseCloseContract.requiredActionClass, "support_case_operate");
-    assert.equal(supportCaseCloseContract.requiredTrustLevel, "strong_mfa");
-    assert.equal(supportCaseCloseContract.requiredScopeType, "support_case");
-    assert.equal(supportCaseCloseContract.expectedObjectVersion, true);
+      assert.ok(supportCaseCloseContract);
+      assert.equal(supportCaseCloseContract.requiredActionClass, "support_case_operate");
+      assert.equal(supportCaseCloseContract.requiredTrustLevel, "strong_mfa");
+      assert.equal(supportCaseCloseContract.requiredScopeType, "support_case");
+      assert.equal(supportCaseCloseContract.expectedObjectVersion, true);
 
-    const tenantBootstrapContract = payload.routeContracts.find(
-      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/tenant/bootstrap"
-    );
+      const workItemAssignContract = payload.routeContracts.find(
+        (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/work-items/:workItemId/assign"
+      );
+      assert.ok(workItemAssignContract);
+      assert.equal(workItemAssignContract.requiredActionClass, "operational_work_item_assign");
+      assert.equal(workItemAssignContract.requiredTrustLevel, "strong_mfa");
+      assert.equal(workItemAssignContract.requiredScopeType, "operational_work_item");
+
+      const workItemEscalateContract = payload.routeContracts.find(
+        (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/work-items/:workItemId/escalate"
+      );
+      assert.ok(workItemEscalateContract);
+      assert.equal(workItemEscalateContract.requiredActionClass, "operational_work_item_escalate");
+      assert.equal(workItemEscalateContract.requiredTrustLevel, "strong_mfa");
+      assert.equal(workItemEscalateContract.requiredScopeType, "operational_work_item");
+
+      const workItemDualApproveContract = payload.routeContracts.find(
+        (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/work-items/:workItemId/dual-approve"
+      );
+      assert.ok(workItemDualApproveContract);
+      assert.equal(workItemDualApproveContract.requiredActionClass, "operational_work_item_dual_approve");
+      assert.equal(workItemDualApproveContract.requiredTrustLevel, "strong_mfa");
+      assert.equal(workItemDualApproveContract.requiredScopeType, "operational_work_item");
+
+      const tenantBootstrapContract = payload.routeContracts.find(
+        (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/tenant/bootstrap"
+      );
     assert.ok(tenantBootstrapContract);
     assert.equal(tenantBootstrapContract.requiredTrustLevel, "public");
     assert.equal(tenantBootstrapContract.requiredScopeType, "public");
