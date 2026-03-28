@@ -10,7 +10,10 @@ export const REPORT_CODES = Object.freeze([
   "cashflow",
   "ar_open_items",
   "ap_open_items",
-  "project_portfolio"
+  "project_portfolio",
+  "payroll_summary",
+  "tax_account_summary",
+  "submission_dashboard"
 ]);
 export const REPORT_VIEW_MODES = Object.freeze(["transactions", "period", "rolling_12", "fiscal_year"]);
 export const REPORT_EXPORT_FORMATS = Object.freeze(["excel", "pdf"]);
@@ -54,7 +57,16 @@ export const RECONCILIATION_AREA_CODES = Object.freeze([
 ]);
 
 const REPORT_DEFINITION_KINDS = Object.freeze(["official", "light_builder"]);
-const REPORT_SOURCE_TYPES = Object.freeze(["ledger", "cashflow", "ar_open_items", "ap_open_items", "project_portfolio"]);
+const REPORT_SOURCE_TYPES = Object.freeze([
+  "ledger",
+  "cashflow",
+  "ar_open_items",
+  "ap_open_items",
+  "project_portfolio",
+  "payroll_summary",
+  "tax_account_summary",
+  "submission_dashboard"
+]);
 const CASHFLOW_BUCKET_CODES = Object.freeze(["operating", "investing", "financing", "unclassified"]);
 const CASHFLOW_BUCKET_LABELS = Object.freeze({
   operating: "Operating cashflow",
@@ -85,7 +97,29 @@ const REPORT_METRIC_DEFINITIONS = Object.freeze([
   createMetricDefinition("project_actual_cost_amount", "Project actual cost", "project_controller", "project_snapshot", "project_cost_snapshot.actual_cost_amount", ["projects"]),
   createMetricDefinition("project_billed_revenue_amount", "Project billed revenue", "project_controller", "project_snapshot", "project_cost_snapshot.billed_revenue_amount", ["projects", "ar"]),
   createMetricDefinition("project_wip_amount", "Project WIP", "project_controller", "project_snapshot", "project_wip_snapshot.wip_amount", ["projects"]),
-  createMetricDefinition("project_forecast_margin_amount", "Project forecast margin", "project_controller", "project_snapshot", "project_forecast_snapshot.forecast_margin_amount", ["projects"])
+  createMetricDefinition("project_forecast_margin_amount", "Project forecast margin", "project_controller", "project_snapshot", "project_forecast_snapshot.forecast_margin_amount", ["projects"]),
+  createMetricDefinition("payroll_gross_earnings_amount", "Payroll gross earnings", "payroll_controller", "pay_run", "sum(pay_run.payslip.totals.grossEarnings)", ["payroll"]),
+  createMetricDefinition("payroll_gross_deductions_amount", "Payroll gross deductions", "payroll_controller", "pay_run", "sum(pay_run.payslip.totals.grossDeductions)", ["payroll"]),
+  createMetricDefinition("payroll_preliminary_tax_amount", "Payroll preliminary tax", "payroll_controller", "pay_run", "sum(pay_run.payslip.totals.preliminaryTax)", ["payroll"]),
+  createMetricDefinition("payroll_employer_contribution_amount", "Payroll employer contributions", "payroll_controller", "pay_run", "sum(pay_run.payslip.totals.employerContributionPreviewAmount)", ["payroll"]),
+  createMetricDefinition("payroll_net_pay_amount", "Payroll net pay", "payroll_controller", "pay_run", "sum(pay_run.payslip.totals.netPay)", ["payroll"]),
+  createMetricDefinition("payroll_vacation_liability_amount", "Payroll vacation liability", "payroll_controller", "vacation_liability_snapshot", "sum(vacation_liability_snapshot.totals.liabilityAmount)", ["payroll"]),
+  createMetricDefinition("payroll_exception_count", "Payroll exception count", "payroll_controller", "pay_run", "count(pay_run.exceptionSummary.totalCount)", ["payroll"]),
+  createMetricDefinition("payroll_agi_submission_count", "AGI submission count", "payroll_controller", "agi_submission", "count(agi_submission)", ["payroll"]),
+  createMetricDefinition("payroll_run_count", "Payroll run count", "payroll_controller", "pay_run", "count(pay_run)", ["payroll"]),
+  createMetricDefinition("tax_account_net_balance_amount", "Tax account net balance", "tax_operator", "tax_account_snapshot", "tax_account_snapshot.balance.netBalance", ["taxAccount"]),
+  createMetricDefinition("tax_account_open_credit_amount", "Tax account open credit", "tax_operator", "tax_account_snapshot", "tax_account_snapshot.balance.openCreditAmount", ["taxAccount"]),
+  createMetricDefinition("tax_account_open_settlement_amount", "Tax account open settlement", "tax_operator", "tax_account_snapshot", "tax_account_snapshot.balance.openSettlementAmount", ["taxAccount"]),
+  createMetricDefinition("tax_account_open_difference_case_count", "Tax account open difference cases", "tax_operator", "tax_account_snapshot", "count(tax_account_snapshot.discrepancies where open)", ["taxAccount"]),
+  createMetricDefinition("tax_account_event_count", "Tax account event count", "tax_operator", "tax_account_event", "count(tax_account_event)", ["taxAccount"]),
+  createMetricDefinition("tax_account_import_batch_count", "Tax account import batch count", "tax_operator", "tax_account_import_batch", "count(tax_account_import_batch)", ["taxAccount"]),
+  createMetricDefinition("submission_total_count", "Submission count", "compliance_operator", "authority_submission", "count(authority_submission)", ["integrations"]),
+  createMetricDefinition("submission_accepted_count", "Accepted submissions", "compliance_operator", "authority_submission", "count(authority_submission where accepted)", ["integrations"]),
+  createMetricDefinition("submission_failed_count", "Failed submissions", "compliance_operator", "authority_submission", "count(authority_submission where failed)", ["integrations"]),
+  createMetricDefinition("submission_open_recovery_count", "Open submission recoveries", "compliance_operator", "submission_recovery", "count(submission_recovery where open)", ["integrations"]),
+  createMetricDefinition("submission_open_action_count", "Open submission actions", "compliance_operator", "submission_action_queue_item", "count(submission_action_queue_item where open)", ["integrations"]),
+  createMetricDefinition("submission_attempt_count", "Submission attempt count", "compliance_operator", "submission_attempt", "count(submission_attempt)", ["integrations"]),
+  createMetricDefinition("submission_receipt_count", "Submission receipt count", "compliance_operator", "submission_receipt", "count(submission_receipt)", ["integrations"])
 ]);
 
 const REPORT_DEFINITIONS = Object.freeze([
@@ -205,6 +239,79 @@ const REPORT_DEFINITIONS = Object.freeze([
       "project_forecast_margin_amount"
     ]),
     status: "active"
+  },
+  {
+    reportCode: "payroll_summary",
+    name: "Payroll summary",
+    purpose: "Reporting-period payroll dashboard with pay runs, AGI readiness, exceptions and liability snapshots.",
+    versionNo: 1,
+    definitionKind: "official",
+    reportSourceType: "payroll_summary",
+    rowDimensionCode: "reporting_period",
+    defaultViewMode: "period",
+    allowedViewModes: ["period", "rolling_12", "fiscal_year"],
+    classFilter: [],
+    drilldownMode: "pay_run_snapshot",
+    defaultFilters: {},
+    metricCatalog: metricCatalog([
+      "payroll_gross_earnings_amount",
+      "payroll_gross_deductions_amount",
+      "payroll_preliminary_tax_amount",
+      "payroll_employer_contribution_amount",
+      "payroll_net_pay_amount",
+      "payroll_vacation_liability_amount",
+      "payroll_exception_count",
+      "payroll_agi_submission_count",
+      "payroll_run_count"
+    ]),
+    status: "active"
+  },
+  {
+    reportCode: "tax_account_summary",
+    name: "Tax account summary",
+    purpose: "Operational tax-account dashboard for balance, open settlement exposure and discrepancy pressure.",
+    versionNo: 1,
+    definitionKind: "official",
+    reportSourceType: "tax_account_summary",
+    rowDimensionCode: "summary_section",
+    defaultViewMode: "period",
+    allowedViewModes: ["period", "rolling_12", "fiscal_year"],
+    classFilter: [],
+    drilldownMode: "tax_account_snapshot",
+    defaultFilters: {},
+    metricCatalog: metricCatalog([
+      "tax_account_net_balance_amount",
+      "tax_account_open_credit_amount",
+      "tax_account_open_settlement_amount",
+      "tax_account_open_difference_case_count",
+      "tax_account_event_count",
+      "tax_account_import_batch_count"
+    ]),
+    status: "active"
+  },
+  {
+    reportCode: "submission_dashboard",
+    name: "Submission dashboard",
+    purpose: "Compliance operations dashboard for regulated submissions, attempts, receipts and recovery pressure.",
+    versionNo: 1,
+    definitionKind: "official",
+    reportSourceType: "submission_dashboard",
+    rowDimensionCode: "submission_type",
+    defaultViewMode: "period",
+    allowedViewModes: ["period", "rolling_12", "fiscal_year"],
+    classFilter: [],
+    drilldownMode: "submission_operation",
+    defaultFilters: {},
+    metricCatalog: metricCatalog([
+      "submission_total_count",
+      "submission_accepted_count",
+      "submission_failed_count",
+      "submission_open_recovery_count",
+      "submission_open_action_count",
+      "submission_attempt_count",
+      "submission_receipt_count"
+    ]),
+    status: "active"
   }
 ]);
 
@@ -219,7 +326,10 @@ export function createReportingEngine({
   documentArchivePlatform = null,
   arPlatform = null,
   apPlatform = null,
-  projectsPlatform = null
+  projectsPlatform = null,
+  payrollPlatform = null,
+  taxAccountPlatform = null,
+  integrationPlatform = null
 } = {}) {
   const ledger = ledgerPlatform || createLedgerEngine({ clock });
   const documents = documentPlatform || documentArchivePlatform || createDocumentArchiveEngine({ clock });
@@ -1265,6 +1375,30 @@ export function createReportingEngine({
         actorId
       });
     }
+    if (definition.reportSourceType === "payroll_summary") {
+      return buildPayrollReportLines({
+        companyId,
+        definition,
+        filters,
+        window
+      });
+    }
+    if (definition.reportSourceType === "tax_account_summary") {
+      return buildTaxAccountReportLines({
+        companyId,
+        definition,
+        filters,
+        window
+      });
+    }
+    if (definition.reportSourceType === "submission_dashboard") {
+      return buildSubmissionDashboardReportLines({
+        companyId,
+        definition,
+        filters,
+        window
+      });
+    }
     throw httpError(500, "report_source_type_invalid", `Unsupported report source ${definition.reportSourceType}.`);
   }
 
@@ -1779,6 +1913,339 @@ export function createReportingEngine({
           lineKey: line.lineKey,
           metricValues: line.metricValues,
           supportingSnapshots: line.supportingSnapshots
+        }))
+      }
+    };
+  }
+
+  function buildPayrollReportLines({ companyId, definition, filters, window }) {
+    if (!payrollPlatform) {
+      throw httpError(500, "payroll_platform_missing", "Payroll platform is required for payroll reporting.");
+    }
+    const requestedPeriods = new Set(normalizeReportingPeriods(filters.reportingPeriods));
+    const requestedRunTypes = new Set(Array.isArray(filters.runTypes) ? filters.runTypes.map((value) => String(value)) : []);
+    const resolvedPeriods = requestedPeriods.size > 0 ? [...requestedPeriods] : listReportingPeriodsInWindow(window);
+    const payrollRuns = dedupeByKey(
+      resolvedPeriods.flatMap((reportingPeriod) => payrollPlatform.listPayRuns({ companyId, reportingPeriod })),
+      (payRun) => payRun.payRunId
+    )
+      .filter((payRun) => (requestedRunTypes.size > 0 ? requestedRunTypes.has(payRun.runType) : true))
+      .filter((payRun) =>
+        Array.isArray(filters.employmentIds) && filters.employmentIds.length > 0
+          ? payRun.employmentIds.some((employmentId) => filters.employmentIds.includes(employmentId))
+          : true
+      );
+    const agiSubmissions = dedupeByKey(
+      resolvedPeriods.flatMap((reportingPeriod) => payrollPlatform.listAgiSubmissions({ companyId, reportingPeriod })),
+      (submission) => submission.agiSubmissionId
+    );
+    const vacationSnapshots = dedupeByKey(
+      resolvedPeriods.flatMap((reportingPeriod) => payrollPlatform.listVacationLiabilitySnapshots({ companyId, reportingPeriod })),
+      (snapshot) => snapshot.vacationLiabilitySnapshotId
+    );
+    const buckets = new Map();
+
+    for (const reportingPeriod of resolvedPeriods) {
+      const periodRuns = payrollRuns.filter((payRun) => payRun.reportingPeriod === reportingPeriod);
+      const periodAgiSubmissions = agiSubmissions.filter((submission) => submission.reportingPeriod === reportingPeriod);
+      const periodVacationSnapshot =
+        vacationSnapshots
+          .filter((snapshot) => snapshot.reportingPeriod === reportingPeriod)
+          .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+          .at(-1) || null;
+      if (periodRuns.length === 0 && periodAgiSubmissions.length === 0 && !periodVacationSnapshot) {
+        continue;
+      }
+      const lineKey = reportingPeriod;
+      const grossEarningsAmount = roundMoney(
+        periodRuns.reduce(
+          (sum, payRun) =>
+            sum +
+            payRun.payslips.reduce((payslipSum, payslip) => payslipSum + Number(payslip.totals?.grossEarnings || 0), 0),
+          0
+        )
+      );
+      const grossDeductionsAmount = roundMoney(
+        periodRuns.reduce(
+          (sum, payRun) =>
+            sum +
+            payRun.payslips.reduce((payslipSum, payslip) => payslipSum + Number(payslip.totals?.grossDeductions || 0), 0),
+          0
+        )
+      );
+      const preliminaryTaxAmount = roundMoney(
+        periodRuns.reduce(
+          (sum, payRun) =>
+            sum +
+            payRun.payslips.reduce((payslipSum, payslip) => payslipSum + Number(payslip.totals?.preliminaryTax || 0), 0),
+          0
+        )
+      );
+      const employerContributionAmount = roundMoney(
+        periodRuns.reduce(
+          (sum, payRun) =>
+            sum +
+            payRun.payslips.reduce(
+              (payslipSum, payslip) => payslipSum + Number(payslip.totals?.employerContributionPreviewAmount || 0),
+              0
+            ),
+          0
+        )
+      );
+      const netPayAmount = roundMoney(
+        periodRuns.reduce(
+          (sum, payRun) =>
+            sum + payRun.payslips.reduce((payslipSum, payslip) => payslipSum + Number(payslip.totals?.netPay || 0), 0),
+          0
+        )
+      );
+      const exceptionCount = periodRuns.reduce((sum, payRun) => sum + Number(payRun.exceptionSummary?.totalCount || 0), 0);
+      const vacationLiabilityAmount = roundMoney(Number(periodVacationSnapshot?.totals?.liabilityAmount || 0));
+      const bucket = finalizeReportLine(
+        {
+          ...createReportLineBucket({
+            lineKey,
+            lineType: "payroll_reporting_period",
+            accountNumber: reportingPeriod,
+            accountName: `Payroll ${reportingPeriod}`,
+            accountClass: "payroll",
+            displayName: `Payroll ${reportingPeriod}`,
+            sectionCode: definition.reportCode
+          }),
+          totalDebit: grossEarningsAmount,
+          totalCredit: roundMoney(preliminaryTaxAmount + employerContributionAmount + grossDeductionsAmount),
+          balanceAmount: netPayAmount,
+          metricValues: {
+            payroll_gross_earnings_amount: grossEarningsAmount,
+            payroll_gross_deductions_amount: grossDeductionsAmount,
+            payroll_preliminary_tax_amount: preliminaryTaxAmount,
+            payroll_employer_contribution_amount: employerContributionAmount,
+            payroll_net_pay_amount: netPayAmount,
+            payroll_vacation_liability_amount: vacationLiabilityAmount,
+            payroll_exception_count: exceptionCount,
+            payroll_agi_submission_count: periodAgiSubmissions.length,
+            payroll_run_count: periodRuns.length
+          },
+          supportingSnapshots: [
+            ...(periodVacationSnapshot
+              ? [
+                  {
+                    snapshotType: "vacation_liability_snapshot",
+                    snapshotId: periodVacationSnapshot.vacationLiabilitySnapshotId,
+                    snapshotHash: periodVacationSnapshot.snapshotHash
+                  }
+                ]
+              : []),
+            ...periodRuns
+              .filter((payRun) => payRun.payrollInputSnapshotId)
+              .map((payRun) => ({
+                snapshotType: "payroll_input_snapshot",
+                snapshotId: payRun.payrollInputSnapshotId,
+                snapshotHash: payRun.payrollInputFingerprint || payRun.sourceSnapshotHash || null
+              })),
+            ...periodAgiSubmissions
+              .filter((submission) => submission.currentVersionId)
+              .map((submission) => ({
+                snapshotType: "agi_submission_version",
+                snapshotId: submission.currentVersionId,
+                snapshotHash: submission.currentVersion?.contentHash || submission.currentVersion?.payloadHash || null
+              }))
+          ].filter((snapshot) => snapshot.snapshotHash != null)
+        },
+        periodRuns.map((payRun) =>
+          createSyntheticDrilldownEntry({
+            journalEntryId: `payrun:${payRun.payRunId}`,
+            journalDate: payRun.payDate,
+            sourceType: "PAY_RUN",
+            sourceId: payRun.payRunId,
+            description: `${payRun.reportingPeriod} ${payRun.runType}`,
+            totalDebit: payRun.payslips.reduce((sum, payslip) => sum + Number(payslip.totals?.grossEarnings || 0), 0),
+            totalCredit: payRun.payslips.reduce((sum, payslip) => sum + Number(payslip.totals?.preliminaryTax || 0), 0),
+            linkedDocuments: []
+          })
+        )
+      );
+      buckets.set(lineKey, bucket);
+    }
+
+    const lines = finalizeReportLines({
+      lines: [...buckets.values()],
+      sortKeySelector: (line) => line.lineKey
+    });
+    return {
+      lines,
+      totals: buildReportTotals(lines),
+      sourceSnapshotPayload: {
+        sourceType: "payroll_summary",
+        filters,
+        reportingPeriods: resolvedPeriods,
+        payRuns: payrollRuns.map((payRun) => ({
+          payRunId: payRun.payRunId,
+          reportingPeriod: payRun.reportingPeriod,
+          runType: payRun.runType,
+          status: payRun.status,
+          exceptionSummary: payRun.exceptionSummary,
+          payRunFingerprint: payRun.payRunFingerprint || null
+        })),
+        agiSubmissions: agiSubmissions.map((submission) => ({
+          agiSubmissionId: submission.agiSubmissionId,
+          reportingPeriod: submission.reportingPeriod,
+          status: submission.status,
+          currentVersionId: submission.currentVersionId
+        })),
+        vacationLiabilitySnapshots: vacationSnapshots.map((snapshot) => ({
+          vacationLiabilitySnapshotId: snapshot.vacationLiabilitySnapshotId,
+          reportingPeriod: snapshot.reportingPeriod,
+          liabilityAmount: snapshot.totals?.liabilityAmount || 0,
+          snapshotHash: snapshot.snapshotHash
+        }))
+      }
+    };
+  }
+
+  function buildTaxAccountReportLines({ companyId, definition, filters, window }) {
+    if (!taxAccountPlatform || typeof taxAccountPlatform.snapshotTaxAccount !== "function") {
+      throw httpError(500, "tax_account_platform_missing", "Tax-account platform is required for tax-account reporting.");
+    }
+    const snapshot = taxAccountPlatform.snapshotTaxAccount({ companyId });
+    const filteredEvents = (snapshot.events || []).filter((event) => isTimestampWithinWindow(event.eventDate || event.createdAt, window));
+    const filteredImportBatches = (snapshot.importBatches || []).filter((batch) =>
+      isTimestampWithinWindow(batch.statementDate || batch.importedAt, window)
+    );
+    const openDiscrepancies = (snapshot.discrepancies || []).filter((item) => item.status === "open" || item.status === "investigating");
+    const line = finalizeReportLine(
+      {
+        ...createReportLineBucket({
+          lineKey: "tax_account",
+          lineType: "tax_account_summary",
+          accountNumber: "tax_account",
+          accountName: "Tax account",
+          accountClass: "tax_account",
+          displayName: "Tax account summary",
+          sectionCode: definition.reportCode
+        }),
+        totalDebit: roundMoney(Number(snapshot.balance?.debitBalance || 0)),
+        totalCredit: roundMoney(Number(snapshot.balance?.creditBalance || 0)),
+        balanceAmount: roundMoney(Number(snapshot.balance?.netBalance || 0)),
+        metricValues: {
+          tax_account_net_balance_amount: roundMoney(Number(snapshot.balance?.netBalance || 0)),
+          tax_account_open_credit_amount: roundMoney(Number(snapshot.balance?.openCreditAmount || 0)),
+          tax_account_open_settlement_amount: roundMoney(Number(snapshot.balance?.openSettlementAmount || 0)),
+          tax_account_open_difference_case_count: openDiscrepancies.length,
+          tax_account_event_count: filteredEvents.length,
+          tax_account_import_batch_count: filteredImportBatches.length
+        },
+        supportingSnapshots: (snapshot.reconciliations || []).map((reconciliation) => ({
+          snapshotType: "tax_account_reconciliation_run",
+          snapshotId: reconciliation.reconciliationRunId,
+          snapshotHash: reconciliation.summary ? hashObject(reconciliation.summary) : hashObject(reconciliation)
+        }))
+      },
+      [
+        createSyntheticDrilldownEntry({
+          journalEntryId: `tax-account:${companyId}`,
+          journalDate: window.toDate,
+          sourceType: "TAX_ACCOUNT_SUMMARY",
+          sourceId: companyId,
+          description: `Tax account summary through ${window.toDate}`,
+          totalDebit: snapshot.balance?.debitBalance || 0,
+          totalCredit: snapshot.balance?.creditBalance || 0,
+          linkedDocuments: []
+        })
+      ]
+    );
+    return {
+      lines: [line],
+      totals: buildReportTotals([line]),
+      sourceSnapshotPayload: {
+        sourceType: "tax_account_summary",
+        filters,
+        balance: snapshot.balance || null,
+        eventIds: filteredEvents.map((event) => event.taxAccountEventId),
+        discrepancyCaseIds: openDiscrepancies.map((item) => item.discrepancyCaseId),
+        importBatchIds: filteredImportBatches.map((batch) => batch.importBatchId)
+      }
+    };
+  }
+
+  function buildSubmissionDashboardReportLines({ companyId, definition, filters, window }) {
+    if (!integrationPlatform || typeof integrationPlatform.listAuthoritySubmissions !== "function") {
+      throw httpError(500, "integration_platform_missing", "Integration platform is required for submission dashboards.");
+    }
+    const requestedSubmissionTypes = new Set(Array.isArray(filters.submissionTypes) ? filters.submissionTypes.map((value) => String(value)) : []);
+    const submissions = integrationPlatform
+      .listAuthoritySubmissions({ companyId })
+      .filter((submission) => (requestedSubmissionTypes.size > 0 ? requestedSubmissionTypes.has(submission.submissionType) : true))
+      .filter((submission) => isTimestampWithinWindow(submission.submittedAt || submission.createdAt, window));
+    const grouped = new Map();
+    for (const submission of submissions) {
+      const lineKey = submission.submissionType;
+      if (!grouped.has(lineKey)) {
+        grouped.set(
+          lineKey,
+          createReportLineBucket({
+            lineKey,
+            lineType: "submission_type_dashboard",
+            accountNumber: submission.submissionType,
+            accountName: submission.submissionType,
+            accountClass: "submission",
+            displayName: submission.submissionType,
+            sectionCode: definition.reportCode
+          })
+        );
+      }
+      const bucket = grouped.get(lineKey);
+      const isAccepted = ["accepted", "finalized"].includes(submission.status) || submission.materialReceiptStateCode === "accepted";
+      const isFailed =
+        ["transport_failed", "domain_rejected"].includes(submission.status) ||
+        ["technical_nack", "business_nack"].includes(submission.latestReceiptType);
+      const openRecoveryCount = (submission.recoveries || []).filter((recovery) => ["open", "monitoring"].includes(recovery.status)).length;
+      const openActionCount = (submission.actionQueueItems || []).filter((item) => ["open", "claimed", "waiting_input"].includes(item.status)).length;
+      bucket.totalDebit = roundMoney(bucket.totalDebit + 1);
+      bucket.totalCredit = roundMoney(bucket.totalCredit + (isFailed ? 1 : 0));
+      bucket.balanceAmount = roundMoney(bucket.balanceAmount + (isAccepted ? 1 : 0));
+      bucket.metricValues = {
+        submission_total_count: roundMoney(Number(bucket.metricValues.submission_total_count || 0) + 1),
+        submission_accepted_count: roundMoney(Number(bucket.metricValues.submission_accepted_count || 0) + (isAccepted ? 1 : 0)),
+        submission_failed_count: roundMoney(Number(bucket.metricValues.submission_failed_count || 0) + (isFailed ? 1 : 0)),
+        submission_open_recovery_count: roundMoney(Number(bucket.metricValues.submission_open_recovery_count || 0) + openRecoveryCount),
+        submission_open_action_count: roundMoney(Number(bucket.metricValues.submission_open_action_count || 0) + openActionCount),
+        submission_attempt_count: roundMoney(Number(bucket.metricValues.submission_attempt_count || 0) + (submission.attempts || []).length),
+        submission_receipt_count: roundMoney(Number(bucket.metricValues.submission_receipt_count || 0) + (submission.receipts || []).length)
+      };
+      pushUniqueDrilldownEntry(
+        bucket,
+        createSyntheticDrilldownEntry({
+          journalEntryId: `submission:${submission.submissionId}`,
+          journalDate: (submission.submittedAt || submission.createdAt || window.toDate).slice(0, 10),
+          sourceType: submission.submissionType,
+          sourceId: submission.submissionId,
+          description: `${submission.status} ${submission.sourceObjectType}:${submission.sourceObjectId}`,
+          totalDebit: 1,
+          totalCredit: isFailed ? 1 : 0,
+          linkedDocuments: []
+        })
+      );
+    }
+
+    const lines = finalizeReportLines({
+      lines: [...grouped.values()],
+      sortKeySelector: (line) => line.lineKey
+    });
+    return {
+      lines,
+      totals: buildReportTotals(lines),
+      sourceSnapshotPayload: {
+        sourceType: "submission_dashboard",
+        filters,
+        submissionIds: submissions.map((submission) => submission.submissionId),
+        statuses: submissions.map((submission) => ({
+          submissionId: submission.submissionId,
+          submissionType: submission.submissionType,
+          status: submission.status,
+          latestReceiptType: submission.latestReceiptType || null,
+          openRecoveryCount: (submission.recoveries || []).filter((recovery) => ["open", "monitoring"].includes(recovery.status)).length,
+          openActionCount: (submission.actionQueueItems || []).filter((item) => ["open", "claimed", "waiting_input"].includes(item.status)).length
         }))
       }
     };
@@ -2337,6 +2804,39 @@ function parseIsoDate(value) {
 
 function toIsoDate(date) {
   return date.toISOString().slice(0, 10);
+}
+
+function isTimestampWithinWindow(value, window) {
+  if (!value) {
+    return false;
+  }
+  const normalizedDate = String(value).slice(0, 10);
+  return normalizedDate >= window.fromDate && normalizedDate <= window.toDate;
+}
+
+function normalizeReportingPeriods(values) {
+  return dedupeStringValues(
+    (Array.isArray(values) ? values : []).map((value) => {
+      const resolvedValue = requireText(String(value), "reporting_period_invalid");
+      if (!/^\d{6}$/.test(resolvedValue)) {
+        throw httpError(400, "reporting_period_invalid", `${resolvedValue} must use YYYYMM format.`);
+      }
+      return resolvedValue;
+    })
+  );
+}
+
+function listReportingPeriodsInWindow(window) {
+  const startDate = parseIsoDate(window.fromDate);
+  const endDate = parseIsoDate(window.toDate);
+  const periods = [];
+  let cursor = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), 1));
+  const endCursor = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), 1));
+  while (cursor <= endCursor) {
+    periods.push(`${cursor.getUTCFullYear()}${String(cursor.getUTCMonth() + 1).padStart(2, "0")}`);
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+  }
+  return periods;
 }
 
 function roundMoney(value) {

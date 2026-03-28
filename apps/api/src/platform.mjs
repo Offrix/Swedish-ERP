@@ -529,7 +529,7 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "reporting",
     label: "Reporting",
     packageName: "@swedish-erp/domain-reporting",
-    dependsOn: ["ledger", "documents", "ar", "ap", "projects"],
+    dependsOn: ["ledger", "documents", "ar", "ap", "taxAccount", "integrations", "payroll", "projects"],
     create: ({ options, dependencies }) =>
       createReportingPlatform({
         ...options,
@@ -537,6 +537,9 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         documentPlatform: dependencies.documents,
         arPlatform: dependencies.ar,
         apPlatform: dependencies.ap,
+        taxAccountPlatform: dependencies.taxAccount,
+        integrationPlatform: dependencies.integrations,
+        payrollPlatform: dependencies.payroll,
         projectsPlatform: dependencies.projects
       })
   }),
