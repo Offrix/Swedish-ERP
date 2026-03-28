@@ -159,6 +159,55 @@ test("Phase 2.3 OCR routes can be disabled and support review-driven correction 
       }
     );
     assert.equal(runs.ocrRuns.length, 2);
+    assert.equal(runs.ocrRuns[0].status, "superseded");
+
+    const asyncIngested = await requestJson(enabledBaseUrl, "/v1/inbox/messages", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001",
+        recipientAddress: "ocr@inbound.example.test",
+        messageId: "<phase10-ocr-e2e-async-001@inbound.example.test>",
+        rawStorageKey: "raw-mail/phase10-ocr-e2e-async-001.eml",
+        attachments: [
+          {
+            filename: "invoice-large.pdf",
+            mimeType: "application/pdf",
+            storageKey: "documents/originals/invoice-large.pdf",
+            contentText: "[OCR_LOW_CONFIDENCE] Invoice: INV-5001 Supplier: Demo Leverantor AB Total: 8900.00",
+            pageCount: 20
+          }
+        ]
+      }
+    });
+    const asyncDocumentId = asyncIngested.routedDocuments[0].documentId;
+
+    const asyncAccepted = await requestJson(enabledBaseUrl, `/v1/documents/${asyncDocumentId}/ocr/runs`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 202,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001",
+        callbackMode: "manual_provider_callback"
+      }
+    });
+    assert.equal(asyncAccepted.ocrRun.processingMode, "batch_lro");
+
+    const asyncCompleted = await requestJson(
+      enabledBaseUrl,
+      `/v1/documents/${asyncDocumentId}/ocr/runs/${asyncAccepted.ocrRun.ocrRunId}/provider-callback`,
+      {
+        method: "POST",
+        token: sessionToken,
+        body: {
+          companyId: "00000000-0000-4000-8000-000000000001",
+          callbackToken: asyncAccepted.ocrRun.metadataJson.callbackToken
+        }
+      }
+    );
+    assert.equal(asyncCompleted.ocrRun.status, "completed");
+    assert.equal(asyncCompleted.reviewTask.status, "open");
   } finally {
     await stopServer(disabledServer);
     await stopServer(enabledServer);

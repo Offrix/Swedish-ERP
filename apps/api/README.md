@@ -86,6 +86,7 @@ Canonical request envelopes may be sent as:
 - `GET /v1/inbox/messages/:emailIngestMessageId?companyId=...`
 - `POST /v1/documents/:documentId/ocr/runs`
 - `GET /v1/documents/:documentId/ocr/runs?companyId=...`
+- `POST /v1/documents/:documentId/ocr/runs/:ocrRunId/provider-callback`
 - `GET /v1/review-tasks/:reviewTaskId?companyId=...`
 - `POST /v1/review-tasks/:reviewTaskId/claim`
 - `POST /v1/review-tasks/:reviewTaskId/correct`

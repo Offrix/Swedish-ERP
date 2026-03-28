@@ -37,9 +37,12 @@ export interface OcrRunState {
   readonly ocrRunId: string;
   readonly companyId: string;
   readonly documentId: string;
-  readonly status: "requested" | "processing" | "completed" | "failed";
+  readonly status: "queued" | "running" | "completed" | "failed" | "superseded";
   readonly suggestedDocumentType: "supplier_invoice" | "expense_receipt" | "contract" | "unknown";
   readonly classificationConfidence: number;
+  readonly providerCode?: string;
+  readonly processingMode?: "sync" | "batch_lro";
+  readonly supersededByOcrRunId?: string | null;
 }
 
 export interface ReviewTaskState {
@@ -139,7 +142,16 @@ export interface DocumentArchivePlatform {
     companyId: string;
     documentId: string;
     reasonCode?: string;
-    modelVersion?: string;
+    modelVersion?: string | null;
+    callbackMode?: "auto" | "force_sync" | "manual_provider_callback";
+    actorId?: string;
+    correlationId?: string;
+  }): unknown;
+  completeDocumentOcrProviderCallback(input: {
+    companyId: string;
+    documentId: string;
+    ocrRunId: string;
+    callbackToken?: string | null;
     actorId?: string;
     correlationId?: string;
   }): unknown;

@@ -45,6 +45,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/documents/:documentId/versions",
   "/v1/documents/:documentId/links",
   "/v1/inbox/messages/:emailIngestMessageId",
+  "/v1/documents/:documentId/ocr/runs/:ocrRunId/provider-callback",
   "/v1/review-tasks/:reviewTaskId/claim",
   "/v1/review-tasks/:reviewTaskId/correct",
   "/v1/review-tasks/:reviewTaskId/approve",

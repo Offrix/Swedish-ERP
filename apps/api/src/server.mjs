@@ -359,6 +359,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/inbox/messages",
               "/v1/inbox/messages/:emailIngestMessageId",
               "/v1/documents/:documentId/ocr/runs",
+              "/v1/documents/:documentId/ocr/runs/:ocrRunId/provider-callback",
               "/v1/review-tasks/:reviewTaskId",
               "/v1/review-tasks/:reviewTaskId/claim",
               "/v1/review-tasks/:reviewTaskId/correct",
@@ -1989,18 +1990,16 @@ async function handleRequest({ req, res, platform, flags }) {
       companyId,
       permissionCode: "company.manage"
     });
-    writeJson(
-      res,
-      201,
-      platform.runDocumentOcr({
+    const result = platform.runDocumentOcr({
         companyId,
         documentId: documentOcrRunsMatch.documentId,
         reasonCode: body.reasonCode || "initial_ingest",
-        modelVersion: body.modelVersion || "textract-stub-2026-03-21",
+        modelVersion: body.modelVersion || null,
+        callbackMode: body.callbackMode || "auto",
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
-      })
-    );
+      });
+    writeJson(res, result.ocrRun?.processingMode === "batch_lro" && result.ocrRun?.status === "running" ? 202 : 201, result);
     return;
   }
 
@@ -2022,6 +2021,31 @@ async function handleRequest({ req, res, platform, flags }) {
       platform.getDocumentOcrRuns({
         companyId,
         documentId: documentOcrRunsMatch.documentId
+      })
+    );
+    return;
+  }
+
+  const documentOcrProviderCallbackMatch = matchPath(path, "/v1/documents/:documentId/ocr/runs/:ocrRunId/provider-callback");
+  if (documentOcrProviderCallbackMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage"
+    });
+    writeJson(
+      res,
+      200,
+      platform.completeDocumentOcrProviderCallback({
+        companyId,
+        documentId: documentOcrProviderCallbackMatch.documentId,
+        ocrRunId: documentOcrProviderCallbackMatch.ocrRunId,
+        callbackToken: body.callbackToken || null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
       })
     );
     return;

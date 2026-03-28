@@ -241,6 +241,7 @@ const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["POST /v1/tax-account/discrepancy-cases/:discrepancyCaseId/review", override("tax_account", "tax_account_discrepancy_review", "strong_mfa", "company", "tax_account", "tax_account_difference_case", "company.manage", true)],
   ["POST /v1/tax-account/discrepancy-cases/:discrepancyCaseId/resolve", override("tax_account", "tax_account_discrepancy_resolve", "strong_mfa", "company", "tax_account", "tax_account_difference_case", "company.manage", true)],
   ["POST /v1/tax-account/discrepancy-cases/:discrepancyCaseId/waive", override("tax_account", "tax_account_discrepancy_waive", "strong_mfa", "company", "tax_account", "tax_account_difference_case", "company.manage", true)],
+  ["POST /v1/documents/:documentId/ocr/runs/:ocrRunId/provider-callback", override("documents", "document_ocr_provider_callback", "strong_mfa", "document", "document", "ocr_run", "company.manage", true)],
   ["POST /v1/review-tasks/:reviewTaskId/approve", override("documents", "review_task_decide", "mfa", "review_task", "review_task", "review_task", "approval.approve", true)],
   ["POST /v1/review-center/items/:reviewItemId/approve", override("review", "review_center_decide", "mfa", "review_item", "review_item", "review_item", "approval.approve", true)],
   ["POST /v1/review-center/items/:reviewItemId/reject", override("review", "review_center_decide", "mfa", "review_item", "review_item", "review_item", "approval.approve", true)],

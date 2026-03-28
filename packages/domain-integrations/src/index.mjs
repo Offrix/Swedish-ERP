@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { createPartnerModule } from "./partners.mjs";
 import { createPublicApiModule } from "./public-api.mjs";
 import { createRegulatedSubmissionsModule } from "./regulated-submissions.mjs";
+import { createGoogleDocumentAiProvider, GOOGLE_DOCUMENT_AI_PROVIDER_CODE } from "./providers/google-document-ai.mjs";
 import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
 import {
   applyDurableStateSnapshot,
@@ -10,6 +11,7 @@ import {
 
 export const INVOICE_DELIVERY_CHANNELS = Object.freeze(["pdf_email", "peppol"]);
 export const PAYMENT_LINK_STATUSES = Object.freeze(["active", "consumed", "expired", "cancelled"]);
+export { GOOGLE_DOCUMENT_AI_PROVIDER_CODE } from "./providers/google-document-ai.mjs";
 export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
   Object.freeze({
     providerBaselineId: "peppol-bis-billing-3-se-2026.1",
@@ -68,6 +70,34 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
     semanticChangeSummary: "Bank file channel baseline for deterministic export/import file envelopes."
   }),
   Object.freeze({
+    providerBaselineId: "google-document-ai-ocr-se-2026.1",
+    baselineCode: "SE-GOOGLE-DOCUMENT-AI-OCR",
+    providerCode: GOOGLE_DOCUMENT_AI_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "document_ai_ocr",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "pretrained-ocr-v2.1-2024-08-07",
+    checksum: "google-document-ai-ocr-se-2026.1",
+    sourceSnapshotDate: "2026-03-28",
+    semanticChangeSummary: "Google Document AI Enterprise OCR baseline for generic document OCR and quality scoring."
+  }),
+  Object.freeze({
+    providerBaselineId: "google-document-ai-invoice-se-2026.1",
+    baselineCode: "SE-GOOGLE-DOCUMENT-AI-INVOICE",
+    providerCode: GOOGLE_DOCUMENT_AI_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "document_ai_invoice",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "pretrained-invoice-v2.0-2023-12-06",
+    checksum: "google-document-ai-invoice-se-2026.1",
+    sourceSnapshotDate: "2026-03-28",
+    semanticChangeSummary: "Google Document AI Invoice Parser baseline for supplier-invoice OCR and entity extraction."
+  }),
+  Object.freeze({
     providerBaselineId: "id06-api-se-2026.1",
     baselineCode: "SE-ID06-API",
     providerCode: "official_id06_integration",
@@ -89,6 +119,7 @@ export function createIntegrationPlatform(options = {}) {
 
 export function createIntegrationEngine({
   clock = () => new Date(),
+  environmentMode = "test",
   paymentBaseUrl = "https://payments.local",
   webhookDeliveryExecutor = undefined,
   partnerContractTestExecutors = undefined,
@@ -99,6 +130,12 @@ export function createIntegrationEngine({
 } = {}) {
   const providerBaselines =
     providerBaselineRegistry || createProviderBaselineRegistry({ clock, seedProviderBaselines: INTEGRATION_PROVIDER_BASELINES });
+  const documentOcrProvider = createGoogleDocumentAiProvider({
+    clock,
+    environmentMode,
+    providerEnvironmentRef: environmentMode === "production" ? "production" : "sandbox",
+    providerBaselineRegistry: providerBaselines
+  });
   const state = {
     submissions: new Map(),
     submissionIdsByCompany: new Map(),
@@ -150,6 +187,9 @@ export function createIntegrationEngine({
     ...regulatedSubmissionsModule,
     deliveryChannels: INVOICE_DELIVERY_CHANNELS,
     paymentLinkStatuses: PAYMENT_LINK_STATUSES,
+    getDocumentOcrCapabilityManifest: () => documentOcrProvider.getCapabilityManifest(),
+    startDocumentOcrExtraction: (input) => documentOcrProvider.startExtraction(input),
+    collectDocumentOcrOperation: (input) => documentOcrProvider.collectOperation(input),
     providerBaselineRegistry: providerBaselines,
     listProviderBaselines: (filters) => providerBaselines.listProviderBaselines(filters),
     resolveProviderBaseline: (filters) => providerBaselines.resolveProviderBaseline(filters),
@@ -174,7 +214,8 @@ export function createIntegrationEngine({
         partnerOperations: [...state.partnerOperations.values()],
         asyncJobs: [...state.asyncJobs.values()],
         asyncDeadLetters: [...state.asyncDeadLetters.values()],
-        providerBaselines: providerBaselines.snapshotProviderBaselineRegistry()
+        providerBaselines: providerBaselines.snapshotProviderBaselineRegistry(),
+        documentOcrProvider: documentOcrProvider.snapshot()
       });
     },
     exportDurableState,
@@ -182,11 +223,17 @@ export function createIntegrationEngine({
   };
 
   function exportDurableState() {
-    return serializeDurableState(state);
+    return {
+      ...serializeDurableState(state),
+      providerSnapshots: {
+        documentOcrProvider: documentOcrProvider.snapshot()
+      }
+    };
   }
 
   function importDurableState(snapshot) {
     applyDurableStateSnapshot(state, snapshot);
+    documentOcrProvider.restore(snapshot?.providerSnapshots?.documentOcrProvider || snapshot?.documentOcrProvider || {});
   }
 
   function prepareInvoiceDelivery({

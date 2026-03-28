@@ -1,5 +1,9 @@
 import crypto from "node:crypto";
 import { createAuditEnvelope } from "../../events/src/index.mjs";
+import {
+  createGoogleDocumentAiProvider,
+  GOOGLE_DOCUMENT_AI_PROVIDER_CODE
+} from "../../domain-integrations/src/providers/google-document-ai.mjs";
 
 export const DOCUMENT_STATES = Object.freeze([
   "received",
@@ -27,15 +31,27 @@ export const INBOX_CHANNEL_STATUSES = Object.freeze(["active", "disabled"]);
 export const EMAIL_INGEST_STATES = Object.freeze(["received", "accepted", "rejected", "quarantined"]);
 export const EMAIL_ATTACHMENT_STATES = Object.freeze(["received", "queued", "quarantined"]);
 export const ATTACHMENT_SCAN_RESULTS = Object.freeze(["clean", "malware", "spam", "policy_violation"]);
-export const OCR_RUN_STATES = Object.freeze(["requested", "processing", "completed", "failed"]);
+export const OCR_RUN_STATES = Object.freeze(["queued", "running", "completed", "failed", "superseded"]);
 export const REVIEW_TASK_STATES = Object.freeze(["open", "claimed", "corrected", "approved", "rejected", "requeued"]);
 export const OCR_DOCUMENT_TYPES = Object.freeze(["supplier_invoice", "expense_receipt", "contract", "unknown"]);
 
 const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 const MAX_OCR_FILE_SIZE_BYTES = 15 * 1024 * 1024;
-const MAX_OCR_PAGE_COUNT = 200;
+const MAX_OCR_PAGE_COUNT = 500;
 
-export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
+export function createDocumentArchiveEngine({
+  clock = () => new Date(),
+  environmentMode = "test",
+  getIntegrationsPlatform = null,
+  ocrProvider = null
+} = {}) {
+  const defaultOcrProvider =
+    ocrProvider ||
+    createGoogleDocumentAiProvider({
+      clock,
+      environmentMode,
+      providerEnvironmentRef: environmentMode === "production" ? "production" : "sandbox"
+    });
   const state = {
     documents: new Map(),
     versions: new Map(),
@@ -66,6 +82,7 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     ingestEmailMessage,
     getEmailIngestMessage,
     runDocumentOcr,
+    completeDocumentOcrProviderCallback,
     getDocumentOcrRuns,
     claimReviewTask,
     correctReviewTask,
@@ -682,7 +699,8 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     companyId,
     documentId,
     reasonCode = "initial_ingest",
-    modelVersion = "textract-stub-2026-03-21",
+    modelVersion = null,
+    callbackMode = "auto",
     actorId = "system",
     correlationId = crypto.randomUUID()
   } = {}) {
@@ -691,6 +709,11 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     const thresholds = requireOcrThresholds(channel);
     const originalVersion = requireOriginalDocumentVersion(document.documentId);
     const pageCount = resolvePageCount(originalVersion);
+    const sourceText = buildOcrSourceText({ document, originalVersion });
+    const resolvedOcrProvider = resolveDocumentOcrProvider({
+      defaultOcrProvider,
+      getIntegrationsPlatform
+    });
     if (originalVersion.fileSizeBytes > MAX_OCR_FILE_SIZE_BYTES) {
       throw createError(409, "ocr_input_too_large", "Document exceeds the OCR size limit.");
     }
@@ -704,19 +727,37 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       documentId: document.documentId,
       companyId: document.companyId,
       sourceDocumentVersionId: originalVersion.documentVersionId,
-      profileCode: determineOcrProfile({ channel, originalVersion }),
-      modelVersion: requireText(modelVersion, "model_version_required", "Model version is required."),
+      profileCode: determineOcrProfile({
+        channel,
+        originalVersion,
+        sourceText,
+        filename: readMetadataText(originalVersion.metadataJson, "filename")
+      }),
+      modelVersion: null,
       reasonCode: requireText(reasonCode, "reason_code_required", "Reason code is required."),
-      status: "requested",
+      status: "queued",
       reviewRequired: false,
       suggestedDocumentType: "unknown",
       classificationConfidence: 0,
       classificationCandidatesJson: [],
       extractedText: "",
       extractedFieldsJson: {},
+      providerCode: GOOGLE_DOCUMENT_AI_PROVIDER_CODE,
+      providerEnvironmentRef: resolvedOcrProvider.providerEnvironmentRef || (environmentMode === "production" ? "production" : "sandbox"),
+      processingMode: "sync",
+      providerOperationRef: null,
+      providerCallbackMode: "none",
+      pageCount,
+      maxSyncPages: null,
+      maxBatchPages: null,
+      processorType: null,
+      qualityScore: null,
+      textConfidence: null,
+      supersededByOcrRunId: null,
       ocrDocumentVersionId: null,
       classificationDocumentVersionId: null,
       createdAt: now,
+      updatedAt: now,
       startedAt: null,
       completedAt: null,
       failedAt: null,
@@ -738,132 +779,104 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       correlationId
     });
 
-    run.status = "processing";
+    run.status = "running";
     run.startedAt = nowIso();
+    run.updatedAt = nowIso();
 
-    const sourceText = buildOcrSourceText({ document, originalVersion });
-    const classification = classifyDocument({
-      channel,
-      sourceText,
-      filename: readMetadataText(originalVersion.metadataJson, "filename"),
-      mimeType: originalVersion.mimeType
-    });
-    const extractedFields = extractOcrFields({
-      sourceText,
-      suggestedDocumentType: classification.suggestedDocumentType
-    });
-    const resolvedClassification = refineClassification({
-      classification,
-      extractedFields,
-      thresholds
-    });
-    const reviewDecision = evaluateReviewRequirement({
-      classification: resolvedClassification,
-      extractedFields,
-      thresholds
-    });
-
-    const ocrVersion = appendDocumentVersion({
+    const providerOutcome = resolvedOcrProvider.startExtraction({
       companyId: document.companyId,
       documentId: document.documentId,
-      variantType: "ocr",
-      storageKey: `documents/ocr/${document.documentId}/${run.ocrRunId}.txt`,
-      mimeType: "text/plain",
-      contentText: sourceText,
-      sourceReference: `${document.documentId}:ocr:${run.ocrRunId}`,
-      derivesFromDocumentVersionId: originalVersion.documentVersionId,
-      metadataJson: {
-        ocrRunId: run.ocrRunId,
-        profileCode: run.profileCode,
-        modelVersion: run.modelVersion,
-        reasonCode: run.reasonCode,
-        pageCount
-      },
-      actorId,
-      correlationId
+      mimeType: originalVersion.mimeType,
+      filename: readMetadataText(originalVersion.metadataJson, "filename") || readMetadataText(document.metadataJson, "filename"),
+      profileCode: run.profileCode,
+      requestedModelVersion: normalizeOptionalText(modelVersion),
+      reasonCode: run.reasonCode,
+      pageCount,
+      sourceText,
+      callbackMode
     });
+    hydrateRunFromProviderOutcome({ run, providerOutcome });
 
-    const classificationPayload = {
-      suggestedDocumentType: resolvedClassification.suggestedDocumentType,
-      confidence: resolvedClassification.confidence,
-      candidates: resolvedClassification.candidates,
-      extractedFields,
-      reviewRequired: reviewDecision.reviewRequired
-    };
-    const classificationVersion = appendDocumentVersion({
-      companyId: document.companyId,
-      documentId: document.documentId,
-      variantType: "classification",
-      storageKey: `documents/classification/${document.documentId}/${run.ocrRunId}.json`,
-      mimeType: "application/json",
-      contentText: JSON.stringify(classificationPayload),
-      sourceReference: `${document.documentId}:classification:${run.ocrRunId}`,
-      derivesFromDocumentVersionId: ocrVersion.version.documentVersionId,
-      metadataJson: {
-        ocrRunId: run.ocrRunId,
-        suggestedDocumentType: resolvedClassification.suggestedDocumentType,
-        confidence: resolvedClassification.confidence,
-        candidates: resolvedClassification.candidates,
-        extractedFields,
-        reviewRequired: reviewDecision.reviewRequired
-      },
-      actorId,
-      correlationId
-    });
-
-    run.status = "completed";
-    run.reviewRequired = reviewDecision.reviewRequired;
-    run.suggestedDocumentType = resolvedClassification.suggestedDocumentType;
-    run.classificationConfidence = resolvedClassification.confidence;
-    run.classificationCandidatesJson = resolvedClassification.candidates;
-    run.extractedText = sourceText;
-    run.extractedFieldsJson = extractedFields;
-    run.ocrDocumentVersionId = ocrVersion.version.documentVersionId;
-    run.classificationDocumentVersionId = classificationVersion.version.documentVersionId;
-    run.completedAt = nowIso();
-    run.metadataJson = {
-      reviewReasonCode: reviewDecision.reasonCode,
-      thresholds
-    };
-
-    document.status = "classified";
-    document.updatedAt = nowIso();
-    document.metadataJson.latestOcrRunId = run.ocrRunId;
-    document.metadataJson.lastSuggestedDocumentType = resolvedClassification.suggestedDocumentType;
-    document.metadataJson.lastClassificationConfidence = resolvedClassification.confidence;
-
-    let reviewTask = null;
-    if (reviewDecision.reviewRequired) {
-      document.metadataJson.pendingReviewQueueCode = reviewDecision.queueCode;
-      reviewTask = createReviewTask({
-        document,
-        run,
-        reviewDecision,
+    if (providerOutcome.status !== "completed") {
+      run.metadataJson = {
+        ...copy(run.metadataJson),
+        thresholds,
+        callbackToken: providerOutcome.callbackToken
+      };
+      document.status = "ocr_done";
+      document.updatedAt = nowIso();
+      document.metadataJson.latestOcrRunId = run.ocrRunId;
+      pushAudit({
+        companyId: run.companyId,
         actorId,
+        action: "ocr.run.accepted",
+        result: "success",
+        entityType: "ocr_run",
+        entityId: run.ocrRunId,
+        explanation: `OCR run ${run.ocrRunId} accepted by ${run.providerCode} in ${run.processingMode} mode.`,
         correlationId
       });
-    } else {
-      document.documentType = resolvedClassification.suggestedDocumentType;
+      return {
+        document: copy(document),
+        ocrRun: copy(run),
+        reviewTask: null,
+        ocrVersion: null,
+        classificationVersion: null
+      };
     }
 
-    pushAudit({
-      companyId: run.companyId,
+    return finalizeCompletedOcrRun({
+      document,
+      channel,
+      thresholds,
+      originalVersion,
+      run,
+      providerOutcome,
       actorId,
-      action: "ocr.run.completed",
-      result: reviewDecision.reviewRequired ? "warning" : "success",
-      entityType: "ocr_run",
-      entityId: run.ocrRunId,
-      explanation: `OCR run completed with suggestion ${resolvedClassification.suggestedDocumentType} at confidence ${resolvedClassification.confidence.toFixed(2)}.`,
       correlationId
     });
+  }
 
-    return {
-      document: copy(document),
-      ocrRun: copy(run),
-      reviewTask: reviewTask ? copy(reviewTask) : null,
-      ocrVersion: copy(ocrVersion.version),
-      classificationVersion: copy(classificationVersion.version)
-    };
+  function completeDocumentOcrProviderCallback({
+    companyId,
+    documentId,
+    ocrRunId,
+    callbackToken = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const document = requireDocument({ companyId, documentId });
+    const channel = requireInboxChannelForDocument(document);
+    const thresholds = requireOcrThresholds(channel);
+    const originalVersion = requireOriginalDocumentVersion(document.documentId);
+    const run = requireOcrRun({ companyId, ocrRunId });
+    if (run.documentId !== document.documentId) {
+      throw createError(409, "ocr_run_document_mismatch", "OCR run does not belong to the provided document.");
+    }
+    if (run.status !== "running" || run.processingMode !== "batch_lro" || !run.providerOperationRef) {
+      throw createError(409, "ocr_run_callback_not_pending", "OCR run is not awaiting provider callback completion.");
+    }
+
+    const resolvedOcrProvider = resolveDocumentOcrProvider({
+      defaultOcrProvider,
+      getIntegrationsPlatform
+    });
+    const providerOutcome = resolvedOcrProvider.collectOperation({
+      operationName: run.providerOperationRef,
+      callbackToken: callbackToken || run.metadataJson?.callbackToken || null
+    });
+    hydrateRunFromProviderOutcome({ run, providerOutcome });
+
+    return finalizeCompletedOcrRun({
+      document,
+      channel,
+      thresholds,
+      originalVersion,
+      run,
+      providerOutcome,
+      actorId,
+      correlationId
+    });
   }
 
   function getDocumentOcrRuns({ companyId, documentId } = {}) {
@@ -999,6 +1012,204 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
 
   function getReviewTask({ companyId, reviewTaskId } = {}) {
     return buildReviewTaskSummary(requireReviewTask({ companyId, reviewTaskId }));
+  }
+
+  function finalizeCompletedOcrRun({
+    document,
+    channel,
+    thresholds,
+    originalVersion,
+    run,
+    providerOutcome,
+    actorId,
+    correlationId
+  }) {
+    const sourceText = providerOutcome.sourceText;
+    const classification = classifyDocument({
+      channel,
+      sourceText,
+      filename: readMetadataText(originalVersion.metadataJson, "filename"),
+      mimeType: originalVersion.mimeType
+    });
+    const heuristicExtractedFields = extractOcrFields({
+      sourceText,
+      suggestedDocumentType: classification.suggestedDocumentType
+    });
+    const providerExtractedFields = normalizeProviderExtractedFields(providerOutcome.entityHints);
+    const extractedFields = {
+      ...copy(heuristicExtractedFields),
+      ...copy(providerExtractedFields)
+    };
+    const resolvedClassification = refineClassification({
+      classification,
+      extractedFields,
+      thresholds
+    });
+    const reviewDecision = evaluateReviewRequirement({
+      classification: resolvedClassification,
+      extractedFields,
+      thresholds,
+      providerOutcome
+    });
+
+    const ocrVersion = appendDocumentVersion({
+      companyId: document.companyId,
+      documentId: document.documentId,
+      variantType: "ocr",
+      storageKey: `documents/ocr/${document.documentId}/${run.ocrRunId}.txt`,
+      mimeType: "text/plain",
+      contentText: sourceText,
+      sourceReference: `${document.documentId}:ocr:${run.ocrRunId}`,
+      derivesFromDocumentVersionId: originalVersion.documentVersionId,
+      metadataJson: {
+        ocrRunId: run.ocrRunId,
+        profileCode: run.profileCode,
+        modelVersion: run.modelVersion,
+        reasonCode: run.reasonCode,
+        pageCount: run.pageCount,
+        providerCode: run.providerCode,
+        providerEnvironmentRef: run.providerEnvironmentRef,
+        processingMode: run.processingMode,
+        providerOperationRef: run.providerOperationRef,
+        processorType: run.processorType,
+        processorVersion: run.modelVersion,
+        qualityScore: run.qualityScore,
+        textConfidence: run.textConfidence
+      },
+      actorId,
+      correlationId
+    });
+
+    const classificationPayload = {
+      suggestedDocumentType: resolvedClassification.suggestedDocumentType,
+      confidence: resolvedClassification.confidence,
+      candidates: resolvedClassification.candidates,
+      extractedFields,
+      reviewRequired: reviewDecision.reviewRequired,
+      providerCode: run.providerCode,
+      processingMode: run.processingMode,
+      textConfidence: run.textConfidence,
+      qualityScore: run.qualityScore
+    };
+    const classificationVersion = appendDocumentVersion({
+      companyId: document.companyId,
+      documentId: document.documentId,
+      variantType: "classification",
+      storageKey: `documents/classification/${document.documentId}/${run.ocrRunId}.json`,
+      mimeType: "application/json",
+      contentText: JSON.stringify(classificationPayload),
+      sourceReference: `${document.documentId}:classification:${run.ocrRunId}`,
+      derivesFromDocumentVersionId: ocrVersion.version.documentVersionId,
+      metadataJson: {
+        ocrRunId: run.ocrRunId,
+        suggestedDocumentType: resolvedClassification.suggestedDocumentType,
+        confidence: resolvedClassification.confidence,
+        candidates: resolvedClassification.candidates,
+        extractedFields,
+        reviewRequired: reviewDecision.reviewRequired,
+        providerCode: run.providerCode,
+        processingMode: run.processingMode,
+        textConfidence: run.textConfidence,
+        qualityScore: run.qualityScore
+      },
+      actorId,
+      correlationId
+    });
+
+    markPriorOcrRunsSuperseded({
+      documentId: document.documentId,
+      completedRunId: run.ocrRunId
+    });
+
+    run.status = "completed";
+    run.reviewRequired = reviewDecision.reviewRequired;
+    run.suggestedDocumentType = resolvedClassification.suggestedDocumentType;
+    run.classificationConfidence = resolvedClassification.confidence;
+    run.classificationCandidatesJson = resolvedClassification.candidates;
+    run.extractedText = sourceText;
+    run.extractedFieldsJson = extractedFields;
+    run.ocrDocumentVersionId = ocrVersion.version.documentVersionId;
+    run.classificationDocumentVersionId = classificationVersion.version.documentVersionId;
+    run.completedAt = nowIso();
+    run.updatedAt = nowIso();
+    run.metadataJson = {
+      ...copy(run.metadataJson),
+      reviewReasonCode: reviewDecision.reasonCode,
+      thresholds
+    };
+
+    document.status = "classified";
+    document.updatedAt = nowIso();
+    document.metadataJson.latestOcrRunId = run.ocrRunId;
+    document.metadataJson.lastSuggestedDocumentType = resolvedClassification.suggestedDocumentType;
+    document.metadataJson.lastClassificationConfidence = resolvedClassification.confidence;
+
+    let reviewTask = null;
+    if (reviewDecision.reviewRequired) {
+      document.metadataJson.pendingReviewQueueCode = reviewDecision.queueCode;
+      reviewTask = createReviewTask({
+        document,
+        run,
+        reviewDecision,
+        actorId,
+        correlationId
+      });
+    } else {
+      document.documentType = resolvedClassification.suggestedDocumentType;
+      delete document.metadataJson.pendingReviewQueueCode;
+    }
+
+    pushAudit({
+      companyId: run.companyId,
+      actorId,
+      action: "ocr.run.completed",
+      result: reviewDecision.reviewRequired ? "warning" : "success",
+      entityType: "ocr_run",
+      entityId: run.ocrRunId,
+      explanation: `OCR run completed with suggestion ${resolvedClassification.suggestedDocumentType} at confidence ${resolvedClassification.confidence.toFixed(2)}.`,
+      correlationId
+    });
+
+    return {
+      document: copy(document),
+      ocrRun: copy(run),
+      reviewTask: reviewTask ? copy(reviewTask) : null,
+      ocrVersion: copy(ocrVersion.version),
+      classificationVersion: copy(classificationVersion.version)
+    };
+  }
+
+  function hydrateRunFromProviderOutcome({ run, providerOutcome }) {
+    run.providerCode = providerOutcome.providerCode || GOOGLE_DOCUMENT_AI_PROVIDER_CODE;
+    run.providerEnvironmentRef = providerOutcome.providerEnvironmentRef || run.providerEnvironmentRef;
+    run.processingMode = providerOutcome.processingMode || "sync";
+    run.providerOperationRef = providerOutcome.operationName || null;
+    run.providerCallbackMode = providerOutcome.callbackMode || "none";
+    run.pageCount = providerOutcome.pageCount || run.pageCount;
+    run.maxSyncPages = providerOutcome.maxSyncPages ?? null;
+    run.maxBatchPages = providerOutcome.maxBatchPages ?? null;
+    run.processorType = providerOutcome.processorType || null;
+    run.modelVersion = providerOutcome.processorVersion || run.modelVersion;
+    run.qualityScore = typeof providerOutcome.qualityScore === "number" ? providerOutcome.qualityScore : null;
+    run.textConfidence = typeof providerOutcome.textConfidence === "number" ? providerOutcome.textConfidence : null;
+    run.metadataJson = {
+      ...copy(run.metadataJson),
+      providerBaselineRef: copy(providerOutcome.providerBaselineRef || null),
+      pagePayloads: copy(providerOutcome.pages || []),
+      entityHints: copy(providerOutcome.entityHints || {})
+    };
+    run.updatedAt = nowIso();
+  }
+
+  function markPriorOcrRunsSuperseded({ documentId, completedRunId }) {
+    for (const candidate of listOcrRuns(documentId)) {
+      if (candidate.ocrRunId === completedRunId || candidate.status !== "completed") {
+        continue;
+      }
+      candidate.status = "superseded";
+      candidate.supersededByOcrRunId = completedRunId;
+      candidate.updatedAt = nowIso();
+    }
   }
 
   function snapshotDocumentArchive() {
@@ -1487,14 +1698,22 @@ function resolveContent({ contentText, contentBase64, fileHash, fileSizeBytes })
   };
 }
 
-function determineOcrProfile({ channel, originalVersion }) {
+function determineOcrProfile({ channel, originalVersion, sourceText = "", filename = "" }) {
+  const normalized = normalizeForMatching([channel.useCase, sourceText, filename].filter(Boolean).join("\n"));
   if (originalVersion.mimeType === "application/xml") {
     return "structured_document_parse";
   }
-  if (channel.useCase.includes("invoice") || channel.useCase.includes("receipt")) {
-    return "textract_analyze_expense_stub";
+  if (
+    channel.useCase.includes("invoice")
+    || channel.useCase.includes("receipt")
+    || normalized.includes("invoice")
+    || normalized.includes("faktura")
+    || normalized.includes("receipt")
+    || normalized.includes("kvitto")
+  ) {
+    return "invoice_parse";
   }
-  return "textract_generic_text_stub";
+  return "generic_document_ocr";
 }
 
 function buildOcrSourceText({ document, originalVersion }) {
@@ -1779,7 +1998,7 @@ function guessFieldConfidence(value) {
   return 0.88;
 }
 
-function evaluateReviewRequirement({ classification, extractedFields, thresholds }) {
+function evaluateReviewRequirement({ classification, extractedFields, thresholds, providerOutcome = null }) {
   if (classification.suggestedDocumentType === "unknown") {
     return {
       reviewRequired: true,
@@ -1793,6 +2012,22 @@ function evaluateReviewRequirement({ classification, extractedFields, thresholds
       reviewRequired: true,
       queueCode: "classification_low_confidence",
       reasonCode: "classification_below_threshold"
+    };
+  }
+
+  if (typeof providerOutcome?.textConfidence === "number" && providerOutcome.textConfidence < thresholds.classificationConfidenceThreshold) {
+    return {
+      reviewRequired: true,
+      queueCode: "ocr_low_confidence",
+      reasonCode: "provider_text_confidence_below_threshold"
+    };
+  }
+
+  if (typeof providerOutcome?.qualityScore === "number" && providerOutcome.qualityScore < thresholds.fieldConfidenceThreshold) {
+    return {
+      reviewRequired: true,
+      queueCode: "ocr_low_confidence",
+      reasonCode: "provider_quality_below_threshold"
     };
   }
 
@@ -1836,6 +2071,50 @@ function resolvePageCount(originalVersion) {
 function readMetadataText(metadataJson, key) {
   const value = metadataJson?.[key];
   return typeof value === "string" ? value : "";
+}
+
+function resolveDocumentOcrProvider({ defaultOcrProvider, getIntegrationsPlatform }) {
+  const integrationsPlatform = typeof getIntegrationsPlatform === "function" ? getIntegrationsPlatform() : null;
+  if (
+    integrationsPlatform
+    && typeof integrationsPlatform.startDocumentOcrExtraction === "function"
+    && typeof integrationsPlatform.collectDocumentOcrOperation === "function"
+    && typeof integrationsPlatform.getDocumentOcrCapabilityManifest === "function"
+  ) {
+    const capabilityManifest = integrationsPlatform.getDocumentOcrCapabilityManifest();
+    return {
+      providerCode: capabilityManifest.providerCode,
+      providerEnvironmentRef: capabilityManifest.providerEnvironmentRef,
+      startExtraction: (input) => integrationsPlatform.startDocumentOcrExtraction(input),
+      collectOperation: (input) => integrationsPlatform.collectDocumentOcrOperation(input)
+    };
+  }
+  return defaultOcrProvider;
+}
+
+function normalizeProviderExtractedFields(entityHints = {}) {
+  const normalized = {};
+  if (entityHints.invoiceId?.value) {
+    normalized.invoiceNumber = copy(entityHints.invoiceId);
+  }
+  if (entityHints.supplierName?.value) {
+    normalized.counterparty = copy(entityHints.supplierName);
+  }
+  if (entityHints.totalAmount?.value) {
+    normalized.totalAmount = copy(entityHints.totalAmount);
+  }
+  if (entityHints.dueDate?.value) {
+    normalized.dueDate = copy(entityHints.dueDate);
+  }
+  return normalized;
+}
+
+function normalizeOptionalText(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function resolveRetentionClassCode({

@@ -6,10 +6,15 @@ Detta dokument sammanfattar resultatet av `P2-03`.
 ## P2-03 OCR, klassificering och granskningsko
 
 - OCR-kedjan skapar separat OCR-derivat och separat klassificeringsderivat fran originalversionen.
-- Dokumenttyperna `supplier_invoice`, `expense_receipt`, `contract` och `unknown` klassificeras deterministiskt fran stubbad OCR-text och kanalmetadata.
+- Dokumenttyperna `supplier_invoice`, `expense_receipt`, `contract` och `unknown` klassificeras deterministiskt fran kanalmetadata, dokumentfingerprint, filnamnssignaler, heuristik och providerutfall.
 - Kanalen styr confidence-trosklar for klassificering och falt, och under troskel skapas review task i explicit granskningsko.
 - Manniskan kan claima, korrigera och godkanna review task utan att skriva over tidigare OCR-resultat.
 - Omkorning skapar ny OCR-run med nya derivatversioner och bevarad versionskedja.
+- OCR-stubben ar ersatt av Google Document AI-baserad provideradapter med explicita profiler for fakturaparsering, generell OCR och strukturerad dokumenttolkning.
+- OCR-run bär nu providerref, processing mode, operation ref, callback mode, page count, processor limits, quality score och text confidence.
+- Langre OCR-korningar kan ga via async callback-route i stallet for att latenstesta som synkrona lokala stubbar.
+- Low-confidence eller lag providerkvalitet leder till blockerande review i stallet for att slappa igenom forslaget.
+- Omkorning supersederar tidigare OCR-run i stallet for att mutera historiskt resultat.
 
 ## Verifieringskommandon
 
@@ -30,6 +35,10 @@ pnpm run seed:demo -- --dry-run
 - fakturor, kvitton och avtal sarskiljs
 - manniskan kan korrigera tolkningen via review task
 - omkorning sparar ny OCR- och klassificeringsversion i stallet for mutation
+- providerkedjan valjer nu sync eller async beroende pa profil och page count
+- callback-baserad OCR-completion finns som separat route
+- page limits och processorprofiler ar explicit spårbara
+- lag provider confidence eller quality skapar reviewkrav
 - OCR-rutter kan stangas av med `PHASE2_OCR_REVIEW_ENABLED=false`
 - review task och OCR-run ar sparbara per dokument och bolag
 
@@ -48,6 +57,15 @@ Resultat efter lokal migrering och seed:
 - `ocr_runs=2`
 - `review_tasks=1`
 - `ocr_threshold_channels=1`
+
+## Providerkedja och operationskrav
+
+- Primar OCR-provider ar Google Document AI via adapter i integrationslagret.
+- `invoice_parse` anvands for leverantorsfakturor och kvitton nar signaler tyder pa faktura-/inkopsdokument.
+- `generic_document_ocr` anvands for generell texttolkning.
+- `structured_document_parse` anvands for strukturerade filer som XML.
+- Async providerkorningar maste kunna avslutas via callback utan att tappa evidence eller versionskedja.
+- Production mode far inte fa live-ocr utan explicit providerkonfiguration och baseline-stod.
 
 ## Disable And Rollback
 

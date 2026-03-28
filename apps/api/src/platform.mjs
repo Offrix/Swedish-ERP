@@ -185,7 +185,11 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "documents",
     label: "Documents",
     packageName: "@swedish-erp/domain-documents",
-    create: ({ options }) => createDocumentArchivePlatform(options)
+    create: ({ options, getDomain }) =>
+      createDocumentArchivePlatform({
+        ...options,
+        getIntegrationsPlatform: () => getDomain("integrations")
+      })
   }),
   createDomainDefinition({
     key: "evidence",

@@ -16,6 +16,17 @@ test("Phase 2.3 migration adds OCR runs, review tasks and channel thresholds", a
   ]) {
     assert.match(migration, new RegExp(fragment.replaceAll(" ", "\\s+")));
   }
+
+  const phase10Migration = await readText("packages/db/migrations/20260328123000_phase10_google_document_ai_ocr.sql");
+  for (const fragment of [
+    "ALTER TABLE ocr_runs",
+    "ADD COLUMN IF NOT EXISTS provider_code",
+    "ADD COLUMN IF NOT EXISTS processing_mode",
+    "ADD COLUMN IF NOT EXISTS provider_operation_ref",
+    "ADD COLUMN IF NOT EXISTS superseded_by_ocr_run_id"
+  ]) {
+    assert.match(phase10Migration, new RegExp(fragment.replaceAll(" ", "\\s+")));
+  }
 });
 
 test("Phase 2.3 API runs OCR, opens review tasks, accepts manual correction and preserves rerun versions", async () => {
@@ -95,6 +106,9 @@ test("Phase 2.3 API runs OCR, opens review tasks, accepts manual correction and 
     assert.equal(invoiceRun.ocrRun.suggestedDocumentType, "supplier_invoice");
     assert.equal(receiptRun.ocrRun.suggestedDocumentType, "expense_receipt");
     assert.equal(contractRun.ocrRun.suggestedDocumentType, "contract");
+    assert.equal(invoiceRun.ocrRun.providerCode, "google_document_ai");
+    assert.equal(invoiceRun.ocrRun.processingMode, "sync");
+    assert.equal(invoiceRun.ocrRun.processorType, "INVOICE_PROCESSOR");
 
     const ambiguousDocumentId = (await ingestSingleDocument({
       baseUrl,
@@ -163,12 +177,46 @@ test("Phase 2.3 API runs OCR, opens review tasks, accepts manual correction and 
       }
     );
     assert.equal(invoiceRuns.ocrRuns.length, 2);
+    assert.equal(invoiceRuns.ocrRuns[0].status, "superseded");
+    assert.equal(invoiceRuns.ocrRuns[1].status, "completed");
+
+    const asyncDocumentId = (await ingestSingleDocument({
+      baseUrl,
+      token: adminSession.sessionToken,
+      companyId: "00000000-0000-4000-8000-000000000001",
+      recipientAddress: "docs@inbound.example.test",
+      messageId: "<phase2-ocr-api-async-001>",
+      filename: "invoice-large.pdf",
+      contentText: "[OCR_LOW_CONFIDENCE] Invoice: INV-4001 Supplier: Demo Leverantor AB Total: 4200.00",
+      pageCount: 20
+    })).documentId;
+
+    const asyncAccepted = await runOcr(baseUrl, adminSession.sessionToken, asyncDocumentId, {
+      callbackMode: "manual_provider_callback"
+    }, 202);
+    assert.equal(asyncAccepted.ocrRun.status, "running");
+    assert.equal(asyncAccepted.ocrRun.processingMode, "batch_lro");
+
+    const asyncCompleted = await requestJson(
+      `${baseUrl}/v1/documents/${asyncDocumentId}/ocr/runs/${asyncAccepted.ocrRun.ocrRunId}/provider-callback`,
+      {
+        method: "POST",
+        token: adminSession.sessionToken,
+        body: {
+          companyId: "00000000-0000-4000-8000-000000000001",
+          callbackToken: asyncAccepted.ocrRun.metadataJson.callbackToken
+        }
+      }
+    );
+    assert.equal(asyncCompleted.ocrRun.status, "completed");
+    assert.equal(asyncCompleted.ocrRun.textConfidence < 0.9, true);
+    assert.equal(asyncCompleted.reviewTask.status, "open");
   } finally {
     await stopServer(server);
   }
 });
 
-async function ingestSingleDocument({ baseUrl, token, companyId, recipientAddress, messageId, filename, contentText }) {
+async function ingestSingleDocument({ baseUrl, token, companyId, recipientAddress, messageId, filename, contentText, pageCount = 1 }) {
   const ingested = await requestJson(`${baseUrl}/v1/inbox/messages`, {
     method: "POST",
     token,
@@ -183,7 +231,8 @@ async function ingestSingleDocument({ baseUrl, token, companyId, recipientAddres
           filename,
           mimeType: "application/pdf",
           storageKey: `documents/originals/${filename}`,
-          contentText
+          contentText,
+          pageCount
         }
       ]
     }
@@ -193,13 +242,14 @@ async function ingestSingleDocument({ baseUrl, token, companyId, recipientAddres
   };
 }
 
-async function runOcr(baseUrl, token, documentId) {
+async function runOcr(baseUrl, token, documentId, body = {}, expectedStatus = 201) {
   return requestJson(`${baseUrl}/v1/documents/${documentId}/ocr/runs`, {
     method: "POST",
     token,
-    expectedStatus: 201,
+    expectedStatus,
     body: {
-      companyId: "00000000-0000-4000-8000-000000000001"
+      companyId: "00000000-0000-4000-8000-000000000001",
+      ...body
     }
   });
 }
