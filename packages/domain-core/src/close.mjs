@@ -5,6 +5,12 @@ export const CLOSE_STEP_STATUSES = Object.freeze(["not_started", "in_progress", 
 export const CLOSE_BLOCKER_SEVERITIES = Object.freeze(["informational", "warning", "hard_stop", "critical"]);
 export const CLOSE_BLOCKER_STATUSES = Object.freeze(["open", "waived", "resolved", "closed"]);
 export const PERIOD_CLOSE_STATES = Object.freeze(["open", "subledger_locked", "vat_locked", "ledger_locked", "signed_off", "hard_closed", "reopened"]);
+export const CLOSE_REOPEN_REQUEST_STATUSES = Object.freeze(["impact_assessed", "executed", "relocked"]);
+export const CLOSE_ADJUSTMENT_TYPES = Object.freeze(["reversal", "correction_replacement"]);
+export const CLOSE_ADJUSTMENT_STATUSES = Object.freeze(["posted"]);
+
+const CLOSE_IMPACT_AREA_CODES = Object.freeze(["ledger", "vat", "agi", "hus", "tax_account", "annual_reporting"]);
+const RELOCK_TARGET_STATUSES = Object.freeze(["soft_locked", "hard_closed"]);
 
 const DEFAULT_STEP_BLUEPRINTS = Object.freeze([
   { stepCode: "bank_reconciliation", title: "Bank reconciliation", mandatory: true, evidenceType: "reconciliation_run", reconciliationAreaCode: "bank" },
@@ -49,6 +55,9 @@ function createCloseEngine({
     audit,
     error
   };
+  if (!helpers.state.closeAdjustments) {
+    helpers.state.closeAdjustments = new Map();
+  }
 
   return {
     closeChecklistStatuses: CLOSE_CHECKLIST_STATUSES,
@@ -56,6 +65,9 @@ function createCloseEngine({
     closeBlockerSeverities: CLOSE_BLOCKER_SEVERITIES,
     closeBlockerStatuses: CLOSE_BLOCKER_STATUSES,
     periodCloseStates: PERIOD_CLOSE_STATES,
+    closeReopenRequestStatuses: CLOSE_REOPEN_REQUEST_STATUSES,
+    closeAdjustmentTypes: CLOSE_ADJUSTMENT_TYPES,
+    closeAdjustmentStatuses: CLOSE_ADJUSTMENT_STATUSES,
     instantiateCloseChecklist(input) {
       return instantiateCloseChecklist(helpers, input);
     },
@@ -80,8 +92,26 @@ function createCloseEngine({
     signOffCloseChecklist(input) {
       return signOffCloseChecklist(helpers, input);
     },
+    listCloseReopenRequests(input) {
+      return listCloseReopenRequests(helpers, input);
+    },
+    getCloseReopenRequest(input) {
+      return getCloseReopenRequest(helpers, input);
+    },
     requestCloseReopen(input) {
       return requestCloseReopen(helpers, input);
+    },
+    listCloseAdjustments(input) {
+      return listCloseAdjustments(helpers, input);
+    },
+    getCloseAdjustment(input) {
+      return getCloseAdjustment(helpers, input);
+    },
+    createCloseAdjustment(input) {
+      return createCloseAdjustment(helpers, input);
+    },
+    relockCloseReopenRequest(input) {
+      return relockCloseReopenRequest(helpers, input);
     },
     snapshotClose(snapshotState = state) {
       return snapshotClose(snapshotState);
@@ -480,6 +510,7 @@ function requestCloseReopen(
     checklistId,
     reasonCode,
     impactSummary,
+    impactAnalysis,
     approvedByCompanyUserId,
     correlationId = crypto.randomUUID()
   } = {}
@@ -495,6 +526,7 @@ function requestCloseReopen(
   if (!["close_signatory", "finance_manager", "company_admin"].includes(String(approver.roleCode || "").toLowerCase())) {
     throw helpers.error(400, "senior_finance_role_required", "Reopen requires a senior finance approver.");
   }
+  const normalizedImpactAnalysis = normalizeReopenImpactAnalysis({ impactSummary, impactAnalysis });
   helpers.ledgerPlatform?.reopenAccountingPeriod?.({
     companyId: checklist.clientCompanyId,
     accountingPeriodId: checklist.accountingPeriodId,
@@ -523,6 +555,8 @@ function requestCloseReopen(
   successor.signedOffAt = null;
   successor.supersedesChecklistId = checklist.checklistId;
   successor.supersededByChecklistId = null;
+  successor.reopenRequestId = null;
+  successor.reopenImpactSummary = normalizedImpactAnalysis.impactSummary;
   successor.steps = checklist.steps.map((step) => ({
     ...clone(step),
     stepId: crypto.randomUUID(),
@@ -539,13 +573,29 @@ function requestCloseReopen(
     bureauOrgId,
     checklistId: checklist.checklistId,
     successorChecklistId: successor.checklistId,
+    clientCompanyId: checklist.clientCompanyId,
+    accountingPeriodId: checklist.accountingPeriodId,
     requestedByUserId: principal.userId,
     approvedByUserId: approver.userId,
     approvedByRoleCode: String(approver.roleCode || "").toLowerCase(),
     reasonCode: text(reasonCode, "reopen_reason_code_required"),
-    impactSummary: text(impactSummary, "reopen_impact_summary_required"),
-    createdAt: helpers.now()
+    impactSummary: normalizedImpactAnalysis.impactSummary,
+    impactAnalysis: normalizedImpactAnalysis,
+    status: "executed",
+    impactAssessedAt: helpers.now(),
+    approvedAt: helpers.now(),
+    executedAt: helpers.now(),
+    relockedAt: null,
+    relockedByUserId: null,
+    relockApprovedByUserId: null,
+    relockApprovedByRoleCode: null,
+    relockReasonCode: null,
+    relockTargetStatus: normalizedImpactAnalysis.relockTargetStatus,
+    adjustmentIds: [],
+    createdAt: helpers.now(),
+    updatedAt: helpers.now()
   };
+  successor.reopenRequestId = reopenRequest.reopenRequestId;
   helpers.state.closeReopenRequests.set(reopenRequest.reopenRequestId, reopenRequest);
   helpers.upsertWorkItem({
     bureauOrgId,
@@ -571,7 +621,7 @@ function requestCloseReopen(
     explanation: `Reopened close checklist ${checklist.checklistId} into successor ${successor.checklistId}.`
   });
   return {
-    reopenRequest: clone(reopenRequest),
+    reopenRequest: materializeReopenRequest(helpers, reopenRequest),
     successorChecklist: materializeChecklist(helpers, successor),
     supersededChecklist: materializeChecklist(helpers, checklist)
   };
@@ -582,7 +632,8 @@ function snapshotClose(state) {
     closeChecklists: [...state.closeChecklists.values()],
     closeBlockers: [...state.closeBlockers.values()],
     closeSignoffs: [...state.closeSignoffs.values()],
-    closeReopenRequests: [...state.closeReopenRequests.values()]
+    closeReopenRequests: [...state.closeReopenRequests.values()],
+    closeAdjustments: [...state.closeAdjustments.values()]
   });
 }
 
@@ -594,6 +645,9 @@ function materializeChecklist(helpers, checklist) {
     .filter((candidate) => candidate.checklistId === checklist.checklistId)
     .sort((left, right) => left.sequence - right.sequence)
     .map(clone);
+  const reopenRequests = [...helpers.state.closeReopenRequests.values()]
+    .filter((candidate) => candidate.checklistId === checklist.checklistId || candidate.successorChecklistId === checklist.checklistId)
+    .map((candidate) => materializeReopenRequest(helpers, candidate));
   const requiredOpenBlockers = blockers.filter((candidate) => candidate.status === "open" && ["hard_stop", "critical"].includes(candidate.severity));
   const period = getAccountingPeriod(helpers, checklist.clientCompanyId, checklist.accountingPeriodId);
   const evidenceSnapshotHash = hashSnapshot({
@@ -618,6 +672,7 @@ function materializeChecklist(helpers, checklist) {
     accountingPeriod: period,
     blockers,
     signoffs,
+    reopenRequests,
     openHardStopBlockerCount: requiredOpenBlockers.length,
     evidenceSnapshotRef: {
       snapshotType: "close_workbench",
@@ -627,6 +682,269 @@ function materializeChecklist(helpers, checklist) {
       checklistVersion: checklist.checklistVersion
     }
   });
+}
+
+function listCloseReopenRequests(
+  helpers,
+  { sessionToken, bureauOrgId, clientCompanyId = null, accountingPeriodId = null, status = null } = {}
+) {
+  const principal = helpers.authorize(sessionToken, bureauOrgId, "company.read");
+  return [...helpers.state.closeReopenRequests.values()]
+    .filter((candidate) => candidate.bureauOrgId === bureauOrgId)
+    .filter((candidate) => !clientCompanyId || candidate.clientCompanyId === clientCompanyId)
+    .filter((candidate) => !accountingPeriodId || candidate.accountingPeriodId === accountingPeriodId)
+    .filter((candidate) => !status || candidate.status === status)
+    .filter((candidate) => canReadChecklist(helpers, principal, requireChecklist(helpers, candidate.checklistId)))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .map((candidate) => materializeReopenRequest(helpers, candidate));
+}
+
+function getCloseReopenRequest(helpers, { sessionToken, bureauOrgId, reopenRequestId } = {}) {
+  const { reopenRequest } = requireReopenRequestAccess(helpers, sessionToken, bureauOrgId, reopenRequestId);
+  return materializeReopenRequest(helpers, reopenRequest);
+}
+
+function listCloseAdjustments(
+  helpers,
+  { sessionToken, bureauOrgId, reopenRequestId = null, checklistId = null } = {}
+) {
+  const principal = helpers.authorize(sessionToken, bureauOrgId, "company.read");
+  return [...helpers.state.closeAdjustments.values()]
+    .filter((candidate) => candidate.bureauOrgId === bureauOrgId)
+    .filter((candidate) => !reopenRequestId || candidate.reopenRequestId === reopenRequestId)
+    .filter((candidate) => !checklistId || candidate.checklistId === checklistId)
+    .filter((candidate) => canReadChecklist(helpers, principal, requireChecklist(helpers, candidate.checklistId)))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .map((candidate) => materializeCloseAdjustment(helpers, candidate));
+}
+
+function getCloseAdjustment(helpers, { sessionToken, bureauOrgId, adjustmentId } = {}) {
+  const { adjustment } = requireCloseAdjustmentAccess(helpers, sessionToken, bureauOrgId, adjustmentId);
+  return materializeCloseAdjustment(helpers, adjustment);
+}
+
+function createCloseAdjustment(
+  helpers,
+  {
+    sessionToken,
+    bureauOrgId,
+    reopenRequestId,
+    adjustmentType,
+    journalEntryId,
+    reasonCode,
+    correctionKey,
+    approvedByCompanyUserId,
+    journalDate = null,
+    voucherSeriesCode = null,
+    lines = null,
+    comment = null,
+    correlationId = crypto.randomUUID()
+  } = {}
+) {
+  const { principal, reopenRequest, checklist } = requireReopenRequestAccess(helpers, sessionToken, bureauOrgId, reopenRequestId);
+  if (reopenRequest.status !== "executed") {
+    throw helpers.error(409, "close_reopen_request_not_executed", "Close reopen request must be executed before adjustments can be created.");
+  }
+  const approver = helpers.requireBureauUser(bureauOrgId, text(approvedByCompanyUserId, "approved_by_company_user_id_required"));
+  if (approver.companyUserId === principal.companyUserId) {
+    throw helpers.error(400, "dual_control_required", "Requester and approver must be different users.");
+  }
+  if (!["close_signatory", "finance_manager", "company_admin"].includes(String(approver.roleCode || "").toLowerCase())) {
+    throw helpers.error(400, "senior_finance_role_required", "Close adjustment requires a senior finance approver.");
+  }
+  const resolvedAdjustmentType = text(adjustmentType, "close_adjustment_type_required");
+  if (!CLOSE_ADJUSTMENT_TYPES.includes(resolvedAdjustmentType)) {
+    throw helpers.error(400, "close_adjustment_type_invalid", "Close adjustment type is not supported.");
+  }
+  const sourceJournalEntry = helpers.ledgerPlatform?.getJournalEntry?.({
+    companyId: checklist.clientCompanyId,
+    journalEntryId: text(journalEntryId, "journal_entry_id_required")
+  });
+  if (!sourceJournalEntry) {
+    throw helpers.error(404, "journal_entry_not_found", "Journal entry was not found.");
+  }
+  const checklistAccountingPeriod = requireAccountingPeriod(helpers, checklist.clientCompanyId, checklist.accountingPeriodId);
+  const sourceAccountingPeriod = getAccountingPeriod(helpers, checklist.clientCompanyId, sourceJournalEntry.accountingPeriodId);
+  if (
+    sourceAccountingPeriod
+    && (
+      sourceAccountingPeriod.startsOn < checklistAccountingPeriod.startsOn
+      || sourceAccountingPeriod.endsOn > checklistAccountingPeriod.endsOn
+    )
+  ) {
+    throw helpers.error(409, "close_adjustment_period_mismatch", "Close adjustment journal entry must belong to the reopened accounting period.");
+  }
+
+  let ledgerResult;
+  if (resolvedAdjustmentType === "reversal") {
+    ledgerResult = helpers.ledgerPlatform?.reverseJournalEntry?.({
+      companyId: checklist.clientCompanyId,
+      journalEntryId: sourceJournalEntry.journalEntryId,
+      actorId: principal.userId,
+      reasonCode: text(reasonCode, "close_adjustment_reason_code_required"),
+      correctionKey: text(correctionKey, "close_adjustment_correction_key_required"),
+      journalDate,
+      voucherSeriesCode,
+      metadataJson: {
+        closeReopenRequestId: reopenRequest.reopenRequestId,
+        closeAdjustmentType: resolvedAdjustmentType,
+        closeAdjustmentComment: norm(comment)
+      },
+      correlationId
+    });
+  } else {
+    if (!Array.isArray(lines) || lines.length === 0) {
+      throw helpers.error(400, "close_adjustment_lines_required", "Correction replacement requires replacement journal lines.");
+    }
+    ledgerResult = helpers.ledgerPlatform?.correctJournalEntry?.({
+      companyId: checklist.clientCompanyId,
+      journalEntryId: sourceJournalEntry.journalEntryId,
+      actorId: principal.userId,
+      reasonCode: text(reasonCode, "close_adjustment_reason_code_required"),
+      correctionKey: text(correctionKey, "close_adjustment_correction_key_required"),
+      lines,
+      journalDate,
+      voucherSeriesCode,
+      reverseOriginal: true,
+      metadataJson: {
+        closeReopenRequestId: reopenRequest.reopenRequestId,
+        closeAdjustmentType: resolvedAdjustmentType,
+        closeAdjustmentComment: norm(comment)
+      },
+      correlationId
+    });
+  }
+
+  const adjustment = {
+    adjustmentId: crypto.randomUUID(),
+    bureauOrgId,
+    reopenRequestId: reopenRequest.reopenRequestId,
+    checklistId: checklist.checklistId,
+    successorChecklistId: reopenRequest.successorChecklistId,
+    clientCompanyId: checklist.clientCompanyId,
+    accountingPeriodId: checklist.accountingPeriodId,
+    adjustmentType: resolvedAdjustmentType,
+    status: "posted",
+    sourceJournalEntryId: sourceJournalEntry.journalEntryId,
+    reversalJournalEntryId: ledgerResult?.reversalJournalEntry?.journalEntryId || null,
+    replacementJournalEntryId: ledgerResult?.correctedJournalEntry?.journalEntryId || null,
+    correctionKey: text(correctionKey, "close_adjustment_correction_key_required"),
+    reasonCode: text(reasonCode, "close_adjustment_reason_code_required"),
+    comment: norm(comment),
+    createdByUserId: principal.userId,
+    approvedByUserId: approver.userId,
+    approvedByRoleCode: String(approver.roleCode || "").toLowerCase(),
+    createdAt: helpers.now(),
+    updatedAt: helpers.now()
+  };
+  helpers.state.closeAdjustments.set(adjustment.adjustmentId, adjustment);
+  reopenRequest.adjustmentIds = [...new Set([...(reopenRequest.adjustmentIds || []), adjustment.adjustmentId])];
+  reopenRequest.updatedAt = helpers.now();
+  helpers.upsertWorkItem({
+    bureauOrgId,
+    portfolioId: checklist.portfolioId,
+    clientCompanyId: checklist.clientCompanyId,
+    sourceType: "close_adjustment",
+    sourceId: adjustment.adjustmentId,
+    ownerCompanyUserId: checklist.ownerCompanyUserId,
+    deadlineAt: checklist.deadlineAt,
+    blockerScope: "close",
+    status: "resolved",
+    actorId: principal.userId,
+    correlationId,
+    reasonCode: "close_adjustment_posted"
+  });
+  helpers.audit({
+    companyId: bureauOrgId,
+    actorId: principal.userId,
+    correlationId,
+    action: "core.close_adjustment.posted",
+    entityType: "close_adjustment",
+    entityId: adjustment.adjustmentId,
+    explanation: `Posted ${resolvedAdjustmentType} adjustment ${adjustment.adjustmentId} for reopen request ${reopenRequest.reopenRequestId}.`
+  });
+  return materializeCloseAdjustment(helpers, adjustment);
+}
+
+function relockCloseReopenRequest(
+  helpers,
+  {
+    sessionToken,
+    bureauOrgId,
+    reopenRequestId,
+    reasonCode,
+    approvedByCompanyUserId,
+    targetLockStatus = null,
+    correlationId = crypto.randomUUID()
+  } = {}
+) {
+  const { principal, reopenRequest, checklist } = requireReopenRequestAccess(helpers, sessionToken, bureauOrgId, reopenRequestId);
+  if (reopenRequest.status !== "executed") {
+    throw helpers.error(409, "close_reopen_request_not_relockable", "Only executed reopen requests can be relocked.");
+  }
+  const approver = helpers.requireBureauUser(bureauOrgId, text(approvedByCompanyUserId, "approved_by_company_user_id_required"));
+  if (approver.companyUserId === principal.companyUserId) {
+    throw helpers.error(400, "dual_control_required", "Requester and approver must be different users.");
+  }
+  if (!["close_signatory", "finance_manager", "company_admin"].includes(String(approver.roleCode || "").toLowerCase())) {
+    throw helpers.error(400, "senior_finance_role_required", "Relock requires a senior finance approver.");
+  }
+  const resolvedTargetLockStatus = targetLockStatus
+    ? text(targetLockStatus, "close_relock_target_status_required")
+    : reopenRequest.relockTargetStatus || "soft_locked";
+  if (!RELOCK_TARGET_STATUSES.includes(resolvedTargetLockStatus)) {
+    throw helpers.error(400, "close_relock_target_status_invalid", "Relock target status is not supported.");
+  }
+  if (resolvedTargetLockStatus === "hard_closed") {
+    throw helpers.error(409, "close_relock_requires_successor_signoff", "Reopen relock must return the period to soft-locked state before close sign-off can hard close it again.");
+  }
+  if (reopenRequest.impactAnalysis?.requiresCorrectionReplacement && (reopenRequest.adjustmentIds || []).length === 0) {
+    throw helpers.error(409, "close_relock_adjustment_required", "Reopen request requires at least one posted close adjustment before relock.");
+  }
+  const successorChecklist = requireChecklist(helpers, reopenRequest.successorChecklistId);
+  helpers.ledgerPlatform?.lockAccountingPeriod?.({
+    companyId: checklist.clientCompanyId,
+    accountingPeriodId: checklist.accountingPeriodId,
+    status: resolvedTargetLockStatus,
+    actorId: principal.userId,
+    reasonCode: text(reasonCode, "close_relock_reason_code_required"),
+    approvedByActorId: approver.userId,
+    approvedByRoleCode: String(approver.roleCode || "").toLowerCase(),
+    correlationId
+  });
+  reopenRequest.status = "relocked";
+  reopenRequest.relockedAt = helpers.now();
+  reopenRequest.relockedByUserId = principal.userId;
+  reopenRequest.relockApprovedByUserId = approver.userId;
+  reopenRequest.relockApprovedByRoleCode = String(approver.roleCode || "").toLowerCase();
+  reopenRequest.relockReasonCode = text(reasonCode, "close_relock_reason_code_required");
+  reopenRequest.updatedAt = helpers.now();
+  successorChecklist.closeState = "subledger_locked";
+  successorChecklist.updatedAt = helpers.now();
+  helpers.upsertWorkItem({
+    bureauOrgId,
+    portfolioId: checklist.portfolioId,
+    clientCompanyId: checklist.clientCompanyId,
+    sourceType: "close_reopen_request",
+    sourceId: reopenRequest.reopenRequestId,
+    ownerCompanyUserId: successorChecklist.ownerCompanyUserId,
+    deadlineAt: successorChecklist.deadlineAt,
+    blockerScope: "close",
+    status: "resolved",
+    actorId: principal.userId,
+    correlationId,
+    reasonCode: "close_reopen_relocked"
+  });
+  helpers.audit({
+    companyId: bureauOrgId,
+    actorId: principal.userId,
+    correlationId,
+    action: "core.close_reopen_request.relocked",
+    entityType: "close_reopen_request",
+    entityId: reopenRequest.reopenRequestId,
+    explanation: `Relocked reopen request ${reopenRequest.reopenRequestId} for accounting period ${checklist.accountingPeriodId}.`
+  });
+  return materializeReopenRequest(helpers, reopenRequest);
 }
 
 function refreshChecklistReadiness(helpers, checklist, principal, correlationId) {
@@ -681,6 +999,39 @@ function nextPendingSignatory(helpers, checklist) {
       .map((candidate) => candidate.sequence)
   );
   return checklist.signoffChain.find((candidate) => !completedSequences.has(candidate.sequence)) || null;
+}
+
+function materializeReopenRequest(helpers, reopenRequest) {
+  const adjustments = [...helpers.state.closeAdjustments.values()]
+    .filter((candidate) => candidate.reopenRequestId === reopenRequest.reopenRequestId)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .map((candidate) => materializeCloseAdjustment(helpers, candidate));
+  return clone({
+    ...reopenRequest,
+    adjustments
+  });
+}
+
+function materializeCloseAdjustment(helpers, adjustment) {
+  return clone({
+    ...adjustment,
+    sourceJournalEntry: helpers.ledgerPlatform?.getJournalEntry?.({
+      companyId: adjustment.clientCompanyId,
+      journalEntryId: adjustment.sourceJournalEntryId
+    }) || null,
+    reversalJournalEntry: adjustment.reversalJournalEntryId
+      ? helpers.ledgerPlatform?.getJournalEntry?.({
+        companyId: adjustment.clientCompanyId,
+        journalEntryId: adjustment.reversalJournalEntryId
+      }) || null
+      : null,
+    replacementJournalEntry: adjustment.replacementJournalEntryId
+      ? helpers.ledgerPlatform?.getJournalEntry?.({
+        companyId: adjustment.clientCompanyId,
+        journalEntryId: adjustment.replacementJournalEntryId
+      }) || null
+      : null
+  });
 }
 
 function hardCloseChecklist(helpers, checklist, companyUser, principal, correlationId) {
@@ -799,6 +1150,63 @@ function normalizeSignoffChain(helpers, bureauOrgId, value) {
   }).sort((left, right) => left.sequence - right.sequence);
 }
 
+function normalizeReopenImpactAnalysis({ impactSummary, impactAnalysis } = {}) {
+  if (!impactAnalysis || typeof impactAnalysis !== "object") {
+    throw errorWithStatus(400, "reopen_impact_analysis_required", "Reopen request requires a structured impact analysis.");
+  }
+  const affectedAreaCodes = [...new Set((Array.isArray(impactAnalysis.affectedAreaCodes) ? impactAnalysis.affectedAreaCodes : [])
+    .map((candidate) => norm(candidate))
+    .filter(Boolean))];
+  if (affectedAreaCodes.length === 0) {
+    throw errorWithStatus(400, "reopen_affected_areas_required", "Reopen request must declare at least one affected area.");
+  }
+  for (const affectedAreaCode of affectedAreaCodes) {
+    if (!CLOSE_IMPACT_AREA_CODES.includes(affectedAreaCode)) {
+      throw errorWithStatus(400, "reopen_affected_area_invalid", `Unsupported reopen affected area ${affectedAreaCode}.`);
+    }
+  }
+  const requiresCorrectionReplacement = Boolean(impactAnalysis.requiresCorrectionReplacement);
+  const correctionPlanSummary = norm(impactAnalysis.correctionPlanSummary);
+  if (requiresCorrectionReplacement && !correctionPlanSummary) {
+    throw errorWithStatus(400, "reopen_correction_plan_required", "Reopen request requires a correction plan summary when corrections are needed.");
+  }
+  const relockTargetStatus = norm(impactAnalysis.relockTargetStatus) || "soft_locked";
+  if (!RELOCK_TARGET_STATUSES.includes(relockTargetStatus)) {
+    throw errorWithStatus(400, "reopen_relock_target_status_invalid", "Reopen relock target status is not supported.");
+  }
+  return {
+    impactSummary: text(impactSummary || impactAnalysis.impactSummary, "reopen_impact_summary_required"),
+    affectedAreaCodes,
+    requiresCorrectionReplacement,
+    correctionPlanSummary,
+    affectedObjectRefs: normalizeSourceObjectRefs(impactAnalysis.affectedObjectRefs),
+    relockTargetStatus
+  };
+}
+
+function normalizeSourceObjectRefs(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => {
+      const sourceDomain = norm(item?.sourceDomain);
+      const sourceObjectType = norm(item?.sourceObjectType);
+      const sourceObjectId = norm(item?.sourceObjectId);
+      if (!sourceDomain || !sourceObjectType || !sourceObjectId) {
+        return null;
+      }
+      return {
+        sourceDomain,
+        sourceObjectType,
+        sourceObjectId,
+        sourceObjectVersion: norm(item?.sourceObjectVersion),
+        note: norm(item?.note)
+      };
+    })
+    .filter(Boolean);
+}
+
 function nextChecklistVersion(state, clientCompanyId, accountingPeriodId) {
   return [...state.closeChecklists.values()]
     .filter((candidate) => candidate.clientCompanyId === clientCompanyId && candidate.accountingPeriodId === accountingPeriodId)
@@ -846,6 +1254,44 @@ function requireBlocker(helpers, blockerId) {
     throw helpers.error(404, "close_blocker_not_found", "Close blocker was not found.");
   }
   return blocker;
+}
+
+function requireCloseReopenRequest(helpers, reopenRequestId) {
+  const reopenRequest = helpers.state.closeReopenRequests.get(text(reopenRequestId, "close_reopen_request_id_required"));
+  if (!reopenRequest) {
+    throw helpers.error(404, "close_reopen_request_not_found", "Close reopen request was not found.");
+  }
+  return reopenRequest;
+}
+
+function requireCloseAdjustment(helpers, adjustmentId) {
+  const adjustment = helpers.state.closeAdjustments.get(text(adjustmentId, "close_adjustment_id_required"));
+  if (!adjustment) {
+    throw helpers.error(404, "close_adjustment_not_found", "Close adjustment was not found.");
+  }
+  return adjustment;
+}
+
+function requireReopenRequestAccess(helpers, sessionToken, bureauOrgId, reopenRequestId, action = "company.read") {
+  const principal = helpers.authorize(sessionToken, bureauOrgId, action);
+  const reopenRequest = requireCloseReopenRequest(helpers, reopenRequestId);
+  if (reopenRequest.bureauOrgId !== bureauOrgId) {
+    throw helpers.error(404, "close_reopen_request_not_found", "Close reopen request was not found.");
+  }
+  const checklist = requireChecklist(helpers, reopenRequest.checklistId);
+  helpers.assertVisible(principal, checklist.portfolioId);
+  return { principal, reopenRequest, checklist };
+}
+
+function requireCloseAdjustmentAccess(helpers, sessionToken, bureauOrgId, adjustmentId, action = "company.read") {
+  const principal = helpers.authorize(sessionToken, bureauOrgId, action);
+  const adjustment = requireCloseAdjustment(helpers, adjustmentId);
+  if (adjustment.bureauOrgId !== bureauOrgId) {
+    throw helpers.error(404, "close_adjustment_not_found", "Close adjustment was not found.");
+  }
+  const checklist = requireChecklist(helpers, adjustment.checklistId);
+  helpers.assertVisible(principal, checklist.portfolioId);
+  return { principal, adjustment, checklist };
 }
 
 function requireAccountingPeriod(helpers, clientCompanyId, accountingPeriodId) {

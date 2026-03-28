@@ -493,6 +493,12 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/close/blockers/:blockerId/override",
               "/v1/close/checklists/:checklistId/signoff",
               "/v1/close/checklists/:checklistId/reopen",
+              "/v1/close/reopen-requests",
+              "/v1/close/reopen-requests/:reopenRequestId",
+              "/v1/close/reopen-requests/:reopenRequestId/adjustments",
+              "/v1/close/reopen-requests/:reopenRequestId/relock",
+              "/v1/close/adjustments",
+              "/v1/close/adjustments/:adjustmentId",
               "/v1/legal-forms/profiles",
               "/v1/legal-forms/profiles/:legalFormProfileId",
               "/v1/legal-forms/profiles/:legalFormProfileId/activate",
@@ -3741,8 +3747,110 @@ async function handleRequest({ req, res, platform, flags }) {
       checklistId: closeReopenMatch.checklistId,
       reasonCode: body.reasonCode,
       impactSummary: body.impactSummary,
+      impactAnalysis: body.impactAnalysis || null,
       approvedByCompanyUserId: body.approvedByCompanyUserId,
       correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/close/reopen-requests") {
+    const bureauOrgId = requireText(
+      url.searchParams.get("bureauOrgId"),
+      "bureau_org_id_required",
+      "bureauOrgId query parameter is required."
+    );
+    writeJson(res, 200, {
+      items: platform.listCloseReopenRequests({
+        sessionToken: readSessionToken(req),
+        bureauOrgId,
+        clientCompanyId: url.searchParams.get("clientCompanyId") || null,
+        accountingPeriodId: url.searchParams.get("accountingPeriodId") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  const closeReopenRequestMatch = matchPath(path, "/v1/close/reopen-requests/:reopenRequestId");
+  if (closeReopenRequestMatch && req.method === "GET") {
+    const bureauOrgId = requireText(
+      url.searchParams.get("bureauOrgId"),
+      "bureau_org_id_required",
+      "bureauOrgId query parameter is required."
+    );
+    writeJson(res, 200, platform.getCloseReopenRequest({
+      sessionToken: readSessionToken(req),
+      bureauOrgId,
+      reopenRequestId: closeReopenRequestMatch.reopenRequestId
+    }));
+    return;
+  }
+
+  const closeAdjustmentCreateMatch = matchPath(path, "/v1/close/reopen-requests/:reopenRequestId/adjustments");
+  if (closeAdjustmentCreateMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(res, 201, platform.createCloseAdjustment({
+      sessionToken: readSessionToken(req, body),
+      bureauOrgId: body.bureauOrgId,
+      reopenRequestId: closeAdjustmentCreateMatch.reopenRequestId,
+      adjustmentType: body.adjustmentType,
+      journalEntryId: body.journalEntryId,
+      reasonCode: body.reasonCode,
+      correctionKey: body.correctionKey,
+      approvedByCompanyUserId: body.approvedByCompanyUserId,
+      journalDate: body.journalDate || null,
+      voucherSeriesCode: body.voucherSeriesCode || null,
+      lines: Array.isArray(body.lines) ? body.lines : null,
+      comment: body.comment || null,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  const closeReopenRelockMatch = matchPath(path, "/v1/close/reopen-requests/:reopenRequestId/relock");
+  if (closeReopenRelockMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    writeJson(res, 200, platform.relockCloseReopenRequest({
+      sessionToken: readSessionToken(req, body),
+      bureauOrgId: body.bureauOrgId,
+      reopenRequestId: closeReopenRelockMatch.reopenRequestId,
+      reasonCode: body.reasonCode,
+      approvedByCompanyUserId: body.approvedByCompanyUserId,
+      targetLockStatus: body.targetLockStatus || null,
+      correlationId: body.correlationId || createCorrelationId()
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/close/adjustments") {
+    const bureauOrgId = requireText(
+      url.searchParams.get("bureauOrgId"),
+      "bureau_org_id_required",
+      "bureauOrgId query parameter is required."
+    );
+    writeJson(res, 200, {
+      items: platform.listCloseAdjustments({
+        sessionToken: readSessionToken(req),
+        bureauOrgId,
+        reopenRequestId: url.searchParams.get("reopenRequestId") || null,
+        checklistId: url.searchParams.get("checklistId") || null
+      })
+    });
+    return;
+  }
+
+  const closeAdjustmentMatch = matchPath(path, "/v1/close/adjustments/:adjustmentId");
+  if (closeAdjustmentMatch && req.method === "GET") {
+    const bureauOrgId = requireText(
+      url.searchParams.get("bureauOrgId"),
+      "bureau_org_id_required",
+      "bureauOrgId query parameter is required."
+    );
+    writeJson(res, 200, platform.getCloseAdjustment({
+      sessionToken: readSessionToken(req),
+      bureauOrgId,
+      adjustmentId: closeAdjustmentMatch.adjustmentId
     }));
     return;
   }

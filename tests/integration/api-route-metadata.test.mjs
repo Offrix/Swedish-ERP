@@ -88,6 +88,12 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/ops/rule-governance/changes/:regulatoryChangeEntryId/publish",
   "/v1/ops/restore-drills/:restoreDrillId/start",
   "/v1/ops/restore-drills/:restoreDrillId/complete",
+  "/v1/close/reopen-requests",
+  "/v1/close/reopen-requests/:reopenRequestId",
+  "/v1/close/reopen-requests/:reopenRequestId/adjustments",
+  "/v1/close/reopen-requests/:reopenRequestId/relock",
+  "/v1/close/adjustments",
+  "/v1/close/adjustments/:adjustmentId",
   "/v1/submissions/:submissionId/evidence-pack",
   "/v1/submissions/:submissionId/replay",
   "/v1/submissions/:submissionId/corrections",
@@ -157,6 +163,22 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.ok(tenantBootstrapContract);
     assert.equal(tenantBootstrapContract.requiredTrustLevel, "public");
     assert.equal(tenantBootstrapContract.requiredScopeType, "public");
+
+    const closeAdjustmentContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/close/reopen-requests/:reopenRequestId/adjustments"
+    );
+    assert.ok(closeAdjustmentContract);
+    assert.equal(closeAdjustmentContract.requiredActionClass, "close_adjustment_post");
+    assert.equal(closeAdjustmentContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(closeAdjustmentContract.requiredScopeType, "close_reopen_request");
+
+    const closeRelockContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/close/reopen-requests/:reopenRequestId/relock"
+    );
+    assert.ok(closeRelockContract);
+    assert.equal(closeRelockContract.requiredActionClass, "close_reopen_request_relock");
+    assert.equal(closeRelockContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(closeRelockContract.requiredScopeType, "close_reopen_request");
 
     const uniqueCount = new Set(payload.routes).size;
     assert.equal(uniqueCount, payload.routes.length, "api root metadata should not contain duplicate route entries");

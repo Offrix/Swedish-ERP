@@ -88,7 +88,7 @@ test("Phase 11.3 closes a month with checklist, blocks on hard stop, preserves r
     fiscalYear: 2026,
     actorId: "phase11-3-unit"
   });
-  createPostedJournal({
+  const posted = createPostedJournal({
     platform,
     companyId: client.companyId,
     sourceId: "phase11-3-unit-income",
@@ -200,12 +200,66 @@ test("Phase 11.3 closes a month with checklist, blocks on hard stop, preserves r
     checklistId: checklist.checklistId,
     reasonCode: "material_reporting_error",
     impactSummary: "Reported close package must be rerun because evidence changed.",
+    impactAnalysis: {
+      affectedAreaCodes: ["ledger", "vat", "annual_reporting"],
+      requiresCorrectionReplacement: true,
+      correctionPlanSummary: "Revenue entry must be reversed and replaced before close can be rerun.",
+      relockTargetStatus: "soft_locked",
+      affectedObjectRefs: [
+        {
+          sourceDomain: "ledger",
+          sourceObjectType: "journal_entry",
+          sourceObjectId: posted.journalEntry.journalEntryId,
+          sourceObjectVersion: posted.journalEntry.updatedAt
+        }
+      ]
+    },
     approvedByCompanyUserId: DEMO_IDS.companyUserId
   });
   assert.equal(reopened.successorChecklist.checklistVersion, 2);
   assert.equal(reopened.successorChecklist.status, "in_progress");
   assert.equal(reopened.supersededChecklist.status, "reopened");
   assert.equal(reopened.supersededChecklist.signoffs.every((record) => typeof record.supersededAt === "string"), true);
+  assert.equal(reopened.reopenRequest.status, "executed");
+
+  const closeAdjustment = platform.createCloseAdjustment({
+    sessionToken: preparerToken,
+    bureauOrgId: DEMO_IDS.companyId,
+    reopenRequestId: reopened.reopenRequest.reopenRequestId,
+    adjustmentType: "correction_replacement",
+    journalEntryId: posted.journalEntry.journalEntryId,
+    reasonCode: "close_reporting_fix",
+    correctionKey: "phase11-3-close-replacement",
+    approvedByCompanyUserId: DEMO_IDS.companyUserId,
+    lines: [
+      { accountNumber: "1510", debitAmount: 4200 },
+      { accountNumber: "3010", creditAmount: 4200 }
+    ],
+    comment: "Replace original revenue classification before relock."
+  });
+  assert.equal(closeAdjustment.adjustmentType, "correction_replacement");
+  assert.equal(closeAdjustment.status, "posted");
+  assert.ok(closeAdjustment.reversalJournalEntry);
+  assert.ok(closeAdjustment.replacementJournalEntry);
+
+  const relocked = platform.relockCloseReopenRequest({
+    sessionToken: preparerToken,
+    bureauOrgId: DEMO_IDS.companyId,
+    reopenRequestId: reopened.reopenRequest.reopenRequestId,
+    reasonCode: "close_adjustments_completed",
+    approvedByCompanyUserId: DEMO_IDS.companyUserId
+  });
+  assert.equal(relocked.status, "relocked");
+  const relockedPeriod = platform
+    .listAccountingPeriods({ companyId: client.companyId })
+    .find((candidate) => candidate.accountingPeriodId === period.accountingPeriodId);
+  assert.equal(relockedPeriod.status, "soft_locked");
+  const successorWorkbench = platform.getCloseWorkbench({
+    sessionToken: preparerToken,
+    bureauOrgId: DEMO_IDS.companyId,
+    checklistId: reopened.successorChecklist.checklistId
+  });
+  assert.equal(successorWorkbench.closeState, "subledger_locked");
 });
 
 function createSignedReconciliations(platform, companyId, accountingPeriodId) {
@@ -246,11 +300,12 @@ function createPostedJournal({ platform, companyId, sourceId, lines }) {
     journalEntryId: created.journalEntry.journalEntryId,
     actorId: "phase11-3-unit"
   });
-  platform.postJournalEntry({
+  const posted = platform.postJournalEntry({
     companyId,
     journalEntryId: created.journalEntry.journalEntryId,
     actorId: "phase11-3-unit"
   });
+  return posted;
 }
 
 function loginWithStrongAuth(platform, companyId, email) {

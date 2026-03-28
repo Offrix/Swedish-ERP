@@ -553,7 +553,7 @@ Skapa en separat kÃ¤lla fÃ¶r tenant bootstrap, module activation, finance re
 **Blockerar UI-readiness**  
 - UI-readiness senare krÃ¤ver stabil bootstrap/status/mode-modell.
 
-## [ ] Fas 8 â€” Legal form, accounting method, fiscal year, ledger, posting recipes och close-kÃ¤rna
+## [x] Fas 8 â€” Legal form, accounting method, fiscal year, ledger, posting recipes och close-kÃ¤rna
 
 **MÃ¥l**  
 Bygga den svenska bokfÃ¶ringskÃ¤rnan som resten av systemet vilar pÃ¥: legal form, periodkalender, posting recipes, voucher series, locks och correction/reopen.
@@ -573,16 +573,20 @@ Bygga den svenska bokfÃ¶ringskÃ¤rnan som resten av systemet vilar pÃ¥: leg
 - [x] 8.2 [HARDEN] **Accounting method och fiscal year** â€” Klar: accounting-method-profiler och change requests kräver nu explicit fiscal-year-boundary utanför onboarding, äldre öppna requests för samma boundary supersederas deterministiskt och fiscal-year-change-requests kräver group-alignment-referenser när profil eller reason code kräver det, samtidigt som duplicerade öppna intervall blockeras eller ersätts kontrollerat via resubmission med permission-underlag.
 - [x] 8.3 [NEW BUILD] **Voucher series, chart governance och dimensionsdisciplin** â€” Klar: ledger-kärnan har nu versionsstyrda konto- och voucher-series-profiler, styrd dimensionskatalog med service lines, journalstämpling av account/voucher/dimension-versioner och blockerar nu både repurpose av använda serier och kontoklassändringar efter faktisk användning.
 - [x] 8.4 [HARDEN] **Posting recipe engine** â€” Klar: ledger har nu en central posting-intent/posting-recipe-motor med explicita recipe codes, journaltyper, source object version och signalbinding, samtidigt som AR/AP/payroll inte längre får skapa/validera/posta journaler direkt utan går via samma recipe-kedja som binder metadata och voucher-purpose deterministiskt.
-- [ ] 8.5 [OPERATIONALIZE] **Close, reopen, reversal och correction engine** â€” Close blockers, signoff, reopen impact analysis, reversal/correction replacement och Ã¥terlÃ¥sning.
+- [x] 8.5 [OPERATIONALIZE] **Close, reopen, reversal och correction engine** â€” Klar: close-kÃ¤rnan bÃ¤r nu strukturerade reopen requests med impact analysis, objektbaserade close adjustments som postar verklig reversal/correction replacement i ledger och separat relock-steg som Ã¥terlÃ¥ser perioden till `soft_locked` innan ny signoff.
 
 **Delfasstatus**
 - 8.1 klar 2026-03-28: legal-form- och annual-obligation-kedjan stoppar nu ogiltiga Bolagsverket-/årsredovisningskombinationer, declaration-profile använder den godkända reporting obligationens filing profile och revised annual obligations supersederar tidigare approved versioner deterministiskt; unit- och API-sviter samt fullsvit är återgrönade.
 - 8.2 klar 2026-03-28: accounting-method-kedjan kräver nu explicit fiscal-year-boundary för profiler och change requests utanför onboarding, äldre öppna method requests supersederas deterministiskt på samma boundary och fiscal-year-change-requests kräver group-alignment-referenser där profil eller reason code kräver det, samtidigt som duplicerade öppna intervall antingen blockeras eller ersätts kontrollerat via resubmission med permission-underlag; unit-, API- och fullsvit är återgrönade.
 - 8.3 klar 2026-03-28: ledger governance bygger nu versionsstyrda konto- och voucher-series-profiler, styrd dimensionskatalog inklusive service lines och journalstämpling av account/voucher/dimension-versioner; nya runtime- och API-sviter bevisar required-dimension-gates, att använda serier inte kan repurposas och att använda konton inte kan byta kontoklass, och fullsviten är återgrönad.
 - 8.4 klar 2026-03-28: posting recipe-engine finns nu som central ledger-motor med registry för AR/AP/payroll/bank/tax-account/HUS/year-end, tvingar explicit source object version, binder postingRecipeCode/journalType/postingSignalCode i journalmetadata och downstream-domänerna AR/AP/payroll går nu via `applyPostingIntent` i stället för direkta `createJournalEntry`/`validateJournalEntry`/`postJournalEntry`-kedjor; nya unit- och API-asserts bevisar metadata och fullsviten är återgrönad.
+- 8.5 klar 2026-03-28: reopen flÃ¶dar nu via strukturerade `ReopenRequest`-objekt med impact analysis, close adjustments kan skapa verklig reversal eller correction replacement mot journaler inom den Ã¥terÃ¶ppnade close-windown, och separat relock-steg lÃ¥ser tillbaka perioden till `soft_locked` innan ny signoff; riktade unit-, close-API- och route-metadata-sviter samt `docs/runbooks/ledger-close-and-reopen.md` bevisar kedjan.
 
 **Exit gate**  
 - Ledger Ã¤r enda bokfÃ¶ringssanning. PeriodlÃ¥s, reopen, correction och legal-form-profiler fungerar och Ã¤r versionsstyrda.
+
+**Fasstatus**  
+- Klar 2026-03-28 genom legal-form- och fiscal-year-hÃ¤rdning, versionsstyrd ledger governance, central posting recipe-engine och ny close/reopen/correction/relock-kedja med objektbaserade requests, close adjustments och operativ runbook.
 
 **Test gate**  
 - Golden postings per signal, lock/reopen tests, close blocker tests, fiscal-year boundary tests, historical reproduction with pinned rulepacks.

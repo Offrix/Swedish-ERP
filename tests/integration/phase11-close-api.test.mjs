@@ -35,7 +35,7 @@ test("Phase 11.3 API exposes close workbench, blocker handling, sign-off and reo
       email: preparer.user.email
     });
 
-    const { clientCompany, period, reportSnapshotId, reconciliationRuns } = seedClientCloseSetup(platform, adminToken, preparer.companyUserId);
+    const { clientCompany, period, sourceJournalEntryId, reportSnapshotId, reconciliationRuns } = seedClientCloseSetup(platform, adminToken, preparer.companyUserId);
 
     const checklist = await requestJson(`${baseUrl}/v1/close/checklists`, {
       method: "POST",
@@ -134,10 +134,59 @@ test("Phase 11.3 API exposes close workbench, blocker handling, sign-off and reo
         bureauOrgId: DEMO_IDS.companyId,
         reasonCode: "external_reporting_change",
         impactSummary: "Close package must be rerun.",
+        impactAnalysis: {
+          affectedAreaCodes: ["ledger", "vat", "annual_reporting"],
+          requiresCorrectionReplacement: true,
+          correctionPlanSummary: "Source journal must be reversed and rebooked before relock.",
+          relockTargetStatus: "soft_locked"
+        },
         approvedByCompanyUserId: DEMO_IDS.companyUserId
       }
     });
     assert.equal(reopened.successorChecklist.checklistVersion, 2);
+
+    const reopenRequests = await requestJson(`${baseUrl}/v1/close/reopen-requests?bureauOrgId=${DEMO_IDS.companyId}&clientCompanyId=${clientCompany.companyId}`, {
+      token: preparerToken
+    });
+    assert.equal(reopenRequests.items.length, 1);
+
+    const closeAdjustment = await requestJson(`${baseUrl}/v1/close/reopen-requests/${reopened.reopenRequest.reopenRequestId}/adjustments`, {
+      method: "POST",
+      token: preparerToken,
+      expectedStatus: 201,
+      body: {
+        bureauOrgId: DEMO_IDS.companyId,
+        adjustmentType: "correction_replacement",
+        journalEntryId: sourceJournalEntryId,
+        reasonCode: "close_reporting_fix",
+        correctionKey: "phase11-close-api-adjustment",
+        approvedByCompanyUserId: DEMO_IDS.companyUserId,
+        lines: [
+          { accountNumber: "1510", debitAmount: 4800 },
+          { accountNumber: "3010", creditAmount: 4800 }
+        ],
+        comment: "Replacement entry before relock."
+      }
+    });
+    assert.equal(closeAdjustment.adjustmentType, "correction_replacement");
+    assert.ok(closeAdjustment.reversalJournalEntry);
+    assert.ok(closeAdjustment.replacementJournalEntry);
+
+    const relocked = await requestJson(`${baseUrl}/v1/close/reopen-requests/${reopened.reopenRequest.reopenRequestId}/relock`, {
+      method: "POST",
+      token: preparerToken,
+      body: {
+        bureauOrgId: DEMO_IDS.companyId,
+        reasonCode: "close_adjustments_completed",
+        approvedByCompanyUserId: DEMO_IDS.companyUserId
+      }
+    });
+    assert.equal(relocked.status, "relocked");
+
+    const closeAdjustments = await requestJson(`${baseUrl}/v1/close/adjustments?bureauOrgId=${DEMO_IDS.companyId}&reopenRequestId=${reopened.reopenRequest.reopenRequestId}`, {
+      token: preparerToken
+    });
+    assert.equal(closeAdjustments.items.length, 1);
   } finally {
     await stopServer(server);
   }
@@ -263,6 +312,7 @@ function seedClientCloseSetup(platform, adminToken, responsibleConsultantId) {
   return {
     clientCompany,
     period,
+    sourceJournalEntryId: created.journalEntry.journalEntryId,
     reportSnapshotId: reportSnapshot.reportSnapshotId,
     reconciliationRuns
   };
