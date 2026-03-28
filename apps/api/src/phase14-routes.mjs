@@ -93,7 +93,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       path,
       platform,
       helpers: {
-        assertPayrollOperationsReadAccess
+        assertPayrollOperationsReadAccess,
+        assertBackofficeReadAccess
       }
     })
   ) {
@@ -108,7 +109,8 @@ export async function tryHandlePhase14Route({ req, res, url, path, platform }) {
       path,
       platform,
       helpers: {
-        assertPayrollOperationsReadAccess
+        assertPayrollOperationsReadAccess,
+        assertBackofficeReadAccess
       }
     })
   ) {

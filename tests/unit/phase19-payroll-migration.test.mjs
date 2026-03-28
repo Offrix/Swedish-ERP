@@ -56,6 +56,12 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
     },
     actorId: DEMO_IDS.userId
   });
+  const catalogEntry = platform.publishAgreementCatalogEntry({
+    companyId: DEMO_IDS.companyId,
+    agreementVersionId: version.agreementVersionId,
+    dropdownLabel: "Almega Test 2026",
+    actorId: DEMO_IDS.userId
+  });
 
   const mappingSet = platform.createMappingSet({
     sessionToken: adminToken,
@@ -109,7 +115,7 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
           reportedThroughPeriod: "2026-03",
           submissionReferences: ["AGI-2026-03"]
         },
-        agreementVersionId: version.agreementVersionId
+      agreementCatalogEntryId: catalogEntry.agreementCatalogEntryId
       }
     ]
   });

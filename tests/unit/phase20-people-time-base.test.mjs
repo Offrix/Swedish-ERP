@@ -136,11 +136,17 @@ test("Step 20 builds a unified people and time base with approvals, balance sync
     },
     actorId: "agreement-admin"
   });
+  const catalogEntry = collectiveAgreementsPlatform.publishAgreementCatalogEntry({
+    companyId: COMPANY_ID,
+    agreementVersionId: version.agreementVersionId,
+    dropdownLabel: "Almega Field 2026",
+    actorId: "agreement-admin"
+  });
   collectiveAgreementsPlatform.assignAgreementToEmployment({
     companyId: COMPANY_ID,
     employeeId: employee.employeeId,
     employmentId: employment.employmentId,
-    agreementVersionId: version.agreementVersionId,
+    agreementCatalogEntryId: catalogEntry.agreementCatalogEntryId,
     effectiveFrom: "2026-01-01",
     assignmentReasonCode: "HIRING",
     actorId: "agreement-admin"

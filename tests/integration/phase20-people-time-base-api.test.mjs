@@ -167,6 +167,16 @@ test("Step 20 API exposes employment snapshots, manual time approvals and unifie
         }
       }
     });
+    const catalogEntry = await requestJson(baseUrl, "/v1/collective-agreements/catalog", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        agreementVersionId: version.agreementVersionId,
+        dropdownLabel: "Almega Service 2026"
+      }
+    });
     await requestJson(baseUrl, "/v1/collective-agreements/assignments", {
       method: "POST",
       token: adminToken,
@@ -175,7 +185,7 @@ test("Step 20 API exposes employment snapshots, manual time approvals and unifie
         companyId: DEMO_IDS.companyId,
         employeeId: employee.employeeId,
         employmentId: employment.employmentId,
-        agreementVersionId: version.agreementVersionId,
+        agreementCatalogEntryId: catalogEntry.agreementCatalogEntryId,
         effectiveFrom: "2026-01-01",
         assignmentReasonCode: "HIRING"
       }

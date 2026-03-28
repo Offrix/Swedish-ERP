@@ -9,7 +9,29 @@ import {
 } from "./route-helpers.mjs";
 
 export async function tryHandlePhase14CollectiveAgreementRoutes({ req, res, url, path, platform, helpers }) {
-  const { assertPayrollOperationsReadAccess } = helpers;
+  const { assertPayrollOperationsReadAccess, assertBackofficeReadAccess } = helpers;
+
+  if (req.method === "GET" && path === "/v1/collective-agreements/catalog") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      action: "company.read",
+      objectType: "agreement_catalog_entry",
+      objectId: companyId,
+      scopeCode: "collective_agreements"
+    });
+    writeJson(res, 200, {
+      items: platform.listAgreementCatalogEntries({
+        companyId,
+        status: optionalText(url.searchParams.get("status")) || "published",
+        agreementFamilyId: optionalText(url.searchParams.get("agreementFamilyId")),
+        agreementFamilyCode: optionalText(url.searchParams.get("agreementFamilyCode"))
+      })
+    });
+    return true;
+  }
 
   if (req.method === "GET" && path === "/v1/collective-agreements/families") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
@@ -30,6 +52,36 @@ export async function tryHandlePhase14CollectiveAgreementRoutes({ req, res, url,
         status: optionalText(url.searchParams.get("status"))
       })
     });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/collective-agreements/catalog") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      action: "company.manage",
+      objectType: "agreement_catalog_entry",
+      objectId: companyId,
+      scopeCode: "backoffice"
+    });
+    assertBackofficeReadAccess({ principal });
+    writeJson(
+      res,
+      201,
+      platform.publishAgreementCatalogEntry({
+        companyId,
+        agreementVersionId: body.agreementVersionId,
+        catalogCode: body.catalogCode ?? null,
+        dropdownLabel: body.dropdownLabel,
+        publicationScopeCode: body.publicationScopeCode ?? "platform_published",
+        sourceIntakeCaseId: body.sourceIntakeCaseId ?? null,
+        idempotencyKey: body.idempotencyKey ?? null,
+        actorId: principal.userId
+      })
+    );
     return true;
   }
 
@@ -168,6 +220,61 @@ export async function tryHandlePhase14CollectiveAgreementRoutes({ req, res, url,
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/collective-agreements/local-supplements") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      action: "company.read",
+      objectType: "agreement_local_supplement",
+      objectId: companyId,
+      scopeCode: "collective_agreements"
+    });
+    assertPayrollOperationsReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listLocalAgreementSupplements({
+        companyId,
+        targetEmploymentId: optionalText(url.searchParams.get("targetEmploymentId")),
+        status: optionalText(url.searchParams.get("status")) || "approved"
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/collective-agreements/local-supplements") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      action: "company.manage",
+      objectType: "agreement_local_supplement",
+      objectId: companyId,
+      scopeCode: "backoffice"
+    });
+    assertBackofficeReadAccess({ principal });
+    writeJson(
+      res,
+      201,
+      platform.approveLocalAgreementSupplement({
+        companyId,
+        agreementVersionId: body.agreementVersionId,
+        supplementCode: body.supplementCode,
+        displayName: body.displayName,
+        targetEmploymentId: body.targetEmploymentId ?? null,
+        effectiveFrom: body.effectiveFrom ?? null,
+        effectiveTo: body.effectiveTo ?? null,
+        overlayRuleSet: body.overlayRuleSet ?? {},
+        sourceIntakeCaseId: body.sourceIntakeCaseId ?? null,
+        idempotencyKey: body.idempotencyKey ?? null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/collective-agreements/assignments") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
@@ -188,11 +295,134 @@ export async function tryHandlePhase14CollectiveAgreementRoutes({ req, res, url,
         companyId,
         employeeId: body.employeeId,
         employmentId: body.employmentId,
-        agreementVersionId: body.agreementVersionId,
+        agreementVersionId: body.agreementVersionId ?? null,
+        agreementCatalogEntryId: body.agreementCatalogEntryId ?? null,
+        localAgreementSupplementId: body.localAgreementSupplementId ?? null,
         effectiveFrom: body.effectiveFrom,
         effectiveTo: body.effectiveTo ?? null,
         assignmentReasonCode: body.assignmentReasonCode,
         idempotencyKey: body.idempotencyKey ?? null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/backoffice/agreement-intake/cases") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      action: "company.read",
+      objectType: "agreement_intake_case",
+      objectId: companyId,
+      scopeCode: "backoffice"
+    });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listAgreementIntakeCases({
+        companyId,
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/backoffice/agreement-intake/cases") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      action: "company.manage",
+      objectType: "agreement_intake_case",
+      objectId: companyId,
+      scopeCode: "backoffice"
+    });
+    assertBackofficeReadAccess({ principal });
+    writeJson(
+      res,
+      201,
+      platform.submitAgreementIntakeCase({
+        companyId,
+        proposedFamilyCode: body.proposedFamilyCode,
+        proposedFamilyName: body.proposedFamilyName,
+        requestedPublicationTarget: body.requestedPublicationTarget ?? "catalog",
+        sourceDocumentRef: body.sourceDocumentRef ?? null,
+        intakeChannelCode: body.intakeChannelCode ?? "support_backoffice",
+        requestedEmploymentId: body.requestedEmploymentId ?? null,
+        note: body.note ?? null,
+        idempotencyKey: body.idempotencyKey ?? null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const agreementIntakeStartMatch = matchPath(path, "/v1/backoffice/agreement-intake/cases/:agreementIntakeCaseId/start-extraction");
+  if (req.method === "POST" && agreementIntakeStartMatch) {
+    const body = await readJsonBody(req, true);
+    const companyId = requireText(body.companyId || url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      action: "company.manage",
+      objectType: "agreement_intake_case",
+      objectId: agreementIntakeStartMatch.agreementIntakeCaseId,
+      scopeCode: "backoffice"
+    });
+    assertBackofficeReadAccess({ principal });
+    writeJson(
+      res,
+      200,
+      platform.startAgreementIntakeExtraction({
+        companyId,
+        agreementIntakeCaseId: agreementIntakeStartMatch.agreementIntakeCaseId,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const agreementIntakeReviewMatch = matchPath(path, "/v1/backoffice/agreement-intake/cases/:agreementIntakeCaseId/review");
+  if (req.method === "POST" && agreementIntakeReviewMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      action: "company.manage",
+      objectType: "agreement_intake_case",
+      objectId: agreementIntakeReviewMatch.agreementIntakeCaseId,
+      scopeCode: "backoffice"
+    });
+    assertBackofficeReadAccess({ principal });
+    writeJson(
+      res,
+      200,
+      platform.reviewAgreementIntakeCase({
+        companyId,
+        agreementIntakeCaseId: agreementIntakeReviewMatch.agreementIntakeCaseId,
+        decisionStatus: body.decisionStatus,
+        agreementFamilyId: body.agreementFamilyId ?? null,
+        agreementFamilyCode: body.agreementFamilyCode ?? null,
+        agreementFamilyName: body.agreementFamilyName ?? null,
+        versionCode: body.versionCode ?? null,
+        effectiveFrom: body.effectiveFrom,
+        effectiveTo: body.effectiveTo ?? null,
+        rulepackVersion: body.rulepackVersion ?? null,
+        ruleSet: body.ruleSet ?? {},
+        catalogCode: body.catalogCode ?? null,
+        dropdownLabel: body.dropdownLabel ?? null,
+        baseAgreementVersionId: body.baseAgreementVersionId ?? null,
+        supplementCode: body.supplementCode ?? null,
+        supplementLabel: body.supplementLabel ?? null,
+        targetEmploymentId: body.targetEmploymentId ?? null,
+        overlayRuleSet: body.overlayRuleSet ?? {},
         actorId: principal.userId
       })
     );

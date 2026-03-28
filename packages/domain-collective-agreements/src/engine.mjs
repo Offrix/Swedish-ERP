@@ -1,10 +1,13 @@
 import crypto from "node:crypto";
 import {
   AGREEMENT_ASSIGNMENT_STATUSES,
+  AGREEMENT_CATALOG_ENTRY_STATUSES,
   AGREEMENT_FAMILY_STATUSES,
+  AGREEMENT_INTAKE_CASE_STATUSES,
   AGREEMENT_OVERRIDE_TYPE_CODES,
   AGREEMENT_RULEPACK_CODE,
-  AGREEMENT_VERSION_STATUSES
+  AGREEMENT_VERSION_STATUSES,
+  LOCAL_AGREEMENT_SUPPLEMENT_STATUSES
 } from "./constants.mjs";
 import {
   appendToIndex,
@@ -48,6 +51,19 @@ export function createCollectiveAgreementsEngine({
     agreementOverrides: new Map(),
     agreementOverrideIdsByAssignment: new Map(),
     agreementOverrideIdByIdempotencyKey: new Map(),
+    agreementCatalogEntries: new Map(),
+    agreementCatalogEntryIdsByCompany: new Map(),
+    agreementCatalogEntryIdsByFamily: new Map(),
+    agreementCatalogEntryIdByVersion: new Map(),
+    agreementCatalogEntryIdByIdempotencyKey: new Map(),
+    agreementIntakeCases: new Map(),
+    agreementIntakeCaseIdsByCompany: new Map(),
+    agreementIntakeCaseIdByIdempotencyKey: new Map(),
+    localAgreementSupplements: new Map(),
+    localAgreementSupplementIdsByCompany: new Map(),
+    localAgreementSupplementIdsByEmployment: new Map(),
+    localAgreementSupplementIdByVersion: new Map(),
+    localAgreementSupplementIdByIdempotencyKey: new Map(),
     auditEvents: []
   };
 
@@ -65,6 +81,14 @@ export function createCollectiveAgreementsEngine({
     publishAgreementVersion,
     listAgreementVersions,
     getAgreementVersion,
+    publishAgreementCatalogEntry,
+    listAgreementCatalogEntries,
+    submitAgreementIntakeCase,
+    listAgreementIntakeCases,
+    startAgreementIntakeExtraction,
+    reviewAgreementIntakeCase,
+    approveLocalAgreementSupplement,
+    listLocalAgreementSupplements,
     assignAgreementToEmployment,
     listAgreementAssignments,
     createAgreementOverride,
@@ -211,11 +235,383 @@ export function createCollectiveAgreementsEngine({
     return presentAgreementVersion(requireAgreementVersion(state, companyId, agreementVersionId));
   }
 
+  function publishAgreementCatalogEntry({
+    companyId,
+    agreementVersionId,
+    catalogCode = null,
+    dropdownLabel,
+    publicationScopeCode = "platform_published",
+    sourceIntakeCaseId = null,
+    idempotencyKey = null,
+    actorId = "system"
+  } = {}) {
+    const version = requireAgreementVersion(state, companyId, agreementVersionId);
+    const resolvedIdempotencyKey = normalizeOptionalText(idempotencyKey);
+    if (resolvedIdempotencyKey) {
+      const existingCatalogEntryId = state.agreementCatalogEntryIdByIdempotencyKey.get(
+        createIdempotencyLookupKey(version.companyId, "agreement_catalog_publish", resolvedIdempotencyKey)
+      );
+      if (existingCatalogEntryId) {
+        return presentAgreementCatalogEntry(state.agreementCatalogEntries.get(existingCatalogEntryId));
+      }
+    }
+    const existingByVersionId = state.agreementCatalogEntryIdByVersion.get(version.agreementVersionId) || null;
+    if (existingByVersionId) {
+      const existing = state.agreementCatalogEntries.get(existingByVersionId);
+      if (existing && existing.status === "published") {
+        return presentAgreementCatalogEntry(existing);
+      }
+    }
+    if (sourceIntakeCaseId) {
+      const intakeCase = requireAgreementIntakeCase(state, version.companyId, sourceIntakeCaseId);
+      if (intakeCase.status !== "approved_for_publication") {
+        throw createError(409, "agreement_intake_not_ready_for_catalog_publication", "Agreement intake case is not approved for catalog publication.");
+      }
+    }
+    markSupersededCatalogEntries(state, version.companyId, version.agreementFamilyId, version.effectiveFrom, clock);
+    const now = nowIso(clock);
+    const record = Object.freeze({
+      agreementCatalogEntryId: existingByVersionId || crypto.randomUUID(),
+      companyId: version.companyId,
+      agreementFamilyId: version.agreementFamilyId,
+      agreementFamilyCode: version.agreementFamilyCode,
+      agreementVersionId: version.agreementVersionId,
+      catalogCode: normalizeCode(catalogCode || version.versionCode, "agreement_catalog_code_required"),
+      dropdownLabel: requireText(dropdownLabel, "agreement_catalog_dropdown_label_required"),
+      publicationScopeCode: normalizeCode(publicationScopeCode, "agreement_catalog_publication_scope_required"),
+      sourceIntakeCaseId: normalizeOptionalText(sourceIntakeCaseId),
+      effectiveFrom: version.effectiveFrom,
+      effectiveTo: version.effectiveTo,
+      status: "published",
+      publishedByActorId: requireText(actorId, "actor_id_required"),
+      publishedAt: now,
+      createdAt: existingByVersionId ? state.agreementCatalogEntries.get(existingByVersionId)?.createdAt || now : now,
+      updatedAt: now
+    });
+    state.agreementCatalogEntries.set(record.agreementCatalogEntryId, record);
+    if (!existingByVersionId) {
+      appendToIndex(state.agreementCatalogEntryIdsByCompany, version.companyId, record.agreementCatalogEntryId);
+      appendToIndex(state.agreementCatalogEntryIdsByFamily, version.agreementFamilyId, record.agreementCatalogEntryId);
+    }
+    state.agreementCatalogEntryIdByVersion.set(version.agreementVersionId, record.agreementCatalogEntryId);
+    if (resolvedIdempotencyKey) {
+      state.agreementCatalogEntryIdByIdempotencyKey.set(
+        createIdempotencyLookupKey(version.companyId, "agreement_catalog_publish", resolvedIdempotencyKey),
+        record.agreementCatalogEntryId
+      );
+    }
+    return presentAgreementCatalogEntry(record);
+  }
+
+  function listAgreementCatalogEntries({ companyId, status = "published", agreementFamilyId = null, agreementFamilyCode = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const family = agreementFamilyId || agreementFamilyCode ? requireAgreementFamily(state, resolvedCompanyId, { agreementFamilyId, agreementFamilyCode }) : null;
+    const resolvedStatus = status ? resolveCatalogEntryStatus(status) : null;
+    const sourceIds = family
+      ? (state.agreementCatalogEntryIdsByFamily.get(family.agreementFamilyId) || [])
+      : (state.agreementCatalogEntryIdsByCompany.get(resolvedCompanyId) || []);
+    return sourceIds
+      .map((agreementCatalogEntryId) => state.agreementCatalogEntries.get(agreementCatalogEntryId))
+      .filter(Boolean)
+      .filter((record) => record.companyId === resolvedCompanyId)
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort((left, right) => left.dropdownLabel.localeCompare(right.dropdownLabel) || left.effectiveFrom.localeCompare(right.effectiveFrom))
+      .map(presentAgreementCatalogEntry);
+  }
+
+  function submitAgreementIntakeCase({
+    companyId,
+    proposedFamilyCode,
+    proposedFamilyName,
+    requestedPublicationTarget = "catalog",
+    sourceDocumentRef = null,
+    intakeChannelCode = "support_backoffice",
+    requestedEmploymentId = null,
+    note = null,
+    idempotencyKey = null,
+    actorId = "system"
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedIdempotencyKey = normalizeOptionalText(idempotencyKey);
+    if (resolvedIdempotencyKey) {
+      const existingIntakeCaseId = state.agreementIntakeCaseIdByIdempotencyKey.get(
+        createIdempotencyLookupKey(resolvedCompanyId, "agreement_intake_submit", resolvedIdempotencyKey)
+      );
+      if (existingIntakeCaseId) {
+        return presentAgreementIntakeCase(state.agreementIntakeCases.get(existingIntakeCaseId));
+      }
+    }
+    const resolvedPublicationTarget = resolveAgreementIntakePublicationTarget(requestedPublicationTarget);
+    const now = nowIso(clock);
+    const record = Object.freeze({
+      agreementIntakeCaseId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      proposedFamilyCode: normalizeCode(proposedFamilyCode, "agreement_intake_family_code_required"),
+      proposedFamilyName: requireText(proposedFamilyName, "agreement_intake_family_name_required"),
+      requestedPublicationTarget: resolvedPublicationTarget,
+      sourceDocumentRef: normalizeOptionalText(sourceDocumentRef),
+      intakeChannelCode: normalizeCode(intakeChannelCode, "agreement_intake_channel_code_required"),
+      requestedEmploymentId: normalizeOptionalText(requestedEmploymentId),
+      note: normalizeOptionalText(note),
+      status: "received",
+      submittedByActorId: requireText(actorId, "actor_id_required"),
+      submittedAt: now,
+      extractionStartedAt: null,
+      reviewQueuedAt: null,
+      reviewedByActorId: null,
+      reviewedAt: null,
+      linkedAgreementVersionId: null,
+      linkedCatalogEntryId: null,
+      linkedLocalAgreementSupplementId: null,
+      createdAt: now,
+      updatedAt: now
+    });
+    state.agreementIntakeCases.set(record.agreementIntakeCaseId, record);
+    appendToIndex(state.agreementIntakeCaseIdsByCompany, resolvedCompanyId, record.agreementIntakeCaseId);
+    if (resolvedIdempotencyKey) {
+      state.agreementIntakeCaseIdByIdempotencyKey.set(
+        createIdempotencyLookupKey(resolvedCompanyId, "agreement_intake_submit", resolvedIdempotencyKey),
+        record.agreementIntakeCaseId
+      );
+    }
+    return presentAgreementIntakeCase(record);
+  }
+
+  function listAgreementIntakeCases({ companyId, status = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = status ? resolveAgreementIntakeCaseStatus(status) : null;
+    return (state.agreementIntakeCaseIdsByCompany.get(resolvedCompanyId) || [])
+      .map((agreementIntakeCaseId) => state.agreementIntakeCases.get(agreementIntakeCaseId))
+      .filter(Boolean)
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(presentAgreementIntakeCase);
+  }
+
+  function startAgreementIntakeExtraction({ companyId, agreementIntakeCaseId, actorId = "system" } = {}) {
+    const intakeCase = requireAgreementIntakeCase(state, companyId, agreementIntakeCaseId);
+    if (!["received", "extraction_in_progress", "review_pending"].includes(intakeCase.status)) {
+      throw createError(409, "agreement_intake_extraction_invalid", "Agreement intake extraction can only start from received or pending states.");
+    }
+    const now = nowIso(clock);
+    const nextRecord = Object.freeze({
+      ...intakeCase,
+      status: "extraction_in_progress",
+      extractionStartedAt: intakeCase.extractionStartedAt || now,
+      reviewQueuedAt: now,
+      updatedAt: now,
+      extractionStartedByActorId: requireText(actorId, "actor_id_required")
+    });
+    state.agreementIntakeCases.set(nextRecord.agreementIntakeCaseId, nextRecord);
+    return presentAgreementIntakeCase(nextRecord);
+  }
+
+  function reviewAgreementIntakeCase({
+    companyId,
+    agreementIntakeCaseId,
+    decisionStatus,
+    agreementFamilyId = null,
+    agreementFamilyCode = null,
+    agreementFamilyName = null,
+    versionCode = null,
+    effectiveFrom,
+    effectiveTo = null,
+    rulepackVersion = null,
+    ruleSet = {},
+    catalogCode = null,
+    dropdownLabel = null,
+    baseAgreementVersionId = null,
+    supplementCode = null,
+    supplementLabel = null,
+    targetEmploymentId = null,
+    overlayRuleSet = {},
+    actorId = "system"
+  } = {}) {
+    const intakeCase = requireAgreementIntakeCase(state, companyId, agreementIntakeCaseId);
+    if (!["received", "extraction_in_progress", "review_pending"].includes(intakeCase.status)) {
+      throw createError(409, "agreement_intake_review_invalid", "Agreement intake case cannot be reviewed from its current state.");
+    }
+    const resolvedDecisionStatus = resolveAgreementIntakeCaseStatus(decisionStatus);
+    if (!["approved_for_publication", "approved_for_local_supplement", "rejected"].includes(resolvedDecisionStatus)) {
+      throw createError(400, "agreement_intake_review_status_invalid", "Agreement intake review must end in publication, local supplement or rejection.");
+    }
+    const now = nowIso(clock);
+    const reviewedCase = Object.freeze({
+      ...intakeCase,
+      status: resolvedDecisionStatus,
+      reviewQueuedAt: intakeCase.reviewQueuedAt || now,
+      reviewedByActorId: requireText(actorId, "actor_id_required"),
+      reviewedAt: now,
+      updatedAt: now
+    });
+    state.agreementIntakeCases.set(reviewedCase.agreementIntakeCaseId, reviewedCase);
+    let linkedAgreementVersionId = null;
+    let linkedCatalogEntryId = null;
+    let linkedLocalAgreementSupplementId = null;
+
+    if (resolvedDecisionStatus === "approved_for_publication") {
+      const family = resolveAgreementFamilyForIntake({
+        state,
+        companyId: reviewedCase.companyId,
+        agreementFamilyId,
+        agreementFamilyCode,
+        agreementFamilyName,
+        intakeCase: reviewedCase,
+        actorId,
+        createAgreementFamily
+      });
+      const version = publishAgreementVersion({
+        companyId: reviewedCase.companyId,
+        agreementFamilyId: family.agreementFamilyId,
+        versionCode,
+        effectiveFrom,
+        effectiveTo,
+        rulepackVersion: requireText(rulepackVersion, "agreement_intake_rulepack_version_required"),
+        ruleSet,
+        actorId
+      });
+      const catalogEntry = publishAgreementCatalogEntry({
+        companyId: reviewedCase.companyId,
+        agreementVersionId: version.agreementVersionId,
+        catalogCode,
+        dropdownLabel: dropdownLabel || family.name,
+        sourceIntakeCaseId: reviewedCase.agreementIntakeCaseId,
+        actorId
+      });
+      linkedAgreementVersionId = version.agreementVersionId;
+      linkedCatalogEntryId = catalogEntry.agreementCatalogEntryId;
+    }
+
+    if (resolvedDecisionStatus === "approved_for_local_supplement") {
+      const supplement = approveLocalAgreementSupplement({
+        companyId: reviewedCase.companyId,
+        agreementVersionId: requireText(baseAgreementVersionId, "agreement_local_supplement_base_version_required"),
+        supplementCode: supplementCode || intakeCase.proposedFamilyCode,
+        displayName: supplementLabel || intakeCase.proposedFamilyName,
+        targetEmploymentId: targetEmploymentId || intakeCase.requestedEmploymentId || null,
+        effectiveFrom,
+        effectiveTo,
+        overlayRuleSet,
+        sourceIntakeCaseId: reviewedCase.agreementIntakeCaseId,
+        actorId
+      });
+      linkedAgreementVersionId = supplement.agreementVersionId;
+      linkedLocalAgreementSupplementId = supplement.localAgreementSupplementId;
+    }
+
+    const nextRecord = Object.freeze({
+      ...reviewedCase,
+      linkedAgreementVersionId,
+      linkedCatalogEntryId,
+      linkedLocalAgreementSupplementId,
+      updatedAt: now
+    });
+    state.agreementIntakeCases.set(nextRecord.agreementIntakeCaseId, nextRecord);
+    return presentAgreementIntakeCase(nextRecord);
+  }
+
+  function approveLocalAgreementSupplement({
+    companyId,
+    agreementVersionId,
+    supplementCode,
+    displayName,
+    targetEmploymentId = null,
+    effectiveFrom = null,
+    effectiveTo = null,
+    overlayRuleSet = {},
+    sourceIntakeCaseId = null,
+    idempotencyKey = null,
+    actorId = "system"
+  } = {}) {
+    const version = requireAgreementVersion(state, companyId, agreementVersionId);
+    const resolvedIdempotencyKey = normalizeOptionalText(idempotencyKey);
+    if (resolvedIdempotencyKey) {
+      const existingSupplementId = state.localAgreementSupplementIdByIdempotencyKey.get(
+        createIdempotencyLookupKey(version.companyId, "agreement_local_supplement_approve", resolvedIdempotencyKey)
+      );
+      if (existingSupplementId) {
+        return presentLocalAgreementSupplement(state.localAgreementSupplements.get(existingSupplementId));
+      }
+    }
+    if (sourceIntakeCaseId) {
+      const intakeCase = requireAgreementIntakeCase(state, version.companyId, sourceIntakeCaseId);
+      if (intakeCase.status !== "approved_for_local_supplement") {
+        throw createError(409, "agreement_intake_not_ready_for_local_supplement", "Agreement intake case is not approved for local supplement creation.");
+      }
+    }
+    const resolvedTargetEmploymentId = normalizeOptionalText(targetEmploymentId);
+    const resolvedEffectiveFrom = effectiveFrom ? normalizeRequiredDate(effectiveFrom, "agreement_local_supplement_effective_from_invalid") : version.effectiveFrom;
+    const resolvedEffectiveTo = effectiveTo ? normalizeRequiredDate(effectiveTo, "agreement_local_supplement_effective_to_invalid") : version.effectiveTo;
+    if (resolvedEffectiveTo && resolvedEffectiveTo < resolvedEffectiveFrom) {
+      throw createError(400, "agreement_local_supplement_dates_invalid", "Local supplement end date cannot be earlier than start date.");
+    }
+    const existingByVersionId = state.localAgreementSupplementIdByVersion.get(version.agreementVersionId) || null;
+    if (existingByVersionId) {
+      const existing = state.localAgreementSupplements.get(existingByVersionId);
+      if (existing && existing.status === "approved" && existing.targetEmploymentId === resolvedTargetEmploymentId) {
+        return presentLocalAgreementSupplement(existing);
+      }
+    }
+    const now = nowIso(clock);
+    const record = Object.freeze({
+      localAgreementSupplementId: existingByVersionId || crypto.randomUUID(),
+      companyId: version.companyId,
+      agreementFamilyId: version.agreementFamilyId,
+      agreementFamilyCode: version.agreementFamilyCode,
+      agreementVersionId: version.agreementVersionId,
+      supplementCode: normalizeCode(supplementCode, "agreement_local_supplement_code_required"),
+      displayName: requireText(displayName, "agreement_local_supplement_display_name_required"),
+      targetEmploymentId: resolvedTargetEmploymentId,
+      effectiveFrom: resolvedEffectiveFrom,
+      effectiveTo: resolvedEffectiveTo,
+      overlayRuleSetJson: sanitizeJson(overlayRuleSet),
+      sourceIntakeCaseId: normalizeOptionalText(sourceIntakeCaseId),
+      status: "approved",
+      approvedByActorId: requireText(actorId, "actor_id_required"),
+      approvedAt: now,
+      createdAt: existingByVersionId ? state.localAgreementSupplements.get(existingByVersionId)?.createdAt || now : now,
+      updatedAt: now
+    });
+    state.localAgreementSupplements.set(record.localAgreementSupplementId, record);
+    if (!existingByVersionId) {
+      appendToIndex(state.localAgreementSupplementIdsByCompany, version.companyId, record.localAgreementSupplementId);
+      if (resolvedTargetEmploymentId) {
+        appendToIndex(state.localAgreementSupplementIdsByEmployment, resolvedTargetEmploymentId, record.localAgreementSupplementId);
+      }
+    }
+    state.localAgreementSupplementIdByVersion.set(version.agreementVersionId, record.localAgreementSupplementId);
+    if (resolvedIdempotencyKey) {
+      state.localAgreementSupplementIdByIdempotencyKey.set(
+        createIdempotencyLookupKey(version.companyId, "agreement_local_supplement_approve", resolvedIdempotencyKey),
+        record.localAgreementSupplementId
+      );
+    }
+    return presentLocalAgreementSupplement(record);
+  }
+
+  function listLocalAgreementSupplements({ companyId, targetEmploymentId = null, status = "approved" } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedTargetEmploymentId = normalizeOptionalText(targetEmploymentId);
+    const resolvedStatus = status ? resolveLocalAgreementSupplementStatus(status) : null;
+    const sourceIds = resolvedTargetEmploymentId
+      ? (state.localAgreementSupplementIdsByEmployment.get(resolvedTargetEmploymentId) || [])
+      : (state.localAgreementSupplementIdsByCompany.get(resolvedCompanyId) || []);
+    return sourceIds
+      .map((localAgreementSupplementId) => state.localAgreementSupplements.get(localAgreementSupplementId))
+      .filter(Boolean)
+      .filter((record) => record.companyId === resolvedCompanyId)
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort((left, right) => left.displayName.localeCompare(right.displayName) || left.effectiveFrom.localeCompare(right.effectiveFrom))
+      .map(presentLocalAgreementSupplement);
+  }
+
   function assignAgreementToEmployment({
     companyId,
     employeeId,
     employmentId,
-    agreementVersionId,
+    agreementVersionId = null,
+    agreementCatalogEntryId = null,
+    localAgreementSupplementId = null,
     effectiveFrom,
     effectiveTo = null,
     assignmentReasonCode,
@@ -234,7 +630,35 @@ export function createCollectiveAgreementsEngine({
     }
     const resolvedEmployeeId = requireText(employeeId, "employee_id_required");
     const resolvedEmploymentId = requireText(employmentId, "employment_id_required");
-    const version = requireAgreementVersion(state, resolvedCompanyId, agreementVersionId);
+    let version = null;
+    let catalogEntry = null;
+    let localSupplement = null;
+    if (agreementCatalogEntryId) {
+      catalogEntry = requireAgreementCatalogEntry(state, resolvedCompanyId, agreementCatalogEntryId);
+      if (catalogEntry.status !== "published") {
+        throw createError(409, "agreement_catalog_entry_not_published", "Agreement assignment requires a published catalog entry.");
+      }
+      version = requireAgreementVersion(state, resolvedCompanyId, catalogEntry.agreementVersionId);
+    } else if (localAgreementSupplementId) {
+      localSupplement = requireLocalAgreementSupplement(state, resolvedCompanyId, localAgreementSupplementId);
+      if (localSupplement.status !== "approved") {
+        throw createError(409, "agreement_local_supplement_not_approved", "Agreement assignment requires an approved local supplement.");
+      }
+      if (localSupplement.targetEmploymentId && localSupplement.targetEmploymentId !== resolvedEmploymentId) {
+        throw createError(409, "agreement_local_supplement_scope_invalid", "Local supplement is not approved for this employment.");
+      }
+      version = requireAgreementVersion(state, resolvedCompanyId, localSupplement.agreementVersionId);
+    } else {
+      version = requireAgreementVersion(state, resolvedCompanyId, agreementVersionId);
+      const publishedCatalogEntryId = state.agreementCatalogEntryIdByVersion.get(version.agreementVersionId) || null;
+      if (!publishedCatalogEntryId) {
+        throw createError(409, "agreement_assignment_requires_published_catalog", "Agreement assignment must reference a published catalog entry or an approved local supplement.");
+      }
+      catalogEntry = requireAgreementCatalogEntry(state, resolvedCompanyId, publishedCatalogEntryId);
+      if (catalogEntry.status !== "published") {
+        throw createError(409, "agreement_catalog_entry_not_published", "Agreement assignment requires a published catalog entry.");
+      }
+    }
     if (hrPlatform) {
       hrPlatform.getEmployment({ companyId: resolvedCompanyId, employeeId: resolvedEmployeeId, employmentId: resolvedEmploymentId });
     }
@@ -257,6 +681,8 @@ export function createCollectiveAgreementsEngine({
       agreementFamilyId: version.agreementFamilyId,
       agreementFamilyCode: version.agreementFamilyCode,
       agreementVersionId: version.agreementVersionId,
+      agreementCatalogEntryId: catalogEntry?.agreementCatalogEntryId || null,
+      localAgreementSupplementId: localSupplement?.localAgreementSupplementId || null,
       effectiveFrom: resolvedEffectiveFrom,
       effectiveTo: resolvedEffectiveTo,
       assignmentReasonCode: normalizeCode(assignmentReasonCode, "agreement_assignment_reason_code_required"),
@@ -387,10 +813,18 @@ export function createCollectiveAgreementsEngine({
       companyId: resolvedCompanyId,
       agreementAssignmentId: assignment.agreementAssignmentId
     }).filter((override) => compareDateRanges(override.effectiveFrom, override.effectiveTo, resolvedEventDate, resolvedEventDate));
+    const catalogEntry = assignment.agreementCatalogEntryId
+      ? requireAgreementCatalogEntry(state, resolvedCompanyId, assignment.agreementCatalogEntryId)
+      : null;
+    const localSupplement = assignment.localAgreementSupplementId
+      ? requireLocalAgreementSupplement(state, resolvedCompanyId, assignment.localAgreementSupplementId)
+      : null;
     return {
       agreementFamily: requireAgreementFamily(state, resolvedCompanyId, { agreementFamilyId: assignment.agreementFamilyId }),
       agreementVersion: version,
+      agreementCatalogEntry: catalogEntry,
       agreementAssignment: assignment,
+      localAgreementSupplement: localSupplement,
       agreementOverrides: overrides
     };
   }
@@ -409,14 +843,19 @@ export function createCollectiveAgreementsEngine({
       ...sanitizeJson(baseRuleSet),
       ...sanitizeJson(activeAgreement.agreementVersion.ruleSetJson)
     };
+    if (activeAgreement.localAgreementSupplement) {
+      Object.assign(mergedRuleSet, sanitizeJson(activeAgreement.localAgreementSupplement.overlayRuleSetJson));
+    }
     for (const override of activeAgreement.agreementOverrides) {
       Object.assign(mergedRuleSet, sanitizeJson(override.overridePayloadJson));
     }
     return {
       agreementFamilyCode: activeAgreement.agreementFamily.code,
+      agreementCatalogEntryId: activeAgreement.agreementCatalogEntry?.agreementCatalogEntryId || null,
       agreementVersionId: activeAgreement.agreementVersion.agreementVersionId,
       agreementVersionCode: activeAgreement.agreementVersion.versionCode,
       assignmentId: activeAgreement.agreementAssignment.agreementAssignmentId,
+      localAgreementSupplementId: activeAgreement.localAgreementSupplement?.localAgreementSupplementId || null,
       overrides: activeAgreement.agreementOverrides.map((override) => override.agreementOverrideId),
       ruleSet: mergedRuleSet
     };
@@ -439,6 +878,18 @@ function presentAgreementOverride(record) {
   return copy(record);
 }
 
+function presentAgreementCatalogEntry(record) {
+  return copy(record);
+}
+
+function presentAgreementIntakeCase(record) {
+  return copy(record);
+}
+
+function presentLocalAgreementSupplement(record) {
+  return copy(record);
+}
+
 function createIdempotencyLookupKey(companyId, actionCode, idempotencyKey) {
   return `${requireText(companyId, "company_id_required")}::${requireText(actionCode, "agreement_action_code_required")}::${requireText(idempotencyKey, "idempotency_key_required")}`;
 }
@@ -456,6 +907,60 @@ function requireAgreementFamily(state, companyId, { agreementFamilyId = null, ag
     throw createError(404, "agreement_family_not_found", "Agreement family was not found.");
   }
   return record;
+}
+
+function requireAgreementCatalogEntry(state, companyId, agreementCatalogEntryId) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const record = state.agreementCatalogEntries.get(requireText(agreementCatalogEntryId, "agreement_catalog_entry_id_required")) || null;
+  if (!record || record.companyId !== resolvedCompanyId) {
+    throw createError(404, "agreement_catalog_entry_not_found", "Agreement catalog entry was not found.");
+  }
+  return record;
+}
+
+function requireAgreementIntakeCase(state, companyId, agreementIntakeCaseId) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const record = state.agreementIntakeCases.get(requireText(agreementIntakeCaseId, "agreement_intake_case_id_required")) || null;
+  if (!record || record.companyId !== resolvedCompanyId) {
+    throw createError(404, "agreement_intake_case_not_found", "Agreement intake case was not found.");
+  }
+  return record;
+}
+
+function requireLocalAgreementSupplement(state, companyId, localAgreementSupplementId) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const record = state.localAgreementSupplements.get(requireText(localAgreementSupplementId, "agreement_local_supplement_id_required")) || null;
+  if (!record || record.companyId !== resolvedCompanyId) {
+    throw createError(404, "agreement_local_supplement_not_found", "Local agreement supplement was not found.");
+  }
+  return record;
+}
+
+function resolveAgreementFamilyForIntake({
+  state,
+  companyId,
+  agreementFamilyId = null,
+  agreementFamilyCode = null,
+  agreementFamilyName = null,
+  intakeCase,
+  actorId,
+  createAgreementFamily
+}) {
+  if (agreementFamilyId || agreementFamilyCode) {
+    return requireAgreementFamily(state, companyId, { agreementFamilyId, agreementFamilyCode });
+  }
+  const proposedFamilyCode = normalizeCode(agreementFamilyCode || intakeCase.proposedFamilyCode, "agreement_intake_family_code_required");
+  const existingFamilyId = getIndexValue(state.agreementFamilyIdByCode, companyId, proposedFamilyCode);
+  if (existingFamilyId) {
+    return state.agreementFamilies.get(existingFamilyId);
+  }
+  return createAgreementFamily({
+    companyId,
+    code: proposedFamilyCode,
+    name: agreementFamilyName || intakeCase.proposedFamilyName,
+    status: "active",
+    actorId
+  });
 }
 
 function requireAgreementVersion(state, companyId, agreementVersionId) {
@@ -508,6 +1013,26 @@ function markHistoricalVersions(state, agreementFamilyId, effectiveFrom) {
   }
 }
 
+function markSupersededCatalogEntries(state, companyId, agreementFamilyId, effectiveFrom, clock) {
+  const now = nowIso(clock);
+  for (const agreementCatalogEntryId of state.agreementCatalogEntryIdsByFamily.get(agreementFamilyId) || []) {
+    const catalogEntry = state.agreementCatalogEntries.get(agreementCatalogEntryId);
+    if (!catalogEntry || catalogEntry.companyId !== companyId || catalogEntry.status !== "published") {
+      continue;
+    }
+    if (catalogEntry.effectiveFrom < effectiveFrom) {
+      state.agreementCatalogEntries.set(
+        catalogEntry.agreementCatalogEntryId,
+        Object.freeze({
+          ...catalogEntry,
+          status: "superseded",
+          updatedAt: now
+        })
+      );
+    }
+  }
+}
+
 function ensureNoOverlappingAssignment(state, companyId, employmentId, effectiveFrom, effectiveTo) {
   for (const assignmentId of state.agreementAssignmentIdsByEmployment.get(employmentId) || []) {
     const assignment = state.agreementAssignments.get(assignmentId);
@@ -540,6 +1065,26 @@ function resolveVersionStatus(status) {
 
 function resolveAssignmentStatus(status) {
   return assertStatus(normalizeCode(status, "agreement_assignment_status_required").toLowerCase(), AGREEMENT_ASSIGNMENT_STATUSES, "agreement_assignment_status_invalid");
+}
+
+function resolveCatalogEntryStatus(status) {
+  return assertStatus(normalizeCode(status, "agreement_catalog_entry_status_required").toLowerCase(), AGREEMENT_CATALOG_ENTRY_STATUSES, "agreement_catalog_entry_status_invalid");
+}
+
+function resolveAgreementIntakeCaseStatus(status) {
+  return assertStatus(normalizeCode(status, "agreement_intake_case_status_required").toLowerCase(), AGREEMENT_INTAKE_CASE_STATUSES, "agreement_intake_case_status_invalid");
+}
+
+function resolveLocalAgreementSupplementStatus(status) {
+  return assertStatus(normalizeCode(status, "agreement_local_supplement_status_required").toLowerCase(), LOCAL_AGREEMENT_SUPPLEMENT_STATUSES, "agreement_local_supplement_status_invalid");
+}
+
+function resolveAgreementIntakePublicationTarget(requestedPublicationTarget) {
+  const value = normalizeCode(requestedPublicationTarget || "catalog", "agreement_intake_publication_target_required").toLowerCase();
+  if (!["catalog", "local_supplement"].includes(value)) {
+    throw createError(400, "agreement_intake_publication_target_invalid", "Agreement intake publication target must be catalog or local_supplement.");
+  }
+  return value;
 }
 
 function resolveOverrideTypeCode(overrideTypeCode) {

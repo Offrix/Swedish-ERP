@@ -596,6 +596,16 @@ test("Phase 4.5 collective-agreement routes expose canonical envelopes, denial r
       })
     });
     assert.equal(version.agreementFamilyId, family.agreementFamilyId);
+    const catalogEntry = await requestJson(baseUrl, "/v1/collective-agreements/catalog", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: envelope({
+        companyId: DEMO_IDS.companyId,
+        agreementVersionId: version.agreementVersionId,
+        dropdownLabel: "Unionen 2026"
+      })
+    });
 
     const overlappingVersion = await requestJson(baseUrl, "/v1/collective-agreements/versions", {
       method: "POST",
@@ -623,7 +633,7 @@ test("Phase 4.5 collective-agreement routes expose canonical envelopes, denial r
         companyId: DEMO_IDS.companyId,
         employeeId: employee.employeeId,
         employmentId: employment.employmentId,
-        agreementVersionId: version.agreementVersionId,
+        agreementCatalogEntryId: catalogEntry.agreementCatalogEntryId,
         effectiveFrom: "2026-01-01",
         assignmentReasonCode: "HIRING"
       })
