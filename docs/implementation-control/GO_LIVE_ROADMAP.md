@@ -746,12 +746,13 @@ GÃ¶ra people masterdata, time/absence, balances, centralt publicerade kollekti
 - 11.1 klar 2026-03-28: HR/employment Ã¤r nu hÃ¤rdad med effektiva placement- och salary-basis-objekt, overlap-blockers fÃ¶r placements/contracts/manager assignments, completeness-signaler i employment snapshot och nya HR-rutter fÃ¶r governed placement/salary basis samt cutover-runbook.
 - 11.2 klar 2026-03-28: Time/absence/balances Ã¤r nu hÃ¤rdade med governed `ApprovedTimeSet`, lÃ¥sning av approved payroll-input per period, AGI-kÃ¤nsliga leave-boundaries, `AbsenceDecision` i admin- och portalflÃ¶den, time-base-kontrakt fÃ¶r active approved set och uppdaterade verifieringsrunbooks.
 - 11.3 klar 2026-03-28: Collective agreements Ã¤r nu hÃ¤rdade med centralt publicerat avtalsbibliotek, supportstyrd intake, intern extraktions- och reviewkedja, publicerad dropdown-selektion, governed agreement assignment via publicerade katalogposter, lokala supplements med approval och uppdaterade intake-/activation-runbooks.
+- 11.4 klar 2026-03-28: Payroll-adjacent history import Ã¤r nu utbyggd med employee master snapshots, employment history, YTD, AGI carry-forward, benefit/travel history, explicit evidence mapping, frozen history evidence bundle, live-gating pÃ¥ saknad evidence coverage och ny verifieringsrunbook fÃ¶r pilot cutover.
 
 **Delfaser**
 - [x] 11.1 [HARDEN] **HR/employment source of truth** â€” Employee, employment, organization placement, salary basis, cost center, service line och effective dating.
 - [x] 11.2 [HARDEN] **Time, absence och balances** â€” Approved time inputs, absence types, carryovers, leave locks och AGI-sensitive absence boundaries.
 - [x] 11.3 [HARDEN] **Collective agreement catalog och engine** â€” Centralt publicerat avtalsbibliotek, supportstyrd intake av nya avtal, intern AI-assisterad extraktion med mÃ¤nsklig payroll/compliance-approval, publicerad dropdown-selektion, agreement assignment, effective dates, pay item derivation, rate tables, lokala supplements och override governance.
-- [ ] 11.4 [MIGRATE] **Payroll-adjacent history import** â€” Employee master, employment history, YTD, balances, AGI history, benefits/travel history och evidence mapping.
+- [x] 11.4 [MIGRATE] **Payroll-adjacent history import** â€” Employee master, employment history, YTD, balances, AGI history, benefits/travel history och evidence mapping.
 - [ ] 11.5 [NEW BUILD] **Payroll input snapshots** â€” LÃ¥s input fingerprints och snapshot objects som pay run senare konsumerar.
 
 **Exit gate**  

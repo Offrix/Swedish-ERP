@@ -102,10 +102,29 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
         personId: "legacy-employee-001",
         employeeId: employee.employeeId,
         employmentId: employment.employmentId,
+        employeeMasterSnapshot: {
+          sourceEmployeeNumber: "1001",
+          displayName: "Paula Payroll",
+          givenName: "Paula",
+          familyName: "Payroll",
+          taxProfileCode: "TABLE_32"
+        },
+        employmentHistory: [
+          {
+            startDate: "2026-01-01",
+            employmentTypeCode: "permanent",
+            jobTitle: "Payroll specialist",
+            payModelCode: "monthly_salary",
+            salaryBasisCode: "monthly",
+            salaryAmountSek: 42000
+          }
+        ],
         ytdBasis: {
           grossCompensationSek: 120000,
           preliminaryTaxSek: 34000,
           employerContributionBasisSek: 120000,
+          taxableBenefitsSek: 2200,
+          pensionBasisSek: 120000,
           reportedThroughPeriod: "2026-03"
         },
         priorPayslipSummary: {
@@ -115,11 +134,72 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
           reportedThroughPeriod: "2026-03",
           submissionReferences: ["AGI-2026-03"]
         },
-      agreementCatalogEntryId: catalogEntry.agreementCatalogEntryId
+        benefitHistory: [
+          {
+            benefitTypeCode: "CAR",
+            reportedPeriod: "2026-03",
+            taxableAmountSek: 2200,
+            netDeductionSek: 0,
+            sourceRecordRef: "benefit-row-2026-03"
+          }
+        ],
+        travelHistory: [
+          {
+            travelTypeCode: "MILEAGE",
+            reportedPeriod: "2026-03",
+            taxFreeAmountSek: 1850,
+            taxableAmountSek: 0,
+            mileageKm: 370,
+            sourceRecordRef: "travel-row-2026-03"
+          }
+        ],
+        evidenceMappings: [
+          {
+            targetAreaCode: "employee_master",
+            sourceRecordRef: "employee-master-1001",
+            artifactType: "legacy_employee_export",
+            artifactRef: "evidence://employee-master-1001"
+          },
+          {
+            targetAreaCode: "employment_history",
+            sourceRecordRef: "employment-history-1001",
+            artifactType: "legacy_employment_export",
+            artifactRef: "evidence://employment-history-1001"
+          },
+          {
+            targetAreaCode: "ytd_basis",
+            sourceRecordRef: "ytd-1001-2026-03",
+            artifactType: "legacy_payroll_summary",
+            artifactRef: "evidence://ytd-1001-2026-03"
+          },
+          {
+            targetAreaCode: "agi_history",
+            sourceRecordRef: "agi-1001-2026-03",
+            artifactType: "agi_receipt",
+            artifactRef: "evidence://agi-1001-2026-03"
+          },
+          {
+            targetAreaCode: "benefit_history",
+            sourceRecordRef: "benefit-row-2026-03",
+            artifactType: "benefit_register",
+            artifactRef: "evidence://benefit-row-2026-03"
+          },
+          {
+            targetAreaCode: "travel_history",
+            sourceRecordRef: "travel-row-2026-03",
+            artifactType: "travel_claim",
+            artifactRef: "evidence://travel-row-2026-03"
+          }
+        ],
+        agreementCatalogEntryId: catalogEntry.agreementCatalogEntryId
       }
     ]
   });
   assert.equal(imported.employeeRecordCount, 1);
+  assert.equal(imported.historyImportSummary.employeeCount, 1);
+  assert.equal(imported.historyImportSummary.benefitHistoryItemCount, 1);
+  assert.equal(imported.historyImportSummary.travelHistoryItemCount, 1);
+  assert.equal(imported.historyEvidenceBundle.artifactCount, 6);
 
   platform.registerBalanceBaselines({
     sessionToken: adminToken,
@@ -143,6 +223,8 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
   });
   assert.equal(validated.status, "validated");
   assert.equal(validated.validationSummary.blockingIssueCount, 0);
+  assert.equal(validated.historyImportSummary.employeesMissingEvidenceMappingCount, 0);
+  assert.equal(validated.historyEvidenceBundle.status, "frozen");
 
   const diffResult = platform.calculatePayrollMigrationDiff({
     sessionToken: adminToken,
@@ -191,6 +273,8 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
   });
   assert.equal(executed.status, "cutover_executed");
   assert.equal(executed.executionReceipt.realizedBalanceTransactions.length, 1);
+  assert.equal(executed.executionReceipt.historyImportSummary.agiSubmissionReferenceCount, 1);
+  assert.ok(executed.executionReceipt.historyEvidenceBundleId);
 
   const account = platform
     .listBalanceAccounts({
@@ -221,4 +305,85 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
     cutoffDate: "2026-04-02"
   });
   assert.equal(snapshotAfterRollback.currentQuantity, 0);
+});
+
+test("Step 19 payroll migration blocks live validation when required history evidence mapping is missing", () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-24T20:00:00Z")
+  });
+  const adminToken = loginWithStrongAuthOnPlatform({
+    platform,
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+
+  const employee = platform.createEmployee({
+    companyId: DEMO_IDS.companyId,
+    givenName: "Elsa",
+    familyName: "Evidence",
+    identityType: "other",
+    actorId: DEMO_IDS.userId
+  });
+  const employment = platform.createEmployment({
+    companyId: DEMO_IDS.companyId,
+    employeeId: employee.employeeId,
+    employmentTypeCode: "permanent",
+    jobTitle: "Administrator",
+    payModelCode: "monthly_salary",
+    startDate: "2026-01-01",
+    actorId: DEMO_IDS.userId
+  });
+
+  const batch = platform.createPayrollMigrationBatch({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    sourceSystemCode: "legacy_payroll",
+    migrationMode: "live",
+    effectiveCutoverDate: "2026-04-01",
+    firstTargetReportingPeriod: "2026-04"
+  });
+
+  platform.importEmployeeMigrationRecords({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    payrollMigrationBatchId: batch.payrollMigrationBatchId,
+    records: [
+      {
+        personId: "legacy-employee-002",
+        employeeId: employee.employeeId,
+        employmentId: employment.employmentId,
+        employeeMasterSnapshot: {
+          sourceEmployeeNumber: "1002",
+          displayName: "Elsa Evidence"
+        },
+        employmentHistory: [
+          {
+            startDate: "2026-01-01",
+            employmentTypeCode: "permanent",
+            jobTitle: "Administrator",
+            payModelCode: "monthly_salary"
+          }
+        ],
+        ytdBasis: {
+          grossCompensationSek: 80000,
+          preliminaryTaxSek: 20000,
+          employerContributionBasisSek: 80000,
+          reportedThroughPeriod: "2026-03"
+        },
+        agiCarryForwardBasis: {
+          reportedThroughPeriod: "2026-03",
+          submissionReferences: ["AGI-2026-03-B"]
+        }
+      }
+    ]
+  });
+
+  const validated = platform.validatePayrollMigrationBatch({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    payrollMigrationBatchId: batch.payrollMigrationBatchId
+  });
+
+  assert.equal(validated.validationSummary.blockingIssueCount, 1);
+  assert.match(validated.validationSummary.issues[0].code, /payroll_migration_evidence_mapping_missing/);
 });

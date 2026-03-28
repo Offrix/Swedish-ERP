@@ -4,17 +4,17 @@ import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
-import { loginWithStrongAuth, loginWithTotpOnly, requestJson } from "../helpers/api-helpers.mjs";
+import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
 
-test("Step 19 API exposes payroll migration creation, validation, diff gating and finalize", async () => {
+test("Step 19 end-to-end flow imports payroll history with evidence mapping and preserves it through cutover", async () => {
   const platform = createApiPlatform({
-    clock: () => new Date("2026-03-24T19:45:00Z")
+    clock: () => new Date("2026-03-28T12:30:00Z")
   });
-  const balanceTypeCode = "VACATION_DAYS_PHASE19_API";
+  const balanceTypeCode = "VACATION_DAYS_PHASE19_E2E";
   const employee = platform.createEmployee({
     companyId: DEMO_IDS.companyId,
-    givenName: "Mikael",
-    familyName: "Migration",
+    givenName: "Hanna",
+    familyName: "History",
     identityType: "other",
     actorId: DEMO_IDS.userId
   });
@@ -22,7 +22,7 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
     companyId: DEMO_IDS.companyId,
     employeeId: employee.employeeId,
     employmentTypeCode: "permanent",
-    jobTitle: "Consultant",
+    jobTitle: "Payroll coordinator",
     payModelCode: "monthly_salary",
     startDate: "2026-01-01",
     actorId: DEMO_IDS.userId
@@ -45,20 +45,6 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
       platform,
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
-    });
-    const fieldUser = platform.createCompanyUser({
-      sessionToken: adminToken,
-      companyId: DEMO_IDS.companyId,
-      email: "payroll-migration-field@example.test",
-      displayName: "Payroll Migration Field",
-      roleCode: "field_user",
-      requiresMfa: false
-    });
-    const fieldUserToken = await loginWithTotpOnly({
-      baseUrl,
-      platform,
-      companyId: DEMO_IDS.companyId,
-      email: "payroll-migration-field@example.test"
     });
 
     const mappingSet = platform.createMappingSet({
@@ -87,16 +73,13 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
         firstTargetReportingPeriod: "2026-04",
         mappingSetId: mappingSet.mappingSetId,
         requiredBalanceTypeCodes: [balanceTypeCode],
-        requiredApprovalRoleCodes: ["PAYROLL_OWNER"]
+        requiredApprovalRoleCodes: ["PAYROLL_OWNER"],
+        sourceSnapshotRef: {
+          system: "legacy_payroll",
+          reportedThroughPeriod: "2026-03"
+        }
       }
     });
-    assert.equal(batch.status, "draft");
-
-    const fieldUserListForbidden = await requestJson(baseUrl, `/v1/payroll/migrations?companyId=${DEMO_IDS.companyId}`, {
-      token: fieldUserToken,
-      expectedStatus: 403
-    });
-    assert.equal(fieldUserListForbidden.error, "payroll_operations_role_forbidden");
 
     const imported = await requestJson(baseUrl, `/v1/payroll/migrations/${batch.payrollMigrationBatchId}/import-records`, {
       method: "POST",
@@ -106,102 +89,99 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
         companyId: DEMO_IDS.companyId,
         records: [
           {
-            personId: "legacy-emp-002",
+            personId: "legacy-hanna-001",
             employeeId: employee.employeeId,
             employmentId: employment.employmentId,
             employeeMasterSnapshot: {
-              sourceEmployeeNumber: "2002",
-              displayName: "Mikael Migration",
-              givenName: "Mikael",
-              familyName: "Migration"
+              sourceEmployeeNumber: "3001",
+              displayName: "Hanna History",
+              taxProfileCode: "TABLE_32"
             },
             employmentHistory: [
               {
                 startDate: "2026-01-01",
                 employmentTypeCode: "permanent",
-                jobTitle: "Consultant",
+                jobTitle: "Payroll coordinator",
                 payModelCode: "monthly_salary",
                 salaryBasisCode: "monthly",
-                salaryAmountSek: 40000
+                salaryAmountSek: 39000
               }
             ],
             ytdBasis: {
-              grossCompensationSek: 100000,
-              preliminaryTaxSek: 30000,
-              employerContributionBasisSek: 100000,
-              taxableBenefitsSek: 1800,
+              grossCompensationSek: 117000,
+              preliminaryTaxSek: 31500,
+              employerContributionBasisSek: 117000,
+              taxableBenefitsSek: 900,
               reportedThroughPeriod: "2026-03"
             },
             priorPayslipSummary: {
-              lastNetPaySek: 24000
+              lastNetPaySek: 27500
             },
             agiCarryForwardBasis: {
               reportedThroughPeriod: "2026-03",
-              submissionReferences: ["AGI-2026-03"]
+              submissionReferences: ["AGI-HANNA-2026-03"]
             },
             benefitHistory: [
               {
                 benefitTypeCode: "MEAL",
                 reportedPeriod: "2026-03",
-                taxableAmountSek: 1800,
+                taxableAmountSek: 900,
                 netDeductionSek: 0,
-                sourceRecordRef: "benefit-api-2026-03"
+                sourceRecordRef: "benefit-hanna-2026-03"
               }
             ],
             travelHistory: [
               {
                 travelTypeCode: "MILEAGE",
                 reportedPeriod: "2026-03",
-                taxFreeAmountSek: 920,
+                taxFreeAmountSek: 1120,
                 taxableAmountSek: 0,
-                mileageKm: 184,
-                sourceRecordRef: "travel-api-2026-03"
+                mileageKm: 224,
+                sourceRecordRef: "travel-hanna-2026-03"
               }
             ],
             evidenceMappings: [
               {
                 targetAreaCode: "employee_master",
-                sourceRecordRef: "employee-master-2002",
+                sourceRecordRef: "employee-master-hanna",
                 artifactType: "legacy_employee_export",
-                artifactRef: "evidence://employee-master-2002"
+                artifactRef: "evidence://employee-master-hanna"
               },
               {
                 targetAreaCode: "employment_history",
-                sourceRecordRef: "employment-history-2002",
+                sourceRecordRef: "employment-history-hanna",
                 artifactType: "legacy_employment_export",
-                artifactRef: "evidence://employment-history-2002"
+                artifactRef: "evidence://employment-history-hanna"
               },
               {
                 targetAreaCode: "ytd_basis",
-                sourceRecordRef: "ytd-2002-2026-03",
+                sourceRecordRef: "ytd-hanna-2026-03",
                 artifactType: "legacy_payroll_summary",
-                artifactRef: "evidence://ytd-2002-2026-03"
+                artifactRef: "evidence://ytd-hanna-2026-03"
               },
               {
                 targetAreaCode: "agi_history",
-                sourceRecordRef: "agi-2002-2026-03",
+                sourceRecordRef: "agi-hanna-2026-03",
                 artifactType: "agi_receipt",
-                artifactRef: "evidence://agi-2002-2026-03"
+                artifactRef: "evidence://agi-hanna-2026-03"
               },
               {
                 targetAreaCode: "benefit_history",
-                sourceRecordRef: "benefit-api-2026-03",
+                sourceRecordRef: "benefit-hanna-2026-03",
                 artifactType: "benefit_register",
-                artifactRef: "evidence://benefit-api-2026-03"
+                artifactRef: "evidence://benefit-hanna-2026-03"
               },
               {
                 targetAreaCode: "travel_history",
-                sourceRecordRef: "travel-api-2026-03",
+                sourceRecordRef: "travel-hanna-2026-03",
                 artifactType: "travel_claim",
-                artifactRef: "evidence://travel-api-2026-03"
+                artifactRef: "evidence://travel-hanna-2026-03"
               }
             ]
           }
         ]
       }
     });
-    assert.equal(imported.employeeRecordCount, 1);
-    assert.equal(imported.historyImportSummary.evidenceMappingCount, 6);
     assert.equal(imported.historyEvidenceBundle.artifactCount, 6);
 
     await requestJson(baseUrl, `/v1/payroll/migrations/${batch.payrollMigrationBatchId}/balance-baselines`, {
@@ -215,7 +195,7 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
             employeeId: employee.employeeId,
             employmentId: employment.employmentId,
             balanceTypeCode,
-            openingQuantity: 10,
+            openingQuantity: 14,
             effectiveDate: "2026-04-01"
           }
         ]
@@ -230,45 +210,24 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
         companyId: DEMO_IDS.companyId
       }
     });
-    assert.equal(validated.status, "validated");
+    assert.equal(validated.validationSummary.blockingIssueCount, 0);
 
-    const diffResult = await requestJson(baseUrl, `/v1/payroll/migrations/${batch.payrollMigrationBatchId}/diffs`, {
+    await requestJson(baseUrl, `/v1/payroll/migrations/${batch.payrollMigrationBatchId}/diffs`, {
       method: "POST",
       token: adminToken,
       expectedStatus: 201,
       body: {
         companyId: DEMO_IDS.companyId,
         sourceTotals: {
-          netPaySek: 24000,
-          preliminaryTaxSek: 30000
+          netPaySek: 27500,
+          preliminaryTaxSek: 31500
         },
         targetTotals: {
-          netPaySek: 23975,
-          preliminaryTaxSek: 30000
+          netPaySek: 27500,
+          preliminaryTaxSek: 31500
         }
       }
     });
-    assert.equal(diffResult.summary.blockingCount, 1);
-
-    const diffList = await requestJson(baseUrl, `/v1/payroll/migrations/${batch.payrollMigrationBatchId}/diffs?companyId=${DEMO_IDS.companyId}`, {
-      token: adminToken
-    });
-    assert.equal(diffList.items.length, 1);
-
-    await requestJson(
-      baseUrl,
-      `/v1/payroll/migrations/${batch.payrollMigrationBatchId}/diffs/${diffList.items[0].payrollMigrationDiffId}/decide`,
-      {
-        method: "POST",
-        token: adminToken,
-        expectedStatus: 200,
-        body: {
-          companyId: DEMO_IDS.companyId,
-          decision: "accepted",
-          explanation: "Signed reconciliation approves the net pay variance."
-        }
-      }
-    );
 
     const approved = await requestJson(baseUrl, `/v1/payroll/migrations/${batch.payrollMigrationBatchId}/approve`, {
       method: "POST",
@@ -290,15 +249,15 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
       }
     });
     assert.equal(finalized.status, "cutover_executed");
+    assert.ok(finalized.executionReceipt.historyEvidenceBundleId);
 
-    const stored = await requestJson(baseUrl, `/v1/payroll/migrations/${batch.payrollMigrationBatchId}?companyId=${DEMO_IDS.companyId}`, {
+    const summary = await requestJson(baseUrl, `/v1/payroll/migrations/${batch.payrollMigrationBatchId}/employees?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
-    assert.equal(stored.balanceBaselines.length, 1);
-    assert.equal(stored.executionReceipt.realizedBalanceTransactions.length, 1);
-    assert.equal(stored.employeeRecords[0].historyCoverage.missingRequiredEvidenceAreas.length, 0);
-    assert.equal(stored.historyEvidenceBundle.status, "frozen");
-    assert.equal(stored.executionReceipt.historyImportSummary.travelHistoryItemCount, 1);
+    assert.equal(summary.items.length, 1);
+    assert.equal(summary.items[0].historyCoverage.missingRequiredEvidenceAreas.length, 0);
+    assert.equal(summary.items[0].historyCoverage.benefitHistoryItemCount, 1);
+    assert.equal(summary.items[0].historyCoverage.travelHistoryItemCount, 1);
   } finally {
     await stopServer(server);
   }

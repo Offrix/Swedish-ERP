@@ -708,6 +708,108 @@ export function createMigrationModule({
     };
   }
 
+  function syncPayrollMigrationHistoryEvidenceBundle({ batch, actorId, correlationId }) {
+    const records = listStoredEmployeeMigrationRecords(batch);
+    if (records.length === 0) {
+      return null;
+    }
+    const historyImportSummary = buildPayrollHistoryImportSummary(batch);
+    const artifactRefs = dedupeObjectList(
+      records.flatMap((record) =>
+        (Array.isArray(record.evidenceMappings) ? record.evidenceMappings : []).map((mapping) => ({
+          artifactType: mapping.artifactType,
+          artifactRef: mapping.artifactRef,
+          checksum: mapping.checksum,
+          roleCode: mapping.targetAreaCode,
+          metadata: {
+            sourceRecordRef: mapping.sourceRecordRef,
+            targetAreaCode: mapping.targetAreaCode
+          }
+        }))
+      ),
+      (value) => `${value.artifactType}::${value.artifactRef}::${value.roleCode || ""}`
+    );
+    const sourceRefs = dedupeObjectList(
+      [
+        clone(batch.sourceSnapshotRef || {}),
+        ...records.flatMap((record) => [
+          {
+            employeeId: record.employeeId,
+            employmentId: record.employmentId,
+            sourceEmployeeRef: record.sourceEmployeeRef
+          },
+          ...(Array.isArray(record.agiCarryForwardBasis?.submissionReferences)
+            ? record.agiCarryForwardBasis.submissionReferences.map((submissionReference) => ({
+                submissionReference,
+                reportedThroughPeriod: record.agiCarryForwardBasis?.reportedThroughPeriod || null
+              }))
+            : [])
+        ])
+      ].filter((value) => value && Object.keys(value).length > 0),
+      (value) => hashObject(value)
+    );
+    const relatedObjectRefs = dedupeObjectList(
+      records.flatMap((record) => [
+        {
+          objectType: "employee",
+          objectId: record.employeeId
+        },
+        {
+          objectType: "employment",
+          objectId: record.employmentId
+        }
+      ]),
+      (value) => `${value.objectType}::${value.objectId}`
+    );
+    if (!evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+      return {
+        historyEvidenceBundleId: crypto.randomUUID(),
+        companyId: batch.companyId,
+        payrollMigrationBatchId: batch.payrollMigrationBatchId,
+        artifactCount: artifactRefs.length,
+        requiredEvidenceAreas: collectPayrollHistoryRequiredEvidenceAreas(records),
+        historyImportSummary
+      };
+    }
+    const bundle = evidencePlatform.createFrozenEvidenceBundleSnapshot({
+      companyId: batch.companyId,
+      bundleType: "payroll_history_import",
+      sourceObjectType: "payroll_migration_batch",
+      sourceObjectId: batch.payrollMigrationBatchId,
+      sourceObjectVersion: batch.updatedAt || batch.createdAt,
+      title: `Payroll history import ${batch.batchReference || batch.payrollMigrationBatchId}`,
+      retentionClass: "regulated",
+      classificationCode: "restricted_internal",
+      metadata: {
+        compatibilityPayload: {
+          payrollMigrationBatchId: batch.payrollMigrationBatchId,
+          migrationMode: batch.migrationMode,
+          effectiveCutoverDate: batch.effectiveCutoverDate,
+          firstTargetReportingPeriod: batch.firstTargetReportingPeriod,
+          historyImportSummary
+        }
+      },
+      artifactRefs,
+      sourceRefs,
+      relatedObjectRefs,
+      actorId,
+      correlationId,
+      previousEvidenceBundleId: batch.historyEvidenceBundle?.historyEvidenceBundleId || null
+    });
+    return {
+      historyEvidenceBundleId: bundle.evidenceBundleId,
+      companyId: batch.companyId,
+      payrollMigrationBatchId: batch.payrollMigrationBatchId,
+      artifactCount: bundle.artifactCount,
+      requiredEvidenceAreas: collectPayrollHistoryRequiredEvidenceAreas(records),
+      historyImportSummary,
+      checksum: bundle.checksum,
+      status: bundle.status,
+      frozenAt: bundle.frozenAt,
+      archivedAt: bundle.archivedAt
+    };
+  }
+
   function updateCutoverChecklistItem({
     sessionToken,
     companyId,
@@ -1281,6 +1383,8 @@ export function createMigrationModule({
       executedByUserId: null,
       rolledBackAt: null,
       rolledBackByUserId: null,
+      historyImportSummary: createEmptyPayrollHistoryImportSummary(),
+      historyEvidenceBundle: null,
       validationSummary: {
         recordCount: 0,
         baselineCount: 0,
@@ -1359,6 +1463,12 @@ export function createMigrationModule({
       state.employeeMigrationRecords.set(stored.employeeMigrationRecordId, stored);
     }
     batch.status = "imported";
+    batch.historyImportSummary = buildPayrollHistoryImportSummary(batch);
+    batch.historyEvidenceBundle = syncPayrollMigrationHistoryEvidenceBundle({
+      batch,
+      actorId: principal.userId,
+      correlationId
+    });
     batch.updatedAt = nowIso(clock);
     audit({
       companyId: batch.companyId,
@@ -1428,6 +1538,12 @@ export function createMigrationModule({
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
     const batch = requirePayrollMigrationBatch(companyId, payrollMigrationBatchId);
+    batch.historyImportSummary = buildPayrollHistoryImportSummary(batch);
+    batch.historyEvidenceBundle = syncPayrollMigrationHistoryEvidenceBundle({
+      batch,
+      actorId: principal.userId,
+      correlationId
+    });
     const validationSummary = computePayrollMigrationValidationSummary({
       batch,
       balancesPlatform
@@ -1658,6 +1774,8 @@ export function createMigrationModule({
     batch.updatedAt = batch.executedAt;
     batch.executionReceipt = {
       realizedBalanceTransactions: realized,
+      historyImportSummary: clone(batch.historyImportSummary || createEmptyPayrollHistoryImportSummary()),
+      historyEvidenceBundleId: batch.historyEvidenceBundle?.historyEvidenceBundleId || null,
       executedAt: batch.executedAt,
       executedByUserId: principal.userId
     };
@@ -1736,7 +1854,8 @@ export function createMigrationModule({
     const batch = requirePayrollMigrationBatch(companyId, payrollMigrationBatchId);
     return listStoredEmployeeMigrationRecords(batch).map((record) => ({
       ...clone(record),
-      baselineCoverage: summarizeEmployeeBaselineCoverage(batch, record)
+      baselineCoverage: summarizeEmployeeBaselineCoverage(batch, record),
+      historyCoverage: summarizeEmployeeHistoryCoverage(record)
     }));
   }
 
@@ -1842,7 +1961,8 @@ export function createMigrationModule({
       ...presentPayrollMigrationBatchSummary(batch),
       employeeRecords: listStoredEmployeeMigrationRecords(batch).map((record) => ({
         ...clone(record),
-        baselineCoverage: summarizeEmployeeBaselineCoverage(batch, record)
+        baselineCoverage: summarizeEmployeeBaselineCoverage(batch, record),
+        historyCoverage: summarizeEmployeeHistoryCoverage(record)
       })),
       balanceBaselines: listStoredBalanceBaselines(batch).map(clone),
       diffs: listStoredPayrollMigrationDiffs(batch).map(clone),
@@ -1884,6 +2004,46 @@ export function createMigrationModule({
       requiredBalanceTypeCodes: clone(requiredCodes),
       coveredBalanceTypeCodes: [...new Set(coveredCodes)].sort(),
       missingBalanceTypeCodes: requiredCodes.filter((code) => !coveredCodes.includes(code))
+    };
+  }
+
+  function buildPayrollHistoryImportSummary(batch) {
+    const records = listStoredEmployeeMigrationRecords(batch);
+    return records.reduce(
+      (summary, record) => {
+        const historyCoverage = summarizeEmployeeHistoryCoverage(record);
+        summary.employeeCount += 1;
+        summary.employmentHistorySegmentCount += historyCoverage.employmentHistorySegmentCount;
+        summary.benefitHistoryItemCount += historyCoverage.benefitHistoryItemCount;
+        summary.travelHistoryItemCount += historyCoverage.travelHistoryItemCount;
+        summary.agiSubmissionReferenceCount += historyCoverage.agiSubmissionReferenceCount;
+        summary.evidenceMappingCount += historyCoverage.evidenceMappingCount;
+        summary.employeesMissingEmployeeMasterCount += historyCoverage.employeeMasterPresent ? 0 : 1;
+        summary.employeesMissingEmploymentHistoryCount += historyCoverage.employmentHistorySegmentCount > 0 ? 0 : 1;
+        summary.employeesMissingEvidenceMappingCount += historyCoverage.missingRequiredEvidenceAreas.length > 0 ? 1 : 0;
+        summary.missingRequiredEvidenceAreaCount += historyCoverage.missingRequiredEvidenceAreas.length;
+        return summary;
+      },
+      createEmptyPayrollHistoryImportSummary()
+    );
+  }
+
+  function summarizeEmployeeHistoryCoverage(record) {
+    const evidenceMappings = Array.isArray(record.evidenceMappings) ? record.evidenceMappings : [];
+    const coveredEvidenceAreas = [...new Set(evidenceMappings.map((mapping) => mapping.targetAreaCode))].sort();
+    const requiredEvidenceAreas = resolveRequiredEvidenceAreas(record);
+    return {
+      employeeMasterPresent: record.employeeMasterSnapshot != null,
+      employmentHistorySegmentCount: Array.isArray(record.employmentHistory) ? record.employmentHistory.length : 0,
+      benefitHistoryItemCount: Array.isArray(record.benefitHistory) ? record.benefitHistory.length : 0,
+      travelHistoryItemCount: Array.isArray(record.travelHistory) ? record.travelHistory.length : 0,
+      agiSubmissionReferenceCount: Array.isArray(record.agiCarryForwardBasis?.submissionReferences)
+        ? record.agiCarryForwardBasis.submissionReferences.length
+        : 0,
+      evidenceMappingCount: evidenceMappings.length,
+      requiredEvidenceAreas,
+      coveredEvidenceAreas,
+      missingRequiredEvidenceAreas: requiredEvidenceAreas.filter((areaCode) => !coveredEvidenceAreas.includes(areaCode))
     };
   }
 
@@ -1980,6 +2140,47 @@ function normalizeMappings(values) {
   }));
 }
 
+function createEmptyPayrollHistoryImportSummary() {
+  return {
+    employeeCount: 0,
+    employmentHistorySegmentCount: 0,
+    benefitHistoryItemCount: 0,
+    travelHistoryItemCount: 0,
+    agiSubmissionReferenceCount: 0,
+    evidenceMappingCount: 0,
+    employeesMissingEmployeeMasterCount: 0,
+    employeesMissingEmploymentHistoryCount: 0,
+    employeesMissingEvidenceMappingCount: 0,
+    missingRequiredEvidenceAreaCount: 0
+  };
+}
+
+function resolveRequiredEvidenceAreas(record) {
+  return [
+    "EMPLOYEE_MASTER",
+    "EMPLOYMENT_HISTORY",
+    "YTD_BASIS",
+    "AGI_HISTORY",
+    ...(Array.isArray(record?.benefitHistory) && record.benefitHistory.length > 0 ? ["BENEFIT_HISTORY"] : []),
+    ...(Array.isArray(record?.travelHistory) && record.travelHistory.length > 0 ? ["TRAVEL_HISTORY"] : [])
+  ];
+}
+
+function collectPayrollHistoryRequiredEvidenceAreas(records) {
+  return [...new Set((Array.isArray(records) ? records : []).flatMap((record) => resolveRequiredEvidenceAreas(record)))].sort();
+}
+
+function dedupeObjectList(values, makeKey) {
+  const map = new Map();
+  for (const value of Array.isArray(values) ? values : []) {
+    const key = makeKey(value);
+    if (!map.has(key)) {
+      map.set(key, clone(value));
+    }
+  }
+  return [...map.values()];
+}
+
 function normalizePayrollMigrationYtdBasis(value, validationErrors) {
   const basis = value && typeof value === "object" ? value : {};
   let grossCompensationSek = null;
@@ -2011,6 +2212,176 @@ function normalizePayrollMigrationYtdBasis(value, validationErrors) {
     taxableBenefitsSek: basis.taxableBenefitsSek == null ? 0 : normalizeNumber(basis.taxableBenefitsSek, "payroll_migration_ytd_taxable_benefits_invalid"),
     pensionBasisSek: basis.pensionBasisSek == null ? null : normalizeNumber(basis.pensionBasisSek, "payroll_migration_ytd_pension_basis_invalid"),
     reportedThroughPeriod
+  };
+}
+
+function normalizeEmployeeMasterSnapshot(value, validationErrors) {
+  if (!value || typeof value !== "object") {
+    validationErrors.push({
+      code: "payroll_migration_employee_master_missing",
+      severity: "blocking",
+      message: "Employee master snapshot is required for payroll history import."
+    });
+    return null;
+  }
+  let sourceEmployeeNumber = null;
+  let displayName = null;
+  try {
+    sourceEmployeeNumber = text(
+      value.sourceEmployeeNumber ?? value.employeeNumber ?? value.employeeNo,
+      "payroll_migration_employee_master_number_required"
+    );
+    displayName = text(
+      value.displayName ?? [value.givenName, value.familyName].filter(Boolean).join(" ").trim(),
+      "payroll_migration_employee_master_name_required"
+    );
+  } catch {
+    validationErrors.push({
+      code: "payroll_migration_employee_master_incomplete",
+      severity: "blocking",
+      message: "Employee master snapshot requires sourceEmployeeNumber and displayName."
+    });
+  }
+  return {
+    sourceEmployeeNumber,
+    displayName,
+    givenName: optionalText(value.givenName),
+    familyName: optionalText(value.familyName),
+    taxProfileCode: optionalText(value.taxProfileCode),
+    employeeStatusCode: optionalText(value.employeeStatusCode),
+    countryCode: optionalText(value.countryCode)
+  };
+}
+
+function normalizeEmploymentHistory(values, validationErrors) {
+  if (!Array.isArray(values) || values.length === 0) {
+    validationErrors.push({
+      code: "payroll_migration_employment_history_missing",
+      severity: "blocking",
+      message: "Employment history with at least one segment is required."
+    });
+    return [];
+  }
+  const segments = values.map((value) => ({
+    startDate: dateOnly(value?.startDate, "payroll_migration_employment_history_start_date_required"),
+    endDate: value?.endDate == null ? null : dateOnly(value.endDate, "payroll_migration_employment_history_end_date_invalid"),
+    employmentTypeCode: normalizeCode(value?.employmentTypeCode, "payroll_migration_employment_type_required"),
+    jobTitle: text(value?.jobTitle, "payroll_migration_job_title_required"),
+    payModelCode: normalizeCode(value?.payModelCode, "payroll_migration_pay_model_required"),
+    salaryBasisCode: optionalText(value?.salaryBasisCode),
+    organizationPlacementRef: optionalText(value?.organizationPlacementRef),
+    costCenterCode: optionalText(value?.costCenterCode),
+    salaryAmountSek: value?.salaryAmountSek == null ? null : normalizeNumber(value.salaryAmountSek, "payroll_migration_salary_amount_invalid")
+  })).sort((left, right) => left.startDate.localeCompare(right.startDate));
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    if (segment.endDate && segment.endDate < segment.startDate) {
+      validationErrors.push({
+        code: "payroll_migration_employment_history_dates_invalid",
+        severity: "blocking",
+        message: "Employment history endDate cannot be earlier than startDate."
+      });
+    }
+    if (index > 0) {
+      const previousSegment = segments[index - 1];
+      if (!previousSegment.endDate || previousSegment.endDate >= segment.startDate) {
+        validationErrors.push({
+          code: "payroll_migration_employment_history_overlap",
+          severity: "blocking",
+          message: "Employment history segments cannot overlap."
+        });
+        break;
+      }
+    }
+  }
+  return segments;
+}
+
+function normalizeBenefitHistory(values, validationErrors) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values.map((value) => ({
+    benefitTypeCode: normalizeCode(value?.benefitTypeCode, "payroll_migration_benefit_type_required"),
+    reportedPeriod: reportingPeriod(value?.reportedPeriod, "payroll_migration_benefit_reported_period_required"),
+    taxableAmountSek: normalizeNumber(value?.taxableAmountSek ?? 0, "payroll_migration_benefit_taxable_amount_invalid"),
+    netDeductionSek: value?.netDeductionSek == null ? 0 : normalizeNumber(value.netDeductionSek, "payroll_migration_benefit_net_deduction_invalid"),
+    sourceRecordRef: text(value?.sourceRecordRef, "payroll_migration_benefit_source_record_ref_required"),
+    note: optionalText(value?.note)
+  }));
+}
+
+function normalizeTravelHistory(values, validationErrors) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values.map((value) => ({
+    travelTypeCode: normalizeCode(value?.travelTypeCode, "payroll_migration_travel_type_required"),
+    reportedPeriod: reportingPeriod(value?.reportedPeriod, "payroll_migration_travel_reported_period_required"),
+    taxFreeAmountSek: normalizeNumber(value?.taxFreeAmountSek ?? 0, "payroll_migration_travel_tax_free_amount_invalid"),
+    taxableAmountSek: normalizeNumber(value?.taxableAmountSek ?? 0, "payroll_migration_travel_taxable_amount_invalid"),
+    mileageKm: value?.mileageKm == null ? null : normalizeNumber(value.mileageKm, "payroll_migration_travel_mileage_invalid"),
+    sourceRecordRef: text(value?.sourceRecordRef, "payroll_migration_travel_source_record_ref_required"),
+    note: optionalText(value?.note)
+  }));
+}
+
+function normalizePayrollMigrationEvidenceMappings(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values.map((value) => ({
+    targetAreaCode: assertAllowed(
+      normalizeCode(value?.targetAreaCode, "payroll_migration_evidence_target_area_required"),
+      ["EMPLOYEE_MASTER", "EMPLOYMENT_HISTORY", "YTD_BASIS", "AGI_HISTORY", "BENEFIT_HISTORY", "TRAVEL_HISTORY"],
+      "payroll_migration_evidence_target_area_invalid"
+    ),
+    sourceRecordRef: text(value?.sourceRecordRef, "payroll_migration_evidence_source_record_ref_required"),
+    artifactType: text(value?.artifactType, "payroll_migration_evidence_artifact_type_required"),
+    artifactRef: text(value?.artifactRef, "payroll_migration_evidence_artifact_ref_required"),
+    checksum: optionalText(value?.checksum),
+    note: optionalText(value?.note)
+  }));
+}
+
+function resolvePayrollMigrationAgreementReference({
+  companyId,
+  agreementVersionId,
+  agreementCatalogEntryId,
+  collectiveAgreementsPlatform,
+  validationErrors
+}) {
+  const resolvedAgreementVersionId = optionalText(agreementVersionId);
+  const resolvedAgreementCatalogEntryId = optionalText(agreementCatalogEntryId);
+  let resolvedVersionId = resolvedAgreementVersionId;
+  if (resolvedAgreementCatalogEntryId) {
+    const matchingCatalogEntry = collectiveAgreementsPlatform?.listAgreementCatalogEntries
+      ? collectiveAgreementsPlatform
+          .listAgreementCatalogEntries({ companyId })
+          .find((candidate) => candidate.agreementCatalogEntryId === resolvedAgreementCatalogEntryId)
+      : null;
+    if (!matchingCatalogEntry) {
+      validationErrors.push({
+        code: "payroll_migration_catalog_entry_not_found",
+        severity: "blocking",
+        message: "Published agreement catalog entry is required when referenced by payroll history import."
+      });
+    } else {
+      resolvedVersionId = matchingCatalogEntry.agreementVersionId;
+      if (resolvedAgreementVersionId && matchingCatalogEntry.agreementVersionId !== resolvedAgreementVersionId) {
+        validationErrors.push({
+          code: "payroll_migration_agreement_reference_mismatch",
+          severity: "blocking",
+          message: "Agreement catalog entry and agreement version must point to the same published version."
+        });
+      }
+    }
+  } else if (resolvedVersionId && collectiveAgreementsPlatform?.getAgreementVersion) {
+    collectiveAgreementsPlatform.getAgreementVersion({ companyId, agreementVersionId: resolvedVersionId });
+  }
+  return {
+    agreementVersionId: resolvedVersionId,
+    agreementCatalogEntryId: resolvedAgreementCatalogEntryId
   };
 }
 
@@ -2051,11 +2422,37 @@ function normalizeEmployeeMigrationRecords(records, { companyId, batch, hrPlatfo
     if (hrPlatform?.getEmployment) {
       hrPlatform.getEmployment({ companyId, employeeId, employmentId });
     }
-    const agreementVersionId = optionalText(value?.agreementVersionId);
-    if (agreementVersionId && collectiveAgreementsPlatform?.getAgreementVersion) {
-      collectiveAgreementsPlatform.getAgreementVersion({ companyId, agreementVersionId });
-    }
     const validationErrors = [];
+    const employeeMasterSnapshot = normalizeEmployeeMasterSnapshot(
+      value?.employeeMasterSnapshot ?? value?.employeeMaster ?? null,
+      validationErrors
+    );
+    const employmentHistory = normalizeEmploymentHistory(value?.employmentHistory, validationErrors);
+    const benefitHistory = normalizeBenefitHistory(value?.benefitHistory, validationErrors);
+    const travelHistory = normalizeTravelHistory(value?.travelHistory, validationErrors);
+    const evidenceMappings = normalizePayrollMigrationEvidenceMappings(value?.evidenceMappings);
+    const agreementReference = resolvePayrollMigrationAgreementReference({
+      companyId,
+      agreementVersionId: value?.agreementVersionId,
+      agreementCatalogEntryId: value?.agreementCatalogEntryId,
+      collectiveAgreementsPlatform,
+      validationErrors
+    });
+    const ytdBasis = normalizePayrollMigrationYtdBasis(value?.ytdBasis, validationErrors);
+    const agiCarryForwardBasis = normalizeAgiCarryForwardBasis(value?.agiCarryForwardBasis, validationErrors);
+    const requiredEvidenceAreas = resolveRequiredEvidenceAreas({
+      benefitHistory,
+      travelHistory
+    });
+    const coveredEvidenceAreas = [...new Set(evidenceMappings.map((mapping) => mapping.targetAreaCode))];
+    const missingRequiredEvidenceAreas = requiredEvidenceAreas.filter((areaCode) => !coveredEvidenceAreas.includes(areaCode));
+    if (missingRequiredEvidenceAreas.length > 0) {
+      validationErrors.push({
+        code: "payroll_migration_evidence_mapping_missing",
+        severity: batch.migrationMode === "live" ? "blocking" : "warning",
+        message: `Evidence mapping is missing for ${missingRequiredEvidenceAreas.join(", ")}.`
+      });
+    }
     return {
       payrollMigrationBatchId: batch.payrollMigrationBatchId,
       companyId,
@@ -2063,11 +2460,17 @@ function normalizeEmployeeMigrationRecords(records, { companyId, batch, hrPlatfo
       employeeId,
       employmentId,
       sourceEmployeeRef: optionalText(value?.sourceEmployeeRef) || text(value?.personId, "payroll_migration_person_id_required"),
-      ytdBasis: normalizePayrollMigrationYtdBasis(value?.ytdBasis, validationErrors),
+      employeeMasterSnapshot,
+      employmentHistory,
+      ytdBasis,
       priorPayslipSummary: clone(value?.priorPayslipSummary || {}),
-      agiCarryForwardBasis: normalizeAgiCarryForwardBasis(value?.agiCarryForwardBasis, validationErrors),
-      agreementVersionId,
-      validationState: validationErrors.length > 0 ? "blocking" : "valid",
+      agiCarryForwardBasis,
+      benefitHistory,
+      travelHistory,
+      evidenceMappings,
+      agreementVersionId: agreementReference.agreementVersionId,
+      agreementCatalogEntryId: agreementReference.agreementCatalogEntryId,
+      validationState: validationErrors.some((validationError) => (validationError.severity || "blocking") === "blocking") ? "blocking" : "valid",
       validationErrors
     };
   });
