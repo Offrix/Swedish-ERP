@@ -34,6 +34,8 @@ export const SUBMISSION_ENVELOPE_STATES = Object.freeze([
 export const SUBMISSION_ATTEMPT_STATUSES = Object.freeze(["queued", "running", "succeeded", "failed", "skipped"]);
 export const SUBMISSION_TRANSPORT_SCENARIOS = Object.freeze(["technical_ack", "technical_nack", "transport_failed", "queued_only"]);
 const SUBMISSION_ACTION_PRIORITIES = Object.freeze(["low", "normal", "high", "urgent"]);
+const TRIAL_SUBMISSION_WATERMARK_CODE = "TRIAL";
+const TRIAL_SUBMISSION_POLICY_CODE = "trial_safe_regulated_simulator";
 
 export function createRegulatedSubmissionsModule({ state, clock, evidencePlatform, getCorePlatform } = {}) {
   return {
@@ -171,6 +173,9 @@ function prepareAuthoritySubmission({ state, clock, evidencePlatform }, input = 
     payloadHash,
     payloadJson: payload,
     correlationId: normalizeOptionalText(input.correlationId) || crypto.randomUUID(),
+    watermarkCode: null,
+    trialSimulationProfileCode: null,
+    simulatedByPolicyCode: null,
     transportJobId: null,
     lastTransportJobId: null,
     transportRequestedAt: null,
@@ -252,6 +257,8 @@ function buildSubmissionEvidencePackPayload(state, submission) {
   const recoveries = getSubmissionRecoveries(state, submission.submissionId);
   const queueItems = getSubmissionQueueItems(state, submission.submissionId);
   const reconciliationSummary = buildSubmissionReconciliation(state, submission);
+  const trialSimulation = buildTrialSubmissionSimulationSummary(submission);
+  const watermark = buildSubmissionAuditWatermark(submission);
   return {
     submissionEvidencePackId: submission.evidencePackId || `submission-evidence:${submission.submissionId}`,
     submissionId: submission.submissionId,
@@ -271,6 +278,8 @@ function buildSubmissionEvidencePackPayload(state, submission) {
     legalEffect: submission.dispatchMode !== "trial",
     signingRequirementCode: submission.signedState,
     signerIdentity: submission.signedByActorId,
+    watermark,
+    trialSimulation,
     signatureRefs: submission.signatureReference ? [submission.signatureReference] : [],
     submittedArtifactRefs: [
       {
@@ -321,6 +330,8 @@ function buildSubmissionEvidencePackPayload(state, submission) {
         createdByActorId: submission.createdByActorId,
         signedByActorId: submission.signedByActorId,
         correlationId: submission.correlationId,
+        watermark,
+        trialSimulation,
         createdAt: submission.createdAt,
         updatedAt: submission.updatedAt
       }
@@ -466,6 +477,10 @@ async function submitAuthoritySubmission(
       payloadHash: submission.payloadHash,
       providerReference: submission.providerReference,
       transportPlan: queuedTransportPlan,
+      watermarkCode: queuedTransportPlan.watermarkCode || null,
+      simulationProfileCode: queuedTransportPlan.simulationProfileCode || null,
+      simulationStepCode: queuedTransportPlan.simulationStepCode || null,
+      simulatedByPolicyCode: queuedTransportPlan.simulatedByPolicyCode || null,
       queuedJobId: submission.transportJobId,
       replayReasonCode: null,
       status: "queued"
@@ -496,6 +511,7 @@ async function submitAuthoritySubmission(
 
   const corePlatform = resolveCorePlatform(getCorePlatform);
   if (corePlatform) {
+    const queuedTransportScenarioCode = isTrialExecutionMode(submission.dispatchMode) ? null : transportPlan.transportScenarioCode;
     const queuedJob = await corePlatform.enqueueRuntimeJob({
       companyId: submission.companyId,
       jobType: "submission.transport",
@@ -505,7 +521,7 @@ async function submitAuthoritySubmission(
       payload: {
         submissionId: submission.submissionId,
         mode: submission.dispatchMode,
-        transportScenarioCode: transportPlan.transportScenarioCode,
+        transportScenarioCode: queuedTransportScenarioCode,
         providerReference: submission.providerReference,
         message: submission.dispatchMessage
       },
@@ -527,6 +543,10 @@ async function submitAuthoritySubmission(
       payloadHash: submission.payloadHash,
       providerReference: submission.providerReference,
       transportPlan,
+      watermarkCode: transportPlan.watermarkCode || null,
+      simulationProfileCode: transportPlan.simulationProfileCode || null,
+      simulationStepCode: transportPlan.simulationStepCode || null,
+      simulatedByPolicyCode: transportPlan.simulatedByPolicyCode || null,
       queuedJobId: queuedJob.jobId,
       replayReasonCode: null,
       status: "queued"
@@ -540,15 +560,15 @@ async function submitAuthoritySubmission(
 
   return executeAuthoritySubmissionTransport(
     { state, clock },
-    {
-      companyId,
-      submissionId,
-      actorId,
-      mode,
-      transportScenarioCode: transportPlan.transportScenarioCode,
-      providerReference,
-      message,
-      triggerCode: "initial_dispatch"
+      {
+        companyId,
+        submissionId,
+        actorId,
+        mode,
+        transportScenarioCode: isTrialExecutionMode(mode) ? null : transportPlan.transportScenarioCode,
+        providerReference,
+        message,
+        triggerCode: "initial_dispatch"
     }
   );
 }
@@ -587,6 +607,16 @@ async function requestSubmissionReplay(
           simulatedTransportOutcome
         })
       : null;
+  const replayTransportPlan =
+    targetJobType === "submission.transport"
+      ? resolveSubmissionTransportPlan({
+          submission,
+          mode: submission.dispatchMode || "test",
+          transportScenarioCode: resolvedTransportScenarioCode,
+          providerReference: submission.providerReference,
+          message: normalizeOptionalText(message) || submission.dispatchMessage
+        })
+      : null;
   const resolvedIdempotencyKey =
     normalizeOptionalText(idempotencyKey) ||
     hashObject({
@@ -597,6 +627,10 @@ async function requestSubmissionReplay(
       status: submission.status
     });
   if (corePlatform) {
+    const queuedTransportScenarioCode =
+      targetJobType === "submission.transport" && isTrialExecutionMode(submission.dispatchMode || "test")
+        ? null
+        : resolvedTransportScenarioCode;
     const queuedJob = await corePlatform.enqueueRuntimeJob({
       companyId: submission.companyId,
       jobType: targetJobType,
@@ -608,7 +642,7 @@ async function requestSubmissionReplay(
           ? {
               submissionId: submission.submissionId,
               mode: submission.dispatchMode || "test",
-              transportScenarioCode: resolvedTransportScenarioCode,
+              transportScenarioCode: queuedTransportScenarioCode,
               providerReference: submission.providerReference,
               message: normalizeOptionalText(message) || submission.dispatchMessage,
               replayReasonCode: resolvedReasonCode
@@ -633,16 +667,11 @@ async function requestSubmissionReplay(
       legalEffect: (submission.dispatchMode || "test") !== "trial",
       payloadHash: submission.payloadHash,
       providerReference: submission.providerReference,
-      transportPlan:
-        targetJobType === "submission.transport"
-          ? resolveSubmissionTransportPlan({
-              submission,
-              mode: submission.dispatchMode || "test",
-              transportScenarioCode: resolvedTransportScenarioCode,
-              providerReference: submission.providerReference,
-              message: normalizeOptionalText(message) || submission.dispatchMessage
-            })
-          : null,
+      transportPlan: replayTransportPlan,
+      watermarkCode: replayTransportPlan?.watermarkCode || null,
+      simulationProfileCode: replayTransportPlan?.simulationProfileCode || null,
+      simulationStepCode: replayTransportPlan?.simulationStepCode || null,
+      simulatedByPolicyCode: replayTransportPlan?.simulatedByPolicyCode || null,
       queuedJobId: queuedJob.jobId,
       replayReasonCode: resolvedReasonCode,
       status: "queued"
@@ -664,7 +693,7 @@ async function requestSubmissionReplay(
           submissionId,
           actorId,
           mode: submission.dispatchMode || "test",
-          transportScenarioCode: resolvedTransportScenarioCode,
+          transportScenarioCode: isTrialExecutionMode(submission.dispatchMode || "test") ? null : resolvedTransportScenarioCode,
           providerReference: submission.providerReference,
           message,
           triggerCode: "replay",
@@ -881,6 +910,10 @@ function executeAuthoritySubmissionTransport(
     payloadHash: submission.payloadHash,
     providerReference: transportPlan.providerReference || submission.providerReference,
     transportPlan,
+    watermarkCode: transportPlan.watermarkCode || null,
+    simulationProfileCode: transportPlan.simulationProfileCode || null,
+    simulationStepCode: transportPlan.simulationStepCode || null,
+    simulatedByPolicyCode: transportPlan.simulatedByPolicyCode || null,
     queuedJobId: normalizeOptionalText(jobId),
     replayReasonCode: normalizeOptionalText(replayReasonCode),
     status: normalizeOptionalText(jobId) ? "queued" : "running"
@@ -975,9 +1008,23 @@ function executeAuthoritySubmissionTransport(
         actorId,
         submissionAttemptId: attempt.submissionAttemptId,
         mode,
-        legalEffect: mode !== "trial"
+        legalEffect: mode !== "trial",
+        watermarkCode: transportPlan.watermarkCode || null,
+        simulationProfileCode: transportPlan.simulationProfileCode || null,
+        simulationStepCode: transportPlan.simulationStepCode || null,
+        simulatedByPolicyCode: transportPlan.simulatedByPolicyCode || null
       }
     );
+    if (isTrialExecutionMode(mode)) {
+      materializeTrialSubmissionReceipts(
+        { state, clock, evidencePlatform },
+        {
+          companyId,
+          submissionId,
+          actorId
+        }
+      );
+    }
   } else if (transportPlan.fallbackActivated === true || transportPlan.resultCode === "official_transport_queued") {
     createQueueItem(state, {
       submission,
@@ -1021,6 +1068,14 @@ function executeSubmissionReceiptCollection(
   } = {}
 ) {
   const submission = requireSubmission(state, companyId, submissionId);
+  const trialReceiptPlan = resolveTrialSubmissionReceiptPlan({
+    state,
+    submission,
+    simulatedReceiptType,
+    providerStatus,
+    message,
+    requiredInput
+  });
   const attempt = ensureSubmissionAttempt(state, {
     submission,
     clock,
@@ -1031,6 +1086,10 @@ function executeSubmissionReceiptCollection(
     legalEffect: (submission.dispatchMode || "test") !== "trial",
     payloadHash: submission.payloadHash,
     providerReference: submission.providerReference,
+    watermarkCode: trialReceiptPlan?.watermarkCode || null,
+    simulationProfileCode: trialReceiptPlan?.simulationProfileCode || null,
+    simulationStepCode: trialReceiptPlan?.simulationStepCode || null,
+    simulatedByPolicyCode: trialReceiptPlan?.simulatedByPolicyCode || null,
     queuedJobId: normalizeOptionalText(jobId),
     replayReasonCode: normalizeOptionalText(replayReasonCode),
     status: normalizeOptionalText(jobId) ? "queued" : "running"
@@ -1049,7 +1108,7 @@ function executeSubmissionReceiptCollection(
       skipReasonCode: "submission_receipt_collection_not_allowed"
     };
   }
-  const receiptType = normalizeOptionalText(simulatedReceiptType);
+  const receiptType = normalizeOptionalText(simulatedReceiptType) || trialReceiptPlan?.receiptType || null;
   if (!receiptType) {
     finalizeSubmissionAttempt(attempt, {
       status: "skipped",
@@ -1069,15 +1128,19 @@ function executeSubmissionReceiptCollection(
       companyId,
       submissionId,
       receiptType,
-      providerStatus,
+      providerStatus: trialReceiptPlan?.providerStatus || providerStatus,
       rawReference: null,
-      message,
-      isFinal,
-      requiredInput,
+      message: trialReceiptPlan?.messageText || message,
+      isFinal: trialReceiptPlan?.isFinal ?? isFinal,
+      requiredInput: trialReceiptPlan?.requiredInput || requiredInput,
       actorId,
       submissionAttemptId: attempt.submissionAttemptId,
       mode: submission.dispatchMode || null,
-      legalEffect: (submission.dispatchMode || "test") !== "trial"
+      legalEffect: (submission.dispatchMode || "test") !== "trial",
+      watermarkCode: trialReceiptPlan?.watermarkCode || null,
+      simulationProfileCode: trialReceiptPlan?.simulationProfileCode || null,
+      simulationStepCode: trialReceiptPlan?.simulationStepCode || null,
+      simulatedByPolicyCode: trialReceiptPlan?.simulatedByPolicyCode || null
     }
   );
 }
@@ -1096,12 +1159,26 @@ function registerSubmissionReceipt(
     actorId = "system",
     submissionAttemptId = null,
     mode = null,
-    legalEffect = null
+    legalEffect = null,
+    watermarkCode = null,
+    simulationProfileCode = null,
+    simulationStepCode = null,
+    simulatedByPolicyCode = null
   } = {}
 ) {
   const submission = requireSubmission(state, companyId, submissionId);
   if (["finalized", "superseded"].includes(submission.status)) {
     throw createError(409, "submission_receipt_not_allowed", "Receipts cannot be appended to a finalized or superseded submission.");
+  }
+  if (
+    isTrialExecutionMode(normalizeOptionalText(mode) || submission.dispatchMode || null)
+    && normalizeOptionalText(simulatedByPolicyCode) !== TRIAL_SUBMISSION_POLICY_CODE
+  ) {
+    throw createError(
+      409,
+      "submission_trial_receipt_override_forbidden",
+      "Trial submissions must use deterministic regulated simulator receipts."
+    );
   }
   const normalizedType = assertAllowed(receiptType, SUBMISSION_RECEIPT_TYPES, "submission_receipt_type_invalid");
   const existingReceipt = findMatchingReceipt(state, submission.submissionId, {
@@ -1139,6 +1216,10 @@ function registerSubmissionReceipt(
           legalEffect: legalEffect == null ? (submission.dispatchMode || "test") !== "trial" : legalEffect === true,
           payloadHash: submission.payloadHash,
           providerReference: normalizeOptionalText(rawReference) || normalizeOptionalText(providerStatus) || submission.providerReference,
+          watermarkCode,
+          simulationProfileCode,
+          simulationStepCode,
+          simulatedByPolicyCode,
           queuedJobId: null,
           replayReasonCode: null,
           status: "running"
@@ -1158,6 +1239,10 @@ function registerSubmissionReceipt(
     payloadHash: submission.payloadHash,
     mode: normalizeOptionalText(mode) || submission.dispatchMode || null,
     legalEffect: legalEffect == null ? (submission.dispatchMode || "test") !== "trial" : legalEffect === true,
+    watermarkCode: normalizeOptionalText(watermarkCode),
+    simulationProfileCode: normalizeOptionalText(simulationProfileCode),
+    simulationStepCode: normalizeOptionalText(simulationStepCode),
+    simulatedByPolicyCode: normalizeOptionalText(simulatedByPolicyCode),
     receivedByActorId: requireText(actorId || "system", "actor_id_required"),
     receivedAt: nowIso(clock)
   };
@@ -1239,7 +1324,6 @@ function registerSubmissionReceipt(
         clock
       });
     }
-  syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
   if (attempt) {
     finalizeSubmissionAttempt(attempt, {
       status: normalizedType.endsWith("_nack") ? "failed" : "succeeded",
@@ -1250,6 +1334,7 @@ function registerSubmissionReceipt(
       providerReference: receipt.rawReference || submission.providerReference
     });
   }
+  syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
   return enrichSubmission(state, submission);
 }
 
@@ -1406,8 +1491,12 @@ export function createCanonicalSubmissionEnvelopeRef(state, submission) {
     envelopeState: deriveSubmissionEnvelopeState(submission),
     signedState: submission.signedState,
     legalEffect: (submission.dispatchMode || "test") !== "trial",
+    watermark: buildSubmissionAuditWatermark(submission),
+    trialSimulation: buildTrialSubmissionSimulationSummary(submission),
     sourceEvidenceBundleId: submission.sourceEvidenceBundleId || null,
     currentEvidencePackId: submission.evidencePackId || null,
+    watermarkCode: normalizeOptionalText(submission.watermarkCode),
+    simulationProfileCode: normalizeOptionalText(submission.trialSimulationProfileCode),
     transportAdapterCode: submission.lastTransportPlan?.transportAdapterCode || null,
     transportRouteCode: submission.lastTransportPlan?.transportRouteCode || null,
     fallbackActivated: submission.lastTransportPlan?.fallbackActivated === true,
@@ -1437,6 +1526,8 @@ export function createCanonicalSubmissionEvidencePackRef(payload = {}) {
     payloadSchemaCode: requireText(payload.payloadSchemaCode, "submission_payload_schema_required"),
     envelopeState: assertAllowed(payload.envelopeState || "draft", SUBMISSION_ENVELOPE_STATES, "submission_envelope_state_invalid"),
     legalEffect: payload.legalEffect === false ? false : true,
+    watermark: clone(payload.watermark || null),
+    trialSimulation: clone(payload.trialSimulation || null),
     checksum: normalizeOptionalText(payload.checksum),
     status: normalizeOptionalText(payload.status),
     frozenAt: normalizeOptionalText(payload.frozenAt),
@@ -1510,6 +1601,10 @@ function buildAttemptRef(attempt) {
     status: attempt.status,
     mode: attempt.mode,
     legalEffect: attempt.legalEffect,
+    watermarkCode: attempt.watermarkCode || null,
+    simulationProfileCode: attempt.simulationProfileCode || null,
+    simulationStepCode: attempt.simulationStepCode || null,
+    simulatedByPolicyCode: attempt.simulatedByPolicyCode || null,
     payloadHash: attempt.payloadHash,
     providerKey: attempt.providerKey,
     providerReference: attempt.providerReference,
@@ -1536,6 +1631,10 @@ function ensureSubmissionAttempt(
     actorId,
     mode,
     legalEffect,
+    watermarkCode = null,
+    simulationProfileCode = null,
+    simulationStepCode = null,
+    simulatedByPolicyCode = null,
     payloadHash,
     providerReference,
     transportPlan = null,
@@ -1562,6 +1661,10 @@ function ensureSubmissionAttempt(
     status: assertAllowed(status, SUBMISSION_ATTEMPT_STATUSES, "submission_attempt_status_invalid"),
     mode: normalizeOptionalText(mode),
     legalEffect: legalEffect === false ? false : true,
+    watermarkCode: normalizeOptionalText(watermarkCode),
+    simulationProfileCode: normalizeOptionalText(simulationProfileCode),
+    simulationStepCode: normalizeOptionalText(simulationStepCode),
+    simulatedByPolicyCode: normalizeOptionalText(simulatedByPolicyCode),
     payloadHash: submission.payloadHash || requireText(payloadHash, "submission_payload_hash_required"),
     providerKey: submission.providerKey,
     providerReference: normalizeOptionalText(providerReference),
@@ -1688,11 +1791,28 @@ function markSubmissionSubmitted(submission, { clock, mode, providerReference = 
   submission.dispatchMode = requireText(mode, "submission_mode_required");
   submission.providerReference = normalizeOptionalText(providerReference);
   submission.dispatchMessage = normalizeOptionalText(message);
+  if (isTrialExecutionMode(submission.dispatchMode)) {
+    const trialSimulation = resolveTrialSubmissionSimulationProfile(submission);
+    submission.watermarkCode = trialSimulation.watermarkCode;
+    submission.trialSimulationProfileCode = trialSimulation.simulationProfileCode;
+    submission.simulatedByPolicyCode = trialSimulation.simulatedByPolicyCode;
+    return;
+  }
+  submission.watermarkCode = null;
+  submission.trialSimulationProfileCode = null;
+  submission.simulatedByPolicyCode = null;
 }
 
 function resolveRequestedTransportScenarioCode({ mode, transportScenarioCode = null, simulatedTransportOutcome = null } = {}) {
   const normalizedScenario = normalizeOptionalText(transportScenarioCode) || normalizeOptionalText(simulatedTransportOutcome);
   const resolvedMode = normalizeExecutionMode(mode);
+  if (isTrialExecutionMode(resolvedMode) && normalizedScenario) {
+    throw createError(
+      409,
+      "submission_trial_scenario_override_forbidden",
+      "Trial submissions must use the deterministic regulated simulator profile."
+    );
+  }
   if (!normalizedScenario) {
     return isLiveExecutionMode(resolvedMode) ? null : "technical_ack";
   }
@@ -1712,6 +1832,28 @@ function resolveSubmissionTransportPlan({ submission, mode, transportScenarioCod
   const profile = resolveSubmissionTransportProfile(submission);
   const resolvedProviderReference = normalizeOptionalText(providerReference) || submission.providerReference || buildFallbackProviderReference(submission, profile);
   const resolvedMessage = normalizeOptionalText(message);
+  if (isTrialExecutionMode(resolvedMode)) {
+    const trialSimulation = resolveTrialSubmissionSimulationProfile(submission);
+    return {
+      transportAdapterCode: profile.transportAdapterCode,
+      transportRouteCode: "trial_simulator",
+      officialChannelCode: profile.officialChannelCode,
+      fallbackCode: null,
+      fallbackActivated: false,
+      transportScenarioCode: "technical_ack",
+      providerReference: resolvedProviderReference,
+      technicalReceiptType: "technical_ack",
+      resultCode: "trial_transport_simulated",
+      messageText:
+        resolvedMessage
+        || `Trial-safe regulated simulator dispatched ${submission.submissionType} through ${profile.transportAdapterCode}.`,
+      requiredInput: [],
+      watermarkCode: trialSimulation.watermarkCode,
+      simulationProfileCode: trialSimulation.simulationProfileCode,
+      simulationStepCode: "transport_acceptance",
+      simulatedByPolicyCode: trialSimulation.simulatedByPolicyCode
+    };
+  }
   const scenarioCode = resolveRequestedTransportScenarioCode({
     mode: resolvedMode,
     transportScenarioCode
@@ -1826,6 +1968,10 @@ function isLiveExecutionMode(mode) {
   return ["production", "pilot"].includes(normalizeExecutionMode(mode));
 }
 
+function isTrialExecutionMode(mode) {
+  return normalizeExecutionMode(mode) === "trial";
+}
+
 function normalizeExecutionMode(mode) {
   return normalizeOptionalText(mode) || "test";
 }
@@ -1928,6 +2074,10 @@ function buildReceiptRef(receipt) {
     payloadHash: receipt.payloadHash || null,
     mode: receipt.mode || null,
     legalEffect: receipt.legalEffect === false ? false : true,
+    watermarkCode: receipt.watermarkCode || null,
+    simulationProfileCode: receipt.simulationProfileCode || null,
+    simulationStepCode: receipt.simulationStepCode || null,
+    simulatedByPolicyCode: receipt.simulatedByPolicyCode || null,
     rawPayloadHash: hashObject({
       receiptType: receipt.receiptType,
       providerStatus: receipt.providerStatus,
@@ -2010,10 +2160,175 @@ function buildSubmissionReconciliation(state, submission) {
     correctionRequired,
     replayAllowed,
     retryAllowed,
+    legalEffect: (submission.dispatchMode || "test") !== "trial",
+    watermarkCode: normalizeOptionalText(submission.watermarkCode),
+    simulationProfileCode: normalizeOptionalText(submission.trialSimulationProfileCode),
     openRecoveryCount: openRecoveries.length,
     openQueueItemCount: openQueueItems.length,
     outstandingActionCodes: [...new Set(openQueueItems.map((queueItem) => queueItem.actionType))],
     currentEvidencePackId: submission.evidencePackId || null
+  };
+}
+
+function materializeTrialSubmissionReceipts(
+  { state, clock, evidencePlatform },
+  { companyId, submissionId, actorId = "system" } = {}
+) {
+  while (true) {
+    const submission = requireSubmission(state, companyId, submissionId);
+    const nextPlan = resolveTrialSubmissionReceiptPlan({
+      state,
+      submission
+    });
+    if (!nextPlan) {
+      return enrichSubmission(state, submission);
+    }
+    const previousReceiptCount = getSubmissionReceipts(state, submissionId).length;
+    const result = executeSubmissionReceiptCollection(
+      { state, clock, evidencePlatform },
+      {
+        companyId,
+        submissionId,
+        actorId,
+        triggerCode: "trial_auto_receipt"
+      }
+    );
+    const nextReceiptCount = getSubmissionReceipts(state, submissionId).length;
+    if (result.executionSkipped === true || nextReceiptCount === previousReceiptCount) {
+      return result;
+    }
+    if (["finalized", "superseded", "domain_rejected", "transport_failed"].includes(result.status)) {
+      return result;
+    }
+  }
+}
+
+function resolveTrialSubmissionReceiptPlan(
+  { state, submission, simulatedReceiptType = null, providerStatus = null, message = null, requiredInput = [] } = {}
+) {
+  if (!isTrialExecutionMode(submission.dispatchMode)) {
+    return null;
+  }
+  if (normalizeOptionalText(simulatedReceiptType) || normalizeOptionalText(providerStatus) || normalizeOptionalText(message) || (Array.isArray(requiredInput) && requiredInput.length > 0)) {
+    throw createError(
+      409,
+      "submission_trial_receipt_override_forbidden",
+      "Trial submissions must collect deterministic simulated receipts without manual overrides."
+    );
+  }
+  const receipts = getSubmissionReceipts(state, submission.submissionId);
+  const technicalReceipt = receipts.find((receipt) => receipt.receiptType === "technical_ack" || receipt.receiptType === "technical_nack") || null;
+  if (!technicalReceipt || technicalReceipt.receiptType !== "technical_ack") {
+    return null;
+  }
+  const trialSimulation = resolveTrialSubmissionSimulationProfile(submission);
+  const materializedSteps = receipts
+    .filter((receipt) => receipt.simulationStepCode && receipt.receiptType !== "technical_ack" && receipt.receiptType !== "technical_nack")
+    .map((receipt) => receipt.simulationStepCode);
+  return trialSimulation.receiptSequence.find((candidate) => !materializedSteps.includes(candidate.simulationStepCode)) || null;
+}
+
+function buildSubmissionAuditWatermark(submission) {
+  if (!isTrialExecutionMode(submission.dispatchMode)) {
+    return null;
+  }
+  return buildTrialSubmissionWatermark(resolveTrialSubmissionSimulationProfile(submission).simulationProfileCode);
+}
+
+function buildTrialSubmissionSimulationSummary(submission) {
+  if (!isTrialExecutionMode(submission.dispatchMode)) {
+    return null;
+  }
+  const trialSimulation = resolveTrialSubmissionSimulationProfile(submission);
+  return {
+    simulationProfileCode: trialSimulation.simulationProfileCode,
+    simulatedByPolicyCode: trialSimulation.simulatedByPolicyCode,
+    supportsLegalEffect: false,
+    receiptSequence: trialSimulation.receiptSequence.map((candidate) => ({
+      simulationStepCode: candidate.simulationStepCode,
+      receiptType: candidate.receiptType,
+      providerStatus: candidate.providerStatus,
+      isFinal: candidate.isFinal === true
+    }))
+  };
+}
+
+function resolveTrialSubmissionSimulationProfile(submission) {
+  const familyCode = resolveTrialSubmissionFamilyCode(submission.submissionType);
+  const baseCode = `trial_${familyCode}_regulated_v1`;
+  const watermarkCode = normalizeOptionalText(submission.watermarkCode) || TRIAL_SUBMISSION_WATERMARK_CODE;
+  const receiptSequence =
+    familyCode === "annual"
+      ? [
+          {
+            simulationStepCode: "material_acceptance",
+            receiptType: "business_ack",
+            providerStatus: `trial_${familyCode}_material_ack`,
+            messageText: `TRIAL material receipt accepted for ${submission.submissionType}.`,
+            requiredInput: [],
+            isFinal: false,
+            watermarkCode,
+            simulationProfileCode: baseCode,
+            simulatedByPolicyCode: TRIAL_SUBMISSION_POLICY_CODE
+          },
+          {
+            simulationStepCode: "final_acceptance",
+            receiptType: "final_ack",
+            providerStatus: `trial_${familyCode}_final_ack`,
+            messageText: `TRIAL final receipt accepted for ${submission.submissionType}.`,
+            requiredInput: [],
+            isFinal: true,
+            watermarkCode,
+            simulationProfileCode: baseCode,
+            simulatedByPolicyCode: TRIAL_SUBMISSION_POLICY_CODE
+          }
+        ]
+      : [
+          {
+            simulationStepCode: "material_acceptance",
+            receiptType: "business_ack",
+            providerStatus: `trial_${familyCode}_material_ack`,
+            messageText: `TRIAL material receipt accepted for ${submission.submissionType}.`,
+            requiredInput: [],
+            isFinal: false,
+            watermarkCode,
+            simulationProfileCode: baseCode,
+            simulatedByPolicyCode: TRIAL_SUBMISSION_POLICY_CODE
+          }
+        ];
+  return {
+    simulationProfileCode: baseCode,
+    simulatedByPolicyCode: TRIAL_SUBMISSION_POLICY_CODE,
+    watermarkCode,
+    receiptSequence
+  };
+}
+
+function resolveTrialSubmissionFamilyCode(submissionType) {
+  if (submissionType.startsWith("agi")) {
+    return "agi";
+  }
+  if (submissionType.startsWith("vat")) {
+    return "vat";
+  }
+  if (submissionType.startsWith("hus")) {
+    return "hus";
+  }
+  if (submissionType.startsWith("income_tax") || submissionType.startsWith("annual")) {
+    return "annual";
+  }
+  return "generic";
+}
+
+function buildTrialSubmissionWatermark(simulationProfileCode) {
+  return {
+    watermarkCode: TRIAL_SUBMISSION_WATERMARK_CODE,
+    label: `${TRIAL_SUBMISSION_WATERMARK_CODE} NON-LIVE`,
+    displayText: `${TRIAL_SUBMISSION_WATERMARK_CODE} - REGULATED SIMULATION ONLY`,
+    scopeCode: "regulated_submission",
+    supportsLegalEffect: false,
+    simulationProfileCode: normalizeOptionalText(simulationProfileCode),
+    policyCode: TRIAL_SUBMISSION_POLICY_CODE
   };
 }
 

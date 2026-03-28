@@ -168,6 +168,93 @@ test("Phase 13.3 API keeps production transport on official fallback path withou
   }
 });
 
+test("Phase 13.6 API trial mode auto-simulates regulated receipts with trial watermark and blocks manual overrides", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-28T15:40:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+    const taxPackage = prepareSignedTaxDeclarationPackage(platform);
+
+    const created = await requestJson(baseUrl, "/v1/submissions", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        submissionType: "income_tax_return",
+        sourceObjectType: "tax_declaration_package",
+        sourceObjectId: taxPackage.taxDeclarationPackageId,
+        providerKey: "skatteverket",
+        recipientId: "skatteverket:income-tax"
+      }
+    });
+
+    await requestJson(baseUrl, `/v1/submissions/${created.submissionId}/sign`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+
+    const overrideAttempt = await requestJson(baseUrl, `/v1/submissions/${created.submissionId}/submit`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        mode: "trial",
+        simulatedTransportOutcome: "technical_nack"
+      }
+    });
+    assert.equal(overrideAttempt.errorDetail?.code || overrideAttempt.error || overrideAttempt.code, "submission_trial_scenario_override_forbidden");
+
+    const queued = await requestJson(baseUrl, `/v1/submissions/${created.submissionId}/submit`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        mode: "trial"
+      }
+    });
+    assert.equal(queued.transportQueued, true);
+
+    await runWorkerBatch({
+      platform,
+      logger: () => {},
+      workerId: "phase13-6-regulated-submission-core"
+    });
+
+    const submission = await requestJson(baseUrl, `/v1/submissions/${created.submissionId}?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(submission.status, "finalized");
+    assert.deepEqual(
+      submission.receipts.map((receipt) => receipt.receiptType),
+      ["technical_ack", "business_ack", "final_ack"]
+    );
+    assert.equal(submission.receipts.every((receipt) => receipt.legalEffect === false), true);
+    assert.equal(submission.receipts.every((receipt) => receipt.watermarkCode === "TRIAL"), true);
+    assert.equal(submission.currentEvidencePack.watermark.watermarkCode, "TRIAL");
+    assert.equal(submission.currentEvidencePack.trialSimulation.simulationProfileCode, "trial_annual_regulated_v1");
+    assert.equal(submission.attempts.every((attempt) => attempt.legalEffect === false), true);
+    assert.equal(submission.attempts.some((attempt) => attempt.simulationStepCode === "final_acceptance"), true);
+    assert.equal(submission.reconciliation.legalEffect, false);
+  } finally {
+    await stopServer(server);
+  }
+});
+
 function prepareSignedTaxDeclarationPackage(platform) {
   platform.installLedgerCatalog({
     companyId: DEMO_IDS.companyId,

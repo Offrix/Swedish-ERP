@@ -34,6 +34,10 @@ export interface SubmissionAttemptRef {
   readonly status: SubmissionAttemptStatus;
   readonly mode: string | null;
   readonly legalEffect: boolean;
+  readonly watermarkCode?: string | null;
+  readonly simulationProfileCode?: string | null;
+  readonly simulationStepCode?: string | null;
+  readonly simulatedByPolicyCode?: string | null;
   readonly payloadHash: string;
   readonly providerKey: string;
   readonly providerReference: string | null;
@@ -60,4 +64,6 @@ export interface SubmissionEvidencePackRef {
   readonly status: string | null;
   readonly frozenAt: string | null;
   readonly archivedAt: string | null;
+  readonly watermark?: Record<string, unknown> | null;
+  readonly trialSimulation?: Record<string, unknown> | null;
 }

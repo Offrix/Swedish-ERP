@@ -196,3 +196,129 @@ test("Phase 13.3 production dispatch queues official fallback instead of fabrica
   assert.equal(submission.actionQueueItems.some((item) => item.actionType === "contact_provider"), true);
   assert.equal(submission.attempts[0].fallbackActivated, true);
 });
+
+test("Phase 13.6 trial mode auto-simulates deterministic regulated receipts with watermark and no legal effect", async () => {
+  const platform = createIntegrationPlatform({
+    clock: () => new Date("2026-03-28T13:10:00Z")
+  });
+
+  let submission = platform.prepareAuthoritySubmission({
+    companyId: "company-13-6",
+    submissionType: "agi_monthly",
+    sourceObjectType: "agi_submission_period",
+    sourceObjectId: "agi-period-2026-04",
+    payloadVersion: "phase13.6",
+    providerKey: "skatteverket",
+    recipientId: "skatteverket:agi",
+    payload: {
+      sourceObjectVersion: "agi-period-2026-04:v1"
+    },
+    actorId: "phase13-6-unit",
+    signedState: "not_required"
+  });
+
+  submission = await platform.submitAuthoritySubmission({
+    companyId: "company-13-6",
+    submissionId: submission.submissionId,
+    actorId: "phase13-6-unit",
+    mode: "trial"
+  });
+
+  assert.equal(submission.status, "accepted");
+  assert.deepEqual(
+    submission.receipts.map((receipt) => receipt.receiptType),
+    ["technical_ack", "business_ack"]
+  );
+  assert.equal(submission.attempts.length, 2);
+  assert.equal(submission.attempts.every((attempt) => attempt.legalEffect === false), true);
+  assert.equal(submission.attempts.every((attempt) => attempt.watermarkCode === "TRIAL"), true);
+  assert.equal(submission.receipts.every((receipt) => receipt.legalEffect === false), true);
+  assert.equal(submission.receipts.every((receipt) => receipt.watermarkCode === "TRIAL"), true);
+  assert.equal(submission.currentEvidencePack.watermark.watermarkCode, "TRIAL");
+  assert.equal(submission.currentEvidencePack.trialSimulation.simulationProfileCode, "trial_agi_regulated_v1");
+  assert.equal(submission.reconciliation.legalEffect, false);
+  assert.equal(submission.reconciliation.watermarkCode, "TRIAL");
+
+  assert.throws(() => {
+    platform.executeSubmissionReceiptCollection({
+      companyId: "company-13-6",
+      submissionId: submission.submissionId,
+      actorId: "phase13-6-unit",
+      simulatedReceiptType: "business_nack"
+    });
+  }, (error) => error?.code === "submission_trial_receipt_override_forbidden");
+});
+
+test("Phase 13.6 annual trial simulation finalizes deterministically and forbids manual scenario override", async () => {
+  const platform = createIntegrationPlatform({
+    clock: () => new Date("2026-03-28T13:25:00Z")
+  });
+
+  let submission = platform.prepareAuthoritySubmission({
+    companyId: "company-13-6-annual",
+    submissionType: "income_tax_return",
+    sourceObjectType: "tax_declaration_package",
+    sourceObjectId: "tax-package-13-6",
+    payloadVersion: "phase13.6-annual",
+    providerKey: "skatteverket",
+    recipientId: "skatteverket:income-tax",
+    payload: {
+      sourceObjectVersion: "tax-package-13-6:v1"
+    },
+    providerBaselineRefs: [
+      {
+        providerBaselineId: "annual-sru-export-se-2026.1",
+        providerCode: "skatteverket",
+        baselineCode: "SE-SRU-FILE",
+        providerBaselineVersion: "2026.1",
+        providerBaselineChecksum: "annual-sru-export-se-2026.1"
+      }
+    ],
+    actorId: "phase13-6-unit",
+    signedState: "signed"
+  });
+
+  submission = await platform.submitAuthoritySubmission({
+    companyId: "company-13-6-annual",
+    submissionId: submission.submissionId,
+    actorId: "phase13-6-unit",
+    mode: "trial"
+  });
+
+  assert.equal(submission.status, "finalized");
+  assert.deepEqual(
+    submission.receipts.map((receipt) => receipt.receiptType),
+    ["technical_ack", "business_ack", "final_ack"]
+  );
+  assert.equal(submission.currentEvidencePack.trialSimulation.simulationProfileCode, "trial_annual_regulated_v1");
+
+  let overrideCandidate = platform.prepareAuthoritySubmission({
+    companyId: "company-13-6-annual",
+    submissionType: "vat_declaration",
+    sourceObjectType: "vat_return",
+    sourceObjectId: "vat-return-13-6-override",
+    payloadVersion: "phase13.6-override",
+    providerKey: "skatteverket",
+    recipientId: "skatteverket:vat",
+    payload: {
+      sourceObjectVersion: "vat-return-13-6-override:v1"
+    },
+    actorId: "phase13-6-unit"
+  });
+  overrideCandidate = platform.signAuthoritySubmission({
+    companyId: "company-13-6-annual",
+    submissionId: overrideCandidate.submissionId,
+    actorId: "phase13-6-unit"
+  });
+
+  await assert.rejects(
+    platform.submitAuthoritySubmission({
+      companyId: "company-13-6-annual",
+      submissionId: overrideCandidate.submissionId,
+      actorId: "phase13-6-unit",
+      mode: "trial",
+      transportScenarioCode: "technical_nack"
+    }),
+    (error) => error?.code === "submission_trial_scenario_override_forbidden"
+  );
+});
