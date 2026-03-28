@@ -1366,7 +1366,7 @@ export function createApEngine({
     if (invoice.reviewRequired || invoice.status !== "approved") {
       throw createError(409, "supplier_invoice_review_required", "Supplier invoice must be approved without open variances before posting.");
     }
-    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+    if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
       throw createError(500, "ledger_platform_missing", "Ledger platform is required to post AP invoices.");
     }
 
@@ -1375,17 +1375,16 @@ export function createApEngine({
       supplier
     });
     const groupedJournalLines = mergeJournalLines(journalLines);
-    const created = ledgerPlatform.createJournalEntry({
+    const posted = ledgerPlatform.applyPostingIntent({
       companyId: invoice.companyId,
       journalDate: invoice.invoiceDate,
-      voucherSeriesCode: resolveApVoucherSeriesCode({
-        ledgerPlatform,
-        companyId: invoice.companyId,
-        purposeCode: "AP_INVOICE",
-        fallbackSeriesCode: "E"
-      }),
+      recipeCode: "AP_INVOICE",
+      postingSignalCode: "ap.invoice.posted",
+      voucherSeriesPurposeCode: "AP_INVOICE",
+      fallbackVoucherSeriesCode: "E",
       sourceType: "AP_INVOICE",
       sourceId: invoice.supplierInvoiceId,
+      sourceObjectVersion: invoice.duplicateFingerprintHash,
       actorId,
       idempotencyKey: `ap_invoice_post:${invoice.supplierInvoiceId}:${invoice.duplicateFingerprintHash}`,
       description: `Supplier invoice ${invoice.externalInvoiceRef}`,
@@ -1396,17 +1395,6 @@ export function createApEngine({
       },
       lines: groupedJournalLines
     });
-    ledgerPlatform.validateJournalEntry({
-      companyId: invoice.companyId,
-      journalEntryId: created.journalEntry.journalEntryId,
-      actorId
-    });
-    const posted = ledgerPlatform.postJournalEntry({
-      companyId: invoice.companyId,
-      journalEntryId: created.journalEntry.journalEntryId,
-      actorId
-    });
-
     invoice.status = "posted";
     invoice.journalEntryId = posted.journalEntry.journalEntryId;
     invoice.postedAt = nowIso(clock);
@@ -1536,8 +1524,15 @@ export function createApEngine({
       ledgerPlatform,
       companyId: openItem.companyId,
       journalDate: openItem.dueOn,
+      recipeCode: "AP_PAYMENT_RESERVE",
+      postingSignalCode: "ap.payment.reserved",
       actorId,
       sourceId: `${paymentOrderId}:reserve`,
+      sourceObjectVersion: hashObject({
+        apOpenItemId: openItem.apOpenItemId,
+        paymentOrderId,
+        reservedAmount: openItem.openAmount
+      }),
       idempotencyKey: `ap_payment_reserve:${openItem.apOpenItemId}:${paymentOrderId}`,
       description: `AP payment reserve ${invoice.externalInvoiceRef}`,
       metadataJson: {
@@ -1614,8 +1609,15 @@ export function createApEngine({
       ledgerPlatform,
       companyId: openItem.companyId,
       journalDate: nowIso(clock).slice(0, 10),
+      recipeCode: "AP_PAYMENT_RELEASE",
+      postingSignalCode: "ap.payment.released",
       actorId,
       sourceId: `${resolvedPaymentOrderId}:reject`,
+      sourceObjectVersion: hashObject({
+        apOpenItemId: openItem.apOpenItemId,
+        paymentOrderId: resolvedPaymentOrderId,
+        reasonCode
+      }),
       idempotencyKey: `ap_payment_release:${openItem.apOpenItemId}:${resolvedPaymentOrderId}:${reasonCode}`,
       description: `AP payment release ${invoice.externalInvoiceRef}`,
       metadataJson: {
@@ -1698,8 +1700,16 @@ export function createApEngine({
       ledgerPlatform,
       companyId: openItem.companyId,
       journalDate: resolvedBookedOn,
+      recipeCode: "AP_PAYMENT_SETTLEMENT",
+      postingSignalCode: "bank.payment_order.settled",
       actorId,
       sourceId: `${openItem.paymentOrderId || paymentOrderId}:book`,
+      sourceObjectVersion: hashObject({
+        apOpenItemId: openItem.apOpenItemId,
+        paymentOrderId: openItem.paymentOrderId || paymentOrderId,
+        bankEventId,
+        bookedOn: resolvedBookedOn
+      }),
       idempotencyKey: `ap_payment_settle:${openItem.apOpenItemId}:${openItem.paymentOrderId || paymentOrderId}:${resolvedBookedOn}`,
       description: `AP payment settled ${invoice.externalInvoiceRef}`,
       metadataJson: {
@@ -1784,8 +1794,16 @@ export function createApEngine({
       ledgerPlatform,
       companyId: openItem.companyId,
       journalDate: resolvedReturnedOn,
+      recipeCode: "AP_PAYMENT_RETURN",
+      postingSignalCode: "bank.payment_order.returned",
       actorId,
       sourceId: `${openItem.lastPaymentOrderId || openItem.paymentOrderId || paymentOrderId}:return`,
+      sourceObjectVersion: hashObject({
+        apOpenItemId: openItem.apOpenItemId,
+        paymentOrderId: openItem.lastPaymentOrderId || openItem.paymentOrderId || paymentOrderId,
+        bankEventId,
+        returnedOn: resolvedReturnedOn
+      }),
       idempotencyKey: `ap_payment_return:${openItem.apOpenItemId}:${bankEventId || openItem.lastPaymentOrderId || paymentOrderId}`,
       description: `AP payment returned ${invoice.externalInvoiceRef}`,
       metadataJson: {
@@ -2766,27 +2784,29 @@ function postApLifecycleJournal({
   ledgerPlatform,
   companyId,
   journalDate,
+  recipeCode,
+  postingSignalCode = null,
   actorId,
   sourceId,
+  sourceObjectVersion = null,
   idempotencyKey,
   description,
   metadataJson = {},
   lines
 }) {
-  if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+  if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
     throw createError(500, "ledger_platform_missing", "Ledger platform is required for AP payment lifecycle postings.");
   }
-  const created = ledgerPlatform.createJournalEntry({
+  const posted = ledgerPlatform.applyPostingIntent({
     companyId,
     journalDate,
-    voucherSeriesCode: resolveApVoucherSeriesCode({
-      ledgerPlatform,
-      companyId,
-      purposeCode: "AP_PAYMENT",
-      fallbackSeriesCode: "E"
-    }),
+    recipeCode,
+    postingSignalCode,
+    voucherSeriesPurposeCode: "AP_PAYMENT",
+    fallbackVoucherSeriesCode: "E",
     sourceType: "AP_PAYMENT",
     sourceId: requireText(sourceId, "source_id_required"),
+    sourceObjectVersion,
     actorId,
     idempotencyKey: requireText(idempotencyKey, "idempotency_key_required"),
     description: requireText(description, "journal_description_required"),
@@ -2796,27 +2816,7 @@ function postApLifecycleJournal({
     },
     lines
   });
-  ledgerPlatform.validateJournalEntry({
-    companyId,
-    journalEntryId: created.journalEntry.journalEntryId,
-    actorId
-  });
-  const posted = ledgerPlatform.postJournalEntry({
-    companyId,
-    journalEntryId: created.journalEntry.journalEntryId,
-    actorId
-  });
   return posted.journalEntry;
-}
-
-function resolveApVoucherSeriesCode({ ledgerPlatform, companyId, purposeCode, fallbackSeriesCode }) {
-  if (ledgerPlatform && typeof ledgerPlatform.resolveVoucherSeriesForPurpose === "function") {
-    return ledgerPlatform.resolveVoucherSeriesForPurpose({
-      companyId,
-      purposeCode
-    }).seriesCode;
-  }
-  return fallbackSeriesCode;
 }
 
 function buildSupplierInvoiceFingerprint({

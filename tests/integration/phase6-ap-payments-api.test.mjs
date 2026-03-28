@@ -148,6 +148,12 @@ test("Phase 6.3 API blocks unauthorized payments, books payouts correctly and re
       body: { companyId: COMPANY_ID }
     });
     assert.equal(posted.status, "posted");
+    const invoiceJournal = platform.getJournalEntry({
+      companyId: COMPANY_ID,
+      journalEntryId: posted.journalEntryId
+    });
+    assert.equal(invoiceJournal.metadataJson.postingRecipeCode, "AP_INVOICE");
+    assert.equal(invoiceJournal.metadataJson.journalType, "operational_posting");
 
     const bankAccount = await requestJson(baseUrl, "/v1/banking/accounts", {
       method: "POST",
@@ -228,6 +234,8 @@ test("Phase 6.3 API blocks unauthorized payments, books payouts correctly and re
     });
     assert.equal(sumDebits(bookingJournal, "2450"), 1250);
     assert.equal(sumCredits(bookingJournal, "1110"), 1250);
+    assert.equal(bookingJournal.metadataJson.postingRecipeCode, "AP_PAYMENT_SETTLEMENT");
+    assert.equal(bookingJournal.metadataJson.journalType, "settlement_posting");
 
     const returned = await requestJson(baseUrl, `/v1/banking/payment-orders/${paymentOrderId}/return`, {
       method: "POST",
@@ -238,6 +246,12 @@ test("Phase 6.3 API blocks unauthorized payments, books payouts correctly and re
         returnedOn: "2026-11-02"
       }
     });
+    const returnJournal = platform.getJournalEntry({
+      companyId: COMPANY_ID,
+      journalEntryId: returned.bankPaymentEvent.journalEntryId
+    });
+    assert.equal(returnJournal.metadataJson.postingRecipeCode, "AP_PAYMENT_RETURN");
+    assert.equal(returnJournal.metadataJson.journalType, "settlement_posting");
     assert.equal(returned.paymentOrder.status, "returned");
 
     const replay = await requestJson(baseUrl, `/v1/banking/payment-orders/${paymentOrderId}/return`, {

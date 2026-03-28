@@ -48,6 +48,10 @@ test("Phase 5.2 issues an invoice only once and reuses the posted journal on rep
   assert.equal(firstIssue.journalEntryId, secondIssue.journalEntryId);
   assert.equal(postedEntries.length, 1);
   assert.equal(postedEntries[0].status, "posted");
+  assert.equal(postedEntries[0].metadataJson.postingRecipeCode, "AR_INVOICE");
+  assert.equal(postedEntries[0].metadataJson.journalType, "operational_posting");
+  assert.equal(postedEntries[0].metadataJson.postingSignalCode, "ar.invoice.issued");
+  assert.equal(postedEntries[0].metadataJson.sourceObjectVersion, invoice.invoiceGenerationKey);
 });
 
 test("Phase 5.2 full credit note closes the credited invoice and posts a separate AR credit journal", () => {
@@ -116,6 +120,9 @@ test("Phase 5.2 full credit note closes the credited invoice and posts a separat
   assert.match(issuedCredit.invoiceNumber, /^CRN-/);
   assert.equal(creditJournal.sourceType, "AR_CREDIT_NOTE");
   assert.equal(creditJournal.voucherSeriesCode, "C");
+  assert.equal(creditJournal.metadataJson.postingRecipeCode, "AR_CREDIT_NOTE");
+  assert.equal(creditJournal.metadataJson.journalType, "operational_posting");
+  assert.equal(creditJournal.metadataJson.postingSignalCode, "ar.credit_note.issued");
 });
 
 test("Phase 5.2 validates Peppol delivery and creates payment links from issued invoices", () => {

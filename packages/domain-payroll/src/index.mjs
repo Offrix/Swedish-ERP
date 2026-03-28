@@ -1271,7 +1271,7 @@ export function createPayrollEngine({
     if (existingPostingId) {
       return presentPayrollPosting(state, state.payrollPostings.get(existingPostingId));
     }
-    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+    if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
       throw createError(500, "ledger_platform_missing", "Ledger platform is required to create payroll postings.");
     }
 
@@ -1281,17 +1281,16 @@ export function createPayrollEngine({
       ledgerPlatform
     });
 
-    const created = ledgerPlatform.createJournalEntry({
+    const posted = ledgerPlatform.applyPostingIntent({
       companyId: payRun.companyId,
       journalDate: payRun.payDate,
-      voucherSeriesCode: resolvePayrollVoucherSeriesCode({
-        ledgerPlatform,
-        companyId: payRun.companyId,
-        purposeCode: payRun.runType === "correction" ? "PAYROLL_CORRECTION" : "PAYROLL_RUN",
-        fallbackSeriesCode: "H"
-      }),
+      recipeCode: payRun.runType === "correction" ? "PAYROLL_CORRECTION" : "PAYROLL_RUN",
+      postingSignalCode: "payroll.run.posted",
+      voucherSeriesPurposeCode: payRun.runType === "correction" ? "PAYROLL_CORRECTION" : "PAYROLL_RUN",
+      fallbackVoucherSeriesCode: "H",
       sourceType: payRun.runType === "correction" ? "PAYROLL_CORRECTION" : "PAYROLL_RUN",
       sourceId: payRun.payRunId,
+      sourceObjectVersion: postingModel.payloadHash,
       actorId,
       idempotencyKey: `payroll_post:${payRun.payRunId}:${postingModel.payloadHash}`,
       description: `Payroll ${payRun.reportingPeriod} ${payRun.runType}`,
@@ -1306,17 +1305,6 @@ export function createPayrollEngine({
       },
       lines: postingModel.journalLines
     });
-    ledgerPlatform.validateJournalEntry({
-      companyId: payRun.companyId,
-      journalEntryId: created.journalEntry.journalEntryId,
-      actorId
-    });
-    const posted = ledgerPlatform.postJournalEntry({
-      companyId: payRun.companyId,
-      journalEntryId: created.journalEntry.journalEntryId,
-      actorId
-    });
-
     const now = nowIso(clock);
     const record = {
       payrollPostingId: crypto.randomUUID(),
@@ -1439,7 +1427,7 @@ export function createPayrollEngine({
     if (batch.status === "matched") {
       return presentPayrollPayoutBatch(state, batch);
     }
-    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+    if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
       throw createError(500, "ledger_platform_missing", "Ledger platform is required to match payroll payouts to bank.");
     }
     const payRun = requireApprovedPayRun(state, batch.companyId, batch.payRunId);
@@ -1450,17 +1438,21 @@ export function createPayrollEngine({
     });
     const matchedDate = matchedOn ? normalizeRequiredDate(matchedOn, "payroll_payout_matched_on_invalid") : payRun.payDate;
     if (roundMoney(batch.totalAmount) > 0) {
-      const created = ledgerPlatform.createJournalEntry({
+      const posted = ledgerPlatform.applyPostingIntent({
         companyId: batch.companyId,
         journalDate: matchedDate,
-        voucherSeriesCode: resolvePayrollVoucherSeriesCode({
-          ledgerPlatform,
-          companyId: batch.companyId,
-          purposeCode: "PAYROLL_PAYOUT_MATCH",
-          fallbackSeriesCode: "H"
-        }),
+        recipeCode: "PAYROLL_PAYOUT_MATCH",
+        postingSignalCode: "bank.payment_order.settled",
+        voucherSeriesPurposeCode: "PAYROLL_PAYOUT_MATCH",
+        fallbackVoucherSeriesCode: "H",
         sourceType: "PAYROLL_RUN",
         sourceId: `${payRun.payRunId}:bank_match`,
+        sourceObjectVersion: buildSnapshotHash({
+          payrollPayoutBatchId: batch.payrollPayoutBatchId,
+          bankEventId,
+          matchedDate,
+          totalAmount: roundMoney(batch.totalAmount)
+        }),
         actorId,
         idempotencyKey: `payroll_payout_match:${batch.payrollPayoutBatchId}:${requireText(bankEventId, "bank_event_id_required")}`,
         description: `Payroll payout match ${payRun.reportingPeriod}`,
@@ -1486,16 +1478,6 @@ export function createPayrollEngine({
             dimensionJson: {}
           }
         ])
-      });
-      ledgerPlatform.validateJournalEntry({
-        companyId: batch.companyId,
-        journalEntryId: created.journalEntry.journalEntryId,
-        actorId
-      });
-      const posted = ledgerPlatform.postJournalEntry({
-        companyId: batch.companyId,
-        journalEntryId: created.journalEntry.journalEntryId,
-        actorId
       });
       batch.matchedJournalEntryId = posted.journalEntry.journalEntryId;
     }
@@ -1923,16 +1905,6 @@ function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
       vacationLiabilityDeltaAmount
     }
   };
-}
-
-function resolvePayrollVoucherSeriesCode({ ledgerPlatform, companyId, purposeCode, fallbackSeriesCode }) {
-  if (ledgerPlatform && typeof ledgerPlatform.resolveVoucherSeriesForPurpose === "function") {
-    return ledgerPlatform.resolveVoucherSeriesForPurpose({
-      companyId,
-      purposeCode
-    }).seriesCode;
-  }
-  return fallbackSeriesCode;
 }
 
 function buildPayrollPayoutBatchModel({ state, payRun, companyBankAccount, hrPlatform }) {

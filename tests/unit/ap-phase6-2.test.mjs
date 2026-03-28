@@ -118,6 +118,10 @@ test("Phase 6.2 ingests OCR invoice lines, explains VAT and posts multiple cost 
   assert.equal(journal.lines.some((line) => line.accountNumber === "5610" && line.debitAmount === 200), true);
   assert.equal(journal.lines.some((line) => line.accountNumber === "2640" && line.debitAmount === 300), true);
   assert.equal(journal.lines.some((line) => line.accountNumber === "2410" && line.creditAmount === 1500), true);
+  assert.equal(journal.metadataJson.postingRecipeCode, "AP_INVOICE");
+  assert.equal(journal.metadataJson.journalType, "operational_posting");
+  assert.equal(journal.metadataJson.postingSignalCode, "ap.invoice.posted");
+  assert.equal(journal.metadataJson.sourceObjectVersion, invoice.duplicateFingerprintHash);
 });
 
 test("Phase 6.2 blocks posting when 3-way matching finds receipt variance", () => {

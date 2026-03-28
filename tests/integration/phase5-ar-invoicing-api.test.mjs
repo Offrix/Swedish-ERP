@@ -179,6 +179,13 @@ test("Phase 5.2 API issues invoices idempotently, closes credits, validates Pepp
     assert.equal(firstIssue.invoiceNumber, secondIssue.invoiceNumber);
     assert.equal(firstIssue.journalEntryId, secondIssue.journalEntryId);
     assert.equal(firstIssue.invoiceSeriesCode, "B");
+    const standardJournal = platform.getJournalEntry({
+      companyId: COMPANY_ID,
+      journalEntryId: firstIssue.journalEntryId
+    });
+    assert.equal(standardJournal.metadataJson.postingRecipeCode, "AR_INVOICE");
+    assert.equal(standardJournal.metadataJson.journalType, "operational_posting");
+    assert.equal(standardJournal.metadataJson.postingSignalCode, "ar.invoice.issued");
 
     const pdfDelivery = await requestJson(baseUrl, `/v1/ar/invoices/${standardInvoice.customerInvoiceId}/deliver`, {
       method: "POST",
@@ -220,6 +227,12 @@ test("Phase 5.2 API issues invoices idempotently, closes credits, validates Pepp
     });
     assert.equal(issuedCredit.invoiceSeriesCode, "C");
     assert.match(issuedCredit.invoiceNumber, /^CRN-/);
+    const creditJournal = platform.getJournalEntry({
+      companyId: COMPANY_ID,
+      journalEntryId: issuedCredit.journalEntryId
+    });
+    assert.equal(creditJournal.metadataJson.postingRecipeCode, "AR_CREDIT_NOTE");
+    assert.equal(creditJournal.metadataJson.journalType, "operational_posting");
 
     const originalAfterCredit = await requestJson(
       baseUrl,

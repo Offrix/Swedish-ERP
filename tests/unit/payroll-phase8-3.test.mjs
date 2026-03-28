@@ -144,6 +144,9 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
     postingJournal.metadataJson.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
     ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
   );
+  assert.equal(postingJournal.metadataJson.postingRecipeCode, "PAYROLL_RUN");
+  assert.equal(postingJournal.metadataJson.journalType, "payroll_posting");
+  assert.equal(postingJournal.metadataJson.sourceObjectVersion, posting.payloadHash);
 
   const payoutBatch = payrollPlatform.createPayrollPayoutBatch({
     companyId: COMPANY_ID,
@@ -169,6 +172,9 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
     payoutMatchJournal.metadataJson.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
     ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
   );
+  assert.equal(payoutMatchJournal.metadataJson.postingRecipeCode, "PAYROLL_PAYOUT_MATCH");
+  assert.equal(payoutMatchJournal.metadataJson.journalType, "settlement_posting");
+  assert.equal(typeof payoutMatchJournal.metadataJson.sourceObjectVersion, "string");
 
   const agiSubmission = payrollPlatform.createAgiSubmission({
     companyId: COMPANY_ID,

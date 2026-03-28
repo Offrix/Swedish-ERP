@@ -163,6 +163,12 @@ test("Phase 8.3 API creates payroll postings, payout batches and vacation snapsh
       posting.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
       ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
     );
+    const postingJournal = platform.getJournalEntry({
+      companyId: COMPANY_ID,
+      journalEntryId: posting.journalEntryId
+    });
+    assert.equal(postingJournal.metadataJson.postingRecipeCode, "PAYROLL_RUN");
+    assert.equal(postingJournal.metadataJson.journalType, "payroll_posting");
 
     const payoutBatch = await requestJson(baseUrl, "/v1/payroll/payout-batches", {
       method: "POST",
@@ -189,6 +195,12 @@ test("Phase 8.3 API creates payroll postings, payout batches and vacation snapsh
       }
     );
     assert.equal(matchedBatch.status, "matched");
+    const payoutMatchJournal = platform.getJournalEntry({
+      companyId: COMPANY_ID,
+      journalEntryId: matchedBatch.matchedJournalEntryId
+    });
+    assert.equal(payoutMatchJournal.metadataJson.postingRecipeCode, "PAYROLL_PAYOUT_MATCH");
+    assert.equal(payoutMatchJournal.metadataJson.journalType, "settlement_posting");
 
     const snapshot = await requestJson(baseUrl, "/v1/payroll/vacation-liability-snapshots", {
       method: "POST",

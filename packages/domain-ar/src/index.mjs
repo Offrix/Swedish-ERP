@@ -1209,7 +1209,7 @@ export function createArEngine({
       }
       return copy(invoice);
     }
-    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+    if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
       throw createError(500, "ledger_platform_missing", "Ledger platform is required to issue invoices.");
     }
     const customer = requireCustomerRecord(state, invoice.companyId, invoice.customerId);
@@ -1259,39 +1259,26 @@ export function createArEngine({
     invoice.invoiceSeriesCode = invoice.invoiceSeriesCode || series.seriesCode;
     invoice.issueIdempotencyKey = invoice.issueIdempotencyKey || `invoice.issue:${invoice.invoiceGenerationKey}`;
     invoice.paymentReference = invoice.paymentReference || String(invoice.invoiceSequenceNumber || 0).padStart(10, "0");
-    const voucherSeriesCode = resolveLedgerVoucherSeriesCode({
-      ledgerPlatform,
-      companyId: invoice.companyId,
-      purposeCode: series.voucherSeriesPurposeCode,
-      fallbackSeriesCode: series.seriesCode
-    });
-
     const journalLines = buildInvoiceJournalLines({
       vatPlatform,
       companyId: invoice.companyId,
       invoice,
       customer
     });
-    const created = ledgerPlatform.createJournalEntry({
+    const posted = ledgerPlatform.applyPostingIntent({
       companyId: invoice.companyId,
       journalDate: invoice.issueDate,
-      voucherSeriesCode,
+      recipeCode: invoice.invoiceType === "credit_note" ? "AR_CREDIT_NOTE" : "AR_INVOICE",
+      voucherSeriesPurposeCode: series.voucherSeriesPurposeCode,
+      fallbackVoucherSeriesCode: series.seriesCode,
+      postingSignalCode: invoice.invoiceType === "credit_note" ? "ar.credit_note.issued" : "ar.invoice.issued",
       sourceType: resolveInvoiceSourceType(invoice.invoiceType),
       sourceId: invoice.customerInvoiceId,
+      sourceObjectVersion: invoice.invoiceGenerationKey || invoice.issueIdempotencyKey,
       actorId,
       idempotencyKey: invoice.issueIdempotencyKey,
       description: `${invoice.invoiceType} ${invoice.invoiceNumber}`,
       lines: journalLines
-    });
-    ledgerPlatform.validateJournalEntry({
-      companyId: invoice.companyId,
-      journalEntryId: created.journalEntry.journalEntryId,
-      actorId
-    });
-    const posted = ledgerPlatform.postJournalEntry({
-      companyId: invoice.companyId,
-      journalEntryId: created.journalEntry.journalEntryId,
-      actorId
     });
 
     invoice.status = "issued";
@@ -1531,7 +1518,7 @@ export function createArEngine({
     correlationId = crypto.randomUUID()
   } = {}) {
     const openItem = requireOpenItemRecord(state, companyId, arOpenItemId);
-    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+    if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
       throw createError(500, "ledger_platform_missing", "Ledger platform is required for AR allocations.");
     }
     const resolvedAllocationType = assertAllowed(allocationType, AR_ALLOCATION_TYPES, "ar_allocation_type_invalid");
@@ -1611,10 +1598,19 @@ export function createArEngine({
       ledgerPlatform,
       companyId: openItem.companyId,
       journalDate: resolvedAllocatedOn,
+      recipeCode: "AR_PAYMENT_ALLOCATION",
+      postingSignalCode: "ar.payment.allocated",
       voucherSeriesPurposeCode: "AR_PAYMENT",
       fallbackVoucherSeriesCode: "D",
       sourceType: "AR_PAYMENT",
       sourceId: allocation.arAllocationId,
+      sourceObjectVersion: hashObject({
+        arOpenItemId: openItem.arOpenItemId,
+        allocationType: resolvedAllocationType,
+        allocatedOn: resolvedAllocatedOn,
+        allocatedAmount: allocation.allocatedAmount,
+        externalEventRef: allocation.externalEventRef
+      }),
       actorId,
       idempotencyKey: `ar_allocation:${allocation.externalEventRef}:${resolvedAllocationType}`,
       description: `AR allocation ${allocation.arAllocationId}`,
@@ -1690,7 +1686,7 @@ export function createArEngine({
     if (allocation.status === "reversed") {
       return copy(allocation);
     }
-    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+    if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
       throw createError(500, "ledger_platform_missing", "Ledger platform is required to reverse AR allocations.");
     }
     const openItem = requireOpenItemRecord(state, allocation.companyId, allocation.arOpenItemId);
@@ -1702,10 +1698,17 @@ export function createArEngine({
       ledgerPlatform,
       companyId: allocation.companyId,
       journalDate: resolvedReversedOn,
+      recipeCode: "AR_PAYMENT_REVERSAL",
+      postingSignalCode: "ar.payment.reversed",
       voucherSeriesPurposeCode: "AR_PAYMENT",
       fallbackVoucherSeriesCode: "D",
       sourceType: "AR_PAYMENT",
       sourceId: `reversal:${allocation.arAllocationId}`,
+      sourceObjectVersion: hashObject({
+        arAllocationId: allocation.arAllocationId,
+        reversedOn: resolvedReversedOn,
+        allocatedAmount: allocation.allocatedAmount
+      }),
       actorId,
       idempotencyKey: `ar_allocation_reversal:${allocation.arAllocationId}`,
       description: `AR allocation reversal ${allocation.arAllocationId}`,
@@ -2012,10 +2015,19 @@ export function createArEngine({
           ledgerPlatform,
           companyId: resolvedCompanyId,
           journalDate: resolvedRunDate,
+          recipeCode: "AR_DUNNING_CHARGE",
+          postingSignalCode: "ar.dunning.charge_booked",
           voucherSeriesPurposeCode: "AR_DUNNING",
           fallbackVoucherSeriesCode: "B",
           sourceType: "AR_INVOICE",
           sourceId: `${openItem.arOpenItemId}:${resolvedStageCode}`,
+          sourceObjectVersion: hashObject({
+            arOpenItemId: openItem.arOpenItemId,
+            stageCode: resolvedStageCode,
+            feeAmount: item.feeAmount,
+            interestAmount: item.interestAmount,
+            calculationWindowEnd
+          }),
           actorId,
           idempotencyKey: `ar_dunning:${openItem.arOpenItemId}:${resolvedStageCode}:${calculationWindowEnd}`,
           description: `AR dunning ${resolvedStageCode} ${openItem.arOpenItemId}`,
@@ -2084,7 +2096,7 @@ export function createArEngine({
     correlationId = crypto.randomUUID()
   } = {}) {
     const openItem = requireOpenItemRecord(state, companyId, arOpenItemId);
-    if (!ledgerPlatform || typeof ledgerPlatform.createJournalEntry !== "function") {
+    if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
       throw createError(500, "ledger_platform_missing", "Ledger platform is required for AR write-offs.");
     }
     if (openItem.disputeFlag || openItem.dunningHoldFlag) {
@@ -2127,10 +2139,18 @@ export function createArEngine({
       ledgerPlatform,
       companyId: openItem.companyId,
       journalDate: resolvedWriteoffDate,
+      recipeCode: "AR_WRITEOFF",
+      postingSignalCode: "ar.writeoff.posted",
       voucherSeriesPurposeCode: "AR_WRITEOFF",
       fallbackVoucherSeriesCode: "V",
       sourceType: "MANUAL_JOURNAL",
       sourceId: `writeoff:${writeoff.arWriteoffId}`,
+      sourceObjectVersion: hashObject({
+        arOpenItemId: openItem.arOpenItemId,
+        writeoffDate: resolvedWriteoffDate,
+        writeoffAmount: resolvedWriteoffAmount,
+        reasonCode: writeoff.reasonCode
+      }),
       actorId,
       idempotencyKey: `ar_writeoff:${openItem.arOpenItemId}:${resolvedWriteoffDate}:${resolvedWriteoffAmount}`,
       description: `AR writeoff ${writeoff.arWriteoffId}`,
@@ -2961,42 +2981,34 @@ function postArJournal({
   ledgerPlatform,
   companyId,
   journalDate,
+  recipeCode,
+  postingSignalCode = null,
   voucherSeriesCode = null,
   voucherSeriesPurposeCode = null,
   fallbackVoucherSeriesCode = null,
   sourceType,
   sourceId,
+  sourceObjectVersion = null,
   actorId,
   idempotencyKey,
   description,
   lines
 }) {
-  const created = ledgerPlatform.createJournalEntry({
+  const posted = ledgerPlatform.applyPostingIntent({
     companyId,
     journalDate,
-    voucherSeriesCode: resolveLedgerVoucherSeriesCode({
-      ledgerPlatform,
-      companyId,
-      explicitSeriesCode: voucherSeriesCode,
-      purposeCode: voucherSeriesPurposeCode,
-      fallbackSeriesCode: fallbackVoucherSeriesCode
-    }),
+    recipeCode,
+    postingSignalCode,
+    voucherSeriesCode,
+    voucherSeriesPurposeCode,
+    fallbackVoucherSeriesCode,
     sourceType,
     sourceId,
+    sourceObjectVersion,
     actorId,
     idempotencyKey,
     description,
     lines
-  });
-  ledgerPlatform.validateJournalEntry({
-    companyId,
-    journalEntryId: created.journalEntry.journalEntryId,
-    actorId
-  });
-  const posted = ledgerPlatform.postJournalEntry({
-    companyId,
-    journalEntryId: created.journalEntry.journalEntryId,
-    actorId
   });
   return posted.journalEntry;
 }
@@ -3727,25 +3739,6 @@ function ensureLedgerPurposeAvailableForInvoiceSeries({ ledgerPlatform, companyI
       `Invoice series requires available ledger purpose ${voucherSeriesPurposeCode}.`
     );
   }
-}
-
-function resolveLedgerVoucherSeriesCode({
-  ledgerPlatform,
-  companyId,
-  explicitSeriesCode = null,
-  purposeCode = null,
-  fallbackSeriesCode = null
-}) {
-  if (explicitSeriesCode) {
-    return normalizeInvoiceSeriesCode(explicitSeriesCode, "voucher_series_code_required");
-  }
-  if (purposeCode && ledgerPlatform && typeof ledgerPlatform.resolveVoucherSeriesForPurpose === "function") {
-    return ledgerPlatform.resolveVoucherSeriesForPurpose({
-      companyId,
-      purposeCode
-    }).seriesCode;
-  }
-  return normalizeInvoiceSeriesCode(fallbackSeriesCode, "voucher_series_code_required");
 }
 
 function normalizeInvoiceSeriesCode(value, code) {

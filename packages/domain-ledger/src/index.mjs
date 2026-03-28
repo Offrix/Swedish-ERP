@@ -44,6 +44,231 @@ export const POSTING_SOURCE_TYPES = Object.freeze([
   "PENSION_REPORT",
   "PROJECT_WIP"
 ]);
+export const POSTING_JOURNAL_TYPES = Object.freeze([
+  "operational_posting",
+  "settlement_posting",
+  "payroll_posting",
+  "tax_account_posting",
+  "year_end_adjustment",
+  "reversal",
+  "correction_replacement",
+  "historical_import"
+]);
+
+export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
+  Object.freeze({
+    recipeCode: "LEDGER_MANUAL_JOURNAL",
+    version: "2026.1",
+    sourceDomain: "ledger",
+    journalType: "operational_posting",
+    allowedSourceTypes: Object.freeze(["MANUAL_JOURNAL"]),
+    defaultVoucherSeriesPurposeCode: "LEDGER_MANUAL",
+    fallbackVoucherSeriesCode: "A",
+    defaultSignalCode: "ledger.manual_journal.created"
+  }),
+  Object.freeze({
+    recipeCode: "AR_INVOICE",
+    version: "2026.1",
+    sourceDomain: "ar",
+    journalType: "operational_posting",
+    allowedSourceTypes: Object.freeze(["AR_INVOICE"]),
+    defaultVoucherSeriesPurposeCode: "AR_INVOICE",
+    fallbackVoucherSeriesCode: "B",
+    defaultSignalCode: "ar.invoice.issued"
+  }),
+  Object.freeze({
+    recipeCode: "AR_CREDIT_NOTE",
+    version: "2026.1",
+    sourceDomain: "ar",
+    journalType: "operational_posting",
+    allowedSourceTypes: Object.freeze(["AR_CREDIT_NOTE"]),
+    defaultVoucherSeriesPurposeCode: "AR_CREDIT_NOTE",
+    fallbackVoucherSeriesCode: "C",
+    defaultSignalCode: "ar.credit_note.issued"
+  }),
+  Object.freeze({
+    recipeCode: "AR_PAYMENT_ALLOCATION",
+    version: "2026.1",
+    sourceDomain: "ar",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["AR_PAYMENT"]),
+    defaultVoucherSeriesPurposeCode: "AR_PAYMENT",
+    fallbackVoucherSeriesCode: "D",
+    defaultSignalCode: "ar.payment.allocated"
+  }),
+  Object.freeze({
+    recipeCode: "AR_PAYMENT_REVERSAL",
+    version: "2026.1",
+    sourceDomain: "ar",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["AR_PAYMENT"]),
+    defaultVoucherSeriesPurposeCode: "AR_PAYMENT",
+    fallbackVoucherSeriesCode: "D",
+    defaultSignalCode: "ar.payment.reversed"
+  }),
+  Object.freeze({
+    recipeCode: "AR_DUNNING_CHARGE",
+    version: "2026.1",
+    sourceDomain: "ar",
+    journalType: "operational_posting",
+    allowedSourceTypes: Object.freeze(["AR_INVOICE"]),
+    defaultVoucherSeriesPurposeCode: "AR_DUNNING",
+    fallbackVoucherSeriesCode: "B",
+    defaultSignalCode: "ar.dunning.charge_booked"
+  }),
+  Object.freeze({
+    recipeCode: "AR_WRITEOFF",
+    version: "2026.1",
+    sourceDomain: "ar",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["MANUAL_JOURNAL"]),
+    defaultVoucherSeriesPurposeCode: "AR_WRITEOFF",
+    fallbackVoucherSeriesCode: "V",
+    defaultSignalCode: "ar.writeoff.posted"
+  }),
+  Object.freeze({
+    recipeCode: "AP_INVOICE",
+    version: "2026.1",
+    sourceDomain: "ap",
+    journalType: "operational_posting",
+    allowedSourceTypes: Object.freeze(["AP_INVOICE"]),
+    defaultVoucherSeriesPurposeCode: "AP_INVOICE",
+    fallbackVoucherSeriesCode: "E",
+    defaultSignalCode: "ap.invoice.posted"
+  }),
+  Object.freeze({
+    recipeCode: "AP_PAYMENT_RESERVE",
+    version: "2026.1",
+    sourceDomain: "ap",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["AP_PAYMENT"]),
+    defaultVoucherSeriesPurposeCode: "AP_PAYMENT",
+    fallbackVoucherSeriesCode: "E",
+    defaultSignalCode: "ap.payment.reserved"
+  }),
+  Object.freeze({
+    recipeCode: "AP_PAYMENT_RELEASE",
+    version: "2026.1",
+    sourceDomain: "ap",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["AP_PAYMENT"]),
+    defaultVoucherSeriesPurposeCode: "AP_PAYMENT",
+    fallbackVoucherSeriesCode: "E",
+    defaultSignalCode: "ap.payment.released"
+  }),
+  Object.freeze({
+    recipeCode: "AP_PAYMENT_SETTLEMENT",
+    version: "2026.1",
+    sourceDomain: "ap",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["AP_PAYMENT"]),
+    defaultVoucherSeriesPurposeCode: "AP_PAYMENT",
+    fallbackVoucherSeriesCode: "E",
+    defaultSignalCode: "bank.payment_order.settled"
+  }),
+  Object.freeze({
+    recipeCode: "AP_PAYMENT_RETURN",
+    version: "2026.1",
+    sourceDomain: "ap",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["AP_PAYMENT"]),
+    defaultVoucherSeriesPurposeCode: "AP_PAYMENT",
+    fallbackVoucherSeriesCode: "E",
+    defaultSignalCode: "bank.payment_order.returned"
+  }),
+  Object.freeze({
+    recipeCode: "PAYROLL_RUN",
+    version: "2026.1",
+    sourceDomain: "payroll",
+    journalType: "payroll_posting",
+    allowedSourceTypes: Object.freeze(["PAYROLL_RUN"]),
+    defaultVoucherSeriesPurposeCode: "PAYROLL_RUN",
+    fallbackVoucherSeriesCode: "H",
+    defaultSignalCode: "payroll.run.posted"
+  }),
+  Object.freeze({
+    recipeCode: "PAYROLL_CORRECTION",
+    version: "2026.1",
+    sourceDomain: "payroll",
+    journalType: "payroll_posting",
+    allowedSourceTypes: Object.freeze(["PAYROLL_CORRECTION"]),
+    defaultVoucherSeriesPurposeCode: "PAYROLL_CORRECTION",
+    fallbackVoucherSeriesCode: "H",
+    defaultSignalCode: "payroll.run.posted"
+  }),
+  Object.freeze({
+    recipeCode: "PAYROLL_PAYOUT_MATCH",
+    version: "2026.1",
+    sourceDomain: "payroll",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["PAYROLL_RUN"]),
+    defaultVoucherSeriesPurposeCode: "PAYROLL_PAYOUT_MATCH",
+    fallbackVoucherSeriesCode: "H",
+    defaultSignalCode: "bank.payment_order.settled"
+  }),
+  Object.freeze({
+    recipeCode: "BANK_STATEMENT_MATCH",
+    version: "2026.1",
+    sourceDomain: "banking",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["BANK_IMPORT"]),
+    defaultVoucherSeriesPurposeCode: null,
+    fallbackVoucherSeriesCode: "D",
+    defaultSignalCode: "bank.statement.line.matched_and_approved"
+  }),
+  Object.freeze({
+    recipeCode: "TAX_ACCOUNT_CLASSIFIED_EVENT",
+    version: "2026.1",
+    sourceDomain: "tax_account",
+    journalType: "tax_account_posting",
+    allowedSourceTypes: Object.freeze(["VAT_SETTLEMENT"]),
+    defaultVoucherSeriesPurposeCode: "VAT_SETTLEMENT",
+    fallbackVoucherSeriesCode: "I",
+    defaultSignalCode: "tax_account.event.classified_and_approved"
+  }),
+  Object.freeze({
+    recipeCode: "HUS_CLAIM_ACCEPTED",
+    version: "2026.1",
+    sourceDomain: "hus",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["ROT_RUT_CLAIM"]),
+    defaultVoucherSeriesPurposeCode: null,
+    fallbackVoucherSeriesCode: "B",
+    defaultSignalCode: "hus.claim.accepted"
+  }),
+  Object.freeze({
+    recipeCode: "HUS_CLAIM_PARTIALLY_ACCEPTED",
+    version: "2026.1",
+    sourceDomain: "hus",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["ROT_RUT_CLAIM"]),
+    defaultVoucherSeriesPurposeCode: null,
+    fallbackVoucherSeriesCode: "B",
+    defaultSignalCode: "hus.claim.partially_accepted"
+  }),
+  Object.freeze({
+    recipeCode: "HUS_RECOVERY_CONFIRMED",
+    version: "2026.1",
+    sourceDomain: "hus",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["ROT_RUT_CLAIM"]),
+    defaultVoucherSeriesPurposeCode: null,
+    fallbackVoucherSeriesCode: "V",
+    defaultSignalCode: "hus.recovery.confirmed"
+  }),
+  Object.freeze({
+    recipeCode: "YEAR_END_ADJUSTMENT",
+    version: "2026.1",
+    sourceDomain: "ledger_close",
+    journalType: "year_end_adjustment",
+    allowedSourceTypes: Object.freeze(["YEAR_END_TRANSFER"]),
+    defaultVoucherSeriesPurposeCode: null,
+    fallbackVoucherSeriesCode: "X",
+    defaultSignalCode: "close.adjustment.approved"
+  })
+]);
+
+const POSTING_RECIPES_BY_CODE = new Map(POSTING_RECIPE_DEFINITIONS.map((recipe) => [recipe.recipeCode, recipe]));
 
 export const REQUIRED_ENGINE_ACCOUNTS = Object.freeze({
   customerInvoices: Object.freeze(["1210", "2610", "2620", "2630", "3010-3490", "2650"]),
@@ -1684,9 +1909,13 @@ export function createLedgerEngine({
   return {
     ledgerStates: LEDGER_STATES,
     postingSourceTypes: POSTING_SOURCE_TYPES,
+    postingJournalTypes: POSTING_JOURNAL_TYPES,
+    postingRecipes: POSTING_RECIPE_DEFINITIONS,
     defaultChartTemplateId: DEFAULT_CHART_TEMPLATE_ID,
     installLedgerCatalog,
     ensureAccountingYearPeriod,
+    listPostingRecipes,
+    getPostingRecipe,
     listLedgerAccounts,
     upsertLedgerAccount,
     listVoucherSeries,
@@ -1699,6 +1928,7 @@ export function createLedgerEngine({
     upsertLedgerDimensionValue,
     lockAccountingPeriod,
     reopenAccountingPeriod,
+    applyPostingIntent,
     createJournalEntry,
     validateJournalEntry,
     postJournalEntry,
@@ -2072,6 +2302,117 @@ export function createLedgerEngine({
       );
     }
     return copy(candidates[0]);
+  }
+
+  function resolvePostingVoucherSeriesCode({
+    companyId,
+    explicitSeriesCode = null,
+    purposeCode = null,
+    fallbackSeriesCode = null
+  } = {}) {
+    if (explicitSeriesCode) {
+      return normalizeSeriesCode(explicitSeriesCode, "voucher_series_code_required");
+    }
+    if (purposeCode) {
+      try {
+        return resolveVoucherSeriesForPurpose({
+          companyId,
+          purposeCode
+        }).seriesCode;
+      } catch (error) {
+        if (!fallbackSeriesCode) {
+          throw error;
+        }
+      }
+    }
+    return normalizeSeriesCode(fallbackSeriesCode, "voucher_series_code_required");
+  }
+
+  function listPostingRecipes() {
+    return POSTING_RECIPE_DEFINITIONS.map(copy);
+  }
+
+  function getPostingRecipe({ recipeCode } = {}) {
+    return copy(requirePostingRecipe(recipeCode));
+  }
+
+  function applyPostingIntent({
+    companyId,
+    journalDate,
+    voucherSeriesCode = null,
+    voucherSeriesPurposeCode = null,
+    fallbackVoucherSeriesCode = null,
+    recipeCode,
+    postingSignalCode = null,
+    sourceType,
+    sourceId,
+    sourceObjectVersion = null,
+    description = null,
+    actorId,
+    idempotencyKey,
+    lines,
+    currencyCode = DEFAULT_LEDGER_CURRENCY,
+    metadataJson = {},
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const recipe = requirePostingRecipe(recipeCode);
+    const resolvedSourceType = assertPostingSourceType(sourceType);
+    const resolvedSourceObjectVersion = normalizeOptionalText(sourceObjectVersion);
+    if (!resolvedSourceObjectVersion) {
+      throw httpError(400, "source_object_version_required", "Posting intents must bind an explicit source object version.");
+    }
+    if (!recipe.allowedSourceTypes.includes(resolvedSourceType)) {
+      throw httpError(
+        409,
+        "posting_recipe_source_type_invalid",
+        `Posting recipe ${recipe.recipeCode} does not allow source type ${resolvedSourceType}.`
+      );
+    }
+    const resolvedVoucherSeriesCode = resolvePostingVoucherSeriesCode({
+      companyId,
+      explicitSeriesCode: voucherSeriesCode,
+      purposeCode: voucherSeriesPurposeCode || recipe.defaultVoucherSeriesPurposeCode,
+      fallbackSeriesCode: fallbackVoucherSeriesCode || recipe.fallbackVoucherSeriesCode
+    });
+    const created = createJournalEntry({
+      companyId,
+      journalDate,
+      voucherSeriesCode: resolvedVoucherSeriesCode,
+      sourceType: resolvedSourceType,
+      sourceId,
+      description,
+      actorId,
+      idempotencyKey,
+      lines,
+      currencyCode,
+      metadataJson: {
+        ...copy(metadataJson || {}),
+        journalType: recipe.journalType,
+        postingRecipeCode: recipe.recipeCode,
+        postingRecipeVersion: recipe.version,
+        postingSignalCode: normalizeOptionalText(postingSignalCode) || recipe.defaultSignalCode,
+        sourceDomain: recipe.sourceDomain,
+        sourceObjectVersion: resolvedSourceObjectVersion
+      },
+      correlationId
+    });
+    const validated = validateJournalEntry({
+      companyId,
+      journalEntryId: created.journalEntry.journalEntryId,
+      actorId,
+      correlationId
+    });
+    const posted = postJournalEntry({
+      companyId,
+      journalEntryId: validated.journalEntry.journalEntryId,
+      actorId,
+      correlationId
+    });
+    return {
+      journalEntry: posted.journalEntry,
+      postingRecipe: copy(recipe),
+      idempotentReplay: created.idempotentReplay === true
+    };
   }
 
   function listAccountingPeriods({ companyId } = {}) {
@@ -3313,6 +3654,15 @@ function defaultSeriesDescription(seriesCode) {
 
 function defaultSeriesPurposeCodes(seriesCode) {
   return copy(DEFAULT_VOUCHER_SERIES_PURPOSE_MAP[seriesCode] || []);
+}
+
+function requirePostingRecipe(recipeCode) {
+  const resolvedRecipeCode = requireText(recipeCode, "posting_recipe_code_required").toUpperCase();
+  const recipe = POSTING_RECIPES_BY_CODE.get(resolvedRecipeCode);
+  if (!recipe) {
+    throw httpError(404, "posting_recipe_not_found", `Posting recipe ${resolvedRecipeCode} is not configured.`);
+  }
+  return recipe;
 }
 
 function createCatalogEntries(values = [], dimensionType) {
