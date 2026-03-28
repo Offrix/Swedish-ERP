@@ -283,7 +283,40 @@ test("Phase 1 tenant setup flows through tenant-control with finance-ready state
     carryOverSelectionCodes: ["settings", "document_templates"],
     approvalActorIds: [approver.user.userId]
   });
-  assert.equal(["approved", "validated"].includes(promotionPlan.status), true);
+  assert.equal(promotionPlan.status, "approved");
+  assert.equal(promotionPlan.validationReport.status, "eligible");
+  assert.equal(promotionPlan.portableDataBundle.liveForbiddenArtifacts.length > 0, true);
+
+  const executedPromotionPlan = tenantControl.executePromotionPlan({
+    sessionToken: adminToken,
+    promotionPlanId: promotionPlan.promotionPlanId
+  });
+  assert.equal(executedPromotionPlan.status, "executed");
+  assert.equal(executedPromotionPlan.liveCompanyId != null, true);
+  assert.notEqual(executedPromotionPlan.liveCompanyId, DEMO_IDS.companyId);
+  assert.equal(executedPromotionPlan.executionSummary.requiredPostPromotionTaskCodes.includes("configure_live_provider_credentials"), true);
+
+  const liveAdminToken = loginWithStrongAuthOnPlatform({
+    platform,
+    companyId: executedPromotionPlan.liveCompanyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+  const liveCompanySetupProfile = tenantControl.getCompanySetupProfile({
+    sessionToken: liveAdminToken,
+    companyId: executedPromotionPlan.liveCompanyId
+  });
+  assert.equal(liveCompanySetupProfile.status, "finance_ready");
+  assert.equal(liveCompanySetupProfile.financeFoundationJson.status, "finance_ready");
+  assert.equal(liveCompanySetupProfile.financeBlueprintJson.chartTemplateId, "DSAM-2026");
+
+  const liveCompanyProfile = platform.getDomain("orgAuth").getCompanyProfile({
+    companyId: executedPromotionPlan.liveCompanyId
+  });
+  const sourceCompanyProfile = platform.getDomain("orgAuth").getCompanyProfile({
+    companyId: DEMO_IDS.companyId
+  });
+  assert.equal(liveCompanyProfile.legalName, sourceCompanyProfile.legalName);
+  assert.equal(liveCompanyProfile.orgNumber, sourceCompanyProfile.orgNumber);
 
   const parallelRunPlan = tenantControl.startParallelRun({
     sessionToken: adminToken,
@@ -295,8 +328,18 @@ test("Phase 1 tenant setup flows through tenant-control with finance-ready state
 
   snapshot = tenantControl.snapshotTenantControl();
   assert.equal(snapshot.moduleActivationProfiles.some((item) => item.moduleCode === "payroll" && item.status === "suspended"), true);
-  assert.equal(snapshot.trialEnvironmentProfiles.length >= 1, true);
+  assert.equal(
+    snapshot.trialEnvironmentProfiles.some(
+      (item) =>
+        item.trialEnvironmentProfileId === trialEnvironment.trialEnvironmentProfileId
+        && item.status === "archived"
+        && item.liveCompanyId === executedPromotionPlan.liveCompanyId
+    ),
+    true
+  );
   assert.equal(snapshot.promotionPlans.length >= 1, true);
+  assert.equal(snapshot.promotionValidationReports.length >= 1, true);
+  assert.equal(snapshot.portableDataBundles.length >= 1, true);
   assert.equal(snapshot.parallelRunPlans.length >= 1, true);
 });
 

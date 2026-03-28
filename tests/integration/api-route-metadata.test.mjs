@@ -41,6 +41,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/trial/environments/:trialEnvironmentProfileId/reset",
   "/v1/trial/environments/:trialEnvironmentProfileId/refresh",
   "/v1/trial/promotions",
+  "/v1/trial/promotions/:promotionPlanId/execute",
   "/v1/documents/:documentId/versions",
   "/v1/documents/:documentId/links",
   "/v1/inbox/messages/:emailIngestMessageId",

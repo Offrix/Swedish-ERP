@@ -346,6 +346,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/trial/environments/:trialEnvironmentProfileId/reset",
               "/v1/trial/environments/:trialEnvironmentProfileId/refresh",
               "/v1/trial/promotions",
+              "/v1/trial/promotions/:promotionPlanId/execute",
               "/v1/onboarding/runs",
               "/v1/onboarding/runs/:runId",
               "/v1/onboarding/runs/:runId/checklist",
@@ -1656,6 +1657,20 @@ async function handleRequest({ req, res, platform, flags }) {
         carryOverSelectionCodes: body.carryOverSelectionCodes,
         approvalActorIds: body.approvalActorIds,
         executeNow: body.executeNow === true
+      })
+    );
+    return;
+  }
+
+  const trialPromotionExecuteMatch = matchPath(path, "/v1/trial/promotions/:promotionPlanId/execute");
+  if (req.method === "POST" && trialPromotionExecuteMatch) {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).executePromotionPlan({
+        sessionToken: readSessionToken(req, body),
+        promotionPlanId: trialPromotionExecuteMatch.promotionPlanId
       })
     );
     return;

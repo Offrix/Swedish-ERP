@@ -16,6 +16,8 @@ export const TRIAL_ENVIRONMENT_PROFILE_STATUSES = Object.freeze([
   "draft",
   "active",
   "reset_in_progress",
+  "promotion_in_progress",
+  "expired",
   "archived"
 ]);
 export const PROMOTION_PLAN_STATUSES = Object.freeze([
@@ -52,6 +54,7 @@ const FORBIDDEN_LIVE_CARRY_OVER_CODES = Object.freeze([
 const DEFAULT_ROLE_TEMPLATE_CODE = "standard_sme";
 const DEFAULT_QUEUE_STRUCTURE_CODE = "standard_finance";
 const DEFAULT_CHART_TEMPLATE_ID = "DSAM-2026";
+const DEFAULT_VOUCHER_SERIES_CODES = Object.freeze(["A", "B", "E", "H", "I"]);
 const DEFAULT_VAT_SCHEME = "se_standard";
 const DEFAULT_VAT_FILING_PERIOD = "monthly";
 const DEFAULT_ACCOUNTING_METHOD_CODE = "FAKTURERINGSMETOD";
@@ -218,6 +221,94 @@ const TRIAL_REFRESH_PACKS = Object.freeze({
     appendWorkItems: Object.freeze(["submission_monitor_delta", "tax_reconciliation_delta"])
   })
 });
+const PORTABLE_CARRY_OVER_SELECTIONS = Object.freeze({
+  company_masterdata: Object.freeze({
+    selectionCode: "company_masterdata",
+    label: "Company masterdata",
+    importBatchCode: "company_masterdata",
+    portableObjectTypes: Object.freeze(["company_profile"]),
+    mandatory: true
+  }),
+  company_registrations: Object.freeze({
+    selectionCode: "company_registrations",
+    label: "Company registrations",
+    importBatchCode: "company_registrations",
+    portableObjectTypes: Object.freeze(["company_registration"]),
+    mandatory: true
+  }),
+  settings: Object.freeze({
+    selectionCode: "settings",
+    label: "Settings",
+    importBatchCode: "company_settings",
+    portableObjectTypes: Object.freeze(["settings"]),
+    mandatory: true
+  }),
+  chart_selection: Object.freeze({
+    selectionCode: "chart_selection",
+    label: "Chart selection",
+    importBatchCode: "chart_selection",
+    portableObjectTypes: Object.freeze(["chart_template", "voucher_series"]),
+    mandatory: true
+  }),
+  document_templates: Object.freeze({
+    selectionCode: "document_templates",
+    label: "Document templates",
+    importBatchCode: "document_templates",
+    portableObjectTypes: Object.freeze(["document_template"]),
+    mandatory: false
+  }),
+  portable_documents: Object.freeze({
+    selectionCode: "portable_documents",
+    label: "Portable documents",
+    importBatchCode: "portable_documents",
+    portableObjectTypes: Object.freeze(["document"]),
+    mandatory: false
+  }),
+  project_templates: Object.freeze({
+    selectionCode: "project_templates",
+    label: "Project templates",
+    importBatchCode: "project_templates",
+    portableObjectTypes: Object.freeze(["project_template"]),
+    mandatory: false
+  }),
+  customer_supplier_masterdata: Object.freeze({
+    selectionCode: "customer_supplier_masterdata",
+    label: "Customer and supplier masterdata",
+    importBatchCode: "customer_supplier_masterdata",
+    portableObjectTypes: Object.freeze(["customer", "supplier"]),
+    mandatory: false
+  }),
+  users_roles: Object.freeze({
+    selectionCode: "users_roles",
+    label: "Approved users and roles",
+    importBatchCode: "users_roles",
+    portableObjectTypes: Object.freeze(["company_user", "team_membership"]),
+    mandatory: false
+  })
+});
+const PROMOTION_REQUIRED_APPROVAL_CLASSES = Object.freeze(["implementation", "finance", "security"]);
+const DEFAULT_PROMOTION_GO_LIVE_PATH = "parallel_run";
+const PROMOTION_PORTABLE_DATA_VERSION = "2026.1";
+const PROMOTION_VALIDATION_VERSION = "2026.1";
+const FORBIDDEN_TRIAL_LIVE_ARTIFACT_CODES = Object.freeze([
+  "trial_journal_entries",
+  "trial_payroll_runs",
+  "trial_submission_receipts",
+  "provider_refs",
+  "provider_tokens",
+  "trial_evidence_bundles",
+  "synthetic_bank_events",
+  "synthetic_tax_account_events",
+  "synthetic_support_artifacts"
+]);
+const DEFAULT_POST_PROMOTION_TASK_CODES = Object.freeze([
+  "configure_live_provider_credentials",
+  "import_opening_balances",
+  "import_payroll_history_if_applicable",
+  "import_open_items_and_history",
+  "configure_bank_connections",
+  "configure_authority_registration"
+]);
 const DEFAULT_FINANCE_QUEUE_STRUCTURE = Object.freeze([
   Object.freeze({
     queueCode: "finance_review",
@@ -303,6 +394,8 @@ export function createTenantControlEngine({
     trialEnvironmentIdsByCompany: new Map(),
     promotionPlans: new Map(),
     promotionPlanIdsByCompany: new Map(),
+    promotionValidationReports: new Map(),
+    portableDataBundles: new Map(),
     parallelRunPlans: new Map(),
     parallelRunPlanIdsByCompany: new Map(),
     financeBlueprintsByCompany: new Map(),
@@ -335,6 +428,8 @@ export function createTenantControlEngine({
     resetTrialEnvironment,
     refreshTrialEnvironment,
     promoteTrialToLive,
+    getPromotionPlan,
+    executePromotionPlan,
     listPromotionPlans,
     startParallelRun,
     listParallelRunPlans,
@@ -635,6 +730,11 @@ export function createTenantControlEngine({
       refreshHistory: [],
       latestResetEvidenceBundleId: null,
       latestRefreshEvidenceBundleId: null,
+      latestPromotionEvidenceBundleId: null,
+      archivedReasonCode: null,
+      promotedAt: null,
+      liveCompanyId: null,
+      lastPromotionPlanId: null,
       expiresAt: normalizeOptionalText(expiresAt),
       createdByUserId: principal.userId,
       createdAt: now,
@@ -694,6 +794,7 @@ export function createTenantControlEngine({
     reasonCode = "manual_reset"
   } = {}) {
     const trialEnvironment = requireTrialEnvironment(trialEnvironmentProfileId);
+    assertTrialEnvironmentStatus(trialEnvironment, ["active"], "trial_environment_reset_status_invalid");
     assertTrialEnvironmentIsolated(trialEnvironment);
     const principal = authorizeCompanyAction({
       sessionToken,
@@ -793,6 +894,7 @@ export function createTenantControlEngine({
     reasonCode = "manual_refresh"
   } = {}) {
     const trialEnvironment = requireTrialEnvironment(trialEnvironmentProfileId);
+    assertTrialEnvironmentStatus(trialEnvironment, ["active"], "trial_environment_refresh_status_invalid");
     assertTrialEnvironmentIsolated(trialEnvironment);
     const principal = authorizeCompanyAction({
       sessionToken,
@@ -868,10 +970,7 @@ export function createTenantControlEngine({
     executeNow = false
   } = {}) {
     const trialEnvironment = requireTrialEnvironment(trialEnvironmentProfileId);
-    assertTrialEnvironmentIsolated(trialEnvironment);
-    if (trialEnvironment.promotionEligibleFlag !== true) {
-      throw httpError(409, "trial_environment_not_promotion_eligible", "Trial environment is not eligible for promotion.");
-    }
+    assertTrialEnvironmentReadyForPromotion(trialEnvironment);
     const principal = authorizeCompanyAction({
       sessionToken,
       companyId: trialEnvironment.companyId,
@@ -880,7 +979,7 @@ export function createTenantControlEngine({
       objectId: trialEnvironmentProfileId,
       scopeCode: "promotion_plan"
     });
-    const normalizedCarryOverSelectionCodes = normalizeStringList(carryOverSelectionCodes);
+    const normalizedCarryOverSelectionCodes = resolvePortableCarryOverSelections(carryOverSelectionCodes);
     const forbiddenCarryOvers = normalizedCarryOverSelectionCodes.filter((code) =>
       FORBIDDEN_LIVE_CARRY_OVER_CODES.includes(code)
     );
@@ -892,35 +991,59 @@ export function createTenantControlEngine({
       );
     }
     const normalizedApprovalActorIds = normalizeStringList(approvalActorIds);
+    const validationReport = buildPromotionValidationReport({
+      trialEnvironment,
+      principal,
+      carryOverSelectionCodes: normalizedCarryOverSelectionCodes
+    });
+    const portableDataBundle = buildPortableDataBundle({
+      trialEnvironment,
+      validationReport,
+      carryOverSelectionCodes: normalizedCarryOverSelectionCodes
+    });
+    const approvalCoverage = evaluatePromotionApprovalCoverage({
+      companyId: trialEnvironment.companyId,
+      principalUserId: principal.userId,
+      approvalActorIds: normalizedApprovalActorIds
+    });
     const now = nowIso();
     const plan = {
       promotionPlanId: crypto.randomUUID(),
       companyId: trialEnvironment.companyId,
       trialEnvironmentProfileId,
-      status:
-        executeNow && normalizedApprovalActorIds.length > 0
-          ? "executed"
-          : normalizedApprovalActorIds.length > 0
-            ? "approved"
-            : "validated",
+      status: approvalCoverage.complete ? "approved" : "validated",
+      sourceCompanyId: trialEnvironment.companyId,
+      sourceMasterdataSnapshotHash: validationReport.sourceMasterdataSnapshotHash,
+      carryOverPolicyCode: "portable_masterdata_only",
       carryOverSelectionCodes: normalizedCarryOverSelectionCodes,
       approvalActorIds: normalizedApprovalActorIds,
+      approvalCoverage,
+      validationReportId: validationReport.promotionValidationReportId,
+      portableDataBundleId: portableDataBundle.portableDataBundleId,
+      recommendedGoLivePath: validationReport.recommendedGoLivePath,
       requiresCutover: true,
       forbiddenCarryOvers,
+      blockingIssueCodes: validationReport.blockingIssues.map((issue) => issue.issueCode),
+      warningCodes: validationReport.warnings.map((warning) => warning.warningCode),
       createdByUserId: principal.userId,
       createdAt: now,
       updatedAt: now,
-      executedAt: executeNow && normalizedApprovalActorIds.length > 0 ? now : null
+      approvedAt: approvalCoverage.complete ? now : null,
+      executedAt: null,
+      liveCompanyId: null,
+      liveTenantBootstrapId: null,
+      liveFinanceFoundationStatus: null,
+      liveCompanySetupProfileId: null,
+      sourceTrialStatus: trialEnvironment.status,
+      executionSummary: null
     };
+    if (validationReport.status !== "eligible") {
+      plan.status = "validated";
+    }
+    state.promotionValidationReports.set(validationReport.promotionValidationReportId, validationReport);
+    state.portableDataBundles.set(portableDataBundle.portableDataBundleId, portableDataBundle);
     state.promotionPlans.set(plan.promotionPlanId, plan);
     appendToIndex(state.promotionPlanIdsByCompany, plan.companyId, plan.promotionPlanId);
-    if (plan.status === "executed") {
-      appendDomainEvent("trial.promoted_to_live", {
-        companyId: plan.companyId,
-        promotionPlanId: plan.promotionPlanId,
-        actorUserId: principal.userId
-      });
-    }
     appendAuditEvent({
       companyId: plan.companyId,
       actorId: principal.userId,
@@ -930,10 +1053,129 @@ export function createTenantControlEngine({
       metadata: {
         status: plan.status,
         carryOverSelectionCodes: plan.carryOverSelectionCodes,
-        approvalActorIds: plan.approvalActorIds
+        approvalActorIds: plan.approvalActorIds,
+        validationReportId: plan.validationReportId,
+        portableDataBundleId: plan.portableDataBundleId,
+        recommendedGoLivePath: plan.recommendedGoLivePath
       }
     });
-    return copy(plan);
+    return executeNow
+      ? executePromotionPlan({
+          sessionToken,
+          promotionPlanId: plan.promotionPlanId
+        })
+      : presentPromotionPlan(plan);
+  }
+
+  function getPromotionPlan({ sessionToken, promotionPlanId } = {}) {
+    const plan = requirePromotionPlan(promotionPlanId);
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: plan.companyId,
+      action: "COMPANY_READ",
+      objectType: "promotion_plan",
+      objectId: plan.promotionPlanId,
+      scopeCode: "promotion_plan"
+    });
+    return presentPromotionPlan(plan);
+  }
+
+  function executePromotionPlan({ sessionToken, promotionPlanId } = {}) {
+    const plan = requirePromotionPlan(promotionPlanId);
+    const trialEnvironment = requireTrialEnvironment(plan.trialEnvironmentProfileId);
+    assertTrialEnvironmentReadyForPromotion(trialEnvironment);
+    const principal = authorizeCompanyAction({
+      sessionToken,
+      companyId: plan.companyId,
+      action: "COMPANY_MANAGE",
+      objectType: "promotion_plan",
+      objectId: plan.promotionPlanId,
+      scopeCode: "promotion_plan"
+    });
+    if (plan.status === "executed") {
+      return presentPromotionPlan(plan);
+    }
+    if (plan.status !== "approved") {
+      throw httpError(409, "trial_promotion_approval_incomplete", "Trial promotion requires completed approval coverage before execution.");
+    }
+
+    const validationReport = requirePromotionValidationReport(plan.validationReportId);
+    if (validationReport.status !== "eligible") {
+      throw httpError(409, "trial_promotion_validation_blocked", "Trial promotion validation is blocked.");
+    }
+    const portableDataBundle = requirePortableDataBundle(plan.portableDataBundleId);
+    const promotionStartedAt = nowIso();
+    trialEnvironment.status = "promotion_in_progress";
+    trialEnvironment.updatedAt = promotionStartedAt;
+
+    const liveBootstrap = materializeLiveCompanyFromPromotion({
+      portableDataBundle,
+      trialEnvironment,
+      plan,
+      principal
+    });
+    const liveCompanySetupProfile = state.companySetupProfiles.get(requireCompanySetupProfileId(liveBootstrap.companyId));
+    const liveFinanceFoundation = state.financeFoundationRecordsByCompany.get(liveBootstrap.companyId) || null;
+    const promotionEvidenceBundle = createPromotionEvidenceBundle({
+      trialEnvironment,
+      plan,
+      validationReport,
+      portableDataBundle,
+      actorId: principal.userId,
+      liveCompanyId: liveBootstrap.companyId
+    });
+
+    trialEnvironment.status = "archived";
+    trialEnvironment.promotionEligibleFlag = false;
+    trialEnvironment.archivedReasonCode = "promoted_to_live";
+    trialEnvironment.promotedAt = promotionStartedAt;
+    trialEnvironment.lastPromotionPlanId = plan.promotionPlanId;
+    trialEnvironment.liveCompanyId = liveBootstrap.companyId;
+    trialEnvironment.latestPromotionEvidenceBundleId = promotionEvidenceBundle.evidenceBundleId;
+    trialEnvironment.updatedAt = nowIso();
+
+    plan.status = "executed";
+    plan.executedAt = nowIso();
+    plan.updatedAt = plan.executedAt;
+    plan.liveCompanyId = liveBootstrap.companyId;
+    plan.liveTenantBootstrapId = liveBootstrap.tenantBootstrapId;
+    plan.liveCompanySetupProfileId = liveCompanySetupProfile?.companySetupProfileId || null;
+    plan.liveFinanceFoundationStatus = liveFinanceFoundation?.status || null;
+    plan.executionSummary = {
+      liveCompanyId: liveBootstrap.companyId,
+      liveTenantBootstrapId: liveBootstrap.tenantBootstrapId,
+      promotedAt: plan.executedAt,
+      liveFinanceFoundationStatus: liveFinanceFoundation?.status || "pending",
+      liveCompanySetupStatus: liveCompanySetupProfile?.status || null,
+      evidenceBundleId: promotionEvidenceBundle.evidenceBundleId,
+      requiredPostPromotionTaskCodes: copy(DEFAULT_POST_PROMOTION_TASK_CODES)
+    };
+
+    appendDomainEvent("trial.promoted_to_live", {
+      companyId: plan.companyId,
+      trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
+      promotionPlanId: plan.promotionPlanId,
+      actorUserId: principal.userId,
+      liveCompanyId: liveBootstrap.companyId,
+      liveTenantBootstrapId: liveBootstrap.tenantBootstrapId,
+      portableDataBundleId: portableDataBundle.portableDataBundleId,
+      validationReportId: validationReport.promotionValidationReportId
+    });
+    appendAuditEvent({
+      companyId: plan.companyId,
+      actorId: principal.userId,
+      action: "tenant_control.trial_promotion.executed",
+      entityType: "promotion_plan",
+      entityId: plan.promotionPlanId,
+      metadata: {
+        liveCompanyId: liveBootstrap.companyId,
+        liveTenantBootstrapId: liveBootstrap.tenantBootstrapId,
+        validationReportId: validationReport.promotionValidationReportId,
+        portableDataBundleId: portableDataBundle.portableDataBundleId,
+        evidenceBundleId: promotionEvidenceBundle.evidenceBundleId
+      }
+    });
+    return presentPromotionPlan(plan);
   }
 
   function listPromotionPlans({ sessionToken, companyId } = {}) {
@@ -950,7 +1192,7 @@ export function createTenantControlEngine({
       .map((promotionPlanId) => state.promotionPlans.get(promotionPlanId))
       .filter(Boolean)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-      .map(copy);
+      .map((plan) => presentPromotionPlan(plan));
   }
 
   function startParallelRun({
@@ -1387,6 +1629,8 @@ export function createTenantControlEngine({
       moduleActivationProfiles: [...state.moduleActivationProfiles.values()],
       trialEnvironmentProfiles: [...state.trialEnvironmentProfiles.values()],
       promotionPlans: [...state.promotionPlans.values()],
+      promotionValidationReports: [...state.promotionValidationReports.values()],
+      portableDataBundles: [...state.portableDataBundles.values()],
       parallelRunPlans: [...state.parallelRunPlans.values()],
       financeBlueprints: [...state.financeBlueprintsByCompany.values()],
       financeFoundationRecords: [...state.financeFoundationRecordsByCompany.values()],
@@ -1896,6 +2140,490 @@ export function createTenantControlEngine({
     return typeof getDomain === "function" ? getDomain(domainKey) || null : null;
   }
 
+  function assertTrialEnvironmentStatus(trialEnvironment, allowedStatuses, code) {
+    const allowed = Array.isArray(allowedStatuses) ? allowedStatuses : [];
+    if (
+      trialEnvironment.status === "active"
+      && normalizeOptionalText(trialEnvironment.expiresAt)
+      && trialEnvironment.expiresAt < nowIso()
+    ) {
+      trialEnvironment.status = "expired";
+      trialEnvironment.updatedAt = nowIso();
+    }
+    if (!allowed.includes(trialEnvironment.status)) {
+      throw httpError(409, code, `Trial environment status ${trialEnvironment.status} is not allowed for this operation.`);
+    }
+  }
+
+  function assertTrialEnvironmentReadyForPromotion(trialEnvironment) {
+    assertTrialEnvironmentStatus(trialEnvironment, ["active"], "trial_environment_promotion_status_invalid");
+    assertTrialEnvironmentIsolated(trialEnvironment);
+    if (trialEnvironment.promotionEligibleFlag !== true) {
+      throw httpError(409, "trial_environment_not_promotion_eligible", "Trial environment is not eligible for promotion.");
+    }
+  }
+
+  function requirePromotionPlan(promotionPlanId) {
+    const record = state.promotionPlans.get(requireText(promotionPlanId, "promotion_plan_id_required"));
+    if (!record) {
+      throw httpError(404, "promotion_plan_not_found", "Promotion plan was not found.");
+    }
+    return record;
+  }
+
+  function requirePromotionValidationReport(promotionValidationReportId) {
+    const record = state.promotionValidationReports.get(
+      requireText(promotionValidationReportId, "promotion_validation_report_id_required")
+    );
+    if (!record) {
+      throw httpError(404, "promotion_validation_report_not_found", "Promotion validation report was not found.");
+    }
+    return record;
+  }
+
+  function requirePortableDataBundle(portableDataBundleId) {
+    const record = state.portableDataBundles.get(requireText(portableDataBundleId, "portable_data_bundle_id_required"));
+    if (!record) {
+      throw httpError(404, "portable_data_bundle_not_found", "Portable data bundle was not found.");
+    }
+    return record;
+  }
+
+  function resolvePortableCarryOverSelections(carryOverSelectionCodes) {
+    const requested = normalizeStringList(carryOverSelectionCodes);
+    const merged = [
+      ...Object.values(PORTABLE_CARRY_OVER_SELECTIONS)
+        .filter((selection) => selection.mandatory)
+        .map((selection) => selection.selectionCode),
+      ...requested
+    ];
+    const resolved = [];
+    for (const selectionCode of merged) {
+      const definition = PORTABLE_CARRY_OVER_SELECTIONS[selectionCode];
+      if (!definition) {
+        throw httpError(400, "trial_promotion_selection_unsupported", `Unsupported carry-over selection ${selectionCode}.`);
+      }
+      if (!resolved.includes(selectionCode)) {
+        resolved.push(selectionCode);
+      }
+    }
+    return resolved;
+  }
+
+  function presentPromotionPlan(plan) {
+    const validationReport = plan.validationReportId
+      ? state.promotionValidationReports.get(plan.validationReportId) || null
+      : null;
+    const portableDataBundle = plan.portableDataBundleId
+      ? state.portableDataBundles.get(plan.portableDataBundleId) || null
+      : null;
+    return copy({
+      ...plan,
+      validationReport,
+      portableDataBundle
+    });
+  }
+
+  function buildPromotionValidationReport({
+    trialEnvironment,
+    principal,
+    carryOverSelectionCodes
+  } = {}) {
+    const company = findCompanySnapshotById(trialEnvironment.companyId);
+    const financeBlueprint =
+      state.financeBlueprintsByCompany.get(trialEnvironment.companyId)
+      || inferFinanceBlueprint({ companyId: trialEnvironment.companyId, company });
+    const financeFoundation = state.financeFoundationRecordsByCompany.get(trialEnvironment.companyId) || null;
+    const registrations = listCompanyRegistrationsSnapshot(trialEnvironment.companyId);
+    const sourceUsers = listSourceCompanyUsersSnapshot(trialEnvironment.companyId);
+    const blockingIssues = [];
+    const warnings = [];
+    if (!company) {
+      blockingIssues.push({
+        issueCode: "source_company_missing",
+        detail: "Source company profile is missing."
+      });
+    }
+    if (financeFoundation?.status !== "finance_ready") {
+      warnings.push({
+        warningCode: "source_company_not_finance_ready",
+        detail: "Source trial company is not finance-ready; promotion will use the portable finance blueprint instead."
+      });
+    }
+    if (!company?.legalName || !company?.orgNumber) {
+      blockingIssues.push({
+        issueCode: "source_company_masterdata_incomplete",
+        detail: "Legal name and org number are required before promotion."
+      });
+    }
+    if (registrations.length === 0) {
+      warnings.push({
+        warningCode: "source_company_registrations_missing",
+        detail: "Source trial company has no explicit registrations; promotion will stage default registration placeholders."
+      });
+    }
+    if (sourceUsers.filter((item) => item.roleCode === "company_admin").length === 0) {
+      blockingIssues.push({
+        issueCode: "source_company_admin_missing",
+        detail: "At least one active company admin is required for promotion."
+      });
+    }
+    if (carryOverSelectionCodes.includes("users_roles") && sourceUsers.length === 0) {
+      warnings.push({
+        warningCode: "portable_users_roles_empty",
+        detail: "No additional users or role assignments are available for staged carry-over."
+      });
+    }
+    return {
+      promotionValidationReportId: crypto.randomUUID(),
+      companyId: trialEnvironment.companyId,
+      trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
+      status: blockingIssues.length === 0 ? "eligible" : "blocked",
+      version: PROMOTION_VALIDATION_VERSION,
+      sourceMasterdataSnapshotHash: hashJson({
+        company,
+        financeBlueprint,
+        financeFoundationStatus: financeFoundation?.status || null,
+        registrations,
+        carryOverSelectionCodes
+      }),
+      carryOverSelectionCodes: copy(carryOverSelectionCodes),
+      carryOverSelectionDetails: carryOverSelectionCodes.map((selectionCode) => copy(PORTABLE_CARRY_OVER_SELECTIONS[selectionCode])),
+      sourceCompanyProfile: company
+        ? {
+            companyId: company.companyId,
+            legalName: company.legalName,
+            orgNumber: company.orgNumber,
+            status: company.status
+          }
+        : null,
+      sourceFinanceFoundationStatus: financeFoundation?.status || null,
+      sourceFinanceBlueprint: copy(financeBlueprint),
+      sourceRegistrationCount: registrations.length,
+      sourceUserCount: sourceUsers.length,
+      blockedForbiddenArtifactCodes: copy(FORBIDDEN_TRIAL_LIVE_ARTIFACT_CODES),
+      blockingIssues,
+      warnings,
+      recommendedGoLivePath: DEFAULT_PROMOTION_GO_LIVE_PATH,
+      generatedByUserId: principal.userId,
+      createdAt: nowIso()
+    };
+  }
+
+  function buildPortableDataBundle({
+    trialEnvironment,
+    validationReport,
+    carryOverSelectionCodes
+  } = {}) {
+    const company = findCompanySnapshotById(trialEnvironment.companyId);
+    const financeBlueprint =
+      state.financeBlueprintsByCompany.get(trialEnvironment.companyId)
+      || inferFinanceBlueprint({ companyId: trialEnvironment.companyId, company });
+    const registrations = listCompanyRegistrationsSnapshot(trialEnvironment.companyId);
+    const sourceUsers = listSourceCompanyUsersSnapshot(trialEnvironment.companyId);
+    const portableDocuments =
+      carryOverSelectionCodes.includes("portable_documents") || carryOverSelectionCodes.includes("document_templates")
+        ? copy(trialEnvironment.seedScenarioManifest.documents || [])
+        : [];
+    const portableProjectTemplates = carryOverSelectionCodes.includes("project_templates")
+      ? copy(trialEnvironment.seedScenarioManifest.projects || [])
+      : [];
+    const stagedUsers = carryOverSelectionCodes.includes("users_roles")
+      ? sourceUsers.map((item) => ({
+          userId: item.userId,
+          email: item.email,
+          displayName: item.displayName,
+          roleCode: item.roleCode,
+          stagedOnly: true
+        }))
+      : [];
+    const stagedImportBatches = [...new Set(
+      carryOverSelectionCodes.map((selectionCode) => PORTABLE_CARRY_OVER_SELECTIONS[selectionCode].importBatchCode)
+    )].sort();
+    return {
+      portableDataBundleId: crypto.randomUUID(),
+      companyId: trialEnvironment.companyId,
+      trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
+      validationReportId: validationReport.promotionValidationReportId,
+      version: PROMOTION_PORTABLE_DATA_VERSION,
+      carryOverSelectionCodes: copy(carryOverSelectionCodes),
+      companyMasterdata: company
+        ? {
+            legalName: company.legalName,
+            orgNumber: company.orgNumber,
+            settingsJson: copy({
+              accountingYear: financeBlueprint.accountingYear,
+              chartTemplateId: financeBlueprint.chartTemplateId,
+              voucherSeriesCodes: copy(company.settingsJson?.voucherSeriesCodes || DEFAULT_VOUCHER_SERIES_CODES),
+              vatScheme: financeBlueprint.vatScheme,
+              vatFilingPeriod: financeBlueprint.vatFilingPeriod,
+              legalFormCode: financeBlueprint.legalFormCode,
+              accountingMethodCode: financeBlueprint.accountingMethodCode,
+              ownerTaxationCode: financeBlueprint.ownerTaxationCode,
+              annualNetTurnoverSek: financeBlueprint.annualNetTurnoverSek
+            })
+          }
+        : null,
+      registrations: registrations.length > 0 ? copy(registrations) : buildDefaultPromotionRegistrations(),
+      financeBlueprintJson: copy(financeBlueprint),
+      portableDocuments,
+      portableProjectTemplates,
+      stagedUsers,
+      stagedImportBatches,
+      liveForbiddenArtifacts: FORBIDDEN_TRIAL_LIVE_ARTIFACT_CODES.map((artifactCode) => ({
+        artifactCode,
+        policy: "archive_in_trial_only"
+      })),
+      createdAt: nowIso()
+    };
+  }
+
+  function evaluatePromotionApprovalCoverage({
+    companyId,
+    principalUserId,
+    approvalActorIds
+  } = {}) {
+    const sourceUsers = listSourceCompanyUsersSnapshot(companyId);
+    const financeActorIds = [];
+    const securityActorIds = [];
+    for (const approvalActorId of approvalActorIds) {
+      const actorRecords = sourceUsers.filter((item) => item.userId === approvalActorId);
+      if (actorRecords.some((item) => item.roleCode === "company_admin" || item.roleCode === "approver")) {
+        financeActorIds.push(approvalActorId);
+      }
+      if (actorRecords.some((item) => ["approver", "bureau_user", "company_admin"].includes(item.roleCode))) {
+        securityActorIds.push(approvalActorId);
+      }
+    }
+    const implementationActorIds = normalizeStringList([principalUserId]);
+    return {
+      requiredApprovalClasses: copy(PROMOTION_REQUIRED_APPROVAL_CLASSES),
+      implementation: {
+        fulfilled: implementationActorIds.length > 0,
+        actorUserIds: implementationActorIds
+      },
+      finance: {
+        fulfilled: financeActorIds.length > 0,
+        actorUserIds: normalizeStringList(financeActorIds)
+      },
+      security: {
+        fulfilled: securityActorIds.length > 0,
+        actorUserIds: normalizeStringList(securityActorIds)
+      },
+      complete: implementationActorIds.length > 0 && financeActorIds.length > 0 && securityActorIds.length > 0
+    };
+  }
+
+  function materializeLiveCompanyFromPromotion({
+    portableDataBundle,
+    trialEnvironment,
+    plan,
+    principal
+  } = {}) {
+    const authPlatform = requireOrgAuthPlatform();
+    const adminContact = resolvePromotionAdminContact({
+      companyId: trialEnvironment.companyId,
+      preferredUserId: principal.userId
+    });
+    const financeBlueprint = copy(portableDataBundle.financeBlueprintJson || {});
+    const accountingYear = String(financeBlueprint.accountingYear || currentDateUtcYear());
+    const liveBootstrap = authPlatform.createOnboardingRun({
+      legalName: portableDataBundle.companyMasterdata?.legalName || `Live ${trialEnvironment.label}`,
+      orgNumber: portableDataBundle.companyMasterdata?.orgNumber || "",
+      adminEmail: adminContact.email,
+      adminDisplayName: adminContact.displayName,
+      accountingYear
+    });
+    state.financeBlueprintsByCompany.set(liveBootstrap.companyId, {
+      ...financeBlueprint,
+      companyId: liveBootstrap.companyId,
+      sourceTrialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
+      promotionPlanId: plan.promotionPlanId
+    });
+    authPlatform.updateOnboardingStep({
+      runId: liveBootstrap.runId,
+      resumeToken: liveBootstrap.resumeToken,
+      stepCode: "registrations",
+      payload: {
+        registrations: copy(portableDataBundle.registrations || [])
+      }
+    });
+    authPlatform.updateOnboardingStep({
+      runId: liveBootstrap.runId,
+      resumeToken: liveBootstrap.resumeToken,
+      stepCode: "chart_template",
+      payload: {
+        chartTemplateId: financeBlueprint.chartTemplateId,
+        voucherSeriesCodes: copy((portableDataBundle.companyMasterdata?.settingsJson?.voucherSeriesCodes) || DEFAULT_VOUCHER_SERIES_CODES)
+      }
+    });
+    authPlatform.updateOnboardingStep({
+      runId: liveBootstrap.runId,
+      resumeToken: liveBootstrap.resumeToken,
+      stepCode: "vat_setup",
+      payload: {
+        vatScheme: financeBlueprint.vatScheme,
+        filingPeriod: financeBlueprint.vatFilingPeriod
+      }
+    });
+    authPlatform.updateOnboardingStep({
+      runId: liveBootstrap.runId,
+      resumeToken: liveBootstrap.resumeToken,
+      stepCode: "fiscal_periods",
+      payload: {
+        year: Number(accountingYear)
+      }
+    });
+    syncRunFromOrgAuth(liveBootstrap.runId);
+    maybeMaterializeFinanceReadyFoundation(liveBootstrap.companyId);
+    return {
+      tenantBootstrapId: liveBootstrap.runId,
+      resumeToken: liveBootstrap.resumeToken,
+      companyId: liveBootstrap.companyId
+    };
+  }
+
+  function resolvePromotionAdminContact({ companyId, preferredUserId = null } = {}) {
+    const sourceUsers = listSourceCompanyUsersSnapshot(companyId);
+    const preferred =
+      (preferredUserId && sourceUsers.find((item) => item.userId === preferredUserId)) ||
+      sourceUsers.find((item) => item.roleCode === "company_admin") ||
+      sourceUsers[0] ||
+      null;
+    if (!preferred?.email || !preferred?.displayName) {
+      throw httpError(409, "trial_promotion_admin_contact_missing", "Promotion requires an active source-company admin contact.");
+    }
+    return {
+      email: preferred.email,
+      displayName: preferred.displayName
+    };
+  }
+
+  function listCompanyRegistrationsSnapshot(companyId) {
+    const orgAuthSnapshot = getOrgAuthSnapshot();
+    return copy(
+      (orgAuthSnapshot?.companyRegistrations || [])
+        .filter((record) => record.companyId === requireText(companyId, "company_id_required"))
+        .sort((left, right) => left.registrationType.localeCompare(right.registrationType))
+    );
+  }
+
+  function buildDefaultPromotionRegistrations() {
+    const effectiveFrom = nowIso();
+    return [
+      {
+        registrationType: "f_tax",
+        registrationValue: "f_tax_pending_confirmation",
+        status: "configured",
+        effectiveFrom
+      },
+      {
+        registrationType: "vat",
+        registrationValue: "vat_pending_confirmation",
+        status: "configured",
+        effectiveFrom
+      },
+      {
+        registrationType: "employer",
+        registrationValue: "employer_pending_confirmation",
+        status: "configured",
+        effectiveFrom
+      }
+    ];
+  }
+
+  function listSourceCompanyUsersSnapshot(companyId) {
+    const orgAuthSnapshot = getOrgAuthSnapshot();
+    const usersById = new Map((orgAuthSnapshot?.users || []).map((record) => [record.userId, record]));
+    return ((orgAuthSnapshot?.companyUsers || [])
+      .filter((record) => record.companyId === requireText(companyId, "company_id_required"))
+      .filter((record) => record.status === "active")
+      .map((record) => ({
+        companyUserId: record.companyUserId,
+        companyId: record.companyId,
+        userId: record.userId,
+        roleCode: record.roleCode,
+        email: usersById.get(record.userId)?.email || null,
+        displayName: usersById.get(record.userId)?.displayName || null
+      })));
+  }
+
+  function createPromotionEvidenceBundle({
+    trialEnvironment,
+    plan,
+    validationReport,
+    portableDataBundle,
+    actorId,
+    liveCompanyId
+  } = {}) {
+    const evidenceDomain = getOptionalDomain("evidence");
+    const metadata = {
+      promotionPlanId: plan.promotionPlanId,
+      liveCompanyId,
+      validationReportId: validationReport.promotionValidationReportId,
+      portableDataBundleId: portableDataBundle.portableDataBundleId,
+      carryOverSelectionCodes: copy(plan.carryOverSelectionCodes)
+    };
+    const artifactRefs = [
+      {
+        artifactType: "promotion_validation_report",
+        artifactRef: `promotion-validation://${validationReport.promotionValidationReportId}`,
+        checksum: hashJson(validationReport),
+        roleCode: "tenant_control",
+        metadata: {
+          version: validationReport.version
+        }
+      },
+      {
+        artifactType: "portable_data_bundle",
+        artifactRef: `portable-data://${portableDataBundle.portableDataBundleId}`,
+        checksum: hashJson(portableDataBundle),
+        roleCode: "tenant_control",
+        metadata: {
+          version: portableDataBundle.version
+        }
+      }
+    ];
+    if (evidenceDomain && typeof evidenceDomain.createFrozenEvidenceBundleSnapshot === "function") {
+      return evidenceDomain.createFrozenEvidenceBundleSnapshot({
+        companyId: trialEnvironment.companyId,
+        bundleType: "trial_promotion",
+        sourceObjectType: "promotion_plan",
+        sourceObjectId: plan.promotionPlanId,
+        sourceObjectVersion: `trial_promotion:${plan.updatedAt || plan.createdAt}`,
+        title: "Trial promotion to live evidence",
+        retentionClass: "operational",
+        classificationCode: "restricted_internal",
+        metadata,
+        artifactRefs,
+        relatedObjectRefs: [
+          {
+            objectType: "trial_environment_profile",
+            objectId: trialEnvironment.trialEnvironmentProfileId,
+            relationCode: "source_trial"
+          },
+          {
+            objectType: "company",
+            objectId: liveCompanyId,
+            relationCode: "target_live"
+          }
+        ],
+        actorId,
+        previousEvidenceBundleId: trialEnvironment.latestPromotionEvidenceBundleId || null,
+        environmentMode: trialEnvironment.mode
+      });
+    }
+    return {
+      evidenceBundleId: crypto.randomUUID(),
+      bundleType: "trial_promotion",
+      sourceObjectType: "promotion_plan",
+      sourceObjectId: plan.promotionPlanId,
+      metadata: copy(metadata),
+      artifactRefs,
+      environmentMode: trialEnvironment.mode
+    };
+  }
+
   function findCompanySnapshotById(companyId) {
     const orgAuthSnapshot = getOrgAuthSnapshot();
     return (orgAuthSnapshot?.companies || []).find((record) => record.companyId === requireText(companyId, "company_id_required")) || null;
@@ -2220,6 +2948,10 @@ function normalizePositiveInteger(value, code) {
 
 function nowIso(clock = () => new Date()) {
   return clock().toISOString();
+}
+
+function currentDateUtcYear(clock = () => new Date()) {
+  return clock().getUTCFullYear();
 }
 
 function copy(value) {

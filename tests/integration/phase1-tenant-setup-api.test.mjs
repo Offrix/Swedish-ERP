@@ -38,6 +38,7 @@ test("Phase 1 API routes tenant setup, trial and module lifecycles through tenan
       "/v1/tenant/modules/activations",
       "/v1/trial/environments",
       "/v1/trial/promotions",
+      "/v1/trial/promotions/:promotionPlanId/execute",
       "/v1/tenant/parallel-runs"
     ]) {
       assert.equal(root.routes.includes(route), true, `${route} should be exposed`);
@@ -302,12 +303,39 @@ test("Phase 1 API routes tenant setup, trial and module lifecycles through tenan
         approvalActorIds: [approver.user.userId]
       }
     });
-    assert.equal(["approved", "validated"].includes(promotion.status), true);
+    assert.equal(promotion.status, "approved");
+    assert.equal(promotion.validationReport.status, "eligible");
 
     const promotions = await requestJson(baseUrl, `/v1/trial/promotions?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
     assert.equal(promotions.items.length >= 1, true);
+
+    const executedPromotion = await requestJson(
+      baseUrl,
+      `/v1/trial/promotions/${promotion.promotionPlanId}/execute`,
+      {
+        method: "POST",
+        token: adminToken,
+        expectedStatus: 200,
+        body: {}
+      }
+    );
+    assert.equal(executedPromotion.status, "executed");
+    assert.equal(executedPromotion.liveCompanyId != null, true);
+    assert.notEqual(executedPromotion.liveCompanyId, DEMO_IDS.companyId);
+
+    const liveAdminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: executedPromotion.liveCompanyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+    const liveProfile = await requestJson(baseUrl, `/v1/tenant/bootstrap/profile?companyId=${executedPromotion.liveCompanyId}`, {
+      token: liveAdminToken
+    });
+    assert.equal(liveProfile.status, "finance_ready");
+    assert.equal(liveProfile.financeFoundationJson.status, "finance_ready");
 
     const parallelRun = await requestJson(baseUrl, "/v1/tenant/parallel-runs", {
       method: "POST",

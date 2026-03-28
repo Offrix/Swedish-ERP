@@ -517,12 +517,14 @@ Skapa en separat kÃ¤lla fÃ¶r tenant bootstrap, module activation, finance re
 - [x] 7.2 [HARDEN] **Bygg finance-ready bootstrap** â€” Legal form, accounting method, fiscal year, chart template, VAT profile, reporting obligation profile, role template och queue structure ska skapas i korrekt ordning.
 - [x] 7.3 [NEW BUILD] **Bygg trial/testkonto-isolering** â€” Trial tenants fÃ¥r eget mode, vattenmÃ¤rkning, fake/sandbox providers, blocked live credentials och skydd mot verkliga ekonomiska konsekvenser.
 - [x] 7.4 [NEW BUILD] **Seed scenarios, reset och refresh** â€” Klar: canonical seed-katalog med åtta scenarier finns nu, legacy-alias mappas deterministiskt, refresh-pack kan fylla på processdata utan att röra masterdata, reset revokerar övriga öppna trial-sessioner, arkiverar process-state metadata och fryser evidence-bundles för reset/refresh innan scenariot reseedas.
-- [ ] 7.5 [MIGRATE] **Bygg upgrade trial->live** â€” Promotion skapar ny live tenant/company profile frÃ¥n godkÃ¤nd masterdata; trial ledger, receipts, provider refs och submissions fÃ¥r aldrig flyttas rakt in i live.
+- [x] 7.5 [MIGRATE] **Bygg upgrade trial->live** â€” Klar: promotion bygger nu `PromotionValidationReport` och `PortableDataBundle`, kräver explicit approval coverage, föder ny live-company via separat onboarding/bootstrap-path, kopierar endast portable masterdata/settings/importbatches och blockerar direktcarry av trial ledger, receipts, provider refs, submissions och evidence.
 
 **Delfasstatus**
 - 7.1 Ã¥terverifierad 2026-03-27
 - 7.2 klar 2026-03-27
 - 7.3 klar 2026-03-27
+- 7.4 klar 2026-03-28
+- 7.5 klar 2026-03-28
 
 **Exit gate**  
 - Tenant kan bli finance-ready eller trial-safe via samma orchestrator. Trial Ã¤r marknadsmÃ¤ssig, sÃ¤ker och isolerad. Promotion till live Ã¤r definierad och testad.

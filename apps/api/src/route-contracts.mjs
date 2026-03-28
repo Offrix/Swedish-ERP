@@ -206,6 +206,7 @@ const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["POST /v1/trial/environments/:trialEnvironmentProfileId/reset", override("trial", "trial_environment_reset", "strong_mfa", "company", "trial_environment", "trial_environment_profile", "company.manage", true)],
   ["POST /v1/trial/environments/:trialEnvironmentProfileId/refresh", override("trial", "trial_environment_refresh", "strong_mfa", "company", "trial_environment", "trial_environment_profile", "company.manage", true)],
   ["POST /v1/trial/promotions", override("trial", "trial_promotion_create", "strong_mfa", "company", "promotion_plan", "promotion_plan", "company.manage", false)],
+  ["POST /v1/trial/promotions/:promotionPlanId/execute", override("trial", "trial_promotion_execute", "strong_mfa", "company", "promotion_plan", "promotion_plan", "company.manage", true)],
   ["GET /v1/trial/promotions", { ...override("trial", "trial_promotion_read", "strong_mfa", "company", "promotion_plan", "promotion_plan", "company.read", false), mutation: false }],
   ["POST /v1/auth/challenges", override("auth", "identity_step_up_start", "authenticated", "self", "auth_challenge", "auth_challenge", null, false)],
   ["POST /v1/auth/challenges/:challengeId/complete", override("auth", "identity_factor_verify", "authenticated", "self", "auth_challenge", "auth_challenge", null, false)],
