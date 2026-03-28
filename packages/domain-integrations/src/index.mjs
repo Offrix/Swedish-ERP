@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 import { createPartnerModule } from "./partners.mjs";
 import { createPublicApiModule } from "./public-api.mjs";
-import { createRegulatedSubmissionsModule } from "./regulated-submissions.mjs";
 import { createGoogleDocumentAiProvider, GOOGLE_DOCUMENT_AI_PROVIDER_CODE } from "./providers/google-document-ai.mjs";
 import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
+import { createRegulatedSubmissionsModule } from "../../domain-regulated-submissions/src/index.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -140,11 +140,14 @@ export function createIntegrationEngine({
     submissions: new Map(),
     submissionIdsByCompany: new Map(),
     submissionIdsByReuseKey: new Map(),
+    submissionAttempts: new Map(),
+    submissionAttemptIdsBySubmission: new Map(),
     receipts: new Map(),
     receiptIdsBySubmission: new Map(),
     correctionLinks: new Map(),
     correctionLinkIdsByOriginalSubmission: new Map(),
     correctionLinkIdsByCorrectingSubmission: new Map(),
+    submissionEvidencePacks: new Map(),
     queueItems: new Map(),
     queueItemIdsByCompany: new Map(),
     queueItemIdsBySubmission: new Map(),
@@ -198,9 +201,16 @@ export function createIntegrationEngine({
     createPaymentLink,
     snapshotIntegrations() {
       return clone({
-        submissions: [...state.submissions.values()].map((submission) => enrichSubmission(state, submission)),
+        submissions: [...state.submissions.values()].map((submission) =>
+          regulatedSubmissionsModule.getAuthoritySubmission({
+            companyId: submission.companyId,
+            submissionId: submission.submissionId
+          })
+        ),
+        submissionAttempts: [...state.submissionAttempts.values()],
         receipts: [...state.receipts.values()],
         correctionLinks: [...state.correctionLinks.values()],
+        submissionEvidencePacks: [...state.submissionEvidencePacks.values()],
         actionQueueItems: [...state.queueItems.values()],
         publicApiCompatibilityBaselines: [...state.publicApiCompatibilityBaselines.values()],
         publicApiClients: [...state.publicApiClients.values()],

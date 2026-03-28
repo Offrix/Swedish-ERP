@@ -542,6 +542,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/submissions/:submissionId/sign",
               "/v1/submissions/:submissionId/submit",
               "/v1/submissions/:submissionId/corrections",
+              "/v1/submissions/:submissionId/attempts",
               "/v1/submissions/:submissionId/receipts",
               "/v1/submissions/:submissionId/evidence-pack",
               "/v1/submissions/:submissionId/replay",
@@ -4466,6 +4467,26 @@ async function handleRequest({ req, res, platform, flags }) {
   }
 
   const submissionReceiptMatch = matchPath(path, "/v1/submissions/:submissionId/receipts");
+  const submissionAttemptMatch = matchPath(path, "/v1/submissions/:submissionId/attempts");
+  if (submissionAttemptMatch && req.method === "GET") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "submission",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listSubmissionAttempts({
+        companyId,
+        submissionId: submissionAttemptMatch.submissionId
+      })
+    });
+    return;
+  }
   if (submissionReceiptMatch && req.method === "GET") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "Company id is required.");
     const principal = authorizeCompanyAccess({

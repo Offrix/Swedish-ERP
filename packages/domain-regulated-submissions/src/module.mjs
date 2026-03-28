@@ -1,18 +1,98 @@
 import crypto from "node:crypto";
 
-export {
-  SUBMISSION_ACTION_STATUSES,
-  SUBMISSION_ACTION_TYPES,
-  SUBMISSION_ATTEMPT_STATUSES,
-  SUBMISSION_ENVELOPE_STATES,
-  SUBMISSION_RECEIPT_TYPES,
-  SUBMISSION_RETRY_CLASSES,
-  SUBMISSION_SIGNED_STATES,
-  SUBMISSION_STATUSES,
-  createCanonicalSubmissionEvidencePackRef,
-  createCanonicalSubmissionEnvelopeRef,
-  createRegulatedSubmissionsModule
-} from "../../domain-regulated-submissions/src/module.mjs";
+export const SUBMISSION_STATUSES = Object.freeze([
+  "ready",
+  "signed",
+  "submitted",
+  "received",
+  "accepted",
+  "transport_failed",
+  "retry_pending",
+  "domain_rejected",
+  "finalized",
+  "superseded"
+]);
+export const SUBMISSION_SIGNED_STATES = Object.freeze(["pending", "signed", "not_required"]);
+export const SUBMISSION_RECEIPT_TYPES = Object.freeze(["technical_ack", "business_ack", "final_ack", "technical_nack", "business_nack"]);
+export const SUBMISSION_RETRY_CLASSES = Object.freeze(["automatic", "manual_only", "forbidden"]);
+export const SUBMISSION_ACTION_TYPES = Object.freeze(["retry", "collect_more_data", "correct_payload", "contact_provider", "close_as_duplicate"]);
+export const SUBMISSION_ACTION_STATUSES = Object.freeze(["open", "claimed", "waiting_input", "resolved", "closed", "auto_resolved"]);
+export const SUBMISSION_ENVELOPE_STATES = Object.freeze([
+  "draft",
+  "locked",
+  "queued",
+  "submitted",
+  "awaiting_receipts",
+  "technically_accepted",
+  "technically_rejected",
+  "materially_accepted",
+  "materially_rejected",
+  "corrected",
+  "abandoned"
+]);
+export const SUBMISSION_ATTEMPT_STATUSES = Object.freeze(["queued", "running", "succeeded", "failed", "skipped"]);
+const SUBMISSION_ACTION_PRIORITIES = Object.freeze(["low", "normal", "high", "urgent"]);
+
+export function createRegulatedSubmissionsModule({ state, clock, evidencePlatform, getCorePlatform } = {}) {
+  return {
+    submissionStatuses: SUBMISSION_STATUSES,
+    submissionSignedStates: SUBMISSION_SIGNED_STATES,
+    submissionReceiptTypes: SUBMISSION_RECEIPT_TYPES,
+    submissionRetryClasses: SUBMISSION_RETRY_CLASSES,
+    submissionActionTypes: SUBMISSION_ACTION_TYPES,
+    submissionActionStatuses: SUBMISSION_ACTION_STATUSES,
+    submissionEnvelopeStates: SUBMISSION_ENVELOPE_STATES,
+    submissionAttemptStatuses: SUBMISSION_ATTEMPT_STATUSES,
+    prepareAuthoritySubmission(input) {
+      return prepareAuthoritySubmission({ state, clock, evidencePlatform }, input);
+    },
+    signAuthoritySubmission(input) {
+      return signAuthoritySubmission({ state, clock, evidencePlatform }, input);
+    },
+    listAuthoritySubmissions(input) {
+      return listAuthoritySubmissions({ state }, input);
+    },
+    getAuthoritySubmission(input) {
+      return getAuthoritySubmission({ state }, input);
+    },
+    listSubmissionAttempts(input) {
+      return listSubmissionAttempts({ state }, input);
+    },
+    listSubmissionReceipts(input) {
+      return listSubmissionReceipts({ state }, input);
+    },
+    getSubmissionEvidencePack(input) {
+      return getSubmissionEvidencePack({ state, evidencePlatform }, input);
+    },
+    async submitAuthoritySubmission(input) {
+      return submitAuthoritySubmission({ state, clock, getCorePlatform }, input);
+    },
+    async requestSubmissionReplay(input) {
+      return requestSubmissionReplay({ state, clock, getCorePlatform }, input);
+    },
+    openSubmissionCorrection(input) {
+      return openSubmissionCorrection({ state, clock, evidencePlatform }, input);
+    },
+    executeSubmissionReceiptCollection(input) {
+      return executeSubmissionReceiptCollection({ state, clock, evidencePlatform }, input);
+    },
+    executeAuthoritySubmissionTransport(input) {
+      return executeAuthoritySubmissionTransport({ state, clock, evidencePlatform }, input);
+    },
+    registerSubmissionReceipt(input) {
+      return registerSubmissionReceipt({ state, clock, evidencePlatform }, input);
+    },
+    listSubmissionActionQueue(input) {
+      return listSubmissionActionQueue({ state }, input);
+    },
+    retryAuthoritySubmission(input) {
+      return retryAuthoritySubmission({ state, clock, evidencePlatform }, input);
+    },
+    resolveSubmissionQueueItem(input) {
+      return resolveSubmissionQueueItem({ state, clock }, input);
+    }
+  };
+}
 function prepareAuthoritySubmission({ state, clock, evidencePlatform }, input = {}) {
   const submissionType = requireText(input.submissionType, "submission_type_required");
   const companyId = requireText(input.companyId, "company_id_required");
@@ -96,9 +176,7 @@ function prepareAuthoritySubmission({ state, clock, evidencePlatform }, input = 
   state.submissions.set(submission.submissionId, submission);
   appendToIndex(state.submissionIdsByCompany, companyId, submission.submissionId);
   state.submissionIdsByReuseKey.set(reuseKey, submission.submissionId);
-  if (evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
-    syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
-  }
+  syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
   return {
     ...enrichSubmission(state, submission),
     idempotentReplay: false
@@ -119,9 +197,7 @@ function signAuthoritySubmission({ state, clock, evidencePlatform }, { companyId
   submission.signedByActorId = requireText(actorId || "system", "actor_id_required");
   submission.signatureReference = normalizeOptionalText(signatureReference) || `signature:${submission.submissionId}`;
   submission.updatedAt = submission.signedAt;
-  if (evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
-    syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
-  }
+  syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
   return enrichSubmission(state, submission);
 }
 
@@ -141,6 +217,11 @@ function getAuthoritySubmission({ state }, { companyId, submissionId } = {}) {
   return enrichSubmission(state, requireSubmission(state, companyId, submissionId));
 }
 
+function listSubmissionAttempts({ state }, { companyId, submissionId } = {}) {
+  const submission = requireSubmission(state, companyId, submissionId);
+  return getSubmissionAttempts(state, submission.submissionId).map(clone);
+}
+
 function listSubmissionReceipts({ state }, { companyId, submissionId } = {}) {
   const submission = requireSubmission(state, companyId, submissionId);
   return getSubmissionReceipts(state, submission.submissionId).map(clone);
@@ -152,6 +233,7 @@ function getSubmissionEvidencePack({ state, evidencePlatform }, { companyId, sub
 }
 
 function buildSubmissionEvidencePackPayload(state, submission) {
+  const attempts = getSubmissionAttempts(state, submission.submissionId);
   const receipts = getSubmissionReceipts(state, submission.submissionId);
   const queueItems = getSubmissionQueueItems(state, submission.submissionId);
   return {
@@ -169,6 +251,8 @@ function buildSubmissionEvidencePackPayload(state, submission) {
     providerBaselineRefs: clone(submission.providerBaselineRefs || []),
     decisionSnapshotRefs: clone(submission.decisionSnapshotRefs || []),
     correlationId: submission.correlationId,
+    envelopeState: deriveSubmissionEnvelopeState(submission),
+    legalEffect: submission.dispatchMode !== "trial",
     signingRequirementCode: submission.signedState,
     signerIdentity: submission.signedByActorId,
     signatureRefs: submission.signatureReference ? [submission.signatureReference] : [],
@@ -179,6 +263,7 @@ function buildSubmissionEvidencePackPayload(state, submission) {
         payloadVersion: submission.payloadVersion
       }
     ],
+    attemptRefs: attempts.map((attempt) => buildAttemptRef(attempt)),
     correctionLinks: getCorrectionLinksForSubmission(state, submission.submissionId).map(clone),
     receiptRefs: receipts.map((receipt) => buildReceiptRef(receipt)),
     preservedPriorReceiptRefs:
@@ -217,7 +302,9 @@ function buildSubmissionEvidencePackPayload(state, submission) {
 function syncSubmissionEvidenceBundle({ state, evidencePlatform, submission }) {
   const payload = buildSubmissionEvidencePackPayload(state, submission);
   if (!evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
-    return clone(payload);
+    const evidencePack = createCanonicalSubmissionEvidencePackRef(payload);
+    state.submissionEvidencePacks?.set(submission.submissionId, evidencePack);
+    return clone(evidencePack);
   }
   const bundle = evidencePlatform.createFrozenEvidenceBundleSnapshot({
     companyId: submission.companyId,
@@ -295,7 +382,7 @@ function syncSubmissionEvidenceBundle({ state, evidencePlatform, submission }) {
     previousEvidenceBundleId: submission.evidencePackId || null
   });
   submission.evidencePackId = bundle.evidenceBundleId;
-  return clone({
+  const evidencePack = createCanonicalSubmissionEvidencePackRef({
     ...payload,
     submissionEvidencePackId: bundle.evidenceBundleId,
     evidenceBundleId: bundle.evidenceBundleId,
@@ -304,6 +391,8 @@ function syncSubmissionEvidenceBundle({ state, evidencePlatform, submission }) {
     frozenAt: bundle.frozenAt,
     archivedAt: bundle.archivedAt
   });
+  state.submissionEvidencePacks?.set(submission.submissionId, evidencePack);
+  return clone(evidencePack);
 }
 
 async function submitAuthoritySubmission(
@@ -312,6 +401,20 @@ async function submitAuthoritySubmission(
 ) {
   const submission = requireSubmission(state, companyId, submissionId);
   if (submission.status === "submitted" && submission.transportJobId && !hasSubmissionTransportReceipt(state, submission.submissionId)) {
+    ensureSubmissionAttempt(state, {
+      submission,
+      clock,
+      attemptStageCode: "transport",
+      triggerCode: "initial_dispatch",
+      actorId,
+      mode: submission.dispatchMode || mode,
+      legalEffect: (submission.dispatchMode || mode) !== "trial",
+      payloadHash: submission.payloadHash,
+      providerReference: submission.providerReference,
+      queuedJobId: submission.transportJobId,
+      replayReasonCode: null,
+      status: "queued"
+    });
     return {
       ...enrichSubmission(state, submission),
       transportQueued: true,
@@ -349,6 +452,20 @@ async function submitAuthoritySubmission(
     submission.transportJobId = queuedJob.jobId;
     submission.transportRequestedAt = submission.submittedAt;
     submission.updatedAt = submission.transportRequestedAt;
+    ensureSubmissionAttempt(state, {
+      submission,
+      clock,
+      attemptStageCode: "transport",
+      triggerCode: "initial_dispatch",
+      actorId,
+      mode: submission.dispatchMode,
+      legalEffect: submission.dispatchMode !== "trial",
+      payloadHash: submission.payloadHash,
+      providerReference: submission.providerReference,
+      queuedJobId: queuedJob.jobId,
+      replayReasonCode: null,
+      status: "queued"
+    });
     return {
       ...enrichSubmission(state, submission),
       transportQueued: true,
@@ -365,7 +482,8 @@ async function submitAuthoritySubmission(
       mode,
       simulatedTransportOutcome,
       providerReference,
-      message
+      message,
+      triggerCode: "initial_dispatch"
     }
   );
 }
@@ -428,6 +546,20 @@ async function requestSubmissionReplay(
             },
       actorId: requireText(actorId || "system", "actor_id_required")
     });
+    ensureSubmissionAttempt(state, {
+      submission,
+      clock,
+      attemptStageCode: targetJobType === "submission.transport" ? "transport" : "receipt_collection",
+      triggerCode: "replay",
+      actorId,
+      mode: targetJobType === "submission.transport" ? submission.dispatchMode || "test" : submission.dispatchMode || null,
+      legalEffect: (submission.dispatchMode || "test") !== "trial",
+      payloadHash: submission.payloadHash,
+      providerReference: submission.providerReference,
+      queuedJobId: queuedJob.jobId,
+      replayReasonCode: resolvedReasonCode,
+      status: "queued"
+    });
     return {
       submission: enrichSubmission(state, submission),
       replayQueued: true,
@@ -447,7 +579,9 @@ async function requestSubmissionReplay(
           mode: submission.dispatchMode || "test",
           simulatedTransportOutcome,
           providerReference: submission.providerReference,
-          message
+          message,
+          triggerCode: "replay",
+          replayReasonCode: resolvedReasonCode
         }
       ),
       replayQueued: false,
@@ -465,7 +599,9 @@ async function requestSubmissionReplay(
         simulatedReceiptType,
         providerStatus,
         message,
-        requiredInput
+        requiredInput,
+        triggerCode: "replay",
+        replayReasonCode: resolvedReasonCode
       }
     ),
     replayQueued: false,
@@ -591,9 +727,7 @@ function openSubmissionCorrection(
   previous.supersededBySubmissionId = correction.submissionId;
   previous.updatedAt = timestamp;
   autoResolveQueueItems(state, previous.submissionId, "correction_spawned", previous.updatedAt);
-  if (evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
-    syncSubmissionEvidenceBundle({ state, evidencePlatform, submission: previous });
-  }
+  syncSubmissionEvidenceBundle({ state, evidencePlatform, submission: previous });
 
   const correctionLink =
     findCorrectionLink(state, previous.submissionId, correction.submissionId) ||
@@ -616,9 +750,36 @@ function openSubmissionCorrection(
 
 function executeAuthoritySubmissionTransport(
   { state, clock, evidencePlatform },
-  { companyId, submissionId, actorId, mode = "test", simulatedTransportOutcome = "technical_ack", providerReference = null, message = null, requiredInput = [] } = {}
+  {
+    companyId,
+    submissionId,
+    actorId,
+    mode = "test",
+    simulatedTransportOutcome = "technical_ack",
+    providerReference = null,
+    message = null,
+    requiredInput = [],
+    triggerCode = "replay",
+    replayReasonCode = null,
+    jobId = null
+  } = {}
 ) {
   const submission = requireSubmission(state, companyId, submissionId);
+  const attempt = ensureSubmissionAttempt(state, {
+    submission,
+    clock,
+    attemptStageCode: "transport",
+    triggerCode,
+    actorId,
+    mode,
+    legalEffect: mode !== "trial",
+    payloadHash: submission.payloadHash,
+    providerReference: normalizeOptionalText(providerReference) || submission.providerReference,
+    queuedJobId: normalizeOptionalText(jobId),
+    replayReasonCode: normalizeOptionalText(replayReasonCode),
+    status: normalizeOptionalText(jobId) ? "queued" : "running"
+  });
+  markSubmissionAttemptRunning(attempt, nowIso(clock), normalizeOptionalText(jobId));
   if (submission.status === "signed") {
     markSubmissionSubmitted(submission, {
       clock,
@@ -628,6 +789,12 @@ function executeAuthoritySubmissionTransport(
     });
   }
   if (submission.status !== "submitted") {
+    finalizeSubmissionAttempt(attempt, {
+      status: "skipped",
+      completedAt: nowIso(clock),
+      resultCode: "submission_transport_not_dispatchable",
+      messageText: "Submission was not dispatchable."
+    });
     return {
       ...enrichSubmission(state, submission),
       executionSkipped: true,
@@ -635,6 +802,12 @@ function executeAuthoritySubmissionTransport(
     };
   }
   if (hasSubmissionTransportReceipt(state, submission.submissionId)) {
+    finalizeSubmissionAttempt(attempt, {
+      status: "skipped",
+      completedAt: nowIso(clock),
+      resultCode: "submission_transport_already_recorded",
+      messageText: "Transport receipt already exists for this submission."
+    });
     return {
       ...enrichSubmission(state, submission),
       executionSkipped: true,
@@ -645,6 +818,13 @@ function executeAuthoritySubmissionTransport(
   if (outcome === "transport_failed") {
     submission.status = "transport_failed";
     submission.updatedAt = nowIso(clock);
+    finalizeSubmissionAttempt(attempt, {
+      status: "failed",
+      completedAt: submission.updatedAt,
+      resultCode: "transport_failed",
+      messageText: normalizeOptionalText(message),
+      providerReference: submission.providerReference
+    });
     createQueueItem(state, {
       submission,
       actionType: "retry",
@@ -656,9 +836,7 @@ function executeAuthoritySubmissionTransport(
       rootCauseCode: "transport_failed",
       clock
     });
-    if (evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
-      syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
-    }
+    syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
     return enrichSubmission(state, submission);
   }
 
@@ -672,19 +850,63 @@ function executeAuthoritySubmissionTransport(
         providerStatus: outcome,
         rawReference: submission.providerReference,
         message,
-        actorId
+        actorId,
+        submissionAttemptId: attempt.submissionAttemptId,
+        mode,
+        legalEffect: mode !== "trial"
       }
     );
   }
+  finalizeSubmissionAttempt(attempt, {
+    status: "succeeded",
+    completedAt: nowIso(clock),
+    resultCode: outcome,
+    messageText: normalizeOptionalText(message),
+    providerReference: submission.providerReference,
+    receiptType: outcome
+  });
   return enrichSubmission(state, submission);
 }
 
 function executeSubmissionReceiptCollection(
   { state, clock, evidencePlatform },
-  { companyId, submissionId, actorId, simulatedReceiptType = null, providerStatus = null, message = null, isFinal = null, requiredInput = [] } = {}
+  {
+    companyId,
+    submissionId,
+    actorId,
+    simulatedReceiptType = null,
+    providerStatus = null,
+    message = null,
+    isFinal = null,
+    requiredInput = [],
+    triggerCode = "replay",
+    replayReasonCode = null,
+    jobId = null
+  } = {}
 ) {
   const submission = requireSubmission(state, companyId, submissionId);
+  const attempt = ensureSubmissionAttempt(state, {
+    submission,
+    clock,
+    attemptStageCode: "receipt_collection",
+    triggerCode,
+    actorId,
+    mode: submission.dispatchMode || null,
+    legalEffect: (submission.dispatchMode || "test") !== "trial",
+    payloadHash: submission.payloadHash,
+    providerReference: submission.providerReference,
+    queuedJobId: normalizeOptionalText(jobId),
+    replayReasonCode: normalizeOptionalText(replayReasonCode),
+    status: normalizeOptionalText(jobId) ? "queued" : "running"
+  });
+  markSubmissionAttemptRunning(attempt, nowIso(clock), normalizeOptionalText(jobId));
   if (["finalized", "superseded"].includes(submission.status)) {
+    finalizeSubmissionAttempt(attempt, {
+      status: "skipped",
+      completedAt: nowIso(clock),
+      resultCode: "submission_receipt_collection_not_allowed",
+      messageText: "Receipt collection is not allowed for this submission."
+    });
     return {
       ...enrichSubmission(state, submission),
       executionSkipped: true,
@@ -693,6 +915,12 @@ function executeSubmissionReceiptCollection(
   }
   const receiptType = normalizeOptionalText(simulatedReceiptType);
   if (!receiptType) {
+    finalizeSubmissionAttempt(attempt, {
+      status: "skipped",
+      completedAt: nowIso(clock),
+      resultCode: "submission_receipt_collection_no_receipt_available",
+      messageText: "No receipt was available for collection."
+    });
     return {
       ...enrichSubmission(state, submission),
       executionSkipped: true,
@@ -710,14 +938,30 @@ function executeSubmissionReceiptCollection(
       message,
       isFinal,
       requiredInput,
-      actorId
+      actorId,
+      submissionAttemptId: attempt.submissionAttemptId,
+      mode: submission.dispatchMode || null,
+      legalEffect: (submission.dispatchMode || "test") !== "trial"
     }
   );
 }
 
 function registerSubmissionReceipt(
   { state, clock, evidencePlatform },
-  { companyId, submissionId, receiptType, providerStatus = null, rawReference = null, message = null, isFinal = null, requiredInput = [], actorId = "system" } = {}
+  {
+    companyId,
+    submissionId,
+    receiptType,
+    providerStatus = null,
+    rawReference = null,
+    message = null,
+    isFinal = null,
+    requiredInput = [],
+    actorId = "system",
+    submissionAttemptId = null,
+    mode = null,
+    legalEffect = null
+  } = {}
 ) {
   const submission = requireSubmission(state, companyId, submissionId);
   if (["finalized", "superseded"].includes(submission.status)) {
@@ -732,11 +976,41 @@ function registerSubmissionReceipt(
     isFinal
   });
   if (existingReceipt) {
+    if (submissionAttemptId) {
+      const attempt = state.submissionAttempts?.get(submissionAttemptId);
+      if (attempt) {
+        finalizeSubmissionAttempt(attempt, {
+          status: "skipped",
+          completedAt: nowIso(clock),
+          resultCode: "duplicate_receipt_ignored",
+          messageText: "Duplicate receipt ignored.",
+          receiptType: normalizedType
+        });
+      }
+    }
     return enrichSubmission(state, submission);
   }
+  const attempt =
+    normalizeOptionalText(submissionAttemptId) && state.submissionAttempts?.get(submissionAttemptId)
+      ? state.submissionAttempts.get(submissionAttemptId)
+      : ensureSubmissionAttempt(state, {
+          submission,
+          clock,
+          attemptStageCode: "receipt_collection",
+          triggerCode: "manual_receipt",
+          actorId,
+          mode: normalizeOptionalText(mode) || submission.dispatchMode || null,
+          legalEffect: legalEffect == null ? (submission.dispatchMode || "test") !== "trial" : legalEffect === true,
+          payloadHash: submission.payloadHash,
+          providerReference: normalizeOptionalText(rawReference) || normalizeOptionalText(providerStatus) || submission.providerReference,
+          queuedJobId: null,
+          replayReasonCode: null,
+          status: "running"
+        });
   const receipt = {
     receiptId: crypto.randomUUID(),
     submissionId: submission.submissionId,
+    submissionAttemptId: attempt?.submissionAttemptId || null,
     sequenceNo: nextSequenceNo(state.receiptIdsBySubmission.get(submission.submissionId)),
     receiptType: normalizedType,
     providerStatus: normalizeOptionalText(providerStatus) || normalizedType,
@@ -744,6 +1018,10 @@ function registerSubmissionReceipt(
     rawReference: normalizeOptionalText(rawReference),
     messageText: normalizeOptionalText(message),
     isFinal: isFinal == null ? normalizedType === "final_ack" || normalizedType.endsWith("_nack") : isFinal === true,
+    providerKey: submission.providerKey,
+    payloadHash: submission.payloadHash,
+    mode: normalizeOptionalText(mode) || submission.dispatchMode || null,
+    legalEffect: legalEffect == null ? (submission.dispatchMode || "test") !== "trial" : legalEffect === true,
     receivedByActorId: requireText(actorId || "system", "actor_id_required"),
     receivedAt: nowIso(clock)
   };
@@ -791,8 +1069,16 @@ function registerSubmissionReceipt(
         clock
       });
     }
-  if (evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
-    syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
+  syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
+  if (attempt) {
+    finalizeSubmissionAttempt(attempt, {
+      status: normalizedType.endsWith("_nack") ? "failed" : "succeeded",
+      completedAt: receipt.receivedAt,
+      resultCode: normalizedType,
+      messageText: receipt.messageText,
+      receiptType: normalizedType,
+      providerReference: receipt.rawReference || submission.providerReference
+    });
   }
   return enrichSubmission(state, submission);
 }
@@ -851,9 +1137,7 @@ function retryAuthoritySubmission({ state, clock, evidencePlatform }, { companyI
       correlationId: previous.correlationId
     }
   );
-  if (evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
-    syncSubmissionEvidenceBundle({ state, evidencePlatform, submission: previous });
-  }
+  syncSubmissionEvidenceBundle({ state, evidencePlatform, submission: previous });
   return {
     previousSubmission: enrichSubmission(state, previous),
     submission: retried
@@ -883,10 +1167,218 @@ function resolveSubmissionQueueItem(
 function enrichSubmission(state, submission) {
   return clone({
     ...submission,
+    canonicalEnvelope: createCanonicalSubmissionEnvelopeRef(state, submission),
+    attempts: getSubmissionAttempts(state, submission.submissionId).map(clone),
     correctionLinks: getCorrectionLinksForSubmission(state, submission.submissionId).map(clone),
     receipts: getSubmissionReceipts(state, submission.submissionId).map(clone),
-    actionQueueItems: getSubmissionQueueItems(state, submission.submissionId).map(clone)
+    actionQueueItems: getSubmissionQueueItems(state, submission.submissionId).map(clone),
+    currentEvidencePack: clone(state.submissionEvidencePacks?.get(submission.submissionId) || null)
   });
+}
+
+export function createCanonicalSubmissionEnvelopeRef(state, submission) {
+  return clone({
+    submissionId: submission.submissionId,
+    companyId: submission.companyId,
+    submissionType: submission.submissionType,
+    rootSubmissionId: submission.rootSubmissionId,
+    previousSubmissionId: submission.previousSubmissionId,
+    correctionOfSubmissionId: submission.correctionOfSubmissionId,
+    correctionChainId: submission.correctionChainId,
+    sourceObjectType: submission.sourceObjectType,
+    sourceObjectId: submission.sourceObjectId,
+    sourceObjectVersion: submission.sourceObjectVersion,
+    payloadVersion: submission.payloadVersion,
+    payloadHash: submission.payloadHash,
+    providerKey: submission.providerKey,
+    recipientId: submission.recipientId,
+    envelopeState: deriveSubmissionEnvelopeState(submission),
+    signedState: submission.signedState,
+    legalEffect: (submission.dispatchMode || "test") !== "trial",
+    sourceEvidenceBundleId: submission.sourceEvidenceBundleId || null,
+    currentEvidencePackId: submission.evidencePackId || null,
+    receiptCount: getSubmissionReceipts(state, submission.submissionId).length,
+    attemptCount: getSubmissionAttempts(state, submission.submissionId).length,
+    correctionCount: getCorrectionLinksForSubmission(state, submission.submissionId).length,
+    createdAt: submission.createdAt,
+    updatedAt: submission.updatedAt
+  });
+}
+
+export function createCanonicalSubmissionEvidencePackRef(payload = {}) {
+  return clone({
+    submissionEvidencePackId: requireText(payload.submissionEvidencePackId, "submission_evidence_pack_id_required"),
+    evidenceBundleId: normalizeOptionalText(payload.evidenceBundleId),
+    submissionId: requireText(payload.submissionId, "submission_id_required"),
+    companyId: requireText(payload.companyId, "company_id_required"),
+    submissionType: requireText(payload.submissionType, "submission_type_required"),
+    sourceObjectType: requireText(payload.sourceObjectType, "submission_source_object_type_required"),
+    sourceObjectId: requireText(payload.sourceObjectId, "submission_source_object_id_required"),
+    sourceObjectVersion: requireText(payload.sourceObjectVersion, "submission_source_object_version_required"),
+    sourceEvidenceBundleId: normalizeOptionalText(payload.sourceEvidenceBundleId),
+    payloadHash: requireText(payload.payloadHash, "submission_payload_hash_required"),
+    payloadSchemaCode: requireText(payload.payloadSchemaCode, "submission_payload_schema_required"),
+    envelopeState: assertAllowed(payload.envelopeState || "draft", SUBMISSION_ENVELOPE_STATES, "submission_envelope_state_invalid"),
+    legalEffect: payload.legalEffect === false ? false : true,
+    checksum: normalizeOptionalText(payload.checksum),
+    status: normalizeOptionalText(payload.status),
+    frozenAt: normalizeOptionalText(payload.frozenAt),
+    archivedAt: normalizeOptionalText(payload.archivedAt),
+    correlationId: normalizeOptionalText(payload.correlationId),
+    signingRequirementCode: normalizeOptionalText(payload.signingRequirementCode),
+    signerIdentity: normalizeOptionalText(payload.signerIdentity),
+    signatureRefs: clone(payload.signatureRefs || []),
+    submittedArtifactRefs: clone(payload.submittedArtifactRefs || []),
+    attemptRefs: clone(payload.attemptRefs || []),
+    correctionLinks: clone(payload.correctionLinks || []),
+    receiptRefs: clone(payload.receiptRefs || []),
+    preservedPriorReceiptRefs: clone(payload.preservedPriorReceiptRefs || []),
+    operatorActions: clone(payload.operatorActions || []),
+    auditRefs: clone(payload.auditRefs || []),
+    rulepackRefs: clone(payload.rulepackRefs || []),
+    providerBaselineRefs: clone(payload.providerBaselineRefs || []),
+    decisionSnapshotRefs: clone(payload.decisionSnapshotRefs || [])
+  });
+}
+
+function deriveSubmissionEnvelopeState(submission) {
+  if (submission.status === "superseded") {
+    return "corrected";
+  }
+  if (submission.status === "retry_pending") {
+    return "technically_rejected";
+  }
+  if (submission.status === "transport_failed") {
+    return "technically_rejected";
+  }
+  if (submission.status === "domain_rejected") {
+    return "materially_rejected";
+  }
+  if (submission.status === "finalized") {
+    return "materially_accepted";
+  }
+  if (submission.status === "accepted") {
+    return "materially_accepted";
+  }
+  if (submission.status === "received") {
+    return "technically_accepted";
+  }
+  if (submission.status === "submitted" && submission.transportJobId) {
+    return "queued";
+  }
+  if (submission.status === "submitted") {
+    return "awaiting_receipts";
+  }
+  if (submission.status === "signed") {
+    return "locked";
+  }
+  return "draft";
+}
+
+function getSubmissionAttempts(state, submissionId) {
+  return (state.submissionAttemptIdsBySubmission?.get(submissionId) || [])
+    .map((submissionAttemptId) => state.submissionAttempts?.get(submissionAttemptId))
+    .filter(Boolean)
+    .sort((left, right) => left.submissionAttemptNo - right.submissionAttemptNo);
+}
+
+function buildAttemptRef(attempt) {
+  return {
+    submissionAttemptId: attempt.submissionAttemptId,
+    submissionAttemptNo: attempt.submissionAttemptNo,
+    attemptStageCode: attempt.attemptStageCode,
+    triggerCode: attempt.triggerCode,
+    status: attempt.status,
+    mode: attempt.mode,
+    legalEffect: attempt.legalEffect,
+    payloadHash: attempt.payloadHash,
+    providerKey: attempt.providerKey,
+    providerReference: attempt.providerReference,
+    receiptType: attempt.receiptType,
+    requestedAt: attempt.requestedAt,
+    startedAt: attempt.startedAt,
+    completedAt: attempt.completedAt
+  };
+}
+
+function ensureSubmissionAttempt(
+  state,
+  {
+    submission,
+    clock,
+    attemptStageCode,
+    triggerCode,
+    actorId,
+    mode,
+    legalEffect,
+    payloadHash,
+    providerReference,
+    queuedJobId = null,
+    replayReasonCode = null,
+    status = "queued"
+  }
+) {
+  const resolvedQueuedJobId = normalizeOptionalText(queuedJobId);
+  if (resolvedQueuedJobId) {
+    const existing = getSubmissionAttempts(state, submission.submissionId).find((attempt) => attempt.queuedJobId === resolvedQueuedJobId);
+    if (existing) {
+      return existing;
+    }
+  }
+  const requestedAt = nowIso(clock);
+  const attempt = {
+    submissionAttemptId: crypto.randomUUID(),
+    submissionId: submission.submissionId,
+    companyId: submission.companyId,
+    submissionAttemptNo: nextSequenceNo(state.submissionAttemptIdsBySubmission?.get(submission.submissionId)),
+    attemptStageCode,
+    triggerCode,
+    status: assertAllowed(status, SUBMISSION_ATTEMPT_STATUSES, "submission_attempt_status_invalid"),
+    mode: normalizeOptionalText(mode),
+    legalEffect: legalEffect === false ? false : true,
+    payloadHash: submission.payloadHash || requireText(payloadHash, "submission_payload_hash_required"),
+    providerKey: submission.providerKey,
+    providerReference: normalizeOptionalText(providerReference),
+    receiptType: null,
+    queuedJobId: resolvedQueuedJobId,
+    replayReasonCode: normalizeOptionalText(replayReasonCode),
+    actorId: requireText(actorId || "system", "actor_id_required"),
+    requestedAt,
+    startedAt: status === "running" ? requestedAt : null,
+    completedAt: null,
+    resultCode: null,
+    messageText: null,
+    updatedAt: requestedAt
+  };
+  state.submissionAttempts?.set(attempt.submissionAttemptId, attempt);
+  appendToIndex(state.submissionAttemptIdsBySubmission, submission.submissionId, attempt.submissionAttemptId);
+  return attempt;
+}
+
+function markSubmissionAttemptRunning(attempt, timestamp, queuedJobId = null) {
+  if (!attempt) {
+    return;
+  }
+  attempt.status = "running";
+  attempt.queuedJobId = normalizeOptionalText(queuedJobId) || attempt.queuedJobId;
+  attempt.startedAt = attempt.startedAt || timestamp;
+  attempt.updatedAt = timestamp;
+}
+
+function finalizeSubmissionAttempt(
+  attempt,
+  { status, completedAt, resultCode = null, messageText = null, receiptType = null, providerReference = null }
+) {
+  if (!attempt) {
+    return;
+  }
+  attempt.status = assertAllowed(status, SUBMISSION_ATTEMPT_STATUSES, "submission_attempt_status_invalid");
+  attempt.completedAt = completedAt;
+  attempt.resultCode = normalizeOptionalText(resultCode);
+  attempt.messageText = normalizeOptionalText(messageText);
+  attempt.receiptType = normalizeOptionalText(receiptType);
+  attempt.providerReference = normalizeOptionalText(providerReference) || attempt.providerReference;
+  attempt.updatedAt = completedAt;
 }
 
 function createQueueItem(
@@ -1033,9 +1525,14 @@ function resolveQueuedTransportJob(getCorePlatform, jobId) {
 function buildReceiptRef(receipt) {
   return {
     receiptId: receipt.receiptId,
+    submissionAttemptId: receipt.submissionAttemptId || null,
     receiptType: receipt.receiptType,
+    providerKey: receipt.providerKey || null,
     providerStatus: receipt.providerStatus,
     rawReference: receipt.rawReference,
+    payloadHash: receipt.payloadHash || null,
+    mode: receipt.mode || null,
+    legalEffect: receipt.legalEffect === false ? false : true,
     rawPayloadHash: hashObject({
       receiptType: receipt.receiptType,
       providerStatus: receipt.providerStatus,

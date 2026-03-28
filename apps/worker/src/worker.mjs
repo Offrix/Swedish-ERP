@@ -75,6 +75,7 @@ export function createDefaultJobHandlers({ logger = console.log } = {}) {
       const result = platform.executeAuthoritySubmissionTransport({
         companyId: job.companyId,
         submissionId: job.payload?.submissionId,
+        jobId: job.jobId,
         actorId: "worker_scheduler",
         mode:
           typeof job.payload?.mode === "string"
@@ -100,6 +101,7 @@ export function createDefaultJobHandlers({ logger = console.log } = {}) {
       const result = platform.executeSubmissionReceiptCollection({
         companyId: job.companyId,
         submissionId: job.payload?.submissionId,
+        jobId: job.jobId,
         actorId: "worker_scheduler",
         simulatedReceiptType: typeof job.payload?.simulatedReceiptType === "string" ? job.payload.simulatedReceiptType : null,
         providerStatus: typeof job.payload?.providerStatus === "string" ? job.payload.providerStatus : null,

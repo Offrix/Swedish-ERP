@@ -96,6 +96,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/close/adjustments",
   "/v1/close/adjustments/:adjustmentId",
   "/v1/submissions/:submissionId/evidence-pack",
+  "/v1/submissions/:submissionId/attempts",
   "/v1/submissions/:submissionId/replay",
   "/v1/submissions/:submissionId/corrections",
   "/v1/vat/review-queue/:vatReviewQueueItemId/resolve",
