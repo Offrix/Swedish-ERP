@@ -351,6 +351,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/onboarding/runs/:runId",
               "/v1/onboarding/runs/:runId/checklist",
               "/v1/documents",
+              "/v1/documents/:documentId",
               "/v1/documents/:documentId/versions",
               "/v1/documents/:documentId/links",
               "/v1/documents/:documentId/export",
@@ -1751,6 +1752,7 @@ async function handleRequest({ req, res, platform, flags }) {
         sourceChannel: body.sourceChannel || "manual",
         sourceReference: body.sourceReference || null,
         retentionPolicyCode: body.retentionPolicyCode || null,
+        retentionClassCode: body.retentionClassCode || null,
         metadataJson: body.metadataJson || {},
         receivedAt: body.receivedAt || new Date().toISOString(),
         actorId: principal.userId,
@@ -1760,7 +1762,57 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  const documentRecordMatch = matchPath(path, "/v1/documents/:documentId");
+  if (documentRecordMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getDocumentRecord({
+        companyId,
+        documentId: documentRecordMatch.documentId
+      })
+    );
+    return;
+  }
+
   const documentVersionsMatch = matchPath(path, "/v1/documents/:documentId/versions");
+  if (documentVersionsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeDocumentAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read"
+    });
+    writeJson(
+      res,
+      200,
+      {
+        companyId,
+        documentId: documentVersionsMatch.documentId,
+        versions: platform.getDocumentVersions({
+          companyId,
+          documentId: documentVersionsMatch.documentId
+        })
+      }
+    );
+    return;
+  }
   if (documentVersionsMatch && req.method === "POST") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
@@ -1784,6 +1836,7 @@ async function handleRequest({ req, res, platform, flags }) {
         fileHash: body.fileHash || null,
         fileSizeBytes: body.fileSizeBytes ?? null,
         sourceReference: body.sourceReference || null,
+        retentionClassCode: body.retentionClassCode || null,
         derivesFromDocumentVersionId: body.derivesFromDocumentVersionId || null,
         metadataJson: body.metadataJson || {},
         actorId: principal.userId,

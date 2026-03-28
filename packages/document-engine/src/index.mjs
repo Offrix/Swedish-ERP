@@ -61,6 +61,7 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     linkDocumentRecord,
     exportDocumentChain,
     getDocumentRecord,
+    getDocumentVersions,
     registerInboxChannel,
     ingestEmailMessage,
     getEmailIngestMessage,
@@ -79,6 +80,7 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     sourceChannel = "manual",
     sourceReference = null,
     retentionPolicyCode = null,
+    retentionClassCode = null,
     metadataJson = {},
     receivedAt = nowIso(),
     actorId = "system",
@@ -87,16 +89,40 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required", "Company id is required.");
     const now = nowIso();
+    const resolvedMetadata = copy(metadataJson);
+    const resolvedSourceChannel = requireText(sourceChannel, "source_channel_required", "Source channel is required.");
+    const resolvedRetentionClassCode = resolveRetentionClassCode({
+      retentionClassCode,
+      retentionPolicyCode,
+      metadataJson: resolvedMetadata
+    });
+    const sourceFingerprint = createSourceFingerprint({
+      companyId: resolvedCompanyId,
+      sourceChannel: resolvedSourceChannel,
+      sourceReference,
+      metadataJson: resolvedMetadata
+    });
     const document = {
       documentId,
       companyId: resolvedCompanyId,
       documentType,
       status: "received",
-      sourceChannel: requireText(sourceChannel, "source_channel_required", "Source channel is required."),
+      sourceChannel: resolvedSourceChannel,
       sourceReference: sourceReference || null,
       retentionPolicyCode,
+      retentionClassCode: resolvedRetentionClassCode,
+      sourceFingerprint,
       duplicateOfDocumentId: null,
-      metadataJson: copy(metadataJson),
+      originalDocumentVersionId: null,
+      latestDocumentVersionId: null,
+      evidenceRefs: buildDocumentEvidenceRefs({
+        documentId,
+        sourceFingerprint,
+        retentionClassCode: resolvedRetentionClassCode,
+        originalDocumentVersionId: null,
+        latestDocumentVersionId: null
+      }),
+      metadataJson: resolvedMetadata,
       receivedAt: normalizeTimestamp(receivedAt),
       storageConfirmedAt: null,
       lastExportedAt: null,
@@ -134,6 +160,7 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     fileHash = null,
     fileSizeBytes = null,
     sourceReference = null,
+    retentionClassCode = null,
     derivesFromDocumentVersionId = null,
     metadataJson = {},
     actorId = "system",
@@ -178,6 +205,22 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     if (typeof contentText === "string" && contentText.length > 0 && storedMetadata.ocrSourceText === undefined) {
       storedMetadata.ocrSourceText = contentText;
     }
+    const resolvedRetentionClassCode = resolveRetentionClassCode({
+      retentionClassCode,
+      retentionPolicyCode: document.retentionPolicyCode,
+      metadataJson: storedMetadata,
+      fallbackRetentionClassCode: document.retentionClassCode
+    });
+    const resolvedSourceReference = sourceReference || document.sourceReference || null;
+    const sourceFingerprint = createSourceFingerprint({
+      companyId: document.companyId,
+      sourceChannel: document.sourceChannel,
+      sourceReference: resolvedSourceReference,
+      metadataJson: {
+        ...copy(document.metadataJson),
+        ...storedMetadata
+      }
+    });
 
     const version = {
       documentVersionId: crypto.randomUUID(),
@@ -188,12 +231,34 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
       storageKey: resolvedStorageKey,
       mimeType: resolvedMimeType,
       contentHash: resolvedHash,
+      checksumAlgorithm: "sha256",
+      checksumSha256: resolvedHash,
       fileSizeBytes: resolvedSize,
-      sourceReference: sourceReference || document.sourceReference || null,
+      sourceReference: resolvedSourceReference,
+      sourceFingerprint,
+      retentionClassCode: resolvedRetentionClassCode,
       derivesFromDocumentVersionId: derivedFromVersionId,
+      evidenceRefs: buildDocumentVersionEvidenceRefs({
+        documentId: document.documentId,
+        documentVersionId: null,
+        storageKey: resolvedStorageKey,
+        checksumSha256: resolvedHash,
+        sourceFingerprint,
+        retentionClassCode: resolvedRetentionClassCode,
+        derivesFromDocumentVersionId: derivedFromVersionId
+      }),
       metadataJson: storedMetadata,
       createdAt: nowIso()
     };
+    version.evidenceRefs = buildDocumentVersionEvidenceRefs({
+      documentId: document.documentId,
+      documentVersionId: version.documentVersionId,
+      storageKey: resolvedStorageKey,
+      checksumSha256: resolvedHash,
+      sourceFingerprint,
+      retentionClassCode: resolvedRetentionClassCode,
+      derivesFromDocumentVersionId: derivedFromVersionId
+    });
 
     const duplicateOfDocumentIds = findDuplicateDocumentIds({
       companyId: document.companyId,
@@ -206,6 +271,17 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
     state.versionIdsByDocument.get(document.documentId).push(version.documentVersionId);
     document.status = "stored";
     document.storageConfirmedAt ??= nowIso();
+    document.retentionClassCode = resolvedRetentionClassCode;
+    document.sourceFingerprint = sourceFingerprint;
+    document.originalDocumentVersionId ??= version.documentVersionId;
+    document.latestDocumentVersionId = version.documentVersionId;
+    document.evidenceRefs = buildDocumentEvidenceRefs({
+      documentId: document.documentId,
+      sourceFingerprint,
+      retentionClassCode: resolvedRetentionClassCode,
+      originalDocumentVersionId: document.originalDocumentVersionId,
+      latestDocumentVersionId: document.latestDocumentVersionId
+    });
     document.updatedAt = nowIso();
     if (duplicateOfDocumentIds.length > 0 && !document.duplicateOfDocumentId) {
       document.duplicateOfDocumentId = duplicateOfDocumentIds[0];
@@ -301,6 +377,13 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
   function exportDocumentChain({ companyId, documentId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
     const document = requireDocument({ companyId, documentId });
     document.lastExportedAt = nowIso();
+    document.evidenceRefs = buildDocumentEvidenceRefs({
+      documentId: document.documentId,
+      sourceFingerprint: document.sourceFingerprint,
+      retentionClassCode: document.retentionClassCode,
+      originalDocumentVersionId: document.originalDocumentVersionId,
+      latestDocumentVersionId: document.latestDocumentVersionId
+    });
     document.updatedAt = nowIso();
 
     pushAudit({
@@ -347,6 +430,11 @@ export function createDocumentArchiveEngine({ clock = () => new Date() } = {}) {
 
   function getDocumentRecord({ companyId, documentId } = {}) {
     return copy(requireDocument({ companyId, documentId }));
+  }
+
+  function getDocumentVersions({ companyId, documentId } = {}) {
+    requireDocument({ companyId, documentId });
+    return listDocumentVersions(documentId).map(copy);
   }
 
   function registerInboxChannel({
@@ -1748,6 +1836,72 @@ function resolvePageCount(originalVersion) {
 function readMetadataText(metadataJson, key) {
   const value = metadataJson?.[key];
   return typeof value === "string" ? value : "";
+}
+
+function resolveRetentionClassCode({
+  retentionClassCode = null,
+  retentionPolicyCode = null,
+  metadataJson = {},
+  fallbackRetentionClassCode = null
+} = {}) {
+  const directValue = [retentionClassCode, metadataJson?.retentionClassCode, fallbackRetentionClassCode, retentionPolicyCode]
+    .find((candidate) => typeof candidate === "string" && candidate.trim().length > 0);
+  return directValue ? directValue.trim() : "unspecified";
+}
+
+function createSourceFingerprint({ companyId, sourceChannel, sourceReference = null, metadataJson = {} } = {}) {
+  const fingerprintPayload = {
+    companyId: requireText(companyId, "company_id_required", "Company id is required."),
+    sourceChannel: requireText(sourceChannel, "source_channel_required", "Source channel is required."),
+    sourceReference: typeof sourceReference === "string" && sourceReference.trim().length > 0 ? sourceReference.trim() : null,
+    filename: readMetadataText(metadataJson, "filename"),
+    senderAddress: readMetadataText(metadataJson, "senderAddress"),
+    subject: readMetadataText(metadataJson, "subject"),
+    inboundAddress: readMetadataText(metadataJson, "inboundAddress"),
+    mailboxCode: readMetadataText(metadataJson, "mailboxCode"),
+    rawMailId: readMetadataText(metadataJson, "rawMailId")
+  };
+  return crypto.createHash("sha256").update(JSON.stringify(fingerprintPayload)).digest("hex");
+}
+
+function buildDocumentEvidenceRefs({
+  documentId,
+  sourceFingerprint,
+  retentionClassCode,
+  originalDocumentVersionId,
+  latestDocumentVersionId
+}) {
+  return compactEvidenceRefs([
+    `document:${documentId}`,
+    sourceFingerprint ? `source_fingerprint:${sourceFingerprint}` : null,
+    retentionClassCode ? `retention_class:${retentionClassCode}` : null,
+    originalDocumentVersionId ? `original_version:${originalDocumentVersionId}` : null,
+    latestDocumentVersionId ? `latest_version:${latestDocumentVersionId}` : null
+  ]);
+}
+
+function buildDocumentVersionEvidenceRefs({
+  documentId,
+  documentVersionId,
+  storageKey,
+  checksumSha256,
+  sourceFingerprint,
+  retentionClassCode,
+  derivesFromDocumentVersionId
+}) {
+  return compactEvidenceRefs([
+    `document:${documentId}`,
+    documentVersionId ? `document_version:${documentVersionId}` : null,
+    storageKey ? `storage:${storageKey}` : null,
+    checksumSha256 ? `checksum:sha256:${checksumSha256}` : null,
+    sourceFingerprint ? `source_fingerprint:${sourceFingerprint}` : null,
+    retentionClassCode ? `retention_class:${retentionClassCode}` : null,
+    derivesFromDocumentVersionId ? `derived_from:${derivesFromDocumentVersionId}` : null
+  ]);
+}
+
+function compactEvidenceRefs(values) {
+  return [...new Set(values.filter((value) => typeof value === "string" && value.trim().length > 0))].sort();
 }
 
 function normalizeForMatching(value) {

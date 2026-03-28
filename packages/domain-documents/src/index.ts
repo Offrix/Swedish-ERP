@@ -57,6 +57,7 @@ export interface DocumentArchivePlatform {
     sourceChannel?: string;
     sourceReference?: string | null;
     retentionPolicyCode?: string | null;
+    retentionClassCode?: string | null;
     metadataJson?: Record<string, unknown>;
     receivedAt?: string;
     actorId?: string;
@@ -73,6 +74,7 @@ export interface DocumentArchivePlatform {
     fileHash?: string | null;
     fileSizeBytes?: number | null;
     sourceReference?: string | null;
+    retentionClassCode?: string | null;
     derivesFromDocumentVersionId?: string | null;
     metadataJson?: Record<string, unknown>;
     actorId?: string;
@@ -92,6 +94,14 @@ export interface DocumentArchivePlatform {
     documentId: string;
     actorId?: string;
     correlationId?: string;
+  }): unknown;
+  getDocumentRecord(input: {
+    companyId: string;
+    documentId: string;
+  }): unknown;
+  getDocumentVersions(input: {
+    companyId: string;
+    documentId: string;
   }): unknown;
   registerInboxChannel(input: {
     companyId: string;

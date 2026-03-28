@@ -76,7 +76,9 @@ Canonical request envelopes may be sent as:
 - `POST /v1/onboarding/runs/:id/steps/vat`
 - `POST /v1/onboarding/runs/:id/steps/periods`
 - `POST /v1/documents`
+- `GET /v1/documents/:documentId?companyId=...`
 - `POST /v1/documents/:documentId/versions`
+- `GET /v1/documents/:documentId/versions?companyId=...`
 - `POST /v1/documents/:documentId/links`
 - `GET /v1/documents/:documentId/export?companyId=...`
 - `POST /v1/inbox/channels`

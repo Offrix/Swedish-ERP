@@ -17,7 +17,12 @@ export interface DocumentRecord {
   readonly sourceChannel: string;
   readonly sourceReference: string | null;
   readonly retentionPolicyCode: string | null;
+  readonly retentionClassCode: string;
+  readonly sourceFingerprint: string;
   readonly duplicateOfDocumentId: string | null;
+  readonly originalDocumentVersionId: string | null;
+  readonly latestDocumentVersionId: string | null;
+  readonly evidenceRefs: readonly string[];
   readonly receivedAt: string;
   readonly storageConfirmedAt: string | null;
   readonly lastExportedAt: string | null;
@@ -35,9 +40,14 @@ export interface DocumentVersion {
   readonly storageKey: string;
   readonly mimeType: string;
   readonly contentHash: string;
+  readonly checksumAlgorithm: "sha256";
+  readonly checksumSha256: string;
   readonly fileSizeBytes: number;
   readonly sourceReference: string | null;
+  readonly sourceFingerprint: string;
+  readonly retentionClassCode: string;
   readonly derivesFromDocumentVersionId: string | null;
+  readonly evidenceRefs: readonly string[];
   readonly metadataJson: Record<string, unknown>;
   readonly createdAt: string;
 }

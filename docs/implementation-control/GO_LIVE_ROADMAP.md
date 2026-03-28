@@ -497,7 +497,7 @@ GÃ¶ra identitet, step-up, federation, impersonation och break-glass verkliga o
 **Blockerar UI-readiness**  
 - UI-kontrakt fÃ¶r actions och challenge center blockerar tills trustnivÃ¥er Ã¤r satta.
 
-## [ ] Fas 7 â€” Tenant bootstrap, modulaktivering och trial/testkonto-system
+## [x] Fas 7 â€” Tenant bootstrap, modulaktivering och trial/testkonto-system
 
 **MÃ¥l**  
 Skapa en separat kÃ¤lla fÃ¶r tenant bootstrap, module activation, finance readiness och trial/live-livscykel sÃ¥ att onboarding, demo, pilot och go-live blir sÃ¤kra.
@@ -612,7 +612,7 @@ Bygga den svenska bokfÃ¶ringskÃ¤rnan som resten av systemet vilar pÃ¥: leg
 **Blockerar UI-readiness**  
 - UI-readiness fÃ¶r reports/workbenches blockerar tills ledger och close Ã¤r stabila.
 
-## [ ] Fas 9 â€” AR, AP, VAT, banking, tax account och document-posting gates
+## [x] Fas 9 â€” AR, AP, VAT, banking, tax account och document-posting gates
 
 **MÃ¥l**  
 Knyta dokument, leverantÃ¶rer, kunder, bank och skattekonto till bokfÃ¶ringskÃ¤rnan utan att tillÃ¥ta otillÃ¥tna autopostningar eller fuzzy matching.
@@ -684,8 +684,11 @@ GÃ¶ra document-to-decision-kedjan verklig: originaldokument, OCR, klassificeri
 **FÃ¥r inte kÃ¶ras parallellt med**  
 - Inget OCR- eller classificationsfÃ¶rslag fÃ¥r leda till posting, payroll eller filing utan reviewgrÃ¤ns dÃ¤r required.
 
+**Delfasstatus**
+- 10.1 klar 2026-03-28: dokumentkedjan bÃ¤r nu explicit `retentionClassCode`, `sourceFingerprint`, `checksumAlgorithm`, `checksumSha256`, `originalDocumentVersionId`, `latestDocumentVersionId` och `evidenceRefs`, med canonical migrationsregistrering och lÃ¤srutter fÃ¶r dokument- och versionskedjan.
+
 **Delfaser**
-- [ ] 10.1 [HARDEN] **Originaldokument och versionskedja** â€” Original, hash, checksum, source fingerprint, retention class och evidence refs.
+- [x] 10.1 [HARDEN] **Originaldokument och versionskedja** â€” Original, hash, checksum, source fingerprint, retention class och evidence refs.
 - [ ] 10.2 [REPLACE] **Byt OCR-stub mot riktig provider** â€” Google Document AI eller vald baseline-adapter med confidence, rerun, page limits, async callback och low-confidence review.
 - [ ] 10.3 [HARDEN] **Classification/extraction pipeline** â€” Canonical extraction model fÃ¶r AP, AR, payroll underlag, benefits/travel och attachments.
 - [ ] 10.4 [HARDEN] **Import cases och blocker codes** â€” Completeness, blocking reasons, correction requests, human decisions och replay-safe mapping till downstream domain.
