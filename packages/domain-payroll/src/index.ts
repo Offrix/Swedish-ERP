@@ -101,7 +101,13 @@ export interface PayrollPosting {
   readonly status: string;
   readonly journalEntryId: string;
   readonly payloadHash: string;
+  readonly payrollInputSnapshotId: string | null;
+  readonly payrollInputFingerprint: string | null;
+  readonly payRunFingerprint: string | null;
   readonly sourceSnapshotHash: string;
+  readonly rulepackRefs: readonly Record<string, unknown>[];
+  readonly providerBaselineRefs: readonly Record<string, unknown>[];
+  readonly decisionSnapshotRefs: readonly Record<string, unknown>[];
   readonly totals: Record<string, unknown>;
   readonly journalLines: readonly PayrollPostingLine[];
   readonly createdByActorId: string;
@@ -135,6 +141,12 @@ export interface PayrollPayoutBatch {
   readonly exportFileName: string;
   readonly exportPayload: string;
   readonly exportPayloadHash: string;
+  readonly payrollInputSnapshotId: string | null;
+  readonly payrollInputFingerprint: string | null;
+  readonly payRunFingerprint: string | null;
+  readonly rulepackRefs: readonly Record<string, unknown>[];
+  readonly providerBaselineRefs: readonly Record<string, unknown>[];
+  readonly decisionSnapshotRefs: readonly Record<string, unknown>[];
   readonly lines: readonly PayrollPayoutBatchLine[];
   readonly createdByActorId: string;
   readonly createdAt: string;
@@ -363,13 +375,51 @@ export interface PayRunRef {
   readonly migrationSnapshot: Record<string, unknown> | null;
   readonly correctionOfPayRunId: string | null;
   readonly correctionReason: string | null;
+  readonly payrollInputSnapshotId: string | null;
+  readonly payrollInputFingerprint: string;
+  readonly payRunFingerprint: string;
   readonly sourceSnapshotHash: string;
   readonly balanceSnapshotHash: string;
   readonly agreementSnapshotHash: string;
   readonly warningCodes: readonly string[];
+  readonly rulepackRefs: readonly Record<string, unknown>[];
+  readonly providerBaselineRefs: readonly Record<string, unknown>[];
+  readonly decisionSnapshotRefs: readonly Record<string, unknown>[];
+  readonly payrollInputSnapshot: PayrollInputSnapshot | null;
   readonly exceptionSummary: Record<string, number>;
   readonly calculationSteps: readonly PayrollStepSummary[];
   readonly exceptions: readonly PayrollException[];
   readonly lines: readonly PayRunLine[];
   readonly payslips: readonly PayslipSnapshot[];
+}
+
+export interface PayrollInputSnapshot {
+  readonly payrollInputSnapshotId: string;
+  readonly companyId: string;
+  readonly payRunId: string;
+  readonly payCalendarId: string;
+  readonly payCalendarCode: string;
+  readonly reportingPeriod: string;
+  readonly periodStartsOn: string;
+  readonly periodEndsOn: string;
+  readonly payDate: string;
+  readonly runType: string;
+  readonly employmentIds: readonly string[];
+  readonly migrationBatchId: string | null;
+  readonly migrationSnapshot: Record<string, unknown> | null;
+  readonly correctionOfPayRunId: string | null;
+  readonly correctionReason: string | null;
+  readonly sourceSnapshot: Record<string, unknown>;
+  readonly agreementSnapshots: readonly Record<string, unknown>[];
+  readonly balanceSnapshots: readonly Record<string, unknown>[];
+  readonly rulepackRefs: readonly Record<string, unknown>[];
+  readonly providerBaselineRefs: readonly Record<string, unknown>[];
+  readonly decisionSnapshotRefs: readonly Record<string, unknown>[];
+  readonly sourceSnapshotHash: string;
+  readonly balanceSnapshotHash: string;
+  readonly agreementSnapshotHash: string;
+  readonly decisionSnapshotHash: string;
+  readonly inputFingerprint: string;
+  readonly lockedAt: string;
+  readonly lockedByActorId: string;
 }

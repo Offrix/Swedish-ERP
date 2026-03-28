@@ -138,6 +138,11 @@ test("Phase 8.3 API creates payroll postings, payout batches and vacation snapsh
       ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
     );
     assert.equal(run.decisionSnapshotRefs.length >= 2, true);
+    assert.equal(typeof run.payrollInputSnapshotId, "string");
+    assert.equal(typeof run.payrollInputFingerprint, "string");
+    assert.equal(typeof run.payRunFingerprint, "string");
+    assert.equal(run.payrollInputSnapshot?.payrollInputSnapshotId, run.payrollInputSnapshotId);
+    assert.equal(run.payrollInputSnapshot?.inputFingerprint, run.payrollInputFingerprint);
 
     await requestJson(baseUrl, `/v1/payroll/pay-runs/${run.payRunId}/approve`, {
       method: "POST",
@@ -163,12 +168,17 @@ test("Phase 8.3 API creates payroll postings, payout batches and vacation snapsh
       posting.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
       ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
     );
+    assert.equal(posting.payrollInputSnapshotId, run.payrollInputSnapshotId);
+    assert.equal(posting.payrollInputFingerprint, run.payrollInputFingerprint);
+    assert.equal(posting.payRunFingerprint, run.payRunFingerprint);
     const postingJournal = platform.getJournalEntry({
       companyId: COMPANY_ID,
       journalEntryId: posting.journalEntryId
     });
     assert.equal(postingJournal.metadataJson.postingRecipeCode, "PAYROLL_RUN");
     assert.equal(postingJournal.metadataJson.journalType, "payroll_posting");
+    assert.equal(postingJournal.metadataJson.payrollInputSnapshotId, run.payrollInputSnapshotId);
+    assert.equal(postingJournal.metadataJson.payRunFingerprint, run.payRunFingerprint);
 
     const payoutBatch = await requestJson(baseUrl, "/v1/payroll/payout-batches", {
       method: "POST",
@@ -181,6 +191,8 @@ test("Phase 8.3 API creates payroll postings, payout batches and vacation snapsh
     });
     assert.match(payoutBatch.exportPayload, /5000:1234567890/);
     assert.equal(payoutBatch.decisionSnapshotRefs.length >= 2, true);
+    assert.equal(payoutBatch.payrollInputSnapshotId, run.payrollInputSnapshotId);
+    assert.equal(payoutBatch.payRunFingerprint, run.payRunFingerprint);
 
     const matchedBatch = await requestJson(
       baseUrl,
@@ -201,6 +213,8 @@ test("Phase 8.3 API creates payroll postings, payout batches and vacation snapsh
     });
     assert.equal(payoutMatchJournal.metadataJson.postingRecipeCode, "PAYROLL_PAYOUT_MATCH");
     assert.equal(payoutMatchJournal.metadataJson.journalType, "settlement_posting");
+    assert.equal(payoutMatchJournal.metadataJson.payrollInputSnapshotId, run.payrollInputSnapshotId);
+    assert.equal(payoutMatchJournal.metadataJson.payRunFingerprint, run.payRunFingerprint);
 
     const snapshot = await requestJson(baseUrl, "/v1/payroll/vacation-liability-snapshots", {
       method: "POST",

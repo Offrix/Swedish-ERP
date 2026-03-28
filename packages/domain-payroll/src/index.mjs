@@ -262,6 +262,9 @@ export function createPayrollEngine({
     payCalendarIdsByCode: new Map(),
     payRuns: new Map(),
     payRunIdsByCompany: new Map(),
+    payrollInputSnapshots: new Map(),
+    payrollInputSnapshotIdsByCompany: new Map(),
+    payrollInputSnapshotIdByRun: new Map(),
     payRunEvents: new Map(),
     payRunEventIdsByRun: new Map(),
     payrollExceptions: new Map(),
@@ -331,6 +334,8 @@ export function createPayrollEngine({
     upsertEmploymentStatutoryProfile,
     listPayRuns,
     getPayRun,
+    listPayrollInputSnapshots,
+    getPayrollInputSnapshot,
     listPayrollExceptions,
     resolvePayrollException,
     createPayRun,
@@ -646,6 +651,31 @@ export function createPayrollEngine({
     return enrichPayRun(state, payRun);
   }
 
+  function listPayrollInputSnapshots({ companyId, payRunId = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.payrollInputSnapshotIdsByCompany.get(resolvedCompanyId) || [])
+      .map((payrollInputSnapshotId) => state.payrollInputSnapshots.get(payrollInputSnapshotId))
+      .filter(Boolean)
+      .filter((candidate) => (payRunId ? candidate.payRunId === payRunId : true))
+      .sort((left, right) => left.lockedAt.localeCompare(right.lockedAt) || left.payRunId.localeCompare(right.payRunId))
+      .map(copy);
+  }
+
+  function getPayrollInputSnapshot({ companyId, payrollInputSnapshotId = null, payRunId = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedSnapshotId =
+      normalizeOptionalText(payrollInputSnapshotId) ||
+      state.payrollInputSnapshotIdByRun.get(requireText(payRunId, "pay_run_id_required"));
+    if (!resolvedSnapshotId) {
+      throw createError(404, "payroll_input_snapshot_not_found", "Payroll input snapshot was not found.");
+    }
+    const snapshot = state.payrollInputSnapshots.get(resolvedSnapshotId);
+    if (!snapshot || snapshot.companyId !== resolvedCompanyId) {
+      throw createError(404, "payroll_input_snapshot_not_found", "Payroll input snapshot was not found.");
+    }
+    return copy(snapshot);
+  }
+
   function listPayrollExceptions({ companyId, payRunId, status = null, blockingOnly = false } = {}) {
     requirePayRun(state, companyId, payRunId);
     const resolvedStatus = status ? assertAllowed(status, PAYROLL_EXCEPTION_STATUSES, "payroll_exception_status_invalid") : null;
@@ -826,6 +856,9 @@ export function createPayrollEngine({
       migrationSnapshot: migrationContext?.snapshot || null,
       correctionOfPayRunId: correctionSourceRun?.payRunId || null,
       correctionReason: normalizeOptionalText(correctionReason),
+      payrollInputSnapshotId: null,
+      payrollInputFingerprint: "",
+      payRunFingerprint: "",
       sourceSnapshotHash: "",
       balanceSnapshotHash: "",
       agreementSnapshotHash: "",
@@ -915,6 +948,16 @@ export function createPayrollEngine({
     run.agreementSnapshotHash = buildSnapshotHash(agreementSnapshots);
     run.rulepackRefs = collectPayRunRulepackRefs(employmentResults);
     run.decisionSnapshotRefs = collectPayRunDecisionSnapshotRefs(run, employmentResults);
+    const inputSnapshotRecord = createPayrollInputSnapshotRecord({
+      run,
+      sourceSnapshot,
+      agreementSnapshots,
+      balanceSnapshots,
+      actorId,
+      clock
+    });
+    run.payrollInputSnapshotId = inputSnapshotRecord.payrollInputSnapshotId;
+    run.payrollInputFingerprint = inputSnapshotRecord.inputFingerprint;
     run.warningCodes = [...new Set(warnings.map((warning) => warning.code))].sort();
     run.calculationSteps = PAYROLL_STEP_DEFINITIONS.map((definition) =>
       summarizeStep(definition, employmentResults.map((result) => result.steps[definition.stepNo]))
@@ -922,6 +965,9 @@ export function createPayrollEngine({
 
     state.payRuns.set(run.payRunId, run);
     appendToIndex(state.payRunIdsByCompany, resolvedCompanyId, run.payRunId);
+    state.payrollInputSnapshots.set(inputSnapshotRecord.payrollInputSnapshotId, inputSnapshotRecord);
+    appendToIndex(state.payrollInputSnapshotIdsByCompany, resolvedCompanyId, inputSnapshotRecord.payrollInputSnapshotId);
+    state.payrollInputSnapshotIdByRun.set(run.payRunId, inputSnapshotRecord.payrollInputSnapshotId);
     appendRunEvent(state, {
       payRunId: run.payRunId,
       companyId: run.companyId,
@@ -986,6 +1032,11 @@ export function createPayrollEngine({
       migrationContext,
       actorId,
       clock
+    });
+
+    run.payRunFingerprint = buildPayRunFingerprint({
+      state,
+      run
     });
 
     return getPayRun({
@@ -1297,6 +1348,9 @@ export function createPayrollEngine({
       metadataJson: {
         pipelineStage: "payroll_posting",
         payRunId: payRun.payRunId,
+        payrollInputSnapshotId: payRun.payrollInputSnapshotId,
+        payrollInputFingerprint: payRun.payrollInputFingerprint,
+        payRunFingerprint: payRun.payRunFingerprint,
         reportingPeriod: payRun.reportingPeriod,
         runType: payRun.runType,
         rulepackRefs: copy(payRun.rulepackRefs || []),
@@ -1315,6 +1369,9 @@ export function createPayrollEngine({
       status: "posted",
       journalEntryId: posted.journalEntry.journalEntryId,
       payloadHash: postingModel.payloadHash,
+      payrollInputSnapshotId: payRun.payrollInputSnapshotId,
+      payrollInputFingerprint: payRun.payrollInputFingerprint,
+      payRunFingerprint: payRun.payRunFingerprint,
       sourceSnapshotHash: postingModel.sourceSnapshotHash,
       rulepackRefs: copy(payRun.rulepackRefs || []),
       providerBaselineRefs: copy(payRun.providerBaselineRefs || []),
@@ -1393,6 +1450,9 @@ export function createPayrollEngine({
       exportFileName: `PAYROLL-${payRun.reportingPeriod}-${payRun.payRunId.slice(0, 8)}.csv`,
       exportPayload: batchModel.exportPayload,
       exportPayloadHash: batchModel.payloadHash,
+      payrollInputSnapshotId: payRun.payrollInputSnapshotId,
+      payrollInputFingerprint: payRun.payrollInputFingerprint,
+      payRunFingerprint: payRun.payRunFingerprint,
       rulepackRefs: copy(payRun.rulepackRefs || []),
       providerBaselineRefs: copy(payRun.providerBaselineRefs || []),
       decisionSnapshotRefs: copy(payRun.decisionSnapshotRefs || []),
@@ -1451,7 +1511,8 @@ export function createPayrollEngine({
           payrollPayoutBatchId: batch.payrollPayoutBatchId,
           bankEventId,
           matchedDate,
-          totalAmount: roundMoney(batch.totalAmount)
+          totalAmount: roundMoney(batch.totalAmount),
+          payRunFingerprint: payRun.payRunFingerprint
         }),
         actorId,
         idempotencyKey: `payroll_payout_match:${batch.payrollPayoutBatchId}:${requireText(bankEventId, "bank_event_id_required")}`,
@@ -1459,6 +1520,9 @@ export function createPayrollEngine({
         metadataJson: {
           pipelineStage: "payroll_payout_match",
           payRunId: payRun.payRunId,
+          payrollInputSnapshotId: payRun.payrollInputSnapshotId,
+          payrollInputFingerprint: payRun.payrollInputFingerprint,
+          payRunFingerprint: payRun.payRunFingerprint,
           payrollPayoutBatchId: batch.payrollPayoutBatchId,
           rulepackRefs: copy(batch.rulepackRefs || []),
           providerBaselineRefs: copy(batch.providerBaselineRefs || []),
@@ -2247,6 +2311,12 @@ function materializeAgiSubmissionVersion({
     },
     reportingPeriod,
     sourcePayRunIds: approvedRuns.map((run) => run.payRunId),
+    payrollInputSnapshotRefs: approvedRuns.map((run) => ({
+      payRunId: run.payRunId,
+      payrollInputSnapshotId: run.payrollInputSnapshotId,
+      payrollInputFingerprint: run.payrollInputFingerprint,
+      payRunFingerprint: run.payRunFingerprint
+    })),
     rulepackRefs: dedupePayrollRulepackRefs(approvedRuns.flatMap((run) => run.rulepackRefs || [])),
     providerBaselineRefs: dedupeProviderBaselineRefs(approvedRuns.flatMap((run) => run.providerBaselineRefs || [])),
     decisionSnapshotRefs: dedupeDecisionSnapshotRefs(approvedRuns.flatMap((run) => run.decisionSnapshotRefs || [])),
@@ -2312,6 +2382,9 @@ function buildAgiSourceSnapshotHash(payRuns) {
       payDate: payRun.payDate,
       runType: payRun.runType,
       status: payRun.status,
+      payrollInputSnapshotId: payRun.payrollInputSnapshotId,
+      payrollInputFingerprint: payRun.payrollInputFingerprint,
+      payRunFingerprint: payRun.payRunFingerprint,
       sourceSnapshotHash: payRun.sourceSnapshotHash,
       rulepackRefs: payRun.rulepackRefs || [],
       decisionSnapshotRefs: payRun.decisionSnapshotRefs || []
@@ -4887,10 +4960,116 @@ function buildPayrollEmploymentKey(companyId, employmentId) {
   return `${companyId}:${employmentId}`;
 }
 
+function createPayrollInputSnapshotRecord({
+  run,
+  sourceSnapshot,
+  agreementSnapshots,
+  balanceSnapshots,
+  actorId,
+  clock
+}) {
+  const decisionSnapshotHash = buildSnapshotHash(run.decisionSnapshotRefs || []);
+  const model = {
+    companyId: run.companyId,
+    payRunId: run.payRunId,
+    payCalendarId: run.payCalendarId,
+    payCalendarCode: run.payCalendarCode,
+    reportingPeriod: run.reportingPeriod,
+    periodStartsOn: run.periodStartsOn,
+    periodEndsOn: run.periodEndsOn,
+    payDate: run.payDate,
+    runType: run.runType,
+    employmentIds: copy(run.employmentIds || []),
+    migrationBatchId: run.migrationBatchId,
+    migrationSnapshot: copy(run.migrationSnapshot || null),
+    correctionOfPayRunId: run.correctionOfPayRunId,
+    correctionReason: run.correctionReason,
+    sourceSnapshot: copy(sourceSnapshot || {}),
+    agreementSnapshots: copy(agreementSnapshots || []),
+    balanceSnapshots: copy(balanceSnapshots || []),
+    rulepackRefs: copy(run.rulepackRefs || []),
+    providerBaselineRefs: copy(run.providerBaselineRefs || []),
+    decisionSnapshotRefs: copy(run.decisionSnapshotRefs || []),
+    sourceSnapshotHash: run.sourceSnapshotHash,
+    balanceSnapshotHash: run.balanceSnapshotHash,
+    agreementSnapshotHash: run.agreementSnapshotHash,
+    decisionSnapshotHash
+  };
+  return {
+    payrollInputSnapshotId: crypto.randomUUID(),
+    ...model,
+    inputFingerprint: buildSnapshotHash(model),
+    lockedAt: nowIso(clock),
+    lockedByActorId: requireText(actorId, "actor_id_required")
+  };
+}
+
+function buildPayRunFingerprint({ state, run }) {
+  return buildSnapshotHash({
+    payRunId: run.payRunId,
+    payrollInputSnapshotId: run.payrollInputSnapshotId,
+    payrollInputFingerprint: run.payrollInputFingerprint,
+    reportingPeriod: run.reportingPeriod,
+    payDate: run.payDate,
+    runType: run.runType,
+    warningCodes: copy(run.warningCodes || []),
+    rulepackRefs: copy(run.rulepackRefs || []),
+    providerBaselineRefs: copy(run.providerBaselineRefs || []),
+    decisionSnapshotRefs: copy(run.decisionSnapshotRefs || []),
+    calculationSteps: copy(run.calculationSteps || []),
+    lines: (state.payRunLineIdsByRun.get(run.payRunId) || [])
+      .map((lineId) => state.payRunLines.get(lineId))
+      .filter(Boolean)
+      .map((line) => ({
+        employmentId: line.employmentId,
+        payItemCode: line.payItemCode,
+        amount: line.amount,
+        quantity: line.quantity,
+        sourceType: line.sourceType,
+        sourceId: line.sourceId,
+        calculationStatus: line.calculationStatus,
+        dimensionJson: copy(line.dimensionJson || {})
+      }))
+      .sort((left, right) => {
+        const leftKey = `${left.employmentId}:${left.payItemCode}:${left.sourceType || ""}:${left.sourceId || ""}:${stableStringify(left.dimensionJson)}`;
+        const rightKey = `${right.employmentId}:${right.payItemCode}:${right.sourceType || ""}:${right.sourceId || ""}:${stableStringify(right.dimensionJson)}`;
+        return leftKey.localeCompare(rightKey);
+      }),
+    payslipSnapshotHashes: (state.payslipIdsByRun.get(run.payRunId) || [])
+      .map((payslipId) => state.payslips.get(payslipId))
+      .filter(Boolean)
+      .map((payslip) => ({
+        payslipId: payslip.payslipId,
+        employmentId: payslip.employmentId,
+        snapshotHash: payslip.snapshotHash
+      }))
+      .sort((left, right) => left.employmentId.localeCompare(right.employmentId)),
+    exceptionSnapshots: listPayrollExceptionsFromState(state, run.payRunId)
+      .map((exception) => ({
+        code: exception.code,
+        employmentId: exception.employmentId,
+        employeeId: exception.employeeId,
+        severity: exception.severity,
+        blocking: exception.blocking,
+        resolutionPolicy: exception.resolutionPolicy,
+        details: copy(exception.details || {})
+      }))
+      .sort((left, right) => {
+        const leftKey = `${left.code}:${left.employmentId || ""}:${left.employeeId || ""}`;
+        const rightKey = `${right.code}:${right.employmentId || ""}:${right.employeeId || ""}`;
+        return leftKey.localeCompare(rightKey);
+      })
+  });
+}
+
 function enrichPayRun(state, payRun) {
   const exceptions = listPayrollExceptionsFromState(state, payRun.payRunId).map(copy);
+  const payrollInputSnapshot = payRun.payrollInputSnapshotId
+    ? state.payrollInputSnapshots.get(payRun.payrollInputSnapshotId) || null
+    : null;
   return {
     ...copy(payRun),
+    payrollInputSnapshot: payrollInputSnapshot ? copy(payrollInputSnapshot) : null,
     exceptionSummary: summarizePayrollExceptions(exceptions),
     exceptions,
     events: (state.payRunEventIdsByRun.get(payRun.payRunId) || [])

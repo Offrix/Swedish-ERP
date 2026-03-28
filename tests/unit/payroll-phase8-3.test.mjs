@@ -111,6 +111,12 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
     ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
   );
   assert.equal(run.decisionSnapshotRefs.length >= 2, true);
+  assert.equal(typeof run.payrollInputSnapshotId, "string");
+  assert.equal(typeof run.payrollInputFingerprint, "string");
+  assert.equal(typeof run.payRunFingerprint, "string");
+  assert.equal(run.payrollInputSnapshot?.payrollInputSnapshotId, run.payrollInputSnapshotId);
+  assert.equal(run.payrollInputSnapshot?.inputFingerprint, run.payrollInputFingerprint);
+  assert.equal(run.payrollInputSnapshot?.sourceSnapshotHash, run.sourceSnapshotHash);
 
   payrollPlatform.approvePayRun({
     companyId: COMPANY_ID,
@@ -136,6 +142,9 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
     ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
   );
   assert.equal(posting.decisionSnapshotRefs.length >= 2, true);
+  assert.equal(posting.payrollInputSnapshotId, run.payrollInputSnapshotId);
+  assert.equal(posting.payrollInputFingerprint, run.payrollInputFingerprint);
+  assert.equal(posting.payRunFingerprint, run.payRunFingerprint);
   const postingJournal = ledgerPlatform.getJournalEntry({
     companyId: COMPANY_ID,
     journalEntryId: posting.journalEntryId
@@ -147,6 +156,8 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
   assert.equal(postingJournal.metadataJson.postingRecipeCode, "PAYROLL_RUN");
   assert.equal(postingJournal.metadataJson.journalType, "payroll_posting");
   assert.equal(postingJournal.metadataJson.sourceObjectVersion, posting.payloadHash);
+  assert.equal(postingJournal.metadataJson.payrollInputSnapshotId, run.payrollInputSnapshotId);
+  assert.equal(postingJournal.metadataJson.payRunFingerprint, run.payRunFingerprint);
 
   const payoutBatch = payrollPlatform.createPayrollPayoutBatch({
     companyId: COMPANY_ID,
@@ -155,6 +166,8 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
   });
   assert.match(payoutBatch.exportPayload, /5000:1234567890/);
   assert.equal(payoutBatch.decisionSnapshotRefs.length >= 2, true);
+  assert.equal(payoutBatch.payrollInputSnapshotId, run.payrollInputSnapshotId);
+  assert.equal(payoutBatch.payRunFingerprint, run.payRunFingerprint);
 
   const matchedBatch = payrollPlatform.matchPayrollPayoutBatch({
     companyId: COMPANY_ID,
@@ -175,6 +188,8 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
   assert.equal(payoutMatchJournal.metadataJson.postingRecipeCode, "PAYROLL_PAYOUT_MATCH");
   assert.equal(payoutMatchJournal.metadataJson.journalType, "settlement_posting");
   assert.equal(typeof payoutMatchJournal.metadataJson.sourceObjectVersion, "string");
+  assert.equal(payoutMatchJournal.metadataJson.payrollInputSnapshotId, run.payrollInputSnapshotId);
+  assert.equal(payoutMatchJournal.metadataJson.payRunFingerprint, run.payRunFingerprint);
 
   const agiSubmission = payrollPlatform.createAgiSubmission({
     companyId: COMPANY_ID,
@@ -186,6 +201,8 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
     ["SE-EMPLOYER-CONTRIBUTIONS", "SE-PAYROLL-TAX"]
   );
   assert.equal(agiSubmission.currentVersion.decisionSnapshotRefs.length >= 2, true);
+  assert.equal(agiSubmission.currentVersion.payloadJson.payrollInputSnapshotRefs[0].payrollInputSnapshotId, run.payrollInputSnapshotId);
+  assert.equal(agiSubmission.currentVersion.payloadJson.payrollInputSnapshotRefs[0].payRunFingerprint, run.payRunFingerprint);
 
   const snapshot = payrollPlatform.createVacationLiabilitySnapshot({
     companyId: COMPANY_ID,
