@@ -229,3 +229,92 @@ test("Phase 2.5 api starter fails closed before listen when canonical repository
     http.Server.prototype.listen = originalListen;
   }
 });
+
+test("Phase 2.5 api starter verifies critical domain store schema contract before listen", async () => {
+  const originalListen = http.Server.prototype.listen;
+  let listenCalls = 0;
+  http.Server.prototype.listen = function patchedListen(...args) {
+    listenCalls += 1;
+    return originalListen.apply(this, args);
+  };
+
+  try {
+    let verificationCalls = 0;
+    const runtime = await import("../../apps/api/src/server.mjs").then(({ startApiServer }) =>
+      startApiServer({
+        port: 0,
+        logger: () => {},
+        platform: {
+          environmentMode: "test",
+          getRuntimeModeProfile: () => ({ environmentMode: "test" }),
+          scanRuntimeInvariants: () => ({
+            startupAllowed: true,
+            activeStoreKind: "sqlite",
+            criticalDomainStoreKind: "sqlite",
+            summary: {
+              totalCount: 0,
+              blockingCount: 0,
+              warningCount: 0
+            }
+          }),
+          async verifyRuntimeCriticalDomainStateStoreSchemaContract() {
+            verificationCalls += 1;
+            assert.equal(listenCalls, 0);
+            return { ok: true };
+          }
+        }
+      })
+    );
+
+    try {
+      assert.equal(verificationCalls, 1);
+      assert.equal(listenCalls, 1);
+    } finally {
+      await runtime.stop();
+    }
+  } finally {
+    http.Server.prototype.listen = originalListen;
+  }
+});
+
+test("Phase 2.5 api starter fails closed before listen when critical domain store schema verification fails", async () => {
+  const originalListen = http.Server.prototype.listen;
+  let listenCalls = 0;
+  http.Server.prototype.listen = function patchedListen(...args) {
+    listenCalls += 1;
+    return originalListen.apply(this, args);
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        import("../../apps/api/src/server.mjs").then(({ startApiServer }) =>
+          startApiServer({
+            port: 0,
+            logger: () => {},
+            platform: {
+              environmentMode: "test",
+              getRuntimeModeProfile: () => ({ environmentMode: "test" }),
+              scanRuntimeInvariants: () => ({
+                startupAllowed: true,
+                activeStoreKind: "sqlite",
+                criticalDomainStoreKind: "sqlite",
+                summary: {
+                  totalCount: 0,
+                  blockingCount: 0,
+                  warningCount: 0
+                }
+              }),
+              async verifyRuntimeCriticalDomainStateStoreSchemaContract() {
+                throw new Error("critical domain state schema contract is incomplete");
+              }
+            }
+          })
+        ),
+      /critical domain state schema contract is incomplete/u
+    );
+    assert.equal(listenCalls, 0);
+  } finally {
+    http.Server.prototype.listen = originalListen;
+  }
+});

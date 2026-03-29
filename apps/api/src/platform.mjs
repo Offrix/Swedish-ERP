@@ -1173,6 +1173,15 @@ export function createApiPlatform(options = {}) {
             : undefined,
       enumerable: false
     },
+    verifyRuntimeCriticalDomainStateStoreSchemaContract: {
+      value:
+        typeof options.verifyRuntimeCriticalDomainStateStoreSchemaContract === "function"
+          ? options.verifyRuntimeCriticalDomainStateStoreSchemaContract
+          : typeof criticalDomainStateStore?.verifySchemaContract === "function"
+            ? () => criticalDomainStateStore.verifySchemaContract()
+            : undefined,
+      enumerable: false
+    },
     criticalDomainStateStore: {
       value: criticalDomainStateStore,
       enumerable: false

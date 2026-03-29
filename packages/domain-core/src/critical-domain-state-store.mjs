@@ -14,6 +14,117 @@ export const CRITICAL_DOMAIN_COMMAND_RECEIPT_TABLE = "critical_domain_command_re
 export const CRITICAL_DOMAIN_DOMAIN_EVENT_TABLE = "critical_domain_domain_events";
 export const CRITICAL_DOMAIN_OUTBOX_MESSAGE_TABLE = "critical_domain_outbox_messages";
 export const CRITICAL_DOMAIN_EVIDENCE_REF_TABLE = "critical_domain_evidence_refs";
+export const SQLITE_CRITICAL_DOMAIN_STATE_SCHEMA_CONTRACT = Object.freeze({
+  tables: Object.freeze({
+    critical_domain_state_snapshots: Object.freeze({
+      columns: Object.freeze([
+        "domain_key",
+        "schema_version",
+        "snapshot_json",
+        "snapshot_hash",
+        "persisted_at",
+        "object_version",
+        "durability_policy",
+        "adapter_kind"
+      ])
+    }),
+    critical_domain_command_receipts: Object.freeze({
+      columns: Object.freeze([
+        "command_receipt_id",
+        "domain_key",
+        "company_id",
+        "command_type",
+        "aggregate_type",
+        "aggregate_id",
+        "command_id",
+        "idempotency_key",
+        "expected_object_version",
+        "resulting_object_version",
+        "actor_id",
+        "session_revision",
+        "correlation_id",
+        "causation_id",
+        "payload_hash",
+        "command_payload_json",
+        "metadata_json",
+        "status",
+        "recorded_at",
+        "processed_at"
+      ]),
+      indexes: Object.freeze([
+        "critical_domain_command_receipts_company_recorded_idx"
+      ])
+    }),
+    critical_domain_domain_events: Object.freeze({
+      columns: Object.freeze([
+        "domain_event_id",
+        "domain_key",
+        "company_id",
+        "aggregate_type",
+        "aggregate_id",
+        "command_receipt_id",
+        "object_version",
+        "event_type",
+        "payload_json",
+        "actor_id",
+        "correlation_id",
+        "causation_id",
+        "status",
+        "recorded_at"
+      ]),
+      indexes: Object.freeze([
+        "critical_domain_domain_events_company_recorded_idx",
+        "critical_domain_domain_events_receipt_idx"
+      ])
+    }),
+    critical_domain_outbox_messages: Object.freeze({
+      columns: Object.freeze([
+        "outbox_message_id",
+        "domain_key",
+        "company_id",
+        "aggregate_type",
+        "aggregate_id",
+        "command_receipt_id",
+        "event_type",
+        "payload_json",
+        "actor_id",
+        "correlation_id",
+        "causation_id",
+        "idempotency_key",
+        "status",
+        "recorded_at",
+        "published_at"
+      ]),
+      indexes: Object.freeze([
+        "critical_domain_outbox_messages_company_recorded_idx",
+        "critical_domain_outbox_messages_receipt_idx"
+      ])
+    }),
+    critical_domain_evidence_refs: Object.freeze({
+      columns: Object.freeze([
+        "evidence_ref_id",
+        "domain_key",
+        "company_id",
+        "aggregate_type",
+        "aggregate_id",
+        "command_receipt_id",
+        "domain_event_id",
+        "evidence_ref_type",
+        "evidence_ref",
+        "metadata_json",
+        "actor_id",
+        "correlation_id",
+        "causation_id",
+        "status",
+        "recorded_at"
+      ]),
+      indexes: Object.freeze([
+        "critical_domain_evidence_refs_company_recorded_idx",
+        "critical_domain_evidence_refs_receipt_idx"
+      ])
+    })
+  })
+});
 
 export class CriticalDomainStateConflictError extends Error {
   constructor(message, details = {}) {
@@ -539,6 +650,57 @@ function mapSqliteEvidenceRefRow(row) {
   };
 }
 
+function verifySqliteCriticalDomainStateStoreSchemaContract(db) {
+  const tableRows = db.prepare("select name from sqlite_master where type = 'table'").all();
+  const indexRows = db.prepare("select name, tbl_name from sqlite_master where type = 'index'").all();
+  const availableTables = new Set(tableRows.map((row) => row.name));
+  const availableIndexes = new Set(indexRows.map((row) => `${row.tbl_name}:${row.name}`));
+  const missingTables = [];
+  const missingColumns = [];
+  const missingIndexes = [];
+
+  for (const [tableName, tableContract] of Object.entries(SQLITE_CRITICAL_DOMAIN_STATE_SCHEMA_CONTRACT.tables)) {
+    if (!availableTables.has(tableName)) {
+      missingTables.push(tableName);
+      continue;
+    }
+    const columnRows = db.prepare(`pragma table_info(${tableName})`).all();
+    const availableColumns = new Set(columnRows.map((row) => row.name));
+    for (const columnName of tableContract.columns || []) {
+      if (!availableColumns.has(columnName)) {
+        missingColumns.push(`${tableName}.${columnName}`);
+      }
+    }
+    for (const indexName of tableContract.indexes || []) {
+      if (!availableIndexes.has(`${tableName}:${indexName}`)) {
+        missingIndexes.push(`${tableName}.${indexName}`);
+      }
+    }
+  }
+
+  const failureMessages = [];
+  if (missingTables.length > 0) {
+    failureMessages.push(`missing tables [${missingTables.join(", ")}]`);
+  }
+  if (missingColumns.length > 0) {
+    failureMessages.push(`missing columns [${missingColumns.join(", ")}]`);
+  }
+  if (missingIndexes.length > 0) {
+    failureMessages.push(`missing indexes [${missingIndexes.join(", ")}]`);
+  }
+  if (failureMessages.length > 0) {
+    throw new Error(`Critical domain state store schema contract is incomplete: ${failureMessages.join("; ")}.`);
+  }
+
+  return Object.freeze({
+    ok: true,
+    verifiedAt: new Date().toISOString(),
+    checkedTables: Object.keys(SQLITE_CRITICAL_DOMAIN_STATE_SCHEMA_CONTRACT.tables),
+    checkedIndexes: Object.values(SQLITE_CRITICAL_DOMAIN_STATE_SCHEMA_CONTRACT.tables)
+      .flatMap((tableContract) => [...(tableContract.indexes || [])])
+  });
+}
+
 export function createSqliteCriticalDomainStateStore({ filePath }) {
   const resolvedFilePath = text(filePath, "filePath");
   ensureDatabaseDirectory(resolvedFilePath);
@@ -628,6 +790,20 @@ export function createSqliteCriticalDomainStateStore({ filePath }) {
       status text not null,
       recorded_at text not null
     );
+    create index if not exists critical_domain_command_receipts_company_recorded_idx
+      on ${CRITICAL_DOMAIN_COMMAND_RECEIPT_TABLE} (company_id, recorded_at, command_receipt_id);
+    create index if not exists critical_domain_domain_events_company_recorded_idx
+      on ${CRITICAL_DOMAIN_DOMAIN_EVENT_TABLE} (company_id, recorded_at, domain_event_id);
+    create index if not exists critical_domain_domain_events_receipt_idx
+      on ${CRITICAL_DOMAIN_DOMAIN_EVENT_TABLE} (command_receipt_id);
+    create index if not exists critical_domain_outbox_messages_company_recorded_idx
+      on ${CRITICAL_DOMAIN_OUTBOX_MESSAGE_TABLE} (company_id, recorded_at, outbox_message_id);
+    create index if not exists critical_domain_outbox_messages_receipt_idx
+      on ${CRITICAL_DOMAIN_OUTBOX_MESSAGE_TABLE} (command_receipt_id);
+    create index if not exists critical_domain_evidence_refs_company_recorded_idx
+      on ${CRITICAL_DOMAIN_EVIDENCE_REF_TABLE} (company_id, recorded_at, evidence_ref_id);
+    create index if not exists critical_domain_evidence_refs_receipt_idx
+      on ${CRITICAL_DOMAIN_EVIDENCE_REF_TABLE} (command_receipt_id);
   `);
   const tableInfo = db.prepare(`pragma table_info(${CRITICAL_DOMAIN_STATE_TABLE})`).all();
   const columnNames = new Set(tableInfo.map((row) => row.name));
@@ -800,6 +976,7 @@ export function createSqliteCriticalDomainStateStore({ filePath }) {
       and (? is null or command_receipt_id = ?)
     order by recorded_at asc, evidence_ref_id asc
   `);
+  let schemaContractVerification = null;
   const runMutationTransaction = (payload) => {
     let result = null;
     let transactionActive = false;
@@ -1266,6 +1443,13 @@ export function createSqliteCriticalDomainStateStore({ filePath }) {
       return listEvidenceRefsStatement
         .all(domainKey, domainKey, companyId, companyId, commandReceiptId, commandReceiptId)
         .map(mapSqliteEvidenceRefRow);
+    },
+
+    verifySchemaContract() {
+      if (!schemaContractVerification) {
+        schemaContractVerification = verifySqliteCriticalDomainStateStoreSchemaContract(db);
+      }
+      return schemaContractVerification;
     },
 
     close() {

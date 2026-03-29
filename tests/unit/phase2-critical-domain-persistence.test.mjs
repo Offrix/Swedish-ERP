@@ -4,7 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { API_PLATFORM_BUILD_ORDER, createApiPlatform } from "../../apps/api/src/platform.mjs";
-import { createInMemoryCriticalDomainStateStore } from "../../packages/domain-core/src/index.mjs";
+import {
+  createInMemoryCriticalDomainStateStore,
+  createSqliteCriticalDomainStateStore
+} from "../../packages/domain-core/src/index.mjs";
 
 const CRITICAL_DOMAIN_KEYS = Object.freeze(
   API_PLATFORM_BUILD_ORDER.filter((domainKey) => domainKey !== "automation")
@@ -21,6 +24,37 @@ function createTempSqlitePath(prefix) {
 function cleanupTempDirectory(directory) {
   fs.rmSync(directory, { recursive: true, force: true });
 }
+
+test("Phase 2.5 sqlite critical domain state store publishes a bindande schema contract with indexes", () => {
+  const temp = createTempSqlitePath("swedish-erp-phase25-critical-store-contract");
+  const store = createSqliteCriticalDomainStateStore({
+    filePath: temp.filePath
+  });
+
+  try {
+    const verification = store.verifySchemaContract();
+    assert.equal(verification.ok, true);
+    assert.deepEqual(verification.checkedTables, [
+      "critical_domain_state_snapshots",
+      "critical_domain_command_receipts",
+      "critical_domain_domain_events",
+      "critical_domain_outbox_messages",
+      "critical_domain_evidence_refs"
+    ]);
+    assert.deepEqual(verification.checkedIndexes, [
+      "critical_domain_command_receipts_company_recorded_idx",
+      "critical_domain_domain_events_company_recorded_idx",
+      "critical_domain_domain_events_receipt_idx",
+      "critical_domain_outbox_messages_company_recorded_idx",
+      "critical_domain_outbox_messages_receipt_idx",
+      "critical_domain_evidence_refs_company_recorded_idx",
+      "critical_domain_evidence_refs_receipt_idx"
+    ]);
+  } finally {
+    store.close();
+    cleanupTempDirectory(temp.directory);
+  }
+});
 
 test("Phase 2.1 rehydrates repository-backed domain truth from sqlite-backed aggregate envelopes", () => {
   const temp = createTempSqlitePath("swedish-erp-phase24");

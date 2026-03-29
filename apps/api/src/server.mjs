@@ -153,6 +153,7 @@ export async function startApiServer({
     starter: "api"
   });
   await resolvedPlatform.verifyRuntimeCanonicalRepositorySchemaContract?.();
+  await resolvedPlatform.verifyRuntimeCriticalDomainStateStoreSchemaContract?.();
   const server = createApiServer({ platform: resolvedPlatform, flags });
   await new Promise((resolve) => {
     server.listen(port, resolve);
