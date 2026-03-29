@@ -36,11 +36,11 @@ test("Phase 13.1 public API clients, compatibility baselines and webhook events 
 
   const baseline = platform.recordPublicApiCompatibilityBaseline({
     companyId: DEMO_IDS.companyId,
-    version: "2026-03-22",
+    version: "2026-03-25",
     routeHash: "phase13-1-route-hash",
     actorId: "phase13-1-unit"
   });
-  assert.equal(baseline.version, "2026-03-22");
+  assert.equal(baseline.version, "2026-03-25");
 
   const subscription = platform.createWebhookSubscription({
     companyId: DEMO_IDS.companyId,

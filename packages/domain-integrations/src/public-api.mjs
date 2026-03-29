@@ -17,6 +17,99 @@ export const PUBLIC_API_SCOPE_CODES = Object.freeze([
   "partner.read",
   "automation.read"
 ]);
+const PUBLIC_API_SCOPE_CATALOG = Object.freeze([
+  Object.freeze({
+    scopeCode: "api_spec.read",
+    label: "Read API spec",
+    description: "Read versioned public API contracts, sandbox catalog and compatibility metadata.",
+    sandboxSupported: true,
+    exampleEndpoints: Object.freeze(["/v1/public/spec", "/v1/public/sandbox/catalog"]),
+    resourceFamilies: Object.freeze(["api_spec", "sandbox_catalog"])
+  }),
+  Object.freeze({
+    scopeCode: "reporting.read",
+    label: "Read reporting snapshots",
+    description: "Read public report snapshots and reporting-derived examples.",
+    sandboxSupported: true,
+    exampleEndpoints: Object.freeze(["/v1/public/report-snapshots"]),
+    resourceFamilies: Object.freeze(["report_snapshot"])
+  }),
+  Object.freeze({
+    scopeCode: "submission.read",
+    label: "Read submissions",
+    description: "Read canonical submission status, receipts and transport summaries for public integrations.",
+    sandboxSupported: true,
+    exampleEndpoints: Object.freeze(["/v1/public/submissions"]),
+    resourceFamilies: Object.freeze(["submission"])
+  }),
+  Object.freeze({
+    scopeCode: "legal_form.read",
+    label: "Read legal-form profiles",
+    description: "Read declaration profile and legal-form obligations for a company and fiscal year.",
+    sandboxSupported: true,
+    exampleEndpoints: Object.freeze(["/v1/public/legal-forms/declaration-profile"]),
+    resourceFamilies: Object.freeze(["legal_form_profile"])
+  }),
+  Object.freeze({
+    scopeCode: "annual_reporting.read",
+    label: "Read annual reporting packages",
+    description: "Read annual-report package summaries and filing readiness state.",
+    sandboxSupported: true,
+    exampleEndpoints: Object.freeze(["/v1/public/annual-reporting/packages"]),
+    resourceFamilies: Object.freeze(["annual_reporting_package"])
+  }),
+  Object.freeze({
+    scopeCode: "tax_account.read",
+    label: "Read tax account",
+    description: "Read tax-account summary and reconciliation state.",
+    sandboxSupported: true,
+    exampleEndpoints: Object.freeze(["/v1/public/tax-account/summary", "/v1/public/tax-account/reconciliations"]),
+    resourceFamilies: Object.freeze(["tax_account_summary", "tax_account_reconciliation"])
+  }),
+  Object.freeze({
+    scopeCode: "webhook.manage",
+    label: "Manage webhooks",
+    description: "Create subscriptions, emit example events and dispatch webhook deliveries for public integrations.",
+    sandboxSupported: true,
+    exampleEndpoints: Object.freeze(["/v1/public-api/webhooks", "/v1/public-api/webhook-events", "/v1/public-api/webhook-deliveries/dispatch"]),
+    resourceFamilies: Object.freeze(["webhook_subscription", "webhook_event", "webhook_delivery"])
+  }),
+  Object.freeze({
+    scopeCode: "partner.read",
+    label: "Read partner state",
+    description: "Read partner-connection surfaces exposed through public integration contracts.",
+    sandboxSupported: true,
+    exampleEndpoints: Object.freeze(["/v1/partners/catalog"]),
+    resourceFamilies: Object.freeze(["partner_connection"])
+  }),
+  Object.freeze({
+    scopeCode: "automation.read",
+    label: "Read automation outcomes",
+    description: "Read automation-driven decisions that are intentionally exposed through public APIs.",
+    sandboxSupported: true,
+    exampleEndpoints: Object.freeze(["/v1/public-api/webhook-events"]),
+    resourceFamilies: Object.freeze(["automation_decision"])
+  })
+]);
+const PUBLIC_API_SPEC_VERSIONS = Object.freeze([
+  Object.freeze({
+    version: PUBLIC_API_SPEC_VERSION,
+    status: "stable",
+    releasedAt: "2026-03-25",
+    backwardCompatibilityWindowDays: 180,
+    canonicalApiVersion: CANONICAL_API_VERSION
+  })
+]);
+const PUBLIC_API_ENDPOINT_CATALOG = Object.freeze([
+  Object.freeze({ path: "/v1/public/spec", scopes: Object.freeze(["api_spec.read"]), stability: "stable" }),
+  Object.freeze({ path: "/v1/public/report-snapshots", scopes: Object.freeze(["reporting.read"]), stability: "stable" }),
+  Object.freeze({ path: "/v1/public/submissions", scopes: Object.freeze(["submission.read"]), stability: "stable" }),
+  Object.freeze({ path: "/v1/public/sandbox/catalog", scopes: Object.freeze(["api_spec.read"]), stability: "stable" }),
+  Object.freeze({ path: "/v1/public/legal-forms/declaration-profile", scopes: Object.freeze(["legal_form.read"]), stability: "stable" }),
+  Object.freeze({ path: "/v1/public/annual-reporting/packages", scopes: Object.freeze(["annual_reporting.read"]), stability: "stable" }),
+  Object.freeze({ path: "/v1/public/tax-account/summary", scopes: Object.freeze(["tax_account.read"]), stability: "stable" }),
+  Object.freeze({ path: "/v1/public/tax-account/reconciliations", scopes: Object.freeze(["tax_account.read"]), stability: "stable" })
+]);
 export const WEBHOOK_DELIVERY_STATUSES = Object.freeze(["queued", "running", "sent", "failed", "rate_limited", "suppressed", "disabled", "dead_lettered"]);
 export const WEBHOOK_EVENT_TYPES = Object.freeze([
   "report.snapshot.ready",
@@ -30,6 +123,63 @@ export const WEBHOOK_EVENT_TYPES = Object.freeze([
   "partner.operation.failed",
   "automation.decision.ready",
   "migration.diff.generated"
+]);
+const WEBHOOK_EVENT_CATALOG = Object.freeze([
+  Object.freeze({
+    eventType: "report.snapshot.ready",
+    resourceType: "report_snapshot",
+    description: "A reporting snapshot is published and ready for downstream consumption."
+  }),
+  Object.freeze({
+    eventType: "submission.updated",
+    resourceType: "authority_submission",
+    description: "A regulated submission changed status, receipt state or recovery state."
+  }),
+  Object.freeze({
+    eventType: "legal_form.profile.updated",
+    resourceType: "legal_form_profile",
+    description: "A declaration or legal-form profile changed in a way that affects filings."
+  }),
+  Object.freeze({
+    eventType: "annual_reporting.package.updated",
+    resourceType: "annual_report_package",
+    description: "An annual-report package changed version, signoff or filing state."
+  }),
+  Object.freeze({
+    eventType: "tax_account.reconciliation.updated",
+    resourceType: "tax_account_reconciliation",
+    description: "A tax-account reconciliation run changed difference-case or settlement state."
+  }),
+  Object.freeze({
+    eventType: "partner.connection.updated",
+    resourceType: "partner_connection",
+    description: "A partner connection changed health, credential or lifecycle state."
+  }),
+  Object.freeze({
+    eventType: "partner.contract_test.completed",
+    resourceType: "partner_contract_test",
+    description: "A partner contract-test pack completed and published an outcome."
+  }),
+  Object.freeze({
+    eventType: "partner.operation.completed",
+    resourceType: "partner_operation",
+    description: "A partner operation completed successfully."
+  }),
+  Object.freeze({
+    eventType: "partner.operation.failed",
+    resourceType: "partner_operation",
+    description: "A partner operation failed or fell back into manual handling."
+  }),
+  Object.freeze({
+    eventType: "automation.decision.ready",
+    resourceType: "automation_decision",
+    description: "A reviewed automation decision is available for downstream consumption."
+  }),
+  Object.freeze({
+    eventType: "migration.diff.generated",
+    resourceType: "migration_diff",
+    description: "A migration diff is ready for operator review."
+  })
 ]);
 
 export function createPublicApiModule({ state, clock = () => new Date(), deliveryExecutor = defaultWebhookDeliveryExecutor }) {
@@ -58,36 +208,41 @@ export function createPublicApiModule({ state, clock = () => new Date(), deliver
   };
 
   function getPublicApiSpec({ version = PUBLIC_API_SPEC_VERSION } = {}) {
-    const resolvedVersion = text(version, "public_api_version_required");
+    const resolvedVersion = resolvePublicApiSpecVersion(version);
     return clone({
-      version: resolvedVersion,
-      backwardCompatibilityWindowDays: 180,
+      version: resolvedVersion.version,
+      currentVersion: PUBLIC_API_SPEC_VERSION,
+      canonicalApiVersion: CANONICAL_API_VERSION,
+      supportedVersions: clone(PUBLIC_API_SPEC_VERSIONS),
+      backwardCompatibilityWindowDays: resolvedVersion.backwardCompatibilityWindowDays,
       auth: {
         scheme: "oauth2_client_credentials",
+        supportedGrantTypes: ["client_credentials"],
         tokenType: "opaque_access_token",
         supportedModes: [...PUBLIC_API_MODES],
-        scopeCodes: [...PUBLIC_API_SCOPE_CODES]
+        scopeCodes: [...PUBLIC_API_SCOPE_CODES],
+        scopeCatalog: clone(PUBLIC_API_SCOPE_CATALOG),
+        tokenEndpoint: "/v1/public/oauth/token"
       },
-      endpoints: [
-        { path: "/v1/public/spec", scopes: ["api_spec.read"], stability: "stable" },
-        { path: "/v1/public/report-snapshots", scopes: ["reporting.read"], stability: "stable" },
-        { path: "/v1/public/submissions", scopes: ["submission.read"], stability: "stable" },
-        { path: "/v1/public/sandbox/catalog", scopes: ["api_spec.read"], stability: "stable" },
-        { path: "/v1/public/legal-forms/declaration-profile", scopes: ["legal_form.read"], stability: "stable" },
-        { path: "/v1/public/annual-reporting/packages", scopes: ["annual_reporting.read"], stability: "stable" },
-        { path: "/v1/public/tax-account/summary", scopes: ["tax_account.read"], stability: "stable" },
-        { path: "/v1/public/tax-account/reconciliations", scopes: ["tax_account.read"], stability: "stable" }
-      ],
-      webhookEventTypes: [...WEBHOOK_EVENT_TYPES]
+      endpoints: clone(PUBLIC_API_ENDPOINT_CATALOG),
+      webhookEventTypes: [...WEBHOOK_EVENT_TYPES],
+      webhookEventCatalog: clone(WEBHOOK_EVENT_CATALOG),
+      compatibility: {
+        baselineRecordingSupported: true,
+        routeHashAlgorithm: "sha256_stable_json"
+      }
     });
   }
 
-  function recordPublicApiCompatibilityBaseline({ companyId, version, routeHash, actorId } = {}) {
+  function recordPublicApiCompatibilityBaseline({ companyId, version, routeHash, specHash = null, endpointCount = null, actorId } = {}) {
+    const resolvedVersion = resolvePublicApiSpecVersion(version);
     const baseline = {
       baselineId: crypto.randomUUID(),
       companyId: text(companyId, "company_id_required"),
-      version: text(version, "public_api_version_required"),
+      version: resolvedVersion.version,
       routeHash: text(routeHash, "public_api_route_hash_required"),
+      specHash: optionalText(specHash),
+      endpointCount: endpointCount == null ? null : normalizePositiveInteger(endpointCount, "public_api_endpoint_count_invalid"),
       actorId: text(actorId || "system", "actor_id_required"),
       recordedAt: nowIso(clock)
     };
@@ -120,6 +275,7 @@ export function createPublicApiModule({ state, clock = () => new Date(), deliver
       displayName: text(displayName, "public_api_client_name_required"),
       mode: resolvedMode,
       scopes: resolvedScopes,
+      specVersion: PUBLIC_API_SPEC_VERSION,
       status: "active",
       clientSecretHash: hashOpaqueToken(clientSecret),
       createdByActorId: text(actorId || "system", "actor_id_required"),
@@ -522,7 +678,15 @@ export function createPublicApiModule({ state, clock = () => new Date(), deliver
     return {
       companyId: text(companyId, "company_id_required"),
       mode: "sandbox",
+      watermarkCode: "SANDBOX_PUBLIC_API",
+      supportsLegalEffect: false,
       apiSpec: getPublicApiSpec({ version: PUBLIC_API_SPEC_VERSION }),
+      scopeCatalog: clone(PUBLIC_API_SCOPE_CATALOG),
+      clientCredentials: {
+        tokenEndpoint: "/v1/public/oauth/token",
+        supportedGrantTypes: ["client_credentials"],
+        supportedModes: [...PUBLIC_API_MODES]
+      },
       exampleResources: [
         {
           resourceType: "declaration_profile",
@@ -549,6 +713,23 @@ export function createPublicApiModule({ state, clock = () => new Date(), deliver
           }
         }
       ],
+      reportSnapshotExamples: [
+        {
+          resourceType: "report_snapshot",
+          payload: {
+            reportSnapshotId: "sandbox-report-snapshot",
+            reportCode: "trial_balance",
+            generatedAt: "2026-03-25T10:00:00.000Z",
+            watermarkCode: "SANDBOX_PUBLIC_API"
+          }
+        }
+      ],
+      taxAccountSummaryExample: {
+        netBalance: -5000,
+        openSettlementAmount: 15000,
+        openDifferenceCaseCount: 1,
+        watermarkCode: "SANDBOX_PUBLIC_API"
+      },
       exampleWebhookEvents: [
         {
           eventType: "report.snapshot.ready",
@@ -600,6 +781,8 @@ export function createPublicApiModule({ state, clock = () => new Date(), deliver
   function presentClient(client) {
     const cloneClient = clone(client);
     delete cloneClient.clientSecretHash;
+    cloneClient.supportedGrantTypes = ["client_credentials"];
+    cloneClient.tokenEndpoint = "/v1/public/oauth/token";
     return cloneClient;
   }
 
@@ -857,6 +1040,15 @@ function parseRetryAfterSeconds(value) {
   }
   const seconds = Math.ceil((parsedDate.getTime() - Date.now()) / 1000);
   return seconds > 0 ? seconds : null;
+}
+
+function resolvePublicApiSpecVersion(version) {
+  const resolvedVersion = optionalText(version) || PUBLIC_API_SPEC_VERSION;
+  const match = PUBLIC_API_SPEC_VERSIONS.find((entry) => entry.version === resolvedVersion);
+  if (!match) {
+    throw createError(400, "public_api_spec_version_unsupported", `Public API spec version ${resolvedVersion} is not supported.`);
+  }
+  return match;
 }
 
 function nextWebhookSequenceNo(state, subscriptionId) {

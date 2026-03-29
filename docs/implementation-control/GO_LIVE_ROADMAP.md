@@ -1039,10 +1039,11 @@ Göra integrationslagret verkligt: connections, credentials, consent, provider h
 
 **Delfasstatus**
 - 16.1 klar 2026-03-29: integrationslagret bär nu first-class `IntegrationConnection`, `CredentialSetMetadata`, `ConsentGrant` och `IntegrationHealthCheck`; capability manifests exponerar explicit `modeMatrix`, `allowedEnvironmentModes`, fallback/rate-limit-policy och provider environment refs; legacy partner creation backfillar canonical control-plane metadata; `/v1/integrations/capability-manifests` och `/v1/integrations/connections*` är verkliga runtime-ytor och credential-reuse över `trial`/`sandbox`/`test`/`pilot_parallel`/`production` blockeras deterministiskt, verifierat i nya phase 16.1 unit/API-sviter, route-metadata-svit och full verifiering.
+- 16.2 klar 2026-03-29: public API-specen är nu explicit versionslåst med `supportedVersions`, `currentVersion`, `canonicalApiVersion`, `scopeCatalog`, endpoint-katalog och webhook-event-katalog; compatibility baselines validerar version, bär `specHash` och `endpointCount`; sandbox-katalogen är uttryckligen watermarked/non-legal-effect med client-credentials-kontrakt, report snapshot-exempel, tax-account summary-exempel och example webhook events; verifierat i nya phase 16.2 unit/API-sviter, regressionssviter för phase 13 och full verifiering.
 
 **Delfaser**
 - [x] 16.1 [HARDEN] **Integration core, credentials och consent** — Capability manifest, credential metadata, consent grant, health checks, rate limits, fallback modes, environment isolation.
-- [ ] 16.2 [HARDEN] **Public API och sandbox catalog** — Client credentials, scope catalog, versioned spec, sandbox catalog, report snapshots, tax account summary, example webhook events.
+- [x] 16.2 [HARDEN] **Public API och sandbox catalog** — Client credentials, scope catalog, versioned spec, sandbox catalog, report snapshots, tax account summary, example webhook events.
 - [ ] 16.3 [HARDEN] **Partner API, contract tests och adapter health** — Connection catalog, operation dispatch, async jobs, retry/dead-letter/replay, contract-test packs per adapter.
 - [ ] 16.4 [REPLACE] **Byt simulerade finance-adapters mot verkliga** — Enable Banking, bankfil/ISO20022, Stripe, Pagero, Google Document AI, Postmark, Twilio, Pleo, official tax transports.
 - [ ] 16.5 [HARDEN] **Auth/signing/federation adapters** — Signicat, WorkOS, passkey/TOTP, signing/evidence archive.
@@ -1270,5 +1271,4 @@ Bevisa att backend-kontrakten bär verkliga kundscenarier, låsa UI-kontrakt och
 ## Slutregel
 
 Denna roadmap är den enda bindande byggordningen. Ingen implementation, ingen featuregren och ingen UI-plan får köra utanför denna ordning utan uttrycklig ändring i detta dokument.
-
 

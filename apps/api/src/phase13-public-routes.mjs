@@ -199,7 +199,7 @@ export async function tryHandlePhase13PublicRoutes({ req, res, url, path, platfo
       objectId: companyId,
       scopeCode: "public_api_baseline"
     });
-    const spec = platform.getPublicApiSpec({ version: body.version || "2026-03-22" });
+    const spec = platform.getPublicApiSpec({ version: body.version || undefined });
     writeJson(
       res,
       201,
@@ -207,6 +207,8 @@ export async function tryHandlePhase13PublicRoutes({ req, res, url, path, platfo
         companyId,
         version: spec.version,
         routeHash: body.routeHash || hashObject(spec),
+        specHash: body.specHash || hashObject(spec),
+        endpointCount: body.endpointCount ?? spec.endpoints.length,
         actorId: body.actorId || "session_user"
       })
     );
