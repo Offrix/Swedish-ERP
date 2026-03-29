@@ -19,6 +19,7 @@ import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
+import { createSecretStore } from "../../domain-core/src/secrets.mjs";
 import { assertSecurityClassCode } from "../../domain-core/src/security-classes.mjs";
 import { normalizeOptionalSwedishOrganizationNumber } from "../../domain-core/src/validation.mjs";
 import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
@@ -264,6 +265,7 @@ export function createOrgAuthPlatform({
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   secretSealKey = null,
+  secretStore = null,
   providerBaselineRegistry = null,
   resolveIdentityModeIsolation = null,
   identityModeCatalog = null
@@ -277,10 +279,19 @@ export function createOrgAuthPlatform({
   const identityIsolationResolver = resolveIdentityModeIsolation;
   const identityIsolationCatalog =
     identityModeCatalog || buildDefaultIdentityModeCatalog({ providerEnvironmentRef });
-  const authSecretSealer = createSecretSealer({
+  const authLegacySecretSealer = createSecretSealer({
     secretSealKey: secretSealKey || `swedish-erp-auth-seal:${normalizedEnvironmentMode}:${providerEnvironmentRef}`,
     keyId: `org-auth:${normalizedEnvironmentMode}:${providerEnvironmentRef}`
   });
+  const authSecretStore =
+    secretStore ||
+    createSecretStore({
+      clock,
+      environmentMode: normalizedEnvironmentMode,
+      storeId: `org-auth:${providerEnvironmentRef}`,
+      masterKey: secretSealKey || `swedish-erp-auth-seal:${normalizedEnvironmentMode}:${providerEnvironmentRef}`,
+      activeKeyVersion: `org-auth:${normalizedEnvironmentMode}:${providerEnvironmentRef}:v1`
+    });
   const state = {
     companies: new Map(),
     users: new Map(),
@@ -331,7 +342,7 @@ export function createOrgAuthPlatform({
   };
 
     if (seedDemo) {
-      seedDemoState(state, clock, authSecretSealer);
+      seedDemoState(state, clock, authSecretStore);
     }
 
   return {
@@ -385,6 +396,7 @@ export function createOrgAuthPlatform({
       exportDurableState,
       importDurableState,
         inspectSession,
+        listSecretStorePostures: () => [authSecretStore.getSecurityPosture()],
         listIdentityAccounts,
         listPersonIdentities,
         getTotpCodeForTesting,
@@ -2311,8 +2323,19 @@ export function createOrgAuthPlatform({
       });
     }
 
-    function exportDurableState() {
+  function exportDurableState() {
       const authBrokerSnapshot = state.authBroker.snapshot();
+      const authBrokerSecretRef = authSecretStore.storeSecretMaterial({
+        secretId: `auth-broker:${normalizedEnvironmentMode}:${providerEnvironmentRef}`,
+        classCode: "S4",
+        material: authBrokerSnapshot,
+        owner: {
+          domainKey: "orgAuth",
+          providerEnvironmentRef
+        },
+        mode: normalizedEnvironmentMode,
+        fingerprintPurpose: "org_auth_broker_snapshot"
+      });
       return {
         ...serializeDurableState(state, {
           excludeKeys: ["authBroker"],
@@ -2330,21 +2353,21 @@ export function createOrgAuthPlatform({
               )
           }
         }),
-        authBrokerEnvelope: {
-          keyId: authSecretSealer.keyId,
-          algorithm: "aes-256-gcm",
-          envelope: authSecretSealer.seal(JSON.stringify(authBrokerSnapshot))
-        }
+        authBrokerSecretRef,
+        secretStoreBundle: authSecretStore.exportSecretBundle()
       };
     }
 
     function importDurableState(snapshot) {
-      const brokerSnapshot = readBrokerSnapshotFromDurableState(snapshot, authSecretSealer);
+      authSecretStore.importSecretBundle(snapshot?.secretStoreBundle);
+      const brokerSnapshot = readBrokerSnapshotFromDurableState(snapshot, authSecretStore, authLegacySecretSealer);
       applyDurableStateSnapshot(state, snapshot, {
-        preserveKeys: ["authBroker", "authBrokerEnvelope"]
+        preserveKeys: ["authBroker", "authBrokerEnvelope", "authBrokerSecretRef", "secretStoreBundle"]
       });
       migrateLegacyAuthFactorSecrets();
       migrateLegacyAuthChallengeSecrets();
+      migrateLegacyAuthFactorSecretRecords();
+      migrateLegacyAuthChallengeSecretRecords();
       normalizeDeviceTrustRecordStorage();
       state.authBroker.restore(brokerSnapshot);
     }
@@ -2769,6 +2792,18 @@ export function createOrgAuthPlatform({
     const secretRef = factor.secretRef || factor.factorId;
     factor.secretRef = secretRef;
     delete factor.secret;
+    const storedSecret = authSecretStore.storeSecretMaterial({
+      secretId: secretRef,
+      classCode: "S4",
+      material: resolvedSecret,
+      owner: {
+        domainKey: "orgAuth",
+        objectFamily: "auth_factor_secret",
+        factorId: factor.factorId
+      },
+      mode: normalizedEnvironmentMode,
+      fingerprintPurpose: "org_auth_factor_secret"
+    });
     state.authFactorSecrets.set(secretRef, {
       secretRef,
       factorId: factor.factorId,
@@ -2776,11 +2811,11 @@ export function createOrgAuthPlatform({
       companyUserId: factor.companyUserId,
       factorType: factor.factorType,
       classCode: "S4",
-      keyId: authSecretSealer.keyId,
-      algorithm: "aes-256-gcm",
+      keyVersion: storedSecret.keyVersion,
+      storageMode: storedSecret.storageMode,
+      fingerprint: storedSecret.fingerprint,
       createdAt: state.authFactorSecrets.get(secretRef)?.createdAt || nowIso(),
-      updatedAt: nowIso(),
-      envelope: authSecretSealer.seal(resolvedSecret)
+      updatedAt: nowIso()
     });
     factor.updatedAt = nowIso();
     return secretRef;
@@ -2799,6 +2834,18 @@ export function createOrgAuthPlatform({
     const challengeRef = challenge.challengeRef || challenge.challengeId;
     challenge.challengeRef = challengeRef;
     delete challenge.challenge;
+    const storedSecret = authSecretStore.storeSecretMaterial({
+      secretId: challengeRef,
+      classCode: "S4",
+      material: resolvedSecret,
+      owner: {
+        domainKey: "orgAuth",
+        objectFamily: "auth_challenge_secret",
+        challengeId: challenge.challengeId
+      },
+      mode: normalizedEnvironmentMode,
+      fingerprintPurpose: "org_auth_challenge_secret"
+    });
     state.authChallengeSecrets.set(challengeRef, {
       challengeRef,
       challengeId: challenge.challengeId,
@@ -2806,11 +2853,11 @@ export function createOrgAuthPlatform({
       companyId: state.companyUsers.get(challenge.companyUserId)?.companyId || null,
       companyUserId: challenge.companyUserId,
       classCode: "S4",
-      keyId: authSecretSealer.keyId,
-      algorithm: "aes-256-gcm",
+      keyVersion: storedSecret.keyVersion,
+      storageMode: storedSecret.storageMode,
+      fingerprint: storedSecret.fingerprint,
       createdAt: state.authChallengeSecrets.get(challengeRef)?.createdAt || nowIso(),
-      updatedAt: nowIso(),
-      envelope: authSecretSealer.seal(resolvedSecret)
+      updatedAt: nowIso()
     });
     return challengeRef;
   }
@@ -2818,10 +2865,13 @@ export function createOrgAuthPlatform({
   function readAuthChallengeSecret(challenge) {
     if (challenge.challengeRef) {
       const storedSecret = state.authChallengeSecrets.get(challenge.challengeRef);
-      if (!storedSecret?.envelope) {
+      if (!storedSecret) {
         throw httpError(500, "auth_challenge_secret_missing", "Auth challenge secret envelope was missing.");
       }
-      return authSecretSealer.open(storedSecret.envelope);
+      if (!authSecretStore.hasSecretMaterial({ secretId: challenge.challengeRef }) && storedSecret.envelope) {
+        migrateLegacyAuthChallengeSecretRecord(storedSecret);
+      }
+      return authSecretStore.readSecretMaterial({ secretId: challenge.challengeRef });
     }
     if (challenge.challenge) {
       const legacySecret = challenge.challenge;
@@ -2834,10 +2884,13 @@ export function createOrgAuthPlatform({
   function readAuthFactorSecret(factor) {
     if (factor.secretRef) {
       const storedSecret = state.authFactorSecrets.get(factor.secretRef);
-      if (!storedSecret?.envelope) {
+      if (!storedSecret) {
         throw httpError(500, "auth_factor_secret_missing", "Auth factor secret envelope was missing.");
       }
-      return authSecretSealer.open(storedSecret.envelope);
+      if (!authSecretStore.hasSecretMaterial({ secretId: factor.secretRef }) && storedSecret.envelope) {
+        migrateLegacyAuthFactorSecretRecord(storedSecret);
+      }
+      return authSecretStore.readSecretMaterial({ secretId: factor.secretRef });
     }
     if (factor.secret) {
       const legacySecret = factor.secret;
@@ -2897,6 +2950,84 @@ export function createOrgAuthPlatform({
       }
       throw httpError(500, "auth_challenge_secret_missing", `Missing auth challenge secret for challenge ${challenge.challengeId}.`);
     }
+  }
+
+  function migrateLegacyAuthFactorSecretRecords() {
+    for (const record of state.authFactorSecrets.values()) {
+      migrateLegacyAuthFactorSecretRecord(record);
+    }
+  }
+
+  function migrateLegacyAuthChallengeSecretRecords() {
+    for (const record of state.authChallengeSecrets.values()) {
+      migrateLegacyAuthChallengeSecretRecord(record);
+    }
+  }
+
+  function migrateLegacyAuthFactorSecretRecord(record) {
+    if (!record?.secretRef || authSecretStore.hasSecretMaterial({ secretId: record.secretRef })) {
+      if (record) {
+        delete record.envelope;
+        delete record.algorithm;
+        delete record.keyId;
+      }
+      return;
+    }
+    if (!record.envelope) {
+      throw httpError(500, "auth_factor_secret_missing", "Auth factor secret material was missing from the secret store.");
+    }
+    const secret = authLegacySecretSealer.open(record.envelope);
+    const storedSecret = authSecretStore.storeSecretMaterial({
+      secretId: record.secretRef,
+      classCode: "S4",
+      material: secret,
+      owner: {
+        domainKey: "orgAuth",
+        objectFamily: "auth_factor_secret",
+        factorId: record.factorId || null
+      },
+      mode: normalizedEnvironmentMode,
+      fingerprintPurpose: "org_auth_factor_secret"
+    });
+    record.keyVersion = storedSecret.keyVersion;
+    record.storageMode = storedSecret.storageMode;
+    record.fingerprint = storedSecret.fingerprint;
+    delete record.envelope;
+    delete record.algorithm;
+    delete record.keyId;
+  }
+
+  function migrateLegacyAuthChallengeSecretRecord(record) {
+    if (!record?.challengeRef || authSecretStore.hasSecretMaterial({ secretId: record.challengeRef })) {
+      if (record) {
+        delete record.envelope;
+        delete record.algorithm;
+        delete record.keyId;
+      }
+      return;
+    }
+    if (!record.envelope) {
+      throw httpError(500, "auth_challenge_secret_missing", "Auth challenge secret material was missing from the secret store.");
+    }
+    const secret = authLegacySecretSealer.open(record.envelope);
+    const storedSecret = authSecretStore.storeSecretMaterial({
+      secretId: record.challengeRef,
+      classCode: "S4",
+      material: secret,
+      owner: {
+        domainKey: "orgAuth",
+        objectFamily: "auth_challenge_secret",
+        challengeId: record.challengeId || null
+      },
+      mode: normalizedEnvironmentMode,
+      fingerprintPurpose: "org_auth_challenge_secret"
+    });
+    record.keyVersion = storedSecret.keyVersion;
+    record.storageMode = storedSecret.storageMode;
+    record.fingerprint = storedSecret.fingerprint;
+    delete record.envelope;
+    delete record.algorithm;
+    delete record.keyId;
   }
 
   function findOrCreateUser({ email, displayName } = {}) {
@@ -3537,7 +3668,7 @@ export function createOrgAuthPlatform({
   }
 }
 
-function seedDemoState(state, clock, authSecretSealer) {
+function seedDemoState(state, clock, authSecretStore) {
   const now = timestamp(new Date(clock()));
   state.companies.set(DEMO_IDS.companyId, {
     companyId: DEMO_IDS.companyId,
@@ -3667,8 +3798,8 @@ function seedDemoState(state, clock, authSecretSealer) {
     createdAt: now,
     updatedAt: now
   });
-  writeSeededAuthFactorSecret(state, authSecretSealer, "demo-totp-factor", DEMO_TOTP_SECRET, now);
-  writeSeededAuthFactorSecret(state, authSecretSealer, "demo-approver-totp-factor", DEMO_APPROVER_TOTP_SECRET, now);
+  writeSeededAuthFactorSecret(state, authSecretStore, "demo-totp-factor", DEMO_TOTP_SECRET, now);
+  writeSeededAuthFactorSecret(state, authSecretStore, "demo-approver-totp-factor", DEMO_APPROVER_TOTP_SECRET, now);
   state.identityAccounts.set(
     buildIdentityAccountKey({
       companyId: DEMO_IDS.companyId,
@@ -4314,29 +4445,63 @@ function createSecretSealer({ secretSealKey, keyId } = {}) {
   };
 }
 
-function writeSeededAuthFactorSecret(state, authSecretSealer, factorId, secret, nowIsoTimestamp) {
+function writeSeededAuthFactorSecret(state, authSecretStore, factorId, secret, nowIsoTimestamp) {
   const factor = state.authFactors.get(assertNonEmpty(factorId, "seeded_factor_id_required"));
   if (!factor) {
     throw httpError(500, "seeded_auth_factor_missing", `Seeded auth factor ${factorId} was not found.`);
   }
   factor.secretRef = factor.factorId;
   delete factor.secret;
+  const storedSecret = authSecretStore.storeSecretMaterial({
+    secretId: factor.secretRef,
+    classCode: "S4",
+    material: secret,
+    owner: {
+      domainKey: "orgAuth",
+      objectFamily: "auth_factor_secret",
+      factorId: factor.factorId
+    },
+    mode: "test",
+    fingerprintPurpose: "org_auth_factor_secret"
+  });
   state.authFactorSecrets.set(factor.secretRef, {
     secretRef: factor.secretRef,
     factorId: factor.factorId,
     companyUserId: factor.companyUserId,
     factorType: factor.factorType,
-    keyId: authSecretSealer.keyId,
-    algorithm: "aes-256-gcm",
+    companyId: state.companyUsers.get(factor.companyUserId)?.companyId || null,
+    classCode: "S4",
+    keyVersion: storedSecret.keyVersion,
+    storageMode: storedSecret.storageMode,
+    fingerprint: storedSecret.fingerprint,
     createdAt: nowIsoTimestamp,
     updatedAt: nowIsoTimestamp,
-    envelope: authSecretSealer.seal(secret)
   });
 }
 
-function readBrokerSnapshotFromDurableState(snapshot, authSecretSealer) {
+function readBrokerSnapshotFromDurableState(snapshot, authSecretStore, authLegacySecretSealer) {
+  if (snapshot?.authBrokerSecretRef?.secretRef && authSecretStore.hasSecretMaterial({ secretId: snapshot.authBrokerSecretRef.secretRef })) {
+    return authSecretStore.readSecretMaterial({
+      secretId: snapshot.authBrokerSecretRef.secretRef,
+      parse: true
+    });
+  }
   if (snapshot?.authBrokerEnvelope?.envelope) {
-    return JSON.parse(authSecretSealer.open(snapshot.authBrokerEnvelope.envelope));
+    const brokerSnapshot = JSON.parse(authLegacySecretSealer.open(snapshot.authBrokerEnvelope.envelope));
+    if (snapshot?.authBrokerSecretRef?.secretRef) {
+      authSecretStore.storeSecretMaterial({
+        secretId: snapshot.authBrokerSecretRef.secretRef,
+        classCode: "S4",
+        material: brokerSnapshot,
+        owner: {
+          domainKey: "orgAuth",
+          objectFamily: "auth_broker_snapshot"
+        },
+        mode: null,
+        fingerprintPurpose: "org_auth_broker_snapshot"
+      });
+    }
+    return brokerSnapshot;
   }
   return snapshot?.authBroker || {};
 }

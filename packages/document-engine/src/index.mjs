@@ -808,8 +808,7 @@ export function createDocumentArchiveEngine({
     if (providerOutcome.status !== "completed") {
       run.metadataJson = {
         ...copy(run.metadataJson),
-        thresholds,
-        callbackToken: providerOutcome.callbackToken
+        thresholds
       };
       document.status = "ocr_done";
       document.updatedAt = nowIso();
@@ -826,7 +825,8 @@ export function createDocumentArchiveEngine({
       });
       return {
         document: copy(document),
-        ocrRun: copy(run),
+        ocrRun: sanitizeOcrRunForRead(run),
+        providerCallbackToken: providerOutcome.callbackToken || null,
         reviewTask: null,
         ocrVersion: null,
         classificationVersion: null
@@ -871,7 +871,7 @@ export function createDocumentArchiveEngine({
     });
     const providerOutcome = resolvedOcrProvider.collectOperation({
       operationName: run.providerOperationRef,
-      callbackToken: callbackToken || run.metadataJson?.callbackToken || null
+      callbackToken: normalizeOptionalText(callbackToken)
     });
     hydrateRunFromProviderOutcome({ run, providerOutcome });
 
@@ -891,7 +891,7 @@ export function createDocumentArchiveEngine({
     const document = requireDocument({ companyId, documentId });
     return {
       document: copy(document),
-      ocrRuns: listOcrRuns(document.documentId).map((candidate) => copy(candidate)),
+      ocrRuns: listOcrRuns(document.documentId).map((candidate) => sanitizeOcrRunForRead(candidate)),
       reviewTasks: listReviewTasks(document.documentId).map((candidate) => copy(candidate))
     };
   }
@@ -1180,7 +1180,8 @@ export function createDocumentArchiveEngine({
 
     return {
       document: copy(document),
-      ocrRun: copy(run),
+      ocrRun: sanitizeOcrRunForRead(run),
+      providerCallbackToken: null,
       reviewTask: reviewTask ? copy(reviewTask) : null,
       ocrVersion: copy(ocrVersion.version),
       classificationVersion: copy(classificationVersion.version)
@@ -1228,10 +1229,18 @@ export function createDocumentArchiveEngine({
       inboxChannels: [...state.inboxChannels.values()].map((candidate) => copy(candidate)),
       emailMessages: [...state.emailMessages.values()].map((candidate) => copy(candidate)),
       emailAttachments: [...state.attachments.values()].map((candidate) => copy(candidate)),
-      ocrRuns: [...state.ocrRuns.values()].map((candidate) => copy(candidate)),
+      ocrRuns: [...state.ocrRuns.values()].map((candidate) => sanitizeOcrRunForRead(candidate)),
       reviewTasks: [...state.reviewTasks.values()].map((candidate) => copy(candidate)),
       auditEvents: state.auditEvents.map((candidate) => copy(candidate))
     };
+  }
+
+  function sanitizeOcrRunForRead(run) {
+    const projected = copy(run);
+    if (projected?.metadataJson && typeof projected.metadataJson === "object") {
+      delete projected.metadataJson.callbackToken;
+    }
+    return projected;
   }
 
   function createEmailAttachmentRecord({ channel, message, attachmentInput, attachmentIndex, actorId, correlationId }) {

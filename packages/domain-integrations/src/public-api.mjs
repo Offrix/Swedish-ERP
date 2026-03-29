@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
+import { createSecretStore } from "../../domain-core/src/secrets.mjs";
 
 const PUBLIC_API_SPEC_VERSION = "2026-03-25";
 const CANONICAL_API_VERSION = "2026-03-27";
@@ -233,7 +234,14 @@ export function createPublicApiModule({
   clock = () => new Date(),
   environmentMode = "test",
   deliveryExecutor = defaultWebhookDeliveryExecutor,
-  webhookSecretSealer = createSecretSealer({
+  secretStore = createSecretStore({
+    clock,
+    environmentMode,
+    storeId: `integrations-webhooks:${environmentMode}`,
+    masterKey: "swedish-erp-integrations-webhook-seal",
+    activeKeyVersion: `integrations-webhooks:${environmentMode}:v1`
+  }),
+  legacyWebhookSecretSealer = createSecretSealer({
     secretSealKey: "swedish-erp-integrations-webhook-seal",
     keyId: WEBHOOK_SECRET_SEAL_KEY_ID
   })
@@ -888,6 +896,10 @@ export function createPublicApiModule({
   function migrateWebhookSubscriptionSecrets() {
     for (const subscription of state.webhookSubscriptions.values()) {
       if (subscription.secretRef) {
+        const storedSecret = state.webhookSubscriptionSecrets.get(subscription.secretRef);
+        if (storedSecret?.envelope && !secretStore.hasSecretMaterial({ secretId: subscription.secretRef })) {
+          migrateLegacyWebhookSecretRecord(storedSecret);
+        }
         if (!subscription.secretPreview) {
           subscription.secretPreview = buildSecretPreview(readWebhookSubscriptionSecret(subscription));
         }
@@ -904,15 +916,29 @@ export function createPublicApiModule({
     const resolvedSecret = text(secret, "webhook_secret_required");
     const secretRef = subscription.secretRef || subscription.subscriptionId;
     const existing = state.webhookSubscriptionSecrets.get(secretRef);
+    const storedSecret = secretStore.storeSecretMaterial({
+      secretId: secretRef,
+      classCode: "S4",
+      material: resolvedSecret,
+      owner: {
+        domainKey: "integrations",
+        objectFamily: "webhook_subscription_secret",
+        subscriptionId: subscription.subscriptionId
+      },
+      mode: environmentMode,
+      fingerprintPurpose: "integration_webhook_secret"
+    });
     subscription.secretRef = secretRef;
     subscription.secretPreview = buildSecretPreview(resolvedSecret);
     state.webhookSubscriptionSecrets.set(secretRef, {
       secretRef,
       subscriptionId: subscription.subscriptionId,
-      keyId: webhookSecretSealer.keyId,
+      classCode: "S4",
+      keyVersion: storedSecret.keyVersion,
+      storageMode: storedSecret.storageMode,
+      fingerprint: storedSecret.fingerprint,
       createdAt: existing?.createdAt || nowIso(clock),
-      updatedAt: nowIso(clock),
-      envelope: webhookSecretSealer.seal(resolvedSecret)
+      updatedAt: nowIso(clock)
     });
     delete subscription.secret;
     return secretRef;
@@ -921,8 +947,11 @@ export function createPublicApiModule({
   function readWebhookSubscriptionSecret(subscription) {
     if (subscription.secretRef) {
       const storedSecret = state.webhookSubscriptionSecrets.get(subscription.secretRef);
-      if (storedSecret?.envelope) {
-        return webhookSecretSealer.open(storedSecret.envelope);
+      if (storedSecret?.envelope && !secretStore.hasSecretMaterial({ secretId: subscription.secretRef })) {
+        migrateLegacyWebhookSecretRecord(storedSecret);
+      }
+      if (secretStore.hasSecretMaterial({ secretId: subscription.secretRef })) {
+        return secretStore.readSecretMaterial({ secretId: subscription.secretRef });
       }
       if (typeof subscription.secret === "string" && subscription.secret.length > 0) {
         const legacySecret = subscription.secret;
@@ -937,6 +966,37 @@ export function createPublicApiModule({
       return legacySecret;
     }
     throw createError(500, "webhook_secret_missing", "Webhook secret was missing.");
+  }
+
+  function migrateLegacyWebhookSecretRecord(record) {
+    if (!record?.secretRef || secretStore.hasSecretMaterial({ secretId: record.secretRef })) {
+      if (record) {
+        delete record.envelope;
+        delete record.keyId;
+      }
+      return;
+    }
+    if (!record.envelope) {
+      throw createError(500, "webhook_secret_missing", "Webhook secret material was missing from the secret store.");
+    }
+    const secret = legacyWebhookSecretSealer.open(record.envelope);
+    const storedSecret = secretStore.storeSecretMaterial({
+      secretId: record.secretRef,
+      classCode: "S4",
+      material: secret,
+      owner: {
+        domainKey: "integrations",
+        objectFamily: "webhook_subscription_secret",
+        subscriptionId: record.subscriptionId || null
+      },
+      mode: environmentMode,
+      fingerprintPurpose: "integration_webhook_secret"
+    });
+    record.keyVersion = storedSecret.keyVersion;
+    record.storageMode = storedSecret.storageMode;
+    record.fingerprint = storedSecret.fingerprint;
+    delete record.envelope;
+    delete record.keyId;
   }
 
   function presentWebhookDelivery(delivery) {

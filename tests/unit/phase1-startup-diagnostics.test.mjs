@@ -36,6 +36,7 @@ test("phase 1.4 runtime diagnostics surface flat merge collisions as warnings in
   const phasebucketRouteFinding = findings.find(
     (finding) => finding.findingCode === "phasebucket_route_runtime_present"
   );
+  const secretRuntimeFinding = findings.find((finding) => finding.findingCode === "secret_runtime_not_bank_grade");
 
   assert.ok(flatMergeFinding);
   assert.ok(collisions.length > 0);
@@ -45,6 +46,7 @@ test("phase 1.4 runtime diagnostics surface flat merge collisions as warnings in
   assert.equal(simulatedRuntimeFinding, undefined);
   assert.equal(forbiddenRouteFinding, undefined);
   assert.ok(phasebucketRouteFinding);
+  assert.equal(secretRuntimeFinding, undefined);
   assert.equal(flatMergeFinding.severityCode, "warning");
   assert.equal(platform.getRuntimeStartupDiagnostics().startupAllowed, true);
 });
@@ -88,8 +90,13 @@ test("phase 1.4 protected runtime does not auto-provision sqlite-backed critical
 
   try {
     const durability = platform.listCriticalDomainDurability();
+    const diagnostics = platform.getRuntimeStartupDiagnostics();
     assert.equal(durability.every((entry) => entry.truthMode === "in_memory_repository_envelope"), true);
-    assert.equal(platform.getRuntimeStartupDiagnostics().startupAllowed, false);
+    assert.equal(diagnostics.startupAllowed, false);
+    assert.equal(
+      diagnostics.findings.some((finding) => finding.findingCode === "secret_runtime_not_bank_grade"),
+      true
+    );
   } finally {
     platform.closeCriticalDomainStateStore?.();
   }
@@ -112,6 +119,10 @@ test("phase 1.4 protected runtime exposes sqlite critical truth as a blocking pe
     assert.equal(diagnostics.startupAllowed, false);
     assert.equal(
       diagnostics.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
+      true
+    );
+    assert.equal(
+      diagnostics.findings.some((finding) => finding.findingCode === "secret_runtime_not_bank_grade"),
       true
     );
   } finally {
@@ -138,6 +149,10 @@ test("phase 1.4 protected runtime blocks sqlite critical truth even when other r
     assert.equal(diagnostics.startupAllowed, false);
     assert.equal(
       diagnostics.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
+      true
+    );
+    assert.equal(
+      diagnostics.findings.some((finding) => finding.findingCode === "secret_runtime_not_bank_grade"),
       true
     );
   } finally {
@@ -169,6 +184,10 @@ test("phase 2.5 protected runtime clears critical-domain persistence finding whe
       diagnostics.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
       false
     );
+    assert.equal(
+      diagnostics.findings.some((finding) => finding.findingCode === "secret_runtime_not_bank_grade"),
+      true
+    );
   } finally {
     platform.closeCriticalDomainStateStore?.();
   }
@@ -195,6 +214,10 @@ test("phase 2.5 critical-domain URL infers Postgres truth without separate store
     assert.equal(
       diagnostics.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
       false
+    );
+    assert.equal(
+      diagnostics.findings.some((finding) => finding.findingCode === "secret_runtime_not_bank_grade"),
+      true
     );
   } finally {
     platform.closeCriticalDomainStateStore?.();

@@ -171,12 +171,15 @@ test("Phase 10.2 OCR provider supports async callback and quality-driven review"
   assert.equal(pending.ocrRun.status, "running");
   assert.equal(pending.ocrRun.processingMode, "batch_lro");
   assert.equal(typeof pending.ocrRun.providerOperationRef, "string");
+  assert.equal(typeof pending.providerCallbackToken, "string");
+  assert.equal("callbackToken" in pending.ocrRun.metadataJson, false);
+  assert.equal(JSON.stringify(engine.snapshotDocumentArchive()).includes(pending.providerCallbackToken), false);
 
   const completed = engine.completeDocumentOcrProviderCallback({
     companyId: "company-1",
     documentId,
     ocrRunId: pending.ocrRun.ocrRunId,
-    callbackToken: pending.ocrRun.metadataJson.callbackToken,
+    callbackToken: pending.providerCallbackToken,
     actorId: "reviewer-1"
   });
   assert.equal(completed.ocrRun.status, "completed");
@@ -220,6 +223,53 @@ test("Phase 10.2 OCR provider enforces processor page limits", () => {
         actorId: "user-1"
       }),
     /ocr profile invoice_parse allows at most 200 pages in batch mode/i
+  );
+});
+
+test("Phase 3.2 OCR provider callback requires explicit token and never persists it in run state", () => {
+  const engine = createDocumentArchiveEngine({
+    clock: () => new Date("2026-03-28T11:31:00Z")
+  });
+
+  const channel = engine.registerInboxChannel({
+    companyId: "company-1",
+    channelCode: "secure_async_ocr",
+    inboundAddress: "secure-async@inbound.example.test",
+    useCase: "documents_inbox",
+    allowedMimeTypes: ["application/pdf"],
+    maxAttachmentSizeBytes: 1024 * 1024,
+    classificationConfidenceThreshold: 0.9,
+    fieldConfidenceThreshold: 0.9
+  });
+
+  const documentId = ingestOne(
+    engine,
+    channel.inboundAddress,
+    "<ocr-secure-001>",
+    "invoice-secure.pdf",
+    "[OCR_LOW_CONFIDENCE] Invoice: INV-3100 Supplier: Demo Leverantor AB Total: 2500.00",
+    20
+  ).routedDocuments[0].documentId;
+
+  const pending = engine.runDocumentOcr({
+    companyId: "company-1",
+    documentId,
+    callbackMode: "manual_provider_callback",
+    actorId: "user-1"
+  });
+
+  assert.equal(typeof pending.providerCallbackToken, "string");
+  assert.equal("callbackToken" in pending.ocrRun.metadataJson, false);
+
+  assert.throws(
+    () =>
+      engine.completeDocumentOcrProviderCallback({
+        companyId: "company-1",
+        documentId,
+        ocrRunId: pending.ocrRun.ocrRunId,
+        actorId: "reviewer-1"
+      }),
+    (error) => error?.code === "ocr_provider_callback_token_required" && error?.status === 403
   );
 });
 

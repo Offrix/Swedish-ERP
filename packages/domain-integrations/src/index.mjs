@@ -72,6 +72,7 @@ import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
+import { createSecretStore } from "../../domain-core/src/secrets.mjs";
 
 export const INVOICE_DELIVERY_CHANNELS = Object.freeze(["pdf_email", "peppol"]);
 export const PAYMENT_LINK_STATUSES = Object.freeze(["active", "consumed", "expired", "cancelled"]);
@@ -485,6 +486,7 @@ export function createIntegrationEngine({
   clock = () => new Date(),
   environmentMode = "test",
   secretSealKey = null,
+  secretStore = null,
   paymentBaseUrl = "https://payments.local",
   webhookDeliveryExecutor = undefined,
   partnerContractTestExecutors = undefined,
@@ -493,10 +495,19 @@ export function createIntegrationEngine({
   getCorePlatform = null,
   providerBaselineRegistry = null
 } = {}) {
-  const integrationSecretSealer = createSecretSealer({
+  const integrationLegacySecretSealer = createSecretSealer({
     secretSealKey: secretSealKey || `swedish-erp-integrations-seal:${environmentMode}`,
     keyId: "integrations-secret-seal-v1"
   });
+  const integrationSecretStore =
+    secretStore ||
+    createSecretStore({
+      clock,
+      environmentMode,
+      storeId: "integrations",
+      masterKey: secretSealKey || `swedish-erp-integrations-seal:${environmentMode}`,
+      activeKeyVersion: `integrations:${environmentMode}:v1`
+    });
   const providerBaselines =
     providerBaselineRegistry || createProviderBaselineRegistry({ clock, seedProviderBaselines: INTEGRATION_PROVIDER_BASELINES });
   const enableBankingProvider = createEnableBankingProvider({
@@ -661,7 +672,8 @@ export function createIntegrationEngine({
     clock,
     environmentMode,
     deliveryExecutor: webhookDeliveryExecutor,
-    webhookSecretSealer: integrationSecretSealer
+    secretStore: integrationSecretStore,
+    legacyWebhookSecretSealer: integrationLegacySecretSealer
   });
   const partnerModule = createPartnerModule({
     state,
@@ -788,8 +800,10 @@ export function createIntegrationEngine({
     archiveSigningEvidence: (input) => signingEvidenceArchiveProvider.archiveSignedEvidence(input),
     listSigningEvidenceArchives: (input) => signingEvidenceArchiveProvider.listArchiveRecords(input),
     prepareProjectImportBatchFromAdapter,
+    listSecretStorePostures: () => [integrationSecretStore.getSecurityPosture()],
     snapshotIntegrations() {
       publicApiModule.migrateWebhookSubscriptionSecrets();
+      const providerSnapshots = buildProviderSnapshotsForPersistence();
       return clone({
         submissions: [...state.submissions.values()].map((submission) =>
           regulatedSubmissionsModule.getAuthoritySubmission({
@@ -821,33 +835,8 @@ export function createIntegrationEngine({
         asyncJobs: [...state.asyncJobs.values()],
         asyncDeadLetters: [...state.asyncDeadLetters.values()],
         providerBaselines: providerBaselines.snapshotProviderBaselineRegistry(),
-        providerSnapshots: {
-          documentOcrProvider: documentOcrProvider.snapshot(),
-          paymentLinkProvider: paymentLinkProvider.snapshot(),
-          peppolProvider: peppolProvider.snapshot(),
-          emailProvider: emailProvider.snapshot(),
-          smsProvider: smsProvider.snapshot(),
-          enableBankingProvider: enableBankingProvider.snapshot(),
-          bankFileProvider: bankFileProvider.snapshot(),
-          spendProvider: spendProvider.snapshot(),
-          agiTransportProvider: agiTransportProvider.snapshot(),
-          vatTransportProvider: vatTransportProvider.snapshot(),
-          husTransportProvider: husTransportProvider.snapshot(),
-          annualTransportProvider: annualTransportProvider.snapshot(),
-          signicatBankIdProvider: signicatBankIdProvider.snapshot(),
-          workOsFederationProvider: workOsFederationProvider.snapshot(),
-          localPasskeyProvider: localPasskeyProvider.snapshot(),
-          localTotpProvider: localTotpProvider.snapshot(),
-          signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot(),
-          asanaProvider: asanaProvider.snapshot(),
-          clickUpProvider: clickUpProvider.snapshot(),
-          dynamics365ProjectOperationsProvider: dynamics365ProjectOperationsProvider.snapshot(),
-          hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
-          mondayWorkManagementProvider: mondayWorkManagementProvider.snapshot(),
-          odooProjectsBillingProvider: odooProjectsBillingProvider.snapshot(),
-          teamleaderFocusProvider: teamleaderFocusProvider.snapshot(),
-          zohoCrmProjectsProvider: zohoCrmProjectsProvider.snapshot()
-        }
+        providerSnapshots,
+        secretStoreBundle: integrationSecretStore.exportSecretBundle()
       });
     },
     exportDurableState,
@@ -856,42 +845,19 @@ export function createIntegrationEngine({
 
   function exportDurableState() {
     publicApiModule.migrateWebhookSubscriptionSecrets();
+    const providerSnapshots = buildProviderSnapshotsForPersistence();
     return {
       ...serializeDurableState(state),
-      providerSnapshots: {
-        documentOcrProvider: documentOcrProvider.snapshot(),
-        paymentLinkProvider: paymentLinkProvider.snapshot(),
-        peppolProvider: peppolProvider.snapshot(),
-        emailProvider: emailProvider.snapshot(),
-        smsProvider: smsProvider.snapshot(),
-        enableBankingProvider: enableBankingProvider.snapshot(),
-        bankFileProvider: bankFileProvider.snapshot(),
-        spendProvider: spendProvider.snapshot(),
-        agiTransportProvider: agiTransportProvider.snapshot(),
-        vatTransportProvider: vatTransportProvider.snapshot(),
-        husTransportProvider: husTransportProvider.snapshot(),
-        annualTransportProvider: annualTransportProvider.snapshot(),
-        signicatBankIdProvider: signicatBankIdProvider.snapshot(),
-        workOsFederationProvider: workOsFederationProvider.snapshot(),
-        localPasskeyProvider: localPasskeyProvider.snapshot(),
-        localTotpProvider: localTotpProvider.snapshot(),
-        signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot(),
-        asanaProvider: asanaProvider.snapshot(),
-        clickUpProvider: clickUpProvider.snapshot(),
-        dynamics365ProjectOperationsProvider: dynamics365ProjectOperationsProvider.snapshot(),
-        hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
-        mondayWorkManagementProvider: mondayWorkManagementProvider.snapshot(),
-        odooProjectsBillingProvider: odooProjectsBillingProvider.snapshot(),
-        teamleaderFocusProvider: teamleaderFocusProvider.snapshot(),
-        zohoCrmProjectsProvider: zohoCrmProjectsProvider.snapshot()
-      }
+      providerSnapshots,
+      secretStoreBundle: integrationSecretStore.exportSecretBundle()
     };
   }
 
   function importDurableState(snapshot) {
     applyDurableStateSnapshot(state, snapshot);
+    integrationSecretStore.importSecretBundle(snapshot?.secretStoreBundle);
     publicApiModule.migrateWebhookSubscriptionSecrets();
-    documentOcrProvider.restore(snapshot?.providerSnapshots?.documentOcrProvider || snapshot?.documentOcrProvider || {});
+    documentOcrProvider.restore(resolveProviderSnapshot(snapshot?.providerSnapshots?.documentOcrProvider || snapshot?.documentOcrProvider));
     paymentLinkProvider.restore(snapshot?.providerSnapshots?.paymentLinkProvider || {});
     peppolProvider.restore(snapshot?.providerSnapshots?.peppolProvider || {});
     emailProvider.restore(snapshot?.providerSnapshots?.emailProvider || {});
@@ -903,8 +869,8 @@ export function createIntegrationEngine({
     vatTransportProvider.restore(snapshot?.providerSnapshots?.vatTransportProvider || {});
     husTransportProvider.restore(snapshot?.providerSnapshots?.husTransportProvider || {});
     annualTransportProvider.restore(snapshot?.providerSnapshots?.annualTransportProvider || {});
-    signicatBankIdProvider.restore(snapshot?.providerSnapshots?.signicatBankIdProvider || {});
-    workOsFederationProvider.restore(snapshot?.providerSnapshots?.workOsFederationProvider || {});
+    signicatBankIdProvider.restore(resolveProviderSnapshot(snapshot?.providerSnapshots?.signicatBankIdProvider || {}));
+    workOsFederationProvider.restore(resolveProviderSnapshot(snapshot?.providerSnapshots?.workOsFederationProvider || {}));
     localPasskeyProvider.restore(snapshot?.providerSnapshots?.localPasskeyProvider || {});
     localTotpProvider.restore(snapshot?.providerSnapshots?.localTotpProvider || {});
     signingEvidenceArchiveProvider.restore(snapshot?.providerSnapshots?.signingEvidenceArchiveProvider || {});
@@ -916,6 +882,86 @@ export function createIntegrationEngine({
     odooProjectsBillingProvider.restore(snapshot?.providerSnapshots?.odooProjectsBillingProvider || {});
     teamleaderFocusProvider.restore(snapshot?.providerSnapshots?.teamleaderFocusProvider || {});
     zohoCrmProjectsProvider.restore(snapshot?.providerSnapshots?.zohoCrmProjectsProvider || {});
+  }
+
+  function buildProviderSnapshotsForPersistence() {
+    const providerSnapshots = snapshotProviderState();
+    return {
+      ...providerSnapshots,
+      documentOcrProvider: protectProviderSnapshot("documentOcrProvider", providerSnapshots.documentOcrProvider),
+      signicatBankIdProvider: protectProviderSnapshot("signicatBankIdProvider", providerSnapshots.signicatBankIdProvider),
+      workOsFederationProvider: protectProviderSnapshot("workOsFederationProvider", providerSnapshots.workOsFederationProvider)
+    };
+  }
+
+  function snapshotProviderState() {
+    return {
+      documentOcrProvider: documentOcrProvider.snapshot(),
+      paymentLinkProvider: paymentLinkProvider.snapshot(),
+      peppolProvider: peppolProvider.snapshot(),
+      emailProvider: emailProvider.snapshot(),
+      smsProvider: smsProvider.snapshot(),
+      enableBankingProvider: enableBankingProvider.snapshot(),
+      bankFileProvider: bankFileProvider.snapshot(),
+      spendProvider: spendProvider.snapshot(),
+      agiTransportProvider: agiTransportProvider.snapshot(),
+      vatTransportProvider: vatTransportProvider.snapshot(),
+      husTransportProvider: husTransportProvider.snapshot(),
+      annualTransportProvider: annualTransportProvider.snapshot(),
+      signicatBankIdProvider: signicatBankIdProvider.snapshot(),
+      workOsFederationProvider: workOsFederationProvider.snapshot(),
+      localPasskeyProvider: localPasskeyProvider.snapshot(),
+      localTotpProvider: localTotpProvider.snapshot(),
+      signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot(),
+      asanaProvider: asanaProvider.snapshot(),
+      clickUpProvider: clickUpProvider.snapshot(),
+      dynamics365ProjectOperationsProvider: dynamics365ProjectOperationsProvider.snapshot(),
+      hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
+      mondayWorkManagementProvider: mondayWorkManagementProvider.snapshot(),
+      odooProjectsBillingProvider: odooProjectsBillingProvider.snapshot(),
+      teamleaderFocusProvider: teamleaderFocusProvider.snapshot(),
+      zohoCrmProjectsProvider: zohoCrmProjectsProvider.snapshot()
+    };
+  }
+
+  function protectProviderSnapshot(providerKey, providerSnapshot) {
+    if (isEmptyStructuredValue(providerSnapshot)) {
+      return providerSnapshot || {};
+    }
+    const protectedSnapshot = integrationSecretStore.storeSecretMaterial({
+      secretId: `integration-provider-snapshot:${environmentMode}:${providerKey}`,
+      classCode: "S4",
+      material: providerSnapshot,
+      owner: {
+        domainKey: "integrations",
+        objectFamily: "provider_snapshot",
+        providerKey
+      },
+      mode: environmentMode,
+      fingerprintPurpose: `integration_provider_snapshot:${providerKey}`
+    });
+    return {
+      protectedSecretRef: protectedSnapshot.secretRef,
+      classCode: "S4",
+      keyVersion: protectedSnapshot.keyVersion,
+      storageMode: protectedSnapshot.storageMode,
+      fingerprint: protectedSnapshot.fingerprint
+    };
+  }
+
+  function resolveProviderSnapshot(providerSnapshot) {
+    if (
+      providerSnapshot
+      && typeof providerSnapshot === "object"
+      && !Array.isArray(providerSnapshot)
+      && typeof providerSnapshot.protectedSecretRef === "string"
+    ) {
+      return integrationSecretStore.readSecretMaterial({
+        secretId: providerSnapshot.protectedSecretRef,
+        parse: true
+      });
+    }
+    return providerSnapshot || {};
   }
 
   function prepareProjectImportBatchFromAdapter({
@@ -1111,6 +1157,19 @@ export function createIntegrationEngine({
     }
     return vatTransportProvider;
   }
+}
+
+function isEmptyStructuredValue(value) {
+  if (value == null) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0;
+  }
+  if (typeof value === "object") {
+    return Object.keys(value).length === 0;
+  }
+  return false;
 }
 
 function uniqueEmails(values) {

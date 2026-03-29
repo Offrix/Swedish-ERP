@@ -71,6 +71,10 @@ test("phase 1.4 runtime endpoints expose startup diagnostics and bootstrap valid
       ),
       true
     );
+    assert.equal(
+      invariantsPayload.findings.some((finding) => finding.findingCode === "secret_runtime_not_bank_grade"),
+      true
+    );
 
     const validateResponse = await fetch(`${baseUrl}/v1/system/bootstrap/validate`, {
       method: "POST",
@@ -121,6 +125,10 @@ test("phase 1.4 bootstrap validation surfaces sqlite critical truth even when ru
     assert.equal(payload.criticalDomainStoreKind, "sqlite");
     assert.equal(
       payload.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
+      true
+    );
+    assert.equal(
+      payload.findings.some((finding) => finding.findingCode === "secret_runtime_not_bank_grade"),
       true
     );
   } finally {

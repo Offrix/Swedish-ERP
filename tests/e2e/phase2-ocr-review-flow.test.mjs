@@ -193,6 +193,8 @@ test("Phase 2.3 OCR routes can be disabled and support review-driven correction 
       }
     });
     assert.equal(asyncAccepted.ocrRun.processingMode, "batch_lro");
+    assert.equal(typeof asyncAccepted.providerCallbackToken, "string");
+    assert.equal("callbackToken" in asyncAccepted.ocrRun.metadataJson, false);
 
     const asyncCompleted = await requestJson(
       enabledBaseUrl,
@@ -202,7 +204,7 @@ test("Phase 2.3 OCR routes can be disabled and support review-driven correction 
         token: sessionToken,
         body: {
           companyId: "00000000-0000-4000-8000-000000000001",
-          callbackToken: asyncAccepted.ocrRun.metadataJson.callbackToken
+          callbackToken: asyncAccepted.providerCallbackToken
         }
       }
     );

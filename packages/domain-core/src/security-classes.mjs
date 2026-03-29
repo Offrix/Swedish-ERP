@@ -103,18 +103,32 @@ export const SECURITY_FIELD_CLASSIFICATIONS = Object.freeze([
     description: "Superseded callback secret reference."
   }),
   Object.freeze({
-    fieldCode: "auth_factor_secret.envelope",
+    fieldCode: "auth_factor_secret.secret_ref",
     objectFamily: "auth_factor_secret",
     classCode: "S4",
-    storagePolicy: "sealed_secret",
-    description: "Stored MFA factor secret envelope."
+    storagePolicy: "secret_ref_only",
+    description: "Stored MFA factor secret reference."
   }),
   Object.freeze({
-    fieldCode: "auth_challenge_secret.envelope",
+    fieldCode: "auth_factor_secret.fingerprint",
+    objectFamily: "auth_factor_secret",
+    classCode: "S4",
+    storagePolicy: "hmac_fingerprint_only",
+    description: "Stored MFA factor secret fingerprint for audit and migration."
+  }),
+  Object.freeze({
+    fieldCode: "auth_challenge_secret.secret_ref",
     objectFamily: "auth_challenge_secret",
     classCode: "S4",
-    storagePolicy: "sealed_secret",
-    description: "Stored authentication challenge secret envelope."
+    storagePolicy: "secret_ref_only",
+    description: "Stored authentication challenge secret reference."
+  }),
+  Object.freeze({
+    fieldCode: "auth_challenge_secret.fingerprint",
+    objectFamily: "auth_challenge_secret",
+    classCode: "S4",
+    storagePolicy: "hmac_fingerprint_only",
+    description: "Stored authentication challenge secret fingerprint for audit and migration."
   }),
   Object.freeze({
     fieldCode: "auth_identity_mode.credential_secret_ref",
@@ -143,6 +157,20 @@ export const SECURITY_FIELD_CLASSIFICATIONS = Object.freeze([
     classCode: "S4",
     storagePolicy: "secret_ref_only",
     description: "Integration secret manager reference."
+  }),
+  Object.freeze({
+    fieldCode: "webhook_subscription_secret.secret_ref",
+    objectFamily: "webhook_subscription_secret",
+    classCode: "S4",
+    storagePolicy: "secret_ref_only",
+    description: "Webhook subscription signing secret reference."
+  }),
+  Object.freeze({
+    fieldCode: "provider_snapshot.protected_secret_ref",
+    objectFamily: "provider_snapshot",
+    classCode: "S4",
+    storagePolicy: "secret_ref_only",
+    description: "Protected provider snapshot secret reference for callback and auth artifacts."
   }),
   Object.freeze({
     fieldCode: "person.swedish_identity_number",

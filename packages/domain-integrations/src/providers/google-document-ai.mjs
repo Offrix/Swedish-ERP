@@ -207,6 +207,9 @@ export function createGoogleDocumentAiProvider({
     if (!operation) {
       throw createError(404, "ocr_provider_operation_not_found", "OCR provider operation was not found.");
     }
+    if (operation.callbackToken && normalizeOptionalText(callbackToken) == null) {
+      throw createError(403, "ocr_provider_callback_token_required", "OCR provider callback token is required.");
+    }
     if (callbackToken !== null && callbackToken !== undefined && operation.callbackToken !== String(callbackToken)) {
       throw createError(403, "ocr_provider_callback_token_invalid", "OCR provider callback token is invalid.");
     }

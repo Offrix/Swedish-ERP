@@ -315,6 +315,42 @@ function collectDemoDataFindings({ protectedMode, startupSurface, domains }) {
   }
 }
 
+function collectSecretStoreFindings({ protectedMode, startupSurface, domains = {} }) {
+  const findings = [];
+
+  for (const [domainKey, domain] of Object.entries(domains)) {
+    if (!domain || typeof domain.listSecretStorePostures !== "function") {
+      continue;
+    }
+
+    for (const posture of toArray(domain.listSecretStorePostures())) {
+      if (!posture || posture.bankGradeReady === true) {
+        continue;
+      }
+
+      const reasonCodes = toArray(posture.reasonCodes).filter((code) => typeof code === "string");
+      findings.push(
+        createRuntimeInvariantFinding({
+          findingCode: "secret_runtime_not_bank_grade",
+          severityCode: protectedMode ? "blocking" : "warning",
+          startupSurface,
+          categoryCode: "security",
+          domainKey,
+          activeStoreKind: posture.providerKind || null,
+          summary: `${domainKey} secret runtime is not bank-grade ready.`,
+          detail:
+            `Secret store ${posture.storeId || "unknown"} runs with providerKind=${posture.providerKind || "unknown"} `
+            + `in ${posture.environmentMode || "unknown"} mode`
+            + (reasonCodes.length > 0 ? ` (${reasonCodes.join(", ")}).` : "."),
+          remediation: "Configure an external KMS/HSM-backed secret runtime before pilot or production."
+        })
+      );
+    }
+  }
+
+  return findings;
+}
+
 function detectFlatMergeCollisions({ domainRegistry = [], domains = {}, mergeOrder = [] } = {}) {
   const collisions = [];
   const seenCapabilities = new Map();
@@ -551,6 +587,13 @@ export function scanRuntimeInvariants({
   );
   findings.push(
     ...collectDemoDataFindings({
+      protectedMode,
+      startupSurface,
+      domains
+    })
+  );
+  findings.push(
+    ...collectSecretStoreFindings({
       protectedMode,
       startupSurface,
       domains

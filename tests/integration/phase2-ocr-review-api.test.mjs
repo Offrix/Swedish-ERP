@@ -196,6 +196,8 @@ test("Phase 2.3 API runs OCR, opens review tasks, accepts manual correction and 
     }, 202);
     assert.equal(asyncAccepted.ocrRun.status, "running");
     assert.equal(asyncAccepted.ocrRun.processingMode, "batch_lro");
+    assert.equal(typeof asyncAccepted.providerCallbackToken, "string");
+    assert.equal("callbackToken" in asyncAccepted.ocrRun.metadataJson, false);
 
     const asyncCompleted = await requestJson(
       `${baseUrl}/v1/documents/${asyncDocumentId}/ocr/runs/${asyncAccepted.ocrRun.ocrRunId}/provider-callback`,
@@ -204,7 +206,7 @@ test("Phase 2.3 API runs OCR, opens review tasks, accepts manual correction and 
         token: adminSession.sessionToken,
         body: {
           companyId: "00000000-0000-4000-8000-000000000001",
-          callbackToken: asyncAccepted.ocrRun.metadataJson.callbackToken
+          callbackToken: asyncAccepted.providerCallbackToken
         }
       }
     );

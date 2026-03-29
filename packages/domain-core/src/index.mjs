@@ -91,6 +91,17 @@ export {
   listSecurityFieldClassifications,
   resolveManagedSecretClassCode
 } from "./security-classes.mjs";
+export {
+  DEFAULT_SECRET_CRYPTO_PROVIDER_KIND,
+  DEFAULT_SECRET_KEY_VERSION,
+  SECRET_BLIND_INDEX_ALGORITHM,
+  SECRET_ENVELOPE_ALGORITHM,
+  createEnvelopeCrypto
+} from "./crypto.mjs";
+export {
+  SECRET_STORE_BUNDLE_VERSION,
+  createSecretStore
+} from "./secrets.mjs";
 export { createCommandMutationRuntime } from "./command-log.mjs";
 import {
   CLOSE_BLOCKER_SEVERITIES,
