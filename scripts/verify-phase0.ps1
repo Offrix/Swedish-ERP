@@ -42,6 +42,8 @@ $requiredPaths = @(
   "infra/terraform/main.tf",
   "infra/ecs/README.md",
   "docs/runbooks/fas-0-bootstrap-verification.md"
+  "docs/runbooks/go-live-no-go-enforcement.md"
+  "docs/implementation-control/GO_LIVE_NO_GO_POLICY.md"
 )
 
 $missing = @()
@@ -53,6 +55,54 @@ foreach ($path in $requiredPaths) {
 
 if ($missing.Count -gt 0) {
   Write-Error ("Missing Phase 0 paths:`n - " + ($missing -join "`n - "))
+}
+
+$roadmap = Get-Content "docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md" -Raw
+$library = Get-Content "docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md" -Raw
+$policy = Get-Content "docs/implementation-control/GO_LIVE_NO_GO_POLICY.md" -Raw
+$supersessionRunbook = Get-Content "docs/runbooks/governance-supersession.md" -Raw
+$enforcementRunbook = Get-Content "docs/runbooks/go-live-no-go-enforcement.md" -Raw
+$decisionDoc = Get-Content "docs/implementation-control/GOVERNANCE_SUPERSESSION_DECISION.md" -Raw
+
+$contentErrors = @()
+
+if ($roadmap -notmatch "\[x\]\s+0\.6") {
+  $contentErrors += "GO_LIVE_ROADMAP_FINAL.md does not mark phase 0.6 as complete."
+}
+
+$requiredPolicyHeadings = @(
+  "## Absolute live no-go rules",
+  "## Absolute parity no-go rules",
+  "## Absolute advantage no-go rules",
+  "## Non-waivable no-go conditions",
+  "## Waiver policy",
+  "## Evidence bundle required before any live, parity or advantage claim"
+)
+
+foreach ($heading in $requiredPolicyHeadings) {
+  if ($policy -notmatch [regex]::Escape($heading)) {
+    $contentErrors += "GO_LIVE_NO_GO_POLICY.md is missing heading: $heading"
+  }
+}
+
+if ($library -notmatch [regex]::Escape("docs/runbooks/go-live-no-go-enforcement.md")) {
+  $contentErrors += "PHASE_IMPLEMENTATION_LIBRARY_FINAL.md does not require the no-go enforcement runbook."
+}
+
+if ($supersessionRunbook -notmatch [regex]::Escape("GO_LIVE_NO_GO_POLICY.md")) {
+  $contentErrors += "governance-supersession.md does not reference GO_LIVE_NO_GO_POLICY.md."
+}
+
+if ($enforcementRunbook -notmatch [regex]::Escape("GO_LIVE_NO_GO_POLICY.md")) {
+  $contentErrors += "go-live-no-go-enforcement.md does not reference GO_LIVE_NO_GO_POLICY.md."
+}
+
+if ($decisionDoc -notmatch [regex]::Escape("GO_LIVE_NO_GO_POLICY.md")) {
+  $contentErrors += "GOVERNANCE_SUPERSESSION_DECISION.md does not include GO_LIVE_NO_GO_POLICY.md in its evidence chain."
+}
+
+if ($contentErrors.Count -gt 0) {
+  Write-Error ("Phase 0 content verification failed:`n - " + ($contentErrors -join "`n - "))
 }
 
 Write-Host "Phase 0 structure verification passed."

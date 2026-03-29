@@ -907,7 +907,7 @@ Ogiltigförklara gamla självattesterade statusmarkeringar, göra denna roadmap 
 - Alla F-001–F-066 måste ha minst en target-subphase.
 
 **Auditkrav / evidence / receipts**  
-- Governance-beslut, waiver-beslut och roadmap-publicering är audit-critical.
+- Governance-beslut, no-go-policy-publicering, waiver-beslut och roadmap-publicering är audit-critical.
 
 **Retry / replay / dead-letter / recovery**  
 - Ej tillämpligt, men gate-publicering ska vara idempotent.
@@ -928,6 +928,7 @@ Ogiltigförklara gamla självattesterade statusmarkeringar, göra denna roadmap 
 
 **Runbooks som krävs**  
 - `docs/runbooks/governance-supersession.md`
+- `docs/runbooks/go-live-no-go-enforcement.md`
 
 **Roadmap-delfaser och exakt implementation**  
 - **0.1 [REWRITE][REMOVE/DEPRECATE]** — Ogiltigförklara historiska `[x]` och markera `GO_LIVE_ROADMAP.md` samt `PHASE_IMPLEMENTATION_BIBLE.md` som historiska input, inte som acceptansbevis.

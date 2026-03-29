@@ -41,9 +41,11 @@ Den bindande carry-forward-matrisen finns i `docs/implementation-control/GOVERNA
 ## Evidence refs
 
 - `docs/runbooks/governance-supersession.md`
+- `docs/runbooks/go-live-no-go-enforcement.md`
 - `docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md`
 - `docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md`
 - `docs/implementation-control/GOVERNANCE_CARRY_FORWARD_MATRIX.md`
+- `docs/implementation-control/GO_LIVE_NO_GO_POLICY.md`
 - commit som inför denna fil och supersession-notiserna i repo:t
 
 ## No-go effekt
@@ -53,3 +55,4 @@ Följande är förbjudet efter detta beslut:
 - att behandla gamla `[x]` som acceptansbevis
 - att peka repo-root-current guidance mot gamla roadmap/bible
 - att markera delfaser klara mot gamla fasstrukturer i stället för final-roadmapen
+- att göra live-, parity- eller advantage-claim utan att `docs/implementation-control/GO_LIVE_NO_GO_POLICY.md` är grön för scope
