@@ -673,7 +673,7 @@ Knyta dokument, leverantörer, kunder, bank och skattekonto till bokföringskär
 **Blockerar UI-readiness**  
 - Finance UI kan inte designas tryggt utan full route- och blockerlogik.
 
-## [ ] Fas 10 — Documents, OCR, classification, import cases och review center
+## [x] Fas 10 — Documents, OCR, classification, import cases och review center
 
 **MÃ¥l**  
 Göra document-to-decision-kedjan verklig: originaldokument, OCR, klassificering, import cases, review queues och evidence-hashar.
@@ -729,7 +729,7 @@ Göra document-to-decision-kedjan verklig: originaldokument, OCR, klassificering
 **Blockerar UI-readiness**  
 - Document, inbox och review UI blockerar tills denna fas är klar.
 
-## [ ] Fas 11 — HR, time, balances, collective agreements och migration intake
+## [x] Fas 11 — HR, time, balances, collective agreements och migration intake
 
 **MÃ¥l**  
 Göra people masterdata, time/absence, balances, centralt publicerade kollektivavtal och supportstyrda avtalsavvikelser till stabila inputs för payroll, projects och migration.
@@ -786,7 +786,7 @@ Göra people masterdata, time/absence, balances, centralt publicerade kollektiva
 **Blockerar UI-readiness**  
 - HR/time/payroll UI blockerar utan stabil people truth.
 
-## [ ] Fas 12 — Payroll, AGI, benefits, travel, pension, salary exchange och Kronofogden
+## [x] Fas 12 — Payroll, AGI, benefits, travel, pension, salary exchange och Kronofogden
 
 **MÃ¥l**  
 Bygga svensk produktionssäker lön med tabellskatt/jämkning/SINK, employer contributions, benefits, travel, pension och löneutmätning.
@@ -839,7 +839,7 @@ Bygga svensk produktionssäker lön med tabellskatt/jämkning/SINK, employer con
 **Blockerar UI-readiness**  
 - Payroll UI kan inte frysas före detta.
 
-## [ ] Fas 13 — HUS, regulated submissions, receipts/recovery, declarations och annual reporting
+## [x] Fas 13 — HUS, regulated submissions, receipts/recovery, declarations och annual reporting
 
 **MÃ¥l**  
 Slutföra alla reglerade submission-kedjor: AGI, VAT, HUS, annual reporting/declarations med receipts, recovery, correction och tax-account-koppling.
@@ -899,7 +899,7 @@ Slutföra alla reglerade submission-kedjor: AGI, VAT, HUS, annual reporting/decl
 **Blockerar UI-readiness**  
 - Submission och compliance UI blockerar tills canonical receipts finns.
 
-## [ ] Fas 14 — Generell project core, CRM-linked commercial chain, profitability, portfolio, field och vertikala packs
+## [x] Fas 14 — Generell project core, CRM-linked commercial chain, profitability, portfolio, field och vertikala packs
 
 **MÃ¥l**  
 Bygga projektfältet som generell projekt- och uppdragsmotor för alla branscher, med CRM-handoff, resource/portfolio/profitability och valbara field/personalliggare/ID06-pack ovanpå.
@@ -961,7 +961,7 @@ Bygga projektfältet som generell projekt- och uppdragsmotor för alla branscher
 **Blockerar UI-readiness**  
 - Project UI och field mobile blockerar tills general core och packgränser är stabila.
 
-## [ ] Fas 15 — Reporting, search, object profiles, saved views, notifications, activity och work items
+## [x] Fas 15 — Reporting, search, object profiles, saved views, notifications, activity och work items
 
 **MÃ¥l**  
 Materialisera read models, operator views och separata objektfamiljer som framtida UI och backoffice ska vila på.
@@ -1015,7 +1015,7 @@ Materialisera read models, operator views och separata objektfamiljer som framti
 **Blockerar UI-readiness**  
 - Denna fas är det direkta UI-underlaget.
 
-## [ ] Fas 16 — Integrationsplattform, public API, partner API, webhooks och prioriterade provideradapters
+## [x] Fas 16 — Integrationsplattform, public API, partner API, webhooks och prioriterade provideradapters
 
 **MÃ¥l**  
 Göra integrationslagret verkligt: connections, credentials, consent, provider health, public sandbox, partner ops, signed webhooks och rätt adapterordning.
@@ -1082,7 +1082,7 @@ Göra integrationslagret verkligt: connections, credentials, consent, provider h
 **Blockerar UI-readiness**  
 - UI och admin views för integrations måste vila på stabil control-plane.
 
-## [ ] Fas 17 — Operations, backoffice, support, migration, cutover, parallel run och trial/live drift
+## [x] Fas 17 — Operations, backoffice, support, migration, cutover, parallel run och trial/live drift
 
 **MÃ¥l**  
 Slutföra operator- och supportsystemet: incidents, support cases, replay, dead-letter, submission monitoring, migration cockpit, cutover och trial/live operations.
