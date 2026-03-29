@@ -67,6 +67,7 @@ import {
   resolveRuntimeModeProfile
 } from "../../../scripts/lib/runtime-mode.mjs";
 import {
+  resolveCriticalDomainStoreKind,
   resolveRuntimeStoreKind,
   scanRuntimeInvariants
 } from "../../../scripts/lib/runtime-diagnostics.mjs";
@@ -963,7 +964,8 @@ export function createApiPlatform(options = {}) {
     domains: registeredDomains,
     domainRegistry: registrations,
     env,
-    options
+    options,
+    criticalDomainStateStore
   });
   const defaultFlatMergeCollisions = Object.freeze(
     defaultRuntimeDiagnostics.findings.filter((finding) => finding.findingCode === "flat_merge_collision")
@@ -1207,6 +1209,10 @@ export function createApiPlatform(options = {}) {
             disabledAdapters:
               overrides.disabledAdapters === undefined ? options.disabledAdapters : overrides.disabledAdapters,
             versionRef: overrides.versionRef === undefined ? options.versionRef : overrides.versionRef,
+            criticalDomainStateStoreKind:
+              overrides.criticalDomainStoreKind === undefined
+                ? options.criticalDomainStateStoreKind
+                : overrides.criticalDomainStoreKind,
             runtimeStoreKind:
               overrides.activeStoreKind ||
               overrides.runtimeStoreKind ||
@@ -1214,7 +1220,8 @@ export function createApiPlatform(options = {}) {
               options.asyncJobStoreKind ||
               options.asyncJobStore?.kind ||
               null
-          }
+          },
+          criticalDomainStateStore
         }),
       enumerable: false
     },
@@ -1961,7 +1968,8 @@ function buildRuntimeDiagnostics({
   domains,
   domainRegistry,
   env,
-  options
+  options,
+  criticalDomainStateStore = null
 }) {
   const activeStoreKind = resolveRuntimeStoreKind({
     explicitStoreKind:
@@ -1969,6 +1977,14 @@ function buildRuntimeDiagnostics({
       options.asyncJobStoreKind ||
       options.asyncJobStore?.kind ||
       null,
+    env
+  });
+  const criticalDomainStoreKind = resolveCriticalDomainStoreKind({
+    explicitStoreKind:
+      options.criticalDomainStateStoreKind
+      || options.criticalDomainStateStore?.kind
+      || criticalDomainStateStore?.kind
+      || null,
     env
   });
 
@@ -1983,6 +1999,7 @@ function buildRuntimeDiagnostics({
     domains,
     mergeOrder: API_PLATFORM_FLAT_MERGE_ORDER,
     activeStoreKind,
+    criticalDomainStoreKind,
     env,
     versionRef: options.versionRef || null,
     disabledAdapters: options.disabledAdapters || []

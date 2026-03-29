@@ -30,6 +30,7 @@ test("phase 1.4 runtime endpoints expose startup diagnostics and bootstrap valid
     const runtimeModePayload = await runtimeModeResponse.json();
     assert.equal(runtimeModePayload.runtimeModeProfile.environmentMode, "production");
     assert.equal(runtimeModePayload.activeStoreKind, "memory");
+    assert.equal(runtimeModePayload.criticalDomainStoreKind, "memory");
     assert.equal(runtimeModePayload.startupAllowed, false);
 
     const invariantsResponse = await fetch(`${baseUrl}/v1/system/invariants`);
@@ -38,6 +39,10 @@ test("phase 1.4 runtime endpoints expose startup diagnostics and bootstrap valid
     assert.equal(Array.isArray(invariantsPayload.findings), true);
     assert.equal(
       invariantsPayload.findings.some((finding) => finding.findingCode === "missing_persistent_store"),
+      true
+    );
+    assert.equal(
+      invariantsPayload.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
       true
     );
     assert.equal(
@@ -82,6 +87,40 @@ test("phase 1.4 runtime endpoints expose startup diagnostics and bootstrap valid
     const validatePayload = await validateResponse.json();
     assert.equal(
       validatePayload.findings.some((finding) => finding.findingCode === "seed_demo_forbidden"),
+      true
+    );
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("phase 1.4 bootstrap validation surfaces sqlite critical truth even when runtime store override is postgres", async () => {
+  const platform = createApiPlatform({
+    runtimeMode: "production",
+    env: {},
+    criticalDomainStateStoreKind: "sqlite"
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const validateResponse = await fetch(`${baseUrl}/v1/system/bootstrap/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        activeStoreKind: "postgres",
+        criticalDomainStoreKind: "sqlite"
+      })
+    });
+    assert.equal(validateResponse.status, 200);
+    const payload = await validateResponse.json();
+    assert.equal(payload.activeStoreKind, "postgres");
+    assert.equal(payload.criticalDomainStoreKind, "sqlite");
+    assert.equal(
+      payload.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
       true
     );
   } finally {

@@ -150,6 +150,7 @@ export function buildOutput({ args, diagnostics, failures }) {
     bootstrapMode: diagnostics.bootstrapMode,
     bootstrapScenarioCode: diagnostics.bootstrapScenarioCode,
     activeStoreKind: diagnostics.activeStoreKind,
+    criticalDomainStoreKind: diagnostics.criticalDomainStoreKind,
     expectedFindings: args.expectedFindings,
     expectedCategories: args.expectedCategories,
     failures,
@@ -193,7 +194,8 @@ export async function runRuntimeHonestyScan({
       bootstrapScenarioCode:
         args.bootstrapScenarioCode === null ? undefined : args.bootstrapScenarioCode,
       seedDemo: args.seedDemo === true,
-      activeStoreKind: args.activeStoreKind || undefined
+      activeStoreKind: args.activeStoreKind || undefined,
+      criticalDomainStoreKind: args.criticalDomainStateStoreKind || undefined
     });
     const failures = validateExpectations({
       diagnostics,
@@ -214,6 +216,7 @@ export async function runRuntimeHonestyScan({
           `startupSurface=${output.startupSurface}`,
           `startupAllowed=${String(output.startupAllowed)}`,
           `activeStoreKind=${output.activeStoreKind}`,
+          `criticalDomainStoreKind=${output.criticalDomainStoreKind}`,
           `findings=${output.summary.totalCount}`,
           `blocking=${output.summary.blockingCount}`,
           `warnings=${output.summary.warningCount}`

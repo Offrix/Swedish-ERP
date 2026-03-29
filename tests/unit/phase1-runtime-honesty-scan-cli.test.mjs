@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { runRuntimeHonestyScan } from "../../scripts/runtime-honesty-scan.mjs";
 
 function createMemoryStream() {
@@ -16,11 +19,27 @@ function createMemoryStream() {
   };
 }
 
-async function runScan(argv) {
+function createTempSqlitePath(prefix) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
+  return {
+    directory,
+    filePath: path.join(directory, "critical-domain-state.sqlite")
+  };
+}
+
+function cleanupTempDirectory(directory) {
+  fs.rmSync(directory, { recursive: true, force: true });
+}
+
+async function runScan(argv, env = {}) {
   const stdout = createMemoryStream();
   const stderr = createMemoryStream();
   const result = await runRuntimeHonestyScan({
     argv,
+    env: {
+      ...process.env,
+      ...env
+    },
     stdout: stdout.stream,
     stderr: stderr.stream
   });
@@ -44,6 +63,8 @@ test("phase 1.5 runtime honesty scan CLI reports protected runtime blockers", ()
       "--expect-finding",
       "missing_persistent_store",
       "--expect-finding",
+      "critical_domain_store_not_persistent",
+      "--expect-finding",
       "map_only_critical_truth",
       "--expect-finding",
       "stub_provider_present",
@@ -57,9 +78,14 @@ test("phase 1.5 runtime honesty scan CLI reports protected runtime blockers", ()
       const payload = JSON.parse(result.stdout);
       assert.equal(payload.runtimeMode, "production");
       assert.equal(payload.startupAllowed, false);
+      assert.equal(payload.criticalDomainStoreKind, "memory");
       assert.ok(payload.summary.blockingCount >= 1);
       assert.equal(
         payload.findings.some((finding) => finding.findingCode === "missing_persistent_store"),
+        true
+      );
+      assert.equal(
+        payload.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
         true
       );
       assert.equal(
@@ -156,5 +182,43 @@ test("phase 1.5 runtime honesty scan CLI can boot sqlite-backed critical truth w
       const payload = JSON.parse(result.stdout);
       assert.equal(payload.runtimeMode, "test");
       assert.ok(payload.summary.totalCount >= 1);
+    });
+});
+
+test("phase 1.5 runtime honesty scan CLI blocks sqlite critical truth even when runtime store is declared postgres", () => {
+  const temp = createTempSqlitePath("swedish-erp-phase15-sqlite-mismatch");
+  return runScan([
+      "--mode",
+      "production",
+      "--surface",
+      "api",
+      "--active-store-kind",
+      "postgres",
+      "--critical-domain-state-store-kind",
+      "sqlite",
+      "--expect-finding",
+      "critical_domain_store_not_persistent",
+      "--require-startup-blocked",
+      "--require-blocking",
+      "--json"
+    ], {
+      ERP_CRITICAL_DOMAIN_STATE_DB_PATH: temp.filePath
+    }).then((result) => {
+      try {
+        assert.equal(result.status, 0, result.stderr);
+        const payload = JSON.parse(result.stdout);
+        assert.equal(payload.activeStoreKind, "postgres");
+        assert.equal(payload.criticalDomainStoreKind, "sqlite");
+        assert.equal(payload.startupAllowed, false);
+        assert.equal(
+          payload.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
+          true
+        );
+      } finally {
+        cleanupTempDirectory(temp.directory);
+      }
+    }, (error) => {
+      cleanupTempDirectory(temp.directory);
+      throw error;
     });
 });

@@ -57,6 +57,23 @@ function normalizeText(value) {
   return normalized.length > 0 ? normalized : null;
 }
 
+function normalizeStoreKind(value) {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === "memory" || normalized.includes("memory")) {
+    return "memory";
+  }
+  if (normalized === "sqlite" || normalized.includes("sqlite")) {
+    return "sqlite";
+  }
+  if (normalized === "postgres" || normalized.includes("postgres")) {
+    return "postgres";
+  }
+  return normalized;
+}
+
 function toArray(value) {
   return Array.isArray(value) ? [...value] : [];
 }
@@ -346,18 +363,21 @@ export function resolveRuntimeStoreKind({
   explicitStoreKind = null,
   env = process.env
 } = {}) {
-  const normalizedExplicit = normalizeText(explicitStoreKind);
+  const normalizedExplicit = normalizeStoreKind(explicitStoreKind);
   if (normalizedExplicit) {
     return normalizedExplicit;
   }
 
   const envStoreKind =
-    normalizeText(env?.ERP_RUNTIME_STORE_KIND) ||
-    normalizeText(env?.RUNTIME_STORE_KIND) ||
-    normalizeText(env?.WORKER_JOB_STORE);
+    normalizeStoreKind(env?.ERP_RUNTIME_STORE_KIND) ||
+    normalizeStoreKind(env?.RUNTIME_STORE_KIND) ||
+    normalizeStoreKind(env?.WORKER_JOB_STORE);
 
   if (envStoreKind === "postgres") {
     return "postgres";
+  }
+  if (envStoreKind === "sqlite") {
+    return "sqlite";
   }
   if (envStoreKind === "memory") {
     return "memory";
@@ -367,6 +387,17 @@ export function resolveRuntimeStoreKind({
   }
 
   return "memory";
+}
+
+export function resolveCriticalDomainStoreKind({
+  explicitStoreKind = null,
+  env = process.env
+} = {}) {
+  const normalizedExplicit = normalizeStoreKind(explicitStoreKind);
+  if (normalizedExplicit) {
+    return normalizedExplicit;
+  }
+  return normalizeStoreKind(env?.ERP_CRITICAL_DOMAIN_STATE_STORE) || "memory";
 }
 
 export function scanRuntimeInvariants({
@@ -380,6 +411,7 @@ export function scanRuntimeInvariants({
   domains = {},
   mergeOrder = [],
   activeStoreKind = "memory",
+  criticalDomainStoreKind = null,
   env = process.env,
   versionRef = null,
   disabledAdapters = [],
@@ -389,7 +421,11 @@ export function scanRuntimeInvariants({
   const protectedMode = PROTECTED_RUNTIME_MODES.has(runtimeModeProfile?.environmentMode);
   const normalizedBootstrapMode = normalizeText(bootstrapMode) || "none";
   const normalizedBootstrapScenarioCode = normalizeText(bootstrapScenarioCode);
-  const normalizedStoreKind = normalizeText(activeStoreKind) || "memory";
+  const normalizedStoreKind = normalizeStoreKind(activeStoreKind) || "memory";
+  const normalizedCriticalDomainStoreKind = resolveCriticalDomainStoreKind({
+    explicitStoreKind: criticalDomainStoreKind,
+    env
+  });
   const allowedBootstrapModes = toArray(bootstrapModePolicy?.allowedBootstrapModes);
 
   if (seedDemo === true || normalizedBootstrapMode === "scenario_seed" || normalizedBootstrapScenarioCode) {
@@ -433,6 +469,23 @@ export function scanRuntimeInvariants({
         summary: `${runtimeModeProfile.environmentMode} boot requires a persistent store.`,
         detail: `Detected activeStoreKind=${normalizedStoreKind}. Protected modes must not boot with in-memory runtime state.`,
         remediation: "Configure a persistent store before starting pilot or production."
+      })
+    );
+  }
+
+  if (protectedMode && !PERSISTENT_STORE_KINDS.has(normalizedCriticalDomainStoreKind)) {
+    findings.push(
+      createRuntimeInvariantFinding({
+        findingCode: "critical_domain_store_not_persistent",
+        severityCode: "blocking",
+        startupSurface,
+        categoryCode: "persistence",
+        activeStoreKind: normalizedCriticalDomainStoreKind,
+        summary: `${runtimeModeProfile.environmentMode} boot requires Postgres-backed critical domain truth.`,
+        detail:
+          `Detected criticalDomainStoreKind=${normalizedCriticalDomainStoreKind}. `
+          + "Protected modes must not boot with memory or sqlite critical domain state.",
+        remediation: "Move critical domain truth onto the Postgres-backed runtime path before pilot or production."
       })
     );
   }
@@ -508,6 +561,7 @@ export function scanRuntimeInvariants({
     bootstrapScenarioCode: normalizedBootstrapScenarioCode,
     seedDemo: seedDemo === true,
     activeStoreKind: normalizedStoreKind,
+    criticalDomainStoreKind: normalizedCriticalDomainStoreKind,
     disabledAdapters: freeze(toArray(disabledAdapters)),
     versionRef: resolveVersionRef({ versionRef, env }),
     findings: freeze(findings),

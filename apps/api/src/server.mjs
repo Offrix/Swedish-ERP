@@ -208,6 +208,7 @@ async function handleRequest({ req, res, platform, flags }) {
       bootstrapMode: diagnostics?.bootstrapMode || null,
       bootstrapScenarioCode: diagnostics?.bootstrapScenarioCode || null,
       activeStoreKind: diagnostics?.activeStoreKind || null,
+      criticalDomainStoreKind: diagnostics?.criticalDomainStoreKind || null,
       startupAllowed: diagnostics?.startupAllowed !== false,
       summary: diagnostics?.summary || {
         totalCount: 0,
@@ -247,7 +248,8 @@ async function handleRequest({ req, res, platform, flags }) {
             bootstrapMode: body.bootstrapMode,
             bootstrapScenarioCode: body.bootstrapScenarioCode,
             seedDemo: body.seedDemo === true,
-            activeStoreKind: body.activeStoreKind
+            activeStoreKind: body.activeStoreKind,
+            criticalDomainStoreKind: body.criticalDomainStoreKind
           })
         : null;
     writeJson(res, 200, diagnostics || {

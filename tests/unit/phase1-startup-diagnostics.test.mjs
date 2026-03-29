@@ -1,8 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { startApiServer } from "../../apps/api/src/server.mjs";
 import { startWorker } from "../../apps/worker/src/worker.mjs";
+
+function createTempSqlitePath(prefix) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
+  return {
+    directory,
+    filePath: path.join(directory, "critical-domain-state.sqlite")
+  };
+}
+
+function cleanupTempDirectory(directory) {
+  fs.rmSync(directory, { recursive: true, force: true });
+}
 
 test("phase 1.4 runtime diagnostics surface flat merge collisions as warnings in test mode", () => {
   const platform = createApiPlatform({
@@ -76,5 +91,56 @@ test("phase 1.4 protected runtime does not auto-provision sqlite-backed critical
     assert.equal(platform.getRuntimeStartupDiagnostics().startupAllowed, false);
   } finally {
     platform.closeCriticalDomainStateStore?.();
+  }
+});
+
+test("phase 1.4 protected runtime exposes sqlite critical truth as a blocking persistence invariant", () => {
+  const temp = createTempSqlitePath("swedish-erp-phase1-critical-store");
+  const platform = createApiPlatform({
+    runtimeMode: "production",
+    env: {},
+    criticalDomainStateStoreKind: "sqlite",
+    criticalDomainStateStorePath: temp.filePath
+  });
+
+  try {
+    const diagnostics = platform.getRuntimeStartupDiagnostics();
+    const durability = platform.listCriticalDomainDurability();
+    assert.equal(durability.every((entry) => entry.truthMode === "repository_envelope"), true);
+    assert.equal(diagnostics.criticalDomainStoreKind, "sqlite");
+    assert.equal(diagnostics.startupAllowed, false);
+    assert.equal(
+      diagnostics.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
+      true
+    );
+  } finally {
+    platform.closeCriticalDomainStateStore?.();
+    cleanupTempDirectory(temp.directory);
+  }
+});
+
+test("phase 1.4 protected runtime blocks sqlite critical truth even when other runtime stores resolve to postgres", () => {
+  const temp = createTempSqlitePath("swedish-erp-phase1-critical-store-postgres-mismatch");
+  const platform = createApiPlatform({
+    runtimeMode: "production",
+    env: {
+      POSTGRES_URL: "postgres://runtime-store"
+    },
+    criticalDomainStateStoreKind: "sqlite",
+    criticalDomainStateStorePath: temp.filePath
+  });
+
+  try {
+    const diagnostics = platform.getRuntimeStartupDiagnostics();
+    assert.equal(diagnostics.activeStoreKind, "postgres");
+    assert.equal(diagnostics.criticalDomainStoreKind, "sqlite");
+    assert.equal(diagnostics.startupAllowed, false);
+    assert.equal(
+      diagnostics.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
+      true
+    );
+  } finally {
+    platform.closeCriticalDomainStateStore?.();
+    cleanupTempDirectory(temp.directory);
   }
 });
