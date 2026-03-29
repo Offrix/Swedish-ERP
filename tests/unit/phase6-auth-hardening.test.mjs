@@ -159,3 +159,81 @@ test("Phase 6 hardening exports sealed auth factor secrets instead of raw TOTP s
   });
   assert.equal(verified.session.status, "active");
 });
+
+test("Phase 6 hardening locks repeated invalid passkey assertions and revokes the attacked session", () => {
+  let now = new Date("2026-03-29T15:00:00Z");
+  const platform = createOrgAuthPlatform({
+    clock: () => new Date(now),
+    bootstrapScenarioCode: "test_default_demo"
+  });
+
+  const registrationLogin = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_APPROVER_EMAIL
+  });
+  platform.verifyTotp({
+    sessionToken: registrationLogin.sessionToken,
+    code: platform.getTotpCodeForTesting({
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_APPROVER_EMAIL,
+      now
+    })
+  });
+  const registration = platform.beginPasskeyRegistration({
+    sessionToken: registrationLogin.sessionToken,
+    deviceName: "Approver key"
+  });
+  platform.finishPasskeyRegistration({
+    sessionToken: registrationLogin.sessionToken,
+    challengeId: registration.challengeId,
+    credentialId: "cred-approver-key",
+    publicKey: "pk-approver-key",
+    deviceName: "Approver key"
+  });
+
+  const login = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_APPROVER_EMAIL
+  });
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    assert.throws(
+      () =>
+        platform.assertPasskey({
+          sessionToken: login.sessionToken,
+          credentialId: "cred-approver-key",
+          assertion: "passkey:wrong"
+        }),
+      (error) => error?.code === "passkey_assertion_invalid" && error?.status === 403
+    );
+  }
+
+  assert.throws(
+    () =>
+      platform.assertPasskey({
+        sessionToken: login.sessionToken,
+        credentialId: "cred-approver-key",
+        assertion: "passkey:wrong"
+      }),
+    (error) => error?.code === "passkey_temporarily_locked" && error?.status === 429
+  );
+  assert.throws(
+    () =>
+      platform.inspectSession({
+        sessionToken: login.sessionToken,
+        allowPending: true
+      }),
+    (error) => error?.code === "session_revoked" && error?.status === 401
+  );
+
+  now = new Date("2026-03-29T15:16:00Z");
+  const retried = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_APPROVER_EMAIL
+  });
+  const asserted = platform.assertPasskey({
+    sessionToken: retried.sessionToken,
+    credentialId: "cred-approver-key",
+    assertion: "passkey:cred-approver-key"
+  });
+  assert.equal(asserted.session.status, "active");
+});

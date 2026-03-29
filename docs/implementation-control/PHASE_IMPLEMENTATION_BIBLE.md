@@ -844,7 +844,7 @@ Implementera riktig svensk stark identitet, federation, session trust, device tr
 
 **Förstärk / härda**
 - session revision, trust TTL, queue ownership, visibility reasoning
-- login-start rate limiting, unresolved-identifier lockout and factor-specific invalid-code lockout
+- login-start rate limiting, unresolved-identifier lockout and factor-specific invalid-code lockout for TOTP and passkeys
 - factor secrets moved out of raw auth-factor state into sealed secret envelopes with refs only in durable auth objects
 
 **Skriv om**
@@ -911,7 +911,7 @@ All factor enrollments, auth completions, linking and impersonation actions are 
 Sandbox and production credentials, callback domains, cookies and test identities are fully separate.
 
 **Testkrav**  
-['BankID sandbox/prod isolation', 'federation claim mapping', 'step-up TTL', 'allowlist enforcement', 'access review stale grant detection', 'login-start rate limit', 'unresolved-identifier lockout', 'factor-based TOTP lockout with session revocation', 'durable export excludes raw TOTP secrets while restore still verifies factors']
+['BankID sandbox/prod isolation', 'federation claim mapping', 'step-up TTL', 'allowlist enforcement', 'access review stale grant detection', 'login-start rate limit', 'unresolved-identifier lockout', 'factor-based TOTP lockout with session revocation', 'factor-based passkey lockout with session revocation', 'durable export excludes raw TOTP secrets while restore still verifies factors']
 
 **Migrations- och cutoverkrav**  
 Migrate identities with reversible linking; dry-run enterprise SSO mapping before enabling.

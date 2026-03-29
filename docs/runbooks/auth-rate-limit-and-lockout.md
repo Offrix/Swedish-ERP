@@ -18,6 +18,13 @@ This runbook governs login-start throttling and TOTP lockout in the phase 6 auth
 - When TOTP lockout is triggered, the attacked pending session must be revoked immediately.
 - After the lockout window expires, a fresh login with a valid TOTP code must succeed again.
 
+## Passkey guardrails
+
+- Invalid passkey assertions must be counted per enrolled passkey factor.
+- Repeated invalid passkey assertions must trigger a temporary lockout and return `429`.
+- When passkey lockout is triggered, the attacked pending session must be revoked immediately.
+- After the lockout window expires, a fresh login with a valid passkey assertion must succeed again.
+
 ## Secret handling
 
 - TOTP plaintext must never be present in exported durable auth factor state.
@@ -29,6 +36,9 @@ This runbook governs login-start throttling and TOTP lockout in the phase 6 auth
 - Verify three pending login starts succeed and the fourth is blocked with `login_rate_limited`.
 - Verify repeated unresolved login starts end in `login_temporarily_locked`.
 - Verify repeated invalid TOTP codes end in `totp_temporarily_locked`.
+- Verify repeated invalid passkey assertions end in `passkey_temporarily_locked`.
 - Verify the attacked session is revoked when TOTP lockout triggers.
+- Verify the attacked session is revoked when passkey lockout triggers.
 - Verify auth audit contains blocked/denied records for both login-start and TOTP guardrails.
+- Verify auth audit contains blocked/denied records for passkey guardrails.
 - Verify exported durable state does not contain raw TOTP secrets.

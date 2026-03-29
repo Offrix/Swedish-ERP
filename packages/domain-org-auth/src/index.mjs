@@ -228,7 +228,7 @@ const TRUST_LEVEL_FRESHNESS_TTL_SECONDS = Object.freeze({
   mfa: 30 * 60,
   strong_mfa: 15 * 60
 });
-const AUTH_GUARDRAIL_SCOPES = Object.freeze(["login_identifier", "totp_factor"]);
+const AUTH_GUARDRAIL_SCOPES = Object.freeze(["login_identifier", "totp_factor", "passkey_factor"]);
 const LOGIN_IDENTIFIER_FAILURE_THRESHOLD = 5;
 const LOGIN_IDENTIFIER_FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_IDENTIFIER_LOCKOUT_MS = 15 * 60 * 1000;
@@ -237,6 +237,9 @@ const LOGIN_PENDING_SESSION_LOCKOUT_MS = 5 * 60 * 1000;
 const TOTP_FAILURE_THRESHOLD = 5;
 const TOTP_FAILURE_WINDOW_MS = 10 * 60 * 1000;
 const TOTP_LOCKOUT_MS = 15 * 60 * 1000;
+const PASSKEY_FAILURE_THRESHOLD = 5;
+const PASSKEY_FAILURE_WINDOW_MS = 10 * 60 * 1000;
+const PASSKEY_LOCKOUT_MS = 15 * 60 * 1000;
 
 export function createOrgAuthPlatform({
   clock = () => new Date(),
@@ -1200,19 +1203,54 @@ export function createOrgAuthPlatform({
     if (!factor) {
       throw httpError(404, "passkey_not_found", "No passkey credential matched the supplied credential id.");
     }
+    const passkeyGuardrail = resolveAuthGuardrail({
+      scope: "passkey_factor",
+      key: createPasskeyFactorGuardrailKey(session.companyUserId, factor.factorId),
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      factorId: factor.factorId
+    });
+    assertAuthGuardrailOpen({
+      guardrail: passkeyGuardrail,
+      windowMs: PASSKEY_FAILURE_WINDOW_MS,
+      code: "passkey_temporarily_locked",
+      message: "Too many invalid passkey assertions. Try again later."
+    });
 
     if (assertion !== `passkey:${credentialId}`) {
+      const failureGuardrail = recordAuthGuardrailFailure(passkeyGuardrail, {
+        windowMs: PASSKEY_FAILURE_WINDOW_MS,
+        threshold: PASSKEY_FAILURE_THRESHOLD,
+        lockoutMs: PASSKEY_LOCKOUT_MS
+      });
+      if (failureGuardrail.lockedUntil) {
+        revokeSessionForSecurityLockout(session, {
+          reasonCode: "passkey_temporarily_locked"
+        });
+      }
       pushAudit({
         companyId: session.companyId,
         actorId: principal.userId,
         action: "auth.passkey.assertion",
-        result: "denied",
+        result: failureGuardrail.lockedUntil ? "blocked" : "denied",
         entityType: "auth_factor",
         entityId: factor.factorId,
-        explanation: "Passkey assertion payload was invalid."
+        explanation: failureGuardrail.lockedUntil
+          ? "Passkey assertion temporarily locked after repeated invalid payloads."
+          : "Passkey assertion payload was invalid.",
+        metadata: {
+          failureCount: failureGuardrail.failureCount,
+          lockedUntil: failureGuardrail.lockedUntil
+        }
       });
+      if (failureGuardrail.lockedUntil) {
+        throw httpError(429, "passkey_temporarily_locked", "Too many invalid passkey assertions. Try again later.");
+      }
       throw httpError(403, "passkey_assertion_invalid", "Passkey assertion was invalid.");
     }
+    markAuthGuardrailSuccess(passkeyGuardrail, {
+      windowMs: PASSKEY_FAILURE_WINDOW_MS
+    });
 
     const challenge = challengeId ? consumeOwnedChallenge({ challengeId, session, allowedTypes: ["passkey_assertion"] }) : null;
     const completion = completeSessionFactor(session, "passkey", {
@@ -2445,6 +2483,10 @@ export function createOrgAuthPlatform({
 
   function createTotpFactorGuardrailKey(companyUserId, factorId) {
     return `totp_factor:${companyUserId}:${factorId}`;
+  }
+
+  function createPasskeyFactorGuardrailKey(companyUserId, factorId) {
+    return `passkey_factor:${companyUserId}:${factorId}`;
   }
 
   function resolveAuthGuardrail({ scope, key, companyId = null, normalizedEmail = null, companyUserId = null, factorId = null } = {}) {
