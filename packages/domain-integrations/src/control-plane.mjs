@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 export const INTEGRATION_SURFACE_CODES = Object.freeze([
   "partner",
+  "crm_handoff",
   "document_ai",
   "payment_link",
   "notification_email",

@@ -63,6 +63,7 @@ export type PublicApiMode = "sandbox" | "production";
 export type PublicApiClientStatus = "active" | "revoked";
 export type IntegrationSurfaceCode =
   | "partner"
+  | "crm_handoff"
   | "document_ai"
   | "payment_link"
   | "notification_email"

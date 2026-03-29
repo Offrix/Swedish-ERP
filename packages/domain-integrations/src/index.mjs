@@ -5,6 +5,11 @@ import { createPublicApiModule } from "./public-api.mjs";
 import { createBolagsverketAnnualProvider, BOLAGSVERKET_ANNUAL_PROVIDER_CODE } from "./providers/bolagsverket-annual.mjs";
 import { createEnableBankingProvider, ENABLE_BANKING_PROVIDER_CODE } from "./providers/enable-banking.mjs";
 import { createGoogleDocumentAiProvider, GOOGLE_DOCUMENT_AI_PROVIDER_CODE } from "./providers/google-document-ai.mjs";
+import {
+  createHubSpotCrmProvider,
+  HUBSPOT_CRM_PROVIDER_BASELINE_CODE,
+  HUBSPOT_CRM_PROVIDER_CODE
+} from "./providers/hubspot-crm.mjs";
 import { createIso20022FilesProvider, ISO20022_FILES_PROVIDER_CODE } from "./providers/iso20022-files.mjs";
 import { createLocalPasskeyProvider, LOCAL_PASSKEY_PROVIDER_CODE } from "./providers/local-passkey.mjs";
 import { createLocalTotpProvider, LOCAL_TOTP_PROVIDER_CODE } from "./providers/local-totp.mjs";
@@ -47,6 +52,7 @@ export { LOCAL_PASSKEY_PROVIDER_CODE } from "./providers/local-passkey.mjs";
 export { LOCAL_TOTP_PROVIDER_CODE } from "./providers/local-totp.mjs";
 export { WORKOS_FEDERATION_PROVIDER_CODE } from "./providers/workos-federation.mjs";
 export { SIGNICAT_SIGNING_ARCHIVE_PROVIDER_CODE } from "./providers/signicat-signing-archive.mjs";
+export { HUBSPOT_CRM_PROVIDER_CODE } from "./providers/hubspot-crm.mjs";
 export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
   Object.freeze({
     providerBaselineId: "peppol-bis-billing-3-se-2026.1",
@@ -313,6 +319,20 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
     checksum: "signicat-signing-archive-se-2026.1",
     sourceSnapshotDate: "2026-03-29",
     semanticChangeSummary: "Signicat signing archive baseline for signature evidence references and immutable archive checksums."
+  }),
+  Object.freeze({
+    providerBaselineId: "hubspot-crm-objects-se-2026.1",
+    baselineCode: HUBSPOT_CRM_PROVIDER_BASELINE_CODE,
+    providerCode: HUBSPOT_CRM_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "crm_handoff_objects",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "v3-objects",
+    checksum: "hubspot-crm-objects-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "HubSpot CRM objects baseline for governed deal and custom-object handoff into project import batches."
   })
 ]);
 
@@ -418,6 +438,11 @@ export function createIntegrationEngine({
     environmentMode,
     providerBaselineRegistry: providerBaselines
   });
+  const hubSpotCrmProvider = createHubSpotCrmProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
   const state = {
     submissions: new Map(),
     submissionIdsByCompany: new Map(),
@@ -480,7 +505,8 @@ export function createIntegrationEngine({
       workOsFederationProvider,
       localPasskeyProvider,
       localTotpProvider,
-      signingEvidenceArchiveProvider
+      signingEvidenceArchiveProvider,
+      hubSpotCrmProvider
     ]
   });
   const regulatedSubmissionsModule = createRegulatedSubmissionsModule({
@@ -570,6 +596,7 @@ export function createIntegrationEngine({
     prepareOfficialSubmissionTransport,
     archiveSigningEvidence: (input) => signingEvidenceArchiveProvider.archiveSignedEvidence(input),
     listSigningEvidenceArchives: (input) => signingEvidenceArchiveProvider.listArchiveRecords(input),
+    prepareProjectImportBatchFromAdapter,
     snapshotIntegrations() {
       return clone({
         submissions: [...state.submissions.values()].map((submission) =>
@@ -646,7 +673,8 @@ export function createIntegrationEngine({
         workOsFederationProvider: workOsFederationProvider.snapshot(),
         localPasskeyProvider: localPasskeyProvider.snapshot(),
         localTotpProvider: localTotpProvider.snapshot(),
-        signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot()
+        signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot(),
+        hubSpotCrmProvider: hubSpotCrmProvider.snapshot()
       }
     };
   }
@@ -670,6 +698,40 @@ export function createIntegrationEngine({
     localPasskeyProvider.restore(snapshot?.providerSnapshots?.localPasskeyProvider || {});
     localTotpProvider.restore(snapshot?.providerSnapshots?.localTotpProvider || {});
     signingEvidenceArchiveProvider.restore(snapshot?.providerSnapshots?.signingEvidenceArchiveProvider || {});
+    hubSpotCrmProvider.restore(snapshot?.providerSnapshots?.hubSpotCrmProvider || {});
+  }
+
+  function prepareProjectImportBatchFromAdapter({
+    companyId,
+    connectionId,
+    providerCode = null,
+    payload = {},
+    sourceExportCapturedAt = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedConnectionId = requireText(connectionId, "integration_connection_id_required");
+    const connection = integrationControlPlane.getIntegrationConnection({
+      companyId: resolvedCompanyId,
+      connectionId: resolvedConnectionId
+    });
+    if (connection.surfaceCode !== "crm_handoff") {
+      throw createError(409, "integration_connection_surface_invalid", "Integration connection must use crm_handoff surface.");
+    }
+    if (providerCode && connection.providerCode !== providerCode) {
+      throw createError(409, "integration_provider_code_mismatch", "Requested provider does not match integration connection.");
+    }
+    if (connection.credentialsConfigured !== true) {
+      throw createError(409, "integration_credentials_missing", "Integration connection must have configured credentials.");
+    }
+    if (connection.providerCode !== HUBSPOT_CRM_PROVIDER_CODE) {
+      throw createError(400, "integration_provider_code_invalid", `${connection.providerCode} is not yet implemented for project import adapters.`);
+    }
+    return hubSpotCrmProvider.prepareProjectImportBatch({
+      companyId: resolvedCompanyId,
+      integrationConnectionId: connection.connectionId,
+      sourceExportCapturedAt,
+      ...(payload && typeof payload === "object" ? payload : {})
+    });
   }
 
   function prepareInvoiceDelivery({

@@ -1064,6 +1064,12 @@ export function createProjectEngine({
     importModeCode = "trial_seed",
     sourceExportCapturedAt = null,
     sourcePayload = [],
+    integrationConnectionId = null,
+    adapterProviderCode = null,
+    adapterProviderMode = null,
+    adapterProviderEnvironmentRef = null,
+    adapterProviderBaselineRef = null,
+    adapterProviderBaselineCode = null,
     actorId = "system",
     correlationId = crypto.randomUUID()
   } = {}) {
@@ -1079,6 +1085,12 @@ export function createProjectEngine({
       importModeCode: normalizeCode(importModeCode, "project_import_mode_required").toLowerCase(),
       sourceExportCapturedAt: normalizeOptionalDate(sourceExportCapturedAt, "project_import_export_captured_at_invalid"),
       sourcePayload: normalizedPayload,
+      integrationConnectionId: normalizeOptionalText(integrationConnectionId),
+      adapterProviderCode: normalizeOptionalText(adapterProviderCode),
+      adapterProviderMode: normalizeOptionalText(adapterProviderMode),
+      adapterProviderEnvironmentRef: normalizeOptionalText(adapterProviderEnvironmentRef),
+      adapterProviderBaselineRef: adapterProviderBaselineRef ? copy(adapterProviderBaselineRef) : null,
+      adapterProviderBaselineCode: normalizeOptionalText(adapterProviderBaselineCode),
       payloadHash: hashObject(normalizedPayload),
       payloadRecordCount: normalizedPayload.length,
       importedProjectIds: [],
@@ -1103,7 +1115,8 @@ export function createProjectEngine({
       metadata: {
         sourceSystemCode: record.sourceSystemCode,
         payloadRecordCount: record.payloadRecordCount,
-        importModeCode: record.importModeCode
+        importModeCode: record.importModeCode,
+        adapterProviderCode: record.adapterProviderCode
       }
     });
     return copy(record);
@@ -6716,7 +6729,13 @@ function normalizeProjectImportPayload(sourcePayload, { clock }) {
       deliveryMilestoneDate: normalizeOptionalDate(item?.deliveryMilestoneDate, "project_import_delivery_milestone_date_invalid"),
       billingPlanFrequencyCode: normalizeCode(item?.billingPlanFrequencyCode || "one_off", "project_import_billing_frequency_required").toLowerCase(),
       billingPlanTriggerCode: normalizeCode(item?.billingPlanTriggerCode || "manual", "project_import_billing_trigger_required").toLowerCase(),
-      billingPlanLines: normalizeImportedBillingPlanLines(item?.billingPlanLines, startsOn)
+      billingPlanLines: normalizeImportedBillingPlanLines(item?.billingPlanLines, startsOn),
+      providerCode: normalizeOptionalText(item?.providerCode),
+      providerMode: normalizeOptionalText(item?.providerMode),
+      providerEnvironmentRef: normalizeOptionalText(item?.providerEnvironmentRef),
+      providerBaselineRef: item?.providerBaselineRef ? copy(item.providerBaselineRef) : null,
+      providerBaselineCode: normalizeOptionalText(item?.providerBaselineCode),
+      adapterContext: item?.adapterContext ? copy(item.adapterContext) : null
     };
   });
 }

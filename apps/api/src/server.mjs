@@ -11125,17 +11125,33 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "project_import_batch",
       scopeCode: "project"
     });
+    const adapterPreparedBatch =
+      body.adapterProviderCode || body.adapterConnectionId
+        ? platform.prepareProjectImportBatchFromAdapter({
+          companyId,
+          connectionId: body.adapterConnectionId,
+          providerCode: body.adapterProviderCode ?? null,
+          payload: body.adapterPayload ?? {},
+          sourceExportCapturedAt: body.sourceExportCapturedAt ?? null
+        })
+        : null;
     writeJson(
       res,
       201,
       platform.createProjectImportBatch({
         companyId,
         projectImportBatchId: body.projectImportBatchId ?? null,
-        sourceSystemCode: body.sourceSystemCode,
-        batchTypeCode: body.batchTypeCode ?? "project_migration",
-        importModeCode: body.importModeCode ?? "trial_seed",
-        sourceExportCapturedAt: body.sourceExportCapturedAt ?? null,
-        sourcePayload: body.sourcePayload || [],
+        sourceSystemCode: adapterPreparedBatch?.sourceSystemCode ?? body.sourceSystemCode,
+        batchTypeCode: body.batchTypeCode ?? adapterPreparedBatch?.batchTypeCode ?? "project_migration",
+        importModeCode: body.importModeCode ?? adapterPreparedBatch?.importModeCode ?? "trial_seed",
+        sourceExportCapturedAt: adapterPreparedBatch?.sourceExportCapturedAt ?? body.sourceExportCapturedAt ?? null,
+        sourcePayload: adapterPreparedBatch?.sourcePayload ?? (body.sourcePayload || []),
+        integrationConnectionId: adapterPreparedBatch?.integrationConnectionId ?? body.adapterConnectionId ?? null,
+        adapterProviderCode: adapterPreparedBatch?.adapterProviderCode ?? body.adapterProviderCode ?? null,
+        adapterProviderMode: adapterPreparedBatch?.adapterProviderMode ?? null,
+        adapterProviderEnvironmentRef: adapterPreparedBatch?.adapterProviderEnvironmentRef ?? null,
+        adapterProviderBaselineRef: adapterPreparedBatch?.adapterProviderBaselineRef ?? null,
+        adapterProviderBaselineCode: adapterPreparedBatch?.adapterProviderBaselineCode ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
