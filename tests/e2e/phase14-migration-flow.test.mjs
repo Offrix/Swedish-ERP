@@ -17,6 +17,7 @@ test("Phase 14.3 flow exposes migration routes and keeps cockpit evidence intact
   try {
     const root = await requestJson(baseUrl, "/");
     assert.equal(root.routes.includes("/v1/migration/cutover-plans/:cutoverPlanId/rollback/complete"), true);
+    assert.equal(root.routes.includes("/v1/migration/acceptance-records/:migrationAcceptanceRecordId/evidence"), true);
     assert.equal(root.routes.includes("/v1/migration/cockpit"), true);
 
     const adminToken = await loginWithStrongAuth({
@@ -134,6 +135,15 @@ test("Phase 14.3 flow exposes migration routes and keeps cockpit evidence intact
         }
       }
     });
+    const acceptanceRecords = await requestJson(baseUrl, `/v1/migration/acceptance-records?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    const acceptanceRecord = acceptanceRecords.items[0];
+    const acceptanceEvidence = await requestJson(baseUrl, `/v1/migration/acceptance-records/${acceptanceRecord.migrationAcceptanceRecordId}/evidence?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(acceptanceEvidence.evidenceBundle.status, "frozen");
+    assert.equal(acceptanceEvidence.evidenceBundle.cutoverPlanId, cutoverPlan.cutoverPlanId);
     await requestJson(baseUrl, `/v1/migration/cutover-plans/${cutoverPlan.cutoverPlanId}/validate`, {
       method: "POST",
       token: adminToken,

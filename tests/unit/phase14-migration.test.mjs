@@ -307,7 +307,7 @@ test("Phase 14.3 rollback requires recovery plan when regulated filing was submi
     cutoverPlanId: cutoverPlan.cutoverPlanId,
     lastExtractAt: "2026-03-24T08:10:00.000Z"
   });
-  platform.createMigrationAcceptanceRecord({
+  const acceptanceRecord = platform.createMigrationAcceptanceRecord({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
     acceptanceType: "go_live_readiness",
@@ -322,6 +322,14 @@ test("Phase 14.3 rollback requires recovery plan when regulated filing was submi
       taxAccountParityPassed: true
     }
   });
+  const exportedAcceptanceEvidence = platform.exportCutoverEvidenceBundle({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    migrationAcceptanceRecordId: acceptanceRecord.migrationAcceptanceRecordId
+  });
+  assert.equal(exportedAcceptanceEvidence.status, "frozen");
+  assert.equal(exportedAcceptanceEvidence.acceptanceType, "go_live_readiness");
+  assert.equal(exportedAcceptanceEvidence.cutoverPlanId, cutoverPlan.cutoverPlanId);
   platform.recordRestoreDrill({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,

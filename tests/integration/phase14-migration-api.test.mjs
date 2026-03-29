@@ -309,6 +309,12 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
       }
     });
     assert.equal(acceptanceRecord.status, "accepted");
+    const acceptanceEvidence = await requestJson(baseUrl, `/v1/migration/acceptance-records/${acceptanceRecord.migrationAcceptanceRecordId}/evidence?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(acceptanceEvidence.evidenceBundle.status, "frozen");
+    assert.equal(acceptanceEvidence.evidenceBundle.acceptanceType, "go_live_readiness");
+    assert.equal(acceptanceEvidence.evidenceBundle.cutoverPlanId, cutoverPlan.cutoverPlanId);
     const listedAcceptanceRecords = await requestJson(baseUrl, `/v1/migration/acceptance-records?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });

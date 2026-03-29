@@ -622,6 +622,8 @@ export function createMigrationModule({
       return {
         cutoverEvidenceBundleId: crypto.randomUUID(),
         companyId: acceptanceRecord.companyId,
+        migrationAcceptanceRecordId: acceptanceRecord.migrationAcceptanceRecordId,
+        acceptanceType: acceptanceRecord.acceptanceType,
         cutoverPlanId: acceptanceRecord.cutoverPlanId,
         acceptedVarianceReports: acceptanceRecord.diffReportIds,
         signoffRefs: acceptanceRecord.signoffRefs,
@@ -695,6 +697,8 @@ export function createMigrationModule({
     return {
       cutoverEvidenceBundleId: bundle.evidenceBundleId,
       companyId: acceptanceRecord.companyId,
+      migrationAcceptanceRecordId: acceptanceRecord.migrationAcceptanceRecordId,
+      acceptanceType: acceptanceRecord.acceptanceType,
       cutoverPlanId: acceptanceRecord.cutoverPlanId,
       acceptedVarianceReports: acceptanceRecord.diffReportIds,
       signoffRefs: acceptanceRecord.signoffRefs,

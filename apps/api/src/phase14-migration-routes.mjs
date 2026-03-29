@@ -211,6 +211,31 @@ export async function tryHandlePhase14MigrationRoutes({ req, res, url, path, pla
     return true;
   }
 
+  const acceptanceEvidenceMatch = matchPath(path, "/v1/migration/acceptance-records/:migrationAcceptanceRecordId/evidence");
+  if (req.method === "GET" && acceptanceEvidenceMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "migration_acceptance_record",
+      objectId: acceptanceEvidenceMatch.migrationAcceptanceRecordId,
+      scopeCode: "migration_cockpit"
+    });
+    assertPayrollOperationsReadAccess({ principal });
+    writeJson(res, 200, {
+      evidenceBundle: platform.exportCutoverEvidenceBundle({
+        sessionToken,
+        companyId,
+        migrationAcceptanceRecordId: acceptanceEvidenceMatch.migrationAcceptanceRecordId,
+        correlationId: optionalText(url.searchParams.get("correlationId")) ?? undefined
+      })
+    });
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/migration/post-cutover-correction-cases") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
