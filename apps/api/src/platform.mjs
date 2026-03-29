@@ -46,7 +46,9 @@ import {
   applyDurableStateSnapshot,
   createInMemoryCriticalDomainStateStore,
   createSqliteCriticalDomainStateStore,
-  serializeDurableState
+  serializeDurableState,
+  resolveCanonicalRepositoryConnectionString,
+  verifyRuntimeCanonicalRepositorySchemaContract as verifyRuntimeCanonicalRepositorySchemaContractBinding
 } from "../../../packages/domain-core/src/index.mjs";
 import { createAnnualReportingPlatform, ANNUAL_REPORTING_PROVIDER_BASELINES } from "../../../packages/domain-annual-reporting/src/index.mjs";
 import {
@@ -790,6 +792,10 @@ export function createApiPlatform(options = {}) {
     env,
     runtimeModeProfile
   });
+  const canonicalRepositoryConnectionString = resolveCanonicalRepositoryConnectionString({
+    connectionString: options.canonicalRepositoryConnectionString || null,
+    env
+  });
   const domains = {};
   const domainRegistry = [];
   const domainRegistryByKey = {};
@@ -1152,6 +1158,19 @@ export function createApiPlatform(options = {}) {
     },
     getRuntimeStartupDiagnostics: {
       value: () => defaultRuntimeDiagnostics,
+      enumerable: false
+    },
+    verifyRuntimeCanonicalRepositorySchemaContract: {
+      value:
+        typeof options.verifyRuntimeCanonicalRepositorySchemaContract === "function"
+          ? options.verifyRuntimeCanonicalRepositorySchemaContract
+          : canonicalRepositoryConnectionString
+            ? () =>
+              verifyRuntimeCanonicalRepositorySchemaContractBinding({
+                connectionString: canonicalRepositoryConnectionString,
+                env
+              })
+            : undefined,
       enumerable: false
     },
     criticalDomainStateStore: {

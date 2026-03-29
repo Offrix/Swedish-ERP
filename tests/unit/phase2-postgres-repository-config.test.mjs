@@ -4,7 +4,8 @@ import {
   POSTGRES_CANONICAL_REPOSITORY_REQUIRED_MIGRATION_IDS,
   POSTGRES_CANONICAL_REPOSITORY_SCHEMA_CONTRACT,
   createPostgresCanonicalRepositoryStore,
-  resolveCanonicalRepositoryConnectionString
+  resolveCanonicalRepositoryConnectionString,
+  verifyRuntimeCanonicalRepositorySchemaContract
 } from "../../packages/domain-core/src/repositories-postgres.mjs";
 
 test("Phase 2.1 canonical repository store prefers explicit connection strings", () => {
@@ -88,4 +89,25 @@ test("Phase 2.5 canonical repository store schema contract covers repository and
       foreignColumns: ["command_receipt_id"]
     }
   ]);
+});
+
+test("Phase 2.5 runtime canonical repository verifier reuses an injected store contract", async () => {
+  let verificationCalls = 0;
+  const verification = await verifyRuntimeCanonicalRepositorySchemaContract({
+    store: {
+      async verifySchemaContract() {
+        verificationCalls += 1;
+        return {
+          ok: true,
+          checkedTables: ["core_domain_records"]
+        };
+      }
+    }
+  });
+
+  assert.equal(verificationCalls, 1);
+  assert.deepEqual(verification, {
+    ok: true,
+    checkedTables: ["core_domain_records"]
+  });
 });

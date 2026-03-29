@@ -58,7 +58,8 @@ export {
 } from "./repositories.mjs";
 export {
   createPostgresCanonicalRepositoryStore,
-  resolveCanonicalRepositoryConnectionString
+  resolveCanonicalRepositoryConnectionString,
+  verifyRuntimeCanonicalRepositorySchemaContract
 } from "./repositories-postgres.mjs";
 export {
   CRITICAL_DOMAIN_STATE_SCHEMA_VERSION,

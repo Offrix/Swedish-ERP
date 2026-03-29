@@ -1249,3 +1249,33 @@ export function createPostgresCanonicalRepositoryStore({
     }
   };
 }
+
+export async function verifyRuntimeCanonicalRepositorySchemaContract({
+  store = null,
+  connectionString = null,
+  env = process.env,
+  max = 5,
+  idleTimeout = 20,
+  connectTimeout = 10
+} = {}) {
+  const ownsStore = !store;
+  const resolvedStore =
+    store ||
+    createPostgresCanonicalRepositoryStore({
+      connectionString,
+      env,
+      max,
+      idleTimeout,
+      connectTimeout
+    });
+  if (typeof resolvedStore?.verifySchemaContract !== "function") {
+    throw new TypeError("Canonical repository store must expose verifySchemaContract().");
+  }
+  try {
+    return await resolvedStore.verifySchemaContract();
+  } finally {
+    if (ownsStore && typeof resolvedStore?.close === "function") {
+      await resolvedStore.close();
+    }
+  }
+}

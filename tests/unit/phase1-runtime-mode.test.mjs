@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import http from "node:http";
 import { createDefaultApiPlatform, createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { startDesktopWebServer } from "../../apps/desktop-web/src/server.mjs";
 import { startFieldMobileServer } from "../../apps/field-mobile/src/server.mjs";
@@ -137,5 +138,94 @@ test("phase 1.2 desktop-web and field-mobile carry declared runtime mode metadat
   } finally {
     await desktopRuntime.stop();
     await fieldRuntime.stop();
+  }
+});
+
+test("Phase 2.5 api starter verifies canonical repository schema contract before listen", async () => {
+  const originalListen = http.Server.prototype.listen;
+  let listenCalls = 0;
+  http.Server.prototype.listen = function patchedListen(...args) {
+    listenCalls += 1;
+    return originalListen.apply(this, args);
+  };
+
+  try {
+    let verificationCalls = 0;
+    const runtime = await import("../../apps/api/src/server.mjs").then(({ startApiServer }) =>
+      startApiServer({
+        port: 0,
+        logger: () => {},
+        platform: {
+          environmentMode: "test",
+          getRuntimeModeProfile: () => ({ environmentMode: "test" }),
+          scanRuntimeInvariants: () => ({
+            startupAllowed: true,
+            activeStoreKind: "postgres",
+            summary: {
+              totalCount: 0,
+              blockingCount: 0,
+              warningCount: 0
+            }
+          }),
+          async verifyRuntimeCanonicalRepositorySchemaContract() {
+            verificationCalls += 1;
+            assert.equal(listenCalls, 0);
+            return {
+              ok: true
+            };
+          }
+        }
+      })
+    );
+
+    try {
+      assert.equal(verificationCalls, 1);
+      assert.equal(listenCalls, 1);
+    } finally {
+      await runtime.stop();
+    }
+  } finally {
+    http.Server.prototype.listen = originalListen;
+  }
+});
+
+test("Phase 2.5 api starter fails closed before listen when canonical repository schema verification fails", async () => {
+  const originalListen = http.Server.prototype.listen;
+  let listenCalls = 0;
+  http.Server.prototype.listen = function patchedListen(...args) {
+    listenCalls += 1;
+    return originalListen.apply(this, args);
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        import("../../apps/api/src/server.mjs").then(({ startApiServer }) =>
+          startApiServer({
+            port: 0,
+            logger: () => {},
+            platform: {
+              environmentMode: "production",
+              getRuntimeModeProfile: () => ({ environmentMode: "production" }),
+              scanRuntimeInvariants: () => ({
+                startupAllowed: true,
+                activeStoreKind: "postgres",
+                summary: {
+                  totalCount: 0,
+                  blockingCount: 0,
+                  warningCount: 0
+                }
+              }),
+              async verifyRuntimeCanonicalRepositorySchemaContract() {
+                throw new Error("canonical repository schema contract is incomplete");
+              }
+            }
+          })
+        ),
+      /canonical repository schema contract is incomplete/u
+    );
+    assert.equal(listenCalls, 0);
+  } finally {
+    http.Server.prototype.listen = originalListen;
   }
 });
