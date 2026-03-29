@@ -9,6 +9,11 @@ import {
 } from "./providers/asana.mjs";
 import { createBolagsverketAnnualProvider, BOLAGSVERKET_ANNUAL_PROVIDER_CODE } from "./providers/bolagsverket-annual.mjs";
 import { createEnableBankingProvider, ENABLE_BANKING_PROVIDER_CODE } from "./providers/enable-banking.mjs";
+import {
+  CLICKUP_PROVIDER_BASELINE_CODE,
+  CLICKUP_PROVIDER_CODE,
+  createClickUpProvider
+} from "./providers/clickup.mjs";
 import { createGoogleDocumentAiProvider, GOOGLE_DOCUMENT_AI_PROVIDER_CODE } from "./providers/google-document-ai.mjs";
 import {
   createHubSpotCrmProvider,
@@ -68,6 +73,7 @@ export { LOCAL_TOTP_PROVIDER_CODE } from "./providers/local-totp.mjs";
 export { WORKOS_FEDERATION_PROVIDER_CODE } from "./providers/workos-federation.mjs";
 export { SIGNICAT_SIGNING_ARCHIVE_PROVIDER_CODE } from "./providers/signicat-signing-archive.mjs";
 export { ASANA_PROVIDER_CODE } from "./providers/asana.mjs";
+export { CLICKUP_PROVIDER_CODE } from "./providers/clickup.mjs";
 export { HUBSPOT_CRM_PROVIDER_CODE } from "./providers/hubspot-crm.mjs";
 export { MONDAY_WORK_MANAGEMENT_PROVIDER_CODE } from "./providers/monday-work-management.mjs";
 export { TEAMLEADER_FOCUS_PROVIDER_CODE } from "./providers/teamleader-focus.mjs";
@@ -393,6 +399,20 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
     checksum: "asana-projects-se-2026.1",
     sourceSnapshotDate: "2026-03-29",
     semanticChangeSummary: "Asana projects baseline for project, portfolio, workload and native time-tracking handoff into governed project import batches."
+  }),
+  Object.freeze({
+    providerBaselineId: "clickup-projects-se-2026.1",
+    baselineCode: CLICKUP_PROVIDER_BASELINE_CODE,
+    providerCode: CLICKUP_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "crm_handoff_objects",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "v2",
+    checksum: "clickup-projects-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "ClickUp projects baseline for list, task, timesheet and workload handoff into governed project import batches."
   })
 ]);
 
@@ -508,6 +528,11 @@ export function createIntegrationEngine({
     environmentMode,
     providerBaselineRegistry: providerBaselines
   });
+  const clickUpProvider = createClickUpProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
   const mondayWorkManagementProvider = createMondayWorkManagementProvider({
     clock,
     environmentMode,
@@ -583,6 +608,7 @@ export function createIntegrationEngine({
       signingEvidenceArchiveProvider,
       hubSpotCrmProvider,
       asanaProvider,
+      clickUpProvider,
       mondayWorkManagementProvider,
       teamleaderFocusProvider
     ]
@@ -725,6 +751,7 @@ export function createIntegrationEngine({
           localTotpProvider: localTotpProvider.snapshot(),
           signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot(),
           asanaProvider: asanaProvider.snapshot(),
+          clickUpProvider: clickUpProvider.snapshot(),
           hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
           mondayWorkManagementProvider: mondayWorkManagementProvider.snapshot(),
           teamleaderFocusProvider: teamleaderFocusProvider.snapshot()
@@ -757,6 +784,7 @@ export function createIntegrationEngine({
         localTotpProvider: localTotpProvider.snapshot(),
         signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot(),
         asanaProvider: asanaProvider.snapshot(),
+        clickUpProvider: clickUpProvider.snapshot(),
         hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
         mondayWorkManagementProvider: mondayWorkManagementProvider.snapshot(),
         teamleaderFocusProvider: teamleaderFocusProvider.snapshot()
@@ -784,6 +812,7 @@ export function createIntegrationEngine({
     localTotpProvider.restore(snapshot?.providerSnapshots?.localTotpProvider || {});
     signingEvidenceArchiveProvider.restore(snapshot?.providerSnapshots?.signingEvidenceArchiveProvider || {});
     asanaProvider.restore(snapshot?.providerSnapshots?.asanaProvider || {});
+    clickUpProvider.restore(snapshot?.providerSnapshots?.clickUpProvider || {});
     hubSpotCrmProvider.restore(snapshot?.providerSnapshots?.hubSpotCrmProvider || {});
     mondayWorkManagementProvider.restore(snapshot?.providerSnapshots?.mondayWorkManagementProvider || {});
     teamleaderFocusProvider.restore(snapshot?.providerSnapshots?.teamleaderFocusProvider || {});
@@ -821,6 +850,14 @@ export function createIntegrationEngine({
     }
     if (connection.providerCode === ASANA_PROVIDER_CODE) {
       return asanaProvider.prepareProjectImportBatch({
+        companyId: resolvedCompanyId,
+        integrationConnectionId: connection.connectionId,
+        sourceExportCapturedAt,
+        ...(payload && typeof payload === "object" ? payload : {})
+      });
+    }
+    if (connection.providerCode === CLICKUP_PROVIDER_CODE) {
+      return clickUpProvider.prepareProjectImportBatch({
         companyId: resolvedCompanyId,
         integrationConnectionId: connection.connectionId,
         sourceExportCapturedAt,
