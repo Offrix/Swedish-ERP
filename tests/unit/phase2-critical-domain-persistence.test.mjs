@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { createInMemoryCriticalDomainStateStore } from "../../packages/domain-core/src/index.mjs";
 
 const CRITICAL_DOMAIN_KEYS = Object.freeze([
   "orgAuth",
@@ -179,5 +180,43 @@ test("Phase 2.4 can bootstrap sqlite-backed critical truth without explicit file
     );
   } finally {
     platform.closeCriticalDomainStateStore();
+  }
+});
+
+test("Phase 2.4 rolls back critical-domain mutations when durable save fails", () => {
+  const baseStore = createInMemoryCriticalDomainStateStore();
+  let failWrites = false;
+  const failingStore = {
+    ...baseStore,
+    kind: "failing_critical_domain_state_store",
+    save(payload) {
+      if (failWrites) {
+        throw new Error("critical_domain_save_failed");
+      }
+      return baseStore.save(payload);
+    }
+  };
+
+  const platform = createApiPlatform({
+    env: {},
+    runtimeMode: "test",
+    criticalDomainStateStore: failingStore
+  });
+
+  try {
+    failWrites = true;
+    assert.throws(
+      () =>
+        platform.createCompany({
+          legalName: "Rollback AB",
+          orgNumber: "556677-1100",
+          status: "active"
+        }),
+      /critical_domain_save_failed/
+    );
+    const orgAuthSnapshot = platform.getDomain("orgAuth").exportDurableState();
+    assert.equal(JSON.stringify(orgAuthSnapshot).includes("Rollback AB"), false);
+  } finally {
+    platform.closeCriticalDomainStateStore?.();
   }
 });

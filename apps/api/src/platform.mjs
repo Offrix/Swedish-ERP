@@ -1321,15 +1321,30 @@ function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
         return value.bind(target);
       }
       return (...args) => {
-        const result = value.apply(target, args);
-        if (result && typeof result.then === "function") {
-          return result.then((resolved) => {
-            persist();
-            return resolved;
-          });
+        const beforeSnapshot = target.exportDurableState();
+        const restoreOnFailure = (error) => {
+          target.importDurableState(beforeSnapshot);
+          throw error;
+        };
+        try {
+          const result = value.apply(target, args);
+          if (result && typeof result.then === "function") {
+            return result
+              .then((resolved) => {
+                try {
+                  persist();
+                } catch (error) {
+                  restoreOnFailure(error);
+                }
+                return resolved;
+              })
+              .catch((error) => restoreOnFailure(error));
+          }
+          persist();
+          return result;
+        } catch (error) {
+          restoreOnFailure(error);
         }
-        persist();
-        return result;
       };
     }
   });

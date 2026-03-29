@@ -417,6 +417,7 @@ Inför en konsekvent persistent kärna med repository interfaces, optimistic con
 - retry logic
 - projection rebuild
 - read model lag tracking
+- rollback-safe critical-domain persistence when durable snapshot save fails after mutation
 
 **Skriv om**
 - critical Map stores till repo-backed stores

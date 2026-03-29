@@ -228,6 +228,7 @@ Flytta affärssanningen från processminne till hållbar persistence med idempot
 - 2.2 återverifierad 2026-03-27: command receipt, outbox och inbox ligger fortsatt i samma commit, duplicate suppression hålls på idempotency-nivå och mutationruntime bär bounded-context repository bundles utan att förlora rollback-garantin.
 - 2.3 återverifierad 2026-03-27: job runtime bär explicit attemptlivscykel, retry policy, dead-letter och replay-planer; claim expiry före start skapar syntetisk attempthistorik och poison-pill-loopar stängs i dead-letter i stället för att försvinna tyst.
 - 2.4 återverifierad 2026-03-27: kritiska domäner kan rehydreras från durable snapshots, sqlite-backed critical truth bootar nu korrekt även utan explicit state-filpath, runtime diagnostics släpper inte igenom Map-only truth förrän durability inventory visar verklig snapshot-backed persistence, och plattformen exponerar nu per-domän durability inventory som fasgate.
+- 2.4 återhärdad 2026-03-29: kritisk domänpersistence rullar nu tillbaka in-memory mutation till föregående durable snapshot om state-save fallerar, så split-brain mellan processminne och critical-domain store inte lämnas kvar efter misslyckad persist.
 - 2.5 återverifierad 2026-03-27: projection rebuild bevarar source of truth och icke-målade projektioner, targeted full rebuild purgar bara rätt projectionsdokument och failed rebuild lämnar truth orörd tills lyckad retry rensar checkpoint-felet.
 
 **Delfaser**
