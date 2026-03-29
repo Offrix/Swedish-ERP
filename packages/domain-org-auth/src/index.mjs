@@ -245,6 +245,7 @@ export function createOrgAuthPlatform({
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  secretSealKey = null,
   providerBaselineRegistry = null,
   resolveIdentityModeIsolation = null,
   identityModeCatalog = null
@@ -258,6 +259,10 @@ export function createOrgAuthPlatform({
   const identityIsolationResolver = resolveIdentityModeIsolation;
   const identityIsolationCatalog =
     identityModeCatalog || buildDefaultIdentityModeCatalog({ providerEnvironmentRef });
+  const authSecretSealer = createSecretSealer({
+    secretSealKey: secretSealKey || `swedish-erp-auth-seal:${normalizedEnvironmentMode}:${providerEnvironmentRef}`,
+    keyId: `org-auth:${normalizedEnvironmentMode}:${providerEnvironmentRef}`
+  });
   const state = {
     companies: new Map(),
     users: new Map(),
@@ -278,6 +283,7 @@ export function createOrgAuthPlatform({
     sessionRevisionIdsBySession: new Map(),
     authFactors: new Map(),
     authGuardrails: new Map(),
+    authFactorSecrets: new Map(),
     authChallenges: new Map(),
     challengeCompletionReceipts: new Map(),
     challengeReceiptIdsByChallenge: new Map(),
@@ -306,7 +312,7 @@ export function createOrgAuthPlatform({
   };
 
     if (seedDemo) {
-      seedDemoState(state, clock);
+      seedDemoState(state, clock, authSecretSealer);
     }
 
   return {
@@ -963,7 +969,7 @@ export function createOrgAuthPlatform({
       userId: session.userId,
       factorType: "totp",
       status: "pending_enrollment",
-      secret: enrollment.secret,
+      secretRef: null,
       credentialId: null,
       publicKey: null,
       providerSubject: null,
@@ -972,6 +978,7 @@ export function createOrgAuthPlatform({
       createdAt: nowIso(),
       updatedAt: nowIso()
     };
+    writeAuthFactorSecret(factor, enrollment.secret);
     state.authFactors.set(factor.factorId, factor);
     pushAudit({
       companyId: session.companyId,
@@ -1011,7 +1018,7 @@ export function createOrgAuthPlatform({
       message: "Too many invalid TOTP attempts. Try again later."
     });
 
-    if (!verifyTotpCode({ secret: factor.secret, code, now: currentDate() })) {
+    if (!verifyTotpCode({ secret: readAuthFactorSecret(factor), code, now: currentDate() })) {
       const failureGuardrail = recordAuthGuardrailFailure(totpGuardrail, {
         windowMs: TOTP_FAILURE_WINDOW_MS,
         threshold: TOTP_FAILURE_THRESHOLD,
@@ -1143,7 +1150,7 @@ export function createOrgAuthPlatform({
       userId: session.userId,
       factorType: "passkey",
       status: "active",
-      secret: null,
+      secretRef: null,
       credentialId: resolvedCredentialId,
       publicKey: resolvedPublicKey,
       providerSubject: null,
@@ -2144,7 +2151,13 @@ export function createOrgAuthPlatform({
     function exportDurableState() {
       return {
         ...serializeDurableState(state, {
-          excludeKeys: ["authBroker"]
+          excludeKeys: ["authBroker"],
+          customSerializers: {
+            authFactors: (authFactors) =>
+              new Map(
+                [...authFactors.entries()].map(([factorId, factor]) => [factorId, sanitizeAuthFactorForPersistence(factor)])
+              )
+          }
         }),
         authBroker: state.authBroker.snapshot()
       };
@@ -2155,6 +2168,7 @@ export function createOrgAuthPlatform({
       applyDurableStateSnapshot(state, snapshot, {
         preserveKeys: ["authBroker"]
       });
+      migrateLegacyAuthFactorSecrets();
       normalizeDeviceTrustRecordStorage();
       state.authBroker.restore(brokerSnapshot);
     }
@@ -2165,7 +2179,7 @@ export function createOrgAuthPlatform({
     if (!factor) {
       throw httpError(404, "totp_factor_missing", "No TOTP factor is available for test generation.");
     }
-    return generateTotpCode({ secret: factor.secret, now });
+    return generateTotpCode({ secret: readAuthFactorSecret(factor), now });
   }
 
   function getBankIdCompletionTokenForTesting(orderRef) {
@@ -2336,7 +2350,7 @@ export function createOrgAuthPlatform({
       userId: user.userId,
       factorType: "totp",
       status: "active",
-      secret: enrollment.secret,
+      secretRef: null,
       credentialId: null,
       publicKey: null,
       providerSubject: null,
@@ -2345,6 +2359,7 @@ export function createOrgAuthPlatform({
       createdAt: factorTimestamp,
       updatedAt: factorTimestamp
     });
+    writeAuthFactorSecret(state.authFactors.get(totpFactorId), enrollment.secret);
     upsertIdentityAccount({
       companyId: company.companyId,
       companyUserId: companyUser.companyUserId,
@@ -2370,7 +2385,7 @@ export function createOrgAuthPlatform({
       userId: user.userId,
       factorType: "bankid",
       status: "active",
-      secret: null,
+      secretRef: null,
       credentialId: null,
       publicKey: null,
       providerSubject: `bankid:${company.companyId}:${companyUser.companyUserId}`,
@@ -2559,6 +2574,69 @@ export function createOrgAuthPlatform({
     createSessionRevision(session, {
       reasonCode: assertNonEmpty(reasonCode, "security_lockout_reason_required")
     });
+  }
+
+  function writeAuthFactorSecret(factor, secret) {
+    const resolvedSecret = assertNonEmpty(secret, "auth_factor_secret_required");
+    const secretRef = factor.secretRef || factor.factorId;
+    factor.secretRef = secretRef;
+    delete factor.secret;
+    state.authFactorSecrets.set(secretRef, {
+      secretRef,
+      factorId: factor.factorId,
+      companyUserId: factor.companyUserId,
+      factorType: factor.factorType,
+      keyId: authSecretSealer.keyId,
+      algorithm: "aes-256-gcm",
+      createdAt: state.authFactorSecrets.get(secretRef)?.createdAt || nowIso(),
+      updatedAt: nowIso(),
+      envelope: authSecretSealer.seal(resolvedSecret)
+    });
+    factor.updatedAt = nowIso();
+    return secretRef;
+  }
+
+  function readAuthFactorSecret(factor) {
+    if (factor.secretRef) {
+      const storedSecret = state.authFactorSecrets.get(factor.secretRef);
+      if (!storedSecret?.envelope) {
+        throw httpError(500, "auth_factor_secret_missing", "Auth factor secret envelope was missing.");
+      }
+      return authSecretSealer.open(storedSecret.envelope);
+    }
+    if (factor.secret) {
+      const legacySecret = factor.secret;
+      writeAuthFactorSecret(factor, legacySecret);
+      return legacySecret;
+    }
+    throw httpError(500, "auth_factor_secret_missing", "Auth factor secret was missing.");
+  }
+
+  function sanitizeAuthFactorForPersistence(factor) {
+    const sanitized = copy(factor);
+    delete sanitized.secret;
+    return sanitized;
+  }
+
+  function migrateLegacyAuthFactorSecrets() {
+    for (const factor of state.authFactors.values()) {
+      if (factor.factorType !== "totp") {
+        delete factor.secret;
+        if (!Object.prototype.hasOwnProperty.call(factor, "secretRef")) {
+          factor.secretRef = null;
+        }
+        continue;
+      }
+      if (factor.secretRef) {
+        delete factor.secret;
+        continue;
+      }
+      if (factor.secret) {
+        writeAuthFactorSecret(factor, factor.secret);
+        continue;
+      }
+      throw httpError(500, "auth_factor_secret_missing", `Missing TOTP secret for factor ${factor.factorId}.`);
+    }
   }
 
   function findOrCreateUser({ email, displayName } = {}) {
@@ -3199,7 +3277,7 @@ export function createOrgAuthPlatform({
   }
 }
 
-function seedDemoState(state, clock) {
+function seedDemoState(state, clock, authSecretSealer) {
   const now = timestamp(new Date(clock()));
   state.companies.set(DEMO_IDS.companyId, {
     companyId: DEMO_IDS.companyId,
@@ -3290,7 +3368,7 @@ function seedDemoState(state, clock) {
     userId: DEMO_IDS.userId,
     factorType: "totp",
     status: "active",
-    secret: DEMO_TOTP_SECRET,
+    secretRef: null,
     credentialId: null,
     publicKey: null,
     providerSubject: null,
@@ -3305,7 +3383,7 @@ function seedDemoState(state, clock) {
     userId: DEMO_IDS.userId,
     factorType: "bankid",
     status: "active",
-    secret: null,
+    secretRef: null,
     credentialId: null,
     publicKey: null,
     providerSubject: DEMO_BANKID_SUBJECT,
@@ -3320,7 +3398,7 @@ function seedDemoState(state, clock) {
     userId: DEMO_APPROVER_IDS.userId,
     factorType: "totp",
     status: "active",
-    secret: DEMO_APPROVER_TOTP_SECRET,
+    secretRef: null,
     credentialId: null,
     publicKey: null,
     providerSubject: null,
@@ -3329,6 +3407,8 @@ function seedDemoState(state, clock) {
     createdAt: now,
     updatedAt: now
   });
+  writeSeededAuthFactorSecret(state, authSecretSealer, "demo-totp-factor", DEMO_TOTP_SECRET, now);
+  writeSeededAuthFactorSecret(state, authSecretSealer, "demo-approver-totp-factor", DEMO_APPROVER_TOTP_SECRET, now);
   state.identityAccounts.set(
     buildIdentityAccountKey({
       companyId: DEMO_IDS.companyId,
@@ -3872,6 +3952,7 @@ function assertAllowedValue(value, allowedValues, code) {
 function stripSecret(factor) {
   const clone = copy(factor);
   delete clone.secret;
+  delete clone.secretRef;
   return clone;
 }
 
@@ -3932,6 +4013,61 @@ function normalizeEmailAddress(email) {
     throw httpError(400, "email_required", "Email is required.");
   }
   return normalizedEmail;
+}
+
+function createSecretSealer({ secretSealKey, keyId } = {}) {
+  const resolvedKeyId = assertNonEmpty(keyId, "secret_sealer_key_id_required");
+  const keyMaterial = crypto.createHash("sha256").update(assertNonEmpty(secretSealKey, "secret_sealer_key_required")).digest();
+  return {
+    keyId: resolvedKeyId,
+    seal(secret) {
+      const iv = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv("aes-256-gcm", keyMaterial, iv);
+      const ciphertext = Buffer.concat([cipher.update(assertNonEmpty(secret, "secret_plaintext_required"), "utf8"), cipher.final()]);
+      return {
+        keyId: resolvedKeyId,
+        iv: iv.toString("base64"),
+        authTag: cipher.getAuthTag().toString("base64"),
+        ciphertext: ciphertext.toString("base64")
+      };
+    },
+    open(envelope) {
+      if (!envelope || envelope.keyId !== resolvedKeyId) {
+        throw httpError(500, "secret_envelope_key_mismatch", "Secret envelope key id did not match the active auth sealer.");
+      }
+      const decipher = crypto.createDecipheriv(
+        "aes-256-gcm",
+        keyMaterial,
+        Buffer.from(assertNonEmpty(envelope.iv, "secret_envelope_iv_required"), "base64")
+      );
+      decipher.setAuthTag(Buffer.from(assertNonEmpty(envelope.authTag, "secret_envelope_auth_tag_required"), "base64"));
+      const plaintext = Buffer.concat([
+        decipher.update(Buffer.from(assertNonEmpty(envelope.ciphertext, "secret_envelope_ciphertext_required"), "base64")),
+        decipher.final()
+      ]).toString("utf8");
+      return plaintext;
+    }
+  };
+}
+
+function writeSeededAuthFactorSecret(state, authSecretSealer, factorId, secret, nowIsoTimestamp) {
+  const factor = state.authFactors.get(assertNonEmpty(factorId, "seeded_factor_id_required"));
+  if (!factor) {
+    throw httpError(500, "seeded_auth_factor_missing", `Seeded auth factor ${factorId} was not found.`);
+  }
+  factor.secretRef = factor.factorId;
+  delete factor.secret;
+  state.authFactorSecrets.set(factor.secretRef, {
+    secretRef: factor.secretRef,
+    factorId: factor.factorId,
+    companyUserId: factor.companyUserId,
+    factorType: factor.factorType,
+    keyId: authSecretSealer.keyId,
+    algorithm: "aes-256-gcm",
+    createdAt: nowIsoTimestamp,
+    updatedAt: nowIsoTimestamp,
+    envelope: authSecretSealer.seal(secret)
+  });
 }
 
 function httpError(status, code, message) {

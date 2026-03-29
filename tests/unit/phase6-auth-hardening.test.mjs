@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEMO_APPROVER_TOTP_SECRET,
   DEMO_APPROVER_EMAIL,
+  DEMO_TOTP_SECRET,
   DEMO_IDS,
   createOrgAuthPlatform
 } from "../../packages/domain-org-auth/src/index.mjs";
@@ -122,6 +124,37 @@ test("Phase 6 hardening locks repeated invalid TOTP attempts and revokes the att
       companyId: DEMO_IDS.companyId,
       email: DEMO_APPROVER_EMAIL,
       now
+    })
+  });
+  assert.equal(verified.session.status, "active");
+});
+
+test("Phase 6 hardening exports sealed auth factor secrets instead of raw TOTP state and restores them after import", () => {
+  const clock = () => new Date("2026-03-29T14:00:00Z");
+  const platform = createOrgAuthPlatform({
+    clock,
+    bootstrapScenarioCode: "test_default_demo"
+  });
+
+  const durableState = platform.exportDurableState();
+  const serialized = JSON.stringify(durableState);
+  assert.equal(serialized.includes(DEMO_TOTP_SECRET), false);
+  assert.equal(serialized.includes(DEMO_APPROVER_TOTP_SECRET), false);
+
+  const restoredPlatform = createOrgAuthPlatform({
+    clock
+  });
+  restoredPlatform.importDurableState(durableState);
+  const started = restoredPlatform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_APPROVER_EMAIL
+  });
+  const verified = restoredPlatform.verifyTotp({
+    sessionToken: started.sessionToken,
+    code: restoredPlatform.getTotpCodeForTesting({
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_APPROVER_EMAIL,
+      now: clock()
     })
   });
   assert.equal(verified.session.status, "active");

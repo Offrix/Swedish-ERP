@@ -18,6 +18,12 @@ This runbook governs login-start throttling and TOTP lockout in the phase 6 auth
 - When TOTP lockout is triggered, the attacked pending session must be revoked immediately.
 - After the lockout window expires, a fresh login with a valid TOTP code must succeed again.
 
+## Secret handling
+
+- TOTP plaintext must never be present in exported durable auth factor state.
+- Durable auth factor objects may carry refs only; sealed secret envelopes carry encrypted factor secrets separately.
+- Restore/import must preserve factor usability without reintroducing plaintext into exported state.
+
 ## Verification
 
 - Verify three pending login starts succeed and the fourth is blocked with `login_rate_limited`.
@@ -25,3 +31,4 @@ This runbook governs login-start throttling and TOTP lockout in the phase 6 auth
 - Verify repeated invalid TOTP codes end in `totp_temporarily_locked`.
 - Verify the attacked session is revoked when TOTP lockout triggers.
 - Verify auth audit contains blocked/denied records for both login-start and TOTP guardrails.
+- Verify exported durable state does not contain raw TOTP secrets.
