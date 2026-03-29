@@ -150,11 +150,14 @@ export function createPartnerModule({
     jobRiskClasses: JOB_RISK_CLASSES,
     jobErrorClasses: JOB_ERROR_CLASSES,
     listPartnerConnectionCatalog,
+    listAdapterContractTestPacks,
     getPartnerConnectionCapabilities,
     createPartnerConnection,
     listPartnerConnections,
     setPartnerConnectionHealth,
     runPartnerHealthCheck,
+    listPartnerHealthChecks,
+    getPartnerHealthSummary,
     runAdapterContractTest,
     listAdapterContractResults,
     dispatchPartnerOperation,
@@ -165,6 +168,7 @@ export function createPartnerModule({
     enqueueAsyncJob,
     listAsyncJobs,
     getAsyncJob,
+    listAsyncDeadLetters,
     claimAsyncJob,
     completeAsyncJob,
     failAsyncJobAttempt,
@@ -175,6 +179,28 @@ export function createPartnerModule({
 
   function listPartnerConnectionCatalog() {
     return PARTNER_CONNECTION_TYPES.map((connectionType) => partnerCatalogEntry(connectionType));
+  }
+
+  function listAdapterContractTestPacks({ connectionType = null, providerCode = null } = {}) {
+    const resolvedConnectionType = optionalText(connectionType);
+    const resolvedProviderCode = optionalText(providerCode);
+    const connectionTypes = resolvedConnectionType ? [assertAllowed(resolvedConnectionType, PARTNER_CONNECTION_TYPES, "partner_connection_type_invalid")] : PARTNER_CONNECTION_TYPES;
+    return connectionTypes.flatMap((type) => {
+      const catalog = partnerCatalogEntry(type);
+      const providers = resolvedProviderCode ? catalog.supportedProviders.filter((candidate) => candidate === resolvedProviderCode) : catalog.supportedProviders;
+      return providers.map((provider) => ({
+        testPackCode: catalog.contractTestPackCode,
+        connectionType: type,
+        providerCode: provider,
+        supportedModes: catalog.supportsSandbox ? ["sandbox", "test", "production"] : ["test", "production"],
+        assertions: contractAssertionsFor(type),
+        requiredEvents: clone(catalog.requiredEvents),
+        replaySafe: catalog.replaySafe,
+        operationCodes: clone(catalog.operationCodes),
+        defaultRateLimitPerMinute: catalog.defaultRateLimitPerMinute,
+        providerBaselineCode: PARTNER_PROVIDER_BASELINE_SELECTIONS[type]?.[provider] || null
+      }));
+    });
   }
 
     function getPartnerConnectionCapabilities({ companyId, connectionId } = {}) {
@@ -334,6 +360,53 @@ export function createPartnerModule({
     return clone(healthCheck);
   }
 
+  function listPartnerHealthChecks({ companyId, connectionId = null, status = null } = {}) {
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const resolvedConnectionId = optionalText(connectionId);
+    const resolvedStatus = optionalText(status);
+    return [...state.partnerHealthChecks.values()]
+      .filter((healthCheck) => healthCheck.companyId === resolvedCompanyId)
+      .filter((healthCheck) => (resolvedConnectionId ? healthCheck.connectionId === resolvedConnectionId : true))
+      .filter((healthCheck) => (resolvedStatus ? healthCheck.status === resolvedStatus : true))
+      .sort((left, right) => left.executedAt.localeCompare(right.executedAt))
+      .map(clone);
+  }
+
+  function getPartnerHealthSummary({ companyId, connectionId } = {}) {
+    const connection = requireConnection(companyId, connectionId);
+    const latestHealthCheck = [...state.partnerHealthChecks.values()]
+      .filter((healthCheck) => healthCheck.companyId === connection.companyId && healthCheck.connectionId === connection.connectionId)
+      .sort((left, right) => right.executedAt.localeCompare(left.executedAt))[0] || null;
+    const operations = [...state.partnerOperations.values()].filter((operation) => operation.connectionId === connection.connectionId);
+    const contractResult = connection.lastContractResultId ? state.partnerContractResults.get(connection.lastContractResultId) || null : null;
+    const connectionJobs = [...state.asyncJobs.values()].filter((job) => job.connectionId === connection.connectionId);
+    const deadLetterCount = connectionJobs.filter((job) => job.status === "dead_lettered").length;
+    const replayPlannedCount = connectionJobs.filter((job) => job.status === "replay_planned").length;
+    const retryScheduledCount = connectionJobs.filter((job) => job.status === "retry_scheduled").length;
+    const fallbackOperationCount = operations.filter((operation) => operation.status === "fallback").length;
+    const rateLimitedOperationCount = operations.filter((operation) => operation.status === "rate_limited").length;
+    return clone({
+      connectionId: connection.connectionId,
+      companyId: connection.companyId,
+      connectionType: connection.connectionType,
+      providerCode: connection.providerCode,
+      mode: connection.mode,
+      connectionStatus: connection.status,
+      healthStatus: connection.healthStatus || "unknown",
+      latestHealthCheck,
+      lastContractResultStatus: contractResult?.status || null,
+      contractTestGreen: contractResult?.status === "passed",
+      lastSuccessfulOperationAt: connection.lastSuccessfulOperationAt || null,
+      lastFailureOperationAt: connection.lastFailureOperationAt || null,
+      latestReceiptAt: connection.latestReceiptAt || null,
+      deadLetterCount,
+      replayPlannedCount,
+      retryScheduledCount,
+      fallbackOperationCount,
+      rateLimitedOperationCount
+    });
+  }
+
   async function runAdapterContractTest({ companyId, connectionId, testPackCode = null, mode = null, actorId = "system" } = {}) {
     const connection = requireConnection(companyId, connectionId);
     const assertions = contractAssertionsFor(connection.connectionType);
@@ -405,6 +478,9 @@ export function createPartnerModule({
     actorId = "system"
   } = {}) {
     const connection = requireConnection(companyId, connectionId);
+    if (connection.mode === "production" && !hasPassingContractTest(state, connection)) {
+      throw createError(409, "partner_contract_test_required", "Production partner operations require a passing contract-test result.");
+    }
     const companyKey = `${companyId}:${connectionId}:${currentMinuteKey(clock)}`;
     const currentCount = state.partnerRateLimitCounters.get(companyKey) || 0;
     const operation = {
@@ -444,6 +520,10 @@ export function createPartnerModule({
         const job = enqueueAsyncJob({
           companyId,
           jobType: `${connection.connectionType}.${operation.operationCode}`,
+          connectionId: connection.connectionId,
+          connectionType: connection.connectionType,
+          providerCode: connection.providerCode,
+          sourceSurfaceCode: "partner",
           payloadRef: operation.operationId,
           payload,
           priority: "normal",
@@ -467,6 +547,10 @@ export function createPartnerModule({
         const job = enqueueAsyncJob({
           companyId,
           jobType: `${connection.connectionType}.${operation.operationCode}`,
+          connectionId: connection.connectionId,
+          connectionType: connection.connectionType,
+          providerCode: connection.providerCode,
+          sourceSurfaceCode: "partner",
           payloadRef: operation.operationId,
           payload,
           priority: connection.status === "outage" ? "high" : "normal",
@@ -482,6 +566,10 @@ export function createPartnerModule({
     const job = enqueueAsyncJob({
       companyId,
       jobType: `${connection.connectionType}.${operation.operationCode}`,
+      connectionId: connection.connectionId,
+      connectionType: connection.connectionType,
+      providerCode: connection.providerCode,
+      sourceSurfaceCode: "partner",
       payloadRef: operation.operationId,
       payload,
       priority: "normal",
@@ -658,6 +746,10 @@ export function createPartnerModule({
   function enqueueAsyncJob({
     companyId,
     jobType,
+    connectionId = null,
+    connectionType = null,
+    providerCode = null,
+    sourceSurfaceCode = null,
     payloadRef,
     payload = {},
     priority = "normal",
@@ -683,6 +775,10 @@ export function createPartnerModule({
       jobId: crypto.randomUUID(),
       companyId: resolvedCompanyId,
       jobType: resolvedJobType,
+      connectionId: optionalText(connectionId),
+      connectionType: optionalText(connectionType),
+      providerCode: optionalText(providerCode),
+      sourceSurfaceCode: optionalText(sourceSurfaceCode),
       jobPayloadHash: payloadHash,
       jobPayloadRef: text(payloadRef || resolvedKey, "job_payload_ref_required"),
       payloadJson: clone(payload),
@@ -708,20 +804,54 @@ export function createPartnerModule({
     return presentJob(state, job);
   }
 
-  function listAsyncJobs({ companyId, status = null, jobType = null } = {}) {
+  function listAsyncJobs({ companyId, status = null, jobType = null, connectionId = null } = {}) {
     const resolvedCompanyId = text(companyId, "company_id_required");
     const resolvedStatus = optionalText(status);
     const resolvedJobType = optionalText(jobType);
+    const resolvedConnectionId = optionalText(connectionId);
     return [...state.asyncJobs.values()]
       .filter((job) => job.companyId === resolvedCompanyId)
       .filter((job) => (resolvedStatus ? job.status === resolvedStatus : true))
       .filter((job) => (resolvedJobType ? job.jobType === resolvedJobType : true))
+      .filter((job) => (resolvedConnectionId ? job.connectionId === resolvedConnectionId : true))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       .map((job) => presentJob(state, job));
   }
 
   function getAsyncJob({ companyId, jobId } = {}) {
     return presentJob(state, requireJob(companyId, jobId));
+  }
+
+  function listAsyncDeadLetters({ companyId, connectionId = null, operatorState = null } = {}) {
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const resolvedConnectionId = optionalText(connectionId);
+    const resolvedOperatorState = optionalText(operatorState);
+    return [...state.asyncDeadLetters.values()]
+      .filter((deadLetter) => deadLetter.companyId === resolvedCompanyId)
+      .map((deadLetter) => ({
+        deadLetter,
+        job: state.asyncJobs.get(deadLetter.jobId) || null
+      }))
+      .filter(({ job }) => (resolvedConnectionId ? job?.connectionId === resolvedConnectionId : true))
+      .filter(({ deadLetter }) => (resolvedOperatorState ? deadLetter.operatorState === resolvedOperatorState : true))
+      .sort((left, right) => left.deadLetter.enteredAt.localeCompare(right.deadLetter.enteredAt))
+      .map(({ deadLetter, job }) =>
+        clone({
+          ...deadLetter,
+          job: job
+            ? {
+                jobId: job.jobId,
+                jobType: job.jobType,
+                status: job.status,
+                connectionId: job.connectionId || null,
+                connectionType: job.connectionType || null,
+                providerCode: job.providerCode || null,
+                sourceSurfaceCode: job.sourceSurfaceCode || null,
+                updatedAt: job.updatedAt
+              }
+            : null
+        })
+      );
   }
 
   function claimAsyncJob({ companyId, jobId, workerId } = {}) {
@@ -1019,6 +1149,14 @@ function presentJob(state, job) {
     ...job,
     deadLetter: state.asyncDeadLetters.get(job.jobId) || null
   });
+}
+
+function hasPassingContractTest(state, connection) {
+  if (!connection?.lastContractResultId) {
+    return false;
+  }
+  const result = state.partnerContractResults.get(connection.lastContractResultId);
+  return result?.status === "passed";
 }
 
 function buildDefaultHealthCheckResults({ state, connection, checkSetCode, clock }) {

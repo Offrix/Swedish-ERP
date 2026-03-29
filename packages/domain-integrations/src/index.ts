@@ -65,7 +65,7 @@ export type PublicApiScopeCode =
   | "webhook.manage"
   | "partner.read"
   | "automation.read";
-export type WebhookDeliveryStatus = "queued" | "running" | "sent" | "failed" | "rate_limited" | "suppressed" | "disabled";
+export type WebhookDeliveryStatus = "queued" | "running" | "sent" | "failed" | "rate_limited" | "suppressed" | "disabled" | "dead_lettered";
 export type PartnerConnectionType = "bank" | "peppol" | "pension" | "crm" | "commerce" | "id06";
 export type PartnerConnectionStatus = "active" | "degraded" | "outage" | "disabled";
 export type PartnerFallbackMode = "queue_retry" | "manual_review" | "disabled";
@@ -162,6 +162,9 @@ export interface PublicApiClient {
   readonly displayName: string;
   readonly mode: PublicApiMode;
   readonly scopes: readonly PublicApiScopeCode[];
+  readonly specVersion: string;
+  readonly supportedGrantTypes: readonly string[];
+  readonly tokenEndpoint: string;
   readonly status: PublicApiClientStatus;
 }
 
@@ -179,9 +182,15 @@ export interface PartnerConnection {
   readonly connectionId: string;
   readonly companyId: string;
   readonly connectionType: PartnerConnectionType;
+  readonly providerCode: string;
   readonly partnerCode: string;
+  readonly mode: "sandbox" | "test" | "production";
   readonly status: PartnerConnectionStatus;
+  readonly healthStatus: "unknown" | "healthy" | "degraded" | "outage";
   readonly fallbackMode: PartnerFallbackMode;
+  readonly credentialsConfigured?: boolean;
+  readonly credentialsPresent?: boolean;
+  readonly latestReceiptAt?: string | null;
 }
 
 export interface PartnerOperation {
@@ -199,5 +208,81 @@ export interface AsyncJobRef {
   readonly jobType: string;
   readonly status: AsyncJobStatus;
   readonly riskClass: AsyncJobRiskClass;
+  readonly connectionId: string | null;
+  readonly connectionType: PartnerConnectionType | null;
+  readonly providerCode: string | null;
+  readonly sourceSurfaceCode: string | null;
   readonly lastErrorClass: AsyncJobErrorClass | null;
+}
+
+export interface PartnerContractTestPack {
+  readonly testPackCode: string;
+  readonly connectionType: PartnerConnectionType;
+  readonly providerCode: string;
+  readonly supportedModes: readonly string[];
+  readonly assertions: readonly string[];
+  readonly requiredEvents: readonly string[];
+  readonly replaySafe: boolean;
+  readonly operationCodes: readonly string[];
+  readonly defaultRateLimitPerMinute: number;
+  readonly providerBaselineCode: string | null;
+}
+
+export interface PartnerHealthCheck {
+  readonly healthCheckId: string;
+  readonly companyId: string;
+  readonly connectionId: string;
+  readonly providerCode: string;
+  readonly checkSetCode: string;
+  readonly actorId: string;
+  readonly status: "healthy" | "degraded" | "outage";
+  readonly results: readonly {
+    readonly checkCode: string;
+    readonly status: "passed" | "warning" | "failed";
+    readonly summary: string;
+    readonly observedAt: string;
+  }[];
+  readonly executedAt: string;
+}
+
+export interface PartnerHealthSummary {
+  readonly connectionId: string;
+  readonly companyId: string;
+  readonly connectionType: PartnerConnectionType;
+  readonly providerCode: string;
+  readonly mode: "sandbox" | "test" | "production";
+  readonly connectionStatus: PartnerConnectionStatus;
+  readonly healthStatus: "unknown" | "healthy" | "degraded" | "outage";
+  readonly latestHealthCheck: PartnerHealthCheck | null;
+  readonly lastContractResultStatus: "passed" | "failed" | null;
+  readonly contractTestGreen: boolean;
+  readonly lastSuccessfulOperationAt: string | null;
+  readonly lastFailureOperationAt: string | null;
+  readonly latestReceiptAt: string | null;
+  readonly deadLetterCount: number;
+  readonly replayPlannedCount: number;
+  readonly retryScheduledCount: number;
+  readonly fallbackOperationCount: number;
+  readonly rateLimitedOperationCount: number;
+}
+
+export interface AsyncDeadLetterRef {
+  readonly deadLetterId: string;
+  readonly jobId: string;
+  readonly companyId: string;
+  readonly enteredAt: string;
+  readonly terminalReason: AsyncJobErrorClass;
+  readonly operatorState: string;
+  readonly replayAllowed: boolean;
+  readonly riskClass: AsyncJobRiskClass;
+  readonly job: {
+    readonly jobId: string;
+    readonly jobType: string;
+    readonly status: AsyncJobStatus;
+    readonly connectionId: string | null;
+    readonly connectionType: PartnerConnectionType | null;
+    readonly providerCode: string | null;
+    readonly sourceSurfaceCode: string | null;
+    readonly updatedAt: string;
+  } | null;
 }

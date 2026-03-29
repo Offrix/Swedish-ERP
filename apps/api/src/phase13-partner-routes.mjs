@@ -9,6 +9,26 @@ import {
 } from "./route-helpers.mjs";
 
 export async function tryHandlePhase13PartnerRoutes({ req, res, url, path, platform }) {
+  if (req.method === "GET" && path === "/v1/partners/contract-test-packs") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      action: "company.read",
+      objectType: "partner_contract_test",
+      objectId: companyId,
+      scopeCode: "partner_contract_test"
+    });
+    writeJson(res, 200, {
+      items: platform.listAdapterContractTestPacks({
+        connectionType: optionalText(url.searchParams.get("connectionType")),
+        providerCode: optionalText(url.searchParams.get("providerCode"))
+      })
+    });
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/partners/connections") {
     const body = await readJsonBody(req);
     const sessionToken = readSessionToken(req, body);
@@ -128,6 +148,26 @@ export async function tryHandlePhase13PartnerRoutes({ req, res, url, path, platf
   }
 
   const partnerHealthCheckMatch = matchPath(path, "/v1/partners/connections/:connectionId/health-checks");
+  if (req.method === "GET" && partnerHealthCheckMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      action: "company.read",
+      objectType: "partner_connection",
+      objectId: partnerHealthCheckMatch.connectionId,
+      scopeCode: "partner_connection"
+    });
+    writeJson(res, 200, {
+      items: platform.listPartnerHealthChecks({
+        companyId,
+        connectionId: partnerHealthCheckMatch.connectionId,
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
   if (req.method === "POST" && partnerHealthCheckMatch) {
     const body = await readJsonBody(req);
     const sessionToken = readSessionToken(req, body);
@@ -151,6 +191,22 @@ export async function tryHandlePhase13PartnerRoutes({ req, res, url, path, platf
         actorId: body.actorId || "session_user"
       })
     );
+    return true;
+  }
+
+  const partnerHealthSummaryMatch = matchPath(path, "/v1/partners/connections/:connectionId/health-summary");
+  if (req.method === "GET" && partnerHealthSummaryMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      action: "company.read",
+      objectType: "partner_connection",
+      objectId: partnerHealthSummaryMatch.connectionId,
+      scopeCode: "partner_connection"
+    });
+    writeJson(res, 200, platform.getPartnerHealthSummary({ companyId, connectionId: partnerHealthSummaryMatch.connectionId }));
     return true;
   }
 

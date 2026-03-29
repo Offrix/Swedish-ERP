@@ -57,7 +57,29 @@ export async function tryHandlePhase13JobRoutes({ req, res, url, path, platform 
       items: platform.listAsyncJobs({
         companyId,
         status: optionalText(url.searchParams.get("status")),
-        jobType: optionalText(url.searchParams.get("jobType"))
+        jobType: optionalText(url.searchParams.get("jobType")),
+        connectionId: optionalText(url.searchParams.get("connectionId"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/jobs/dead-letters") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      action: "company.read",
+      objectType: "async_job",
+      objectId: companyId,
+      scopeCode: "async_job"
+    });
+    writeJson(res, 200, {
+      items: platform.listAsyncDeadLetters({
+        companyId,
+        connectionId: optionalText(url.searchParams.get("connectionId")),
+        operatorState: optionalText(url.searchParams.get("operatorState"))
       })
     });
     return true;
