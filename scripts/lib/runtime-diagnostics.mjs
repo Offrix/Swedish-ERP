@@ -76,6 +76,15 @@ const FORBIDDEN_ROUTE_TARGETS = Object.freeze([
     remediation: "Hide sandbox-only route families from protected runtime metadata."
   })
 ]);
+const PHASEBUCKET_ROUTE_TARGETS = Object.freeze([
+  Object.freeze({
+    domainKey: "apiPhasebucketRoutes",
+    relativePath: "apps/api/src/server.mjs",
+    pattern: /\.\/phase(?:6|13|14|16)[^"]*routes\.mjs|tryHandlePhase(?:6|13|14|16)/gu,
+    summary: "API runtime still depends on phasebucket route handlers.",
+    remediation: "Replace phasebucket route handlers with domain-driven route families before protected boot or parity claims."
+  })
+]);
 
 function freeze(value) {
   return Object.freeze(value);
@@ -445,6 +454,16 @@ export function scanRuntimeInvariants({
       workspaceRoot,
       targets: FORBIDDEN_ROUTE_TARGETS,
       findingCode: "forbidden_route_family_present",
+      categoryCode: "route_surface"
+    })
+  );
+  findings.push(
+    ...collectPatternFindings({
+      protectedMode,
+      startupSurface,
+      workspaceRoot,
+      targets: PHASEBUCKET_ROUTE_TARGETS,
+      findingCode: "phasebucket_route_runtime_present",
       categoryCode: "route_surface"
     })
   );

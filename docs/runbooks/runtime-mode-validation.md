@@ -29,6 +29,7 @@ Ensure every starter chooses an explicit runtime mode and that non-live modes ne
    - stub providers
    - simulated filing or receipt runtime
    - forbidden sandbox route families
+   - phasebucket route handlers still wired into protected API runtime
 8. Critical-domain snapshot persistence is never auto-provisioned for protected modes; if a durable store is required it must be configured explicitly.
 9. Runtime diagnostics must be observable through:
    - `GET /v1/system/runtime-mode`
@@ -40,7 +41,7 @@ Ensure every starter chooses an explicit runtime mode and that non-live modes ne
 Run:
 
 ```powershell
-node scripts/runtime-honesty-scan.mjs --mode production --surface api --active-store-kind memory --critical-domain-state-store-kind memory --expect-finding missing_persistent_store --expect-finding map_only_critical_truth --expect-finding stub_provider_present --expect-finding simulated_receipt_runtime --expect-finding forbidden_route_family_present --require-startup-blocked --require-blocking --json
+node scripts/runtime-honesty-scan.mjs --mode production --surface api --active-store-kind memory --critical-domain-state-store-kind memory --expect-finding missing_persistent_store --expect-finding map_only_critical_truth --expect-finding stub_provider_present --expect-finding simulated_receipt_runtime --expect-finding forbidden_route_family_present --expect-finding phasebucket_route_runtime_present --require-startup-blocked --require-blocking --json
 node scripts/runtime-honesty-scan.mjs --mode production --surface api --active-store-kind memory --critical-domain-state-store-kind memory --bootstrap-mode scenario_seed --bootstrap-scenario-code phase1_protected_seed_probe --seed-demo --expect-finding seed_demo_forbidden --require-startup-blocked --require-blocking --json
 node scripts/runtime-honesty-scan.mjs --mode production --surface api --active-store-kind memory --critical-domain-state-store-kind memory --bootstrap-mode scenario_seed --bootstrap-scenario-code test_default_demo --seed-demo --expect-finding seed_demo_forbidden --expect-finding demo_data_present_in_protected_mode --require-startup-blocked --require-blocking --json
 node --test tests/unit/phase1-runtime-mode.test.mjs
@@ -64,6 +65,7 @@ Then run the full verification suite before the next roadmap subphase.
 - Protected boot proceeds despite blocking runtime invariant findings.
 - Runtime diagnostics endpoint omits current findings or startupAllowed state.
 - Honesty scanner misses Map-only truth, stub providers, simulated submission runtime or forbidden sandbox route families.
+- Honesty scanner misses phasebucket route handlers still wired into protected API runtime.
 - Honesty scanner misses demo data already resident in protected runtime state.
 - Protected boot does not emit `seed_demo_forbidden` when scenario seeding or `seedDemo=true` is attempted.
 

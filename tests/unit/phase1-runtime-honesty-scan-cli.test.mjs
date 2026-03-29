@@ -51,6 +51,8 @@ test("phase 1.5 runtime honesty scan CLI reports protected runtime blockers", ()
       "simulated_receipt_runtime",
       "--expect-finding",
       "forbidden_route_family_present",
+      "--expect-finding",
+      "phasebucket_route_runtime_present",
       "--require-startup-blocked",
       "--require-blocking",
       "--json"
@@ -62,6 +64,12 @@ test("phase 1.5 runtime honesty scan CLI reports protected runtime blockers", ()
       assert.ok(payload.summary.blockingCount >= 1);
       assert.equal(
         payload.findings.some((finding) => finding.findingCode === "missing_persistent_store"),
+        true
+      );
+      assert.equal(
+        payload.findings.some(
+          (finding) => finding.findingCode === "phasebucket_route_runtime_present"
+        ),
         true
       );
       assert.equal(

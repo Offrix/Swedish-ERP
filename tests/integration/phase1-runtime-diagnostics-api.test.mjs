@@ -50,6 +50,12 @@ test("phase 1.4 runtime endpoints expose startup diagnostics and bootstrap valid
       invariantsPayload.findings.some((finding) => finding.findingCode === "forbidden_route_family_present"),
       true
     );
+    assert.equal(
+      invariantsPayload.findings.some(
+        (finding) => finding.findingCode === "phasebucket_route_runtime_present"
+      ),
+      true
+    );
 
     const validateResponse = await fetch(`${baseUrl}/v1/system/bootstrap/validate`, {
       method: "POST",
