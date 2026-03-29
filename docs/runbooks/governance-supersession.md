@@ -28,6 +28,7 @@ Historiska `[x]`-markeringar är uttryckligen icke-bindande.
 3. Nya byggbeslut måste placeras i final-roadmapen och implementationsbiblioteket, inte i äldre roadmap/bible.
 4. Om ett äldre dokument innehåller korrekt bakgrund får det bara användas som stödunderlag när det inte krockar med finaldokumenten.
 5. Inga historiska `[x]` får användas som leveransbevis, go-live-bevis eller parity-/advantage-bevis.
+6. Det som fortfarande är rätt i tidigare styrning måste bevaras uttryckligen via `docs/implementation-control/GOVERNANCE_CARRY_FORWARD_MATRIX.md`, inte via fortsatt beroende på gamla acceptansmarkeringar.
 
 ## Evidence
 
@@ -35,12 +36,15 @@ Supersession ska alltid kunna bevisas med:
 
 - commit som introducerar finaldokumenten
 - commit som nedgraderar gamla roadmap/bible
+- commit som låser carry-forward-matrisen
 - repo-root-referenser som pekar på finaldokumenten
 - komplett blocker-traceability i fas 0.3
 
 ## Kontrollista
 
 - README pekar på finaldokumenten
+- README pekar även på carry-forward-matrisen
 - gamla roadmap/bible har explicit historisk statusnotis
+- carry-forward-matrisen finns och täcker generell plattform, finance/payroll före projects, trial/live, provider baselines och operator-first support
 - historiska statusnotiser i docs pekar på finaldokumenten
 - inga release-noter eller root-dokument pekar ut gamla roadmap/bible som bindande

@@ -11,6 +11,10 @@ De enda bindande styrdokumenten fÃ¶r allt kvarvarande arbete fÃ¶re UI Ã¤r:
 - `docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md`
 - `docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md`
 
+Det som var rätt i den tidigare styrningen men fortfarande ska bevaras uttryckligen finns låst i:
+
+- `docs/implementation-control/GOVERNANCE_CARRY_FORWARD_MATRIX.md`
+
 Alla Ã¤ldre `master-control`-, `implementation-control`-, ADR-, runbook- och analysdokument Ã¤r historiska inputkÃ¤llor. De fÃ¥r anvÃ¤ndas som stÃ¶dmaterial, men de Ã¤r inte bindande om de krockar med dokumenten ovan.
 
 ## Vad Produkten Ã„r

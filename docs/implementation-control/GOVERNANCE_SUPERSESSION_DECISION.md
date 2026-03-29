@@ -25,11 +25,25 @@ Följande dokument är historiska input och får inte användas som acceptansbev
 - Finaldokumenten definierar ny fasordning, nya blocker-traces och nya bindande krav för security, migration, SIE4, corporate tax och owner distributions.
 - Repo-root och historiska stöddokument måste därför peka på finaldokumenten som enda current guidance.
 
+## Bevarade styrprinciper
+
+Följande delar från tidigare styrning är uttryckligen bevarade och får inte tappas bort bara för att gamla acceptansmarkeringar ogiltigförklaras:
+
+- generell svensk företagsplattform, inte byggcentrerad produktkärna
+- finance/payroll före general project core och vertikala packs
+- trial/live-separation som eget tekniskt och operativt problem
+- rulepack/provider-baseline-tänk med publicering, pinning och rollback
+- operator-first support/backoffice
+- unified receipts/recovery som bärande driftprincip
+
+Den bindande carry-forward-matrisen finns i `docs/implementation-control/GOVERNANCE_CARRY_FORWARD_MATRIX.md`.
+
 ## Evidence refs
 
 - `docs/runbooks/governance-supersession.md`
 - `docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md`
 - `docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md`
+- `docs/implementation-control/GOVERNANCE_CARRY_FORWARD_MATRIX.md`
 - commit som inför denna fil och supersession-notiserna i repo:t
 
 ## No-go effekt
