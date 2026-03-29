@@ -34,6 +34,17 @@ export const PARALLEL_RUN_PLAN_STATUSES = Object.freeze([
   "cancelled"
 ]);
 export const FINANCE_READINESS_CHECK_STATUSES = Object.freeze(["pending", "completed", "blocked"]);
+export const PILOT_EXECUTION_STATUSES = Object.freeze([
+  "in_progress",
+  "blocked",
+  "completed"
+]);
+export const PILOT_SCENARIO_STATUSES = Object.freeze([
+  "pending",
+  "passed",
+  "blocked",
+  "failed"
+]);
 
 const DEFAULT_ONBOARDING_STEP_CODES = Object.freeze([
   "company_profile",
@@ -77,6 +88,52 @@ const DEFAULT_TRIAL_BLOCKED_OPERATION_CLASSES = Object.freeze([
   "live_tax_account_events",
   "live_psp_settlement",
   "legal_effect"
+]);
+const DEFAULT_PILOT_COHORT_CODE = "internal_finance_dogfood";
+const PILOT_REQUIRED_APPROVAL_CLASSES = Object.freeze(["implementation", "finance", "support"]);
+const DEFAULT_PILOT_SCENARIO_DEFINITIONS = Object.freeze([
+  Object.freeze({
+    scenarioCode: "finance_core",
+    label: "Finance core",
+    domainCode: "finance",
+    description: "Accounts receivable, accounts payable, banking and close flows."
+  }),
+  Object.freeze({
+    scenarioCode: "vat_cycle",
+    label: "VAT cycle",
+    domainCode: "vat",
+    description: "VAT decision, period lock and reporting flow."
+  }),
+  Object.freeze({
+    scenarioCode: "payroll_agi",
+    label: "Payroll and AGI",
+    domainCode: "payroll",
+    description: "Payroll processing, AGI preparation and submission readiness."
+  }),
+  Object.freeze({
+    scenarioCode: "hus_claim",
+    label: "HUS claim",
+    domainCode: "hus",
+    description: "HUS readiness, evidence and submission chain."
+  }),
+  Object.freeze({
+    scenarioCode: "tax_account_reconciliation",
+    label: "Tax account reconciliation",
+    domainCode: "tax_account",
+    description: "Tax account liabilities, discrepancies and reconciliation handling."
+  }),
+  Object.freeze({
+    scenarioCode: "annual_reporting",
+    label: "Annual reporting",
+    domainCode: "annual_reporting",
+    description: "Annual package, signoff and filing readiness."
+  }),
+  Object.freeze({
+    scenarioCode: "support_operations",
+    label: "Support operations",
+    domainCode: "support",
+    description: "Support case, replay, dead-letter and incident handling."
+  })
 ]);
 const TRIAL_SEED_SCENARIO_ALIAS_CODES = Object.freeze({
   agency_trial_seed: "retainer_capacity_agency"
@@ -434,6 +491,8 @@ export function createTenantControlEngine({
     portableDataBundles: new Map(),
     parallelRunPlans: new Map(),
     parallelRunPlanIdsByCompany: new Map(),
+    pilotExecutions: new Map(),
+    pilotExecutionIdsByCompany: new Map(),
     financeBlueprintsByCompany: new Map(),
     financeFoundationRecordsByCompany: new Map(),
     tenantControlEvents: [],
@@ -449,6 +508,8 @@ export function createTenantControlEngine({
     trialEnvironmentProfileStatuses: TRIAL_ENVIRONMENT_PROFILE_STATUSES,
     promotionPlanStatuses: PROMOTION_PLAN_STATUSES,
     parallelRunPlanStatuses: PARALLEL_RUN_PLAN_STATUSES,
+    pilotExecutionStatuses: PILOT_EXECUTION_STATUSES,
+    pilotScenarioStatuses: PILOT_SCENARIO_STATUSES,
     createTenantBootstrap,
     getTenantBootstrap,
     getTenantBootstrapChecklist,
@@ -476,6 +537,12 @@ export function createTenantControlEngine({
     listPromotionPlans,
     startParallelRun,
     listParallelRunPlans,
+    startPilotExecution,
+    getPilotExecution,
+    listPilotExecutions,
+    recordPilotScenarioOutcome,
+    completePilotExecution,
+    exportPilotExecutionEvidence,
     getFinanceReadinessValidation,
     snapshotTenantControl,
     exportDurableState,
@@ -1484,6 +1551,359 @@ export function createTenantControlEngine({
       .map(copy);
   }
 
+  function startPilotExecution({
+    sessionToken,
+    companyId,
+    label = null,
+    cohortCode = DEFAULT_PILOT_COHORT_CODE,
+    scenarioCodes = [],
+    trialEnvironmentProfileId = null,
+    promotionPlanId = null,
+    parallelRunPlanId = null,
+    cutoverPlanId = null,
+    notes = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const principal = authorizeCompanyAction({
+      sessionToken,
+      companyId: resolvedCompanyId,
+      action: "COMPANY_MANAGE",
+      objectType: "pilot_execution",
+      objectId: resolvedCompanyId,
+      scopeCode: "pilot_execution"
+    });
+    const financeReadiness = getFinanceReadinessValidation({
+      sessionToken,
+      companyId: resolvedCompanyId
+    });
+    if (financeReadiness.status !== "finance_ready") {
+      throw httpError(409, "pilot_execution_finance_not_ready", "Pilot execution requires a finance-ready company.");
+    }
+
+    const resolvedTrialEnvironment = trialEnvironmentProfileId ? requireTrialEnvironment(trialEnvironmentProfileId) : null;
+    if (resolvedTrialEnvironment && resolvedTrialEnvironment.companyId !== resolvedCompanyId) {
+      throw httpError(409, "pilot_execution_trial_scope_mismatch", "Trial environment belongs to another company.");
+    }
+    if (resolvedTrialEnvironment) {
+      assertTrialEnvironmentIsolated(resolvedTrialEnvironment);
+    }
+
+    const resolvedPromotionPlan = promotionPlanId ? requirePromotionPlan(promotionPlanId) : null;
+    if (resolvedPromotionPlan && resolvedPromotionPlan.companyId !== resolvedCompanyId) {
+      throw httpError(409, "pilot_execution_promotion_scope_mismatch", "Promotion plan belongs to another company.");
+    }
+
+    const resolvedParallelRunPlan = parallelRunPlanId ? requireParallelRunPlan(parallelRunPlanId) : null;
+    if (resolvedParallelRunPlan && resolvedParallelRunPlan.companyId !== resolvedCompanyId) {
+      throw httpError(409, "pilot_execution_parallel_run_scope_mismatch", "Parallel run belongs to another company.");
+    }
+
+    const scenarioDefinitions = resolvePilotScenarioDefinitions(scenarioCodes);
+    const domainAvailability = buildPilotDomainAvailability();
+    const missingDomains = domainAvailability.filter((item) => item.available !== true).map((item) => item.domainCode);
+    if (missingDomains.length > 0) {
+      throw httpError(
+        409,
+        "pilot_execution_domain_unavailable",
+        `Pilot execution requires domains that are not available: ${missingDomains.join(", ")}.`
+      );
+    }
+
+    const now = nowIso();
+    const record = {
+      pilotExecutionId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      cohortCode: requireText(String(cohortCode || DEFAULT_PILOT_COHORT_CODE), "pilot_cohort_code_required"),
+      label: normalizeOptionalText(label) || `Internal pilot ${resolvedCompanyId}`,
+      status: "in_progress",
+      financeReadinessStatusAtStart: financeReadiness.status,
+      financeReadinessSnapshot: copy(financeReadiness),
+      scenarioResults: buildPilotScenarioResults(scenarioDefinitions),
+      scenarioSummary: null,
+      gateStatus: "in_progress",
+      blockingIssueCodes: [],
+      nextActionCodes: [],
+      domainAvailability,
+      trialEnvironmentProfileId: resolvedTrialEnvironment?.trialEnvironmentProfileId || null,
+      promotionPlanId: resolvedPromotionPlan?.promotionPlanId || null,
+      parallelRunPlanId: resolvedParallelRunPlan?.parallelRunPlanId || null,
+      cutoverPlanId: normalizeOptionalText(cutoverPlanId),
+      rollbackPreparedness: {
+        status: "pending",
+        strategyCode: null,
+        evidenceRefs: [],
+        notes: null,
+        updatedAt: null
+      },
+      approvalCoverage: {
+        requiredApprovalClasses: copy(PILOT_REQUIRED_APPROVAL_CLASSES),
+        implementation: { fulfilled: false, actorUserIds: [] },
+        finance: { fulfilled: false, actorUserIds: [] },
+        support: { fulfilled: false, actorUserIds: [] },
+        complete: false
+      },
+      latestEvidenceBundleId: null,
+      notes: normalizeOptionalText(notes),
+      startedByUserId: principal.userId,
+      startedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null
+    };
+    syncPilotExecutionDerivedState(record);
+    state.pilotExecutions.set(record.pilotExecutionId, record);
+    appendToIndex(state.pilotExecutionIdsByCompany, resolvedCompanyId, record.pilotExecutionId);
+    appendDomainEvent("pilot.started", {
+      companyId: resolvedCompanyId,
+      pilotExecutionId: record.pilotExecutionId,
+      actorUserId: principal.userId,
+      cohortCode: record.cohortCode,
+      scenarioCodes: record.scenarioResults.map((item) => item.scenarioCode)
+    });
+    appendAuditEvent({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      action: "tenant_control.pilot_execution.started",
+      entityType: "pilot_execution",
+      entityId: record.pilotExecutionId,
+      metadata: {
+        cohortCode: record.cohortCode,
+        scenarioCount: record.scenarioResults.length,
+        trialEnvironmentProfileId: record.trialEnvironmentProfileId,
+        promotionPlanId: record.promotionPlanId,
+        parallelRunPlanId: record.parallelRunPlanId
+      }
+    });
+    return presentPilotExecution(record);
+  }
+
+  function getPilotExecution({ sessionToken, pilotExecutionId } = {}) {
+    const record = requirePilotExecution(pilotExecutionId);
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_READ",
+      objectType: "pilot_execution",
+      objectId: record.pilotExecutionId,
+      scopeCode: "pilot_execution"
+    });
+    return presentPilotExecution(record);
+  }
+
+  function listPilotExecutions({ sessionToken, companyId } = {}) {
+    authorizeCompanyAction({
+      sessionToken,
+      companyId,
+      action: "COMPANY_READ",
+      objectType: "pilot_execution",
+      objectId: companyId,
+      scopeCode: "pilot_execution"
+    });
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.pilotExecutionIdsByCompany.get(resolvedCompanyId) || [])
+      .map((pilotExecutionId) => state.pilotExecutions.get(pilotExecutionId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map((record) => presentPilotExecution(record));
+  }
+
+  function recordPilotScenarioOutcome({
+    sessionToken,
+    pilotExecutionId,
+    scenarioCode,
+    status,
+    notes = null,
+    blockerCodes = [],
+    evidenceRefs = []
+  } = {}) {
+    const record = requirePilotExecution(pilotExecutionId);
+    const principal = authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_MANAGE",
+      objectType: "pilot_execution",
+      objectId: record.pilotExecutionId,
+      scopeCode: "pilot_execution"
+    });
+    if (record.status === "completed") {
+      throw httpError(409, "pilot_execution_completed", "Completed pilot executions are immutable.");
+    }
+    const resolvedScenarioCode = requireText(scenarioCode, "pilot_scenario_code_required");
+    const scenario = record.scenarioResults.find((item) => item.scenarioCode === resolvedScenarioCode);
+    if (!scenario) {
+      throw httpError(404, "pilot_scenario_not_found", "Pilot scenario was not found.");
+    }
+    const resolvedStatus = requirePilotScenarioStatus(status);
+    scenario.status = resolvedStatus;
+    scenario.notes = normalizeOptionalText(notes);
+    scenario.blockerCodes = resolvedStatus === "passed" ? [] : normalizeStringList(blockerCodes);
+    scenario.evidenceRefs = normalizePilotArtifactRefs(evidenceRefs, {
+      defaultArtifactType: "pilot_scenario_evidence",
+      roleCode: "pilot_execution"
+    });
+    scenario.recordedByUserId = principal.userId;
+    scenario.recordedAt = nowIso();
+    scenario.updatedAt = scenario.recordedAt;
+    syncPilotExecutionDerivedState(record);
+    record.updatedAt = scenario.updatedAt;
+    appendDomainEvent("pilot.scenario_recorded", {
+      companyId: record.companyId,
+      pilotExecutionId: record.pilotExecutionId,
+      scenarioCode: scenario.scenarioCode,
+      status: scenario.status,
+      actorUserId: principal.userId
+    });
+    appendAuditEvent({
+      companyId: record.companyId,
+      actorId: principal.userId,
+      action: "tenant_control.pilot_execution.scenario_recorded",
+      entityType: "pilot_execution",
+      entityId: record.pilotExecutionId,
+      metadata: {
+        scenarioCode: scenario.scenarioCode,
+        status: scenario.status,
+        blockerCodes: copy(scenario.blockerCodes),
+        evidenceRefCount: scenario.evidenceRefs.length
+      }
+    });
+    return presentPilotExecution(record);
+  }
+
+  function completePilotExecution({
+    sessionToken,
+    pilotExecutionId,
+    approvalActorIds = [],
+    rollbackStrategyCode,
+    rollbackEvidenceRefs = [],
+    notes = null
+  } = {}) {
+    const record = requirePilotExecution(pilotExecutionId);
+    const principal = authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_MANAGE",
+      objectType: "pilot_execution",
+      objectId: record.pilotExecutionId,
+      scopeCode: "pilot_execution"
+    });
+    if (record.status === "completed") {
+      return presentPilotExecution(record);
+    }
+
+    syncPilotExecutionDerivedState(record);
+    if (record.scenarioSummary?.pendingCount > 0 || record.scenarioSummary?.blockedCount > 0 || record.scenarioSummary?.failedCount > 0) {
+      throw httpError(409, "pilot_execution_not_ready_for_completion", "All pilot scenarios must pass before completion.");
+    }
+
+    const financeReadiness = getFinanceReadinessValidation({
+      sessionToken,
+      companyId: record.companyId
+    });
+    if (financeReadiness.status !== "finance_ready") {
+      throw httpError(409, "pilot_execution_finance_not_ready", "Pilot completion requires a finance-ready company.");
+    }
+
+    const approvalCoverage = evaluatePilotApprovalCoverage({
+      companyId: record.companyId,
+      principalUserId: principal.userId,
+      approvalActorIds: normalizeStringList(approvalActorIds)
+    });
+    if (approvalCoverage.complete !== true) {
+      throw httpError(409, "pilot_execution_approval_incomplete", "Pilot completion requires implementation, finance and support approval coverage.");
+    }
+
+    const normalizedRollbackEvidenceRefs = normalizePilotArtifactRefs(rollbackEvidenceRefs, {
+      defaultArtifactType: "rollback_preparedness_evidence",
+      roleCode: "pilot_execution"
+    });
+    if (normalizedRollbackEvidenceRefs.length === 0) {
+      throw httpError(409, "pilot_execution_rollback_evidence_required", "Pilot completion requires rollback preparedness evidence.");
+    }
+
+    record.rollbackPreparedness = {
+      status: "verified",
+      strategyCode: requireText(rollbackStrategyCode, "pilot_execution_rollback_strategy_required"),
+      evidenceRefs: normalizedRollbackEvidenceRefs,
+      notes: normalizeOptionalText(notes),
+      updatedAt: nowIso()
+    };
+    record.approvalCoverage = approvalCoverage;
+    record.notes = normalizeOptionalText(notes) || record.notes;
+    record.financeReadinessSnapshot = copy(financeReadiness);
+    record.financeReadinessStatusAtStart = record.financeReadinessStatusAtStart || financeReadiness.status;
+    const evidenceBundle = createPilotExecutionEvidenceBundle({
+      record,
+      actorId: principal.userId
+    });
+    record.latestEvidenceBundleId = evidenceBundle.evidenceBundleId;
+    record.status = "completed";
+    record.gateStatus = "completed";
+    record.blockingIssueCodes = [];
+    record.completedAt = nowIso();
+    record.updatedAt = record.completedAt;
+
+    const companySetupProfileId = state.companySetupProfileIdByCompany.get(record.companyId);
+    const companySetupProfile = companySetupProfileId ? state.companySetupProfiles.get(companySetupProfileId) || null : null;
+    if (companySetupProfile) {
+      companySetupProfile.status = "pilot";
+      companySetupProfile.updatedAt = record.completedAt;
+      companySetupProfile.financeReadyAt = companySetupProfile.financeReadyAt || record.completedAt;
+    }
+
+    appendDomainEvent("pilot.completed", {
+      companyId: record.companyId,
+      pilotExecutionId: record.pilotExecutionId,
+      actorUserId: principal.userId,
+      evidenceBundleId: record.latestEvidenceBundleId
+    });
+    appendAuditEvent({
+      companyId: record.companyId,
+      actorId: principal.userId,
+      action: "tenant_control.pilot_execution.completed",
+      entityType: "pilot_execution",
+      entityId: record.pilotExecutionId,
+      metadata: {
+        evidenceBundleId: record.latestEvidenceBundleId,
+        rollbackStrategyCode: record.rollbackPreparedness.strategyCode,
+        approvalCoverage: copy(record.approvalCoverage)
+      }
+    });
+    return presentPilotExecution(record);
+  }
+
+  function exportPilotExecutionEvidence({ sessionToken, pilotExecutionId } = {}) {
+    const record = requirePilotExecution(pilotExecutionId);
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_READ",
+      objectType: "pilot_execution",
+      objectId: record.pilotExecutionId,
+      scopeCode: "pilot_execution"
+    });
+    if (record.status !== "completed") {
+      throw httpError(409, "pilot_execution_not_completed", "Pilot evidence can only be exported after completion.");
+    }
+    const evidenceDomain = getOptionalDomain("evidence");
+    if (
+      record.latestEvidenceBundleId
+      && evidenceDomain
+      && typeof evidenceDomain.getEvidenceBundle === "function"
+    ) {
+      return evidenceDomain.getEvidenceBundle({
+        companyId: record.companyId,
+        evidenceBundleId: record.latestEvidenceBundleId
+      });
+    }
+    const evidenceBundle = createPilotExecutionEvidenceBundle({
+      record,
+      actorId: "tenant_control_pilot_export"
+    });
+    record.latestEvidenceBundleId = evidenceBundle.evidenceBundleId;
+    record.updatedAt = nowIso();
+    return copy(evidenceBundle);
+  }
+
   function listTrialEnvironmentRecordsByCompany(companyId) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return (state.trialEnvironmentIdsByCompany.get(resolvedCompanyId) || [])
@@ -1504,6 +1924,14 @@ export function createTenantControlEngine({
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return (state.parallelRunPlanIdsByCompany.get(resolvedCompanyId) || [])
       .map((parallelRunPlanId) => state.parallelRunPlans.get(parallelRunPlanId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  function listPilotExecutionRecordsByCompany(companyId) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.pilotExecutionIdsByCompany.get(resolvedCompanyId) || [])
+      .map((pilotExecutionId) => state.pilotExecutions.get(pilotExecutionId))
       .filter(Boolean)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
@@ -2166,6 +2594,7 @@ export function createTenantControlEngine({
       promotionValidationReports: [...state.promotionValidationReports.values()],
       portableDataBundles: [...state.portableDataBundles.values()],
       parallelRunPlans: [...state.parallelRunPlans.values()],
+      pilotExecutions: [...state.pilotExecutions.values()],
       financeBlueprints: [...state.financeBlueprintsByCompany.values()],
       financeFoundationRecords: [...state.financeFoundationRecordsByCompany.values()],
       tenantControlEvents: [...state.tenantControlEvents],
@@ -2306,7 +2735,7 @@ export function createTenantControlEngine({
       existingId ||
       tenantSetupProfile?.tenantSetupProfileId ||
       crypto.randomUUID();
-    const status = mapCompanySetupStatus(tenantSetupProfile?.status, bootstrapStatus, company?.status);
+    const status = mapCompanySetupStatus(tenantSetupProfile?.status, bootstrapStatus, company?.status, existing?.status);
     const financeBlueprint = state.financeBlueprintsByCompany.get(companyId) || inferFinanceBlueprint({
       companyId,
       bootstrap: tenantBootstrapId ? state.tenantBootstraps.get(tenantBootstrapId) || null : null,
@@ -2742,6 +3171,22 @@ export function createTenantControlEngine({
     }
   }
 
+  function requireParallelRunPlan(parallelRunPlanId) {
+    const record = state.parallelRunPlans.get(requireText(parallelRunPlanId, "parallel_run_plan_id_required"));
+    if (!record) {
+      throw httpError(404, "parallel_run_plan_not_found", "Parallel run plan was not found.");
+    }
+    return record;
+  }
+
+  function requirePilotExecution(pilotExecutionId) {
+    const record = state.pilotExecutions.get(requireText(pilotExecutionId, "pilot_execution_id_required"));
+    if (!record) {
+      throw httpError(404, "pilot_execution_not_found", "Pilot execution was not found.");
+    }
+    return record;
+  }
+
   function requirePromotionPlan(promotionPlanId) {
     const record = state.promotionPlans.get(requireText(promotionPlanId, "promotion_plan_id_required"));
     if (!record) {
@@ -2800,6 +3245,19 @@ export function createTenantControlEngine({
       ...plan,
       validationReport,
       portableDataBundle
+    });
+  }
+
+  function presentPilotExecution(record) {
+    return copy({
+      ...record,
+      scenarioResults: (record.scenarioResults || []).map((item) => copy(item)),
+      scenarioSummary: copy(record.scenarioSummary),
+      blockingIssueCodes: copy(record.blockingIssueCodes || []),
+      nextActionCodes: copy(record.nextActionCodes || []),
+      domainAvailability: copy(record.domainAvailability || []),
+      rollbackPreparedness: copy(record.rollbackPreparedness || null),
+      approvalCoverage: copy(record.approvalCoverage || null)
     });
   }
 
@@ -3203,6 +3661,118 @@ export function createTenantControlEngine({
     };
   }
 
+  function createPilotExecutionEvidenceBundle({
+    record,
+    actorId
+  } = {}) {
+    const evidenceDomain = getOptionalDomain("evidence");
+    const metadata = {
+      cohortCode: record.cohortCode,
+      financeReadinessStatusAtStart: record.financeReadinessStatusAtStart,
+      approvalCoverage: copy(record.approvalCoverage),
+      rollbackPreparedness: copy(record.rollbackPreparedness),
+      scenarioSummary: copy(record.scenarioSummary)
+    };
+    const artifactRefs = [
+      {
+        artifactType: "pilot_finance_readiness_snapshot",
+        artifactRef: `pilot-finance-readiness://${record.companyId}/${record.pilotExecutionId}`,
+        checksum: hashJson(record.financeReadinessSnapshot),
+        roleCode: "tenant_control",
+        metadata: {
+          status: record.financeReadinessSnapshot?.status || null
+        }
+      },
+      {
+        artifactType: "pilot_scenario_matrix",
+        artifactRef: `pilot-scenarios://${record.pilotExecutionId}`,
+        checksum: hashJson(record.scenarioResults),
+        roleCode: "tenant_control",
+        metadata: {
+          totalCount: record.scenarioResults.length
+        }
+      },
+      {
+        artifactType: "pilot_rollback_preparedness",
+        artifactRef: `pilot-rollback://${record.pilotExecutionId}`,
+        checksum: hashJson(record.rollbackPreparedness),
+        roleCode: "tenant_control",
+        metadata: {
+          status: record.rollbackPreparedness?.status || null,
+          strategyCode: record.rollbackPreparedness?.strategyCode || null
+        }
+      },
+      ...flattenPilotArtifactRefs(record.scenarioResults),
+      ...normalizePilotArtifactRefs(record.rollbackPreparedness?.evidenceRefs, {
+        defaultArtifactType: "rollback_preparedness_evidence",
+        roleCode: "pilot_execution"
+      })
+    ];
+    const relatedObjectRefs = [
+      {
+        objectType: "company",
+        objectId: record.companyId,
+        relationCode: "pilot_company"
+      }
+    ];
+    if (record.trialEnvironmentProfileId) {
+      relatedObjectRefs.push({
+        objectType: "trial_environment_profile",
+        objectId: record.trialEnvironmentProfileId,
+        relationCode: "source_trial"
+      });
+    }
+    if (record.promotionPlanId) {
+      relatedObjectRefs.push({
+        objectType: "promotion_plan",
+        objectId: record.promotionPlanId,
+        relationCode: "promotion_plan"
+      });
+    }
+    if (record.parallelRunPlanId) {
+      relatedObjectRefs.push({
+        objectType: "parallel_run_plan",
+        objectId: record.parallelRunPlanId,
+        relationCode: "parallel_run"
+      });
+    }
+    if (record.cutoverPlanId) {
+      relatedObjectRefs.push({
+        objectType: "migration_cutover_plan",
+        objectId: record.cutoverPlanId,
+        relationCode: "cutover_plan"
+      });
+    }
+    if (evidenceDomain && typeof evidenceDomain.createFrozenEvidenceBundleSnapshot === "function") {
+      return evidenceDomain.createFrozenEvidenceBundleSnapshot({
+        companyId: record.companyId,
+        bundleType: "pilot_execution",
+        sourceObjectType: "pilot_execution",
+        sourceObjectId: record.pilotExecutionId,
+        sourceObjectVersion: `pilot_execution:${record.updatedAt || record.createdAt}`,
+        title: "Pilot execution evidence",
+        retentionClass: "operational",
+        classificationCode: "restricted_internal",
+        metadata,
+        artifactRefs,
+        relatedObjectRefs,
+        actorId,
+        previousEvidenceBundleId: record.latestEvidenceBundleId || null,
+        environmentMode: "pilot_parallel"
+      });
+    }
+    return {
+      evidenceBundleId: crypto.randomUUID(),
+      bundleType: "pilot_execution",
+      sourceObjectType: "pilot_execution",
+      sourceObjectId: record.pilotExecutionId,
+      metadata: copy(metadata),
+      artifactRefs,
+      relatedObjectRefs,
+      environmentMode: "pilot_parallel"
+    };
+  }
+
   function findCompanySnapshotById(companyId) {
     const orgAuthSnapshot = getOrgAuthSnapshot();
     return (orgAuthSnapshot?.companies || []).find((record) => record.companyId === requireText(companyId, "company_id_required")) || null;
@@ -3295,6 +3865,238 @@ export function createTenantControlEngine({
     return [...counts.entries()]
       .map(([scenarioCode, count]) => ({ scenarioCode, count }))
       .sort((left, right) => right.count - left.count || left.scenarioCode.localeCompare(right.scenarioCode));
+  }
+
+  function resolvePilotScenarioDefinitions(requestedScenarioCodes = []) {
+    const requested = normalizeStringList(requestedScenarioCodes);
+    if (requested.length === 0) {
+      return DEFAULT_PILOT_SCENARIO_DEFINITIONS.map((item) => copy(item));
+    }
+    return requested.map((scenarioCode) => {
+      const definition = DEFAULT_PILOT_SCENARIO_DEFINITIONS.find((item) => item.scenarioCode === scenarioCode);
+      if (!definition) {
+        throw httpError(400, "pilot_scenario_unsupported", `Unsupported pilot scenario ${scenarioCode}.`);
+      }
+      return copy(definition);
+    });
+  }
+
+  function buildPilotScenarioResults(definitions) {
+    const now = nowIso();
+    return (Array.isArray(definitions) ? definitions : []).map((definition) => ({
+      scenarioCode: definition.scenarioCode,
+      label: definition.label,
+      domainCode: definition.domainCode,
+      description: definition.description,
+      requiredFlag: true,
+      status: "pending",
+      blockerCodes: [],
+      evidenceRefs: [],
+      notes: null,
+      recordedByUserId: null,
+      recordedAt: null,
+      updatedAt: now
+    }));
+  }
+
+  function buildPilotDomainAvailability() {
+    const domainChecks = [
+      { domainCode: "finance", requiredDomains: ["ledger", "ar", "ap", "banking"] },
+      { domainCode: "vat", requiredDomains: ["vat"] },
+      { domainCode: "payroll", requiredDomains: ["payroll"] },
+      { domainCode: "hus", requiredDomains: ["hus"] },
+      { domainCode: "tax_account", requiredDomains: ["taxAccount"] },
+      { domainCode: "annual_reporting", requiredDomains: ["annualReporting"] },
+      { domainCode: "support", requiredDomains: ["core"] }
+    ];
+    return domainChecks.map((item) => {
+      const missingDomainKeys = item.requiredDomains.filter((domainKey) => !getOptionalDomain(domainKey));
+      return {
+        domainCode: item.domainCode,
+        available: missingDomainKeys.length === 0,
+        requiredDomains: copy(item.requiredDomains),
+        missingDomainKeys
+      };
+    });
+  }
+
+  function syncPilotExecutionDerivedState(record) {
+    const scenarioSummary = buildPilotScenarioSummary(record.scenarioResults);
+    record.scenarioSummary = scenarioSummary;
+    record.blockingIssueCodes = buildPilotBlockingIssueCodes(record, scenarioSummary);
+    record.nextActionCodes = buildPilotNextActionCodes(record, scenarioSummary);
+    if (scenarioSummary.failedCount > 0 || scenarioSummary.blockedCount > 0) {
+      record.status = "blocked";
+      record.gateStatus = "blocked";
+      return;
+    }
+    if (record.status !== "completed") {
+      record.status = "in_progress";
+      record.gateStatus = scenarioSummary.pendingCount === 0 ? "ready_for_completion" : "in_progress";
+    }
+  }
+
+  function buildPilotScenarioSummary(scenarios) {
+    const items = Array.isArray(scenarios) ? scenarios : [];
+    const totalCount = items.length;
+    const pendingCount = items.filter((item) => item.status === "pending").length;
+    const passedCount = items.filter((item) => item.status === "passed").length;
+    const blockedCount = items.filter((item) => item.status === "blocked").length;
+    const failedCount = items.filter((item) => item.status === "failed").length;
+    const requiredCount = items.filter((item) => item.requiredFlag !== false).length;
+    return {
+      totalCount,
+      requiredCount,
+      pendingCount,
+      passedCount,
+      blockedCount,
+      failedCount,
+      readyForCompletion: requiredCount > 0 && pendingCount === 0 && blockedCount === 0 && failedCount === 0,
+      coveragePercent: requiredCount > 0 ? Number(((passedCount / requiredCount) * 100).toFixed(2)) : 0
+    };
+  }
+
+  function buildPilotBlockingIssueCodes(record, scenarioSummary) {
+    const blockingIssues = [];
+    if (record.financeReadinessSnapshot?.status !== "finance_ready") {
+      blockingIssues.push("finance_readiness_not_green");
+    }
+    if (scenarioSummary.pendingCount > 0) {
+      blockingIssues.push("pilot_scenarios_pending");
+    }
+    if (scenarioSummary.blockedCount > 0) {
+      blockingIssues.push("pilot_scenarios_blocked");
+    }
+    if (scenarioSummary.failedCount > 0) {
+      blockingIssues.push("pilot_scenarios_failed");
+    }
+    if ((record.domainAvailability || []).some((item) => item.available !== true)) {
+      blockingIssues.push("pilot_domain_unavailable");
+    }
+    if (record.rollbackPreparedness?.status !== "verified") {
+      blockingIssues.push("rollback_preparedness_missing");
+    }
+    if (record.approvalCoverage?.complete !== true) {
+      blockingIssues.push("pilot_signoff_incomplete");
+    }
+    if (!record.latestEvidenceBundleId && record.status === "completed") {
+      blockingIssues.push("pilot_evidence_missing");
+    }
+    return [...new Set(blockingIssues)];
+  }
+
+  function buildPilotNextActionCodes(record, scenarioSummary) {
+    const nextActions = [];
+    if (scenarioSummary.pendingCount > 0) {
+      nextActions.push("record_remaining_scenarios");
+    }
+    if (scenarioSummary.blockedCount > 0 || scenarioSummary.failedCount > 0) {
+      nextActions.push("resolve_blocked_scenarios");
+    }
+    if (record.rollbackPreparedness?.status !== "verified") {
+      nextActions.push("attach_rollback_preparedness");
+    }
+    if (scenarioSummary.readyForCompletion && record.approvalCoverage?.complete !== true) {
+      nextActions.push("collect_pilot_signoff");
+    }
+    if (record.status === "completed" && !record.latestEvidenceBundleId) {
+      nextActions.push("freeze_pilot_evidence");
+    }
+    return [...new Set(nextActions)];
+  }
+
+  function requirePilotScenarioStatus(status) {
+    const resolved = requireText(String(status || ""), "pilot_scenario_status_required");
+    if (!PILOT_SCENARIO_STATUSES.includes(resolved) || resolved === "pending") {
+      throw httpError(400, "pilot_scenario_status_invalid", "Pilot scenario status must be passed, blocked or failed.");
+    }
+    return resolved;
+  }
+
+  function evaluatePilotApprovalCoverage({
+    companyId,
+    principalUserId,
+    approvalActorIds
+  } = {}) {
+    const sourceUsers = listSourceCompanyUsersSnapshot(companyId);
+    const financeActorIds = [];
+    const supportActorIds = [];
+    for (const approvalActorId of approvalActorIds) {
+      const actorRecords = sourceUsers.filter((item) => item.userId === approvalActorId);
+      if (actorRecords.some((item) => item.roleCode === "company_admin" || item.roleCode === "approver")) {
+        financeActorIds.push(approvalActorId);
+      }
+      if (actorRecords.some((item) => ["approver", "bureau_user", "company_admin"].includes(item.roleCode))) {
+        supportActorIds.push(approvalActorId);
+      }
+    }
+    const implementationActorIds = normalizeStringList([principalUserId]);
+    return {
+      requiredApprovalClasses: copy(PILOT_REQUIRED_APPROVAL_CLASSES),
+      implementation: {
+        fulfilled: implementationActorIds.length > 0,
+        actorUserIds: implementationActorIds
+      },
+      finance: {
+        fulfilled: financeActorIds.length > 0,
+        actorUserIds: normalizeStringList(financeActorIds)
+      },
+      support: {
+        fulfilled: supportActorIds.length > 0,
+        actorUserIds: normalizeStringList(supportActorIds)
+      },
+      complete: implementationActorIds.length > 0 && financeActorIds.length > 0 && supportActorIds.length > 0
+    };
+  }
+
+  function normalizePilotArtifactRefs(values, { defaultArtifactType = "pilot_evidence", roleCode = "pilot_execution" } = {}) {
+    return (Array.isArray(values) ? values : [])
+      .map((entry, index) => {
+        if (typeof entry === "string") {
+          const artifactRef = normalizeOptionalText(entry);
+          if (!artifactRef) {
+            return null;
+          }
+          return {
+            artifactType: defaultArtifactType,
+            artifactRef,
+            checksum: hashJson({ artifactRef }),
+            roleCode,
+            metadata: {}
+          };
+        }
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const artifactRef = normalizeOptionalText(entry.artifactRef) || normalizeOptionalText(entry.ref);
+        if (!artifactRef) {
+          return null;
+        }
+        return {
+          artifactType: normalizeOptionalText(entry.artifactType) || defaultArtifactType,
+          artifactRef,
+          checksum: normalizeOptionalText(entry.checksum) || hashJson({ artifactRef, index }),
+          roleCode: normalizeOptionalText(entry.roleCode) || roleCode,
+          metadata: copy(entry.metadata || {})
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function flattenPilotArtifactRefs(scenarios) {
+    return (Array.isArray(scenarios) ? scenarios : []).flatMap((scenario) =>
+      normalizePilotArtifactRefs(scenario.evidenceRefs, {
+        defaultArtifactType: "pilot_scenario_evidence",
+        roleCode: "pilot_execution"
+      }).map((artifact) => ({
+        ...artifact,
+        metadata: {
+          ...artifact.metadata,
+          scenarioCode: scenario.scenarioCode,
+          scenarioStatus: scenario.status
+        }
+      }))
+    );
   }
 
   function groupItemsBy(items, keyResolver) {
@@ -3562,9 +4364,15 @@ function assertTrialEnvironmentIsolated(trialEnvironment) {
   }
 }
 
-function mapCompanySetupStatus(tenantStatus, bootstrapStatus = null, companyStatus = null) {
+function mapCompanySetupStatus(tenantStatus, bootstrapStatus = null, companyStatus = null, existingStatus = null) {
   if (tenantStatus === "suspended") {
     return "suspended";
+  }
+  if (existingStatus === "production_live" && tenantStatus === "active") {
+    return "production_live";
+  }
+  if (existingStatus === "pilot" && tenantStatus === "active") {
+    return "pilot";
   }
   if (companyStatus === "trial") {
     return "pilot";

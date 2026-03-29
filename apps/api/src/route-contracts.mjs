@@ -185,7 +185,8 @@ const HIGH_RISK_ROUTE_PREFIXES = Object.freeze([
   "/v1/balances/",
   "/v1/collective-agreements/",
   "/v1/tenant/",
-  "/v1/trial/"
+  "/v1/trial/",
+  "/v1/pilot/"
 ]);
 
 const EXPLICIT_ROUTE_OVERRIDES = new Map([
@@ -215,6 +216,12 @@ const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["GET /v1/trial/operations/alerts", { ...override("trial", "trial_operations_alert_read", "strong_mfa", "company", "trial_support_policy", "trial_operation_alert", "company.read", false), mutation: false }],
   ["GET /v1/trial/operations/queues", { ...override("trial", "trial_operations_queue_read", "strong_mfa", "company", "trial_support_policy", "trial_operations_queue", "company.read", false), mutation: false }],
   ["GET /v1/trial/analytics", { ...override("trial", "trial_sales_demo_analytics_read", "strong_mfa", "company", "trial_support_policy", "trial_sales_demo_analytics", "company.read", false), mutation: false }],
+  ["POST /v1/pilot/executions", override("pilot", "pilot_execution_start", "strong_mfa", "company", "pilot_execution", "pilot_execution", "company.manage", false)],
+  ["GET /v1/pilot/executions", { ...override("pilot", "pilot_execution_read", "strong_mfa", "company", "pilot_execution", "pilot_execution", "company.read", false), mutation: false }],
+  ["GET /v1/pilot/executions/:pilotExecutionId", { ...override("pilot", "pilot_execution_read", "strong_mfa", "company", "pilot_execution", "pilot_execution", "company.read", false), mutation: false }],
+  ["POST /v1/pilot/executions/:pilotExecutionId/scenarios/:scenarioCode", override("pilot", "pilot_execution_scenario_record", "strong_mfa", "pilot_execution", "pilot_execution", "pilot_execution", "company.manage", true)],
+  ["POST /v1/pilot/executions/:pilotExecutionId/complete", override("pilot", "pilot_execution_complete", "strong_mfa", "pilot_execution", "pilot_execution", "pilot_execution", "company.manage", true)],
+  ["GET /v1/pilot/executions/:pilotExecutionId/evidence", { ...override("pilot", "pilot_execution_evidence_read", "strong_mfa", "pilot_execution", "pilot_execution", "evidence_bundle", "company.read", false), mutation: false }],
   ["POST /v1/integrations/connections", override("integrations", "integration_connection_create", "strong_mfa", "company", "integration_connection", "integration_connection", "company.manage", false)],
   ["POST /v1/integrations/connections/:connectionId/credentials", override("integrations", "integration_credentials_manage", "strong_mfa", "integration_connection", "integration_connection", "integration_credential_set", "company.manage", true)],
   ["POST /v1/integrations/connections/:connectionId/consents", override("integrations", "integration_consent_authorize", "strong_mfa", "integration_connection", "integration_connection", "integration_consent_grant", "company.manage", true)],

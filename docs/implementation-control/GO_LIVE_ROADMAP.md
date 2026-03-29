@@ -1152,7 +1152,7 @@ Bevisa att backend-kontrakten bär verkliga kundscenarier, låsa UI-kontrakt och
 - Ingen generell lansering före godkänd pilot, enterprise gate och competitor parity gate. UI-start får inte ske innan backend-kontrakt är frozen.
 
 **Delfaser**
-- [ ] 18.1 [OPERATIONALIZE] **Intern dogfood + finance pilot** — Kör eget bolag/egna testbolag genom finance, VAT, payroll, HUS, tax account, annual och supportflöden.
+- [x] 18.1 [OPERATIONALIZE] **Intern dogfood + finance pilot** — Kör eget bolag/egna testbolag genom finance, VAT, payroll, HUS, tax account, annual och supportflöden. Klar 2026-03-29: `PilotExecution` runtime, scenario gating, rollback preparedness, approvals, evidence export, trial/parallel-run linkage, API-routes och unit/integration/e2e-verifiering.
 - [ ] 18.2 [OPERATIONALIZE] **Pilotkohorter per segment** — AB med ekonomi+lön, service/projektbolag, HUS-bolag, construction/service med personalliggare/ID06, enterprise SSO-kund.
 - [ ] 18.3 [NEW BUILD] **Competitor parity board** — Mät svart på vitt parity mot Fortnox, Visma, Bokio, Wint, Teamleader, monday, Asana, ClickUp, Zoho, Odoo, Bygglet, Byggdagboken.
 - [ ] 18.4 [NEW BUILD] **Competitor advantage release pack** — Släpp differentiators: tax account cockpit, unified receipts/recovery, migration concierge, safe trial-to-live, project profitability mission control.

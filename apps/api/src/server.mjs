@@ -355,6 +355,11 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/trial/operations/alerts",
               "/v1/trial/operations/queues",
               "/v1/trial/analytics",
+              "/v1/pilot/executions",
+              "/v1/pilot/executions/:pilotExecutionId",
+              "/v1/pilot/executions/:pilotExecutionId/scenarios/:scenarioCode",
+              "/v1/pilot/executions/:pilotExecutionId/complete",
+              "/v1/pilot/executions/:pilotExecutionId/evidence",
               "/v1/onboarding/runs",
               "/v1/onboarding/runs/:runId",
               "/v1/onboarding/runs/:runId/checklist",
@@ -1924,6 +1929,106 @@ async function handleRequest({ req, res, platform, flags }) {
         sessionToken: readSessionToken(req),
         companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
       })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/pilot/executions") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      requireTenantControlDomain(platform).startPilotExecution({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        label: body.label,
+        cohortCode: body.cohortCode,
+        scenarioCodes: body.scenarioCodes,
+        trialEnvironmentProfileId: body.trialEnvironmentProfileId,
+        promotionPlanId: body.promotionPlanId,
+        parallelRunPlanId: body.parallelRunPlanId,
+        cutoverPlanId: body.cutoverPlanId,
+        notes: body.notes
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/pilot/executions") {
+    writeJson(
+      res,
+      200,
+      {
+        items: requireTenantControlDomain(platform).listPilotExecutions({
+          sessionToken: readSessionToken(req),
+          companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+        })
+      }
+    );
+    return;
+  }
+
+  const pilotExecutionMatch = matchPath(path, "/v1/pilot/executions/:pilotExecutionId");
+  if (req.method === "GET" && pilotExecutionMatch) {
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).getPilotExecution({
+        sessionToken: readSessionToken(req),
+        pilotExecutionId: pilotExecutionMatch.pilotExecutionId
+      })
+    );
+    return;
+  }
+
+  const pilotExecutionScenarioMatch = matchPath(path, "/v1/pilot/executions/:pilotExecutionId/scenarios/:scenarioCode");
+  if (req.method === "POST" && pilotExecutionScenarioMatch) {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).recordPilotScenarioOutcome({
+        sessionToken: readSessionToken(req, body),
+        pilotExecutionId: pilotExecutionScenarioMatch.pilotExecutionId,
+        scenarioCode: pilotExecutionScenarioMatch.scenarioCode,
+        status: body.status,
+        notes: body.notes,
+        blockerCodes: body.blockerCodes,
+        evidenceRefs: body.evidenceRefs
+      })
+    );
+    return;
+  }
+
+  const pilotExecutionCompleteMatch = matchPath(path, "/v1/pilot/executions/:pilotExecutionId/complete");
+  if (req.method === "POST" && pilotExecutionCompleteMatch) {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).completePilotExecution({
+        sessionToken: readSessionToken(req, body),
+        pilotExecutionId: pilotExecutionCompleteMatch.pilotExecutionId,
+        approvalActorIds: body.approvalActorIds,
+        rollbackStrategyCode: body.rollbackStrategyCode,
+        rollbackEvidenceRefs: body.rollbackEvidenceRefs,
+        notes: body.notes
+      })
+    );
+    return;
+  }
+
+  const pilotExecutionEvidenceMatch = matchPath(path, "/v1/pilot/executions/:pilotExecutionId/evidence");
+  if (req.method === "GET" && pilotExecutionEvidenceMatch) {
+    writeJson(
+      res,
+      200,
+      {
+        evidenceBundle: requireTenantControlDomain(platform).exportPilotExecutionEvidence({
+          sessionToken: readSessionToken(req),
+          pilotExecutionId: pilotExecutionEvidenceMatch.pilotExecutionId
+        })
+      }
     );
     return;
   }
