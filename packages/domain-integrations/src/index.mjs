@@ -25,6 +25,11 @@ import { createSkatteverketAgiProvider, SKATTEVERKET_AGI_PROVIDER_CODE } from ".
 import { createSkatteverketHusProvider, SKATTEVERKET_HUS_PROVIDER_CODE } from "./providers/skatteverket-hus.mjs";
 import { createSkatteverketVatProvider, SKATTEVERKET_VAT_PROVIDER_CODE } from "./providers/skatteverket-vat.mjs";
 import { createStripePaymentLinksProvider, STRIPE_PAYMENT_LINKS_PROVIDER_CODE } from "./providers/stripe-payment-links.mjs";
+import {
+  createTeamleaderFocusProvider,
+  TEAMLEADER_FOCUS_PROVIDER_BASELINE_CODE,
+  TEAMLEADER_FOCUS_PROVIDER_CODE
+} from "./providers/teamleader-focus.mjs";
 import { createTwilioSmsProvider, TWILIO_SMS_PROVIDER_CODE } from "./providers/twilio-sms.mjs";
 import {
   createWorkOsFederationProvider,
@@ -53,6 +58,7 @@ export { LOCAL_TOTP_PROVIDER_CODE } from "./providers/local-totp.mjs";
 export { WORKOS_FEDERATION_PROVIDER_CODE } from "./providers/workos-federation.mjs";
 export { SIGNICAT_SIGNING_ARCHIVE_PROVIDER_CODE } from "./providers/signicat-signing-archive.mjs";
 export { HUBSPOT_CRM_PROVIDER_CODE } from "./providers/hubspot-crm.mjs";
+export { TEAMLEADER_FOCUS_PROVIDER_CODE } from "./providers/teamleader-focus.mjs";
 export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
   Object.freeze({
     providerBaselineId: "peppol-bis-billing-3-se-2026.1",
@@ -333,6 +339,20 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
     checksum: "hubspot-crm-objects-se-2026.1",
     sourceSnapshotDate: "2026-03-29",
     semanticChangeSummary: "HubSpot CRM objects baseline for governed deal and custom-object handoff into project import batches."
+  }),
+  Object.freeze({
+    providerBaselineId: "teamleader-focus-crm-projects-se-2026.1",
+    baselineCode: TEAMLEADER_FOCUS_PROVIDER_BASELINE_CODE,
+    providerCode: TEAMLEADER_FOCUS_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "crm_handoff_objects",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "v1",
+    checksum: "teamleader-focus-crm-projects-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Teamleader Focus baseline for deal, quotation, project and work-order handoff into governed project import batches."
   })
 ]);
 
@@ -443,6 +463,11 @@ export function createIntegrationEngine({
     environmentMode,
     providerBaselineRegistry: providerBaselines
   });
+  const teamleaderFocusProvider = createTeamleaderFocusProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
   const state = {
     submissions: new Map(),
     submissionIdsByCompany: new Map(),
@@ -506,7 +531,8 @@ export function createIntegrationEngine({
       localPasskeyProvider,
       localTotpProvider,
       signingEvidenceArchiveProvider,
-      hubSpotCrmProvider
+      hubSpotCrmProvider,
+      teamleaderFocusProvider
     ]
   });
   const regulatedSubmissionsModule = createRegulatedSubmissionsModule({
@@ -674,7 +700,8 @@ export function createIntegrationEngine({
         localPasskeyProvider: localPasskeyProvider.snapshot(),
         localTotpProvider: localTotpProvider.snapshot(),
         signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot(),
-        hubSpotCrmProvider: hubSpotCrmProvider.snapshot()
+        hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
+        teamleaderFocusProvider: teamleaderFocusProvider.snapshot()
       }
     };
   }
@@ -699,6 +726,7 @@ export function createIntegrationEngine({
     localTotpProvider.restore(snapshot?.providerSnapshots?.localTotpProvider || {});
     signingEvidenceArchiveProvider.restore(snapshot?.providerSnapshots?.signingEvidenceArchiveProvider || {});
     hubSpotCrmProvider.restore(snapshot?.providerSnapshots?.hubSpotCrmProvider || {});
+    teamleaderFocusProvider.restore(snapshot?.providerSnapshots?.teamleaderFocusProvider || {});
   }
 
   function prepareProjectImportBatchFromAdapter({
@@ -723,15 +751,23 @@ export function createIntegrationEngine({
     if (connection.credentialsConfigured !== true) {
       throw createError(409, "integration_credentials_missing", "Integration connection must have configured credentials.");
     }
-    if (connection.providerCode !== HUBSPOT_CRM_PROVIDER_CODE) {
-      throw createError(400, "integration_provider_code_invalid", `${connection.providerCode} is not yet implemented for project import adapters.`);
+    if (connection.providerCode === HUBSPOT_CRM_PROVIDER_CODE) {
+      return hubSpotCrmProvider.prepareProjectImportBatch({
+        companyId: resolvedCompanyId,
+        integrationConnectionId: connection.connectionId,
+        sourceExportCapturedAt,
+        ...(payload && typeof payload === "object" ? payload : {})
+      });
     }
-    return hubSpotCrmProvider.prepareProjectImportBatch({
-      companyId: resolvedCompanyId,
-      integrationConnectionId: connection.connectionId,
-      sourceExportCapturedAt,
-      ...(payload && typeof payload === "object" ? payload : {})
-    });
+    if (connection.providerCode === TEAMLEADER_FOCUS_PROVIDER_CODE) {
+      return teamleaderFocusProvider.prepareProjectImportBatch({
+        companyId: resolvedCompanyId,
+        integrationConnectionId: connection.connectionId,
+        sourceExportCapturedAt,
+        ...(payload && typeof payload === "object" ? payload : {})
+      });
+    }
+    throw createError(400, "integration_provider_code_invalid", `${connection.providerCode} is not yet implemented for project import adapters.`);
   }
 
   function prepareInvoiceDelivery({
