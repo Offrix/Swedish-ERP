@@ -66,4 +66,5 @@ export interface SubmissionEvidencePackRef {
   readonly archivedAt: string | null;
   readonly watermark?: Record<string, unknown> | null;
   readonly trialSimulation?: Record<string, unknown> | null;
+  readonly signatureArchiveRefs?: readonly Record<string, unknown>[];
 }

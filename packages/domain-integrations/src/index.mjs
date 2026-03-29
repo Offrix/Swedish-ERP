@@ -6,14 +6,25 @@ import { createBolagsverketAnnualProvider, BOLAGSVERKET_ANNUAL_PROVIDER_CODE } f
 import { createEnableBankingProvider, ENABLE_BANKING_PROVIDER_CODE } from "./providers/enable-banking.mjs";
 import { createGoogleDocumentAiProvider, GOOGLE_DOCUMENT_AI_PROVIDER_CODE } from "./providers/google-document-ai.mjs";
 import { createIso20022FilesProvider, ISO20022_FILES_PROVIDER_CODE } from "./providers/iso20022-files.mjs";
+import { createLocalPasskeyProvider, LOCAL_PASSKEY_PROVIDER_CODE } from "./providers/local-passkey.mjs";
+import { createLocalTotpProvider, LOCAL_TOTP_PROVIDER_CODE } from "./providers/local-totp.mjs";
 import { createPageroPeppolProvider, PAGERO_PEPPOL_PROVIDER_CODE } from "./providers/pagero-peppol.mjs";
 import { createPleoSpendProvider, PLEO_SPEND_PROVIDER_CODE } from "./providers/pleo-spend.mjs";
 import { createPostmarkEmailProvider, POSTMARK_EMAIL_PROVIDER_CODE } from "./providers/postmark-email.mjs";
+import { createSignicatBankIdProvider } from "./providers/signicat-bankid.mjs";
+import {
+  createSignicatSigningArchiveProvider,
+  SIGNICAT_SIGNING_ARCHIVE_PROVIDER_CODE
+} from "./providers/signicat-signing-archive.mjs";
 import { createSkatteverketAgiProvider, SKATTEVERKET_AGI_PROVIDER_CODE } from "./providers/skatteverket-agi.mjs";
 import { createSkatteverketHusProvider, SKATTEVERKET_HUS_PROVIDER_CODE } from "./providers/skatteverket-hus.mjs";
 import { createSkatteverketVatProvider, SKATTEVERKET_VAT_PROVIDER_CODE } from "./providers/skatteverket-vat.mjs";
 import { createStripePaymentLinksProvider, STRIPE_PAYMENT_LINKS_PROVIDER_CODE } from "./providers/stripe-payment-links.mjs";
 import { createTwilioSmsProvider, TWILIO_SMS_PROVIDER_CODE } from "./providers/twilio-sms.mjs";
+import {
+  createWorkOsFederationProvider,
+  WORKOS_FEDERATION_PROVIDER_CODE
+} from "./providers/workos-federation.mjs";
 import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
 import { createRegulatedSubmissionsModule } from "../../domain-regulated-submissions/src/index.mjs";
 import {
@@ -32,6 +43,10 @@ export { SKATTEVERKET_AGI_PROVIDER_CODE } from "./providers/skatteverket-agi.mjs
 export { SKATTEVERKET_VAT_PROVIDER_CODE } from "./providers/skatteverket-vat.mjs";
 export { SKATTEVERKET_HUS_PROVIDER_CODE } from "./providers/skatteverket-hus.mjs";
 export { BOLAGSVERKET_ANNUAL_PROVIDER_CODE } from "./providers/bolagsverket-annual.mjs";
+export { LOCAL_PASSKEY_PROVIDER_CODE } from "./providers/local-passkey.mjs";
+export { LOCAL_TOTP_PROVIDER_CODE } from "./providers/local-totp.mjs";
+export { WORKOS_FEDERATION_PROVIDER_CODE } from "./providers/workos-federation.mjs";
+export { SIGNICAT_SIGNING_ARCHIVE_PROVIDER_CODE } from "./providers/signicat-signing-archive.mjs";
 export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
   Object.freeze({
     providerBaselineId: "peppol-bis-billing-3-se-2026.1",
@@ -228,6 +243,76 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
     checksum: "id06-api-se-2026.1",
     sourceSnapshotDate: "2026-03-27",
     semanticChangeSummary: "ID06 provider adapter baseline for official workforce and site synchronization."
+  }),
+  Object.freeze({
+    providerBaselineId: "signicat-bankid-broker-se-2026.1",
+    baselineCode: "SE-SIGNICAT-BANKID-BROKER",
+    providerCode: "signicat-bankid",
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "auth_broker_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "signicat-bankid-broker-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Signicat BankID broker baseline for challenge start/collect and callback governance."
+  }),
+  Object.freeze({
+    providerBaselineId: "workos-federation-broker-se-2026.1",
+    baselineCode: "SE-WORKOS-FEDERATION-BROKER",
+    providerCode: WORKOS_FEDERATION_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "enterprise_federation_broker",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "workos-federation-broker-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "WorkOS broker baseline for enterprise SAML/OIDC federation authorization and callback handling."
+  }),
+  Object.freeze({
+    providerBaselineId: "passkey-webauthn-se-2026.1",
+    baselineCode: "SE-PASSKEY-WEBAUTHN",
+    providerCode: LOCAL_PASSKEY_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "webauthn_passkey",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "passkey-webauthn-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Local passkey baseline for resident-key registration and assertion verification."
+  }),
+  Object.freeze({
+    providerBaselineId: "totp-rfc6238-se-2026.1",
+    baselineCode: "SE-TOTP-RFC6238",
+    providerCode: LOCAL_TOTP_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "totp_rfc6238",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "totp-rfc6238-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Local TOTP baseline for enrollment and verification under RFC 6238."
+  }),
+  Object.freeze({
+    providerBaselineId: "signicat-signing-archive-se-2026.1",
+    baselineCode: "SE-SIGNICAT-SIGNING-ARCHIVE",
+    providerCode: SIGNICAT_SIGNING_ARCHIVE_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "signing_evidence_archive",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "signicat-signing-archive-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Signicat signing archive baseline for signature evidence references and immutable archive checksums."
   })
 ]);
 
@@ -310,6 +395,29 @@ export function createIntegrationEngine({
     environmentMode,
     providerBaselineRegistry: providerBaselines
   });
+  const signicatBankIdProvider = createSignicatBankIdProvider({
+    clock,
+    environmentMode,
+    providerMode: environmentMode === "production" ? "production" : "sandbox",
+    providerBaselineRegistry: providerBaselines
+  });
+  const workOsFederationProvider = createWorkOsFederationProvider({
+    clock,
+    environmentMode,
+    providerMode: environmentMode === "production" ? "production" : "sandbox",
+    providerBaselineRegistry: providerBaselines
+  });
+  const localPasskeyProvider = createLocalPasskeyProvider({
+    environmentMode
+  });
+  const localTotpProvider = createLocalTotpProvider({
+    environmentMode
+  });
+  const signingEvidenceArchiveProvider = createSignicatSigningArchiveProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
   const state = {
     submissions: new Map(),
     submissionIdsByCompany: new Map(),
@@ -367,14 +475,20 @@ export function createIntegrationEngine({
       agiTransportProvider,
       vatTransportProvider,
       husTransportProvider,
-      annualTransportProvider
+      annualTransportProvider,
+      signicatBankIdProvider,
+      workOsFederationProvider,
+      localPasskeyProvider,
+      localTotpProvider,
+      signingEvidenceArchiveProvider
     ]
   });
   const regulatedSubmissionsModule = createRegulatedSubmissionsModule({
     state,
     clock,
     evidencePlatform,
-    getCorePlatform
+    getCorePlatform,
+    signingArchiveProvider: signingEvidenceArchiveProvider
   });
   const createPartnerConnection = (input = {}) => {
     const connection = partnerModule.createPartnerConnection(input);
@@ -454,6 +568,8 @@ export function createIntegrationEngine({
     prepareSmsNotification: (input) => smsProvider.prepareSmsDelivery(input),
     prepareSpendSync: (input) => spendProvider.prepareSpendSync(input),
     prepareOfficialSubmissionTransport,
+    archiveSigningEvidence: (input) => signingEvidenceArchiveProvider.archiveSignedEvidence(input),
+    listSigningEvidenceArchives: (input) => signingEvidenceArchiveProvider.listArchiveRecords(input),
     snapshotIntegrations() {
       return clone({
         submissions: [...state.submissions.values()].map((submission) =>
@@ -497,7 +613,12 @@ export function createIntegrationEngine({
           agiTransportProvider: agiTransportProvider.snapshot(),
           vatTransportProvider: vatTransportProvider.snapshot(),
           husTransportProvider: husTransportProvider.snapshot(),
-          annualTransportProvider: annualTransportProvider.snapshot()
+          annualTransportProvider: annualTransportProvider.snapshot(),
+          signicatBankIdProvider: signicatBankIdProvider.snapshot(),
+          workOsFederationProvider: workOsFederationProvider.snapshot(),
+          localPasskeyProvider: localPasskeyProvider.snapshot(),
+          localTotpProvider: localTotpProvider.snapshot(),
+          signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot()
         }
       });
     },
@@ -520,7 +641,12 @@ export function createIntegrationEngine({
         agiTransportProvider: agiTransportProvider.snapshot(),
         vatTransportProvider: vatTransportProvider.snapshot(),
         husTransportProvider: husTransportProvider.snapshot(),
-        annualTransportProvider: annualTransportProvider.snapshot()
+        annualTransportProvider: annualTransportProvider.snapshot(),
+        signicatBankIdProvider: signicatBankIdProvider.snapshot(),
+        workOsFederationProvider: workOsFederationProvider.snapshot(),
+        localPasskeyProvider: localPasskeyProvider.snapshot(),
+        localTotpProvider: localTotpProvider.snapshot(),
+        signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot()
       }
     };
   }
@@ -539,6 +665,11 @@ export function createIntegrationEngine({
     vatTransportProvider.restore(snapshot?.providerSnapshots?.vatTransportProvider || {});
     husTransportProvider.restore(snapshot?.providerSnapshots?.husTransportProvider || {});
     annualTransportProvider.restore(snapshot?.providerSnapshots?.annualTransportProvider || {});
+    signicatBankIdProvider.restore(snapshot?.providerSnapshots?.signicatBankIdProvider || {});
+    workOsFederationProvider.restore(snapshot?.providerSnapshots?.workOsFederationProvider || {});
+    localPasskeyProvider.restore(snapshot?.providerSnapshots?.localPasskeyProvider || {});
+    localTotpProvider.restore(snapshot?.providerSnapshots?.localTotpProvider || {});
+    signingEvidenceArchiveProvider.restore(snapshot?.providerSnapshots?.signingEvidenceArchiveProvider || {});
   }
 
   function prepareInvoiceDelivery({

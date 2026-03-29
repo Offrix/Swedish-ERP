@@ -68,7 +68,11 @@ export type IntegrationSurfaceCode =
   | "notification_email"
   | "notification_sms"
   | "spend"
-  | "regulated_transport";
+  | "regulated_transport"
+  | "auth_identity"
+  | "enterprise_federation"
+  | "auth_local_factor"
+  | "evidence_archive";
 export type IntegrationEnvironmentMode = "trial" | "sandbox" | "test" | "pilot_parallel" | "production";
 export type CredentialKind = "api_credentials" | "client_secret" | "certificate_ref" | "file_channel_credentials";
 export type PublicApiScopeCode =
@@ -114,6 +118,8 @@ export interface IntegrationConnection {
   readonly fallbackMode: PartnerFallbackMode;
   readonly rateLimitPerMinute: number;
   readonly requiredCredentialKinds: readonly CredentialKind[];
+  readonly requiredCallbackRegistration?: boolean;
+  readonly supportsAsyncCallback?: boolean;
   readonly consentRequired: boolean;
   readonly capabilityManifestId: string;
   readonly credentialsConfigured: boolean;

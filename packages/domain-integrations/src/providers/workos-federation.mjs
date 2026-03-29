@@ -1,18 +1,47 @@
 import crypto from "node:crypto";
 import { issueOpaqueToken } from "../../../auth-core/src/index.mjs";
+import {
+  buildProviderBaselineRef,
+  createStatelessProvider,
+  nowIso
+} from "./provider-runtime-helpers.mjs";
 
 export const WORKOS_FEDERATION_PROVIDER_CODE = "workos-federation";
 
 export function createWorkOsFederationProvider({
   clock = () => new Date(),
   providerMode = "sandbox",
-  issuerBaseUrl = "https://api.workos.com"
+  issuerBaseUrl = "https://api.workos.com",
+  environmentMode = "test",
+  providerBaselineRegistry = null
 } = {}) {
   const authorizations = new Map();
+  const provider = createStatelessProvider({
+    providerCode: WORKOS_FEDERATION_PROVIDER_CODE,
+    surfaceCode: "enterprise_federation",
+    connectionType: "enterprise_sso",
+    environmentMode,
+    requiredCredentialKinds: ["client_secret"],
+    sandboxSupported: true,
+    trialSafe: true,
+    productionSupported: true,
+    supportsLegalEffectInProduction: false,
+    supportsAsyncCallback: true,
+    requiresCallbackRegistration: true,
+    profiles: [
+      {
+        profileCode: "workos_enterprise_federation_v1",
+        baselineCode: "SE-WORKOS-FEDERATION-BROKER",
+        operationCodes: ["authorization_start", "authorization_complete", "callback_validate"]
+      }
+    ]
+  });
 
   return {
+    ...provider,
     providerCode: WORKOS_FEDERATION_PROVIDER_CODE,
     providerMode,
+    providerEnvironmentRef: provider.providerEnvironmentRef,
     startAuthorization({
       companyId,
       companyUserId,
@@ -24,6 +53,17 @@ export function createWorkOsFederationProvider({
       const authRequestId = crypto.randomUUID();
       const state = issueOpaqueToken();
       const authorizationCode = issueOpaqueToken();
+      const providerBaselineRef = buildProviderBaselineRef({
+        providerBaselineRegistry,
+        providerCode: WORKOS_FEDERATION_PROVIDER_CODE,
+        baselineCode: "SE-WORKOS-FEDERATION-BROKER",
+        effectiveDate: nowIso(clock).slice(0, 10),
+        metadata: {
+          brokerCode: "workos",
+          connectionId,
+          providerMode
+        }
+      });
       const profile = {
         subject: `${connectionId}:${companyUserId}`,
         email: typeof loginHint === "string" && loginHint.trim().length > 0 ? loginHint.trim().toLowerCase() : null,
@@ -55,8 +95,11 @@ export function createWorkOsFederationProvider({
         providerCode: WORKOS_FEDERATION_PROVIDER_CODE,
         brokerCode: "workos",
         providerMode,
+        providerEnvironmentRef: provider.providerEnvironmentRef,
         connectionId,
         state,
+        providerBaselineRef,
+        providerBaselineCode: providerBaselineRef.baselineCode,
         authorizationUrl: `${issuerBaseUrl}/sso/authorize?${params.toString()}`
       };
     },
@@ -77,9 +120,12 @@ export function createWorkOsFederationProvider({
         providerCode: WORKOS_FEDERATION_PROVIDER_CODE,
         brokerCode: "workos",
         providerMode,
+        providerEnvironmentRef: provider.providerEnvironmentRef,
         status: "complete",
         connectionId: authorization.connectionId,
         subject: authorization.profile.subject,
+        providerBaselineRef: authorization.providerBaselineRef,
+        providerBaselineCode: authorization.providerBaselineCode,
         claims: {
           email: authorization.profile.email,
           connectionId: authorization.connectionId

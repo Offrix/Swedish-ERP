@@ -37,6 +37,9 @@ export interface AnnualReportSignatoryRef {
   readonly userId: string;
   readonly signatoryRole: string;
   readonly status: AnnualReportSignatoryStatus;
+  readonly signatureReference?: string | null;
+  readonly signatureArchiveRef?: string | null;
+  readonly evidenceArchiveId?: string | null;
 }
 
 export interface AnnualEvidencePackRef {
@@ -53,6 +56,8 @@ export interface AnnualEvidencePackRef {
   readonly packageFamilyCode: string;
   readonly sourceFingerprint: string;
   readonly checksum: string;
+  readonly signatureArchiveRefs?: readonly Record<string, unknown>[];
+  readonly signoffRefs?: readonly Record<string, unknown>[];
 }
 
 export interface TaxDeclarationPackageRef {

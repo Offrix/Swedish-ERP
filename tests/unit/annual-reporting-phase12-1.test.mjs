@@ -140,6 +140,9 @@ test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions 
   assert.equal(signed.currentVersion.packageStatus, "signed");
   assert.equal(typeof signed.currentVersion.lockedAt, "string");
   assert.equal(signed.currentVersion.signoffHash, signed.currentVersion.checksum);
+  assert.equal(signed.signatories[0].signatureReference.startsWith("signature:"), true);
+  assert.equal(typeof signed.signatories[0].signatureArchiveRef, "string");
+  assert.equal(signed.currentEvidencePack.signatureArchiveRefs.length, 1);
 
   platform.reopenAccountingPeriod({
     companyId: company.companyId,

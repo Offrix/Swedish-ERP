@@ -146,9 +146,11 @@ export function createStatelessProvider({
   sandboxSupported = true,
   trialSafe = true,
   supportsLegalEffectInProduction = true,
+  productionSupported = supportsLegalEffectInProduction,
   profiles = [],
   supportsAsyncCallback = false,
-  supportsRerun = false
+  supportsRerun = false,
+  requiresCallbackRegistration = false
 }) {
   const providerMode = resolveProviderMode(environmentMode);
   const resolvedProviderEnvironmentRef =
@@ -162,14 +164,14 @@ export function createStatelessProvider({
     allowedEnvironmentModes.push("sandbox");
   }
   allowedEnvironmentModes.push("test");
-  if (supportsLegalEffectInProduction === true) {
+  if (productionSupported === true) {
     allowedEnvironmentModes.push("pilot_parallel", "production");
   }
   const modeMatrix = buildModeMatrix({
     trialSafe,
     sandboxSupported,
     testSupported: true,
-    productionSupported: supportsLegalEffectInProduction,
+    productionSupported,
     supportsLegalEffect
   });
   return {
@@ -188,6 +190,7 @@ export function createStatelessProvider({
         supportsLegalEffect,
         supportsAsyncCallback,
         supportsRerun,
+        requiresCallbackRegistration,
         allowedEnvironmentModes: [...new Set(allowedEnvironmentModes)],
         modeMatrix,
         profiles: clone(profiles)

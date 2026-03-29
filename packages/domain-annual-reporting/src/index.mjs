@@ -131,7 +131,7 @@ export function createAnnualReportingEngine({
       return clone(record);
     },
     inviteAnnualReportSignatory: (input) => inviteAnnualReportSignatory({ state, orgAuthPlatform, clock }, input),
-    signAnnualReportVersion: (input) => signAnnualReportVersion({ state, orgAuthPlatform, clock }, input),
+    signAnnualReportVersion: (input) => signAnnualReportVersion({ state, orgAuthPlatform, integrationPlatform, evidencePlatform, clock }, input),
     openAnnualCorrectionPackage: (input) =>
       openAnnualCorrectionPackage({ state, ledgerPlatform, reportingPlatform, orgAuthPlatform, fiscalYearPlatform, legalFormPlatform, evidencePlatform, providerBaselineRegistry: providerBaselines, clock }, input),
     diffAnnualReportVersions: ({ companyId, packageId, leftVersionId, rightVersionId } = {}) => {
@@ -434,6 +434,12 @@ function inviteAnnualReportSignatory({ state, orgAuthPlatform, clock }, input = 
       signatoryRole: resolvedSignatoryRole,
       status: "invited",
       invitedAt: now,
+    signatureReference: null,
+    signatureArchiveRef: null,
+    evidenceArchiveId: null,
+    signatureArchiveChecksum: null,
+    signatureProviderCode: null,
+    signatureProviderBaselineRef: null,
     signedAt: null,
     comment: null,
     updatedAt: now
@@ -449,7 +455,7 @@ function inviteAnnualReportSignatory({ state, orgAuthPlatform, clock }, input = 
   return clone(signatory);
 }
 
-function signAnnualReportVersion({ state, orgAuthPlatform, clock }, input = {}) {
+function signAnnualReportVersion({ state, orgAuthPlatform, integrationPlatform, evidencePlatform, clock }, input = {}) {
   const companyId = text(input.companyId, "company_id_required");
   const annualPackage = requirePackage(state, companyId, input.packageId);
   const version = requireVersion(state, annualPackage.packageId, input.versionId);
@@ -477,10 +483,46 @@ function signAnnualReportVersion({ state, orgAuthPlatform, clock }, input = {}) 
   signatory.status = "signed";
   signatory.comment = normalizeText(input.comment);
   signatory.signedAt = now;
+  const signatureArchive = integrationPlatform?.archiveSigningEvidence
+    ? integrationPlatform.archiveSigningEvidence({
+        companyId,
+        sourceObjectType: "annual_report_version",
+        sourceObjectId: version.versionId,
+        sourceObjectVersion: String(version.versionNo),
+        signerActorId: signatory.userId,
+        evidenceBundleId: version.evidencePackId,
+        signaturePayloadHash: hashPayload({
+          packageId: annualPackage.packageId,
+          versionId: version.versionId,
+          versionChecksum: version.checksum,
+          signatoryId: signatory.signatoryId,
+          comment: signatory.comment
+        }),
+        signoffHash: version.checksum,
+        metadata: {
+          packageId: annualPackage.packageId,
+          signatoryRole: signatory.signatoryRole
+        }
+      })
+    : null;
+  signatory.signatureReference = signatureArchive?.signatureReference || `annual-signature:${version.versionId}:${signatory.signatoryId}`;
+  signatory.signatureArchiveRef = signatureArchive?.signatureArchiveRef || null;
+  signatory.evidenceArchiveId = signatureArchive?.evidenceArchiveId || null;
+  signatory.signatureArchiveChecksum = signatureArchive?.archiveChecksum || null;
+  signatory.signatureProviderCode = signatureArchive?.providerCode || null;
+  signatory.signatureProviderBaselineRef = clone(signatureArchive?.providerBaselineRef || null);
   signatory.updatedAt = now;
   const currentSignatories = [...state.signatories.values()].filter(
     (candidate) => candidate.packageId === annualPackage.packageId && candidate.versionId === version.versionId && candidate.status !== "superseded"
   );
+  refreshAnnualEvidencePackAfterSignature({
+    state,
+    annualPackage,
+    version,
+    evidencePlatform,
+    actorId: user.userId,
+    correlationId: `${annualPackage.packageId}:${version.versionId}:${signatory.signatoryId}`
+  });
   const allSigned = currentSignatories.every((candidate) => candidate.status === "signed");
   if (allSigned && annualSignoffSatisfied({ annualPackage, signatories: currentSignatories })) {
     version.packageStatus = "signed";
@@ -491,8 +533,56 @@ function signAnnualReportVersion({ state, orgAuthPlatform, clock }, input = {}) 
     annualPackage.status = "signed";
     annualPackage.updatedAt = now;
   }
-  appendSubmissionEvent(state, annualPackage.packageId, version.versionId, "signatory_signed", version.checksum, { signatoryId: signatory.signatoryId, userId: signatory.userId, comment: signatory.comment }, clock);
+  appendSubmissionEvent(
+    state,
+    annualPackage.packageId,
+    version.versionId,
+    "signatory_signed",
+    version.checksum,
+    {
+      signatoryId: signatory.signatoryId,
+      userId: signatory.userId,
+      comment: signatory.comment,
+      signatureReference: signatory.signatureReference,
+      signatureArchiveRef: signatory.signatureArchiveRef,
+      evidenceArchiveId: signatory.evidenceArchiveId
+    },
+    clock,
+    signatory.signatureArchiveRef || signatory.signatureReference
+  );
   return materializePackage(state, annualPackage);
+}
+
+function refreshAnnualEvidencePackAfterSignature({ state, annualPackage, version, evidencePlatform, actorId, correlationId }) {
+  const currentEvidencePack = state.evidencePacks.get(version.evidencePackId) || state.evidencePacks.get(annualPackage.currentEvidencePackId);
+  if (!currentEvidencePack) {
+    return null;
+  }
+  const signedSignatories = [...state.signatories.values()]
+    .filter(
+      (candidate) =>
+        candidate.packageId === annualPackage.packageId
+        && candidate.versionId === version.versionId
+        && candidate.status === "signed"
+    )
+    .sort((left, right) => left.signedAt.localeCompare(right.signedAt))
+    .map((signatory) => buildAnnualSignatureArchiveRef(signatory));
+  const refreshedEvidencePack = registerAnnualEvidencePack({
+    evidencePlatform,
+    annualPackage,
+    version,
+    evidencePack: {
+      ...clone(currentEvidencePack),
+      signatureArchiveRefs: signedSignatories,
+      signoffRefs: clone(signedSignatories)
+    },
+    actorId,
+    correlationId
+  });
+  version.evidencePackId = refreshedEvidencePack.evidencePackId;
+  annualPackage.currentEvidencePackId = refreshedEvidencePack.evidencePackId;
+  state.evidencePacks.set(refreshedEvidencePack.evidencePackId, refreshedEvidencePack);
+  return refreshedEvidencePack;
 }
 
 function openAnnualCorrectionPackage(context, input = {}) {
@@ -812,6 +902,8 @@ function buildEvidencePack({ companyId, accountingPeriod, annualContext, provide
     closeSnapshotRefs: [accountingPeriod.accountingPeriodId],
     rulepackRefs: buildAnnualRulepackRefs(annualContext),
     providerBaselineRefs: dedupeProviderBaselineRefs(providerBaselineRefs),
+    signatureArchiveRefs: [],
+    signoffRefs: [],
     documentChecksums: documents.map((document) => ({ documentCode: document.documentCode, checksum: document.checksum })),
     sourceFingerprint,
     checksum,
@@ -860,6 +952,13 @@ function registerAnnualEvidencePack({
           reportSnapshotRef,
           sourceFingerprint: evidencePack.sourceFingerprint
         })
+      })),
+      ...clone(evidencePack.signatureArchiveRefs || []).map((signatureArchiveRef) => ({
+        artifactType: "annual_signature_archive",
+        artifactRef: signatureArchiveRef.signatureArchiveRef || signatureArchiveRef.signatureReference,
+        checksum: signatureArchiveRef.archiveChecksum || signatureArchiveRef.signatureReference,
+        roleCode: signatureArchiveRef.signatoryRole || "annual_signature",
+        metadata: clone(signatureArchiveRef)
       }))
     ],
     sourceRefs: [
@@ -869,6 +968,7 @@ function registerAnnualEvidencePack({
       ...clone(evidencePack.rulepackRefs),
       ...clone(evidencePack.providerBaselineRefs)
     ],
+    signoffRefs: clone(evidencePack.signoffRefs || []),
     actorId,
     correlationId
   });
@@ -881,6 +981,22 @@ function registerAnnualEvidencePack({
     frozenAt: bundle.frozenAt,
     archivedAt: bundle.archivedAt,
     createdAt: bundle.frozenAt || bundle.createdAt
+  };
+}
+
+function buildAnnualSignatureArchiveRef(signatory) {
+  return {
+    signatoryId: signatory.signatoryId,
+    companyUserId: signatory.companyUserId,
+    userId: signatory.userId,
+    signatoryRole: signatory.signatoryRole,
+    signedAt: signatory.signedAt,
+    signatureReference: signatory.signatureReference,
+    signatureArchiveRef: signatory.signatureArchiveRef,
+    evidenceArchiveId: signatory.evidenceArchiveId,
+    archiveChecksum: signatory.signatureArchiveChecksum,
+    providerCode: signatory.signatureProviderCode,
+    providerBaselineRef: clone(signatory.signatureProviderBaselineRef || null)
   };
 }
 

@@ -1,28 +1,70 @@
 import crypto from "node:crypto";
 import { BANKID_PROVIDER_CODE, issueOpaqueToken } from "../../../auth-core/src/index.mjs";
+import {
+  buildProviderBaselineRef,
+  createStatelessProvider,
+  nowIso
+} from "./provider-runtime-helpers.mjs";
 
 export function createSignicatBankIdProvider({
   clock = () => new Date(),
-  providerMode = "sandbox"
+  providerMode = "sandbox",
+  environmentMode = "test",
+  providerBaselineRegistry = null
 } = {}) {
   const orders = new Map();
+  const provider = createStatelessProvider({
+    providerCode: BANKID_PROVIDER_CODE,
+    surfaceCode: "auth_identity",
+    connectionType: "bankid_authentication",
+    environmentMode,
+    requiredCredentialKinds: ["client_secret"],
+    sandboxSupported: true,
+    trialSafe: true,
+    productionSupported: true,
+    supportsLegalEffectInProduction: false,
+    supportsAsyncCallback: true,
+    requiresCallbackRegistration: true,
+    profiles: [
+      {
+        profileCode: "signicat_bankid_authentication_v1",
+        baselineCode: "SE-SIGNICAT-BANKID-BROKER",
+        operationCodes: ["challenge_start", "challenge_collect", "callback_validate"]
+      }
+    ]
+  });
 
   return {
+    ...provider,
     providerCode: BANKID_PROVIDER_CODE,
     providerMode,
+    providerEnvironmentRef: provider.providerEnvironmentRef,
     startChallenge({ sessionId, companyId, companyUserId, providerSubject } = {}) {
       const orderRef = crypto.randomUUID();
       const completionToken = issueOpaqueToken();
+      const providerBaselineRef = buildProviderBaselineRef({
+        providerBaselineRegistry,
+        providerCode: BANKID_PROVIDER_CODE,
+        baselineCode: "SE-SIGNICAT-BANKID-BROKER",
+        effectiveDate: nowIso(clock).slice(0, 10),
+        metadata: {
+          brokerCode: "signicat",
+          providerMode
+        }
+      });
       const payload = {
         providerCode: BANKID_PROVIDER_CODE,
         brokerCode: "signicat",
         providerMode,
+        providerEnvironmentRef: provider.providerEnvironmentRef,
         orderRef,
         providerOrderRef: `signicat:${orderRef}`,
         autoStartToken: issueOpaqueToken(),
         qrStartToken: issueOpaqueToken(),
         qrStartSecret: issueOpaqueToken().slice(0, 16),
-        completionToken
+        completionToken,
+        providerBaselineRef,
+        providerBaselineCode: providerBaselineRef.baselineCode
       };
       orders.set(orderRef, {
         ...payload,
@@ -49,10 +91,13 @@ export function createSignicatBankIdProvider({
         providerCode: BANKID_PROVIDER_CODE,
         brokerCode: "signicat",
         providerMode,
+        providerEnvironmentRef: provider.providerEnvironmentRef,
         providerOrderRef: order.providerOrderRef,
         orderRef,
         status: "complete",
-        providerSubject: order.providerSubject
+        providerSubject: order.providerSubject,
+        providerBaselineRef: order.providerBaselineRef,
+        providerBaselineCode: order.providerBaselineCode
       };
     },
     getCompletionToken(orderRef) {

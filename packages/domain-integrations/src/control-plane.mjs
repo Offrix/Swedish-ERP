@@ -7,7 +7,11 @@ export const INTEGRATION_SURFACE_CODES = Object.freeze([
   "notification_email",
   "notification_sms",
   "spend",
-  "regulated_transport"
+  "regulated_transport",
+  "auth_identity",
+  "enterprise_federation",
+  "auth_local_factor",
+  "evidence_archive"
 ]);
 export const INTEGRATION_ENVIRONMENT_MODES = Object.freeze(["trial", "sandbox", "test", "pilot_parallel", "production"]);
 export const CREDENTIAL_KINDS = Object.freeze(["api_credentials", "client_secret", "certificate_ref", "file_channel_credentials"]);
@@ -145,6 +149,8 @@ export function createIntegrationControlPlane({
       fallbackMode: optional(input.fallbackMode) || "queue_retry",
       rateLimitPerMinute: Number(input.rateLimitPerMinute || 60),
       requiredCredentialKinds: [...manifest.requiredCredentialKinds],
+      requiredCallbackRegistration: manifest.requiresCallbackRegistration === true,
+      supportsAsyncCallback: manifest.supportsAsyncCallback === true,
       consentRequired: manifest.requiredCredentialKinds.includes("consent_grant"),
       providerBaselineRef: clone(input.providerBaselineRef || null),
       capabilityManifestId: manifest.manifestId,
@@ -227,6 +233,8 @@ export function createIntegrationControlPlane({
         sandboxSupported: manifest.sandboxSupported === true,
         trialSafe: manifest.trialSafe === true,
         supportsLegalEffect: manifest.supportsLegalEffect === true,
+        supportsAsyncCallback: manifest.supportsAsyncCallback === true,
+        requiresCallbackRegistration: manifest.requiresCallbackRegistration === true,
         allowedEnvironmentModes: clone(manifest.allowedEnvironmentModes || modeMatrixToAllowedEnvironmentModes(manifest.modeMatrix)),
         modeMatrix: clone(manifest.modeMatrix),
         profiles: clone(manifest.profiles || [])
@@ -327,18 +335,50 @@ export function createIntegrationControlPlane({
 
   function runIntegrationHealthCheck({ companyId, connectionId, actorId = "system", checkSetCode = "standard" } = {}) {
     const connection = requireIntegrationConnection(state, companyId, connectionId);
+    const manifest = requireIntegrationManifest({
+      partnerModule: connection.surfaceCode === "partner" ? requirePartnerModule(getPartnerModule) : null,
+      surfaceCode: connection.surfaceCode,
+      connectionType: connection.connectionType,
+      providerCode: connection.providerCode,
+      getAdapterProviders
+    });
     const credentials = listForConnection(state.credentialMetadataIdsByConnection, state.credentialSetMetadata, connectionId).filter((item) => item.status === "active");
     const consents = listForConnection(state.consentGrantIdsByConnection, state.consentGrants, connectionId).filter((item) => item.status === "authorized");
     const partnerHealth = connection.surfaceCode === "partner"
       ? requirePartnerModule(getPartnerModule).runPartnerHealthCheck({ companyId, connectionId, checkSetCode, actorId })
       : null;
+    const credentialsRequired = (manifest.requiredCredentialKinds || []).length > 0;
+    const callbackConfigured = credentials.some(
+      (item) => typeof item.callbackDomain === "string" && item.callbackDomain.length > 0
+        && typeof item.callbackPath === "string" && item.callbackPath.length > 0
+    );
+    const credentialsConfigured = credentialsRequired ? credentials.length > 0 : true;
     const results = [
-      check("credentials_configured", credentials.length > 0 ? "passed" : "failed", credentials.length > 0 ? "Credentials configured." : "Credentials missing.", clock),
+      check(
+        "credentials_configured",
+        credentialsConfigured ? "passed" : "failed",
+        credentialsConfigured
+          ? credentialsRequired
+            ? "Credentials configured."
+            : "Credentials not required for this adapter."
+          : "Credentials missing.",
+        clock
+      ),
       check("environment_isolation", hasCrossModeReuse(state, connection, credentials) ? "failed" : "passed", hasCrossModeReuse(state, connection, credentials) ? "Credential reuse across environments detected." : "Credentials isolated per environment.", clock),
       check("rate_limit_policy", connection.rateLimitPerMinute > 0 ? "passed" : "failed", connection.rateLimitPerMinute > 0 ? "Rate limit policy configured." : "Rate limit policy missing.", clock),
       check("fallback_mode", typeof connection.fallbackMode === "string" && connection.fallbackMode.length > 0 ? "passed" : "failed", connection.fallbackMode ? `Fallback mode ${connection.fallbackMode}.` : "Fallback mode missing.", clock),
       check("provider_baseline", connection.providerBaselineRef ? "passed" : "warning", connection.providerBaselineRef ? "Provider baseline pinned." : "Provider baseline missing.", clock)
     ];
+    if (manifest.requiresCallbackRegistration === true) {
+      results.push(
+        check(
+          "callback_registration",
+          callbackConfigured ? "passed" : "failed",
+          callbackConfigured ? "Callback domain and path configured." : "Callback domain/path missing.",
+          clock
+        )
+      );
+    }
     if (connection.consentRequired) {
       results.push(check("consent_authorized", consents.length > 0 ? "passed" : "failed", consents.length > 0 ? "Consent authorized." : "Consent required but missing.", clock));
     }
@@ -446,14 +486,14 @@ function materializeConnection(state, clock, record) {
   const latestHealth = [...healthChecks].sort((left, right) => right.executedAt.localeCompare(left.executedAt))[0] || null;
   const partnerConnection = state.partnerConnections?.get(record.connectionId) || null;
   const minuteKey = `${record.companyId}:${record.connectionId}:${nowIso(clock).slice(0, 16)}`;
-  return clone({
-    ...record,
-    status: partnerConnection?.status || "active",
-    healthStatus: latestHealth?.status || partnerConnection?.healthStatus || "unknown",
-    credentialsConfigured: credentials.length > 0,
-    credentialMetadataCount: credentials.length,
-    consentGrantCount: consents.length,
-    consentsAuthorized: consents.length > 0,
+    return clone({
+      ...record,
+      status: partnerConnection?.status || "active",
+      healthStatus: latestHealth?.status || partnerConnection?.healthStatus || "unknown",
+      credentialsConfigured: record.requiredCredentialKinds.length === 0 ? true : credentials.length > 0,
+      credentialMetadataCount: credentials.length,
+      consentGrantCount: consents.length,
+      consentsAuthorized: consents.length > 0,
     currentMinuteRateLimitCount: state.partnerRateLimitCounters?.get(minuteKey) || 0,
     credentials,
     consents,
@@ -513,6 +553,9 @@ function appendId(indexMap, connectionId, id) {
 }
 
 function assertCredentialIsolation({ state, companyId, providerCode, environmentMode, credentialRef, secretManagerRef = null, existingConnectionId = null }) {
+  if (optional(credentialRef) === null) {
+    return;
+  }
   const credentialRefFingerprint = fingerprint(text(credentialRef, "integration_credentials_ref_required"));
   const secretManagerRefFingerprint = fingerprint(text(secretManagerRef || credentialRef, "integration_secret_manager_ref_required"));
   const resolvedCompanyId = text(companyId, "company_id_required");

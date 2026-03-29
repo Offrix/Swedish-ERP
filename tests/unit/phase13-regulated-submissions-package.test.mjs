@@ -80,6 +80,8 @@ test("Phase 13.2 canonical submission core persists attempts, canonical envelope
     submissionId: submission.submissionId,
     actorId: "phase13-2-unit"
   });
+  assert.equal(submission.currentEvidencePack.signatureArchiveRefs.length, 1);
+  assert.equal(typeof submission.currentEvidencePack.signatureArchiveRefs[0].signatureArchiveRef, "string");
   submission = await platform.submitAuthoritySubmission({
     companyId: "company-13-2",
     submissionId: submission.submissionId,

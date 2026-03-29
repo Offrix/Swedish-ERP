@@ -37,7 +37,7 @@ const SUBMISSION_ACTION_PRIORITIES = Object.freeze(["low", "normal", "high", "ur
 const TRIAL_SUBMISSION_WATERMARK_CODE = "TRIAL";
 const TRIAL_SUBMISSION_POLICY_CODE = "trial_safe_regulated_simulator";
 
-export function createRegulatedSubmissionsModule({ state, clock, evidencePlatform, getCorePlatform } = {}) {
+export function createRegulatedSubmissionsModule({ state, clock, evidencePlatform, getCorePlatform, signingArchiveProvider = null } = {}) {
   return {
     submissionStatuses: SUBMISSION_STATUSES,
     submissionSignedStates: SUBMISSION_SIGNED_STATES,
@@ -52,7 +52,7 @@ export function createRegulatedSubmissionsModule({ state, clock, evidencePlatfor
       return prepareAuthoritySubmission({ state, clock, evidencePlatform }, input);
     },
     signAuthoritySubmission(input) {
-      return signAuthoritySubmission({ state, clock, evidencePlatform }, input);
+      return signAuthoritySubmission({ state, clock, evidencePlatform, signingArchiveProvider }, input);
     },
     listAuthoritySubmissions(input) {
       return listAuthoritySubmissions({ state }, input);
@@ -173,6 +173,8 @@ function prepareAuthoritySubmission({ state, clock, evidencePlatform }, input = 
     payloadHash,
     payloadJson: payload,
     correlationId: normalizeOptionalText(input.correlationId) || crypto.randomUUID(),
+    signatureReference: null,
+    signatureArchiveRefs: [],
     watermarkCode: null,
     trialSimulationProfileCode: null,
     simulatedByPolicyCode: null,
@@ -202,7 +204,7 @@ function prepareAuthoritySubmission({ state, clock, evidencePlatform }, input = 
   };
 }
 
-function signAuthoritySubmission({ state, clock, evidencePlatform }, { companyId, submissionId, actorId, signatureReference = null } = {}) {
+function signAuthoritySubmission({ state, clock, evidencePlatform, signingArchiveProvider }, { companyId, submissionId, actorId, signatureReference = null } = {}) {
   const submission = requireSubmission(state, companyId, submissionId);
   if (submission.signedState === "not_required") {
     return enrichSubmission(state, submission);
@@ -214,7 +216,31 @@ function signAuthoritySubmission({ state, clock, evidencePlatform }, { companyId
   submission.status = "signed";
   submission.signedAt = nowIso(clock);
   submission.signedByActorId = requireText(actorId || "system", "actor_id_required");
-  submission.signatureReference = normalizeOptionalText(signatureReference) || `signature:${submission.submissionId}`;
+  const explicitSignatureReference = normalizeOptionalText(signatureReference);
+  if (signingArchiveProvider?.archiveSignedEvidence) {
+    const signatureArchive = signingArchiveProvider.archiveSignedEvidence({
+      companyId: submission.companyId,
+      sourceObjectType: "authority_submission",
+      sourceObjectId: submission.submissionId,
+      sourceObjectVersion: submission.sourceObjectVersion,
+      signerActorId: submission.signedByActorId,
+      evidenceBundleId: submission.evidencePackId,
+      signaturePayloadHash: submission.payloadHash,
+      signoffHash: submission.payloadHash,
+      metadata: {
+        submissionType: submission.submissionType,
+        providerKey: submission.providerKey,
+        recipientId: submission.recipientId
+      }
+    });
+    submission.signatureReference = explicitSignatureReference || signatureArchive.signatureReference;
+    submission.signatureArchiveRefs = [
+      buildSignatureArchiveRef(signatureArchive, explicitSignatureReference || signatureArchive.signatureReference)
+    ];
+  } else {
+    submission.signatureReference = explicitSignatureReference || `signature:${submission.submissionId}`;
+    submission.signatureArchiveRefs = [];
+  }
   submission.updatedAt = submission.signedAt;
   syncSubmissionEvidenceBundle({ state, evidencePlatform, submission });
   return enrichSubmission(state, submission);
@@ -281,6 +307,7 @@ function buildSubmissionEvidencePackPayload(state, submission) {
     watermark,
     trialSimulation,
     signatureRefs: submission.signatureReference ? [submission.signatureReference] : [],
+    signatureArchiveRefs: clone(submission.signatureArchiveRefs || []),
     submittedArtifactRefs: [
       {
         artifactType: "submission_payload",
@@ -377,6 +404,13 @@ function syncSubmissionEvidenceBundle({ state, evidencePlatform, submission }) {
         }),
         roleCode: "signature"
       })),
+      ...clone(payload.signatureArchiveRefs || []).map((signatureArchiveRef) => ({
+        artifactType: "submission_signature_archive",
+        artifactRef: signatureArchiveRef.signatureArchiveRef || signatureArchiveRef.signatureReference,
+        checksum: signatureArchiveRef.archiveChecksum || signatureArchiveRef.signatureReference,
+        roleCode: signatureArchiveRef.providerCode || "signature_archive",
+        metadata: clone(signatureArchiveRef)
+      })),
       ...payload.receiptRefs.map((receiptRef) => ({
         artifactType: "submission_receipt",
         artifactRef: receiptRef.receiptId,
@@ -403,6 +437,7 @@ function syncSubmissionEvidenceBundle({ state, evidencePlatform, submission }) {
         ...clone(ref)
       }))
     ],
+    signoffRefs: clone(payload.signatureArchiveRefs || []),
     relatedObjectRefs: [
       ...(submission.sourceEvidenceBundleId
         ? [
@@ -1536,6 +1571,7 @@ export function createCanonicalSubmissionEvidencePackRef(payload = {}) {
     signingRequirementCode: normalizeOptionalText(payload.signingRequirementCode),
     signerIdentity: normalizeOptionalText(payload.signerIdentity),
     signatureRefs: clone(payload.signatureRefs || []),
+    signatureArchiveRefs: clone(payload.signatureArchiveRefs || []),
     submittedArtifactRefs: clone(payload.submittedArtifactRefs || []),
     attemptRefs: clone(payload.attemptRefs || []),
     correctionLinks: clone(payload.correctionLinks || []),
@@ -1549,6 +1585,23 @@ export function createCanonicalSubmissionEvidencePackRef(payload = {}) {
     providerBaselineRefs: clone(payload.providerBaselineRefs || []),
     decisionSnapshotRefs: clone(payload.decisionSnapshotRefs || [])
   });
+}
+
+function buildSignatureArchiveRef(signatureArchive, signatureReference) {
+  return {
+    providerCode: signatureArchive.providerCode,
+    providerMode: signatureArchive.providerMode,
+    providerEnvironmentRef: signatureArchive.providerEnvironmentRef,
+    providerBaselineRef: clone(signatureArchive.providerBaselineRef || null),
+    providerBaselineCode: signatureArchive.providerBaselineCode || null,
+    signatureReference: normalizeOptionalText(signatureReference) || signatureArchive.signatureReference,
+    signatureArchiveRef: signatureArchive.signatureArchiveRef,
+    evidenceArchiveId: signatureArchive.evidenceArchiveId,
+    evidenceBundleId: signatureArchive.evidenceBundleId || null,
+    archiveChecksum: signatureArchive.archiveChecksum,
+    signerActorId: signatureArchive.signerActorId,
+    createdAt: signatureArchive.createdAt
+  };
 }
 
 function deriveSubmissionEnvelopeState(submission) {
