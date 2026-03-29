@@ -382,3 +382,76 @@ export interface InboxMessageRecord<TPayload = Record<string, unknown>> {
   readonly processedAt: string | null;
   readonly errorCode: string | null;
 }
+
+export interface MoneyAmount {
+  readonly amountMinor: number;
+  readonly currencyCode: string;
+  readonly scale: number;
+  readonly source: string;
+  readonly amount: number;
+}
+
+export interface Rate {
+  readonly numerator: number;
+  readonly denominator: number;
+  readonly precision: number;
+  readonly source: string;
+  readonly value: number;
+}
+
+export interface Quantity {
+  readonly value: number;
+  readonly precision: number;
+  readonly source: string;
+}
+
+export interface FxRate {
+  readonly baseCurrency: string;
+  readonly quoteCurrency: string;
+  readonly rate: number;
+  readonly rateScale: number;
+  readonly source: string;
+  readonly observedAt: string | null;
+}
+
+export declare const VALUE_KERNEL_VERSION: string;
+
+export declare function roundMoney(value: unknown): number;
+export declare function normalizeAmount(value: unknown, code?: string): number;
+export declare function normalizePositiveAmount(value: unknown, code?: string): number;
+export declare function normalizeSignedAmount(value: unknown, code?: string): number;
+export declare function roundRate(value: unknown, precision?: number): number;
+export declare function roundQuantity(value: unknown, precision?: number): number;
+export declare function amountToMinorUnits(value: unknown, scale?: number): number;
+export declare function minorUnitsToAmount(value: unknown, scale?: number): number;
+export declare function createValueKernelError(code: string, message: string): Error & { readonly code: string; readonly status: number };
+export declare function createMoneyAmount(
+  value: unknown,
+  options?: {
+    readonly currencyCode?: string;
+    readonly scale?: number;
+    readonly source?: string;
+  }
+): MoneyAmount;
+export declare function createRate(
+  value: unknown,
+  options?: {
+    readonly precision?: number;
+    readonly source?: string;
+  }
+): Rate;
+export declare function createQuantity(
+  value: unknown,
+  options?: {
+    readonly precision?: number;
+    readonly source?: string;
+  }
+): Quantity;
+export declare function createFxRate(input: {
+  readonly baseCurrency: string;
+  readonly quoteCurrency: string;
+  readonly rate: unknown;
+  readonly rateScale?: number;
+  readonly source?: string;
+  readonly observedAt?: string | Date | null;
+}): FxRate;

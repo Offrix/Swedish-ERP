@@ -1,6 +1,22 @@
 import crypto from "node:crypto";
 import { createAuditEnvelope } from "../../events/src/index.mjs";
 export {
+  VALUE_KERNEL_VERSION,
+  amountToMinorUnits,
+  createFxRate,
+  createMoneyAmount,
+  createRate,
+  createQuantity,
+  createValueKernelError,
+  minorUnitsToAmount,
+  normalizeAmount,
+  normalizePositiveAmount,
+  normalizeSignedAmount,
+  roundMoney,
+  roundQuantity,
+  roundRate
+} from "./value-kernel.mjs";
+export {
   CORE_CANONICAL_REPOSITORY_OBJECT_TYPES,
   CORE_CANONICAL_REPOSITORY_TABLE,
   COMMAND_RECEIPT_STATUSES,
