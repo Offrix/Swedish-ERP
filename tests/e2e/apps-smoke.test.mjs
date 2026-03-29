@@ -14,7 +14,7 @@ test("app baselines expose green health checks and worker heartbeats", async () 
     runtimes.push(await startDesktopWebServer({ port: 4301, logger: () => {}, runtimeMode: "test" }));
     runtimes.push(await startFieldMobileServer({ port: 4302, logger: () => {}, runtimeMode: "test" }));
     runtimes.push(
-      startWorker({
+      await startWorker({
         intervalMs: 25,
         runtimeMode: "test",
         logger: (message) => {

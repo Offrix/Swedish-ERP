@@ -63,8 +63,8 @@ test("phase 1.4 api starter rejects protected boot when runtime invariants are b
   );
 });
 
-test("phase 1.4 worker rejects protected boot when runtime store is not persistent", () => {
-  assert.throws(
+test("phase 1.4 worker rejects protected boot when runtime store is not persistent", async () => {
+  await assert.rejects(
     () =>
       startWorker({
         intervalMs: 250,

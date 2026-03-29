@@ -25,13 +25,11 @@ const runtimes = await Promise.all([
     runtimeMode,
     enforceExplicitRuntimeMode: true
   }),
-  Promise.resolve(
-    startWorker({
-      intervalMs: Number(process.env.WORKER_INTERVAL_MS || "1000"),
-      runtimeMode,
-      enforceExplicitRuntimeMode: true
-    })
-  )
+  startWorker({
+    intervalMs: Number(process.env.WORKER_INTERVAL_MS || "1000"),
+    runtimeMode,
+    enforceExplicitRuntimeMode: true
+  })
 ]);
 
 const shutdown = async () => {

@@ -405,7 +405,12 @@ export async function runWorkerBatch({
   return processedJobs;
 }
 
-export function startWorker({
+async function verifyWorkerRuntimeContracts(platform) {
+  await platform.verifyRuntimeCriticalDomainStateStoreSchemaContract?.();
+  await platform.verifyRuntimeJobStoreSchemaContract?.();
+}
+
+export async function startWorker({
   intervalMs = Number(process.env.WORKER_INTERVAL_MS || 5000),
   batchSize = Number(process.env.WORKER_BATCH_SIZE || 10),
   claimTtlSeconds = Number(process.env.WORKER_CLAIM_TTL_SECONDS || 120),
@@ -440,6 +445,7 @@ export function startWorker({
     starter: "worker"
   });
   const workerId = buildWorkerId(env);
+  await verifyWorkerRuntimeContracts(resolvedPlatform);
 
   let stopped = false;
   let timer = null;
@@ -524,7 +530,7 @@ export function startWorker({
 }
 
 if (isMainModule(import.meta.url)) {
-  const runtime = startWorker({
+  const runtime = await startWorker({
     enforceExplicitRuntimeMode: true
   });
   process.on("SIGINT", () => {

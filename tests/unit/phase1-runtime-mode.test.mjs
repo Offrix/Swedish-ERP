@@ -68,7 +68,7 @@ test("phase 1.2 api platform carries runtime mode metadata", () => {
 
 test("phase 1.2 worker resolves runtime mode before entering the polling loop", async () => {
   const logs = [];
-  const runtime = startWorker({
+  const runtime = await startWorker({
     intervalMs: 250,
     env: {
       WORKER_JOB_STORE: "memory",
@@ -83,6 +83,56 @@ test("phase 1.2 worker resolves runtime mode before entering the polling loop", 
     assert.equal(runtime.platform.environmentMode, "sandbox_internal");
     assert.equal(runtime.platform.supportsLegalEffect, false);
     assert.equal(logs.some((message) => /sandbox_internal/u.test(message)), true);
+  } finally {
+    await runtime.stop();
+  }
+});
+
+test("Phase 2.5 worker starter verifies runtime schema contracts before reporting startup", async () => {
+  const logs = [];
+  let criticalVerified = 0;
+  let jobStoreVerified = 0;
+
+  const runtime = await startWorker({
+    intervalMs: 250,
+    logger: (message) => {
+      logs.push(message);
+    },
+    platform: {
+      environmentMode: "test",
+      getRuntimeModeProfile: () => ({ environmentMode: "test" }),
+      scanRuntimeInvariants: () => ({
+        startupAllowed: true,
+        activeStoreKind: "postgres",
+        summary: {
+          totalCount: 0,
+          blockingCount: 0,
+          warningCount: 0
+        }
+      }),
+      async verifyRuntimeCriticalDomainStateStoreSchemaContract() {
+        criticalVerified += 1;
+        assert.equal(logs.some((entry) => entry.includes("worker started")), false);
+      },
+      async verifyRuntimeJobStoreSchemaContract() {
+        jobStoreVerified += 1;
+        assert.equal(criticalVerified, 1);
+        assert.equal(logs.some((entry) => entry.includes("worker started")), false);
+      },
+      async claimAvailableRuntimeJobs() {
+        return [];
+      }
+    },
+    env: {
+      ERP_RUNTIME_MODE: "test",
+      WORKER_JOB_STORE: "memory"
+    }
+  });
+
+  try {
+    assert.equal(criticalVerified >= 1, true);
+    assert.equal(jobStoreVerified >= 1, true);
+    assert.equal(logs.some((entry) => entry.includes("worker started")), true);
   } finally {
     await runtime.stop();
   }
