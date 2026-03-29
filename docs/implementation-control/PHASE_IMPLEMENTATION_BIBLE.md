@@ -1977,6 +1977,7 @@ Build real integrations control-plane and prioritized providers/adapters with co
 
 **Förstärk / härda**
 - credential storage, health checks, fallback modes, contract-test packs, webhook sequencing
+- sealed webhook signing secrets with `secretRef` + encrypted envelope storage, no raw webhook secret in durable snapshots, and restore-safe legacy migration
 
 **Skriv om**
 - synthetic executors in live path

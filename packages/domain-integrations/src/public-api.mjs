@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 const PUBLIC_API_SPEC_VERSION = "2026-03-25";
 const CANONICAL_API_VERSION = "2026-03-27";
 const MAX_WEBHOOK_DELIVERY_ATTEMPTS = 5;
+const WEBHOOK_SECRET_SEAL_KEY_ID = "integrations-webhook-secret-seal-v1";
 
 export const PUBLIC_API_MODES = Object.freeze(["sandbox", "production"]);
 export const PUBLIC_API_CLIENT_STATUSES = Object.freeze(["active", "revoked"]);
@@ -182,7 +183,18 @@ const WEBHOOK_EVENT_CATALOG = Object.freeze([
   })
 ]);
 
-export function createPublicApiModule({ state, clock = () => new Date(), deliveryExecutor = defaultWebhookDeliveryExecutor }) {
+export function createPublicApiModule({
+  state,
+  clock = () => new Date(),
+  deliveryExecutor = defaultWebhookDeliveryExecutor,
+  webhookSecretSealer = createSecretSealer({
+    secretSealKey: "swedish-erp-integrations-webhook-seal",
+    keyId: WEBHOOK_SECRET_SEAL_KEY_ID
+  })
+}) {
+  if (!(state.webhookSubscriptionSecrets instanceof Map)) {
+    state.webhookSubscriptionSecrets = new Map();
+  }
   return {
     publicApiModes: PUBLIC_API_MODES,
     publicApiClientStatuses: PUBLIC_API_CLIENT_STATUSES,
@@ -204,7 +216,8 @@ export function createPublicApiModule({ state, clock = () => new Date(), deliver
     dispatchWebhookDeliveries,
     listWebhookEvents,
     listWebhookDeliveries,
-    getPublicApiSandboxCatalog
+    getPublicApiSandboxCatalog,
+    migrateWebhookSubscriptionSecrets
   };
 
   function getPublicApiSpec({ version = PUBLIC_API_SPEC_VERSION } = {}) {
@@ -414,6 +427,7 @@ export function createPublicApiModule({ state, clock = () => new Date(), deliver
     if (resolvedMode !== client.mode) {
       throw createError(409, "public_api_webhook_mode_mismatch", "Webhook subscriptions must use the same mode as the owning client.");
     }
+    const issuedSecret = issueOpaqueToken();
     const subscription = {
       subscriptionId: crypto.randomUUID(),
       companyId: client.companyId,
@@ -422,13 +436,15 @@ export function createPublicApiModule({ state, clock = () => new Date(), deliver
       eventTypes: normalizeEventTypes(eventTypes),
       targetUrl: text(targetUrl, "webhook_target_url_required"),
       description: optionalText(description),
-      secret: issueOpaqueToken(),
+      secretRef: null,
+      secretPreview: buildSecretPreview(issuedSecret),
       signingKeyVersion: 1,
       status: "active",
       createdByActorId: text(actorId || "system", "actor_id_required"),
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
     };
+    writeWebhookSubscriptionSecret(subscription, issuedSecret);
     state.webhookSubscriptions.set(subscription.subscriptionId, subscription);
     return presentWebhookSubscription(subscription, { includeSecret: true });
   }
@@ -506,6 +522,7 @@ export function createPublicApiModule({ state, clock = () => new Date(), deliver
         payload: clone(event.payloadJson)
       };
       const sequenceNo = nextWebhookSequenceNo(state, subscription.subscriptionId);
+      const signingSecret = readWebhookSubscriptionSecret(subscription);
       const delivery = {
         deliveryId,
         eventId: event.eventId,
@@ -515,7 +532,7 @@ export function createPublicApiModule({ state, clock = () => new Date(), deliver
         mode: resolvedMode,
         status: "queued",
         deliveryAttemptNo: 0,
-        signature: signWebhookBody(subscription.secret, body),
+        signature: signWebhookBody(signingSecret, body),
         signingKeyVersion: subscription.signingKeyVersion,
         bodyHash: hashObject(body),
         bodyJson: clone(body),
@@ -794,13 +811,71 @@ export function createPublicApiModule({ state, clock = () => new Date(), deliver
       .map((delivery) => delivery.deliveredAt)
       .filter((value) => typeof value === "string" && value.length > 0)
       .sort((left, right) => right.localeCompare(left))[0] || null;
-    if (!includeSecret) {
-      const secret = cloneSubscription.secret;
+    const secretPresent = Boolean(cloneSubscription.secretRef || cloneSubscription.secret);
+    if (includeSecret) {
+      cloneSubscription.secret = readWebhookSubscriptionSecret(subscription);
+    } else {
+      const preview = cloneSubscription.secretPreview || buildSecretPreview(cloneSubscription.secret);
       delete cloneSubscription.secret;
-      cloneSubscription.secretPresent = typeof secret === "string" && secret.length > 0;
-      cloneSubscription.secretPreview = typeof secret === "string" ? `***${secret.slice(-4)}` : null;
+      cloneSubscription.secretPresent = secretPresent;
+      cloneSubscription.secretPreview = preview;
     }
+    delete cloneSubscription.secretRef;
     return cloneSubscription;
+  }
+
+  function migrateWebhookSubscriptionSecrets() {
+    for (const subscription of state.webhookSubscriptions.values()) {
+      if (subscription.secretRef) {
+        if (!subscription.secretPreview) {
+          subscription.secretPreview = buildSecretPreview(readWebhookSubscriptionSecret(subscription));
+        }
+        delete subscription.secret;
+        continue;
+      }
+      if (typeof subscription.secret === "string" && subscription.secret.length > 0) {
+        writeWebhookSubscriptionSecret(subscription, subscription.secret);
+      }
+    }
+  }
+
+  function writeWebhookSubscriptionSecret(subscription, secret) {
+    const resolvedSecret = text(secret, "webhook_secret_required");
+    const secretRef = subscription.secretRef || subscription.subscriptionId;
+    const existing = state.webhookSubscriptionSecrets.get(secretRef);
+    subscription.secretRef = secretRef;
+    subscription.secretPreview = buildSecretPreview(resolvedSecret);
+    state.webhookSubscriptionSecrets.set(secretRef, {
+      secretRef,
+      subscriptionId: subscription.subscriptionId,
+      keyId: webhookSecretSealer.keyId,
+      createdAt: existing?.createdAt || nowIso(clock),
+      updatedAt: nowIso(clock),
+      envelope: webhookSecretSealer.seal(resolvedSecret)
+    });
+    delete subscription.secret;
+    return secretRef;
+  }
+
+  function readWebhookSubscriptionSecret(subscription) {
+    if (subscription.secretRef) {
+      const storedSecret = state.webhookSubscriptionSecrets.get(subscription.secretRef);
+      if (storedSecret?.envelope) {
+        return webhookSecretSealer.open(storedSecret.envelope);
+      }
+      if (typeof subscription.secret === "string" && subscription.secret.length > 0) {
+        const legacySecret = subscription.secret;
+        writeWebhookSubscriptionSecret(subscription, legacySecret);
+        return legacySecret;
+      }
+      throw createError(500, "webhook_secret_missing", "Webhook secret envelope was missing.");
+    }
+    if (typeof subscription.secret === "string" && subscription.secret.length > 0) {
+      const legacySecret = subscription.secret;
+      writeWebhookSubscriptionSecret(subscription, legacySecret);
+      return legacySecret;
+    }
+    throw createError(500, "webhook_secret_missing", "Webhook secret was missing.");
   }
 
   function presentWebhookDelivery(delivery) {
@@ -1116,6 +1191,10 @@ function issueOpaqueToken() {
   return crypto.randomBytes(24).toString("base64url");
 }
 
+function buildSecretPreview(secret) {
+  return typeof secret === "string" && secret.length > 0 ? `***${secret.slice(-4)}` : null;
+}
+
 function hashOpaqueToken(token) {
   return crypto.createHash("sha256").update(String(token)).digest("hex");
 }
@@ -1211,6 +1290,41 @@ function text(value, code) {
 
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function createSecretSealer({ secretSealKey, keyId } = {}) {
+  const resolvedKeyId = text(keyId, "secret_sealer_key_id_required");
+  const keyMaterial = crypto.createHash("sha256").update(text(secretSealKey, "secret_sealer_key_required")).digest();
+  return {
+    keyId: resolvedKeyId,
+    seal(secret) {
+      const resolvedSecret = text(secret, "secret_sealer_secret_required");
+      const iv = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv("aes-256-gcm", keyMaterial, iv);
+      const ciphertext = Buffer.concat([cipher.update(resolvedSecret, "utf8"), cipher.final()]);
+      return {
+        keyId: resolvedKeyId,
+        iv: iv.toString("base64"),
+        authTag: cipher.getAuthTag().toString("base64"),
+        ciphertext: ciphertext.toString("base64")
+      };
+    },
+    open(envelope) {
+      if (!envelope || envelope.keyId !== resolvedKeyId) {
+        throw createError(500, "secret_envelope_key_mismatch", "Secret envelope key id did not match the active integrations sealer.");
+      }
+      const decipher = crypto.createDecipheriv(
+        "aes-256-gcm",
+        keyMaterial,
+        Buffer.from(text(envelope.iv, "secret_envelope_iv_required"), "base64")
+      );
+      decipher.setAuthTag(Buffer.from(text(envelope.authTag, "secret_envelope_auth_tag_required"), "base64"));
+      return Buffer.concat([
+        decipher.update(Buffer.from(text(envelope.ciphertext, "secret_envelope_ciphertext_required"), "base64")),
+        decipher.final()
+      ]).toString("utf8");
+    }
+  };
 }
 
 function createError(status, code, message) {

@@ -483,6 +483,7 @@ export function createIntegrationPlatform(options = {}) {
 export function createIntegrationEngine({
   clock = () => new Date(),
   environmentMode = "test",
+  secretSealKey = null,
   paymentBaseUrl = "https://payments.local",
   webhookDeliveryExecutor = undefined,
   partnerContractTestExecutors = undefined,
@@ -491,6 +492,10 @@ export function createIntegrationEngine({
   getCorePlatform = null,
   providerBaselineRegistry = null
 } = {}) {
+  const integrationSecretSealer = createSecretSealer({
+    secretSealKey: secretSealKey || `swedish-erp-integrations-seal:${environmentMode}`,
+    keyId: "integrations-secret-seal-v1"
+  });
   const providerBaselines =
     providerBaselineRegistry || createProviderBaselineRegistry({ clock, seedProviderBaselines: INTEGRATION_PROVIDER_BASELINES });
   const enableBankingProvider = createEnableBankingProvider({
@@ -639,6 +644,7 @@ export function createIntegrationEngine({
     publicApiClients: new Map(),
     publicApiTokens: new Map(),
     webhookSubscriptions: new Map(),
+    webhookSubscriptionSecrets: new Map(),
     webhookEvents: new Map(),
     webhookDeliveries: new Map(),
     partnerConnections: new Map(),
@@ -652,7 +658,8 @@ export function createIntegrationEngine({
   const publicApiModule = createPublicApiModule({
     state,
     clock,
-    deliveryExecutor: webhookDeliveryExecutor
+    deliveryExecutor: webhookDeliveryExecutor,
+    webhookSecretSealer: integrationSecretSealer
   });
   const partnerModule = createPartnerModule({
     state,
@@ -780,6 +787,7 @@ export function createIntegrationEngine({
     listSigningEvidenceArchives: (input) => signingEvidenceArchiveProvider.listArchiveRecords(input),
     prepareProjectImportBatchFromAdapter,
     snapshotIntegrations() {
+      publicApiModule.migrateWebhookSubscriptionSecrets();
       return clone({
         submissions: [...state.submissions.values()].map((submission) =>
           regulatedSubmissionsModule.getAuthoritySubmission({
@@ -797,14 +805,15 @@ export function createIntegrationEngine({
         publicApiClients: [...state.publicApiClients.values()],
         publicApiTokens: [...state.publicApiTokens.values()],
         webhookSubscriptions: [...state.webhookSubscriptions.values()],
-          webhookEvents: [...state.webhookEvents.values()],
-          webhookDeliveries: [...state.webhookDeliveries.values()],
-          integrationConnections: [...state.integrationConnections.values()],
-          credentialSetMetadata: [...state.credentialSetMetadata.values()],
-          consentGrants: [...state.consentGrants.values()],
-          integrationHealthChecks: [...state.integrationHealthChecks.values()],
-          partnerConnections: [...state.partnerConnections.values()],
-          partnerHealthChecks: [...state.partnerHealthChecks.values()],
+        webhookSubscriptionSecrets: [...state.webhookSubscriptionSecrets.values()],
+        webhookEvents: [...state.webhookEvents.values()],
+        webhookDeliveries: [...state.webhookDeliveries.values()],
+        integrationConnections: [...state.integrationConnections.values()],
+        credentialSetMetadata: [...state.credentialSetMetadata.values()],
+        consentGrants: [...state.consentGrants.values()],
+        integrationHealthChecks: [...state.integrationHealthChecks.values()],
+        partnerConnections: [...state.partnerConnections.values()],
+        partnerHealthChecks: [...state.partnerHealthChecks.values()],
         partnerContractResults: [...state.partnerContractResults.values()],
         partnerOperations: [...state.partnerOperations.values()],
         asyncJobs: [...state.asyncJobs.values()],
@@ -844,6 +853,7 @@ export function createIntegrationEngine({
   };
 
   function exportDurableState() {
+    publicApiModule.migrateWebhookSubscriptionSecrets();
     return {
       ...serializeDurableState(state),
       providerSnapshots: {
@@ -878,6 +888,7 @@ export function createIntegrationEngine({
 
   function importDurableState(snapshot) {
     applyDurableStateSnapshot(state, snapshot);
+    publicApiModule.migrateWebhookSubscriptionSecrets();
     documentOcrProvider.restore(snapshot?.providerSnapshots?.documentOcrProvider || snapshot?.documentOcrProvider || {});
     paymentLinkProvider.restore(snapshot?.providerSnapshots?.paymentLinkProvider || {});
     peppolProvider.restore(snapshot?.providerSnapshots?.peppolProvider || {});
@@ -1212,6 +1223,41 @@ function stableStringify(value) {
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function createSecretSealer({ secretSealKey, keyId } = {}) {
+  const resolvedKeyId = requireText(keyId, "secret_sealer_key_id_required");
+  const keyMaterial = crypto.createHash("sha256").update(requireText(secretSealKey, "secret_sealer_key_required")).digest();
+  return {
+    keyId: resolvedKeyId,
+    seal(secret) {
+      const resolvedSecret = requireText(secret, "secret_sealer_secret_required");
+      const iv = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv("aes-256-gcm", keyMaterial, iv);
+      const ciphertext = Buffer.concat([cipher.update(resolvedSecret, "utf8"), cipher.final()]);
+      return {
+        keyId: resolvedKeyId,
+        iv: iv.toString("base64"),
+        authTag: cipher.getAuthTag().toString("base64"),
+        ciphertext: ciphertext.toString("base64")
+      };
+    },
+    open(envelope) {
+      if (!envelope || envelope.keyId !== resolvedKeyId) {
+        throw createError(500, "secret_envelope_key_mismatch", "Secret envelope key id did not match the active integrations sealer.");
+      }
+      const decipher = crypto.createDecipheriv(
+        "aes-256-gcm",
+        keyMaterial,
+        Buffer.from(requireText(envelope.iv, "secret_envelope_iv_required"), "base64")
+      );
+      decipher.setAuthTag(Buffer.from(requireText(envelope.authTag, "secret_envelope_auth_tag_required"), "base64"));
+      return Buffer.concat([
+        decipher.update(Buffer.from(requireText(envelope.ciphertext, "secret_envelope_ciphertext_required"), "base64")),
+        decipher.final()
+      ]).toString("utf8");
+    }
+  };
 }
 
 function createError(status, code, message) {

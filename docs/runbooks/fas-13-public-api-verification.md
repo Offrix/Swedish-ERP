@@ -39,6 +39,7 @@ Verifiera att publikt API, OAuth-scope, sandbox och webhook-kedjan fungerar enli
 - sandbox-katalog och rapport-snapshots respekterar scope och bolagsgräns
 - webhook-subscription, event och delivery-kedja är append-only och idempotent per mode
 - webhook-hemligheter returneras endast vid skapande och maskeras i listningar
+- durable export och restore exponerar aldrig rå webhook-signing-secret men signerad delivery-dispatch fungerar fortfarande efter import
 - compatibility baseline kan registreras utan att mutera tidigare baselines
 
 ## Vanliga fel

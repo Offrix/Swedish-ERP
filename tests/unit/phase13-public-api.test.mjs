@@ -142,6 +142,63 @@ test("Phase 13.1 public API clients, compatibility baselines and webhook events 
   assert.equal(sandboxCatalog.exampleResources.length >= 3, true);
 });
 
+test("Phase 13.1 durable export seals webhook subscription secrets and restore preserves dispatch", async () => {
+  const clock = () => new Date("2026-03-29T22:00:00Z");
+  const platform = createApiPlatform({
+    clock,
+    webhookDeliveryExecutor: createSentWebhookDeliveryExecutor()
+  });
+
+  const client = platform.createPublicApiClient({
+    companyId: DEMO_IDS.companyId,
+    displayName: "Durable webhook client",
+    mode: "sandbox",
+    scopes: ["api_spec.read", "webhook.manage"],
+    actorId: "phase13-1-durable"
+  });
+  const subscription = platform.createWebhookSubscription({
+    companyId: DEMO_IDS.companyId,
+    clientId: client.clientId,
+    mode: "sandbox",
+    eventTypes: ["report.snapshot.ready"],
+    targetUrl: "https://example.test/durable-webhook",
+    actorId: "phase13-1-durable"
+  });
+
+  const durableState = platform.getDomain("integrations").exportDurableState();
+  const serialized = JSON.stringify(durableState);
+  assert.equal(serialized.includes(subscription.secret), false);
+
+  const restoredPlatform = createApiPlatform({
+    clock,
+    webhookDeliveryExecutor: createSentWebhookDeliveryExecutor()
+  });
+  restoredPlatform.getDomain("integrations").importDurableState(durableState);
+
+  const listedSubscriptions = restoredPlatform.listWebhookSubscriptions({
+    companyId: DEMO_IDS.companyId,
+    clientId: client.clientId
+  });
+  assert.equal("secret" in listedSubscriptions[0], false);
+  assert.equal(listedSubscriptions[0].secretPresent, true);
+
+  const event = restoredPlatform.emitWebhookEvent({
+    companyId: DEMO_IDS.companyId,
+    eventType: "report.snapshot.ready",
+    resourceType: "report_snapshot",
+    resourceId: "snapshot-durable",
+    payload: { snapshotId: "snapshot-durable" },
+    mode: "sandbox",
+    eventKey: "phase13-1:durable"
+  });
+  const dispatch = await restoredPlatform.dispatchWebhookDeliveries({
+    companyId: DEMO_IDS.companyId,
+    deliveryId: event.deliveries[0].deliveryId,
+    actorId: "phase13-1-durable"
+  });
+  assert.equal(dispatch.items[0].status, "sent");
+});
+
 test("Phase 13.1 webhook runtime dead-letters deliveries after repeated transport failure", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-22T18:30:00Z"),
