@@ -27,7 +27,7 @@ test("Phase 10.3 HUS classifies, submits, pays out and recovers deterministicall
     buyers: [
       {
         displayName: "Anna Andersson",
-        personalIdentityNumber: "197501019999",
+        personalIdentityNumber: "197501019991",
         allocationPercent: 100
       }
     ],

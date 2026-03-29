@@ -43,7 +43,7 @@ test("Phase 14.4 API exposes resource, risk and portfolio runtime", async () => 
     const customer = platform.createCustomer({
       companyId: COMPANY_ID,
       legalName: "API Portfolio Customer AB",
-      organizationNumber: "5566778822",
+      organizationNumber: "5566778824",
       countryCode: "SE",
       languageCode: "SV",
       currencyCode: "SEK",

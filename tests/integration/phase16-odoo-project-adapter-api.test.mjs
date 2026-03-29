@@ -73,7 +73,7 @@ test("Phase 16.6 API exposes Odoo project billing manifests and imports projects
             {
               id: "odoo-api-partner-16-6",
               name: "API Odoo Customer AB",
-              vat: "5569981122"
+              vat: "5569981128"
             }
           ],
           saleOrders: [

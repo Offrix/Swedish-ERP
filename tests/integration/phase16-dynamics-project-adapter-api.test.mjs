@@ -73,7 +73,7 @@ test("Phase 16.6 API exposes Dynamics 365 Project Operations manifests and impor
             {
               id: "d365-api-customer-16-6",
               name: "API Dynamics Customer AB",
-              organizationNumber: "5561239876"
+              organizationNumber: "5561239871"
             }
           ],
           contracts: [

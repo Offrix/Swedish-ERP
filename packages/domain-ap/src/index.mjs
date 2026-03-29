@@ -3,6 +3,11 @@ import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { createVatPlatform } from "../../domain-vat/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
+  normalizeOptionalSwedishOrganizationNumber,
+  normalizeOptionalVatNumber,
+  normalizeRequiredIsoDate
+} from "../../domain-core/src/validation.mjs";
+import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
@@ -258,14 +263,18 @@ export function createApEngine({
       bic,
       paymentRecipient
     });
+    const resolvedCountryCode = normalizeUpperCode(countryCode, "country_code_required", 2);
     const record = {
       supplierId: crypto.randomUUID(),
       companyId: resolvedCompanyId,
       supplierNo: resolvedSupplierNo,
       legalName: requireText(legalName, "supplier_legal_name_required"),
-      organizationNumber: normalizeOptionalText(organizationNumber),
-      vatNumber: normalizeOptionalText(vatNumber),
-      countryCode: normalizeUpperCode(countryCode, "country_code_required", 2),
+      organizationNumber: normalizeSupplierOrganizationNumber(resolvedCountryCode, organizationNumber),
+      vatNumber: normalizeOptionalVatNumber(vatNumber, "supplier_vat_number_invalid", {
+        errorFactory: createError,
+        countryCode: resolvedCountryCode
+      }),
+      countryCode: resolvedCountryCode,
       currencyCode: normalizeUpperCode(currencyCode, "currency_code_required", 3),
       paymentTermsCode: requireText(paymentTermsCode, "payment_terms_code_required"),
       paymentRecipient: bankDetails.paymentRecipient,
@@ -3254,9 +3263,15 @@ function updateSupplierFromImport({ state, clock, vatPlatform, supplier, incomin
     paymentRecipient: incoming.paymentRecipient ?? supplier.paymentRecipient
   });
   supplier.legalName = requireText(incoming.legalName || supplier.legalName, "supplier_legal_name_required");
-  supplier.organizationNumber = normalizeOptionalText(incoming.organizationNumber ?? supplier.organizationNumber);
-  supplier.vatNumber = normalizeOptionalText(incoming.vatNumber ?? supplier.vatNumber);
   supplier.countryCode = normalizeUpperCode(incoming.countryCode || supplier.countryCode, "country_code_required", 2);
+  supplier.organizationNumber = normalizeSupplierOrganizationNumber(
+    supplier.countryCode,
+    incoming.organizationNumber ?? supplier.organizationNumber
+  );
+  supplier.vatNumber = normalizeOptionalVatNumber(incoming.vatNumber ?? supplier.vatNumber, "supplier_vat_number_invalid", {
+    errorFactory: createError,
+    countryCode: supplier.countryCode
+  });
   supplier.currencyCode = normalizeUpperCode(incoming.currencyCode || supplier.currencyCode, "currency_code_required", 3);
   supplier.paymentTermsCode = requireText(incoming.paymentTermsCode || supplier.paymentTermsCode, "payment_terms_code_required");
   supplier.paymentRecipient = bankDetails.paymentRecipient;
@@ -3718,11 +3733,7 @@ function normalizeUpperCode(value, code, expectedLength = null) {
 }
 
 function normalizeDate(value, code) {
-  const normalized = requireText(value, code);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    throw createError(409, code, `${code.replaceAll("_", " ")}.`);
-  }
-  return normalized;
+  return normalizeRequiredIsoDate(value, code, { errorFactory: createError });
 }
 
 function normalizeOptionalDate(value, code) {
@@ -3799,6 +3810,15 @@ function createError(statusCode, code, message) {
   error.statusCode = statusCode;
   error.code = code;
   return error;
+}
+
+function normalizeSupplierOrganizationNumber(countryCode, organizationNumber) {
+  if ((countryCode || "").toUpperCase() === "SE") {
+    return normalizeOptionalSwedishOrganizationNumber(organizationNumber, "supplier_organization_number_invalid", {
+      errorFactory: createError
+    });
+  }
+  return normalizeOptionalText(organizationNumber);
 }
 
 function pushAudit(state, clock, event) {

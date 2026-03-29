@@ -66,7 +66,7 @@ test("Phase 6.1 broker-backed BankID and local factors create canonical identity
       (account) =>
         account.providerCode === BANKID_PROVIDER_CODE
         && account.factorType === "bankid"
-        && account.providerSubject === "197001011234"
+        && account.providerSubject === "197001011233"
     ),
     true
   );
@@ -87,7 +87,7 @@ test("Phase 6.1 broker-backed BankID and local factors create canonical identity
     personIdentities.some(
       (identity) =>
         identity.providerCode === BANKID_PROVIDER_CODE
-        && identity.providerSubject === "197001011234"
+        && identity.providerSubject === "197001011233"
         && identity.email === DEMO_ADMIN_EMAIL
     ),
     true

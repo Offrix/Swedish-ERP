@@ -104,7 +104,7 @@ INSERT INTO companies (company_id, legal_name, org_number, status, settings_json
 VALUES (
   '00000000-0000-4000-8000-000000000013',
   'Onboarding Demo AB',
-  '559900-0013',
+  '559900-0014',
   'draft',
   '{"accountingYear":"2026"}'::jsonb
 )
@@ -145,7 +145,7 @@ VALUES
     'company_profile',
     'completed',
     NOW(),
-    '{"legalName":"Onboarding Demo AB","orgNumber":"559900-0013"}'::jsonb
+    '{"legalName":"Onboarding Demo AB","orgNumber":"559900-0014"}'::jsonb
   ),
   (
     '00000000-0000-4000-8000-000000000028',

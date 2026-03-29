@@ -167,7 +167,7 @@ function seedReportingSources(platform) {
   const customer = platform.createCustomer({
     companyId: COMPANY_ID,
     legalName: "API Reporting Customer AB",
-    organizationNumber: "5566771122",
+    organizationNumber: "5566771126",
     countryCode: "SE",
     languageCode: "SV",
     currencyCode: "SEK",

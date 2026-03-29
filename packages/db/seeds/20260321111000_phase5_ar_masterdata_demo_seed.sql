@@ -36,7 +36,7 @@ VALUES (
   'CUST-2001',
   'Scandi Retail Group AB',
   'Scandi Retail Group AB',
-  '559122-3344',
+  '559122-3341',
   'active',
   'SE',
   'sv',
@@ -52,7 +52,7 @@ VALUES (
   FALSE,
   '{"line1":"Klarabergsgatan 50","postal_code":"11121","city":"Stockholm","country_code":"SE"}'::jsonb,
   '{"line1":"Södra Hamngatan 28","postal_code":"41106","city":"Göteborg","country_code":"SE"}'::jsonb,
-  '0007:5591223344',
+  '0007:5591223341',
   '0088',
   '1210',
   'RETAIL',
@@ -746,7 +746,7 @@ VALUES
     '00000000-0000-4000-8000-000000005301',
     NULL,
     NULL,
-    '{"customer_no":"CUST-2001","org_number":"559122-3344"}'::jsonb
+    '{"customer_no":"CUST-2001","org_number":"559122-3341"}'::jsonb
   ),
   (
     '00000000-0000-4000-8000-000000005442',

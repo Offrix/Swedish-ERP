@@ -96,7 +96,7 @@ test("Phase 11.3 end-to-end flow exposes close routes and closes a checklist", a
 function seedClientCloseSetup(platform, adminToken, responsibleConsultantId) {
   const clientCompany = platform.createCompany({
     legalName: "Close E2E Client AB",
-    orgNumber: "559900-4303",
+    orgNumber: "559900-4305",
     settingsJson: {
       bureauDelivery: {
         closeLeadBusinessDays: 3,

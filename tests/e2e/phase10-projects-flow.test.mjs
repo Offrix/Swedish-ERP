@@ -60,7 +60,7 @@ test("Phase 10.1 e2e flow covers project setup, payroll-backed actuals, AR tie-o
       body: {
         companyId: COMPANY_ID,
         legalName: "E2E Project Customer AB",
-        organizationNumber: "5591223301",
+        organizationNumber: "5591223309",
         countryCode: "SE",
         languageCode: "SV",
         currencyCode: "SEK",

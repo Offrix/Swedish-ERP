@@ -67,7 +67,7 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
       expectedStatus: 400,
       body: {
         legalName: "Broken Company AB",
-        orgNumber: "559900-9998",
+        orgNumber: "559901-0005",
         adminEmail: "",
         adminDisplayName: "Broken Owner"
       }

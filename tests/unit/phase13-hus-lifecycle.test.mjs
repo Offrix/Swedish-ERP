@@ -11,7 +11,7 @@ test("Phase 13.1 applies buyer annual cap and weekend-adjusted HUS deadline", ()
 
   const buyer = {
     displayName: "Anna Andersson",
-    personalIdentityNumber: "197501019999",
+    personalIdentityNumber: "197501019991",
     allocationPercent: 100
   };
 
@@ -161,7 +161,7 @@ test("Phase 13.1 locks HUS claim fields and blocks unresolved partial payout", (
     buyers: [
       {
         displayName: "Anna Andersson",
-        personalIdentityNumber: "197501019999",
+        personalIdentityNumber: "197501019991",
         allocationPercent: 100
       }
     ],
@@ -209,7 +209,7 @@ test("Phase 13.1 locks HUS claim fields and blocks unresolved partial payout", (
         buyers: [
           {
             displayName: "Anna Andersson",
-            personalIdentityNumber: "197501019999",
+            personalIdentityNumber: "197501019991",
             allocationPercent: 100
           }
         ],
@@ -311,7 +311,7 @@ test("Phase 13.1 supports XML HUS transport profiles", () => {
     buyers: [
       {
         displayName: "Ruth Rutsson",
-        personalIdentityNumber: "198001019999",
+        personalIdentityNumber: "198001019994",
         allocationPercent: 100
       }
     ],

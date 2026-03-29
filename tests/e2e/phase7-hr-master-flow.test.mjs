@@ -69,7 +69,7 @@ test("Phase 7.1 e2e flow keeps one person across multiple employments with versi
         givenName: "Nova",
         familyName: "HR",
         identityType: "samordningsnummer",
-        identityValue: "930303-1234",
+        identityValue: "930363-1239",
         protectedIdentity: true
       }
     });
@@ -83,7 +83,7 @@ test("Phase 7.1 e2e flow keeps one person across multiple employments with versi
         givenName: "Patrik",
         familyName: "Lead",
         identityType: "personnummer",
-        identityValue: "820202-1111"
+        identityValue: "820202-1112"
       }
     });
 

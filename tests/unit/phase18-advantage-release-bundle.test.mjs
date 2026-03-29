@@ -87,7 +87,7 @@ test("Phase 18.4 advantage release bundle records released bundle when parity an
   const financeReady = bootstrapFinanceReadyCompany({
     tenantControl,
     legalName: "Phase 18 Advantage AB",
-    orgNumber: "559900-9991",
+    orgNumber: "559901-0039",
     adminEmail: "phase18-advantage-owner@example.test"
   });
   const companyToken = loginWithStrongAuthOnPlatform({
@@ -197,7 +197,7 @@ test("Phase 18.4 advantage release bundle rejects na move statuses", () => {
   const financeReady = bootstrapFinanceReadyCompany({
     tenantControl,
     legalName: "Phase 18 Advantage Guard AB",
-    orgNumber: "559900-9992",
+    orgNumber: "559901-0047",
     adminEmail: "phase18-advantage-guard@example.test"
   });
   const companyToken = loginWithStrongAuthOnPlatform({

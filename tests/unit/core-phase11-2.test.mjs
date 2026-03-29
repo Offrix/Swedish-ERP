@@ -29,7 +29,7 @@ test("Phase 11.2 core enforces bureau scope, derives deadlines and tracks reques
 
   const clientA = org.createCompany({
     legalName: "Client A AB",
-    orgNumber: "559900-1001",
+    orgNumber: "559900-1004",
     settingsJson: {
       bureauDelivery: {
         closeLeadBusinessDays: 3,
@@ -43,7 +43,7 @@ test("Phase 11.2 core enforces bureau scope, derives deadlines and tracks reques
   });
   const clientB = org.createCompany({
     legalName: "Client B AB",
-    orgNumber: "559900-1002",
+    orgNumber: "559900-1012",
     settingsJson: {
       bureauDelivery: {
         closeLeadBusinessDays: 3,
@@ -57,7 +57,7 @@ test("Phase 11.2 core enforces bureau scope, derives deadlines and tracks reques
   });
   const expiredClient = org.createCompany({
     legalName: "Expired Client AB",
-    orgNumber: "559900-1003",
+    orgNumber: "559900-1020",
     settingsJson: {
       bureauDelivery: {
         closeLeadBusinessDays: 3,

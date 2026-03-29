@@ -66,7 +66,7 @@ test("Phase 10.2 API manages dispatch, stock, signature, invoice and offline con
       body: {
         companyId: COMPANY_ID,
         legalName: "Phase 10.2 API Customer AB",
-        organizationNumber: "5591223399",
+        organizationNumber: "5591223390",
         countryCode: "SE",
         languageCode: "SV",
         currencyCode: "SEK",

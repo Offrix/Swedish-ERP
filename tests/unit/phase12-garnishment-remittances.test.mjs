@@ -26,7 +26,7 @@ test("Phase 12.6 garnishment decisions drive withholding and remittance instruct
     givenName: "Klara",
     familyName: "Kronofogd",
     monthlySalary: 30000,
-    identityValue: "19800112-7777"
+    identityValue: "19800112-7771"
   });
 
   payrollPlatform.createTaxDecisionSnapshot({
@@ -69,7 +69,7 @@ test("Phase 12.6 garnishment decisions drive withholding and remittance instruct
     remittanceRecipientName: "Kronofogden",
     remittanceMethodCode: "bankgiro",
     remittanceBankgiro: "5050-1234",
-    remittanceOcrReference: "KFM20260001",
+    remittanceOcrReference: "202600015",
     decisionSource: "kronofogden_order",
     decisionReference: "beslut-2026-0001",
     evidenceRef: "evidence-kfm-2026-0001",

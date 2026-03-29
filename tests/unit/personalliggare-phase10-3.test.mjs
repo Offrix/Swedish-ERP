@@ -41,7 +41,7 @@ test("Phase 10.3 personalliggare preserves offline events, corrections and contr
     workerIdentityType: "personnummer",
     workerIdentityValue: "198902029999",
     fullNameSnapshot: "Sara Nilsson",
-    employerOrgNo: "5561112222",
+    employerOrgNo: "5561112227",
     contractorOrgNo: "5561234567",
     eventType: "check_in",
     eventTimestamp: "2026-03-24T06:10:00Z",

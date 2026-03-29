@@ -27,7 +27,7 @@ test("Phase 12.2 employer contribution decisions handle age buckets, threshold s
     givenName: "Algot",
     familyName: "Aldersavgift",
     monthlySalary: 30000,
-    identityValue: "19590203-1111",
+    identityValue: "19590203-1110",
     dateOfBirth: "1959-02-03"
   });
   const olderRun = payrollPlatform.createPayRun({
@@ -46,7 +46,7 @@ test("Phase 12.2 employer contribution decisions handle age buckets, threshold s
     givenName: "Ylva",
     familyName: "Youthdecision",
     monthlySalary: 30000,
-    identityValue: "20050512-2222",
+    identityValue: "20050512-2226",
     dateOfBirth: "2005-05-12"
   });
   const youthRun = payrollPlatform.createPayRun({
@@ -72,7 +72,7 @@ test("Phase 12.2 employer contribution decisions handle age buckets, threshold s
     givenName: "Vera",
     familyName: "Vaxa",
     monthlySalary: 30000,
-    identityValue: "19900112-3333",
+    identityValue: "19900112-3331",
     dateOfBirth: "1990-01-12"
   });
   const vaxaDraft = payrollPlatform.createEmployerContributionDecisionSnapshot({

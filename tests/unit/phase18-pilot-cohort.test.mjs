@@ -27,7 +27,7 @@ test("Phase 18.2 pilot cohorts operationalize segment acceptance with reusable c
   const financeReady = bootstrapFinanceReadyCompany({
     tenantControl,
     legalName: "Phase 18 Cohort AB",
-    orgNumber: "559900-9393",
+    orgNumber: "559900-9395",
     adminEmail: "phase18-cohort-owner@example.test"
   });
   const companyToken = loginWithStrongAuthOnPlatform({

@@ -66,7 +66,7 @@ test("Phase 16.6 exposes ClickUp project adapter manifest and prepares governed 
           folderId: "clickup-folder-16-6",
           customer: {
             name: "ClickUp Customer AB",
-            organization_number: "5569981122"
+            organization_number: "5569981128"
           },
           billingModel: "fixed_price",
           contractValue: 118000,

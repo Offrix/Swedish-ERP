@@ -50,7 +50,7 @@ test("Phase 16.6 exposes Dynamics 365 Project Operations adapter manifest and pr
         {
           id: "d365-customer-16-6",
           name: "Dynamics Customer AB",
-          organizationNumber: "5565544332"
+          organizationNumber: "5565544334"
         }
       ],
       contracts: [

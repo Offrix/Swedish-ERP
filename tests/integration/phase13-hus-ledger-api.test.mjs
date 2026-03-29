@@ -70,7 +70,7 @@ test("Phase 13.1 API writes ledger journals for HUS decision and recovery flows"
         buyers: [
           {
             displayName: "Anna Andersson",
-            personalIdentityNumber: "197501019999",
+            personalIdentityNumber: "197501019991",
             allocationPercent: 100
           }
         ],

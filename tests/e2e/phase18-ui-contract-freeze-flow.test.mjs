@@ -74,7 +74,7 @@ test("Phase 18.5 end-to-end freezes deterministic UI contract snapshot after rel
       baseUrl,
       adminEmail: "phase18-ui-freeze-e2e-owner@example.test",
       legalName: "Phase 18 UI Freeze E2E AB",
-      orgNumber: "559900-9998"
+      orgNumber: "559901-0005"
     });
     const companyToken = await loginWithStrongAuth({
       baseUrl,

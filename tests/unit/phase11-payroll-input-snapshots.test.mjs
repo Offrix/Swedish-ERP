@@ -104,7 +104,7 @@ function createMonthlyEmployee({ hrPlatform, givenName, familyName, monthlySalar
     givenName,
     familyName,
     identityType: "personnummer",
-    identityValue: "19800112-1234",
+    identityValue: "19800112-1238",
     workEmail: `${givenName.toLowerCase()}.${familyName.toLowerCase()}@example.com`,
     actorId: "unit-test"
   });

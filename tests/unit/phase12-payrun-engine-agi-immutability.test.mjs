@@ -92,7 +92,7 @@ test("Phase 12.3 AGI versions become immutable after ready_for_sign and later co
     givenName: "Agi",
     familyName: "Immutable",
     workEmail: "agi.immutable@example.com",
-    identityValue: "19800112-8888",
+    identityValue: "19800112-8886",
     monthlySalary: 40000
   });
   const payCalendar = payrollPlatform.listPayCalendars({ companyId: COMPANY_ID })[0];
@@ -204,7 +204,7 @@ function createPayrollFixture() {
     givenName: "Pia",
     familyName: "Preview",
     workEmail: "pia.preview@example.com",
-    identityValue: "19800112-9999",
+    identityValue: "19800112-9991",
     monthlySalary: 40000
   });
   return {

@@ -258,7 +258,7 @@ test("phase 5.1 HUS pins rulepack refs on case, claim and decision", () => {
   hus.classifyHusCase({
     companyId: TEST_COMPANY_ID,
     husCaseId: husCase.husCaseId,
-    buyers: [{ displayName: "Anna Andersson", personalIdentityNumber: "197501019999", allocationPercent: 100 }],
+    buyers: [{ displayName: "Anna Andersson", personalIdentityNumber: "197501019991", allocationPercent: 100 }],
     serviceLines: [{ description: "ROT labor", serviceTypeCode: "rot", workedHours: 8, laborCostAmount: 10000 }],
     actorId: "tester"
   });

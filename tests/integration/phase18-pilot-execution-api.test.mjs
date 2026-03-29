@@ -25,7 +25,7 @@ test("Phase 18.1 API exposes internal finance pilot execution runtime", async ()
       baseUrl,
       adminEmail: "phase18-api-owner@example.test",
       legalName: "Phase 18 API Pilot AB",
-      orgNumber: "559900-9191"
+      orgNumber: "559900-9197"
     });
     const financeReadyToken = await loginWithStrongAuth({
       baseUrl,

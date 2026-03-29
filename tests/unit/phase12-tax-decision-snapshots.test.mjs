@@ -33,7 +33,7 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
     givenName: "Tora",
     familyName: "Tabell",
     monthlySalary: 40000,
-    identityValue: "19800112-1111"
+    identityValue: "19800112-1113"
   });
   payrollPlatform.createTaxDecisionSnapshot({
     companyId: COMPANY_ID,
@@ -66,7 +66,7 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
     givenName: "Jonna",
     familyName: "Jamkning",
     monthlySalary: 40000,
-    identityValue: "19800112-2222"
+    identityValue: "19800112-2228"
   });
   payrollPlatform.createTaxDecisionSnapshot({
     companyId: COMPANY_ID,
@@ -139,7 +139,7 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
     givenName: "Maja",
     familyName: "Emergency",
     monthlySalary: 30000,
-    identityValue: "19800112-4444"
+    identityValue: "19800112-4448"
   });
   const emergencyDraft = payrollPlatform.createTaxDecisionSnapshot({
     companyId: COMPANY_ID,

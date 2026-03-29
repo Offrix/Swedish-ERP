@@ -21,7 +21,7 @@ test("Phase 11.3 closes a month with checklist, blocks on hard stop, preserves r
 
   const client = platform.createCompany({
     legalName: "Close Unit Client AB",
-    orgNumber: "559900-4301",
+    orgNumber: "559900-4339",
     settingsJson: {
       bureauDelivery: {
         closeLeadBusinessDays: 3,

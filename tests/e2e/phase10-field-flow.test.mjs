@@ -71,7 +71,7 @@ test("Phase 10.2 e2e covers field-mobile shell, disable flag, offline sync and i
       body: {
         companyId: COMPANY_ID,
         legalName: "Phase 10.2 E2E Customer AB",
-        organizationNumber: "5591223388",
+        organizationNumber: "5591223382",
         countryCode: "SE",
         languageCode: "SV",
         currencyCode: "SEK",

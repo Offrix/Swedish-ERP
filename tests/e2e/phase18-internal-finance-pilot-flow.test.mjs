@@ -25,7 +25,7 @@ test("Phase 18.1 internal finance pilot flow links trial and parallel run into p
       baseUrl,
       adminEmail: "phase18-e2e-owner@example.test",
       legalName: "Phase 18 E2E Pilot AB",
-      orgNumber: "559900-9292"
+      orgNumber: "559900-9296"
     });
     const financeReadyToken = await loginWithStrongAuth({
       baseUrl,

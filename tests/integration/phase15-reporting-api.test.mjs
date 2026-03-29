@@ -253,7 +253,7 @@ function createHourlyEmployee(platform) {
     givenName: "Petra",
     familyName: "Report",
     identityType: "personnummer",
-    identityValue: "19800112-1234",
+    identityValue: "19800112-1238",
     workEmail: "petra.report@example.com",
     actorId: "phase15-api"
   });

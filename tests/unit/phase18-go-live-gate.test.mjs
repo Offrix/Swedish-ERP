@@ -152,7 +152,7 @@ test("Phase 18.6 records approved final go-live gate when every prerequisite is 
   const financeReady = bootstrapFinanceReadyCompany({
     tenantControl,
     legalName: "Phase 18 GA Gate AB",
-    orgNumber: "559901-0101",
+    orgNumber: "559901-0112",
     adminEmail: "phase18-go-live-owner@example.test"
   });
   const companyToken = loginWithStrongAuthOnPlatform({
@@ -229,7 +229,7 @@ test("Phase 18.6 records blocked gate when any final checklist item is not green
   const financeReady = bootstrapFinanceReadyCompany({
     tenantControl,
     legalName: "Phase 18 GA Blocked AB",
-    orgNumber: "559901-0102",
+    orgNumber: "559901-0120",
     adminEmail: "phase18-go-live-blocked@example.test"
   });
   const companyToken = loginWithStrongAuthOnPlatform({

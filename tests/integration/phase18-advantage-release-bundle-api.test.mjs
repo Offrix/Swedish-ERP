@@ -76,7 +76,7 @@ test("Phase 18.4 API exposes blocked advantage release bundles when parity cover
       baseUrl,
       adminEmail: "phase18-advantage-api-owner@example.test",
       legalName: "Phase 18 Advantage API AB",
-      orgNumber: "559900-9993"
+      orgNumber: "559901-0013"
     });
     const companyToken = await loginWithStrongAuth({
       baseUrl,

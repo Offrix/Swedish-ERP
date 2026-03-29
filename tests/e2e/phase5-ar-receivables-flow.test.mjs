@@ -76,7 +76,7 @@ test("Phase 5.3 AR receivables routes toggle cleanly and the flow covers partial
       body: {
         companyId: COMPANY_ID,
         legalName: "E2E Receivables Customer AB",
-        organizationNumber: "5591223344",
+        organizationNumber: "5591223341",
         countryCode: "SE",
         languageCode: "SV",
         currencyCode: "SEK",

@@ -2,6 +2,11 @@ import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
+import {
+  normalizeOptionalPaymentReference as normalizeOptionalPaymentReferenceKernel,
+  normalizeOptionalSwedishOrganizationNumber as normalizeOptionalSwedishOrganizationNumberKernel,
+  normalizeRequiredSwedishIdentityNumber as normalizeRequiredSwedishIdentityNumberKernel
+} from "../../domain-core/src/validation.mjs";
 
 export const HUS_CASE_STATES = Object.freeze([
   "draft",
@@ -490,7 +495,8 @@ export function createHusEngine({
       throw createError(409, "hus_customer_share_missing", "Customer share must be classified before payments can be registered.");
     }
     const normalizedPaymentChannel = requireEnum(HUS_PAYMENT_CHANNELS, paymentChannel, "hus_payment_channel_invalid");
-    if (!normalizeOptionalText(paymentReference) && !normalizeOptionalText(externalTraceId)) {
+    const normalizedPaymentReference = normalizeOptionalPaymentReference(paymentReference, "hus_payment_reference_invalid");
+    if (!normalizedPaymentReference && !normalizeOptionalText(externalTraceId)) {
       throw createError(409, "hus_payment_evidence_missing", "Electronic HUS payments require a payment reference or external trace id.");
     }
     const paymentDate = normalizeRequiredDate(paidOn, "hus_customer_payment_date_required");
@@ -502,7 +508,7 @@ export function createHusEngine({
       paidAmount: normalizeMoney(paidAmount, "hus_customer_payment_amount_invalid"),
       paidOn: paymentDate,
       paymentChannel: normalizedPaymentChannel,
-      paymentReference: normalizeOptionalText(paymentReference),
+      paymentReference: normalizedPaymentReference,
       externalTraceId: normalizeOptionalText(externalTraceId),
       evidenceStatus: "verified",
       claimCapacityAmount: 0,
@@ -2096,23 +2102,15 @@ function buildHusTransportProfile({ transportType }) {
 }
 
 function normalizeIdentityNumber(value, code) {
-  const normalized = requireText(value, code).replace(/[^0-9]/g, "");
-  if (![10, 12].includes(normalized.length)) {
-    throw createError(400, code, "Buyer identity number must use 10 or 12 digits.");
-  }
-  return normalized;
+  return normalizeRequiredSwedishIdentityNumberKernel(value, code, { errorFactory: createError });
 }
 
 function normalizeOptionalOrgNumber(value) {
-  const normalized = normalizeOptionalText(value);
-  if (!normalized) {
-    return null;
-  }
-  const digits = normalized.replace(/[^0-9]/g, "");
-  if (digits.length !== 10) {
-    throw createError(400, "hus_org_number_invalid", "Organisation number must use 10 digits.");
-  }
-  return digits;
+  return normalizeOptionalSwedishOrganizationNumberKernel(value, "hus_org_number_invalid", { errorFactory: createError });
+}
+
+function normalizeOptionalPaymentReference(value, code) {
+  return normalizeOptionalPaymentReferenceKernel(value, code, { errorFactory: createError });
 }
 
 function requireText(value, code) {

@@ -70,7 +70,7 @@ test("Phase 7.1 API supports multiple employments, contract history, employee do
         givenName: "Elin",
         familyName: "Master",
         identityType: "samordningsnummer",
-        identityValue: "920202-9876",
+        identityValue: "920262-9870",
         privateEmail: "elin.private@example.com",
         protectedIdentity: true
       }
@@ -85,7 +85,7 @@ test("Phase 7.1 API supports multiple employments, contract history, employee do
         givenName: "Maria",
         familyName: "Chef",
         identityType: "personnummer",
-        identityValue: "810101-1111"
+        identityValue: "810101-1115"
       }
     });
 
@@ -258,7 +258,7 @@ test("Phase 7.1 API supports multiple employments, contract history, employee do
     });
 
     assert.equal(employeeState.employments.length, 2);
-    assert.equal(employeeState.identityValueMasked.endsWith("9876"), true);
+    assert.equal(employeeState.identityValueMasked.endsWith("9870"), true);
     assert.equal(contracts.items.length, 2);
     assert.equal(placements.items.length, 1);
     assert.equal(salaryBases.items.length, 1);

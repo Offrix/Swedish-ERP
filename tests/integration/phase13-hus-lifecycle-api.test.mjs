@@ -69,7 +69,7 @@ test("Phase 13.1 API hardens HUS lifecycle gates, direct transport and deadline 
         buyers: [
           {
             displayName: "Anna Andersson",
-            personalIdentityNumber: "197501019999",
+            personalIdentityNumber: "197501019991",
             allocationPercent: 100
           }
         ],
@@ -135,7 +135,7 @@ test("Phase 13.1 API hardens HUS lifecycle gates, direct transport and deadline 
         buyers: [
           {
             displayName: "Anna Andersson",
-            personalIdentityNumber: "197501019999",
+            personalIdentityNumber: "197501019991",
             allocationPercent: 100
           }
         ],

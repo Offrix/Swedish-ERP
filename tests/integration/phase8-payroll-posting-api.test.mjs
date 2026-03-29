@@ -82,7 +82,7 @@ test("Phase 8.3 API creates payroll postings, payout batches and vacation snapsh
       platform,
       givenName: "Nora",
       familyName: "Posting",
-      identityValue: "19800112-1234",
+      identityValue: "19800112-1238",
       hourlyRate: 210
     });
     platform.upsertEmploymentStatutoryProfile({

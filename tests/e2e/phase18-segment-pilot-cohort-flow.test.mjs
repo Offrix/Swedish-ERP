@@ -37,7 +37,7 @@ test("Phase 18.2 segment cohort flow proves construction service pilot acceptanc
       baseUrl,
       adminEmail: "phase18-segment-owner@example.test",
       legalName: "Phase 18 Construction Pilot AB",
-      orgNumber: "559900-9595"
+      orgNumber: "559900-9593"
     });
     const companyToken = await loginWithStrongAuth({
       baseUrl,

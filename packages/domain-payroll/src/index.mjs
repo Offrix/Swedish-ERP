@@ -2,6 +2,12 @@ import crypto from "node:crypto";
 import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
+  normalizeOptionalIsoDate as normalizeOptionalIsoDateKernel,
+  normalizeOptionalOcrReference as normalizeOptionalOcrReferenceKernel,
+  normalizeRequiredIanaTimeZone,
+  normalizeRequiredIsoDate as normalizeRequiredIsoDateKernel
+} from "../../domain-core/src/validation.mjs";
+import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
@@ -639,7 +645,7 @@ export function createPayrollEngine({
       frequencyCode: assertAllowed(frequencyCode, PAYROLL_FREQUENCY_CODES, "pay_calendar_frequency_invalid"),
       cutoffDay: normalizeIntegerInRange(cutoffDay, 1, 31, "pay_calendar_cutoff_day_invalid"),
       payDay: normalizeIntegerInRange(payDay, 1, 31, "pay_calendar_pay_day_invalid"),
-      timezone: requireText(timezone, "pay_calendar_timezone_required"),
+      timezone: normalizeRequiredIanaTimeZone(timezone, "pay_calendar_timezone_required", { errorFactory: createError }),
       defaultCurrencyCode: normalizeUpperCode(defaultCurrencyCode, "pay_calendar_currency_invalid", 3),
       active: active !== false,
       createdByActorId: requireText(actorId, "actor_id_required"),
@@ -5954,7 +5960,7 @@ function buildRemittanceInstructionRecord({ state, payRun, payslip, garnishmentD
     remittanceMethodCode: normalizeOptionalText(decisionSnapshot.remittanceMethodCode) || "bankgiro",
     remittanceBankgiro: normalizeOptionalText(decisionSnapshot.remittanceBankgiro),
     remittancePlusgiro: normalizeOptionalText(decisionSnapshot.remittancePlusgiro),
-    remittanceOcrReference: normalizeOptionalText(decisionSnapshot.remittanceOcrReference),
+    remittanceOcrReference: normalizeOptionalOcrReference(decisionSnapshot.remittanceOcrReference, "garnishment_decision_snapshot_remittance_ocr_invalid"),
     protectedAmountBaseline: copy(decisionSnapshot.protectedAmountBaseline || {}),
     householdProfile: copy(decisionSnapshot.householdProfile || {}),
     paymentOrderState: "payment_order_ready",
@@ -5966,7 +5972,7 @@ function buildRemittanceInstructionRecord({ state, payRun, payslip, garnishmentD
       methodCode: normalizeOptionalText(decisionSnapshot.remittanceMethodCode) || "bankgiro",
       bankgiro: normalizeOptionalText(decisionSnapshot.remittanceBankgiro),
       plusgiro: normalizeOptionalText(decisionSnapshot.remittancePlusgiro),
-      ocrReference: normalizeOptionalText(decisionSnapshot.remittanceOcrReference),
+      ocrReference: normalizeOptionalOcrReference(decisionSnapshot.remittanceOcrReference, "garnishment_decision_snapshot_remittance_ocr_invalid"),
       message: normalizeOptionalText(decisionSnapshot.authorityCaseReference) || `Payroll remittance ${payRun.reportingPeriod}`
     },
     status: "payment_order_ready",
@@ -8314,7 +8320,7 @@ function normalizeGarnishmentDecisionSnapshot(snapshot = {}) {
     remittanceMethodCode,
     remittanceBankgiro: normalizeOptionalText(snapshot.remittanceBankgiro),
     remittancePlusgiro: normalizeOptionalText(snapshot.remittancePlusgiro),
-    remittanceOcrReference: normalizeOptionalText(snapshot.remittanceOcrReference),
+    remittanceOcrReference: normalizeOptionalOcrReference(snapshot.remittanceOcrReference, "garnishment_decision_snapshot_remittance_ocr_invalid"),
     decisionSource: requireText(snapshot.decisionSource, "garnishment_decision_snapshot_decision_source_required"),
     decisionReference: requireText(snapshot.decisionReference, "garnishment_decision_snapshot_decision_reference_required"),
     evidenceRef: requireText(snapshot.evidenceRef, "garnishment_decision_snapshot_evidence_ref_required"),
@@ -8787,10 +8793,7 @@ function buildSourceSummaryId(ids) {
 }
 
 function normalizeOptionalDate(value, code) {
-  if (value == null || value === "") {
-    return null;
-  }
-  return normalizeRequiredDate(value, code);
+  return normalizeOptionalIsoDateKernel(value, code, { errorFactory: createError });
 }
 
 function buildPayDate(year, month, payDay) {
@@ -8883,11 +8886,14 @@ function nowIso(clock) {
 }
 
 function normalizeRequiredDate(value, code) {
-  const resolved = requireText(value, code);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(resolved)) {
-    throw createError(400, code, `${resolved} must be an ISO date.`);
-  }
-  return resolved;
+  return normalizeRequiredIsoDateKernel(value, code, { errorFactory: createError });
+}
+
+function normalizeOptionalOcrReference(value, code) {
+  return normalizeOptionalOcrReferenceKernel(value, code, {
+    errorFactory: createError,
+    controlMode: "mod10"
+  });
 }
 
 function normalizeReportingPeriod(value, code) {

@@ -46,7 +46,7 @@ test("Phase 11.2 API scopes bureau portfolio and tracks requests, approvals, com
 
     const clientA = platform.createCompany({
       legalName: "Client Scope A AB",
-      orgNumber: "559900-1101",
+      orgNumber: "559900-1103",
       settingsJson: {
         bureauDelivery: {
           closeLeadBusinessDays: 3,
@@ -60,7 +60,7 @@ test("Phase 11.2 API scopes bureau portfolio and tracks requests, approvals, com
     });
     const clientB = platform.createCompany({
       legalName: "Client Scope B AB",
-      orgNumber: "559900-1102",
+      orgNumber: "559900-1111",
       settingsJson: {
         bureauDelivery: {
           closeLeadBusinessDays: 3,

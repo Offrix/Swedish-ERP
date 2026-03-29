@@ -111,7 +111,7 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         givenName: "Tina",
         familyName: "Tid",
         identityType: "personnummer",
-        identityValue: "900101-1234"
+        identityValue: "900101-1239"
       }
     });
     const employment = await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/employments`, {

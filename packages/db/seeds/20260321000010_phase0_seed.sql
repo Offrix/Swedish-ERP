@@ -1,5 +1,5 @@
 INSERT INTO companies (company_id, legal_name, org_number, status)
-VALUES ('00000000-0000-4000-8000-000000000001', 'Swedish ERP Demo AB', '559900-0001', 'active')
+VALUES ('00000000-0000-4000-8000-000000000001', 'Swedish ERP Demo AB', '559900-0006', 'active')
 ON CONFLICT (company_id) DO NOTHING;
 
 INSERT INTO users (user_id, email, display_name, status)

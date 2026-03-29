@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { cloneValue as clone } from "./clone.mjs";
+import { normalizeOptionalCountryCode } from "./validation.mjs";
 
 export const IMPORT_BATCH_STATUSES = Object.freeze(["received", "validated", "mapped", "imported", "reconciled", "accepted", "rejected", "corrected"]);
 export const MAPPING_SET_STATUSES = Object.freeze(["draft", "approved"]);
@@ -2831,7 +2832,7 @@ function normalizeEmployeeMasterSnapshot(value, validationErrors) {
     familyName: optionalText(value.familyName),
     taxProfileCode: optionalText(value.taxProfileCode),
     employeeStatusCode: optionalText(value.employeeStatusCode),
-    countryCode: optionalText(value.countryCode)
+    countryCode: normalizeOptionalCountryCode(value.countryCode, "payroll_migration_employee_master_country_invalid")
   };
 }
 

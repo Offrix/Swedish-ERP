@@ -61,7 +61,7 @@ test("Step 32 API exposes project workspace and deviation lifecycle across conne
       baseUrl,
       token: sessionToken,
       legalName: "Workspace API Customer AB",
-      organizationNumber: "5566889900"
+      organizationNumber: "5566889902"
     });
     const employee = await createEmployeeWithContract({
       baseUrl,
@@ -294,7 +294,7 @@ test("Step 32 API exposes project workspace and deviation lifecycle across conne
         buyers: [
           {
             displayName: "Anna Andersson",
-            personalIdentityNumber: "197501019999",
+            personalIdentityNumber: "197501019991",
             allocationPercent: 100
           }
         ],

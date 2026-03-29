@@ -674,7 +674,7 @@ function materializePayrollAndAgiOverview(platform) {
     givenName: "Ari",
     familyName: "Annual",
     identityType: "personnummer",
-    identityValue: "19850412-1234",
+    identityValue: "19850412-1230",
     workEmail: "ari.annual@example.com",
     actorId: "phase12-2-unit"
   });
@@ -794,7 +794,7 @@ function materializeHusOverview(platform) {
     buyers: [
       {
         displayName: "Anna Andersson",
-        personalIdentityNumber: "197501019999",
+        personalIdentityNumber: "197501019991",
         allocationPercent: 100
       }
     ],

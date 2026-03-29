@@ -17,6 +17,7 @@ $requiredPaths = @(
   "tests/unit/phase1-value-kernel.test.mjs",
   "tests/unit/phase1-clone-api.test.mjs",
   "tests/unit/phase1-account-catalog.test.mjs",
+  "tests/unit/phase1-validation-kernel.test.mjs",
   "tests/unit/phase1-migration-history.test.mjs",
   "tests/unit/phase1-migration-history-repair.test.mjs",
   "tests/unit/phase1-runtime-mode.test.mjs",
@@ -28,6 +29,7 @@ $requiredPaths = @(
   "tests/integration/phase1-runtime-diagnostics-api.test.mjs",
   "tests/e2e/apps-smoke.test.mjs",
   "docs/runbooks/account-catalog-update.md",
+  "docs/runbooks/phase1-validation-kernel.md",
   "docs/runbooks/migration-history-repair.md",
   "docs/runbooks/runtime-mode-validation.md"
 )
@@ -81,6 +83,7 @@ if ($LASTEXITCODE -ne 0) {
   "tests/unit/phase1-value-kernel.test.mjs" `
   "tests/unit/phase1-clone-api.test.mjs" `
   "tests/unit/phase1-account-catalog.test.mjs" `
+  "tests/unit/phase1-validation-kernel.test.mjs" `
   "tests/unit/phase1-migration-history.test.mjs" `
   "tests/unit/phase1-migration-history-repair.test.mjs" `
   "tests/unit/phase1-runtime-mode.test.mjs" `

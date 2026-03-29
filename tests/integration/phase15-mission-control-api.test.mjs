@@ -297,7 +297,7 @@ function seedTrialConversion(platform, adminToken) {
 function seedFinanceClose(platform, adminToken, preparerToken, responsibleConsultantId) {
   const clientCompany = platform.createCompany({
     legalName: "Mission Control Close Client AB",
-    orgNumber: "5599004315",
+    orgNumber: "5599004321",
     settingsJson: {
       bureauDelivery: {
         closeLeadBusinessDays: 3,

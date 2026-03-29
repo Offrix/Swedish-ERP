@@ -194,7 +194,7 @@ test("Step 32 project workspace aggregates field, HUS, personalliggare, egenkont
     buyers: [
       {
         displayName: "Anna Andersson",
-        personalIdentityNumber: "197501019999",
+        personalIdentityNumber: "197501019991",
         allocationPercent: 100
       }
     ],

@@ -1,5 +1,10 @@
 import crypto from "node:crypto";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
+import {
+  normalizeOptionalIsoDate as normalizeOptionalIsoDateKernel,
+  normalizeRequiredIanaTimeZone,
+  normalizeRequiredIsoDate as normalizeRequiredIsoDateKernel
+} from "../../domain-core/src/validation.mjs";
 
 export const TIME_CLOCK_EVENT_TYPES = Object.freeze(["clock_in", "clock_out"]);
 export const TIME_BALANCE_TYPES = Object.freeze(["flex_minutes", "comp_minutes", "overtime_minutes"]);
@@ -139,7 +144,7 @@ export function createTimeEngine({
       companyId: resolvedCompanyId,
       scheduleTemplateCode: resolvedCode,
       displayName: requireText(displayName, "schedule_template_display_name_required"),
-      timezone: requireText(timezone, "schedule_template_timezone_required"),
+      timezone: normalizeRequiredIanaTimeZone(timezone, "schedule_template_timezone_required", { errorFactory: createError }),
       active: active !== false,
       days: normalizedDays,
       createdAt: nowIso(clock),
@@ -1961,18 +1966,11 @@ function normalizeOptionalText(value) {
 }
 
 function normalizeRequiredDate(value, code) {
-  const resolvedValue = requireText(value, code);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(resolvedValue)) {
-    throw createError(400, code, "Date must be in YYYY-MM-DD format.");
-  }
-  return resolvedValue;
+  return normalizeRequiredIsoDateKernel(value, code, { errorFactory: createError });
 }
 
 function normalizeOptionalDate(value, code) {
-  if (value == null || value === "") {
-    return null;
-  }
-  return normalizeRequiredDate(String(value), code);
+  return normalizeOptionalIsoDateKernel(value, code, { errorFactory: createError });
 }
 
 function normalizeRequiredDateTime(value, code) {
@@ -2062,4 +2060,3 @@ function createError(statusCode, code, message) {
   error.code = code;
   return error;
 }
-

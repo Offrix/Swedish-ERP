@@ -87,7 +87,7 @@ test("Phase 18.5 records frozen UI contract baseline when released advantage bun
   const financeReady = bootstrapFinanceReadyCompany({
     tenantControl,
     legalName: "Phase 18 UI Freeze AB",
-    orgNumber: "559900-9995",
+    orgNumber: "559901-0054",
     adminEmail: "phase18-ui-freeze-owner@example.test"
   });
   const companyToken = loginWithStrongAuthOnPlatform({
@@ -158,7 +158,7 @@ test("Phase 18.5 rejects freeze when linked advantage bundle is not released", (
   const financeReady = bootstrapFinanceReadyCompany({
     tenantControl,
     legalName: "Phase 18 UI Freeze Guard AB",
-    orgNumber: "559900-9996",
+    orgNumber: "559901-0062",
     adminEmail: "phase18-ui-freeze-guard@example.test"
   });
   const companyToken = loginWithStrongAuthOnPlatform({

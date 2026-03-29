@@ -59,7 +59,7 @@ test("Phase 16.6 exposes Zoho CRM/Projects/Billing adapter manifest and prepares
         {
           id: "zoho-contact-16-6",
           accountName: "Zoho Customer AB",
-          organizationNumber: "5561020304",
+          organizationNumber: "5561020305",
           email: "customer@example.se"
         }
       ],

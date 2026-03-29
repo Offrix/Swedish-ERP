@@ -1,6 +1,12 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
+import {
+  normalizeOptionalIsoDate as normalizeOptionalIsoDateKernel,
+  normalizeOptionalSwedishIdentityNumber as normalizeOptionalSwedishIdentityNumberKernel,
+  normalizeRequiredCountryCode as normalizeRequiredCountryCodeKernel,
+  normalizeRequiredIsoDate as normalizeRequiredIsoDateKernel
+} from "../../domain-core/src/validation.mjs";
 
 export const HR_IDENTITY_TYPES = Object.freeze(["personnummer", "samordningsnummer", "other"]);
 export const HR_BANK_PAYOUT_METHODS = Object.freeze(["domestic_account", "bankgiro", "plusgiro", "iban"]);
@@ -187,7 +193,7 @@ export function createHrEngine({
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedIdentityType = assertAllowed(identityType || "other", HR_IDENTITY_TYPES, "employee_identity_type_invalid");
-    const normalizedIdentityValue = normalizeOptionalText(identityValue);
+    const normalizedIdentityValue = normalizeEmployeeIdentityValue(identityValue, resolvedIdentityType);
     if (resolvedIdentityType !== "other" && !normalizedIdentityValue) {
       throw createError(400, "employee_identity_value_required", "Identity value is required for the chosen identity type.");
     }
@@ -222,7 +228,7 @@ export function createHrEngine({
       workEmail: normalizeOptionalEmail(workEmail, "employee_work_email_invalid"),
       privateEmail: normalizeOptionalEmail(privateEmail, "employee_private_email_invalid"),
       phone: normalizeOptionalText(phone),
-      countryCode: normalizeUpperCode(countryCode, "employee_country_code_invalid", 2),
+      countryCode: normalizeRequiredCountryCodeKernel(countryCode, "employee_country_code_invalid", { errorFactory: createError }),
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
     };
@@ -771,7 +777,7 @@ export function createHrEngine({
       employeeId: employee.employeeId,
       payoutMethod: resolvedPayoutMethod,
       accountHolderName: requireText(accountHolderName, "employee_bank_account_holder_required"),
-      countryCode: normalizeUpperCode(countryCode, "employee_bank_country_invalid", 2),
+      countryCode: normalizeRequiredCountryCodeKernel(countryCode, "employee_bank_country_invalid", { errorFactory: createError }),
       clearingNumber: normalizedBankDetails.clearingNumber,
       accountNumber: normalizedBankDetails.accountNumber ? maskSensitiveValue(normalizedBankDetails.accountNumber) : null,
       bankgiro: normalizedBankDetails.bankgiro ? maskSensitiveValue(normalizedBankDetails.bankgiro) : null,
@@ -1205,22 +1211,11 @@ function normalizeOptionalMoney(value, errorCode) {
 }
 
 function normalizeRequiredDate(value, errorCode) {
-  const normalized = normalizeOptionalDate(value, errorCode);
-  if (!normalized) {
-    throw createError(400, errorCode, "Date is required.");
-  }
-  return normalized;
+  return normalizeRequiredIsoDateKernel(value, errorCode, { errorFactory: createError });
 }
 
 function normalizeOptionalDate(value, errorCode) {
-  if (value === null || value === undefined || value === "") {
-    return null;
-  }
-  const normalized = String(value).trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    throw createError(400, errorCode, "Date must use YYYY-MM-DD format.");
-  }
-  return normalized;
+  return normalizeOptionalIsoDateKernel(value, errorCode, { errorFactory: createError });
 }
 
 function normalizeUpperCode(value, errorCode, length) {
@@ -1229,6 +1224,16 @@ function normalizeUpperCode(value, errorCode, length) {
     throw createError(400, errorCode, `Code must be ${length} characters.`);
   }
   return normalized;
+}
+
+function normalizeEmployeeIdentityValue(value, identityType) {
+  if (identityType === "other") {
+    return normalizeOptionalText(value);
+  }
+  return normalizeOptionalSwedishIdentityNumberKernel(value, "employee_identity_value_invalid", {
+    errorFactory: createError,
+    expectedType: identityType
+  });
 }
 
 function normalizeOptionalEmail(value, errorCode) {

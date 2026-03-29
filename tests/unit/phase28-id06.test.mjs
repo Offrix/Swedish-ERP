@@ -38,7 +38,7 @@ test("Step 28 builds an ID06 chain from company and person verification to workp
 
   const companyVerification = id06.verifyCompany({
     companyId: COMPANY_ID,
-    orgNo: "5561112222",
+    orgNo: "5561112227",
     companyName: "Demo Employer AB",
     actorId: "id06-unit"
   });
@@ -54,7 +54,7 @@ test("Step 28 builds an ID06 chain from company and person verification to workp
 
   const cardStatus = id06.validateCard({
     companyId: COMPANY_ID,
-    employerOrgNo: "5561112222",
+    employerOrgNo: "5561112227",
     workerIdentityValue: "198902029999",
     cardReference: "ID06-CARD-001",
     maskedCardNumber: "****0001",
@@ -65,7 +65,7 @@ test("Step 28 builds an ID06 chain from company and person verification to workp
   const binding = id06.createWorkplaceBinding({
     companyId: COMPANY_ID,
     workplaceId: site.workplaceId,
-    employerOrgNo: "5561112222",
+    employerOrgNo: "5561112227",
     workerIdentityValue: "198902029999",
     cardReference: "ID06-CARD-001",
     actorId: "id06-unit"
@@ -79,7 +79,7 @@ test("Step 28 builds an ID06 chain from company and person verification to workp
     workerIdentityType: "personnummer",
     workerIdentityValue: "198902029999",
     fullNameSnapshot: "Sara Nilsson",
-    employerOrgNo: "5561112222",
+    employerOrgNo: "5561112227",
     contractorOrgNo: "5561234567",
     roleAtWorkplace: "installer",
     clientEventId: "id06-unit-attendance-1",

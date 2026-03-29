@@ -59,7 +59,7 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
     hrPlatform,
     givenName: "Lina",
     familyName: "Ledger",
-    identityValue: "19800112-1234",
+    identityValue: "19800112-1238",
     hourlyRate: 200
   });
 

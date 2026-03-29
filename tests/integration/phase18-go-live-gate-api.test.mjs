@@ -98,7 +98,7 @@ test("Phase 18.6 API records, lists and exports final general availability gate"
       baseUrl,
       adminEmail: "phase18-go-live-api-owner@example.test",
       legalName: "Phase 18 GA API AB",
-      orgNumber: "559901-0103"
+      orgNumber: "559901-0104"
     });
     const companyToken = await loginWithStrongAuth({
       baseUrl,

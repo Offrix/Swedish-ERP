@@ -33,7 +33,7 @@ test("Phase 8.2 payroll resolves manual tax and SINK, locks AGI absence and crea
     givenName: "Mia",
     familyName: "Manual",
     workEmail: "mia.manual@example.com",
-    identityValue: "19800112-1234",
+    identityValue: "19800112-1238",
     monthlySalary: 40000
   });
   const sink = createEmployeeWithContract({
@@ -41,7 +41,7 @@ test("Phase 8.2 payroll resolves manual tax and SINK, locks AGI absence and crea
     givenName: "Sven",
     familyName: "Sink",
     workEmail: "sven.sink@example.com",
-    identityValue: "19891103-4321",
+    identityValue: "19891103-4323",
     monthlySalary: 43500,
     protectedIdentity: true
   });

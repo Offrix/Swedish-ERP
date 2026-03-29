@@ -120,7 +120,7 @@ test("Phase 18.5 API records, lists and exports UI contract freezes from runtime
       baseUrl,
       adminEmail: "phase18-ui-freeze-api-owner@example.test",
       legalName: "Phase 18 UI Freeze API AB",
-      orgNumber: "559900-9997"
+      orgNumber: "559901-0021"
     });
     const companyToken = await loginWithStrongAuth({
       baseUrl,

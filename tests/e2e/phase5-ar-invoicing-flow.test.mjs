@@ -101,7 +101,7 @@ test("Phase 5.2 AR invoicing routes toggle cleanly and the end-to-end flow cover
       body: {
         companyId: COMPANY_ID,
         legalName: "E2E Invoice Customer AB",
-        organizationNumber: "5591223344",
+        organizationNumber: "5591223341",
         countryCode: "SE",
         languageCode: "SV",
         currencyCode: "SEK",
@@ -109,7 +109,7 @@ test("Phase 5.2 AR invoicing routes toggle cleanly and the end-to-end flow cover
         invoiceDeliveryMethod: "peppol",
         reminderProfileCode: "standard",
         peppolScheme: "0007",
-        peppolIdentifier: "5591223344",
+        peppolIdentifier: "5591223341",
         billingAddress: {
           line1: "E2E-straket 1",
           postalCode: "11157",

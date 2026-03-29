@@ -224,7 +224,7 @@ VALUES (
         "agiEmployeeId": "00000000-0000-4000-8000-000000008433",
         "employeeId": "00000000-0000-4000-8000-000000000711",
         "personIdentifierType": "national_identity",
-        "personIdentifier": "19800112-1234",
+        "personIdentifier": "19800112-1238",
         "protectedIdentity": false,
         "countryCode": "SE",
         "compensationFields": {
@@ -356,7 +356,7 @@ VALUES
     '00000000-0000-4000-8000-000000000001',
     '00000000-0000-4000-8000-000000000711',
     'national_identity',
-    '19800112-1234',
+    '19800112-1238',
     FALSE,
     'phase8-demo-agi-employee-seed-202603-v2',
     '{

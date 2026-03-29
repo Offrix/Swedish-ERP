@@ -45,7 +45,7 @@ test("Phase 13.1 posts accepted HUS claims into the ledger with canonical recipe
     buyers: [
       {
         displayName: "Anna Andersson",
-        personalIdentityNumber: "197501019999",
+        personalIdentityNumber: "197501019991",
         allocationPercent: 100
       }
     ],
@@ -141,7 +141,7 @@ test("Phase 13.1 posts partial acceptance and recovery with distinct HUS recipes
     buyers: [
       {
         displayName: "Anna Andersson",
-        personalIdentityNumber: "197501019999",
+        personalIdentityNumber: "197501019991",
         allocationPercent: 100
       }
     ],

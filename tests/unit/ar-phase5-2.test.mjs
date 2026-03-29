@@ -452,7 +452,7 @@ test("Step 24 blocks export and HUS invoices until legal overlays are complete",
     dueDate: "2026-04-23",
     husCaseId: "hus-case-002",
     husPropertyDesignation: "UPPSALA SUNNERSTA 1:23",
-    husBuyerIdentityNumber: "197001011234",
+    husBuyerIdentityNumber: "197001011233",
     husServiceTypeCode: "rot",
     lines: [{ itemId: husItem.arItemId, quantity: 1, unitPrice: 5000 }],
     actorId: "user-1"

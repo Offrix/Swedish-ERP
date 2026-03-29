@@ -36,7 +36,7 @@ test("Phase 12.2 API manages employer contribution decisions and pay runs consum
       token: sessionToken,
       givenName: "Valter",
       familyName: "Vaxaapi",
-      identityValue: "19900112-7777",
+      identityValue: "19900112-7779",
       dateOfBirth: "1990-01-12"
     });
     const vaxaDraft = await requestJson(baseUrl, "/v1/payroll/employer-contribution-decisions", {

@@ -65,7 +65,7 @@ test("Phase 8.2 API manages statutory profiles and AGI submissions with correcti
       givenName: "Iris",
       familyName: "Income",
       workEmail: "iris.income@example.com",
-      identityValue: "19800112-1234",
+      identityValue: "19800112-1238",
       monthlySalary: 41000
     });
     const sink = createEmployeeWithContract({
@@ -73,7 +73,7 @@ test("Phase 8.2 API manages statutory profiles and AGI submissions with correcti
       givenName: "Nils",
       familyName: "Sink",
       workEmail: "nils.sink@example.com",
-      identityValue: "19891103-4321",
+      identityValue: "19891103-4323",
       monthlySalary: 43500,
       protectedIdentity: true
     });

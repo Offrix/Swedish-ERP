@@ -13,7 +13,7 @@ test("Phase 1 tenant setup flows through tenant-control with finance-ready state
 
   const onboardingRun = tenantControl.createTenantBootstrap({
     legalName: "Tenant Setup AB",
-    orgNumber: "559900-4242",
+    orgNumber: "559900-4248",
     adminEmail: "owner@tenant-setup.test",
     adminDisplayName: "Owner Admin",
     accountingYear: "2026"

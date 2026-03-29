@@ -108,7 +108,7 @@ test("Step 28 API exposes readiness, decision difference and recovery candidate 
         buyers: [
           {
             displayName: "Anna Andersson",
-            personalIdentityNumber: "197501019999",
+            personalIdentityNumber: "197501019991",
             allocationPercent: 100
           }
         ],

@@ -31,7 +31,7 @@ test("Phase 12.7 payroll trial guards watermark pay runs and force non-live AGI 
     givenName: "Tora",
     familyName: "Trial",
     workEmail: "tora.trial@example.com",
-    identityValue: "19800112-5511",
+    identityValue: "19800112-5510",
     monthlySalary: 35500
   });
   const payCalendar = platform.listPayCalendars({ companyId: COMPANY_ID })[0];
@@ -104,7 +104,7 @@ test("Phase 1.4 production runtime blocks AGI live submission until provider-bac
   });
   const onboardingRun = platform.createOnboardingRun({
     legalName: "Protected Runtime Payroll AB",
-    orgNumber: "559900-2201",
+    orgNumber: "559900-2200",
     adminEmail: "owner@protected-payroll.test",
     adminDisplayName: "Protected Payroll Owner",
     accountingYear: "2026"
@@ -126,7 +126,7 @@ test("Phase 1.4 production runtime blocks AGI live submission until provider-bac
     givenName: "Lars",
     familyName: "Live",
     workEmail: "lars.live@example.com",
-    identityValue: "19740101-1111",
+    identityValue: "19740101-1114",
     monthlySalary: 36500
   });
   const run = platform.createPayRun({

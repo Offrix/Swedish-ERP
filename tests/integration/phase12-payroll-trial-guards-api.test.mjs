@@ -44,7 +44,7 @@ test("Phase 12.7 API keeps payroll trial flows non-live end-to-end", async () =>
       token: sessionToken,
       givenName: "Tina",
       familyName: "Trialapi",
-      identityValue: "19800112-7733"
+      identityValue: "19800112-7730"
     });
 
     await requestJson(baseUrl, "/v1/payroll/tax-decisions", {

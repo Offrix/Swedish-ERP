@@ -121,7 +121,7 @@ test("Phase 18.4 end-to-end flow releases advantage bundle after full parity cov
       baseUrl,
       adminEmail: "phase18-advantage-e2e-owner@example.test",
       legalName: "Phase 18 Advantage E2E AB",
-      orgNumber: "559900-9994"
+      orgNumber: "559900-9999"
     });
     const companyToken = await loginWithStrongAuth({
       baseUrl,

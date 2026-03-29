@@ -89,7 +89,7 @@ test("Phase 16.6 API exposes ClickUp project adapter manifests and imports proje
               folderId: "clickup-api-folder-16-6",
               customer: {
                 name: "API ClickUp Customer AB",
-                organization_number: "5562233110"
+                organization_number: "5562233113"
               },
               billingModel: "fixed_price",
               contractValue: 76000,

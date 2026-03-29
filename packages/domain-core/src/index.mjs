@@ -24,6 +24,27 @@ export {
   serializeSnapshotValue
 } from "./clone.mjs";
 export {
+  VALIDATION_KERNEL_VERSION,
+  normalizeOptionalCountryCode,
+  normalizeOptionalIanaTimeZone,
+  normalizeOptionalIsoDate,
+  normalizeOptionalOcrReference,
+  normalizeOptionalPaymentReference,
+  normalizeOptionalSwedishIdentityNumber,
+  normalizeOptionalSwedishOrganizationNumber,
+  normalizeOptionalVatCountryCode,
+  normalizeOptionalVatNumber,
+  normalizeRequiredCountryCode,
+  normalizeRequiredIanaTimeZone,
+  normalizeRequiredIsoDate,
+  normalizeRequiredOcrReference,
+  normalizeRequiredPaymentReference,
+  normalizeRequiredSwedishIdentityNumber,
+  normalizeRequiredSwedishOrganizationNumber,
+  normalizeRequiredVatCountryCode,
+  normalizeRequiredVatNumber
+} from "./validation.mjs";
+export {
   CORE_CANONICAL_REPOSITORY_OBJECT_TYPES,
   CORE_CANONICAL_REPOSITORY_TABLE,
   COMMAND_RECEIPT_STATUSES,

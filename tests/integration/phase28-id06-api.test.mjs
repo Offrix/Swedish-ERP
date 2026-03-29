@@ -102,7 +102,7 @@ test("Step 28 API exposes ID06 verification, binding, work-pass and evidence flo
       expectedStatus: 201,
       body: {
         companyId: DEMO_IDS.companyId,
-        orgNo: "5561112222",
+        orgNo: "5561112227",
         companyName: "Employer Verified AB"
       }
     });
@@ -126,7 +126,7 @@ test("Step 28 API exposes ID06 verification, binding, work-pass and evidence flo
       expectedStatus: 201,
       body: {
         companyId: DEMO_IDS.companyId,
-        employerOrgNo: "5561112222",
+        employerOrgNo: "5561112227",
         workerIdentityValue: "198902029999",
         cardReference: "ID06-CARD-API-001",
         maskedCardNumber: "****1111"
@@ -140,7 +140,7 @@ test("Step 28 API exposes ID06 verification, binding, work-pass and evidence flo
       expectedStatus: 201,
       body: {
         companyId: DEMO_IDS.companyId,
-        employerOrgNo: "5561112222",
+        employerOrgNo: "5561112227",
         workerIdentityValue: "198902029999",
         cardReference: "ID06-CARD-API-001"
       }
@@ -157,7 +157,7 @@ test("Step 28 API exposes ID06 verification, binding, work-pass and evidence flo
         workerIdentityType: "personnummer",
         workerIdentityValue: "198902029999",
         fullNameSnapshot: "Sara Nilsson",
-        employerOrgNo: "5561112222",
+        employerOrgNo: "5561112227",
         contractorOrgNo: "5561234567",
         roleAtWorkplace: "worker",
         clientEventId: "id06-api-attendance-1",

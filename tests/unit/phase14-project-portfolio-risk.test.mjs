@@ -22,7 +22,7 @@ test("Phase 14.4 builds capacity, assignment, risk and portfolio views from cano
   const customer = arPlatform.createCustomer({
     companyId: COMPANY_ID,
     legalName: "Portfolio Customer AB",
-    organizationNumber: "5566778811",
+    organizationNumber: "5566778816",
     countryCode: "SE",
     languageCode: "SV",
     currencyCode: "SEK",

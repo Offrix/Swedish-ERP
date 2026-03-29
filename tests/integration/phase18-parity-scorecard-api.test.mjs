@@ -54,7 +54,7 @@ test("Phase 18.3 API exposes blocked parity scorecards when a competitor gap rem
       baseUrl,
       adminEmail: "phase18-parity-api-owner@example.test",
       legalName: "Phase 18 Parity API AB",
-      orgNumber: "559900-9797"
+      orgNumber: "559900-9791"
     });
     const companyToken = await loginWithStrongAuth({
       baseUrl,

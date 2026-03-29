@@ -27,7 +27,7 @@ test("Step 28 HUS gates proportion claims, open decision differences and recover
     buyers: [
       {
         displayName: "Anna Andersson",
-        personalIdentityNumber: "197501019999",
+        personalIdentityNumber: "197501019991",
         allocationPercent: 100
       }
     ],
@@ -156,7 +156,7 @@ test("Step 28 HUS gates block payment and claim without invoice and payment evid
     buyers: [
       {
         displayName: "Anna Andersson",
-        personalIdentityNumber: "197501019999",
+        personalIdentityNumber: "197501019991",
         allocationPercent: 100
       }
     ],

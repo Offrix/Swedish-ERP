@@ -80,7 +80,7 @@ test("Phase 10.1 API manages projects, budgets, resource allocations and snapsho
       baseUrl,
       token: sessionToken,
       legalName: "Projects API Customer AB",
-      organizationNumber: "5566778900"
+      organizationNumber: "5566778907"
     });
     const employee = await createEmployeeWithContract({
       baseUrl,

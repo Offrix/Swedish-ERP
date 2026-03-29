@@ -45,7 +45,7 @@ test("Phase 18.3 parity scorecard records green finance parity against Fortnox",
   const financeReady = bootstrapFinanceReadyCompany({
     tenantControl,
     legalName: "Phase 18 Parity AB",
-    orgNumber: "559900-9696",
+    orgNumber: "559900-9692",
     adminEmail: "phase18-parity-owner@example.test"
   });
   const companyToken = loginWithStrongAuthOnPlatform({

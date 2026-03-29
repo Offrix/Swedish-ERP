@@ -195,7 +195,7 @@ test("Phase 11.3 API exposes close workbench, blocker handling, sign-off and reo
 function seedClientCloseSetup(platform, adminToken, responsibleConsultantId) {
   const clientCompany = platform.createCompany({
     legalName: "Close API Client AB",
-    orgNumber: "559900-4302",
+    orgNumber: "559900-4313",
     settingsJson: {
       bureauDelivery: {
         closeLeadBusinessDays: 3,

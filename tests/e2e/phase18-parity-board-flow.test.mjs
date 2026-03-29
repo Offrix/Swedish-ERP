@@ -56,7 +56,7 @@ test("Phase 18.3 parity board flow records green field parity against Bygglet", 
       baseUrl,
       adminEmail: "phase18-parity-board-owner@example.test",
       legalName: "Phase 18 Parity Board AB",
-      orgNumber: "559900-9898"
+      orgNumber: "559900-9890"
     });
     const companyToken = await loginWithStrongAuth({
       baseUrl,

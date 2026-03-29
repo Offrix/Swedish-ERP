@@ -76,7 +76,7 @@ test("Phase 16.6 API exposes Asana project adapter manifests and imports project
               portfolioId: "asana-api-portfolio-16-6",
               customer: {
                 name: "API Asana Customer AB",
-                organization_number: "5563344556"
+                organization_number: "5563344554"
               },
               billingModel: "fixed_price",
               contractValue: 87000,

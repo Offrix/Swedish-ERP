@@ -19,6 +19,7 @@ import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
+import { normalizeOptionalSwedishOrganizationNumber } from "../../domain-core/src/validation.mjs";
 import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
@@ -124,7 +125,7 @@ const DEFAULT_OPERATIONAL_TEAMS = Object.freeze([
 
 export const DEMO_ADMIN_EMAIL = "admin@example.test";
 export const DEMO_TOTP_SECRET = "JBSWY3DPEHPK3PXP";
-export const DEMO_BANKID_SUBJECT = "197001011234";
+export const DEMO_BANKID_SUBJECT = "197001011233";
 export const DEMO_APPROVER_EMAIL = "approver@example.test";
 export const DEMO_APPROVER_TOTP_SECRET = "KRSXG5DSNFXGOIDB";
 export const LOCAL_TOTP_PROVIDER_CODE = "local-totp";
@@ -396,7 +397,9 @@ export function createOrgAuthPlatform({
     const company = {
       companyId: crypto.randomUUID(),
       legalName: assertNonEmpty(legalName, "legal_name_required"),
-      orgNumber: String(orgNumber || ""),
+      orgNumber:
+        normalizeOptionalSwedishOrganizationNumber(orgNumber, "organization_number_invalid", { errorFactory: httpError })
+        || "",
       status,
       settingsJson: { ...settingsJson },
       createdAt: now,
@@ -1983,7 +1986,11 @@ export function createOrgAuthPlatform({
     switch (stepCode) {
       case "company_profile":
         company.legalName = assertNonEmpty(payload?.legalName || company.legalName, "legal_name_required");
-        company.orgNumber = String(payload?.orgNumber || company.orgNumber || "");
+        company.orgNumber =
+          normalizeOptionalSwedishOrganizationNumber(payload?.orgNumber || company.orgNumber || null, "organization_number_invalid", {
+            errorFactory: httpError
+          })
+          || "";
         company.updatedAt = nowIso();
         stepState.dataJson = {
           legalName: company.legalName,
@@ -3530,7 +3537,7 @@ function seedDemoState(state, clock, authSecretSealer) {
   state.companies.set(DEMO_IDS.companyId, {
     companyId: DEMO_IDS.companyId,
     legalName: "Swedish ERP Demo AB",
-    orgNumber: "559900-0001",
+    orgNumber: "5599000006",
     status: "active",
     settingsJson: {
       chartTemplateId: DEFAULT_CHART_TEMPLATE_ID,
@@ -4342,4 +4349,3 @@ function httpError(status, code, message) {
   error.code = code;
   return error;
 }
-

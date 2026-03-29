@@ -65,7 +65,7 @@ VALUES
     '00000000-0000-4000-8000-000000010401',
     1,
     'Anna Andersson',
-    '197501019999',
+    '197501019991',
     1.000000,
     3000.00,
     12000.00
@@ -196,7 +196,7 @@ VALUES
     '00000000-0000-4000-8000-000000010407',
     '00000000-0000-4000-8000-000000010406',
     1,
-    '{"requestedAmount":3000,"buyers":[{"personalIdentityNo":"197501019999"}]}'::jsonb,
+    '{"requestedAmount":3000,"buyers":[{"personalIdentityNo":"197501019991"}]}'::jsonb,
     'phase10_3_seed_hus_claim_hash'
   )
 ON CONFLICT (hus_claim_version_id) DO NOTHING;
@@ -430,7 +430,7 @@ VALUES
     'personnummer',
     '198902029999',
     'Sara Nilsson',
-    '5561112222',
+    '5561112227',
     '5561234567',
     'check_in',
     TIMESTAMPTZ '2026-03-21T06:45:00Z',

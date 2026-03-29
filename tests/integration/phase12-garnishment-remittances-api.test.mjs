@@ -36,7 +36,7 @@ test("Phase 12.6 API manages garnishment decisions and remittance instructions",
       token: sessionToken,
       givenName: "Greta",
       familyName: "Garnapi",
-      identityValue: "19800112-8888"
+      identityValue: "19800112-8886"
     });
 
     await requestJson(baseUrl, "/v1/payroll/tax-decisions", {
@@ -87,7 +87,7 @@ test("Phase 12.6 API manages garnishment decisions and remittance instructions",
         remittanceRecipientName: "Kronofogden",
         remittanceMethodCode: "bankgiro",
         remittanceBankgiro: "5050-1234",
-        remittanceOcrReference: "KFMAPI20260001",
+        remittanceOcrReference: "2026000113",
         decisionSource: "kronofogden_order",
         decisionReference: "api-beslut-2026-0001",
         evidenceRef: "evidence-kfm-api-2026-0001"

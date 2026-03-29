@@ -51,7 +51,7 @@ test("Phase 14.2 API converts accepted quote into canonical project handoff obje
       body: {
         companyId: COMPANY_ID,
         legalName: "API Handoff Customer AB",
-        organizationNumber: "5566778801",
+        organizationNumber: "5566778808",
         countryCode: "SE",
         languageCode: "SV",
         currencyCode: "SEK",

@@ -35,7 +35,7 @@ test("Phase 12.6 e2e payroll flow creates and settles Kronofogden remittance", a
       token: sessionToken,
       givenName: "Ester",
       familyName: "Endtoend",
-      identityValue: "19800112-9999"
+      identityValue: "19800112-9991"
     });
 
     await requestJson(baseUrl, "/v1/payroll/tax-decisions", {
@@ -86,7 +86,7 @@ test("Phase 12.6 e2e payroll flow creates and settles Kronofogden remittance", a
         remittanceRecipientName: "Kronofogden",
         remittanceMethodCode: "bankgiro",
         remittanceBankgiro: "5050-1234",
-        remittanceOcrReference: "KFME2E20260001",
+        remittanceOcrReference: "2026000121",
         decisionSource: "kronofogden_order",
         decisionReference: "e2e-beslut-2026-0001",
         evidenceRef: "evidence-kfm-e2e-2026-0001"

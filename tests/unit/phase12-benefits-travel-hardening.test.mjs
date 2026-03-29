@@ -39,7 +39,7 @@ test("Phase 12.4 payroll input snapshot carries benefit offset and travel expens
     givenName: "Hardy",
     familyName: "Review",
     workEmail: "hardy.review@example.com",
-    identityValue: "19800112-7777",
+    identityValue: "19800112-7771",
     monthlySalary: 42000
   });
   payrollPlatform.upsertEmploymentStatutoryProfile({

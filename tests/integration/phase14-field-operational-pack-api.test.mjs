@@ -40,7 +40,7 @@ test("Phase 14.5 API exposes operational cases, field evidence, reservations and
       body: {
         companyId: COMPANY_ID,
         legalName: "Phase 14.5 API Customer AB",
-        organizationNumber: "5591223399",
+        organizationNumber: "5591223390",
         countryCode: "SE",
         languageCode: "SV",
         currencyCode: "SEK",

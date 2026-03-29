@@ -73,7 +73,7 @@ test("desktop-web exposes auth/onboarding entrypoints while API completes the ma
       method: "POST",
       body: {
         legalName: "Surface Flow AB",
-        orgNumber: "559900-1234",
+        orgNumber: "559900-1236",
         adminEmail: "surface@example.test",
         adminDisplayName: "Surface Owner"
       }

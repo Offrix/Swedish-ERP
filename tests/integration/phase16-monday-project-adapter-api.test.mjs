@@ -77,7 +77,7 @@ test("Phase 16.6 API exposes monday work management manifests and imports projec
               portfolioId: "monday-api-portfolio-16-6",
               customer: {
                 name: "API monday Customer AB",
-                organization_number: "5565567788"
+                organization_number: "5565567780"
               },
               billingModel: "fixed_price",
               contractValue: 99000,

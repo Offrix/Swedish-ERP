@@ -3,6 +3,12 @@ import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
+  normalizeOptionalIsoDate as normalizeOptionalIsoDateKernel,
+  normalizeOptionalVatCountryCode as normalizeOptionalVatCountryCodeKernel,
+  normalizeOptionalVatNumber as normalizeOptionalVatNumberKernel,
+  normalizeRequiredIsoDate as normalizeRequiredIsoDateKernel
+} from "../../domain-core/src/validation.mjs";
+import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
@@ -1257,8 +1263,8 @@ function normalizeTransactionLine(transactionLine) {
   normalized.source_type = normalizeUpperString(candidate.source_type);
   normalized.source_id = typeof candidate.source_id === "string" ? candidate.source_id.trim() : candidate.source_id;
   normalized.project_id = typeof candidate.project_id === "string" ? candidate.project_id.trim() : candidate.project_id;
-  normalized.buyer_vat_no = typeof candidate.buyer_vat_no === "string" ? candidate.buyer_vat_no.trim() : candidate.buyer_vat_no;
-  normalized.buyer_vat_number = typeof candidate.buyer_vat_number === "string" ? candidate.buyer_vat_number.trim() : candidate.buyer_vat_number;
+  normalized.buyer_vat_no = normalizeOptionalVatNumber(candidate.buyer_vat_no, normalized.buyer_country);
+  normalized.buyer_vat_number = normalizeOptionalVatNumber(candidate.buyer_vat_number, normalized.buyer_country);
   normalized.buyer_vat_number_status = normalizeLowerString(candidate.buyer_vat_number_status);
   normalized.invoice_text_code = typeof candidate.invoice_text_code === "string" ? candidate.invoice_text_code.trim() : candidate.invoice_text_code;
   normalized.report_box_code = typeof candidate.report_box_code === "string" ? candidate.report_box_code.trim() : candidate.report_box_code;
@@ -2193,15 +2199,11 @@ function normalizeGoodsOrServices(value) {
 }
 
 function normalizeCountry(value) {
-  const normalized = normalizeUpperString(value);
-  return normalized || null;
+  return normalizeOptionalVatCountryCodeKernel(value, "vat_country_invalid", { errorFactory: createError });
 }
 
 function normalizeOptionalDate(value) {
-  if (value === null || value === undefined || value === "") {
-    return null;
-  }
-  return normalizeDate(value, "date_invalid");
+  return normalizeOptionalIsoDateKernel(value, "date_invalid", { errorFactory: createError });
 }
 
 function normalizeOptionalNumber(value) {
@@ -2223,10 +2225,14 @@ function normalizeOptionalBoolean(value) {
 }
 
 function normalizeDate(value, code) {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
-    throw createError(400, code, `${code} must be an ISO date.`);
-  }
-  return value.trim();
+  return normalizeRequiredIsoDateKernel(value, code, { errorFactory: createError });
+}
+
+function normalizeOptionalVatNumber(value, countryCode = null) {
+  return normalizeOptionalVatNumberKernel(value, "vat_number_invalid", {
+    errorFactory: createError,
+    countryCode
+  });
 }
 
 function assertDateRange(fromDate, toDate, code) {

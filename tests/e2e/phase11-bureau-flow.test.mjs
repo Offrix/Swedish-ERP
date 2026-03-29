@@ -43,7 +43,7 @@ test("Phase 11.2 end-to-end flow exposes bureau portfolio, tracked client reques
 
     const clientCompany = platform.createCompany({
       legalName: "Bureau Flow Client AB",
-      orgNumber: "559900-2201",
+      orgNumber: "559900-2200",
       settingsJson: {
         bureauDelivery: {
           closeLeadBusinessDays: 3,

@@ -76,7 +76,7 @@ test("Phase 16.6 API exposes Teamleader Focus crm handoff manifests and imports 
               title: "API Teamleader deal",
               customer: {
                 name: "API Teamleader Customer AB",
-                organization_number: "5562233445"
+                organization_number: "5562233444"
               },
               createdAt: "2026-03-27T00:00:00.000Z"
             }

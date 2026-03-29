@@ -3,6 +3,11 @@ import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { createVatPlatform } from "../../domain-vat/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
+  normalizeOptionalSwedishOrganizationNumber,
+  normalizeOptionalVatNumber,
+  normalizeRequiredIsoDate
+} from "../../domain-core/src/validation.mjs";
+import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
@@ -302,9 +307,10 @@ export function createArEngine({
       ensureCustomerImportSourceUnique(state, resolvedCompanyId, normalizedImportSourceKey);
     }
 
-    validateOrganizationNumber(countryCode, organizationNumber);
+    const resolvedCountryCode = normalizeUpperCode(countryCode, "country_code_required", 2);
+    const normalizedOrganizationNumber = normalizeCustomerOrganizationNumber(resolvedCountryCode, organizationNumber);
     validatePeppolFields({
-      countryCode,
+      countryCode: resolvedCountryCode,
       peppolScheme,
       peppolIdentifier
     });
@@ -314,8 +320,8 @@ export function createArEngine({
       companyId: resolvedCompanyId,
       customerNo: resolvedCustomerNo,
       legalName: requireText(legalName, "customer_legal_name_required"),
-      organizationNumber: normalizeOptionalText(organizationNumber),
-      countryCode: normalizeUpperCode(countryCode, "country_code_required", 2),
+      organizationNumber: normalizedOrganizationNumber,
+      countryCode: resolvedCountryCode,
       languageCode: normalizeUpperCode(languageCode, "language_code_required", 2),
       currencyCode: normalizeUpperCode(currencyCode, "currency_code_required", 3),
       paymentTermsCode: requireText(paymentTermsCode, "payment_terms_code_required"),
@@ -1052,6 +1058,10 @@ export function createArEngine({
     const resolvedIssueDate = normalizeDate(issueDate, "invoice_issue_date_invalid");
     const resolvedDueDate = normalizeDate(dueDate, "invoice_due_date_invalid");
     assertDateRange(resolvedIssueDate, resolvedDueDate, "invoice_due_date_invalid");
+    const resolvedBuyerVatNumber = normalizeOptionalVatNumber(buyerVatNumber, "invoice_buyer_vat_number_invalid", {
+      errorFactory: createError,
+      countryCode: customer.countryCode
+    });
     const resolvedCurrencyCode = normalizeUpperCode(
       currencyCode || contract?.currencyCode || sourceQuoteVersion?.currencyCode || customer.currencyCode,
       "currency_code_required",
@@ -1112,7 +1122,7 @@ export function createArEngine({
       deliveryChannel,
       buyerReference: normalizeOptionalText(buyerReference),
       purchaseOrderReference: normalizeOptionalText(purchaseOrderReference),
-      buyerVatNumber: normalizeOptionalText(buyerVatNumber),
+      buyerVatNumber: resolvedBuyerVatNumber,
       specialLegalText: normalizeOptionalText(specialLegalText),
       amendmentReason: normalizeOptionalText(amendmentReason),
       exportEvidenceReference: normalizeOptionalText(exportEvidenceReference),
@@ -1160,7 +1170,7 @@ export function createArEngine({
       deliveryDate: resolvedDeliveryDate,
       buyerReference: normalizeOptionalText(buyerReference),
       purchaseOrderReference: normalizeOptionalText(purchaseOrderReference),
-      buyerVatNumber: normalizeOptionalText(buyerVatNumber),
+      buyerVatNumber: resolvedBuyerVatNumber,
       specialLegalText: normalizeOptionalText(specialLegalText),
       amendmentReason: normalizeOptionalText(amendmentReason),
       exportEvidenceReference: normalizeOptionalText(exportEvidenceReference),
@@ -4101,9 +4111,13 @@ function upsertImportedCustomer({ state, clock, vatPlatform, companyId, row, bat
   }
 
   const customer = state.customers.get(existingCustomerId);
-  validateOrganizationNumber(row.countryCode || customer.countryCode, row.organizationNumber || customer.organizationNumber);
+  const resolvedCountryCode = normalizeUpperCode(row.countryCode || customer.countryCode, "country_code_required", 2);
+  const normalizedOrganizationNumber = normalizeCustomerOrganizationNumber(
+    resolvedCountryCode,
+    row.organizationNumber || customer.organizationNumber
+  );
   validatePeppolFields({
-    countryCode: row.countryCode || customer.countryCode,
+    countryCode: resolvedCountryCode,
     peppolScheme: row.peppolScheme || customer.peppolScheme,
     peppolIdentifier: row.peppolIdentifier || customer.peppolIdentifier
   });
@@ -4116,8 +4130,8 @@ function upsertImportedCustomer({ state, clock, vatPlatform, companyId, row, bat
   }
   Object.assign(customer, {
     legalName: requireText(row.legalName || customer.legalName, "customer_legal_name_required"),
-    organizationNumber: normalizeOptionalText(row.organizationNumber || customer.organizationNumber),
-    countryCode: normalizeUpperCode(row.countryCode || customer.countryCode, "country_code_required", 2),
+    organizationNumber: normalizedOrganizationNumber,
+    countryCode: resolvedCountryCode,
     languageCode: normalizeUpperCode(row.languageCode || customer.languageCode, "language_code_required", 2),
     currencyCode: normalizeUpperCode(row.currencyCode || customer.currencyCode, "currency_code_required", 3),
     paymentTermsCode: requireText(row.paymentTermsCode || customer.paymentTermsCode, "payment_terms_code_required"),
@@ -4182,9 +4196,10 @@ function createImportedCustomer(state, clock, companyId, batchKey, actorId, corr
   if (normalizedImportSourceKey) {
     ensureCustomerImportSourceUnique(state, companyId, normalizedImportSourceKey);
   }
-  validateOrganizationNumber(row.countryCode, row.organizationNumber || null);
+  const resolvedCountryCode = normalizeUpperCode(row.countryCode, "country_code_required", 2);
+  const normalizedOrganizationNumber = normalizeCustomerOrganizationNumber(resolvedCountryCode, row.organizationNumber || null);
   validatePeppolFields({
-    countryCode: row.countryCode,
+    countryCode: resolvedCountryCode,
     peppolScheme: row.peppolScheme || null,
     peppolIdentifier: row.peppolIdentifier || null
   });
@@ -4193,8 +4208,8 @@ function createImportedCustomer(state, clock, companyId, batchKey, actorId, corr
     companyId,
     customerNo,
     legalName: requireText(row.legalName, "customer_legal_name_required"),
-    organizationNumber: normalizeOptionalText(row.organizationNumber || null),
-    countryCode: normalizeUpperCode(row.countryCode, "country_code_required", 2),
+    organizationNumber: normalizedOrganizationNumber,
+    countryCode: resolvedCountryCode,
     languageCode: normalizeUpperCode(row.languageCode, "language_code_required", 2),
     currencyCode: normalizeUpperCode(row.currencyCode, "currency_code_required", 3),
     paymentTermsCode: requireText(row.paymentTermsCode, "payment_terms_code_required"),
@@ -4431,17 +4446,7 @@ function assertNoPriceListOverlap(lines) {
 }
 
 function validateOrganizationNumber(countryCode, organizationNumber) {
-  const normalizedCountryCode = normalizeOptionalText(countryCode)?.toUpperCase() || null;
-  const normalizedOrgNo = normalizeOptionalText(organizationNumber);
-  if (!normalizedOrgNo) {
-    return;
-  }
-  if (normalizedCountryCode === "SE") {
-    const digits = normalizedOrgNo.replace(/\D/g, "");
-    if (digits.length !== 10 && digits.length !== 12) {
-      throw createError(400, "organization_number_invalid", "Swedish organization numbers must contain 10 or 12 digits.");
-    }
-  }
+  normalizeCustomerOrganizationNumber(countryCode, organizationNumber);
 }
 
 function validatePeppolFields({ countryCode, peppolScheme, peppolIdentifier }) {
@@ -4535,11 +4540,17 @@ function normalizeAccountNumber(value) {
 }
 
 function normalizeDate(value, code) {
-  const input = requireText(value, code);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) {
-    throw createError(400, code, `${code} must be an ISO date.`);
+  return normalizeRequiredIsoDate(value, code, { errorFactory: createError });
+}
+
+function normalizeCustomerOrganizationNumber(countryCode, organizationNumber) {
+  const normalizedCountryCode = normalizeOptionalText(countryCode)?.toUpperCase() || null;
+  if (normalizedCountryCode === "SE") {
+    return normalizeOptionalSwedishOrganizationNumber(organizationNumber, "organization_number_invalid", {
+      errorFactory: createError
+    });
   }
-  return input;
+  return normalizeOptionalText(organizationNumber);
 }
 
 function normalizeOptionalDate(value, code) {

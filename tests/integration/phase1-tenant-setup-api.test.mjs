@@ -55,7 +55,7 @@ test("Phase 1 API routes tenant setup, trial and module lifecycles through tenan
       expectedStatus: 201,
       body: {
         legalName: "API Tenant Bootstrap AB",
-        orgNumber: "559900-6767",
+        orgNumber: "559900-6763",
         adminEmail: "api-owner@example.test",
         adminDisplayName: "API Owner"
       }

@@ -41,20 +41,20 @@ test("Phase 7.1 direct platform supports multiple employments, preserves contrac
     familyName: "Lind",
     dateOfBirth: "1991-05-05",
     identityType: "samordningsnummer",
-    identityValue: "910505-1234",
+    identityValue: "910565-1237",
     privateEmail: "klara.private@example.com",
     protectedIdentity: true,
     actorId: "unit-test",
     correlationId: "hr-unit-employee"
   });
-  assert.equal(employee.identityValueMasked.endsWith("1234"), true);
+  assert.equal(employee.identityValueMasked.endsWith("1237"), true);
 
   const manager = hrPlatform.createEmployee({
     companyId: COMPANY_ID,
     givenName: "Mikael",
     familyName: "Chef",
     identityType: "personnummer",
-    identityValue: "800101-4321",
+    identityValue: "800101-4326",
     actorId: "unit-test",
     correlationId: "hr-unit-manager"
   });
