@@ -16,6 +16,11 @@ import { createLocalTotpProvider, LOCAL_TOTP_PROVIDER_CODE } from "./providers/l
 import { createPageroPeppolProvider, PAGERO_PEPPOL_PROVIDER_CODE } from "./providers/pagero-peppol.mjs";
 import { createPleoSpendProvider, PLEO_SPEND_PROVIDER_CODE } from "./providers/pleo-spend.mjs";
 import { createPostmarkEmailProvider, POSTMARK_EMAIL_PROVIDER_CODE } from "./providers/postmark-email.mjs";
+import {
+  createMondayWorkManagementProvider,
+  MONDAY_WORK_MANAGEMENT_PROVIDER_BASELINE_CODE,
+  MONDAY_WORK_MANAGEMENT_PROVIDER_CODE
+} from "./providers/monday-work-management.mjs";
 import { createSignicatBankIdProvider } from "./providers/signicat-bankid.mjs";
 import {
   createSignicatSigningArchiveProvider,
@@ -58,6 +63,7 @@ export { LOCAL_TOTP_PROVIDER_CODE } from "./providers/local-totp.mjs";
 export { WORKOS_FEDERATION_PROVIDER_CODE } from "./providers/workos-federation.mjs";
 export { SIGNICAT_SIGNING_ARCHIVE_PROVIDER_CODE } from "./providers/signicat-signing-archive.mjs";
 export { HUBSPOT_CRM_PROVIDER_CODE } from "./providers/hubspot-crm.mjs";
+export { MONDAY_WORK_MANAGEMENT_PROVIDER_CODE } from "./providers/monday-work-management.mjs";
 export { TEAMLEADER_FOCUS_PROVIDER_CODE } from "./providers/teamleader-focus.mjs";
 export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
   Object.freeze({
@@ -353,6 +359,20 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
     checksum: "teamleader-focus-crm-projects-se-2026.1",
     sourceSnapshotDate: "2026-03-29",
     semanticChangeSummary: "Teamleader Focus baseline for deal, quotation, project and work-order handoff into governed project import batches."
+  }),
+  Object.freeze({
+    providerBaselineId: "monday-work-management-projects-se-2026.1",
+    baselineCode: MONDAY_WORK_MANAGEMENT_PROVIDER_BASELINE_CODE,
+    providerCode: MONDAY_WORK_MANAGEMENT_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "crm_handoff_objects",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "2026-01",
+    checksum: "monday-work-management-projects-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "monday work management baseline for board, item, portfolio and workload handoff into governed project import batches."
   })
 ]);
 
@@ -463,6 +483,11 @@ export function createIntegrationEngine({
     environmentMode,
     providerBaselineRegistry: providerBaselines
   });
+  const mondayWorkManagementProvider = createMondayWorkManagementProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
   const teamleaderFocusProvider = createTeamleaderFocusProvider({
     clock,
     environmentMode,
@@ -532,6 +557,7 @@ export function createIntegrationEngine({
       localTotpProvider,
       signingEvidenceArchiveProvider,
       hubSpotCrmProvider,
+      mondayWorkManagementProvider,
       teamleaderFocusProvider
     ]
   });
@@ -671,7 +697,10 @@ export function createIntegrationEngine({
           workOsFederationProvider: workOsFederationProvider.snapshot(),
           localPasskeyProvider: localPasskeyProvider.snapshot(),
           localTotpProvider: localTotpProvider.snapshot(),
-          signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot()
+          signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot(),
+          hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
+          mondayWorkManagementProvider: mondayWorkManagementProvider.snapshot(),
+          teamleaderFocusProvider: teamleaderFocusProvider.snapshot()
         }
       });
     },
@@ -701,6 +730,7 @@ export function createIntegrationEngine({
         localTotpProvider: localTotpProvider.snapshot(),
         signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot(),
         hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
+        mondayWorkManagementProvider: mondayWorkManagementProvider.snapshot(),
         teamleaderFocusProvider: teamleaderFocusProvider.snapshot()
       }
     };
@@ -726,6 +756,7 @@ export function createIntegrationEngine({
     localTotpProvider.restore(snapshot?.providerSnapshots?.localTotpProvider || {});
     signingEvidenceArchiveProvider.restore(snapshot?.providerSnapshots?.signingEvidenceArchiveProvider || {});
     hubSpotCrmProvider.restore(snapshot?.providerSnapshots?.hubSpotCrmProvider || {});
+    mondayWorkManagementProvider.restore(snapshot?.providerSnapshots?.mondayWorkManagementProvider || {});
     teamleaderFocusProvider.restore(snapshot?.providerSnapshots?.teamleaderFocusProvider || {});
   }
 
@@ -753,6 +784,14 @@ export function createIntegrationEngine({
     }
     if (connection.providerCode === HUBSPOT_CRM_PROVIDER_CODE) {
       return hubSpotCrmProvider.prepareProjectImportBatch({
+        companyId: resolvedCompanyId,
+        integrationConnectionId: connection.connectionId,
+        sourceExportCapturedAt,
+        ...(payload && typeof payload === "object" ? payload : {})
+      });
+    }
+    if (connection.providerCode === MONDAY_WORK_MANAGEMENT_PROVIDER_CODE) {
+      return mondayWorkManagementProvider.prepareProjectImportBatch({
         companyId: resolvedCompanyId,
         integrationConnectionId: connection.connectionId,
         sourceExportCapturedAt,
