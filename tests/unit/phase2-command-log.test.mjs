@@ -31,7 +31,7 @@ test("Phase 2.2 command runtime writes repository mutation, command receipt and 
       clientCompanyId: "22222222-2222-2222-2222-222222222222",
       status: "active"
     },
-    mutation: async ({ coreRepositories, queueOutboxMessage }) => {
+    mutation: async ({ coreRepositories, queueDomainEvent, queueEvidenceRef, queueOutboxMessage }) => {
       const saved = await coreRepositories.portfolios.save({
         companyId: COMPANY_ID,
         objectId: "portfolio-1",
@@ -44,11 +44,26 @@ test("Phase 2.2 command runtime writes repository mutation, command receipt and 
         actorId: "user-1",
         correlationId: "corr-1"
       });
+      queueDomainEvent({
+        eventType: "core.portfolio_membership.committed",
+        objectVersion: saved.objectVersion,
+        payload: {
+          portfolioId: saved.objectId,
+          status: saved.payload.status
+        }
+      });
       queueOutboxMessage({
         eventType: "command.accepted",
         payload: {
           aggregateId: saved.objectId,
           objectVersion: saved.objectVersion
+        }
+      });
+      queueEvidenceRef({
+        evidenceRefType: "audit_bundle",
+        evidenceRef: "evidence://portfolio-1",
+        metadata: {
+          aggregateId: saved.objectId
         }
       });
       return {
@@ -63,8 +78,12 @@ test("Phase 2.2 command runtime writes repository mutation, command receipt and 
   assert.equal(execution.commandReceipt.expectedObjectVersion, null);
   assert.equal(execution.commandReceipt.resultingObjectVersion, 1);
   assert.equal(execution.commandReceipt.sessionRevision, 3);
+  assert.equal(execution.domainEvents.length, 1);
+  assert.equal(execution.domainEvents[0].commandReceiptId, execution.commandReceipt.commandReceiptId);
   assert.equal(execution.outboxMessages.length, 1);
   assert.equal(execution.outboxMessages[0].commandReceiptId, execution.commandReceipt.commandReceiptId);
+  assert.equal(execution.evidenceRefs.length, 1);
+  assert.equal(execution.evidenceRefs[0].commandReceiptId, execution.commandReceipt.commandReceiptId);
 
   const repositories = createCoreCanonicalRepositories({ store });
   const storedPortfolio = await repositories.portfolios.get({
@@ -75,8 +94,12 @@ test("Phase 2.2 command runtime writes repository mutation, command receipt and 
 
   const receipts = await runtime.listCommandReceipts({ companyId: COMPANY_ID });
   assert.equal(receipts.length, 1);
+  const domainEvents = await runtime.listDomainEvents({ companyId: COMPANY_ID });
+  assert.equal(domainEvents.length, 1);
   const outboxMessages = await runtime.listOutboxMessages({ companyId: COMPANY_ID });
   assert.equal(outboxMessages.length, 1);
+  const evidenceRefs = await runtime.listEvidenceRefs({ companyId: COMPANY_ID });
+  assert.equal(evidenceRefs.length, 1);
 });
 
 test("Phase 2.2 command runtime suppresses duplicate commands by idempotency key", async () => {
@@ -129,7 +152,9 @@ test("Phase 2.2 command runtime suppresses duplicate commands by idempotency key
   assert.equal(second.duplicate, true);
   assert.equal(mutationCalls, 1);
   assert.equal((await runtime.listCommandReceipts({ companyId: COMPANY_ID })).length, 1);
+  assert.equal((await runtime.listDomainEvents({ companyId: COMPANY_ID })).length, 0);
   assert.equal((await runtime.listOutboxMessages({ companyId: COMPANY_ID })).length, 1);
+  assert.equal((await runtime.listEvidenceRefs({ companyId: COMPANY_ID })).length, 0);
 });
 
 test("Phase 2.2 command runtime supports bounded-context repository bundles in the same transaction", async () => {
@@ -164,7 +189,7 @@ test("Phase 2.2 command runtime supports bounded-context repository bundles in t
       agreementFamilyCode: "unionen_tjansteman",
       versionCode: "2026.1"
     },
-    mutation: async ({ repositories, queueOutboxMessage }) => {
+    mutation: async ({ repositories, queueDomainEvent, queueEvidenceRef, queueOutboxMessage }) => {
       const saved = await repositories.collectiveAgreements.catalogEntries.save({
         companyId: COMPANY_ID,
         objectId: "agreement-1",
@@ -177,6 +202,15 @@ test("Phase 2.2 command runtime supports bounded-context repository bundles in t
         actorId: "user-3",
         correlationId: "corr-agreement-1"
       });
+      queueDomainEvent({
+        eventType: "collective_agreement.catalog_entry.published",
+        aggregateType: "collective_agreement_catalog_entry",
+        aggregateId: saved.objectId,
+        objectVersion: saved.objectVersion,
+        payload: {
+          agreementId: saved.objectId
+        }
+      });
       queueOutboxMessage({
         eventType: "command.accepted",
         aggregateType: "collective_agreement_catalog_entry",
@@ -185,6 +219,12 @@ test("Phase 2.2 command runtime supports bounded-context repository bundles in t
           agreementId: saved.objectId,
           objectVersion: saved.objectVersion
         }
+      });
+      queueEvidenceRef({
+        aggregateType: "collective_agreement_catalog_entry",
+        aggregateId: saved.objectId,
+        evidenceRefType: "publication_bundle",
+        evidenceRef: "evidence://agreement-1/publication"
       });
       return {
         result: saved,
@@ -196,7 +236,9 @@ test("Phase 2.2 command runtime supports bounded-context repository bundles in t
   assert.equal(execution.duplicate, false);
   assert.equal(execution.commandReceipt.commandType, "collective_agreement.catalog.publish");
   assert.equal(execution.commandReceipt.resultingObjectVersion, 1);
+  assert.equal(execution.domainEvents.length, 1);
   assert.equal(execution.outboxMessages.length, 1);
+  assert.equal(execution.evidenceRefs.length, 1);
   assert.equal(execution.outboxMessages[0].commandReceiptId, execution.commandReceipt.commandReceiptId);
 
   const agreementRepositories = createBoundedContextCanonicalRepositories({
@@ -213,7 +255,9 @@ test("Phase 2.2 command runtime supports bounded-context repository bundles in t
   assert.equal(storedAgreement.objectVersion, 1);
   assert.equal(storedAgreement.payload.publicationStatus, "published");
   assert.equal((await runtime.listCommandReceipts({ companyId: COMPANY_ID })).length, 1);
+  assert.equal((await runtime.listDomainEvents({ companyId: COMPANY_ID })).length, 1);
   assert.equal((await runtime.listOutboxMessages({ companyId: COMPANY_ID })).length, 1);
+  assert.equal((await runtime.listEvidenceRefs({ companyId: COMPANY_ID })).length, 1);
 });
 
 test("Phase 2.2 command runtime rolls back repository, command receipt and outbox on mutation failure", async () => {
@@ -234,7 +278,7 @@ test("Phase 2.2 command runtime rolls back repository, command receipt and outbo
         featureFlagId: "flag-1",
         flagKey: "trial_mode"
       },
-      mutation: async ({ coreRepositories, queueOutboxMessage }) => {
+      mutation: async ({ coreRepositories, queueDomainEvent, queueEvidenceRef, queueOutboxMessage }) => {
         await coreRepositories.featureFlags.save({
           companyId: COMPANY_ID,
           objectId: "flag-1",
@@ -245,11 +289,21 @@ test("Phase 2.2 command runtime rolls back repository, command receipt and outbo
             status: "draft"
           }
         });
+        queueDomainEvent({
+          eventType: "core.feature_flag.created",
+          payload: {
+            featureFlagId: "flag-1"
+          }
+        });
         queueOutboxMessage({
           eventType: "command.accepted",
           payload: {
             featureFlagId: "flag-1"
           }
+        });
+        queueEvidenceRef({
+          evidenceRefType: "audit_bundle",
+          evidenceRef: "evidence://feature-flag-1"
         });
         throw new Error("mutation_failed");
       }
@@ -260,7 +314,9 @@ test("Phase 2.2 command runtime rolls back repository, command receipt and outbo
   const repositories = createCoreCanonicalRepositories({ store });
   assert.equal((await repositories.featureFlags.list({ companyId: COMPANY_ID })).length, 0);
   assert.equal((await runtime.listCommandReceipts({ companyId: COMPANY_ID })).length, 0);
+  assert.equal((await runtime.listDomainEvents({ companyId: COMPANY_ID })).length, 0);
   assert.equal((await runtime.listOutboxMessages({ companyId: COMPANY_ID })).length, 0);
+  assert.equal((await runtime.listEvidenceRefs({ companyId: COMPANY_ID })).length, 0);
 });
 
 test("Phase 2.2 inbox runtime deduplicates incoming messages and records processing state", async () => {

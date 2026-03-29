@@ -47,6 +47,51 @@ CREATE TABLE IF NOT EXISTS command_inbox_messages (
 CREATE INDEX IF NOT EXISTS command_inbox_messages_company_received_idx
   ON command_inbox_messages (company_id, received_at, inbox_message_id);
 
+CREATE TABLE IF NOT EXISTS command_domain_events (
+  domain_event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID NOT NULL REFERENCES companies(company_id),
+  aggregate_type TEXT NOT NULL,
+  aggregate_id TEXT NOT NULL,
+  command_receipt_id UUID REFERENCES command_receipts(command_receipt_id),
+  object_version BIGINT,
+  event_type TEXT NOT NULL,
+  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  actor_id TEXT NOT NULL,
+  correlation_id TEXT NOT NULL,
+  causation_id TEXT,
+  status TEXT NOT NULL DEFAULT 'recorded',
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS command_domain_events_company_recorded_idx
+  ON command_domain_events (company_id, recorded_at, domain_event_id);
+
+CREATE INDEX IF NOT EXISTS command_domain_events_receipt_idx
+  ON command_domain_events (command_receipt_id, recorded_at);
+
+CREATE TABLE IF NOT EXISTS command_evidence_refs (
+  evidence_ref_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID NOT NULL REFERENCES companies(company_id),
+  aggregate_type TEXT NOT NULL,
+  aggregate_id TEXT NOT NULL,
+  command_receipt_id UUID REFERENCES command_receipts(command_receipt_id),
+  domain_event_id UUID REFERENCES command_domain_events(domain_event_id),
+  evidence_ref_type TEXT NOT NULL,
+  evidence_ref TEXT NOT NULL,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  actor_id TEXT,
+  correlation_id TEXT,
+  causation_id TEXT,
+  status TEXT NOT NULL DEFAULT 'recorded',
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS command_evidence_refs_company_recorded_idx
+  ON command_evidence_refs (company_id, recorded_at, evidence_ref_id);
+
+CREATE INDEX IF NOT EXISTS command_evidence_refs_receipt_idx
+  ON command_evidence_refs (command_receipt_id, recorded_at);
+
 ALTER TABLE outbox_events
   ADD COLUMN IF NOT EXISTS command_receipt_id UUID REFERENCES command_receipts(command_receipt_id),
   ADD COLUMN IF NOT EXISTS actor_id TEXT,

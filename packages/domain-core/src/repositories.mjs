@@ -5,6 +5,8 @@ export const CORE_CANONICAL_REPOSITORY_TABLE = "core_domain_records";
 export const COMMAND_RECEIPT_STATUSES = Object.freeze(["accepted", "duplicate", "replayed"]);
 export const OUTBOX_MESSAGE_STATUSES = Object.freeze(["pending", "published"]);
 export const INBOX_MESSAGE_STATUSES = Object.freeze(["recorded", "processed", "rejected"]);
+export const DOMAIN_EVENT_RECORD_STATUSES = Object.freeze(["recorded"]);
+export const EVIDENCE_REF_RECORD_STATUSES = Object.freeze(["recorded"]);
 
 export const CORE_CANONICAL_REPOSITORY_OBJECT_TYPES = Object.freeze({
   portfolios: "bureau_portfolio_membership",
@@ -114,6 +116,14 @@ function buildInboxKey({ companyId, sourceSystem, messageId }) {
   return [companyId, sourceSystem, messageId].join("::");
 }
 
+function buildDomainEventKey({ companyId, domainEventId }) {
+  return [companyId, domainEventId].join("::");
+}
+
+function buildEvidenceRefKey({ companyId, evidenceRefId }) {
+  return [companyId, evidenceRefId].join("::");
+}
+
 function toRepositoryObject(record) {
   if (!record) {
     return null;
@@ -207,6 +217,49 @@ function toInboxMessageObject(record) {
   };
 }
 
+function toDomainEventObject(record) {
+  if (!record) {
+    return null;
+  }
+  return {
+    domainEventId: record.domainEventId,
+    companyId: record.companyId,
+    aggregateType: record.aggregateType,
+    aggregateId: record.aggregateId,
+    commandReceiptId: record.commandReceiptId,
+    objectVersion: record.objectVersion,
+    eventType: record.eventType,
+    payload: clone(record.payload),
+    actorId: record.actorId,
+    correlationId: record.correlationId,
+    causationId: record.causationId,
+    status: record.status,
+    recordedAt: record.recordedAt
+  };
+}
+
+function toEvidenceRefObject(record) {
+  if (!record) {
+    return null;
+  }
+  return {
+    evidenceRefId: record.evidenceRefId,
+    companyId: record.companyId,
+    aggregateType: record.aggregateType,
+    aggregateId: record.aggregateId,
+    commandReceiptId: record.commandReceiptId,
+    domainEventId: record.domainEventId,
+    evidenceRefType: record.evidenceRefType,
+    evidenceRef: record.evidenceRef,
+    metadata: clone(record.metadata),
+    actorId: record.actorId,
+    correlationId: record.correlationId,
+    causationId: record.causationId,
+    status: record.status,
+    recordedAt: record.recordedAt
+  };
+}
+
 export class CanonicalRepositoryConflictError extends Error {
   constructor(message, details = {}) {
     super(message);
@@ -229,7 +282,7 @@ function createConflictError({ tableName, boundedContextCode, objectType, compan
   });
 }
 
-function createMemoryTransaction(records, commandReceipts, outboxMessages, inboxMessages) {
+function createMemoryTransaction(records, commandReceipts, outboxMessages, inboxMessages, domainEvents, evidenceRefs) {
   function findCommandReceipt({ companyId, commandType = null, commandId = null, idempotencyKey = null }) {
     const normalizedCompanyId = text(companyId, "companyId");
     return [...commandReceipts.values()].find((candidate) =>
@@ -600,6 +653,113 @@ function createMemoryTransaction(records, commandReceipts, outboxMessages, inbox
       message.processedAt = normalizeTimestamp(processedAt);
       message.errorCode = optionalText(errorCode, "errorCode");
       return toInboxMessageObject(message);
+    },
+
+    async listDomainEvents({ companyId, aggregateType = null, aggregateId = null, commandReceiptId = null } = {}) {
+      const normalizedCompanyId = text(companyId, "companyId");
+      return [...domainEvents.values()]
+        .filter((candidate) => candidate.companyId === normalizedCompanyId)
+        .filter((candidate) => (aggregateType ? candidate.aggregateType === text(aggregateType, "aggregateType") : true))
+        .filter((candidate) => (aggregateId ? candidate.aggregateId === text(aggregateId, "aggregateId") : true))
+        .filter((candidate) => (commandReceiptId ? candidate.commandReceiptId === text(commandReceiptId, "commandReceiptId") : true))
+        .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt) || left.domainEventId.localeCompare(right.domainEventId))
+        .map(toDomainEventObject);
+    },
+
+    async appendDomainEvent({
+      domainEventId = crypto.randomUUID(),
+      companyId,
+      aggregateType,
+      aggregateId,
+      commandReceiptId = null,
+      objectVersion = null,
+      eventType,
+      payload,
+      actorId,
+      correlationId,
+      causationId = null,
+      status = "recorded",
+      recordedAt = null
+    } = {}) {
+      const event = {
+        domainEventId: text(domainEventId, "domainEventId"),
+        companyId: text(companyId, "companyId"),
+        aggregateType: text(aggregateType, "aggregateType"),
+        aggregateId: text(aggregateId, "aggregateId"),
+        commandReceiptId: optionalText(commandReceiptId, "commandReceiptId"),
+        objectVersion: objectVersion == null ? null : Number(objectVersion),
+        eventType: text(eventType, "eventType"),
+        payload: clone(payload ?? {}),
+        actorId: text(actorId, "actorId"),
+        correlationId: text(correlationId, "correlationId"),
+        causationId: optionalText(causationId, "causationId"),
+        status: assertAllowed(status, DOMAIN_EVENT_RECORD_STATUSES, "status"),
+        recordedAt: normalizeTimestamp(recordedAt)
+      };
+      domainEvents.set(
+        buildDomainEventKey({ companyId: event.companyId, domainEventId: event.domainEventId }),
+        event
+      );
+      return toDomainEventObject(event);
+    },
+
+    async listEvidenceRefs({
+      companyId,
+      aggregateType = null,
+      aggregateId = null,
+      commandReceiptId = null,
+      domainEventId = null,
+      evidenceRefType = null
+    } = {}) {
+      const normalizedCompanyId = text(companyId, "companyId");
+      return [...evidenceRefs.values()]
+        .filter((candidate) => candidate.companyId === normalizedCompanyId)
+        .filter((candidate) => (aggregateType ? candidate.aggregateType === text(aggregateType, "aggregateType") : true))
+        .filter((candidate) => (aggregateId ? candidate.aggregateId === text(aggregateId, "aggregateId") : true))
+        .filter((candidate) => (commandReceiptId ? candidate.commandReceiptId === text(commandReceiptId, "commandReceiptId") : true))
+        .filter((candidate) => (domainEventId ? candidate.domainEventId === text(domainEventId, "domainEventId") : true))
+        .filter((candidate) => (evidenceRefType ? candidate.evidenceRefType === text(evidenceRefType, "evidenceRefType") : true))
+        .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt) || left.evidenceRefId.localeCompare(right.evidenceRefId))
+        .map(toEvidenceRefObject);
+    },
+
+    async appendEvidenceRef({
+      evidenceRefId = crypto.randomUUID(),
+      companyId,
+      aggregateType,
+      aggregateId,
+      commandReceiptId = null,
+      domainEventId = null,
+      evidenceRefType,
+      evidenceRef,
+      metadata = {},
+      actorId = null,
+      correlationId = null,
+      causationId = null,
+      status = "recorded",
+      recordedAt = null
+    } = {}) {
+      const record = {
+        evidenceRefId: text(evidenceRefId, "evidenceRefId"),
+        companyId: text(companyId, "companyId"),
+        aggregateType: text(aggregateType, "aggregateType"),
+        aggregateId: text(aggregateId, "aggregateId"),
+        commandReceiptId: optionalText(commandReceiptId, "commandReceiptId"),
+        domainEventId: optionalText(domainEventId, "domainEventId"),
+        evidenceRefType: text(evidenceRefType, "evidenceRefType"),
+        evidenceRef: text(evidenceRef, "evidenceRef"),
+        metadata: clone(metadata || {}),
+        actorId: optionalText(actorId, "actorId"),
+        correlationId: optionalText(correlationId, "correlationId"),
+        causationId: optionalText(causationId, "causationId"),
+        status: assertAllowed(status, EVIDENCE_REF_RECORD_STATUSES, "status"),
+        recordedAt: normalizeTimestamp(recordedAt)
+      };
+      evidenceRefs.set(
+        buildEvidenceRefKey({ companyId: record.companyId, evidenceRefId: record.evidenceRefId }),
+        record
+      );
+      return toEvidenceRefObject(record);
     }
   };
 }
@@ -609,6 +769,8 @@ export function createInMemoryCanonicalRepositoryStore() {
   const commandReceipts = new Map();
   const outboxMessages = new Map();
   const inboxMessages = new Map();
+  const domainEvents = new Map();
+  const evidenceRefs = new Map();
 
   return {
     kind: "memory_canonical_repository_store",
@@ -632,11 +794,21 @@ export function createInMemoryCanonicalRepositoryStore() {
       for (const [key, value] of inboxMessages.entries()) {
         transactionalInboxMessages.set(key, clone(value));
       }
+      const transactionalDomainEvents = new Map();
+      for (const [key, value] of domainEvents.entries()) {
+        transactionalDomainEvents.set(key, clone(value));
+      }
+      const transactionalEvidenceRefs = new Map();
+      for (const [key, value] of evidenceRefs.entries()) {
+        transactionalEvidenceRefs.set(key, clone(value));
+      }
       const transaction = createMemoryTransaction(
         transactionalRecords,
         transactionalCommandReceipts,
         transactionalOutboxMessages,
-        transactionalInboxMessages
+        transactionalInboxMessages,
+        transactionalDomainEvents,
+        transactionalEvidenceRefs
       );
       const result = await work(transaction);
       records.clear();
@@ -655,6 +827,14 @@ export function createInMemoryCanonicalRepositoryStore() {
       for (const [key, value] of transactionalInboxMessages.entries()) {
         inboxMessages.set(key, value);
       }
+      domainEvents.clear();
+      for (const [key, value] of transactionalDomainEvents.entries()) {
+        domainEvents.set(key, value);
+      }
+      evidenceRefs.clear();
+      for (const [key, value] of transactionalEvidenceRefs.entries()) {
+        evidenceRefs.set(key, value);
+      }
       return result;
     },
 
@@ -663,7 +843,9 @@ export function createInMemoryCanonicalRepositoryStore() {
         records: [...records.values()].map(toRepositoryObject),
         commandReceipts: [...commandReceipts.values()].map(toCommandReceiptObject),
         outboxMessages: [...outboxMessages.values()].map(toOutboxMessageObject),
-        inboxMessages: [...inboxMessages.values()].map(toInboxMessageObject)
+        inboxMessages: [...inboxMessages.values()].map(toInboxMessageObject),
+        domainEvents: [...domainEvents.values()].map(toDomainEventObject),
+        evidenceRefs: [...evidenceRefs.values()].map(toEvidenceRefObject)
       };
     }
   };

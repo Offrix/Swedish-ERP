@@ -211,3 +211,75 @@ test("Phase 2.1 rolls back repository-backed domain mutations when aggregate sav
     platform.closeCriticalDomainStateStore?.();
   }
 });
+
+test("Phase 2.2 exposes explicit per-domain method intents instead of method-name heuristics", () => {
+  const platform = createApiPlatform({
+    env: {},
+    runtimeMode: "test",
+    criticalDomainStateStore: createInMemoryCriticalDomainStateStore()
+  });
+
+  try {
+    const legalFormIntents = platform.listCriticalDomainMethodIntents({ domainKey: "legalForm" });
+    const husIntents = platform.listCriticalDomainMethodIntents({ domainKey: "hus" });
+
+    assert.equal(
+      legalFormIntents.find((entry) => entry.methodName === "resolveActiveLegalFormProfile")?.intent,
+      "read"
+    );
+    assert.equal(
+      husIntents.find((entry) => entry.methodName === "resolveHusDecisionDifference")?.intent,
+      "write"
+    );
+    assert.equal(
+      husIntents.find((entry) => entry.methodName === "evaluateHusCaseReadiness")?.intent,
+      "read"
+    );
+    assert.equal(
+      platform.listCriticalDomainMethodIntents().every((entry) => ["read", "write"].includes(entry.intent)),
+      true
+    );
+  } finally {
+    platform.closeCriticalDomainStateStore?.();
+  }
+});
+
+test("Phase 2.2 special read methods do not trigger aggregate persistence writes", () => {
+  const platform = createApiPlatform({
+    env: {},
+    runtimeMode: "test",
+    criticalDomainStateStore: createInMemoryCriticalDomainStateStore()
+  });
+
+  try {
+    const company = platform.createCompany({
+      legalName: "Method Intent AB",
+      orgNumber: "556677-8899",
+      status: "active"
+    });
+    const profile = platform.createLegalFormProfile({
+      companyId: company.companyId,
+      legalFormCode: "AKTIEBOLAG",
+      effectiveFrom: "2026-01-01",
+      actorId: "system"
+    });
+    platform.activateLegalFormProfile({
+      companyId: company.companyId,
+      legalFormProfileId: profile.legalFormProfileId,
+      actorId: "system"
+    });
+
+    const before = platform.getCriticalDomainDurability("legalForm");
+    const resolved = platform.resolveActiveLegalFormProfile({
+      companyId: company.companyId,
+      asOfDate: "2026-01-15"
+    });
+    const after = platform.getCriticalDomainDurability("legalForm");
+
+    assert.equal(resolved.legalFormProfileId, profile.legalFormProfileId);
+    assert.equal(after.objectVersion, before.objectVersion);
+    assert.equal(after.snapshotHash, before.snapshotHash);
+  } finally {
+    platform.closeCriticalDomainStateStore?.();
+  }
+});

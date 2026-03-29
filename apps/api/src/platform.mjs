@@ -67,6 +67,11 @@ import {
   resolveRuntimeStoreKind,
   scanRuntimeInvariants
 } from "../../../scripts/lib/runtime-diagnostics.mjs";
+import {
+  assertCriticalDomainMethodIntentCoverage,
+  listCriticalDomainMethodIntents,
+  resolveCriticalDomainMethodIntent
+} from "./platform-method-intents.mjs";
 
 function createDomainDefinition({ key, label, packageName, dependsOn = [], create }) {
   return Object.freeze({
@@ -946,6 +951,7 @@ export function createApiPlatform(options = {}) {
   const registeredDomains = Object.freeze({ ...domains });
   const registrations = Object.freeze([...domainRegistry]);
   const registrationsByKey = Object.freeze({ ...domainRegistryByKey });
+  assertCriticalDomainMethodIntentCoverage(registrations, registeredDomains);
   const defaultRuntimeDiagnostics = buildRuntimeDiagnostics({
     startupSurface: options.startupSurface || "api",
     runtimeModeProfile,
@@ -1074,6 +1080,13 @@ export function createApiPlatform(options = {}) {
         }),
       enumerable: false
     },
+    listCriticalDomainMethodIntents: {
+      value: ({ domainKey = null } = {}) =>
+        listCriticalDomainMethodIntents(registrations, registeredDomains).filter((entry) =>
+          domainKey ? entry.domainKey === domainKey : true
+        ),
+      enumerable: false
+    },
     getDomainRegistration: {
       value: (domainKey) => registrationsByKey[domainKey] || null,
       enumerable: false
@@ -1188,13 +1201,6 @@ const CRITICAL_DOMAIN_KEYS = Object.freeze(
   API_PLATFORM_BUILD_ORDER.filter((domainKey) => !STATELESS_DOMAIN_KEYS.includes(domainKey))
 );
 
-const CRITICAL_DOMAIN_READ_METHOD_PREFIXES = Object.freeze([
-  "get",
-  "list",
-  "snapshot",
-  "check"
-]);
-
 function stableStringify(value) {
   if (Array.isArray(value)) {
     return `[${value.map((entryValue) => stableStringify(entryValue)).join(",")}]`;
@@ -1218,10 +1224,6 @@ function resolveCriticalDomainTruthMode(store) {
 
 function hashSnapshot(value) {
   return crypto.createHash("sha256").update(stableStringify(value ?? null)).digest("hex");
-}
-
-function isReadMethod(methodName) {
-  return CRITICAL_DOMAIN_READ_METHOD_PREFIXES.some((prefix) => methodName.startsWith(prefix));
 }
 
 function resolveDomainDurabilityPolicy(domainKey) {
@@ -1384,7 +1386,7 @@ function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
           "getCriticalDomainDurability",
           "flushDurableState"
         ].includes(property) ||
-        isReadMethod(property)
+        resolveCriticalDomainMethodIntent(domainKey, property) === "read"
       ) {
         return value.bind(target);
       }

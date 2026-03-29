@@ -4,6 +4,8 @@ import {
   COMMAND_RECEIPT_STATUSES,
   CORE_CANONICAL_REPOSITORY_TABLE,
   CanonicalRepositoryConflictError,
+  DOMAIN_EVENT_RECORD_STATUSES,
+  EVIDENCE_REF_RECORD_STATUSES,
   INBOX_MESSAGE_STATUSES
 } from "./repositories.mjs";
 
@@ -162,6 +164,49 @@ function mapInboxRow(row) {
     receivedAt: row.received_at,
     processedAt: row.processed_at,
     errorCode: row.error_code
+  };
+}
+
+function mapDomainEventRow(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    domainEventId: row.domain_event_id,
+    companyId: row.company_id,
+    aggregateType: row.aggregate_type,
+    aggregateId: row.aggregate_id,
+    commandReceiptId: row.command_receipt_id,
+    objectVersion: row.object_version == null ? null : Number(row.object_version),
+    eventType: row.event_type,
+    payload: jsonValue(row.payload_json) || {},
+    actorId: row.actor_id,
+    correlationId: row.correlation_id,
+    causationId: row.causation_id,
+    status: row.status,
+    recordedAt: row.recorded_at
+  };
+}
+
+function mapEvidenceRefRow(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    evidenceRefId: row.evidence_ref_id,
+    companyId: row.company_id,
+    aggregateType: row.aggregate_type,
+    aggregateId: row.aggregate_id,
+    commandReceiptId: row.command_receipt_id,
+    domainEventId: row.domain_event_id,
+    evidenceRefType: row.evidence_ref_type,
+    evidenceRef: row.evidence_ref,
+    metadata: jsonValue(row.metadata_json) || {},
+    actorId: row.actor_id,
+    correlationId: row.correlation_id,
+    causationId: row.causation_id,
+    status: row.status,
+    recordedAt: row.recorded_at
   };
 }
 
@@ -644,6 +689,144 @@ function createPostgresTransaction(tx) {
         returning *
       `;
       return mapInboxRow(rows[0] || null);
+    },
+
+    async listDomainEvents({ companyId, aggregateType = null, aggregateId = null, commandReceiptId = null }) {
+      const rows = await tx`
+        select *
+        from command_domain_events
+        where company_id = ${text(companyId, "companyId")}
+          and (${aggregateType == null} or aggregate_type = ${aggregateType == null ? null : text(aggregateType, "aggregateType")})
+          and (${aggregateId == null} or aggregate_id = ${aggregateId == null ? null : text(aggregateId, "aggregateId")})
+          and (${commandReceiptId == null} or command_receipt_id = ${commandReceiptId == null ? null : text(commandReceiptId, "commandReceiptId")})
+        order by recorded_at asc, domain_event_id asc
+      `;
+      return rows.map(mapDomainEventRow);
+    },
+
+    async appendDomainEvent({
+      domainEventId = crypto.randomUUID(),
+      companyId,
+      aggregateType,
+      aggregateId,
+      commandReceiptId = null,
+      objectVersion = null,
+      eventType,
+      payload,
+      actorId,
+      correlationId,
+      causationId = null,
+      status = "recorded",
+      recordedAt = null
+    }) {
+      const rows = await tx`
+        insert into command_domain_events (
+          domain_event_id,
+          company_id,
+          aggregate_type,
+          aggregate_id,
+          command_receipt_id,
+          object_version,
+          event_type,
+          payload_json,
+          actor_id,
+          correlation_id,
+          causation_id,
+          status,
+          recorded_at
+        ) values (
+          ${text(domainEventId, "domainEventId")},
+          ${text(companyId, "companyId")},
+          ${text(aggregateType, "aggregateType")},
+          ${text(aggregateId, "aggregateId")},
+          ${optionalText(commandReceiptId, "commandReceiptId")},
+          ${objectVersion == null ? null : Number(objectVersion)},
+          ${text(eventType, "eventType")},
+          ${JSON.stringify(clone(payload ?? {}))}::jsonb,
+          ${text(actorId, "actorId")},
+          ${text(correlationId, "correlationId")},
+          ${optionalText(causationId, "causationId")},
+          ${assertAllowed(status, DOMAIN_EVENT_RECORD_STATUSES, "status")},
+          ${normalizeTimestamp(recordedAt)}
+        )
+        returning *
+      `;
+      return mapDomainEventRow(rows[0]);
+    },
+
+    async listEvidenceRefs({
+      companyId,
+      aggregateType = null,
+      aggregateId = null,
+      commandReceiptId = null,
+      domainEventId = null,
+      evidenceRefType = null
+    }) {
+      const rows = await tx`
+        select *
+        from command_evidence_refs
+        where company_id = ${text(companyId, "companyId")}
+          and (${aggregateType == null} or aggregate_type = ${aggregateType == null ? null : text(aggregateType, "aggregateType")})
+          and (${aggregateId == null} or aggregate_id = ${aggregateId == null ? null : text(aggregateId, "aggregateId")})
+          and (${commandReceiptId == null} or command_receipt_id = ${commandReceiptId == null ? null : text(commandReceiptId, "commandReceiptId")})
+          and (${domainEventId == null} or domain_event_id = ${domainEventId == null ? null : text(domainEventId, "domainEventId")})
+          and (${evidenceRefType == null} or evidence_ref_type = ${evidenceRefType == null ? null : text(evidenceRefType, "evidenceRefType")})
+        order by recorded_at asc, evidence_ref_id asc
+      `;
+      return rows.map(mapEvidenceRefRow);
+    },
+
+    async appendEvidenceRef({
+      evidenceRefId = crypto.randomUUID(),
+      companyId,
+      aggregateType,
+      aggregateId,
+      commandReceiptId = null,
+      domainEventId = null,
+      evidenceRefType,
+      evidenceRef,
+      metadata = {},
+      actorId = null,
+      correlationId = null,
+      causationId = null,
+      status = "recorded",
+      recordedAt = null
+    }) {
+      const rows = await tx`
+        insert into command_evidence_refs (
+          evidence_ref_id,
+          company_id,
+          aggregate_type,
+          aggregate_id,
+          command_receipt_id,
+          domain_event_id,
+          evidence_ref_type,
+          evidence_ref,
+          metadata_json,
+          actor_id,
+          correlation_id,
+          causation_id,
+          status,
+          recorded_at
+        ) values (
+          ${text(evidenceRefId, "evidenceRefId")},
+          ${text(companyId, "companyId")},
+          ${text(aggregateType, "aggregateType")},
+          ${text(aggregateId, "aggregateId")},
+          ${optionalText(commandReceiptId, "commandReceiptId")},
+          ${optionalText(domainEventId, "domainEventId")},
+          ${text(evidenceRefType, "evidenceRefType")},
+          ${text(evidenceRef, "evidenceRef")},
+          ${JSON.stringify(clone(metadata || {}))}::jsonb,
+          ${optionalText(actorId, "actorId")},
+          ${optionalText(correlationId, "correlationId")},
+          ${optionalText(causationId, "causationId")},
+          ${assertAllowed(status, EVIDENCE_REF_RECORD_STATUSES, "status")},
+          ${normalizeTimestamp(recordedAt)}
+        )
+        returning *
+      `;
+      return mapEvidenceRefRow(rows[0]);
     }
   };
 }

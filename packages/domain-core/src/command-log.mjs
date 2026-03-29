@@ -96,7 +96,15 @@ export function createCommandMutationRuntime({
           return {
             duplicate: true,
             commandReceipt: existingReceipt,
+            domainEvents: await transaction.listDomainEvents({
+              companyId: normalized.companyId,
+              commandReceiptId: existingReceipt.commandReceiptId
+            }),
             outboxMessages: await transaction.listOutboxMessages({
+              companyId: normalized.companyId,
+              commandReceiptId: existingReceipt.commandReceiptId
+            }),
+            evidenceRefs: await transaction.listEvidenceRefs({
               companyId: normalized.companyId,
               commandReceiptId: existingReceipt.commandReceiptId
             }),
@@ -105,6 +113,8 @@ export function createCommandMutationRuntime({
         }
 
         const queuedOutboxMessages = [];
+        const queuedDomainEvents = [];
+        const queuedEvidenceRefs = [];
         const repositories = repositoryBundle(
           createRepositories?.({
             transaction,
@@ -122,6 +132,12 @@ export function createCommandMutationRuntime({
           command: clone(normalized),
           queueOutboxMessage(message) {
             queuedOutboxMessages.push(clone(message || {}));
+          },
+          queueDomainEvent(event) {
+            queuedDomainEvents.push(clone(event || {}));
+          },
+          queueEvidenceRef(evidenceRef) {
+            queuedEvidenceRefs.push(clone(evidenceRef || {}));
           }
         });
 
@@ -143,6 +159,24 @@ export function createCommandMutationRuntime({
           metadata: normalized.metadata,
           recordedAt: clock()
         });
+
+        const domainEvents = [];
+        for (const queued of queuedDomainEvents) {
+          domainEvents.push(await transaction.appendDomainEvent({
+            domainEventId: queued.domainEventId || crypto.randomUUID(),
+            companyId: normalized.companyId,
+            aggregateType: queued.aggregateType || normalized.aggregateType,
+            aggregateId: queued.aggregateId || normalized.aggregateId,
+            commandReceiptId: receipt.commandReceiptId,
+            objectVersion: queued.objectVersion ?? mutationOutput?.resultingObjectVersion ?? null,
+            eventType: text(queued.eventType, "eventType"),
+            payload: clone(queued.payload ?? {}),
+            actorId: queued.actorId || normalized.actorId,
+            correlationId: queued.correlationId || normalized.correlationId,
+            causationId: queued.causationId || receipt.commandReceiptId,
+            recordedAt: queued.recordedAt || clock()
+          }));
+        }
 
         const outboxMessages = [];
         for (const queued of queuedOutboxMessages) {
@@ -166,10 +200,31 @@ export function createCommandMutationRuntime({
           }));
         }
 
+        const evidenceRefs = [];
+        for (const queued of queuedEvidenceRefs) {
+          evidenceRefs.push(await transaction.appendEvidenceRef({
+            evidenceRefId: queued.evidenceRefId || crypto.randomUUID(),
+            companyId: normalized.companyId,
+            aggregateType: queued.aggregateType || normalized.aggregateType,
+            aggregateId: queued.aggregateId || normalized.aggregateId,
+            commandReceiptId: receipt.commandReceiptId,
+            domainEventId: queued.domainEventId || null,
+            evidenceRefType: text(queued.evidenceRefType, "evidenceRefType"),
+            evidenceRef: text(queued.evidenceRef, "evidenceRef"),
+            metadata: clone(queued.metadata || {}),
+            actorId: queued.actorId || normalized.actorId,
+            correlationId: queued.correlationId || normalized.correlationId,
+            causationId: queued.causationId || receipt.commandReceiptId,
+            recordedAt: queued.recordedAt || clock()
+          }));
+        }
+
         return {
           duplicate: false,
           commandReceipt: receipt,
+          domainEvents,
           outboxMessages,
+          evidenceRefs,
           mutationResult: mutationOutput?.result ?? null
         };
       });
@@ -192,6 +247,37 @@ export function createCommandMutationRuntime({
           aggregateId,
           commandReceiptId,
           published
+        })
+      );
+    },
+
+    async listDomainEvents({ companyId, aggregateType = null, aggregateId = null, commandReceiptId = null } = {}) {
+      return store.withTransaction((transaction) =>
+        transaction.listDomainEvents({
+          companyId: text(companyId, "companyId"),
+          aggregateType,
+          aggregateId,
+          commandReceiptId
+        })
+      );
+    },
+
+    async listEvidenceRefs({
+      companyId,
+      aggregateType = null,
+      aggregateId = null,
+      commandReceiptId = null,
+      domainEventId = null,
+      evidenceRefType = null
+    } = {}) {
+      return store.withTransaction((transaction) =>
+        transaction.listEvidenceRefs({
+          companyId: text(companyId, "companyId"),
+          aggregateType,
+          aggregateId,
+          commandReceiptId,
+          domainEventId,
+          evidenceRefType
         })
       );
     },
