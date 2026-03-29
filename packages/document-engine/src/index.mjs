@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelope } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
   createGoogleDocumentAiProvider,
   GOOGLE_DOCUMENT_AI_PROVIDER_CODE
@@ -2245,6 +2246,3 @@ function createError(status, code, message) {
   return error;
 }
 
-function copy(value) {
-  return JSON.parse(JSON.stringify(value));
-}

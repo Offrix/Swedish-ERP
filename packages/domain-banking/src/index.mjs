@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 export const BANK_ACCOUNT_STATUSES = Object.freeze(["active", "blocked", "archived"]);
 export const PAYMENT_PROPOSAL_STATUSES = Object.freeze(["draft", "approved", "exported", "submitted", "accepted_by_bank", "partially_executed", "settled", "failed", "cancelled"]);
@@ -1948,7 +1949,6 @@ function pushAudit(state, clock, event) {
     })
   );
 }
-function copy(value) { return value === undefined ? undefined : JSON.parse(JSON.stringify(value)); }
 function createError(statusCode, code, message) { const error = new Error(message); error.statusCode = statusCode; error.code = code; return error; }
 function toCompanyScopedKey(companyId, value) { return `${requireText(companyId, "company_id_required")}::${requireText(value, "scoped_key_required")}`; }
 function resolveDeferredPlatform({ platform = null, getter = null }) { if (platform) return platform; if (typeof getter === "function") return getter() || null; return null; }

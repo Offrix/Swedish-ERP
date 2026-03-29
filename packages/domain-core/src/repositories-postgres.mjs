@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { cloneValue as clone } from "./clone.mjs";
 import {
   COMMAND_RECEIPT_STATUSES,
   CORE_CANONICAL_REPOSITORY_TABLE,
@@ -8,9 +9,6 @@ import {
 
 const require = createRequire(import.meta.url);
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function text(value, fieldName) {
   if (typeof value !== "string" || value.trim().length === 0) {

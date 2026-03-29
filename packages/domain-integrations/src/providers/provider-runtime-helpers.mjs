@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { cloneValue as clone } from "../../../domain-core/src/clone.mjs";
+export { clone };
 
 export function createError(status, code, message) {
   const error = new Error(message);
@@ -60,9 +62,6 @@ export function hashObject(value) {
   return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-export function clone(value) {
-  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
-}
 
 export function resolveProviderMode(environmentMode) {
   const normalized = normalizeOptionalText(environmentMode) || "test";

@@ -1,11 +1,9 @@
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
+import { cloneValue as clone } from "./clone.mjs";
 
 const require = createRequire(import.meta.url);
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function jsonValue(value) {
   if (value == null) {

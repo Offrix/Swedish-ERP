@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -1687,9 +1688,6 @@ function nowIso(clock) {
   return clock().toISOString();
 }
 
-function copy(value) {
-  return structuredClone(value);
-}
 
 function roundMoney(value) {
   return Number(Number(value).toFixed(2));

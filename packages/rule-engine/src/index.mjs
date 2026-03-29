@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 export {
   REGULATORY_CHANGE_APPROVAL_ROLES,
   REGULATORY_CHANGE_SANDBOX_RESULTS,
@@ -2064,9 +2065,6 @@ function requireText(value, code) {
   return value.trim();
 }
 
-function copy(value) {
-  return JSON.parse(JSON.stringify(value));
-}
 
 function createError(status, code, message) {
   const error = new Error(message);

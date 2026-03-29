@@ -1,4 +1,5 @@
 import { createHttpError } from "./route-helpers.mjs";
+import { cloneValue as clone } from "../../../packages/domain-core/src/clone.mjs";
 
 const DASHBOARD_CODES = Object.freeze([
   "project_portfolio",
@@ -637,6 +638,3 @@ function normalizeText(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}

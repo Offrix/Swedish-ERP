@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { createLedgerEngine, REQUIRED_ENGINE_ACCOUNTS } from "../../domain-ledger/src/index.mjs";
 import { createDocumentArchiveEngine } from "../../document-engine/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 export const REPORT_CODES = Object.freeze([
   "trial_balance",
@@ -2903,9 +2904,6 @@ function httpError(status, code, message) {
   return error;
 }
 
-function copy(value) {
-  return JSON.parse(JSON.stringify(value));
-}
 
 function hashObject(value) {
   return crypto.createHash("sha256").update(stableStringify(value)).digest("hex");

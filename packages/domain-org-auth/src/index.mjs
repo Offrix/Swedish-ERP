@@ -20,6 +20,7 @@ import {
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
 import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
   WORKOS_FEDERATION_PROVIDER_CODE,
   createAuthBroker
@@ -4342,6 +4343,3 @@ function httpError(status, code, message) {
   return error;
 }
 
-function copy(value) {
-  return JSON.parse(JSON.stringify(value));
-}

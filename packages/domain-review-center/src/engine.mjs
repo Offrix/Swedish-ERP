@@ -17,6 +17,7 @@ import {
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
 import { createAuditEnvelope } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 export function createReviewCenterPlatform(options = {}) {
   return createReviewCenterEngine(options);
@@ -1143,6 +1144,3 @@ function diffMinutes(fromIso, toIso) {
   return Math.max(0, Math.floor((Date.parse(toIso) - Date.parse(fromIso)) / 60000));
 }
 
-function copy(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}

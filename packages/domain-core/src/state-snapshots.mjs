@@ -1,48 +1,8 @@
-function isPlainObject(value) {
-  return value != null && typeof value === "object" && !Array.isArray(value) && !(value instanceof Map);
-}
-
-function cloneJson(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
-
-function serializeValue(value) {
-  if (value instanceof Map) {
-    return {
-      __type: "Map",
-      entries: [...value.entries()].map(([key, entryValue]) => [serializeValue(key), serializeValue(entryValue)])
-    };
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((entryValue) => serializeValue(entryValue));
-  }
-
-  if (isPlainObject(value)) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entryValue]) => [key, serializeValue(entryValue)])
-    );
-  }
-
-  return cloneJson(value);
-}
-
-function deserializeValue(value) {
-  if (Array.isArray(value)) {
-    return value.map((entryValue) => deserializeValue(entryValue));
-  }
-
-  if (isPlainObject(value)) {
-    if (value.__type === "Map") {
-      return new Map((value.entries || []).map(([key, entryValue]) => [deserializeValue(key), deserializeValue(entryValue)]));
-    }
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entryValue]) => [key, deserializeValue(entryValue)])
-    );
-  }
-
-  return cloneJson(value);
-}
+import {
+  cloneSnapshotValue,
+  deserializeSnapshotValue,
+  serializeSnapshotValue
+} from "./clone.mjs";
 
 function replaceMap(target, source) {
   target.clear();
@@ -60,10 +20,10 @@ export function serializeDurableState(state, { excludeKeys = [], customSerialize
       continue;
     }
     if (typeof customSerializers[key] === "function") {
-      payload[key] = serializeValue(customSerializers[key](value));
+      payload[key] = serializeSnapshotValue(customSerializers[key](value));
       continue;
     }
-    payload[key] = serializeValue(value);
+    payload[key] = serializeSnapshotValue(value);
   }
 
   return payload;
@@ -75,7 +35,7 @@ export function applyDurableStateSnapshot(
   { preserveKeys = [], customHydrators = {} } = {}
 ) {
   const preserved = new Set(preserveKeys);
-  const restored = deserializeValue(snapshot || {});
+  const restored = deserializeSnapshotValue(snapshot || {});
 
   for (const [key, targetValue] of Object.entries(targetState || {})) {
     if (preserved.has(key)) {
@@ -98,6 +58,6 @@ export function applyDurableStateSnapshot(
       continue;
     }
 
-    targetState[key] = cloneJson(nextValue);
+    targetState[key] = cloneSnapshotValue(nextValue);
   }
 }

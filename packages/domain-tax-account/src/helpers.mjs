@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
+export { copy };
 import {
   ASSESSMENT_EVENT_TYPES,
   CREDIT_EVENT_TYPES,
@@ -146,9 +148,6 @@ export function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
-export function copy(value) {
-  return value == null ? value : structuredClone(value);
-}
 
 export function createError(status, code, message) {
   const error = new Error(message);

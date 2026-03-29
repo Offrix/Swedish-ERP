@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { COUNTRY_NAME_BY_CODE, FOREIGN_NORMAL_AMOUNTS_2026 } from "./normal-amounts-2026.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 const DEFAULT_RULE_VERSION = "travel-se-2026.1";
@@ -1633,12 +1634,6 @@ function pushAudit(state, clock, event) {
   );
 }
 
-function copy(value) {
-  if (value == null) {
-    return value;
-  }
-  return JSON.parse(JSON.stringify(value));
-}
 
 function createError(status, code, message) {
   const error = new Error(message);

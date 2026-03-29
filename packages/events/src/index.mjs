@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
 
 export const EVENT_ENVELOPE_VERSION = 1;
 export const AUDIT_EVENT_VERSION = 2;
@@ -236,9 +237,6 @@ function defaultActorType(actorId) {
   return requireText(actorId, "actorId") === "system" ? "system" : "user";
 }
 
-function clone(value) {
-  return JSON.parse(JSON.stringify(value ?? {}));
-}
 
 function flattenMetadataAliases(metadata) {
   return Object.fromEntries(

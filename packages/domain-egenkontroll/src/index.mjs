@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 export const EGENKONTROLL_TEMPLATE_STATUSES = Object.freeze(["draft", "active", "retired"]);
 export const EGENKONTROLL_INSTANCE_STATUSES = Object.freeze([
@@ -902,9 +903,6 @@ function resolveAuditRecordedAt(event) {
   return String(event?.recordedAt || event?.createdAt || event?.occurredAt || "");
 }
 
-function copy(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function createError(statusCode, error, message) {
   const err = new Error(message);

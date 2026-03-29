@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
 
 export {
   SUBMISSION_ACTION_STATUSES,
@@ -1267,9 +1268,6 @@ function requireText(value, code) {
   return value.trim();
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function nowIso(clock = () => new Date()) {
   return new Date(clock()).toISOString();

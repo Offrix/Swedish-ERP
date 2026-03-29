@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelope } from "../../events/src/index.mjs";
+import { cloneValue as clone } from "./clone.mjs";
 export {
   VALUE_KERNEL_VERSION,
   amountToMinorUnits,
@@ -16,6 +17,12 @@ export {
   roundQuantity,
   roundRate
 } from "./value-kernel.mjs";
+export {
+  cloneSnapshotValue,
+  cloneValue,
+  deserializeSnapshotValue,
+  serializeSnapshotValue
+} from "./clone.mjs";
 export {
   CORE_CANONICAL_REPOSITORY_OBJECT_TYPES,
   CORE_CANONICAL_REPOSITORY_TABLE,
@@ -2043,9 +2050,6 @@ function deriveDeadline({ clientCompanyId, blockerScope, targetDate, deadlineAt,
   }
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function snapshotRefPayload(value) {
   if (!value || typeof value !== "object") {

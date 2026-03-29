@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as clone } from "./clone.mjs";
 
 export const IMPORT_BATCH_STATUSES = Object.freeze(["received", "validated", "mapped", "imported", "reconciled", "accepted", "rejected", "corrected"]);
 export const MAPPING_SET_STATUSES = Object.freeze(["draft", "approved"]);
@@ -4626,9 +4627,6 @@ function nowIso(clock = () => new Date()) {
   return new Date(clock()).toISOString();
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function hashObject(value) {
   return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");

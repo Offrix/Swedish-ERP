@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
+export { copy };
 import {
   CLASSIFICATION_CASE_STATUSES,
   CLASSIFICATION_REVIEW_REASON_CODES,
@@ -17,9 +19,6 @@ export function appendToIndex(index, key, value) {
   index.set(key, bucket);
 }
 
-export function copy(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 export function createError(status, code, message) {
   return Object.assign(new Error(message), { status, code });

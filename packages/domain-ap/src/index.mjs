@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { createVatPlatform } from "../../domain-vat/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -3788,9 +3789,6 @@ function nowIso(clock) {
   return clock().toISOString();
 }
 
-function copy(value) {
-  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
-}
 
 function toCompanyScopedKey(companyId, value) {
   return `${requireText(companyId, "company_id_required")}::${requireText(value, "scoped_key_required")}`;

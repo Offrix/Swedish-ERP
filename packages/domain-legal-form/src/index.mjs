@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 export const LEGAL_FORM_CODES = Object.freeze([
   "AKTIEBOLAG",
@@ -908,9 +909,3 @@ function nowIso(clock) {
   return clock().toISOString();
 }
 
-function copy(value) {
-  if (value === undefined) {
-    return undefined;
-  }
-  return JSON.parse(JSON.stringify(value));
-}

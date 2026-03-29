@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as clone } from "./clone.mjs";
 
 export const CORE_CANONICAL_REPOSITORY_TABLE = "core_domain_records";
 export const COMMAND_RECEIPT_STATUSES = Object.freeze(["accepted", "duplicate", "replayed"]);
@@ -48,9 +49,6 @@ export const CORE_CANONICAL_REPOSITORY_OBJECT_TYPES = Object.freeze({
 
 const CORE_BOUNDED_CONTEXT_CODE = "core";
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function text(value, fieldName) {
   if (typeof value !== "string" || value.trim().length === 0) {

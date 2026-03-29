@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
 import {
   buildReceiptModePolicy,
   resolveReceiptModeForEnvironment
@@ -764,9 +765,6 @@ function allowed(value, allowedValues, code) {
   return resolved;
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function error(status, code, message) {
   const err = new Error(message);

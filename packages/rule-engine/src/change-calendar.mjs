@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 export const REGULATORY_CHANGE_TARGET_TYPES = Object.freeze(["rule_pack", "provider_baseline"]);
 export const REGULATORY_CHANGE_STATUSES = Object.freeze([
@@ -594,9 +595,6 @@ function hashObject(value) {
   return crypto.createHash("sha256").update(JSON.stringify(value ?? {})).digest("hex");
 }
 
-function copy(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function createError(status, code, message) {
   const error = new Error(message);

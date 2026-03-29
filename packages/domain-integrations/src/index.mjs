@@ -67,6 +67,7 @@ import {
 } from "./providers/workos-federation.mjs";
 import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
 import { createRegulatedSubmissionsModule } from "../../domain-regulated-submissions/src/index.mjs";
+import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -1181,9 +1182,6 @@ function requireText(value, code) {
   return value.trim();
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function nowIso(clock = () => new Date()) {
   return new Date(clock()).toISOString();

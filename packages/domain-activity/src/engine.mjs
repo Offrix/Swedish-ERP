@@ -4,6 +4,7 @@ import {
   ACTIVITY_VISIBILITY_SCOPES
 } from "./constants.mjs";
 import { createAuditEnvelope } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 export function createActivityPlatform(options = {}) {
   return createActivityEngine(options);
@@ -411,6 +412,3 @@ function nowIso(clock) {
   return new Date(clock()).toISOString();
 }
 
-function copy(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}

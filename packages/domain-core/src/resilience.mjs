@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as clone } from "./clone.mjs";
 
 export const FEATURE_FLAG_SCOPE_TYPES = Object.freeze(["global", "company", "company_user"]);
 export const FEATURE_FLAG_TYPES = Object.freeze(["release", "ops", "entitlement", "kill_switch"]);
@@ -2124,9 +2125,6 @@ function text(value, code) {
   return value.trim();
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function createValidationError(code, message) {
   const instance = new Error(message);

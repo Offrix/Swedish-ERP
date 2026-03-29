@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as clone } from "./clone.mjs";
 
 export const SUPPORT_CASE_STATUSES = Object.freeze(["open", "triaged", "in_progress", "waiting_customer", "resolved", "closed", "escalated", "reopened"]);
 export const SUPPORT_CASE_SEVERITIES = Object.freeze(["low", "medium", "high", "critical"]);
@@ -2065,9 +2066,6 @@ function text(value, code) {
   return value.trim();
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function buildSessionWatermark({
   sessionKind,

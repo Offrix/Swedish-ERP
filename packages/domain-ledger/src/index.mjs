@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -4130,6 +4131,3 @@ function httpError(status, code, message) {
   return error;
 }
 
-function copy(value) {
-  return JSON.parse(JSON.stringify(value));
-}

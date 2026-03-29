@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
 
 export const OBSERVABILITY_LOG_LEVELS = Object.freeze(["debug", "info", "warn", "error", "critical"]);
 export const TRACE_SPAN_STATUSES = Object.freeze(["running", "completed", "failed"]);
@@ -555,9 +556,6 @@ function createError(code, message) {
   return error;
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function text(value, code) {
   if (typeof value !== "string" || value.trim().length === 0) {

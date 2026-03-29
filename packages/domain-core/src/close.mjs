@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as clone } from "./clone.mjs";
 
 export const CLOSE_CHECKLIST_STATUSES = Object.freeze(["created", "in_progress", "review_ready", "signoff_pending", "signed_off", "closed", "reopened"]);
 export const CLOSE_STEP_STATUSES = Object.freeze(["not_started", "in_progress", "awaiting_review", "complete", "blocked", "reopened"]);
@@ -1331,9 +1332,6 @@ function hashSnapshot(value) {
   return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function text(value, code) {
   if (typeof value !== "string" || value.trim().length === 0) {

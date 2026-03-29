@@ -1,10 +1,8 @@
 import crypto, { createHash } from "node:crypto";
 import { createEventEnvelope } from "../../events/src/index.mjs";
 import { createCoreCanonicalRepositories } from "./repositories.mjs";
+import { cloneValue as clone } from "./clone.mjs";
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function text(value, fieldName) {
   if (typeof value !== "string" || value.trim().length === 0) {

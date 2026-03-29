@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
+import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
 
 export const ANNUAL_REPORT_PROFILE_CODES = Object.freeze(["k1", "k2", "k3"]);
 export const ANNUAL_REPORT_PACKAGE_STATUSES = Object.freeze(["draft", "ready_for_signature", "signed", "submitted", "locked", "superseded"]);
@@ -1863,9 +1864,6 @@ function roundMoney(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function error(status, code, message) {
   const failure = new Error(message);

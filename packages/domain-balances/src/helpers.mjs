@@ -1,12 +1,8 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
+export { copy };
 
-export function copy(value) {
-  if (value === null || value === undefined) {
-    return value;
-  }
-  return JSON.parse(JSON.stringify(value));
-}
 
 export function createError(status, code, message) {
   const error = new Error(message);

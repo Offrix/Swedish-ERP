@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelope } from "../../events/src/index.mjs";
+import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -466,9 +467,6 @@ function toSourceKey(companyId, sourceObjectType, sourceObjectId) {
   return `${companyId}::${sourceObjectType}::${sourceObjectId}`;
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function requireText(value, code) {
   if (typeof value !== "string" || value.trim().length === 0) {

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -6618,9 +6619,6 @@ function currentDateUtcYear(clock = () => new Date()) {
   return clock().getUTCFullYear();
 }
 
-function copy(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function hashJson(value) {
   return crypto.createHash("sha256").update(JSON.stringify(copy(value))).digest("hex");

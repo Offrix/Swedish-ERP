@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
 
 const PUBLIC_API_SPEC_VERSION = "2026-03-25";
 const CANONICAL_API_VERSION = "2026-03-27";
@@ -1288,9 +1289,6 @@ function text(value, code) {
   return value.trim();
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function createSecretSealer({ secretSealKey, keyId } = {}) {
   const resolvedKeyId = text(keyId, "secret_sealer_key_id_required");

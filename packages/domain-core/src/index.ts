@@ -455,3 +455,8 @@ export declare function createFxRate(input: {
   readonly source?: string;
   readonly observedAt?: string | Date | null;
 }): FxRate;
+
+export declare function cloneValue<T>(value: T): T;
+export declare function cloneSnapshotValue<T>(value: T): T;
+export declare function serializeSnapshotValue(value: unknown): unknown;
+export declare function deserializeSnapshotValue<T = unknown>(value: unknown): T;

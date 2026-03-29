@@ -10,6 +10,7 @@ import {
   NOTIFICATION_STATUSES
 } from "./constants.mjs";
 import { createAuditEnvelope } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 export function createNotificationsPlatform(options = {}) {
   return createNotificationsEngine(options);
@@ -887,6 +888,3 @@ function addHours(isoValue, hours) {
   return date.toISOString();
 }
 
-function copy(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}

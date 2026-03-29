@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 const DEFAULT_RULE_VERSION = "benefits-se-2026.1";
@@ -1426,9 +1427,6 @@ function nowIso(clock) {
   return new Date(clock()).toISOString();
 }
 
-function copy(value) {
-  return value == null ? value : structuredClone(value);
-}
 
 function createError(status, code, message) {
   const error = new Error(message);

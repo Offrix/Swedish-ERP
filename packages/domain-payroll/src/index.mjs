@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -8995,9 +8996,6 @@ function requireText(value, code) {
   return value.trim();
 }
 
-function copy(value) {
-  return JSON.parse(JSON.stringify(value));
-}
 
 function createError(status, code, message) {
   const error = new Error(message);

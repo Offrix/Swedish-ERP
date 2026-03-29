@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import { SEARCH_VISIBILITY_SCOPES } from "./constants.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
+export { copy };
 
 export function normalizeCode(value, code) {
   return requireText(value, code).replaceAll("-", "_").replaceAll(" ", "_").toUpperCase();
@@ -133,9 +135,6 @@ export function createError(status, code, message) {
   return error;
 }
 
-export function copy(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 export function newId() {
   return crypto.randomUUID();

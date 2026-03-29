@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
+export { copy };
 
 export function appendToIndex(index, key, value) {
   const bucket = index.get(key) || [];
@@ -10,9 +12,6 @@ export function buildHash(payload) {
   return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
-export function copy(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 export function createError(status, code, message) {
   return Object.assign(new Error(message), { status, code });

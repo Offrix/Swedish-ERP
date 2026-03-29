@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -995,9 +996,6 @@ function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
-function copy(value) {
-  return value == null ? value : structuredClone(value);
-}
 
 function createError(status, code, message) {
   const error = new Error(message);

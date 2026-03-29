@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 export const TIME_CLOCK_EVENT_TYPES = Object.freeze(["clock_in", "clock_out"]);
 export const TIME_BALANCE_TYPES = Object.freeze(["flex_minutes", "comp_minutes", "overtime_minutes"]);
@@ -2062,6 +2063,3 @@ function createError(statusCode, code, message) {
   return error;
 }
 
-function copy(value) {
-  return JSON.parse(JSON.stringify(value));
-}

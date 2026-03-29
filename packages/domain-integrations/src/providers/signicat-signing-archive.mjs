@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue } from "../../../domain-core/src/clone.mjs";
 import {
   buildProviderBaselineRef,
   createError,
@@ -118,7 +119,7 @@ export function createSignicatSigningArchiveProvider({
         evidenceBundleId: normalizeOptionalText(evidenceBundleId),
         metadata
       }),
-      metadata: JSON.parse(JSON.stringify(metadata || {})),
+      metadata: cloneValue(metadata || {}),
       createdAt: nowIso(clock)
     });
     archiveRecords.set(archiveRecord.archiveRecordId, archiveRecord);
@@ -131,6 +132,6 @@ export function createSignicatSigningArchiveProvider({
       .filter((record) => record.companyId === resolvedCompanyId)
       .filter((record) => (sourceObjectType ? record.sourceObjectType === sourceObjectType : true))
       .filter((record) => (sourceObjectId ? record.sourceObjectId === sourceObjectId : true))
-      .map((record) => ({ ...record, metadata: JSON.parse(JSON.stringify(record.metadata || {})) }));
+      .map((record) => ({ ...record, metadata: cloneValue(record.metadata || {}) }));
   }
 }

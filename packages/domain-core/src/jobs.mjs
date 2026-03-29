@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createPostgresAsyncJobStore } from "./jobs-store-postgres.mjs";
+import { cloneValue as clone } from "./clone.mjs";
 
 export { createPostgresAsyncJobStore };
 
@@ -10,9 +11,6 @@ export const ASYNC_JOB_REPLAY_STATUSES = Object.freeze(["pending_approval", "app
 export const ASYNC_JOB_OPERATOR_STATES = Object.freeze(["pending_triage", "acknowledged", "replay_planned", "resolved", "closed"]);
 export const ASYNC_JOB_ERROR_CLASSES = Object.freeze(["transient_technical", "persistent_technical", "business_input", "downstream_unknown"]);
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function nowIso(clock) {
   return new Date(clock()).toISOString();

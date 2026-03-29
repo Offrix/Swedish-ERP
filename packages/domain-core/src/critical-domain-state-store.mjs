@@ -2,6 +2,11 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import {
+  cloneSnapshotValue,
+  deserializeSnapshotValue,
+  serializeSnapshotValue
+} from "./clone.mjs";
 
 export const CRITICAL_DOMAIN_STATE_TABLE = "critical_domain_state_snapshots";
 export const CRITICAL_DOMAIN_STATE_SCHEMA_VERSION = 1;
@@ -22,7 +27,7 @@ function normalizeTimestamp(value = null) {
 }
 
 function hashSnapshot(snapshot) {
-  return crypto.createHash("sha256").update(JSON.stringify(snapshot ?? null)).digest("hex");
+  return crypto.createHash("sha256").update(JSON.stringify(serializeSnapshotValue(snapshot ?? null))).digest("hex");
 }
 
 export function createInMemoryCriticalDomainStateStore() {
@@ -33,7 +38,7 @@ export function createInMemoryCriticalDomainStateStore() {
 
     load(domainKey) {
       const record = records.get(text(domainKey, "domainKey")) || null;
-      return record ? JSON.parse(JSON.stringify(record)) : null;
+      return record ? cloneSnapshotValue(record) : null;
     },
 
     save({ domainKey, snapshot, persistedAt = null }) {
@@ -41,16 +46,16 @@ export function createInMemoryCriticalDomainStateStore() {
       const record = {
         domainKey: normalizedDomainKey,
         schemaVersion: CRITICAL_DOMAIN_STATE_SCHEMA_VERSION,
-        snapshot: JSON.parse(JSON.stringify(snapshot ?? {})),
+        snapshot: cloneSnapshotValue(snapshot ?? {}),
         snapshotHash: hashSnapshot(snapshot),
         persistedAt: normalizeTimestamp(persistedAt)
       };
       records.set(normalizedDomainKey, record);
-      return JSON.parse(JSON.stringify(record));
+      return cloneSnapshotValue(record);
     },
 
     list() {
-      return [...records.values()].map((record) => JSON.parse(JSON.stringify(record)));
+      return [...records.values()].map((record) => cloneSnapshotValue(record));
     },
 
     close() {}
@@ -71,7 +76,7 @@ function mapRow(row) {
   return {
     domainKey: row.domain_key,
     schemaVersion: Number(row.schema_version),
-    snapshot: row.snapshot_json ? JSON.parse(row.snapshot_json) : {},
+    snapshot: row.snapshot_json ? deserializeSnapshotValue(JSON.parse(row.snapshot_json)) : {},
     snapshotHash: row.snapshot_hash,
     persistedAt: row.persisted_at
   };
@@ -127,14 +132,14 @@ export function createSqliteCriticalDomainStateStore({ filePath }) {
       const record = {
         domainKey: text(domainKey, "domainKey"),
         schemaVersion: CRITICAL_DOMAIN_STATE_SCHEMA_VERSION,
-        snapshot: JSON.parse(JSON.stringify(snapshot ?? {})),
+        snapshot: cloneSnapshotValue(snapshot ?? {}),
         snapshotHash: hashSnapshot(snapshot),
         persistedAt: normalizeTimestamp(persistedAt)
       };
       upsertStatement.run(
         record.domainKey,
         record.schemaVersion,
-        JSON.stringify(record.snapshot),
+        JSON.stringify(serializeSnapshotValue(record.snapshot)),
         record.snapshotHash,
         record.persistedAt
       );

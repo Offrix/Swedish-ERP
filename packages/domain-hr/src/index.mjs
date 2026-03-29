@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 export const HR_IDENTITY_TYPES = Object.freeze(["personnummer", "samordningsnummer", "other"]);
 export const HR_BANK_PAYOUT_METHODS = Object.freeze(["domestic_account", "bankgiro", "plusgiro", "iban"]);
@@ -1278,9 +1279,6 @@ function nowIso(clock) {
   return new Date(clock()).toISOString();
 }
 
-function copy(value) {
-  return value == null ? value : structuredClone(value);
-}
 
 function createError(statusCode, code, message) {
   const error = new Error(message);

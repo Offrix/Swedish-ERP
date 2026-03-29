@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { createVatPlatform } from "../../domain-vat/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -4637,9 +4638,6 @@ function roundMoney(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
-function copy(value) {
-  return JSON.parse(JSON.stringify(value));
-}
 
 function hashObject(value) {
   return crypto.createHash("sha256").update(stableStringify(value)).digest("hex");

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 export const ID06_COMPANY_VERIFICATION_STATUSES = Object.freeze(["requested", "verified", "failed", "expired"]);
 export const ID06_PERSON_VERIFICATION_STATUSES = Object.freeze(["requested", "verified", "failed", "expired"]);
@@ -658,9 +659,6 @@ function todayIso(clock) {
   return nowIso(clock).slice(0, 10);
 }
 
-function copy(value) {
-  return JSON.parse(JSON.stringify(value));
-}
 
 function hashObject(value) {
   return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");

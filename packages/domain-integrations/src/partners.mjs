@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
 
 export const PARTNER_CONNECTION_TYPES = Object.freeze(["bank", "peppol", "pension", "crm", "commerce", "id06"]);
 export const PARTNER_CONNECTION_MODES = Object.freeze(["sandbox", "test", "production"]);
@@ -1406,9 +1407,6 @@ function text(value, code) {
   return value.trim();
 }
 
-function clone(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function createError(status, code, message) {
   const error = new Error(message);

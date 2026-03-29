@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 const PAYROLL_CONSUMPTION_STAGES = Object.freeze(["calculated", "approved"]);
@@ -1553,9 +1554,6 @@ function stableStringify(value) {
   return JSON.stringify(value);
 }
 
-function copy(value) {
-  return value == null ? value : JSON.parse(JSON.stringify(value));
-}
 
 function uniqueStrings(values) {
   return [...new Set((Array.isArray(values) ? values : []).filter(Boolean))];
