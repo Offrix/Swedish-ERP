@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createIntegrationControlPlane } from "./control-plane.mjs";
 import { createPartnerModule } from "./partners.mjs";
 import { createPublicApiModule } from "./public-api.mjs";
 import { createGoogleDocumentAiProvider, GOOGLE_DOCUMENT_AI_PROVIDER_CODE } from "./providers/google-document-ai.mjs";
@@ -179,17 +180,78 @@ export function createIntegrationEngine({
     operationExecutors: partnerOperationExecutors,
     providerBaselineRegistry: providerBaselines
   });
+  const integrationControlPlane = createIntegrationControlPlane({
+    state,
+    clock,
+    environmentMode,
+    getPartnerModule: () => partnerModule,
+    getDocumentOcrProvider: () => documentOcrProvider
+  });
   const regulatedSubmissionsModule = createRegulatedSubmissionsModule({
     state,
     clock,
     evidencePlatform,
     getCorePlatform
   });
+  const createPartnerConnection = (input = {}) => {
+    const connection = partnerModule.createPartnerConnection(input);
+    const registeredConnection = integrationControlPlane.registerPartnerConnection({
+      companyId: connection.companyId,
+      connectionId: connection.connectionId,
+      actorId: input.actorId || "system"
+    });
+    if (typeof input.credentialsRef === "string" && input.credentialsRef.trim().length > 0) {
+      const existingCredentialMetadata = integrationControlPlane.listCredentialSetMetadata({
+        companyId: connection.companyId,
+        connectionId: connection.connectionId
+      });
+      if (existingCredentialMetadata.length === 0) {
+        const [manifest] = integrationControlPlane.listAdapterCapabilityManifests({
+          surfaceCode: "partner",
+          connectionType: connection.connectionType,
+          providerCode: connection.providerCode
+        });
+        const credentialKind =
+          manifest?.requiredCredentialKinds?.find((kind) => integrationControlPlane.credentialKinds.includes(kind))
+          || "api_credentials";
+        integrationControlPlane.recordCredentialSetMetadata({
+          companyId: connection.companyId,
+          connectionId: connection.connectionId,
+          credentialRef: input.credentialsRef,
+          credentialKind,
+          secretManagerRef: input.secretManagerRef || input.credentialsRef,
+          callbackDomain: input.config?.callbackDomain || null,
+          callbackPath: input.config?.callbackPath || null,
+          expiresAt: input.config?.credentialsExpiresAt || null,
+          actorId: input.actorId || "system"
+        });
+      }
+    }
+    if (registeredConnection.consentRequired && input.config?.consentExpiresAt) {
+      const existingConsents = integrationControlPlane.listConsentGrants({
+        companyId: connection.companyId,
+        connectionId: connection.connectionId
+      });
+      if (existingConsents.length === 0) {
+        integrationControlPlane.authorizeConsent({
+          companyId: connection.companyId,
+          connectionId: connection.connectionId,
+          scopeSet: ["legacy_partner_consent"],
+          grantType: "legacy_partner_backfill",
+          expiresAt: input.config.consentExpiresAt,
+          actorId: input.actorId || "system"
+        });
+      }
+    }
+    return connection;
+  };
 
   return {
     ...publicApiModule,
     ...partnerModule,
+    ...integrationControlPlane,
     ...regulatedSubmissionsModule,
+    createPartnerConnection,
     deliveryChannels: INVOICE_DELIVERY_CHANNELS,
     paymentLinkStatuses: PAYMENT_LINK_STATUSES,
     getDocumentOcrCapabilityManifest: () => documentOcrProvider.getCapabilityManifest(),
@@ -219,10 +281,14 @@ export function createIntegrationEngine({
         publicApiClients: [...state.publicApiClients.values()],
         publicApiTokens: [...state.publicApiTokens.values()],
         webhookSubscriptions: [...state.webhookSubscriptions.values()],
-        webhookEvents: [...state.webhookEvents.values()],
-        webhookDeliveries: [...state.webhookDeliveries.values()],
-        partnerConnections: [...state.partnerConnections.values()],
-        partnerHealthChecks: [...state.partnerHealthChecks.values()],
+          webhookEvents: [...state.webhookEvents.values()],
+          webhookDeliveries: [...state.webhookDeliveries.values()],
+          integrationConnections: [...state.integrationConnections.values()],
+          credentialSetMetadata: [...state.credentialSetMetadata.values()],
+          consentGrants: [...state.consentGrants.values()],
+          integrationHealthChecks: [...state.integrationHealthChecks.values()],
+          partnerConnections: [...state.partnerConnections.values()],
+          partnerHealthChecks: [...state.partnerHealthChecks.values()],
         partnerContractResults: [...state.partnerContractResults.values()],
         partnerOperations: [...state.partnerOperations.values()],
         asyncJobs: [...state.asyncJobs.values()],

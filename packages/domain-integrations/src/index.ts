@@ -52,6 +52,9 @@ export interface AuthoritySubmissionRef {
 
 export type PublicApiMode = "sandbox" | "production";
 export type PublicApiClientStatus = "active" | "revoked";
+export type IntegrationSurfaceCode = "partner" | "document_ai";
+export type IntegrationEnvironmentMode = "trial" | "sandbox" | "test" | "pilot_parallel" | "production";
+export type CredentialKind = "api_credentials" | "client_secret" | "certificate_ref" | "file_channel_credentials";
 export type PublicApiScopeCode =
   | "api_spec.read"
   | "reporting.read"
@@ -70,6 +73,88 @@ export type PartnerOperationStatus = "queued" | "running" | "succeeded" | "faile
 export type AsyncJobStatus = "queued" | "claimed" | "running" | "succeeded" | "failed" | "retry_scheduled" | "dead_lettered" | "replay_planned" | "replayed";
 export type AsyncJobRiskClass = "normal" | "high_risk" | "restricted";
 export type AsyncJobErrorClass = "transient_technical" | "persistent_technical" | "business_input" | "downstream_unknown";
+
+export interface IntegrationModeMatrix {
+  readonly trial_safe: boolean;
+  readonly sandbox_supported: boolean;
+  readonly test_supported: boolean;
+  readonly production_supported: boolean;
+  readonly supportsLegalEffect: boolean;
+}
+
+export interface IntegrationConnection {
+  readonly connectionId: string;
+  readonly companyId: string;
+  readonly surfaceCode: IntegrationSurfaceCode;
+  readonly connectionType: string;
+  readonly providerCode: string;
+  readonly displayName: string;
+  readonly environmentMode: IntegrationEnvironmentMode;
+  readonly providerEnvironmentRef: string;
+  readonly supportsLegalEffect: boolean;
+  readonly sandboxSupported: boolean;
+  readonly trialSafe: boolean;
+  readonly modeMatrix: IntegrationModeMatrix;
+  readonly fallbackMode: PartnerFallbackMode;
+  readonly rateLimitPerMinute: number;
+  readonly requiredCredentialKinds: readonly CredentialKind[];
+  readonly consentRequired: boolean;
+  readonly capabilityManifestId: string;
+  readonly credentialsConfigured: boolean;
+  readonly credentialMetadataCount: number;
+  readonly consentGrantCount: number;
+  readonly consentsAuthorized: boolean;
+  readonly healthStatus: string;
+}
+
+export interface CredentialSetMetadata {
+  readonly credentialSetId: string;
+  readonly companyId: string;
+  readonly connectionId: string;
+  readonly providerCode: string;
+  readonly environmentMode: IntegrationEnvironmentMode;
+  readonly credentialKind: CredentialKind;
+  readonly credentialRefFingerprint: string;
+  readonly credentialRefPreview: string | null;
+  readonly secretManagerRefFingerprint: string;
+  readonly secretManagerRefPreview: string | null;
+  readonly callbackDomain: string | null;
+  readonly callbackPath: string | null;
+  readonly expiresAt: string | null;
+  readonly status: "active" | "superseded";
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ConsentGrant {
+  readonly consentGrantId: string;
+  readonly companyId: string;
+  readonly connectionId: string;
+  readonly providerCode: string;
+  readonly environmentMode: IntegrationEnvironmentMode;
+  readonly grantType: string;
+  readonly scopeSet: readonly string[];
+  readonly externalConsentRef: string | null;
+  readonly status: "authorized" | "revoked";
+  readonly authorizedByActorId: string;
+  readonly authorizedAt: string;
+  readonly expiresAt: string | null;
+  readonly revokedAt: string | null;
+}
+
+export interface IntegrationHealthCheck {
+  readonly integrationHealthCheckId: string;
+  readonly companyId: string;
+  readonly connectionId: string;
+  readonly providerCode: string;
+  readonly environmentMode: IntegrationEnvironmentMode;
+  readonly checkSetCode: string;
+  readonly actorId: string;
+  readonly delegatedPartnerHealthCheckId: string | null;
+  readonly status: "healthy" | "degraded" | "outage";
+  readonly executedAt: string;
+}
 
 export interface PublicApiClient {
   readonly clientId: string;

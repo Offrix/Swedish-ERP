@@ -5,6 +5,7 @@ import { getMissionControlDashboard, listMissionControlDashboards } from "./miss
 import { tryHandlePhase6AuthRoutes } from "./phase6-auth-routes.mjs";
 import { tryHandlePhase13Route } from "./phase13-routes.mjs";
 import { tryHandlePhase14Route } from "./phase14-routes.mjs";
+import { tryHandlePhase16IntegrationRoutes } from "./phase16-integration-routes.mjs";
 import { listPublishedRouteContracts, resolvePublishedRouteContract } from "./route-contracts.mjs";
 import {
   CANONICAL_API_VERSION,
@@ -900,11 +901,17 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/public/submissions",
               "/v1/public/legal-forms/declaration-profile",
               "/v1/public/annual-reporting/packages",
-              "/v1/public/tax-account/summary",
-              "/v1/public/tax-account/reconciliations",
-              "/v1/public-api/clients",
-              "/v1/public-api/tokens",
-              "/v1/public-api/compatibility-baselines",
+                "/v1/public/tax-account/summary",
+                "/v1/public/tax-account/reconciliations",
+                "/v1/integrations/capability-manifests",
+                "/v1/integrations/connections",
+                "/v1/integrations/connections/:connectionId",
+                "/v1/integrations/connections/:connectionId/credentials",
+                "/v1/integrations/connections/:connectionId/consents",
+                "/v1/integrations/connections/:connectionId/health-checks",
+                "/v1/public-api/clients",
+                "/v1/public-api/tokens",
+                "/v1/public-api/compatibility-baselines",
               "/v1/public-api/webhooks",
               "/v1/public-api/webhook-events",
               "/v1/public-api/webhook-deliveries",
@@ -1141,6 +1148,10 @@ async function handleRequest({ req, res, platform, flags }) {
   }
 
   if (await tryHandlePhase14Route({ req, res, url, path, platform })) {
+    return;
+  }
+
+  if (await tryHandlePhase16IntegrationRoutes({ req, res, url, path, platform })) {
     return;
   }
 

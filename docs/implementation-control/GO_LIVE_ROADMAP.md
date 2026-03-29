@@ -1037,8 +1037,11 @@ Göra integrationslagret verkligt: connections, credentials, consent, provider h
 **Får inte köras parallellt med**  
 - Inga live providers får aktiveras före sina domängater. ID06 får inte råka använda trial/sandbox på fel sätt. CRM/project-adapters får inte styra core semantics.
 
+**Delfasstatus**
+- 16.1 klar 2026-03-29: integrationslagret bär nu first-class `IntegrationConnection`, `CredentialSetMetadata`, `ConsentGrant` och `IntegrationHealthCheck`; capability manifests exponerar explicit `modeMatrix`, `allowedEnvironmentModes`, fallback/rate-limit-policy och provider environment refs; legacy partner creation backfillar canonical control-plane metadata; `/v1/integrations/capability-manifests` och `/v1/integrations/connections*` är verkliga runtime-ytor och credential-reuse över `trial`/`sandbox`/`test`/`pilot_parallel`/`production` blockeras deterministiskt, verifierat i nya phase 16.1 unit/API-sviter, route-metadata-svit och full verifiering.
+
 **Delfaser**
-- [ ] 16.1 [HARDEN] **Integration core, credentials och consent** — Capability manifest, credential metadata, consent grant, health checks, rate limits, fallback modes, environment isolation.
+- [x] 16.1 [HARDEN] **Integration core, credentials och consent** — Capability manifest, credential metadata, consent grant, health checks, rate limits, fallback modes, environment isolation.
 - [ ] 16.2 [HARDEN] **Public API och sandbox catalog** — Client credentials, scope catalog, versioned spec, sandbox catalog, report snapshots, tax account summary, example webhook events.
 - [ ] 16.3 [HARDEN] **Partner API, contract tests och adapter health** — Connection catalog, operation dispatch, async jobs, retry/dead-letter/replay, contract-test packs per adapter.
 - [ ] 16.4 [REPLACE] **Byt simulerade finance-adapters mot verkliga** — Enable Banking, bankfil/ISO20022, Stripe, Pagero, Google Document AI, Postmark, Twilio, Pleo, official tax transports.
@@ -1267,6 +1270,5 @@ Bevisa att backend-kontrakten bär verkliga kundscenarier, låsa UI-kontrakt och
 ## Slutregel
 
 Denna roadmap är den enda bindande byggordningen. Ingen implementation, ingen featuregren och ingen UI-plan får köra utanför denna ordning utan uttrycklig ändring i detta dokument.
-
 
 

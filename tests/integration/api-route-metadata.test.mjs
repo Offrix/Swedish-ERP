@@ -42,6 +42,12 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/trial/environments/:trialEnvironmentProfileId/refresh",
   "/v1/trial/promotions",
   "/v1/trial/promotions/:promotionPlanId/execute",
+  "/v1/integrations/capability-manifests",
+  "/v1/integrations/connections",
+  "/v1/integrations/connections/:connectionId",
+  "/v1/integrations/connections/:connectionId/credentials",
+  "/v1/integrations/connections/:connectionId/consents",
+  "/v1/integrations/connections/:connectionId/health-checks",
   "/v1/mission-control/dashboards",
   "/v1/mission-control/dashboards/:dashboardCode",
   "/v1/documents/:documentId/versions",
@@ -282,12 +288,44 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
       assert.equal(workItemDualApproveContract.requiredTrustLevel, "strong_mfa");
       assert.equal(workItemDualApproveContract.requiredScopeType, "operational_work_item");
 
-      const tenantBootstrapContract = payload.routeContracts.find(
-        (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/tenant/bootstrap"
-      );
+    const tenantBootstrapContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/tenant/bootstrap"
+    );
     assert.ok(tenantBootstrapContract);
     assert.equal(tenantBootstrapContract.requiredTrustLevel, "public");
     assert.equal(tenantBootstrapContract.requiredScopeType, "public");
+
+    const integrationConnectionCreateContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/integrations/connections"
+    );
+    assert.ok(integrationConnectionCreateContract);
+    assert.equal(integrationConnectionCreateContract.requiredActionClass, "integration_connection_create");
+    assert.equal(integrationConnectionCreateContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(integrationConnectionCreateContract.requiredScopeType, "company");
+
+    const integrationCredentialManageContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/integrations/connections/:connectionId/credentials"
+    );
+    assert.ok(integrationCredentialManageContract);
+    assert.equal(integrationCredentialManageContract.requiredActionClass, "integration_credentials_manage");
+    assert.equal(integrationCredentialManageContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(integrationCredentialManageContract.requiredScopeType, "integration_connection");
+
+    const integrationConsentAuthorizeContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/integrations/connections/:connectionId/consents"
+    );
+    assert.ok(integrationConsentAuthorizeContract);
+    assert.equal(integrationConsentAuthorizeContract.requiredActionClass, "integration_consent_authorize");
+    assert.equal(integrationConsentAuthorizeContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(integrationConsentAuthorizeContract.requiredScopeType, "integration_connection");
+
+    const integrationHealthCheckRunContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/integrations/connections/:connectionId/health-checks"
+    );
+    assert.ok(integrationHealthCheckRunContract);
+    assert.equal(integrationHealthCheckRunContract.requiredActionClass, "integration_health_check_run");
+    assert.equal(integrationHealthCheckRunContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(integrationHealthCheckRunContract.requiredScopeType, "integration_connection");
 
     const closeAdjustmentContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/close/reopen-requests/:reopenRequestId/adjustments"

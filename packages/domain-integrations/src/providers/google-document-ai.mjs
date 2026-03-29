@@ -56,6 +56,13 @@ export function createGoogleDocumentAiProvider({
   };
 
   function getCapabilityManifest() {
+    const modeMatrix = Object.freeze({
+      trial_safe: providerMode !== "production",
+      sandbox_supported: true,
+      test_supported: true,
+      production_supported: true,
+      supportsLegalEffect: providerMode === "production"
+    });
     return Object.freeze({
       providerCode: GOOGLE_DOCUMENT_AI_PROVIDER_CODE,
       providerMode,
@@ -63,6 +70,7 @@ export function createGoogleDocumentAiProvider({
       trialSafe: providerMode !== "production",
       sandboxSupported: true,
       supportsLegalEffect: providerMode === "production",
+      modeMatrix,
       supportsAsyncCallback: true,
       supportsRerun: true,
       profiles: Object.values(OCR_PROFILE_CATALOG).map((profile) =>
