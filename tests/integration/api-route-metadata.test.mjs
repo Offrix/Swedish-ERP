@@ -56,6 +56,9 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/release/advantage-bundles",
   "/v1/release/advantage-bundles/:advantageReleaseBundleId",
   "/v1/release/advantage-bundles/:advantageReleaseBundleId/evidence",
+  "/v1/release/ui-contract-freezes",
+  "/v1/release/ui-contract-freezes/:uiContractFreezeRecordId",
+  "/v1/release/ui-contract-freezes/:uiContractFreezeRecordId/evidence",
   "/v1/integrations/capability-manifests",
   "/v1/integrations/connections",
   "/v1/integrations/connections/:connectionId",
@@ -360,6 +363,14 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(advantageReleaseBundleCreateContract.requiredActionClass, "advantage_release_bundle_record");
     assert.equal(advantageReleaseBundleCreateContract.requiredTrustLevel, "strong_mfa");
     assert.equal(advantageReleaseBundleCreateContract.requiredScopeType, "company");
+
+    const uiContractFreezeCreateContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/release/ui-contract-freezes"
+    );
+    assert.ok(uiContractFreezeCreateContract);
+    assert.equal(uiContractFreezeCreateContract.requiredActionClass, "ui_contract_freeze_record");
+    assert.equal(uiContractFreezeCreateContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(uiContractFreezeCreateContract.requiredScopeType, "company");
 
     const closeAdjustmentContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/close/reopen-requests/:reopenRequestId/adjustments"

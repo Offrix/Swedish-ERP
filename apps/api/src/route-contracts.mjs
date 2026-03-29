@@ -5,6 +5,7 @@ import { matchPath } from "./route-helpers.mjs";
 export const ROUTE_TRUST_LEVELS = Object.freeze(["public", "authenticated", "mfa", "strong_mfa"]);
 
 const MUTATING_HTTP_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const READONLY_HTTP_METHODS = new Set(["GET"]);
 const ACTION_SEGMENTS = new Set([
   "accept",
   "ack",
@@ -236,6 +237,10 @@ const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["GET /v1/release/advantage-bundles", { ...override("release", "advantage_release_bundle_read", "strong_mfa", "company", "advantage_release_bundle", "advantage_release_bundle", "company.read", false), mutation: false }],
   ["GET /v1/release/advantage-bundles/:advantageReleaseBundleId", { ...override("release", "advantage_release_bundle_read", "strong_mfa", "advantage_release_bundle", "advantage_release_bundle", "advantage_release_bundle", "company.read", false), mutation: false }],
   ["GET /v1/release/advantage-bundles/:advantageReleaseBundleId/evidence", { ...override("release", "advantage_release_bundle_evidence_read", "strong_mfa", "advantage_release_bundle", "advantage_release_bundle", "evidence_bundle", "company.read", false), mutation: false }],
+  ["POST /v1/release/ui-contract-freezes", override("release", "ui_contract_freeze_record", "strong_mfa", "company", "ui_contract_freeze_record", "ui_contract_freeze_record", "company.manage", false)],
+  ["GET /v1/release/ui-contract-freezes", { ...override("release", "ui_contract_freeze_read", "strong_mfa", "company", "ui_contract_freeze_record", "ui_contract_freeze_record", "company.read", false), mutation: false }],
+  ["GET /v1/release/ui-contract-freezes/:uiContractFreezeRecordId", { ...override("release", "ui_contract_freeze_read", "strong_mfa", "ui_contract_freeze_record", "ui_contract_freeze_record", "ui_contract_freeze_record", "company.read", false), mutation: false }],
+  ["GET /v1/release/ui-contract-freezes/:uiContractFreezeRecordId/evidence", { ...override("release", "ui_contract_freeze_evidence_read", "strong_mfa", "ui_contract_freeze_record", "ui_contract_freeze_record", "evidence_bundle", "company.read", false), mutation: false }],
   ["POST /v1/integrations/connections", override("integrations", "integration_connection_create", "strong_mfa", "company", "integration_connection", "integration_connection", "company.manage", false)],
   ["POST /v1/integrations/connections/:connectionId/credentials", override("integrations", "integration_credentials_manage", "strong_mfa", "integration_connection", "integration_connection", "integration_credential_set", "company.manage", true)],
   ["POST /v1/integrations/connections/:connectionId/consents", override("integrations", "integration_consent_authorize", "strong_mfa", "integration_connection", "integration_connection", "integration_consent_grant", "company.manage", true)],
@@ -368,13 +373,164 @@ const SOURCE_ROUTE_FILES = Object.freeze([
     .sort((left, right) => left.href.localeCompare(right.href))
 ]);
 
+const READ_ROUTE_TEMPLATES = Object.freeze(
+  dedupeRoutes(SOURCE_ROUTE_FILES.flatMap((fileUrl) => parseRoutesFromSource(fileUrl, READONLY_HTTP_METHODS))).map((route) =>
+    Object.freeze({
+      method: route.method,
+      path: route.path
+    })
+  )
+);
 const MUTATING_ROUTE_CONTRACTS = Object.freeze(buildRouteContracts());
+const UI_PERMISSION_REASON_CATALOG = Object.freeze([
+  Object.freeze({
+    reasonCode: "session_token_required",
+    category: "trust",
+    label: "Session required",
+    explanation: "The actor must have an authenticated session before the route or contract can be used.",
+    surfaceFamilyCodes: ["desktop", "backoffice", "field"]
+  }),
+  Object.freeze({
+    reasonCode: "trust_level_insufficient",
+    category: "trust",
+    label: "Higher trust level required",
+    explanation: "The actor is authenticated but lacks the required MFA or strong MFA trust level.",
+    surfaceFamilyCodes: ["desktop", "backoffice", "field"]
+  }),
+  Object.freeze({
+    reasonCode: "missing_permission",
+    category: "permission",
+    label: "Permission missing",
+    explanation: "The actor does not hold the required company permission or delegated grant for the operation.",
+    surfaceFamilyCodes: ["desktop", "backoffice", "field"]
+  }),
+  Object.freeze({
+    reasonCode: "cross_company_forbidden",
+    category: "scope",
+    label: "Cross-company access denied",
+    explanation: "The requested object or route falls outside the signed-in principal's company scope.",
+    surfaceFamilyCodes: ["desktop", "backoffice", "field"]
+  }),
+  Object.freeze({
+    reasonCode: "permission_scope_denied",
+    category: "visibility",
+    label: "Permission scope denied",
+    explanation: "The actor cannot see the object because read-model visibility or queue scope denies access.",
+    surfaceFamilyCodes: ["desktop", "backoffice", "field"]
+  }),
+  Object.freeze({
+    reasonCode: "search_document_forbidden",
+    category: "visibility",
+    label: "Search document denied",
+    explanation: "The search hit exists but is not visible to the current actor due to visibility trimming.",
+    surfaceFamilyCodes: ["desktop", "backoffice", "field"]
+  }),
+  Object.freeze({
+    reasonCode: "object_profile_forbidden",
+    category: "visibility",
+    label: "Object profile denied",
+    explanation: "The object profile exists but is not visible to the current actor.",
+    surfaceFamilyCodes: ["desktop", "backoffice", "field"]
+  }),
+  Object.freeze({
+    reasonCode: "saved_view_forbidden",
+    category: "visibility",
+    label: "Saved view denied",
+    explanation: "The saved view is not owned by or shared with the current actor.",
+    surfaceFamilyCodes: ["desktop", "backoffice", "field"]
+  }),
+  Object.freeze({
+    reasonCode: "desktop_surface_role_forbidden",
+    category: "surface",
+    label: "Desktop surface denied",
+    explanation: "The actor role is not allowed to access desktop-only read models.",
+    surfaceFamilyCodes: ["desktop"]
+  }),
+  Object.freeze({
+    reasonCode: "finance_operations_role_forbidden",
+    category: "surface",
+    label: "Finance operations denied",
+    explanation: "The actor role is not allowed to access finance operations worklists.",
+    surfaceFamilyCodes: ["desktop"]
+  }),
+  Object.freeze({
+    reasonCode: "annual_operations_role_forbidden",
+    category: "surface",
+    label: "Annual operations denied",
+    explanation: "The actor role is not allowed to access annual reporting and filing operations.",
+    surfaceFamilyCodes: ["desktop"]
+  }),
+  Object.freeze({
+    reasonCode: "payroll_operations_role_forbidden",
+    category: "surface",
+    label: "Payroll operations denied",
+    explanation: "The actor role is not allowed to access payroll operations worklists.",
+    surfaceFamilyCodes: ["desktop"]
+  }),
+  Object.freeze({
+    reasonCode: "hr_operations_role_forbidden",
+    category: "surface",
+    label: "HR operations denied",
+    explanation: "The actor role is not allowed to access HR read models.",
+    surfaceFamilyCodes: ["desktop"]
+  }),
+  Object.freeze({
+    reasonCode: "time_operations_role_forbidden",
+    category: "surface",
+    label: "Time operations denied",
+    explanation: "The actor role is not allowed to access time operations read models.",
+    surfaceFamilyCodes: ["desktop"]
+  }),
+  Object.freeze({
+    reasonCode: "project_workspace_role_forbidden",
+    category: "surface",
+    label: "Project workspace denied",
+    explanation: "The actor role is not allowed to access the project workspace surfaces.",
+    surfaceFamilyCodes: ["desktop"]
+  }),
+  Object.freeze({
+    reasonCode: "field_control_role_forbidden",
+    category: "surface",
+    label: "Field control denied",
+    explanation: "The actor role is not allowed to access field operations controls.",
+    surfaceFamilyCodes: ["field"]
+  }),
+  Object.freeze({
+    reasonCode: "personalliggare_control_role_forbidden",
+    category: "surface",
+    label: "Personalliggare control denied",
+    explanation: "The actor role is not allowed to access personalliggare controls.",
+    surfaceFamilyCodes: ["field"]
+  }),
+  Object.freeze({
+    reasonCode: "id06_control_role_forbidden",
+    category: "surface",
+    label: "ID06 control denied",
+    explanation: "The actor role is not allowed to access ID06 controls.",
+    surfaceFamilyCodes: ["field"]
+  }),
+  Object.freeze({
+    reasonCode: "egenkontroll_control_role_forbidden",
+    category: "surface",
+    label: "Egenkontroll denied",
+    explanation: "The actor role is not allowed to access egenkontroll controls.",
+    surfaceFamilyCodes: ["field"]
+  })
+]);
 export const ROUTE_SCOPE_TYPES = Object.freeze(
   [...new Set(MUTATING_ROUTE_CONTRACTS.map((routeContract) => routeContract.requiredScopeType))].sort()
 );
 
 export function listPublishedRouteContracts() {
   return MUTATING_ROUTE_CONTRACTS.map(cloneContract);
+}
+
+export function listPublishedReadRouteTemplates() {
+  return READ_ROUTE_TEMPLATES.map(cloneContract);
+}
+
+export function listUiPermissionReasonCatalog() {
+  return UI_PERMISSION_REASON_CATALOG.map(clonePermissionReason);
 }
 
 export function resolvePublishedRouteContract({ method, path } = {}) {
@@ -406,6 +562,10 @@ function buildRouteContracts() {
 }
 
 function parseMutatingRoutesFromSource(fileUrl) {
+  return parseRoutesFromSource(fileUrl, MUTATING_HTTP_METHODS);
+}
+
+function parseRoutesFromSource(fileUrl, allowedMethods) {
   const sourceText = fs.readFileSync(fileURLToPath(fileUrl), "utf8");
   const bindings = new Map(
     [...sourceText.matchAll(/const\s+(\w+)\s*=\s*matchPath\(path,\s*"([^"]+)"\)/g)].map((match) => [match[1], match[2]])
@@ -420,7 +580,7 @@ function parseMutatingRoutesFromSource(fileUrl) {
     const directPaths = [...condition.matchAll(/path\s*===\s*"([^"]+)"/g)].map((pathMatch) => pathMatch[1]);
     const boundPaths = [...bindings.entries()].filter(([binding]) => condition.includes(binding)).map(([, route]) => route);
     for (const method of methods) {
-      if (!MUTATING_HTTP_METHODS.has(method)) {
+      if (!allowedMethods.has(method)) {
         continue;
       }
       for (const routePath of new Set([...directPaths, ...boundPaths])) {
@@ -715,5 +875,12 @@ function compactTokens(tokens) {
 function cloneContract(routeContract) {
   return {
     ...routeContract
+  };
+}
+
+function clonePermissionReason(reason) {
+  return {
+    ...reason,
+    surfaceFamilyCodes: [...(reason.surfaceFamilyCodes || [])]
   };
 }

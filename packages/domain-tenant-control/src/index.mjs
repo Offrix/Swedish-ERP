@@ -53,6 +53,9 @@ export const ADVANTAGE_RELEASE_BUNDLE_STATUSES = Object.freeze([
   "released",
   "blocked"
 ]);
+export const UI_CONTRACT_FREEZE_RECORD_STATUSES = Object.freeze([
+  "frozen"
+]);
 export const PARITY_CRITERION_STATUSES = Object.freeze([
   "green",
   "amber",
@@ -753,6 +756,8 @@ export function createTenantControlEngine({
     parityScorecardIdsByCompetitor: new Map(),
     advantageReleaseBundles: new Map(),
     advantageReleaseBundleIdsByCompany: new Map(),
+    uiContractFreezeRecords: new Map(),
+    uiContractFreezeRecordIdsByCompany: new Map(),
     financeBlueprintsByCompany: new Map(),
     financeFoundationRecordsByCompany: new Map(),
     tenantControlEvents: [],
@@ -772,6 +777,7 @@ export function createTenantControlEngine({
     pilotCohortStatuses: PILOT_COHORT_STATUSES,
     parityScorecardStatuses: PARITY_SCORECARD_STATUSES,
     advantageReleaseBundleStatuses: ADVANTAGE_RELEASE_BUNDLE_STATUSES,
+    uiContractFreezeRecordStatuses: UI_CONTRACT_FREEZE_RECORD_STATUSES,
     pilotScenarioStatuses: PILOT_SCENARIO_STATUSES,
     createTenantBootstrap,
     getTenantBootstrap,
@@ -820,6 +826,10 @@ export function createTenantControlEngine({
     getAdvantageReleaseBundle,
     listAdvantageReleaseBundles,
     exportAdvantageReleaseBundleEvidence,
+    recordUiContractFreeze,
+    getUiContractFreezeRecord,
+    listUiContractFreezeRecords,
+    exportUiContractFreezeEvidence,
     getFinanceReadinessValidation,
     snapshotTenantControl,
     exportDurableState,
@@ -2768,6 +2778,140 @@ export function createTenantControlEngine({
     return copy(evidenceBundle);
   }
 
+  function recordUiContractFreeze({
+    sessionToken,
+    companyId,
+    advantageReleaseBundleId,
+    contractSnapshot,
+    notes = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const principal = authorizeCompanyAction({
+      sessionToken,
+      companyId: resolvedCompanyId,
+      action: "COMPANY_MANAGE",
+      objectType: "ui_contract_freeze_record",
+      objectId: resolvedCompanyId,
+      scopeCode: "pilot_execution"
+    });
+    const linkedBundle = requireAdvantageReleaseBundle(advantageReleaseBundleId);
+    if (linkedBundle.companyId !== resolvedCompanyId) {
+      throw httpError(409, "ui_contract_freeze_company_scope_mismatch", "Advantage release bundle belongs to another company.");
+    }
+    if (linkedBundle.status !== "released") {
+      throw httpError(409, "ui_contract_freeze_requires_released_advantage_bundle", "UI contract freeze requires a released advantage bundle.");
+    }
+    const normalizedContractSnapshot = normalizeUiContractFreezeSnapshot(contractSnapshot);
+    const hashes = buildUiContractFreezeHashes({
+      contractSnapshot: normalizedContractSnapshot
+    });
+    const summary = buildUiContractFreezeSummary({
+      contractSnapshot: normalizedContractSnapshot,
+      hashes
+    });
+    const now = nowIso();
+    const record = {
+      uiContractFreezeRecordId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      advantageReleaseBundleId: linkedBundle.advantageReleaseBundleId,
+      contractSnapshot: normalizedContractSnapshot,
+      hashes,
+      summary,
+      status: "frozen",
+      notes: normalizeOptionalText(notes),
+      latestEvidenceBundleId: null,
+      recordedAt: now,
+      updatedAt: now,
+      actorUserId: principal.userId
+    };
+    const evidenceBundle = createUiContractFreezeEvidenceBundle({
+      record,
+      actorId: principal.userId
+    });
+    record.latestEvidenceBundleId = evidenceBundle.evidenceBundleId;
+    state.uiContractFreezeRecords.set(record.uiContractFreezeRecordId, record);
+    appendToIndex(state.uiContractFreezeRecordIdsByCompany, resolvedCompanyId, record.uiContractFreezeRecordId);
+    appendDomainEvent("ui.contract_freeze.recorded", {
+      companyId: resolvedCompanyId,
+      uiContractFreezeRecordId: record.uiContractFreezeRecordId,
+      advantageReleaseBundleId: record.advantageReleaseBundleId,
+      frozenHash: record.summary.aggregateHash,
+      actorUserId: principal.userId
+    });
+    appendAuditEvent({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      action: "tenant_control.ui_contract_freeze.recorded",
+      entityType: "ui_contract_freeze_record",
+      entityId: record.uiContractFreezeRecordId,
+      metadata: {
+        advantageReleaseBundleId: record.advantageReleaseBundleId,
+        aggregateHash: record.summary.aggregateHash
+      }
+    });
+    return presentUiContractFreezeRecord(record);
+  }
+
+  function getUiContractFreezeRecord({ sessionToken, uiContractFreezeRecordId } = {}) {
+    const record = requireUiContractFreezeRecord(uiContractFreezeRecordId);
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_READ",
+      objectType: "ui_contract_freeze_record",
+      objectId: record.uiContractFreezeRecordId,
+      scopeCode: "pilot_execution"
+    });
+    return presentUiContractFreezeRecord(record);
+  }
+
+  function listUiContractFreezeRecords({ sessionToken, companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: resolvedCompanyId,
+      action: "COMPANY_READ",
+      objectType: "ui_contract_freeze_record",
+      objectId: resolvedCompanyId,
+      scopeCode: "pilot_execution"
+    });
+    return (state.uiContractFreezeRecordIdsByCompany.get(resolvedCompanyId) || [])
+      .map((uiContractFreezeRecordId) => state.uiContractFreezeRecords.get(uiContractFreezeRecordId))
+      .filter(Boolean)
+      .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt))
+      .map((record) => presentUiContractFreezeRecord(record));
+  }
+
+  function exportUiContractFreezeEvidence({ sessionToken, uiContractFreezeRecordId } = {}) {
+    const record = requireUiContractFreezeRecord(uiContractFreezeRecordId);
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_READ",
+      objectType: "ui_contract_freeze_record",
+      objectId: record.uiContractFreezeRecordId,
+      scopeCode: "pilot_execution"
+    });
+    const evidenceDomain = getOptionalDomain("evidence");
+    if (
+      record.latestEvidenceBundleId
+      && evidenceDomain
+      && typeof evidenceDomain.getEvidenceBundle === "function"
+    ) {
+      return evidenceDomain.getEvidenceBundle({
+        companyId: record.companyId,
+        evidenceBundleId: record.latestEvidenceBundleId
+      });
+    }
+    const evidenceBundle = createUiContractFreezeEvidenceBundle({
+      record,
+      actorId: "tenant_control_ui_contract_freeze_export"
+    });
+    record.latestEvidenceBundleId = evidenceBundle.evidenceBundleId;
+    record.updatedAt = nowIso();
+    return copy(evidenceBundle);
+  }
+
   function listTrialEnvironmentRecordsByCompany(companyId) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return (state.trialEnvironmentIdsByCompany.get(resolvedCompanyId) || [])
@@ -3462,6 +3606,7 @@ export function createTenantControlEngine({
       pilotCohorts: [...state.pilotCohorts.values()],
       parityScorecards: [...state.parityScorecards.values()],
       advantageReleaseBundles: [...state.advantageReleaseBundles.values()],
+      uiContractFreezeRecords: [...state.uiContractFreezeRecords.values()],
       financeBlueprints: [...state.financeBlueprintsByCompany.values()],
       financeFoundationRecords: [...state.financeFoundationRecordsByCompany.values()],
       tenantControlEvents: [...state.tenantControlEvents],
@@ -4078,6 +4223,14 @@ export function createTenantControlEngine({
     return record;
   }
 
+  function requireUiContractFreezeRecord(uiContractFreezeRecordId) {
+    const record = state.uiContractFreezeRecords.get(requireText(uiContractFreezeRecordId, "ui_contract_freeze_record_id_required"));
+    if (!record) {
+      throw httpError(404, "ui_contract_freeze_record_not_found", "UI contract freeze record was not found.");
+    }
+    return record;
+  }
+
   function requirePromotionPlan(promotionPlanId) {
     const record = state.promotionPlans.get(requireText(promotionPlanId, "promotion_plan_id_required"));
     if (!record) {
@@ -4181,6 +4334,15 @@ export function createTenantControlEngine({
       ...record,
       parityScorecardIds: copy(record.parityScorecardIds || []),
       moveResults: copy(record.moveResults || []),
+      summary: copy(record.summary || null)
+    });
+  }
+
+  function presentUiContractFreezeRecord(record) {
+    return copy({
+      ...record,
+      contractSnapshot: copy(record.contractSnapshot || {}),
+      hashes: copy(record.hashes || {}),
       summary: copy(record.summary || null)
     });
   }
@@ -4915,6 +5077,132 @@ export function createTenantControlEngine({
     };
   }
 
+  function createUiContractFreezeEvidenceBundle({
+    record,
+    actorId
+  } = {}) {
+    const evidenceDomain = getOptionalDomain("evidence");
+    const metadata = {
+      status: record.status,
+      summary: copy(record.summary),
+      hashes: copy(record.hashes)
+    };
+    const artifactRefs = [
+      {
+        artifactType: "ui_contract_object_profiles",
+        artifactRef: `ui-contract-freeze://${record.uiContractFreezeRecordId}/object-profiles`,
+        checksum: record.hashes.objectProfileContractsHash,
+        roleCode: "tenant_control",
+        metadata: {
+          count: record.summary.objectProfileCount
+        }
+      },
+      {
+        artifactType: "ui_contract_workbenches",
+        artifactRef: `ui-contract-freeze://${record.uiContractFreezeRecordId}/workbenches`,
+        checksum: record.hashes.workbenchContractsHash,
+        roleCode: "tenant_control",
+        metadata: {
+          count: record.summary.workbenchCount
+        }
+      },
+      {
+        artifactType: "ui_contract_commands",
+        artifactRef: `ui-contract-freeze://${record.uiContractFreezeRecordId}/commands`,
+        checksum: record.hashes.commandCatalogHash,
+        roleCode: "tenant_control",
+        metadata: {
+          count: record.summary.commandCount
+        }
+      },
+      {
+        artifactType: "ui_contract_blockers",
+        artifactRef: `ui-contract-freeze://${record.uiContractFreezeRecordId}/blockers`,
+        checksum: record.hashes.blockerCatalogHash,
+        roleCode: "tenant_control",
+        metadata: {
+          count: record.summary.blockerCount
+        }
+      },
+      {
+        artifactType: "ui_contract_read_routes",
+        artifactRef: `ui-contract-freeze://${record.uiContractFreezeRecordId}/read-routes`,
+        checksum: record.hashes.readRouteContractsHash,
+        roleCode: "tenant_control",
+        metadata: {
+          count: record.summary.readRouteContractCount
+        }
+      },
+      {
+        artifactType: "ui_contract_action_routes",
+        artifactRef: `ui-contract-freeze://${record.uiContractFreezeRecordId}/action-routes`,
+        checksum: record.hashes.actionRouteContractsHash,
+        roleCode: "tenant_control",
+        metadata: {
+          count: record.summary.actionRouteContractCount
+        }
+      },
+      {
+        artifactType: "ui_contract_permission_reasons",
+        artifactRef: `ui-contract-freeze://${record.uiContractFreezeRecordId}/permission-reasons`,
+        checksum: record.hashes.permissionReasonCatalogHash,
+        roleCode: "tenant_control",
+        metadata: {
+          count: record.summary.permissionReasonCount
+        }
+      },
+      {
+        artifactType: "ui_contract_freeze_manifest",
+        artifactRef: `ui-contract-freeze://${record.uiContractFreezeRecordId}`,
+        checksum: record.hashes.aggregateHash,
+        roleCode: "tenant_control",
+        metadata: {
+          frozenHash: record.summary.aggregateHash
+        }
+      }
+    ];
+    const relatedObjectRefs = [
+      {
+        objectType: "company",
+        objectId: record.companyId,
+        relationCode: "ui_contract_company"
+      },
+      {
+        objectType: "advantage_release_bundle",
+        objectId: record.advantageReleaseBundleId,
+        relationCode: "released_advantage_bundle"
+      }
+    ];
+    if (evidenceDomain && typeof evidenceDomain.createFrozenEvidenceBundleSnapshot === "function") {
+      return evidenceDomain.createFrozenEvidenceBundleSnapshot({
+        companyId: record.companyId,
+        bundleType: "ui_contract_freeze_record",
+        sourceObjectType: "ui_contract_freeze_record",
+        sourceObjectId: record.uiContractFreezeRecordId,
+        sourceObjectVersion: `ui_contract_freeze_record:${record.updatedAt || record.recordedAt}`,
+        title: "UI readiness contract freeze evidence",
+        retentionClass: "operational",
+        classificationCode: "restricted_internal",
+        metadata,
+        artifactRefs,
+        relatedObjectRefs,
+        actorId,
+        previousEvidenceBundleId: record.latestEvidenceBundleId || null,
+        environmentMode: "pilot_parallel"
+      });
+    }
+    return {
+      evidenceBundleId: crypto.randomUUID(),
+      bundleType: "ui_contract_freeze_record",
+      sourceObjectType: "ui_contract_freeze_record",
+      sourceObjectId: record.uiContractFreezeRecordId,
+      metadata: copy(metadata),
+      artifactRefs,
+      relatedObjectRefs,
+      environmentMode: "pilot_parallel"
+    };
+  }
+
   function findCompanySnapshotById(companyId) {
     const orgAuthSnapshot = getOrgAuthSnapshot();
     return (orgAuthSnapshot?.companies || []).find((record) => record.companyId === requireText(companyId, "company_id_required")) || null;
@@ -5368,6 +5656,111 @@ export function createTenantControlEngine({
         && moveResults.length === ADVANTAGE_MOVE_CODES.length
         && moveResults.every((item) => item.status === "green")
     };
+  }
+
+  function normalizeUiContractFreezeSnapshot(contractSnapshot) {
+    const snapshot = contractSnapshot && typeof contractSnapshot === "object" ? contractSnapshot : {};
+    const objectProfileContracts = normalizeUiContractObjectList(snapshot.objectProfileContracts, "ui_contract_object_profiles_required");
+    const workbenchContracts = normalizeUiContractObjectList(snapshot.workbenchContracts, "ui_contract_workbenches_required");
+    const readRouteContracts = normalizeUiContractObjectList(snapshot.readRouteContracts, "ui_contract_read_routes_required");
+    const actionRouteContracts = normalizeUiContractObjectList(snapshot.actionRouteContracts, "ui_contract_action_routes_required");
+    const commandCatalog = normalizeUiContractObjectList(snapshot.commandCatalog, "ui_contract_command_catalog_required");
+    const blockerCatalog = normalizeUiContractObjectList(snapshot.blockerCatalog, "ui_contract_blocker_catalog_required");
+    const permissionReasonCatalog = normalizeUiContractObjectList(snapshot.permissionReasonCatalog, "ui_contract_permission_reason_catalog_required");
+    return {
+      objectProfileContracts,
+      workbenchContracts,
+      readRouteContracts,
+      actionRouteContracts,
+      commandCatalog,
+      blockerCatalog,
+      permissionReasonCatalog
+    };
+  }
+
+  function buildUiContractFreezeHashes({ contractSnapshot } = {}) {
+    return {
+      objectProfileContractsHash: hashJson(contractSnapshot.objectProfileContracts),
+      workbenchContractsHash: hashJson(contractSnapshot.workbenchContracts),
+      readRouteContractsHash: hashJson(contractSnapshot.readRouteContracts),
+      actionRouteContractsHash: hashJson(contractSnapshot.actionRouteContracts),
+      commandCatalogHash: hashJson(contractSnapshot.commandCatalog),
+      blockerCatalogHash: hashJson(contractSnapshot.blockerCatalog),
+      permissionReasonCatalogHash: hashJson(contractSnapshot.permissionReasonCatalog),
+      aggregateHash: hashJson(contractSnapshot)
+    };
+  }
+
+  function buildUiContractFreezeSummary({ contractSnapshot, hashes } = {}) {
+    const surfaceFamilyCodes = [
+      ...new Set([
+        ...collectUiSurfaceFamilyCodesFromContracts(contractSnapshot.objectProfileContracts),
+        ...collectUiSurfaceFamilyCodesFromContracts(contractSnapshot.workbenchContracts),
+        ...collectUiSurfaceFamilyCodesFromSnapshotObjects(contractSnapshot.readRouteContracts),
+        ...collectUiSurfaceFamilyCodesFromSnapshotObjects(contractSnapshot.actionRouteContracts),
+        ...collectUiSurfaceFamilyCodesFromSnapshotObjects(contractSnapshot.permissionReasonCatalog)
+      ])
+    ].sort();
+    return {
+      objectProfileCount: contractSnapshot.objectProfileContracts.length,
+      workbenchCount: contractSnapshot.workbenchContracts.length,
+      readRouteContractCount: contractSnapshot.readRouteContracts.length,
+      actionRouteContractCount: contractSnapshot.actionRouteContracts.length,
+      totalRouteContractCount: contractSnapshot.readRouteContracts.length + contractSnapshot.actionRouteContracts.length,
+      commandCount: contractSnapshot.commandCatalog.length,
+      blockerCount: contractSnapshot.blockerCatalog.length,
+      permissionReasonCount: contractSnapshot.permissionReasonCatalog.length,
+      surfaceFamilyCodes,
+      aggregateHash: hashes.aggregateHash
+    };
+  }
+
+  function normalizeUiContractObjectList(items, errorCode) {
+    const normalized = (Array.isArray(items) ? items : [])
+      .filter((item) => item && typeof item === "object")
+      .map((item) => copy(item));
+    if (normalized.length === 0) {
+      throw httpError(409, errorCode, "UI contract freeze requires a non-empty contract catalog.");
+    }
+    return normalized;
+  }
+
+  function collectUiSurfaceFamilyCodesFromContracts(contracts = []) {
+    return contracts.flatMap((item) =>
+      normalizeStringList(item?.surfaceCodes || []).map((surfaceCode) => normalizeUiContractSurfaceFamilyCode(surfaceCode))
+    ).filter(Boolean);
+  }
+
+  function collectUiSurfaceFamilyCodesFromSnapshotObjects(items = []) {
+    return (Array.isArray(items) ? items : [])
+      .flatMap((item) =>
+        normalizeStringList(
+          Array.isArray(item?.surfaceFamilyCodes)
+            ? item.surfaceFamilyCodes
+            : item?.surfaceFamilyCode
+              ? [item.surfaceFamilyCode]
+              : []
+        )
+      )
+      .map((surfaceCode) => normalizeUiContractSurfaceFamilyCode(surfaceCode))
+      .filter(Boolean);
+  }
+
+  function normalizeUiContractSurfaceFamilyCode(surfaceCode) {
+    const resolved = normalizeOptionalText(surfaceCode);
+    if (!resolved) {
+      return null;
+    }
+    if (resolved === "desktop" || resolved.startsWith("desktop.")) {
+      return "desktop";
+    }
+    if (resolved === "backoffice" || resolved.startsWith("backoffice.")) {
+      return "backoffice";
+    }
+    if (resolved === "field" || resolved.startsWith("field.") || resolved.startsWith("field_")) {
+      return "field";
+    }
+    return null;
   }
 
   function requirePilotScenarioStatus(status) {

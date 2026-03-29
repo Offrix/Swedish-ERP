@@ -6,7 +6,12 @@ import { tryHandlePhase6AuthRoutes } from "./phase6-auth-routes.mjs";
 import { tryHandlePhase13Route } from "./phase13-routes.mjs";
 import { tryHandlePhase14Route } from "./phase14-routes.mjs";
 import { tryHandlePhase16IntegrationRoutes } from "./phase16-integration-routes.mjs";
-import { listPublishedRouteContracts, resolvePublishedRouteContract } from "./route-contracts.mjs";
+import {
+  listPublishedReadRouteTemplates,
+  listPublishedRouteContracts,
+  listUiPermissionReasonCatalog,
+  resolvePublishedRouteContract
+} from "./route-contracts.mjs";
 import {
   CANONICAL_API_VERSION,
   createHttpError,
@@ -371,6 +376,9 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/release/advantage-bundles",
               "/v1/release/advantage-bundles/:advantageReleaseBundleId",
               "/v1/release/advantage-bundles/:advantageReleaseBundleId/evidence",
+              "/v1/release/ui-contract-freezes",
+              "/v1/release/ui-contract-freezes/:uiContractFreezeRecordId",
+              "/v1/release/ui-contract-freezes/:uiContractFreezeRecordId/evidence",
               "/v1/onboarding/runs",
               "/v1/onboarding/runs/:runId",
               "/v1/onboarding/runs/:runId/checklist",
@@ -2252,6 +2260,67 @@ async function handleRequest({ req, res, platform, flags }) {
         evidenceBundle: requireTenantControlDomain(platform).exportAdvantageReleaseBundleEvidence({
           sessionToken: readSessionToken(req),
           advantageReleaseBundleId: advantageReleaseBundleEvidenceMatch.advantageReleaseBundleId
+        })
+      }
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/release/ui-contract-freezes") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      requireTenantControlDomain(platform).recordUiContractFreeze({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        advantageReleaseBundleId: body.advantageReleaseBundleId,
+        contractSnapshot: buildUiContractFreezeSnapshot({
+          platform,
+          companyId: body.companyId
+        }),
+        notes: body.notes
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/release/ui-contract-freezes") {
+    writeJson(
+      res,
+      200,
+      {
+        items: requireTenantControlDomain(platform).listUiContractFreezeRecords({
+          sessionToken: readSessionToken(req),
+          companyId: url.searchParams.get("companyId")
+        })
+      }
+    );
+    return;
+  }
+
+  const uiContractFreezeRecordMatch = matchPath(path, "/v1/release/ui-contract-freezes/:uiContractFreezeRecordId");
+  if (req.method === "GET" && uiContractFreezeRecordMatch) {
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).getUiContractFreezeRecord({
+        sessionToken: readSessionToken(req),
+        uiContractFreezeRecordId: uiContractFreezeRecordMatch.uiContractFreezeRecordId
+      })
+    );
+    return;
+  }
+
+  const uiContractFreezeEvidenceMatch = matchPath(path, "/v1/release/ui-contract-freezes/:uiContractFreezeRecordId/evidence");
+  if (req.method === "GET" && uiContractFreezeEvidenceMatch) {
+    writeJson(
+      res,
+      200,
+      {
+        evidenceBundle: requireTenantControlDomain(platform).exportUiContractFreezeEvidence({
+          sessionToken: readSessionToken(req),
+          uiContractFreezeRecordId: uiContractFreezeEvidenceMatch.uiContractFreezeRecordId
         })
       }
     );
@@ -16803,6 +16872,187 @@ function stripRouteContractParams(routeContract) {
     permissionCode: routeContract.permissionCode,
     expectedObjectVersion: routeContract.expectedObjectVersion
   };
+}
+
+function buildUiContractFreezeSnapshot({ platform, companyId } = {}) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required", "Company id is required.");
+  const objectProfileContracts = platform.listObjectProfileContracts({ companyId: resolvedCompanyId });
+  const workbenchContracts = platform.listWorkbenchContracts({ companyId: resolvedCompanyId });
+  const readRouteContracts = listPublishedReadRouteTemplates()
+    .map((route) => ({
+      ...route,
+      contractKind: deriveUiReadRouteContractKind(route.path),
+      surfaceFamilyCodes: inferUiSurfaceFamilyCodesFromRoutePath(route.path)
+    }))
+    .filter((route) => route.surfaceFamilyCodes.length > 0)
+    .sort(compareUiRouteContracts);
+  const actionRouteContracts = listPublishedRouteContracts()
+    .map((routeContract) => ({
+      ...stripRouteContractParams(routeContract),
+      contractKind: "action",
+      surfaceFamilyCodes: inferUiSurfaceFamilyCodesFromRoutePath(routeContract.path)
+    }))
+    .filter((routeContract) => routeContract.surfaceFamilyCodes.length > 0)
+    .sort(compareUiRouteContracts);
+  return {
+    objectProfileContracts,
+    workbenchContracts,
+    readRouteContracts,
+    actionRouteContracts,
+    commandCatalog: buildUiCommandCatalog({
+      objectProfileContracts,
+      workbenchContracts,
+      actionRouteContracts
+    }),
+    blockerCatalog: buildUiBlockerCatalog({ objectProfileContracts }),
+    permissionReasonCatalog: listUiPermissionReasonCatalog()
+  };
+}
+
+function buildUiCommandCatalog({
+  objectProfileContracts = [],
+  workbenchContracts = [],
+  actionRouteContracts = []
+} = {}) {
+  const commands = new Map();
+  for (const profile of objectProfileContracts) {
+    for (const actionContract of Array.isArray(profile.actionContracts) ? profile.actionContracts : []) {
+      const key = `object_profile:${profile.objectType}:${actionContract.actionCode}`;
+      commands.set(key, {
+        commandCode: actionContract.actionCode,
+        sourceType: "object_profile_action",
+        objectType: profile.objectType,
+        surfaceCodes: [...(profile.surfaceCodes || [])],
+        actionClass: actionContract.actionClass || String(actionContract.actionCode || "").split(".")[0] || null,
+        routeTemplate: actionContract.routeTemplate || null,
+        requiresStepUp: Boolean(actionContract.requiresStepUp),
+        requiresDualControl: Boolean(actionContract.requiresDualControl),
+        receiptRequired: Boolean(actionContract.receiptRequired),
+        reviewRequired: Boolean(actionContract.reviewRequired),
+        forbiddenReasonCodes: [...(actionContract.forbiddenReasonCodes || [])]
+      });
+    }
+  }
+  for (const workbench of workbenchContracts) {
+    for (const commandCode of workbench.commandBarActionCodes || []) {
+      const key = `workbench_command:${workbench.workbenchCode}:${commandCode}`;
+      commands.set(key, {
+        commandCode,
+        sourceType: "workbench_command_bar",
+        workbenchCode: workbench.workbenchCode,
+        surfaceCodes: [...(workbench.surfaceCodes || [])],
+        actionClass: String(commandCode || "").split(".")[0] || null
+      });
+    }
+    for (const commandCode of workbench.bulkActionCodes || []) {
+      const key = `workbench_bulk:${workbench.workbenchCode}:${commandCode}`;
+      commands.set(key, {
+        commandCode,
+        sourceType: "workbench_bulk_action",
+        workbenchCode: workbench.workbenchCode,
+        surfaceCodes: [...(workbench.surfaceCodes || [])],
+        actionClass: String(commandCode || "").split(".")[0] || null
+      });
+    }
+  }
+  for (const routeContract of actionRouteContracts) {
+    const key = `route_action:${routeContract.method}:${routeContract.path}`;
+    commands.set(key, {
+      commandCode: routeContract.requiredActionClass,
+      sourceType: "route_action",
+      path: routeContract.path,
+      routeFamily: routeContract.routeFamily,
+      surfaceFamilyCodes: [...(routeContract.surfaceFamilyCodes || [])],
+      actionClass: routeContract.requiredActionClass,
+      permissionCode: routeContract.permissionCode || null,
+      requiredTrustLevel: routeContract.requiredTrustLevel,
+      requiredScopeType: routeContract.requiredScopeType,
+      scopeCode: routeContract.scopeCode,
+      expectedObjectVersion: Boolean(routeContract.expectedObjectVersion)
+    });
+  }
+  return [...commands.values()].sort((left, right) =>
+    left.commandCode === right.commandCode
+      ? String(left.sourceType).localeCompare(String(right.sourceType))
+      : String(left.commandCode).localeCompare(String(right.commandCode))
+  );
+}
+
+function buildUiBlockerCatalog({ objectProfileContracts = [] } = {}) {
+  const blockers = new Map();
+  for (const profile of objectProfileContracts) {
+    for (const blockerCode of profile.blockerCodes || []) {
+      const existing = blockers.get(blockerCode) || {
+        blockerCode,
+        objectTypes: [],
+        profileTypes: [],
+        surfaceCodes: []
+      };
+      if (!existing.objectTypes.includes(profile.objectType)) {
+        existing.objectTypes.push(profile.objectType);
+      }
+      if (!existing.profileTypes.includes(profile.profileType)) {
+        existing.profileTypes.push(profile.profileType);
+      }
+      for (const surfaceCode of profile.surfaceCodes || []) {
+        if (!existing.surfaceCodes.includes(surfaceCode)) {
+          existing.surfaceCodes.push(surfaceCode);
+        }
+      }
+      blockers.set(blockerCode, existing);
+    }
+  }
+  return [...blockers.values()].sort((left, right) => left.blockerCode.localeCompare(right.blockerCode));
+}
+
+function deriveUiReadRouteContractKind(path) {
+  if (path.endsWith("/contracts")) {
+    return "contract_catalog";
+  }
+  if (path.endsWith("/evidence") || path.endsWith("/evidence-pack")) {
+    return "evidence";
+  }
+  if (path.includes("/:")) {
+    return "detail";
+  }
+  return "list";
+}
+
+function inferUiSurfaceFamilyCodesFromRoutePath(path) {
+  if (
+    path.startsWith("/v1/system/")
+    || path.startsWith("/v1/auth/")
+    || path.startsWith("/v1/public/")
+    || path.startsWith("/v1/onboarding/")
+    || path.startsWith("/v1/tenant/")
+    || path.startsWith("/v1/trial/")
+    || path.startsWith("/v1/pilot/")
+    || path.startsWith("/v1/release/")
+    || path.startsWith("/v1/integrations/")
+  ) {
+    return [];
+  }
+  if (path.startsWith("/v1/backoffice/") || path.startsWith("/v1/ops/")) {
+    return ["backoffice"];
+  }
+  if (
+    path.startsWith("/v1/field/")
+    || path.startsWith("/v1/personalliggare/")
+    || path.startsWith("/v1/id06/")
+    || path.startsWith("/v1/egenkontroll/")
+  ) {
+    return ["field"];
+  }
+  if (path.startsWith("/v1/")) {
+    return ["desktop"];
+  }
+  return [];
+}
+
+function compareUiRouteContracts(left, right) {
+  return left.path === right.path
+    ? left.method.localeCompare(right.method)
+    : left.path.localeCompare(right.path);
 }
 
 function authorizeDocumentAccess({ platform, sessionToken, companyId, permissionCode }) {
