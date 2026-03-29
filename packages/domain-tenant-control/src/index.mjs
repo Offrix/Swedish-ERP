@@ -39,6 +39,12 @@ export const PILOT_EXECUTION_STATUSES = Object.freeze([
   "blocked",
   "completed"
 ]);
+export const PILOT_COHORT_STATUSES = Object.freeze([
+  "planned",
+  "running",
+  "accepted",
+  "rejected"
+]);
 export const PILOT_SCENARIO_STATUSES = Object.freeze([
   "pending",
   "passed",
@@ -133,6 +139,99 @@ const DEFAULT_PILOT_SCENARIO_DEFINITIONS = Object.freeze([
     label: "Support operations",
     domainCode: "support",
     description: "Support case, replay, dead-letter and incident handling."
+  })
+]);
+const OPTIONAL_PILOT_SCENARIO_DEFINITIONS = Object.freeze([
+  Object.freeze({
+    scenarioCode: "project_profitability",
+    label: "Project profitability",
+    domainCode: "projects",
+    description: "Project commercial core, actuals, profitability and forecast handling."
+  }),
+  Object.freeze({
+    scenarioCode: "personalliggare_id06",
+    label: "Personalliggare and ID06",
+    domainCode: "personalliggare_id06",
+    description: "Attendance, trusted kiosk and ID06 verification evidence flow."
+  }),
+  Object.freeze({
+    scenarioCode: "enterprise_auth",
+    label: "Enterprise authentication",
+    domainCode: "enterprise_auth",
+    description: "SSO, federation and enterprise auth controls for pilot scope."
+  })
+]);
+const PILOT_COHORT_SEGMENT_DEFINITIONS = Object.freeze([
+  Object.freeze({
+    segmentCode: "finance_payroll_ab",
+    label: "AB finance and payroll",
+    requiredScenarioCodes: [
+      "finance_core",
+      "vat_cycle",
+      "payroll_agi",
+      "tax_account_reconciliation",
+      "annual_reporting",
+      "support_operations"
+    ],
+    minimumPilotCount: 1
+  }),
+  Object.freeze({
+    segmentCode: "service_project_company",
+    label: "Service and project company",
+    requiredScenarioCodes: [
+      "finance_core",
+      "vat_cycle",
+      "payroll_agi",
+      "tax_account_reconciliation",
+      "annual_reporting",
+      "support_operations",
+      "project_profitability"
+    ],
+    minimumPilotCount: 1
+  }),
+  Object.freeze({
+    segmentCode: "hus_business",
+    label: "HUS business",
+    requiredScenarioCodes: [
+      "finance_core",
+      "vat_cycle",
+      "payroll_agi",
+      "hus_claim",
+      "tax_account_reconciliation",
+      "annual_reporting",
+      "support_operations"
+    ],
+    minimumPilotCount: 1
+  }),
+  Object.freeze({
+    segmentCode: "construction_service_id06",
+    label: "Construction and service with personalliggare and ID06",
+    requiredScenarioCodes: [
+      "finance_core",
+      "vat_cycle",
+      "payroll_agi",
+      "hus_claim",
+      "tax_account_reconciliation",
+      "annual_reporting",
+      "support_operations",
+      "project_profitability",
+      "personalliggare_id06"
+    ],
+    minimumPilotCount: 1
+  }),
+  Object.freeze({
+    segmentCode: "enterprise_sso_customer",
+    label: "Enterprise SSO customer",
+    requiredScenarioCodes: [
+      "finance_core",
+      "vat_cycle",
+      "payroll_agi",
+      "tax_account_reconciliation",
+      "annual_reporting",
+      "support_operations",
+      "enterprise_auth"
+    ],
+    minimumPilotCount: 1
   })
 ]);
 const TRIAL_SEED_SCENARIO_ALIAS_CODES = Object.freeze({
@@ -493,6 +592,9 @@ export function createTenantControlEngine({
     parallelRunPlanIdsByCompany: new Map(),
     pilotExecutions: new Map(),
     pilotExecutionIdsByCompany: new Map(),
+    pilotCohorts: new Map(),
+    pilotCohortIdsByCompany: new Map(),
+    pilotCohortIdsBySegment: new Map(),
     financeBlueprintsByCompany: new Map(),
     financeFoundationRecordsByCompany: new Map(),
     tenantControlEvents: [],
@@ -509,6 +611,7 @@ export function createTenantControlEngine({
     promotionPlanStatuses: PROMOTION_PLAN_STATUSES,
     parallelRunPlanStatuses: PARALLEL_RUN_PLAN_STATUSES,
     pilotExecutionStatuses: PILOT_EXECUTION_STATUSES,
+    pilotCohortStatuses: PILOT_COHORT_STATUSES,
     pilotScenarioStatuses: PILOT_SCENARIO_STATUSES,
     createTenantBootstrap,
     getTenantBootstrap,
@@ -543,6 +646,12 @@ export function createTenantControlEngine({
     recordPilotScenarioOutcome,
     completePilotExecution,
     exportPilotExecutionEvidence,
+    startPilotCohort,
+    getPilotCohort,
+    listPilotCohorts,
+    attachPilotExecutionsToCohort,
+    assessPilotCohort,
+    exportPilotCohortEvidence,
     getFinanceReadinessValidation,
     snapshotTenantControl,
     exportDurableState,
@@ -1599,7 +1708,7 @@ export function createTenantControlEngine({
     }
 
     const scenarioDefinitions = resolvePilotScenarioDefinitions(scenarioCodes);
-    const domainAvailability = buildPilotDomainAvailability();
+    const domainAvailability = buildPilotDomainAvailability(scenarioDefinitions);
     const missingDomains = domainAvailability.filter((item) => item.available !== true).map((item) => item.domainCode);
     if (missingDomains.length > 0) {
       throw httpError(
@@ -1898,6 +2007,302 @@ export function createTenantControlEngine({
     const evidenceBundle = createPilotExecutionEvidenceBundle({
       record,
       actorId: "tenant_control_pilot_export"
+    });
+    record.latestEvidenceBundleId = evidenceBundle.evidenceBundleId;
+    record.updatedAt = nowIso();
+    return copy(evidenceBundle);
+  }
+
+  function startPilotCohort({
+    sessionToken,
+    companyId,
+    segmentCode,
+    label = null,
+    pilotExecutionIds = [],
+    notes = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const principal = authorizeCompanyAction({
+      sessionToken,
+      companyId: resolvedCompanyId,
+      action: "COMPANY_MANAGE",
+      objectType: "pilot_cohort",
+      objectId: resolvedCompanyId,
+      scopeCode: "pilot_execution"
+    });
+    const segmentDefinition = requirePilotCohortSegmentDefinition(segmentCode);
+    const now = nowIso();
+    const record = {
+      pilotCohortId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      segmentCode: segmentDefinition.segmentCode,
+      label: normalizeOptionalText(label) || segmentDefinition.label,
+      status: "planned",
+      requiredScenarioCodes: copy(segmentDefinition.requiredScenarioCodes),
+      minimumPilotCount: segmentDefinition.minimumPilotCount,
+      pilotExecutionIds: [],
+      linkedPilotExecutions: [],
+      coverageSummary: {
+        requiredScenarioCodes: copy(segmentDefinition.requiredScenarioCodes),
+        coveredScenarioCodes: [],
+        missingScenarioCodes: copy(segmentDefinition.requiredScenarioCodes),
+        completedPilotCount: 0,
+        minimumPilotCount: segmentDefinition.minimumPilotCount,
+        readyForAcceptance: false
+      },
+      blockingIssueCodes: ["pilot_cohort_needs_completed_pilots"],
+      reusableCutoverTemplateRefs: [],
+      rollbackEvidenceRefs: [],
+      approvalCoverage: {
+        requiredApprovalClasses: copy(PILOT_REQUIRED_APPROVAL_CLASSES),
+        implementation: { fulfilled: false, actorUserIds: [] },
+        finance: { fulfilled: false, actorUserIds: [] },
+        support: { fulfilled: false, actorUserIds: [] },
+        complete: false
+      },
+      notes: normalizeOptionalText(notes),
+      latestEvidenceBundleId: null,
+      createdAt: now,
+      updatedAt: now,
+      startedByUserId: principal.userId,
+      acceptedAt: null,
+      rejectedAt: null
+    };
+    state.pilotCohorts.set(record.pilotCohortId, record);
+    appendToIndex(state.pilotCohortIdsByCompany, resolvedCompanyId, record.pilotCohortId);
+    appendToIndex(state.pilotCohortIdsBySegment, record.segmentCode, record.pilotCohortId);
+    if (Array.isArray(pilotExecutionIds) && pilotExecutionIds.length > 0) {
+      linkPilotExecutionsIntoCohort({
+        record,
+        pilotExecutionIds,
+        principalUserId: principal.userId
+      });
+    } else {
+      syncPilotCohortDerivedState(record);
+    }
+    appendDomainEvent("pilot.cohort.started", {
+      companyId: resolvedCompanyId,
+      pilotCohortId: record.pilotCohortId,
+      segmentCode: record.segmentCode,
+      actorUserId: principal.userId
+    });
+    appendAuditEvent({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      action: "tenant_control.pilot_cohort.started",
+      entityType: "pilot_cohort",
+      entityId: record.pilotCohortId,
+      metadata: {
+        segmentCode: record.segmentCode,
+        pilotExecutionCount: record.pilotExecutionIds.length
+      }
+    });
+    return presentPilotCohort(record);
+  }
+
+  function getPilotCohort({ sessionToken, pilotCohortId } = {}) {
+    const record = requirePilotCohort(pilotCohortId);
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_READ",
+      objectType: "pilot_cohort",
+      objectId: record.pilotCohortId,
+      scopeCode: "pilot_execution"
+    });
+    return presentPilotCohort(record);
+  }
+
+  function listPilotCohorts({ sessionToken, companyId = null, segmentCode = null } = {}) {
+    const resolvedCompanyId = normalizeOptionalText(companyId);
+    if (resolvedCompanyId) {
+      authorizeCompanyAction({
+        sessionToken,
+        companyId: resolvedCompanyId,
+        action: "COMPANY_READ",
+        objectType: "pilot_cohort",
+        objectId: resolvedCompanyId,
+        scopeCode: "pilot_execution"
+      });
+    }
+    const resolvedSegmentCode = normalizeOptionalText(segmentCode);
+    let candidates = [...state.pilotCohorts.values()];
+    if (resolvedCompanyId) {
+      const allowedIds = new Set(state.pilotCohortIdsByCompany.get(resolvedCompanyId) || []);
+      candidates = candidates.filter((item) => allowedIds.has(item.pilotCohortId));
+    }
+    if (resolvedSegmentCode) {
+      candidates = candidates.filter((item) => item.segmentCode === resolvedSegmentCode);
+    }
+    return candidates
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map((record) => presentPilotCohort(record));
+  }
+
+  function attachPilotExecutionsToCohort({
+    sessionToken,
+    pilotCohortId,
+    pilotExecutionIds = []
+  } = {}) {
+    const record = requirePilotCohort(pilotCohortId);
+    const principal = authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_MANAGE",
+      objectType: "pilot_cohort",
+      objectId: record.pilotCohortId,
+      scopeCode: "pilot_execution"
+    });
+    if (["accepted", "rejected"].includes(record.status)) {
+      throw httpError(409, "pilot_cohort_terminal", "Pilot cohort is already terminal.");
+    }
+    linkPilotExecutionsIntoCohort({
+      record,
+      pilotExecutionIds,
+      principalUserId: principal.userId
+    });
+    appendAuditEvent({
+      companyId: record.companyId,
+      actorId: principal.userId,
+      action: "tenant_control.pilot_cohort.pilots_attached",
+      entityType: "pilot_cohort",
+      entityId: record.pilotCohortId,
+      metadata: {
+        linkedPilotExecutionIds: copy(record.pilotExecutionIds)
+      }
+    });
+    return presentPilotCohort(record);
+  }
+
+  function assessPilotCohort({
+    sessionToken,
+    pilotCohortId,
+    decision,
+    approvalActorIds = [],
+    reusableCutoverTemplateRefs = [],
+    rollbackEvidenceRefs = [],
+    blockerCodes = [],
+    notes = null
+  } = {}) {
+    const record = requirePilotCohort(pilotCohortId);
+    const principal = authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_MANAGE",
+      objectType: "pilot_cohort",
+      objectId: record.pilotCohortId,
+      scopeCode: "pilot_execution"
+    });
+    if (["accepted", "rejected"].includes(record.status)) {
+      return presentPilotCohort(record);
+    }
+
+    syncPilotCohortDerivedState(record);
+    const resolvedDecision = requireText(String(decision || ""), "pilot_cohort_decision_required");
+    if (!["accepted", "rejected"].includes(resolvedDecision)) {
+      throw httpError(400, "pilot_cohort_decision_invalid", "Pilot cohort decision must be accepted or rejected.");
+    }
+
+    if (resolvedDecision === "accepted" && record.coverageSummary.readyForAcceptance !== true) {
+      throw httpError(409, "pilot_cohort_not_ready_for_acceptance", "Pilot cohort is not ready for acceptance.");
+    }
+
+    const approvalCoverage = evaluatePilotApprovalCoverage({
+      companyId: record.companyId,
+      principalUserId: principal.userId,
+      approvalActorIds: normalizeStringList(approvalActorIds)
+    });
+    if (resolvedDecision === "accepted" && approvalCoverage.complete !== true) {
+      throw httpError(409, "pilot_cohort_approval_incomplete", "Pilot cohort acceptance requires implementation, finance and support approval coverage.");
+    }
+
+    const normalizedCutoverTemplateRefs = normalizePilotArtifactRefs(reusableCutoverTemplateRefs, {
+      defaultArtifactType: "cutover_template_evidence",
+      roleCode: "pilot_cohort"
+    });
+    const normalizedRollbackEvidenceRefs = normalizePilotArtifactRefs(rollbackEvidenceRefs, {
+      defaultArtifactType: "rollback_preparedness_evidence",
+      roleCode: "pilot_cohort"
+    });
+    if (resolvedDecision === "accepted" && normalizedCutoverTemplateRefs.length === 0) {
+      throw httpError(409, "pilot_cohort_cutover_template_required", "Pilot cohort acceptance requires reusable cutover template evidence.");
+    }
+    if (resolvedDecision === "accepted" && normalizedRollbackEvidenceRefs.length === 0) {
+      throw httpError(409, "pilot_cohort_rollback_evidence_required", "Pilot cohort acceptance requires rollback evidence.");
+    }
+
+    record.approvalCoverage = approvalCoverage;
+    record.reusableCutoverTemplateRefs = normalizedCutoverTemplateRefs;
+    record.rollbackEvidenceRefs = normalizedRollbackEvidenceRefs;
+    record.notes = normalizeOptionalText(notes) || record.notes;
+    record.updatedAt = nowIso();
+    if (resolvedDecision === "accepted") {
+      const evidenceBundle = createPilotCohortEvidenceBundle({
+        record,
+        actorId: principal.userId
+      });
+      record.latestEvidenceBundleId = evidenceBundle.evidenceBundleId;
+      record.status = "accepted";
+      record.acceptedAt = record.updatedAt;
+      record.blockingIssueCodes = [];
+    } else {
+      const resolvedBlockerCodes = normalizeStringList(blockerCodes);
+      if (resolvedBlockerCodes.length === 0) {
+        throw httpError(409, "pilot_cohort_rejection_requires_blockers", "Rejected pilot cohorts require blocker codes.");
+      }
+      record.status = "rejected";
+      record.rejectedAt = record.updatedAt;
+      record.blockingIssueCodes = resolvedBlockerCodes;
+    }
+    appendDomainEvent("pilot.cohort.assessed", {
+      companyId: record.companyId,
+      pilotCohortId: record.pilotCohortId,
+      decision: record.status,
+      actorUserId: principal.userId
+    });
+    appendAuditEvent({
+      companyId: record.companyId,
+      actorId: principal.userId,
+      action: "tenant_control.pilot_cohort.assessed",
+      entityType: "pilot_cohort",
+      entityId: record.pilotCohortId,
+      metadata: {
+        decision: record.status,
+        cutoverTemplateCount: record.reusableCutoverTemplateRefs.length,
+        rollbackEvidenceCount: record.rollbackEvidenceRefs.length,
+        approvalCoverage: copy(record.approvalCoverage)
+      }
+    });
+    return presentPilotCohort(record);
+  }
+
+  function exportPilotCohortEvidence({ sessionToken, pilotCohortId } = {}) {
+    const record = requirePilotCohort(pilotCohortId);
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_READ",
+      objectType: "pilot_cohort",
+      objectId: record.pilotCohortId,
+      scopeCode: "pilot_execution"
+    });
+    if (record.status !== "accepted") {
+      throw httpError(409, "pilot_cohort_not_accepted", "Pilot cohort evidence can only be exported after acceptance.");
+    }
+    const evidenceDomain = getOptionalDomain("evidence");
+    if (
+      record.latestEvidenceBundleId
+      && evidenceDomain
+      && typeof evidenceDomain.getEvidenceBundle === "function"
+    ) {
+      return evidenceDomain.getEvidenceBundle({
+        companyId: record.companyId,
+        evidenceBundleId: record.latestEvidenceBundleId
+      });
+    }
+    const evidenceBundle = createPilotCohortEvidenceBundle({
+      record,
+      actorId: "tenant_control_pilot_cohort_export"
     });
     record.latestEvidenceBundleId = evidenceBundle.evidenceBundleId;
     record.updatedAt = nowIso();
@@ -2595,6 +3000,7 @@ export function createTenantControlEngine({
       portableDataBundles: [...state.portableDataBundles.values()],
       parallelRunPlans: [...state.parallelRunPlans.values()],
       pilotExecutions: [...state.pilotExecutions.values()],
+      pilotCohorts: [...state.pilotCohorts.values()],
       financeBlueprints: [...state.financeBlueprintsByCompany.values()],
       financeFoundationRecords: [...state.financeFoundationRecordsByCompany.values()],
       tenantControlEvents: [...state.tenantControlEvents],
@@ -3187,6 +3593,14 @@ export function createTenantControlEngine({
     return record;
   }
 
+  function requirePilotCohort(pilotCohortId) {
+    const record = state.pilotCohorts.get(requireText(pilotCohortId, "pilot_cohort_id_required"));
+    if (!record) {
+      throw httpError(404, "pilot_cohort_not_found", "Pilot cohort was not found.");
+    }
+    return record;
+  }
+
   function requirePromotionPlan(promotionPlanId) {
     const record = state.promotionPlans.get(requireText(promotionPlanId, "promotion_plan_id_required"));
     if (!record) {
@@ -3257,6 +3671,20 @@ export function createTenantControlEngine({
       nextActionCodes: copy(record.nextActionCodes || []),
       domainAvailability: copy(record.domainAvailability || []),
       rollbackPreparedness: copy(record.rollbackPreparedness || null),
+      approvalCoverage: copy(record.approvalCoverage || null)
+    });
+  }
+
+  function presentPilotCohort(record) {
+    return copy({
+      ...record,
+      requiredScenarioCodes: copy(record.requiredScenarioCodes || []),
+      pilotExecutionIds: copy(record.pilotExecutionIds || []),
+      linkedPilotExecutions: copy(record.linkedPilotExecutions || []),
+      coverageSummary: copy(record.coverageSummary || null),
+      blockingIssueCodes: copy(record.blockingIssueCodes || []),
+      reusableCutoverTemplateRefs: copy(record.reusableCutoverTemplateRefs || []),
+      rollbackEvidenceRefs: copy(record.rollbackEvidenceRefs || []),
       approvalCoverage: copy(record.approvalCoverage || null)
     });
   }
@@ -3773,6 +4201,78 @@ export function createTenantControlEngine({
     };
   }
 
+  function createPilotCohortEvidenceBundle({
+    record,
+    actorId
+  } = {}) {
+    const evidenceDomain = getOptionalDomain("evidence");
+    const metadata = {
+      segmentCode: record.segmentCode,
+      coverageSummary: copy(record.coverageSummary),
+      approvalCoverage: copy(record.approvalCoverage)
+    };
+    const artifactRefs = [
+      {
+        artifactType: "pilot_cohort_coverage_matrix",
+        artifactRef: `pilot-cohort-coverage://${record.pilotCohortId}`,
+        checksum: hashJson(record.coverageSummary),
+        roleCode: "tenant_control",
+        metadata: {
+          completedPilotCount: record.coverageSummary?.completedPilotCount || 0,
+          missingScenarioCount: (record.coverageSummary?.missingScenarioCodes || []).length
+        }
+      },
+      ...normalizePilotArtifactRefs(record.reusableCutoverTemplateRefs, {
+        defaultArtifactType: "cutover_template_evidence",
+        roleCode: "pilot_cohort"
+      }),
+      ...normalizePilotArtifactRefs(record.rollbackEvidenceRefs, {
+        defaultArtifactType: "rollback_preparedness_evidence",
+        roleCode: "pilot_cohort"
+      })
+    ];
+    const relatedObjectRefs = [
+      {
+        objectType: "company",
+        objectId: record.companyId,
+        relationCode: "pilot_cohort_company"
+      },
+      ...(record.pilotExecutionIds || []).map((pilotExecutionId) => ({
+        objectType: "pilot_execution",
+        objectId: pilotExecutionId,
+        relationCode: "pilot_execution"
+      }))
+    ];
+    if (evidenceDomain && typeof evidenceDomain.createFrozenEvidenceBundleSnapshot === "function") {
+      return evidenceDomain.createFrozenEvidenceBundleSnapshot({
+        companyId: record.companyId,
+        bundleType: "pilot_cohort",
+        sourceObjectType: "pilot_cohort",
+        sourceObjectId: record.pilotCohortId,
+        sourceObjectVersion: `pilot_cohort:${record.updatedAt || record.createdAt}`,
+        title: "Pilot cohort evidence",
+        retentionClass: "operational",
+        classificationCode: "restricted_internal",
+        metadata,
+        artifactRefs,
+        relatedObjectRefs,
+        actorId,
+        previousEvidenceBundleId: record.latestEvidenceBundleId || null,
+        environmentMode: "pilot_parallel"
+      });
+    }
+    return {
+      evidenceBundleId: crypto.randomUUID(),
+      bundleType: "pilot_cohort",
+      sourceObjectType: "pilot_cohort",
+      sourceObjectId: record.pilotCohortId,
+      metadata: copy(metadata),
+      artifactRefs,
+      relatedObjectRefs,
+      environmentMode: "pilot_parallel"
+    };
+  }
+
   function findCompanySnapshotById(companyId) {
     const orgAuthSnapshot = getOrgAuthSnapshot();
     return (orgAuthSnapshot?.companies || []).find((record) => record.companyId === requireText(companyId, "company_id_required")) || null;
@@ -3872,13 +4372,23 @@ export function createTenantControlEngine({
     if (requested.length === 0) {
       return DEFAULT_PILOT_SCENARIO_DEFINITIONS.map((item) => copy(item));
     }
+    const supportedDefinitions = [...DEFAULT_PILOT_SCENARIO_DEFINITIONS, ...OPTIONAL_PILOT_SCENARIO_DEFINITIONS];
     return requested.map((scenarioCode) => {
-      const definition = DEFAULT_PILOT_SCENARIO_DEFINITIONS.find((item) => item.scenarioCode === scenarioCode);
+      const definition = supportedDefinitions.find((item) => item.scenarioCode === scenarioCode);
       if (!definition) {
         throw httpError(400, "pilot_scenario_unsupported", `Unsupported pilot scenario ${scenarioCode}.`);
       }
       return copy(definition);
     });
+  }
+
+  function requirePilotCohortSegmentDefinition(segmentCode) {
+    const resolvedSegmentCode = requireText(String(segmentCode || ""), "pilot_cohort_segment_code_required");
+    const definition = PILOT_COHORT_SEGMENT_DEFINITIONS.find((item) => item.segmentCode === resolvedSegmentCode);
+    if (!definition) {
+      throw httpError(400, "pilot_cohort_segment_unsupported", `Unsupported pilot cohort segment ${resolvedSegmentCode}.`);
+    }
+    return copy(definition);
   }
 
   function buildPilotScenarioResults(definitions) {
@@ -3899,17 +4409,24 @@ export function createTenantControlEngine({
     }));
   }
 
-  function buildPilotDomainAvailability() {
-    const domainChecks = [
-      { domainCode: "finance", requiredDomains: ["ledger", "ar", "ap", "banking"] },
-      { domainCode: "vat", requiredDomains: ["vat"] },
-      { domainCode: "payroll", requiredDomains: ["payroll"] },
-      { domainCode: "hus", requiredDomains: ["hus"] },
-      { domainCode: "tax_account", requiredDomains: ["taxAccount"] },
-      { domainCode: "annual_reporting", requiredDomains: ["annualReporting"] },
-      { domainCode: "support", requiredDomains: ["core"] }
+  function buildPilotDomainAvailability(definitions = DEFAULT_PILOT_SCENARIO_DEFINITIONS) {
+    const domainChecksByCode = new Map([
+      ["finance", { domainCode: "finance", requiredDomains: ["ledger", "ar", "ap", "banking"] }],
+      ["vat", { domainCode: "vat", requiredDomains: ["vat"] }],
+      ["payroll", { domainCode: "payroll", requiredDomains: ["payroll"] }],
+      ["hus", { domainCode: "hus", requiredDomains: ["hus"] }],
+      ["tax_account", { domainCode: "tax_account", requiredDomains: ["taxAccount"] }],
+      ["annual_reporting", { domainCode: "annual_reporting", requiredDomains: ["annualReporting"] }],
+      ["support", { domainCode: "support", requiredDomains: ["core"] }],
+      ["projects", { domainCode: "projects", requiredDomains: ["projects"] }],
+      ["personalliggare_id06", { domainCode: "personalliggare_id06", requiredDomains: ["personalliggare", "id06"] }],
+      ["enterprise_auth", { domainCode: "enterprise_auth", requiredDomains: ["orgAuth"] }]
+    ]);
+    const requestedDomainCodes = [
+      ...new Set((Array.isArray(definitions) ? definitions : []).map((item) => item.domainCode).filter(Boolean))
     ];
-    return domainChecks.map((item) => {
+    return requestedDomainCodes.map((domainCode) => {
+      const item = domainChecksByCode.get(domainCode) || { domainCode, requiredDomains: [] };
       const missingDomainKeys = item.requiredDomains.filter((domainKey) => !getOptionalDomain(domainKey));
       return {
         domainCode: item.domainCode,
@@ -4003,6 +4520,98 @@ export function createTenantControlEngine({
       nextActions.push("freeze_pilot_evidence");
     }
     return [...new Set(nextActions)];
+  }
+
+  function linkPilotExecutionsIntoCohort({ record, pilotExecutionIds = [], principalUserId } = {}) {
+    const resolvedPilotExecutionIds = normalizeStringList(pilotExecutionIds);
+    for (const pilotExecutionId of resolvedPilotExecutionIds) {
+      const pilotExecution = requirePilotExecution(pilotExecutionId);
+      if (pilotExecution.companyId !== record.companyId) {
+        throw httpError(409, "pilot_cohort_company_scope_mismatch", "Pilot execution belongs to another company.");
+      }
+      if (pilotExecution.status !== "completed") {
+        throw httpError(409, "pilot_cohort_requires_completed_pilot", "Pilot cohort requires completed pilot executions.");
+      }
+      if (!record.requiredScenarioCodes.every((scenarioCode) => pilotExecution.scenarioResults.some((item) => item.scenarioCode === scenarioCode))) {
+        throw httpError(409, "pilot_cohort_scenario_coverage_mismatch", "Pilot execution does not cover the required segment scenarios.");
+      }
+      if (!record.pilotExecutionIds.includes(pilotExecution.pilotExecutionId)) {
+        record.pilotExecutionIds.push(pilotExecution.pilotExecutionId);
+      }
+      pilotExecution.cohortCode = record.segmentCode;
+      pilotExecution.updatedAt = nowIso();
+    }
+    record.linkedPilotExecutions = record.pilotExecutionIds
+      .map((pilotExecutionId) => state.pilotExecutions.get(pilotExecutionId))
+      .filter(Boolean)
+      .map((pilotExecution) => ({
+        pilotExecutionId: pilotExecution.pilotExecutionId,
+        label: pilotExecution.label,
+        cohortCode: pilotExecution.cohortCode,
+        companyId: pilotExecution.companyId,
+        scenarioSummary: copy(pilotExecution.scenarioSummary),
+        latestEvidenceBundleId: pilotExecution.latestEvidenceBundleId || null,
+        completedAt: pilotExecution.completedAt || null
+      }));
+    record.updatedAt = nowIso();
+    syncPilotCohortDerivedState(record);
+    appendDomainEvent("pilot.cohort.pilots_linked", {
+      companyId: record.companyId,
+      pilotCohortId: record.pilotCohortId,
+      actorUserId: principalUserId,
+      pilotExecutionIds: copy(record.pilotExecutionIds)
+    });
+  }
+
+  function syncPilotCohortDerivedState(record) {
+    const coverageSummary = buildPilotCohortCoverageSummary(record);
+    record.coverageSummary = coverageSummary;
+    if (record.status === "accepted" || record.status === "rejected") {
+      return;
+    }
+    if (coverageSummary.completedPilotCount === 0) {
+      record.status = "planned";
+    } else {
+      record.status = "running";
+    }
+    record.blockingIssueCodes = buildPilotCohortBlockingIssueCodes(record);
+  }
+
+  function buildPilotCohortCoverageSummary(record) {
+    const linkedPilots = (record.pilotExecutionIds || [])
+      .map((pilotExecutionId) => state.pilotExecutions.get(pilotExecutionId))
+      .filter(Boolean);
+    const coveredScenarioCodes = [
+      ...new Set(
+        linkedPilots.flatMap((pilotExecution) =>
+          (pilotExecution.scenarioResults || [])
+            .filter((item) => item.status === "passed")
+            .map((item) => item.scenarioCode)
+        )
+      )
+    ].sort();
+    const requiredScenarioCodes = normalizeStringList(record.requiredScenarioCodes);
+    const missingScenarioCodes = requiredScenarioCodes.filter((scenarioCode) => !coveredScenarioCodes.includes(scenarioCode));
+    const completedPilotCount = linkedPilots.filter((pilotExecution) => pilotExecution.status === "completed").length;
+    return {
+      requiredScenarioCodes,
+      coveredScenarioCodes,
+      missingScenarioCodes,
+      completedPilotCount,
+      minimumPilotCount: Number(record.minimumPilotCount || 1),
+      readyForAcceptance: completedPilotCount >= Number(record.minimumPilotCount || 1) && missingScenarioCodes.length === 0
+    };
+  }
+
+  function buildPilotCohortBlockingIssueCodes(record) {
+    const issues = [];
+    if ((record.coverageSummary?.completedPilotCount || 0) < Number(record.minimumPilotCount || 1)) {
+      issues.push("pilot_cohort_needs_completed_pilots");
+    }
+    if ((record.coverageSummary?.missingScenarioCodes || []).length > 0) {
+      issues.push("pilot_cohort_missing_segment_coverage");
+    }
+    return [...new Set(issues)];
   }
 
   function requirePilotScenarioStatus(status) {

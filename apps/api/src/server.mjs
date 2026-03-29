@@ -360,6 +360,11 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/pilot/executions/:pilotExecutionId/scenarios/:scenarioCode",
               "/v1/pilot/executions/:pilotExecutionId/complete",
               "/v1/pilot/executions/:pilotExecutionId/evidence",
+              "/v1/pilot/cohorts",
+              "/v1/pilot/cohorts/:pilotCohortId",
+              "/v1/pilot/cohorts/:pilotCohortId/pilots",
+              "/v1/pilot/cohorts/:pilotCohortId/assess",
+              "/v1/pilot/cohorts/:pilotCohortId/evidence",
               "/v1/onboarding/runs",
               "/v1/onboarding/runs/:runId",
               "/v1/onboarding/runs/:runId/checklist",
@@ -1968,6 +1973,38 @@ async function handleRequest({ req, res, platform, flags }) {
     return;
   }
 
+  if (req.method === "POST" && path === "/v1/pilot/cohorts") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      requireTenantControlDomain(platform).startPilotCohort({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        segmentCode: body.segmentCode,
+        label: body.label,
+        pilotExecutionIds: body.pilotExecutionIds,
+        notes: body.notes
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/pilot/cohorts") {
+    writeJson(
+      res,
+      200,
+      {
+        items: requireTenantControlDomain(platform).listPilotCohorts({
+          sessionToken: readSessionToken(req),
+          companyId: url.searchParams.get("companyId"),
+          segmentCode: url.searchParams.get("segmentCode")
+        })
+      }
+    );
+    return;
+  }
+
   const pilotExecutionMatch = matchPath(path, "/v1/pilot/executions/:pilotExecutionId");
   if (req.method === "GET" && pilotExecutionMatch) {
     writeJson(
@@ -1977,6 +2014,69 @@ async function handleRequest({ req, res, platform, flags }) {
         sessionToken: readSessionToken(req),
         pilotExecutionId: pilotExecutionMatch.pilotExecutionId
       })
+    );
+    return;
+  }
+
+  const pilotCohortMatch = matchPath(path, "/v1/pilot/cohorts/:pilotCohortId");
+  if (req.method === "GET" && pilotCohortMatch) {
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).getPilotCohort({
+        sessionToken: readSessionToken(req),
+        pilotCohortId: pilotCohortMatch.pilotCohortId
+      })
+    );
+    return;
+  }
+
+  const pilotCohortPilotsMatch = matchPath(path, "/v1/pilot/cohorts/:pilotCohortId/pilots");
+  if (req.method === "POST" && pilotCohortPilotsMatch) {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).attachPilotExecutionsToCohort({
+        sessionToken: readSessionToken(req, body),
+        pilotCohortId: pilotCohortPilotsMatch.pilotCohortId,
+        pilotExecutionIds: body.pilotExecutionIds
+      })
+    );
+    return;
+  }
+
+  const pilotCohortAssessMatch = matchPath(path, "/v1/pilot/cohorts/:pilotCohortId/assess");
+  if (req.method === "POST" && pilotCohortAssessMatch) {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).assessPilotCohort({
+        sessionToken: readSessionToken(req, body),
+        pilotCohortId: pilotCohortAssessMatch.pilotCohortId,
+        decision: body.decision,
+        approvalActorIds: body.approvalActorIds,
+        reusableCutoverTemplateRefs: body.reusableCutoverTemplateRefs,
+        rollbackEvidenceRefs: body.rollbackEvidenceRefs,
+        blockerCodes: body.blockerCodes,
+        notes: body.notes
+      })
+    );
+    return;
+  }
+
+  const pilotCohortEvidenceMatch = matchPath(path, "/v1/pilot/cohorts/:pilotCohortId/evidence");
+  if (req.method === "GET" && pilotCohortEvidenceMatch) {
+    writeJson(
+      res,
+      200,
+      {
+        evidenceBundle: requireTenantControlDomain(platform).exportPilotCohortEvidence({
+          sessionToken: readSessionToken(req),
+          pilotCohortId: pilotCohortEvidenceMatch.pilotCohortId
+        })
+      }
     );
     return;
   }
