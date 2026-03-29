@@ -45,6 +45,11 @@ import {
   TEAMLEADER_FOCUS_PROVIDER_BASELINE_CODE,
   TEAMLEADER_FOCUS_PROVIDER_CODE
 } from "./providers/teamleader-focus.mjs";
+import {
+  createZohoCrmProjectsProvider,
+  ZOHO_CRM_PROJECTS_PROVIDER_BASELINE_CODE,
+  ZOHO_CRM_PROJECTS_PROVIDER_CODE
+} from "./providers/zoho-crm-projects.mjs";
 import { createTwilioSmsProvider, TWILIO_SMS_PROVIDER_CODE } from "./providers/twilio-sms.mjs";
 import {
   createWorkOsFederationProvider,
@@ -77,6 +82,7 @@ export { CLICKUP_PROVIDER_CODE } from "./providers/clickup.mjs";
 export { HUBSPOT_CRM_PROVIDER_CODE } from "./providers/hubspot-crm.mjs";
 export { MONDAY_WORK_MANAGEMENT_PROVIDER_CODE } from "./providers/monday-work-management.mjs";
 export { TEAMLEADER_FOCUS_PROVIDER_CODE } from "./providers/teamleader-focus.mjs";
+export { ZOHO_CRM_PROJECTS_PROVIDER_CODE } from "./providers/zoho-crm-projects.mjs";
 export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
   Object.freeze({
     providerBaselineId: "peppol-bis-billing-3-se-2026.1",
@@ -413,6 +419,20 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
     checksum: "clickup-projects-se-2026.1",
     sourceSnapshotDate: "2026-03-29",
     semanticChangeSummary: "ClickUp projects baseline for list, task, timesheet and workload handoff into governed project import batches."
+  }),
+  Object.freeze({
+    providerBaselineId: "zoho-crm-projects-billing-se-2026.1",
+    baselineCode: ZOHO_CRM_PROJECTS_PROVIDER_BASELINE_CODE,
+    providerCode: ZOHO_CRM_PROJECTS_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "crm_handoff_objects",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "crm-v8-projects-v3-billing-v1",
+    checksum: "zoho-crm-projects-billing-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Zoho CRM/Projects/Billing baseline for deal, project, timesheet and project billing handoff into governed project import batches."
   })
 ]);
 
@@ -543,6 +563,11 @@ export function createIntegrationEngine({
     environmentMode,
     providerBaselineRegistry: providerBaselines
   });
+  const zohoCrmProjectsProvider = createZohoCrmProjectsProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
   const state = {
     submissions: new Map(),
     submissionIdsByCompany: new Map(),
@@ -610,7 +635,8 @@ export function createIntegrationEngine({
       asanaProvider,
       clickUpProvider,
       mondayWorkManagementProvider,
-      teamleaderFocusProvider
+      teamleaderFocusProvider,
+      zohoCrmProjectsProvider
     ]
   });
   const regulatedSubmissionsModule = createRegulatedSubmissionsModule({
@@ -754,7 +780,8 @@ export function createIntegrationEngine({
           clickUpProvider: clickUpProvider.snapshot(),
           hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
           mondayWorkManagementProvider: mondayWorkManagementProvider.snapshot(),
-          teamleaderFocusProvider: teamleaderFocusProvider.snapshot()
+          teamleaderFocusProvider: teamleaderFocusProvider.snapshot(),
+          zohoCrmProjectsProvider: zohoCrmProjectsProvider.snapshot()
         }
       });
     },
@@ -787,7 +814,8 @@ export function createIntegrationEngine({
         clickUpProvider: clickUpProvider.snapshot(),
         hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
         mondayWorkManagementProvider: mondayWorkManagementProvider.snapshot(),
-        teamleaderFocusProvider: teamleaderFocusProvider.snapshot()
+        teamleaderFocusProvider: teamleaderFocusProvider.snapshot(),
+        zohoCrmProjectsProvider: zohoCrmProjectsProvider.snapshot()
       }
     };
   }
@@ -816,6 +844,7 @@ export function createIntegrationEngine({
     hubSpotCrmProvider.restore(snapshot?.providerSnapshots?.hubSpotCrmProvider || {});
     mondayWorkManagementProvider.restore(snapshot?.providerSnapshots?.mondayWorkManagementProvider || {});
     teamleaderFocusProvider.restore(snapshot?.providerSnapshots?.teamleaderFocusProvider || {});
+    zohoCrmProjectsProvider.restore(snapshot?.providerSnapshots?.zohoCrmProjectsProvider || {});
   }
 
   function prepareProjectImportBatchFromAdapter({
@@ -874,6 +903,14 @@ export function createIntegrationEngine({
     }
     if (connection.providerCode === TEAMLEADER_FOCUS_PROVIDER_CODE) {
       return teamleaderFocusProvider.prepareProjectImportBatch({
+        companyId: resolvedCompanyId,
+        integrationConnectionId: connection.connectionId,
+        sourceExportCapturedAt,
+        ...(payload && typeof payload === "object" ? payload : {})
+      });
+    }
+    if (connection.providerCode === ZOHO_CRM_PROJECTS_PROVIDER_CODE) {
+      return zohoCrmProjectsProvider.prepareProjectImportBatch({
         companyId: resolvedCompanyId,
         integrationConnectionId: connection.connectionId,
         sourceExportCapturedAt,
