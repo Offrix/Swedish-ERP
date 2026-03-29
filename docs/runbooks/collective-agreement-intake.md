@@ -1,9 +1,9 @@
-> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
+> Statusnotis: Detta dokument Ã¤r inte primÃ¤r sanning. Bindande styrning fÃ¶re UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md`. Detta dokument Ã¤r historiskt input- eller stÃ¶ddokument och fÃ¥r inte Ã¶verstyra dem.
 # Collective agreement intake verification
 
 ## Syfte
 
-Verifiera att nya kollektivavtal tas in via support/backoffice, går genom intern extraktion och review, och bara publiceras eller lokalsupplementeras via styrda beslut.
+Verifiera att nya kollektivavtal tas in via support/backoffice, gÃ¥r genom intern extraktion och review, och bara publiceras eller lokalsupplementeras via styrda beslut.
 
 ## Forkrav
 

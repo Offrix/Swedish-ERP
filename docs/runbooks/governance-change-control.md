@@ -1,56 +1,56 @@
-﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
+> Statusnotis: Detta dokument Ã¤r inte primÃ¤r sanning. Bindande styrning fÃ¶re UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md`. Detta dokument Ã¤r historiskt input- eller stÃ¶ddokument och fÃ¥r inte Ã¶verstyra dem.
 # Governance Change Control
 
 ## Syfte
 
-Denna runbook styr hur bindande sanning får ändras efter att:
+Denna runbook styr hur bindande sanning fÃ¥r Ã¤ndras efter att:
 
-- `docs/implementation-control/GO_LIVE_ROADMAP.md`
-- `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`
+- `docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md`
+- `docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md`
 
-har låsts som primär styrning.
+har lÃ¥sts som primÃ¤r styrning.
 
-## Primär sanning
+## PrimÃ¤r sanning
 
-Endast följande dokument är bindande för allt kvarvarande arbete före UI:
+Endast fÃ¶ljande dokument Ã¤r bindande fÃ¶r allt kvarvarande arbete fÃ¶re UI:
 
-- `docs/implementation-control/GO_LIVE_ROADMAP.md`
-- `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`
+- `docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md`
+- `docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md`
 
-Alla andra dokument i repo:t är:
+Alla andra dokument i repo:t Ã¤r:
 
-- historiska inputkällor
-- stöddokument
+- historiska inputkÃ¤llor
+- stÃ¶ddokument
 - runbooks
 - evidens eller analysunderlag
 
-De får inte överstyra de två primära dokumenten.
+De fÃ¥r inte Ã¶verstyra de tvÃ¥ primÃ¤ra dokumenten.
 
-## När denna runbook måste användas
+## NÃ¤r denna runbook mÃ¥ste anvÃ¤ndas
 
-Använd denna runbook när någon vill:
+AnvÃ¤nd denna runbook nÃ¤r nÃ¥gon vill:
 
-- ändra byggordning
-- lägga till eller ta bort en fas eller delfas
+- Ã¤ndra byggordning
+- lÃ¤gga till eller ta bort en fas eller delfas
 - markera en fas som klar
-- ändra produktkategori eller benchmark
+- Ã¤ndra produktkategori eller benchmark
 - byta providerstrategi
 - nedgradera eller uppgradera legacy-kod
-- ändra trial/live-gränser
-- ändra regulated logic, receipts, replay, recovery eller auditkrav
+- Ã¤ndra trial/live-grÃ¤nser
+- Ã¤ndra regulated logic, receipts, replay, recovery eller auditkrav
 
-## Obligatorisk ändringsprocess
+## Obligatorisk Ã¤ndringsprocess
 
-1. Identifiera vilken rad eller delfas i roadmapen som påverkas.
-2. Identifiera vilken del i implementation-bibeln som påverkas.
-3. Verifiera om ändringen är:
-   - governance-städning
+1. Identifiera vilken rad eller delfas i roadmapen som pÃ¥verkas.
+2. Identifiera vilken del i implementation-bibeln som pÃ¥verkas.
+3. Verifiera om Ã¤ndringen Ã¤r:
+   - governance-stÃ¤dning
    - hardening
    - rewrite
    - replace
    - remove/deprecate
    - ny kapabilitet
-4. Kontrollera om ändringen påverkar:
+4. Kontrollera om Ã¤ndringen pÃ¥verkar:
    - regulated logic
    - auth/security
    - provider/adapters
@@ -58,42 +58,42 @@ Använd denna runbook när någon vill:
    - cutover/migration
    - competitor parity
    - competitor advantage
-5. Uppdatera båda primära dokumenten om ändringen påverkar båda.
-6. Uppdatera stöddokument endast efter att primär sanning ändrats.
-7. Lägg till eller uppdatera traceability-rad i `docs/implementation-control/ANALYSIS_TRACEABILITY_MATRIX.md` om ändringen påverkar tidigare analysfynd.
-8. Lägg till tester, verifiering och runbooks om ändringen kräver det.
+5. Uppdatera bÃ¥da primÃ¤ra dokumenten om Ã¤ndringen pÃ¥verkar bÃ¥da.
+6. Uppdatera stÃ¶ddokument endast efter att primÃ¤r sanning Ã¤ndrats.
+7. LÃ¤gg till eller uppdatera traceability-rad i `docs/implementation-control/ANALYSIS_TRACEABILITY_MATRIX.md` om Ã¤ndringen pÃ¥verkar tidigare analysfynd.
+8. LÃ¤gg till tester, verifiering och runbooks om Ã¤ndringen krÃ¤ver det.
 
-## Regler för att markera fas eller delfas som klar
+## Regler fÃ¶r att markera fas eller delfas som klar
 
-En fas eller delfas får bara markeras som klar när:
+En fas eller delfas fÃ¥r bara markeras som klar nÃ¤r:
 
 - koden finns
 - tester finns
-- testerna är gröna
-- nödvändiga runbooks finns
-- exit gate i roadmapen är uppfylld
-- motsvarande del i implementation-bibeln faktiskt är omsatt i repo-verklighet
+- testerna Ã¤r grÃ¶na
+- nÃ¶dvÃ¤ndiga runbooks finns
+- exit gate i roadmapen Ã¤r uppfylld
+- motsvarande del i implementation-bibeln faktiskt Ã¤r omsatt i repo-verklighet
 
-Grön testsvit ensam räcker inte.
+GrÃ¶n testsvit ensam rÃ¤cker inte.
 
-## Förbjudna genvägar
+## FÃ¶rbjudna genvÃ¤gar
 
-Följande är förbjudet:
+FÃ¶ljande Ã¤r fÃ¶rbjudet:
 
-- markera fas klar för att “det mesta finns”
+- markera fas klar fÃ¶r att â€œdet mesta finnsâ€
 - behandla shell-appar eller seeds som produktmognad
-- räkna stub-provider som live coverage
-- låta äldre master-control-dokument åter bli primär sanning
-- ändra roadmapen utan motsvarande ändring i implementation-bibeln
-- bygga utanför roadmapens ordning
+- rÃ¤kna stub-provider som live coverage
+- lÃ¥ta Ã¤ldre master-control-dokument Ã¥ter bli primÃ¤r sanning
+- Ã¤ndra roadmapen utan motsvarande Ã¤ndring i implementation-bibeln
+- bygga utanfÃ¶r roadmapens ordning
 
-## När dual review krävs
+## NÃ¤r dual review krÃ¤vs
 
-Dual review krävs för ändringar som rör:
+Dual review krÃ¤vs fÃ¶r Ã¤ndringar som rÃ¶r:
 
 - regulated flows
 - providerbyten
-- trial/live-gränser
+- trial/live-grÃ¤nser
 - cutover/rollback
 - impersonation/break-glass
 - payroll tax, AGI, HUS, VAT, tax account
@@ -101,14 +101,14 @@ Dual review krävs för ändringar som rör:
 
 ## Evidens
 
-Varje governance-ändring ska dokumentera:
+Varje governance-Ã¤ndring ska dokumentera:
 
-- varför ändringen gjordes
+- varfÃ¶r Ã¤ndringen gjordes
 - vilken tidigare sanning som ersattes
-- vilka faser/delfaser som påverkas
-- vilka tester eller verifieringar som måste uppdateras
+- vilka faser/delfaser som pÃ¥verkas
+- vilka tester eller verifieringar som mÃ¥ste uppdateras
 
 ## Slutregel
 
-Om en ändring inte kan kopplas till både roadmap och implementation-bibel är ändringen inte godkänd.
+Om en Ã¤ndring inte kan kopplas till bÃ¥de roadmap och implementation-bibel Ã¤r Ã¤ndringen inte godkÃ¤nd.
 

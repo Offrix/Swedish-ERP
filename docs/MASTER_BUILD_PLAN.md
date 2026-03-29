@@ -1,4 +1,4 @@
-﻿> Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
+> Statusnotis: Detta dokument Ã¤r inte primÃ¤r sanning. Bindande styrning fÃ¶re UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md`. Detta dokument Ã¤r historiskt input- eller stÃ¶ddokument och fÃ¥r inte Ã¶verstyra dem.
 # Master metadata
 
 - Document ID: MBP-001
@@ -34,74 +34,74 @@
 
 # Supersession Notice
 
-Detta dokument är nu ett historiskt basdokument.
+Detta dokument Ã¤r nu ett historiskt basdokument.
 
-Bindande genomförandeordning och bindande implementationssanning ligger i:
+Bindande genomfÃ¶randeordning och bindande implementationssanning ligger i:
 
-- `docs/implementation-control/GO_LIVE_ROADMAP.md`
-- `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`
+- `docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md`
+- `docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md`
 
-Detta dokument får endast användas som historiskt inputmaterial när det inte krockar med dokumenten ovan.
+Detta dokument fÃ¥r endast anvÃ¤ndas som historiskt inputmaterial nÃ¤r det inte krockar med dokumenten ovan.
 
 # Purpose
 
-Detta dokument var den bindande genomförandeplanen för omtaget av produkten. Det är nu ersatt som huvuddokument för faktisk leveransordning, exit gates och dokumentberoenden.
+Detta dokument var den bindande genomfÃ¶randeplanen fÃ¶r omtaget av produkten. Det Ã¤r nu ersatt som huvuddokument fÃ¶r faktisk leveransordning, exit gates och dokumentberoenden.
 
-Planen ska användas för att:
+Planen ska anvÃ¤ndas fÃ¶r att:
 
-- styra exakt i vilken ordning Codex får bygga
-- förhindra att UI, automation eller integrationslager springer före kärnmotorerna
-- låsa sambandet mellan dokumentation, implementation, tester, runbooks och verifiering
-- säkerställa att reglerade flöden inte implementeras på gissning
+- styra exakt i vilken ordning Codex fÃ¥r bygga
+- fÃ¶rhindra att UI, automation eller integrationslager springer fÃ¶re kÃ¤rnmotorerna
+- lÃ¥sa sambandet mellan dokumentation, implementation, tester, runbooks och verifiering
+- sÃ¤kerstÃ¤lla att reglerade flÃ¶den inte implementeras pÃ¥ gissning
 
 # Binding precedence
 
-Vid konflikt gäller följande prioritetsordning:
+Vid konflikt gÃ¤ller fÃ¶ljande prioritetsordning:
 
-1. användarens uttryckliga krav i den aktiva tråden
+1. anvÃ¤ndarens uttryckliga krav i den aktiva trÃ¥den
 2. `docs/master-control/master-rebuild-control.md`
-3. övriga master-control-dokument
+3. Ã¶vriga master-control-dokument
 4. detta dokument
 5. verifierad repo-verklighet
-6. äldre dokument som ännu inte ersatts
+6. Ã¤ldre dokument som Ã¤nnu inte ersatts
 
-Den tidigare UI-planen är inte längre styrande för slutlig design eller ytstruktur. Den får endast användas som historiskt underlag tills dess ersättningsdokument i UI-spåret har frysts.
+Den tidigare UI-planen Ã¤r inte lÃ¤ngre styrande fÃ¶r slutlig design eller ytstruktur. Den fÃ¥r endast anvÃ¤ndas som historiskt underlag tills dess ersÃ¤ttningsdokument i UI-spÃ¥ret har frysts.
 
 # Repo reality and target state
 
 ## Current reality
 
-Repo:t är ett starkt dokumenterat och delvis brett kodat ERP-byggprogram, men inte en färdig produkt. De största styrkorna finns i ledger, momsmodellering, AR/AP-bredd, submission/receipt-tänk och teststrategi. De största luckorna finns i accounting method, fiscal year, tax account, person-linked document classification, payroll migration, balances, agreements, review center, worker runtime och den slutliga UI-ytan.
+Repo:t Ã¤r ett starkt dokumenterat och delvis brett kodat ERP-byggprogram, men inte en fÃ¤rdig produkt. De stÃ¶rsta styrkorna finns i ledger, momsmodellering, AR/AP-bredd, submission/receipt-tÃ¤nk och teststrategi. De stÃ¶rsta luckorna finns i accounting method, fiscal year, tax account, person-linked document classification, payroll migration, balances, agreements, review center, worker runtime och den slutliga UI-ytan.
 
 ## Target state
 
-Slutläget är ett svenskt premium-ERP där:
+SlutlÃ¤get Ã¤r ett svenskt premium-ERP dÃ¤r:
 
-- desktop-web är den enda fulla arbetsytan för alla roller
-- field-mobile är en tumvänlig stödprodukt för fältarbete
-- backoffice är en separat operatörs- och supportyta
-- ledger är enda källan till bokföring
-- payroll är enda källan till AGI-objekt
-- VAT äger momsbeslut
-- HUS äger claim-lifecycle
-- fiscal year äger periodkalender och year-change-kontroll
-- accounting method äger timinglogik för kontantmetod kontra faktureringsmetod
+- desktop-web Ã¤r den enda fulla arbetsytan fÃ¶r alla roller
+- field-mobile Ã¤r en tumvÃ¤nlig stÃ¶dprodukt fÃ¶r fÃ¤ltarbete
+- backoffice Ã¤r en separat operatÃ¶rs- och supportyta
+- ledger Ã¤r enda kÃ¤llan till bokfÃ¶ring
+- payroll Ã¤r enda kÃ¤llan till AGI-objekt
+- VAT Ã¤ger momsbeslut
+- HUS Ã¤ger claim-lifecycle
+- fiscal year Ã¤ger periodkalender och year-change-kontroll
+- accounting method Ã¤ger timinglogik fÃ¶r kontantmetod kontra faktureringsmetod
 - search aldrig blir source of truth
 
 # Non-negotiable delivery rules
 
-1. Inget område får implementeras före sina blockerande W1- eller W2-dokument.
-2. Alla nya bounded contexts ska ha dokument, tester, migrationspåverkan och runbook-spår innan de räknas som införda.
-3. UI får aldrig bära domänregler.
-4. AI får aldrig vara slutlig ekonomisk beslutsmotor.
-5. Alla reglerade beslut ska vara deterministiska, versionerade, spårbara och reproducerbara.
+1. Inget omrÃ¥de fÃ¥r implementeras fÃ¶re sina blockerande W1- eller W2-dokument.
+2. Alla nya bounded contexts ska ha dokument, tester, migrationspÃ¥verkan och runbook-spÃ¥r innan de rÃ¤knas som infÃ¶rda.
+3. UI fÃ¥r aldrig bÃ¤ra domÃ¤nregler.
+4. AI fÃ¥r aldrig vara slutlig ekonomisk beslutsmotor.
+5. Alla reglerade beslut ska vara deterministiska, versionerade, spÃ¥rbara och reproducerbara.
 6. Alla kritiska objekt ska ha explicit state machine och correction model.
-7. Alla asynkrona flöden med reglerad påverkan ska använda persistent jobs, attempts, replay och dead-letter.
-8. Pilot readiness får inte påstås förrän block 5 är uppfyllt.
+7. Alla asynkrona flÃ¶den med reglerad pÃ¥verkan ska anvÃ¤nda persistent jobs, attempts, replay och dead-letter.
+8. Pilot readiness fÃ¥r inte pÃ¥stÃ¥s fÃ¶rrÃ¤n block 5 Ã¤r uppfyllt.
 
 # Reading order before implementation
 
-För varje område gäller följande läsordning:
+FÃ¶r varje omrÃ¥de gÃ¤ller fÃ¶ljande lÃ¤sordning:
 
 1. relevant master-control-dokument
 2. detta dokument
@@ -112,7 +112,7 @@ För varje område gäller följande läsordning:
 7. relevant runbook
 8. relevant test plan
 
-Om konflikt kvarstår efter detta ska Codex stanna och eskalera konflikten som blockerare.
+Om konflikt kvarstÃ¥r efter detta ska Codex stanna och eskalera konflikten som blockerare.
 
 # Phase structure
 
@@ -128,7 +128,7 @@ Exit gate:
 
 - master-control-paketet finns
 - block 1-dokumenten finns
-- implementation har inte sprungit före dokumenten
+- implementation har inte sprungit fÃ¶re dokumenten
 
 ## Phase 1 - Shared runtime hardening
 
@@ -268,34 +268,34 @@ Omfattar:
 - annual filing packages
 - pilot-readiness verifiering
 
-Ingen implementation får börja i ett område om dess blockerande dokument i manifestet fortfarande saknas.
+Ingen implementation fÃ¥r bÃ¶rja i ett omrÃ¥de om dess blockerande dokument i manifestet fortfarande saknas.
 
 # Verification and completion model
 
-Ett område får bara markeras klart när följande är sant:
+Ett omrÃ¥de fÃ¥r bara markeras klart nÃ¤r fÃ¶ljande Ã¤r sant:
 
 - relevant dokumentation finns
 - implementation finns
-- tester finns och är gröna
-- runbook finns där drift eller recovery krävs
-- ändringen kan spåras tillbaka till manifestet, gap-registret och build sequence
+- tester finns och Ã¤r grÃ¶na
+- runbook finns dÃ¤r drift eller recovery krÃ¤vs
+- Ã¤ndringen kan spÃ¥ras tillbaka till manifestet, gap-registret och build sequence
 
 # Human dependency model
 
-Codex får endast stanna för användarfrågor när blockeraren faktiskt kräver mänsklig handling, till exempel:
+Codex fÃ¥r endast stanna fÃ¶r anvÃ¤ndarfrÃ¥gor nÃ¤r blockeraren faktiskt krÃ¤ver mÃ¤nsklig handling, till exempel:
 
-- köp eller avtal med extern leverantör
-- certifikat, hemligheter eller myndighetsåtkomst
-- bolagsspecifik policy som dokumenten uttryckligen lämnar öppen
+- kÃ¶p eller avtal med extern leverantÃ¶r
+- certifikat, hemligheter eller myndighetsÃ¥tkomst
+- bolagsspecifik policy som dokumenten uttryckligen lÃ¤mnar Ã¶ppen
 
-Allt annat ska lösas inom dokumentens ramar.
+Allt annat ska lÃ¶sas inom dokumentens ramar.
 
 # Exit gate
 
-Denna plan är uppfylld först när:
+Denna plan Ã¤r uppfylld fÃ¶rst nÃ¤r:
 
 - hela dokumentinventariet i manifestet finns i repo:t
-- byggordningen i master-build-sequence är genomförbar utan motsägelser
-- äldre huvudplanering som strider mot master-control har tagits bort
-- inget område längre styrs av utkast, chattsvar eller `Downloads`-filer
+- byggordningen i master-build-sequence Ã¤r genomfÃ¶rbar utan motsÃ¤gelser
+- Ã¤ldre huvudplanering som strider mot master-control har tagits bort
+- inget omrÃ¥de lÃ¤ngre styrs av utkast, chattsvar eller `Downloads`-filer
 

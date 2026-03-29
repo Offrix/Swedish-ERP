@@ -1,43 +1,43 @@
 # Swedish ERP
 
-Svensk företagsplattform för att driva hela bolaget i ett sammanhållet system: bokföring, moms, skatt, lön, AGI, skattekonto, HUS, dokument, review, arbetsflöden, projekt, operations, integrationer, audit och backoffice.
+Svensk fÃ¶retagsplattform fÃ¶r att driva hela bolaget i ett sammanhÃ¥llet system: bokfÃ¶ring, moms, skatt, lÃ¶n, AGI, skattekonto, HUS, dokument, review, arbetsflÃ¶den, projekt, operations, integrationer, audit och backoffice.
 
-Det här repo:t byggs inte för att bli ännu ett smalt bokföringsprogram eller ett byggspecialsystem med lite ekonomi bredvid. Målet är att bli världens bästa företagssida för svenska bolag: en produkt där företag faktiskt kan sköta hela verksamheten med starkare kontroll, bättre regelstöd, tydligare spårbarhet och bättre operativt arbetsflöde än dagens alternativ.
+Det hÃ¤r repo:t byggs inte fÃ¶r att bli Ã¤nnu ett smalt bokfÃ¶ringsprogram eller ett byggspecialsystem med lite ekonomi bredvid. MÃ¥let Ã¤r att bli vÃ¤rldens bÃ¤sta fÃ¶retagssida fÃ¶r svenska bolag: en produkt dÃ¤r fÃ¶retag faktiskt kan skÃ¶ta hela verksamheten med starkare kontroll, bÃ¤ttre regelstÃ¶d, tydligare spÃ¥rbarhet och bÃ¤ttre operativt arbetsflÃ¶de Ã¤n dagens alternativ.
 
-## Primär Styrning
+## PrimÃ¤r Styrning
 
-De enda bindande styrdokumenten för allt kvarvarande arbete före UI är:
+De enda bindande styrdokumenten fÃ¶r allt kvarvarande arbete fÃ¶re UI Ã¤r:
 
-- `docs/implementation-control/GO_LIVE_ROADMAP.md`
-- `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`
+- `docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md`
+- `docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md`
 
-Alla äldre `master-control`-, `implementation-control`-, ADR-, runbook- och analysdokument är historiska inputkällor. De får användas som stödmaterial, men de är inte bindande om de krockar med dokumenten ovan.
+Alla Ã¤ldre `master-control`-, `implementation-control`-, ADR-, runbook- och analysdokument Ã¤r historiska inputkÃ¤llor. De fÃ¥r anvÃ¤ndas som stÃ¶dmaterial, men de Ã¤r inte bindande om de krockar med dokumenten ovan.
 
-## Vad Produkten Är
+## Vad Produkten Ã„r
 
-Produkten är en generell företagsplattform för alla bolag, inte bara för en viss bransch.
+Produkten Ã¤r en generell fÃ¶retagsplattform fÃ¶r alla bolag, inte bara fÃ¶r en viss bransch.
 
-Kärnan ska bära:
+KÃ¤rnan ska bÃ¤ra:
 
-- bokföring och redovisning
+- bokfÃ¶ring och redovisning
 - moms och skattedriven regelmotorik
-- lön, AGI och people operations
-- kund- och leverantörsflöden
+- lÃ¶n, AGI och people operations
+- kund- och leverantÃ¶rsflÃ¶den
 - bank, betalningar och skattekonto
 - dokument, OCR, klassificering och review
 - HUS/ROT/RUT
-- projekt, kostnadsuppföljning och lönsamhet
-- arbetsflöden, notiser, aktivitet och work items
+- projekt, kostnadsuppfÃ¶ljning och lÃ¶nsamhet
+- arbetsflÃ¶den, notiser, aktivitet och work items
 - support, backoffice, audit, replay och incidenthantering
 - publika API:er, partner-API:er, webhooks och integrationer
 
-Bygg, field, personalliggare och ID06 är viktiga vertikala kapabiliteter, men de är inte produktens identitet. Plattformen ska fungera lika bra för konsultbolag, byråer, tjänstebolag, servicebolag, handelsbolag, installationsbolag och andra svenska företag som vill driva hela bolaget i ett system.
+Bygg, field, personalliggare och ID06 Ã¤r viktiga vertikala kapabiliteter, men de Ã¤r inte produktens identitet. Plattformen ska fungera lika bra fÃ¶r konsultbolag, byrÃ¥er, tjÃ¤nstebolag, servicebolag, handelsbolag, installationsbolag och andra svenska fÃ¶retag som vill driva hela bolaget i ett system.
 
 ## Vad Produkten Ska Bli
 
-Ambitionen är att bygga en premiumplattform som kan slå Fortnox, Visma, Bokio, Wint och andra relevanta konkurrenter genom att kombinera bredd, kontroll och operativ styrka i samma produkt.
+Ambitionen Ã¤r att bygga en premiumplattform som kan slÃ¥ Fortnox, Visma, Bokio, Wint och andra relevanta konkurrenter genom att kombinera bredd, kontroll och operativ styrka i samma produkt.
 
-När plattformen är färdig ska den kunna bära hela företagets kärnflöde:
+NÃ¤r plattformen Ã¤r fÃ¤rdig ska den kunna bÃ¤ra hela fÃ¶retagets kÃ¤rnflÃ¶de:
 
 - lead-to-cash
 - procure-to-pay
@@ -50,13 +50,13 @@ När plattformen är färdig ska den kunna bära hela företagets kärnflöde:
 - support-to-audit
 - import-to-cutover-to-go-live
 
-Den ska vara stark både i vardagsdrift och i svåra lägen:
+Den ska vara stark bÃ¥de i vardagsdrift och i svÃ¥ra lÃ¤gen:
 
-- regelstyrd bokföring och skatt
-- deterministisk och versionsstyrd löne- och AGI-logik
-- receipts, replay, dead-letter och recovery för reglerade submission-flöden
-- riktig backoffice-drift för support, replay, incidenter och cutover
-- tydlig source-of-truth-separation mellan domäner
+- regelstyrd bokfÃ¶ring och skatt
+- deterministisk och versionsstyrd lÃ¶ne- och AGI-logik
+- receipts, replay, dead-letter och recovery fÃ¶r reglerade submission-flÃ¶den
+- riktig backoffice-drift fÃ¶r support, replay, incidenter och cutover
+- tydlig source-of-truth-separation mellan domÃ¤ner
 - testbar och reproducerbar rulepack-driven logik
 
 ## Vad Systemet Ska Klara Av
@@ -65,35 +65,35 @@ Den ska vara stark både i vardagsdrift och i svåra lägen:
 
 - append-only ledger
 - verifikationsserier
-- periodlås, reopen, correction och reversal
+- periodlÃ¥s, reopen, correction och reversal
 - kontantmetod och faktureringsmetod
-- brutet räkenskapsår
+- brutet rÃ¤kenskapsÃ¥r
 - rapporter, close och annual reporting
-- legal form-styrd årslogik
+- legal form-styrd Ã¥rslogik
 
-### Moms, skatt och myndighetsflöden
+### Moms, skatt och myndighetsflÃ¶den
 
 - momsbeslut, momsperioder och deklarationsunderlag
-- skattekonto, kvittningar, differenser, räntor och avgifter
-- AGI och tillhörande receipts, correction chains och recovery
-- HUS/ROT/RUT med blockerande fältkontroller, betalningsbevis, XML/submission och återkravshantering
+- skattekonto, kvittningar, differenser, rÃ¤ntor och avgifter
+- AGI och tillhÃ¶rande receipts, correction chains och recovery
+- HUS/ROT/RUT med blockerande fÃ¤ltkontroller, betalningsbevis, XML/submission och Ã¥terkravshantering
 - annual filings, declaration packages och myndighetskvittenser
 
-### Lön och people operations
+### LÃ¶n och people operations
 
-- anställningar, masterdata och historik
-- lönekörningar, bokföringspreview och utbetalningar
-- AGI-objekt och AGI-säkra korrigeringar
-- benefits, pension, resor, traktamenten och milersättning
-- kollektivavtalsdriven löneberäkning
-- löneutmätning, Kronofogden och förbehållsbelopp
-- migrering av lönehistorik, YTD och saldon
+- anstÃ¤llningar, masterdata och historik
+- lÃ¶nekÃ¶rningar, bokfÃ¶ringspreview och utbetalningar
+- AGI-objekt och AGI-sÃ¤kra korrigeringar
+- benefits, pension, resor, traktamenten och milersÃ¤ttning
+- kollektivavtalsdriven lÃ¶neberÃ¤kning
+- lÃ¶neutmÃ¤tning, Kronofogden och fÃ¶rbehÃ¥llsbelopp
+- migrering av lÃ¶nehistorik, YTD och saldon
 
-### Försäljning, inköp och betalningar
+### FÃ¶rsÃ¤ljning, inkÃ¶p och betalningar
 
 - kundfakturor, kreditnotor, abonnemang och reskontra
-- leverantörsfakturor, attest, matchning och betalningsunderlag
-- bankhändelser, statement import och betalningsmatchning
+- leverantÃ¶rsfakturor, attest, matchning och betalningsunderlag
+- bankhÃ¤ndelser, statement import och betalningsmatchning
 - payment links, e-faktura och Peppol
 - returer, differenser och avvikelsehantering
 
@@ -102,99 +102,99 @@ Den ska vara stark både i vardagsdrift och i svåra lägen:
 - dokumentinbox
 - OCR
 - dokumentklassificering
-- personkopplade dokumentkedjor till lön, AGI, benefits och bokföring
-- review center med tydliga beslutsgränser
+- personkopplade dokumentkedjor till lÃ¶n, AGI, benefits och bokfÃ¶ring
+- review center med tydliga beslutsgrÃ¤nser
 - notifications, activity feed och work items som separata objektfamiljer
 - audit explorer, evidence packs och operativ replay
 
 ### Projekt, operations och vertikala kapabiliteter
 
-- generell projektmotor för alla bolag
-- budget, utfall, forecast, WIP och lönsamhet
-- kostnadsallokering från lön och andra källor
-- service- och uppdragsflöden
-- field-stöd där det behövs
-- personalliggare, workplace/site-logik och contractor snapshots där relevant
-- ID06- och byggnära stöd som vertikal modul, inte som produktens kärnidentitet
+- generell projektmotor fÃ¶r alla bolag
+- budget, utfall, forecast, WIP och lÃ¶nsamhet
+- kostnadsallokering frÃ¥n lÃ¶n och andra kÃ¤llor
+- service- och uppdragsflÃ¶den
+- field-stÃ¶d dÃ¤r det behÃ¶vs
+- personalliggare, workplace/site-logik och contractor snapshots dÃ¤r relevant
+- ID06- och byggnÃ¤ra stÃ¶d som vertikal modul, inte som produktens kÃ¤rnidentitet
 
-### Plattform, säkerhet och kontroll
+### Plattform, sÃ¤kerhet och kontroll
 
 - stark auth- och scope-modell
 - MFA, stark identitet och enterprise federation
 - support impersonation och break-glass med audit
-- backoffice för support, incidenter, replay, dead-letter och submission monitoring
+- backoffice fÃ¶r support, incidenter, replay, dead-letter och submission monitoring
 - public API, partner API, webhooks och provider-onboarding
 - rulepacks med effective dating, historisk pinning och rollback
 
-## Det Som Måste Fungera För Go-Live
+## Det Som MÃ¥ste Fungera FÃ¶r Go-Live
 
-För att plattformen ska anses färdig nog för verklig drift räcker det inte att enskilda moduler existerar. Följande kedjor måste fungera end-to-end utan att UI behöver kompensera för backendbrister:
+FÃ¶r att plattformen ska anses fÃ¤rdig nog fÃ¶r verklig drift rÃ¤cker det inte att enskilda moduler existerar. FÃ¶ljande kedjor mÃ¥ste fungera end-to-end utan att UI behÃ¶ver kompensera fÃ¶r backendbrister:
 
 - tenant setup till finance-ready bolag med legal form, accounting method, fiscal year och modulaktivering
-- supplier invoice från dokument/OCR till import case, AP, betalning, bankmatchning och korrekt momsutfall
-- kundfaktura från issue till betalning, reskontrastängning och korrekt momsutfall
+- supplier invoice frÃ¥n dokument/OCR till import case, AP, betalning, bankmatchning och korrekt momsutfall
+- kundfaktura frÃ¥n issue till betalning, reskontrastÃ¤ngning och korrekt momsutfall
 - bankimport, betalningsorder, statement matchning och reconciliation till ledger och skattekonto
-- månatlig lön med korrekt skatt, arbetsgivaravgifter, kollektivavtal, AGI-preview, bokföringsposter och utbetalningsunderlag
-- SINK-flöden och andra särskilda skatteprofiler där relevant
-- Kronofogden/löneutmätning med beslutssnapshot, förbehållsbelopp, remittance och audit chain
-- benefits, resor och privata köp som korrekt går till receivable, payroll deduction eller beskattning
+- mÃ¥natlig lÃ¶n med korrekt skatt, arbetsgivaravgifter, kollektivavtal, AGI-preview, bokfÃ¶ringsposter och utbetalningsunderlag
+- SINK-flÃ¶den och andra sÃ¤rskilda skatteprofiler dÃ¤r relevant
+- Kronofogden/lÃ¶neutmÃ¤tning med beslutssnapshot, fÃ¶rbehÃ¥llsbelopp, remittance och audit chain
+- benefits, resor och privata kÃ¶p som korrekt gÃ¥r till receivable, payroll deduction eller beskattning
 - AGI-submission med tekniska receipts, materiella receipts, correction chain, replay och recovery
-- HUS/ROT/RUT från verifierad kundbetalning till korrekt claim-underlag, XML/submission, beslut, återkrav och reconciliation
-- skattekontoimport, differenshantering, offset-logik och koppling till moms, lön och HUS
+- HUS/ROT/RUT frÃ¥n verifierad kundbetalning till korrekt claim-underlag, XML/submission, beslut, Ã¥terkrav och reconciliation
+- skattekontoimport, differenshantering, offset-logik och koppling till moms, lÃ¶n och HUS
 - period close, reopen, correction och annual reporting utan att historiken bryts
-- migration, cutover, diff, signoff och rollback-plan för go-live
+- migration, cutover, diff, signoff och rollback-plan fÃ¶r go-live
 - review center, work items, notifications och activity som separata men samverkande objektfamiljer
 - support, replay, dead-letter, submission monitoring och incidenthantering utan databasingrepp
 - public API, partner API och webhooks med tydliga kontrakt, signering, idempotency, sequencing och replay
-- object profiles, workbenches, search, saved views och command contracts redo för framtida UI utan omtag
+- object profiles, workbenches, search, saved views och command contracts redo fÃ¶r framtida UI utan omtag
 - permissions, team/scope ownership, segregation of duties, impersonation och break-glass med full audit
 
-Go-live betyder därför att ekonomi, lön, skatt, myndighetsflöden, operations, support och integrationer fungerar som ett sammanhängande system, inte bara att enskilda features finns i repo:t.
+Go-live betyder dÃ¤rfÃ¶r att ekonomi, lÃ¶n, skatt, myndighetsflÃ¶den, operations, support och integrationer fungerar som ett sammanhÃ¤ngande system, inte bara att enskilda features finns i repo:t.
 
 ## Produktens Ytor
 
 ### Desktop Web
 
-Desktop-web är den enda fullständiga arbetsytan för alla professionella roller. Det är här ekonomi, lön, compliance, review, rapportering, projektstyrning och operativ kontroll ska fungera fullt ut.
+Desktop-web Ã¤r den enda fullstÃ¤ndiga arbetsytan fÃ¶r alla professionella roller. Det Ã¤r hÃ¤r ekonomi, lÃ¶n, compliance, review, rapportering, projektstyrning och operativ kontroll ska fungera fullt ut.
 
 ### Field Mobile
 
-Field-mobile är en separat, förenklad stödyta för snabb operativ användning där det behövs. Den är inte en mini-desktop och ska inte bära domänlogik.
+Field-mobile Ã¤r en separat, fÃ¶renklad stÃ¶dyta fÃ¶r snabb operativ anvÃ¤ndning dÃ¤r det behÃ¶vs. Den Ã¤r inte en mini-desktop och ska inte bÃ¤ra domÃ¤nlogik.
 
 ### Backoffice
 
-Backoffice är en separat operatörs- och supportyta för audit, replay, dead-letter, supportärenden, incidenter, tenantdiagnostik, access reviews och andra driftkritiska funktioner.
+Backoffice Ã¤r en separat operatÃ¶rs- och supportyta fÃ¶r audit, replay, dead-letter, supportÃ¤renden, incidenter, tenantdiagnostik, access reviews och andra driftkritiska funktioner.
 
 ## Arkitekturprinciper
 
-Systemet byggs som en modulär monolit med hårda bounded contexts.
+Systemet byggs som en modulÃ¤r monolit med hÃ¥rda bounded contexts.
 
-Det här är icke-förhandlingsbara principer:
+Det hÃ¤r Ã¤r icke-fÃ¶rhandlingsbara principer:
 
-- ledger är enda källan till bokföring
-- payroll är enda källan till AGI-objekt
-- VAT äger momsbeslut
-- HUS äger claim-lifecycle
-- fiscal year äger periodkalender och lås
-- accounting method äger timinglogik för kontantmetod kontra faktureringsmetod
-- search är aldrig source of truth
-- UI bär aldrig domänlogik
-- kritiska regler ska vara deterministiska, versionsstyrda, spårbara och testade
-- reglerade beslut får inte göras på gissning eller av AI utan explicit policy
-- asynkrona reglerade flöden ska ha receipts, replay, dead-letter och audit chain
+- ledger Ã¤r enda kÃ¤llan till bokfÃ¶ring
+- payroll Ã¤r enda kÃ¤llan till AGI-objekt
+- VAT Ã¤ger momsbeslut
+- HUS Ã¤ger claim-lifecycle
+- fiscal year Ã¤ger periodkalender och lÃ¥s
+- accounting method Ã¤ger timinglogik fÃ¶r kontantmetod kontra faktureringsmetod
+- search Ã¤r aldrig source of truth
+- UI bÃ¤r aldrig domÃ¤nlogik
+- kritiska regler ska vara deterministiska, versionsstyrda, spÃ¥rbara och testade
+- reglerade beslut fÃ¥r inte gÃ¶ras pÃ¥ gissning eller av AI utan explicit policy
+- asynkrona reglerade flÃ¶den ska ha receipts, replay, dead-letter och audit chain
 
-## Repo-Läge Idag
+## Repo-LÃ¤ge Idag
 
-Repo:t innehåller redan mycket verklig funktionalitet, bred dokumentation och många tester, men det är fortfarande ett aktivt byggprogram och inte en färdig go-live-produkt.
+Repo:t innehÃ¥ller redan mycket verklig funktionalitet, bred dokumentation och mÃ¥nga tester, men det Ã¤r fortfarande ett aktivt byggprogram och inte en fÃ¤rdig go-live-produkt.
 
 Det betyder:
 
-- flera domäner är redan verkliga och testade
-- flera integrations-, backoffice- och go-live-delar är under pågående härdning
-- dokumenterat stöd är inte samma sak som färdig driftmognad
-- shell-appar ska inte misstolkas som färdig produkt-UI
+- flera domÃ¤ner Ã¤r redan verkliga och testade
+- flera integrations-, backoffice- och go-live-delar Ã¤r under pÃ¥gÃ¥ende hÃ¤rdning
+- dokumenterat stÃ¶d Ã¤r inte samma sak som fÃ¤rdig driftmognad
+- shell-appar ska inte misstolkas som fÃ¤rdig produkt-UI
 
-Det riktiga läget måste alltid bedömas utifrån:
+Det riktiga lÃ¤get mÃ¥ste alltid bedÃ¶mas utifrÃ¥n:
 
 - faktisk kod
 - faktiska tester
@@ -206,22 +206,22 @@ Det riktiga läget måste alltid bedömas utifrån:
 ### Appar
 
 - `apps/api` API, auth, komposition, routes och plattformsintegration
-- `apps/worker` asynk job-runtime, replay, batch och bakgrundsflöden
-- `apps/desktop-web` desktop-shell för framtida full arbetsyta
-- `apps/field-mobile` separat mobile-shell för operativ stödyta
+- `apps/worker` asynk job-runtime, replay, batch och bakgrundsflÃ¶den
+- `apps/desktop-web` desktop-shell fÃ¶r framtida full arbetsyta
+- `apps/field-mobile` separat mobile-shell fÃ¶r operativ stÃ¶dyta
 
 ### Paket
 
-Repo:t innehåller bland annat:
+Repo:t innehÃ¥ller bland annat:
 
-- `packages/domain-*` för bounded contexts och domänmotorer
-- `packages/db` för migrationer och seeds
-- `packages/rule-engine` för deterministisk regelmotorik
-- `packages/events` för event- och audit-envelopes
-- `packages/auth-core` och `packages/integration-core` för gemensamma primitives
-- `packages/ui-*` för framtida UI-lager utan domänlogik
+- `packages/domain-*` fÃ¶r bounded contexts och domÃ¤nmotorer
+- `packages/db` fÃ¶r migrationer och seeds
+- `packages/rule-engine` fÃ¶r deterministisk regelmotorik
+- `packages/events` fÃ¶r event- och audit-envelopes
+- `packages/auth-core` och `packages/integration-core` fÃ¶r gemensamma primitives
+- `packages/ui-*` fÃ¶r framtida UI-lager utan domÃ¤nlogik
 
-### Domänområden som redan finns representerade
+### DomÃ¤nomrÃ¥den som redan finns representerade
 
 - accounting method
 - fiscal year
@@ -259,7 +259,7 @@ Repo:t innehåller bland annat:
 
 ## Styrande Dokument
 
-Om du öppnar repo:t för att förstå vad produkten ska bli ska du börja här:
+Om du Ã¶ppnar repo:t fÃ¶r att fÃ¶rstÃ¥ vad produkten ska bli ska du bÃ¶rja hÃ¤r:
 
 - [MASTER_BUILD_PLAN.md](/C:/Users/snobb/Desktop/Swedish%20ERP/docs/MASTER_BUILD_PLAN.md)
 - [MASTER_BUILD_SEQUENCE_FINAL.md](/C:/Users/snobb/Desktop/Swedish%20ERP/docs/implementation-control/MASTER_BUILD_SEQUENCE_FINAL.md)
@@ -269,14 +269,14 @@ Om du öppnar repo:t för att förstå vad produkten ska bli ska du börja här:
 - [COMPETITOR_WIN_MATRIX.md](/C:/Users/snobb/Desktop/Swedish%20ERP/docs/implementation-control/COMPETITOR_WIN_MATRIX.md)
 - [UI_READINESS_GATE.md](/C:/Users/snobb/Desktop/Swedish%20ERP/docs/implementation-control/UI_READINESS_GATE.md)
 
-Den nya sanningen för vidare implementation ligger i `docs/implementation-control/`. Äldre dokument ska bara användas om de inte motsäger dessa styrdokument eller faktisk repo-verklighet.
+Den nya sanningen fÃ¶r vidare implementation ligger i `docs/implementation-control/`. Ã„ldre dokument ska bara anvÃ¤ndas om de inte motsÃ¤ger dessa styrdokument eller faktisk repo-verklighet.
 
 ## Kodstruktur
 
 ```text
 apps/
   api/            API, auth, routes, komposition och integrationsytor
-  worker/         async jobs, replay, batch och bakgrundsflöden
+  worker/         async jobs, replay, batch och bakgrundsflÃ¶den
   desktop-web/    framtida full desktop-yta
   field-mobile/   separat operativ mobile-yta
 
@@ -310,7 +310,7 @@ tests/
   e2e/
 ```
 
-## Kom Igång
+## Kom IgÃ¥ng
 
 ### Bootstrap
 
@@ -360,7 +360,7 @@ pnpm run security
 pnpm run runtime-log
 ```
 
-Repo:t har även områdesspecifika verifieringsskript för bland annat:
+Repo:t har Ã¤ven omrÃ¥desspecifika verifieringsskript fÃ¶r bland annat:
 
 - ledger
 - VAT
@@ -376,13 +376,13 @@ Repo:t har även områdesspecifika verifieringsskript för bland annat:
 - resilience
 - migration/go-live
 
-## Vad README:n Ska Göra Tydligt
+## Vad README:n Ska GÃ¶ra Tydligt
 
-Den här README:n ska göra fyra saker tydliga från första raden:
+Den hÃ¤r README:n ska gÃ¶ra fyra saker tydliga frÃ¥n fÃ¶rsta raden:
 
-1. Det här är en generell svensk företagsplattform för hela bolaget, inte ett byggprogram.
-2. Målet är världsklass inom bokföring, lön, skatt, compliance, operations och integrationer i samma produkt.
-3. Repo:t innehåller redan mycket verklig funktionalitet, men är fortfarande under byggnation och härdning.
-4. Bygg/field/personalliggare/ID06 är viktiga vertikaler, men inte produktens identitet.
+1. Det hÃ¤r Ã¤r en generell svensk fÃ¶retagsplattform fÃ¶r hela bolaget, inte ett byggprogram.
+2. MÃ¥let Ã¤r vÃ¤rldsklass inom bokfÃ¶ring, lÃ¶n, skatt, compliance, operations och integrationer i samma produkt.
+3. Repo:t innehÃ¥ller redan mycket verklig funktionalitet, men Ã¤r fortfarande under byggnation och hÃ¤rdning.
+4. Bygg/field/personalliggare/ID06 Ã¤r viktiga vertikaler, men inte produktens identitet.
 
-Om du ska bygga vidare här ska du utgå från den bindande dokumentationen och faktisk kod, inte från antaganden.
+Om du ska bygga vidare hÃ¤r ska du utgÃ¥ frÃ¥n den bindande dokumentationen och faktisk kod, inte frÃ¥n antaganden.

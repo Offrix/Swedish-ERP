@@ -141,7 +141,7 @@ Dokumentstädning, spårbarhetsmatris och mock-/seedinventering.
 Ingen ny affärslogik, ingen ny live-adapter, ingen UI-byggnation.
 
 **Delfaser**  
-- [ ] 0.1 [REWRITE][REMOVE/DEPRECATE] Ogiltigförklara historiska `[x]` och markera `GO_LIVE_ROADMAP.md` samt `PHASE_IMPLEMENTATION_BIBLE.md` som historiska input, inte som acceptansbevis.
+- [x] 0.1 [REWRITE][REMOVE/DEPRECATE] Ogiltigförklara historiska `[x]` och markera `GO_LIVE_ROADMAP.md` samt `PHASE_IMPLEMENTATION_BIBLE.md` som historiska input, inte som acceptansbevis.
 - [ ] 0.2 [REWRITE] Behåll det som är rätt i nuvarande styrning: generell plattform, trial/live-separation, provider-baselines, project core efter finance/payroll och operator-first support.
 - [ ] 0.3 [NEW BUILD] Skriv full blocker-traceability för alla findings F-001–F-066 samt nya obligatoriska arbetsobjekt som saknas i gamla dokument.
 - [ ] 0.4 [REMOVE/DEPRECATE] Förbjud seed-, stub-, simulator- och phasebucket-antaganden som live coverage.

@@ -1,4 +1,4 @@
-> Statusnotis: Detta dokument ar inte primar sanning. Bindande styrning fore UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md`. Detta dokument ar historiskt input- eller stodmaterial och far inte overstyra dem.
+> Statusnotis: Detta dokument ar inte primar sanning. Bindande styrning fore UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md`. Detta dokument ar historiskt input- eller stodmaterial och far inte overstyra dem.
 
 # Payroll history import verification
 

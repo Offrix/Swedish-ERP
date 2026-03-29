@@ -46,4 +46,4 @@ node scripts/security-scan.mjs
 - All targeted 16.5 tests green
 - Full suite green
 - Lint, typecheck, build and security green
-- `docs/implementation-control/GO_LIVE_ROADMAP.md` marks `16.5` complete
+- historical phase 16.5 acceptance lived in `docs/implementation-control/GO_LIVE_ROADMAP.md`; current bindande sanning ligger i `docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md`
