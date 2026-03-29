@@ -45,6 +45,16 @@ export const PILOT_COHORT_STATUSES = Object.freeze([
   "accepted",
   "rejected"
 ]);
+export const PARITY_SCORECARD_STATUSES = Object.freeze([
+  "green",
+  "blocked"
+]);
+export const PARITY_CRITERION_STATUSES = Object.freeze([
+  "green",
+  "amber",
+  "red",
+  "na"
+]);
 export const PILOT_SCENARIO_STATUSES = Object.freeze([
   "pending",
   "passed",
@@ -233,6 +243,138 @@ const PILOT_COHORT_SEGMENT_DEFINITIONS = Object.freeze([
     ],
     minimumPilotCount: 1
   })
+]);
+const PARITY_BENCHMARK_CRITERIA = Object.freeze({
+  finance_ready_tenant_setup: Object.freeze({ criterionCode: "finance_ready_tenant_setup", label: "Finance-ready tenant setup" }),
+  accounting_ap_ar_bank_vat: Object.freeze({ criterionCode: "accounting_ap_ar_bank_vat", label: "Accounting, AP, AR, bank and VAT" }),
+  payroll_agi: Object.freeze({ criterionCode: "payroll_agi", label: "Payroll and AGI" }),
+  annual_reporting_declarations: Object.freeze({ criterionCode: "annual_reporting_declarations", label: "Annual reporting and declarations" }),
+  hus_claims: Object.freeze({ criterionCode: "hus_claims", label: "HUS where relevant" }),
+  integrations_api_webhooks: Object.freeze({ criterionCode: "integrations_api_webhooks", label: "Integrations, API and webhooks" }),
+  migration_support_operations: Object.freeze({ criterionCode: "migration_support_operations", label: "Migration and supportable daily operations" }),
+  portfolio_project_status: Object.freeze({ criterionCode: "portfolio_project_status", label: "Portfolio and project status" }),
+  resource_capacity: Object.freeze({ criterionCode: "resource_capacity", label: "Resource and capacity" }),
+  quote_to_project_handoff: Object.freeze({ criterionCode: "quote_to_project_handoff", label: "Quote or deal to project handoff" }),
+  time_expense_material_to_invoice: Object.freeze({ criterionCode: "time_expense_material_to_invoice", label: "Time, expense and material to invoice" }),
+  project_profitability: Object.freeze({ criterionCode: "project_profitability", label: "Project profitability" }),
+  customer_context_execution: Object.freeze({ criterionCode: "customer_context_execution", label: "Customer context through execution" }),
+  work_order_service_order: Object.freeze({ criterionCode: "work_order_service_order", label: "Work order and service order" }),
+  material_photo_signature_evidence: Object.freeze({ criterionCode: "material_photo_signature_evidence", label: "Material, photo and signature evidence" }),
+  personalliggare: Object.freeze({ criterionCode: "personalliggare", label: "Personalliggare" }),
+  simple_field_execution: Object.freeze({ criterionCode: "simple_field_execution", label: "Simple field execution" }),
+  change_order_semantics: Object.freeze({ criterionCode: "change_order_semantics", label: "Change-order semantics" }),
+  id06_compliance: Object.freeze({ criterionCode: "id06_compliance", label: "ID06 compliance" })
+});
+const GO_LIVE_PARITY_GATE_CODES = Object.freeze([
+  "finance_hygiene",
+  "payroll_correctness",
+  "regulated_submissions_recovery",
+  "general_project_core",
+  "field_pack_targeted",
+  "trial_to_live",
+  "migration_cutover",
+  "api_webhooks",
+  "bankid_sso_backoffice"
+]);
+const PARITY_COMPETITOR_DEFINITIONS = Object.freeze([
+  Object.freeze({
+    competitorCode: "fortnox",
+    label: "Fortnox",
+    categoryCode: "finance_platform",
+    requiredPilotSegmentCodes: ["finance_payroll_ab"],
+    criterionCodes: [
+      "finance_ready_tenant_setup",
+      "accounting_ap_ar_bank_vat",
+      "payroll_agi",
+      "annual_reporting_declarations",
+      "integrations_api_webhooks",
+      "migration_support_operations"
+    ]
+  }),
+  Object.freeze({
+    competitorCode: "visma",
+    label: "Visma",
+    categoryCode: "finance_platform",
+    requiredPilotSegmentCodes: ["finance_payroll_ab"],
+    criterionCodes: [
+      "finance_ready_tenant_setup",
+      "accounting_ap_ar_bank_vat",
+      "payroll_agi",
+      "annual_reporting_declarations",
+      "integrations_api_webhooks",
+      "migration_support_operations"
+    ]
+  }),
+  Object.freeze({
+    competitorCode: "bokio",
+    label: "Bokio",
+    categoryCode: "finance_platform",
+    requiredPilotSegmentCodes: ["finance_payroll_ab"],
+    criterionCodes: [
+      "finance_ready_tenant_setup",
+      "accounting_ap_ar_bank_vat",
+      "payroll_agi",
+      "annual_reporting_declarations",
+      "integrations_api_webhooks",
+      "migration_support_operations"
+    ]
+  }),
+  Object.freeze({
+    competitorCode: "wint",
+    label: "Wint",
+    categoryCode: "finance_platform",
+    requiredPilotSegmentCodes: ["finance_payroll_ab"],
+    criterionCodes: [
+      "finance_ready_tenant_setup",
+      "accounting_ap_ar_bank_vat",
+      "payroll_agi",
+      "annual_reporting_declarations",
+      "integrations_api_webhooks",
+      "migration_support_operations"
+    ]
+  }),
+  Object.freeze({
+    competitorCode: "bjorn_lunden",
+    label: "Bjorn Lunden",
+    categoryCode: "finance_platform",
+    requiredPilotSegmentCodes: ["finance_payroll_ab"],
+    criterionCodes: [
+      "finance_ready_tenant_setup",
+      "accounting_ap_ar_bank_vat",
+      "payroll_agi",
+      "annual_reporting_declarations",
+      "integrations_api_webhooks",
+      "migration_support_operations"
+    ]
+  }),
+  ...["teamleader", "monday", "asana", "clickup", "zoho", "odoo", "dynamics365"].map((competitorCode) => Object.freeze({
+    competitorCode,
+    label: competitorCode === "dynamics365" ? "Dynamics 365 Project Operations" : competitorCode,
+    categoryCode: "crm_project_service",
+    requiredPilotSegmentCodes: ["service_project_company"],
+    criterionCodes: [
+      "portfolio_project_status",
+      "resource_capacity",
+      "quote_to_project_handoff",
+      "time_expense_material_to_invoice",
+      "project_profitability",
+      "customer_context_execution"
+    ]
+  })),
+  ...["bygglet", "byggdagboken"].map((competitorCode) => Object.freeze({
+    competitorCode,
+    label: competitorCode,
+    categoryCode: "field_vertical",
+    requiredPilotSegmentCodes: ["construction_service_id06"],
+    criterionCodes: [
+      "work_order_service_order",
+      "material_photo_signature_evidence",
+      "personalliggare",
+      "simple_field_execution",
+      "change_order_semantics",
+      "id06_compliance"
+    ]
+  }))
 ]);
 const TRIAL_SEED_SCENARIO_ALIAS_CODES = Object.freeze({
   agency_trial_seed: "retainer_capacity_agency"
@@ -595,6 +737,9 @@ export function createTenantControlEngine({
     pilotCohorts: new Map(),
     pilotCohortIdsByCompany: new Map(),
     pilotCohortIdsBySegment: new Map(),
+    parityScorecards: new Map(),
+    parityScorecardIdsByCompany: new Map(),
+    parityScorecardIdsByCompetitor: new Map(),
     financeBlueprintsByCompany: new Map(),
     financeFoundationRecordsByCompany: new Map(),
     tenantControlEvents: [],
@@ -612,6 +757,7 @@ export function createTenantControlEngine({
     parallelRunPlanStatuses: PARALLEL_RUN_PLAN_STATUSES,
     pilotExecutionStatuses: PILOT_EXECUTION_STATUSES,
     pilotCohortStatuses: PILOT_COHORT_STATUSES,
+    parityScorecardStatuses: PARITY_SCORECARD_STATUSES,
     pilotScenarioStatuses: PILOT_SCENARIO_STATUSES,
     createTenantBootstrap,
     getTenantBootstrap,
@@ -652,6 +798,10 @@ export function createTenantControlEngine({
     attachPilotExecutionsToCohort,
     assessPilotCohort,
     exportPilotCohortEvidence,
+    recordParityScorecard,
+    getParityScorecard,
+    listParityScorecards,
+    exportParityScorecardEvidence,
     getFinanceReadinessValidation,
     snapshotTenantControl,
     exportDurableState,
@@ -2309,6 +2459,168 @@ export function createTenantControlEngine({
     return copy(evidenceBundle);
   }
 
+  function recordParityScorecard({
+    sessionToken,
+    companyId,
+    competitorCode,
+    pilotCohortIds = [],
+    criteriaResults = [],
+    gateResults = [],
+    notes = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const principal = authorizeCompanyAction({
+      sessionToken,
+      companyId: resolvedCompanyId,
+      action: "COMPANY_MANAGE",
+      objectType: "parity_scorecard",
+      objectId: resolvedCompanyId,
+      scopeCode: "pilot_execution"
+    });
+    const competitorDefinition = requireParityCompetitorDefinition(competitorCode);
+    const linkedPilotCohorts = normalizeStringList(pilotCohortIds).map((pilotCohortId) => {
+      const pilotCohort = requirePilotCohort(pilotCohortId);
+      if (pilotCohort.companyId !== resolvedCompanyId) {
+        throw httpError(409, "parity_scorecard_company_scope_mismatch", "Pilot cohort belongs to another company.");
+      }
+      if (pilotCohort.status !== "accepted") {
+        throw httpError(409, "parity_scorecard_requires_accepted_pilot_cohort", "Parity scorecards require accepted pilot cohorts.");
+      }
+      return pilotCohort;
+    });
+    for (const requiredSegmentCode of competitorDefinition.requiredPilotSegmentCodes) {
+      if (!linkedPilotCohorts.some((pilotCohort) => pilotCohort.segmentCode === requiredSegmentCode)) {
+        throw httpError(409, "parity_scorecard_missing_required_segment", `Parity scorecard requires accepted pilot cohort for segment ${requiredSegmentCode}.`);
+      }
+    }
+
+    const normalizedCriteriaResults = normalizeParityCriterionResults({
+      competitorDefinition,
+      criteriaResults
+    });
+    const normalizedGateResults = normalizeParityGateResults(gateResults);
+    const summary = buildParityScorecardSummary({
+      criteriaResults: normalizedCriteriaResults,
+      gateResults: normalizedGateResults
+    });
+    const now = nowIso();
+    const record = {
+      parityScorecardId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      competitorCode: competitorDefinition.competitorCode,
+      competitorLabel: competitorDefinition.label,
+      categoryCode: competitorDefinition.categoryCode,
+      pilotCohortIds: linkedPilotCohorts.map((pilotCohort) => pilotCohort.pilotCohortId),
+      criteriaResults: normalizedCriteriaResults,
+      gateResults: normalizedGateResults,
+      summary,
+      status: summary.parityAchieved ? "green" : "blocked",
+      notes: normalizeOptionalText(notes),
+      latestEvidenceBundleId: null,
+      recordedAt: now,
+      updatedAt: now,
+      actorUserId: principal.userId
+    };
+    const evidenceBundle = createParityScorecardEvidenceBundle({
+      record,
+      actorId: principal.userId
+    });
+    record.latestEvidenceBundleId = evidenceBundle.evidenceBundleId;
+    state.parityScorecards.set(record.parityScorecardId, record);
+    appendToIndex(state.parityScorecardIdsByCompany, resolvedCompanyId, record.parityScorecardId);
+    appendToIndex(state.parityScorecardIdsByCompetitor, record.competitorCode, record.parityScorecardId);
+    appendDomainEvent("parity.scorecard.recorded", {
+      companyId: resolvedCompanyId,
+      parityScorecardId: record.parityScorecardId,
+      competitorCode: record.competitorCode,
+      status: record.status,
+      actorUserId: principal.userId
+    });
+    appendAuditEvent({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      action: "tenant_control.parity_scorecard.recorded",
+      entityType: "parity_scorecard",
+      entityId: record.parityScorecardId,
+      metadata: {
+        competitorCode: record.competitorCode,
+        categoryCode: record.categoryCode,
+        pilotCohortIds: copy(record.pilotCohortIds),
+        parityAchieved: record.summary.parityAchieved
+      }
+    });
+    return presentParityScorecard(record);
+  }
+
+  function getParityScorecard({ sessionToken, parityScorecardId } = {}) {
+    const record = requireParityScorecard(parityScorecardId);
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_READ",
+      objectType: "parity_scorecard",
+      objectId: record.parityScorecardId,
+      scopeCode: "pilot_execution"
+    });
+    return presentParityScorecard(record);
+  }
+
+  function listParityScorecards({ sessionToken, companyId = null, competitorCode = null } = {}) {
+    const resolvedCompanyId = normalizeOptionalText(companyId);
+    if (resolvedCompanyId) {
+      authorizeCompanyAction({
+        sessionToken,
+        companyId: resolvedCompanyId,
+        action: "COMPANY_READ",
+        objectType: "parity_scorecard",
+        objectId: resolvedCompanyId,
+        scopeCode: "pilot_execution"
+      });
+    }
+    const resolvedCompetitorCode = normalizeOptionalText(competitorCode);
+    let candidates = [...state.parityScorecards.values()];
+    if (resolvedCompanyId) {
+      const allowedIds = new Set(state.parityScorecardIdsByCompany.get(resolvedCompanyId) || []);
+      candidates = candidates.filter((item) => allowedIds.has(item.parityScorecardId));
+    }
+    if (resolvedCompetitorCode) {
+      candidates = candidates.filter((item) => item.competitorCode === resolvedCompetitorCode);
+    }
+    return candidates
+      .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt))
+      .map((record) => presentParityScorecard(record));
+  }
+
+  function exportParityScorecardEvidence({ sessionToken, parityScorecardId } = {}) {
+    const record = requireParityScorecard(parityScorecardId);
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_READ",
+      objectType: "parity_scorecard",
+      objectId: record.parityScorecardId,
+      scopeCode: "pilot_execution"
+    });
+    const evidenceDomain = getOptionalDomain("evidence");
+    if (
+      record.latestEvidenceBundleId
+      && evidenceDomain
+      && typeof evidenceDomain.getEvidenceBundle === "function"
+    ) {
+      return evidenceDomain.getEvidenceBundle({
+        companyId: record.companyId,
+        evidenceBundleId: record.latestEvidenceBundleId
+      });
+    }
+    const evidenceBundle = createParityScorecardEvidenceBundle({
+      record,
+      actorId: "tenant_control_parity_scorecard_export"
+    });
+    record.latestEvidenceBundleId = evidenceBundle.evidenceBundleId;
+    record.updatedAt = nowIso();
+    return copy(evidenceBundle);
+  }
+
   function listTrialEnvironmentRecordsByCompany(companyId) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return (state.trialEnvironmentIdsByCompany.get(resolvedCompanyId) || [])
@@ -3001,6 +3313,7 @@ export function createTenantControlEngine({
       parallelRunPlans: [...state.parallelRunPlans.values()],
       pilotExecutions: [...state.pilotExecutions.values()],
       pilotCohorts: [...state.pilotCohorts.values()],
+      parityScorecards: [...state.parityScorecards.values()],
       financeBlueprints: [...state.financeBlueprintsByCompany.values()],
       financeFoundationRecords: [...state.financeFoundationRecordsByCompany.values()],
       tenantControlEvents: [...state.tenantControlEvents],
@@ -3601,6 +3914,14 @@ export function createTenantControlEngine({
     return record;
   }
 
+  function requireParityScorecard(parityScorecardId) {
+    const record = state.parityScorecards.get(requireText(parityScorecardId, "parity_scorecard_id_required"));
+    if (!record) {
+      throw httpError(404, "parity_scorecard_not_found", "Parity scorecard was not found.");
+    }
+    return record;
+  }
+
   function requirePromotionPlan(promotionPlanId) {
     const record = state.promotionPlans.get(requireText(promotionPlanId, "promotion_plan_id_required"));
     if (!record) {
@@ -3686,6 +4007,16 @@ export function createTenantControlEngine({
       reusableCutoverTemplateRefs: copy(record.reusableCutoverTemplateRefs || []),
       rollbackEvidenceRefs: copy(record.rollbackEvidenceRefs || []),
       approvalCoverage: copy(record.approvalCoverage || null)
+    });
+  }
+
+  function presentParityScorecard(record) {
+    return copy({
+      ...record,
+      pilotCohortIds: copy(record.pilotCohortIds || []),
+      criteriaResults: copy(record.criteriaResults || []),
+      gateResults: copy(record.gateResults || []),
+      summary: copy(record.summary || null)
     });
   }
 
@@ -4273,6 +4604,83 @@ export function createTenantControlEngine({
     };
   }
 
+  function createParityScorecardEvidenceBundle({
+    record,
+    actorId
+  } = {}) {
+    const evidenceDomain = getOptionalDomain("evidence");
+    const metadata = {
+      competitorCode: record.competitorCode,
+      categoryCode: record.categoryCode,
+      status: record.status,
+      summary: copy(record.summary)
+    };
+    const artifactRefs = [
+      {
+        artifactType: "parity_scorecard_matrix",
+        artifactRef: `parity-scorecard://${record.parityScorecardId}`,
+        checksum: hashJson({
+          criteriaResults: record.criteriaResults,
+          gateResults: record.gateResults,
+          summary: record.summary
+        }),
+        roleCode: "tenant_control",
+        metadata: {
+          competitorCode: record.competitorCode,
+          parityAchieved: record.summary?.parityAchieved === true
+        }
+      },
+      ...record.criteriaResults.flatMap((item) => normalizePilotArtifactRefs(item.evidenceRefs, {
+        defaultArtifactType: "parity_criterion_evidence",
+        roleCode: "parity_scorecard"
+      })),
+      ...record.gateResults.flatMap((item) => normalizePilotArtifactRefs(item.evidenceRefs, {
+        defaultArtifactType: "parity_gate_evidence",
+        roleCode: "parity_scorecard"
+      }))
+    ];
+    const relatedObjectRefs = [
+      {
+        objectType: "company",
+        objectId: record.companyId,
+        relationCode: "parity_company"
+      },
+      ...(record.pilotCohortIds || []).map((pilotCohortId) => ({
+        objectType: "pilot_cohort",
+        objectId: pilotCohortId,
+        relationCode: "accepted_pilot_cohort"
+      }))
+    ];
+    if (evidenceDomain && typeof evidenceDomain.createFrozenEvidenceBundleSnapshot === "function") {
+      return evidenceDomain.createFrozenEvidenceBundleSnapshot({
+        companyId: record.companyId,
+        bundleType: "parity_scorecard",
+        sourceObjectType: "parity_scorecard",
+        sourceObjectId: record.parityScorecardId,
+        sourceObjectVersion: `parity_scorecard:${record.updatedAt || record.recordedAt}`,
+        title: "Parity scorecard evidence",
+        retentionClass: "operational",
+        classificationCode: "restricted_internal",
+        metadata,
+        artifactRefs,
+        relatedObjectRefs,
+        actorId,
+        previousEvidenceBundleId: record.latestEvidenceBundleId || null,
+        environmentMode: "pilot_parallel"
+      });
+    }
+    return {
+      evidenceBundleId: crypto.randomUUID(),
+      bundleType: "parity_scorecard",
+      sourceObjectType: "parity_scorecard",
+      sourceObjectId: record.parityScorecardId,
+      metadata: copy(metadata),
+      artifactRefs,
+      relatedObjectRefs,
+      environmentMode: "pilot_parallel"
+    };
+  }
+
   function findCompanySnapshotById(companyId) {
     const orgAuthSnapshot = getOrgAuthSnapshot();
     return (orgAuthSnapshot?.companies || []).find((record) => record.companyId === requireText(companyId, "company_id_required")) || null;
@@ -4614,10 +5022,84 @@ export function createTenantControlEngine({
     return [...new Set(issues)];
   }
 
+  function requireParityCompetitorDefinition(competitorCode) {
+    const resolvedCompetitorCode = requireText(String(competitorCode || ""), "parity_competitor_code_required");
+    const definition = PARITY_COMPETITOR_DEFINITIONS.find((item) => item.competitorCode === resolvedCompetitorCode);
+    if (!definition) {
+      throw httpError(400, "parity_competitor_unsupported", `Unsupported parity competitor ${resolvedCompetitorCode}.`);
+    }
+    return copy(definition);
+  }
+
+  function normalizeParityCriterionResults({ competitorDefinition, criteriaResults } = {}) {
+    const rawResults = Array.isArray(criteriaResults) ? criteriaResults : [];
+    return competitorDefinition.criterionCodes.map((criterionCode) => {
+      const definition = PARITY_BENCHMARK_CRITERIA[criterionCode];
+      const entry = rawResults.find((item) => item?.criterionCode === criterionCode) || null;
+      if (!definition || !entry) {
+        throw httpError(409, "parity_scorecard_missing_criterion", `Parity scorecard requires criterion ${criterionCode}.`);
+      }
+      const status = requireParityCriterionStatus(entry.status);
+      return {
+        criterionCode,
+        label: definition.label,
+        status,
+        notes: normalizeOptionalText(entry.notes),
+        evidenceRefs: normalizePilotArtifactRefs(entry.evidenceRefs, {
+          defaultArtifactType: "parity_criterion_evidence",
+          roleCode: "parity_scorecard"
+        })
+      };
+    });
+  }
+
+  function normalizeParityGateResults(gateResults) {
+    const rawResults = Array.isArray(gateResults) ? gateResults : [];
+    return GO_LIVE_PARITY_GATE_CODES.map((gateCode) => {
+      const entry = rawResults.find((item) => item?.gateCode === gateCode) || null;
+      if (!entry) {
+        throw httpError(409, "parity_scorecard_missing_gate", `Parity scorecard requires gate ${gateCode}.`);
+      }
+      const status = requireParityCriterionStatus(entry.status);
+      return {
+        gateCode,
+        status,
+        notes: normalizeOptionalText(entry.notes),
+        evidenceRefs: normalizePilotArtifactRefs(entry.evidenceRefs, {
+          defaultArtifactType: "parity_gate_evidence",
+          roleCode: "parity_scorecard"
+        })
+      };
+    });
+  }
+
+  function buildParityScorecardSummary({ criteriaResults = [], gateResults = [] } = {}) {
+    const greenCriteriaCount = criteriaResults.filter((item) => item.status === "green").length;
+    const redCriteriaCount = criteriaResults.filter((item) => item.status === "red").length;
+    const amberCriteriaCount = criteriaResults.filter((item) => item.status === "amber").length;
+    const blockedGateCodes = gateResults.filter((item) => item.status !== "green").map((item) => item.gateCode);
+    return {
+      totalCriteriaCount: criteriaResults.length,
+      greenCriteriaCount,
+      amberCriteriaCount,
+      redCriteriaCount,
+      blockedGateCodes,
+      parityAchieved: redCriteriaCount === 0 && amberCriteriaCount === 0 && blockedGateCodes.length === 0
+    };
+  }
+
   function requirePilotScenarioStatus(status) {
     const resolved = requireText(String(status || ""), "pilot_scenario_status_required");
     if (!PILOT_SCENARIO_STATUSES.includes(resolved) || resolved === "pending") {
       throw httpError(400, "pilot_scenario_status_invalid", "Pilot scenario status must be passed, blocked or failed.");
+    }
+    return resolved;
+  }
+
+  function requireParityCriterionStatus(status) {
+    const resolved = requireText(String(status || ""), "parity_status_required");
+    if (!PARITY_CRITERION_STATUSES.includes(resolved)) {
+      throw httpError(400, "parity_status_invalid", "Parity status must be green, amber, red or na.");
     }
     return resolved;
   }

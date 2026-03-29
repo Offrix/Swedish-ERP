@@ -365,6 +365,9 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/pilot/cohorts/:pilotCohortId/pilots",
               "/v1/pilot/cohorts/:pilotCohortId/assess",
               "/v1/pilot/cohorts/:pilotCohortId/evidence",
+              "/v1/release/parity-scorecards",
+              "/v1/release/parity-scorecards/:parityScorecardId",
+              "/v1/release/parity-scorecards/:parityScorecardId/evidence",
               "/v1/onboarding/runs",
               "/v1/onboarding/runs/:runId",
               "/v1/onboarding/runs/:runId/checklist",
@@ -2127,6 +2130,67 @@ async function handleRequest({ req, res, platform, flags }) {
         evidenceBundle: requireTenantControlDomain(platform).exportPilotExecutionEvidence({
           sessionToken: readSessionToken(req),
           pilotExecutionId: pilotExecutionEvidenceMatch.pilotExecutionId
+        })
+      }
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/release/parity-scorecards") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      requireTenantControlDomain(platform).recordParityScorecard({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        competitorCode: body.competitorCode,
+        pilotCohortIds: body.pilotCohortIds,
+        criteriaResults: body.criteriaResults,
+        gateResults: body.gateResults,
+        notes: body.notes
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/release/parity-scorecards") {
+    writeJson(
+      res,
+      200,
+      {
+        items: requireTenantControlDomain(platform).listParityScorecards({
+          sessionToken: readSessionToken(req),
+          companyId: url.searchParams.get("companyId"),
+          competitorCode: url.searchParams.get("competitorCode")
+        })
+      }
+    );
+    return;
+  }
+
+  const parityScorecardMatch = matchPath(path, "/v1/release/parity-scorecards/:parityScorecardId");
+  if (req.method === "GET" && parityScorecardMatch) {
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).getParityScorecard({
+        sessionToken: readSessionToken(req),
+        parityScorecardId: parityScorecardMatch.parityScorecardId
+      })
+    );
+    return;
+  }
+
+  const parityScorecardEvidenceMatch = matchPath(path, "/v1/release/parity-scorecards/:parityScorecardId/evidence");
+  if (req.method === "GET" && parityScorecardEvidenceMatch) {
+    writeJson(
+      res,
+      200,
+      {
+        evidenceBundle: requireTenantControlDomain(platform).exportParityScorecardEvidence({
+          sessionToken: readSessionToken(req),
+          parityScorecardId: parityScorecardEvidenceMatch.parityScorecardId
         })
       }
     );
