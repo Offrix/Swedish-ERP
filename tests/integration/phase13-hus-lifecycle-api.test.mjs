@@ -11,6 +11,15 @@ test("Phase 13.1 API hardens HUS lifecycle gates, direct transport and deadline 
   const platform = createApiPlatform({
     clock: () => new Date("2026-12-20T08:00:00Z")
   });
+  platform.installLedgerCatalog({
+    companyId: COMPANY_ID,
+    actorId: "phase13-api"
+  });
+  platform.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
+    actorId: "phase13-api"
+  });
   const server = createApiServer({
     platform,
     flags: {

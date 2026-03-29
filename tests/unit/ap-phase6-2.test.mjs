@@ -92,7 +92,10 @@ test("Phase 6.2 ingests OCR invoice lines, explains VAT and posts multiple cost 
   assert.equal(invoice.lines.length, 2);
   assert.equal(invoice.lines[0].netAmount, 1000);
   assert.equal(invoice.lines[1].netAmount, 200);
-  assert.match(invoice.lines[0].vatProposal.explanation, /2640/i);
+  assert.equal(typeof invoice.lines[0].vatProposal.vatDecisionId, "string");
+  assert.equal(invoice.lines[0].vatProposal.decisionCategory, "domestic_supplier_charged_purchase");
+  assert.deepEqual(invoice.lines[0].vatProposal.declarationBoxCodes, ["48"]);
+  assert.match(invoice.lines[0].vatProposal.explanation.join(" "), /VAT_SE_DOMESTIC_PURCHASE_25/);
 
   const matched = ap.runSupplierInvoiceMatch({
     companyId: COMPANY_ID,

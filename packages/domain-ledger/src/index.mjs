@@ -292,7 +292,7 @@ export const REQUIRED_ENGINE_ACCOUNTS = Object.freeze({
   tax: Object.freeze(["1120", "2570", "2510-2590"])
 });
 
-export const DSAM_ACCOUNTS = Object.freeze([
+const RAW_DSAM_ACCOUNTS = Object.freeze([
   {
     "accountNumber": "1000",
     "accountName": "Kassa",
@@ -1849,6 +1849,15 @@ export const DSAM_ACCOUNTS = Object.freeze([
     "accountClass": "8"
   }
 ]);
+
+export const DSAM_ACCOUNTS = Object.freeze(
+  RAW_DSAM_ACCOUNTS.map((definition) =>
+    Object.freeze({
+      ...definition,
+      accountClass: deriveTemplateAccountClass(definition.accountNumber, definition.accountClass)
+    })
+  )
+);
 
 const DEMO_LEDGER_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 const DIMENSION_TYPES = Object.freeze(["projects", "costCenters", "businessAreas", "serviceLines"]);
@@ -3761,6 +3770,15 @@ function normalizeAccountClass(value) {
     throw httpError(400, "account_class_invalid", "Ledger account class must be a single digit between 1 and 8.");
   }
   return normalized;
+}
+
+function deriveTemplateAccountClass(accountNumber, fallbackAccountClass) {
+  const normalizedAccountNumber = normalizeAccountNumber(accountNumber);
+  const derivedAccountClass = normalizedAccountNumber.charAt(0);
+  if (/^[1-8]$/.test(derivedAccountClass)) {
+    return derivedAccountClass;
+  }
+  return normalizeAccountClass(fallbackAccountClass);
 }
 
 function normalizeLedgerAccountStatus(value) {

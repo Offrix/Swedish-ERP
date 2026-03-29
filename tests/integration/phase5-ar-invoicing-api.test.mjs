@@ -179,6 +179,9 @@ test("Phase 5.2 API issues invoices idempotently, closes credits, validates Pepp
     assert.equal(firstIssue.invoiceNumber, secondIssue.invoiceNumber);
     assert.equal(firstIssue.journalEntryId, secondIssue.journalEntryId);
     assert.equal(firstIssue.invoiceSeriesCode, "B");
+    assert.equal(typeof firstIssue.lines[0].vatDecisionId, "string");
+    assert.equal(firstIssue.lines[0].vatDecisionCategory, "domestic_standard_sale");
+    assert.deepEqual(firstIssue.lines[0].vatDeclarationBoxCodes, ["05", "10"]);
     const standardJournal = platform.getJournalEntry({
       companyId: COMPANY_ID,
       journalEntryId: firstIssue.journalEntryId
@@ -229,6 +232,8 @@ test("Phase 5.2 API issues invoices idempotently, closes credits, validates Pepp
     });
     assert.equal(issuedCredit.invoiceSeriesCode, "C");
     assert.match(issuedCredit.invoiceNumber, /^CRN-/);
+    assert.equal(typeof issuedCredit.lines[0].vatDecisionId, "string");
+    assert.equal(issuedCredit.lines[0].vatDecisionCategory, "credit_note_mirror");
     const creditJournal = platform.getJournalEntry({
       companyId: COMPANY_ID,
       journalEntryId: issuedCredit.journalEntryId

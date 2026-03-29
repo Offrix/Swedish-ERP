@@ -76,7 +76,7 @@ test("Phase 4.1 end-to-end flow exposes VAT routes, dated decisions and review q
         companyId: COMPANY_ID,
         transactionLine: buildTransactionLine({
           source_id: "phase4-1-e2e-review",
-          buyer_vat_number_status: null
+          line_quantity: null
         })
       }
     });

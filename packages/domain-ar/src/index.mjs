@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { createVatPlatform } from "../../domain-vat/src/index.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -116,7 +117,7 @@ export function createArEngine({
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
-  vatPlatform = null,
+  vatPlatform = createVatPlatform({ clock, seedDemo: true }),
   ledgerPlatform = null,
   integrationPlatform = null
 } = {}) {
@@ -1267,9 +1268,16 @@ export function createArEngine({
     invoice.invoiceSeriesCode = invoice.invoiceSeriesCode || series.seriesCode;
     invoice.issueIdempotencyKey = invoice.issueIdempotencyKey || `invoice.issue:${invoice.invoiceGenerationKey}`;
     invoice.paymentReference = invoice.paymentReference || String(invoice.invoiceSequenceNumber || 0).padStart(10, "0");
-    const journalLines = buildInvoiceJournalLines({
+    evaluateInvoiceVatDecisions({
       vatPlatform,
       companyId: invoice.companyId,
+      invoice,
+      customer,
+      originalInvoice,
+      actorId,
+      correlationId
+    });
+    const journalLines = buildInvoiceJournalLines({
       invoice,
       customer,
       ledgerPlatform
@@ -3234,15 +3242,19 @@ function normalizeCommercialLine({ state, vatPlatform, companyId, currencyCode, 
   const description = requireText(line.description || item?.description || `Line ${lineNumber}`, "commercial_line_description_required");
   const revenueAccountNumber = normalizeAccountNumber(line.revenueAccountNumber || item?.revenueAccountNumber);
   const vatCode = ensureVatCodeExists(vatPlatform, companyId, line.vatCode || item?.vatCode);
+  const goodsOrServices =
+    normalizeOptionalText(line.goodsOrServices)?.toLowerCase() === "goods" || item?.itemType === "goods" ? "goods" : "services";
   return {
     lineId: crypto.randomUUID(),
     lineNumber,
     itemId: item?.arItemId || null,
     itemCode: item?.itemCode || normalizeOptionalText(line.itemCode),
+    itemType: item?.itemType || normalizeOptionalText(line.itemType) || null,
     projectId: normalizeOptionalText(line.projectId),
     costCenterCode: normalizeOptionalText(line.costCenterCode || item?.costCenterCode),
     businessAreaCode: normalizeOptionalText(line.businessAreaCode || item?.businessAreaCode),
     serviceLineCode: normalizeOptionalText(line.serviceLineCode || item?.serviceLineCode),
+    goodsOrServices,
     description,
     quantity,
     unitCode: requireText(line.unitCode || item?.unitCode || "ea", "commercial_line_unit_required"),
@@ -3250,6 +3262,12 @@ function normalizeCommercialLine({ state, vatPlatform, companyId, currencyCode, 
     lineAmount: roundMoney(quantity * unitPrice),
     revenueAccountNumber,
     vatCode,
+    vatDecisionId: null,
+    vatReviewQueueItemId: null,
+    vatDecisionCategory: null,
+    vatDeclarationBoxCodes: [],
+    vatEffectiveRate: null,
+    vatPostingEntries: [],
     recurringFlag: line.recurringFlag === true || item?.recurringFlag === true,
     projectBoundFlag: line.projectBoundFlag === true || item?.projectBoundFlag === true
   };
@@ -3406,7 +3424,90 @@ function calculateVatAmount(vatRate, netAmount) {
   return roundMoney(Number(netAmount || 0) * (vatRate / 100));
 }
 
-function buildInvoiceJournalLines({ vatPlatform, companyId, invoice, customer, ledgerPlatform = null }) {
+function evaluateInvoiceVatDecisions({
+  vatPlatform,
+  companyId,
+  invoice,
+  customer,
+  originalInvoice = null,
+  actorId,
+  correlationId
+}) {
+  if (!vatPlatform || typeof vatPlatform.evaluateVatDecision !== "function") {
+    throw createError(500, "vat_platform_missing", "VAT platform is required to issue invoices.");
+  }
+  return (invoice.lines || []).map((line, index) => {
+    const originalLine = invoice.invoiceType === "credit_note" ? originalInvoice?.lines?.[index] || null : null;
+    const reverseChargeFlag = typeof line.vatCode === "string" && line.vatCode.includes("_RC_");
+    const exportFlag = typeof line.vatCode === "string" && line.vatCode.includes("EXPORT");
+    const ossFlag = typeof line.vatCode === "string" && line.vatCode.includes("OSS");
+    const iossFlag = typeof line.vatCode === "string" && line.vatCode.includes("IOSS");
+    const constructionServiceFlag =
+      typeof line.vatCode === "string" && (line.vatCode.includes("RC_BUILD") || line.vatCode.includes("BUILD"));
+    const vatEvaluation = vatPlatform.evaluateVatDecision({
+      companyId,
+      actorId,
+      correlationId,
+      transactionLine: {
+        source_type: invoice.invoiceType === "credit_note" ? "AR_CREDIT_NOTE" : "AR_INVOICE",
+        source_id: `${invoice.customerInvoiceId}:${line.lineId}`,
+        supply_type: "sale",
+        seller_country: "SE",
+        seller_vat_registration_country: "SE",
+        buyer_country: customer.countryCode || "SE",
+        goods_or_services: line.goodsOrServices || "services",
+        invoice_date: invoice.issueDate,
+        delivery_date: invoice.deliveryDate || invoice.supplyDate || invoice.issueDate,
+        tax_date: invoice.supplyDate || invoice.issueDate,
+        prepayment_date: invoice.issueDate,
+        currency: invoice.currencyCode || "SEK",
+        line_amount_ex_vat: line.lineAmount,
+        line_quantity: line.quantity,
+        vat_rate: resolveVatRate(vatPlatform, companyId, line.vatCode),
+        vat_code_candidate: line.vatCode,
+        buyer_is_taxable_person: Boolean(invoice.buyerVatNumber),
+        buyer_vat_number: invoice.buyerVatNumber || null,
+        import_flag: false,
+        reverse_charge_flag: reverseChargeFlag,
+        export_flag: exportFlag,
+        oss_flag: ossFlag,
+        ioss_flag: iossFlag,
+        construction_service_flag: constructionServiceFlag,
+        credit_note_flag: invoice.invoiceType === "credit_note",
+        original_vat_decision_id: originalLine?.vatDecisionId || null,
+        project_id: line.projectId || null
+      }
+    });
+    const vatDecision = vatEvaluation.vatDecision;
+    if (vatDecision.status !== "decided" || vatEvaluation.reviewQueueItem) {
+      throw createError(
+        409,
+        "invoice_issue_blocked",
+        `Invoice cannot be issued before VAT decision blockers are resolved for line ${line.lineNumber}.`
+      );
+    }
+    line.vatDecisionId = vatDecision.vatDecisionId;
+    line.vatReviewQueueItemId = vatEvaluation.reviewQueueItem?.vatReviewQueueItemId || null;
+    line.vatDecisionCategory = vatDecision.outputs?.decisionCategory || vatDecision.decisionCategory || null;
+    line.vatDeclarationBoxCodes = copy(vatDecision.outputs?.declarationBoxCodes || vatDecision.declarationBoxCodes || []);
+    line.vatEffectiveRate = Number(vatDecision.outputs?.vatRate ?? vatDecision.vatRate ?? 0);
+    line.vatPostingEntries = copy(vatDecision.outputs?.postingEntries || vatDecision.postingEntries || []);
+    return vatDecision;
+  });
+}
+
+function calculateInvoiceLineOutputVatAmount(line) {
+  return roundMoney(
+    (line.vatPostingEntries || []).reduce((sum, entry) => {
+      if (entry.vatEffect !== "output_vat") {
+        return sum;
+      }
+      return sum + Math.abs(Number(entry.amount || 0));
+    }, 0)
+  );
+}
+
+function buildInvoiceJournalLines({ invoice, customer, ledgerPlatform = null }) {
   const sourceType = resolveInvoiceSourceType(invoice.invoiceType);
   const receivableAccountNumber = resolveCustomerReceivableAccount(customer);
   const journalLines = [];
@@ -3415,19 +3516,21 @@ function buildInvoiceJournalLines({ vatPlatform, companyId, invoice, customer, l
   let totalCredit = 0;
 
   for (const line of invoice.lines) {
-    const vatRate = resolveVatRate(vatPlatform, companyId, line.vatCode);
-    const vatAmount = calculateVatAmount(vatRate, line.lineAmount);
-    const vatAccountNumber = resolveOutputVatAccountNumber(vatRate);
+    const vatAmount = calculateInvoiceLineOutputVatAmount(line);
+    const vatAccountNumber = resolveOutputVatAccountNumber(line.vatEffectiveRate);
+    if (vatAmount > 0 && !vatAccountNumber) {
+      throw createError(409, "invoice_issue_blocked", `Invoice VAT account mapping is missing for line ${line.lineNumber}.`);
+    }
     if (invoice.invoiceType === "credit_note") {
       journalLines.push(
-        createJournalLine(line.revenueAccountNumber, lineNumber, line.lineAmount, 0, sourceType, invoice.customerInvoiceId, {
-          dimensionJson: buildRevenueDimensionJson({ companyId, ledgerPlatform, line })
+        createJournalLine(line.revenueAccountNumber, lineNumber, line.lineAmount, 0, sourceType, line.lineId, {
+          dimensionJson: buildRevenueDimensionJson({ companyId: invoice.companyId, ledgerPlatform, line })
         })
       );
       totalDebit += line.lineAmount;
       lineNumber += 1;
       if (vatAmount > 0 && vatAccountNumber) {
-        journalLines.push(createJournalLine(vatAccountNumber, lineNumber, vatAmount, 0, sourceType, invoice.customerInvoiceId));
+        journalLines.push(createJournalLine(vatAccountNumber, lineNumber, vatAmount, 0, sourceType, line.vatDecisionId || line.lineId));
         totalDebit += vatAmount;
         lineNumber += 1;
       }
@@ -3435,14 +3538,14 @@ function buildInvoiceJournalLines({ vatPlatform, companyId, invoice, customer, l
     }
 
     journalLines.push(
-      createJournalLine(line.revenueAccountNumber, lineNumber, 0, line.lineAmount, sourceType, invoice.customerInvoiceId, {
-        dimensionJson: buildRevenueDimensionJson({ companyId, ledgerPlatform, line })
+      createJournalLine(line.revenueAccountNumber, lineNumber, 0, line.lineAmount, sourceType, line.lineId, {
+        dimensionJson: buildRevenueDimensionJson({ companyId: invoice.companyId, ledgerPlatform, line })
       })
     );
     totalCredit += line.lineAmount;
     lineNumber += 1;
     if (vatAmount > 0 && vatAccountNumber) {
-      journalLines.push(createJournalLine(vatAccountNumber, lineNumber, 0, vatAmount, sourceType, invoice.customerInvoiceId));
+      journalLines.push(createJournalLine(vatAccountNumber, lineNumber, 0, vatAmount, sourceType, line.vatDecisionId || line.lineId));
       totalCredit += vatAmount;
       lineNumber += 1;
     }
@@ -3550,6 +3653,9 @@ function evaluateInvoiceFieldRulesSnapshot({
   }
   if (invoice.currencyCode !== "SEK" && hasPositiveVat && invoice.currencyVatAmountSek == null) {
     missingFieldCodes.push("currency_vat_amount_sek");
+  }
+  if (scenarioCode === "eu_cross_border_invoice" && !invoice.buyerVatNumber) {
+    missingFieldCodes.push("buyer_vat_number");
   }
   if (scenarioCode === "eu_cross_border_invoice" && !invoice.buyerVatNumber) {
     warningCodes.push("buyer_vat_number_missing_review");

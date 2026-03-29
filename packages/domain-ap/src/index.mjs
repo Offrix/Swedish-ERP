@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { createVatPlatform } from "../../domain-vat/src/index.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -103,7 +104,7 @@ export function createApEngine({
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
-  vatPlatform = null,
+  vatPlatform = createVatPlatform({ clock, seedDemo: true }),
   ledgerPlatform = null,
   documentPlatform = null,
   orgAuthPlatform = null,
@@ -972,6 +973,8 @@ export function createApEngine({
       supplier,
       purchaseOrder: linkedPurchaseOrder,
       invoiceType: resolvedInvoiceType,
+      invoiceDate: resolvedInvoiceDate,
+      currencyCode: resolvedCurrencyCode,
       companyId: resolvedCompanyId,
       ledgerPlatform,
       vatPlatform,
@@ -2479,6 +2482,8 @@ function normalizeSupplierInvoiceLines({
   supplier,
   purchaseOrder,
   invoiceType = "standard",
+  invoiceDate,
+  currencyCode,
   companyId,
   ledgerPlatform,
   vatPlatform,
@@ -2537,6 +2542,8 @@ function normalizeSupplierInvoiceLines({
       supplier,
       line,
       invoiceType,
+      invoiceDate,
+      currencyCode,
       netAmount,
       quantity,
       purchaseOrderLine,
@@ -2595,6 +2602,8 @@ function buildApVatProposal({
   supplier,
   line,
   invoiceType = "standard",
+  invoiceDate,
+  currencyCode = "SEK",
   netAmount,
   quantity,
   purchaseOrderLine,
@@ -2609,15 +2618,8 @@ function buildApVatProposal({
     deriveDomesticPurchaseVatCode(line.vatRate);
   const goodsOrServices = normalizeOptionalText(line.goodsOrServices)?.toLowerCase() === "goods" ? "goods" : "services";
   const reverseChargeFlag = line.reverseChargeFlag === true || supplier.reverseChargeDefault === true;
-  if (supplier.countryCode === "SE" && reverseChargeFlag !== true) {
-    return buildDomesticPurchaseVatProposal({
-      vatCodeCandidate,
-      vatRate: line.vatRate,
-      netAmount
-    });
-  }
   if (!vatPlatform || typeof vatPlatform.evaluateVatDecision !== "function") {
-    return buildReviewVatProposal("tax_review_required", "VAT platform is missing for non-domestic or reverse-charge purchases.");
+    return buildReviewVatProposal("tax_review_required", "VAT platform is required to classify supplier-invoice VAT.");
   }
   const vatEvaluation = vatPlatform.evaluateVatDecision({
     companyId,
@@ -2628,17 +2630,28 @@ function buildApVatProposal({
       source_id: `${supplier.supplierId}:${line.description}:${quantity}`,
       supply_type: "purchase",
       seller_country: supplier.countryCode,
+      seller_vat_registration_country: supplier.countryCode,
       buyer_country: "SE",
       goods_or_services: goodsOrServices,
+      invoice_date: invoiceDate,
+      delivery_date: invoiceDate,
+      tax_date: invoiceDate,
+      prepayment_date: invoiceDate,
+      currency: currencyCode,
       line_amount_ex_vat: netAmount,
+      line_quantity: quantity,
       vat_rate: line.vatRate ?? deriveVatRateFromCode(vatCodeCandidate) ?? 25,
       reverse_charge_flag: reverseChargeFlag,
       import_flag: supplier.countryCode !== "SE" && !EU_COUNTRY_CODES.has(supplier.countryCode) && goodsOrServices === "goods",
+      export_flag: false,
       buyer_is_taxable_person: true,
       construction_service_flag: line.constructionServiceFlag === true,
+      oss_flag: false,
+      ioss_flag: false,
       vat_code_candidate: vatCodeCandidate,
       deduction_ratio: line.deductionRatio == null ? 1 : line.deductionRatio,
-      credit_note_flag: invoiceType === "credit_note"
+      credit_note_flag: invoiceType === "credit_note",
+      original_vat_decision_id: normalizeOptionalText(line.originalVatDecisionId)
     }
   });
   const vatDecision = vatEvaluation.vatDecision;
@@ -2806,6 +2819,7 @@ function buildCreditNoteLineInputs({ originalInvoice, lines = null }) {
     constructionServiceFlag: line.constructionServiceFlag === true,
     deductionRatio: line.deductionRatio,
     vatCode: line.vatCode,
+    originalVatDecisionId: line.vatProposal?.vatDecisionId || null,
     receiptRequired: line.receiptRequired === true,
     purchaseOrderLineId: line.purchaseOrderLineId || null,
     purchaseOrderLineReference: line.purchaseOrderLineReference || null

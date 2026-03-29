@@ -39,7 +39,7 @@ test("Phase 5.3 creates open items, handles partial payments and captures determ
 
   const openItem = ar.listOpenItems({ companyId: COMPANY_ID })[0];
   assert.equal(issued.status, "issued");
-  assert.equal(openItem.openAmount, 1000);
+  assert.equal(openItem.openAmount, 1250);
   assert.equal(openItem.status, "open");
 
   const allocation = ar.createOpenItemAllocation({
@@ -73,13 +73,13 @@ test("Phase 5.3 creates open items, handles partial payments and captures determ
 
   assert.equal(updatedOpenItem.status, "partially_settled");
   assert.equal(updatedOpenItem.paidAmount, 500);
-  assert.equal(updatedOpenItem.openAmount, 500);
+  assert.equal(updatedOpenItem.openAmount, 750);
   assert.equal(updatedInvoice.status, "partially_paid");
-  assert.equal(updatedInvoice.remainingAmount, 500);
+  assert.equal(updatedInvoice.remainingAmount, 750);
   assert.equal(paymentJournal.sourceType, "AR_PAYMENT");
   assert.equal(paymentJournal.voucherSeriesCode, "D");
-  assert.equal(aging.bucketTotalsJson["1_30"], 500);
-  assert.equal(aging.customerTotalsJson[customer.customerId], 500);
+  assert.equal(aging.bucketTotalsJson["1_30"], 750);
+  assert.equal(aging.customerTotalsJson[customer.customerId], 750);
 });
 
 test("Phase 5.3 bank matching keeps overpayments in unmatched receipts and marks the run for review", () => {
@@ -132,7 +132,7 @@ test("Phase 5.3 bank matching keeps overpayments in unmatched receipts and marks
   assert.equal(run.status, "review_required");
   assert.equal(run.allocations.length, 1);
   assert.equal(snapshot.unmatchedBankReceipts.length, 1);
-  assert.equal(snapshot.unmatchedBankReceipts[0].remainingAmount, 500);
+  assert.equal(snapshot.unmatchedBankReceipts[0].remainingAmount, 250);
   assert.equal(snapshot.unmatchedBankReceipts[0].status, "unmatched");
 });
 
@@ -170,8 +170,8 @@ test("Phase 5.3 can reverse a mis-match and reopen the open item without losing 
   const allocation = ar.createOpenItemAllocation({
     companyId: COMPANY_ID,
     arOpenItemId: openItem.arOpenItemId,
-    allocationAmount: 1000,
-    receiptAmount: 1000,
+    allocationAmount: 1250,
+    receiptAmount: 1250,
     allocatedOn: "2026-07-20",
     sourceChannel: "manual",
     bankTransactionUid: "bank-txn-rollback",
@@ -192,10 +192,10 @@ test("Phase 5.3 can reverse a mis-match and reopen the open item without losing 
   const snapshot = ar.snapshotAr();
 
   assert.equal(reversed.status, "reversed");
-  assert.equal(reopenedOpenItem.openAmount, 1000);
+  assert.equal(reopenedOpenItem.openAmount, 1250);
   assert.equal(reopenedOpenItem.status, "open");
   assert.equal(snapshot.unmatchedBankReceipts.length, 1);
-  assert.equal(snapshot.unmatchedBankReceipts[0].remainingAmount, 1000);
+  assert.equal(snapshot.unmatchedBankReceipts[0].remainingAmount, 1250);
 });
 
 test("Phase 5.3 blocks dunning on held disputes and books deterministic reminder charges otherwise", () => {

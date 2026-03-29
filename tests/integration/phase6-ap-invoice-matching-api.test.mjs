@@ -91,6 +91,9 @@ test("Phase 6.2 API ingests supplier invoices, posts multi-line costs and blocks
       }
     });
     assert.equal(ingested.lines.length, 2);
+    assert.equal(typeof ingested.lines[0].vatProposal.vatDecisionId, "string");
+    assert.equal(ingested.lines[0].vatProposal.decisionCategory, "domestic_supplier_charged_purchase");
+    assert.deepEqual(ingested.lines[0].vatProposal.declarationBoxCodes, ["48"]);
 
     const matched = await requestJson(baseUrl, `/v1/ap/invoices/${ingested.supplierInvoiceId}/match`, {
       method: "POST",

@@ -82,7 +82,7 @@ test("Phase 4.1 API exposes VAT masterdata, dated rule packs, explainable decisi
         companyId: COMPANY_ID,
         transactionLine: buildTransactionLine({
           source_id: "phase4-1-api-review",
-          buyer_vat_number_status: null
+          line_quantity: null
         })
       }
     });

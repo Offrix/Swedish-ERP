@@ -46,41 +46,23 @@ const EU_COUNTRY_CODES = new Set([
 const REQUIRED_DECISION_FIELDS = Object.freeze([
   "seller_country",
   "buyer_country",
-  "buyer_type",
-  "buyer_vat_no",
   "supply_type",
   "goods_or_services",
   "invoice_date",
-  "delivery_date",
   "currency",
   "line_amount_ex_vat",
   "vat_rate",
-  "vat_code_candidate",
-  "project_id",
   "source_type",
   "source_id",
-  "seller_vat_registration_country",
   "buyer_is_taxable_person",
-  "buyer_vat_number",
-  "buyer_vat_number_status",
-  "supply_subtype",
-  "property_related_flag",
   "construction_service_flag",
-  "transport_end_country",
   "import_flag",
   "export_flag",
   "reverse_charge_flag",
   "oss_flag",
   "ioss_flag",
   "tax_date",
-  "prepayment_date",
-  "line_discount",
-  "line_quantity",
-  "line_uom",
-  "tax_rate_candidate",
-  "exemption_reason",
-  "invoice_text_code",
-  "report_box_code"
+  "line_quantity"
 ]);
 
 const OPTIONAL_DECISION_FIELDS = Object.freeze([
@@ -105,12 +87,22 @@ const IMPORT_OUTPUT_BOX_BY_RATE = Object.freeze({
   "12.00": "61",
   "6.00": "62"
 });
+const DOMESTIC_PURCHASE_CANDIDATE_ALIASES = Object.freeze({
+  VAT_SE_DOMESTIC_PURCHASE_25: ["VAT_SE_DOMESTIC_25", "VAT_SE_DOMESTIC_PURCHASE_25"],
+  VAT_SE_DOMESTIC_PURCHASE_12: ["VAT_SE_DOMESTIC_12", "VAT_SE_DOMESTIC_PURCHASE_12"],
+  VAT_SE_DOMESTIC_PURCHASE_6: ["VAT_SE_DOMESTIC_6", "VAT_SE_DOMESTIC_PURCHASE_6"],
+  VAT_SE_DOMESTIC_PURCHASE_0: ["VAT_SE_EXEMPT", "VAT_SE_DOMESTIC_PURCHASE_0"]
+});
 const VAT_RULE_PACK_CODE = "SE-VAT-CORE";
 
 const VAT_CODE_DEFINITIONS = Object.freeze([
   createVatCodeDefinition("VAT_SE_DOMESTIC_25", "Domestic 25 %", 25, ["05", "10"], "vat_se_domestic_25"),
   createVatCodeDefinition("VAT_SE_DOMESTIC_12", "Domestic 12 %", 12, ["05", "11"], "vat_se_domestic_12"),
   createVatCodeDefinition("VAT_SE_DOMESTIC_6", "Domestic 6 %", 6, ["05", "12"], "vat_se_domestic_6"),
+  createVatCodeDefinition("VAT_SE_DOMESTIC_PURCHASE_25", "Domestic purchase 25 %", 25, ["48"], "vat_se_domestic_purchase_25"),
+  createVatCodeDefinition("VAT_SE_DOMESTIC_PURCHASE_12", "Domestic purchase 12 %", 12, ["48"], "vat_se_domestic_purchase_12"),
+  createVatCodeDefinition("VAT_SE_DOMESTIC_PURCHASE_6", "Domestic purchase 6 %", 6, ["48"], "vat_se_domestic_purchase_6"),
+  createVatCodeDefinition("VAT_SE_DOMESTIC_PURCHASE_0", "Domestic purchase 0 %", 0, [], "vat_se_domestic_purchase_0"),
   createVatCodeDefinition("VAT_SE_EXEMPT", "Exempt or zero-rated", 0, ["42"], "vat_se_exempt"),
   createVatCodeDefinition("VAT_SE_RC_BUILD_SELL", "Construction reverse charge sale", 0, ["41"], "vat_se_rc_build_sell"),
   createVatCodeDefinition("VAT_SE_RC_BUILD_PURCHASE", "Construction reverse charge purchase", 25, ["24", "30", "48"], "vat_se_rc_build_purchase"),
@@ -217,6 +209,10 @@ const VAT_SCENARIO_BY_CODE = Object.freeze({
   VAT_SE_DOMESTIC_25: { decisionCategory: "domestic_standard_sale", invoiceTextRequirements: [] },
   VAT_SE_DOMESTIC_12: { decisionCategory: "domestic_standard_sale", invoiceTextRequirements: [] },
   VAT_SE_DOMESTIC_6: { decisionCategory: "domestic_standard_sale", invoiceTextRequirements: [] },
+  VAT_SE_DOMESTIC_PURCHASE_25: { decisionCategory: "domestic_supplier_charged_purchase", invoiceTextRequirements: [] },
+  VAT_SE_DOMESTIC_PURCHASE_12: { decisionCategory: "domestic_supplier_charged_purchase", invoiceTextRequirements: [] },
+  VAT_SE_DOMESTIC_PURCHASE_6: { decisionCategory: "domestic_supplier_charged_purchase", invoiceTextRequirements: [] },
+  VAT_SE_DOMESTIC_PURCHASE_0: { decisionCategory: "domestic_supplier_charged_purchase", invoiceTextRequirements: [] },
   VAT_SE_EXEMPT: { decisionCategory: "domestic_exempt_sale", invoiceTextRequirements: [] },
   VAT_SE_RC_BUILD_SELL: {
     decisionCategory: "construction_reverse_charge_sale",
@@ -1062,7 +1058,7 @@ function classifyVatDecision({ companyId, normalizedLine, rulePack, state }) {
     });
   }
 
-  if (normalizedLine.vat_code_candidate && normalizedLine.vat_code_candidate !== scenario.vatCode) {
+  if (!isCompatibleVatCodeCandidate(normalizedLine, scenario.vatCode)) {
     return buildReviewDecision({
       normalizedLine,
       rulePack,
@@ -1074,6 +1070,25 @@ function classifyVatDecision({ companyId, normalizedLine, rulePack, state }) {
         `candidate=${normalizedLine.vat_code_candidate}`,
         `derived=${scenario.vatCode}`,
         "Decision routed to manual review because the VAT code candidate conflicts with transaction facts."
+      ]
+    });
+  }
+
+  if (
+    scenario.decisionCategory === "domestic_supplier_charged_purchase" &&
+    normalizedLine.deduction_ratio !== null &&
+    normalizedLine.deduction_ratio !== 1
+  ) {
+    return buildReviewDecision({
+      normalizedLine,
+      rulePack,
+      reviewReasonCode: "unsupported_domestic_purchase_deduction_ratio",
+      warningCode: "unsupported_domestic_purchase_deduction_ratio",
+      warningMessage: "Domestic supplier-charged purchases with partial deduction must be reviewed before posting.",
+      explanation: [
+        `rule_pack_id=${rulePack.rulePackId}`,
+        `deduction_ratio=${normalizedLine.deduction_ratio}`,
+        "Decision routed to manual review because domestic supplier-charged purchases do not yet support partial deduction auto-booking."
       ]
     });
   }
@@ -1383,7 +1398,17 @@ function deriveScenario(normalizedLine) {
           goodsOrServices === "goods" ? "domestic_goods_purchase_reverse_charge" : "domestic_services_purchase_reverse_charge"
         );
       }
-      return reviewScenario("domestic_purchase_not_in_scope_yet", "Domestic purchases with supplier-charged VAT are handled in the supplier-invoice phase.");
+      if (isExemptLine(normalizedLine)) {
+        return acceptScenario("VAT_SE_DOMESTIC_PURCHASE_0", "domestic_supplier_charged_purchase");
+      }
+      const domesticPurchaseCode = domesticPurchaseCodeFromRate(normalizedLine);
+      if (!domesticPurchaseCode) {
+        return reviewScenario(
+          "unsupported_domestic_purchase_vat_rate",
+          "Domestic supplier-charged purchases must resolve to 25, 12, 6 or exempt."
+        );
+      }
+      return acceptScenario(domesticPurchaseCode, "domestic_supplier_charged_purchase");
     }
     if (deriveRegion(normalizedLine.seller_country) === "EU") {
       return acceptScenario(
@@ -1481,6 +1506,15 @@ function buildScenarioOutputs(normalizedLine, scenario) {
       declarationBoxAmounts = [createBoxAmount("40", baseAmount, "taxable_base")];
       postingEntries = [createPostingEntry("net_sale", "credit", baseAmount, "taxable_base")];
       break;
+    case "domestic_supplier_charged_purchase": {
+      const inputVat = calculateVat(baseAmount, rate);
+      declarationBoxAmounts = inputVat > 0 ? [createBoxAmount("48", inputVat, "input_vat")] : [];
+      postingEntries =
+        inputVat > 0
+          ? [createPostingEntry("input_vat_supplier_charged", "debit", inputVat, "input_vat")]
+          : [];
+      break;
+    }
     case "import_goods_purchase": {
       const outputBox = requireBox(IMPORT_OUTPUT_BOX_BY_RATE, rate, "unsupported_import_vat_rate");
       const vatAmount = calculateVat(baseAmount, rate);
@@ -1647,6 +1681,25 @@ function createPostingEntry(entryCode, direction, amount, vatEffect) {
   };
 }
 
+function isCompatibleVatCodeCandidate(normalizedLine, derivedVatCode) {
+  if (!normalizedLine.vat_code_candidate) {
+    return true;
+  }
+  if (normalizedLine.vat_code_candidate === derivedVatCode) {
+    return true;
+  }
+  if (
+    normalizedLine.supply_type === "purchase" &&
+    normalizedLine.seller_country === "SE" &&
+    normalizedLine.buyer_country === "SE" &&
+    normalizedLine.reverse_charge_flag !== true
+  ) {
+    const aliases = DOMESTIC_PURCHASE_CANDIDATE_ALIASES[derivedVatCode] || [];
+    return aliases.includes(normalizedLine.vat_code_candidate);
+  }
+  return false;
+}
+
 function domesticCodeFromRate(normalizedLine) {
   const rate = formatRate(resolveVatRate(normalizedLine, null));
   if (rate === "25.00") {
@@ -1657,6 +1710,20 @@ function domesticCodeFromRate(normalizedLine) {
   }
   if (rate === "6.00") {
     return "VAT_SE_DOMESTIC_6";
+  }
+  return null;
+}
+
+function domesticPurchaseCodeFromRate(normalizedLine) {
+  const rate = formatRate(resolveVatRate(normalizedLine, null));
+  if (rate === "25.00") {
+    return "VAT_SE_DOMESTIC_PURCHASE_25";
+  }
+  if (rate === "12.00") {
+    return "VAT_SE_DOMESTIC_PURCHASE_12";
+  }
+  if (rate === "6.00") {
+    return "VAT_SE_DOMESTIC_PURCHASE_6";
   }
   return null;
 }

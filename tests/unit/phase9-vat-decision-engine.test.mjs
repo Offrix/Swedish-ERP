@@ -63,7 +63,7 @@ test("Phase 9.3 materializes VAT declaration basis, resolves review blockers and
     actorId: "user-1",
     transactionLine: buildTransactionLine({
       source_id: "phase9-3-unit-review",
-      buyer_vat_number_status: null
+      line_quantity: null
     })
   });
   assert.equal(review.vatDecision.status, "review_required");

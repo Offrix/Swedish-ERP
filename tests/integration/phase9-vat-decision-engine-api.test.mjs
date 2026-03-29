@@ -92,7 +92,7 @@ test("Phase 9.3 API resolves VAT review blockers, materializes declaration basis
         companyId: COMPANY_ID,
         transactionLine: buildTransactionLine({
           source_id: "phase9-3-api-review",
-          buyer_vat_number_status: null
+          line_quantity: null
         })
       }
     });

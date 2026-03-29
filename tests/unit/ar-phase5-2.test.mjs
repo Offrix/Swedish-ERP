@@ -46,6 +46,9 @@ test("Phase 5.2 issues an invoice only once and reuses the posted journal on rep
   const postedEntries = ledger.snapshotLedger().journalEntries.filter((entry) => entry.sourceId === invoice.customerInvoiceId);
   assert.equal(firstIssue.invoiceNumber, secondIssue.invoiceNumber);
   assert.equal(firstIssue.journalEntryId, secondIssue.journalEntryId);
+  assert.equal(typeof firstIssue.lines[0].vatDecisionId, "string");
+  assert.equal(firstIssue.lines[0].vatDecisionCategory, "domestic_standard_sale");
+  assert.deepEqual(firstIssue.lines[0].vatDeclarationBoxCodes, ["05", "10"]);
   assert.equal(postedEntries.length, 1);
   assert.equal(postedEntries[0].status, "posted");
   assert.equal(postedEntries[0].metadataJson.postingRecipeCode, "AR_INVOICE");
@@ -118,6 +121,8 @@ test("Phase 5.2 full credit note closes the credited invoice and posts a separat
   assert.equal(originalAfterCredit.status, "credited");
   assert.equal(originalAfterCredit.remainingAmount, 0);
   assert.match(issuedCredit.invoiceNumber, /^CRN-/);
+  assert.equal(typeof issuedCredit.lines[0].vatDecisionId, "string");
+  assert.equal(issuedCredit.lines[0].vatDecisionCategory, "credit_note_mirror");
   assert.equal(creditJournal.sourceType, "AR_CREDIT_NOTE");
   assert.equal(creditJournal.voucherSeriesCode, "C");
   assert.equal(creditJournal.metadataJson.postingRecipeCode, "AR_CREDIT_NOTE");

@@ -63,7 +63,7 @@ test("Phase 4.1 routes unclear VAT cases to review queue instead of silent auto-
     actorId: "user-1",
     transactionLine: buildTransactionLine({
       source_id: "phase4-1-unit-review",
-      buyer_vat_number_status: null
+      line_quantity: null
     })
   });
 

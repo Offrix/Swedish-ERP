@@ -35,6 +35,9 @@ export const HUS_RECOVERY_CANDIDATE_STATUSES = Object.freeze(["open", "recovered
 export const HUS_DECISION_RESOLUTION_CODES = Object.freeze(["customer_reinvoice", "internal_writeoff", "credit_note_issued"]);
 export const HUS_RULEPACK_CODE = "RP-HUS-SE";
 export const HUS_RULEPACK_VERSION = "se-hus-2026.1";
+const HUS_SETTLEMENT_CLEARING_ACCOUNT = "1180";
+const HUS_SKATTEVERKET_ACCOUNT = "2560";
+const HUS_RECOVERY_RECEIVABLE_ACCOUNT = "1590";
 
 const HUS_RULE_PACKS = Object.freeze([
   Object.freeze({
@@ -98,6 +101,7 @@ export function createHusEngine({
   clock = () => new Date(),
   arPlatform = null,
   projectsPlatform = null,
+  ledgerPlatform = null,
   ruleRegistry = null
 } = {}) {
   const rules = ruleRegistry || createRulePackRegistry({
@@ -733,6 +737,7 @@ export function createHusEngine({
         approvedAmount: resolvedApprovedAmount,
         rejectedAmount: resolvedRejectedAmount
       }),
+      journalEntryId: null,
       reasonCode: requireText(reasonCode, "hus_decision_reason_required"),
       rejectedOutcomeCode: requireText(rejectedOutcomeCode, "hus_rejected_outcome_required"),
       createdByActorId: requireText(actorId, "actor_id_required"),
@@ -772,6 +777,17 @@ export function createHusEngine({
     } else {
       claimRecord.status = "claim_partially_accepted";
       record.status = "claim_partially_accepted";
+    }
+    if (resolvedApprovedAmount > 0) {
+      const postedDecision = maybePostHusDecisionToLedger({
+        ledgerPlatform,
+        record,
+        claimRecord,
+        decision,
+        actorId,
+        correlationId
+      });
+      decision.journalEntryId = postedDecision?.journalEntry?.journalEntryId || null;
     }
     claimRecord.updatedAt = nowIso(clock);
     claimRecord.statusEvents.push({
@@ -1016,11 +1032,21 @@ export function createHusEngine({
       husRecoveryCandidateId: recoveryCandidate.husRecoveryCandidateId,
       recoveryDate: normalizeRequiredDate(recoveryDate, "hus_recovery_date_required"),
       recoveryAmount: recoveryAmountValue,
+      journalEntryId: null,
       reasonCode: requireText(reasonCode, "hus_recovery_reason_required"),
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock)
     };
     record.recoveries.push(recovery);
+    const postedRecovery = maybePostHusRecoveryToLedger({
+      ledgerPlatform,
+      record,
+      recoveryCandidate,
+      recovery,
+      actorId,
+      correlationId
+    });
+    recovery.journalEntryId = postedRecovery?.journalEntry?.journalEntryId || null;
     recoveryCandidate.status = recoveryAmountValue >= recoveryCandidate.differenceAmount - MONEY_EPSILON ? "recovered" : "open";
     recoveryCandidate.resolvedAt = recoveryCandidate.status === "recovered" ? nowIso(clock) : null;
     recoveryCandidate.resolutionCode = recoveryCandidate.status === "recovered" ? "recovered" : null;
@@ -1080,6 +1106,191 @@ export function createHusEngine({
     return copy({
       ...record,
       claimReadiness: buildClaimReadinessSnapshot(record)
+    });
+  }
+
+  function maybePostHusDecisionToLedger({
+    ledgerPlatform,
+    record,
+    claimRecord,
+    decision,
+    actorId,
+    correlationId
+  } = {}) {
+    if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
+      return null;
+    }
+    const recipeCode = claimRecord.status === "claim_partially_accepted"
+      ? "HUS_CLAIM_PARTIALLY_ACCEPTED"
+      : "HUS_CLAIM_ACCEPTED";
+    ensureHusVoucherSeries({
+      ledgerPlatform,
+      companyId: record.companyId,
+      seriesCode: "B",
+      description: "HUS settlement clearing",
+      actorId
+    });
+    return ledgerPlatform.applyPostingIntent({
+      companyId: record.companyId,
+      journalDate: decision.decisionDate,
+      recipeCode,
+      postingSignalCode: claimRecord.status === "claim_partially_accepted"
+        ? "hus.claim.partially_accepted"
+        : "hus.claim.accepted",
+      sourceType: "ROT_RUT_CLAIM",
+      sourceId: claimRecord.husClaimId,
+      sourceObjectVersion: `hus-decision:${decision.husDecisionId}`,
+      actorId,
+      correlationId,
+      idempotencyKey: `hus-decision-posting:${decision.husDecisionId}`,
+      description: `HUS claim ${claimRecord.versionNo} ${claimRecord.status}`,
+      metadataJson: buildHusPostingMetadata({
+        record,
+        claimRecord,
+        rulepackId: decision.rulepackId,
+        rulepackCode: decision.rulepackCode,
+        rulepackVersion: decision.rulepackVersion,
+        rulepackChecksum: decision.rulepackChecksum,
+        claimPayloadHash: claimRecord.payloadHash,
+        approvedAmount: decision.approvedAmount,
+        rejectedAmount: decision.rejectedAmount
+      }),
+      lines: [
+        createHusJournalLine(HUS_SETTLEMENT_CLEARING_ACCOUNT, 1, decision.approvedAmount, 0, record),
+        createHusJournalLine(HUS_SKATTEVERKET_ACCOUNT, 2, 0, decision.approvedAmount, record)
+      ]
+    });
+  }
+
+  function maybePostHusRecoveryToLedger({
+    ledgerPlatform,
+    record,
+    recoveryCandidate,
+    recovery,
+    actorId,
+    correlationId
+  } = {}) {
+    if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
+      return null;
+    }
+    ensureHusVoucherSeries({
+      ledgerPlatform,
+      companyId: record.companyId,
+      seriesCode: "V",
+      description: "HUS recovery adjustments",
+      actorId
+    });
+    return ledgerPlatform.applyPostingIntent({
+      companyId: record.companyId,
+      journalDate: recovery.recoveryDate,
+      recipeCode: "HUS_RECOVERY_CONFIRMED",
+      postingSignalCode: "hus.recovery.confirmed",
+      sourceType: "ROT_RUT_CLAIM",
+      sourceId: recoveryCandidate.husRecoveryCandidateId,
+      sourceObjectVersion: `hus-recovery:${recovery.husRecoveryId}`,
+      actorId,
+      correlationId,
+      idempotencyKey: `hus-recovery-posting:${recovery.husRecoveryId}`,
+      description: `HUS recovery ${record.caseReference}`,
+      metadataJson: buildHusPostingMetadata({
+        record,
+        claimRecord: findClaimByRecoveryCandidate(record, recoveryCandidate),
+        rulepackId: record.rulepackId,
+        rulepackCode: record.rulepackCode,
+        rulepackVersion: record.rulepackVersion,
+        rulepackChecksum: record.rulepackChecksum,
+        recoveryAmount: recovery.recoveryAmount,
+        recoveryCandidateId: recoveryCandidate.husRecoveryCandidateId
+      }),
+      lines: [
+        createHusJournalLine(HUS_RECOVERY_RECEIVABLE_ACCOUNT, 1, recovery.recoveryAmount, 0, record),
+        createHusJournalLine(HUS_SETTLEMENT_CLEARING_ACCOUNT, 2, 0, recovery.recoveryAmount, record)
+      ]
+    });
+  }
+
+  function buildHusPostingMetadata({
+    record,
+    claimRecord = null,
+    rulepackId,
+    rulepackCode,
+    rulepackVersion,
+    rulepackChecksum,
+    claimPayloadHash = null,
+    approvedAmount = null,
+    rejectedAmount = null,
+    recoveryAmount = null,
+    recoveryCandidateId = null
+  } = {}) {
+    return {
+      rulepackRefs: [
+        {
+          rulepackId,
+          rulepackCode,
+          rulepackVersion,
+          rulepackChecksum
+        }
+      ],
+      husCaseId: record.husCaseId,
+      husCaseReference: record.caseReference,
+      husClaimId: claimRecord?.husClaimId || null,
+      customerInvoiceId: record.customerInvoiceId || null,
+      projectId: record.projectId || null,
+      serviceTypeCode: record.serviceTypeCode,
+      claimPayloadHash: claimPayloadHash || null,
+      approvedAmount: normalizeOptionalMoney(approvedAmount, "hus_posting_approved_amount_invalid"),
+      rejectedAmount: normalizeOptionalMoney(rejectedAmount, "hus_posting_rejected_amount_invalid"),
+      recoveryAmount: normalizeOptionalMoney(recoveryAmount, "hus_posting_recovery_amount_invalid"),
+      recoveryCandidateId: normalizeOptionalText(recoveryCandidateId),
+      propertyDesignation: record.propertyProfile?.propertyDesignation || null,
+      housingFormCode: record.propertyProfile?.housingFormCode || null
+    };
+  }
+
+  function createHusJournalLine(accountNumber, lineNumber, debitAmount, creditAmount, record) {
+    const dimensionJson = record.projectId
+      ? { projectId: record.projectId }
+      : null;
+    return {
+      accountNumber,
+      lineNumber,
+      debitAmount: roundMoney(debitAmount),
+      creditAmount: roundMoney(creditAmount),
+      sourceType: "ROT_RUT_CLAIM",
+      sourceId: record.husCaseId,
+      description: record.caseReference,
+      ...(dimensionJson ? { dimensionJson } : {})
+    };
+  }
+
+  function findClaimByRecoveryCandidate(record, recoveryCandidate) {
+    return record.claims.find((claim) =>
+      record.decisions.some(
+        (decision) =>
+          decision.husClaimId === claim.husClaimId
+          && moneyEquals(decision.approvedAmount, recoveryCandidate.previousAcceptedAmount)
+      )
+    ) || record.claims.at(-1) || null;
+  }
+
+  function ensureHusVoucherSeries({
+    ledgerPlatform,
+    companyId,
+    seriesCode,
+    description,
+    actorId
+  } = {}) {
+    if (!ledgerPlatform || typeof ledgerPlatform.upsertVoucherSeries !== "function") {
+      return;
+    }
+    ledgerPlatform.upsertVoucherSeries({
+      companyId,
+      seriesCode,
+      description,
+      purposeCodes: [],
+      locked: true,
+      changeReasonCode: "hus_posting_runtime",
+      actorId
     });
   }
 

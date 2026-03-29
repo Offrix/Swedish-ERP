@@ -57,6 +57,29 @@ test("Phase 4.2 derives declaration-box amounts for domestic, import and reverse
     { entryCode: "input_vat_deductible", direction: "debit", amount: 600, vatEffect: "input_vat" }
   ]);
 
+  const domesticPurchase = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_type: "AP_INVOICE",
+      source_id: "phase4-2-unit-domestic-purchase",
+      supply_type: "purchase",
+      seller_country: "SE",
+      buyer_country: "SE",
+      goods_or_services: "services",
+      vat_rate: 25,
+      tax_rate_candidate: 25,
+      vat_code_candidate: "VAT_SE_DOMESTIC_25",
+      line_amount_ex_vat: 1200
+    })
+  });
+  assert.equal(domesticPurchase.vatDecision.decisionCategory, "domestic_supplier_charged_purchase");
+  assert.equal(domesticPurchase.vatDecision.vatCode, "VAT_SE_DOMESTIC_PURCHASE_25");
+  assert.deepEqual(domesticPurchase.vatDecision.declarationBoxAmounts, [{ boxCode: "48", amount: 300, amountType: "input_vat" }]);
+  assert.deepEqual(domesticPurchase.vatDecision.postingEntries, [
+    { entryCode: "input_vat_supplier_charged", direction: "debit", amount: 300, vatEffect: "input_vat" }
+  ]);
+
   const reverseCharge = vat.evaluateVatDecision({
     companyId: COMPANY_ID,
     actorId: "user-1",
@@ -89,7 +112,7 @@ test("Phase 4.2 derives declaration-box amounts for domestic, import and reverse
     { boxCode: "11", amountType: "output_vat", amount: 96 },
     { boxCode: "21", amountType: "taxable_base", amount: 1000 },
     { boxCode: "30", amountType: "output_vat", amount: 250 },
-    { boxCode: "48", amountType: "input_vat", amount: 850 },
+    { boxCode: "48", amountType: "input_vat", amount: 1150 },
     { boxCode: "50", amountType: "taxable_base", amount: 2400 },
     { boxCode: "60", amountType: "output_vat", amount: 600 }
   ]);

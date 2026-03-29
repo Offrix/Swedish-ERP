@@ -92,7 +92,7 @@ test("Phase 9.3 e2e flow resolves VAT review blockers, locks the declaration per
         companyId: COMPANY_ID,
         transactionLine: buildTransactionLine({
           source_id: "phase9-3-e2e-review",
-          buyer_vat_number_status: null
+          line_quantity: null
         })
       }
     });

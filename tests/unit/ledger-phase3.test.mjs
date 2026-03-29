@@ -18,6 +18,16 @@ test("Phase 3.1 installs DSAM accounts and A-Z voucher series", () => {
   assert.equal(engine.listVoucherSeries({ companyId: "company-1" }).length, 26);
 });
 
+test("Phase 3.1 derives DSAM account classes from BAS account numbers", () => {
+  const administrationAccount = DSAM_ACCOUNTS.find((account) => account.accountNumber === "6000");
+  const payrollAccount = DSAM_ACCOUNTS.find((account) => account.accountNumber === "7070");
+  const revenueAccount = DSAM_ACCOUNTS.find((account) => account.accountNumber === "3010");
+
+  assert.equal(administrationAccount?.accountClass, "6");
+  assert.equal(payrollAccount?.accountClass, "7");
+  assert.equal(revenueAccount?.accountClass, "3");
+});
+
 test("Phase 3.1 validates balance, preserves idempotency, marks imports and numbers vouchers deterministically", () => {
   const engine = createLedgerEngine({
     clock: () => new Date("2026-03-21T18:15:00Z")
