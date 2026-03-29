@@ -844,6 +844,7 @@ Implementera riktig svensk stark identitet, federation, session trust, device tr
 
 **Förstärk / härda**
 - session revision, trust TTL, queue ownership, visibility reasoning
+- login-start rate limiting, unresolved-identifier lockout and factor-specific invalid-code lockout
 
 **Skriv om**
 - current BankID stub integration
@@ -909,13 +910,14 @@ All factor enrollments, auth completions, linking and impersonation actions are 
 Sandbox and production credentials, callback domains, cookies and test identities are fully separate.
 
 **Testkrav**  
-['BankID sandbox/prod isolation', 'federation claim mapping', 'step-up TTL', 'allowlist enforcement', 'access review stale grant detection']
+['BankID sandbox/prod isolation', 'federation claim mapping', 'step-up TTL', 'allowlist enforcement', 'access review stale grant detection', 'login-start rate limit', 'unresolved-identifier lockout', 'factor-based TOTP lockout with session revocation']
 
 **Migrations- och cutoverkrav**  
 Migrate identities with reversible linking; dry-run enterprise SSO mapping before enabling.
 
 **Runbooks som krävs**
 - `docs/runbooks/bankid-provider-setup.md`
+- `docs/runbooks/auth-rate-limit-and-lockout.md`
 - `docs/runbooks/support-impersonation.md`
 - `docs/runbooks/break-glass.md`
 

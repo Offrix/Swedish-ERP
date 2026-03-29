@@ -476,6 +476,7 @@ Göra identitet, step-up, federation, impersonation och break-glass verkliga och
 - 6.3 återverifierad 2026-03-27
 - 6.4 återverifierad 2026-03-27
 - 6.5 återverifierad 2026-03-27
+- 6.x återhärdad 2026-03-29: login-start har nu pending-session-rate-limit och unresolved-identifier-lockout, TOTP har faktorbaserad invalid-code-lockout med session-revokering, verifierat i nya phase 6 unit/API-sviter och runbook `docs/runbooks/auth-rate-limit-and-lockout.md`.
 
 **Test gate**  
 - BankID sandbox/prod isolation, passkey enroll/revoke, TOTP recovery, SSO login, impersonation denial tests, dual control tests, access review tests.

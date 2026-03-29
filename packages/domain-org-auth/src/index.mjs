@@ -228,6 +228,15 @@ const TRUST_LEVEL_FRESHNESS_TTL_SECONDS = Object.freeze({
   mfa: 30 * 60,
   strong_mfa: 15 * 60
 });
+const AUTH_GUARDRAIL_SCOPES = Object.freeze(["login_identifier", "totp_factor"]);
+const LOGIN_IDENTIFIER_FAILURE_THRESHOLD = 5;
+const LOGIN_IDENTIFIER_FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_IDENTIFIER_LOCKOUT_MS = 15 * 60 * 1000;
+const LOGIN_PENDING_SESSION_LIMIT = 3;
+const LOGIN_PENDING_SESSION_LOCKOUT_MS = 5 * 60 * 1000;
+const TOTP_FAILURE_THRESHOLD = 5;
+const TOTP_FAILURE_WINDOW_MS = 10 * 60 * 1000;
+const TOTP_LOCKOUT_MS = 15 * 60 * 1000;
 
 export function createOrgAuthPlatform({
   clock = () => new Date(),
@@ -268,6 +277,7 @@ export function createOrgAuthPlatform({
     sessionRevisions: new Map(),
     sessionRevisionIdsBySession: new Map(),
     authFactors: new Map(),
+    authGuardrails: new Map(),
     authChallenges: new Map(),
     challengeCompletionReceipts: new Map(),
     challengeReceiptIdsByChallenge: new Map(),
@@ -760,7 +770,62 @@ export function createOrgAuthPlatform({
   }
 
   function startLogin({ companyId, email } = {}) {
-    const companyUser = findActiveCompanyUser(companyId, email);
+    const resolvedCompanyId = assertNonEmpty(companyId, "company_id_required");
+    const normalizedEmail = normalizeEmailAddress(email);
+    const loginGuardrail = resolveAuthGuardrail({
+      scope: "login_identifier",
+      key: createLoginIdentifierGuardrailKey(resolvedCompanyId, normalizedEmail),
+      companyId: resolvedCompanyId,
+      normalizedEmail
+    });
+    assertAuthGuardrailOpen({
+      guardrail: loginGuardrail,
+      windowMs: LOGIN_IDENTIFIER_FAILURE_WINDOW_MS,
+      code: "login_temporarily_locked",
+      message: "Too many failed login attempts. Try again later."
+    });
+    let companyUser;
+    try {
+      companyUser = findActiveCompanyUser(resolvedCompanyId, normalizedEmail);
+    } catch (error) {
+      if (error?.code === "user_not_found" || error?.code === "company_user_not_found") {
+        const failureGuardrail = recordAuthGuardrailFailure(loginGuardrail, {
+          windowMs: LOGIN_IDENTIFIER_FAILURE_WINDOW_MS,
+          threshold: LOGIN_IDENTIFIER_FAILURE_THRESHOLD,
+          lockoutMs: LOGIN_IDENTIFIER_LOCKOUT_MS
+        });
+        pushAudit({
+          companyId: resolvedCompanyId,
+          actorId: `unresolved:${normalizedEmail}`,
+          action: "auth.login.started",
+          result: failureGuardrail.lockedUntil ? "blocked" : "denied",
+          entityType: "auth_guardrail",
+          entityId: failureGuardrail.guardrailId,
+          explanation: failureGuardrail.lockedUntil
+            ? "Login temporarily locked after repeated unresolved login attempts."
+            : "Login denied because no active company user matched the supplied identifier.",
+          metadata: {
+            scope: failureGuardrail.scope,
+            normalizedEmail,
+            failureCount: failureGuardrail.failureCount,
+            lockedUntil: failureGuardrail.lockedUntil,
+            originalErrorCode: error.code
+          }
+        });
+        if (failureGuardrail.lockedUntil) {
+          throw httpError(429, "login_temporarily_locked", "Too many failed login attempts. Try again later.");
+        }
+      }
+      throw error;
+    }
+    enforcePendingLoginSessionLimit({
+      guardrail: loginGuardrail,
+      companyUser,
+      normalizedEmail
+    });
+    markAuthGuardrailSuccess(loginGuardrail, {
+      windowMs: LOGIN_IDENTIFIER_FAILURE_WINDOW_MS
+    });
     const now = currentDate();
     const requiredFactorCount = companyUser.requiresMfa ? 2 : requiredFactorCountForRoles([companyUser.roleCode]);
     const sessionToken = issueOpaqueToken();
@@ -789,7 +854,7 @@ export function createOrgAuthPlatform({
       reasonCode: "login_started"
     });
     pushAudit({
-      companyId,
+      companyId: resolvedCompanyId,
       actorId: companyUser.userId,
       action: "auth.login.started",
       result: "pending",
@@ -932,19 +997,54 @@ export function createOrgAuthPlatform({
     if (!factor || factor.companyUserId !== session.companyUserId || factor.factorType !== "totp") {
       throw httpError(404, "totp_factor_not_found", "No matching TOTP factor was found.");
     }
+    const totpGuardrail = resolveAuthGuardrail({
+      scope: "totp_factor",
+      key: createTotpFactorGuardrailKey(session.companyUserId, factor.factorId),
+      companyId: session.companyId,
+      companyUserId: session.companyUserId,
+      factorId: factor.factorId
+    });
+    assertAuthGuardrailOpen({
+      guardrail: totpGuardrail,
+      windowMs: TOTP_FAILURE_WINDOW_MS,
+      code: "totp_temporarily_locked",
+      message: "Too many invalid TOTP attempts. Try again later."
+    });
 
     if (!verifyTotpCode({ secret: factor.secret, code, now: currentDate() })) {
+      const failureGuardrail = recordAuthGuardrailFailure(totpGuardrail, {
+        windowMs: TOTP_FAILURE_WINDOW_MS,
+        threshold: TOTP_FAILURE_THRESHOLD,
+        lockoutMs: TOTP_LOCKOUT_MS
+      });
+      if (failureGuardrail.lockedUntil) {
+        revokeSessionForSecurityLockout(session, {
+          reasonCode: "totp_temporarily_locked"
+        });
+      }
       pushAudit({
         companyId: session.companyId,
         actorId: principal.userId,
         action: "auth.mfa.totp.verify",
-        result: "denied",
+        result: failureGuardrail.lockedUntil ? "blocked" : "denied",
         entityType: "auth_factor",
         entityId: factor.factorId,
-        explanation: "Provided TOTP code was invalid."
+        explanation: failureGuardrail.lockedUntil
+          ? "TOTP verification temporarily locked after repeated invalid codes."
+          : "Provided TOTP code was invalid.",
+        metadata: {
+          failureCount: failureGuardrail.failureCount,
+          lockedUntil: failureGuardrail.lockedUntil
+        }
       });
+      if (failureGuardrail.lockedUntil) {
+        throw httpError(429, "totp_temporarily_locked", "Too many invalid TOTP attempts. Try again later.");
+      }
       throw httpError(403, "totp_code_invalid", "The provided TOTP code was invalid.");
     }
+    markAuthGuardrailSuccess(totpGuardrail, {
+      windowMs: TOTP_FAILURE_WINDOW_MS
+    });
 
     if (factor.status === "pending_enrollment") {
       factor.status = "active";
@@ -2023,6 +2123,7 @@ export function createOrgAuthPlatform({
       authSessions: [...state.authSessions.values()].map(publicSession),
       sessionRevisions: [...state.sessionRevisions.values()].map(copy),
       authFactors: [...state.authFactors.values()].map(stripSecret),
+      authGuardrails: [...state.authGuardrails.values()].map(copy),
       challengeCompletionReceipts: [...state.challengeCompletionReceipts.values()].map(copy),
       deviceTrustRecords: [...state.deviceTrustRecords.values()].map(copy),
       identityAccounts: listIdentityAccounts(),
@@ -2321,6 +2422,143 @@ export function createOrgAuthPlatform({
       throw httpError(404, "company_user_not_found", "No active company user matched the supplied company and user.");
     }
     return companyUser;
+  }
+
+  function createLoginIdentifierGuardrailKey(companyId, normalizedEmail) {
+    return `login_identifier:${companyId}:${normalizedEmail}`;
+  }
+
+  function createTotpFactorGuardrailKey(companyUserId, factorId) {
+    return `totp_factor:${companyUserId}:${factorId}`;
+  }
+
+  function resolveAuthGuardrail({ scope, key, companyId = null, normalizedEmail = null, companyUserId = null, factorId = null } = {}) {
+    const resolvedScope = assertAllowedValue(scope, AUTH_GUARDRAIL_SCOPES, "auth_guardrail_scope_invalid");
+    const resolvedKey = assertNonEmpty(key, "auth_guardrail_key_required");
+    const existing = state.authGuardrails.get(resolvedKey);
+    if (existing) {
+      return existing;
+    }
+    const guardrail = {
+      guardrailId: crypto.randomUUID(),
+      scope: resolvedScope,
+      key: resolvedKey,
+      companyId: companyId || null,
+      normalizedEmail: normalizedEmail || null,
+      companyUserId: companyUserId || null,
+      factorId: factorId || null,
+      failureCount: 0,
+      windowStartedAt: null,
+      lastFailureAt: null,
+      lastSuccessAt: null,
+      lockedUntil: null,
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    };
+    state.authGuardrails.set(resolvedKey, guardrail);
+    return guardrail;
+  }
+
+  function refreshAuthGuardrailWindow(guardrail, { windowMs } = {}) {
+    const resolvedWindowMs = Number(windowMs || 0);
+    const now = currentDate();
+    if (guardrail.lockedUntil && new Date(guardrail.lockedUntil) <= now) {
+      guardrail.lockedUntil = null;
+    }
+    if (!guardrail.windowStartedAt) {
+      guardrail.windowStartedAt = timestamp(now);
+    }
+    if (resolvedWindowMs > 0 && new Date(guardrail.windowStartedAt).getTime() + resolvedWindowMs <= now.getTime()) {
+      guardrail.failureCount = 0;
+      guardrail.windowStartedAt = timestamp(now);
+      guardrail.lastFailureAt = null;
+    }
+    guardrail.updatedAt = timestamp(now);
+    return guardrail;
+  }
+
+  function assertAuthGuardrailOpen({ guardrail, windowMs, code, message } = {}) {
+    refreshAuthGuardrailWindow(guardrail, { windowMs });
+    if (guardrail.lockedUntil && new Date(guardrail.lockedUntil) > currentDate()) {
+      throw httpError(429, code, message);
+    }
+  }
+
+  function recordAuthGuardrailFailure(guardrail, { windowMs, threshold, lockoutMs } = {}) {
+    const now = currentDate();
+    refreshAuthGuardrailWindow(guardrail, { windowMs });
+    guardrail.failureCount += 1;
+    guardrail.lastFailureAt = timestamp(now);
+    guardrail.updatedAt = timestamp(now);
+    if (guardrail.failureCount >= Number(threshold || 0)) {
+      guardrail.lockedUntil = timestamp(new Date(now.getTime() + Number(lockoutMs || 0)));
+    }
+    return guardrail;
+  }
+
+  function markAuthGuardrailSuccess(guardrail, { windowMs } = {}) {
+    const now = currentDate();
+    refreshAuthGuardrailWindow(guardrail, { windowMs });
+    guardrail.failureCount = 0;
+    guardrail.windowStartedAt = timestamp(now);
+    guardrail.lastFailureAt = null;
+    guardrail.lastSuccessAt = timestamp(now);
+    guardrail.lockedUntil = null;
+    guardrail.updatedAt = timestamp(now);
+    return guardrail;
+  }
+
+  function countPendingLoginSessions(companyUserId) {
+    return [...state.authSessions.values()].filter(
+      (session) =>
+        session.companyUserId === companyUserId &&
+        session.status === "pending" &&
+        !session.revokedAt &&
+        sessionIsNotExpired(session, currentDate())
+    ).length;
+  }
+
+  function enforcePendingLoginSessionLimit({ guardrail, companyUser, normalizedEmail } = {}) {
+    const pendingSessionCount = countPendingLoginSessions(companyUser.companyUserId);
+    if (pendingSessionCount < LOGIN_PENDING_SESSION_LIMIT) {
+      return;
+    }
+    const now = currentDate();
+    guardrail.failureCount = Math.max(guardrail.failureCount, LOGIN_IDENTIFIER_FAILURE_THRESHOLD);
+    guardrail.windowStartedAt = guardrail.windowStartedAt || timestamp(now);
+    guardrail.lockedUntil = timestamp(new Date(now.getTime() + LOGIN_PENDING_SESSION_LOCKOUT_MS));
+    guardrail.updatedAt = timestamp(now);
+    pushAudit({
+      companyId: companyUser.companyId,
+      actorId: companyUser.userId,
+      action: "auth.login.started",
+      result: "blocked",
+      entityType: "auth_guardrail",
+      entityId: guardrail.guardrailId,
+      explanation: "Login temporarily blocked because too many pending login sessions already exist.",
+      metadata: {
+        scope: guardrail.scope,
+        normalizedEmail,
+        pendingSessionCount,
+        lockedUntil: guardrail.lockedUntil
+      }
+    });
+    throw httpError(
+      429,
+      "login_rate_limited",
+      "Too many pending login sessions already exist for this account. Complete or revoke an existing login and try again."
+    );
+  }
+
+  function revokeSessionForSecurityLockout(session, { reasonCode } = {}) {
+    if (!session || session.status === "revoked") {
+      return;
+    }
+    session.status = "revoked";
+    session.revokedAt = nowIso();
+    createSessionRevision(session, {
+      reasonCode: assertNonEmpty(reasonCode, "security_lockout_reason_required")
+    });
   }
 
   function findOrCreateUser({ email, displayName } = {}) {
@@ -3686,6 +3924,14 @@ function assertNonEmpty(value, code) {
     throw httpError(400, code, `${code} is required.`);
   }
   return String(value).trim();
+}
+
+function normalizeEmailAddress(email) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) {
+    throw httpError(400, "email_required", "Email is required.");
+  }
+  return normalizedEmail;
 }
 
 function httpError(status, code, message) {
