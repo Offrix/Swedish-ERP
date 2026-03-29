@@ -18,6 +18,11 @@ export interface PreparedInvoiceDelivery {
   readonly payloadType: string;
   readonly payloadVersion: string;
   readonly payloadHash: string;
+  readonly providerCode?: string;
+  readonly providerBaselineId?: string;
+  readonly providerBaselineCode?: string;
+  readonly providerBaselineVersion?: string;
+  readonly providerBaselineChecksum?: string;
   readonly status: InvoiceDeliveryStatus;
   readonly recipient: string;
   readonly buyerReference: string | null;
@@ -31,6 +36,10 @@ export interface PreparedPaymentLink {
   readonly companyId: string;
   readonly invoiceId: string;
   readonly providerCode: string;
+  readonly providerBaselineId: string;
+  readonly providerBaselineCode: string;
+  readonly providerBaselineVersion: string;
+  readonly providerBaselineChecksum: string;
   readonly status: PaymentLinkStatus;
   readonly amount: number;
   readonly currencyCode: string;
@@ -52,7 +61,14 @@ export interface AuthoritySubmissionRef {
 
 export type PublicApiMode = "sandbox" | "production";
 export type PublicApiClientStatus = "active" | "revoked";
-export type IntegrationSurfaceCode = "partner" | "document_ai";
+export type IntegrationSurfaceCode =
+  | "partner"
+  | "document_ai"
+  | "payment_link"
+  | "notification_email"
+  | "notification_sms"
+  | "spend"
+  | "regulated_transport";
 export type IntegrationEnvironmentMode = "trial" | "sandbox" | "test" | "pilot_parallel" | "production";
 export type CredentialKind = "api_credentials" | "client_secret" | "certificate_ref" | "file_channel_credentials";
 export type PublicApiScopeCode =

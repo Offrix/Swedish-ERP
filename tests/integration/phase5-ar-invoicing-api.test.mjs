@@ -196,6 +196,8 @@ test("Phase 5.2 API issues invoices idempotently, closes credits, validates Pepp
     });
     assert.equal(pdfDelivery.channel, "pdf_email");
     assert.equal(pdfDelivery.recipient, "billing@invoice-api.test");
+    assert.equal(pdfDelivery.providerCode, "postmark_email");
+    assert.equal(pdfDelivery.providerBaselineCode, "SE-POSTMARK-EMAIL-API");
 
     const creditInvoice = await requestJson(baseUrl, "/v1/ar/invoices", {
       method: "POST",
@@ -331,11 +333,12 @@ test("Phase 5.2 API issues invoices idempotently, closes credits, validates Pepp
       expectedStatus: 201,
       body: {
         companyId: COMPANY_ID,
-        providerCode: "internal_mock"
+        providerCode: "stripe_payment_links"
       }
     });
     assert.equal(paymentLink.status, "active");
-    assert.match(paymentLink.url, /payments\.local/);
+    assert.equal(paymentLink.providerCode, "stripe_payment_links");
+    assert.match(paymentLink.url, /payments\.local|buy\.stripe\.local/);
 
     const missingProvider = await requestJson(baseUrl, `/v1/ar/invoices/${subscriptionInvoice.customerInvoiceId}/payment-links`, {
       method: "POST",

@@ -182,16 +182,18 @@ test("Phase 5.2 validates Peppol delivery and creates payment links from issued 
   const paymentLink = ar.createInvoicePaymentLink({
     companyId: COMPANY_ID,
     customerInvoiceId: invoice.customerInvoiceId,
-    providerCode: "internal_mock",
+    providerCode: "stripe_payment_links",
     actorId: "user-1"
   });
 
   assert.equal(delivery.channel, "peppol");
   assert.equal(delivery.payloadType, "peppol_bis_billing_3");
+  assert.equal(delivery.providerCode, "pagero_online");
   assert.equal(delivery.recipient, "0088:0007:5566778899");
   assert.equal(delivery.providerBaselineCode, "SE-PEPPOL-BIS-BILLING-3");
   assert.equal(typeof delivery.providerBaselineChecksum, "string");
   assert.equal(paymentLink.status, "active");
+  assert.equal(paymentLink.providerCode, "stripe_payment_links");
   assert.equal(paymentLink.providerBaselineCode, "SE-PAYMENT-LINK-API");
   assert.equal(typeof paymentLink.providerBaselineChecksum, "string");
 });

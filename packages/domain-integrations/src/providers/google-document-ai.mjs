@@ -64,6 +64,9 @@ export function createGoogleDocumentAiProvider({
       supportsLegalEffect: providerMode === "production"
     });
     return Object.freeze({
+      manifestId: `document_ai:document_ai:${GOOGLE_DOCUMENT_AI_PROVIDER_CODE}`,
+      surfaceCode: "document_ai",
+      connectionType: "document_ai",
       providerCode: GOOGLE_DOCUMENT_AI_PROVIDER_CODE,
       providerMode,
       providerEnvironmentRef,

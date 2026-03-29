@@ -2,7 +2,18 @@ import crypto from "node:crypto";
 import { createIntegrationControlPlane } from "./control-plane.mjs";
 import { createPartnerModule } from "./partners.mjs";
 import { createPublicApiModule } from "./public-api.mjs";
+import { createBolagsverketAnnualProvider, BOLAGSVERKET_ANNUAL_PROVIDER_CODE } from "./providers/bolagsverket-annual.mjs";
+import { createEnableBankingProvider, ENABLE_BANKING_PROVIDER_CODE } from "./providers/enable-banking.mjs";
 import { createGoogleDocumentAiProvider, GOOGLE_DOCUMENT_AI_PROVIDER_CODE } from "./providers/google-document-ai.mjs";
+import { createIso20022FilesProvider, ISO20022_FILES_PROVIDER_CODE } from "./providers/iso20022-files.mjs";
+import { createPageroPeppolProvider, PAGERO_PEPPOL_PROVIDER_CODE } from "./providers/pagero-peppol.mjs";
+import { createPleoSpendProvider, PLEO_SPEND_PROVIDER_CODE } from "./providers/pleo-spend.mjs";
+import { createPostmarkEmailProvider, POSTMARK_EMAIL_PROVIDER_CODE } from "./providers/postmark-email.mjs";
+import { createSkatteverketAgiProvider, SKATTEVERKET_AGI_PROVIDER_CODE } from "./providers/skatteverket-agi.mjs";
+import { createSkatteverketHusProvider, SKATTEVERKET_HUS_PROVIDER_CODE } from "./providers/skatteverket-hus.mjs";
+import { createSkatteverketVatProvider, SKATTEVERKET_VAT_PROVIDER_CODE } from "./providers/skatteverket-vat.mjs";
+import { createStripePaymentLinksProvider, STRIPE_PAYMENT_LINKS_PROVIDER_CODE } from "./providers/stripe-payment-links.mjs";
+import { createTwilioSmsProvider, TWILIO_SMS_PROVIDER_CODE } from "./providers/twilio-sms.mjs";
 import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
 import { createRegulatedSubmissionsModule } from "../../domain-regulated-submissions/src/index.mjs";
 import {
@@ -13,6 +24,14 @@ import {
 export const INVOICE_DELIVERY_CHANNELS = Object.freeze(["pdf_email", "peppol"]);
 export const PAYMENT_LINK_STATUSES = Object.freeze(["active", "consumed", "expired", "cancelled"]);
 export { GOOGLE_DOCUMENT_AI_PROVIDER_CODE } from "./providers/google-document-ai.mjs";
+export { STRIPE_PAYMENT_LINKS_PROVIDER_CODE } from "./providers/stripe-payment-links.mjs";
+export { POSTMARK_EMAIL_PROVIDER_CODE } from "./providers/postmark-email.mjs";
+export { TWILIO_SMS_PROVIDER_CODE } from "./providers/twilio-sms.mjs";
+export { PLEO_SPEND_PROVIDER_CODE } from "./providers/pleo-spend.mjs";
+export { SKATTEVERKET_AGI_PROVIDER_CODE } from "./providers/skatteverket-agi.mjs";
+export { SKATTEVERKET_VAT_PROVIDER_CODE } from "./providers/skatteverket-vat.mjs";
+export { SKATTEVERKET_HUS_PROVIDER_CODE } from "./providers/skatteverket-hus.mjs";
+export { BOLAGSVERKET_ANNUAL_PROVIDER_CODE } from "./providers/bolagsverket-annual.mjs";
 export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
   Object.freeze({
     providerBaselineId: "peppol-bis-billing-3-se-2026.1",
@@ -31,7 +50,7 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
   Object.freeze({
     providerBaselineId: "payment-link-api-se-2026.1",
     baselineCode: "SE-PAYMENT-LINK-API",
-    providerCode: "internal_mock",
+    providerCode: STRIPE_PAYMENT_LINKS_PROVIDER_CODE,
     domain: "integrations",
     jurisdiction: "SE",
     formatFamily: "payment_link_api",
@@ -40,7 +59,7 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
     specVersion: "1.0",
     checksum: "payment-link-api-se-2026.1",
     sourceSnapshotDate: "2026-03-27",
-    semanticChangeSummary: "Internal payment-link contract baseline for deterministic trial and sandbox checkout flows."
+    semanticChangeSummary: "Stripe payment-link baseline for governed hosted checkout and callback reconciliation."
   }),
   Object.freeze({
     providerBaselineId: "open-banking-core-se-2026.1",
@@ -71,6 +90,48 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
     semanticChangeSummary: "Bank file channel baseline for deterministic export/import file envelopes."
   }),
   Object.freeze({
+    providerBaselineId: "postmark-email-api-se-2026.1",
+    baselineCode: "SE-POSTMARK-EMAIL-API",
+    providerCode: POSTMARK_EMAIL_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "transactional_email_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "postmark-email-api-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Postmark transactional email baseline for invoice and operational mail delivery."
+  }),
+  Object.freeze({
+    providerBaselineId: "twilio-sms-api-se-2026.1",
+    baselineCode: "SE-TWILIO-SMS-API",
+    providerCode: TWILIO_SMS_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "transactional_sms_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "twilio-sms-api-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Twilio SMS baseline for operational and customer messaging."
+  }),
+  Object.freeze({
+    providerBaselineId: "pleo-spend-api-se-2026.1",
+    baselineCode: "SE-PLEO-SPEND-API",
+    providerCode: PLEO_SPEND_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "spend_management_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "pleo-spend-api-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Pleo spend baseline for expense, receipt and card transaction synchronization."
+  }),
+  Object.freeze({
     providerBaselineId: "google-document-ai-ocr-se-2026.1",
     baselineCode: "SE-GOOGLE-DOCUMENT-AI-OCR",
     providerCode: GOOGLE_DOCUMENT_AI_PROVIDER_CODE,
@@ -97,6 +158,62 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
     checksum: "google-document-ai-invoice-se-2026.1",
     sourceSnapshotDate: "2026-03-28",
     semanticChangeSummary: "Google Document AI Invoice Parser baseline for supplier-invoice OCR and entity extraction."
+  }),
+  Object.freeze({
+    providerBaselineId: "skatteverket-agi-api-se-2026.1",
+    baselineCode: "SE-SKATTEVERKET-AGI-API",
+    providerCode: SKATTEVERKET_AGI_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "authority_transport_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "skatteverket-agi-api-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Skatteverket AGI transport baseline for official dispatch and receipt collection."
+  }),
+  Object.freeze({
+    providerBaselineId: "skatteverket-vat-api-se-2026.1",
+    baselineCode: "SE-SKATTEVERKET-VAT-API",
+    providerCode: SKATTEVERKET_VAT_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "authority_transport_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "skatteverket-vat-api-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Skatteverket VAT transport baseline for official dispatch and XML fallback governance."
+  }),
+  Object.freeze({
+    providerBaselineId: "skatteverket-hus-api-se-2026.1",
+    baselineCode: "SE-SKATTEVERKET-HUS-API",
+    providerCode: SKATTEVERKET_HUS_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "authority_transport_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "skatteverket-hus-api-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Skatteverket HUS transport baseline for official API and signed XML fallback."
+  }),
+  Object.freeze({
+    providerBaselineId: "bolagsverket-annual-api-se-2026.1",
+    baselineCode: "SE-BOLAGSVERKET-ANNUAL-API",
+    providerCode: BOLAGSVERKET_ANNUAL_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "authority_transport_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "bolagsverket-annual-api-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Bolagsverket annual filing baseline for official annual report transport and fallback."
   }),
   Object.freeze({
     providerBaselineId: "id06-api-se-2026.1",
@@ -131,10 +248,66 @@ export function createIntegrationEngine({
 } = {}) {
   const providerBaselines =
     providerBaselineRegistry || createProviderBaselineRegistry({ clock, seedProviderBaselines: INTEGRATION_PROVIDER_BASELINES });
+  const enableBankingProvider = createEnableBankingProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
+  const bankFileProvider = createIso20022FilesProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
+  const paymentLinkProvider = createStripePaymentLinksProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines,
+    checkoutBaseUrl: paymentBaseUrl
+  });
+  const peppolProvider = createPageroPeppolProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
+  const emailProvider = createPostmarkEmailProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
+  const smsProvider = createTwilioSmsProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
+  const spendProvider = createPleoSpendProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
   const documentOcrProvider = createGoogleDocumentAiProvider({
     clock,
     environmentMode,
     providerEnvironmentRef: environmentMode === "production" ? "production" : "sandbox",
+    providerBaselineRegistry: providerBaselines
+  });
+  const agiTransportProvider = createSkatteverketAgiProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
+  const vatTransportProvider = createSkatteverketVatProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
+  const husTransportProvider = createSkatteverketHusProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
+  const annualTransportProvider = createBolagsverketAnnualProvider({
+    clock,
+    environmentMode,
     providerBaselineRegistry: providerBaselines
   });
   const state = {
@@ -185,7 +358,17 @@ export function createIntegrationEngine({
     clock,
     environmentMode,
     getPartnerModule: () => partnerModule,
-    getDocumentOcrProvider: () => documentOcrProvider
+    getAdapterProviders: () => [
+      documentOcrProvider,
+      paymentLinkProvider,
+      emailProvider,
+      smsProvider,
+      spendProvider,
+      agiTransportProvider,
+      vatTransportProvider,
+      husTransportProvider,
+      annualTransportProvider
+    ]
   });
   const regulatedSubmissionsModule = createRegulatedSubmissionsModule({
     state,
@@ -261,8 +444,16 @@ export function createIntegrationEngine({
     listProviderBaselines: (filters) => providerBaselines.listProviderBaselines(filters),
     resolveProviderBaseline: (filters) => providerBaselines.resolveProviderBaseline(filters),
     snapshotProviderBaselineRegistry: () => providerBaselines.snapshotProviderBaselineRegistry(),
+    prepareBankStatementSync: (input) => enableBankingProvider.prepareStatementSync(input),
+    prepareBankPaymentExport: (input) => enableBankingProvider.preparePaymentExport(input),
+    prepareTaxAccountSync: (input) => enableBankingProvider.prepareTaxAccountSync(input),
+    prepareBankFileExchange: (input) => bankFileProvider.prepareFileExchange(input),
     prepareInvoiceDelivery,
     createPaymentLink,
+    prepareEmailNotification: (input) => emailProvider.prepareEmailDelivery(input),
+    prepareSmsNotification: (input) => smsProvider.prepareSmsDelivery(input),
+    prepareSpendSync: (input) => spendProvider.prepareSpendSync(input),
+    prepareOfficialSubmissionTransport,
     snapshotIntegrations() {
       return clone({
         submissions: [...state.submissions.values()].map((submission) =>
@@ -294,7 +485,20 @@ export function createIntegrationEngine({
         asyncJobs: [...state.asyncJobs.values()],
         asyncDeadLetters: [...state.asyncDeadLetters.values()],
         providerBaselines: providerBaselines.snapshotProviderBaselineRegistry(),
-        documentOcrProvider: documentOcrProvider.snapshot()
+        providerSnapshots: {
+          documentOcrProvider: documentOcrProvider.snapshot(),
+          paymentLinkProvider: paymentLinkProvider.snapshot(),
+          peppolProvider: peppolProvider.snapshot(),
+          emailProvider: emailProvider.snapshot(),
+          smsProvider: smsProvider.snapshot(),
+          enableBankingProvider: enableBankingProvider.snapshot(),
+          bankFileProvider: bankFileProvider.snapshot(),
+          spendProvider: spendProvider.snapshot(),
+          agiTransportProvider: agiTransportProvider.snapshot(),
+          vatTransportProvider: vatTransportProvider.snapshot(),
+          husTransportProvider: husTransportProvider.snapshot(),
+          annualTransportProvider: annualTransportProvider.snapshot()
+        }
       });
     },
     exportDurableState,
@@ -305,7 +509,18 @@ export function createIntegrationEngine({
     return {
       ...serializeDurableState(state),
       providerSnapshots: {
-        documentOcrProvider: documentOcrProvider.snapshot()
+        documentOcrProvider: documentOcrProvider.snapshot(),
+        paymentLinkProvider: paymentLinkProvider.snapshot(),
+        peppolProvider: peppolProvider.snapshot(),
+        emailProvider: emailProvider.snapshot(),
+        smsProvider: smsProvider.snapshot(),
+        enableBankingProvider: enableBankingProvider.snapshot(),
+        bankFileProvider: bankFileProvider.snapshot(),
+        spendProvider: spendProvider.snapshot(),
+        agiTransportProvider: agiTransportProvider.snapshot(),
+        vatTransportProvider: vatTransportProvider.snapshot(),
+        husTransportProvider: husTransportProvider.snapshot(),
+        annualTransportProvider: annualTransportProvider.snapshot()
       }
     };
   }
@@ -313,6 +528,17 @@ export function createIntegrationEngine({
   function importDurableState(snapshot) {
     applyDurableStateSnapshot(state, snapshot);
     documentOcrProvider.restore(snapshot?.providerSnapshots?.documentOcrProvider || snapshot?.documentOcrProvider || {});
+    paymentLinkProvider.restore(snapshot?.providerSnapshots?.paymentLinkProvider || {});
+    peppolProvider.restore(snapshot?.providerSnapshots?.peppolProvider || {});
+    emailProvider.restore(snapshot?.providerSnapshots?.emailProvider || {});
+    smsProvider.restore(snapshot?.providerSnapshots?.smsProvider || {});
+    enableBankingProvider.restore(snapshot?.providerSnapshots?.enableBankingProvider || {});
+    bankFileProvider.restore(snapshot?.providerSnapshots?.bankFileProvider || {});
+    spendProvider.restore(snapshot?.providerSnapshots?.spendProvider || {});
+    agiTransportProvider.restore(snapshot?.providerSnapshots?.agiTransportProvider || {});
+    vatTransportProvider.restore(snapshot?.providerSnapshots?.vatTransportProvider || {});
+    husTransportProvider.restore(snapshot?.providerSnapshots?.husTransportProvider || {});
+    annualTransportProvider.restore(snapshot?.providerSnapshots?.annualTransportProvider || {});
   }
 
   function prepareInvoiceDelivery({
@@ -326,120 +552,48 @@ export function createIntegrationEngine({
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedChannel = assertAllowed(deliveryChannel || invoice.deliveryChannel, INVOICE_DELIVERY_CHANNELS, "invoice_delivery_channel_invalid");
-    const documentType = invoice.invoiceType === "credit_note" ? "credit_note" : "invoice";
     if (resolvedChannel === "pdf_email") {
       const recipients = uniqueEmails(recipientEmails);
       if (recipients.length === 0) {
         throw createError(400, "invoice_delivery_recipient_required", "PDF delivery requires at least one recipient email.");
       }
-      const payload = {
-        templateCode: "ar_invoice_pdf_v1",
-        documentType,
-        invoiceId: invoice.customerInvoiceId,
-        invoiceNumber: invoice.invoiceNumber,
-        issuedAt: invoice.issuedAt,
-        dueDate: invoice.dueDate,
-        customerName: customer.legalName,
-        lines: invoice.lines,
-        totals: invoice.totals
-      };
-      return {
-        deliveryId: crypto.randomUUID(),
+      const delivery = emailProvider.prepareEmailDelivery({
         companyId: resolvedCompanyId,
+        sourceObjectId: invoice.customerInvoiceId,
+        recipientEmails: recipients,
+        templateCode: "ar_invoice_pdf_v1",
+        subjectLine: `Invoice ${invoice.invoiceNumber}`,
+        templateModel: {
+          documentType: invoice.invoiceType === "credit_note" ? "credit_note" : "invoice",
+          invoiceId: invoice.customerInvoiceId,
+          invoiceNumber: invoice.invoiceNumber,
+          issuedAt: invoice.issuedAt,
+          dueDate: invoice.dueDate,
+          customerName: customer.legalName,
+          lines: invoice.lines,
+          totals: invoice.totals
+        }
+      });
+      return {
+        ...delivery,
         invoiceId: invoice.customerInvoiceId,
         invoiceNumber: invoice.invoiceNumber,
         channel: resolvedChannel,
-        documentType,
-        payloadType: "pdf_render_request",
-        payloadVersion: "1.0",
-        payloadHash: hashObject(payload),
-        status: "delivered",
+        documentType: invoice.invoiceType === "credit_note" ? "credit_note" : "invoice",
         recipient: recipients.join(","),
         buyerReference: normalizeOptionalText(buyerReference),
         purchaseOrderReference: normalizeOptionalText(purchaseOrderReference),
-        payload,
-        createdAt: nowIso(clock)
+        payload: delivery.templateModel
       };
     }
 
-    const peppolBaseline = resolveProviderBaselineRef(providerBaselines, {
-      providerCode: "pagero_online",
-      baselineCode: "SE-PEPPOL-BIS-BILLING-3",
-      effectiveDate: invoice.issueDate || nowIso(clock).slice(0, 10),
-      metadata: {
-        invoiceId: invoice.customerInvoiceId,
-        channel: "peppol"
-      }
-    });
-    const peppolId = normalizeOptionalText(customer.peppolIdentifier);
-    const peppolScheme = normalizeOptionalText(customer.peppolScheme);
-    if (!peppolId || !peppolScheme) {
-      throw createError(400, "peppol_identifier_missing", "Peppol delivery requires customer identifier and scheme.");
-    }
-    const resolvedBuyerReference = normalizeOptionalText(buyerReference);
-    const resolvedPurchaseOrderReference = normalizeOptionalText(purchaseOrderReference);
-    if (!resolvedBuyerReference && !resolvedPurchaseOrderReference) {
-      throw createError(
-        400,
-        "peppol_reference_missing",
-        "Peppol delivery requires buyer reference or purchase-order reference for outbound validation."
-      );
-    }
-    const payload = {
-      standard: "Peppol BIS Billing 3",
-      documentType,
-      invoiceId: invoice.customerInvoiceId,
-      invoiceNumber: invoice.invoiceNumber,
-      issueDate: invoice.issueDate,
-      dueDate: invoice.dueDate,
-      paymentReference: invoice.paymentReference,
-      seller: {
-        companyId: resolvedCompanyId
-      },
-      buyer: {
-        legalName: customer.legalName,
-        countryCode: customer.countryCode,
-        peppolIdentifier: peppolId,
-        peppolScheme
-      },
-      references: {
-        buyerReference: resolvedBuyerReference,
-        purchaseOrderReference: resolvedPurchaseOrderReference
-      },
-      currencyCode: invoice.currencyCode,
-      lines: invoice.lines.map((line) => ({
-        description: line.description,
-        quantity: line.quantity,
-        unitCode: line.unitCode,
-        unitPrice: line.unitPrice,
-        lineAmount: line.lineAmount,
-        vatCode: line.vatCode
-      })),
-      totals: invoice.totals
-    };
-    return {
-      deliveryId: crypto.randomUUID(),
+    return peppolProvider.prepareInvoiceDelivery({
       companyId: resolvedCompanyId,
-      invoiceId: invoice.customerInvoiceId,
-      invoiceNumber: invoice.invoiceNumber,
-      channel: resolvedChannel,
-      documentType,
-      payloadType: "peppol_bis_billing_3",
-      payloadVersion: "3.0",
-      payloadHash: hashObject(payload),
-      providerCode: peppolBaseline.providerCode,
-      providerBaselineId: peppolBaseline.providerBaselineId,
-      providerBaselineCode: peppolBaseline.baselineCode,
-      providerBaselineVersion: peppolBaseline.providerBaselineVersion,
-      providerBaselineChecksum: peppolBaseline.providerBaselineChecksum,
-      providerBaselineRef: peppolBaseline,
-      status: "prepared",
-      recipient: `${peppolScheme}:${peppolId}`,
-      buyerReference: resolvedBuyerReference,
-      purchaseOrderReference: resolvedPurchaseOrderReference,
-      payload,
-      createdAt: nowIso(clock)
-    };
+      invoice,
+      customer,
+      buyerReference,
+      purchaseOrderReference
+    });
   }
 
   function createPaymentLink({
@@ -450,38 +604,46 @@ export function createIntegrationEngine({
     providerCode,
     expiresAt
   } = {}) {
-    const resolvedCompanyId = requireText(companyId, "company_id_required");
-    const resolvedInvoiceId = requireText(invoiceId, "customer_invoice_id_required");
-    const resolvedAmount = normalizeMoney(amount, "payment_link_amount_invalid");
-    const resolvedCurrencyCode = normalizeUpperCode(currencyCode, "currency_code_required", 3);
-    const paymentLinkId = crypto.randomUUID();
-    const resolvedExpiresAt = normalizeDate(expiresAt || addDaysIso(nowIso(clock).slice(0, 10), 14), "payment_link_expiry_invalid");
-    const paymentLinkBaseline = resolveProviderBaselineRef(providerBaselines, {
-      providerCode: requireText(providerCode, "payment_link_provider_code_required"),
-      baselineCode: "SE-PAYMENT-LINK-API",
-      effectiveDate: nowIso(clock).slice(0, 10),
-      metadata: {
-        invoiceId: resolvedInvoiceId,
-        currencyCode: resolvedCurrencyCode
-      }
+    const resolvedProviderCode = requireText(providerCode, "payment_link_provider_code_required");
+    if (resolvedProviderCode !== STRIPE_PAYMENT_LINKS_PROVIDER_CODE) {
+      throw createError(
+        409,
+        "payment_link_provider_not_supported",
+        `${resolvedProviderCode} is not supported in phase 16.4.`
+      );
+    }
+    return paymentLinkProvider.createPaymentLink({
+      companyId,
+      invoiceId,
+      amount,
+      currencyCode,
+      expiresAt
     });
-    return {
-      paymentLinkId,
-      companyId: resolvedCompanyId,
-      invoiceId: resolvedInvoiceId,
-      providerCode: paymentLinkBaseline.providerCode,
-      providerBaselineId: paymentLinkBaseline.providerBaselineId,
-      providerBaselineCode: paymentLinkBaseline.baselineCode,
-      providerBaselineVersion: paymentLinkBaseline.providerBaselineVersion,
-      providerBaselineChecksum: paymentLinkBaseline.providerBaselineChecksum,
-      providerBaselineRef: paymentLinkBaseline,
-      status: "active",
-      amount: resolvedAmount,
-      currencyCode: resolvedCurrencyCode,
-      url: `${paymentBaseUrl.replace(/\/+$/, "")}/${resolvedInvoiceId}/${paymentLinkId}`,
-      expiresAt: resolvedExpiresAt,
-      createdAt: nowIso(clock)
-    };
+  }
+
+  function prepareOfficialSubmissionTransport({ submissionType, ...input } = {}) {
+    const provider = selectOfficialTransportProvider(submissionType);
+    return provider.prepareTransport({
+      ...input,
+      submissionType
+    });
+  }
+
+  function selectOfficialTransportProvider(submissionType) {
+    const resolvedSubmissionType = requireText(submissionType, "submission_type_required");
+    if (resolvedSubmissionType.startsWith("agi")) {
+      return agiTransportProvider;
+    }
+    if (resolvedSubmissionType.startsWith("vat")) {
+      return vatTransportProvider;
+    }
+    if (resolvedSubmissionType.startsWith("hus")) {
+      return husTransportProvider;
+    }
+    if (resolvedSubmissionType.startsWith("income_tax") || resolvedSubmissionType.startsWith("annual")) {
+      return annualTransportProvider;
+    }
+    return vatTransportProvider;
   }
 }
 

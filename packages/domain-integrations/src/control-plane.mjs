@@ -1,6 +1,14 @@
 import crypto from "node:crypto";
 
-export const INTEGRATION_SURFACE_CODES = Object.freeze(["partner", "document_ai"]);
+export const INTEGRATION_SURFACE_CODES = Object.freeze([
+  "partner",
+  "document_ai",
+  "payment_link",
+  "notification_email",
+  "notification_sms",
+  "spend",
+  "regulated_transport"
+]);
 export const INTEGRATION_ENVIRONMENT_MODES = Object.freeze(["trial", "sandbox", "test", "pilot_parallel", "production"]);
 export const CREDENTIAL_KINDS = Object.freeze(["api_credentials", "client_secret", "certificate_ref", "file_channel_credentials"]);
 
@@ -9,7 +17,7 @@ export function createIntegrationControlPlane({
   clock = () => new Date(),
   environmentMode: defaultRuntimeEnvironmentMode = "test",
   getPartnerModule = null,
-  getDocumentOcrProvider = null
+  getAdapterProviders = null
 } = {}) {
   state.integrationConnections ||= new Map();
   state.credentialSetMetadata ||= new Map();
@@ -38,16 +46,18 @@ export function createIntegrationControlPlane({
 
   function createIntegrationConnection(input = {}) {
     const surfaceCode = allowed(input.surfaceCode || "partner", INTEGRATION_SURFACE_CODES, "integration_surface_code_invalid");
-    if (surfaceCode !== "partner") {
-      throw error(409, "integration_surface_creation_not_supported", `${surfaceCode} connections are not supported in phase 16.1.`);
-    }
     const resolvedEnvironmentMode = allowed(
       input.environmentMode || defaultEnvironmentMode(defaultRuntimeEnvironmentMode),
       INTEGRATION_ENVIRONMENT_MODES,
       "integration_environment_mode_invalid"
     );
-    const partnerModule = requirePartnerModule(getPartnerModule);
-    const manifest = requirePartnerManifest(partnerModule, input.connectionType, input.providerCode);
+    const manifest = requireIntegrationManifest({
+      partnerModule: surfaceCode === "partner" ? requirePartnerModule(getPartnerModule) : null,
+      surfaceCode,
+      connectionType: input.connectionType,
+      providerCode: input.providerCode,
+      getAdapterProviders
+    });
     if (!manifest.allowedEnvironmentModes.includes(resolvedEnvironmentMode)) {
       throw error(409, "integration_environment_mode_not_supported", `${input.providerCode} does not support ${resolvedEnvironmentMode}.`);
     }
@@ -59,6 +69,39 @@ export function createIntegrationControlPlane({
       credentialRef: input.credentialsRef,
       secretManagerRef: input.secretManagerRef
     });
+    const registered =
+      surfaceCode === "partner"
+        ? registerPartnerSurfaceConnection({ input, manifest, resolvedEnvironmentMode })
+        : createDirectIntegrationConnection({ input, manifest, resolvedEnvironmentMode });
+    if (typeof input.credentialsRef === "string" && input.credentialsRef.trim().length > 0) {
+      recordCredentialSetMetadata({
+        companyId: input.companyId,
+        connectionId: registered.connectionId,
+        credentialRef: input.credentialsRef,
+        credentialKind: input.credentialKind || inferCredentialKind(manifest),
+        secretManagerRef: input.secretManagerRef || input.credentialsRef,
+        callbackDomain: input.callbackDomain,
+        callbackPath: input.callbackPath,
+        expiresAt: input.credentialsExpiresAt,
+        actorId: input.actorId || "system"
+      });
+    }
+    if (input.consentGrant) {
+      authorizeConsent({
+        companyId: input.companyId,
+        connectionId: registered.connectionId,
+        scopeSet: input.consentGrant.scopeSet,
+        grantType: input.consentGrant.grantType,
+        externalConsentRef: input.consentGrant.externalConsentRef,
+        expiresAt: input.consentGrant.expiresAt,
+        actorId: input.actorId || "system"
+      });
+    }
+    return getIntegrationConnection({ companyId: input.companyId, connectionId: registered.connectionId });
+  }
+
+  function registerPartnerSurfaceConnection({ input, manifest, resolvedEnvironmentMode }) {
+    const partnerModule = requirePartnerModule(getPartnerModule);
     const partnerConnection = partnerModule.createPartnerConnection({
       companyId: input.companyId,
       connectionType: input.connectionType,
@@ -76,35 +119,41 @@ export function createIntegrationControlPlane({
       },
       actorId: input.actorId || "system"
     });
-    const registered = registerPartnerConnection({
+    return registerPartnerConnection({
       companyId: input.companyId,
       connectionId: partnerConnection.connectionId,
       environmentMode: resolvedEnvironmentMode,
       actorId: input.actorId || "system"
     });
-    recordCredentialSetMetadata({
-      companyId: input.companyId,
-      connectionId: registered.connectionId,
-      credentialRef: input.credentialsRef,
-      credentialKind: input.credentialKind || inferCredentialKind(manifest),
-      secretManagerRef: input.secretManagerRef || input.credentialsRef,
-      callbackDomain: input.callbackDomain,
-      callbackPath: input.callbackPath,
-      expiresAt: input.credentialsExpiresAt,
-      actorId: input.actorId || "system"
-    });
-    if (input.consentGrant) {
-      authorizeConsent({
-        companyId: input.companyId,
-        connectionId: registered.connectionId,
-        scopeSet: input.consentGrant.scopeSet,
-        grantType: input.consentGrant.grantType,
-        externalConsentRef: input.consentGrant.externalConsentRef,
-        expiresAt: input.consentGrant.expiresAt,
-        actorId: input.actorId || "system"
-      });
-    }
-    return getIntegrationConnection({ companyId: input.companyId, connectionId: registered.connectionId });
+  }
+
+  function createDirectIntegrationConnection({ input, manifest, resolvedEnvironmentMode }) {
+    const createdAt = nowIso(clock);
+    const record = {
+      connectionId: crypto.randomUUID(),
+      companyId: text(input.companyId, "company_id_required"),
+      surfaceCode: manifest.surfaceCode,
+      connectionType: manifest.connectionType,
+      providerCode: manifest.providerCode,
+      displayName: text(input.displayName, "integration_display_name_required"),
+      environmentMode: resolvedEnvironmentMode,
+      providerEnvironmentRef: providerEnvironmentRefForMode(resolvedEnvironmentMode),
+      supportsLegalEffect: supportsLegalEffect(resolvedEnvironmentMode) && manifest.supportsLegalEffect === true,
+      sandboxSupported: manifest.sandboxSupported === true,
+      trialSafe: manifest.trialSafe === true,
+      modeMatrix: clone(manifest.modeMatrix),
+      fallbackMode: optional(input.fallbackMode) || "queue_retry",
+      rateLimitPerMinute: Number(input.rateLimitPerMinute || 60),
+      requiredCredentialKinds: [...manifest.requiredCredentialKinds],
+      consentRequired: manifest.requiredCredentialKinds.includes("consent_grant"),
+      providerBaselineRef: clone(input.providerBaselineRef || null),
+      capabilityManifestId: manifest.manifestId,
+      createdByActorId: text(input.actorId || "system", "actor_id_required"),
+      createdAt,
+      updatedAt: createdAt
+    };
+    state.integrationConnections.set(record.connectionId, record);
+    return materializeConnection(state, clock, record);
   }
 
   function registerPartnerConnection({ companyId, connectionId, environmentMode = null, actorId = "system" } = {}) {
@@ -163,19 +212,22 @@ export function createIntegrationControlPlane({
         }
       }
     }
-    const documentOcrProvider = typeof getDocumentOcrProvider === "function" ? getDocumentOcrProvider() : null;
-    if (documentOcrProvider?.getCapabilityManifest) {
-      const manifest = documentOcrProvider.getCapabilityManifest();
+    const adapterProviders = typeof getAdapterProviders === "function" ? getAdapterProviders() : [];
+    for (const provider of Array.isArray(adapterProviders) ? adapterProviders : []) {
+      if (typeof provider?.getCapabilityManifest !== "function") {
+        continue;
+      }
+      const manifest = provider.getCapabilityManifest();
       manifests.push({
-        manifestId: `document_ai:${manifest.providerCode}:${manifest.providerMode}`,
-        surfaceCode: "document_ai",
-        connectionType: "document_ai",
+        manifestId: manifest.manifestId || `${manifest.surfaceCode}:${manifest.connectionType}:${manifest.providerCode}`,
+        surfaceCode: manifest.surfaceCode,
+        connectionType: manifest.connectionType,
         providerCode: manifest.providerCode,
-        requiredCredentialKinds: ["api_credentials"],
+        requiredCredentialKinds: clone(manifest.requiredCredentialKinds || ["api_credentials"]),
         sandboxSupported: manifest.sandboxSupported === true,
         trialSafe: manifest.trialSafe === true,
         supportsLegalEffect: manifest.supportsLegalEffect === true,
-        allowedEnvironmentModes: modeMatrixToAllowedEnvironmentModes(manifest.modeMatrix),
+        allowedEnvironmentModes: clone(manifest.allowedEnvironmentModes || modeMatrixToAllowedEnvironmentModes(manifest.modeMatrix)),
         modeMatrix: clone(manifest.modeMatrix),
         profiles: clone(manifest.profiles || [])
       });
@@ -337,6 +389,22 @@ function requirePartnerManifest(partnerModule, connectionType, providerCode) {
   return buildPartnerManifest(entry, providerCode);
 }
 
+function requireIntegrationManifest({ partnerModule = null, surfaceCode, connectionType, providerCode, getAdapterProviders = null }) {
+  if (surfaceCode === "partner") {
+    return requirePartnerManifest(partnerModule, connectionType, providerCode);
+  }
+  const manifest = listNonPartnerManifests(getAdapterProviders).find(
+    (candidate) =>
+      candidate.surfaceCode === text(surfaceCode, "integration_surface_code_invalid")
+      && candidate.connectionType === text(connectionType, "integration_connection_type_required")
+      && candidate.providerCode === text(providerCode, "integration_provider_code_required")
+  );
+  if (!manifest) {
+    throw error(400, "integration_provider_code_invalid", `${providerCode} is not supported for ${surfaceCode}/${connectionType}.`);
+  }
+  return manifest;
+}
+
 function buildPartnerManifest(entry, providerCode) {
   const sandboxSupported = entry.supportsSandbox === true;
   const modeMatrix = {
@@ -358,6 +426,13 @@ function buildPartnerManifest(entry, providerCode) {
     allowedEnvironmentModes: sandboxSupported ? ["trial", "sandbox", "test", "pilot_parallel", "production"] : ["pilot_parallel", "production"],
     modeMatrix
   };
+}
+
+function listNonPartnerManifests(getAdapterProviders) {
+  const providers = typeof getAdapterProviders === "function" ? getAdapterProviders() : [];
+  return (Array.isArray(providers) ? providers : [])
+    .filter((provider) => typeof provider?.getCapabilityManifest === "function")
+    .map((provider) => provider.getCapabilityManifest());
 }
 
 function inferCredentialKind(manifest) {

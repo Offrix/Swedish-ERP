@@ -229,10 +229,11 @@ test("Phase 5.2 AR invoicing routes toggle cleanly and the end-to-end flow cover
       expectedStatus: 201,
       body: {
         companyId: COMPANY_ID,
-        providerCode: "internal_mock"
+        providerCode: "stripe_payment_links"
       }
     });
     assert.equal(payLink.status, "active");
+    assert.equal(payLink.providerCode, "stripe_payment_links");
   } finally {
     await stopServer(disabledServer);
     await stopServer(enabledServer);
