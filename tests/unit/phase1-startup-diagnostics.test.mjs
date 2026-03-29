@@ -6,6 +6,7 @@ import path from "node:path";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { startApiServer } from "../../apps/api/src/server.mjs";
 import { startWorker } from "../../apps/worker/src/worker.mjs";
+import { createInMemoryCriticalDomainStateStore } from "../../packages/domain-core/src/index.mjs";
 
 function createTempSqlitePath(prefix) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
@@ -142,5 +143,60 @@ test("phase 1.4 protected runtime blocks sqlite critical truth even when other r
   } finally {
     platform.closeCriticalDomainStateStore?.();
     cleanupTempDirectory(temp.directory);
+  }
+});
+
+test("phase 2.5 protected runtime clears critical-domain persistence finding when injected truth is postgres-backed", () => {
+  const baseStore = createInMemoryCriticalDomainStateStore();
+  const platform = createApiPlatform({
+    runtimeMode: "production",
+    env: {
+      POSTGRES_URL: "postgres://runtime-store",
+      ERP_CRITICAL_DOMAIN_STATE_STORE: "postgres"
+    },
+    criticalDomainStateStore: {
+      ...baseStore,
+      kind: "postgres_critical_domain_state_store",
+      verifySchemaContract: () => ({ ok: true })
+    }
+  });
+
+  try {
+    const diagnostics = platform.getRuntimeStartupDiagnostics();
+    assert.equal(diagnostics.activeStoreKind, "postgres");
+    assert.equal(diagnostics.criticalDomainStoreKind, "postgres");
+    assert.equal(
+      diagnostics.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
+      false
+    );
+  } finally {
+    platform.closeCriticalDomainStateStore?.();
+  }
+});
+
+test("phase 2.5 critical-domain URL infers Postgres truth without separate store-kind flag", () => {
+  const baseStore = createInMemoryCriticalDomainStateStore();
+  const platform = createApiPlatform({
+    runtimeMode: "production",
+    env: {
+      POSTGRES_URL: "postgres://runtime-store",
+      ERP_CRITICAL_DOMAIN_STATE_URL: "postgres://critical-domain-store"
+    },
+    criticalDomainStateStore: {
+      ...baseStore,
+      kind: "postgres_critical_domain_state_store",
+      verifySchemaContract: () => ({ ok: true })
+    }
+  });
+
+  try {
+    const diagnostics = platform.getRuntimeStartupDiagnostics();
+    assert.equal(diagnostics.criticalDomainStoreKind, "postgres");
+    assert.equal(
+      diagnostics.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
+      false
+    );
+  } finally {
+    platform.closeCriticalDomainStateStore?.();
   }
 });

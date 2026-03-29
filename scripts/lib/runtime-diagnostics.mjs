@@ -397,7 +397,14 @@ export function resolveCriticalDomainStoreKind({
   if (normalizedExplicit) {
     return normalizedExplicit;
   }
-  return normalizeStoreKind(env?.ERP_CRITICAL_DOMAIN_STATE_STORE) || "memory";
+  const envStoreKind = normalizeStoreKind(env?.ERP_CRITICAL_DOMAIN_STATE_STORE);
+  if (envStoreKind) {
+    return envStoreKind;
+  }
+  if (env?.ERP_CRITICAL_DOMAIN_STATE_URL || env?.CRITICAL_DOMAIN_STATE_URL) {
+    return "postgres";
+  }
+  return "memory";
 }
 
 export function scanRuntimeInvariants({

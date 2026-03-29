@@ -68,6 +68,12 @@ export {
   createSqliteCriticalDomainStateStore
 } from "./critical-domain-state-store.mjs";
 export {
+  POSTGRES_CRITICAL_DOMAIN_STATE_REQUIRED_MIGRATION_IDS,
+  POSTGRES_CRITICAL_DOMAIN_STATE_SCHEMA_CONTRACT,
+  createPostgresCriticalDomainStateStore,
+  resolveCriticalDomainStateConnectionString
+} from "./critical-domain-state-store-postgres.mjs";
+export {
   DURABLE_SNAPSHOT_ARTIFACT_SCHEMA_VERSION,
   applyDurableStateSnapshotArtifact,
   createDurableStateSnapshotArtifact,

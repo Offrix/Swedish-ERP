@@ -45,7 +45,9 @@ import {
   validateDurableStateSnapshotArtifact,
   applyDurableStateSnapshot,
   createInMemoryCriticalDomainStateStore,
+  createPostgresCriticalDomainStateStore,
   createSqliteCriticalDomainStateStore,
+  resolveCriticalDomainStateConnectionString,
   serializeDurableState,
   resolveCanonicalRepositoryConnectionString,
   verifyRuntimeCanonicalRepositorySchemaContract as verifyRuntimeCanonicalRepositorySchemaContractBinding
@@ -1526,9 +1528,14 @@ function resolveCriticalDomainStateStore({
     return options.criticalDomainStateStore;
   }
 
+  const hasExplicitPostgresConnection =
+    !!options.criticalDomainStateConnectionString
+    || !!env.ERP_CRITICAL_DOMAIN_STATE_URL
+    || !!env.CRITICAL_DOMAIN_STATE_URL;
   const storeKind =
     options.criticalDomainStateStoreKind ||
     env.ERP_CRITICAL_DOMAIN_STATE_STORE ||
+    (hasExplicitPostgresConnection ? "postgres" : null) ||
     "memory";
 
   if (storeKind === "memory") {
@@ -1541,6 +1548,19 @@ function resolveCriticalDomainStateStore({
       env.ERP_CRITICAL_DOMAIN_STATE_DB_PATH ||
       path.join(os.tmpdir(), `swedish-erp-${runtimeModeProfile.environmentMode}-critical-domain-state.sqlite`);
     return createSqliteCriticalDomainStateStore({ filePath });
+  }
+
+  if (storeKind === "postgres") {
+    return createPostgresCriticalDomainStateStore({
+      connectionString: resolveCriticalDomainStateConnectionString({
+        connectionString: options.criticalDomainStateConnectionString || null,
+        env
+      }),
+      env,
+      max: options.criticalDomainStateStoreMaxConnections || 5,
+      idleTimeout: options.criticalDomainStateStoreIdleTimeout || 5,
+      connectTimeout: options.criticalDomainStateStoreConnectTimeout || 30
+    });
   }
 
   throw new Error(`Unsupported critical domain state store kind: ${storeKind}.`);

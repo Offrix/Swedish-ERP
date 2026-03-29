@@ -6,7 +6,11 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    dependencies:
+      postgres:
+        specifier: 3.4.8
+        version: 3.4.8
 
   apps/api: {}
 
@@ -22,15 +26,23 @@ importers:
 
   packages/document-engine: {}
 
+  packages/domain-accounting-method: {}
+
+  packages/domain-activity: {}
+
   packages/domain-annual-reporting: {}
 
   packages/domain-ap: {}
 
   packages/domain-ar: {}
 
+  packages/domain-balances: {}
+
   packages/domain-banking: {}
 
   packages/domain-benefits: {}
+
+  packages/domain-collective-agreements: {}
 
   packages/domain-core:
     dependencies:
@@ -38,17 +50,37 @@ importers:
         specifier: 3.4.8
         version: 3.4.8
 
+  packages/domain-document-classification: {}
+
   packages/domain-documents: {}
 
+  packages/domain-egenkontroll: {}
+
+  packages/domain-evidence: {}
+
   packages/domain-field: {}
+
+  packages/domain-fiscal-year: {}
 
   packages/domain-hr: {}
 
   packages/domain-hus: {}
 
+  packages/domain-id06: {}
+
+  packages/domain-import-cases: {}
+
   packages/domain-integrations: {}
 
+  packages/domain-kalkyl: {}
+
   packages/domain-ledger: {}
+
+  packages/domain-legal-form: {}
+
+  packages/domain-notifications: {}
+
+  packages/domain-observability: {}
 
   packages/domain-org-auth: {}
 
@@ -60,7 +92,17 @@ importers:
 
   packages/domain-projects: {}
 
+  packages/domain-regulated-submissions: {}
+
   packages/domain-reporting: {}
+
+  packages/domain-review-center: {}
+
+  packages/domain-search: {}
+
+  packages/domain-tax-account: {}
+
+  packages/domain-tenant-control: {}
 
   packages/domain-time: {}
 

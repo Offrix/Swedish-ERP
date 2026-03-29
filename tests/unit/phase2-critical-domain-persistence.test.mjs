@@ -6,7 +6,10 @@ import path from "node:path";
 import { API_PLATFORM_BUILD_ORDER, createApiPlatform } from "../../apps/api/src/platform.mjs";
 import {
   createInMemoryCriticalDomainStateStore,
-  createSqliteCriticalDomainStateStore
+  createSqliteCriticalDomainStateStore,
+  POSTGRES_CRITICAL_DOMAIN_STATE_REQUIRED_MIGRATION_IDS,
+  POSTGRES_CRITICAL_DOMAIN_STATE_SCHEMA_CONTRACT,
+  resolveCriticalDomainStateConnectionString
 } from "../../packages/domain-core/src/index.mjs";
 
 const CRITICAL_DOMAIN_KEYS = Object.freeze(
@@ -54,6 +57,60 @@ test("Phase 2.5 sqlite critical domain state store publishes a bindande schema c
     store.close();
     cleanupTempDirectory(temp.directory);
   }
+});
+
+test("Phase 2.5 Postgres critical domain state store publishes a bindande migration contract", () => {
+  assert.deepEqual(POSTGRES_CRITICAL_DOMAIN_STATE_REQUIRED_MIGRATION_IDS, [
+    "20260326121500_phase2_critical_domain_state_runtime"
+  ]);
+  assert.deepEqual(
+    Object.keys(POSTGRES_CRITICAL_DOMAIN_STATE_SCHEMA_CONTRACT.tables),
+    [
+      "critical_domain_state_snapshots",
+      "critical_domain_command_receipts",
+      "critical_domain_domain_events",
+      "critical_domain_outbox_messages",
+      "critical_domain_evidence_refs"
+    ]
+  );
+  assert.equal(
+    POSTGRES_CRITICAL_DOMAIN_STATE_SCHEMA_CONTRACT.tables.critical_domain_command_receipts.uniqueConstraints.length,
+    2
+  );
+  assert.equal(
+    POSTGRES_CRITICAL_DOMAIN_STATE_SCHEMA_CONTRACT.tables.critical_domain_evidence_refs.foreignKeys.length,
+    3
+  );
+});
+
+test("Phase 2.5 critical domain store resolves Postgres connection strings from explicit and env-backed config", () => {
+  assert.equal(
+    resolveCriticalDomainStateConnectionString({
+      connectionString: "postgres://explicit-critical-domain-store",
+      env: {}
+    }),
+    "postgres://explicit-critical-domain-store"
+  );
+  assert.equal(
+    resolveCriticalDomainStateConnectionString({
+      env: {
+        ERP_CRITICAL_DOMAIN_STATE_URL: "postgres://critical-domain-url"
+      }
+    }),
+    "postgres://critical-domain-url"
+  );
+  assert.equal(
+    resolveCriticalDomainStateConnectionString({
+      env: {
+        POSTGRES_HOST: "db.internal",
+        POSTGRES_PORT: "5433",
+        POSTGRES_USER: "erp",
+        POSTGRES_PASSWORD: "secret",
+        POSTGRES_DB: "swedish_erp"
+      }
+    }),
+    "postgres://erp:secret@db.internal:5433/swedish_erp"
+  );
 });
 
 test("Phase 2.1 rehydrates repository-backed domain truth from sqlite-backed aggregate envelopes", () => {

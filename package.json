@@ -83,5 +83,8 @@
     "verify:phase14:security": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase14-security-review.ps1",
     "verify:phase14:resilience": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase14-resilience.ps1",
     "verify:phase14:migration": "powershell -ExecutionPolicy Bypass -File ./scripts/verify-phase14-migration-go-live.ps1"
+  },
+  "dependencies": {
+    "postgres": "3.4.8"
   }
 }
