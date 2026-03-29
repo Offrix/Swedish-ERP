@@ -106,6 +106,10 @@ export function createBackofficeModule({
     activateBreakGlass,
     closeBreakGlassSession,
     exportSupportCaseEvidenceBundle,
+    registerReplayOperation,
+    recordReplayOperationApproval,
+    recordReplayOperationExecution,
+    listReplayOperations,
     exportBreakGlassEvidenceBundle,
     listAuditTrail
   };
@@ -251,6 +255,152 @@ export function createBackofficeModule({
       actorId: principal.userId,
       correlationId
     });
+  }
+
+  async function registerReplayOperation({
+    sessionToken,
+    companyId,
+    replayPlan,
+    supportCaseId = null,
+    incidentId = null,
+    deadLetterId = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const resolvedReplayPlan = requireReplayPlan(replayPlan, resolvedCompanyId);
+    const supportCase = optionalText(supportCaseId) ? requireSupportCase(resolvedCompanyId, supportCaseId) : null;
+    const runtimeIncident = optionalText(incidentId) ? requireRuntimeIncident(resolvedCompanyId, incidentId) : null;
+    let replayOperation = findReplayOperationByPlanId(resolvedCompanyId, resolvedReplayPlan.replayPlanId);
+    if (!replayOperation) {
+      replayOperation = {
+        replayOperationId: crypto.randomUUID(),
+        companyId: resolvedCompanyId,
+        replayPlanId: resolvedReplayPlan.replayPlanId,
+        jobId: resolvedReplayPlan.jobId,
+        replayJobId: resolvedReplayPlan.replayJobId || null,
+        deadLetterId: optionalText(deadLetterId),
+        supportCaseId: supportCase?.supportCaseId || null,
+        incidentId: runtimeIncident?.incidentId || null,
+        reasonCode: resolvedReplayPlan.reasonCode,
+        plannedPayloadStrategy: resolvedReplayPlan.plannedPayloadStrategy,
+        status: resolvedReplayPlan.status,
+        plannedByUserId: resolvedReplayPlan.plannedByUserId || principal.userId,
+        approvedByUserId: resolvedReplayPlan.approvedByUserId || null,
+        executedByUserId: null,
+        plannedAt: resolvedReplayPlan.createdAt,
+        approvedAt: resolvedReplayPlan.approvedAt || null,
+        executedAt: resolvedReplayPlan.executedAt || null,
+        latestPlanUpdatedAt: resolvedReplayPlan.updatedAt || resolvedReplayPlan.createdAt,
+        createdAt: nowIso(clock),
+        updatedAt: nowIso(clock)
+      };
+    } else {
+      replayOperation.deadLetterId = optionalText(deadLetterId) || replayOperation.deadLetterId;
+      replayOperation.supportCaseId = supportCase?.supportCaseId || replayOperation.supportCaseId;
+      replayOperation.incidentId = runtimeIncident?.incidentId || replayOperation.incidentId;
+      replayOperation.replayJobId = resolvedReplayPlan.replayJobId || replayOperation.replayJobId;
+      replayOperation.status = resolvedReplayPlan.status;
+      replayOperation.latestPlanUpdatedAt = resolvedReplayPlan.updatedAt || replayOperation.latestPlanUpdatedAt;
+      replayOperation.updatedAt = nowIso(clock);
+    }
+    state.replayOperations.set(replayOperation.replayOperationId, replayOperation);
+    audit({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.replay_operation.planned",
+      entityType: "replay_operation",
+      entityId: replayOperation.replayOperationId,
+      explanation: `Registered replay operation for async job ${resolvedReplayPlan.jobId}.`
+    });
+    return clone(replayOperation);
+  }
+
+  async function recordReplayOperationApproval({
+    sessionToken,
+    companyId,
+    replayPlan,
+    supportCaseId = null,
+    incidentId = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const resolvedReplayPlan = requireReplayPlan(replayPlan, resolvedCompanyId);
+    const replayOperation = requireReplayOperationByPlanId(resolvedCompanyId, resolvedReplayPlan.replayPlanId);
+    if (optionalText(supportCaseId)) {
+      replayOperation.supportCaseId = requireSupportCase(resolvedCompanyId, supportCaseId).supportCaseId;
+    }
+    if (optionalText(incidentId)) {
+      replayOperation.incidentId = requireRuntimeIncident(resolvedCompanyId, incidentId).incidentId;
+    }
+    replayOperation.status = resolvedReplayPlan.status;
+    replayOperation.approvedByUserId = resolvedReplayPlan.approvedByUserId || principal.userId;
+    replayOperation.approvedAt = resolvedReplayPlan.approvedAt || nowIso(clock);
+    replayOperation.latestPlanUpdatedAt = resolvedReplayPlan.updatedAt || replayOperation.latestPlanUpdatedAt;
+    replayOperation.updatedAt = nowIso(clock);
+    audit({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.replay_operation.approved",
+      entityType: "replay_operation",
+      entityId: replayOperation.replayOperationId,
+      explanation: `Approved replay operation ${replayOperation.replayOperationId}.`
+    });
+    return clone(replayOperation);
+  }
+
+  async function recordReplayOperationExecution({
+    sessionToken,
+    companyId,
+    replayPlan,
+    replayJob = null,
+    deadLetterId = null,
+    supportCaseId = null,
+    incidentId = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const resolvedReplayPlan = requireReplayPlan(replayPlan, resolvedCompanyId);
+    const replayOperation = requireReplayOperationByPlanId(resolvedCompanyId, resolvedReplayPlan.replayPlanId);
+    if (optionalText(supportCaseId)) {
+      replayOperation.supportCaseId = requireSupportCase(resolvedCompanyId, supportCaseId).supportCaseId;
+    }
+    if (optionalText(incidentId)) {
+      replayOperation.incidentId = requireRuntimeIncident(resolvedCompanyId, incidentId).incidentId;
+    }
+    replayOperation.deadLetterId = optionalText(deadLetterId) || replayOperation.deadLetterId;
+    replayOperation.status = resolvedReplayPlan.status;
+    replayOperation.replayJobId = replayJob?.jobId || resolvedReplayPlan.replayJobId || replayOperation.replayJobId;
+    replayOperation.executedByUserId = principal.userId;
+    replayOperation.executedAt = resolvedReplayPlan.executedAt || replayOperation.executedAt || nowIso(clock);
+    replayOperation.latestPlanUpdatedAt = resolvedReplayPlan.updatedAt || replayOperation.latestPlanUpdatedAt;
+    replayOperation.updatedAt = nowIso(clock);
+    audit({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.replay_operation.executed",
+      entityType: "replay_operation",
+      entityId: replayOperation.replayOperationId,
+      explanation: `Executed replay operation ${replayOperation.replayOperationId}.`
+    });
+    return clone(replayOperation);
+  }
+
+  async function listReplayOperations({ sessionToken, companyId, status = null } = {}) {
+    if (sessionToken) {
+      authorize(sessionToken, companyId, "company.read");
+    }
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    return [...state.replayOperations.values()]
+      .filter((operation) => operation.companyId === resolvedCompanyId)
+      .map(clone)
+      .filter((operation) => (optionalText(status) ? operation.status === status : true))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
   function registerManagedSecret({
@@ -1248,6 +1398,43 @@ export function createBackofficeModule({
       throw error(404, "support_case_not_found", "Support case was not found.");
     }
     return supportCase;
+  }
+
+  function requireRuntimeIncident(companyId, incidentId) {
+    const runtimeIncident = state.runtimeIncidents.get(text(incidentId, "incident_id_required"));
+    if (!runtimeIncident || runtimeIncident.companyId !== text(companyId, "company_id_required")) {
+      throw error(404, "runtime_incident_not_found", "Runtime incident was not found.");
+    }
+    return runtimeIncident;
+  }
+
+  function requireReplayPlan(replayPlan, companyId) {
+    if (!replayPlan || typeof replayPlan !== "object") {
+      throw error(400, "replay_plan_required", "Replay plan is required.");
+    }
+    if (replayPlan.companyId !== companyId) {
+      throw error(409, "replay_plan_company_mismatch", "Replay plan must belong to the same company.");
+    }
+    return clone(replayPlan);
+  }
+
+  function findReplayOperationByPlanId(companyId, replayPlanId) {
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const resolvedReplayPlanId = text(replayPlanId, "async_job_replay_plan_id_required");
+    for (const replayOperation of state.replayOperations.values()) {
+      if (replayOperation.companyId === resolvedCompanyId && replayOperation.replayPlanId === resolvedReplayPlanId) {
+        return replayOperation;
+      }
+    }
+    return null;
+  }
+
+  function requireReplayOperationByPlanId(companyId, replayPlanId) {
+    const replayOperation = findReplayOperationByPlanId(companyId, replayPlanId);
+    if (!replayOperation) {
+      throw error(404, "replay_operation_not_found", "Replay operation was not found.");
+    }
+    return replayOperation;
   }
 
   function requireImpersonationSession(companyId, sessionId) {

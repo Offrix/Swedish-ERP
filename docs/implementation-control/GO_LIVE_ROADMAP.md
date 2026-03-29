@@ -1102,7 +1102,8 @@ Slutföra operator- och supportsystemet: incidents, support cases, replay, dead-
 - Ingen extern pilot eller go-live får ske innan cutover, rollback och support operations är körbara utan databasingrepp.
 
 **Delfaser**
-- [ ] 17.1 [HARDEN] **Support case, incident, replay och dead-letter ops** — Support scopes, masked data views, replay planning, dead-letter triage, incident commander flows, submission monitoring.
+- [x] 17.1 [HARDEN] **Support case, incident, replay och dead-letter ops** — Support scopes, masked data views, replay planning, dead-letter triage, incident commander flows, submission monitoring.
+- 17.1 klar 2026-03-29: backoffice bär nu first-class `ReplayOperation` ovanpå async replay-planer, dead-letter- och submission-monitor-rader länkar tillbaka till replayoperationen, support case- och incidentvyer är maskade som default i API-svaren och verifieringsrunbook finns i `docs/runbooks/support-case-and-replay.md`; delfasen är grön i nya phase 17.1-unit/API-sviter samt full gate.
 - [ ] 17.2 [HARDEN] **Backoffice-gränser och evidence** — Write-capable impersonation allowlists, break-glass, masking, session watermarks, evidence packs och export for audit.
 - [ ] 17.3 [HARDEN] **Migration cockpit och acceptance** — Mapping sets, import batches, variance reports, acceptance records, cutover plans, signoff chains, rollback points.
 - [ ] 17.4 [OPERATIONALIZE] **Parallel run och diff motor** — Finance, payroll, HUS, personalliggare och project profitability parallel runs med diff thresholds och manual acceptance.

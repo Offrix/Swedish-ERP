@@ -27,7 +27,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "support_case", objectId: companyId, scopeCode: "support_case" });
-    writeJson(res, 201, platform.createSupportCase({
+    writeJson(res, 201, projectMaskedSupportCaseView(platform.createSupportCase({
       sessionToken,
       companyId,
       category: body.category,
@@ -37,7 +37,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
       policyScope: body.policyScope,
       approvedActions: body.approvedActions,
       ownerUserId: body.ownerUserId
-    }));
+    })));
     return true;
   }
 
@@ -46,7 +46,11 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const sessionToken = readSessionToken(req);
     const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "support_case", objectId: companyId, scopeCode: "support_case" });
     assertBackofficeReadAccess({ principal });
-    writeJson(res, 200, { items: platform.listSupportCases({ sessionToken, companyId, status: optionalText(url.searchParams.get("status")) }) });
+    writeJson(res, 200, {
+      items: platform
+        .listSupportCases({ sessionToken, companyId, status: optionalText(url.searchParams.get("status")) })
+        .map(projectMaskedSupportCaseView)
+    });
     return true;
   }
 
@@ -56,13 +60,13 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "support_case", objectId: supportCloseMatch.supportCaseId, scopeCode: "support_case" });
-    writeJson(res, 200, platform.closeSupportCase({
+    writeJson(res, 200, projectMaskedSupportCaseView(platform.closeSupportCase({
       sessionToken,
       companyId,
       supportCaseId: supportCloseMatch.supportCaseId,
       resolutionCode: body.resolutionCode,
       resolutionNote: body.resolutionNote
-    }));
+    })));
     return true;
   }
 
@@ -72,12 +76,12 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "support_case", objectId: supportApprovalMatch.supportCaseId, scopeCode: "support_case" });
-    writeJson(res, 200, platform.approveSupportCaseActions({
+    writeJson(res, 200, projectMaskedSupportCaseView(platform.approveSupportCaseActions({
       sessionToken,
       companyId,
       supportCaseId: supportApprovalMatch.supportCaseId,
       approvedActions: body.approvedActions
-    }));
+    })));
     return true;
   }
 
@@ -365,7 +369,15 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
       replayPlanId: replayApproveMatch.replayPlanId,
       approvedByUserId: principal.userId
     });
-    writeJson(res, 200, { replayPlan });
+    const replayOperation = await platform.recordReplayOperationApproval?.({
+      sessionToken,
+      companyId,
+      replayPlan,
+      supportCaseId: body.supportCaseId ?? null,
+      incidentId: body.incidentId ?? null,
+      correlationId: body.correlationId ?? undefined
+    }) || null;
+    writeJson(res, 200, { replayPlan, replayOperation });
     return true;
   }
 
@@ -397,10 +409,21 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
         operatorState: "resolved"
       })
       : null;
+    const replayOperation = await platform.recordReplayOperationExecution?.({
+      sessionToken,
+      companyId,
+      replayPlan: replay.replayPlan,
+      replayJob: replay.replayJob,
+      deadLetterId: resolvedDeadLetter?.deadLetterId || deadLetter?.deadLetterId || null,
+      supportCaseId: body.supportCaseId ?? null,
+      incidentId: body.incidentId ?? null,
+      correlationId: body.correlationId ?? undefined
+    }) || null;
     writeJson(res, 200, {
       replayPlan: replay.replayPlan,
       replayJob: replay.replayJob,
-      deadLetter: resolvedDeadLetter
+      deadLetter: resolvedDeadLetter,
+      replayOperation
     });
     return true;
   }
@@ -435,7 +458,16 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
         operatorState: "replay_planned"
       })
       : null;
-    writeJson(res, 200, { replayPlan, deadLetter: triagedDeadLetter });
+    const replayOperation = await platform.registerReplayOperation?.({
+      sessionToken,
+      companyId,
+      replayPlan,
+      deadLetterId: triagedDeadLetter?.deadLetterId || deadLetter?.deadLetterId || null,
+      supportCaseId: body.supportCaseId ?? null,
+      incidentId: body.incidentId ?? null,
+      correlationId: body.correlationId ?? undefined
+    }) || null;
+    writeJson(res, 200, { replayPlan, deadLetter: triagedDeadLetter, replayOperation });
     return true;
   }
 
@@ -669,7 +701,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "runtime_incident", objectId: companyId, scopeCode: "backoffice" });
-    writeJson(res, 201, platform.openRuntimeIncident({
+    writeJson(res, 201, projectMaskedRuntimeIncidentView(platform.openRuntimeIncident({
       sessionToken,
       companyId,
       title: body.title,
@@ -680,7 +712,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
       linkedCorrelationId: body.linkedCorrelationId || null,
       relatedObjectRefs: Array.isArray(body.relatedObjectRefs) ? body.relatedObjectRefs : [],
       impactScope: body.impactScope || null
-    }));
+    })));
     return true;
   }
 
@@ -695,7 +727,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
         companyId,
         status: optionalText(url.searchParams.get("status")),
         severity: optionalText(url.searchParams.get("severity"))
-      })
+      }).map(projectMaskedRuntimeIncidentView)
     });
     return true;
   }
@@ -755,7 +787,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "runtime_incident", objectId: incidentPostReviewMatch.incidentId, scopeCode: "backoffice" });
-    writeJson(res, 201, platform.recordRuntimeIncidentPostReview({
+    writeJson(res, 201, projectMaskedRuntimeIncidentView(platform.recordRuntimeIncidentPostReview({
       sessionToken,
       companyId,
       incidentId: incidentPostReviewMatch.incidentId,
@@ -767,7 +799,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
       preventiveActions: Array.isArray(body.preventiveActions) ? body.preventiveActions : [],
       reviewedBreakGlassIds: Array.isArray(body.reviewedBreakGlassIds) ? body.reviewedBreakGlassIds : [],
       evidenceRefs: Array.isArray(body.evidenceRefs) ? body.evidenceRefs : []
-    }));
+    })));
     return true;
   }
 
@@ -777,16 +809,81 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "runtime_incident", objectId: incidentStatusMatch.incidentId, scopeCode: "backoffice" });
-    writeJson(res, 200, platform.updateRuntimeIncidentStatus({
+    writeJson(res, 200, projectMaskedRuntimeIncidentView(platform.updateRuntimeIncidentStatus({
       sessionToken,
       companyId,
       incidentId: incidentStatusMatch.incidentId,
       status: body.status,
       note: body.note || null
-    }));
+    })));
     return true;
   }
 
 
   return false;
+}
+
+function projectMaskedSupportCaseView(supportCase) {
+  return {
+    ...supportCase,
+    requester: maskRequester(supportCase?.requester || null),
+    relatedObjectRefs: maskObjectRefs(supportCase?.relatedObjectRefs || []),
+    masking: {
+      masked: true,
+      maskedFields: ["requester", "relatedObjectRefs"],
+      maskingPolicyCode: "support_case.default_masked_view"
+    }
+  };
+}
+
+function projectMaskedRuntimeIncidentView(response) {
+  if (response?.incident) {
+    return {
+      ...response,
+      incident: projectMaskedRuntimeIncidentView(response.incident)
+    };
+  }
+  return {
+    ...response,
+    relatedObjectRefs: maskObjectRefs(response?.relatedObjectRefs || []),
+    masking: {
+      masked: true,
+      maskedFields: ["relatedObjectRefs"],
+      maskingPolicyCode: "runtime_incident.default_masked_view"
+    }
+  };
+}
+
+function maskRequester(requester) {
+  if (!requester || typeof requester !== "object") {
+    return requester;
+  }
+  const maskedRequester = { ...requester };
+  for (const key of Object.keys(maskedRequester)) {
+    if (key === "channel") {
+      continue;
+    }
+    if (typeof maskedRequester[key] === "string" && maskedRequester[key].length > 0) {
+      maskedRequester[key] = maskValue(maskedRequester[key]);
+    }
+  }
+  return maskedRequester;
+}
+
+function maskObjectRefs(objectRefs) {
+  return (Array.isArray(objectRefs) ? objectRefs : []).map((objectRef) => ({
+    ...objectRef,
+    objectId: typeof objectRef?.objectId === "string" ? maskValue(objectRef.objectId) : objectRef?.objectId,
+    rawObjectIdRedacted: typeof objectRef?.objectId === "string"
+  }));
+}
+
+function maskValue(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    return value;
+  }
+  if (value.length <= 4) {
+    return "*".repeat(value.length);
+  }
+  return `${value.slice(0, 2)}***${value.slice(-2)}`;
 }

@@ -446,31 +446,37 @@ async function buildBackofficeJobRows({ platform, companyId, status = null, jobT
 }
 
 async function buildBackofficeDeadLetterRows({ platform, companyId, operatorState = null }) {
-  const [deadLetters, jobs, replayPlans] = await Promise.all([
+  const [deadLetters, jobs, replayPlans, replayOperations] = await Promise.all([
     platform.listRuntimeDeadLetters({ companyId, operatorState }),
     platform.listRuntimeJobs({ companyId }),
-    platform.listRuntimeJobReplayPlans({})
+    platform.listRuntimeJobReplayPlans({}),
+    platform.listReplayOperations?.({ companyId }) || []
   ]);
   const jobsById = new Map(jobs.map((job) => [job.jobId, job]));
   const replayPlansByJobId = buildReplayPlansByJobId({ replayPlans, companyId });
+  const replayOperationsByJobId = new Map(replayOperations.map((operation) => [operation.jobId, operation]));
   return deadLetters.map((deadLetter) => ({
     ...deadLetter,
     job: jobsById.get(deadLetter.jobId) || null,
-    replayPlan: replayPlansByJobId.get(deadLetter.jobId) || null
+    replayPlan: replayPlansByJobId.get(deadLetter.jobId) || null,
+    replayOperation: replayOperationsByJobId.get(deadLetter.jobId) || null
   }));
 }
 
 async function buildBackofficeReplayRows({ platform, companyId, status = null }) {
-  const [replayPlans, jobs, deadLetters] = await Promise.all([
+  const [replayPlans, jobs, deadLetters, replayOperations] = await Promise.all([
     platform.listRuntimeJobReplayPlans({ status }),
     platform.listRuntimeJobs({ companyId }),
-    platform.listRuntimeDeadLetters({ companyId })
+    platform.listRuntimeDeadLetters({ companyId }),
+    platform.listReplayOperations?.({ companyId }) || []
   ]);
   const jobsById = new Map(jobs.map((job) => [job.jobId, job]));
   const deadLettersByJobId = new Map(deadLetters.map((deadLetter) => [deadLetter.jobId, deadLetter]));
+  const replayOperationsByPlanId = new Map(replayOperations.map((operation) => [operation.replayPlanId, operation]));
   return replayPlans
     .filter((replayPlan) => replayPlan.companyId === companyId)
     .map((replayPlan) => ({
+      ...(replayOperationsByPlanId.get(replayPlan.replayPlanId) || {}),
       ...replayPlan,
       job: jobsById.get(replayPlan.jobId) || null,
       deadLetter: deadLettersByJobId.get(replayPlan.jobId) || null
@@ -479,12 +485,13 @@ async function buildBackofficeReplayRows({ platform, companyId, status = null })
 
 async function buildSubmissionMonitorPayload({ platform, companyId, submissionType = null, ownerQueue = null, status = null, asOf = null }) {
   const resolvedAsOf = resolveSubmissionMonitorAsOf(asOf);
-  const [submissions, queueItems, jobs, deadLetters, replayPlans] = await Promise.all([
+  const [submissions, queueItems, jobs, deadLetters, replayPlans, replayOperations] = await Promise.all([
     platform.listAuthoritySubmissions({ companyId, submissionType }),
     platform.listSubmissionActionQueue({ companyId, ownerQueue, status: null }),
     platform.listRuntimeJobs({ companyId }),
     platform.listRuntimeDeadLetters({ companyId }),
-    platform.listRuntimeJobReplayPlans({})
+    platform.listRuntimeJobReplayPlans({}),
+    platform.listReplayOperations?.({ companyId }) || []
   ]);
   const filteredSubmissions = submissions.filter((submission) => (status ? submission.status === status : true));
   const submissionsById = new Map(submissions.map((submission) => [submission.submissionId, submission]));
@@ -527,6 +534,7 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
   });
   const jobsById = new Map(jobs.map((job) => [job.jobId, job]));
   const replayPlansByJobId = buildReplayPlansByJobId({ replayPlans, companyId });
+  const replayOperationsByJobId = new Map(replayOperations.map((operation) => [operation.jobId, operation]));
   const submissionDeadLetterRows = deadLetters
     .map((deadLetter) => {
       const job = jobsById.get(deadLetter.jobId) || null;
@@ -576,6 +584,7 @@ async function buildSubmissionMonitorPayload({ platform, companyId, submissionTy
         replayEligible: deadLetter.replayAllowed === true,
         deadLetter,
         replayPlan: replayPlansByJobId.get(deadLetter.jobId) || null,
+        replayOperation: replayOperationsByJobId.get(deadLetter.jobId) || null,
         job,
         ownerQueues: [...new Set(submissionQueueItems.map((queueItem) => queueItem.ownerQueue).filter(Boolean))],
         ...queueMetrics

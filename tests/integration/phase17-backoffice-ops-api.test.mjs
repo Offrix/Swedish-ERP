@@ -114,6 +114,35 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     });
     assert.equal(fieldUserBackofficeDenied.error, "backoffice_role_forbidden");
 
+    const supportCase = await requestJson(baseUrl, "/v1/backoffice/support-cases", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        category: "submission_transport_failure",
+        severity: "high",
+        requester: {
+          channel: "email",
+          requesterId: "customer-raw-001",
+          email: "customer@example.test"
+        },
+        relatedObjectRefs: [
+          { objectType: "submission", objectId: "phase17-submission-sensitive" }
+        ]
+      }
+    });
+    assert.equal(supportCase.masking.masked, true);
+    assert.notEqual(supportCase.requester.requesterId, "customer-raw-001");
+    assert.notEqual(supportCase.relatedObjectRefs[0].objectId, "phase17-submission-sensitive");
+
+    const supportCases = await requestJson(baseUrl, `/v1/backoffice/support-cases?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    const listedSupportCase = supportCases.items.find((item) => item.supportCaseId === supportCase.supportCaseId);
+    assert.equal(listedSupportCase.masking.masked, true);
+    assert.notEqual(listedSupportCase.requester.email, "customer@example.test");
+
     const jobs = await requestJson(baseUrl, `/v1/backoffice/jobs?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
@@ -186,11 +215,16 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     });
     assert.equal(replayPlanned.replayPlan.status, "pending_approval");
     assert.equal(replayPlanned.deadLetter.operatorState, "replay_planned");
+    assert.equal(typeof replayPlanned.replayOperation.replayOperationId, "string");
+    assert.equal(replayPlanned.replayOperation.supportCaseId, null);
+    assert.equal(replayPlanned.replayOperation.incidentId, opsIncident.incident.incidentId);
 
     const replayDeadLetters = await requestJson(baseUrl, `/v1/backoffice/dead-letters?companyId=${DEMO_IDS.companyId}&operatorState=replay_planned`, {
       token: adminToken
     });
     assert.equal(replayDeadLetters.items.some((item) => item.deadLetterId === deadLetter.deadLetterId), true);
+    const replayDeadLetterRow = replayDeadLetters.items.find((item) => item.deadLetterId === deadLetter.deadLetterId);
+    assert.equal(replayDeadLetterRow.replayOperation.replayOperationId, replayPlanned.replayOperation.replayOperationId);
 
     const overdueReview = platform.createReviewItem({
       companyId: DEMO_IDS.companyId,
@@ -361,6 +395,7 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     assert.equal(submissionDeadLetterRow.job.jobId, job.jobId);
     assert.equal(submissionDeadLetterRow.deadLetter.operatorState, "replay_planned");
     assert.equal(submissionDeadLetterRow.replayPlan.status, "pending_approval");
+    assert.equal(submissionDeadLetterRow.replayOperation.replayOperationId, replayPlanned.replayOperation.replayOperationId);
     assert.equal(submissionDeadLetterRow.escalationPolicyCode, "submission_monitor.dead_letter_replay");
     assert.equal(typeof submissionDeadLetterRow.oldestOpenAgeMinutes, "number");
     assert.equal(submissionDeadLetterRow.lagAlerts.some((alert) => alert.alertCode === "dead_letter_open"), true);
@@ -413,11 +448,15 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     });
     assert.equal(incident.incident.status, "open");
     assert.equal(incident.incident.relatedObjectRefs.length, 2);
+    assert.equal(incident.incident.masking.masked, true);
+    assert.notEqual(incident.incident.relatedObjectRefs[0].objectId, submission.submissionId);
 
     const incidentList = await requestJson(baseUrl, `/v1/backoffice/incidents?companyId=${DEMO_IDS.companyId}&status=open`, {
       token: adminToken
     });
     assert.equal(incidentList.items.some((item) => item.incidentId === incident.incident.incidentId), true);
+    const incidentListRow = incidentList.items.find((item) => item.incidentId === incident.incident.incidentId);
+    assert.equal(incidentListRow.masking.masked, true);
 
     const incidentEvent = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/events`, {
       method: "POST",
@@ -613,6 +652,10 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
       token: adminToken
     });
     assert.equal(replayListBeforeApproval.items.some((item) => item.replayPlanId === replayPlanned.replayPlan.replayPlanId), true);
+    const replayListRow = replayListBeforeApproval.items.find((item) => item.replayPlanId === replayPlanned.replayPlan.replayPlanId);
+    assert.equal(replayListRow.replayOperationId, replayPlanned.replayOperation.replayOperationId);
+    assert.equal(replayListRow.incidentId, opsIncident.incident.incidentId);
+    assert.equal(replayListRow.deadLetter.deadLetterId, deadLetter.deadLetterId);
 
     const selfApprovalDenied = await requestJson(baseUrl, `/v1/backoffice/replays/${replayPlanned.replayPlan.replayPlanId}/approve`, {
       method: "POST",
@@ -634,6 +677,7 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
       }
     });
     assert.equal(approvedReplay.replayPlan.status, "approved");
+    assert.equal(approvedReplay.replayOperation.approvedByUserId, approvedReplay.replayPlan.approvedByUserId);
 
     const executedReplay = await requestJson(baseUrl, `/v1/backoffice/replays/${replayPlanned.replayPlan.replayPlanId}/execute`, {
       method: "POST",
@@ -645,6 +689,8 @@ test("Step 17 API exposes backoffice jobs, SLA escalations, submission monitorin
     });
     assert.equal(executedReplay.replayPlan.status, "scheduled");
     assert.equal(executedReplay.deadLetter.operatorState, "resolved");
+    assert.equal(executedReplay.replayOperation.replayOperationId, replayPlanned.replayOperation.replayOperationId);
+    assert.equal(executedReplay.replayOperation.replayJobId, executedReplay.replayJob.jobId);
   } finally {
     await stopServer(server);
   }
