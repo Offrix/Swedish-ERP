@@ -196,6 +196,10 @@ function createClaimExpiryPoisonFingerprint(jobRow) {
     .digest("hex");
 }
 
+function addSeconds(isoTimestamp, seconds) {
+  return new Date(new Date(isoTimestamp).getTime() + seconds * 1000).toISOString();
+}
+
 export function createPostgresAsyncJobStore({
   connectionString = null,
   env = process.env,
@@ -537,6 +541,46 @@ export function createPostgresAsyncJobStore({
       });
     },
 
+    async heartbeatJobAttempt({ jobId, claimToken, workerId, attemptId, heartbeatAt, claimTtlSeconds }) {
+      return sql.begin(async (tx) => {
+        const jobRow = await fetchJob(tx, jobId);
+        if (!jobRow) {
+          throw new Error(`Async job ${jobId} was not found.`);
+        }
+        if (jobRow.claim_token !== claimToken || jobRow.worker_id !== workerId) {
+          throw new Error(`Async job ${jobId} is not claimed by worker ${workerId}.`);
+        }
+
+        const attemptRow = await fetchAttempt(tx, attemptId);
+        if (!attemptRow) {
+          throw new Error(`Async job attempt ${attemptId} was not found.`);
+        }
+        if (attemptRow.finished_at) {
+          throw new Error(`Async job attempt ${attemptId} is already finished.`);
+        }
+
+        const nextClaimExpiresAt = addSeconds(heartbeatAt, claimTtlSeconds);
+        const updatedAttemptRows = await tx`
+          update async_job_attempts
+          set claim_expires_at = ${nextClaimExpiresAt}
+          where job_attempt_id = ${attemptId}
+          returning *
+        `;
+        const updatedJobRows = await tx`
+          update async_jobs
+          set claim_expires_at = ${nextClaimExpiresAt},
+              updated_at = ${heartbeatAt}
+          where job_id = ${jobId}
+          returning *
+        `;
+
+        return {
+          job: mapJobRow(updatedJobRows[0]),
+          attempt: mapAttemptRow(updatedAttemptRows[0])
+        };
+      });
+    },
+
     async finalizeJobAttempt({
       jobId,
       claimToken,
@@ -648,6 +692,124 @@ export function createPostgresAsyncJobStore({
               poison_fingerprint, poison_detected_at, entered_at, created_at, updated_at
             ) values (
               ${crypto.randomUUID()}, ${jobId}, ${jobRow.company_id}, ${attemptId},
+              ${terminalReason || "worker_terminal_failure"}, 'pending_triage', ${replayAllowed},
+              ${poisonDescriptor?.poisonPillDetected === true},
+              ${poisonDescriptor?.poisonReasonCode || null},
+              ${poisonDescriptor?.poisonFingerprint || null},
+              ${poisonDescriptor?.poisonPillDetected === true ? finishedAt : null},
+              ${finishedAt}, ${finishedAt}, ${finishedAt}
+            )
+            on conflict (job_id)
+            do update set
+              latest_attempt_id = excluded.latest_attempt_id,
+              terminal_reason = excluded.terminal_reason,
+              replay_allowed = excluded.replay_allowed,
+              poison_pill_detected = async_job_dead_letters.poison_pill_detected OR excluded.poison_pill_detected,
+              poison_reason_code = coalesce(excluded.poison_reason_code, async_job_dead_letters.poison_reason_code),
+              poison_fingerprint = coalesce(excluded.poison_fingerprint, async_job_dead_letters.poison_fingerprint),
+              poison_detected_at = coalesce(excluded.poison_detected_at, async_job_dead_letters.poison_detected_at),
+              updated_at = excluded.updated_at
+          `;
+        }
+
+        const deadLetterRows = await tx`
+          select *
+          from async_job_dead_letters
+          where job_id = ${jobId}
+          limit 1
+        `;
+
+        return {
+          job: mapJobRow(jobRows[0]),
+          attempt: mapAttemptRow(attemptRows[0]),
+          deadLetter: mapDeadLetterRow(deadLetterRows[0])
+        };
+      });
+    },
+
+    async failJobClaim({
+      jobId,
+      claimToken,
+      workerId,
+      finishedAt,
+      terminalState,
+      errorClass = null,
+      errorCode = null,
+      errorMessage = null,
+      nextRetryAt = null,
+      terminalReason = null,
+      replayAllowed = true,
+      poisonDescriptor = null,
+      resultPayload = null
+    }) {
+      return sql.begin(async (tx) => {
+        const jobRow = await fetchJob(tx, jobId);
+        if (!jobRow) {
+          throw new Error(`Async job ${jobId} was not found.`);
+        }
+        if (jobRow.claim_token !== claimToken || jobRow.worker_id !== workerId) {
+          throw new Error(`Async job ${jobId} is not claimed by worker ${workerId}.`);
+        }
+
+        const attemptNo = Number(jobRow.attempt_count || 0) + 1;
+        const attemptRows = await tx`
+          insert into async_job_attempts (
+            job_attempt_id, job_id, attempt_no, worker_id, claim_token, status,
+            claimed_at, claim_expires_at, started_at, finished_at, result_code,
+            error_class, error_code, error_message, result_payload_json, next_retry_at, created_at
+          ) values (
+            ${crypto.randomUUID()}, ${jobId}, ${attemptNo}, ${workerId}, ${claimToken},
+            ${terminalState === "retry_scheduled" ? "retry_scheduled" : "dead_lettered"},
+            ${jobRow.claimed_at}, ${jobRow.claim_expires_at}, null, ${finishedAt}, null,
+            ${errorClass}, ${errorCode}, ${errorMessage}, ${JSON.stringify(resultPayload)}::jsonb, ${nextRetryAt},
+            ${jobRow.claimed_at || finishedAt}
+          )
+          returning *
+        `;
+
+        let jobRows;
+        if (terminalState === "retry_scheduled") {
+          jobRows = await tx`
+            update async_jobs
+            set status = 'retry_scheduled',
+                claim_token = null,
+                worker_id = null,
+                claimed_at = null,
+                claim_expires_at = null,
+                available_at = ${nextRetryAt},
+                updated_at = ${finishedAt},
+                attempt_count = ${attemptNo},
+                last_result_code = null,
+                last_error_class = ${errorClass},
+                last_error_code = ${errorCode},
+                last_error_message = ${errorMessage}
+            where job_id = ${jobId}
+            returning *
+          `;
+        } else {
+          jobRows = await tx`
+            update async_jobs
+            set status = 'dead_lettered',
+                claim_token = null,
+                worker_id = null,
+                claimed_at = null,
+                claim_expires_at = null,
+                updated_at = ${finishedAt},
+                attempt_count = ${attemptNo},
+                last_result_code = null,
+                last_error_class = ${errorClass},
+                last_error_code = ${errorCode},
+                last_error_message = ${errorMessage}
+            where job_id = ${jobId}
+            returning *
+          `;
+          await tx`
+            insert into async_job_dead_letters (
+              dead_letter_id, job_id, company_id, latest_attempt_id, terminal_reason,
+              operator_state, replay_allowed, poison_pill_detected, poison_reason_code,
+              poison_fingerprint, poison_detected_at, entered_at, created_at, updated_at
+            ) values (
+              ${crypto.randomUUID()}, ${jobId}, ${jobRow.company_id}, ${attemptRows[0].job_attempt_id},
               ${terminalReason || "worker_terminal_failure"}, 'pending_triage', ${replayAllowed},
               ${poisonDescriptor?.poisonPillDetected === true},
               ${poisonDescriptor?.poisonReasonCode || null},

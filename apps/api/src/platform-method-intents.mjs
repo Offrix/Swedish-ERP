@@ -989,6 +989,7 @@ const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
     "getRuntimeControlPlaneSummary": "read",
     "getRuntimeIncidentPostReview": "read",
     "getRuntimeJob": "read",
+    "heartbeatRuntimeJobAttempt": "write",
     "getSecretManagementSummary": "read",
     "importEmployeeMigrationRecords": "write",
     "instantiateCloseChecklist": "write",

@@ -245,6 +245,103 @@ test("Phase 14 Step 4 async jobs record synthetic attempts when a claim expires 
   assert.equal(recoveredJob.attemptCount, 1);
 });
 
+test("Phase 2.4 async jobs extend claim expiry through heartbeats", async () => {
+  let currentTime = "2026-03-24T10:38:00Z";
+  const platform = createApiPlatform({
+    clock: () => new Date(currentTime)
+  });
+
+  const queuedJob = await platform.enqueueRuntimeJob({
+    companyId: "00000000-0000-4000-8000-000000000001",
+    jobType: "system.noop",
+    sourceObjectType: "test_fixture",
+    sourceObjectId: "heartbeat-claim-1",
+    idempotencyKey: "phase2-heartbeat-claim-1",
+    payload: { noop: true },
+    actorId: "system"
+  });
+
+  const [claimedJob] = await platform.claimAvailableRuntimeJobs({
+    workerId: "worker-step4-heartbeat",
+    limit: 1,
+    claimTtlSeconds: 60
+  });
+  assert.equal(claimedJob.jobId, queuedJob.jobId);
+
+  const started = await platform.startRuntimeJobAttempt({
+    jobId: queuedJob.jobId,
+    claimToken: claimedJob.claimToken,
+    workerId: "worker-step4-heartbeat"
+  });
+  const originalJobExpiry = started.job.claimExpiresAt;
+  const originalAttemptExpiry = started.attempt.claimExpiresAt;
+
+  currentTime = "2026-03-24T10:38:45Z";
+  const heartbeated = await platform.heartbeatRuntimeJobAttempt({
+    jobId: queuedJob.jobId,
+    claimToken: claimedJob.claimToken,
+    workerId: "worker-step4-heartbeat",
+    attemptId: started.attempt.jobAttemptId,
+    claimTtlSeconds: 180
+  });
+
+  assert.equal(heartbeated.job.status, "running");
+  assert.equal(heartbeated.attempt.status, "running");
+  assert.ok(heartbeated.job.claimExpiresAt > originalJobExpiry);
+  assert.ok(heartbeated.attempt.claimExpiresAt > originalAttemptExpiry);
+});
+
+test("Phase 2.4 worker records synthetic failed attempts when attempt start crashes before persistence", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-24T10:39:00Z")
+  });
+
+  const queuedJob = await platform.enqueueRuntimeJob({
+    companyId: "00000000-0000-4000-8000-000000000001",
+    jobType: "system.noop",
+    sourceObjectType: "test_fixture",
+    sourceObjectId: "attempt-start-crash-1",
+    idempotencyKey: "phase2-attempt-start-crash-1",
+    payload: { noop: true },
+    actorId: "system"
+  });
+
+  const crashingPlatform = {
+    ...platform,
+    async startRuntimeJobAttempt() {
+      const err = new Error("Attempt start crashed before persistence.");
+      err.errorClass = "persistent_technical";
+      err.errorCode = "worker_attempt_start_crash";
+      err.retryable = false;
+      err.replayAllowed = true;
+      throw err;
+    }
+  };
+
+  const processed = await runWorkerBatch({
+    platform: crashingPlatform,
+    handlers: createDefaultJobHandlers({ logger: () => {} }),
+    logger: () => {},
+    workerId: "worker-step4-attempt-start-crash"
+  });
+
+  const deadLetteredJob = await platform.getRuntimeJob({ jobId: queuedJob.jobId });
+  const attempts = await platform.listRuntimeJobAttempts({ jobId: queuedJob.jobId });
+  const deadLetters = await platform.listRuntimeDeadLetters({
+    companyId: queuedJob.companyId
+  });
+  const deadLetter = deadLetters.find((candidate) => candidate.jobId === queuedJob.jobId);
+
+  assert.equal(processed, 1);
+  assert.equal(deadLetteredJob.status, "dead_lettered");
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].startedAt, null);
+  assert.equal(attempts[0].errorCode, "worker_attempt_start_crash");
+  assert.equal(attempts[0].status, "dead_lettered");
+  assert.equal(Boolean(deadLetter), true);
+  assert.equal(deadLetter.latestAttemptId, attempts[0].jobAttemptId);
+});
+
 test("Phase 14 Step 4 worker runs submission transport jobs through the shared runtime", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-24T10:35:00Z")

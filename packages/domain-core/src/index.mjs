@@ -628,6 +628,7 @@ export function createCoreEngine({
       enqueueRuntimeJob: asyncJobsModule.enqueueAsyncJob,
       claimAvailableRuntimeJobs: asyncJobsModule.claimAvailableAsyncJobs,
       startRuntimeJobAttempt: asyncJobsModule.startAsyncJobAttempt,
+      heartbeatRuntimeJobAttempt: asyncJobsModule.heartbeatAsyncJobAttempt,
       completeRuntimeJob: asyncJobsModule.completeAsyncJob,
       failRuntimeJob: asyncJobsModule.failAsyncJob,
       cancelRuntimeJob: asyncJobsModule.cancelAsyncJob,

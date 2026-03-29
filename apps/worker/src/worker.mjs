@@ -298,6 +298,14 @@ export async function runWorkerBatch({
         attempt: started.attempt,
         platform,
         workerId,
+        heartbeat: async ({ claimTtlSeconds: overrideClaimTtlSeconds = claimTtlSeconds } = {}) =>
+          platform.heartbeatRuntimeJobAttempt({
+            jobId: started.job.jobId,
+            claimToken: started.job.claimToken,
+            workerId,
+            attemptId: started.attempt.jobAttemptId,
+            claimTtlSeconds: overrideClaimTtlSeconds
+          }),
         logger
       });
       await platform.completeRuntimeJob({
@@ -342,20 +350,18 @@ export async function runWorkerBatch({
       const referenceJob = started?.job || claimedJob;
       const referenceAttempt = started?.attempt || { attemptNo: Number(referenceJob.attemptCount || 0) + 1, jobAttemptId: null };
       const failure = classifyWorkerFailure(error, referenceAttempt.attemptNo, referenceJob.maxAttempts || 1);
-      if (started?.attempt?.jobAttemptId) {
-        await platform.failRuntimeJob({
-          jobId: referenceJob.jobId,
-          claimToken: referenceJob.claimToken,
-          workerId,
-          attemptId: started.attempt.jobAttemptId,
-          errorClass: failure.errorClass,
-          errorCode: failure.errorCode,
-          errorMessage: failure.errorMessage,
-          retryDelaySeconds: failure.retryDelaySeconds,
-          terminalReason: failure.terminalReason,
-          replayAllowed: failure.replayAllowed
-        });
-      }
+      await platform.failRuntimeJob({
+        jobId: referenceJob.jobId,
+        claimToken: referenceJob.claimToken,
+        workerId,
+        attemptId: started?.attempt?.jobAttemptId || null,
+        errorClass: failure.errorClass,
+        errorCode: failure.errorCode,
+        errorMessage: failure.errorMessage,
+        retryDelaySeconds: failure.retryDelaySeconds,
+        terminalReason: failure.terminalReason,
+        replayAllowed: failure.replayAllowed
+      });
       if (typeof platform.recordStructuredLog === "function") {
         platform.recordStructuredLog({
           companyId: referenceJob.companyId,

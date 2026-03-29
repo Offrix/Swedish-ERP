@@ -253,6 +253,61 @@ export function createInMemoryAsyncJobStore() {
     return (state.attemptIdsByJob.get(jobId) || []).map((attemptId) => clone(state.attempts.get(attemptId)));
   }
 
+  function applyTerminalJobOutcome({
+    job,
+    attempt,
+    finishedAt,
+    terminalState,
+    resultCode = null,
+    errorClass = null,
+    errorCode = null,
+    errorMessage = null,
+    nextRetryAt = null,
+    terminalReason = null,
+    replayAllowed = true,
+    poisonDescriptor = null
+  } = {}) {
+    job.claimToken = null;
+    job.workerId = null;
+    job.claimedAt = null;
+    job.claimExpiresAt = null;
+    job.updatedAt = finishedAt;
+
+    if (terminalState === "succeeded") {
+      job.status = "succeeded";
+      job.completedAt = finishedAt;
+      job.lastResultCode = resultCode;
+      job.lastErrorClass = null;
+      job.lastErrorCode = null;
+      job.lastErrorMessage = null;
+    } else if (terminalState === "retry_scheduled") {
+      job.status = "retry_scheduled";
+      job.availableAt = nextRetryAt;
+      job.lastResultCode = null;
+      job.lastErrorClass = errorClass;
+      job.lastErrorCode = errorCode;
+      job.lastErrorMessage = errorMessage;
+    } else {
+      job.status = "dead_lettered";
+      job.lastResultCode = null;
+      job.lastErrorClass = errorClass;
+      job.lastErrorCode = errorCode;
+      job.lastErrorMessage = errorMessage;
+      const existingDeadLetterId = state.deadLetterByJob.get(job.jobId);
+      const deadLetter = upsertDeadLetterRecord({
+        existingDeadLetter: existingDeadLetterId ? state.deadLetters.get(existingDeadLetterId) : null,
+        job,
+        attempt,
+        terminalReason: terminalReason || "worker_terminal_failure",
+        replayAllowed,
+        updatedAt: finishedAt,
+        poisonDescriptor
+      });
+      state.deadLetters.set(deadLetter.deadLetterId, deadLetter);
+      state.deadLetterByJob.set(job.jobId, deadLetter.deadLetterId);
+    }
+  }
+
   function recoverExpiredClaims(nowIsoValue) {
     const reclaimedJobs = [];
     const deadLetteredJobs = [];
@@ -486,6 +541,31 @@ export function createInMemoryAsyncJobStore() {
       };
     },
 
+    async heartbeatJobAttempt({ jobId, claimToken, workerId, attemptId, heartbeatAt, claimTtlSeconds }) {
+      const job = state.jobs.get(jobId);
+      if (!job) {
+        throw new Error(`Async job ${jobId} was not found.`);
+      }
+      if (job.claimToken !== claimToken || job.workerId !== workerId) {
+        throw new Error(`Async job ${jobId} is not claimed by worker ${workerId}.`);
+      }
+      const attempt = state.attempts.get(attemptId);
+      if (!attempt) {
+        throw new Error(`Async job attempt ${attemptId} was not found.`);
+      }
+      if (attempt.finishedAt) {
+        throw new Error(`Async job attempt ${attemptId} is already finished.`);
+      }
+      const nextClaimExpiresAt = addSeconds(heartbeatAt, claimTtlSeconds);
+      job.claimExpiresAt = nextClaimExpiresAt;
+      job.updatedAt = heartbeatAt;
+      attempt.claimExpiresAt = nextClaimExpiresAt;
+      return {
+        job: clone(job),
+        attempt: clone(attempt)
+      };
+    },
+
     async finalizeJobAttempt({
       jobId,
       claimToken,
@@ -530,47 +610,85 @@ export function createInMemoryAsyncJobStore() {
       attempt.errorMessage = errorMessage;
       attempt.resultPayload = clone(resultPayload);
       attempt.nextRetryAt = nextRetryAt;
+      applyTerminalJobOutcome({
+        job,
+        attempt,
+        finishedAt,
+        terminalState,
+        resultCode,
+        errorClass,
+        errorCode,
+        errorMessage,
+        nextRetryAt,
+        terminalReason,
+        replayAllowed,
+        poisonDescriptor
+      });
 
-      job.claimToken = null;
-      job.workerId = null;
-      job.claimedAt = null;
-      job.claimExpiresAt = null;
-      job.updatedAt = finishedAt;
+      return {
+        job: clone(job),
+        attempt: clone(attempt),
+        deadLetter: clone(state.deadLetters.get(state.deadLetterByJob.get(jobId)) || null)
+      };
+    },
 
-      if (terminalState === "succeeded") {
-        job.status = "succeeded";
-        job.completedAt = finishedAt;
-        job.lastResultCode = resultCode;
-        job.lastErrorClass = null;
-        job.lastErrorCode = null;
-        job.lastErrorMessage = null;
-      } else if (terminalState === "retry_scheduled") {
-        job.status = "retry_scheduled";
-        job.availableAt = nextRetryAt;
-        job.lastResultCode = null;
-        job.lastErrorClass = errorClass;
-        job.lastErrorCode = errorCode;
-        job.lastErrorMessage = errorMessage;
-      } else {
-        job.status = "dead_lettered";
-        job.lastResultCode = null;
-        job.lastErrorClass = errorClass;
-        job.lastErrorCode = errorCode;
-        job.lastErrorMessage = errorMessage;
-        const existingDeadLetterId = state.deadLetterByJob.get(jobId);
-        const deadLetter = upsertDeadLetterRecord({
-          existingDeadLetter: existingDeadLetterId ? state.deadLetters.get(existingDeadLetterId) : null,
-          job,
-          attempt,
-          terminalReason: terminalReason || "worker_terminal_failure",
-          replayAllowed,
-          updatedAt: finishedAt,
-          poisonDescriptor
-        });
-        state.deadLetters.set(deadLetter.deadLetterId, deadLetter);
-        state.deadLetterByJob.set(jobId, deadLetter.deadLetterId);
+    async failJobClaim({
+      jobId,
+      claimToken,
+      workerId,
+      finishedAt,
+      terminalState,
+      errorClass = null,
+      errorCode = null,
+      errorMessage = null,
+      nextRetryAt = null,
+      terminalReason = null,
+      replayAllowed = true,
+      poisonDescriptor = null,
+      resultPayload = null
+    }) {
+      const job = state.jobs.get(jobId);
+      if (!job) {
+        throw new Error(`Async job ${jobId} was not found.`);
       }
-
+      if (job.claimToken !== claimToken || job.workerId !== workerId) {
+        throw new Error(`Async job ${jobId} is not claimed by worker ${workerId}.`);
+      }
+      const attempt = {
+        jobAttemptId: crypto.randomUUID(),
+        jobId,
+        attemptNo: Number(job.attemptCount || 0) + 1,
+        workerId,
+        claimToken,
+        status: attemptStatusForTerminalState(terminalState),
+        claimedAt: job.claimedAt || null,
+        claimExpiresAt: job.claimExpiresAt || null,
+        startedAt: null,
+        finishedAt,
+        resultCode: null,
+        errorClass,
+        errorCode,
+        errorMessage,
+        resultPayload: clone(resultPayload),
+        nextRetryAt,
+        createdAt: job.claimedAt || finishedAt
+      };
+      job.attemptCount = attempt.attemptNo;
+      state.attempts.set(attempt.jobAttemptId, attempt);
+      state.attemptIdsByJob.set(jobId, [...(state.attemptIdsByJob.get(jobId) || []), attempt.jobAttemptId]);
+      applyTerminalJobOutcome({
+        job,
+        attempt,
+        finishedAt,
+        terminalState,
+        errorClass,
+        errorCode,
+        errorMessage,
+        nextRetryAt,
+        terminalReason,
+        replayAllowed,
+        poisonDescriptor
+      });
       return {
         job: clone(job),
         attempt: clone(attempt),
@@ -747,6 +865,7 @@ export function createAsyncJobsModule({
     enqueueAsyncJob,
     claimAvailableAsyncJobs,
     startAsyncJobAttempt,
+    heartbeatAsyncJobAttempt,
     completeAsyncJob,
     failAsyncJob,
     cancelAsyncJob,
@@ -988,6 +1107,23 @@ export function createAsyncJobsModule({
     return result;
   }
 
+  async function heartbeatAsyncJobAttempt({
+    jobId,
+    claimToken,
+    workerId,
+    attemptId,
+    claimTtlSeconds = 120
+  } = {}) {
+    return store.heartbeatJobAttempt({
+      jobId: text(jobId, "async_job_id_required", error),
+      claimToken: text(claimToken, "async_job_claim_token_required", error),
+      workerId: text(workerId, "async_job_worker_id_required", error),
+      attemptId: text(attemptId, "async_job_attempt_id_required", error),
+      heartbeatAt: nowIso(clock),
+      claimTtlSeconds: positiveInteger(claimTtlSeconds, "async_job_claim_ttl_invalid", error, 120)
+    });
+  }
+
   async function completeAsyncJob({
     jobId,
     claimToken,
@@ -1043,11 +1179,17 @@ export function createAsyncJobsModule({
     terminalReason = null,
     replayAllowed = true
   } = {}) {
-    const currentJob = await store.getJob(text(jobId, "async_job_id_required", error));
+    const resolvedJobId = text(jobId, "async_job_id_required", error);
+    const resolvedClaimToken = text(claimToken, "async_job_claim_token_required", error);
+    const resolvedWorkerId = text(workerId, "async_job_worker_id_required", error);
+    const resolvedAttemptId = optionalText(attemptId);
+    const resolvedErrorCode = text(errorCode, "async_job_error_code_required", error);
+    const resolvedErrorMessage = text(errorMessage, "async_job_error_message_required", error);
+    const currentJob = await store.getJob(resolvedJobId);
     if (!currentJob) {
       throw error(404, "async_job_not_found", "Async job was not found.");
     }
-    const currentAttemptNo = Number(currentJob.attemptCount || 0);
+    const currentAttemptNo = resolvedAttemptId ? Number(currentJob.attemptCount || 0) : Number(currentJob.attemptCount || 0) + 1;
     const resolvedErrorClass = assertAllowed(errorClass, ASYNC_JOB_ERROR_CLASSES, "async_job_error_class_invalid", error);
     const resolvedRetryDelaySeconds = retryDelaySeconds == null ? defaultRetryDelaySeconds(resolvedErrorClass, currentAttemptNo) : positiveInteger(retryDelaySeconds, "async_job_retry_delay_invalid", error);
     const exhaustedAttempts = currentAttemptNo >= currentJob.maxAttempts;
@@ -1056,44 +1198,65 @@ export function createAsyncJobsModule({
     const poisonDescriptor = shouldRetry
       ? null
       : resolvePoisonDescriptor({
-        job: currentJob,
-        attemptHistory: historicalAttempts,
-        errorClass: resolvedErrorClass,
-        errorCode: text(errorCode, "async_job_error_code_required", error),
-        terminalReason: optionalText(terminalReason) || (exhaustedAttempts ? "max_attempts_exhausted" : "worker_terminal_failure"),
-        claimExpiryCount: Number(currentJob.claimExpiryCount || 0),
-        attemptCount: Number(currentJob.attemptCount || 0),
-        currentAttemptAlreadyPersisted: false
-      });
+          job: currentJob,
+          attemptHistory: historicalAttempts,
+          errorClass: resolvedErrorClass,
+          errorCode: resolvedErrorCode,
+          terminalReason: optionalText(terminalReason) || (exhaustedAttempts ? "max_attempts_exhausted" : "worker_terminal_failure"),
+          claimExpiryCount: Number(currentJob.claimExpiryCount || 0),
+          attemptCount: currentAttemptNo,
+          currentAttemptAlreadyPersisted: false
+        });
     const finishedAt = nowIso(clock);
-    const result = await store.finalizeJobAttempt({
-      jobId: currentJob.jobId,
-      claimToken: text(claimToken, "async_job_claim_token_required", error),
-      workerId: text(workerId, "async_job_worker_id_required", error),
-      attemptId: text(attemptId, "async_job_attempt_id_required", error),
-      finishedAt,
-      terminalState: shouldRetry ? "retry_scheduled" : "dead_lettered",
-      errorClass: resolvedErrorClass,
-      errorCode: text(errorCode, "async_job_error_code_required", error),
-      errorMessage: text(errorMessage, "async_job_error_message_required", error),
-      nextRetryAt: shouldRetry ? addSeconds(finishedAt, resolvedRetryDelaySeconds) : null,
-      terminalReason: shouldRetry ? null : optionalText(terminalReason) || (exhaustedAttempts ? "max_attempts_exhausted" : "worker_terminal_failure"),
-      replayAllowed,
-      poisonDescriptor
-    });
+    const terminalState = shouldRetry ? "retry_scheduled" : "dead_lettered";
+    const nextRetryAt = shouldRetry ? addSeconds(finishedAt, resolvedRetryDelaySeconds) : null;
+    const resolvedTerminalReason = shouldRetry ? null : optionalText(terminalReason) || (exhaustedAttempts ? "max_attempts_exhausted" : "worker_terminal_failure");
+    const result = resolvedAttemptId
+      ? await store.finalizeJobAttempt({
+          jobId: currentJob.jobId,
+          claimToken: resolvedClaimToken,
+          workerId: resolvedWorkerId,
+          attemptId: resolvedAttemptId,
+          finishedAt,
+          terminalState,
+          errorClass: resolvedErrorClass,
+          errorCode: resolvedErrorCode,
+          errorMessage: resolvedErrorMessage,
+          nextRetryAt,
+          terminalReason: resolvedTerminalReason,
+          replayAllowed,
+          poisonDescriptor
+        })
+      : await store.failJobClaim({
+          jobId: currentJob.jobId,
+          claimToken: resolvedClaimToken,
+          workerId: resolvedWorkerId,
+          finishedAt,
+          terminalState,
+          errorClass: resolvedErrorClass,
+          errorCode: resolvedErrorCode,
+          errorMessage: resolvedErrorMessage,
+          nextRetryAt,
+          terminalReason: resolvedTerminalReason,
+          replayAllowed,
+          poisonDescriptor,
+          resultPayload: {
+            failurePhase: "attempt_start"
+          }
+        });
     const replayPlanId = result.job?.metadata?.replayPlanId;
     const replayPlan = replayPlanId && !shouldRetry
       ? await store.markReplayPlanFailed({
         replayPlanId,
         replayJobId: result.job.jobId,
         failedAt: finishedAt,
-        errorCode: result.attempt?.errorCode || errorCode,
+        errorCode: result.attempt?.errorCode || resolvedErrorCode,
         errorClass: resolvedErrorClass
       })
       : null;
     audit({
       companyId: result.job.companyId,
-      actorId: workerId,
+      actorId: resolvedWorkerId,
       correlationId: result.job.correlationId,
       action: shouldRetry ? "jobs.async_job.retry_scheduled" : "jobs.async_job.dead_lettered",
       entityType: "async_job",
