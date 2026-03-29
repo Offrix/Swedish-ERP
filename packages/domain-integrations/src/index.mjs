@@ -31,6 +31,11 @@ import {
   MONDAY_WORK_MANAGEMENT_PROVIDER_BASELINE_CODE,
   MONDAY_WORK_MANAGEMENT_PROVIDER_CODE
 } from "./providers/monday-work-management.mjs";
+import {
+  createOdooProjectsBillingProvider,
+  ODOO_PROJECTS_BILLING_PROVIDER_BASELINE_CODE,
+  ODOO_PROJECTS_BILLING_PROVIDER_CODE
+} from "./providers/odoo-projects-billing.mjs";
 import { createSignicatBankIdProvider } from "./providers/signicat-bankid.mjs";
 import {
   createSignicatSigningArchiveProvider,
@@ -81,6 +86,7 @@ export { ASANA_PROVIDER_CODE } from "./providers/asana.mjs";
 export { CLICKUP_PROVIDER_CODE } from "./providers/clickup.mjs";
 export { HUBSPOT_CRM_PROVIDER_CODE } from "./providers/hubspot-crm.mjs";
 export { MONDAY_WORK_MANAGEMENT_PROVIDER_CODE } from "./providers/monday-work-management.mjs";
+export { ODOO_PROJECTS_BILLING_PROVIDER_CODE } from "./providers/odoo-projects-billing.mjs";
 export { TEAMLEADER_FOCUS_PROVIDER_CODE } from "./providers/teamleader-focus.mjs";
 export { ZOHO_CRM_PROJECTS_PROVIDER_CODE } from "./providers/zoho-crm-projects.mjs";
 export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
@@ -433,6 +439,20 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
     checksum: "zoho-crm-projects-billing-se-2026.1",
     sourceSnapshotDate: "2026-03-29",
     semanticChangeSummary: "Zoho CRM/Projects/Billing baseline for deal, project, timesheet and project billing handoff into governed project import batches."
+  }),
+  Object.freeze({
+    providerBaselineId: "odoo-projects-billing-se-2026.1",
+    baselineCode: ODOO_PROJECTS_BILLING_PROVIDER_BASELINE_CODE,
+    providerCode: ODOO_PROJECTS_BILLING_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "crm_handoff_objects",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "19.0-project-timesheets-sales",
+    checksum: "odoo-projects-billing-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Odoo project and time-and-materials billing baseline for project, sales order, timesheet and invoice handoff into governed project import batches."
   })
 ]);
 
@@ -558,6 +578,11 @@ export function createIntegrationEngine({
     environmentMode,
     providerBaselineRegistry: providerBaselines
   });
+  const odooProjectsBillingProvider = createOdooProjectsBillingProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
   const teamleaderFocusProvider = createTeamleaderFocusProvider({
     clock,
     environmentMode,
@@ -635,6 +660,7 @@ export function createIntegrationEngine({
       asanaProvider,
       clickUpProvider,
       mondayWorkManagementProvider,
+      odooProjectsBillingProvider,
       teamleaderFocusProvider,
       zohoCrmProjectsProvider
     ]
@@ -780,6 +806,7 @@ export function createIntegrationEngine({
           clickUpProvider: clickUpProvider.snapshot(),
           hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
           mondayWorkManagementProvider: mondayWorkManagementProvider.snapshot(),
+          odooProjectsBillingProvider: odooProjectsBillingProvider.snapshot(),
           teamleaderFocusProvider: teamleaderFocusProvider.snapshot(),
           zohoCrmProjectsProvider: zohoCrmProjectsProvider.snapshot()
         }
@@ -814,6 +841,7 @@ export function createIntegrationEngine({
         clickUpProvider: clickUpProvider.snapshot(),
         hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
         mondayWorkManagementProvider: mondayWorkManagementProvider.snapshot(),
+        odooProjectsBillingProvider: odooProjectsBillingProvider.snapshot(),
         teamleaderFocusProvider: teamleaderFocusProvider.snapshot(),
         zohoCrmProjectsProvider: zohoCrmProjectsProvider.snapshot()
       }
@@ -843,6 +871,7 @@ export function createIntegrationEngine({
     clickUpProvider.restore(snapshot?.providerSnapshots?.clickUpProvider || {});
     hubSpotCrmProvider.restore(snapshot?.providerSnapshots?.hubSpotCrmProvider || {});
     mondayWorkManagementProvider.restore(snapshot?.providerSnapshots?.mondayWorkManagementProvider || {});
+    odooProjectsBillingProvider.restore(snapshot?.providerSnapshots?.odooProjectsBillingProvider || {});
     teamleaderFocusProvider.restore(snapshot?.providerSnapshots?.teamleaderFocusProvider || {});
     zohoCrmProjectsProvider.restore(snapshot?.providerSnapshots?.zohoCrmProjectsProvider || {});
   }
@@ -895,6 +924,14 @@ export function createIntegrationEngine({
     }
     if (connection.providerCode === MONDAY_WORK_MANAGEMENT_PROVIDER_CODE) {
       return mondayWorkManagementProvider.prepareProjectImportBatch({
+        companyId: resolvedCompanyId,
+        integrationConnectionId: connection.connectionId,
+        sourceExportCapturedAt,
+        ...(payload && typeof payload === "object" ? payload : {})
+      });
+    }
+    if (connection.providerCode === ODOO_PROJECTS_BILLING_PROVIDER_CODE) {
+      return odooProjectsBillingProvider.prepareProjectImportBatch({
         companyId: resolvedCompanyId,
         integrationConnectionId: connection.connectionId,
         sourceExportCapturedAt,
