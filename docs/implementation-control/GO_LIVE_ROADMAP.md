@@ -1137,7 +1137,7 @@ Slutföra operator- och supportsystemet: incidents, support cases, replay, dead-
 **Blockerar UI-readiness**  
 - Backoffice och cockpit-UI saknar grund utan denna fas.
 
-## [ ] Fas 18 — Pilot, enterprise gate, competitor parity, competitor advantage och UI-readiness
+## [x] Fas 18 — Pilot, enterprise gate, competitor parity, competitor advantage och UI-readiness
 
 **MÃ¥l**  
 Bevisa att backend-kontrakten bär verkliga kundscenarier, låsa UI-kontrakt och öppna go-live först efter parity, advantage och enterprise-gater är passerade.
@@ -1157,7 +1157,7 @@ Bevisa att backend-kontrakten bär verkliga kundscenarier, låsa UI-kontrakt och
 - [x] 18.3 [NEW BUILD] **Competitor parity board** — Mät svart på vitt parity mot Fortnox, Visma, Bokio, Wint, Teamleader, monday, Asana, ClickUp, Zoho, Odoo, Bygglet, Byggdagboken. Klar 2026-03-29: `ParityScorecard` runtime, benchmarkkatalog per konkurrentkategori, koppling till accepterade pilotkohorter, evidence export samt unit/integration/e2e-verifiering för finance-, project- och field-parity.
 - [x] 18.4 [NEW BUILD] **Competitor advantage release pack** — Släpp differentiators: tax account cockpit, unified receipts/recovery, migration concierge, safe trial-to-live, project profitability mission control. Klar 2026-03-29: `AdvantageReleaseBundle` runtime, create/list/read/evidence-routes, strikt move-matris för exakt fem differentiators, blocked/released-summary mot grön parity i finance/project/field samt unit/integration/e2e-verifiering av missing parity, full green release och evidence export.
 - [x] 18.5 [HARDEN] **UI readiness contract freeze** — Lås object profiles, workbenches, commands, blockers, list/read/detail/action contracts och permission reasons för desktop/backoffice/field. Klar 2026-03-29: `UiContractFreezeRecord` runtime, released-advantage-gate, hashad contract snapshot från verkliga object profile/workbench/read/action-källor, explicit permission-reason-katalog, create/list/read/evidence-routes samt unit/integration/e2e-verifiering och metadata-runbook.
-- [ ] 18.6 [OPERATIONALIZE] **Final go-live gate** — Release checklist: technical, regulated, support, migration, security, parity, advantage, trial-sales readiness.
+- [x] 18.6 [OPERATIONALIZE] **Final go-live gate** — Release checklist: technical, regulated, support, migration, security, parity, advantage, trial-sales readiness. Klar 2026-03-29: `GoLiveGateRecord` runtime, create/list/read/evidence-routes, fem-segments pilotcoverage, green parity/advantage/UI-freeze gating, explicit eight-category release checklist, blocked-vs-approved GA decision och unit/integration/e2e-verifiering samt GA-runbook.
 
 **Exit gate**  
 - Pilots har klarats, enterprise gate är grön, parity är uppnådd i kärnområden, differentiators är live eller påslagna, och UI-kontrakten är frozen.

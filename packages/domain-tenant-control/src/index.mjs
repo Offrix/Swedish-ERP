@@ -56,6 +56,10 @@ export const ADVANTAGE_RELEASE_BUNDLE_STATUSES = Object.freeze([
 export const UI_CONTRACT_FREEZE_RECORD_STATUSES = Object.freeze([
   "frozen"
 ]);
+export const GO_LIVE_GATE_RECORD_STATUSES = Object.freeze([
+  "approved",
+  "blocked"
+]);
 export const PARITY_CRITERION_STATUSES = Object.freeze([
   "green",
   "amber",
@@ -283,6 +287,19 @@ const GO_LIVE_PARITY_GATE_CODES = Object.freeze([
   "api_webhooks",
   "bankid_sso_backoffice"
 ]);
+const GO_LIVE_FINAL_CHECKLIST_DEFINITIONS = Object.freeze([
+  Object.freeze({ checklistCode: "technical", label: "Technical readiness" }),
+  Object.freeze({ checklistCode: "regulated", label: "Regulated readiness" }),
+  Object.freeze({ checklistCode: "support", label: "Support readiness" }),
+  Object.freeze({ checklistCode: "migration", label: "Migration readiness" }),
+  Object.freeze({ checklistCode: "security", label: "Security readiness" }),
+  Object.freeze({ checklistCode: "parity", label: "Competitor parity readiness" }),
+  Object.freeze({ checklistCode: "advantage", label: "Competitor advantage readiness" }),
+  Object.freeze({ checklistCode: "trial_sales_readiness", label: "Trial and sales readiness" })
+]);
+const GO_LIVE_FINAL_CHECKLIST_CODES = Object.freeze(
+  GO_LIVE_FINAL_CHECKLIST_DEFINITIONS.map((item) => item.checklistCode)
+);
 const ADVANTAGE_MOVE_CODES = Object.freeze([
   "tax_account_cockpit",
   "unified_receipts_recovery",
@@ -758,6 +775,8 @@ export function createTenantControlEngine({
     advantageReleaseBundleIdsByCompany: new Map(),
     uiContractFreezeRecords: new Map(),
     uiContractFreezeRecordIdsByCompany: new Map(),
+    goLiveGateRecords: new Map(),
+    goLiveGateRecordIdsByCompany: new Map(),
     financeBlueprintsByCompany: new Map(),
     financeFoundationRecordsByCompany: new Map(),
     tenantControlEvents: [],
@@ -778,6 +797,7 @@ export function createTenantControlEngine({
     parityScorecardStatuses: PARITY_SCORECARD_STATUSES,
     advantageReleaseBundleStatuses: ADVANTAGE_RELEASE_BUNDLE_STATUSES,
     uiContractFreezeRecordStatuses: UI_CONTRACT_FREEZE_RECORD_STATUSES,
+    goLiveGateRecordStatuses: GO_LIVE_GATE_RECORD_STATUSES,
     pilotScenarioStatuses: PILOT_SCENARIO_STATUSES,
     createTenantBootstrap,
     getTenantBootstrap,
@@ -830,6 +850,10 @@ export function createTenantControlEngine({
     getUiContractFreezeRecord,
     listUiContractFreezeRecords,
     exportUiContractFreezeEvidence,
+    recordGoLiveGate,
+    getGoLiveGateRecord,
+    listGoLiveGateRecords,
+    exportGoLiveGateEvidence,
     getFinanceReadinessValidation,
     snapshotTenantControl,
     exportDurableState,
@@ -2912,6 +2936,174 @@ export function createTenantControlEngine({
     return copy(evidenceBundle);
   }
 
+  function recordGoLiveGate({
+    sessionToken,
+    companyId,
+    pilotExecutionIds = [],
+    pilotCohortIds = [],
+    parityScorecardIds = [],
+    advantageReleaseBundleId,
+    uiContractFreezeRecordId,
+    checklistResults = [],
+    notes = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const principal = authorizeCompanyAction({
+      sessionToken,
+      companyId: resolvedCompanyId,
+      action: "COMPANY_MANAGE",
+      objectType: "go_live_gate_record",
+      objectId: resolvedCompanyId,
+      scopeCode: "pilot_execution"
+    });
+    const linkedCohorts = normalizeStringList(pilotCohortIds).map((pilotCohortId) => {
+      const cohort = requirePilotCohort(pilotCohortId);
+      if (cohort.companyId !== resolvedCompanyId) {
+        throw httpError(409, "go_live_gate_company_scope_mismatch", "Pilot cohort belongs to another company.");
+      }
+      return cohort;
+    });
+    const linkedPilots = [
+      ...new Set([
+        ...normalizeStringList(pilotExecutionIds),
+        ...linkedCohorts.flatMap((cohort) => normalizeStringList(cohort.pilotExecutionIds))
+      ])
+    ].map((pilotExecutionId) => {
+      const pilotExecution = requirePilotExecution(pilotExecutionId);
+      if (pilotExecution.companyId !== resolvedCompanyId) {
+        throw httpError(409, "go_live_gate_company_scope_mismatch", "Pilot execution belongs to another company.");
+      }
+      return pilotExecution;
+    });
+    const linkedScorecards = normalizeStringList(parityScorecardIds).map((parityScorecardId) => {
+      const scorecard = requireParityScorecard(parityScorecardId);
+      if (scorecard.companyId !== resolvedCompanyId) {
+        throw httpError(409, "go_live_gate_company_scope_mismatch", "Parity scorecard belongs to another company.");
+      }
+      return scorecard;
+    });
+    const linkedBundle = requireAdvantageReleaseBundle(advantageReleaseBundleId);
+    if (linkedBundle.companyId !== resolvedCompanyId) {
+      throw httpError(409, "go_live_gate_company_scope_mismatch", "Advantage release bundle belongs to another company.");
+    }
+    const linkedFreeze = requireUiContractFreezeRecord(uiContractFreezeRecordId);
+    if (linkedFreeze.companyId !== resolvedCompanyId) {
+      throw httpError(409, "go_live_gate_company_scope_mismatch", "UI contract freeze record belongs to another company.");
+    }
+    const normalizedChecklistResults = normalizeGoLiveChecklistResults(checklistResults);
+    const summary = buildGoLiveGateSummary({
+      linkedPilots,
+      linkedCohorts,
+      linkedScorecards,
+      linkedBundle,
+      linkedFreeze,
+      checklistResults: normalizedChecklistResults
+    });
+    const now = nowIso();
+    const record = {
+      goLiveGateRecordId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      pilotExecutionIds: linkedPilots.map((pilotExecution) => pilotExecution.pilotExecutionId),
+      pilotCohortIds: linkedCohorts.map((cohort) => cohort.pilotCohortId),
+      parityScorecardIds: linkedScorecards.map((scorecard) => scorecard.parityScorecardId),
+      advantageReleaseBundleId: linkedBundle.advantageReleaseBundleId,
+      uiContractFreezeRecordId: linkedFreeze.uiContractFreezeRecordId,
+      checklistResults: normalizedChecklistResults,
+      summary,
+      status: summary.generalAvailabilityReady ? "approved" : "blocked",
+      notes: normalizeOptionalText(notes),
+      latestEvidenceBundleId: null,
+      recordedAt: now,
+      updatedAt: now,
+      actorUserId: principal.userId
+    };
+    const evidenceBundle = createGoLiveGateEvidenceBundle({
+      record,
+      actorId: principal.userId
+    });
+    record.latestEvidenceBundleId = evidenceBundle.evidenceBundleId;
+    state.goLiveGateRecords.set(record.goLiveGateRecordId, record);
+    appendToIndex(state.goLiveGateRecordIdsByCompany, resolvedCompanyId, record.goLiveGateRecordId);
+    appendDomainEvent("go_live.gate_recorded", {
+      companyId: resolvedCompanyId,
+      goLiveGateRecordId: record.goLiveGateRecordId,
+      status: record.status,
+      actorUserId: principal.userId
+    });
+    appendAuditEvent({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      action: "tenant_control.go_live_gate.recorded",
+      entityType: "go_live_gate_record",
+      entityId: record.goLiveGateRecordId,
+      metadata: {
+        status: record.status,
+        generalAvailabilityReady: record.summary.generalAvailabilityReady
+      }
+    });
+    return presentGoLiveGateRecord(record);
+  }
+
+  function getGoLiveGateRecord({ sessionToken, goLiveGateRecordId } = {}) {
+    const record = requireGoLiveGateRecord(goLiveGateRecordId);
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_READ",
+      objectType: "go_live_gate_record",
+      objectId: record.goLiveGateRecordId,
+      scopeCode: "pilot_execution"
+    });
+    return presentGoLiveGateRecord(record);
+  }
+
+  function listGoLiveGateRecords({ sessionToken, companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: resolvedCompanyId,
+      action: "COMPANY_READ",
+      objectType: "go_live_gate_record",
+      objectId: resolvedCompanyId,
+      scopeCode: "pilot_execution"
+    });
+    return (state.goLiveGateRecordIdsByCompany.get(resolvedCompanyId) || [])
+      .map((goLiveGateRecordId) => state.goLiveGateRecords.get(goLiveGateRecordId))
+      .filter(Boolean)
+      .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt))
+      .map((record) => presentGoLiveGateRecord(record));
+  }
+
+  function exportGoLiveGateEvidence({ sessionToken, goLiveGateRecordId } = {}) {
+    const record = requireGoLiveGateRecord(goLiveGateRecordId);
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_READ",
+      objectType: "go_live_gate_record",
+      objectId: record.goLiveGateRecordId,
+      scopeCode: "pilot_execution"
+    });
+    const evidenceDomain = getOptionalDomain("evidence");
+    if (
+      record.latestEvidenceBundleId
+      && evidenceDomain
+      && typeof evidenceDomain.getEvidenceBundle === "function"
+    ) {
+      return evidenceDomain.getEvidenceBundle({
+        companyId: record.companyId,
+        evidenceBundleId: record.latestEvidenceBundleId
+      });
+    }
+    const evidenceBundle = createGoLiveGateEvidenceBundle({
+      record,
+      actorId: "tenant_control_go_live_gate_export"
+    });
+    record.latestEvidenceBundleId = evidenceBundle.evidenceBundleId;
+    record.updatedAt = nowIso();
+    return copy(evidenceBundle);
+  }
+
   function listTrialEnvironmentRecordsByCompany(companyId) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return (state.trialEnvironmentIdsByCompany.get(resolvedCompanyId) || [])
@@ -4231,6 +4423,14 @@ export function createTenantControlEngine({
     return record;
   }
 
+  function requireGoLiveGateRecord(goLiveGateRecordId) {
+    const record = state.goLiveGateRecords.get(requireText(goLiveGateRecordId, "go_live_gate_record_id_required"));
+    if (!record) {
+      throw httpError(404, "go_live_gate_record_not_found", "Go-live gate record was not found.");
+    }
+    return record;
+  }
+
   function requirePromotionPlan(promotionPlanId) {
     const record = state.promotionPlans.get(requireText(promotionPlanId, "promotion_plan_id_required"));
     if (!record) {
@@ -4343,6 +4543,17 @@ export function createTenantControlEngine({
       ...record,
       contractSnapshot: copy(record.contractSnapshot || {}),
       hashes: copy(record.hashes || {}),
+      summary: copy(record.summary || null)
+    });
+  }
+
+  function presentGoLiveGateRecord(record) {
+    return copy({
+      ...record,
+      pilotExecutionIds: copy(record.pilotExecutionIds || []),
+      pilotCohortIds: copy(record.pilotCohortIds || []),
+      parityScorecardIds: copy(record.parityScorecardIds || []),
+      checklistResults: copy(record.checklistResults || []),
       summary: copy(record.summary || null)
     });
   }
@@ -5203,6 +5414,95 @@ export function createTenantControlEngine({
     };
   }
 
+  function createGoLiveGateEvidenceBundle({
+    record,
+    actorId
+  } = {}) {
+    const evidenceDomain = getOptionalDomain("evidence");
+    const metadata = {
+      status: record.status,
+      summary: copy(record.summary)
+    };
+    const artifactRefs = [
+      {
+        artifactType: "go_live_gate_manifest",
+        artifactRef: `go-live-gate://${record.goLiveGateRecordId}`,
+        checksum: hashJson({
+          checklistResults: record.checklistResults,
+          summary: record.summary
+        }),
+        roleCode: "tenant_control",
+        metadata: {
+          generalAvailabilityReady: record.summary?.generalAvailabilityReady === true
+        }
+      },
+      ...record.checklistResults.flatMap((item) => normalizePilotArtifactRefs(item.evidenceRefs, {
+        defaultArtifactType: "go_live_gate_checklist_evidence",
+        roleCode: "go_live_gate_record"
+      }))
+    ];
+    const relatedObjectRefs = [
+      {
+        objectType: "company",
+        objectId: record.companyId,
+        relationCode: "go_live_company"
+      },
+      {
+        objectType: "advantage_release_bundle",
+        objectId: record.advantageReleaseBundleId,
+        relationCode: "released_advantage_bundle"
+      },
+      {
+        objectType: "ui_contract_freeze_record",
+        objectId: record.uiContractFreezeRecordId,
+        relationCode: "frozen_ui_contracts"
+      },
+      ...(record.pilotExecutionIds || []).map((pilotExecutionId) => ({
+        objectType: "pilot_execution",
+        objectId: pilotExecutionId,
+        relationCode: "completed_pilot_execution"
+      })),
+      ...(record.pilotCohortIds || []).map((pilotCohortId) => ({
+        objectType: "pilot_cohort",
+        objectId: pilotCohortId,
+        relationCode: "accepted_pilot_cohort"
+      })),
+      ...(record.parityScorecardIds || []).map((parityScorecardId) => ({
+        objectType: "parity_scorecard",
+        objectId: parityScorecardId,
+        relationCode: "green_parity_scorecard"
+      }))
+    ];
+    if (evidenceDomain && typeof evidenceDomain.createFrozenEvidenceBundleSnapshot === "function") {
+      return evidenceDomain.createFrozenEvidenceBundleSnapshot({
+        companyId: record.companyId,
+        bundleType: "go_live_gate_record",
+        sourceObjectType: "go_live_gate_record",
+        sourceObjectId: record.goLiveGateRecordId,
+        sourceObjectVersion: `go_live_gate_record:${record.updatedAt || record.recordedAt}`,
+        title: "General availability decision evidence",
+        retentionClass: "operational",
+        classificationCode: "restricted_internal",
+        metadata,
+        artifactRefs,
+        relatedObjectRefs,
+        actorId,
+        previousEvidenceBundleId: record.latestEvidenceBundleId || null,
+        environmentMode: "pilot_parallel"
+      });
+    }
+    return {
+      evidenceBundleId: crypto.randomUUID(),
+      bundleType: "go_live_gate_record",
+      sourceObjectType: "go_live_gate_record",
+      sourceObjectId: record.goLiveGateRecordId,
+      metadata: copy(metadata),
+      artifactRefs,
+      relatedObjectRefs,
+      environmentMode: "pilot_parallel"
+    };
+  }
+
   function findCompanySnapshotById(companyId) {
     const orgAuthSnapshot = getOrgAuthSnapshot();
     return (orgAuthSnapshot?.companies || []).find((record) => record.companyId === requireText(companyId, "company_id_required")) || null;
@@ -5658,6 +5958,111 @@ export function createTenantControlEngine({
     };
   }
 
+  function normalizeGoLiveChecklistResults(checklistResults) {
+    const rawResults = Array.isArray(checklistResults) ? checklistResults : [];
+    return GO_LIVE_FINAL_CHECKLIST_DEFINITIONS.map((definition) => {
+      const entry = rawResults.find((item) => item?.checklistCode === definition.checklistCode) || null;
+      if (!entry) {
+        throw httpError(409, "go_live_gate_missing_checklist_result", `Go-live gate requires checklist ${definition.checklistCode}.`);
+      }
+      return {
+        checklistCode: definition.checklistCode,
+        label: definition.label,
+        status: requireGoLiveChecklistStatus(entry.status),
+        notes: normalizeOptionalText(entry.notes),
+        evidenceRefs: normalizePilotArtifactRefs(entry.evidenceRefs, {
+          defaultArtifactType: "go_live_gate_checklist_evidence",
+          roleCode: "go_live_gate_record"
+        })
+      };
+    });
+  }
+
+  function buildGoLiveGateSummary({
+    linkedPilots = [],
+    linkedCohorts = [],
+    linkedScorecards = [],
+    linkedBundle,
+    linkedFreeze,
+    checklistResults = []
+  } = {}) {
+    const requiredPilotSegmentCodes = PILOT_COHORT_SEGMENT_DEFINITIONS.map((item) => item.segmentCode);
+    const acceptedPilotSegmentCodes = [
+      ...new Set(
+        linkedCohorts
+          .filter((cohort) => cohort.status === "accepted")
+          .map((cohort) => cohort.segmentCode)
+      )
+    ].sort();
+    const missingPilotSegmentCodes = requiredPilotSegmentCodes.filter(
+      (segmentCode) => !acceptedPilotSegmentCodes.includes(segmentCode)
+    );
+    const completedPilotExecutionCount = linkedPilots.filter((pilotExecution) => pilotExecution.status === "completed").length;
+    const incompletePilotExecutionIds = linkedPilots
+      .filter((pilotExecution) => pilotExecution.status !== "completed")
+      .map((pilotExecution) => pilotExecution.pilotExecutionId);
+    const acceptedPilotCohortCount = linkedCohorts.filter((cohort) => cohort.status === "accepted").length;
+    const rejectedPilotCohortIds = linkedCohorts
+      .filter((cohort) => cohort.status !== "accepted")
+      .map((cohort) => cohort.pilotCohortId);
+    const requiredParityCategories = ["finance_platform", "crm_project_service", "field_vertical"];
+    const greenParityCategories = [
+      ...new Set(
+        linkedScorecards
+          .filter((scorecard) => scorecard.status === "green")
+          .map((scorecard) => scorecard.categoryCode)
+      )
+    ].sort();
+    const missingParityCategories = requiredParityCategories.filter(
+      (categoryCode) => !greenParityCategories.includes(categoryCode)
+    );
+    const blockedChecklistCodes = checklistResults
+      .filter((item) => item.status !== "green")
+      .map((item) => item.checklistCode);
+    const greenChecklistCodes = checklistResults
+      .filter((item) => item.status === "green")
+      .map((item) => item.checklistCode);
+    const blockingIssueCodes = [
+      ...(linkedBundle?.status === "released" ? [] : ["advantage_bundle_not_released"]),
+      ...(linkedFreeze?.status === "frozen" ? [] : ["ui_contracts_not_frozen"]),
+      ...(linkedFreeze?.advantageReleaseBundleId === linkedBundle?.advantageReleaseBundleId
+        ? []
+        : ["ui_contract_freeze_advantage_mismatch"]),
+      ...(incompletePilotExecutionIds.length === 0 ? [] : ["pilot_execution_not_completed"]),
+      ...(rejectedPilotCohortIds.length === 0 ? [] : ["pilot_cohort_not_accepted"]),
+      ...(missingPilotSegmentCodes.length === 0 ? [] : ["pilot_segment_coverage_missing"]),
+      ...(missingParityCategories.length === 0 ? [] : ["parity_category_missing"]),
+      ...(blockedChecklistCodes.length === 0 ? [] : ["release_checklist_blocked"])
+    ];
+    return {
+      requiredPilotSegmentCodes,
+      acceptedPilotSegmentCodes,
+      missingPilotSegmentCodes,
+      completedPilotExecutionCount,
+      incompletePilotExecutionIds,
+      acceptedPilotCohortCount,
+      rejectedPilotCohortIds,
+      requiredParityCategories,
+      greenParityCategories,
+      missingParityCategories,
+      totalChecklistCount: checklistResults.length,
+      greenChecklistCodes,
+      blockedChecklistCodes,
+      blockingIssueCodes: [...new Set(blockingIssueCodes)],
+      generalAvailabilityReady:
+        linkedBundle?.status === "released"
+        && linkedFreeze?.status === "frozen"
+        && linkedFreeze?.advantageReleaseBundleId === linkedBundle?.advantageReleaseBundleId
+        && linkedPilots.length > 0
+        && incompletePilotExecutionIds.length === 0
+        && linkedCohorts.length > 0
+        && rejectedPilotCohortIds.length === 0
+        && missingPilotSegmentCodes.length === 0
+        && missingParityCategories.length === 0
+        && blockedChecklistCodes.length === 0
+    };
+  }
+
   function normalizeUiContractFreezeSnapshot(contractSnapshot) {
     const snapshot = contractSnapshot && typeof contractSnapshot === "object" ? contractSnapshot : {};
     const objectProfileContracts = normalizeUiContractObjectList(snapshot.objectProfileContracts, "ui_contract_object_profiles_required");
@@ -5783,6 +6188,14 @@ export function createTenantControlEngine({
     const resolved = requireParityCriterionStatus(status);
     if (resolved === "na") {
       throw httpError(400, "advantage_move_status_invalid", "Advantage move status must be green, amber or red.");
+    }
+    return resolved;
+  }
+
+  function requireGoLiveChecklistStatus(status) {
+    const resolved = requireParityCriterionStatus(status);
+    if (resolved === "na") {
+      throw httpError(400, "go_live_gate_status_invalid", "Go-live checklist status must be green, amber or red.");
     }
     return resolved;
   }

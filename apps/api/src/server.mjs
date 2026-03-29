@@ -379,6 +379,9 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/release/ui-contract-freezes",
               "/v1/release/ui-contract-freezes/:uiContractFreezeRecordId",
               "/v1/release/ui-contract-freezes/:uiContractFreezeRecordId/evidence",
+              "/v1/release/go-live-gates",
+              "/v1/release/go-live-gates/:goLiveGateRecordId",
+              "/v1/release/go-live-gates/:goLiveGateRecordId/evidence",
               "/v1/onboarding/runs",
               "/v1/onboarding/runs/:runId",
               "/v1/onboarding/runs/:runId/checklist",
@@ -2321,6 +2324,68 @@ async function handleRequest({ req, res, platform, flags }) {
         evidenceBundle: requireTenantControlDomain(platform).exportUiContractFreezeEvidence({
           sessionToken: readSessionToken(req),
           uiContractFreezeRecordId: uiContractFreezeEvidenceMatch.uiContractFreezeRecordId
+        })
+      }
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/release/go-live-gates") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      requireTenantControlDomain(platform).recordGoLiveGate({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        pilotExecutionIds: body.pilotExecutionIds,
+        pilotCohortIds: body.pilotCohortIds,
+        parityScorecardIds: body.parityScorecardIds,
+        advantageReleaseBundleId: body.advantageReleaseBundleId,
+        uiContractFreezeRecordId: body.uiContractFreezeRecordId,
+        checklistResults: body.checklistResults,
+        notes: body.notes
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/release/go-live-gates") {
+    writeJson(
+      res,
+      200,
+      {
+        items: requireTenantControlDomain(platform).listGoLiveGateRecords({
+          sessionToken: readSessionToken(req),
+          companyId: url.searchParams.get("companyId")
+        })
+      }
+    );
+    return;
+  }
+
+  const goLiveGateRecordMatch = matchPath(path, "/v1/release/go-live-gates/:goLiveGateRecordId");
+  if (req.method === "GET" && goLiveGateRecordMatch) {
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).getGoLiveGateRecord({
+        sessionToken: readSessionToken(req),
+        goLiveGateRecordId: goLiveGateRecordMatch.goLiveGateRecordId
+      })
+    );
+    return;
+  }
+
+  const goLiveGateEvidenceMatch = matchPath(path, "/v1/release/go-live-gates/:goLiveGateRecordId/evidence");
+  if (req.method === "GET" && goLiveGateEvidenceMatch) {
+    writeJson(
+      res,
+      200,
+      {
+        evidenceBundle: requireTenantControlDomain(platform).exportGoLiveGateEvidence({
+          sessionToken: readSessionToken(req),
+          goLiveGateRecordId: goLiveGateEvidenceMatch.goLiveGateRecordId
         })
       }
     );

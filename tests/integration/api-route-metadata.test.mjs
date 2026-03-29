@@ -59,6 +59,9 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/release/ui-contract-freezes",
   "/v1/release/ui-contract-freezes/:uiContractFreezeRecordId",
   "/v1/release/ui-contract-freezes/:uiContractFreezeRecordId/evidence",
+  "/v1/release/go-live-gates",
+  "/v1/release/go-live-gates/:goLiveGateRecordId",
+  "/v1/release/go-live-gates/:goLiveGateRecordId/evidence",
   "/v1/integrations/capability-manifests",
   "/v1/integrations/connections",
   "/v1/integrations/connections/:connectionId",
@@ -371,6 +374,14 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(uiContractFreezeCreateContract.requiredActionClass, "ui_contract_freeze_record");
     assert.equal(uiContractFreezeCreateContract.requiredTrustLevel, "strong_mfa");
     assert.equal(uiContractFreezeCreateContract.requiredScopeType, "company");
+
+    const goLiveGateCreateContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/release/go-live-gates"
+    );
+    assert.ok(goLiveGateCreateContract);
+    assert.equal(goLiveGateCreateContract.requiredActionClass, "go_live_gate_record");
+    assert.equal(goLiveGateCreateContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(goLiveGateCreateContract.requiredScopeType, "company");
 
     const closeAdjustmentContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/close/reopen-requests/:reopenRequestId/adjustments"
