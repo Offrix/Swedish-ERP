@@ -48,10 +48,6 @@ test("phase 1.5 runtime honesty scan CLI reports protected runtime blockers", ()
       "--expect-finding",
       "stub_provider_present",
       "--expect-finding",
-      "simulated_receipt_runtime",
-      "--expect-finding",
-      "forbidden_route_family_present",
-      "--expect-finding",
       "phasebucket_route_runtime_present",
       "--require-startup-blocked",
       "--require-blocking",
@@ -71,6 +67,14 @@ test("phase 1.5 runtime honesty scan CLI reports protected runtime blockers", ()
           (finding) => finding.findingCode === "phasebucket_route_runtime_present"
         ),
         true
+      );
+      assert.equal(
+        payload.findings.some((finding) => finding.findingCode === "simulated_receipt_runtime"),
+        false
+      );
+      assert.equal(
+        payload.findings.some((finding) => finding.findingCode === "forbidden_route_family_present"),
+        false
       );
       assert.equal(
         payload.findings.some((finding) => finding.findingCode === "seed_demo_forbidden"),

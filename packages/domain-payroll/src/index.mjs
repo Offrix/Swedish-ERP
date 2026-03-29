@@ -1903,7 +1903,7 @@ export function createPayrollEngine({
     agiSubmissionId,
     actorId = "system",
     mode = "test",
-    simulatedOutcome = "accepted",
+    simulatedOutcome = null,
     receiptMessage = null,
     receiptErrors = []
   } = {}) {
@@ -1926,6 +1926,14 @@ export function createPayrollEngine({
       requestedMode: mode,
       executionBoundary
     });
+    if (executionBoundary.supportsLegalEffect === true) {
+      throw createError(
+        409,
+        "agi_submission_live_provider_not_implemented",
+        "Protected runtime AGI submissions require provider-backed transport and receipt collection."
+      );
+    }
+    const resolvedSimulatedOutcome = normalizeOptionalText(simulatedOutcome) || "accepted";
 
     appendAgiSignature(state, {
       version,
@@ -1958,7 +1966,7 @@ export function createPayrollEngine({
 
     const receipt = appendAgiReceipt(state, {
       version,
-      simulatedOutcome,
+      simulatedOutcome: resolvedSimulatedOutcome,
       message: receiptMessage,
       actorId,
       clock,

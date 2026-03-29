@@ -305,7 +305,9 @@ async function handleRequest({ req, res, platform, flags }) {
             phase14ResilienceEnabled: flags.phase14ResilienceEnabled,
             phase14MigrationEnabled: flags.phase14MigrationEnabled,
             routeContracts: listPublishedRouteContracts(),
-            routes: [
+            routes: filterAdvertisedRoutesForRuntime({
+              platform,
+              routes: [
               "/healthz",
               "/readyz",
               "/v1/system/runtime-mode",
@@ -1060,6 +1062,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/migration/cutover-plans/:cutoverPlanId/rollback/complete",
               "/v1/migration/cockpit"
             ]
+            })
           }
         : { status: "ok" }
     );
@@ -5201,6 +5204,12 @@ async function handleRequest({ req, res, platform, flags }) {
       companyId,
       submission: submissionBeforeDispatch
     });
+    assertProtectedRuntimeSimulationInputAllowed({
+      platform,
+      values: [body.transportScenarioCode, body.simulatedTransportOutcome],
+      errorCode: "submission_simulated_transport_forbidden_in_protected_runtime",
+      noun: "Authority submission"
+    });
     writeJson(
       res,
       200,
@@ -5208,7 +5217,12 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         submissionId: submissionSubmitMatch.submissionId,
         actorId: principal.userId,
-        mode: body.mode || platform.getRuntimeModeProfile?.().environmentMode || platform.environmentMode || "test",
+        mode: resolveProtectedExecutionMode({
+          platform,
+          requestedMode: body.mode,
+          errorCode: "submission_mode_override_forbidden_in_protected_runtime",
+          noun: "Authority submission"
+        }),
         transportScenarioCode: body.transportScenarioCode ?? body.simulatedTransportOutcome ?? null,
         providerReference: body.providerReference ?? null,
         message: body.message ?? null
@@ -6629,6 +6643,12 @@ async function handleRequest({ req, res, platform, flags }) {
       scopeCode: "annual_reporting"
     });
     assertAnnualOperationsAccess({ principal });
+    assertProtectedRuntimeSimulationInputAllowed({
+      platform,
+      values: [body.transportScenarioCode, body.simulatedTransportOutcome, body.simulatedReceiptType],
+      errorCode: "submission_simulated_override_forbidden_in_protected_runtime",
+      noun: "Submission recovery"
+    });
     writeJson(
       res,
       200,
@@ -16640,6 +16660,12 @@ async function handleRequest({ req, res, platform, flags }) {
       objectType: "payroll",
       scopeCode: "payroll"
     });
+    assertProtectedRuntimeSimulationInputAllowed({
+      platform,
+      values: [body.simulatedOutcome, body.receiptMessage, ...(Array.isArray(body.receiptErrors) ? body.receiptErrors : [])],
+      errorCode: "agi_submission_simulated_receipt_forbidden_in_protected_runtime",
+      noun: "AGI submission"
+    });
     writeJson(
       res,
       200,
@@ -16647,8 +16673,13 @@ async function handleRequest({ req, res, platform, flags }) {
         companyId,
         agiSubmissionId: agiSubmissionSubmitMatch.agiSubmissionId,
         actorId: principal.userId,
-        mode: body.mode || "test",
-        simulatedOutcome: body.simulatedOutcome || "accepted",
+        mode: resolveProtectedExecutionMode({
+          platform,
+          requestedMode: body.mode,
+          errorCode: "agi_submission_mode_override_forbidden_in_protected_runtime",
+          noun: "AGI submission"
+        }),
+        simulatedOutcome: body.simulatedOutcome ?? null,
         receiptMessage: body.receiptMessage ?? null,
         receiptErrors: Array.isArray(body.receiptErrors) ? body.receiptErrors : []
       })
@@ -17118,6 +17149,62 @@ function compareUiRouteContracts(left, right) {
   return left.path === right.path
     ? left.method.localeCompare(right.method)
     : left.path.localeCompare(right.path);
+}
+
+export function filterAdvertisedRoutesForRuntime({ platform, routes = [] } = {}) {
+  if (!isProtectedRuntimeMode(platform)) {
+    return routes;
+  }
+  return routes.filter((route) => route !== "/v1/public/sandbox/catalog");
+}
+
+export function resolveProtectedExecutionMode({
+  platform,
+  requestedMode = null,
+  errorCode = "runtime_mode_override_forbidden_in_protected_runtime",
+  noun = "Operation"
+} = {}) {
+  const runtimeMode = platform.getRuntimeModeProfile?.().environmentMode || platform.environmentMode || "test";
+  const normalizedRequestedMode =
+    typeof requestedMode === "string" && requestedMode.trim().length > 0 ? requestedMode.trim() : null;
+  if (!isProtectedRuntimeMode(platform)) {
+    return normalizedRequestedMode || runtimeMode;
+  }
+  if (normalizedRequestedMode && normalizedRequestedMode !== runtimeMode) {
+    throw createHttpError(409, errorCode, `${noun} must use runtime mode ${runtimeMode} in protected runtime.`);
+  }
+  return runtimeMode;
+}
+
+export function assertProtectedRuntimeSimulationInputAllowed({
+  platform,
+  values = [],
+  errorCode = "simulated_input_forbidden_in_protected_runtime",
+  noun = "Operation"
+} = {}) {
+  if (!isProtectedRuntimeMode(platform)) {
+    return;
+  }
+  const hasSimulationInput = values.some((value) => {
+    if (value === null || value === undefined) {
+      return false;
+    }
+    if (typeof value === "string") {
+      return value.trim().length > 0;
+    }
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+    return true;
+  });
+  if (hasSimulationInput) {
+    throw createHttpError(409, errorCode, `${noun} may not use simulated or manually injected receipt inputs in protected runtime.`);
+  }
+}
+
+function isProtectedRuntimeMode(platform) {
+  const runtimeMode = platform.getRuntimeModeProfile?.().environmentMode || platform.environmentMode || "test";
+  return runtimeMode === "pilot_parallel" || runtimeMode === "production";
 }
 
 function authorizeDocumentAccess({ platform, sessionToken, companyId, permissionCode }) {

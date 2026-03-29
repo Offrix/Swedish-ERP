@@ -95,9 +95,83 @@ test("Phase 12.7 payroll trial guards watermark pay runs and force non-live AGI 
   assert.equal(accepted.currentVersion.evidenceBundleId != null, true);
 });
 
-function createEmployeeWithoutBankAccount({ platform, givenName, familyName, workEmail, identityValue, monthlySalary }) {
+test("Phase 1.4 production runtime blocks AGI live submission until provider-backed transport exists", () => {
+  const platform = createApiPlatform({
+    runtimeMode: "production",
+    env: {},
+    criticalDomainStateStoreKind: "memory",
+    clock: () => new Date("2026-03-28T13:30:00Z")
+  });
+  const onboardingRun = platform.createOnboardingRun({
+    legalName: "Protected Runtime Payroll AB",
+    orgNumber: "559900-2201",
+    adminEmail: "owner@protected-payroll.test",
+    adminDisplayName: "Protected Payroll Owner",
+    accountingYear: "2026"
+  });
+  platform.updateOnboardingStep({
+    runId: onboardingRun.runId,
+    resumeToken: onboardingRun.resumeToken,
+    stepCode: "registrations",
+    payload: {
+      registrations: [{ registrationType: "employer", registrationValue: "configured-employer", status: "configured" }]
+    }
+  });
+  const companyId = onboardingRun.companyId;
+  const payCalendar = createProductionPayrollBaseline(platform, companyId);
+
+  const employee = createEmployeeWithoutBankAccount({
+    platform,
+    companyId,
+    givenName: "Lars",
+    familyName: "Live",
+    workEmail: "lars.live@example.com",
+    identityValue: "19740101-1111",
+    monthlySalary: 36500
+  });
+  const run = platform.createPayRun({
+    companyId,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202603",
+    employmentIds: [employee.employment.employmentId],
+    taxDecisionSnapshots: [createTabellDecision(employee.employment.employmentId)],
+    actorId: "unit-test"
+  });
+
+  platform.approvePayRun({
+    companyId,
+    payRunId: run.payRunId,
+    actorId: "unit-test"
+  });
+  const submission = platform.createAgiSubmission({
+    companyId,
+    reportingPeriod: "202603",
+    actorId: "unit-test"
+  });
+  platform.validateAgiSubmission({
+    companyId,
+    agiSubmissionId: submission.agiSubmissionId
+  });
+  platform.markAgiSubmissionReadyForSign({
+    companyId,
+    agiSubmissionId: submission.agiSubmissionId,
+    actorId: "unit-test"
+  });
+
+  assert.throws(
+    () =>
+      platform.submitAgiSubmission({
+        companyId,
+        agiSubmissionId: submission.agiSubmissionId,
+        actorId: "unit-test"
+      }),
+    (error) => error?.code === "agi_submission_live_provider_not_implemented"
+  );
+});
+
+function createEmployeeWithoutBankAccount({ platform, companyId = COMPANY_ID, givenName, familyName, workEmail, identityValue, monthlySalary }) {
   const employee = platform.createEmployee({
-    companyId: COMPANY_ID,
+    companyId,
     givenName,
     familyName,
     identityType: "personnummer",
@@ -106,7 +180,7 @@ function createEmployeeWithoutBankAccount({ platform, givenName, familyName, wor
     actorId: "unit-test"
   });
   const employment = platform.createEmployment({
-    companyId: COMPANY_ID,
+    companyId,
     employeeId: employee.employeeId,
     employmentTypeCode: "permanent",
     jobTitle: "Trial payroll employee",
@@ -115,7 +189,7 @@ function createEmployeeWithoutBankAccount({ platform, givenName, familyName, wor
     actorId: "unit-test"
   });
   platform.addEmploymentContract({
-    companyId: COMPANY_ID,
+    companyId,
     employeeId: employee.employeeId,
     employmentId: employment.employmentId,
     validFrom: "2025-01-01",
@@ -145,4 +219,25 @@ function createTabellDecision(employmentId) {
     decisionReference: "tabell-34-kolumn-1-2026",
     evidenceRef: "evidence-tax-table-2026"
   };
+}
+
+function createProductionPayrollBaseline(platform, companyId) {
+  platform.createPayItem({
+    companyId,
+    payItemCode: "MONTHLY_SALARY",
+    payItemType: "monthly_salary",
+    displayName: "Manadslon",
+    calculationBasis: "contract_monthly_salary",
+    unitCode: "month",
+    compensationBucket: "gross_addition",
+    affectsVacationBasis: true,
+    affectsPensionBasis: true,
+    actorId: "unit-test"
+  });
+  return platform.createPayCalendar({
+    companyId,
+    payCalendarCode: "PROD-MONTHLY",
+    displayName: "Production Monthly",
+    actorId: "unit-test"
+  });
 }

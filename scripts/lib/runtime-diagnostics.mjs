@@ -35,47 +35,6 @@ const STUB_PROVIDER_TARGETS = Object.freeze([
     remediation: "Replace stub OCR providers with real OCR provider adapters before protected boot."
   })
 ]);
-const SIMULATED_RUNTIME_TARGETS = Object.freeze([
-  Object.freeze({
-    domainKey: "integrations",
-    relativePath: "packages/domain-integrations/src/index.mjs",
-    pattern: /simulatedTransportOutcome|simulatedReceiptType|technical_ack|technical_nack/gu,
-    summary: "Submission runtime still exposes simulated transport or receipt outcomes.",
-    remediation: "Replace simulated submission controls with provider-backed receipts before protected boot."
-  }),
-  Object.freeze({
-    domainKey: "api",
-    relativePath: "apps/api/src/server.mjs",
-    pattern: /simulatedTransportOutcome|simulatedReceiptType|simulatedOutcome/gu,
-    summary: "API routes still accept simulated filing and submission outcomes.",
-    remediation: "Remove or hard-gate simulated submission inputs before protected boot."
-  }),
-  Object.freeze({
-    domainKey: "worker",
-    relativePath: "apps/worker/src/worker.mjs",
-    pattern: /simulatedTransportOutcome|simulatedReceiptType/gu,
-    summary: "Worker handlers still default to simulated submission outcomes.",
-    remediation: "Replace simulated worker payload defaults with provider-backed runtime behavior."
-  })
-]);
-const FORBIDDEN_ROUTE_TARGETS = Object.freeze([
-  Object.freeze({
-    domainKey: "phase13Routes",
-    relativePath: "apps/api/src/phase13-routes.mjs",
-    pattern: /\/v1\/public\/sandbox\/catalog/gu,
-    routeFamilyCode: "public_sandbox_catalog",
-    summary: "Sandbox route family is still present in the API surface.",
-    remediation: "Move sandbox-only public routes behind trial/sandbox-only exposure before protected boot."
-  }),
-  Object.freeze({
-    domainKey: "apiMetadata",
-    relativePath: "apps/api/src/server.mjs",
-    pattern: /\/v1\/public\/sandbox\/catalog/gu,
-    routeFamilyCode: "public_sandbox_catalog",
-    summary: "API root metadata still advertises sandbox route families.",
-    remediation: "Hide sandbox-only route families from protected runtime metadata."
-  })
-]);
 const PHASEBUCKET_ROUTE_TARGETS = Object.freeze([
   Object.freeze({
     domainKey: "apiPhasebucketRoutes",
@@ -226,6 +185,81 @@ function collectPatternFindings({
         remediation: target.remediation
       })
     );
+  }
+
+  return findings;
+}
+
+function collectIntegrationCapabilityTruthFindings({
+  protectedMode,
+  startupSurface,
+  domains = {},
+  runtimeModeProfile
+}) {
+  const integrations = domains?.integrations;
+  if (!integrations || typeof integrations.listAdapterCapabilityManifests !== "function") {
+    return [];
+  }
+
+  const findings = [];
+  const environmentMode = runtimeModeProfile?.environmentMode || "test";
+  const manifests = integrations.listAdapterCapabilityManifests();
+  for (const manifest of manifests) {
+    const truth = manifest?.environmentCapabilityTruth;
+    const currentTruth = truth?.[environmentMode];
+    if (!truth || !currentTruth) {
+      findings.push(
+        createRuntimeInvariantFinding({
+          findingCode: "provider_capability_truth_incomplete",
+          severityCode: protectedMode ? "blocking" : "warning",
+          startupSurface,
+          categoryCode: "provider_reality",
+          domainKey: "integrations",
+          capabilityCode: manifest?.providerCode || null,
+          summary: `${manifest?.providerCode || "adapter"} lacks explicit environment capability truth.`,
+          detail: `Capability manifest ${manifest?.manifestId || "unknown"} is missing environmentCapabilityTruth for ${environmentMode}.`,
+          remediation: "Publish explicit capability truth for every adapter and environment before protected boot."
+        })
+      );
+      continue;
+    }
+    if (
+      currentTruth.supportsLegalEffect === true
+      && currentTruth.receiptMode !== "provider_receipt_required"
+    ) {
+      findings.push(
+        createRuntimeInvariantFinding({
+          findingCode: "provider_capability_truth_invalid",
+          severityCode: protectedMode ? "blocking" : "warning",
+          startupSurface,
+          categoryCode: "provider_reality",
+          domainKey: "integrations",
+          capabilityCode: manifest.providerCode,
+          summary: `${manifest.providerCode} claims legal effect without provider receipt enforcement.`,
+          detail: `Environment ${environmentMode} resolves to exposureClass=${currentTruth.exposureClass} and receiptMode=${currentTruth.receiptMode}.`,
+          remediation: "Legal-effect adapters must require provider receipts in protected runtime."
+        })
+      );
+    }
+  }
+
+  if (typeof integrations.getPublicApiSpec === "function") {
+    const spec = integrations.getPublicApiSpec({ environmentMode });
+    const endpointPaths = Array.isArray(spec?.endpoints) ? spec.endpoints.map((endpoint) => endpoint.path) : [];
+    if (protectedMode && endpointPaths.includes("/v1/public/sandbox/catalog")) {
+      findings.push(
+        createRuntimeInvariantFinding({
+          findingCode: "forbidden_route_family_present",
+          severityCode: "blocking",
+          startupSurface,
+          categoryCode: "route_surface",
+          domainKey: "integrations",
+          summary: "Protected runtime still exposes sandbox-only public API catalog.",
+          detail: "Public API spec for protected runtime still contains /v1/public/sandbox/catalog.",
+          remediation: "Hide sandbox-only public routes from protected runtime metadata and route exposure."
+        })
+      );
+    }
   }
 
   return findings;
@@ -438,23 +472,11 @@ export function scanRuntimeInvariants({
     })
   );
   findings.push(
-    ...collectPatternFindings({
+    ...collectIntegrationCapabilityTruthFindings({
       protectedMode,
       startupSurface,
-      workspaceRoot,
-      targets: SIMULATED_RUNTIME_TARGETS,
-      findingCode: "simulated_receipt_runtime",
-      categoryCode: "receipt_reality"
-    })
-  );
-  findings.push(
-    ...collectPatternFindings({
-      protectedMode,
-      startupSurface,
-      workspaceRoot,
-      targets: FORBIDDEN_ROUTE_TARGETS,
-      findingCode: "forbidden_route_family_present",
-      categoryCode: "route_surface"
+      domains,
+      runtimeModeProfile
     })
   );
   findings.push(

@@ -28,14 +28,28 @@ export async function tryHandlePhase13PublicRoutes({ req, res, url, path, platfo
   }
 
   if (req.method === "GET" && path === "/v1/public/spec") {
-    writeJson(res, 200, platform.getPublicApiSpec({ version: url.searchParams.get("version") || undefined }));
+    writeJson(
+      res,
+      200,
+      platform.getPublicApiSpec({
+        version: url.searchParams.get("version") || undefined,
+        environmentMode: platform.getRuntimeModeProfile?.().environmentMode || platform.environmentMode || "test"
+      })
+    );
     return true;
   }
 
   if (req.method === "GET" && path === "/v1/public/sandbox/catalog") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     authorizePublicAccess({ platform, req, requiredScopes: ["api_spec.read"], mode: "sandbox", companyId });
-    writeJson(res, 200, platform.getPublicApiSandboxCatalog({ companyId }));
+    writeJson(
+      res,
+      200,
+      platform.getPublicApiSandboxCatalog({
+        companyId,
+        environmentMode: platform.getRuntimeModeProfile?.().environmentMode || platform.environmentMode || "test"
+      })
+    );
     return true;
   }
 
@@ -199,7 +213,10 @@ export async function tryHandlePhase13PublicRoutes({ req, res, url, path, platfo
       objectId: companyId,
       scopeCode: "public_api_baseline"
     });
-    const spec = platform.getPublicApiSpec({ version: body.version || undefined });
+    const spec = platform.getPublicApiSpec({
+      version: body.version || undefined,
+      environmentMode: platform.getRuntimeModeProfile?.().environmentMode || platform.environmentMode || "test"
+    });
     writeJson(
       res,
       201,

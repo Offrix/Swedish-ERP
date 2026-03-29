@@ -88,6 +88,13 @@ export const RECEIPT_MODE_CODES = Object.freeze([
   "internal_audit_only",
   "provider_receipt_required"
 ]);
+export const PROVIDER_ENVIRONMENT_MODES = Object.freeze([
+  "trial",
+  "sandbox",
+  "test",
+  "pilot_parallel",
+  "production"
+]);
 
 export function buildReceiptModePolicy({
   trialSafe,
@@ -152,6 +159,56 @@ export function buildModeMatrix({
     supportsLegalEffect: supportsLegalEffect === true,
     receiptModePolicy: clone(receiptModePolicy)
   });
+}
+
+export function buildEnvironmentCapabilityTruth({
+  trialSafe,
+  sandboxSupported,
+  testSupported = true,
+  productionSupported = true,
+  supportsLegalEffectInProduction = true,
+  receiptModePolicy = {}
+}) {
+  return Object.freeze(
+    Object.fromEntries(
+      PROVIDER_ENVIRONMENT_MODES.map((environmentMode) => {
+        const enabled =
+          environmentMode === "trial"
+            ? trialSafe === true
+            : environmentMode === "sandbox"
+              ? sandboxSupported === true
+              : environmentMode === "test"
+                ? testSupported === true
+                : productionSupported === true;
+        const receiptMode = receiptModePolicy?.[environmentMode] || null;
+        const supportsLegalEffect = enabled && ["pilot_parallel", "production"].includes(environmentMode)
+          ? supportsLegalEffectInProduction === true
+          : false;
+        const exposureClass = !enabled
+          ? "disabled"
+          : environmentMode === "trial"
+            ? "trial_only"
+            : environmentMode === "sandbox"
+              ? "sandbox_only"
+              : environmentMode === "test"
+                ? "test_only"
+                : supportsLegalEffect
+                  ? "legal_effect"
+                  : "non_legal_effect";
+        return [
+          environmentMode,
+          Object.freeze({
+            environmentMode,
+            enabled,
+            receiptMode,
+            supportsLegalEffect,
+            liveCoverageEligible: supportsLegalEffect,
+            exposureClass
+          })
+        ];
+      })
+    )
+  );
 }
 
 export function buildProviderBaselineRef({
@@ -238,6 +295,14 @@ export function createStatelessProvider({
     supportsLegalEffect,
     receiptModePolicy
   });
+  const environmentCapabilityTruth = buildEnvironmentCapabilityTruth({
+    trialSafe,
+    sandboxSupported,
+    testSupported: true,
+    productionSupported,
+    supportsLegalEffectInProduction,
+    receiptModePolicy
+  });
   return {
     providerCode,
     providerMode,
@@ -252,11 +317,15 @@ export function createStatelessProvider({
         sandboxSupported,
         trialSafe,
         supportsLegalEffect,
+        supportsLegalEffectInProduction,
         receiptMode,
         receiptModePolicy: clone(receiptModePolicy),
         supportsAsyncCallback,
         supportsRerun,
         requiresCallbackRegistration,
+        runtimeEnvironmentMode: normalizeOptionalText(environmentMode) || "test",
+        runtimeExposureClass: environmentCapabilityTruth[normalizeOptionalText(environmentMode) || "test"]?.exposureClass || "disabled",
+        environmentCapabilityTruth: clone(environmentCapabilityTruth),
         allowedEnvironmentModes: [...new Set(allowedEnvironmentModes)],
         modeMatrix,
         profiles: clone(profiles)

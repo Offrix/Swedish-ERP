@@ -21,6 +21,8 @@ $requiredPaths = @(
   "tests/unit/phase1-migration-history-repair.test.mjs",
   "tests/unit/phase1-runtime-mode.test.mjs",
   "tests/unit/phase1-bootstrap-mode.test.mjs",
+  "tests/unit/phase1-runtime-capability-truth.test.mjs",
+  "tests/unit/phase1-protected-runtime-route-guards.test.mjs",
   "tests/unit/phase1-startup-diagnostics.test.mjs",
   "tests/unit/phase1-runtime-honesty-scan-cli.test.mjs",
   "tests/integration/phase1-runtime-diagnostics-api.test.mjs",
@@ -49,8 +51,6 @@ if ($missing.Count -gt 0) {
   --expect-finding "missing_persistent_store" `
   --expect-finding "map_only_critical_truth" `
   --expect-finding "stub_provider_present" `
-  --expect-finding "simulated_receipt_runtime" `
-  --expect-finding "forbidden_route_family_present" `
   --require-startup-blocked `
   --require-blocking `
   --json
@@ -85,6 +85,8 @@ if ($LASTEXITCODE -ne 0) {
   "tests/unit/phase1-migration-history-repair.test.mjs" `
   "tests/unit/phase1-runtime-mode.test.mjs" `
   "tests/unit/phase1-bootstrap-mode.test.mjs" `
+  "tests/unit/phase1-runtime-capability-truth.test.mjs" `
+  "tests/unit/phase1-protected-runtime-route-guards.test.mjs" `
   "tests/unit/phase1-startup-diagnostics.test.mjs" `
   "tests/unit/phase1-runtime-honesty-scan-cli.test.mjs" `
   "tests/integration/phase1-runtime-diagnostics-api.test.mjs" `

@@ -659,6 +659,7 @@ export function createIntegrationEngine({
   const publicApiModule = createPublicApiModule({
     state,
     clock,
+    environmentMode,
     deliveryExecutor: webhookDeliveryExecutor,
     webhookSecretSealer: integrationSecretSealer
   });

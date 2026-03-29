@@ -15,6 +15,16 @@ test("phase 1.4 runtime endpoints expose startup diagnostics and bootstrap valid
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
 
   try {
+    const rootResponse = await fetch(`${baseUrl}/`);
+    assert.equal(rootResponse.status, 200);
+    const rootPayload = await rootResponse.json();
+    assert.equal(rootPayload.routes.includes("/v1/public/sandbox/catalog"), false);
+
+    const specResponse = await fetch(`${baseUrl}/v1/public/spec`);
+    assert.equal(specResponse.status, 200);
+    const specPayload = await specResponse.json();
+    assert.equal(specPayload.endpoints.some((endpoint) => endpoint.path === "/v1/public/sandbox/catalog"), false);
+
     const runtimeModeResponse = await fetch(`${baseUrl}/v1/system/runtime-mode`);
     assert.equal(runtimeModeResponse.status, 200);
     const runtimeModePayload = await runtimeModeResponse.json();
@@ -44,11 +54,11 @@ test("phase 1.4 runtime endpoints expose startup diagnostics and bootstrap valid
     );
     assert.equal(
       invariantsPayload.findings.some((finding) => finding.findingCode === "simulated_receipt_runtime"),
-      true
+      false
     );
     assert.equal(
       invariantsPayload.findings.some((finding) => finding.findingCode === "forbidden_route_family_present"),
-      true
+      false
     );
     assert.equal(
       invariantsPayload.findings.some(

@@ -5,6 +5,7 @@ const PUBLIC_API_SPEC_VERSION = "2026-03-25";
 const CANONICAL_API_VERSION = "2026-03-27";
 const MAX_WEBHOOK_DELIVERY_ATTEMPTS = 5;
 const WEBHOOK_SECRET_SEAL_KEY_ID = "integrations-webhook-secret-seal-v1";
+const PROTECTED_RUNTIME_MODES = new Set(["pilot_parallel", "production"]);
 
 export const PUBLIC_API_MODES = Object.freeze(["sandbox", "production"]);
 export const PUBLIC_API_CLIENT_STATUSES = Object.freeze(["active", "revoked"]);
@@ -25,7 +26,10 @@ const PUBLIC_API_SCOPE_CATALOG = Object.freeze([
     label: "Read API spec",
     description: "Read versioned public API contracts, sandbox catalog and compatibility metadata.",
     sandboxSupported: true,
-    exampleEndpoints: Object.freeze(["/v1/public/spec", "/v1/public/sandbox/catalog"]),
+    exampleEndpoints: Object.freeze([
+      Object.freeze({ path: "/v1/public/spec", allowedEnvironmentModes: Object.freeze(["trial", "sandbox", "test", "pilot_parallel", "production"]) }),
+      Object.freeze({ path: "/v1/public/sandbox/catalog", allowedEnvironmentModes: Object.freeze(["trial", "sandbox", "test"]) })
+    ]),
     resourceFamilies: Object.freeze(["api_spec", "sandbox_catalog"])
   }),
   Object.freeze({
@@ -103,14 +107,54 @@ const PUBLIC_API_SPEC_VERSIONS = Object.freeze([
   })
 ]);
 const PUBLIC_API_ENDPOINT_CATALOG = Object.freeze([
-  Object.freeze({ path: "/v1/public/spec", scopes: Object.freeze(["api_spec.read"]), stability: "stable" }),
-  Object.freeze({ path: "/v1/public/report-snapshots", scopes: Object.freeze(["reporting.read"]), stability: "stable" }),
-  Object.freeze({ path: "/v1/public/submissions", scopes: Object.freeze(["submission.read"]), stability: "stable" }),
-  Object.freeze({ path: "/v1/public/sandbox/catalog", scopes: Object.freeze(["api_spec.read"]), stability: "stable" }),
-  Object.freeze({ path: "/v1/public/legal-forms/declaration-profile", scopes: Object.freeze(["legal_form.read"]), stability: "stable" }),
-  Object.freeze({ path: "/v1/public/annual-reporting/packages", scopes: Object.freeze(["annual_reporting.read"]), stability: "stable" }),
-  Object.freeze({ path: "/v1/public/tax-account/summary", scopes: Object.freeze(["tax_account.read"]), stability: "stable" }),
-  Object.freeze({ path: "/v1/public/tax-account/reconciliations", scopes: Object.freeze(["tax_account.read"]), stability: "stable" })
+  Object.freeze({
+    path: "/v1/public/spec",
+    scopes: Object.freeze(["api_spec.read"]),
+    stability: "stable",
+    allowedEnvironmentModes: Object.freeze(["trial", "sandbox", "test", "pilot_parallel", "production"])
+  }),
+  Object.freeze({
+    path: "/v1/public/report-snapshots",
+    scopes: Object.freeze(["reporting.read"]),
+    stability: "stable",
+    allowedEnvironmentModes: Object.freeze(["trial", "sandbox", "test", "pilot_parallel", "production"])
+  }),
+  Object.freeze({
+    path: "/v1/public/submissions",
+    scopes: Object.freeze(["submission.read"]),
+    stability: "stable",
+    allowedEnvironmentModes: Object.freeze(["trial", "sandbox", "test", "pilot_parallel", "production"])
+  }),
+  Object.freeze({
+    path: "/v1/public/sandbox/catalog",
+    scopes: Object.freeze(["api_spec.read"]),
+    stability: "stable",
+    allowedEnvironmentModes: Object.freeze(["trial", "sandbox", "test"])
+  }),
+  Object.freeze({
+    path: "/v1/public/legal-forms/declaration-profile",
+    scopes: Object.freeze(["legal_form.read"]),
+    stability: "stable",
+    allowedEnvironmentModes: Object.freeze(["trial", "sandbox", "test", "pilot_parallel", "production"])
+  }),
+  Object.freeze({
+    path: "/v1/public/annual-reporting/packages",
+    scopes: Object.freeze(["annual_reporting.read"]),
+    stability: "stable",
+    allowedEnvironmentModes: Object.freeze(["trial", "sandbox", "test", "pilot_parallel", "production"])
+  }),
+  Object.freeze({
+    path: "/v1/public/tax-account/summary",
+    scopes: Object.freeze(["tax_account.read"]),
+    stability: "stable",
+    allowedEnvironmentModes: Object.freeze(["trial", "sandbox", "test", "pilot_parallel", "production"])
+  }),
+  Object.freeze({
+    path: "/v1/public/tax-account/reconciliations",
+    scopes: Object.freeze(["tax_account.read"]),
+    stability: "stable",
+    allowedEnvironmentModes: Object.freeze(["trial", "sandbox", "test", "pilot_parallel", "production"])
+  })
 ]);
 export const WEBHOOK_DELIVERY_STATUSES = Object.freeze(["queued", "running", "sent", "failed", "rate_limited", "suppressed", "disabled", "dead_lettered"]);
 export const WEBHOOK_EVENT_TYPES = Object.freeze([
@@ -187,6 +231,7 @@ const WEBHOOK_EVENT_CATALOG = Object.freeze([
 export function createPublicApiModule({
   state,
   clock = () => new Date(),
+  environmentMode = "test",
   deliveryExecutor = defaultWebhookDeliveryExecutor,
   webhookSecretSealer = createSecretSealer({
     secretSealKey: "swedish-erp-integrations-webhook-seal",
@@ -221,8 +266,12 @@ export function createPublicApiModule({
     migrateWebhookSubscriptionSecrets
   };
 
-  function getPublicApiSpec({ version = PUBLIC_API_SPEC_VERSION } = {}) {
+  function getPublicApiSpec({
+    version = PUBLIC_API_SPEC_VERSION,
+    environmentMode: requestedEnvironmentMode = environmentMode
+  } = {}) {
     const resolvedVersion = resolvePublicApiSpecVersion(version);
+    const resolvedEnvironmentMode = normalizeEnvironmentMode(requestedEnvironmentMode);
     return clone({
       version: resolvedVersion.version,
       currentVersion: PUBLIC_API_SPEC_VERSION,
@@ -235,10 +284,10 @@ export function createPublicApiModule({
         tokenType: "opaque_access_token",
         supportedModes: [...PUBLIC_API_MODES],
         scopeCodes: [...PUBLIC_API_SCOPE_CODES],
-        scopeCatalog: clone(PUBLIC_API_SCOPE_CATALOG),
+        scopeCatalog: filterScopeCatalogForEnvironment(resolvedEnvironmentMode),
         tokenEndpoint: "/v1/public/oauth/token"
       },
-      endpoints: clone(PUBLIC_API_ENDPOINT_CATALOG),
+      endpoints: filterEndpointCatalogForEnvironment(resolvedEnvironmentMode),
       webhookEventTypes: [...WEBHOOK_EVENT_TYPES],
       webhookEventCatalog: clone(WEBHOOK_EVENT_CATALOG),
       compatibility: {
@@ -692,14 +741,25 @@ export function createPublicApiModule({
       .map(presentWebhookDelivery);
   }
 
-  function getPublicApiSandboxCatalog({ companyId } = {}) {
+  function getPublicApiSandboxCatalog({
+    companyId,
+    environmentMode: requestedEnvironmentMode = environmentMode
+  } = {}) {
+    const resolvedEnvironmentMode = normalizeEnvironmentMode(requestedEnvironmentMode);
+    if (PROTECTED_RUNTIME_MODES.has(resolvedEnvironmentMode)) {
+      throw createError(
+        404,
+        "public_api_sandbox_catalog_not_available",
+        `Sandbox public API catalog is not exposed in protected runtime mode ${resolvedEnvironmentMode}.`
+      );
+    }
     return {
       companyId: text(companyId, "company_id_required"),
       mode: "sandbox",
       watermarkCode: "SANDBOX_PUBLIC_API",
       supportsLegalEffect: false,
-      apiSpec: getPublicApiSpec({ version: PUBLIC_API_SPEC_VERSION }),
-      scopeCatalog: clone(PUBLIC_API_SCOPE_CATALOG),
+      apiSpec: getPublicApiSpec({ version: PUBLIC_API_SPEC_VERSION, environmentMode: resolvedEnvironmentMode }),
+      scopeCatalog: filterScopeCatalogForEnvironment(resolvedEnvironmentMode),
       clientCredentials: {
         tokenEndpoint: "/v1/public/oauth/token",
         supportedGrantTypes: ["client_credentials"],
@@ -904,6 +964,42 @@ export function createPublicApiModule({
     }
     return token;
   }
+}
+
+function filterScopeCatalogForEnvironment(environmentMode) {
+  return clone(
+    PUBLIC_API_SCOPE_CATALOG.map((scope) => ({
+      ...scope,
+      exampleEndpoints: scope.exampleEndpoints
+        .map((endpoint) => (typeof endpoint === "string" ? { path: endpoint, allowedEnvironmentModes: PROVIDERLESS_ALLOWED_ENVIRONMENTS } : endpoint))
+        .filter((endpoint) => isExposedInEnvironment(endpoint.allowedEnvironmentModes, environmentMode))
+        .map((endpoint) => endpoint.path)
+    }))
+  );
+}
+
+const PROVIDERLESS_ALLOWED_ENVIRONMENTS = Object.freeze(["trial", "sandbox", "test", "pilot_parallel", "production"]);
+
+function filterEndpointCatalogForEnvironment(environmentMode) {
+  return clone(
+    PUBLIC_API_ENDPOINT_CATALOG.filter((endpoint) =>
+      isExposedInEnvironment(endpoint.allowedEnvironmentModes, environmentMode)
+    )
+  );
+}
+
+function isExposedInEnvironment(allowedEnvironmentModes, environmentMode) {
+  const resolvedEnvironmentMode = normalizeEnvironmentMode(environmentMode);
+  const resolvedAllowedModes = Array.isArray(allowedEnvironmentModes) && allowedEnvironmentModes.length > 0
+    ? allowedEnvironmentModes
+    : PROVIDERLESS_ALLOWED_ENVIRONMENTS;
+  return resolvedAllowedModes.includes(resolvedEnvironmentMode);
+}
+
+function normalizeEnvironmentMode(environmentMode) {
+  return typeof environmentMode === "string" && environmentMode.trim().length > 0
+    ? environmentMode.trim()
+    : "test";
 }
 
 async function executeWebhookDelivery({ executor, subscription, event, delivery }) {

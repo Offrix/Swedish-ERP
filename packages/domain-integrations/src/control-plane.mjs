@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
 import {
+  buildEnvironmentCapabilityTruth,
   buildReceiptModePolicy,
   resolveReceiptModeForEnvironment
 } from "./providers/provider-runtime-helpers.mjs";
@@ -152,6 +153,11 @@ export function createIntegrationControlPlane({
       receiptMode: resolveReceiptModeForEnvironment(resolveManifestReceiptModePolicy(manifest), resolvedEnvironmentMode),
       sandboxSupported: manifest.sandboxSupported === true,
       trialSafe: manifest.trialSafe === true,
+      liveCoverageEligible: supportsLegalEffectForManifest(manifest, resolvedEnvironmentMode),
+      runtimeExposureClass:
+        manifest.environmentCapabilityTruth?.[resolvedEnvironmentMode]?.exposureClass
+        || (supportsLegalEffectForManifest(manifest, resolvedEnvironmentMode) ? "legal_effect" : "non_legal_effect"),
+      environmentCapabilityTruth: clone(manifest.environmentCapabilityTruth || null),
       modeMatrix: clone(manifest.modeMatrix),
       fallbackMode: optional(input.fallbackMode) || "queue_retry",
       rateLimitPerMinute: Number(input.rateLimitPerMinute || 60),
@@ -187,6 +193,11 @@ export function createIntegrationControlPlane({
       receiptMode: resolveReceiptModeForEnvironment(resolveManifestReceiptModePolicy(manifest), resolvedEnvironmentMode),
       sandboxSupported: manifest.sandboxSupported,
       trialSafe: manifest.trialSafe,
+      liveCoverageEligible: supportsLegalEffectForManifest(manifest, resolvedEnvironmentMode),
+      runtimeExposureClass:
+        manifest.environmentCapabilityTruth?.[resolvedEnvironmentMode]?.exposureClass
+        || (supportsLegalEffectForManifest(manifest, resolvedEnvironmentMode) ? "legal_effect" : "non_legal_effect"),
+      environmentCapabilityTruth: clone(manifest.environmentCapabilityTruth || null),
       modeMatrix: clone(manifest.modeMatrix),
       fallbackMode: partnerConnection.fallbackMode,
       rateLimitPerMinute: partnerConnection.rateLimitPerMinute,
@@ -241,8 +252,12 @@ export function createIntegrationControlPlane({
         sandboxSupported: manifest.sandboxSupported === true,
         trialSafe: manifest.trialSafe === true,
         supportsLegalEffect: manifest.supportsLegalEffect === true,
+        supportsLegalEffectInProduction: manifest.supportsLegalEffectInProduction === true,
         receiptMode: manifest.receiptMode || null,
         receiptModePolicy: clone(manifest.receiptModePolicy || manifest.modeMatrix?.receiptModePolicy || {}),
+        runtimeEnvironmentMode: manifest.runtimeEnvironmentMode || null,
+        runtimeExposureClass: manifest.runtimeExposureClass || null,
+        environmentCapabilityTruth: clone(manifest.environmentCapabilityTruth || null),
         supportsAsyncCallback: manifest.supportsAsyncCallback === true,
         requiresCallbackRegistration: manifest.requiresCallbackRegistration === true,
         allowedEnvironmentModes: clone(manifest.allowedEnvironmentModes || modeMatrixToAllowedEnvironmentModes(manifest.modeMatrix)),
@@ -482,6 +497,14 @@ function buildPartnerManifest(entry, providerCode) {
     supportsLegalEffect: true,
     receiptModePolicy: clone(receiptModePolicy)
   };
+  const environmentCapabilityTruth = buildEnvironmentCapabilityTruth({
+    trialSafe: sandboxSupported,
+    sandboxSupported,
+    testSupported: true,
+    productionSupported: true,
+    supportsLegalEffectInProduction: true,
+    receiptModePolicy
+  });
   return {
     manifestId: `partner:${entry.connectionType}:${providerCode}`,
     surfaceCode: "partner",
@@ -491,8 +514,12 @@ function buildPartnerManifest(entry, providerCode) {
     sandboxSupported,
     trialSafe: sandboxSupported,
     supportsLegalEffect: true,
+    supportsLegalEffectInProduction: true,
     receiptMode: resolveReceiptModeForEnvironment(receiptModePolicy, sandboxSupported ? "trial" : "production"),
     receiptModePolicy: clone(receiptModePolicy),
+    runtimeEnvironmentMode: sandboxSupported ? "trial" : "production",
+    runtimeExposureClass: sandboxSupported ? "trial_only" : "legal_effect",
+    environmentCapabilityTruth: clone(environmentCapabilityTruth),
     allowedEnvironmentModes: sandboxSupported ? ["trial", "sandbox", "test", "pilot_parallel", "production"] : ["pilot_parallel", "production"],
     modeMatrix
   };
