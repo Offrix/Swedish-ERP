@@ -186,14 +186,14 @@ test("Phase 3.2 central evidence bundles cover support, break-glass, cutover and
     companyId: DEMO_IDS.companyId,
     category: "regulated_submission_outage",
     severity: "high",
-    approvedActions: ["plan_job_replay"],
+    approvedActions: ["plan_job_replay", "impersonation_read_only"],
     relatedObjectRefs: [{ objectType: "submission", objectId: "submission-x" }]
   });
   platform.approveSupportCaseActions({
     sessionToken: approverToken,
     companyId: DEMO_IDS.companyId,
     supportCaseId: supportCase.supportCaseId,
-    approvedActions: ["plan_job_replay"]
+    approvedActions: ["plan_job_replay", "impersonation_read_only"]
   });
   const supportEvidence = platform.exportSupportCaseEvidenceBundle({
     sessionToken: adminToken,
@@ -202,6 +202,37 @@ test("Phase 3.2 central evidence bundles cover support, break-glass, cutover and
   });
   assert.equal(supportEvidence.status, "frozen");
   assert.ok(supportEvidence.checksum);
+  const impersonation = platform.requestImpersonation({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    supportCaseId: supportCase.supportCaseId,
+    targetCompanyUserId: DEMO_APPROVER_IDS.companyUserId,
+    purposeCode: "phase3_2_export",
+    mode: "read_only"
+  });
+  platform.approveImpersonation({
+    sessionToken: approverToken,
+    companyId: DEMO_IDS.companyId,
+    sessionId: impersonation.sessionId
+  });
+  platform.activateImpersonation({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    sessionId: impersonation.sessionId
+  });
+  platform.terminateImpersonation({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    sessionId: impersonation.sessionId,
+    reasonCode: "support_complete"
+  });
+  const impersonationEvidence = platform.exportImpersonationEvidenceBundle({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    sessionId: impersonation.sessionId
+  });
+  assert.equal(impersonationEvidence.status, "frozen");
+  assert.equal(impersonationEvidence.watermark.watermarkCode, "SUPPORT-IMPERSONATION");
 
   const breakGlass = platform.requestBreakGlass({
     sessionToken: adminToken,

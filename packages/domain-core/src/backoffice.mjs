@@ -97,6 +97,7 @@ export function createBackofficeModule({
     approveImpersonation,
     activateImpersonation,
     terminateImpersonation,
+    exportImpersonationEvidenceBundle,
     generateAccessReview,
     listAccessReviews,
     recordAccessReviewDecision,
@@ -1112,6 +1113,21 @@ export function createBackofficeModule({
     return clone(session);
   }
 
+  function exportImpersonationEvidenceBundle({
+    sessionToken,
+    companyId,
+    sessionId,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.read");
+    const session = requireImpersonationSession(companyId, sessionId);
+    return syncImpersonationEvidenceBundle({
+      session,
+      actorId: principal.userId,
+      correlationId
+    });
+  }
+
   function generateAccessReview({
     sessionToken,
     companyId,
@@ -1532,6 +1548,102 @@ export function createBackofficeModule({
       archivedAt: bundle.archivedAt,
       ...payload,
       supportCaseStatus: payload.status,
+      status: bundle.status
+    });
+  }
+
+  function syncImpersonationEvidenceBundle({ session, actorId, correlationId }) {
+    if (!evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+      throw error(500, "evidence_platform_required", "Evidence platform is required.");
+    }
+    const payload = {
+      sessionId: session.sessionId,
+      companyId: session.companyId,
+      supportCaseId: session.supportCaseId,
+      targetCompanyUserId: session.targetCompanyUserId,
+      targetUserId: session.targetUserId,
+      requestedByUserId: session.requestedByUserId,
+      approvedByUserId: session.approvedByUserId,
+      activatedByUserId: session.activatedByUserId,
+      purposeCode: session.purposeCode,
+      mode: session.mode,
+      restrictedActions: [...session.restrictedActions],
+      approvalActorIds: [...session.approvalActorIds],
+      status: session.status,
+      approvedAt: session.approvedAt,
+      startedAt: session.startedAt,
+      expiresAt: session.expiresAt,
+      endedAt: session.endedAt,
+      endReasonCode: session.endReasonCode || null,
+      watermark: clone(session.watermark)
+    };
+    const bundle = evidencePlatform.createFrozenEvidenceBundleSnapshot({
+      companyId: session.companyId,
+      bundleType: "support_impersonation",
+      sourceObjectType: "impersonation_session",
+      sourceObjectId: session.sessionId,
+      sourceObjectVersion: session.updatedAt,
+      title: `Support impersonation ${session.sessionId}`,
+      retentionClass: "regulated",
+      classificationCode: "restricted_internal",
+      metadata: {
+        compatibilityPayload: payload
+      },
+      artifactRefs: [
+        ...payload.approvalActorIds.map((approvalActorId) => ({
+          artifactType: "impersonation_approval",
+          artifactRef: approvalActorId,
+          checksum: hashObject({
+            approvalActorId,
+            sessionId: session.sessionId,
+            mode: session.mode
+          }),
+          roleCode: "approval"
+        })),
+        ...payload.restrictedActions.map((actionCode) => ({
+          artifactType: "impersonation_allowlist_action",
+          artifactRef: actionCode,
+          checksum: hashObject({
+            actionCode,
+            sessionId: session.sessionId
+          }),
+          roleCode: "restricted_action"
+        }))
+      ],
+      auditRefs: payload.approvalActorIds.map((approvalActorId) => ({
+        approvalActorId
+      })),
+      sourceRefs: [
+        {
+          supportCaseId: session.supportCaseId,
+          status: session.status,
+          mode: session.mode
+        }
+      ],
+      relatedObjectRefs: [
+        {
+          objectType: "support_case",
+          objectId: session.supportCaseId
+        },
+        {
+          objectType: "company_user",
+          objectId: session.targetCompanyUserId
+        }
+      ],
+      actorId,
+      correlationId,
+      previousEvidenceBundleId: session.currentEvidenceBundleId || null
+    });
+    session.currentEvidenceBundleId = bundle.evidenceBundleId;
+    return clone({
+      impersonationEvidenceBundleId: bundle.evidenceBundleId,
+      evidenceBundleId: bundle.evidenceBundleId,
+      checksum: bundle.checksum,
+      status: bundle.status,
+      frozenAt: bundle.frozenAt,
+      archivedAt: bundle.archivedAt,
+      ...payload,
+      impersonationStatus: payload.status,
       status: bundle.status
     });
   }

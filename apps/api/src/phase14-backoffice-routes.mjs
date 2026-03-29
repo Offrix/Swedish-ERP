@@ -173,6 +173,23 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     return true;
   }
 
+  const supportEvidenceMatch = matchPath(path, "/v1/backoffice/support-cases/:supportCaseId/evidence");
+  if (req.method === "GET" && supportEvidenceMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "support_case", objectId: supportEvidenceMatch.supportCaseId, scopeCode: "support_case" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      evidenceBundle: platform.exportSupportCaseEvidenceBundle({
+        sessionToken,
+        companyId,
+        supportCaseId: supportEvidenceMatch.supportCaseId,
+        correlationId: optionalText(url.searchParams.get("correlationId")) ?? undefined
+      })
+    });
+    return true;
+  }
+
   if (req.method === "GET" && path === "/v1/backoffice/impersonations") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
@@ -269,6 +286,23 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     return true;
   }
 
+  const impersonationEvidenceMatch = matchPath(path, "/v1/backoffice/impersonations/:sessionId/evidence");
+  if (req.method === "GET" && impersonationEvidenceMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "impersonation_session", objectId: impersonationEvidenceMatch.sessionId, scopeCode: "impersonation_session" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      evidenceBundle: platform.exportImpersonationEvidenceBundle({
+        sessionToken,
+        companyId,
+        sessionId: impersonationEvidenceMatch.sessionId,
+        correlationId: optionalText(url.searchParams.get("correlationId")) ?? undefined
+      })
+    });
+    return true;
+  }
+
   if (req.method === "GET" && path === "/v1/backoffice/break-glass") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
@@ -310,6 +344,23 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
       breakGlassId: breakGlassCloseMatch.breakGlassId,
       reasonCode: body.reasonCode
     }));
+    return true;
+  }
+
+  const breakGlassEvidenceMatch = matchPath(path, "/v1/backoffice/break-glass/:breakGlassId/evidence");
+  if (req.method === "GET" && breakGlassEvidenceMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "break_glass_session", objectId: breakGlassEvidenceMatch.breakGlassId, scopeCode: "break_glass_session" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      evidenceBundle: platform.exportBreakGlassEvidenceBundle({
+        sessionToken,
+        companyId,
+        breakGlassId: breakGlassEvidenceMatch.breakGlassId,
+        correlationId: optionalText(url.searchParams.get("correlationId")) ?? undefined
+      })
+    });
     return true;
   }
 

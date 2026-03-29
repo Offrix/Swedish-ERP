@@ -23,7 +23,8 @@ Operate time-limited support impersonation sessions without bypassing tenant per
    - expiry timestamp
 5. Perform allowed support work only.
 6. End the session with explicit reason code.
-7. Export evidence bundle if the case requires audit export.
+7. Export the audit bundle through `GET /v1/backoffice/impersonations/:sessionId/evidence?companyId=...`.
+8. Export the parent support case bundle through `GET /v1/backoffice/support-cases/:supportCaseId/evidence?companyId=...` when the operator chain must be archived as one case package.
 
 ## Guardrails
 
@@ -41,3 +42,4 @@ Operate time-limited support impersonation sessions without bypassing tenant per
   - watermark presence
   - expiry denial on start
   - termination audit trail
+  - evidence export for impersonation and parent support case

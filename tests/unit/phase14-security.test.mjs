@@ -141,6 +141,13 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
   assert.equal(closedSupportCase.status, "closed");
   assert.equal(closedSupportCase.resolutionCode, "operator_resolved");
   assert.equal(closedSupportCase.closedByUserId, DEMO_IDS.userId);
+  const supportEvidence = platform.exportSupportCaseEvidenceBundle({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    supportCaseId: supportCase.supportCaseId
+  });
+  assert.equal(supportEvidence.status, "frozen");
+  assert.equal(supportEvidence.supportCaseId, supportCase.supportCaseId);
 
   const impersonation = platform.requestImpersonation({
     sessionToken: adminToken,
@@ -181,6 +188,14 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
     reasonCode: "case_resolved"
   });
   assert.equal(impersonationEnded.status, "terminated");
+  const impersonationEvidence = platform.exportImpersonationEvidenceBundle({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    sessionId: impersonation.sessionId
+  });
+  assert.equal(impersonationEvidence.status, "frozen");
+  assert.equal(impersonationEvidence.supportCaseId, supportCase.supportCaseId);
+  assert.equal(impersonationEvidence.watermark.watermarkCode, "SUPPORT-IMPERSONATION");
   assert.throws(
     () =>
       platform.requestImpersonation({
@@ -367,6 +382,13 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
     breakGlassId: breakGlass.breakGlassId
   });
   assert.equal(closedBreakGlass.status, "ended");
+  const breakGlassEvidence = platform.exportBreakGlassEvidenceBundle({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    breakGlassId: breakGlass.breakGlassId
+  });
+  assert.equal(breakGlassEvidence.status, "frozen");
+  assert.equal(breakGlassEvidence.watermark.watermarkCode, "BREAK-GLASS");
 
   const auditTrail = platform.listAuditTrail({
     sessionToken: adminToken,

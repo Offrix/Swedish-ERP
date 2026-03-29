@@ -24,7 +24,7 @@ Operate emergency incident access through time-limited, dual-approved, allowlist
 6. Perform only the requested emergency actions.
 7. End the session with explicit reason code.
 8. Reference the ended session in incident post-review.
-9. Export the break-glass evidence bundle when audit or post-review requires it.
+9. Export the break-glass evidence bundle through `GET /v1/backoffice/break-glass/:breakGlassId/evidence?companyId=...` when audit or post-review requires it.
 
 ## Guardrails
 
@@ -42,3 +42,4 @@ Operate emergency incident access through time-limited, dual-approved, allowlist
   - explicit activation step
   - watermark presence
   - ended-session post-review linkage
+  - evidence export for audit and post-review

@@ -529,6 +529,7 @@ export function createCoreEngine({
       approveImpersonation: backofficeModule.approveImpersonation,
       activateImpersonation: backofficeModule.activateImpersonation,
       terminateImpersonation: backofficeModule.terminateImpersonation,
+      exportImpersonationEvidenceBundle: backofficeModule.exportImpersonationEvidenceBundle,
       generateAccessReview: backofficeModule.generateAccessReview,
       listAccessReviews: backofficeModule.listAccessReviews,
       recordAccessReviewDecision: backofficeModule.recordAccessReviewDecision,

@@ -228,6 +228,11 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
     });
     assert.equal(closedSupportCase.status, "closed");
     assert.equal(closedSupportCase.resolutionCode, "operator_resolved");
+    const supportEvidence = await requestJson(baseUrl, `/v1/backoffice/support-cases/${supportCase.supportCaseId}/evidence?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(supportEvidence.evidenceBundle.status, "frozen");
+    assert.equal(supportEvidence.evidenceBundle.supportCaseId, supportCase.supportCaseId);
 
     const impersonation = await requestJson(baseUrl, "/v1/backoffice/impersonations", {
       method: "POST",
@@ -277,6 +282,11 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       }
     });
     assert.equal(impersonationEnded.status, "terminated");
+    const impersonationEvidence = await requestJson(baseUrl, `/v1/backoffice/impersonations/${impersonation.sessionId}/evidence?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(impersonationEvidence.evidenceBundle.status, "frozen");
+    assert.equal(impersonationEvidence.evidenceBundle.watermark.watermarkCode, "SUPPORT-IMPERSONATION");
     const limitedWriteMissingAllowlist = await requestJson(baseUrl, "/v1/backoffice/impersonations", {
       method: "POST",
       token: adminToken,
@@ -515,6 +525,11 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       }
     });
     assert.equal(closedBreakGlass.status, "ended");
+    const breakGlassEvidence = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/evidence?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(breakGlassEvidence.evidenceBundle.status, "frozen");
+    assert.equal(breakGlassEvidence.evidenceBundle.watermark.watermarkCode, "BREAK-GLASS");
 
     const auditEvents = await requestJson(baseUrl, `/v1/backoffice/audit-events?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
