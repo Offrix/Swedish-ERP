@@ -44,6 +44,25 @@ export interface LedgerAccount {
   readonly updatedAt: string;
 }
 
+export interface AccountCatalogAccount {
+  readonly accountNumber: string;
+  readonly accountName: string;
+  readonly accountClass: string;
+}
+
+export interface AccountCatalogVersion {
+  readonly versionId: string;
+  readonly templateKind: string;
+  readonly sourceName: string;
+  readonly sourceDocumentName: string;
+  readonly effectiveFrom: string;
+  readonly publishedAt: string;
+  readonly checksumAlgorithm: string;
+  readonly checksum: string;
+  readonly accountCount: number;
+  readonly accounts: readonly AccountCatalogAccount[];
+}
+
 export interface VoucherSeries {
   readonly voucherSeriesId: string;
   readonly companyId: string;

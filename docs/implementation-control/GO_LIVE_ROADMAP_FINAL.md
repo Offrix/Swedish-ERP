@@ -197,7 +197,7 @@ Ingen ny ledger/postinglogik, ingen ny payroll/VAT/HUS-logik, ingen ny rapportlo
 **Delfaser**  
 - [x] 1.1 [REWRITE][HARDEN] Inför `packages/domain-core/src/value-kernel.mjs` med canonical `MoneyAmount`, `Rate`, `Quantity`, `FxRate`, `roundMoney`, `normalizeAmount`, `normalizePositiveAmount`, `normalizeSignedAmount`, `roundRate`, `roundQuantity`.
 - [x] 1.2 [REPLACE][REMOVE/DEPRECATE] Byt ut alla lokala `copy`/`clone`/`structuredClone`/`JSON.parse(JSON.stringify())` mot ett kontrollerat clone-API med definierad behandling av datum, `undefined`, `Map`, `Set`, binärdata och snapshots.
-- [ ] 1.3 [REWRITE][MIGRATE] Externalisera BAS/DSAM-tabeller och kontometadata från hårdkodad källkod till versionerad datafil med checksumma, källa och importerbar validering.
+- [x] 1.3 [REWRITE][MIGRATE] Externalisera BAS/DSAM-tabeller och kontometadata från hårdkodad källkod till versionerad datafil med checksumma, källa och importerbar validering.
 - [ ] 1.4 [HARDEN] Gör runtime mode och provider capability truth explicit: inga simulatorer, demo-seeds eller `supportsLegalEffect=false`-adaptrar får maskeras som live.
 - [ ] 1.5 [NEW BUILD] Inför central valideringskärna för organisationsnummer, personnummer/samordningsnummer, OCR-/betalningsreferenser, VAT-nummer-normalisering (`GR`/`EL`) och datum/tidszonnormalisering.
 
