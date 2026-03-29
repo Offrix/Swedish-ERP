@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createPostgresAsyncJobStore, resolvePostgresConnectionString } from "../../packages/domain-core/src/jobs-store-postgres.mjs";
+import {
+  POSTGRES_ASYNC_JOB_REQUIRED_MIGRATION_IDS,
+  POSTGRES_ASYNC_JOB_SCHEMA_CONTRACT,
+  createPostgresAsyncJobStore,
+  resolvePostgresConnectionString
+} from "../../packages/domain-core/src/jobs-store-postgres.mjs";
 
 test("postgres async job store uses explicit connection string when provided", () => {
   const connectionString = resolvePostgresConnectionString({
@@ -69,4 +74,37 @@ test("postgres async job store constructor fails fast when host config is incomp
       }),
     /Missing Postgres environment variables/u
   );
+});
+
+test("postgres async job store publishes the bindande migration contract", () => {
+  assert.deepEqual(POSTGRES_ASYNC_JOB_REQUIRED_MIGRATION_IDS, [
+    "20260322200500_phase14_job_runtime",
+    "20260326124500_phase2_async_job_poison_and_failover",
+    "20260326143000_phase2_async_job_attempt_lifecycle",
+    "20260326083000_phase17_async_job_replay_lifecycle"
+  ]);
+  assert.equal(POSTGRES_ASYNC_JOB_SCHEMA_CONTRACT.schemaMigrationsTable, "schema_migrations");
+});
+
+test("postgres async job store schema contract covers required async job tables, indexes and keys", () => {
+  assert.deepEqual(Object.keys(POSTGRES_ASYNC_JOB_SCHEMA_CONTRACT.tables), [
+    "async_jobs",
+    "async_job_attempts",
+    "async_job_dead_letters",
+    "async_job_replay_plans"
+  ]);
+  assert.deepEqual(POSTGRES_ASYNC_JOB_SCHEMA_CONTRACT.tables.async_jobs.indexes, [
+    "ux_async_jobs_idempotency",
+    "ix_async_jobs_available",
+    "ix_async_jobs_claim_expiry"
+  ]);
+  assert.deepEqual(POSTGRES_ASYNC_JOB_SCHEMA_CONTRACT.tables.async_job_attempts.foreignKeys, [
+    {
+      columns: ["job_id"],
+      foreignTable: "async_jobs",
+      foreignColumns: ["job_id"]
+    }
+  ]);
+  assert.deepEqual(POSTGRES_ASYNC_JOB_SCHEMA_CONTRACT.tables.async_job_dead_letters.uniqueConstraints, [["job_id"]]);
+  assert.deepEqual(POSTGRES_ASYNC_JOB_SCHEMA_CONTRACT.tables.async_job_replay_plans.indexes, ["ix_async_job_replay_plans_job"]);
 });

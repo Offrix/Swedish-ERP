@@ -626,6 +626,7 @@ export function createCoreEngine({
       completeRuntimeRestorePlan: publicResilienceModule.completeRuntimeRestorePlan,
       abortRuntimeRestorePlan: publicResilienceModule.abortRuntimeRestorePlan,
       enqueueRuntimeJob: asyncJobsModule.enqueueAsyncJob,
+      verifyRuntimeJobStoreSchemaContract: asyncJobsModule.verifyAsyncJobStoreSchemaContract,
       claimAvailableRuntimeJobs: asyncJobsModule.claimAvailableAsyncJobs,
       startRuntimeJobAttempt: asyncJobsModule.startAsyncJobAttempt,
       heartbeatRuntimeJobAttempt: asyncJobsModule.heartbeatAsyncJobAttempt,

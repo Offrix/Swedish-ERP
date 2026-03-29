@@ -342,6 +342,30 @@ test("Phase 2.4 worker records synthetic failed attempts when attempt start cras
   assert.equal(deadLetter.latestAttemptId, attempts[0].jobAttemptId);
 });
 
+test("Phase 2.5 worker verifies runtime job store schema contract before claiming work", async () => {
+  let verified = 0;
+  let claimed = 0;
+
+  const processed = await runWorkerBatch({
+    platform: {
+      async verifyRuntimeJobStoreSchemaContract() {
+        verified += 1;
+      },
+      async claimAvailableRuntimeJobs() {
+        claimed += 1;
+        return [];
+      }
+    },
+    handlers: {},
+    logger: () => {},
+    workerId: "worker-phase2-schema-contract"
+  });
+
+  assert.equal(processed, 0);
+  assert.equal(verified, 1);
+  assert.equal(claimed, 1);
+});
+
 test("Phase 14 Step 4 worker runs submission transport jobs through the shared runtime", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-24T10:35:00Z")

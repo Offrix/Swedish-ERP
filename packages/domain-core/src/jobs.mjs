@@ -862,6 +862,7 @@ export function createAsyncJobsModule({
     asyncJobReplayStatuses: ASYNC_JOB_REPLAY_STATUSES,
     asyncJobOperatorStates: ASYNC_JOB_OPERATOR_STATES,
     asyncJobErrorClasses: ASYNC_JOB_ERROR_CLASSES,
+    verifyAsyncJobStoreSchemaContract,
     enqueueAsyncJob,
     claimAvailableAsyncJobs,
     startAsyncJobAttempt,
@@ -885,6 +886,18 @@ export function createAsyncJobsModule({
     if (typeof store.close === "function") {
       await store.close();
     }
+  }
+
+  async function verifyAsyncJobStoreSchemaContract() {
+    if (typeof store.verifySchemaContract === "function") {
+      return store.verifySchemaContract();
+    }
+    return {
+      ok: true,
+      schemaContractEnforced: false,
+      storeKind: typeof store.kind === "string" ? store.kind : "unknown",
+      verifiedAt: nowIso(clock)
+    };
   }
 
   async function enqueueAsyncJob({

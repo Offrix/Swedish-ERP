@@ -200,6 +200,349 @@ function addSeconds(isoTimestamp, seconds) {
   return new Date(new Date(isoTimestamp).getTime() + seconds * 1000).toISOString();
 }
 
+export const POSTGRES_ASYNC_JOB_REQUIRED_MIGRATION_IDS = Object.freeze([
+  "20260322200500_phase14_job_runtime",
+  "20260326124500_phase2_async_job_poison_and_failover",
+  "20260326143000_phase2_async_job_attempt_lifecycle",
+  "20260326083000_phase17_async_job_replay_lifecycle"
+]);
+
+export const POSTGRES_ASYNC_JOB_SCHEMA_CONTRACT = Object.freeze({
+  schemaMigrationsTable: "schema_migrations",
+  requiredMigrationIds: POSTGRES_ASYNC_JOB_REQUIRED_MIGRATION_IDS,
+  tables: Object.freeze({
+    async_jobs: Object.freeze({
+      columns: Object.freeze([
+        "job_id",
+        "company_id",
+        "job_type",
+        "source_object_type",
+        "source_object_id",
+        "idempotency_key",
+        "payload_hash",
+        "payload_json",
+        "metadata_json",
+        "status",
+        "risk_class",
+        "priority",
+        "available_at",
+        "claim_token",
+        "worker_id",
+        "claimed_at",
+        "claim_expires_at",
+        "attempt_count",
+        "max_attempts",
+        "last_result_code",
+        "last_error_class",
+        "last_error_code",
+        "last_error_message",
+        "claim_expiry_count",
+        "last_claim_expired_at",
+        "correlation_id",
+        "enqueued_by",
+        "completed_at",
+        "cancelled_at",
+        "created_at",
+        "updated_at"
+      ]),
+      indexes: Object.freeze([
+        "ux_async_jobs_idempotency",
+        "ix_async_jobs_available",
+        "ix_async_jobs_claim_expiry"
+      ]),
+      foreignKeys: Object.freeze([
+        Object.freeze({
+          columns: Object.freeze(["company_id"]),
+          foreignTable: "companies",
+          foreignColumns: Object.freeze(["company_id"])
+        })
+      ])
+    }),
+    async_job_attempts: Object.freeze({
+      columns: Object.freeze([
+        "job_attempt_id",
+        "job_id",
+        "attempt_no",
+        "worker_id",
+        "claim_token",
+        "status",
+        "claimed_at",
+        "claim_expires_at",
+        "started_at",
+        "finished_at",
+        "result_code",
+        "error_class",
+        "error_code",
+        "error_message",
+        "result_payload_json",
+        "next_retry_at",
+        "created_at"
+      ]),
+      indexes: Object.freeze([
+        "ux_async_job_attempts_job_attempt_no",
+        "ix_async_job_attempts_job",
+        "ix_async_job_attempts_job_status"
+      ]),
+      foreignKeys: Object.freeze([
+        Object.freeze({
+          columns: Object.freeze(["job_id"]),
+          foreignTable: "async_jobs",
+          foreignColumns: Object.freeze(["job_id"])
+        })
+      ])
+    }),
+    async_job_dead_letters: Object.freeze({
+      columns: Object.freeze([
+        "dead_letter_id",
+        "job_id",
+        "company_id",
+        "latest_attempt_id",
+        "terminal_reason",
+        "operator_state",
+        "replay_allowed",
+        "poison_pill_detected",
+        "poison_reason_code",
+        "poison_fingerprint",
+        "poison_detected_at",
+        "entered_at",
+        "created_at",
+        "updated_at"
+      ]),
+      indexes: Object.freeze([
+        "ix_async_job_dead_letters_company_state",
+        "ix_async_job_dead_letters_poison"
+      ]),
+      uniqueConstraints: Object.freeze([
+        Object.freeze(["job_id"])
+      ]),
+      foreignKeys: Object.freeze([
+        Object.freeze({
+          columns: Object.freeze(["job_id"]),
+          foreignTable: "async_jobs",
+          foreignColumns: Object.freeze(["job_id"])
+        }),
+        Object.freeze({
+          columns: Object.freeze(["company_id"]),
+          foreignTable: "companies",
+          foreignColumns: Object.freeze(["company_id"])
+        }),
+        Object.freeze({
+          columns: Object.freeze(["latest_attempt_id"]),
+          foreignTable: "async_job_attempts",
+          foreignColumns: Object.freeze(["job_attempt_id"])
+        })
+      ])
+    }),
+    async_job_replay_plans: Object.freeze({
+      columns: Object.freeze([
+        "replay_plan_id",
+        "job_id",
+        "company_id",
+        "planned_by_user_id",
+        "reason_code",
+        "planned_payload_strategy",
+        "status",
+        "approved_by_user_id",
+        "replay_job_id",
+        "planned_at",
+        "approved_at",
+        "executed_at",
+        "scheduled_at",
+        "started_at",
+        "completed_at",
+        "failed_at",
+        "cancelled_at",
+        "last_outcome_code",
+        "last_error_class",
+        "created_at",
+        "updated_at"
+      ]),
+      indexes: Object.freeze([
+        "ix_async_job_replay_plans_job"
+      ]),
+      foreignKeys: Object.freeze([
+        Object.freeze({
+          columns: Object.freeze(["job_id"]),
+          foreignTable: "async_jobs",
+          foreignColumns: Object.freeze(["job_id"])
+        }),
+        Object.freeze({
+          columns: Object.freeze(["company_id"]),
+          foreignTable: "companies",
+          foreignColumns: Object.freeze(["company_id"])
+        }),
+        Object.freeze({
+          columns: Object.freeze(["planned_by_user_id"]),
+          foreignTable: "users",
+          foreignColumns: Object.freeze(["user_id"])
+        }),
+        Object.freeze({
+          columns: Object.freeze(["approved_by_user_id"]),
+          foreignTable: "users",
+          foreignColumns: Object.freeze(["user_id"])
+        }),
+        Object.freeze({
+          columns: Object.freeze(["replay_job_id"]),
+          foreignTable: "async_jobs",
+          foreignColumns: Object.freeze(["job_id"])
+        })
+      ])
+    })
+  })
+});
+
+function buildColumnContractKey(tableName, columnName) {
+  return `${tableName}.${columnName}`;
+}
+
+function buildIndexContractKey(tableName, indexName) {
+  return `${tableName}.${indexName}`;
+}
+
+function buildUniqueConstraintKey(tableName, columns) {
+  return `${tableName}:${columns.join(",")}`;
+}
+
+function buildForeignKeyContractKey(tableName, columns, foreignTable, foreignColumns) {
+  return `${tableName}:${columns.join(",")}=>${foreignTable}:${foreignColumns.join(",")}`;
+}
+
+async function verifyPostgresAsyncJobSchemaContract(sql) {
+  const [schemaMigrationsTableRows, migrationRows, columnRows, indexRows, uniqueConstraintRows, foreignKeyRows] = await Promise.all([
+    sql`select to_regclass(current_schema() || '.schema_migrations')::text as relation_name`,
+    sql`select migration_id from schema_migrations`,
+    sql`
+      select table_name, column_name
+      from information_schema.columns
+      where table_schema = current_schema()
+    `,
+    sql`
+      select tablename as table_name, indexname as index_name
+      from pg_indexes
+      where schemaname = current_schema()
+    `,
+    sql`
+      select
+        tc.table_name,
+        string_agg(kcu.column_name, ',' order by kcu.ordinal_position) as column_list
+      from information_schema.table_constraints tc
+      join information_schema.key_column_usage kcu
+        on tc.constraint_name = kcu.constraint_name
+       and tc.table_schema = kcu.table_schema
+      where tc.table_schema = current_schema()
+        and tc.constraint_type = 'UNIQUE'
+      group by tc.table_name, tc.constraint_name
+    `,
+    sql`
+      select
+        tc.table_name,
+        string_agg(kcu.column_name, ',' order by kcu.ordinal_position) as column_list,
+        ccu.table_name as foreign_table_name,
+        string_agg(ccu.column_name, ',' order by kcu.ordinal_position) as foreign_column_list
+      from information_schema.table_constraints tc
+      join information_schema.key_column_usage kcu
+        on tc.constraint_name = kcu.constraint_name
+       and tc.table_schema = kcu.table_schema
+      join information_schema.constraint_column_usage ccu
+        on tc.constraint_name = ccu.constraint_name
+       and tc.table_schema = ccu.table_schema
+      where tc.table_schema = current_schema()
+        and tc.constraint_type = 'FOREIGN KEY'
+      group by tc.table_name, tc.constraint_name, ccu.table_name
+    `
+  ]);
+
+  if (!schemaMigrationsTableRows[0]?.relation_name) {
+    throw new Error("Postgres async job store schema contract is incomplete: missing schema_migrations table.");
+  }
+
+  const installedMigrationIds = new Set(migrationRows.map((row) => row.migration_id));
+  const availableColumns = new Set(columnRows.map((row) => buildColumnContractKey(row.table_name, row.column_name)));
+  const availableIndexes = new Set(indexRows.map((row) => buildIndexContractKey(row.table_name, row.index_name)));
+  const availableUniqueConstraints = new Set(
+    uniqueConstraintRows.map((row) => buildUniqueConstraintKey(row.table_name, String(row.column_list || "").split(",").filter(Boolean)))
+  );
+  const availableForeignKeys = new Set(
+    foreignKeyRows.map((row) =>
+      buildForeignKeyContractKey(
+        row.table_name,
+        String(row.column_list || "").split(",").filter(Boolean),
+        row.foreign_table_name,
+        String(row.foreign_column_list || "").split(",").filter(Boolean)
+      )
+    )
+  );
+
+  const missingMigrationIds = POSTGRES_ASYNC_JOB_SCHEMA_CONTRACT.requiredMigrationIds.filter(
+    (migrationId) => !installedMigrationIds.has(migrationId)
+  );
+  const missingColumns = [];
+  const missingIndexes = [];
+  const missingUniqueConstraints = [];
+  const missingForeignKeys = [];
+
+  for (const [tableName, tableContract] of Object.entries(POSTGRES_ASYNC_JOB_SCHEMA_CONTRACT.tables)) {
+    for (const columnName of tableContract.columns || []) {
+      const columnKey = buildColumnContractKey(tableName, columnName);
+      if (!availableColumns.has(columnKey)) {
+        missingColumns.push(columnKey);
+      }
+    }
+    for (const indexName of tableContract.indexes || []) {
+      const indexKey = buildIndexContractKey(tableName, indexName);
+      if (!availableIndexes.has(indexKey)) {
+        missingIndexes.push(indexKey);
+      }
+    }
+    for (const columns of tableContract.uniqueConstraints || []) {
+      const uniqueKey = buildUniqueConstraintKey(tableName, columns);
+      if (!availableUniqueConstraints.has(uniqueKey)) {
+        missingUniqueConstraints.push(uniqueKey);
+      }
+    }
+    for (const foreignKey of tableContract.foreignKeys || []) {
+      const foreignKeyKey = buildForeignKeyContractKey(
+        tableName,
+        foreignKey.columns,
+        foreignKey.foreignTable,
+        foreignKey.foreignColumns
+      );
+      if (!availableForeignKeys.has(foreignKeyKey)) {
+        missingForeignKeys.push(foreignKeyKey);
+      }
+    }
+  }
+
+  const failureMessages = [];
+  if (missingMigrationIds.length > 0) {
+    failureMessages.push(`missing migrations [${missingMigrationIds.join(", ")}]`);
+  }
+  if (missingColumns.length > 0) {
+    failureMessages.push(`missing columns [${missingColumns.join(", ")}]`);
+  }
+  if (missingIndexes.length > 0) {
+    failureMessages.push(`missing indexes [${missingIndexes.join(", ")}]`);
+  }
+  if (missingUniqueConstraints.length > 0) {
+    failureMessages.push(`missing unique constraints [${missingUniqueConstraints.join(", ")}]`);
+  }
+  if (missingForeignKeys.length > 0) {
+    failureMessages.push(`missing foreign keys [${missingForeignKeys.join(", ")}]`);
+  }
+
+  if (failureMessages.length > 0) {
+    throw new Error(`Postgres async job store schema contract is incomplete: ${failureMessages.join("; ")}.`);
+  }
+
+  return Object.freeze({
+    ok: true,
+    schemaMigrationsTable: POSTGRES_ASYNC_JOB_SCHEMA_CONTRACT.schemaMigrationsTable,
+    verifiedAt: new Date().toISOString(),
+    requiredMigrationIds: [...POSTGRES_ASYNC_JOB_SCHEMA_CONTRACT.requiredMigrationIds],
+    checkedTables: Object.keys(POSTGRES_ASYNC_JOB_SCHEMA_CONTRACT.tables)
+  });
+}
+
 export function createPostgresAsyncJobStore({
   connectionString = null,
   env = process.env,
@@ -221,12 +564,28 @@ export function createPostgresAsyncJobStore({
     prepare: false,
     onnotice: () => {}
   });
+  let schemaContractVerification = null;
 
   const store = {
     kind: "postgres",
 
     async close() {
       await sql.end({ timeout: 5 });
+    },
+
+    async verifySchemaContract() {
+      if (!schemaContractVerification) {
+        schemaContractVerification = verifyPostgresAsyncJobSchemaContract(sql)
+          .then((result) => {
+            logger("postgres async job store schema contract verified");
+            return result;
+          })
+          .catch((error) => {
+            schemaContractVerification = null;
+            throw error;
+          });
+      }
+      return schemaContractVerification;
     },
 
     async enqueueJob(record) {
