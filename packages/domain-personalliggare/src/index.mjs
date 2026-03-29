@@ -41,7 +41,7 @@ export function createPersonalliggareEngine({
     auditEvents: []
   };
 
-  return {
+  const engine = {
     registrationStatuses: PERSONALLIGGARE_REGISTRATION_STATUSES,
     attendanceEventTypes: PERSONALLIGGARE_ATTENDANCE_EVENT_TYPES,
     sourceChannels: PERSONALLIGGARE_SOURCE_CHANNELS,
@@ -71,6 +71,13 @@ export function createPersonalliggareEngine({
     exportAttendanceControlChain,
     listAttendanceAuditEvents
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function listConstructionSites({ companyId, thresholdRequired = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");

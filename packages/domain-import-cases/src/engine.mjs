@@ -75,7 +75,7 @@ export function createImportCasesEngine({
     seedDemoState();
   }
 
-  return {
+  const engine = {
     importCaseStatuses: IMPORT_CASE_STATUSES,
     importCaseCompletenessStatuses: IMPORT_CASE_COMPLETENESS_STATUSES,
     importCaseDocumentRoleCodes: IMPORT_CASE_DOCUMENT_ROLE_CODES,
@@ -95,6 +95,13 @@ export function createImportCasesEngine({
     correctImportCase,
     snapshotImportCases
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function createImportCase({
     companyId,

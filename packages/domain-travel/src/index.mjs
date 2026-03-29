@@ -107,7 +107,7 @@ export function createTravelEngine({
     seedTravelDemo(state, { clock, companyId: DEMO_COMPANY_ID });
   }
 
-  return {
+  const engine = {
     travelApprovalStatuses: TRAVEL_APPROVAL_STATUSES,
     mileageVehicleTypes: MILEAGE_VEHICLE_TYPES,
     expensePaymentMethods: EXPENSE_PAYMENT_METHODS,
@@ -120,6 +120,13 @@ export function createTravelEngine({
     listPayrollTravelPayloads,
     registerTravelPayrollConsumption
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function listForeignNormalAmounts({ taxYear = "2026" } = {}) {
     const resolvedTaxYear = normalizeTaxYear(taxYear);

@@ -71,7 +71,7 @@ export function createCollectiveAgreementsEngine({
     seedDemoState(state, clock);
   }
 
-  return {
+  const engine = {
     agreementFamilyStatuses: AGREEMENT_FAMILY_STATUSES,
     agreementVersionStatuses: AGREEMENT_VERSION_STATUSES,
     agreementAssignmentStatuses: AGREEMENT_ASSIGNMENT_STATUSES,
@@ -96,6 +96,13 @@ export function createCollectiveAgreementsEngine({
     getActiveAgreementForEmployment,
     evaluateAgreementOverlay
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function createAgreementFamily({
     companyId,

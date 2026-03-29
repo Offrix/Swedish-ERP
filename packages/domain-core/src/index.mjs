@@ -455,7 +455,7 @@ export function createCoreEngine({
     error
   });
 
-  return {
+  const engine = {
     portfolioStatusCodes: PORTFOLIO_STATUS_CODES,
     clientRequestStatuses: CLIENT_REQUEST_STATUSES,
     approvalPackageStatuses: APPROVAL_PACKAGE_STATUSES,
@@ -692,6 +692,13 @@ export function createCoreEngine({
         runPortfolioStatusRecomputeJob,
       snapshotCore: snapshot
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function createPortfolioMembership({
     sessionToken,

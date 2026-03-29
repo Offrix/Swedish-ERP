@@ -105,7 +105,7 @@ export function createSearchEngine({
     integrations: getIntegrationsPlatform
   };
 
-  return {
+  const engine = {
     searchDocumentStatuses: SEARCH_DOCUMENT_STATUSES,
     searchReindexStatuses: SEARCH_REINDEX_STATUSES,
     searchRebuildModes: SEARCH_REBUILD_MODES,
@@ -138,6 +138,13 @@ export function createSearchEngine({
     listDashboardWidgets,
     snapshotSearch
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function listSearchProjectionContracts({ companyId } = {}) {
     return syncProjectionContracts(requireText(companyId, "company_id_required")).map(copy);

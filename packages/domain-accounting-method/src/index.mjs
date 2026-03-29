@@ -130,6 +130,12 @@ export function createAccountingMethodEngine({
     enumerable: false
   });
 
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
   return engine;
 
   function assessCashMethodEligibility({

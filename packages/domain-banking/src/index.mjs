@@ -114,7 +114,7 @@ export function createBankingEngine({
     seedDemoState();
   }
 
-  return {
+  const engine = {
     bankAccountStatuses: BANK_ACCOUNT_STATUSES,
     paymentProposalStatuses: PAYMENT_PROPOSAL_STATUSES,
     paymentOrderStatuses: PAYMENT_ORDER_STATUSES,
@@ -155,6 +155,13 @@ export function createBankingEngine({
     returnPaymentOrder,
     snapshotBanking
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function listBankAccounts({ companyId, status = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");

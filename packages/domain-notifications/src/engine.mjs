@@ -34,7 +34,7 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     auditEvents: []
   };
 
-  return {
+  const engine = {
     notificationStatuses: NOTIFICATION_STATUSES,
     notificationRecipientTypes: NOTIFICATION_RECIPIENT_TYPES,
     notificationPriorityCodes: NOTIFICATION_PRIORITY_CODES,
@@ -63,6 +63,13 @@ export function createNotificationsEngine({ clock = () => new Date() } = {}) {
     listNotificationAuditEvents,
     snapshotNotifications
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function createNotification({
     companyId,

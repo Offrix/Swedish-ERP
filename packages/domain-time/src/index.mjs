@@ -63,7 +63,7 @@ export function createTimeEngine({
     countersByCompany: new Map()
   };
 
-  return {
+  const engine = {
     clockEventTypes: TIME_CLOCK_EVENT_TYPES,
     balanceTypes: TIME_BALANCE_TYPES,
     entrySourceTypes: TIME_ENTRY_SOURCE_TYPES,
@@ -104,6 +104,13 @@ export function createTimeEngine({
     lockLeaveSignals,
     listAbsenceDecisions
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function listScheduleTemplates({ companyId } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");

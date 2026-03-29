@@ -103,7 +103,7 @@ export function createAnnualReportingEngine({
     taxPackages: new Map()
   };
 
-  return {
+  const engine = {
     annualReportProfileCodes: ANNUAL_REPORT_PROFILE_CODES,
     annualReportPackageStatuses: ANNUAL_REPORT_PACKAGE_STATUSES,
     annualReportSignatoryStatuses: ANNUAL_REPORT_SIGNATORY_STATUSES,
@@ -201,6 +201,13 @@ export function createAnnualReportingEngine({
         providerBaselines: providerBaselines.snapshotProviderBaselineRegistry()
       })
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 }
 
 function createAnnualReportPackage(context, input = {}) {

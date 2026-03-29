@@ -21,7 +21,7 @@ export function createActivityEngine({ clock = () => new Date() } = {}) {
     auditEvents: []
   };
 
-  return {
+  const engine = {
     activityEntryStatuses: ACTIVITY_ENTRY_STATUSES,
     activityVisibilityScopes: ACTIVITY_VISIBILITY_SCOPES,
     projectActivityEntry,
@@ -32,6 +32,13 @@ export function createActivityEngine({ clock = () => new Date() } = {}) {
     rebuildActivityProjection,
     snapshotActivity
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function projectActivityEntry({
     companyId,

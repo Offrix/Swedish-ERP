@@ -94,7 +94,7 @@ export function createBenefitsEngine({
     seedCatalog(state, clock, DEMO_COMPANY_ID);
   }
 
-  return {
+  const engine = {
     benefitCodes: BENEFIT_CODES,
     listBenefitCatalog,
     getBenefitCatalogItem,
@@ -106,6 +106,13 @@ export function createBenefitsEngine({
     listPayrollBenefitPayloads,
     registerBenefitPayrollConsumption
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function listBenefitCatalog({ companyId } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");

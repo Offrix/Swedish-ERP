@@ -171,6 +171,12 @@ export function createHusEngine({
     enumerable: false
   });
 
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
   return engine;
 
   function listHusCases({ companyId, status = null } = {}) {
@@ -771,9 +777,9 @@ export function createHusEngine({
         createdAt: nowIso(clock),
         resolvedAt: null
       };
-      record.decisionDifferences.push(differenceRecord);
       state.husDecisionDifferences.set(differenceRecord.husDecisionDifferenceId, differenceRecord);
       appendToIndex(state.husDecisionDifferenceIdsByCompany, record.companyId, differenceRecord.husDecisionDifferenceId);
+      syncCaseDecisionDifference(record, differenceRecord);
     }
     if (resolvedRejectedAmount === 0) {
       claimRecord.status = "claim_accepted";
@@ -858,8 +864,9 @@ export function createHusEngine({
     record.resolvedByActorId = requireText(actorId, "actor_id_required");
     record.resolvedAt = nowIso(clock);
     const husCase = requireHusCase(record.companyId, record.husCaseId);
+    syncCaseDecisionDifference(husCase, record);
     refreshCaseDerivedState(husCase);
-    if (!hasOpenDecisionDifferences(husCase) && !hasOpenRecoveryCandidates(husCase) && husCase.status === "claim_rejected") {
+    if (!hasOpenDecisionDifferences(state, husCase) && !hasOpenRecoveryCandidates(state, husCase) && husCase.status === "claim_rejected") {
       husCase.status = "closed";
     }
     husCase.updatedAt = nowIso(clock);
@@ -890,7 +897,7 @@ export function createHusEngine({
       throw createError(409, "hus_claim_not_payable", "Only accepted HUS claims can be paid out.");
     }
     const record = requireHusCase(companyId, claimRecord.husCaseId);
-    if (record.decisionDifferences.some((item) => item.husClaimId === claimRecord.husClaimId && item.status === "open")) {
+    if (hasOpenDecisionDifferencesForClaim(state, record, claimRecord.husClaimId)) {
       throw createError(409, "hus_claim_difference_unresolved", "Partial HUS decisions must resolve open decision differences before payout.");
     }
     const payout = {
@@ -919,7 +926,7 @@ export function createHusEngine({
       createdAt: nowIso(clock)
     });
     refreshCaseDerivedState(record);
-    record.status = hasOpenRecoveryCandidates(record) ? "recovery_pending" : "paid_out";
+    record.status = hasOpenRecoveryCandidates(state, record) ? "recovery_pending" : "paid_out";
     record.updatedAt = nowIso(clock);
     pushAudit(state, clock, {
       companyId: record.companyId,
@@ -971,9 +978,9 @@ export function createHusEngine({
         createdByActorId: adjustment.createdByActorId,
         createdAt: nowIso(clock)
       };
-      record.recoveryCandidates.push(recoveryCandidate);
       state.husRecoveryCandidates.set(recoveryCandidate.husRecoveryCandidateId, recoveryCandidate);
       appendToIndex(state.husRecoveryCandidateIdsByCompany, record.companyId, recoveryCandidate.husRecoveryCandidateId);
+      syncCaseRecoveryCandidate(record, recoveryCandidate);
     }
     refreshCaseDerivedState(record);
     record.status = adjustment.afterPayoutFlag ? "recovery_pending" : record.status;
@@ -1027,7 +1034,7 @@ export function createHusEngine({
     const recoveryAmountValue = normalizeMoney(recoveryAmount, "hus_recovery_amount_invalid");
     const recoveryCandidate = normalizeOptionalText(husRecoveryCandidateId)
       ? requireHusRecoveryCandidate(record.companyId, husRecoveryCandidateId)
-      : findOpenRecoveryCandidate(record);
+      : findOpenRecoveryCandidate(state, record);
     if (!recoveryCandidate || recoveryCandidate.husCaseId !== record.husCaseId || recoveryCandidate.status !== "open") {
       throw createError(409, "hus_recovery_candidate_missing", "An open HUS recovery candidate is required before recovery can be recorded.");
     }
@@ -1057,8 +1064,9 @@ export function createHusEngine({
     recoveryCandidate.status = recoveryAmountValue >= recoveryCandidate.differenceAmount - MONEY_EPSILON ? "recovered" : "open";
     recoveryCandidate.resolvedAt = recoveryCandidate.status === "recovered" ? nowIso(clock) : null;
     recoveryCandidate.resolutionCode = recoveryCandidate.status === "recovered" ? "recovered" : null;
+    syncCaseRecoveryCandidate(record, recoveryCandidate);
     refreshCaseDerivedState(record);
-    if (!hasOpenRecoveryCandidates(record) && !hasOpenDecisionDifferences(record)) {
+    if (!hasOpenRecoveryCandidates(state, record) && !hasOpenDecisionDifferences(state, record)) {
       record.status = "closed";
     } else {
       record.status = "recovery_pending";
@@ -2017,16 +2025,55 @@ function buildClaimBuyerDecisionAllocations(claimRecord, { approvedAmount, rejec
   });
 }
 
-function hasOpenDecisionDifferences(record) {
-  return record.decisionDifferences.some((item) => item.status === "open");
+function syncCaseDecisionDifference(record, differenceRecord) {
+  upsertCaseCollectionRecord(record.decisionDifferences, "husDecisionDifferenceId", differenceRecord);
 }
 
-function hasOpenRecoveryCandidates(record) {
-  return record.recoveryCandidates.some((item) => item.status === "open");
+function syncCaseRecoveryCandidate(record, recoveryCandidate) {
+  upsertCaseCollectionRecord(record.recoveryCandidates, "husRecoveryCandidateId", recoveryCandidate);
 }
 
-function findOpenRecoveryCandidate(record) {
-  return record.recoveryCandidates.find((item) => item.status === "open") || null;
+function upsertCaseCollectionRecord(collection, idField, entry) {
+  const index = collection.findIndex((candidate) => candidate[idField] === entry[idField]);
+  if (index === -1) {
+    collection.push(entry);
+    return;
+  }
+  collection[index] = entry;
+}
+
+function listCaseDecisionDifferences(state, record) {
+  const records = (state.husDecisionDifferenceIdsByCompany.get(record.companyId) || [])
+    .map((differenceId) => state.husDecisionDifferences.get(differenceId))
+    .filter(Boolean)
+    .filter((candidate) => candidate.husCaseId === record.husCaseId);
+  return records.length ? records : record.decisionDifferences;
+}
+
+function listCaseRecoveryCandidates(state, record) {
+  const records = (state.husRecoveryCandidateIdsByCompany.get(record.companyId) || [])
+    .map((candidateId) => state.husRecoveryCandidates.get(candidateId))
+    .filter(Boolean)
+    .filter((candidate) => candidate.husCaseId === record.husCaseId);
+  return records.length ? records : record.recoveryCandidates;
+}
+
+function hasOpenDecisionDifferences(state, record) {
+  return listCaseDecisionDifferences(state, record).some((item) => item.status === "open");
+}
+
+function hasOpenDecisionDifferencesForClaim(state, record, husClaimId) {
+  return listCaseDecisionDifferences(state, record).some(
+    (item) => item.husClaimId === husClaimId && item.status === "open"
+  );
+}
+
+function hasOpenRecoveryCandidates(state, record) {
+  return listCaseRecoveryCandidates(state, record).some((item) => item.status === "open");
+}
+
+function findOpenRecoveryCandidate(state, record) {
+  return listCaseRecoveryCandidates(state, record).find((item) => item.status === "open") || null;
 }
 
 function hasLockedClaimFields(record) {

@@ -126,7 +126,7 @@ function collectMapOnlyTruthFindings({ protectedMode, startupSurface, workspaceR
       typeof domains?.[target.domainKey]?.getCriticalDomainDurability === "function"
         ? domains[target.domainKey].getCriticalDomainDurability()
         : null;
-    if (durability?.truthMode === "durable_snapshot") {
+    if (["durable_snapshot", "repository_envelope"].includes(durability?.truthMode)) {
       continue;
     }
 

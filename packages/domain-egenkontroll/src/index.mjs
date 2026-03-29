@@ -44,7 +44,7 @@ export function createEgenkontrollEngine({
     auditEvents: []
   };
 
-  return {
+  const engine = {
     checklistTemplateStatuses: EGENKONTROLL_TEMPLATE_STATUSES,
     checklistInstanceStatuses: EGENKONTROLL_INSTANCE_STATUSES,
     checklistPointResultCodes: EGENKONTROLL_POINT_RESULT_CODES,
@@ -69,6 +69,13 @@ export function createEgenkontrollEngine({
     listEgenkontrollAuditEvents,
     snapshotEgenkontroll
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function listChecklistTemplates({ companyId, templateCode = null, status = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");

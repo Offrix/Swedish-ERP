@@ -65,7 +65,7 @@ export function createBalancesEngine({
     seedDemoState(state, clock);
   }
 
-  return {
+  const engine = {
     balanceUnitCodes: BALANCE_UNIT_CODES,
     balanceOwnerTypeCodes: BALANCE_OWNER_TYPE_CODES,
     balanceAccountStatuses: BALANCE_ACCOUNT_STATUSES,
@@ -86,6 +86,13 @@ export function createBalancesEngine({
     runBalanceExpiry,
     listBalanceExpiryRuns
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function createBalanceType({
     companyId,

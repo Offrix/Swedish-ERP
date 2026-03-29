@@ -55,7 +55,7 @@ export function createHrEngine({
     seedDemoState();
   }
 
-  return {
+  const engine = {
     identityTypes: HR_IDENTITY_TYPES,
     bankPayoutMethods: HR_BANK_PAYOUT_METHODS,
     listEmployees,
@@ -82,6 +82,13 @@ export function createHrEngine({
     attachEmployeeDocument,
     listEmployeeAuditEvents
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function listEmployees({ companyId } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");

@@ -116,7 +116,7 @@ export function createPensionEngine({
     seedPlanCatalog(state, { companyId: DEMO_COMPANY_ID, clock });
   }
 
-  return {
+  const engine = {
     pensionPlanCodes: PENSION_PLAN_CODES,
     pensionProviderCodes: PENSION_PROVIDER_CODES,
     contributionModes: CONTRIBUTION_MODES,
@@ -140,6 +140,13 @@ export function createPensionEngine({
     listPayrollPensionPayloads,
     registerPensionPayrollConsumption
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function listPensionPlans({ companyId } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");

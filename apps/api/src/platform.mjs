@@ -40,8 +40,10 @@ import { createSearchPlatform } from "../../../packages/domain-search/src/index.
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
 import {
   createCorePlatform,
+  applyDurableStateSnapshot,
   createInMemoryCriticalDomainStateStore,
-  createSqliteCriticalDomainStateStore
+  createSqliteCriticalDomainStateStore,
+  serializeDurableState
 } from "../../../packages/domain-core/src/index.mjs";
 import { createAnnualReportingPlatform, ANNUAL_REPORTING_PROVIDER_BASELINES } from "../../../packages/domain-annual-reporting/src/index.mjs";
 import {
@@ -1064,7 +1066,10 @@ export function createApiPlatform(options = {}) {
             truthMode: durability?.truthMode || "map_only",
             persistenceStoreKind: durability?.persistenceStoreKind || null,
             snapshotHash: durability?.snapshotHash || null,
-            durable: durability?.truthMode === "durable_snapshot"
+            objectVersion: durability?.objectVersion ?? null,
+            durabilityPolicy: durability?.durabilityPolicy || null,
+            adapterKind: durability?.adapterKind || null,
+            durable: ["repository_envelope", "in_memory_repository_envelope"].includes(durability?.truthMode)
           });
         }),
       enumerable: false
@@ -1178,21 +1183,10 @@ export function createDefaultApiPlatform({
   });
 }
 
-const CRITICAL_DOMAIN_KEYS = Object.freeze([
-  "orgAuth",
-  "tenantControl",
-  "evidence",
-  "observability",
-  "ledger",
-  "vat",
-  "ar",
-  "ap",
-  "payroll",
-  "taxAccount",
-  "reviewCenter",
-  "projects",
-  "integrations"
-]);
+const STATELESS_DOMAIN_KEYS = Object.freeze(["automation"]);
+const CRITICAL_DOMAIN_KEYS = Object.freeze(
+  API_PLATFORM_BUILD_ORDER.filter((domainKey) => !STATELESS_DOMAIN_KEYS.includes(domainKey))
+);
 
 const CRITICAL_DOMAIN_READ_METHOD_PREFIXES = Object.freeze([
   "get",
@@ -1217,9 +1211,9 @@ function stableStringify(value) {
 function resolveCriticalDomainTruthMode(store) {
   const storeKind = typeof store?.kind === "string" ? store.kind : null;
   if (storeKind && storeKind !== "memory_critical_domain_state_store") {
-    return "durable_snapshot";
+    return "repository_envelope";
   }
-  return "in_memory_snapshot";
+  return "in_memory_repository_envelope";
 }
 
 function hashSnapshot(value) {
@@ -1228,6 +1222,44 @@ function hashSnapshot(value) {
 
 function isReadMethod(methodName) {
   return CRITICAL_DOMAIN_READ_METHOD_PREFIXES.some((prefix) => methodName.startsWith(prefix));
+}
+
+function resolveDomainDurabilityPolicy(domainKey) {
+  if (STATELESS_DOMAIN_KEYS.includes(domainKey)) {
+    return Object.freeze({
+      domainKey,
+      truthMode: "stateless",
+      durabilityPolicy: "stateless"
+    });
+  }
+  return Object.freeze({
+    domainKey,
+    truthMode: "repository_envelope",
+    durabilityPolicy: "repository_envelope"
+  });
+}
+
+function resolveDurableStateAdapter(platform) {
+  if (
+    typeof platform?.exportDurableState === "function"
+    && typeof platform?.importDurableState === "function"
+  ) {
+    return {
+      adapterKind: "platform_export_import",
+      exportSnapshot: () => platform.exportDurableState(),
+      importSnapshot: (snapshot) => platform.importDurableState(snapshot)
+    };
+  }
+
+  if (platform?.__durableState && typeof platform.__durableState === "object") {
+    return {
+      adapterKind: "hidden_state_generic",
+      exportSnapshot: () => serializeDurableState(platform.__durableState),
+      importSnapshot: (snapshot) => applyDurableStateSnapshot(platform.__durableState, snapshot)
+    };
+  }
+
+  return null;
 }
 
 function resolveCriticalDomainStateStore({
@@ -1260,32 +1292,63 @@ function resolveCriticalDomainStateStore({
 }
 
 function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
-  if (!CRITICAL_DOMAIN_KEYS.includes(domainKey)) {
+  const durabilityPolicy = resolveDomainDurabilityPolicy(domainKey);
+  if (durabilityPolicy.truthMode === "stateless") {
+    Object.defineProperty(platform, "__criticalDomainPersistence", {
+      value: Object.freeze({
+        domainKey,
+        storeKind: null,
+        durabilityPolicy: durabilityPolicy.durabilityPolicy
+      }),
+      enumerable: false
+    });
+    Object.defineProperty(platform, "getCriticalDomainDurability", {
+      value: () =>
+        Object.freeze({
+          domainKey,
+          truthMode: "stateless",
+          persistenceStoreKind: null,
+          snapshotHash: null,
+          objectVersion: null,
+          durabilityPolicy: durabilityPolicy.durabilityPolicy,
+          adapterKind: null
+        }),
+      enumerable: false
+    });
+    Object.defineProperty(platform, "flushDurableState", {
+      value: () => null,
+      enumerable: false
+    });
     return platform;
   }
 
-  if (
-    !store ||
-    typeof platform?.exportDurableState !== "function" ||
-    typeof platform?.importDurableState !== "function"
-  ) {
-    return platform;
+  const adapter = resolveDurableStateAdapter(platform);
+  if (!store || !adapter) {
+    throw new Error(`Domain "${domainKey}" requires a repository durability adapter in phase 2.1.`);
   }
 
   const existingRecord = store.load(domainKey);
   if (existingRecord?.snapshot) {
-    platform.importDurableState(existingRecord.snapshot);
+    adapter.importSnapshot(existingRecord.snapshot);
   }
 
   let lastPersistedHash = existingRecord?.snapshotHash || null;
+  let lastPersistedObjectVersion = existingRecord?.objectVersion || 0;
   const persist = () => {
-    const snapshot = platform.exportDurableState();
+    const snapshot = adapter.exportSnapshot();
     const snapshotHash = hashSnapshot(snapshot);
     if (snapshotHash === lastPersistedHash) {
       return null;
     }
-    const record = store.save({ domainKey, snapshot });
+    const record = store.save({
+      domainKey,
+      snapshot,
+      expectedObjectVersion: lastPersistedObjectVersion,
+      durabilityPolicy: durabilityPolicy.durabilityPolicy,
+      adapterKind: adapter.adapterKind
+    });
     lastPersistedHash = record.snapshotHash;
+    lastPersistedObjectVersion = record.objectVersion;
     return record;
   };
 
@@ -1299,7 +1362,10 @@ function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
             domainKey,
             truthMode: resolveCriticalDomainTruthMode(store),
             persistenceStoreKind: store.kind,
-            snapshotHash: lastPersistedHash
+            snapshotHash: lastPersistedHash,
+            objectVersion: lastPersistedObjectVersion,
+            durabilityPolicy: durabilityPolicy.durabilityPolicy,
+            adapterKind: adapter.adapterKind
           });
       }
       if (property === "flushDurableState") {
@@ -1314,6 +1380,7 @@ function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
         [
           "exportDurableState",
           "importDurableState",
+          "__durableState",
           "getCriticalDomainDurability",
           "flushDurableState"
         ].includes(property) ||
@@ -1322,9 +1389,9 @@ function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
         return value.bind(target);
       }
       return (...args) => {
-        const beforeSnapshot = target.exportDurableState();
+        const beforeSnapshot = adapter.exportSnapshot();
         const restoreOnFailure = (error) => {
-          target.importDurableState(beforeSnapshot);
+          adapter.importSnapshot(beforeSnapshot);
           throw error;
         };
         try {
@@ -1353,7 +1420,9 @@ function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
   Object.defineProperty(proxy, "__criticalDomainPersistence", {
     value: Object.freeze({
       domainKey,
-      storeKind: store.kind
+      storeKind: store.kind,
+      durabilityPolicy: durabilityPolicy.durabilityPolicy,
+      objectVersion: () => lastPersistedObjectVersion
     }),
     enumerable: false
   });

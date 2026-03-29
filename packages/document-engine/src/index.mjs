@@ -72,7 +72,7 @@ export function createDocumentArchiveEngine({
     auditEvents: []
   };
 
-  return {
+  const engine = {
     createDocumentRecord,
     appendDocumentVersion,
     linkDocumentRecord,
@@ -91,6 +91,13 @@ export function createDocumentArchiveEngine({
     getReviewTask,
     snapshotDocumentArchive
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function createDocumentRecord({
     companyId,

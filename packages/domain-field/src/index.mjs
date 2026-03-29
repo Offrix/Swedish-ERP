@@ -1224,7 +1224,7 @@ export function createFieldEngine({
       .map(copy);
   }
 
-  return {
+  const engine = {
     fieldWorkOrderStatuses: FIELD_WORK_ORDER_STATUSES,
     fieldDispatchStatuses: FIELD_DISPATCH_STATUSES,
     fieldInventoryLocationTypes: FIELD_INVENTORY_LOCATION_TYPES,
@@ -1269,6 +1269,13 @@ export function createFieldEngine({
     resolveConflictRecord,
     listFieldAuditEvents
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 }
 
 function pushAudit(state, clock, event) {

@@ -73,7 +73,7 @@ export function createDocumentClassificationEngine({
     seedDemoState();
   }
 
-  return {
+  const engine = {
     classificationCaseStatuses: CLASSIFICATION_CASE_STATUSES,
     treatmentLineTypes: TREATMENT_LINE_TYPES,
     treatmentCodes: TREATMENT_CODES,
@@ -90,6 +90,13 @@ export function createDocumentClassificationEngine({
     getClassificationDispatchStatus,
     snapshotDocumentClassification
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function createClassificationCase(input = {}) {
     const companyId = requireText(input.companyId, "company_id_required");

@@ -28,7 +28,7 @@ export function createId06Engine({
     auditEvents: []
   };
 
-  return {
+  const engine = {
     companyVerificationStatuses: ID06_COMPANY_VERIFICATION_STATUSES,
     personVerificationStatuses: ID06_PERSON_VERIFICATION_STATUSES,
     cardLifecycleStatuses: ID06_CARD_LIFECYCLE_STATUSES,
@@ -48,6 +48,13 @@ export function createId06Engine({
     listAttendanceMirrors,
     listAuditEvents
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function verifyCompany({
     companyId,

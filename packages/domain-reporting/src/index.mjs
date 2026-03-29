@@ -347,7 +347,7 @@ export function createReportingEngine({
     auditEvents: []
   };
 
-  return {
+  const engine = {
     reportCodes: REPORT_CODES,
     reportViewModes: REPORT_VIEW_MODES,
     reportExportFormats: REPORT_EXPORT_FORMATS,
@@ -375,6 +375,13 @@ export function createReportingEngine({
     signOffReconciliationRun,
     snapshotReporting
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function listMetricDefinitions({ companyId, reportCode = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");

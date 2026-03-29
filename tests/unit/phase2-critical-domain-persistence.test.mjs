@@ -3,24 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { API_PLATFORM_BUILD_ORDER, createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { createInMemoryCriticalDomainStateStore } from "../../packages/domain-core/src/index.mjs";
 
-const CRITICAL_DOMAIN_KEYS = Object.freeze([
-  "orgAuth",
-  "tenantControl",
-  "evidence",
-  "observability",
-  "ledger",
-  "vat",
-  "ar",
-  "ap",
-  "payroll",
-  "taxAccount",
-  "reviewCenter",
-  "projects",
-  "integrations"
-]);
+const CRITICAL_DOMAIN_KEYS = Object.freeze(
+  API_PLATFORM_BUILD_ORDER.filter((domainKey) => domainKey !== "automation")
+);
 
 function createTempSqlitePath(prefix) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
@@ -34,7 +22,7 @@ function cleanupTempDirectory(directory) {
   fs.rmSync(directory, { recursive: true, force: true });
 }
 
-test("Phase 2.4 rehydrates critical domain truth from sqlite-backed durable snapshots", () => {
+test("Phase 2.1 rehydrates repository-backed domain truth from sqlite-backed aggregate envelopes", () => {
   const temp = createTempSqlitePath("swedish-erp-phase24");
   const options = {
     env: {},
@@ -74,7 +62,8 @@ test("Phase 2.4 rehydrates critical domain truth from sqlite-backed durable snap
 
     for (const domainKey of CRITICAL_DOMAIN_KEYS) {
       const durability = platform1.getDomain(domainKey)?.getCriticalDomainDurability?.();
-      assert.equal(durability?.truthMode, "durable_snapshot");
+      assert.equal(durability?.truthMode, "repository_envelope");
+      assert.equal(typeof durability?.objectVersion, "number");
       assert.ok(typeof durability?.snapshotHash === "string" && durability.snapshotHash.length > 0);
     }
 
@@ -101,7 +90,7 @@ test("Phase 2.4 rehydrates critical domain truth from sqlite-backed durable snap
   }
 });
 
-test("Phase 2.4 runtime diagnostics clear map-only truth only for durable critical-domain stores", () => {
+test("Phase 2.1 runtime diagnostics clear map-only truth only for repository-backed durable domain stores", () => {
   const temp = createTempSqlitePath("swedish-erp-phase24-runtime");
   const sqlitePlatform = createApiPlatform({
     env: {},
@@ -134,7 +123,7 @@ test("Phase 2.4 runtime diagnostics clear map-only truth only for durable critic
   }
 });
 
-test("Phase 2.4 platform exposes per-domain durability inventory for critical domains", () => {
+test("Phase 2.1 platform exposes per-domain durability inventory for all repository-backed domains", () => {
   const temp = createTempSqlitePath("swedish-erp-phase24-inventory");
   const sqlitePlatform = createApiPlatform({
     env: {},
@@ -155,7 +144,9 @@ test("Phase 2.4 platform exposes per-domain durability inventory for critical do
     assert.deepEqual(sqliteInventory.map((entry) => entry.domainKey), CRITICAL_DOMAIN_KEYS);
     assert.deepEqual(memoryInventory.map((entry) => entry.domainKey), CRITICAL_DOMAIN_KEYS);
     assert.equal(sqliteInventory.every((entry) => entry.durable === true), true);
-    assert.equal(memoryInventory.every((entry) => entry.truthMode === "in_memory_snapshot"), true);
+    assert.equal(memoryInventory.every((entry) => entry.truthMode === "in_memory_repository_envelope"), true);
+    assert.equal(sqliteInventory.every((entry) => entry.truthMode === "repository_envelope"), true);
+    assert.equal(sqliteInventory.every((entry) => typeof entry.objectVersion === "number" && entry.objectVersion >= 1), true);
     assert.equal(sqliteInventory.every((entry) => typeof entry.snapshotHash === "string" && entry.snapshotHash.length > 0), true);
   } finally {
     sqlitePlatform.closeCriticalDomainStateStore();
@@ -164,7 +155,7 @@ test("Phase 2.4 platform exposes per-domain durability inventory for critical do
   }
 });
 
-test("Phase 2.4 can bootstrap sqlite-backed critical truth without explicit file path", () => {
+test("Phase 2.1 can bootstrap sqlite-backed repository truth without explicit file path", () => {
   const platform = createApiPlatform({
     env: {},
     runtimeMode: "test",
@@ -173,7 +164,7 @@ test("Phase 2.4 can bootstrap sqlite-backed critical truth without explicit file
 
   try {
     const durability = platform.listCriticalDomainDurability();
-    assert.equal(durability.every((entry) => entry.truthMode === "durable_snapshot"), true);
+    assert.equal(durability.every((entry) => entry.truthMode === "repository_envelope"), true);
     assert.equal(
       durability.every((entry) => typeof entry.snapshotHash === "string" && entry.snapshotHash.length > 0),
       true
@@ -183,7 +174,7 @@ test("Phase 2.4 can bootstrap sqlite-backed critical truth without explicit file
   }
 });
 
-test("Phase 2.4 rolls back critical-domain mutations when durable save fails", () => {
+test("Phase 2.1 rolls back repository-backed domain mutations when aggregate save fails", () => {
   const baseStore = createInMemoryCriticalDomainStateStore();
   let failWrites = false;
   const failingStore = {

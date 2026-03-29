@@ -72,7 +72,7 @@ test("phase 1.4 protected runtime does not auto-provision sqlite-backed critical
 
   try {
     const durability = platform.listCriticalDomainDurability();
-    assert.equal(durability.every((entry) => entry.truthMode === "in_memory_snapshot"), true);
+    assert.equal(durability.every((entry) => entry.truthMode === "in_memory_repository_envelope"), true);
     assert.equal(platform.getRuntimeStartupDiagnostics().startupAllowed, false);
   } finally {
     platform.closeCriticalDomainStateStore?.();

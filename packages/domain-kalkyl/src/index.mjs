@@ -21,7 +21,7 @@ export function createKalkylEngine({
     auditEvents: []
   };
 
-  return {
+  const engine = {
     estimateVersionStatuses: ESTIMATE_VERSION_STATUSES,
     estimateLineTypeCodes: ESTIMATE_LINE_TYPE_CODES,
     listEstimateVersions,
@@ -36,6 +36,13 @@ export function createKalkylEngine({
     listEstimateAuditEvents,
     snapshotKalkyl
   };
+
+  Object.defineProperty(engine, "__durableState", {
+    value: state,
+    enumerable: false
+  });
+
+  return engine;
 
   function listEstimateVersions({ companyId, estimateNo = null, status = null, customerId = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
