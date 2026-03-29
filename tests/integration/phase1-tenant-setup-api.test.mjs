@@ -39,6 +39,12 @@ test("Phase 1 API routes tenant setup, trial and module lifecycles through tenan
       "/v1/trial/environments",
       "/v1/trial/promotions",
       "/v1/trial/promotions/:promotionPlanId/execute",
+      "/v1/trial/promotions/workflows",
+      "/v1/trial/support-policy",
+      "/v1/trial/operations",
+      "/v1/trial/operations/alerts",
+      "/v1/trial/operations/queues",
+      "/v1/trial/analytics",
       "/v1/tenant/parallel-runs"
     ]) {
       assert.equal(root.routes.includes(route), true, `${route} should be exposed`);

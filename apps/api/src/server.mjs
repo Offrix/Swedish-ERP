@@ -349,6 +349,12 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/trial/environments/:trialEnvironmentProfileId/refresh",
               "/v1/trial/promotions",
               "/v1/trial/promotions/:promotionPlanId/execute",
+              "/v1/trial/promotions/workflows",
+              "/v1/trial/support-policy",
+              "/v1/trial/operations",
+              "/v1/trial/operations/alerts",
+              "/v1/trial/operations/queues",
+              "/v1/trial/analytics",
               "/v1/onboarding/runs",
               "/v1/onboarding/runs/:runId",
               "/v1/onboarding/runs/:runId/checklist",
@@ -1814,6 +1820,104 @@ async function handleRequest({ req, res, platform, flags }) {
           companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
         })
       }
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/trial/promotions/workflows") {
+    writeJson(
+      res,
+      200,
+      {
+        items: requireTenantControlDomain(platform).listTrialPromotionWorkflows({
+          sessionToken: readSessionToken(req),
+          companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+        })
+      }
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/trial/support-policy") {
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).getTrialSupportPolicy({
+        sessionToken: readSessionToken(req),
+        companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/trial/support-policy") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).updateTrialSupportPolicy({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        allowedResetRoleCodes: body.allowedResetRoleCodes,
+        allowedResetCompanyUserIds: body.allowedResetCompanyUserIds,
+        allowedSupportRoleCodes: body.allowedSupportRoleCodes,
+        expiryWarningDays: body.expiryWarningDays,
+        promotionStaleDays: body.promotionStaleDays,
+        resetStaleHours: body.resetStaleHours,
+        analyticsWindowDays: body.analyticsWindowDays
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/trial/operations") {
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).getTrialOperationsSnapshot({
+        sessionToken: readSessionToken(req),
+        companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/trial/operations/alerts") {
+    writeJson(
+      res,
+      200,
+      {
+        items: requireTenantControlDomain(platform).listTrialOperationAlerts({
+          sessionToken: readSessionToken(req),
+          companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+        })
+      }
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/trial/operations/queues") {
+    writeJson(
+      res,
+      200,
+      {
+        items: requireTenantControlDomain(platform).listTrialOperationQueueViews({
+          sessionToken: readSessionToken(req),
+          companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+        })
+      }
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/trial/analytics") {
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).getTrialSalesDemoAnalytics({
+        sessionToken: readSessionToken(req),
+        companyId: requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.")
+      })
     );
     return;
   }

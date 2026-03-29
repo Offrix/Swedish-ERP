@@ -132,6 +132,8 @@ test("Phase 15.5 mission control exposes project, close, payroll, cutover and tr
     assert.equal(trialDashboard.counters.activeTrials >= 1, true);
     assert.equal(trialDashboard.rows.some((row) => row.promotionStatus != null), true);
     assert.equal(trialDashboard.rows.some((row) => row.parallelRunStatus != null), true);
+    assert.equal(trialDashboard.summary.operationsSummary != null, true);
+    assert.equal(trialDashboard.summary.salesDemoAnalytics != null, true);
   } finally {
     await stopServer(server);
   }

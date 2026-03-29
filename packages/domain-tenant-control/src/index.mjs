@@ -309,6 +309,41 @@ const DEFAULT_POST_PROMOTION_TASK_CODES = Object.freeze([
   "configure_bank_connections",
   "configure_authority_registration"
 ]);
+const DEFAULT_TRIAL_SUPPORT_POLICY_CODE = "trial_live_ops_default";
+const DEFAULT_TRIAL_OPERATIONS_QUEUE_DEFINITIONS = Object.freeze([
+  Object.freeze({
+    queueCode: "TRIAL_SUPPORT_QUEUE",
+    label: "Trial support queue",
+    sourceType: "trial_environment_profile"
+  }),
+  Object.freeze({
+    queueCode: "TRIAL_RESET_QUEUE",
+    label: "Trial reset queue",
+    sourceType: "trial_reset"
+  }),
+  Object.freeze({
+    queueCode: "TRIAL_PROMOTION_QUEUE",
+    label: "Trial promotion queue",
+    sourceType: "promotion_plan"
+  }),
+  Object.freeze({
+    queueCode: "TRIAL_EXPIRY_QUEUE",
+    label: "Trial expiry queue",
+    sourceType: "trial_expiry"
+  }),
+  Object.freeze({
+    queueCode: "TRIAL_PARALLEL_RUN_QUEUE",
+    label: "Trial parallel run queue",
+    sourceType: "parallel_run_plan"
+  })
+]);
+const DEFAULT_TRIAL_RESET_ROLE_CODES = Object.freeze(["company_admin", "bureau_user"]);
+const DEFAULT_TRIAL_SUPPORT_ROLE_CODES = Object.freeze(["company_admin", "bureau_user"]);
+const DEFAULT_TRIAL_EXPIRY_WARNING_DAYS = 7;
+const DEFAULT_TRIAL_PROMOTION_STALE_DAYS = 14;
+const DEFAULT_TRIAL_RESET_STALE_HOURS = 4;
+const DEFAULT_TRIAL_ANALYTICS_WINDOW_DAYS = 90;
+const TRIAL_POLICY_ALLOWED_ROLE_CODES = Object.freeze(["company_admin", "approver", "payroll_admin", "field_user", "bureau_user"]);
 const DEFAULT_FINANCE_QUEUE_STRUCTURE = Object.freeze([
   Object.freeze({
     queueCode: "finance_review",
@@ -392,6 +427,7 @@ export function createTenantControlEngine({
     moduleActivationProfiles: new Map(),
     trialEnvironmentProfiles: new Map(),
     trialEnvironmentIdsByCompany: new Map(),
+    trialSupportPolicies: new Map(),
     promotionPlans: new Map(),
     promotionPlanIdsByCompany: new Map(),
     promotionValidationReports: new Map(),
@@ -425,6 +461,13 @@ export function createTenantControlEngine({
     suspendTenantModuleActivation,
     createTrialEnvironment,
     listTrialEnvironments,
+    getTrialSupportPolicy,
+    updateTrialSupportPolicy,
+    getTrialOperationsSnapshot,
+    listTrialOperationAlerts,
+    listTrialOperationQueueViews,
+    listTrialPromotionWorkflows,
+    getTrialSalesDemoAnalytics,
     resetTrialEnvironment,
     refreshTrialEnvironment,
     promoteTrialToLive,
@@ -788,6 +831,179 @@ export function createTenantControlEngine({
       .map(copy);
   }
 
+  function getTrialSupportPolicy({ sessionToken, companyId } = {}) {
+    authorizeCompanyAction({
+      sessionToken,
+      companyId,
+      action: "COMPANY_READ",
+      objectType: "trial_support_policy",
+      objectId: companyId,
+      scopeCode: "trial_operations"
+    });
+    return presentTrialSupportPolicy(resolveTrialSupportPolicy(companyId));
+  }
+
+  function updateTrialSupportPolicy({
+    sessionToken,
+    companyId,
+    allowedResetRoleCodes = null,
+    allowedResetCompanyUserIds = null,
+    allowedSupportRoleCodes = null,
+    expiryWarningDays = null,
+    promotionStaleDays = null,
+    resetStaleHours = null,
+    analyticsWindowDays = null
+  } = {}) {
+    const principal = authorizeCompanyAction({
+      sessionToken,
+      companyId,
+      action: "COMPANY_MANAGE",
+      objectType: "trial_support_policy",
+      objectId: companyId,
+      scopeCode: "trial_operations"
+    });
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const existing = resolveTrialSupportPolicy(resolvedCompanyId);
+    const allowedResetUsers = validateCompanyUserIdsForPolicy({
+      companyId: resolvedCompanyId,
+      companyUserIds: allowedResetCompanyUserIds
+    });
+    const updated = {
+      ...existing,
+      allowedResetRoleCodes:
+        allowedResetRoleCodes == null
+          ? existing.allowedResetRoleCodes
+          : normalizeTrialPolicyRoleCodes(allowedResetRoleCodes, "trial_support_policy_role_invalid"),
+      allowedResetCompanyUserIds:
+        allowedResetCompanyUserIds == null ? existing.allowedResetCompanyUserIds : allowedResetUsers,
+      allowedSupportRoleCodes:
+        allowedSupportRoleCodes == null
+          ? existing.allowedSupportRoleCodes
+          : normalizeTrialPolicyRoleCodes(allowedSupportRoleCodes, "trial_support_policy_role_invalid"),
+      expiryWarningDays:
+        expiryWarningDays == null
+          ? existing.expiryWarningDays
+          : normalizePositiveInteger(expiryWarningDays, "trial_support_policy_expiry_warning_invalid"),
+      promotionStaleDays:
+        promotionStaleDays == null
+          ? existing.promotionStaleDays
+          : normalizePositiveInteger(promotionStaleDays, "trial_support_policy_promotion_stale_invalid"),
+      resetStaleHours:
+        resetStaleHours == null
+          ? existing.resetStaleHours
+          : normalizePositiveInteger(resetStaleHours, "trial_support_policy_reset_stale_invalid"),
+      analyticsWindowDays:
+        analyticsWindowDays == null
+          ? existing.analyticsWindowDays
+          : normalizePositiveInteger(analyticsWindowDays, "trial_support_policy_analytics_window_invalid"),
+      updatedByUserId: principal.userId,
+      updatedAt: nowIso()
+    };
+    state.trialSupportPolicies.set(resolvedCompanyId, updated);
+    appendDomainEvent("trial.support_policy.updated", {
+      companyId: resolvedCompanyId,
+      actorUserId: principal.userId,
+      allowedResetRoleCodes: updated.allowedResetRoleCodes,
+      allowedResetCompanyUserIds: updated.allowedResetCompanyUserIds,
+      expiryWarningDays: updated.expiryWarningDays,
+      promotionStaleDays: updated.promotionStaleDays,
+      resetStaleHours: updated.resetStaleHours,
+      analyticsWindowDays: updated.analyticsWindowDays
+    });
+    appendAuditEvent({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      action: "tenant_control.trial_support_policy.updated",
+      entityType: "trial_support_policy",
+      entityId: resolvedCompanyId,
+      metadata: {
+        allowedResetRoleCodes: updated.allowedResetRoleCodes,
+        allowedResetCompanyUserIds: updated.allowedResetCompanyUserIds,
+        allowedSupportRoleCodes: updated.allowedSupportRoleCodes,
+        expiryWarningDays: updated.expiryWarningDays,
+        promotionStaleDays: updated.promotionStaleDays,
+        resetStaleHours: updated.resetStaleHours,
+        analyticsWindowDays: updated.analyticsWindowDays
+      }
+    });
+    return presentTrialSupportPolicy(updated);
+  }
+
+  function getTrialOperationsSnapshot({ sessionToken, companyId } = {}) {
+    authorizeCompanyAction({
+      sessionToken,
+      companyId,
+      action: "COMPANY_READ",
+      objectType: "trial_support_policy",
+      objectId: companyId,
+      scopeCode: "trial_operations"
+    });
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const supportPolicy = resolveTrialSupportPolicy(resolvedCompanyId);
+    const trials = listTrialEnvironmentRecordsByCompany(resolvedCompanyId);
+    const promotions = listPromotionPlanRecordsByCompany(resolvedCompanyId);
+    const parallelRuns = listParallelRunPlanRecordsByCompany(resolvedCompanyId);
+    const alerts = buildTrialOperationAlerts({
+      companyId: resolvedCompanyId,
+      supportPolicy,
+      trials,
+      promotions,
+      parallelRuns
+    });
+    const queueViews = buildTrialOperationQueueViews({
+      companyId: resolvedCompanyId,
+      supportPolicy,
+      trials,
+      promotions,
+      parallelRuns,
+      alerts
+    });
+    const promotionWorkflows = buildTrialPromotionWorkflows({
+      promotions,
+      supportPolicy
+    });
+    const salesDemoAnalytics = buildTrialSalesDemoAnalytics({
+      supportPolicy,
+      trials,
+      promotions,
+      parallelRuns
+    });
+    return copy({
+      companyId: resolvedCompanyId,
+      generatedAt: nowIso(),
+      supportPolicy: presentTrialSupportPolicy(supportPolicy),
+      queueViews,
+      alerts,
+      promotionWorkflows,
+      salesDemoAnalytics,
+      summary: {
+        trialCount: trials.length,
+        activeTrialCount: trials.filter((trial) => trial.status === "active").length,
+        promotionPlanCount: promotions.length,
+        pendingPromotionCount: promotions.filter((plan) => ["validated", "approved"].includes(plan.status)).length,
+        alertCount: alerts.length,
+        criticalAlertCount: alerts.filter((alert) => alert.severityCode === "critical").length,
+        queueCount: queueViews.length
+      }
+    });
+  }
+
+  function listTrialOperationAlerts({ sessionToken, companyId } = {}) {
+    return getTrialOperationsSnapshot({ sessionToken, companyId }).alerts;
+  }
+
+  function listTrialOperationQueueViews({ sessionToken, companyId } = {}) {
+    return getTrialOperationsSnapshot({ sessionToken, companyId }).queueViews;
+  }
+
+  function listTrialPromotionWorkflows({ sessionToken, companyId } = {}) {
+    return getTrialOperationsSnapshot({ sessionToken, companyId }).promotionWorkflows;
+  }
+
+  function getTrialSalesDemoAnalytics({ sessionToken, companyId } = {}) {
+    return getTrialOperationsSnapshot({ sessionToken, companyId }).salesDemoAnalytics;
+  }
+
   function resetTrialEnvironment({
     sessionToken,
     trialEnvironmentProfileId,
@@ -804,12 +1020,14 @@ export function createTenantControlEngine({
       objectId: trialEnvironmentProfileId,
       scopeCode: "trial_environment"
     });
+    assertTrialResetRights({ principal, companyId: trialEnvironment.companyId });
     const resetStartedAt = nowIso();
     trialEnvironment.status = "reset_in_progress";
     trialEnvironment.updatedAt = resetStartedAt;
     const terminatedSessions = terminateTrialSessions({
       sessionToken,
-      companyId: trialEnvironment.companyId
+      companyId: trialEnvironment.companyId,
+      actorId: principal.userId
     });
     const archivedDataRef = archiveTrialProcessState(trialEnvironment);
     const reseededAt = nowIso();
@@ -1266,6 +1484,321 @@ export function createTenantControlEngine({
       .map(copy);
   }
 
+  function listTrialEnvironmentRecordsByCompany(companyId) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.trialEnvironmentIdsByCompany.get(resolvedCompanyId) || [])
+      .map((trialEnvironmentProfileId) => state.trialEnvironmentProfiles.get(trialEnvironmentProfileId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  function listPromotionPlanRecordsByCompany(companyId) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.promotionPlanIdsByCompany.get(resolvedCompanyId) || [])
+      .map((promotionPlanId) => state.promotionPlans.get(promotionPlanId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  function listParallelRunPlanRecordsByCompany(companyId) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.parallelRunPlanIdsByCompany.get(resolvedCompanyId) || [])
+      .map((parallelRunPlanId) => state.parallelRunPlans.get(parallelRunPlanId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  function resolveTrialSupportPolicy(companyId) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const existing = state.trialSupportPolicies.get(resolvedCompanyId);
+    if (existing) {
+      return existing;
+    }
+    const record = {
+      trialSupportPolicyId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      policyCode: DEFAULT_TRIAL_SUPPORT_POLICY_CODE,
+      queueViews: copy(DEFAULT_TRIAL_OPERATIONS_QUEUE_DEFINITIONS),
+      allowedResetRoleCodes: [...DEFAULT_TRIAL_RESET_ROLE_CODES],
+      allowedResetCompanyUserIds: [],
+      allowedSupportRoleCodes: [...DEFAULT_TRIAL_SUPPORT_ROLE_CODES],
+      expiryWarningDays: DEFAULT_TRIAL_EXPIRY_WARNING_DAYS,
+      promotionStaleDays: DEFAULT_TRIAL_PROMOTION_STALE_DAYS,
+      resetStaleHours: DEFAULT_TRIAL_RESET_STALE_HOURS,
+      analyticsWindowDays: DEFAULT_TRIAL_ANALYTICS_WINDOW_DAYS,
+      requiredPromotionApprovalClasses: copy(PROMOTION_REQUIRED_APPROVAL_CLASSES),
+      queueSeparationMode: "trial_support_only",
+      salesDemoAnalyticsEnabled: true,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      updatedByUserId: null
+    };
+    state.trialSupportPolicies.set(resolvedCompanyId, record);
+    return record;
+  }
+
+  function presentTrialSupportPolicy(policy) {
+    const companyUsers = new Map(
+      listSourceCompanyUsersSnapshot(policy.companyId).map((record) => [record.companyUserId, record])
+    );
+    return copy({
+      ...policy,
+      allowedResetCompanyUsers: policy.allowedResetCompanyUserIds
+        .map((companyUserId) => {
+          const companyUser = companyUsers.get(companyUserId);
+          return companyUser
+            ? {
+                companyUserId,
+                userId: companyUser.userId,
+                roleCode: companyUser.roleCode,
+                email: companyUser.email,
+                displayName: companyUser.displayName
+              }
+            : {
+                companyUserId,
+                userId: null,
+                roleCode: null,
+                email: null,
+                displayName: null
+              };
+        })
+        .sort((left, right) => String(left.companyUserId).localeCompare(String(right.companyUserId)))
+    });
+  }
+
+  function buildTrialOperationAlerts({ companyId, supportPolicy, trials, promotions, parallelRuns } = {}) {
+    const alerts = [];
+    const promotionByTrialId = new Map(promotions.map((plan) => [plan.trialEnvironmentProfileId, plan]));
+    const parallelByTrialId = new Map(parallelRuns.map((plan) => [plan.trialEnvironmentProfileId, plan]));
+    const now = clock();
+    for (const trial of trials) {
+      const expiresAt = normalizeOptionalText(trial.expiresAt);
+      const promotion = promotionByTrialId.get(trial.trialEnvironmentProfileId) || null;
+      const parallelRun = parallelByTrialId.get(trial.trialEnvironmentProfileId) || null;
+      if (trial.supportsLegalEffect === true || trial.trialIsolationStatus !== "isolated") {
+        alerts.push(
+          createTrialOperationAlert({
+            companyId,
+            alertCode: "trial_isolation_breach",
+            severityCode: "critical",
+            queueCode: "TRIAL_SUPPORT_QUEUE",
+            title: `Trial isolation breach: ${trial.label}`,
+            detail: "Trial environment is no longer fully isolated from live capabilities.",
+            trialEnvironment: trial
+          })
+        );
+      }
+      if (expiresAt) {
+        const expiresAtDate = new Date(expiresAt);
+        const daysUntilExpiry = Math.ceil((expiresAtDate.getTime() - now.getTime()) / 86400000);
+        if (daysUntilExpiry < 0 && trial.status !== "archived") {
+          alerts.push(
+            createTrialOperationAlert({
+              companyId,
+              alertCode: "trial_expired",
+              severityCode: "critical",
+              queueCode: "TRIAL_EXPIRY_QUEUE",
+              title: `Expired trial: ${trial.label}`,
+              detail: "Trial environment expired and requires archival, reset or promotion decision.",
+              trialEnvironment: trial,
+              ageHours: Math.abs(hoursBetween(now, expiresAtDate))
+            })
+          );
+        } else if (daysUntilExpiry <= supportPolicy.expiryWarningDays && trial.status === "active") {
+          alerts.push(
+            createTrialOperationAlert({
+              companyId,
+              alertCode: "trial_expiring_soon",
+              severityCode: "attention",
+              queueCode: "TRIAL_EXPIRY_QUEUE",
+              title: `Trial expiring soon: ${trial.label}`,
+              detail: `Trial expires within ${supportPolicy.expiryWarningDays} days and needs owner action.`,
+              trialEnvironment: trial,
+              ageHours: Math.max(0, hoursBetween(expiresAtDate, now))
+            })
+          );
+        }
+      }
+      if (trial.status === "reset_in_progress") {
+        const staleHours = hoursBetween(now, new Date(trial.updatedAt || trial.createdAt));
+        alerts.push(
+          createTrialOperationAlert({
+            companyId,
+            alertCode: staleHours >= supportPolicy.resetStaleHours ? "trial_reset_stuck" : "trial_reset_in_progress",
+            severityCode: staleHours >= supportPolicy.resetStaleHours ? "critical" : "attention",
+            queueCode: "TRIAL_RESET_QUEUE",
+            title: `Trial reset in progress: ${trial.label}`,
+            detail:
+              staleHours >= supportPolicy.resetStaleHours
+                ? "Reset exceeded allowed stale threshold and needs operator intervention."
+                : "Reset is running and should be monitored until complete.",
+            trialEnvironment: trial,
+            ageHours: staleHours
+          })
+        );
+      }
+      if (promotion && ["validated", "approved"].includes(promotion.status)) {
+        const staleDays = daysBetween(now, new Date(promotion.updatedAt || promotion.createdAt));
+        if (staleDays >= supportPolicy.promotionStaleDays) {
+          alerts.push(
+            createTrialOperationAlert({
+              companyId,
+              alertCode: "trial_promotion_stalled",
+              severityCode: "attention",
+              queueCode: "TRIAL_PROMOTION_QUEUE",
+              title: `Trial promotion stalled: ${trial.label}`,
+              detail: "Promotion is waiting longer than allowed and needs approval or execution.",
+              trialEnvironment: trial,
+              promotionPlan: promotion,
+              ageHours: staleDays * 24
+            })
+          );
+        }
+      }
+      if (parallelRun && parallelRun.status === "started") {
+        alerts.push(
+          createTrialOperationAlert({
+            companyId,
+            alertCode: "trial_parallel_run_active",
+            severityCode: "attention",
+            queueCode: "TRIAL_PARALLEL_RUN_QUEUE",
+            title: `Parallel run active: ${trial.label}`,
+            detail: "Trial promotion path still depends on an active parallel run.",
+            trialEnvironment: trial,
+            parallelRunPlan: parallelRun,
+            ageHours: hoursBetween(now, new Date(parallelRun.updatedAt || parallelRun.createdAt))
+          })
+        );
+      }
+    }
+    return alerts.sort((left, right) => String(right.severityCode).localeCompare(String(left.severityCode)) || String(left.createdAt).localeCompare(String(right.createdAt)));
+  }
+
+  function buildTrialOperationQueueViews({ companyId, supportPolicy, trials, promotions, parallelRuns, alerts } = {}) {
+    const alertsByQueueCode = groupItemsBy(alerts, (alert) => alert.queueCode);
+    const activeTrials = trials.filter((trial) => ["active", "promotion_in_progress", "reset_in_progress"].includes(trial.status));
+    const pendingPromotions = promotions.filter((plan) => ["validated", "approved"].includes(plan.status));
+    const expiringAlerts = alerts.filter((alert) => alert.queueCode === "TRIAL_EXPIRY_QUEUE");
+    return supportPolicy.queueViews.map((queue) => {
+      const queueAlerts = alertsByQueueCode.get(queue.queueCode) || [];
+      let openCount = 0;
+      let completedCount = 0;
+      switch (queue.queueCode) {
+        case "TRIAL_SUPPORT_QUEUE":
+          openCount = activeTrials.length;
+          completedCount = trials.filter((trial) => ["archived", "expired"].includes(trial.status)).length;
+          break;
+        case "TRIAL_RESET_QUEUE":
+          openCount = trials.filter((trial) => trial.status === "reset_in_progress").length;
+          completedCount = trials.reduce((sum, trial) => sum + Number(trial.resetCount || 0), 0);
+          break;
+        case "TRIAL_PROMOTION_QUEUE":
+          openCount = pendingPromotions.length;
+          completedCount = promotions.filter((plan) => plan.status === "executed").length;
+          break;
+        case "TRIAL_EXPIRY_QUEUE":
+          openCount = expiringAlerts.length;
+          completedCount = trials.filter((trial) => trial.status === "archived").length;
+          break;
+        case "TRIAL_PARALLEL_RUN_QUEUE":
+          openCount = parallelRuns.filter((plan) => plan.status === "started").length;
+          completedCount = parallelRuns.filter((plan) => plan.status === "completed").length;
+          break;
+        default:
+          break;
+      }
+      return {
+        queueCode: queue.queueCode,
+        label: queue.label,
+        sourceType: queue.sourceType,
+        openCount,
+        completedCount,
+        alertCount: queueAlerts.length,
+        criticalCount: queueAlerts.filter((alert) => alert.severityCode === "critical").length,
+        attentionCount: queueAlerts.filter((alert) => alert.severityCode === "attention").length,
+        statusCode:
+          queueAlerts.some((alert) => alert.severityCode === "critical")
+            ? "critical"
+            : queueAlerts.length > 0 || openCount > 0
+              ? "attention"
+              : "ok",
+        drilldownTarget: {
+          objectType: "trial_operations_queue",
+          objectId: queue.queueCode,
+          routePath: "/v1/trial/operations/queues"
+        },
+        companyId
+      };
+    });
+  }
+
+  function buildTrialPromotionWorkflows({ promotions, supportPolicy } = {}) {
+    return promotions.map((plan) => {
+      const pendingApprovalClasses = (plan.approvalCoverage?.requiredApprovalClasses || []).filter(
+        (approvalClass) => plan.approvalCoverage?.[approvalClass]?.fulfilled !== true
+      );
+      return {
+        workflowId: plan.promotionPlanId,
+        promotionPlanId: plan.promotionPlanId,
+        companyId: plan.companyId,
+        trialEnvironmentProfileId: plan.trialEnvironmentProfileId,
+        currentStageCode: resolvePromotionWorkflowStage(plan),
+        pendingApprovalClasses,
+        recommendedGoLivePath: plan.recommendedGoLivePath,
+        requiresCutover: plan.requiresCutover === true,
+        requiredPostPromotionTaskCodes:
+          plan.executionSummary?.requiredPostPromotionTaskCodes || copy(DEFAULT_POST_PROMOTION_TASK_CODES),
+        carryOverSelectionCodes: copy(plan.carryOverSelectionCodes || []),
+        blockingIssueCodes: copy(plan.blockingIssueCodes || []),
+        warningCodes: copy(plan.warningCodes || []),
+        supportPolicyCode: supportPolicy.policyCode,
+        liveCompanyId: plan.liveCompanyId || null,
+        status: plan.status,
+        createdAt: plan.createdAt,
+        updatedAt: plan.updatedAt
+      };
+    });
+  }
+
+  function buildTrialSalesDemoAnalytics({ supportPolicy, trials, promotions, parallelRuns } = {}) {
+    const now = clock();
+    const windowStartsAt = new Date(now.getTime() - supportPolicy.analyticsWindowDays * 86400000);
+    const windowTrials = trials.filter((trial) => new Date(trial.createdAt) >= windowStartsAt);
+    const windowPromotions = promotions.filter((plan) => new Date(plan.createdAt) >= windowStartsAt);
+    const promotedPlans = promotions.filter((plan) => plan.status === "executed");
+    const promotionLeadTimes = promotedPlans
+      .map((plan) => {
+        const matchingTrial = trials.find((trial) => trial.trialEnvironmentProfileId === plan.trialEnvironmentProfileId);
+        if (!matchingTrial || !plan.executedAt) {
+          return null;
+        }
+        return Math.max(0, daysBetween(new Date(plan.executedAt), new Date(matchingTrial.createdAt)));
+      })
+      .filter((value) => value != null);
+    return {
+      analyticsWindowDays: supportPolicy.analyticsWindowDays,
+      windowStartsAt: windowStartsAt.toISOString(),
+      totalTrialsCreated: windowTrials.length,
+      activeTrialCount: trials.filter((trial) => trial.status === "active").length,
+      archivedTrialCount: trials.filter((trial) => trial.status === "archived").length,
+      expiredTrialCount: trials.filter((trial) => trial.status === "expired").length,
+      resetVolume: trials.reduce((sum, trial) => sum + Number(trial.resetCount || 0), 0),
+      refreshVolume: trials.reduce((sum, trial) => sum + Number(trial.refreshCount || 0), 0),
+      promotionPipelineCount: windowPromotions.filter((plan) => ["validated", "approved"].includes(plan.status)).length,
+      promotionsExecuted: windowPromotions.filter((plan) => plan.status === "executed").length,
+      parallelRunStartedCount: parallelRuns.filter((plan) => plan.status === "started").length,
+      conversionRatePercent:
+        windowTrials.length > 0
+          ? Number(((windowPromotions.filter((plan) => plan.status === "executed").length / windowTrials.length) * 100).toFixed(2))
+          : 0,
+      averageDaysToPromotion:
+        promotionLeadTimes.length > 0
+          ? Number((promotionLeadTimes.reduce((sum, value) => sum + value, 0) / promotionLeadTimes.length).toFixed(2))
+          : null,
+      scenarioBreakdown: buildTrialScenarioBreakdown(trials)
+    };
+  }
+
   function maybeMaterializeFinanceReadyFoundation(companyId) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const bootstrap = findTenantBootstrapByCompanyId(resolvedCompanyId);
@@ -1628,6 +2161,7 @@ export function createTenantControlEngine({
       moduleDefinitions: [...state.moduleDefinitions.values()],
       moduleActivationProfiles: [...state.moduleActivationProfiles.values()],
       trialEnvironmentProfiles: [...state.trialEnvironmentProfiles.values()],
+      trialSupportPolicies: [...state.trialSupportPolicies.values()],
       promotionPlans: [...state.promotionPlans.values()],
       promotionValidationReports: [...state.promotionValidationReports.values()],
       portableDataBundles: [...state.portableDataBundles.values()],
@@ -1924,6 +2458,41 @@ export function createTenantControlEngine({
     return orgAuthPlatform;
   }
 
+  function normalizeTrialPolicyRoleCodes(roleCodes, code) {
+    const resolved = normalizeStringList(roleCodes);
+    for (const roleCode of resolved) {
+      if (!TRIAL_POLICY_ALLOWED_ROLE_CODES.includes(roleCode)) {
+        throw httpError(400, code, `Unsupported trial support role ${roleCode}.`);
+      }
+    }
+    return resolved;
+  }
+
+  function validateCompanyUserIdsForPolicy({ companyId, companyUserIds } = {}) {
+    const requestedIds = normalizeStringList(companyUserIds);
+    if (requestedIds.length === 0) {
+      return [];
+    }
+    const knownUsers = new Set(listSourceCompanyUsersSnapshot(companyId).map((record) => record.companyUserId));
+    for (const companyUserId of requestedIds) {
+      if (!knownUsers.has(companyUserId)) {
+        throw httpError(409, "trial_support_policy_company_user_not_found", `Company user ${companyUserId} is not active in the company.`);
+      }
+    }
+    return requestedIds;
+  }
+
+  function assertTrialResetRights({ principal, companyId } = {}) {
+    const supportPolicy = resolveTrialSupportPolicy(companyId);
+    const roleAllowed = (principal?.roles || []).some((roleCode) => supportPolicy.allowedResetRoleCodes.includes(roleCode));
+    const userAllowed =
+      normalizeOptionalText(principal?.companyUserId) != null
+      && supportPolicy.allowedResetCompanyUserIds.includes(principal.companyUserId);
+    if (!roleAllowed && !userAllowed) {
+      throw httpError(403, "trial_environment_reset_right_required", "Trial reset requires explicit trial reset rights.");
+    }
+  }
+
   function getOrgAuthSnapshot() {
     const platform = requireOrgAuthPlatform();
     if (typeof platform.snapshot !== "function") {
@@ -2039,7 +2608,7 @@ export function createTenantControlEngine({
     };
   }
 
-  function terminateTrialSessions({ sessionToken, companyId } = {}) {
+  function terminateTrialSessions({ sessionToken, companyId, actorId } = {}) {
     const authPlatform = requireOrgAuthPlatform();
     if (typeof authPlatform.snapshot !== "function" || typeof authPlatform.revokeSession !== "function") {
       return { sessionIds: [] };
@@ -2056,6 +2625,16 @@ export function createTenantControlEngine({
       .map((session) => session.sessionId)
       .filter((sessionId) => sessionId !== currentSessionId);
     for (const targetSessionId of targetSessionIds) {
+      if (typeof authPlatform.revokeSessionForCompanyOperation === "function") {
+        authPlatform.revokeSessionForCompanyOperation({
+          companyId,
+          targetSessionId,
+          actorId: requireText(actorId, "actor_id_required"),
+          operationCode: "trial_environment_reset",
+          explanation: "Session revoked by trial reset operation."
+        });
+        continue;
+      }
       authPlatform.revokeSession({
         sessionToken,
         targetSessionId
@@ -2649,6 +3228,96 @@ export function createTenantControlEngine({
       metadata: copy(metadata || {}),
       recordedAt: nowIso()
     });
+  }
+
+  function createTrialOperationAlert({
+    companyId,
+    alertCode,
+    severityCode,
+    queueCode,
+    title,
+    detail,
+    trialEnvironment = null,
+    promotionPlan = null,
+    parallelRunPlan = null,
+    ageHours = null
+  } = {}) {
+    return {
+      trialOperationAlertId: crypto.randomUUID(),
+      companyId,
+      alertCode: requireText(alertCode, "trial_alert_code_required"),
+      severityCode: requireText(severityCode, "trial_alert_severity_required"),
+      queueCode: requireText(queueCode, "trial_alert_queue_required"),
+      title: requireText(title, "trial_alert_title_required"),
+      detail: requireText(detail, "trial_alert_detail_required"),
+      trialEnvironmentProfileId: trialEnvironment?.trialEnvironmentProfileId || null,
+      promotionPlanId: promotionPlan?.promotionPlanId || null,
+      parallelRunPlanId: parallelRunPlan?.parallelRunPlanId || null,
+      objectType:
+        trialEnvironment != null
+          ? "trial_environment_profile"
+          : promotionPlan != null
+            ? "promotion_plan"
+            : parallelRunPlan != null
+              ? "parallel_run_plan"
+              : "trial_operations",
+      objectId:
+        trialEnvironment?.trialEnvironmentProfileId
+        || promotionPlan?.promotionPlanId
+        || parallelRunPlan?.parallelRunPlanId
+        || companyId,
+      ageHours: ageHours == null ? null : Number(ageHours.toFixed(2)),
+      createdAt: nowIso()
+    };
+  }
+
+  function resolvePromotionWorkflowStage(plan) {
+    switch (plan.status) {
+      case "validated":
+        return "awaiting_approval";
+      case "approved":
+        return "ready_for_execution";
+      case "executed":
+        return "live_materialized";
+      case "cancelled":
+        return "cancelled";
+      default:
+        return "draft";
+    }
+  }
+
+  function buildTrialScenarioBreakdown(trials) {
+    const counts = new Map();
+    for (const trial of trials) {
+      const scenarioCode = normalizeOptionalText(trial.seedScenarioCode) || "unknown";
+      counts.set(scenarioCode, Number(counts.get(scenarioCode) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([scenarioCode, count]) => ({ scenarioCode, count }))
+      .sort((left, right) => right.count - left.count || left.scenarioCode.localeCompare(right.scenarioCode));
+  }
+
+  function groupItemsBy(items, keyResolver) {
+    const grouped = new Map();
+    for (const item of Array.isArray(items) ? items : []) {
+      const key = keyResolver(item);
+      if (!key) {
+        continue;
+      }
+      if (!grouped.has(key)) {
+        grouped.set(key, []);
+      }
+      grouped.get(key).push(item);
+    }
+    return grouped;
+  }
+
+  function hoursBetween(left, right) {
+    return (new Date(left).getTime() - new Date(right).getTime()) / 3600000;
+  }
+
+  function daysBetween(left, right) {
+    return (new Date(left).getTime() - new Date(right).getTime()) / 86400000;
   }
 }
 

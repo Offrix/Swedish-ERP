@@ -319,6 +319,7 @@ export function createOrgAuthPlatform({
     startLogin,
     logout,
     revokeSession,
+    revokeSessionForCompanyOperation,
     beginTotpEnrollment,
     verifyTotp,
     beginPasskeyRegistration,
@@ -848,6 +849,40 @@ export function createOrgAuthPlatform({
       entityType: "auth_session",
       entityId: targetSession.sessionId,
       explanation: "Session revoked by administrator."
+    });
+    return publicSession(targetSession);
+  }
+
+  function revokeSessionForCompanyOperation({
+    companyId,
+    targetSessionId,
+    actorId,
+    operationCode = "company_operation",
+    explanation = "Session revoked by company operation."
+  } = {}) {
+    const resolvedCompanyId = assertNonEmpty(companyId, "company_id_required");
+    const resolvedActorId = assertNonEmpty(actorId, "actor_id_required");
+    const resolvedTargetSessionId = assertNonEmpty(targetSessionId, "target_session_id_required");
+    const targetSession = state.authSessions.get(resolvedTargetSessionId);
+    if (!targetSession || targetSession.companyId !== resolvedCompanyId) {
+      throw httpError(404, "auth_session_not_found", "Session was not found inside the current company.");
+    }
+    targetSession.status = "revoked";
+    targetSession.revokedAt = nowIso();
+    createSessionRevision(targetSession, {
+      reasonCode: "session_revoked"
+    });
+    pushAudit({
+      companyId: targetSession.companyId,
+      actorId: resolvedActorId,
+      action: "auth.session.revoked",
+      result: "success",
+      entityType: "auth_session",
+      entityId: targetSession.sessionId,
+      explanation,
+      metadata: {
+        operationCode
+      }
     });
     return publicSession(targetSession);
   }

@@ -385,13 +385,35 @@ function buildTrialConversionDashboard({ platform, sessionToken, companyId, gene
   const trials = callOptional(platform, "listTrialEnvironments", { sessionToken, companyId }, []);
   const promotions = callOptional(platform, "listPromotionPlans", { sessionToken, companyId }, []);
   const parallelRuns = callOptional(platform, "listParallelRunPlans", { sessionToken, companyId }, []);
+  const operations = callOptional(platform, "getTrialOperationsSnapshot", { sessionToken, companyId }, null);
   const promotionByTrialId = groupLatestBy(promotions, (plan) => normalizeText(plan.trialEnvironmentProfileId));
   const parallelByTrialId = groupLatestBy(parallelRuns, (plan) => normalizeText(plan.trialEnvironmentProfileId));
+  const alerts = Array.isArray(operations?.alerts) ? operations.alerts : [];
+  const queueViews = Array.isArray(operations?.queueViews) ? operations.queueViews : [];
+  const promotionWorkflows = Array.isArray(operations?.promotionWorkflows) ? operations.promotionWorkflows : [];
+  const alertsByTrialId = new Map();
+  for (const alert of alerts) {
+    const trialEnvironmentProfileId = normalizeText(alert.trialEnvironmentProfileId);
+    if (!trialEnvironmentProfileId) {
+      continue;
+    }
+    if (!alertsByTrialId.has(trialEnvironmentProfileId)) {
+      alertsByTrialId.set(trialEnvironmentProfileId, []);
+    }
+    alertsByTrialId.get(trialEnvironmentProfileId).push(alert);
+  }
+  const workflowByTrialId = new Map(
+    promotionWorkflows
+      .filter((workflow) => normalizeText(workflow.trialEnvironmentProfileId))
+      .map((workflow) => [workflow.trialEnvironmentProfileId, workflow])
+  );
 
   const rows = trials
     .map((trial) => {
       const promotion = promotionByTrialId.get(trial.trialEnvironmentProfileId) || null;
       const parallelRun = parallelByTrialId.get(trial.trialEnvironmentProfileId) || null;
+      const workflow = workflowByTrialId.get(trial.trialEnvironmentProfileId) || null;
+      const trialAlerts = alertsByTrialId.get(trial.trialEnvironmentProfileId) || [];
       return {
         rowId: trial.trialEnvironmentProfileId,
         objectType: "trial_environment_profile",
@@ -403,9 +425,16 @@ function buildTrialConversionDashboard({ platform, sessionToken, companyId, gene
         trialIsolationStatus: trial.trialIsolationStatus,
         promotionStatus: promotion?.status || null,
         parallelRunStatus: parallelRun?.status || null,
+        workflowStageCode: workflow?.currentStageCode || null,
+        pendingApprovalClasses: workflow?.pendingApprovalClasses || [],
+        requiredPostPromotionTaskCodes: workflow?.requiredPostPromotionTaskCodes || [],
         promotionEligibleFlag: trial.promotionEligibleFlag === true,
         supportsLegalEffect: trial.supportsLegalEffect === true,
         providerPolicyCode: trial.providerPolicyCode || null,
+        alertCount: trialAlerts.length,
+        criticalAlertCount: trialAlerts.filter((alert) => alert.severityCode === "critical").length,
+        attentionAlertCount: trialAlerts.filter((alert) => alert.severityCode === "attention").length,
+        activeAlertCodes: trialAlerts.map((alert) => alert.alertCode),
         drilldownTarget: {
           objectType: "trial_environment_profile",
           objectId: trial.trialEnvironmentProfileId,
@@ -420,7 +449,11 @@ function buildTrialConversionDashboard({ platform, sessionToken, companyId, gene
     activeTrials: rows.filter((row) => row.trialStatus === "active").length,
     pendingPromotion: rows.filter((row) => ["validated", "approved"].includes(row.promotionStatus)).length,
     executedPromotion: rows.filter((row) => row.promotionStatus === "executed").length,
-    parallelRunStarted: rows.filter((row) => row.parallelRunStatus === "started").length
+    parallelRunStarted: rows.filter((row) => row.parallelRunStatus === "started").length,
+    alertCount: alerts.length,
+    criticalAlertCount: alerts.filter((alert) => alert.severityCode === "critical").length,
+    openQueueCount: queueViews.filter((queue) => queue.openCount > 0).length,
+    stalledPromotionCount: promotionWorkflows.filter((workflow) => workflow.currentStageCode === "awaiting_approval" || workflow.currentStageCode === "ready_for_execution").length
   };
 
   return {
@@ -430,30 +463,41 @@ function buildTrialConversionDashboard({ platform, sessionToken, companyId, gene
     companyId,
     generatedAt,
     statusCode:
-      rows.some((row) => row.supportsLegalEffect || row.trialIsolationStatus !== "isolated")
+      counters.criticalAlertCount > 0 || rows.some((row) => row.supportsLegalEffect || row.trialIsolationStatus !== "isolated")
         ? "critical"
-        : counters.pendingPromotion > 0 || counters.parallelRunStarted > 0 || counters.activeTrials > 0
+        : counters.alertCount > 0 || counters.pendingPromotion > 0 || counters.parallelRunStarted > 0 || counters.activeTrials > 0
           ? "attention"
           : "ok",
     summary: {
       trialCount: trials.length,
       promotionPlanCount: promotions.length,
-      parallelRunPlanCount: parallelRuns.length
+      parallelRunPlanCount: parallelRuns.length,
+      operationsSummary: operations?.summary || null,
+      supportPolicy: operations?.supportPolicy || null,
+      salesDemoAnalytics: operations?.salesDemoAnalytics || null
     },
     counters,
     rows,
     actionBar: {
-      availableCommands: ["trial.openEnvironments", "trial.openPromotions", "trial.openParallelRuns"]
+      availableCommands: [
+        "trial.openOperations",
+        "trial.openEnvironments",
+        "trial.openPromotions",
+        "trial.openParallelRuns",
+        "trial.openSupportPolicy"
+      ]
     },
     drilldownTarget: {
-      routePath: "/v1/trial/environments",
-      objectType: "trial_environment_profile",
+      routePath: "/v1/trial/operations",
+      objectType: "trial_operations_snapshot",
       objectId: companyId
     },
     sourceRefs: [
       { sourceType: "trial_environment_profile", sourceObjectId: companyId, recordCount: trials.length },
       { sourceType: "promotion_plan", sourceObjectId: companyId, recordCount: promotions.length },
-      { sourceType: "parallel_run_plan", sourceObjectId: companyId, recordCount: parallelRuns.length }
+      { sourceType: "parallel_run_plan", sourceObjectId: companyId, recordCount: parallelRuns.length },
+      { sourceType: "trial_operation_alert", sourceObjectId: companyId, recordCount: alerts.length },
+      { sourceType: "trial_operations_queue", sourceObjectId: companyId, recordCount: queueViews.length }
     ]
   };
 }
