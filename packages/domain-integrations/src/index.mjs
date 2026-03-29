@@ -8,6 +8,11 @@ import {
   createAsanaProvider
 } from "./providers/asana.mjs";
 import { createBolagsverketAnnualProvider, BOLAGSVERKET_ANNUAL_PROVIDER_CODE } from "./providers/bolagsverket-annual.mjs";
+import {
+  createDynamics365ProjectOperationsProvider,
+  DYNAMICS365_PROJECT_OPERATIONS_PROVIDER_BASELINE_CODE,
+  DYNAMICS365_PROJECT_OPERATIONS_PROVIDER_CODE
+} from "./providers/dynamics365-project-operations.mjs";
 import { createEnableBankingProvider, ENABLE_BANKING_PROVIDER_CODE } from "./providers/enable-banking.mjs";
 import {
   CLICKUP_PROVIDER_BASELINE_CODE,
@@ -78,6 +83,7 @@ export { SKATTEVERKET_AGI_PROVIDER_CODE } from "./providers/skatteverket-agi.mjs
 export { SKATTEVERKET_VAT_PROVIDER_CODE } from "./providers/skatteverket-vat.mjs";
 export { SKATTEVERKET_HUS_PROVIDER_CODE } from "./providers/skatteverket-hus.mjs";
 export { BOLAGSVERKET_ANNUAL_PROVIDER_CODE } from "./providers/bolagsverket-annual.mjs";
+export { DYNAMICS365_PROJECT_OPERATIONS_PROVIDER_CODE } from "./providers/dynamics365-project-operations.mjs";
 export { LOCAL_PASSKEY_PROVIDER_CODE } from "./providers/local-passkey.mjs";
 export { LOCAL_TOTP_PROVIDER_CODE } from "./providers/local-totp.mjs";
 export { WORKOS_FEDERATION_PROVIDER_CODE } from "./providers/workos-federation.mjs";
@@ -453,6 +459,20 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
     checksum: "odoo-projects-billing-se-2026.1",
     sourceSnapshotDate: "2026-03-29",
     semanticChangeSummary: "Odoo project and time-and-materials billing baseline for project, sales order, timesheet and invoice handoff into governed project import batches."
+  }),
+  Object.freeze({
+    providerBaselineId: "d365-project-operations-se-2026.1",
+    baselineCode: DYNAMICS365_PROJECT_OPERATIONS_PROVIDER_BASELINE_CODE,
+    providerCode: DYNAMICS365_PROJECT_OPERATIONS_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "crm_handoff_objects",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "project-operations-v1",
+    checksum: "d365-project-operations-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Dynamics 365 Project Operations baseline for project contract, actual and billing backlog handoff into governed project import batches."
   })
 ]);
 
@@ -578,6 +598,11 @@ export function createIntegrationEngine({
     environmentMode,
     providerBaselineRegistry: providerBaselines
   });
+  const dynamics365ProjectOperationsProvider = createDynamics365ProjectOperationsProvider({
+    clock,
+    environmentMode,
+    providerBaselineRegistry: providerBaselines
+  });
   const odooProjectsBillingProvider = createOdooProjectsBillingProvider({
     clock,
     environmentMode,
@@ -659,6 +684,7 @@ export function createIntegrationEngine({
       hubSpotCrmProvider,
       asanaProvider,
       clickUpProvider,
+      dynamics365ProjectOperationsProvider,
       mondayWorkManagementProvider,
       odooProjectsBillingProvider,
       teamleaderFocusProvider,
@@ -804,6 +830,7 @@ export function createIntegrationEngine({
           signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot(),
           asanaProvider: asanaProvider.snapshot(),
           clickUpProvider: clickUpProvider.snapshot(),
+          dynamics365ProjectOperationsProvider: dynamics365ProjectOperationsProvider.snapshot(),
           hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
           mondayWorkManagementProvider: mondayWorkManagementProvider.snapshot(),
           odooProjectsBillingProvider: odooProjectsBillingProvider.snapshot(),
@@ -839,6 +866,7 @@ export function createIntegrationEngine({
         signingEvidenceArchiveProvider: signingEvidenceArchiveProvider.snapshot(),
         asanaProvider: asanaProvider.snapshot(),
         clickUpProvider: clickUpProvider.snapshot(),
+        dynamics365ProjectOperationsProvider: dynamics365ProjectOperationsProvider.snapshot(),
         hubSpotCrmProvider: hubSpotCrmProvider.snapshot(),
         mondayWorkManagementProvider: mondayWorkManagementProvider.snapshot(),
         odooProjectsBillingProvider: odooProjectsBillingProvider.snapshot(),
@@ -869,6 +897,7 @@ export function createIntegrationEngine({
     signingEvidenceArchiveProvider.restore(snapshot?.providerSnapshots?.signingEvidenceArchiveProvider || {});
     asanaProvider.restore(snapshot?.providerSnapshots?.asanaProvider || {});
     clickUpProvider.restore(snapshot?.providerSnapshots?.clickUpProvider || {});
+    dynamics365ProjectOperationsProvider.restore(snapshot?.providerSnapshots?.dynamics365ProjectOperationsProvider || {});
     hubSpotCrmProvider.restore(snapshot?.providerSnapshots?.hubSpotCrmProvider || {});
     mondayWorkManagementProvider.restore(snapshot?.providerSnapshots?.mondayWorkManagementProvider || {});
     odooProjectsBillingProvider.restore(snapshot?.providerSnapshots?.odooProjectsBillingProvider || {});
@@ -916,6 +945,14 @@ export function createIntegrationEngine({
     }
     if (connection.providerCode === CLICKUP_PROVIDER_CODE) {
       return clickUpProvider.prepareProjectImportBatch({
+        companyId: resolvedCompanyId,
+        integrationConnectionId: connection.connectionId,
+        sourceExportCapturedAt,
+        ...(payload && typeof payload === "object" ? payload : {})
+      });
+    }
+    if (connection.providerCode === DYNAMICS365_PROJECT_OPERATIONS_PROVIDER_CODE) {
+      return dynamics365ProjectOperationsProvider.prepareProjectImportBatch({
         companyId: resolvedCompanyId,
         integrationConnectionId: connection.connectionId,
         sourceExportCapturedAt,

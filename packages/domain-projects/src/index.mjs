@@ -15,7 +15,8 @@ const PROJECT_IMPORT_SOURCE_SYSTEM_CODES = Object.freeze([
   "asana",
   "clickup",
   "zoho",
-  "odoo"
+  "odoo",
+  "dynamics365_project_operations"
 ]);
 const PROJECT_TRIAL_SCENARIOS = Object.freeze({
   consulting_time_and_milestone: Object.freeze({
