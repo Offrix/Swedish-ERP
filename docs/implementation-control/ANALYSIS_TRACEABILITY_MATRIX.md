@@ -1,8 +1,8 @@
 > Statusnotis: Detta dokument är inte primär sanning. Bindande styrning före UI ligger endast i `docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md` och `docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md`. Detta dokument är historiskt input- eller stöddokument och får inte överstyra dem.
 # ANALYSIS_TRACEABILITY_MATRIX
 
-Status: Stöddokument för fas 0.4.  
-Detta dokument är inte primär sanning. Det finns för att bevisa att kritiska findings från analysdokumenten faktiskt är mappade till `GO_LIVE_ROADMAP.md`.
+Status: historiskt analysstöd.
+Detta dokument är inte primär sanning. Bindande blocker-traceability för fas 0.3 ligger nu i `docs/implementation-control/BLOCKER_TRACEABILITY_MATRIX_FINAL.md`, medan detta dokument bara bevarar hur äldre analysdokument en gång mappades in i styrningen.
 
 ## Mappningsregler
 

@@ -143,7 +143,7 @@ Ingen ny affärslogik, ingen ny live-adapter, ingen UI-byggnation.
 **Delfaser**  
 - [x] 0.1 [REWRITE][REMOVE/DEPRECATE] Ogiltigförklara historiska `[x]` och markera `GO_LIVE_ROADMAP.md` samt `PHASE_IMPLEMENTATION_BIBLE.md` som historiska input, inte som acceptansbevis.
 - [x] 0.2 [REWRITE] Behåll det som är rätt i nuvarande styrning: generell plattform, trial/live-separation, provider-baselines, project core efter finance/payroll och operator-first support.
-- [ ] 0.3 [NEW BUILD] Skriv full blocker-traceability för alla findings F-001–F-066 samt nya obligatoriska arbetsobjekt som saknas i gamla dokument.
+- [x] 0.3 [NEW BUILD] Skriv full blocker-traceability för alla findings F-001–F-066 samt nya obligatoriska arbetsobjekt som saknas i gamla dokument.
 - [ ] 0.4 [REMOVE/DEPRECATE] Förbjud seed-, stub-, simulator- och phasebucket-antaganden som live coverage.
 - [ ] 0.5 [NEW BUILD] Lås in saknade men obligatoriska kapabiliteter: bank-grade security, 1-klick migration/import, SIE4 import/export, aktieutdelning/owner distributions, corporate tax/tax declaration pack.
 - [ ] 0.6 [OPERATIONALIZE] Sätt absoluta no-go-regler för live, parity och advantage.
