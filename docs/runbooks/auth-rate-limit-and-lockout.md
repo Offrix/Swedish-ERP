@@ -29,7 +29,9 @@ This runbook governs login-start throttling and TOTP lockout in the phase 6 auth
 
 - TOTP plaintext must never be present in exported durable auth factor state.
 - Durable auth factor objects may carry refs only; sealed secret envelopes carry encrypted factor secrets separately.
+- Durable auth-broker exports must never contain raw BankID completion tokens, QR secrets, WorkOS state values or federation authorization codes.
 - Restore/import must preserve factor usability without reintroducing plaintext into exported state.
+- Restore/import must preserve BankID collect and federation callback completion without reintroducing raw broker secrets.
 
 ## Verification
 
@@ -42,3 +44,4 @@ This runbook governs login-start throttling and TOTP lockout in the phase 6 auth
 - Verify auth audit contains blocked/denied records for both login-start and TOTP guardrails.
 - Verify auth audit contains blocked/denied records for passkey guardrails.
 - Verify exported durable state does not contain raw TOTP secrets.
+- Verify exported durable state does not contain raw BankID or federation broker challenge secrets.

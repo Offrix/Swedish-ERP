@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEMO_ADMIN_EMAIL,
   DEMO_APPROVER_TOTP_SECRET,
   DEMO_APPROVER_EMAIL,
   DEMO_TOTP_SECRET,
@@ -158,6 +159,67 @@ test("Phase 6 hardening exports sealed auth factor secrets instead of raw TOTP s
     })
   });
   assert.equal(verified.session.status, "active");
+});
+
+test("Phase 6 hardening seals auth broker challenge secrets in durable export and restores broker flows after import", () => {
+  const clock = () => new Date("2026-03-29T14:30:00Z");
+  const platform = createOrgAuthPlatform({
+    clock,
+    bootstrapScenarioCode: "test_default_demo"
+  });
+
+  const adminLogin = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+  const adminTotpCode = platform.getTotpCodeForTesting({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL,
+    now: clock()
+  });
+  platform.verifyTotp({
+    sessionToken: adminLogin.sessionToken,
+    code: adminTotpCode
+  });
+  const bankIdStart = platform.startBankIdAuthentication({
+    sessionToken: adminLogin.sessionToken
+  });
+  const bankIdCompletionToken = platform.getBankIdCompletionTokenForTesting(bankIdStart.orderRef);
+
+  const federationStart = platform.startFederationAuthentication({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_APPROVER_EMAIL,
+    connectionId: "acme-sso",
+    redirectUri: "https://app.example.test/auth/federation/callback"
+  });
+  const federationAuthorizationCode = platform.getFederationAuthorizationCodeForTesting(federationStart.authRequestId);
+
+  const durableState = platform.exportDurableState();
+  const serialized = JSON.stringify(durableState);
+  assert.equal(serialized.includes(bankIdCompletionToken), false);
+  assert.equal(serialized.includes(bankIdStart.qrStartSecret), false);
+  assert.equal(serialized.includes(federationStart.state), false);
+  assert.equal(serialized.includes(federationAuthorizationCode), false);
+
+  const restoredPlatform = createOrgAuthPlatform({
+    clock
+  });
+  restoredPlatform.importDurableState(durableState);
+
+  const restoredBankIdCollect = restoredPlatform.collectBankIdAuthentication({
+    sessionToken: adminLogin.sessionToken,
+    orderRef: bankIdStart.orderRef,
+    completionToken: restoredPlatform.getBankIdCompletionTokenForTesting(bankIdStart.orderRef)
+  });
+  assert.equal(restoredBankIdCollect.session.status, "active");
+
+  const restoredFederationComplete = restoredPlatform.completeFederationAuthentication({
+    sessionToken: federationStart.sessionToken,
+    authRequestId: federationStart.authRequestId,
+    authorizationCode: restoredPlatform.getFederationAuthorizationCodeForTesting(federationStart.authRequestId),
+    state: federationStart.state
+  });
+  assert.equal(restoredFederationComplete.session.status, "active");
 });
 
 test("Phase 6 hardening locks repeated invalid passkey assertions and revokes the attacked session", () => {

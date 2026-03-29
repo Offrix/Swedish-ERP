@@ -288,6 +288,7 @@ export function createOrgAuthPlatform({
     authGuardrails: new Map(),
     authFactorSecrets: new Map(),
     authChallenges: new Map(),
+    authChallengeSecrets: new Map(),
     challengeCompletionReceipts: new Map(),
     challengeReceiptIdsByChallenge: new Map(),
     challengeReceiptIdsBySession: new Map(),
@@ -1117,7 +1118,7 @@ export function createOrgAuthPlatform({
       consumedAt: null,
       payloadJson: { deviceName }
     };
-    state.authChallenges.set(challenge.challengeId, challengeState);
+    persistAuthChallenge(challengeState, challenge.challenge);
     pushAudit({
       companyId: session.companyId,
       actorId: principal.userId,
@@ -1326,7 +1327,7 @@ export function createOrgAuthPlatform({
         providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum
       }
     };
-    state.authChallenges.set(challenge.challengeId, challenge);
+    persistAuthChallenge(challenge, providerResult.autoStartToken);
 
     pushAudit({
       companyId: session.companyId,
@@ -1476,7 +1477,7 @@ export function createOrgAuthPlatform({
         providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum
       }
     };
-    state.authChallenges.set(challenge.challengeId, challenge);
+    persistAuthChallenge(challenge, providerResult.state);
     pushAudit({
       companyId: session.companyId,
       actorId: principal.userId,
@@ -1603,7 +1604,7 @@ export function createOrgAuthPlatform({
         deviceName
       }
     };
-    state.authChallenges.set(challenge.challengeId, challenge);
+    persistAuthChallenge(challenge, challengeTemplate.challenge);
     pushAudit({
       companyId: session.companyId,
       actorId: principal.userId,
@@ -2187,6 +2188,7 @@ export function createOrgAuthPlatform({
     }
 
     function exportDurableState() {
+      const authBrokerSnapshot = state.authBroker.snapshot();
       return {
         ...serializeDurableState(state, {
           excludeKeys: ["authBroker"],
@@ -2194,19 +2196,31 @@ export function createOrgAuthPlatform({
             authFactors: (authFactors) =>
               new Map(
                 [...authFactors.entries()].map(([factorId, factor]) => [factorId, sanitizeAuthFactorForPersistence(factor)])
+              ),
+            authChallenges: (authChallenges) =>
+              new Map(
+                [...authChallenges.entries()].map(([challengeId, challenge]) => [
+                  challengeId,
+                  sanitizeAuthChallengeForPersistence(challenge)
+                ])
               )
           }
         }),
-        authBroker: state.authBroker.snapshot()
+        authBrokerEnvelope: {
+          keyId: authSecretSealer.keyId,
+          algorithm: "aes-256-gcm",
+          envelope: authSecretSealer.seal(JSON.stringify(authBrokerSnapshot))
+        }
       };
     }
 
     function importDurableState(snapshot) {
-      const brokerSnapshot = snapshot?.authBroker || {};
+      const brokerSnapshot = readBrokerSnapshotFromDurableState(snapshot, authSecretSealer);
       applyDurableStateSnapshot(state, snapshot, {
-        preserveKeys: ["authBroker"]
+        preserveKeys: ["authBroker", "authBrokerEnvelope"]
       });
       migrateLegacyAuthFactorSecrets();
+      migrateLegacyAuthChallengeSecrets();
       normalizeDeviceTrustRecordStorage();
       state.authBroker.restore(brokerSnapshot);
     }
@@ -2638,6 +2652,49 @@ export function createOrgAuthPlatform({
     return secretRef;
   }
 
+  function persistAuthChallenge(challenge, secret) {
+    const challengeRef = writeAuthChallengeSecret(challenge, secret);
+    challenge.challengeRef = challengeRef;
+    delete challenge.challenge;
+    state.authChallenges.set(challenge.challengeId, challenge);
+    return challengeRef;
+  }
+
+  function writeAuthChallengeSecret(challenge, secret) {
+    const resolvedSecret = assertNonEmpty(secret, "auth_challenge_secret_required");
+    const challengeRef = challenge.challengeRef || challenge.challengeId;
+    challenge.challengeRef = challengeRef;
+    delete challenge.challenge;
+    state.authChallengeSecrets.set(challengeRef, {
+      challengeRef,
+      challengeId: challenge.challengeId,
+      challengeType: challenge.challengeType,
+      companyUserId: challenge.companyUserId,
+      keyId: authSecretSealer.keyId,
+      algorithm: "aes-256-gcm",
+      createdAt: state.authChallengeSecrets.get(challengeRef)?.createdAt || nowIso(),
+      updatedAt: nowIso(),
+      envelope: authSecretSealer.seal(resolvedSecret)
+    });
+    return challengeRef;
+  }
+
+  function readAuthChallengeSecret(challenge) {
+    if (challenge.challengeRef) {
+      const storedSecret = state.authChallengeSecrets.get(challenge.challengeRef);
+      if (!storedSecret?.envelope) {
+        throw httpError(500, "auth_challenge_secret_missing", "Auth challenge secret envelope was missing.");
+      }
+      return authSecretSealer.open(storedSecret.envelope);
+    }
+    if (challenge.challenge) {
+      const legacySecret = challenge.challenge;
+      writeAuthChallengeSecret(challenge, legacySecret);
+      return legacySecret;
+    }
+    throw httpError(500, "auth_challenge_secret_missing", "Auth challenge secret was missing.");
+  }
+
   function readAuthFactorSecret(factor) {
     if (factor.secretRef) {
       const storedSecret = state.authFactorSecrets.get(factor.secretRef);
@@ -2660,6 +2717,17 @@ export function createOrgAuthPlatform({
     return sanitized;
   }
 
+  function sanitizeAuthChallengeForPersistence(challenge) {
+    const sanitized = copy(challenge);
+    delete sanitized.challenge;
+    if (sanitized.challengeType === "federation_auth" && sanitized.payloadJson?.authorizationUrl) {
+      sanitized.payloadJson.authorizationUrl = redactFederationAuthorizationUrlForPersistence(
+        sanitized.payloadJson.authorizationUrl
+      );
+    }
+    return sanitized;
+  }
+
   function migrateLegacyAuthFactorSecrets() {
     for (const factor of state.authFactors.values()) {
       if (factor.factorType !== "totp") {
@@ -2678,6 +2746,20 @@ export function createOrgAuthPlatform({
         continue;
       }
       throw httpError(500, "auth_factor_secret_missing", `Missing TOTP secret for factor ${factor.factorId}.`);
+    }
+  }
+
+  function migrateLegacyAuthChallengeSecrets() {
+    for (const challenge of state.authChallenges.values()) {
+      if (challenge.challengeRef) {
+        delete challenge.challenge;
+        continue;
+      }
+      if (challenge.challenge) {
+        writeAuthChallengeSecret(challenge, challenge.challenge);
+        continue;
+      }
+      throw httpError(500, "auth_challenge_secret_missing", `Missing auth challenge secret for challenge ${challenge.challengeId}.`);
     }
   }
 
@@ -4110,6 +4192,24 @@ function writeSeededAuthFactorSecret(state, authSecretSealer, factorId, secret, 
     updatedAt: nowIsoTimestamp,
     envelope: authSecretSealer.seal(secret)
   });
+}
+
+function readBrokerSnapshotFromDurableState(snapshot, authSecretSealer) {
+  if (snapshot?.authBrokerEnvelope?.envelope) {
+    return JSON.parse(authSecretSealer.open(snapshot.authBrokerEnvelope.envelope));
+  }
+  return snapshot?.authBroker || {};
+}
+
+function redactFederationAuthorizationUrlForPersistence(authorizationUrl) {
+  const resolvedAuthorizationUrl = assertNonEmpty(authorizationUrl, "federation_authorization_url_required");
+  try {
+    const url = new URL(resolvedAuthorizationUrl);
+    url.searchParams.delete("state");
+    return url.toString();
+  } catch {
+    return resolvedAuthorizationUrl.replace(/([?&])state=[^&]+(&|$)/, "$1redacted_state=1$2").replace(/[?&]$/, "");
+  }
 }
 
 function httpError(status, code, message) {
