@@ -250,7 +250,7 @@ Ingen live pilot, ingen submissions-transport, ingen migrationscutover på nuvar
 
 **Delfaser**  
 - [x] 2.1 [REWRITE][MIGRATE] Lägg alla produktionsdomäner bakom riktiga repositories med versionsfält, optimistic concurrency och explicit durabilitypolicy. Inga memory-only affärsdomäner tillåts.
-- [ ] 2.2 [REWRITE][HARDEN] Ersätt mutate-then-persist med `command_journal + aggregate_state + domain_events + outbox_messages + evidence_refs` i samma commit. `apps/api/src/platform.mjs` får inte gissa read/write via metodnamn.
+- [x] 2.2 [REWRITE][HARDEN] Ersätt mutate-then-persist med `command_journal + aggregate_state + domain_events + outbox_messages + evidence_refs` i samma commit. `apps/api/src/platform.mjs` får inte gissa read/write via metodnamn.
 - [ ] 2.3 [REWRITE] Gör snapshot import/export schema-aware, versionsstyrd och fail-fast. Snapshot är återställningsartefakt, inte primär sanning.
 - [ ] 2.4 [HARDEN] Bygg worker-attempt-livscykel med claim, heartbeat, retry, dead-letter, replay och säker fail-markering även när attempt-starten kraschar.
 - [ ] 2.5 [REPLACE] Gör Postgres-migrationslagret bindande för runtime istället för sidovagn. CHECK/FK/UNIQUE/index måste spegla domänregler och användas av applikationen.

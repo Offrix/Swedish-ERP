@@ -283,3 +283,95 @@ test("Phase 2.2 special read methods do not trigger aggregate persistence writes
     platform.closeCriticalDomainStateStore?.();
   }
 });
+
+test("Phase 2.2 platform mutation journaling writes command receipt and domain event with redacted payload summary", () => {
+  const platform = createApiPlatform({
+    env: {},
+    runtimeMode: "test",
+    criticalDomainStateStore: createInMemoryCriticalDomainStateStore()
+  });
+
+  try {
+    const company = platform.createCompany({
+      legalName: "Journal AB",
+      orgNumber: "556677-8899",
+      status: "active"
+    });
+
+    const receipts = platform.listCriticalDomainCommandReceipts({
+      domainKey: "orgAuth",
+      companyId: company.companyId
+    });
+    const events = platform.listCriticalDomainDomainEvents({
+      domainKey: "orgAuth",
+      companyId: company.companyId
+    });
+    const evidenceRefs = platform.listCriticalDomainEvidenceRefs({
+      domainKey: "orgAuth",
+      companyId: company.companyId
+    });
+
+    assert.equal(receipts.length >= 1, true);
+    assert.equal(events.length >= 1, true);
+    assert.equal(evidenceRefs.length, 0);
+    assert.equal(receipts[receipts.length - 1].commandType, "orgAuth.createCompany");
+    assert.equal(receipts[receipts.length - 1].aggregateType, "orgAuth_aggregate_state");
+    assert.equal(receipts[receipts.length - 1].commandPayload.input.arguments[0].fields.legalName.kind, "string");
+    assert.equal(JSON.stringify(receipts[receipts.length - 1].commandPayload).includes("Journal AB"), false);
+    assert.equal(events[events.length - 1].eventType, "orgAuth.createCompany.committed");
+  } finally {
+    platform.closeCriticalDomainStateStore?.();
+  }
+});
+
+test("Phase 2.2 sqlite-backed mutation journal survives restart with command receipts and domain events", () => {
+  const temp = createTempSqlitePath("swedish-erp-phase22-journal");
+  const options = {
+    env: {},
+    runtimeMode: "test",
+    criticalDomainStateStoreKind: "sqlite",
+    criticalDomainStateStorePath: temp.filePath
+  };
+  const platform1 = createApiPlatform(options);
+
+  try {
+    const company = platform1.createCompany({
+      legalName: "Restart Journal AB",
+      orgNumber: "556677-8899",
+      status: "active"
+    });
+    const receiptsBefore = platform1.listCriticalDomainCommandReceipts({
+      domainKey: "orgAuth",
+      companyId: company.companyId
+    });
+    const eventsBefore = platform1.listCriticalDomainDomainEvents({
+      domainKey: "orgAuth",
+      companyId: company.companyId
+    });
+
+    assert.equal(receiptsBefore.length >= 1, true);
+    assert.equal(eventsBefore.length >= 1, true);
+    platform1.closeCriticalDomainStateStore();
+
+    const platform2 = createApiPlatform(options);
+    try {
+      const receiptsAfter = platform2.listCriticalDomainCommandReceipts({
+        domainKey: "orgAuth",
+        companyId: company.companyId
+      });
+      const eventsAfter = platform2.listCriticalDomainDomainEvents({
+        domainKey: "orgAuth",
+        companyId: company.companyId
+      });
+
+      assert.equal(receiptsAfter.length, receiptsBefore.length);
+      assert.equal(eventsAfter.length, eventsBefore.length);
+      assert.equal(receiptsAfter[receiptsAfter.length - 1].commandType, "orgAuth.createCompany");
+      assert.equal(eventsAfter[eventsAfter.length - 1].eventType, "orgAuth.createCompany.committed");
+    } finally {
+      platform2.closeCriticalDomainStateStore();
+    }
+  } finally {
+    cleanupTempDirectory(temp.directory);
+  }
+});

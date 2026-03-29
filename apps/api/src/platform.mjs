@@ -1080,6 +1080,34 @@ export function createApiPlatform(options = {}) {
         }),
       enumerable: false
     },
+    listCriticalDomainCommandReceipts: {
+      value: ({ domainKey = null, companyId = null } = {}) =>
+        typeof criticalDomainStateStore.listCommandReceipts === "function"
+          ? criticalDomainStateStore.listCommandReceipts({ domainKey, companyId })
+          : [],
+      enumerable: false
+    },
+    listCriticalDomainDomainEvents: {
+      value: ({ domainKey = null, companyId = null, commandReceiptId = null } = {}) =>
+        typeof criticalDomainStateStore.listDomainEvents === "function"
+          ? criticalDomainStateStore.listDomainEvents({ domainKey, companyId, commandReceiptId })
+          : [],
+      enumerable: false
+    },
+    listCriticalDomainOutboxMessages: {
+      value: ({ domainKey = null, companyId = null, commandReceiptId = null } = {}) =>
+        typeof criticalDomainStateStore.listOutboxMessages === "function"
+          ? criticalDomainStateStore.listOutboxMessages({ domainKey, companyId, commandReceiptId })
+          : [],
+      enumerable: false
+    },
+    listCriticalDomainEvidenceRefs: {
+      value: ({ domainKey = null, companyId = null, commandReceiptId = null } = {}) =>
+        typeof criticalDomainStateStore.listEvidenceRefs === "function"
+          ? criticalDomainStateStore.listEvidenceRefs({ domainKey, companyId, commandReceiptId })
+          : [],
+      enumerable: false
+    },
     listCriticalDomainMethodIntents: {
       value: ({ domainKey = null } = {}) =>
         listCriticalDomainMethodIntents(registrations, registeredDomains).filter((entry) =>
@@ -1226,6 +1254,120 @@ function hashSnapshot(value) {
   return crypto.createHash("sha256").update(stableStringify(value ?? null)).digest("hex");
 }
 
+function isPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function summarizeMutationValue(value) {
+  if (Array.isArray(value)) {
+    return Object.freeze({
+      kind: "array",
+      length: value.length,
+      items: value.slice(0, 5).map((entry) => summarizeMutationValue(entry))
+    });
+  }
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value).sort();
+    return Object.freeze({
+      kind: "object",
+      keys,
+      fields: Object.freeze(
+        Object.fromEntries(keys.slice(0, 32).map((key) => [key, summarizeMutationValue(value[key])]))
+      )
+    });
+  }
+  if (value == null) {
+    return null;
+  }
+  return Object.freeze({
+    kind: typeof value
+  });
+}
+
+function resolveMutationInput(args) {
+  return isPlainObject(args?.[0]) ? args[0] : {};
+}
+
+function resolveMutationCompanyId(input, result) {
+  const candidates = [
+    input.companyId,
+    input.bureauOrgId,
+    input.clientCompanyId,
+    input.tenantId,
+    result?.companyId,
+    result?.bureauOrgId,
+    result?.tenantId,
+    "platform"
+  ];
+  return candidates.find((candidate) => typeof candidate === "string" && candidate.trim().length > 0) || "platform";
+}
+
+function resolveMutationActorId(input, result) {
+  return (
+    [input.actorId, input.userId, result?.actorId, "system"].find(
+      (candidate) => typeof candidate === "string" && candidate.trim().length > 0
+    ) || "system"
+  );
+}
+
+function resolveMutationSessionRevision(input) {
+  const candidate = Number(input.sessionRevision);
+  if (Number.isInteger(candidate) && candidate > 0) {
+    return candidate;
+  }
+  return 1;
+}
+
+function resolveMutationCorrelationId(input) {
+  return (
+    [input.correlationId, input.correlation_id].find(
+      (candidate) => typeof candidate === "string" && candidate.trim().length > 0
+    ) || crypto.randomUUID()
+  );
+}
+
+function resolveMutationCausationId(input) {
+  return (
+    [input.causationId, input.causation_id].find(
+      (candidate) => typeof candidate === "string" && candidate.trim().length > 0
+    ) || null
+  );
+}
+
+function summarizeMutationArgs(args) {
+  return Object.freeze({
+    argumentCount: Array.isArray(args) ? args.length : 0,
+    arguments: Array.isArray(args) ? args.map((entry) => summarizeMutationValue(entry)) : []
+  });
+}
+
+function summarizeMutationResult(result) {
+  return summarizeMutationValue(result);
+}
+
+function extractEvidenceRefRecords({ domainKey, companyId, aggregateType, aggregateId, actorId, correlationId, result }) {
+  if (!Array.isArray(result?.evidenceRefs)) {
+    return [];
+  }
+  return result.evidenceRefs
+    .filter((entry) => typeof entry === "string" && entry.trim().length > 0)
+    .map((entry) =>
+      Object.freeze({
+        domainKey,
+        companyId,
+        aggregateType,
+        aggregateId,
+        evidenceRefType: "domain_result_ref",
+        evidenceRef: entry.trim(),
+        actorId,
+        correlationId,
+        metadata: Object.freeze({
+          source: "domain_result"
+        })
+      })
+    );
+}
+
 function resolveDomainDurabilityPolicy(domainKey) {
   if (STATELESS_DOMAIN_KEYS.includes(domainKey)) {
     return Object.freeze({
@@ -1336,19 +1478,42 @@ function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
 
   let lastPersistedHash = existingRecord?.snapshotHash || null;
   let lastPersistedObjectVersion = existingRecord?.objectVersion || 0;
-  const persist = () => {
+  const persist = (journalContext = null) => {
     const snapshot = adapter.exportSnapshot();
     const snapshotHash = hashSnapshot(snapshot);
     if (snapshotHash === lastPersistedHash) {
       return null;
     }
-    const record = store.save({
-      domainKey,
-      snapshot,
-      expectedObjectVersion: lastPersistedObjectVersion,
-      durabilityPolicy: durabilityPolicy.durabilityPolicy,
-      adapterKind: adapter.adapterKind
-    });
+    const record = typeof store.recordMutation === "function" && journalContext
+      ? store.recordMutation({
+        domainKey,
+        companyId: journalContext.companyId,
+        commandType: journalContext.commandType,
+        aggregateType: journalContext.aggregateType,
+        aggregateId: journalContext.aggregateId,
+        commandId: journalContext.commandId,
+        idempotencyKey: journalContext.idempotencyKey,
+        expectedObjectVersion: lastPersistedObjectVersion,
+        actorId: journalContext.actorId,
+        sessionRevision: journalContext.sessionRevision,
+        correlationId: journalContext.correlationId,
+        causationId: journalContext.causationId,
+        commandPayload: journalContext.commandPayload,
+        metadata: journalContext.metadata,
+        domainEventRecords: journalContext.domainEventRecords,
+        outboxMessageRecords: journalContext.outboxMessageRecords,
+        evidenceRefRecords: journalContext.evidenceRefRecords,
+        snapshot,
+        durabilityPolicy: durabilityPolicy.durabilityPolicy,
+        adapterKind: adapter.adapterKind
+      }).stateRecord
+      : store.save({
+        domainKey,
+        snapshot,
+        expectedObjectVersion: lastPersistedObjectVersion,
+        durabilityPolicy: durabilityPolicy.durabilityPolicy,
+        adapterKind: adapter.adapterKind
+      });
     lastPersistedHash = record.snapshotHash;
     lastPersistedObjectVersion = record.objectVersion;
     return record;
@@ -1392,6 +1557,7 @@ function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
       }
       return (...args) => {
         const beforeSnapshot = adapter.exportSnapshot();
+        const input = resolveMutationInput(args);
         const restoreOnFailure = (error) => {
           adapter.importSnapshot(beforeSnapshot);
           throw error;
@@ -1402,7 +1568,79 @@ function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
             return result
               .then((resolved) => {
                 try {
-                  persist();
+                  const companyId = resolveMutationCompanyId(input, resolved);
+                  const actorId = resolveMutationActorId(input, resolved);
+                  const correlationId = resolveMutationCorrelationId(input);
+                  const commandId = typeof input.commandId === "string" && input.commandId.trim().length > 0
+                    ? input.commandId.trim()
+                    : crypto.randomUUID();
+                  const aggregateType = `${domainKey}_aggregate_state`;
+                  const aggregateId = domainKey;
+                  const commandType = `${domainKey}.${property}`;
+                  const auditEnvelope = createAuditEnvelope({
+                    action: commandType,
+                    actorId,
+                    companyId,
+                    entityType: aggregateType,
+                    entityId: aggregateId,
+                    explanation: `Committed ${commandType} through critical domain persistence.`,
+                    correlationId,
+                    causationId: resolveMutationCausationId(input),
+                    metadata: {
+                      domainKey,
+                      methodName: property
+                    }
+                  });
+                  persist({
+                    companyId,
+                    commandType,
+                    aggregateType,
+                    aggregateId,
+                    commandId,
+                    idempotencyKey:
+                      typeof input.idempotencyKey === "string" && input.idempotencyKey.trim().length > 0
+                        ? input.idempotencyKey.trim()
+                        : `${commandType}:${commandId}`,
+                    actorId,
+                    sessionRevision: resolveMutationSessionRevision(input),
+                    correlationId,
+                    causationId: resolveMutationCausationId(input),
+                    commandPayload: Object.freeze({
+                      domainKey,
+                      methodName: property,
+                      input: summarizeMutationArgs(args),
+                      result: summarizeMutationResult(resolved)
+                    }),
+                    metadata: Object.freeze({
+                      auditEnvelope,
+                      durabilityPolicy: durabilityPolicy.durabilityPolicy,
+                      adapterKind: adapter.adapterKind
+                    }),
+                    domainEventRecords: [
+                      Object.freeze({
+                        aggregateType,
+                        aggregateId,
+                        eventType: `${commandType}.committed`,
+                        payload: Object.freeze({
+                          domainKey,
+                          methodName: property,
+                          result: summarizeMutationResult(resolved)
+                        }),
+                        actorId,
+                        correlationId
+                      })
+                    ],
+                    outboxMessageRecords: [],
+                    evidenceRefRecords: extractEvidenceRefRecords({
+                      domainKey,
+                      companyId,
+                      aggregateType,
+                      aggregateId,
+                      actorId,
+                      correlationId,
+                      result: resolved
+                    })
+                  });
                 } catch (error) {
                   restoreOnFailure(error);
                 }
@@ -1410,7 +1648,79 @@ function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
               })
               .catch((error) => restoreOnFailure(error));
           }
-          persist();
+          const companyId = resolveMutationCompanyId(input, result);
+          const actorId = resolveMutationActorId(input, result);
+          const correlationId = resolveMutationCorrelationId(input);
+          const commandId = typeof input.commandId === "string" && input.commandId.trim().length > 0
+            ? input.commandId.trim()
+            : crypto.randomUUID();
+          const aggregateType = `${domainKey}_aggregate_state`;
+          const aggregateId = domainKey;
+          const commandType = `${domainKey}.${property}`;
+          const auditEnvelope = createAuditEnvelope({
+            action: commandType,
+            actorId,
+            companyId,
+            entityType: aggregateType,
+            entityId: aggregateId,
+            explanation: `Committed ${commandType} through critical domain persistence.`,
+            correlationId,
+            causationId: resolveMutationCausationId(input),
+            metadata: {
+              domainKey,
+              methodName: property
+            }
+          });
+          persist({
+            companyId,
+            commandType,
+            aggregateType,
+            aggregateId,
+            commandId,
+            idempotencyKey:
+              typeof input.idempotencyKey === "string" && input.idempotencyKey.trim().length > 0
+                ? input.idempotencyKey.trim()
+                : `${commandType}:${commandId}`,
+            actorId,
+            sessionRevision: resolveMutationSessionRevision(input),
+            correlationId,
+            causationId: resolveMutationCausationId(input),
+            commandPayload: Object.freeze({
+              domainKey,
+              methodName: property,
+              input: summarizeMutationArgs(args),
+              result: summarizeMutationResult(result)
+            }),
+            metadata: Object.freeze({
+              auditEnvelope,
+              durabilityPolicy: durabilityPolicy.durabilityPolicy,
+              adapterKind: adapter.adapterKind
+            }),
+            domainEventRecords: [
+              Object.freeze({
+                aggregateType,
+                aggregateId,
+                eventType: `${commandType}.committed`,
+                payload: Object.freeze({
+                  domainKey,
+                  methodName: property,
+                  result: summarizeMutationResult(result)
+                }),
+                actorId,
+                correlationId
+              })
+            ],
+            outboxMessageRecords: [],
+            evidenceRefRecords: extractEvidenceRefRecords({
+              domainKey,
+              companyId,
+              aggregateType,
+              aggregateId,
+              actorId,
+              correlationId,
+              result
+            })
+          });
           return result;
         } catch (error) {
           restoreOnFailure(error);
