@@ -831,6 +831,349 @@ function createPostgresTransaction(tx) {
   };
 }
 
+export const POSTGRES_CANONICAL_REPOSITORY_REQUIRED_MIGRATION_IDS = Object.freeze([
+  "20260326113000_phase2_core_canonical_repositories",
+  "20260326120000_phase2_command_log_outbox_inbox"
+]);
+
+export const POSTGRES_CANONICAL_REPOSITORY_SCHEMA_CONTRACT = Object.freeze({
+  schemaMigrationsTable: "schema_migrations",
+  requiredMigrationIds: POSTGRES_CANONICAL_REPOSITORY_REQUIRED_MIGRATION_IDS,
+  tables: Object.freeze({
+    core_domain_records: Object.freeze({
+      columns: Object.freeze([
+        "bounded_context_code",
+        "object_type",
+        "company_id",
+        "object_id",
+        "status",
+        "payload_json",
+        "object_version",
+        "last_actor_id",
+        "last_correlation_id",
+        "created_at",
+        "updated_at"
+      ]),
+      indexes: Object.freeze([
+        "core_domain_records_company_lookup_idx",
+        "core_domain_records_correlation_lookup_idx"
+      ])
+    }),
+    command_receipts: Object.freeze({
+      columns: Object.freeze([
+        "command_receipt_id",
+        "company_id",
+        "command_type",
+        "aggregate_type",
+        "aggregate_id",
+        "command_id",
+        "idempotency_key",
+        "expected_object_version",
+        "resulting_object_version",
+        "actor_id",
+        "session_revision",
+        "correlation_id",
+        "causation_id",
+        "payload_hash",
+        "command_payload_json",
+        "metadata_json",
+        "status",
+        "recorded_at",
+        "processed_at"
+      ]),
+      indexes: Object.freeze([
+        "command_receipts_company_recorded_idx"
+      ]),
+      uniqueConstraints: Object.freeze([
+        Object.freeze(["company_id", "command_type", "command_id"]),
+        Object.freeze(["company_id", "idempotency_key"])
+      ]),
+      foreignKeys: Object.freeze([
+        Object.freeze({
+          columns: Object.freeze(["company_id"]),
+          foreignTable: "companies",
+          foreignColumns: Object.freeze(["company_id"])
+        })
+      ])
+    }),
+    command_inbox_messages: Object.freeze({
+      columns: Object.freeze([
+        "inbox_message_id",
+        "company_id",
+        "source_system",
+        "message_id",
+        "aggregate_type",
+        "aggregate_id",
+        "payload_hash",
+        "payload_json",
+        "correlation_id",
+        "causation_id",
+        "actor_id",
+        "status",
+        "received_at",
+        "processed_at",
+        "error_code"
+      ]),
+      indexes: Object.freeze([
+        "command_inbox_messages_company_received_idx"
+      ]),
+      uniqueConstraints: Object.freeze([
+        Object.freeze(["company_id", "source_system", "message_id"])
+      ]),
+      foreignKeys: Object.freeze([
+        Object.freeze({
+          columns: Object.freeze(["company_id"]),
+          foreignTable: "companies",
+          foreignColumns: Object.freeze(["company_id"])
+        })
+      ])
+    }),
+    command_domain_events: Object.freeze({
+      columns: Object.freeze([
+        "domain_event_id",
+        "company_id",
+        "aggregate_type",
+        "aggregate_id",
+        "command_receipt_id",
+        "object_version",
+        "event_type",
+        "payload_json",
+        "actor_id",
+        "correlation_id",
+        "causation_id",
+        "status",
+        "recorded_at"
+      ]),
+      indexes: Object.freeze([
+        "command_domain_events_company_recorded_idx",
+        "command_domain_events_receipt_idx"
+      ]),
+      foreignKeys: Object.freeze([
+        Object.freeze({
+          columns: Object.freeze(["company_id"]),
+          foreignTable: "companies",
+          foreignColumns: Object.freeze(["company_id"])
+        }),
+        Object.freeze({
+          columns: Object.freeze(["command_receipt_id"]),
+          foreignTable: "command_receipts",
+          foreignColumns: Object.freeze(["command_receipt_id"])
+        })
+      ])
+    }),
+    command_evidence_refs: Object.freeze({
+      columns: Object.freeze([
+        "evidence_ref_id",
+        "company_id",
+        "aggregate_type",
+        "aggregate_id",
+        "command_receipt_id",
+        "domain_event_id",
+        "evidence_ref_type",
+        "evidence_ref",
+        "metadata_json",
+        "actor_id",
+        "correlation_id",
+        "causation_id",
+        "status",
+        "recorded_at"
+      ]),
+      indexes: Object.freeze([
+        "command_evidence_refs_company_recorded_idx",
+        "command_evidence_refs_receipt_idx"
+      ]),
+      foreignKeys: Object.freeze([
+        Object.freeze({
+          columns: Object.freeze(["company_id"]),
+          foreignTable: "companies",
+          foreignColumns: Object.freeze(["company_id"])
+        }),
+        Object.freeze({
+          columns: Object.freeze(["command_receipt_id"]),
+          foreignTable: "command_receipts",
+          foreignColumns: Object.freeze(["command_receipt_id"])
+        }),
+        Object.freeze({
+          columns: Object.freeze(["domain_event_id"]),
+          foreignTable: "command_domain_events",
+          foreignColumns: Object.freeze(["domain_event_id"])
+        })
+      ])
+    }),
+    outbox_events: Object.freeze({
+      columns: Object.freeze([
+        "command_receipt_id",
+        "actor_id",
+        "correlation_id",
+        "causation_id",
+        "idempotency_key"
+      ]),
+      indexes: Object.freeze([
+        "outbox_events_command_receipt_idx"
+      ]),
+      foreignKeys: Object.freeze([
+        Object.freeze({
+          columns: Object.freeze(["command_receipt_id"]),
+          foreignTable: "command_receipts",
+          foreignColumns: Object.freeze(["command_receipt_id"])
+        })
+      ])
+    })
+  })
+});
+
+function buildColumnContractKey(tableName, columnName) {
+  return `${tableName}.${columnName}`;
+}
+
+function buildIndexContractKey(tableName, indexName) {
+  return `${tableName}.${indexName}`;
+}
+
+function buildUniqueConstraintKey(tableName, columns) {
+  return `${tableName}:${columns.join(",")}`;
+}
+
+function buildForeignKeyContractKey(tableName, columns, foreignTable, foreignColumns) {
+  return `${tableName}:${columns.join(",")}=>${foreignTable}:${foreignColumns.join(",")}`;
+}
+
+async function verifyPostgresCanonicalRepositorySchemaContract(sql) {
+  const [schemaMigrationsTableRows, migrationRows, columnRows, indexRows, uniqueConstraintRows, foreignKeyRows] = await Promise.all([
+    sql`select to_regclass(current_schema() || '.schema_migrations')::text as relation_name`,
+    sql`select migration_id from schema_migrations`,
+    sql`
+      select table_name, column_name
+      from information_schema.columns
+      where table_schema = current_schema()
+    `,
+    sql`
+      select tablename as table_name, indexname as index_name
+      from pg_indexes
+      where schemaname = current_schema()
+    `,
+    sql`
+      select
+        tc.table_name,
+        string_agg(kcu.column_name, ',' order by kcu.ordinal_position) as column_list
+      from information_schema.table_constraints tc
+      join information_schema.key_column_usage kcu
+        on tc.constraint_name = kcu.constraint_name
+       and tc.table_schema = kcu.table_schema
+      where tc.table_schema = current_schema()
+        and tc.constraint_type = 'UNIQUE'
+      group by tc.table_name, tc.constraint_name
+    `,
+    sql`
+      select
+        tc.table_name,
+        string_agg(kcu.column_name, ',' order by kcu.ordinal_position) as column_list,
+        ccu.table_name as foreign_table_name,
+        string_agg(ccu.column_name, ',' order by kcu.ordinal_position) as foreign_column_list
+      from information_schema.table_constraints tc
+      join information_schema.key_column_usage kcu
+        on tc.constraint_name = kcu.constraint_name
+       and tc.table_schema = kcu.table_schema
+      join information_schema.constraint_column_usage ccu
+        on tc.constraint_name = ccu.constraint_name
+       and tc.table_schema = ccu.table_schema
+      where tc.table_schema = current_schema()
+        and tc.constraint_type = 'FOREIGN KEY'
+      group by tc.table_name, tc.constraint_name, ccu.table_name
+    `
+  ]);
+
+  if (!schemaMigrationsTableRows[0]?.relation_name) {
+    throw new Error("Postgres canonical repository schema contract is incomplete: missing schema_migrations table.");
+  }
+
+  const installedMigrationIds = new Set(migrationRows.map((row) => row.migration_id));
+  const availableColumns = new Set(columnRows.map((row) => buildColumnContractKey(row.table_name, row.column_name)));
+  const availableIndexes = new Set(indexRows.map((row) => buildIndexContractKey(row.table_name, row.index_name)));
+  const availableUniqueConstraints = new Set(
+    uniqueConstraintRows.map((row) => buildUniqueConstraintKey(row.table_name, String(row.column_list || "").split(",").filter(Boolean)))
+  );
+  const availableForeignKeys = new Set(
+    foreignKeyRows.map((row) =>
+      buildForeignKeyContractKey(
+        row.table_name,
+        String(row.column_list || "").split(",").filter(Boolean),
+        row.foreign_table_name,
+        String(row.foreign_column_list || "").split(",").filter(Boolean)
+      )
+    )
+  );
+
+  const missingMigrationIds = POSTGRES_CANONICAL_REPOSITORY_SCHEMA_CONTRACT.requiredMigrationIds.filter(
+    (migrationId) => !installedMigrationIds.has(migrationId)
+  );
+  const missingColumns = [];
+  const missingIndexes = [];
+  const missingUniqueConstraints = [];
+  const missingForeignKeys = [];
+
+  for (const [tableName, tableContract] of Object.entries(POSTGRES_CANONICAL_REPOSITORY_SCHEMA_CONTRACT.tables)) {
+    for (const columnName of tableContract.columns || []) {
+      const columnKey = buildColumnContractKey(tableName, columnName);
+      if (!availableColumns.has(columnKey)) {
+        missingColumns.push(columnKey);
+      }
+    }
+    for (const indexName of tableContract.indexes || []) {
+      const indexKey = buildIndexContractKey(tableName, indexName);
+      if (!availableIndexes.has(indexKey)) {
+        missingIndexes.push(indexKey);
+      }
+    }
+    for (const columns of tableContract.uniqueConstraints || []) {
+      const uniqueKey = buildUniqueConstraintKey(tableName, columns);
+      if (!availableUniqueConstraints.has(uniqueKey)) {
+        missingUniqueConstraints.push(uniqueKey);
+      }
+    }
+    for (const foreignKey of tableContract.foreignKeys || []) {
+      const foreignKeyKey = buildForeignKeyContractKey(
+        tableName,
+        foreignKey.columns,
+        foreignKey.foreignTable,
+        foreignKey.foreignColumns
+      );
+      if (!availableForeignKeys.has(foreignKeyKey)) {
+        missingForeignKeys.push(foreignKeyKey);
+      }
+    }
+  }
+
+  const failureMessages = [];
+  if (missingMigrationIds.length > 0) {
+    failureMessages.push(`missing migrations [${missingMigrationIds.join(", ")}]`);
+  }
+  if (missingColumns.length > 0) {
+    failureMessages.push(`missing columns [${missingColumns.join(", ")}]`);
+  }
+  if (missingIndexes.length > 0) {
+    failureMessages.push(`missing indexes [${missingIndexes.join(", ")}]`);
+  }
+  if (missingUniqueConstraints.length > 0) {
+    failureMessages.push(`missing unique constraints [${missingUniqueConstraints.join(", ")}]`);
+  }
+  if (missingForeignKeys.length > 0) {
+    failureMessages.push(`missing foreign keys [${missingForeignKeys.join(", ")}]`);
+  }
+
+  if (failureMessages.length > 0) {
+    throw new Error(`Postgres canonical repository schema contract is incomplete: ${failureMessages.join("; ")}.`);
+  }
+
+  return Object.freeze({
+    ok: true,
+    schemaMigrationsTable: POSTGRES_CANONICAL_REPOSITORY_SCHEMA_CONTRACT.schemaMigrationsTable,
+    verifiedAt: new Date().toISOString(),
+    requiredMigrationIds: [...POSTGRES_CANONICAL_REPOSITORY_SCHEMA_CONTRACT.requiredMigrationIds],
+    checkedTables: Object.keys(POSTGRES_CANONICAL_REPOSITORY_SCHEMA_CONTRACT.tables)
+  });
+}
+
 export function resolveCanonicalRepositoryConnectionString({
   connectionString = null,
   env = process.env
@@ -881,12 +1224,24 @@ export function createPostgresCanonicalRepositoryStore({
     prepare: false,
     onnotice: () => {}
   });
+  let schemaContractVerification = null;
 
   return {
     kind: "postgres_canonical_repository_store",
 
     async close() {
       await sql.end({ timeout: 5 });
+    },
+
+    async verifySchemaContract() {
+      if (!schemaContractVerification) {
+        schemaContractVerification = verifyPostgresCanonicalRepositorySchemaContract(sql)
+          .catch((error) => {
+            schemaContractVerification = null;
+            throw error;
+          });
+      }
+      return schemaContractVerification;
     },
 
     async withTransaction(work) {

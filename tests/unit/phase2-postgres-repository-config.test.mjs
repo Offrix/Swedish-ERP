@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  POSTGRES_CANONICAL_REPOSITORY_REQUIRED_MIGRATION_IDS,
+  POSTGRES_CANONICAL_REPOSITORY_SCHEMA_CONTRACT,
   createPostgresCanonicalRepositoryStore,
   resolveCanonicalRepositoryConnectionString
 } from "../../packages/domain-core/src/repositories-postgres.mjs";
@@ -53,4 +55,37 @@ test("Phase 2.1 canonical repository store constructor fails fast on incomplete 
       }),
     /Missing Postgres environment variables for canonical repositories/u
   );
+});
+
+test("Phase 2.5 canonical repository store publishes the bindande migration contract", () => {
+  assert.deepEqual(POSTGRES_CANONICAL_REPOSITORY_REQUIRED_MIGRATION_IDS, [
+    "20260326113000_phase2_core_canonical_repositories",
+    "20260326120000_phase2_command_log_outbox_inbox"
+  ]);
+  assert.equal(POSTGRES_CANONICAL_REPOSITORY_SCHEMA_CONTRACT.schemaMigrationsTable, "schema_migrations");
+});
+
+test("Phase 2.5 canonical repository store schema contract covers repository and command log tables", () => {
+  assert.deepEqual(Object.keys(POSTGRES_CANONICAL_REPOSITORY_SCHEMA_CONTRACT.tables), [
+    "core_domain_records",
+    "command_receipts",
+    "command_inbox_messages",
+    "command_domain_events",
+    "command_evidence_refs",
+    "outbox_events"
+  ]);
+  assert.deepEqual(POSTGRES_CANONICAL_REPOSITORY_SCHEMA_CONTRACT.tables.command_receipts.uniqueConstraints, [
+    ["company_id", "command_type", "command_id"],
+    ["company_id", "idempotency_key"]
+  ]);
+  assert.deepEqual(POSTGRES_CANONICAL_REPOSITORY_SCHEMA_CONTRACT.tables.command_inbox_messages.indexes, [
+    "command_inbox_messages_company_received_idx"
+  ]);
+  assert.deepEqual(POSTGRES_CANONICAL_REPOSITORY_SCHEMA_CONTRACT.tables.outbox_events.foreignKeys, [
+    {
+      columns: ["command_receipt_id"],
+      foreignTable: "command_receipts",
+      foreignColumns: ["command_receipt_id"]
+    }
+  ]);
 });

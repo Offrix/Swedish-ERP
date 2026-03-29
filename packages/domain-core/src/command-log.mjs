@@ -46,6 +46,7 @@ export function createCommandMutationRuntime({
   }
 
   return {
+    verifyMutationStoreSchemaContract,
     async executeMutation({
       companyId,
       commandType,
@@ -81,6 +82,7 @@ export function createCommandMutationRuntime({
         throw new TypeError("mutation is required.");
       }
 
+      await verifyMutationStoreSchemaContract();
       return store.withTransaction(async (transaction) => {
         const existingReceipt =
           await transaction.getCommandReceipt({
@@ -231,6 +233,7 @@ export function createCommandMutationRuntime({
     },
 
     async listCommandReceipts({ companyId, commandType = null } = {}) {
+      await verifyMutationStoreSchemaContract();
       return store.withTransaction((transaction) =>
         transaction.listCommandReceipts({
           companyId: text(companyId, "companyId"),
@@ -240,6 +243,7 @@ export function createCommandMutationRuntime({
     },
 
     async listOutboxMessages({ companyId, aggregateType = null, aggregateId = null, commandReceiptId = null, published = null } = {}) {
+      await verifyMutationStoreSchemaContract();
       return store.withTransaction((transaction) =>
         transaction.listOutboxMessages({
           companyId: text(companyId, "companyId"),
@@ -252,6 +256,7 @@ export function createCommandMutationRuntime({
     },
 
     async listDomainEvents({ companyId, aggregateType = null, aggregateId = null, commandReceiptId = null } = {}) {
+      await verifyMutationStoreSchemaContract();
       return store.withTransaction((transaction) =>
         transaction.listDomainEvents({
           companyId: text(companyId, "companyId"),
@@ -270,6 +275,7 @@ export function createCommandMutationRuntime({
       domainEventId = null,
       evidenceRefType = null
     } = {}) {
+      await verifyMutationStoreSchemaContract();
       return store.withTransaction((transaction) =>
         transaction.listEvidenceRefs({
           companyId: text(companyId, "companyId"),
@@ -283,6 +289,7 @@ export function createCommandMutationRuntime({
     },
 
     async markOutboxMessagePublished({ eventId, publishedAt = null } = {}) {
+      await verifyMutationStoreSchemaContract();
       return store.withTransaction((transaction) =>
         transaction.markOutboxMessagePublished({
           eventId: text(eventId, "eventId"),
@@ -302,6 +309,7 @@ export function createCommandMutationRuntime({
       causationId = null,
       actorId = null
     } = {}) {
+      await verifyMutationStoreSchemaContract();
       return store.withTransaction((transaction) =>
         transaction.recordInboxMessage({
           companyId: text(companyId, "companyId"),
@@ -320,6 +328,7 @@ export function createCommandMutationRuntime({
     },
 
     async listInboxMessages({ companyId, sourceSystem = null, status = null } = {}) {
+      await verifyMutationStoreSchemaContract();
       return store.withTransaction((transaction) =>
         transaction.listInboxMessages({
           companyId: text(companyId, "companyId"),
@@ -330,6 +339,7 @@ export function createCommandMutationRuntime({
     },
 
     async markInboxMessageProcessed({ inboxMessageId, processedAt = null, status = "processed", errorCode = null } = {}) {
+      await verifyMutationStoreSchemaContract();
       return store.withTransaction((transaction) =>
         transaction.markInboxMessageProcessed({
           inboxMessageId: text(inboxMessageId, "inboxMessageId"),
@@ -340,4 +350,21 @@ export function createCommandMutationRuntime({
       );
     }
   };
+
+  async function verifyMutationStoreSchemaContract() {
+    if (typeof store.verifySchemaContract === "function") {
+      return store.verifySchemaContract();
+    }
+    return {
+      ok: true,
+      schemaContractEnforced: false,
+      storeKind: typeof store.kind === "string" ? store.kind : "unknown",
+      verifiedAt: normalizeVerificationTimestamp(clock())
+    };
+  }
+}
+
+function normalizeVerificationTimestamp(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
 }

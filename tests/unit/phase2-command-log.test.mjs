@@ -157,6 +157,34 @@ test("Phase 2.2 command runtime suppresses duplicate commands by idempotency key
   assert.equal((await runtime.listEvidenceRefs({ companyId: COMPANY_ID })).length, 0);
 });
 
+test("Phase 2.5 command runtime verifies the repository store schema contract before transactions", async () => {
+  let verificationCalls = 0;
+  let transactionCalls = 0;
+  const runtime = createCommandMutationRuntime({
+    store: {
+      kind: "postgres_canonical_repository_store",
+      async verifySchemaContract() {
+        verificationCalls += 1;
+        return { ok: true };
+      },
+      async withTransaction(work) {
+        transactionCalls += 1;
+        return work({
+          listCommandReceipts() {
+            return [];
+          }
+        });
+      }
+    }
+  });
+
+  const receipts = await runtime.listCommandReceipts({ companyId: COMPANY_ID });
+
+  assert.deepEqual(receipts, []);
+  assert.equal(verificationCalls, 1);
+  assert.equal(transactionCalls, 1);
+});
+
 test("Phase 2.2 command runtime supports bounded-context repository bundles in the same transaction", async () => {
   const store = createInMemoryCanonicalRepositoryStore();
   const runtime = createCommandMutationRuntime({
