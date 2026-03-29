@@ -53,6 +53,9 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/pilot/executions/:pilotExecutionId/scenarios/:scenarioCode",
   "/v1/pilot/executions/:pilotExecutionId/complete",
   "/v1/pilot/executions/:pilotExecutionId/evidence",
+  "/v1/release/advantage-bundles",
+  "/v1/release/advantage-bundles/:advantageReleaseBundleId",
+  "/v1/release/advantage-bundles/:advantageReleaseBundleId/evidence",
   "/v1/integrations/capability-manifests",
   "/v1/integrations/connections",
   "/v1/integrations/connections/:connectionId",
@@ -349,6 +352,14 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(integrationHealthCheckRunContract.requiredActionClass, "integration_health_check_run");
     assert.equal(integrationHealthCheckRunContract.requiredTrustLevel, "strong_mfa");
     assert.equal(integrationHealthCheckRunContract.requiredScopeType, "integration_connection");
+
+    const advantageReleaseBundleCreateContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/release/advantage-bundles"
+    );
+    assert.ok(advantageReleaseBundleCreateContract);
+    assert.equal(advantageReleaseBundleCreateContract.requiredActionClass, "advantage_release_bundle_record");
+    assert.equal(advantageReleaseBundleCreateContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(advantageReleaseBundleCreateContract.requiredScopeType, "company");
 
     const closeAdjustmentContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/close/reopen-requests/:reopenRequestId/adjustments"

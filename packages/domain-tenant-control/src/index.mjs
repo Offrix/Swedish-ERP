@@ -49,6 +49,10 @@ export const PARITY_SCORECARD_STATUSES = Object.freeze([
   "green",
   "blocked"
 ]);
+export const ADVANTAGE_RELEASE_BUNDLE_STATUSES = Object.freeze([
+  "released",
+  "blocked"
+]);
 export const PARITY_CRITERION_STATUSES = Object.freeze([
   "green",
   "amber",
@@ -275,6 +279,13 @@ const GO_LIVE_PARITY_GATE_CODES = Object.freeze([
   "migration_cutover",
   "api_webhooks",
   "bankid_sso_backoffice"
+]);
+const ADVANTAGE_MOVE_CODES = Object.freeze([
+  "tax_account_cockpit",
+  "unified_receipts_recovery",
+  "migration_concierge",
+  "safe_trial_to_live",
+  "project_profitability_mission_control"
 ]);
 const PARITY_COMPETITOR_DEFINITIONS = Object.freeze([
   Object.freeze({
@@ -740,6 +751,8 @@ export function createTenantControlEngine({
     parityScorecards: new Map(),
     parityScorecardIdsByCompany: new Map(),
     parityScorecardIdsByCompetitor: new Map(),
+    advantageReleaseBundles: new Map(),
+    advantageReleaseBundleIdsByCompany: new Map(),
     financeBlueprintsByCompany: new Map(),
     financeFoundationRecordsByCompany: new Map(),
     tenantControlEvents: [],
@@ -758,6 +771,7 @@ export function createTenantControlEngine({
     pilotExecutionStatuses: PILOT_EXECUTION_STATUSES,
     pilotCohortStatuses: PILOT_COHORT_STATUSES,
     parityScorecardStatuses: PARITY_SCORECARD_STATUSES,
+    advantageReleaseBundleStatuses: ADVANTAGE_RELEASE_BUNDLE_STATUSES,
     pilotScenarioStatuses: PILOT_SCENARIO_STATUSES,
     createTenantBootstrap,
     getTenantBootstrap,
@@ -802,6 +816,10 @@ export function createTenantControlEngine({
     getParityScorecard,
     listParityScorecards,
     exportParityScorecardEvidence,
+    recordAdvantageReleaseBundle,
+    getAdvantageReleaseBundle,
+    listAdvantageReleaseBundles,
+    exportAdvantageReleaseBundleEvidence,
     getFinanceReadinessValidation,
     snapshotTenantControl,
     exportDurableState,
@@ -2621,6 +2639,135 @@ export function createTenantControlEngine({
     return copy(evidenceBundle);
   }
 
+  function recordAdvantageReleaseBundle({
+    sessionToken,
+    companyId,
+    parityScorecardIds = [],
+    moveResults = [],
+    notes = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const principal = authorizeCompanyAction({
+      sessionToken,
+      companyId: resolvedCompanyId,
+      action: "COMPANY_MANAGE",
+      objectType: "advantage_release_bundle",
+      objectId: resolvedCompanyId,
+      scopeCode: "pilot_execution"
+    });
+    const linkedScorecards = normalizeStringList(parityScorecardIds).map((parityScorecardId) => {
+      const scorecard = requireParityScorecard(parityScorecardId);
+      if (scorecard.companyId !== resolvedCompanyId) {
+        throw httpError(409, "advantage_bundle_company_scope_mismatch", "Parity scorecard belongs to another company.");
+      }
+      return scorecard;
+    });
+    const moveMatrix = normalizeAdvantageMoveResults(moveResults);
+    const summary = buildAdvantageReleaseBundleSummary({
+      linkedScorecards,
+      moveResults: moveMatrix
+    });
+    const now = nowIso();
+    const record = {
+      advantageReleaseBundleId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      parityScorecardIds: linkedScorecards.map((scorecard) => scorecard.parityScorecardId),
+      moveResults: moveMatrix,
+      summary,
+      status: summary.releaseReady ? "released" : "blocked",
+      notes: normalizeOptionalText(notes),
+      latestEvidenceBundleId: null,
+      recordedAt: now,
+      updatedAt: now,
+      actorUserId: principal.userId
+    };
+    const evidenceBundle = createAdvantageReleaseBundleEvidenceBundle({
+      record,
+      actorId: principal.userId
+    });
+    record.latestEvidenceBundleId = evidenceBundle.evidenceBundleId;
+    state.advantageReleaseBundles.set(record.advantageReleaseBundleId, record);
+    appendToIndex(state.advantageReleaseBundleIdsByCompany, resolvedCompanyId, record.advantageReleaseBundleId);
+    appendDomainEvent("advantage.release_bundle.recorded", {
+      companyId: resolvedCompanyId,
+      advantageReleaseBundleId: record.advantageReleaseBundleId,
+      status: record.status,
+      actorUserId: principal.userId
+    });
+    appendAuditEvent({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      action: "tenant_control.advantage_release_bundle.recorded",
+      entityType: "advantage_release_bundle",
+      entityId: record.advantageReleaseBundleId,
+      metadata: {
+        parityScorecardIds: copy(record.parityScorecardIds),
+        releaseReady: record.summary.releaseReady
+      }
+    });
+    return presentAdvantageReleaseBundle(record);
+  }
+
+  function getAdvantageReleaseBundle({ sessionToken, advantageReleaseBundleId } = {}) {
+    const record = requireAdvantageReleaseBundle(advantageReleaseBundleId);
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_READ",
+      objectType: "advantage_release_bundle",
+      objectId: record.advantageReleaseBundleId,
+      scopeCode: "pilot_execution"
+    });
+    return presentAdvantageReleaseBundle(record);
+  }
+
+  function listAdvantageReleaseBundles({ sessionToken, companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: resolvedCompanyId,
+      action: "COMPANY_READ",
+      objectType: "advantage_release_bundle",
+      objectId: resolvedCompanyId,
+      scopeCode: "pilot_execution"
+    });
+    return (state.advantageReleaseBundleIdsByCompany.get(resolvedCompanyId) || [])
+      .map((bundleId) => state.advantageReleaseBundles.get(bundleId))
+      .filter(Boolean)
+      .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt))
+      .map((record) => presentAdvantageReleaseBundle(record));
+  }
+
+  function exportAdvantageReleaseBundleEvidence({ sessionToken, advantageReleaseBundleId } = {}) {
+    const record = requireAdvantageReleaseBundle(advantageReleaseBundleId);
+    authorizeCompanyAction({
+      sessionToken,
+      companyId: record.companyId,
+      action: "COMPANY_READ",
+      objectType: "advantage_release_bundle",
+      objectId: record.advantageReleaseBundleId,
+      scopeCode: "pilot_execution"
+    });
+    const evidenceDomain = getOptionalDomain("evidence");
+    if (
+      record.latestEvidenceBundleId
+      && evidenceDomain
+      && typeof evidenceDomain.getEvidenceBundle === "function"
+    ) {
+      return evidenceDomain.getEvidenceBundle({
+        companyId: record.companyId,
+        evidenceBundleId: record.latestEvidenceBundleId
+      });
+    }
+    const evidenceBundle = createAdvantageReleaseBundleEvidenceBundle({
+      record,
+      actorId: "tenant_control_advantage_bundle_export"
+    });
+    record.latestEvidenceBundleId = evidenceBundle.evidenceBundleId;
+    record.updatedAt = nowIso();
+    return copy(evidenceBundle);
+  }
+
   function listTrialEnvironmentRecordsByCompany(companyId) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return (state.trialEnvironmentIdsByCompany.get(resolvedCompanyId) || [])
@@ -3314,6 +3461,7 @@ export function createTenantControlEngine({
       pilotExecutions: [...state.pilotExecutions.values()],
       pilotCohorts: [...state.pilotCohorts.values()],
       parityScorecards: [...state.parityScorecards.values()],
+      advantageReleaseBundles: [...state.advantageReleaseBundles.values()],
       financeBlueprints: [...state.financeBlueprintsByCompany.values()],
       financeFoundationRecords: [...state.financeFoundationRecordsByCompany.values()],
       tenantControlEvents: [...state.tenantControlEvents],
@@ -3922,6 +4070,14 @@ export function createTenantControlEngine({
     return record;
   }
 
+  function requireAdvantageReleaseBundle(advantageReleaseBundleId) {
+    const record = state.advantageReleaseBundles.get(requireText(advantageReleaseBundleId, "advantage_release_bundle_id_required"));
+    if (!record) {
+      throw httpError(404, "advantage_release_bundle_not_found", "Advantage release bundle was not found.");
+    }
+    return record;
+  }
+
   function requirePromotionPlan(promotionPlanId) {
     const record = state.promotionPlans.get(requireText(promotionPlanId, "promotion_plan_id_required"));
     if (!record) {
@@ -4016,6 +4172,15 @@ export function createTenantControlEngine({
       pilotCohortIds: copy(record.pilotCohortIds || []),
       criteriaResults: copy(record.criteriaResults || []),
       gateResults: copy(record.gateResults || []),
+      summary: copy(record.summary || null)
+    });
+  }
+
+  function presentAdvantageReleaseBundle(record) {
+    return copy({
+      ...record,
+      parityScorecardIds: copy(record.parityScorecardIds || []),
+      moveResults: copy(record.moveResults || []),
       summary: copy(record.summary || null)
     });
   }
@@ -4681,6 +4846,75 @@ export function createTenantControlEngine({
     };
   }
 
+  function createAdvantageReleaseBundleEvidenceBundle({
+    record,
+    actorId
+  } = {}) {
+    const evidenceDomain = getOptionalDomain("evidence");
+    const metadata = {
+      status: record.status,
+      summary: copy(record.summary)
+    };
+    const artifactRefs = [
+      {
+        artifactType: "advantage_release_bundle_matrix",
+        artifactRef: `advantage-release-bundle://${record.advantageReleaseBundleId}`,
+        checksum: hashJson({
+          moveResults: record.moveResults,
+          summary: record.summary
+        }),
+        roleCode: "tenant_control",
+        metadata: {
+          releaseReady: record.summary?.releaseReady === true
+        }
+      },
+      ...record.moveResults.flatMap((item) => normalizePilotArtifactRefs(item.evidenceRefs, {
+        defaultArtifactType: "advantage_move_evidence",
+        roleCode: "advantage_release_bundle"
+      }))
+    ];
+    const relatedObjectRefs = [
+      {
+        objectType: "company",
+        objectId: record.companyId,
+        relationCode: "advantage_company"
+      },
+      ...(record.parityScorecardIds || []).map((parityScorecardId) => ({
+        objectType: "parity_scorecard",
+        objectId: parityScorecardId,
+        relationCode: "green_parity_scorecard"
+      }))
+    ];
+    if (evidenceDomain && typeof evidenceDomain.createFrozenEvidenceBundleSnapshot === "function") {
+      return evidenceDomain.createFrozenEvidenceBundleSnapshot({
+        companyId: record.companyId,
+        bundleType: "advantage_release_bundle",
+        sourceObjectType: "advantage_release_bundle",
+        sourceObjectId: record.advantageReleaseBundleId,
+        sourceObjectVersion: `advantage_release_bundle:${record.updatedAt || record.recordedAt}`,
+        title: "Advantage release bundle evidence",
+        retentionClass: "operational",
+        classificationCode: "restricted_internal",
+        metadata,
+        artifactRefs,
+        relatedObjectRefs,
+        actorId,
+        previousEvidenceBundleId: record.latestEvidenceBundleId || null,
+        environmentMode: "pilot_parallel"
+      });
+    }
+    return {
+      evidenceBundleId: crypto.randomUUID(),
+      bundleType: "advantage_release_bundle",
+      sourceObjectType: "advantage_release_bundle",
+      sourceObjectId: record.advantageReleaseBundleId,
+      metadata: copy(metadata),
+      artifactRefs,
+      relatedObjectRefs,
+      environmentMode: "pilot_parallel"
+    };
+  }
+
   function findCompanySnapshotById(companyId) {
     const orgAuthSnapshot = getOrgAuthSnapshot();
     return (orgAuthSnapshot?.companies || []).find((record) => record.companyId === requireText(companyId, "company_id_required")) || null;
@@ -5088,6 +5322,54 @@ export function createTenantControlEngine({
     };
   }
 
+  function normalizeAdvantageMoveResults(moveResults) {
+    const rawResults = Array.isArray(moveResults) ? moveResults : [];
+    return ADVANTAGE_MOVE_CODES.map((moveCode) => {
+      const entry = rawResults.find((item) => item?.moveCode === moveCode) || null;
+      if (!entry) {
+        throw httpError(409, "advantage_bundle_missing_move", `Advantage release bundle requires move ${moveCode}.`);
+      }
+      return {
+        moveCode,
+        status: requireAdvantageMoveStatus(entry.status),
+        notes: normalizeOptionalText(entry.notes),
+        evidenceRefs: normalizePilotArtifactRefs(entry.evidenceRefs, {
+          defaultArtifactType: "advantage_move_evidence",
+          roleCode: "advantage_release_bundle"
+        })
+      };
+    });
+  }
+
+  function buildAdvantageReleaseBundleSummary({ linkedScorecards = [], moveResults = [] } = {}) {
+    const greenParityCategories = [
+      ...new Set(
+        linkedScorecards
+          .filter((scorecard) => scorecard.status === "green")
+          .map((scorecard) => scorecard.categoryCode)
+      )
+    ].sort();
+    const requiredParityCategories = ["finance_platform", "crm_project_service", "field_vertical"];
+    const missingParityCategories = requiredParityCategories.filter((categoryCode) => !greenParityCategories.includes(categoryCode));
+    const amberMoveCodes = moveResults.filter((item) => item.status === "amber").map((item) => item.moveCode);
+    const redMoveCodes = moveResults.filter((item) => item.status === "red").map((item) => item.moveCode);
+    return {
+      requiredParityCategories,
+      greenParityCategories,
+      missingParityCategories,
+      totalMoveCount: moveResults.length,
+      greenMoveCount: moveResults.filter((item) => item.status === "green").length,
+      amberMoveCodes,
+      redMoveCodes,
+      releaseReady:
+        missingParityCategories.length === 0
+        && amberMoveCodes.length === 0
+        && redMoveCodes.length === 0
+        && moveResults.length === ADVANTAGE_MOVE_CODES.length
+        && moveResults.every((item) => item.status === "green")
+    };
+  }
+
   function requirePilotScenarioStatus(status) {
     const resolved = requireText(String(status || ""), "pilot_scenario_status_required");
     if (!PILOT_SCENARIO_STATUSES.includes(resolved) || resolved === "pending") {
@@ -5100,6 +5382,14 @@ export function createTenantControlEngine({
     const resolved = requireText(String(status || ""), "parity_status_required");
     if (!PARITY_CRITERION_STATUSES.includes(resolved)) {
       throw httpError(400, "parity_status_invalid", "Parity status must be green, amber, red or na.");
+    }
+    return resolved;
+  }
+
+  function requireAdvantageMoveStatus(status) {
+    const resolved = requireParityCriterionStatus(status);
+    if (resolved === "na") {
+      throw httpError(400, "advantage_move_status_invalid", "Advantage move status must be green, amber or red.");
     }
     return resolved;
   }

@@ -368,6 +368,9 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/release/parity-scorecards",
               "/v1/release/parity-scorecards/:parityScorecardId",
               "/v1/release/parity-scorecards/:parityScorecardId/evidence",
+              "/v1/release/advantage-bundles",
+              "/v1/release/advantage-bundles/:advantageReleaseBundleId",
+              "/v1/release/advantage-bundles/:advantageReleaseBundleId/evidence",
               "/v1/onboarding/runs",
               "/v1/onboarding/runs/:runId",
               "/v1/onboarding/runs/:runId/checklist",
@@ -2191,6 +2194,64 @@ async function handleRequest({ req, res, platform, flags }) {
         evidenceBundle: requireTenantControlDomain(platform).exportParityScorecardEvidence({
           sessionToken: readSessionToken(req),
           parityScorecardId: parityScorecardEvidenceMatch.parityScorecardId
+        })
+      }
+    );
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/release/advantage-bundles") {
+    const body = await readJsonBody(req);
+    writeJson(
+      res,
+      201,
+      requireTenantControlDomain(platform).recordAdvantageReleaseBundle({
+        sessionToken: readSessionToken(req, body),
+        companyId: body.companyId,
+        parityScorecardIds: body.parityScorecardIds,
+        moveResults: body.moveResults,
+        notes: body.notes
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/release/advantage-bundles") {
+    writeJson(
+      res,
+      200,
+      {
+        items: requireTenantControlDomain(platform).listAdvantageReleaseBundles({
+          sessionToken: readSessionToken(req),
+          companyId: url.searchParams.get("companyId")
+        })
+      }
+    );
+    return;
+  }
+
+  const advantageReleaseBundleMatch = matchPath(path, "/v1/release/advantage-bundles/:advantageReleaseBundleId");
+  if (req.method === "GET" && advantageReleaseBundleMatch) {
+    writeJson(
+      res,
+      200,
+      requireTenantControlDomain(platform).getAdvantageReleaseBundle({
+        sessionToken: readSessionToken(req),
+        advantageReleaseBundleId: advantageReleaseBundleMatch.advantageReleaseBundleId
+      })
+    );
+    return;
+  }
+
+  const advantageReleaseBundleEvidenceMatch = matchPath(path, "/v1/release/advantage-bundles/:advantageReleaseBundleId/evidence");
+  if (req.method === "GET" && advantageReleaseBundleEvidenceMatch) {
+    writeJson(
+      res,
+      200,
+      {
+        evidenceBundle: requireTenantControlDomain(platform).exportAdvantageReleaseBundleEvidence({
+          sessionToken: readSessionToken(req),
+          advantageReleaseBundleId: advantageReleaseBundleEvidenceMatch.advantageReleaseBundleId
         })
       }
     );
