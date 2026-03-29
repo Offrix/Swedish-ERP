@@ -252,6 +252,177 @@ test("Phase 14.3 migration cockpit tracks import, diff, cutover and rollback det
   assert.equal(cockpit.acceptanceBoard.items[0].paritySummary.taxAccountParityPassed, true);
 });
 
+test("Phase 17.4 parallel run results require thresholds and manual acceptance before go-live acceptance", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-25T09:15:00Z")
+  });
+  const adminToken = loginWithStrongAuthOnPlatform({
+    platform,
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+
+  const cutoverPlan = platform.createCutoverPlan({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    freezeAt: "2026-03-26T08:00:00.000Z",
+    rollbackPointRef: "snapshot://phase17-4-unit",
+    acceptedVarianceThresholds: {
+      amountDelta: 10,
+      countDelta: 0
+    },
+    stabilizationWindowHours: 24,
+    signoffChain: [{ userId: DEMO_IDS.userId, roleCode: "migration_lead", label: "Migration lead" }],
+    goLiveChecklist: [{ itemCode: "parallel_run_green", label: "Parallel run green" }]
+  });
+
+  const manualReviewResult = platform.recordParallelRunResult({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    comparisonScope: "payroll",
+    sourceSnapshotRef: { system: "legacy_erp", period: "2026-03" },
+    targetSnapshotRef: { system: "swedish_erp", period: "2026-03" },
+    metrics: [
+      {
+        metricCode: "gross_pay_delta",
+        label: "Gross pay delta",
+        thresholdCode: "amountDelta",
+        sourceValue: 1000,
+        targetValue: 1018,
+        unitCode: "sek"
+      }
+    ]
+  });
+  assert.equal(manualReviewResult.status, "manual_review_required");
+
+  const blockedResult = platform.recordParallelRunResult({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    comparisonScope: "hus",
+    sourceSnapshotRef: { system: "legacy_erp", period: "2026-03" },
+    targetSnapshotRef: { system: "swedish_erp", period: "2026-03" },
+    metrics: [
+      {
+        metricCode: "claim_count_delta",
+        label: "Claim count delta",
+        thresholdCode: "countDelta",
+        sourceValue: 12,
+        targetValue: 13,
+        hardBlock: true
+      }
+    ]
+  });
+  assert.equal(blockedResult.status, "blocked");
+  assert.throws(
+    () =>
+      platform.acceptParallelRunResult({
+        sessionToken: adminToken,
+        companyId: DEMO_IDS.companyId,
+        parallelRunResultId: blockedResult.parallelRunResultId,
+        decisionComment: "Should fail"
+      }),
+    (thrown) => thrown?.code === "parallel_run_result_blocked"
+  );
+
+  const acceptedResult = platform.acceptParallelRunResult({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    parallelRunResultId: manualReviewResult.parallelRunResultId,
+    decisionComment: "Payroll diff reviewed and accepted."
+  });
+  assert.equal(acceptedResult.status, "accepted");
+
+  const blockedAcceptance = platform.createMigrationAcceptanceRecord({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    acceptanceType: "go_live_readiness",
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    parallelRunResultIds: [blockedResult.parallelRunResultId],
+    sourceParitySummary: {
+      countParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+      amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+      unresolvedMaterialDifferences: 0,
+      openingBalanceParityPassed: true,
+      openReceivablesParityPassed: true,
+      openPayablesParityPassed: true,
+      payrollYtdParityPassed: true,
+      agiHistoryParityPassed: true,
+      taxAccountParityPassed: true
+    }
+  });
+  assert.equal(blockedAcceptance.status, "blocked");
+  assert.equal(blockedAcceptance.blockingReasonCodes.includes("parallel_run_blocked"), true);
+
+  const acceptedAcceptance = platform.createMigrationAcceptanceRecord({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    acceptanceType: "go_live_readiness",
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    parallelRunResultIds: [acceptedResult.parallelRunResultId],
+    signoffRefs: [{ userId: DEMO_IDS.userId, roleCode: "migration_lead", label: "Migration lead", approvedAt: "2026-03-25T09:20:00.000Z" }],
+    sourceParitySummary: {
+      countParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+      amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+      unresolvedMaterialDifferences: 0,
+      openingBalanceParityPassed: true,
+      openReceivablesParityPassed: true,
+      openPayablesParityPassed: true,
+      payrollYtdParityPassed: true,
+      agiHistoryParityPassed: true,
+      taxAccountParityPassed: true
+    },
+    rollbackPointRef: "snapshot://phase17-4-unit"
+  });
+  assert.equal(acceptedAcceptance.status, "blocked");
+  assert.equal(acceptedAcceptance.blockingReasonCodes.includes("cutover_signoff_incomplete"), true);
+
+  platform.recordCutoverSignoff({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId
+  });
+  platform.updateCutoverChecklistItem({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    itemCode: "parallel_run_green",
+    status: "completed"
+  });
+  const goLiveAcceptance = platform.createMigrationAcceptanceRecord({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    acceptanceType: "go_live_readiness",
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    parallelRunResultIds: [acceptedResult.parallelRunResultId],
+    sourceParitySummary: {
+      countParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+      amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
+      unresolvedMaterialDifferences: 0,
+      openingBalanceParityPassed: true,
+      openReceivablesParityPassed: true,
+      openPayablesParityPassed: true,
+      payrollYtdParityPassed: true,
+      agiHistoryParityPassed: true,
+      taxAccountParityPassed: true
+    },
+    signoffRefs: [{ userId: DEMO_IDS.userId, roleCode: "migration_lead", label: "Migration lead", approvedAt: "2026-03-25T09:20:00.000Z" }],
+    rollbackPointRef: "snapshot://phase17-4-unit"
+  });
+  assert.equal(goLiveAcceptance.status, "accepted");
+
+  const cockpit = platform.getMigrationCockpit({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId
+  });
+  assert.equal(cockpit.parallelRunResults.length, 2);
+  assert.equal(cockpit.datasetSummary.parallelRunResultCount, 2);
+  assert.equal(cockpit.parallelRunBoard.counters.blocked, 1);
+  assert.equal(cockpit.parallelRunBoard.counters.accepted, 1);
+  assert.equal(cockpit.cutoverBoard.items[0].parallelRunSummary.blocked, 1);
+});
+
 test("Phase 14.3 rollback requires recovery plan when regulated filing was submitted after switch and closed cutover uses correction case", async () => {
   let currentTime = new Date("2026-03-23T20:30:00Z");
   const platform = createApiPlatform({

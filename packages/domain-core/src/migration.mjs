@@ -4,6 +4,7 @@ export const IMPORT_BATCH_STATUSES = Object.freeze(["received", "validated", "ma
 export const MAPPING_SET_STATUSES = Object.freeze(["draft", "approved"]);
 export const DIFF_REPORT_STATUSES = Object.freeze(["generated", "reviewed", "accepted", "remediation_required"]);
 export const DIFFERENCE_CLASSES = Object.freeze(["cosmetic", "timing", "mapping_error", "missing_data", "material"]);
+export const PARALLEL_RUN_RESULT_STATUSES = Object.freeze(["completed", "manual_review_required", "accepted", "blocked"]);
 export const MIGRATION_ACCEPTANCE_RECORD_STATUSES = Object.freeze(["accepted", "blocked"]);
 export const CUTOVER_PLAN_STATUSES = Object.freeze([
   "planned",
@@ -70,6 +71,7 @@ export function createMigrationModule({
     mappingSetStatuses: MAPPING_SET_STATUSES,
     diffReportStatuses: DIFF_REPORT_STATUSES,
     differenceClasses: DIFFERENCE_CLASSES,
+    parallelRunResultStatuses: PARALLEL_RUN_RESULT_STATUSES,
     migrationAcceptanceRecordStatuses: MIGRATION_ACCEPTANCE_RECORD_STATUSES,
     cutoverPlanStatuses: CUTOVER_PLAN_STATUSES,
     payrollMigrationBatchStatuses: PAYROLL_MIGRATION_BATCH_STATUSES,
@@ -87,6 +89,9 @@ export function createMigrationModule({
     generateDiffReport,
     listDiffReports,
     recordDifferenceDecision,
+    recordParallelRunResult,
+    listParallelRunResults,
+    acceptParallelRunResult,
     createCutoverPlan,
     listCutoverPlans,
     createMigrationAcceptanceRecord,
@@ -414,6 +419,116 @@ export function createMigrationModule({
     return clone(diffReport);
   }
 
+  function recordParallelRunResult({
+    sessionToken,
+    companyId,
+    comparisonScope,
+    cutoverPlanId = null,
+    trialEnvironmentProfileId = null,
+    liveCompanyId = null,
+    sourceSnapshotRef = {},
+    targetSnapshotRef = {},
+    thresholds = null,
+    metrics = [],
+    notes = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const cutoverPlan = cutoverPlanId ? requireCutoverPlan(resolvedCompanyId, cutoverPlanId) : null;
+    const thresholdProfile = normalizeParallelRunThresholds(thresholds ?? cutoverPlan?.acceptedVarianceThresholds ?? {});
+    const measurements = normalizeParallelRunMeasurements(metrics, thresholdProfile);
+    const differenceSummary = summarizeParallelRunMeasurements(measurements);
+    const parallelRunResult = {
+      parallelRunResultId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      comparisonScope: text(comparisonScope, "parallel_run_scope_required"),
+      cutoverPlanId: cutoverPlan?.cutoverPlanId || null,
+      trialEnvironmentProfileId: optionalText(trialEnvironmentProfileId),
+      liveCompanyId: optionalText(liveCompanyId),
+      sourceSnapshotRef: clone(sourceSnapshotRef || {}),
+      targetSnapshotRef: clone(targetSnapshotRef || {}),
+      thresholdProfile,
+      metrics: measurements,
+      differenceSummary,
+      status: resolveParallelRunResultStatus(differenceSummary),
+      notes: optionalText(notes),
+      recordedByUserId: principal.userId,
+      completedAt: nowIso(clock),
+      acceptedAt: null,
+      acceptedByUserId: null,
+      decisionComment: null,
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.parallelRunResults.set(parallelRunResult.parallelRunResultId, parallelRunResult);
+    audit({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "migration.parallel_run.recorded",
+      entityType: "migration_parallel_run_result",
+      entityId: parallelRunResult.parallelRunResultId,
+      explanation: `Recorded parallel run ${parallelRunResult.comparisonScope} as ${parallelRunResult.status}.`
+    });
+    return clone(parallelRunResult);
+  }
+
+  function listParallelRunResults({
+    sessionToken,
+    companyId,
+    comparisonScope = null,
+    cutoverPlanId = null,
+    status = null
+  } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const resolvedComparisonScope = optionalText(comparisonScope);
+    const resolvedCutoverPlanId = optionalText(cutoverPlanId);
+    const resolvedStatus = status == null
+      ? null
+      : assertAllowed(text(status, "parallel_run_result_status_required"), PARALLEL_RUN_RESULT_STATUSES, "parallel_run_result_status_invalid");
+    return [...state.parallelRunResults.values()]
+      .filter((parallelRunResult) => parallelRunResult.companyId === resolvedCompanyId)
+      .filter((parallelRunResult) => (resolvedComparisonScope ? parallelRunResult.comparisonScope === resolvedComparisonScope : true))
+      .filter((parallelRunResult) => (resolvedCutoverPlanId ? parallelRunResult.cutoverPlanId === resolvedCutoverPlanId : true))
+      .filter((parallelRunResult) => (resolvedStatus ? parallelRunResult.status === resolvedStatus : true))
+      .sort((left, right) => left.completedAt.localeCompare(right.completedAt))
+      .map(clone);
+  }
+
+  function acceptParallelRunResult({
+    sessionToken,
+    companyId,
+    parallelRunResultId,
+    decisionComment,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const parallelRunResult = requireParallelRunResult(companyId, parallelRunResultId);
+    if (parallelRunResult.status === "blocked") {
+      throw error(409, "parallel_run_result_blocked", "Blocked parallel run results must be rerun instead of manually accepted.");
+    }
+    if (parallelRunResult.status === "accepted") {
+      return clone(parallelRunResult);
+    }
+    parallelRunResult.status = "accepted";
+    parallelRunResult.acceptedAt = nowIso(clock);
+    parallelRunResult.acceptedByUserId = principal.userId;
+    parallelRunResult.decisionComment = text(decisionComment, "parallel_run_decision_comment_required");
+    parallelRunResult.updatedAt = parallelRunResult.acceptedAt;
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "migration.parallel_run.accepted",
+      entityType: "migration_parallel_run_result",
+      entityId: parallelRunResult.parallelRunResultId,
+      explanation: `Accepted parallel run ${parallelRunResult.comparisonScope}.`
+    });
+    return clone(parallelRunResult);
+  }
+
   function createCutoverPlan({
     sessionToken,
     companyId,
@@ -480,6 +595,7 @@ export function createMigrationModule({
     cutoverPlanId = null,
     importBatchIds = [],
     diffReportIds = [],
+    parallelRunResultIds = [],
     sourceParitySummary = {},
     signoffRefs = [],
     rollbackPointRef = null,
@@ -491,6 +607,7 @@ export function createMigrationModule({
     const cutoverPlan = cutoverPlanId ? requireCutoverPlan(resolvedCompanyId, cutoverPlanId) : null;
     const normalizedImportBatchIds = normalizeExistingImportBatchIds(resolvedCompanyId, importBatchIds, state, error);
     const normalizedDiffReportIds = normalizeExistingDiffReportIds(resolvedCompanyId, diffReportIds, state, error);
+    const normalizedParallelRunResultIds = normalizeExistingParallelRunResultIds(resolvedCompanyId, parallelRunResultIds, state, error);
     const normalizedSignoffRefs = normalizeAcceptanceSignoffRefs(signoffRefs, cutoverPlan);
     const normalizedParitySummary = normalizeSourceParitySummary(sourceParitySummary);
     const rollbackPoint = optionalText(rollbackPointRef) || cutoverPlan?.rollbackPoint || null;
@@ -499,6 +616,7 @@ export function createMigrationModule({
       cutoverPlan,
       importBatchIds: normalizedImportBatchIds,
       diffReportIds: normalizedDiffReportIds,
+      parallelRunResultIds: normalizedParallelRunResultIds,
       sourceParitySummary: normalizedParitySummary,
       signoffRefs: normalizedSignoffRefs,
       rollbackPointRef: rollbackPoint,
@@ -513,6 +631,7 @@ export function createMigrationModule({
       cutoverPlanId: cutoverPlan?.cutoverPlanId || null,
       importBatchIds: normalizedImportBatchIds,
       diffReportIds: normalizedDiffReportIds,
+      parallelRunResultIds: normalizedParallelRunResultIds,
       status: blockingReasonCodes.length === 0 ? "accepted" : "blocked",
       blockingReasonCodes,
       sourceParitySummary: normalizedParitySummary,
@@ -617,6 +736,14 @@ export function createMigrationModule({
     return record;
   }
 
+  function requireParallelRunResult(companyId, parallelRunResultId) {
+    const record = state.parallelRunResults.get(text(parallelRunResultId, "parallel_run_result_id_required"));
+    if (!record || record.companyId !== text(companyId, "company_id_required")) {
+      throw error(404, "parallel_run_result_not_found", "Parallel run result was not found.");
+    }
+    return record;
+  }
+
   function syncCutoverEvidenceBundle({ acceptanceRecord, actorId, correlationId }) {
     if (!evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
       return {
@@ -626,6 +753,7 @@ export function createMigrationModule({
         acceptanceType: acceptanceRecord.acceptanceType,
         cutoverPlanId: acceptanceRecord.cutoverPlanId,
         acceptedVarianceReports: acceptanceRecord.diffReportIds,
+        acceptedParallelRunResults: acceptanceRecord.parallelRunResultIds,
         signoffRefs: acceptanceRecord.signoffRefs,
         sourceParitySummary: acceptanceRecord.sourceParitySummary,
         rollbackPointRef: acceptanceRecord.rollbackPointRef
@@ -637,6 +765,7 @@ export function createMigrationModule({
       acceptanceType: acceptanceRecord.acceptanceType,
       cutoverPlanId: acceptanceRecord.cutoverPlanId,
       acceptedVarianceReports: acceptanceRecord.diffReportIds,
+      acceptedParallelRunResults: acceptanceRecord.parallelRunResultIds,
       importBatchIds: acceptanceRecord.importBatchIds,
       signoffRefs: acceptanceRecord.signoffRefs,
       sourceParitySummary: acceptanceRecord.sourceParitySummary,
@@ -663,7 +792,16 @@ export function createMigrationModule({
           diffReportId,
           acceptanceType: acceptanceRecord.acceptanceType
         })
-      })),
+      })).concat(
+        acceptanceRecord.parallelRunResultIds.map((parallelRunResultId) => ({
+          artifactType: "parallel_run_result",
+          artifactRef: parallelRunResultId,
+          checksum: hashObject({
+            parallelRunResultId,
+            acceptanceType: acceptanceRecord.acceptanceType
+          })
+        }))
+      ),
       auditRefs: clone(acceptanceRecord.signoffRefs),
       signoffRefs: clone(acceptanceRecord.signoffRefs),
       sourceRefs: [
@@ -680,6 +818,10 @@ export function createMigrationModule({
         ...acceptanceRecord.diffReportIds.map((diffReportId) => ({
           objectType: "migration_diff_report",
           objectId: diffReportId
+        })),
+        ...acceptanceRecord.parallelRunResultIds.map((parallelRunResultId) => ({
+          objectType: "migration_parallel_run_result",
+          objectId: parallelRunResultId
         })),
         ...(acceptanceRecord.cutoverPlanId
           ? [
@@ -701,6 +843,7 @@ export function createMigrationModule({
       acceptanceType: acceptanceRecord.acceptanceType,
       cutoverPlanId: acceptanceRecord.cutoverPlanId,
       acceptedVarianceReports: acceptanceRecord.diffReportIds,
+      acceptedParallelRunResults: acceptanceRecord.parallelRunResultIds,
       signoffRefs: acceptanceRecord.signoffRefs,
       sourceParitySummary: acceptanceRecord.sourceParitySummary,
       rollbackPointRef: acceptanceRecord.rollbackPointRef,
@@ -1304,6 +1447,7 @@ export function createMigrationModule({
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       .map(clone);
     const diffReports = listDiffReports({ sessionToken, companyId: resolvedCompanyId });
+    const parallelRunResults = listParallelRunResults({ sessionToken, companyId: resolvedCompanyId });
     const cutoverPlans = listCutoverPlans({ sessionToken, companyId: resolvedCompanyId });
     const acceptanceRecords = listMigrationAcceptanceRecords({ sessionToken, companyId: resolvedCompanyId });
     const postCutoverCorrectionCases = listPostCutoverCorrectionCases({ sessionToken, companyId: resolvedCompanyId });
@@ -1313,15 +1457,23 @@ export function createMigrationModule({
       importBatches,
       corrections,
       diffReports,
+      parallelRunResults,
       cutoverPlans,
       acceptanceRecords,
       postCutoverCorrectionCases,
-      datasetSummary: buildMigrationDatasetSummary({ importBatches, diffReports, acceptanceRecords, postCutoverCorrectionCases }),
+      datasetSummary: buildMigrationDatasetSummary({ importBatches, diffReports, parallelRunResults, acceptanceRecords, postCutoverCorrectionCases }),
       cutoverBoard: buildMigrationCutoverBoard({
         companyId: resolvedCompanyId,
         cutoverPlans,
+        parallelRunResults,
         acceptanceRecords,
         postCutoverCorrectionCases,
+        currentTimestamp
+      }),
+      parallelRunBoard: buildMigrationParallelRunBoard({
+        companyId: resolvedCompanyId,
+        parallelRunResults,
+        cutoverPlans,
         currentTimestamp
       }),
       acceptanceBoard: buildMigrationAcceptanceBoard({
@@ -2612,6 +2764,16 @@ function normalizeExistingDiffReportIds(companyId, values, state, error) {
   });
 }
 
+function normalizeExistingParallelRunResultIds(companyId, values, state, error) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return [...new Set(values.map((value) => text(value, "parallel_run_result_id_required")))].map((parallelRunResultId) => {
+    const parallelRunResult = statefulRequire("parallelRunResults", companyId, parallelRunResultId, "parallel_run_result_not_found", state, error);
+    return parallelRunResult.parallelRunResultId;
+  });
+}
+
 function normalizeAcceptanceSignoffRefs(values, cutoverPlan) {
   if (Array.isArray(values) && values.length > 0) {
     return values.map((value) => ({
@@ -2698,6 +2860,7 @@ function computeAcceptanceBlockingReasonCodes({
   cutoverPlan,
   importBatchIds,
   diffReportIds,
+  parallelRunResultIds,
   sourceParitySummary,
   signoffRefs,
   rollbackPointRef,
@@ -2725,6 +2888,17 @@ function computeAcceptanceBlockingReasonCodes({
     const diffReport = statefulRequire("diffReports", companyId, diffReportId, "diff_report_not_found", state, error);
     if (diffReport.status !== "accepted") {
       reasons.push("variance_report_not_accepted");
+      break;
+    }
+  }
+  for (const parallelRunResultId of parallelRunResultIds) {
+    const parallelRunResult = statefulRequire("parallelRunResults", companyId, parallelRunResultId, "parallel_run_result_not_found", state, error);
+    if (parallelRunResult.status === "blocked") {
+      reasons.push("parallel_run_blocked");
+      break;
+    }
+    if (parallelRunResult.status !== "accepted") {
+      reasons.push("parallel_run_not_accepted");
       break;
     }
   }
@@ -2913,13 +3087,115 @@ function normalizeAcceptanceReportDelta(value) {
   return clone(value);
 }
 
-function buildMigrationDatasetSummary({ importBatches, diffReports, acceptanceRecords, postCutoverCorrectionCases }) {
+function normalizeParallelRunThresholds(value) {
+  if (value == null) {
+    return {};
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw createValidationError("parallel_run_thresholds_invalid", "Parallel run thresholds must be an object.");
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([thresholdCode, thresholdValue]) => [
+      text(thresholdCode, "parallel_run_threshold_code_required"),
+      normalizeNumber(thresholdValue, "parallel_run_threshold_value_invalid")
+    ])
+  );
+}
+
+function normalizeParallelRunMeasurements(values, thresholdProfile) {
+  if (!Array.isArray(values) || values.length === 0) {
+    throw createValidationError("parallel_run_metrics_required", "Parallel run requires at least one metric.");
+  }
+  return values.map((value, index) => {
+    const metricCode = text(value?.metricCode || `metric_${index + 1}`, "parallel_run_metric_code_required");
+    const label = text(value?.label || metricCode, "parallel_run_metric_label_required");
+    const sourceValue = normalizeNumber(value?.sourceValue, "parallel_run_metric_source_value_invalid");
+    const targetValue = normalizeNumber(value?.targetValue, "parallel_run_metric_target_value_invalid");
+    const deltaValue = value?.deltaValue == null
+      ? roundMoney(targetValue - sourceValue)
+      : normalizeNumber(value.deltaValue, "parallel_run_metric_delta_value_invalid");
+    const deltaPercent = value?.deltaPercent == null
+      ? computeParallelRunDeltaPercent({ sourceValue, deltaValue })
+      : normalizeNumber(value.deltaPercent, "parallel_run_metric_delta_percent_invalid");
+    const thresholdCode = optionalText(value?.thresholdCode);
+    const thresholdValue = value?.thresholdValue != null
+      ? normalizeNumber(value.thresholdValue, "parallel_run_metric_threshold_value_invalid")
+      : thresholdCode && Object.prototype.hasOwnProperty.call(thresholdProfile, thresholdCode)
+        ? normalizeNumber(thresholdProfile[thresholdCode], "parallel_run_metric_threshold_value_invalid")
+        : null;
+    const thresholdPercent = value?.thresholdPercent != null
+      ? normalizeNumber(value.thresholdPercent, "parallel_run_metric_threshold_percent_invalid")
+      : null;
+    const informational = value?.informational === true;
+    const hardBlock = value?.hardBlock === true;
+    if (!informational && thresholdValue == null && thresholdPercent == null) {
+      throw createValidationError("parallel_run_threshold_missing", `Parallel run metric ${metricCode} requires a threshold.`);
+    }
+    const thresholdBreached =
+      !informational
+      && (
+        (thresholdValue != null && Math.abs(deltaValue) > Math.abs(thresholdValue))
+        || (thresholdPercent != null && Math.abs(deltaPercent) > Math.abs(thresholdPercent))
+      );
+    return {
+      metricCode,
+      label,
+      unitCode: optionalText(value?.unitCode) || "count",
+      sourceValue,
+      targetValue,
+      deltaValue,
+      deltaPercent,
+      thresholdCode,
+      thresholdValue,
+      thresholdPercent,
+      informational,
+      hardBlock,
+      comment: optionalText(value?.comment),
+      outcomeCode: thresholdBreached ? (hardBlock ? "blocked" : "outside_threshold") : informational ? "informational" : "within_threshold"
+    };
+  });
+}
+
+function computeParallelRunDeltaPercent({ sourceValue, deltaValue }) {
+  if (sourceValue === 0) {
+    return deltaValue === 0 ? 0 : 100;
+  }
+  return roundMoney((deltaValue / sourceValue) * 100);
+}
+
+function summarizeParallelRunMeasurements(measurements) {
+  return {
+    totalMetrics: measurements.length,
+    breachedMetrics: measurements.filter((measurement) => measurement.outcomeCode === "outside_threshold").length,
+    blockingMetrics: measurements.filter((measurement) => measurement.outcomeCode === "blocked").length,
+    informationalMetrics: measurements.filter((measurement) => measurement.outcomeCode === "informational").length,
+    withinThresholdMetrics: measurements.filter((measurement) => measurement.outcomeCode === "within_threshold").length,
+    maxAbsDeltaValue: measurements.reduce((maxValue, measurement) => Math.max(maxValue, Math.abs(Number(measurement.deltaValue || 0))), 0),
+    maxAbsDeltaPercent: measurements.reduce((maxValue, measurement) => Math.max(maxValue, Math.abs(Number(measurement.deltaPercent || 0))), 0)
+  };
+}
+
+function resolveParallelRunResultStatus(differenceSummary) {
+  if ((differenceSummary?.blockingMetrics || 0) > 0) {
+    return "blocked";
+  }
+  if ((differenceSummary?.breachedMetrics || 0) > 0) {
+    return "manual_review_required";
+  }
+  return "completed";
+}
+
+function buildMigrationDatasetSummary({ importBatches, diffReports, parallelRunResults, acceptanceRecords, postCutoverCorrectionCases }) {
   return {
     importBatchCount: importBatches.length,
     acceptedImportBatchCount: importBatches.filter((batch) => batch.status === "accepted").length,
     correctedImportBatchCount: importBatches.filter((batch) => batch.status === "corrected").length,
     blockingDiffReportCount: diffReports.filter((diffReport) => diffReport.status === "remediation_required").length,
     acceptedDiffReportCount: diffReports.filter((diffReport) => diffReport.status === "accepted").length,
+    parallelRunResultCount: parallelRunResults.length,
+    acceptedParallelRunResultCount: parallelRunResults.filter((result) => result.status === "accepted").length,
+    pendingParallelRunAcceptanceCount: parallelRunResults.filter((result) => ["completed", "manual_review_required"].includes(result.status)).length,
+    blockedParallelRunResultCount: parallelRunResults.filter((result) => result.status === "blocked").length,
     acceptedAcceptanceRecordCount: acceptanceRecords.filter((record) => record.status === "accepted").length,
     blockedAcceptanceRecordCount: acceptanceRecords.filter((record) => record.status === "blocked").length,
     openPostCutoverCorrectionCaseCount: postCutoverCorrectionCases.filter((correctionCase) => correctionCase.status === "open").length
@@ -2929,10 +3205,21 @@ function buildMigrationDatasetSummary({ importBatches, diffReports, acceptanceRe
 function buildMigrationCutoverBoard({
   companyId,
   cutoverPlans,
+  parallelRunResults,
   acceptanceRecords,
   postCutoverCorrectionCases,
   currentTimestamp
 }) {
+  const parallelRunResultsByCutoverPlanId = new Map();
+  for (const parallelRunResult of parallelRunResults) {
+    if (!parallelRunResult.cutoverPlanId) {
+      continue;
+    }
+    if (!parallelRunResultsByCutoverPlanId.has(parallelRunResult.cutoverPlanId)) {
+      parallelRunResultsByCutoverPlanId.set(parallelRunResult.cutoverPlanId, []);
+    }
+    parallelRunResultsByCutoverPlanId.get(parallelRunResult.cutoverPlanId).push(parallelRunResult);
+  }
   const acceptanceRecordsByCutoverPlanId = new Map();
   for (const acceptanceRecord of acceptanceRecords) {
     if (!acceptanceRecord.cutoverPlanId) {
@@ -2954,6 +3241,7 @@ function buildMigrationCutoverBoard({
     .map((cutoverPlan) =>
       buildMigrationCutoverBoardRow({
         cutoverPlan,
+        parallelRunResults: parallelRunResultsByCutoverPlanId.get(cutoverPlan.cutoverPlanId) || [],
         acceptanceRecords: acceptanceRecordsByCutoverPlanId.get(cutoverPlan.cutoverPlanId) || [],
         correctionCases: correctionCasesByCutoverPlanId.get(cutoverPlan.cutoverPlanId) || [],
         currentTimestamp
@@ -2992,6 +3280,7 @@ function buildMigrationCutoverBoard({
       contextObject: { objectType: "migrationCutoverCockpit", objectId: companyId },
       availableCommands: [
         { actionCode: "migration.openCutoverPlans", label: "Open cutover plans" },
+        { actionCode: "migration.openParallelRuns", label: "Open parallel runs" },
         { actionCode: "migration.openAcceptanceRecords", label: "Open acceptance records" },
         { actionCode: "migration.openCorrections", label: "Open corrections" }
       ],
@@ -3011,6 +3300,8 @@ function buildMigrationCutoverBoard({
       rollbackInProgress: items.filter((item) => item.status === "rollback_in_progress").length,
       rolledBack: items.filter((item) => item.status === "rolled_back").length,
       correctionOpen: items.filter((item) => item.postCutoverCorrectionOpenCount > 0).length,
+      parallelRunBlocked: items.filter((item) => item.parallelRunSummary.blocked > 0).length,
+      parallelRunPendingAcceptance: items.filter((item) => item.parallelRunSummary.pendingAcceptance > 0).length,
       attentionRequired: items.filter((item) => item.requiresAttention).length,
       acceptanceBlocked: items.filter((item) => item.latestAcceptanceStatus === "blocked").length,
       checklistBlocked: items.filter((item) => item.checklistSummary.blockedMandatory > 0).length
@@ -3026,9 +3317,16 @@ function buildMigrationCutoverBoard({
   };
 }
 
-function buildMigrationCutoverBoardRow({ cutoverPlan, acceptanceRecords, correctionCases, currentTimestamp }) {
+function buildMigrationCutoverBoardRow({ cutoverPlan, parallelRunResults, acceptanceRecords, correctionCases, currentTimestamp }) {
   const latestAcceptanceRecord = [...acceptanceRecords]
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] || null;
+  const parallelRunSummary = {
+    total: parallelRunResults.length,
+    accepted: parallelRunResults.filter((result) => result.status === "accepted").length,
+    pendingAcceptance: parallelRunResults.filter((result) => ["completed", "manual_review_required"].includes(result.status)).length,
+    blocked: parallelRunResults.filter((result) => result.status === "blocked").length,
+    scopes: [...new Set(parallelRunResults.map((result) => result.comparisonScope))].sort()
+  };
   const signoffSummary = {
     total: cutoverPlan.signoffChain.length,
     approved: cutoverPlan.signoffChain.filter((step) => step.approvedAt && step.approvedByUserId).length
@@ -3058,6 +3356,12 @@ function buildMigrationCutoverBoardRow({ cutoverPlan, acceptanceRecords, correct
   if (openCorrectionCases.length > 0) {
     attentionReasonCodes.push("post_cutover_correction_open");
   }
+  if (parallelRunSummary.pendingAcceptance > 0) {
+    attentionReasonCodes.push("parallel_run_acceptance_pending");
+  }
+  if (parallelRunSummary.blocked > 0) {
+    attentionReasonCodes.push("parallel_run_blocked");
+  }
   if (checklistSummary.blockedMandatory > 0) {
     attentionReasonCodes.push("checklist_blocked");
   }
@@ -3085,6 +3389,7 @@ function buildMigrationCutoverBoardRow({ cutoverPlan, acceptanceRecords, correct
     rollbackCompletedAt: cutoverPlan.rollbackCompletedAt || null,
     signoffSummary,
     checklistSummary,
+    parallelRunSummary,
     latestAcceptanceRecordId: latestAcceptanceRecord?.migrationAcceptanceRecordId || null,
     latestAcceptanceStatus: latestAcceptanceRecord?.status || null,
     latestAcceptanceRecordedAt: latestAcceptanceRecord?.recordedAt || null,
@@ -3098,6 +3403,8 @@ function buildMigrationCutoverBoardRow({ cutoverPlan, acceptanceRecords, correct
     ownerQueue: "migration_operator",
     blockedCount:
       (latestAcceptanceRecord?.blockingReasonCodes?.length || 0)
+      + parallelRunSummary.pendingAcceptance
+      + parallelRunSummary.blocked
       + (cutoverPlan.validationSummary?.blockingReasonCodes?.length || 0)
       + checklistSummary.blockedMandatory
       + signoffSummary.pending
@@ -3111,6 +3418,118 @@ function buildMigrationCutoverBoardRow({ cutoverPlan, acceptanceRecords, correct
     requiresAttention: attentionReasonCodes.length > 0,
     attentionReasonCodes: [...new Set(attentionReasonCodes)],
     ageHours: computeAgeHours(cutoverPlan.createdAt || cutoverPlan.freezeAt || currentTimestamp, currentTimestamp)
+  };
+}
+
+function buildMigrationParallelRunBoard({ companyId, parallelRunResults, cutoverPlans, currentTimestamp }) {
+  const cutoverPlansById = new Map(cutoverPlans.map((cutoverPlan) => [cutoverPlan.cutoverPlanId, cutoverPlan]));
+  const items = parallelRunResults
+    .map((parallelRunResult) =>
+      buildMigrationParallelRunBoardRow({
+        parallelRunResult,
+        cutoverPlan: parallelRunResult.cutoverPlanId ? cutoverPlansById.get(parallelRunResult.cutoverPlanId) || null : null,
+        currentTimestamp
+      })
+    )
+    .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt));
+  const queueSummary = buildMigrationQueueSummary({
+    queueCode: "MIGRATION_PARALLEL_RUN",
+    ownerQueue: "migration_operator",
+    items,
+    currentTimestamp
+  });
+  return {
+    boardCode: "MigrationParallelRunBoard",
+    title: "Migration parallel run board",
+    scope: "company",
+    companyId,
+    defaultViewCode: "review",
+    views: [
+      { viewCode: "review", label: "Needs review", filter: { status: ["completed", "manual_review_required", "blocked"] } },
+      { viewCode: "accepted", label: "Accepted", filter: { status: ["accepted"] } },
+      { viewCode: "blocked", label: "Blocked", filter: { status: ["blocked"] } }
+    ],
+    filters: [
+      { filterCode: "status", inputType: "enum", values: PARALLEL_RUN_RESULT_STATUSES },
+      { filterCode: "comparisonScope", inputType: "string" },
+      { filterCode: "cutoverPlanId", inputType: "string" }
+    ],
+    sortOptions: [
+      { sortCode: "recent", field: "recordedAt", direction: "desc" },
+      { sortCode: "scope", field: "comparisonScope", direction: "asc" }
+    ],
+    commandBar: {
+      contextObject: { objectType: "migrationParallelRunBoard", objectId: companyId },
+      availableCommands: [
+        { actionCode: "migration.openParallelRuns", label: "Open parallel runs" },
+        { actionCode: "migration.openCutoverCockpit", label: "Open cutover cockpit" }
+      ],
+      recentCommands: [],
+      quickFilters: ["review", "accepted", "blocked"],
+      createActions: ["migration.recordParallelRunResult"]
+    },
+    items,
+    queueSummary,
+    counters: {
+      total: items.length,
+      accepted: items.filter((item) => item.status === "accepted").length,
+      completedAwaitingAcceptance: items.filter((item) => item.status === "completed").length,
+      manualReviewRequired: items.filter((item) => item.status === "manual_review_required").length,
+      blocked: items.filter((item) => item.status === "blocked").length
+    },
+    projectionInfo: {
+      projectionCode: "MigrationParallelRunBoard",
+      objectType: "workbench",
+      objectId: companyId,
+      sourceVersion: currentTimestamp,
+      targetVersion: currentTimestamp,
+      staleProjection: false
+    }
+  };
+}
+
+function buildMigrationParallelRunBoardRow({ parallelRunResult, cutoverPlan, currentTimestamp }) {
+  const summary = parallelRunResult.differenceSummary || {};
+  const attentionReasonCodes = [];
+  if (parallelRunResult.status === "manual_review_required") {
+    attentionReasonCodes.push("parallel_run_manual_review_required");
+  }
+  if (parallelRunResult.status === "blocked") {
+    attentionReasonCodes.push("parallel_run_blocked");
+  }
+  if (parallelRunResult.status === "completed") {
+    attentionReasonCodes.push("parallel_run_acceptance_pending");
+  }
+  return {
+    objectType: "migrationParallelRunResult",
+    parallelRunResultId: parallelRunResult.parallelRunResultId,
+    comparisonScope: parallelRunResult.comparisonScope,
+    cutoverPlanId: parallelRunResult.cutoverPlanId,
+    cutoverStatus: cutoverPlan?.status || null,
+    trialEnvironmentProfileId: parallelRunResult.trialEnvironmentProfileId || null,
+    liveCompanyId: parallelRunResult.liveCompanyId || null,
+    status: parallelRunResult.status,
+    recordedAt: parallelRunResult.completedAt,
+    acceptedAt: parallelRunResult.acceptedAt || null,
+    acceptedByUserId: parallelRunResult.acceptedByUserId || null,
+    thresholdProfile: parallelRunResult.thresholdProfile || {},
+    metricCount: Number(summary.totalMetrics || 0),
+    breachedMetricCount: Number(summary.breachedMetrics || 0),
+    hardBlockCount: Number(summary.blockingMetrics || 0),
+    maxAbsDeltaValue: Number(summary.maxAbsDeltaValue || 0),
+    maxAbsDeltaPercent: Number(summary.maxAbsDeltaPercent || 0),
+    queueCode: "MIGRATION_PARALLEL_RUN",
+    ownerQueue: "migration_operator",
+    blockedCount: Number(summary.breachedMetrics || 0) + Number(summary.blockingMetrics || 0),
+    escalationPolicyCode:
+      parallelRunResult.status === "blocked"
+        ? "parallel_run_blocked"
+        : parallelRunResult.status === "manual_review_required"
+          ? "parallel_run_manual_review"
+          : "parallel_run_acceptance",
+    requiresAttention: attentionReasonCodes.length > 0,
+    attentionReasonCodes,
+    ageHours: computeAgeHours(parallelRunResult.completedAt, currentTimestamp)
   };
 }
 

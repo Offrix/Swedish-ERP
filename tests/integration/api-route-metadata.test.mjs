@@ -136,6 +136,8 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/banking/settlement-links",
   "/v1/migration/acceptance-records",
   "/v1/migration/acceptance-records/:migrationAcceptanceRecordId/evidence",
+  "/v1/migration/parallel-run-results",
+  "/v1/migration/parallel-run-results/:parallelRunResultId/accept",
   "/v1/migration/post-cutover-correction-cases",
   "/v1/migration/cutover-plans/:cutoverPlanId/signoffs",
   "/v1/migration/cutover-plans/:cutoverPlanId/checklist/:itemCode",

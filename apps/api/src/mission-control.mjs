@@ -305,9 +305,11 @@ function buildCutoverControlDashboard({ platform, sessionToken, companyId, gener
   const cockpit =
     callOptional(platform, "getMigrationCockpit", { sessionToken, companyId }, null) || {
       cutoverBoard: { items: [], counters: {} },
+      parallelRunBoard: { items: [], counters: {} },
       acceptanceBoard: { items: [], counters: {} }
     };
   const cutoverBoard = cockpit.cutoverBoard || { items: [], counters: {} };
+  const parallelRunBoard = cockpit.parallelRunBoard || { items: [], counters: {} };
   const acceptanceBoard = cockpit.acceptanceBoard || { items: [], counters: {} };
 
   const rows = (cutoverBoard.items || [])
@@ -322,6 +324,8 @@ function buildCutoverControlDashboard({ platform, sessionToken, companyId, gener
       validationGateStatus: item.validationGateStatus,
       blockedCount: Number(item.blockedCount || 0),
       postCutoverCorrectionOpenCount: Number(item.postCutoverCorrectionOpenCount || 0),
+      parallelRunPendingAcceptanceCount: Number(item.parallelRunSummary?.pendingAcceptance || 0),
+      parallelRunBlockedCount: Number(item.parallelRunSummary?.blocked || 0),
       escalationPolicyCode: item.escalationPolicyCode || null,
       attentionReasonCodes: Array.isArray(item.attentionReasonCodes) ? item.attentionReasonCodes : [],
       drilldownTarget: {
@@ -338,7 +342,9 @@ function buildCutoverControlDashboard({ platform, sessionToken, companyId, gener
     validationBlocked: Number(cutoverBoard.counters?.validationBlocked || 0),
     readyToSwitch: Number(cutoverBoard.counters?.readyToSwitch || 0),
     rollbackInProgress: Number(cutoverBoard.counters?.rollbackInProgress || 0),
-    acceptanceBlocked: Number(cutoverBoard.counters?.acceptanceBlocked || acceptanceBoard.items?.filter((item) => item.status === "blocked").length || 0)
+    acceptanceBlocked: Number(cutoverBoard.counters?.acceptanceBlocked || acceptanceBoard.items?.filter((item) => item.status === "blocked").length || 0),
+    parallelRunReviewRequired: Number(parallelRunBoard.counters?.manualReviewRequired || 0) + Number(parallelRunBoard.counters?.completedAwaitingAcceptance || 0),
+    parallelRunBlocked: Number(parallelRunBoard.counters?.blocked || 0)
   };
 
   return {
@@ -348,14 +354,15 @@ function buildCutoverControlDashboard({ platform, sessionToken, companyId, gener
     companyId,
     generatedAt,
     statusCode:
-      counters.rollbackInProgress > 0 || counters.validationBlocked > 0 || counters.acceptanceBlocked > 0
+      counters.rollbackInProgress > 0 || counters.validationBlocked > 0 || counters.acceptanceBlocked > 0 || counters.parallelRunBlocked > 0
         ? "critical"
-        : counters.totalPlans > 0
+        : counters.totalPlans > 0 || counters.parallelRunReviewRequired > 0
           ? "attention"
           : "ok",
     summary: {
       acceptanceRecordCount: Array.isArray(acceptanceBoard.items) ? acceptanceBoard.items.length : 0,
-      correctionOpenCount: rows.reduce((sum, row) => sum + row.postCutoverCorrectionOpenCount, 0)
+      correctionOpenCount: rows.reduce((sum, row) => sum + row.postCutoverCorrectionOpenCount, 0),
+      parallelRunResultCount: Array.isArray(parallelRunBoard.items) ? parallelRunBoard.items.length : 0
     },
     counters,
     rows,

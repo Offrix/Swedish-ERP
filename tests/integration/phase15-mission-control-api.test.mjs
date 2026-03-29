@@ -118,6 +118,9 @@ test("Phase 15.5 mission control exposes project, close, payroll, cutover and tr
     );
     assert.equal(cutoverDashboard.counters.totalPlans >= 1, true);
     assert.equal(cutoverDashboard.rows.some((row) => row.validationGateStatus === "pending"), true);
+    assert.equal(cutoverDashboard.counters.parallelRunReviewRequired >= 1, true);
+    assert.equal(cutoverDashboard.summary.parallelRunResultCount >= 1, true);
+    assert.equal(cutoverDashboard.rows.some((row) => row.parallelRunPendingAcceptanceCount > 0 || row.parallelRunBlockedCount > 0), true);
 
     const trialDashboard = await requestJson(
       baseUrl,
@@ -249,6 +252,25 @@ function seedCutoverControl(platform, adminToken) {
       }
     ],
     rollbackPointRef: "snapshot://phase15-mission-control"
+  });
+  platform.recordParallelRunResult({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    comparisonScope: "finance",
+    sourceSnapshotRef: { system: "legacy_erp", period: "2026-03" },
+    targetSnapshotRef: { system: "swedish_erp", period: "2026-03" },
+    metrics: [
+      {
+        metricCode: "trial_balance_delta",
+        label: "Trial balance delta",
+        thresholdCode: "amountSek",
+        sourceValue: 25000,
+        targetValue: 25015,
+        unitCode: "sek"
+      }
+    ],
+    notes: "Manual review still pending."
   });
 }
 

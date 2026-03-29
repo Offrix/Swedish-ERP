@@ -18,6 +18,8 @@ test("Phase 14.3 flow exposes migration routes and keeps cockpit evidence intact
     const root = await requestJson(baseUrl, "/");
     assert.equal(root.routes.includes("/v1/migration/cutover-plans/:cutoverPlanId/rollback/complete"), true);
     assert.equal(root.routes.includes("/v1/migration/acceptance-records/:migrationAcceptanceRecordId/evidence"), true);
+    assert.equal(root.routes.includes("/v1/migration/parallel-run-results"), true);
+    assert.equal(root.routes.includes("/v1/migration/parallel-run-results/:parallelRunResultId/accept"), true);
     assert.equal(root.routes.includes("/v1/migration/cockpit"), true);
 
     const adminToken = await loginWithStrongAuth({
@@ -77,6 +79,38 @@ test("Phase 14.3 flow exposes migration routes and keeps cockpit evidence intact
         differenceItems: []
       }
     });
+    const parallelRunResult = await requestJson(baseUrl, "/v1/migration/parallel-run-results", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        cutoverPlanId: cutoverPlan.cutoverPlanId,
+        comparisonScope: "finance",
+        sourceSnapshotRef: { system: "legacy_erp", period: "2026-03" },
+        targetSnapshotRef: { system: "swedish_erp", period: "2026-03" },
+        metrics: [
+          {
+            metricCode: "trial_balance_delta",
+            label: "Trial balance delta",
+            thresholdCode: "amountDelta",
+            sourceValue: 25000,
+            targetValue: 25000,
+            unitCode: "sek"
+          }
+        ]
+      }
+    });
+    assert.equal(parallelRunResult.status, "completed");
+    const acceptedParallelRunResult = await requestJson(baseUrl, `/v1/migration/parallel-run-results/${parallelRunResult.parallelRunResultId}/accept`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        decisionComment: "Finance parallel run accepted."
+      }
+    });
+    assert.equal(acceptedParallelRunResult.status, "accepted");
     await requestJson(baseUrl, `/v1/migration/cutover-plans/${cutoverPlan.cutoverPlanId}/signoffs`, {
       method: "POST",
       token: adminToken,
@@ -124,6 +158,7 @@ test("Phase 14.3 flow exposes migration routes and keeps cockpit evidence intact
         companyId: DEMO_IDS.companyId,
         acceptanceType: "go_live_readiness",
         cutoverPlanId: cutoverPlan.cutoverPlanId,
+        parallelRunResultIds: [acceptedParallelRunResult.parallelRunResultId],
         sourceParitySummary: {
           countParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
           amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
@@ -209,6 +244,9 @@ test("Phase 14.3 flow exposes migration routes and keeps cockpit evidence intact
     assert.equal(cockpit.cutoverBoard.items.length, 1);
     assert.equal(cockpit.cutoverBoard.counters.rolledBack, 1);
     assert.equal(cockpit.cutoverBoard.items[0].postCutoverCorrectionOpenCount, 1);
+    assert.equal(cockpit.parallelRunBoard.boardCode, "MigrationParallelRunBoard");
+    assert.equal(cockpit.parallelRunBoard.items.length, 1);
+    assert.equal(cockpit.parallelRunBoard.counters.accepted, 1);
     assert.equal(cockpit.acceptanceBoard.boardCode, "MigrationAcceptanceBoard");
     assert.equal(cockpit.acceptanceBoard.items.length, 1);
     assert.equal(cockpit.acceptanceBoard.counters.accepted, 1);

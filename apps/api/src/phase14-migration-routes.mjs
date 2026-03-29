@@ -146,6 +146,61 @@ export async function tryHandlePhase14MigrationRoutes({ req, res, url, path, pla
     return true;
   }
 
+  if (req.method === "POST" && path === "/v1/migration/parallel-run-results") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "migration_parallel_run_result", objectId: companyId, scopeCode: "migration_cockpit" });
+    const parallelRunResult = platform.recordParallelRunResult({
+      sessionToken,
+      companyId,
+      comparisonScope: body.comparisonScope,
+      cutoverPlanId: body.cutoverPlanId,
+      trialEnvironmentProfileId: body.trialEnvironmentProfileId,
+      liveCompanyId: body.liveCompanyId,
+      sourceSnapshotRef: body.sourceSnapshotRef,
+      targetSnapshotRef: body.targetSnapshotRef,
+      thresholds: body.thresholds,
+      metrics: body.metrics,
+      notes: body.notes
+    });
+    writeJson(res, 201, parallelRunResult);
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/migration/parallel-run-results") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_parallel_run_result", objectId: companyId, scopeCode: "migration_cockpit" });
+    assertPayrollOperationsReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listParallelRunResults({
+        sessionToken,
+        companyId,
+        comparisonScope: optionalText(url.searchParams.get("comparisonScope")),
+        cutoverPlanId: optionalText(url.searchParams.get("cutoverPlanId")),
+        status: optionalText(url.searchParams.get("status"))
+      })
+    });
+    return true;
+  }
+
+  const parallelRunAcceptMatch = matchPath(path, "/v1/migration/parallel-run-results/:parallelRunResultId/accept");
+  if (req.method === "POST" && parallelRunAcceptMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "migration_parallel_run_result", objectId: parallelRunAcceptMatch.parallelRunResultId, scopeCode: "migration_cockpit" });
+    const parallelRunResult = platform.acceptParallelRunResult({
+      sessionToken,
+      companyId,
+      parallelRunResultId: parallelRunAcceptMatch.parallelRunResultId,
+      decisionComment: body.decisionComment
+    });
+    writeJson(res, 200, parallelRunResult);
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/migration/cutover-plans") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
@@ -186,6 +241,7 @@ export async function tryHandlePhase14MigrationRoutes({ req, res, url, path, pla
       cutoverPlanId: body.cutoverPlanId,
       importBatchIds: body.importBatchIds,
       diffReportIds: body.diffReportIds,
+      parallelRunResultIds: body.parallelRunResultIds,
       sourceParitySummary: body.sourceParitySummary,
       signoffRefs: body.signoffRefs,
       rollbackPointRef: body.rollbackPointRef,

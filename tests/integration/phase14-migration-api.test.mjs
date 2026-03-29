@@ -153,6 +153,42 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
     assert.equal(cutoverPlan.rollbackPointRef, "snapshot://phase14-api");
     assert.equal(cutoverPlan.stabilizationWindowHours, 24);
     assert.equal(cutoverPlan.acceptedVarianceThresholds.amountDelta, 0);
+    const parallelRunResult = await requestJson(baseUrl, "/v1/migration/parallel-run-results", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        cutoverPlanId: cutoverPlan.cutoverPlanId,
+        comparisonScope: "finance",
+        sourceSnapshotRef: { system: "legacy_erp", period: "2026-03" },
+        targetSnapshotRef: { system: "swedish_erp", period: "2026-03" },
+        metrics: [
+          {
+            metricCode: "trial_balance_delta",
+            label: "Trial balance delta",
+            thresholdCode: "amountDelta",
+            sourceValue: 100000,
+            targetValue: 100000,
+            unitCode: "sek"
+          }
+        ]
+      }
+    });
+    assert.equal(parallelRunResult.status, "completed");
+    const listedParallelRuns = await requestJson(baseUrl, `/v1/migration/parallel-run-results?companyId=${DEMO_IDS.companyId}&cutoverPlanId=${cutoverPlan.cutoverPlanId}`, {
+      token: adminToken
+    });
+    assert.equal(listedParallelRuns.items.length, 1);
+    const acceptedParallelRunResult = await requestJson(baseUrl, `/v1/migration/parallel-run-results/${parallelRunResult.parallelRunResultId}/accept`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        decisionComment: "Finance parallel run accepted."
+      }
+    });
+    assert.equal(acceptedParallelRunResult.status, "accepted");
     await requestJson(baseUrl, `/v1/migration/cutover-plans/${cutoverPlan.cutoverPlanId}/signoffs`, {
       method: "POST",
       token: adminToken,
@@ -192,6 +228,7 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
         cutoverPlanId: cutoverPlan.cutoverPlanId,
         importBatchIds: [batch.importBatchId],
         diffReportIds: [diffReport.diffReportId],
+        parallelRunResultIds: [acceptedParallelRunResult.parallelRunResultId],
         sourceParitySummary: {
           countParity: { passed: true, sourceCount: 42, targetCount: 42, delta: 0 },
           amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
@@ -295,6 +332,7 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
         cutoverPlanId: cutoverPlan.cutoverPlanId,
         importBatchIds: [batch.importBatchId],
         diffReportIds: [diffReport.diffReportId],
+        parallelRunResultIds: [acceptedParallelRunResult.parallelRunResultId],
         sourceParitySummary: {
           countParity: { passed: true, sourceCount: 42, targetCount: 42, delta: 0 },
           amountParity: { passed: true, sourceCount: 1, targetCount: 1, delta: 0 },
@@ -387,6 +425,7 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
       `/v1/migration/mapping-sets?companyId=${DEMO_IDS.companyId}`,
       `/v1/migration/import-batches?companyId=${DEMO_IDS.companyId}`,
       `/v1/migration/diff-reports?companyId=${DEMO_IDS.companyId}`,
+      `/v1/migration/parallel-run-results?companyId=${DEMO_IDS.companyId}`,
       `/v1/migration/cutover-plans?companyId=${DEMO_IDS.companyId}`,
       `/v1/migration/acceptance-records?companyId=${DEMO_IDS.companyId}`,
       `/v1/migration/cockpit?companyId=${DEMO_IDS.companyId}`
@@ -400,16 +439,21 @@ test("Phase 14.3 API tracks mapping, imports, diffs, cutover and rollback end-to
     assert.equal(cockpit.importBatches.length, 1);
     assert.equal(cockpit.corrections.length, 1);
     assert.equal(cockpit.diffReports.length, 1);
+    assert.equal(cockpit.parallelRunResults.length, 1);
     assert.equal(cockpit.cutoverPlans.length, 1);
     assert.equal(cockpit.acceptanceRecords.length, 2);
     assert.equal(cockpit.postCutoverCorrectionCases.length, 1);
     assert.equal(cockpit.datasetSummary.acceptedImportBatchCount, 1);
+    assert.equal(cockpit.datasetSummary.acceptedParallelRunResultCount, 1);
     assert.equal(cockpit.cutoverBoard.boardCode, "MigrationCutoverCockpit");
     assert.equal(cockpit.cutoverBoard.items.length, 1);
     assert.equal(cockpit.cutoverBoard.counters.rolledBack, 1);
     assert.equal(cockpit.cutoverBoard.queueSummary[0].queueCode, "MIGRATION_CUTOVER");
     assert.equal(cockpit.cutoverBoard.items[0].rollbackExecutionMode, "post_switch_compensation");
     assert.equal(cockpit.cutoverBoard.items[0].postCutoverCorrectionOpenCount, 1);
+    assert.equal(cockpit.parallelRunBoard.boardCode, "MigrationParallelRunBoard");
+    assert.equal(cockpit.parallelRunBoard.items.length, 1);
+    assert.equal(cockpit.parallelRunBoard.counters.accepted, 1);
     assert.equal(cockpit.acceptanceBoard.boardCode, "MigrationAcceptanceBoard");
     assert.equal(cockpit.acceptanceBoard.items.length, 2);
     assert.equal(cockpit.acceptanceBoard.counters.accepted, 2);

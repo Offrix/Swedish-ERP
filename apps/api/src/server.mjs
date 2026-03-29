@@ -1004,6 +1004,8 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/migration/import-batches/:importBatchId/corrections",
               "/v1/migration/diff-reports",
               "/v1/migration/diff-reports/:diffReportId/items/:itemId",
+              "/v1/migration/parallel-run-results",
+              "/v1/migration/parallel-run-results/:parallelRunResultId/accept",
               "/v1/migration/cutover-plans",
               "/v1/migration/acceptance-records",
               "/v1/migration/acceptance-records/:migrationAcceptanceRecordId/evidence",
