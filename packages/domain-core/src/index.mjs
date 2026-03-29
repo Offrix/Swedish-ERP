@@ -67,8 +67,12 @@ export {
   createSqliteCriticalDomainStateStore
 } from "./critical-domain-state-store.mjs";
 export {
+  DURABLE_SNAPSHOT_ARTIFACT_SCHEMA_VERSION,
+  applyDurableStateSnapshotArtifact,
+  createDurableStateSnapshotArtifact,
   applyDurableStateSnapshot,
-  serializeDurableState
+  serializeDurableState,
+  validateDurableStateSnapshotArtifact
 } from "./state-snapshots.mjs";
 export { createCommandMutationRuntime } from "./command-log.mjs";
 import {

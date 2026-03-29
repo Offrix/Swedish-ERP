@@ -375,3 +375,126 @@ test("Phase 2.2 sqlite-backed mutation journal survives restart with command rec
     cleanupTempDirectory(temp.directory);
   }
 });
+
+test("Phase 2.3 exports schema-aware snapshot artifacts and rejects checksum tampering", () => {
+  const platform = createApiPlatform({
+    env: {},
+    runtimeMode: "test",
+    criticalDomainStateStore: createInMemoryCriticalDomainStateStore()
+  });
+
+  try {
+    const company = platform.createCompany({
+      legalName: "Artifact AB",
+      orgNumber: "556677-8899",
+      status: "active"
+    });
+    const artifact = platform.exportCriticalDomainSnapshotArtifact({
+      domainKey: "orgAuth",
+      companyId: company.companyId
+    });
+
+    assert.equal(artifact.domainKey, "orgAuth");
+    assert.equal(artifact.snapshotSchemaVersion, 1);
+    assert.deepEqual(artifact.classMask, ["S3", "S4"]);
+    assert.equal(typeof artifact.checksum, "string");
+    assert.equal(artifact.checksum.length, 64);
+
+    assert.throws(
+      () =>
+        platform.importCriticalDomainSnapshotArtifact({
+          domainKey: "orgAuth",
+          companyId: company.companyId,
+          actorId: "system",
+          artifact: {
+            ...artifact,
+            checksum: "0".repeat(64)
+          }
+        }),
+      (error) => error?.code === "snapshot_artifact_checksum_mismatch"
+    );
+    assert.throws(
+      () =>
+        platform.importCriticalDomainSnapshotArtifact({
+          domainKey: "orgAuth",
+          companyId: company.companyId,
+          actorId: "system",
+          artifact: {
+            ...artifact,
+            snapshotSchemaVersion: 99
+          }
+        }),
+      (error) => error?.code === "snapshot_artifact_schema_version_mismatch"
+    );
+  } finally {
+    platform.closeCriticalDomainStateStore?.();
+  }
+});
+
+test("Phase 2.3 imports schema-aware snapshot artifacts and records snapshot.imported journal", () => {
+  const sourcePlatform = createApiPlatform({
+    env: {},
+    runtimeMode: "test",
+    criticalDomainStateStore: createInMemoryCriticalDomainStateStore()
+  });
+
+  let artifact;
+  let company;
+  try {
+    company = sourcePlatform.createCompany({
+      legalName: "Imported Artifact AB",
+      orgNumber: "556677-8899",
+      status: "active"
+    });
+    artifact = sourcePlatform.exportCriticalDomainSnapshotArtifact({
+      domainKey: "orgAuth",
+      companyId: company.companyId
+    });
+  } finally {
+    sourcePlatform.closeCriticalDomainStateStore?.();
+  }
+
+  const targetPlatform = createApiPlatform({
+    env: {},
+    runtimeMode: "test",
+    criticalDomainStateStore: createInMemoryCriticalDomainStateStore()
+  });
+
+  try {
+    const imported = targetPlatform.importCriticalDomainSnapshotArtifact({
+      domainKey: "orgAuth",
+      companyId: company.companyId,
+      actorId: "system",
+      artifact
+    });
+    const importedCompany = targetPlatform.getCompanyProfile({ companyId: company.companyId });
+    const receipts = targetPlatform.listCriticalDomainCommandReceipts({
+      domainKey: "orgAuth",
+      companyId: company.companyId
+    });
+    const events = targetPlatform.listCriticalDomainDomainEvents({
+      domainKey: "orgAuth",
+      companyId: company.companyId
+    });
+
+    assert.equal(imported.companyId, company.companyId);
+    assert.equal(imported.snapshotArtifactId, artifact.snapshotArtifactId);
+    assert.equal(importedCompany.legalName, "Imported Artifact AB");
+    assert.equal(
+      receipts.some((receipt) =>
+        receipt.commandType === "orgAuth.importSnapshotArtifact"
+        && receipt.commandPayload.snapshotArtifact.snapshotArtifactId === artifact.snapshotArtifactId
+      ),
+      true
+    );
+    assert.equal(
+      events.some((event) =>
+        event.eventType === "snapshot.imported"
+        && event.payload.snapshotArtifactId === artifact.snapshotArtifactId
+      ),
+      true
+    );
+  } finally {
+    targetPlatform.closeCriticalDomainStateStore?.();
+  }
+});

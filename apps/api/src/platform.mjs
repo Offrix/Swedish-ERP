@@ -39,7 +39,10 @@ import { createEgenkontrollPlatform } from "../../../packages/domain-egenkontrol
 import { createSearchPlatform } from "../../../packages/domain-search/src/index.mjs";
 import { createIntegrationPlatform } from "../../../packages/domain-integrations/src/index.mjs";
 import {
+  createDurableStateSnapshotArtifact,
   createCorePlatform,
+  cloneSnapshotValue,
+  validateDurableStateSnapshotArtifact,
   applyDurableStateSnapshot,
   createInMemoryCriticalDomainStateStore,
   createSqliteCriticalDomainStateStore,
@@ -1108,6 +1111,28 @@ export function createApiPlatform(options = {}) {
           : [],
       enumerable: false
     },
+    exportCriticalDomainSnapshotArtifact: {
+      value: ({ domainKey, ...options } = {}) => {
+        const resolvedDomainKey = text(domainKey, "domainKey");
+        const domain = registeredDomains[resolvedDomainKey];
+        if (!domain || typeof domain.exportCriticalDomainSnapshotArtifact !== "function") {
+          throw new Error(`Domain "${resolvedDomainKey}" does not expose critical snapshot export.`);
+        }
+        return domain.exportCriticalDomainSnapshotArtifact(options);
+      },
+      enumerable: false
+    },
+    importCriticalDomainSnapshotArtifact: {
+      value: ({ domainKey, ...options } = {}) => {
+        const resolvedDomainKey = text(domainKey, "domainKey");
+        const domain = registeredDomains[resolvedDomainKey];
+        if (!domain || typeof domain.importCriticalDomainSnapshotArtifact !== "function") {
+          throw new Error(`Domain "${resolvedDomainKey}" does not expose critical snapshot import.`);
+        }
+        return domain.importCriticalDomainSnapshotArtifact(options);
+      },
+      enumerable: false
+    },
     listCriticalDomainMethodIntents: {
       value: ({ domainKey = null } = {}) =>
         listCriticalDomainMethodIntents(registrations, registeredDomains).filter((entry) =>
@@ -1228,6 +1253,23 @@ const STATELESS_DOMAIN_KEYS = Object.freeze(["automation"]);
 const CRITICAL_DOMAIN_KEYS = Object.freeze(
   API_PLATFORM_BUILD_ORDER.filter((domainKey) => !STATELESS_DOMAIN_KEYS.includes(domainKey))
 );
+const CRITICAL_DOMAIN_SNAPSHOT_SCHEMA_VERSIONS = Object.freeze(
+  Object.fromEntries(CRITICAL_DOMAIN_KEYS.map((domainKey) => [domainKey, 1]))
+);
+const CRITICAL_DOMAIN_SNAPSHOT_CLASS_MASK_OVERRIDES = Object.freeze({
+  orgAuth: Object.freeze(["S3", "S4"]),
+  integrations: Object.freeze(["S3", "S4"]),
+  core: Object.freeze(["S2", "S4"]),
+  payroll: Object.freeze(["S3"]),
+  taxAccount: Object.freeze(["S3"]),
+  annualReporting: Object.freeze(["S3"]),
+  hus: Object.freeze(["S3"]),
+  banking: Object.freeze(["S3"]),
+  ledger: Object.freeze(["S3"]),
+  vat: Object.freeze(["S3"]),
+  ar: Object.freeze(["S3"]),
+  ap: Object.freeze(["S3"])
+});
 
 function stableStringify(value) {
   if (Array.isArray(value)) {
@@ -1252,6 +1294,40 @@ function resolveCriticalDomainTruthMode(store) {
 
 function hashSnapshot(value) {
   return crypto.createHash("sha256").update(stableStringify(value ?? null)).digest("hex");
+}
+
+function createSnapshotArtifactError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function text(value, fieldName) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw createSnapshotArtifactError(`${fieldName}_required`, `${fieldName} is required.`);
+  }
+  return value.trim();
+}
+
+function optionalText(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizePositiveInteger(value, fieldName) {
+  const normalized = Number(value);
+  if (!Number.isInteger(normalized) || normalized <= 0) {
+    throw createSnapshotArtifactError(`${fieldName}_invalid`, `${fieldName} must be a positive integer.`);
+  }
+  return normalized;
+}
+
+function resolveCriticalDomainSnapshotSchemaVersion(domainKey) {
+  return CRITICAL_DOMAIN_SNAPSHOT_SCHEMA_VERSIONS[domainKey] || 1;
+}
+
+function resolveCriticalDomainSnapshotClassMask(domainKey) {
+  const classMask = CRITICAL_DOMAIN_SNAPSHOT_CLASS_MASK_OVERRIDES[domainKey];
+  return Array.isArray(classMask) && classMask.length > 0 ? [...classMask] : ["S2"];
 }
 
 function isPlainObject(value) {
@@ -1518,6 +1594,135 @@ function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
     lastPersistedObjectVersion = record.objectVersion;
     return record;
   };
+  const exportSnapshotArtifact = ({
+    companyId = null,
+    exportedAt = null,
+    classMask = null,
+    metadata = {}
+  } = {}) =>
+    createDurableStateSnapshotArtifact({
+      domainKey,
+      snapshot: adapter.exportSnapshot(),
+      snapshotSchemaVersion: resolveCriticalDomainSnapshotSchemaVersion(domainKey),
+      classMask: Array.isArray(classMask) && classMask.length > 0 ? classMask : resolveCriticalDomainSnapshotClassMask(domainKey),
+      exportedAt,
+      sourceObjectVersion: lastPersistedObjectVersion,
+      sourceSnapshotHash: lastPersistedHash,
+      adapterKind: adapter.adapterKind,
+      durabilityPolicy: durabilityPolicy.durabilityPolicy,
+      scopeCompanyId: optionalText(companyId, "companyId"),
+      metadata
+    });
+  const importSnapshotArtifact = ({
+    artifact,
+    companyId = null,
+    actorId = "system",
+    sessionRevision = 1,
+    correlationId = crypto.randomUUID(),
+    causationId = null,
+    commandId = crypto.randomUUID(),
+    idempotencyKey = null
+  } = {}) => {
+    const beforeSnapshot = adapter.exportSnapshot();
+    try {
+      const validatedArtifact = validateDurableStateSnapshotArtifact(artifact, {
+        expectedDomainKey: domainKey,
+        expectedSnapshotSchemaVersion: resolveCriticalDomainSnapshotSchemaVersion(domainKey)
+      });
+      const resolvedCompanyId = optionalText(companyId, "companyId") || validatedArtifact.scopeCompanyId;
+      if (!resolvedCompanyId) {
+        throw createSnapshotArtifactError(
+          "snapshot_artifact_company_id_required",
+          `Snapshot import for "${domainKey}" requires an explicit companyId or a scoped artifact company id.`
+        );
+      }
+      const resolvedActorId = text(actorId, "actorId");
+      const resolvedCorrelationId = text(correlationId, "correlationId");
+      const resolvedCommandId = text(commandId, "commandId");
+      const resolvedSessionRevision = normalizePositiveInteger(sessionRevision, "sessionRevision");
+      adapter.importSnapshot(validatedArtifact.snapshotPayload);
+
+      const aggregateType = `${domainKey}_aggregate_state`;
+      const aggregateId = domainKey;
+      const commandType = `${domainKey}.importSnapshotArtifact`;
+      const auditEnvelope = createAuditEnvelope({
+        action: commandType,
+        actorId: resolvedActorId,
+        companyId: resolvedCompanyId,
+        entityType: aggregateType,
+        entityId: aggregateId,
+        explanation: `Imported snapshot artifact ${validatedArtifact.snapshotArtifactId} into ${domainKey}.`,
+        correlationId: resolvedCorrelationId,
+        causationId: optionalText(causationId, "causationId"),
+        metadata: {
+          domainKey,
+          snapshotArtifactId: validatedArtifact.snapshotArtifactId,
+          snapshotSchemaVersion: validatedArtifact.snapshotSchemaVersion
+        }
+      });
+      const stateRecord = persist({
+        companyId: resolvedCompanyId,
+        commandType,
+        aggregateType,
+        aggregateId,
+        commandId: resolvedCommandId,
+        idempotencyKey:
+          optionalText(idempotencyKey, "idempotencyKey")
+          || `${commandType}:${validatedArtifact.snapshotArtifactId}`,
+        actorId: resolvedActorId,
+        sessionRevision: resolvedSessionRevision,
+        correlationId: resolvedCorrelationId,
+        causationId: optionalText(causationId, "causationId"),
+        commandPayload: Object.freeze({
+          domainKey,
+          methodName: "importSnapshotArtifact",
+          snapshotArtifact: Object.freeze({
+            snapshotArtifactId: validatedArtifact.snapshotArtifactId,
+            snapshotSchemaVersion: validatedArtifact.snapshotSchemaVersion,
+            checksum: validatedArtifact.checksum,
+            classMask: [...validatedArtifact.classMask],
+            sourceObjectVersion: validatedArtifact.sourceObjectVersion,
+            sourceSnapshotHash: validatedArtifact.sourceSnapshotHash,
+            scopeCompanyId: validatedArtifact.scopeCompanyId
+          })
+        }),
+        metadata: Object.freeze({
+          auditEnvelope,
+          durabilityPolicy: durabilityPolicy.durabilityPolicy,
+          adapterKind: adapter.adapterKind,
+          snapshotArtifactMetadata: cloneSnapshotValue(validatedArtifact.metadata)
+        }),
+        domainEventRecords: [
+          Object.freeze({
+            aggregateType,
+            aggregateId,
+            eventType: "snapshot.imported",
+            payload: Object.freeze({
+              domainKey,
+              snapshotArtifactId: validatedArtifact.snapshotArtifactId,
+              snapshotSchemaVersion: validatedArtifact.snapshotSchemaVersion,
+              sourceObjectVersion: validatedArtifact.sourceObjectVersion
+            }),
+            actorId: resolvedActorId,
+            correlationId: resolvedCorrelationId,
+            causationId: optionalText(causationId, "causationId")
+          })
+        ],
+        outboxMessageRecords: [],
+        evidenceRefRecords: []
+      });
+      return Object.freeze({
+        domainKey,
+        companyId: resolvedCompanyId,
+        snapshotArtifactId: validatedArtifact.snapshotArtifactId,
+        snapshotSchemaVersion: validatedArtifact.snapshotSchemaVersion,
+        stateRecord
+      });
+    } catch (error) {
+      adapter.importSnapshot(beforeSnapshot);
+      throw error;
+    }
+  };
 
   persist();
 
@@ -1537,6 +1742,12 @@ function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
       }
       if (property === "flushDurableState") {
         return () => persist();
+      }
+      if (property === "exportCriticalDomainSnapshotArtifact") {
+        return exportSnapshotArtifact;
+      }
+      if (property === "importCriticalDomainSnapshotArtifact") {
+        return importSnapshotArtifact;
       }
 
       const value = Reflect.get(target, property, receiver);
