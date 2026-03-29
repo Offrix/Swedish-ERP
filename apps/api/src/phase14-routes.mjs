@@ -851,6 +851,7 @@ async function buildObservabilityPayload({
     deadLetters,
     reviewItems,
     submissionQueueItems,
+    transactionBoundary,
     structuredLogs,
     traceChains,
     auditCorrelations
@@ -885,6 +886,9 @@ async function buildObservabilityPayload({
     typeof platform.listSubmissionActionQueue === "function"
       ? platform.listSubmissionActionQueue({ companyId })
       : [],
+    typeof platform.getTransactionBoundarySummary === "function"
+      ? platform.getTransactionBoundarySummary({ companyId, asOf: resolvedAsOf })
+      : null,
     typeof platform.listStructuredLogs === "function"
       ? platform.listStructuredLogs({ companyId, includeGlobal, limit: logLimit })
       : [],
@@ -929,6 +933,7 @@ async function buildObservabilityPayload({
       openInvariantAlarmCount: invariantAlarms.filter((alarm) => alarm.state !== "resolved").length,
       unhealthyProviderCount: providerHealth.items.filter((item) => ["degraded", "outage"].includes(item.healthStatus)).length,
       laggingProjectionCount: projectionLag.items.filter((item) => item.lagState !== "healthy").length,
+      laggingCommitBoundaryCount: transactionBoundary?.commitLag?.summary?.laggingDomainCount || 0,
       queueAgeAlertCount: queueAgeAlerts.length,
       runtimeJobBacklogCount: runtimeJobs.filter((job) => ["queued", "retry_scheduled", "claimed", "running"].includes(job.status)).length,
       runtimeDeadLetterCount: deadLetters.filter((item) => item.operatorState !== "closed").length,
@@ -945,6 +950,7 @@ async function buildObservabilityPayload({
     secretManagement: secretManagementSummary,
     providerHealth,
     projectionLag,
+    transactionBoundary,
     queueAgeAlerts,
     invariantAlarms,
     structuredLogs,

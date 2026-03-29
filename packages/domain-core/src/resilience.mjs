@@ -9,6 +9,8 @@ export const LOAD_PROFILE_STATUSES = Object.freeze(["draft", "passed", "failed"]
 export const RESTORE_DRILL_TYPES = Object.freeze(["database_restore", "projection_rebuild", "worker_restart"]);
 export const RESTORE_DRILL_REQUIRED_TYPES = Object.freeze(["database_restore", "projection_rebuild", "worker_restart"]);
 export const RESTORE_DRILL_STATUSES = Object.freeze(["scheduled", "running", "passed", "failed"]);
+export const ROLLBACK_CHECKPOINT_STATUSES = Object.freeze(["open", "sealed", "used", "expired"]);
+export const REPLAY_DRILL_STATUSES = Object.freeze(["planned", "running", "passed", "failed"]);
 export const CHAOS_SCENARIO_STATUSES = Object.freeze(["planned", "executed", "failed"]);
 export const CHAOS_SCENARIO_REQUIRED_CODES = Object.freeze(["worker_restart"]);
 export const INCIDENT_SEVERITIES = Object.freeze(["low", "medium", "high", "critical"]);
@@ -153,6 +155,8 @@ export function createResilienceModule({
     loadProfileStatuses: LOAD_PROFILE_STATUSES,
     restoreDrillTypes: RESTORE_DRILL_TYPES,
     restoreDrillStatuses: RESTORE_DRILL_STATUSES,
+    rollbackCheckpointStatuses: ROLLBACK_CHECKPOINT_STATUSES,
+    replayDrillStatuses: REPLAY_DRILL_STATUSES,
     chaosScenarioStatuses: CHAOS_SCENARIO_STATUSES,
     incidentSeverities: INCIDENT_SEVERITIES,
     incidentStatuses: INCIDENT_STATUSES,
@@ -167,11 +171,21 @@ export function createResilienceModule({
     releaseEmergencyDisable,
     recordLoadProfile,
     listLoadProfiles,
+    createRollbackCheckpoint,
+    sealRollbackCheckpoint,
+    useRollbackCheckpoint,
+    expireRollbackCheckpoint,
+    listRollbackCheckpoints,
     recordRestoreDrill,
     startRestoreDrill,
     completeRestoreDrill,
     listRestoreDrills,
     getRestoreDrillCoverageSummary,
+    recordReplayDrill,
+    startReplayDrill,
+    completeReplayDrill,
+    listReplayDrills,
+    getReplayDrillSummary,
     recordChaosScenario,
     listChaosScenarios,
     resolveRuntimeFlags,
@@ -514,6 +528,199 @@ export function createResilienceModule({
       .map(clone);
   }
 
+  function createRollbackCheckpoint({
+    sessionToken,
+    companyId,
+    scopeCode,
+    scopeRef = null,
+    snapshotRefs = [],
+    commandReceiptIds = [],
+    notes = null,
+    expiresAt = null,
+    evidence = {},
+    requiredReviewUserIds = [],
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const checkpoint = {
+      rollbackCheckpointId: crypto.randomUUID(),
+      companyId: text(companyId, "company_id_required"),
+      scopeCode: text(scopeCode, "rollback_checkpoint_scope_code_required"),
+      scopeRef: optionalText(scopeRef),
+      snapshotRefs: normalizeRefArray(snapshotRefs, "rollback_checkpoint_snapshot_refs_invalid"),
+      commandReceiptIds: normalizeStringArray(commandReceiptIds),
+      notes: optionalText(notes),
+      expiresAt: normalizeOptionalIsoTimestamp(expiresAt, "rollback_checkpoint_expires_at_invalid"),
+      evidence: clone(evidence || {}),
+      requiredReviewUserIds: normalizeActorIds(requiredReviewUserIds, "rollback_checkpoint_required_review_user_ids_invalid"),
+      status: "open",
+      createdByUserId: principal.userId,
+      createdAt: nowIso(clock),
+      sealedAt: null,
+      sealedByUserId: null,
+      sealSummary: null,
+      usedAt: null,
+      usedByUserId: null,
+      usageSummary: null,
+      expiredAt: null,
+      expiredByUserId: null,
+      expiryReason: null
+    };
+    if (checkpoint.snapshotRefs.length === 0) {
+      throw error(400, "rollback_checkpoint_snapshot_refs_required", "Rollback checkpoints require at least one snapshot reference.");
+    }
+    state.rollbackCheckpoints.set(checkpoint.rollbackCheckpointId, checkpoint);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.rollback_checkpoint.created",
+      entityType: "rollback_checkpoint",
+      entityId: checkpoint.rollbackCheckpointId,
+      explanation: `Created rollback checkpoint for ${checkpoint.scopeCode}.`
+    });
+    return clone(checkpoint);
+  }
+
+  function sealRollbackCheckpoint({
+    sessionToken,
+    companyId,
+    rollbackCheckpointId,
+    sealSummary,
+    evidence = {},
+    requiredReviewUserIds = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const checkpoint = requireRollbackCheckpoint(companyId, rollbackCheckpointId);
+    if (checkpoint.status !== "open") {
+      throw error(409, "rollback_checkpoint_not_open", "Only open rollback checkpoints can be sealed.");
+    }
+    checkpoint.status = "sealed";
+    checkpoint.sealedAt = nowIso(clock);
+    checkpoint.sealedByUserId = principal.userId;
+    checkpoint.sealSummary = text(sealSummary, "rollback_checkpoint_seal_summary_required");
+    checkpoint.evidence = {
+      ...clone(checkpoint.evidence || {}),
+      ...clone(evidence || {})
+    };
+    if (requiredReviewUserIds != null) {
+      checkpoint.requiredReviewUserIds = normalizeActorIds(requiredReviewUserIds, "rollback_checkpoint_required_review_user_ids_invalid");
+    }
+    checkpoint.updatedAt = nowIso(clock);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.rollback_checkpoint.sealed",
+      entityType: "rollback_checkpoint",
+      entityId: checkpoint.rollbackCheckpointId,
+      explanation: `Sealed rollback checkpoint ${checkpoint.rollbackCheckpointId}.`
+    });
+    return clone(checkpoint);
+  }
+
+  function useRollbackCheckpoint({
+    sessionToken,
+    companyId,
+    rollbackCheckpointId,
+    usageSummary,
+    evidence = {},
+    approvalActorIds = [],
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const checkpoint = requireRollbackCheckpoint(companyId, rollbackCheckpointId);
+    if (checkpoint.status !== "sealed") {
+      throw error(409, "rollback_checkpoint_not_sealed", "Only sealed rollback checkpoints can be used.");
+    }
+    const normalizedApprovalActorIds = normalizeActorIds(approvalActorIds, "rollback_checkpoint_approval_actor_ids_invalid");
+    const requiresDualReview = checkpointRequiresDualReview(checkpoint);
+    if (requiresDualReview) {
+      const requiredReviewUserIds = checkpoint.requiredReviewUserIds || [];
+      if (normalizedApprovalActorIds.length === 0) {
+        throw error(409, "rollback_checkpoint_dual_review_required", "Using this rollback checkpoint requires a separate approver.");
+      }
+      if (normalizedApprovalActorIds.includes(principal.userId)) {
+        throw error(409, "rollback_checkpoint_self_approval_forbidden", "Rollback checkpoint usage requires a separate approver.");
+      }
+      validateFeatureFlagApprovalActors({
+        authState: orgAuthPlatform?.snapshot?.(),
+        companyId,
+        approvalActorIds: normalizedApprovalActorIds,
+        clock
+      });
+      if (requiredReviewUserIds.length > 0 && requiredReviewUserIds.some((actorId) => !normalizedApprovalActorIds.includes(actorId))) {
+        throw error(409, "rollback_checkpoint_required_approver_missing", "Rollback checkpoint usage is missing a required approver.");
+      }
+    }
+    checkpoint.status = "used";
+    checkpoint.usedAt = nowIso(clock);
+    checkpoint.usedByUserId = principal.userId;
+    checkpoint.usageSummary = text(usageSummary, "rollback_checkpoint_usage_summary_required");
+    checkpoint.approvalActorIds = normalizedApprovalActorIds;
+    checkpoint.evidence = {
+      ...clone(checkpoint.evidence || {}),
+      ...clone(evidence || {})
+    };
+    checkpoint.updatedAt = nowIso(clock);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.rollback_checkpoint.used",
+      entityType: "rollback_checkpoint",
+      entityId: checkpoint.rollbackCheckpointId,
+      explanation: `Used rollback checkpoint ${checkpoint.rollbackCheckpointId}.`,
+      metadata: {
+        approvalActorIds: normalizedApprovalActorIds
+      }
+    });
+    return clone(checkpoint);
+  }
+
+  function expireRollbackCheckpoint({
+    sessionToken,
+    companyId,
+    rollbackCheckpointId,
+    expiryReason,
+    expiredAt = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const checkpoint = requireRollbackCheckpoint(companyId, rollbackCheckpointId);
+    if (!["open", "sealed"].includes(checkpoint.status)) {
+      throw error(409, "rollback_checkpoint_not_expirable", "Only open or sealed rollback checkpoints can expire.");
+    }
+    checkpoint.status = "expired";
+    checkpoint.expiredAt = normalizeIsoTimestamp(expiredAt || nowIso(clock), "rollback_checkpoint_expired_at_invalid");
+    checkpoint.expiredByUserId = principal.userId;
+    checkpoint.expiryReason = text(expiryReason, "rollback_checkpoint_expiry_reason_required");
+    checkpoint.updatedAt = nowIso(clock);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.rollback_checkpoint.expired",
+      entityType: "rollback_checkpoint",
+      entityId: checkpoint.rollbackCheckpointId,
+      explanation: `Expired rollback checkpoint ${checkpoint.rollbackCheckpointId}.`
+    });
+    return clone(checkpoint);
+  }
+
+  function listRollbackCheckpoints({ sessionToken, companyId, status = null, scopeCode = null } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedStatus = optionalText(status);
+    const resolvedScopeCode = optionalText(scopeCode);
+    return [...state.rollbackCheckpoints.values()]
+      .filter((checkpoint) => checkpoint.companyId === text(companyId, "company_id_required"))
+      .filter((checkpoint) => (resolvedStatus ? checkpoint.status === resolvedStatus : true))
+      .filter((checkpoint) => (resolvedScopeCode ? checkpoint.scopeCode === resolvedScopeCode : true))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .map(clone);
+  }
+
   function recordRestoreDrill({
     sessionToken,
     companyId,
@@ -740,6 +947,152 @@ export function createResilienceModule({
     };
   }
 
+  function recordReplayDrill({
+    sessionToken,
+    companyId,
+    drillCode,
+    targetScope,
+    replayPlanId = null,
+    deadLetterId = null,
+    jobId = null,
+    expectedOutcome,
+    status = null,
+    verificationSummary = null,
+    evidence = {},
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const replayDrill = {
+      replayDrillId: crypto.randomUUID(),
+      companyId: text(companyId, "company_id_required"),
+      drillCode: text(drillCode, "replay_drill_code_required"),
+      targetScope: text(targetScope || "async_job", "replay_drill_target_scope_required"),
+      replayPlanId: optionalText(replayPlanId),
+      deadLetterId: optionalText(deadLetterId),
+      jobId: optionalText(jobId),
+      expectedOutcome: text(expectedOutcome, "replay_drill_expected_outcome_required"),
+      status: normalizeReplayDrillStatus(status, { verificationSummary }),
+      verificationSummary: optionalText(verificationSummary),
+      evidence: clone(evidence || {}),
+      recordedByUserId: principal.userId,
+      recordedAt: nowIso(clock),
+      startedAt: null,
+      completedAt: null
+    };
+    if (!replayDrill.replayPlanId && !replayDrill.deadLetterId && !replayDrill.jobId) {
+      throw error(400, "replay_drill_target_required", "Replay drills require a replay plan, dead-letter or job reference.");
+    }
+    if (["passed", "failed"].includes(replayDrill.status)) {
+      replayDrill.completedAt = nowIso(clock);
+      replayDrill.startedAt = replayDrill.recordedAt;
+      if (!replayDrill.verificationSummary) {
+        throw error(400, "replay_drill_verification_required", "Completed replay drills require a verification summary.");
+      }
+    }
+    state.replayDrills.set(replayDrill.replayDrillId, replayDrill);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.replay_drill.recorded",
+      entityType: "replay_drill",
+      entityId: replayDrill.replayDrillId,
+      explanation: `Recorded replay drill ${replayDrill.drillCode}.`
+    });
+    return clone(replayDrill);
+  }
+
+  function startReplayDrill({
+    sessionToken,
+    companyId,
+    replayDrillId,
+    startedAt = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const replayDrill = requireReplayDrill(companyId, replayDrillId);
+    if (replayDrill.status !== "planned") {
+      throw error(409, "replay_drill_not_planned", "Only planned replay drills can be started.");
+    }
+    replayDrill.status = "running";
+    replayDrill.startedAt = normalizeIsoTimestamp(startedAt || nowIso(clock), "replay_drill_started_at_invalid");
+    replayDrill.updatedAt = nowIso(clock);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.replay_drill.started",
+      entityType: "replay_drill",
+      entityId: replayDrill.replayDrillId,
+      explanation: `Started replay drill ${replayDrill.drillCode}.`
+    });
+    return clone(replayDrill);
+  }
+
+  function completeReplayDrill({
+    sessionToken,
+    companyId,
+    replayDrillId,
+    status,
+    verificationSummary,
+    evidence = {},
+    completedAt = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const replayDrill = requireReplayDrill(companyId, replayDrillId);
+    if (!["planned", "running"].includes(replayDrill.status)) {
+      throw error(409, "replay_drill_not_executable", "Only planned or running replay drills can be completed.");
+    }
+    replayDrill.status = assertAllowed(status, ["passed", "failed"], "replay_drill_status_invalid");
+    replayDrill.startedAt = replayDrill.startedAt || nowIso(clock);
+    replayDrill.completedAt = normalizeIsoTimestamp(completedAt || nowIso(clock), "replay_drill_completed_at_invalid");
+    replayDrill.verificationSummary = text(verificationSummary, "replay_drill_verification_required");
+    replayDrill.evidence = {
+      ...clone(replayDrill.evidence || {}),
+      ...clone(evidence || {})
+    };
+    replayDrill.updatedAt = nowIso(clock);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "resilience.replay_drill.completed",
+      entityType: "replay_drill",
+      entityId: replayDrill.replayDrillId,
+      explanation: `Completed replay drill ${replayDrill.drillCode} with status ${replayDrill.status}.`
+    });
+    return clone(replayDrill);
+  }
+
+  function listReplayDrills({ sessionToken, companyId, status = null } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedStatus = optionalText(status);
+    return [...state.replayDrills.values()]
+      .filter((replayDrill) => replayDrill.companyId === text(companyId, "company_id_required"))
+      .filter((replayDrill) => (resolvedStatus ? replayDrill.status === resolvedStatus : true))
+      .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))
+      .map(clone);
+  }
+
+  function getReplayDrillSummary({ sessionToken, companyId } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const items = [...state.replayDrills.values()]
+      .filter((replayDrill) => replayDrill.companyId === text(companyId, "company_id_required"))
+      .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt));
+    const latestPassed = items.find((item) => item.status === "passed") || null;
+    return {
+      totalCount: items.length,
+      passedCount: items.filter((item) => item.status === "passed").length,
+      failedCount: items.filter((item) => item.status === "failed").length,
+      openCount: items.filter((item) => ["planned", "running"].includes(item.status)).length,
+      latestReplayDrillId: items[0]?.replayDrillId || null,
+      latestPassedReplayDrillId: latestPassed?.replayDrillId || null,
+      latestPassedAt: latestPassed?.completedAt || null,
+      coverageMissing: !latestPassed
+    };
+  }
+
   function recordChaosScenario({
     sessionToken,
     companyId,
@@ -839,7 +1192,10 @@ export function createResilienceModule({
     const incidents = listRuntimeIncidentsForCompany(resolvedCompanyId);
     const restorePlans = listRuntimeRestorePlansForCompany(resolvedCompanyId);
     const restoreDrills = [...state.restoreDrills.values()].filter((drill) => drill.companyId === resolvedCompanyId);
+    const rollbackCheckpoints = [...state.rollbackCheckpoints.values()].filter((checkpoint) => checkpoint.companyId === resolvedCompanyId);
+    const replayDrills = [...state.replayDrills.values()].filter((drill) => drill.companyId === resolvedCompanyId);
     const restoreDrillCoverage = getRestoreDrillCoverageSummary({ sessionToken, companyId: resolvedCompanyId });
+    const replayDrillSummary = getReplayDrillSummary({ sessionToken, companyId: resolvedCompanyId });
     const expiredFeatureFlags = [...state.featureFlags.values()]
       .filter((featureFlag) => featureFlag.companyId === resolvedCompanyId)
       .filter((featureFlag) => isFeatureFlagExpired(featureFlag, currentDateKey(clock)));
@@ -854,7 +1210,18 @@ export function createResilienceModule({
       openIncidentCount: incidents.filter((incident) => !["resolved", "post_review", "closed"].includes(incident.status)).length,
       pendingRestorePlanCount: restorePlans.filter((plan) => ["draft", "approved", "executing"].includes(plan.status)).length,
       failedRestoreDrillCount: restoreDrills.filter((drill) => drill.status === "failed").length,
+      openRollbackCheckpointCount: rollbackCheckpoints.filter((checkpoint) => checkpoint.status === "open").length,
+      sealedRollbackCheckpointCount: rollbackCheckpoints.filter((checkpoint) => checkpoint.status === "sealed").length,
+      failedReplayDrillCount: replayDrills.filter((drill) => drill.status === "failed").length,
       restoreDrillCoverage,
+      replayDrillSummary,
+      rollbackCheckpointSummary: {
+        totalCount: rollbackCheckpoints.length,
+        openCount: rollbackCheckpoints.filter((checkpoint) => checkpoint.status === "open").length,
+        sealedCount: rollbackCheckpoints.filter((checkpoint) => checkpoint.status === "sealed").length,
+        usedCount: rollbackCheckpoints.filter((checkpoint) => checkpoint.status === "used").length,
+        expiredCount: rollbackCheckpoints.filter((checkpoint) => checkpoint.status === "expired").length
+      },
       expiredFeatureFlags: expiredFeatureFlags.slice(0, 5).map((featureFlag) => ({
         featureFlagId: featureFlag.featureFlagId,
         flagKey: featureFlag.flagKey,
@@ -867,6 +1234,14 @@ export function createResilienceModule({
       recentIncidents: incidents.slice(0, 5).map(clone),
       recentRestorePlans: restorePlans.slice(0, 5).map(clone),
       recentRestoreDrills: restoreDrills
+        .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))
+        .slice(0, 5)
+        .map(clone),
+      recentRollbackCheckpoints: rollbackCheckpoints
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, 5)
+        .map(clone),
+      recentReplayDrills: replayDrills
         .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))
         .slice(0, 5)
         .map(clone)
@@ -1719,6 +2094,22 @@ export function createResilienceModule({
     return restoreDrill;
   }
 
+  function requireRollbackCheckpoint(companyId, rollbackCheckpointId) {
+    const checkpoint = state.rollbackCheckpoints.get(text(rollbackCheckpointId, "rollback_checkpoint_id_required"));
+    if (!checkpoint || checkpoint.companyId !== text(companyId, "company_id_required")) {
+      throw error(404, "rollback_checkpoint_not_found", "Rollback checkpoint was not found.");
+    }
+    return checkpoint;
+  }
+
+  function requireReplayDrill(companyId, replayDrillId) {
+    const replayDrill = state.replayDrills.get(text(replayDrillId, "replay_drill_id_required"));
+    if (!replayDrill || replayDrill.companyId !== text(companyId, "company_id_required")) {
+      throw error(404, "replay_drill_not_found", "Replay drill was not found.");
+    }
+    return replayDrill;
+  }
+
   function findOpenIncidentSignal({ companyId, signalType, sourceObjectType, sourceObjectId } = {}) {
     return [...state.incidentSignals.values()].find(
       (signal) =>
@@ -2044,6 +2435,23 @@ function normalizeStringArray(values) {
   return result;
 }
 
+function normalizeRefArray(values, code) {
+  if (!Array.isArray(values)) {
+    throw createValidationError(code, `${code} must be an array.`);
+  }
+  const result = [];
+  for (const value of values) {
+    const resolved = optionalText(value);
+    if (!resolved) {
+      throw createValidationError(code, `${code} must only contain non-empty references.`);
+    }
+    if (!result.includes(resolved)) {
+      result.push(resolved);
+    }
+  }
+  return result;
+}
+
 function normalizeOptionalNonNegativeInteger(value) {
   if (value == null || value === "") {
     return null;
@@ -2085,6 +2493,17 @@ function normalizeRestoreDrillType({ drillType = null, drillCode = null, restore
   return "database_restore";
 }
 
+function normalizeReplayDrillStatus(status, { verificationSummary = null } = {}) {
+  const resolved = optionalText(status);
+  if (!resolved) {
+    return optionalText(verificationSummary) ? "passed" : "planned";
+  }
+  if (resolved === "scheduled") {
+    return "planned";
+  }
+  return assertAllowed(resolved, REPLAY_DRILL_STATUSES, "replay_drill_status_invalid");
+}
+
 function normalizeActorIds(values, code) {
   if (values == null) {
     return [];
@@ -2103,6 +2522,27 @@ function normalizeActorIds(values, code) {
     }
   }
   return actorIds;
+}
+
+function checkpointRequiresDualReview(checkpoint) {
+  if ((checkpoint?.requiredReviewUserIds || []).length > 0) {
+    return true;
+  }
+  const scopeCode = `${optionalText(checkpoint?.scopeCode) || ""}`.toLowerCase();
+  return [
+    "regulated",
+    "submission",
+    "ledger",
+    "vat",
+    "payroll",
+    "agi",
+    "tax",
+    "hus",
+    "annual",
+    "owner_distribution",
+    "migration_cutover",
+    "trial_promotion"
+  ].some((token) => scopeCode.includes(token));
 }
 
 function highestSeverity(currentSeverity, nextSeverity) {

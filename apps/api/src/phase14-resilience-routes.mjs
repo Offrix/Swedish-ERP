@@ -382,5 +382,20 @@ export async function tryHandlePhase14ResilienceRoutes({ req, res, url, path, pl
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/ops/transaction-boundary") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "transaction_boundary", objectId: companyId, scopeCode: "resilience" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, platform.getTransactionBoundarySummary({
+      companyId,
+      asOf: optionalText(url.searchParams.get("asOf")),
+      warningLagMinutes: optionalInteger(url.searchParams.get("warningLagMinutes")) || 15,
+      criticalLagMinutes: optionalInteger(url.searchParams.get("criticalLagMinutes")) || 60,
+      projectionRunningStaleMinutes: optionalInteger(url.searchParams.get("projectionRunningStaleMinutes")) || 15
+    }));
+    return true;
+  }
+
   return false;
 }

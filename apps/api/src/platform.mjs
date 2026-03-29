@@ -49,6 +49,8 @@ import {
   createSqliteCriticalDomainStateStore,
   resolveCriticalDomainStateConnectionString,
   serializeDurableState,
+  summarizeProjectionRebuildGates,
+  summarizeTransactionBoundary,
   resolveCanonicalRepositoryConnectionString,
   verifyRuntimeCanonicalRepositorySchemaContract as verifyRuntimeCanonicalRepositorySchemaContractBinding
 } from "../../../packages/domain-core/src/index.mjs";
@@ -1119,6 +1121,49 @@ export function createApiPlatform(options = {}) {
         typeof criticalDomainStateStore.listEvidenceRefs === "function"
           ? criticalDomainStateStore.listEvidenceRefs({ domainKey, companyId, commandReceiptId })
           : [],
+      enumerable: false
+    },
+    getTransactionBoundarySummary: {
+      value: ({
+        companyId,
+        asOf = null,
+        warningLagMinutes = 15,
+        criticalLagMinutes = 60,
+        projectionRunningStaleMinutes = 15
+      } = {}) => {
+        const resolvedCompanyId = text(companyId, "companyId");
+        const commitLag = summarizeTransactionBoundary({
+          commandReceipts:
+            typeof criticalDomainStateStore.listCommandReceipts === "function"
+              ? criticalDomainStateStore.listCommandReceipts({ companyId: resolvedCompanyId })
+              : [],
+          outboxMessages:
+            typeof criticalDomainStateStore.listOutboxMessages === "function"
+              ? criticalDomainStateStore.listOutboxMessages({ companyId: resolvedCompanyId })
+              : [],
+          asOf,
+          warningLagMinutes,
+          criticalLagMinutes
+        });
+        const projectionRebuildGates = summarizeProjectionRebuildGates({
+          projectionContracts:
+            typeof platform.listSearchProjectionContracts === "function"
+              ? platform.listSearchProjectionContracts({ companyId: resolvedCompanyId })
+              : [],
+          projectionCheckpoints:
+            typeof platform.listProjectionCheckpoints === "function"
+              ? platform.listProjectionCheckpoints({ companyId: resolvedCompanyId })
+              : [],
+          asOf,
+          runningStaleMinutes: projectionRunningStaleMinutes
+        });
+        return Object.freeze({
+          companyId: resolvedCompanyId,
+          asOf: commitLag.asOf,
+          commitLag,
+          projectionRebuildGates
+        });
+      },
       enumerable: false
     },
     exportCriticalDomainSnapshotArtifact: {

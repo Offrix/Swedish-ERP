@@ -479,6 +479,165 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     return true;
   }
 
+  if (req.method === "POST" && path === "/v1/backoffice/checkpoints") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "rollback_checkpoint", objectId: companyId, scopeCode: "backoffice" });
+    writeJson(res, 201, platform.createRollbackCheckpoint({
+      sessionToken,
+      companyId,
+      scopeCode: body.scopeCode,
+      scopeRef: body.scopeRef,
+      snapshotRefs: body.snapshotRefs,
+      commandReceiptIds: body.commandReceiptIds,
+      notes: body.notes,
+      expiresAt: body.expiresAt,
+      evidence: body.evidence,
+      requiredReviewUserIds: body.requiredReviewUserIds
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/backoffice/checkpoints") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "rollback_checkpoint", objectId: companyId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listRollbackCheckpoints({
+        sessionToken,
+        companyId,
+        status: optionalText(url.searchParams.get("status")),
+        scopeCode: optionalText(url.searchParams.get("scopeCode"))
+      })
+    });
+    return true;
+  }
+
+  const checkpointSealMatch = matchPath(path, "/v1/backoffice/checkpoints/:rollbackCheckpointId/seal");
+  if (req.method === "POST" && checkpointSealMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "rollback_checkpoint", objectId: checkpointSealMatch.rollbackCheckpointId, scopeCode: "backoffice" });
+    writeJson(res, 200, platform.sealRollbackCheckpoint({
+      sessionToken,
+      companyId,
+      rollbackCheckpointId: checkpointSealMatch.rollbackCheckpointId,
+      sealSummary: body.sealSummary,
+      evidence: body.evidence,
+      requiredReviewUserIds: body.requiredReviewUserIds
+    }));
+    return true;
+  }
+
+  const checkpointUseMatch = matchPath(path, "/v1/backoffice/checkpoints/:rollbackCheckpointId/use");
+  if (req.method === "POST" && checkpointUseMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "rollback_checkpoint", objectId: checkpointUseMatch.rollbackCheckpointId, scopeCode: "backoffice" });
+    writeJson(res, 200, platform.useRollbackCheckpoint({
+      sessionToken,
+      companyId,
+      rollbackCheckpointId: checkpointUseMatch.rollbackCheckpointId,
+      usageSummary: body.usageSummary,
+      evidence: body.evidence,
+      approvalActorIds: body.approvalActorIds
+    }));
+    return true;
+  }
+
+  const checkpointExpireMatch = matchPath(path, "/v1/backoffice/checkpoints/:rollbackCheckpointId/expire");
+  if (req.method === "POST" && checkpointExpireMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "rollback_checkpoint", objectId: checkpointExpireMatch.rollbackCheckpointId, scopeCode: "backoffice" });
+    writeJson(res, 200, platform.expireRollbackCheckpoint({
+      sessionToken,
+      companyId,
+      rollbackCheckpointId: checkpointExpireMatch.rollbackCheckpointId,
+      expiryReason: body.expiryReason,
+      expiredAt: body.expiredAt
+    }));
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/backoffice/replay-drills") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "replay_drill", objectId: companyId, scopeCode: "backoffice" });
+    writeJson(res, 201, platform.recordReplayDrill({
+      sessionToken,
+      companyId,
+      drillCode: body.drillCode,
+      targetScope: body.targetScope,
+      replayPlanId: body.replayPlanId,
+      deadLetterId: body.deadLetterId,
+      jobId: body.jobId,
+      expectedOutcome: body.expectedOutcome,
+      status: body.status,
+      verificationSummary: body.verificationSummary,
+      evidence: body.evidence
+    }));
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/backoffice/replay-drills") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "replay_drill", objectId: companyId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listReplayDrills({
+        sessionToken,
+        companyId,
+        status: optionalText(url.searchParams.get("status"))
+      }),
+      summary: platform.getReplayDrillSummary({
+        sessionToken,
+        companyId
+      })
+    });
+    return true;
+  }
+
+  const replayDrillStartMatch = matchPath(path, "/v1/backoffice/replay-drills/:replayDrillId/start");
+  if (req.method === "POST" && replayDrillStartMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "replay_drill", objectId: replayDrillStartMatch.replayDrillId, scopeCode: "backoffice" });
+    writeJson(res, 200, platform.startReplayDrill({
+      sessionToken,
+      companyId,
+      replayDrillId: replayDrillStartMatch.replayDrillId,
+      startedAt: body.startedAt
+    }));
+    return true;
+  }
+
+  const replayDrillCompleteMatch = matchPath(path, "/v1/backoffice/replay-drills/:replayDrillId/complete");
+  if (req.method === "POST" && replayDrillCompleteMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "replay_drill", objectId: replayDrillCompleteMatch.replayDrillId, scopeCode: "backoffice" });
+    writeJson(res, 200, platform.completeReplayDrill({
+      sessionToken,
+      companyId,
+      replayDrillId: replayDrillCompleteMatch.replayDrillId,
+      status: body.status,
+      verificationSummary: body.verificationSummary,
+      evidence: body.evidence,
+      completedAt: body.completedAt
+    }));
+    return true;
+  }
+
   const backofficeJobReplayMatch = matchPath(path, "/v1/backoffice/jobs/:jobId/replay");
   if (req.method === "POST" && backofficeJobReplayMatch) {
     const body = await readJsonBody(req);

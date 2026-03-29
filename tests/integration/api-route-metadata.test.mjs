@@ -106,6 +106,13 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/backoffice/replays",
   "/v1/backoffice/replays/:replayPlanId/approve",
   "/v1/backoffice/replays/:replayPlanId/execute",
+  "/v1/backoffice/checkpoints",
+  "/v1/backoffice/checkpoints/:rollbackCheckpointId/seal",
+  "/v1/backoffice/checkpoints/:rollbackCheckpointId/use",
+  "/v1/backoffice/checkpoints/:rollbackCheckpointId/expire",
+  "/v1/backoffice/replay-drills",
+  "/v1/backoffice/replay-drills/:replayDrillId/start",
+  "/v1/backoffice/replay-drills/:replayDrillId/complete",
   "/v1/backoffice/dead-letters/:deadLetterId/triage",
   "/v1/backoffice/submissions/monitor",
   "/v1/backoffice/review-center/sla-scan",
@@ -116,6 +123,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/backoffice/break-glass/:breakGlassId/evidence",
   "/v1/backoffice/break-glass/:breakGlassId/start",
   "/v1/ops/observability",
+  "/v1/ops/transaction-boundary",
   "/v1/ops/secrets",
   "/v1/ops/secrets/:managedSecretId/rotate",
   "/v1/ops/secret-rotations",
@@ -295,6 +303,22 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
       assert.equal(supportCaseCloseContract.requiredTrustLevel, "strong_mfa");
       assert.equal(supportCaseCloseContract.requiredScopeType, "support_case");
       assert.equal(supportCaseCloseContract.expectedObjectVersion, true);
+
+      const rollbackCheckpointUseContract = payload.routeContracts.find(
+        (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/backoffice/checkpoints/:rollbackCheckpointId/use"
+      );
+      assert.ok(rollbackCheckpointUseContract);
+      assert.equal(rollbackCheckpointUseContract.requiredActionClass, "rollback_checkpoint_use");
+      assert.equal(rollbackCheckpointUseContract.requiredTrustLevel, "strong_mfa");
+      assert.equal(rollbackCheckpointUseContract.requiredScopeType, "rollback_checkpoint");
+
+      const replayDrillCompleteContract = payload.routeContracts.find(
+        (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/backoffice/replay-drills/:replayDrillId/complete"
+      );
+      assert.ok(replayDrillCompleteContract);
+      assert.equal(replayDrillCompleteContract.requiredActionClass, "replay_drill_complete");
+      assert.equal(replayDrillCompleteContract.requiredTrustLevel, "strong_mfa");
+      assert.equal(replayDrillCompleteContract.requiredScopeType, "replay_drill");
 
       const workItemAssignContract = payload.routeContracts.find(
         (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/work-items/:workItemId/assign"

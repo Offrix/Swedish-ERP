@@ -254,7 +254,7 @@ Ingen live pilot, ingen submissions-transport, ingen migrationscutover på nuvar
 - [x] 2.3 [REWRITE] Gör snapshot import/export schema-aware, versionsstyrd och fail-fast. Snapshot är återställningsartefakt, inte primär sanning.
 - [x] 2.4 [HARDEN] Bygg worker-attempt-livscykel med claim, heartbeat, retry, dead-letter, replay och säker fail-markering även när attempt-starten kraschar.
 - [x] 2.5 [REPLACE] Gör Postgres-migrationslagret bindande för runtime istället för sidovagn. CHECK/FK/UNIQUE/index måste spegla domänregler och användas av applikationen.
-- [ ] 2.6 [OPERATIONALIZE] Inför restore checkpoints, replay drills, projection rebuild-gates och commit-lag-övervakning.
+- [x] 2.6 [OPERATIONALIZE] Inför restore checkpoints, replay drills, projection rebuild-gates och commit-lag-övervakning.
 
 **Exit gate**  
 - Alla muterande endpoints går genom atomär commit-path.
