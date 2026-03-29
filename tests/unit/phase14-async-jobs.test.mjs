@@ -342,16 +342,22 @@ test("Phase 2.4 worker records synthetic failed attempts when attempt start cras
   assert.equal(deadLetter.latestAttemptId, attempts[0].jobAttemptId);
 });
 
-test("Phase 2.5 worker verifies runtime job store schema contract before claiming work", async () => {
-  let verified = 0;
+test("Phase 2.5 worker verifies critical-domain and job-store schema contracts before claiming work", async () => {
+  let criticalVerified = 0;
+  let jobStoreVerified = 0;
   let claimed = 0;
 
   const processed = await runWorkerBatch({
     platform: {
+      async verifyRuntimeCriticalDomainStateStoreSchemaContract() {
+        criticalVerified += 1;
+      },
       async verifyRuntimeJobStoreSchemaContract() {
-        verified += 1;
+        jobStoreVerified += 1;
       },
       async claimAvailableRuntimeJobs() {
+        assert.equal(criticalVerified, 1);
+        assert.equal(jobStoreVerified, 1);
         claimed += 1;
         return [];
       }
@@ -362,8 +368,37 @@ test("Phase 2.5 worker verifies runtime job store schema contract before claimin
   });
 
   assert.equal(processed, 0);
-  assert.equal(verified, 1);
+  assert.equal(criticalVerified, 1);
+  assert.equal(jobStoreVerified, 1);
   assert.equal(claimed, 1);
+});
+
+test("Phase 2.5 worker fails closed before claiming work when critical-domain schema verification fails", async () => {
+  let claimed = 0;
+
+  await assert.rejects(
+    () =>
+      runWorkerBatch({
+        platform: {
+          async verifyRuntimeCriticalDomainStateStoreSchemaContract() {
+            throw new Error("critical domain state schema contract is incomplete");
+          },
+          async verifyRuntimeJobStoreSchemaContract() {
+            throw new Error("job store verification should not run");
+          },
+          async claimAvailableRuntimeJobs() {
+            claimed += 1;
+            return [];
+          }
+        },
+        handlers: {},
+        logger: () => {},
+        workerId: "worker-phase2-critical-store-contract"
+      }),
+    /critical domain state schema contract is incomplete/u
+  );
+
+  assert.equal(claimed, 0);
 });
 
 test("Phase 14 Step 4 worker runs submission transport jobs through the shared runtime", async () => {

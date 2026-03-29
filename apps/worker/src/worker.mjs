@@ -232,6 +232,7 @@ export async function runWorkerBatch({
   workerId = buildWorkerId(),
   logger = console.log
 } = {}) {
+  await platform.verifyRuntimeCriticalDomainStateStoreSchemaContract?.();
   await platform.verifyRuntimeJobStoreSchemaContract?.();
   const claimedJobs = await platform.claimAvailableRuntimeJobs({
     workerId,
