@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
+import { assertSecurityClassCode } from "../../domain-core/src/security-classes.mjs";
 import {
   buildEnvironmentCapabilityTruth,
   buildReceiptModePolicy,
@@ -298,8 +299,10 @@ export function createIntegrationControlPlane({
       environmentMode: connection.environmentMode,
       credentialKind: resolvedKind,
       credentialRef,
+      credentialRefClassCode: "S4",
       credentialRefFingerprint: fingerprint(credentialRef),
       secretManagerRef: text(secretManagerRef || credentialRef, "integration_secret_manager_ref_required"),
+      secretManagerRefClassCode: "S4",
       secretManagerRefFingerprint: fingerprint(secretManagerRef || credentialRef),
       callbackDomain: optional(callbackDomain),
       callbackPath: optional(callbackPath),
@@ -589,8 +592,10 @@ function presentCredential(item) {
     providerCode: item.providerCode,
     environmentMode: item.environmentMode,
     credentialKind: item.credentialKind,
+    credentialRefClassCode: assertSecurityClassCode(item.credentialRefClassCode || "S4"),
     credentialRefFingerprint: item.credentialRefFingerprint,
     credentialRefPreview: preview(item.credentialRef),
+    secretManagerRefClassCode: assertSecurityClassCode(item.secretManagerRefClassCode || "S4"),
     secretManagerRefFingerprint: item.secretManagerRefFingerprint,
     secretManagerRefPreview: preview(item.secretManagerRef),
     callbackDomain: item.callbackDomain,

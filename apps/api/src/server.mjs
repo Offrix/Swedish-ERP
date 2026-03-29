@@ -1021,6 +1021,7 @@ async function handleRequest({ req, res, platform, flags }) {
               "/v1/backoffice/break-glass/:breakGlassId/start",
               "/v1/backoffice/break-glass/:breakGlassId/close",
               "/v1/backoffice/break-glass/:breakGlassId/evidence",
+              "/v1/security/classes",
               "/v1/ops/feature-flags",
               "/v1/ops/observability",
               "/v1/ops/transaction-boundary",

@@ -122,6 +122,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/backoffice/impersonations/:sessionId/start",
   "/v1/backoffice/break-glass/:breakGlassId/evidence",
   "/v1/backoffice/break-glass/:breakGlassId/start",
+  "/v1/security/classes",
   "/v1/ops/observability",
   "/v1/ops/transaction-boundary",
   "/v1/ops/secrets",

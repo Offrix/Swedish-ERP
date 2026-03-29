@@ -1,5 +1,10 @@
 import crypto from "node:crypto";
 import { cloneValue as clone } from "./clone.mjs";
+import {
+  buildSecurityClassificationCatalog,
+  listSecurityClasses,
+  resolveManagedSecretClassCode
+} from "./security-classes.mjs";
 
 export const SUPPORT_CASE_STATUSES = Object.freeze(["open", "triaged", "in_progress", "waiting_customer", "resolved", "closed", "escalated", "reopened"]);
 export const SUPPORT_CASE_SEVERITIES = Object.freeze(["low", "medium", "high", "critical"]);
@@ -91,6 +96,7 @@ export function createBackofficeModule({
     listCertificateChains,
     registerCallbackSecret,
     listCallbackSecrets,
+    getSecurityClassificationCatalog,
     getSecretManagementSummary,
     runAdminDiagnostic,
     requestImpersonation,
@@ -445,6 +451,7 @@ export function createBackofficeModule({
       mode: resolvedMode,
       providerCode: resolvedProviderCode,
       secretType: assertAllowed(secretType, MANAGED_SECRET_TYPES, "managed_secret_type_invalid"),
+      classCode: resolveManagedSecretClassCode(secretType),
       currentSecretRef: parsedSecret.originalRef,
       currentSecretVersion: parsedSecret.secretName,
       previousSecretRef: null,
@@ -542,6 +549,7 @@ export function createBackofficeModule({
       mode: managedSecret.mode,
       providerCode: managedSecret.providerCode,
       secretType: managedSecret.secretType,
+      classCode: managedSecret.classCode,
       previousSecretVersion: managedSecret.previousSecretVersion,
       nextSecretVersion: managedSecret.currentSecretVersion,
       previousSecretRef: managedSecret.previousSecretRef,
@@ -655,7 +663,9 @@ export function createBackofficeModule({
       subjectCommonName: text(subjectCommonName, "certificate_chain_subject_common_name_required"),
       sanDomains: normalizeStringList(sanDomains, "certificate_chain_san_domain_required"),
       certificateSecretRef: parsedCertificateSecret?.originalRef || null,
+      certificateSecretClassCode: parsedCertificateSecret?.originalRef ? "S4" : null,
       privateKeySecretRef: parsedPrivateKeySecret.originalRef,
+      privateKeySecretClassCode: "S5",
       privateKeySecretVersion: parsedPrivateKeySecret.secretName,
       ownerUserId: text(ownerUserId, "certificate_chain_owner_user_id_required"),
       backupOwnerUserId: optionalText(backupOwnerUserId),
@@ -738,6 +748,7 @@ export function createBackofficeModule({
       callbackDomain: text(callbackDomain, "callback_secret_callback_domain_required"),
       callbackPath: text(callbackPath, "callback_secret_callback_path_required"),
       managedSecretId: linkedManagedSecretId,
+      classCode: "S4",
       currentSecretRef: parsedSecret.originalRef,
       currentSecretVersion: parsedSecret.secretName,
       previousSecretRef: null,
@@ -802,11 +813,70 @@ export function createBackofficeModule({
       dualRunningCallbackSecretCount: callbackSecrets.filter((record) => record.status === "dual_running").length,
       modeIsolationViolationCount: modeIsolationViolations.length,
       modeIsolationViolations,
+      classCounts: summarizeSecurityInventoryByClass({
+        managedSecrets,
+        callbackSecrets,
+        certificateChains,
+        authFactorSecrets: [],
+        authChallengeSecrets: [],
+        integrationCredentials: []
+      }),
       recentSecretRotations: secretRotationRecords
         .sort((left, right) => right.rotatedAt.localeCompare(left.rotatedAt))
         .slice(0, 10)
         .map(projectSecretRotationRecord)
     };
+  }
+
+  function getSecurityClassificationCatalog({ sessionToken, companyId } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const managedSecrets = [...state.managedSecrets.values()].filter((record) => record.companyId === resolvedCompanyId);
+    const callbackSecrets = [...state.callbackSecrets.values()].filter((record) => record.companyId === resolvedCompanyId);
+    const certificateChains = [...state.certificateChains.values()].filter((record) => record.companyId === resolvedCompanyId);
+    const authFactorSecrets = [...(state.authFactorSecrets?.values() || [])].filter((record) => record.companyId === resolvedCompanyId);
+    const authChallengeSecrets = [...(state.authChallengeSecrets?.values() || [])].filter((record) => {
+      if (typeof record.companyId === "string" && record.companyId === resolvedCompanyId) {
+        return true;
+      }
+      const companyUserId = optionalText(record.companyUserId);
+      if (!companyUserId || !state.companyUsers?.has(companyUserId)) {
+        return false;
+      }
+      return state.companyUsers.get(companyUserId)?.companyId === resolvedCompanyId;
+    });
+    const integrationConnections =
+      typeof integrationPlatform?.listIntegrationConnections === "function"
+        ? integrationPlatform.listIntegrationConnections({ companyId: resolvedCompanyId })
+        : [];
+    const integrationCredentials = integrationConnections.flatMap((connection) =>
+      typeof integrationPlatform?.listCredentialSetMetadata === "function"
+        ? integrationPlatform.listCredentialSetMetadata({
+            companyId: resolvedCompanyId,
+            connectionId: connection.connectionId
+          })
+        : []
+    );
+    return buildSecurityClassificationCatalog({
+      generatedAt: nowIso(clock),
+      inventorySummary: {
+        companyId: resolvedCompanyId,
+        managedSecretCount: managedSecrets.length,
+        callbackSecretCount: callbackSecrets.length,
+        certificateChainCount: certificateChains.length,
+        authFactorSecretCount: authFactorSecrets.length,
+        authChallengeSecretCount: authChallengeSecrets.length,
+        integrationCredentialSetCount: integrationCredentials.length,
+        countsByClass: summarizeSecurityInventoryByClass({
+          managedSecrets,
+          callbackSecrets,
+          certificateChains,
+          authFactorSecrets,
+          authChallengeSecrets,
+          integrationCredentials
+        })
+      }
+    });
   }
 
   function runAdminDiagnostic({
@@ -2227,6 +2297,9 @@ function projectManagedSecret(record) {
     mode: record.mode,
     providerCode: record.providerCode,
     secretType: record.secretType,
+    classCode: record.classCode || resolveManagedSecretClassCode(record.secretType),
+    currentSecretRefClassCode: record.classCode || resolveManagedSecretClassCode(record.secretType),
+    previousSecretRefClassCode: record.previousSecretRef ? record.classCode || resolveManagedSecretClassCode(record.secretType) : null,
     ownerUserId: record.ownerUserId,
     backupOwnerUserId: record.backupOwnerUserId,
     vaultRef: record.vaultRef,
@@ -2253,6 +2326,10 @@ function projectSecretRotationRecord(record) {
     mode: record.mode,
     providerCode: record.providerCode,
     secretType: record.secretType,
+    classCode: record.classCode || resolveManagedSecretClassCode(record.secretType),
+    previousSecretRefClassCode:
+      record.previousSecretRef ? record.classCode || resolveManagedSecretClassCode(record.secretType) : null,
+    nextSecretRefClassCode: record.classCode || resolveManagedSecretClassCode(record.secretType),
     previousSecretVersion: record.previousSecretVersion,
     nextSecretVersion: record.nextSecretVersion,
     previousSecretRef: record.previousSecretRef ? redactSecretRef(record.previousSecretRef) : null,
@@ -2279,7 +2356,9 @@ function projectCertificateChain(record, clock) {
     subjectCommonName: record.subjectCommonName,
     sanDomains: [...record.sanDomains],
     certificateSecretRef: record.certificateSecretRef ? redactSecretRef(record.certificateSecretRef) : null,
+    certificateSecretClassCode: record.certificateSecretClassCode || (record.certificateSecretRef ? "S4" : null),
     privateKeySecretRef: redactSecretRef(record.privateKeySecretRef),
+    privateKeySecretClassCode: record.privateKeySecretClassCode || "S5",
     privateKeySecretVersion: record.privateKeySecretVersion,
     ownerUserId: record.ownerUserId,
     backupOwnerUserId: record.backupOwnerUserId,
@@ -2304,6 +2383,9 @@ function projectCallbackSecret(record) {
     callbackDomain: record.callbackDomain,
     callbackPath: record.callbackPath,
     managedSecretId: record.managedSecretId,
+    classCode: record.classCode || "S4",
+    currentSecretRefClassCode: record.classCode || "S4",
+    previousSecretRefClassCode: record.previousSecretRef ? record.classCode || "S4" : null,
     currentSecretRef: redactSecretRef(record.currentSecretRef),
     previousSecretRef: record.previousSecretRef ? redactSecretRef(record.previousSecretRef) : null,
     currentSecretVersion: record.currentSecretVersion,
@@ -2351,6 +2433,40 @@ function detectManagedSecretIsolationViolations(record) {
       detail: `${record.managedSecretId} stores an invalid vault reference.`
     }];
   }
+}
+
+function summarizeSecurityInventoryByClass({
+  managedSecrets = [],
+  callbackSecrets = [],
+  certificateChains = [],
+  authFactorSecrets = [],
+  authChallengeSecrets = [],
+  integrationCredentials = []
+} = {}) {
+  const counts = Object.fromEntries(listSecurityClasses().map((entry) => [entry.classCode, 0]));
+  for (const record of managedSecrets) {
+    counts[record.classCode || resolveManagedSecretClassCode(record.secretType)] += 1;
+  }
+  for (const record of callbackSecrets) {
+    counts[record.classCode || "S4"] += 1;
+  }
+  for (const record of certificateChains) {
+    if (record.certificateSecretRef) {
+      counts[record.certificateSecretClassCode || "S4"] += 1;
+    }
+    counts[record.privateKeySecretClassCode || "S5"] += 1;
+  }
+  for (const record of authFactorSecrets) {
+    counts[record.classCode || "S4"] += 1;
+  }
+  for (const record of authChallengeSecrets) {
+    counts[record.classCode || "S4"] += 1;
+  }
+  for (const record of integrationCredentials) {
+    counts[record.credentialRefClassCode || "S4"] += 1;
+    counts[record.secretManagerRefClassCode || "S4"] += 1;
+  }
+  return counts;
 }
 
 function detectCallbackSecretIsolationViolations(record) {

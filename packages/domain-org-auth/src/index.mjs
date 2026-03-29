@@ -19,6 +19,7 @@ import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
+import { assertSecurityClassCode } from "../../domain-core/src/security-classes.mjs";
 import { normalizeOptionalSwedishOrganizationNumber } from "../../domain-core/src/validation.mjs";
 import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
@@ -2771,8 +2772,10 @@ export function createOrgAuthPlatform({
     state.authFactorSecrets.set(secretRef, {
       secretRef,
       factorId: factor.factorId,
+      companyId: state.companyUsers.get(factor.companyUserId)?.companyId || null,
       companyUserId: factor.companyUserId,
       factorType: factor.factorType,
+      classCode: "S4",
       keyId: authSecretSealer.keyId,
       algorithm: "aes-256-gcm",
       createdAt: state.authFactorSecrets.get(secretRef)?.createdAt || nowIso(),
@@ -2800,7 +2803,9 @@ export function createOrgAuthPlatform({
       challengeRef,
       challengeId: challenge.challengeId,
       challengeType: challenge.challengeType,
+      companyId: state.companyUsers.get(challenge.companyUserId)?.companyId || null,
       companyUserId: challenge.companyUserId,
+      classCode: "S4",
       keyId: authSecretSealer.keyId,
       algorithm: "aes-256-gcm",
       createdAt: state.authChallengeSecrets.get(challengeRef)?.createdAt || nowIso(),
@@ -3875,7 +3880,9 @@ function buildDefaultIdentityModeCatalog({ providerEnvironmentRef } = {}) {
           providerCode,
           brokerCode: definition.brokerCode,
           credentialSecretRef: `vault://${runtimeMode}/${providerCode}/oauth-client-secret`,
+          credentialSecretClassCode: "S4",
           webhookSecretRef: `vault://${runtimeMode}/${providerCode}/webhook-signing-secret`,
+          webhookSecretClassCode: "S4",
           requiredManagedSecretTypes: [...definition.requiredManagedSecretTypes],
           callbackDomain,
           callbackPath: definition.callbackPath,
@@ -3981,7 +3988,9 @@ function projectIdentityModeCatalogEntry(entry) {
     providerCode: entry.providerCode,
     brokerCode: entry.brokerCode,
     credentialSecretRef: entry.credentialSecretRef,
+    credentialSecretClassCode: assertSecurityClassCode(entry.credentialSecretClassCode || "S4"),
     webhookSecretRef: entry.webhookSecretRef,
+    webhookSecretClassCode: assertSecurityClassCode(entry.webhookSecretClassCode || "S4"),
     requiredManagedSecretTypes: [...entry.requiredManagedSecretTypes],
     callbackDomain: entry.callbackDomain,
     callbackPath: entry.callbackPath,

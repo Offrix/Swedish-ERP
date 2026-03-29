@@ -81,6 +81,16 @@ export {
   serializeDurableState,
   validateDurableStateSnapshotArtifact
 } from "./state-snapshots.mjs";
+export {
+  SECURITY_CLASS_CODES,
+  SECURITY_FIELD_CLASSIFICATIONS,
+  assertSecurityClassCode,
+  buildSecurityClassificationCatalog,
+  getSecurityClassDefinition,
+  listSecurityClasses,
+  listSecurityFieldClassifications,
+  resolveManagedSecretClassCode
+} from "./security-classes.mjs";
 export { createCommandMutationRuntime } from "./command-log.mjs";
 import {
   CLOSE_BLOCKER_SEVERITIES,
@@ -594,6 +604,7 @@ export function createCoreEngine({
       listCertificateChains: backofficeModule.listCertificateChains,
       registerCallbackSecret: backofficeModule.registerCallbackSecret,
       listCallbackSecrets: backofficeModule.listCallbackSecrets,
+      getSecurityClassificationCatalog: backofficeModule.getSecurityClassificationCatalog,
       getSecretManagementSummary: backofficeModule.getSecretManagementSummary,
       runAdminDiagnostic: backofficeModule.runAdminDiagnostic,
       requestImpersonation: backofficeModule.requestImpersonation,

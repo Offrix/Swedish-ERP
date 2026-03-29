@@ -4,6 +4,7 @@ import {
   deserializeSnapshotValue,
   serializeSnapshotValue
 } from "./clone.mjs";
+import { assertSecurityClassCode } from "./security-classes.mjs";
 
 export const DURABLE_SNAPSHOT_ARTIFACT_SCHEMA_VERSION = 1;
 
@@ -75,7 +76,11 @@ function normalizeClassMask(classMask) {
     );
   }
   return [...new Set(classMask.map((entry) =>
-    text(entry, "snapshot_artifact_class_mask_invalid", "Snapshot artifact class mask entries must be non-empty strings.")
+    assertSecurityClassCode(entry, {
+      code: "snapshot_artifact_class_mask_invalid",
+      message: "Snapshot artifact class mask entries must use canonical S0-S5 codes.",
+      createError: createSnapshotArtifactError
+    })
   ))].sort();
 }
 

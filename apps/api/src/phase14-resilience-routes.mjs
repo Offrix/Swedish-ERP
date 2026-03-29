@@ -269,6 +269,18 @@ export async function tryHandlePhase14ResilienceRoutes({ req, res, url, path, pl
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/security/classes") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "security_classification", objectId: companyId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, platform.getSecurityClassificationCatalog({
+      sessionToken,
+      companyId
+    }));
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/ops/restore-drills") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
