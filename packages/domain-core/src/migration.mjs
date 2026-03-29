@@ -6,6 +6,8 @@ export const DIFF_REPORT_STATUSES = Object.freeze(["generated", "reviewed", "acc
 export const DIFFERENCE_CLASSES = Object.freeze(["cosmetic", "timing", "mapping_error", "missing_data", "material"]);
 export const PARALLEL_RUN_RESULT_STATUSES = Object.freeze(["completed", "manual_review_required", "accepted", "blocked"]);
 export const MIGRATION_ACCEPTANCE_RECORD_STATUSES = Object.freeze(["accepted", "blocked"]);
+export const CUTOVER_REHEARSAL_STATUSES = Object.freeze(["scheduled", "completed", "blocked"]);
+export const CUTOVER_AUTOMATED_VARIANCE_REPORT_STATUSES = Object.freeze(["generated", "accepted", "blocking"]);
 export const CUTOVER_PLAN_STATUSES = Object.freeze([
   "planned",
   "freeze_started",
@@ -73,6 +75,8 @@ export function createMigrationModule({
     differenceClasses: DIFFERENCE_CLASSES,
     parallelRunResultStatuses: PARALLEL_RUN_RESULT_STATUSES,
     migrationAcceptanceRecordStatuses: MIGRATION_ACCEPTANCE_RECORD_STATUSES,
+    cutoverRehearsalStatuses: CUTOVER_REHEARSAL_STATUSES,
+    cutoverAutomatedVarianceReportStatuses: CUTOVER_AUTOMATED_VARIANCE_REPORT_STATUSES,
     cutoverPlanStatuses: CUTOVER_PLAN_STATUSES,
     payrollMigrationBatchStatuses: PAYROLL_MIGRATION_BATCH_STATUSES,
     payrollMigrationModes: PAYROLL_MIGRATION_MODES,
@@ -94,11 +98,17 @@ export function createMigrationModule({
     acceptParallelRunResult,
     createCutoverPlan,
     listCutoverPlans,
+    getCutoverConcierge,
     createMigrationAcceptanceRecord,
     listMigrationAcceptanceRecords,
     exportCutoverEvidenceBundle,
+    exportCutoverSignoffEvidence,
     recordCutoverSignoff,
     updateCutoverChecklistItem,
+    updateCutoverSourceExtractChecklistItem,
+    recordCutoverRehearsal,
+    generateCutoverAutomatedVarianceReport,
+    recordCutoverRollbackDrill,
     startCutover,
     completeFinalExtract,
     passCutoverValidation,
@@ -539,6 +549,7 @@ export function createMigrationModule({
     stabilizationWindowHours,
     signoffChain = [],
     goLiveChecklist = [],
+    sourceExtractChecklist = [],
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
@@ -555,6 +566,11 @@ export function createMigrationModule({
       rollbackPoint: resolvedRollbackPointRef,
       signoffChain: normalizeSignoffChain(signoffChain),
       goLiveChecklist: normalizeChecklist(goLiveChecklist),
+      sourceExtractChecklist: normalizeSourceExtractChecklist(sourceExtractChecklist),
+      cutoverRehearsals: [],
+      automatedVarianceReport: null,
+      rollbackDrill: null,
+      signoffEvidenceBundle: null,
       stabilizationWindowHours: normalizePositiveInteger(stabilizationWindowHours, "cutover_stabilization_window_hours_invalid"),
       status: "planned",
       switchedAt: null,
@@ -586,6 +602,32 @@ export function createMigrationModule({
       .filter((cutoverPlan) => cutoverPlan.companyId === text(companyId, "company_id_required"))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       .map(clone);
+  }
+
+  function getCutoverConcierge({
+    sessionToken,
+    companyId,
+    cutoverPlanId
+  } = {}) {
+    authorize(sessionToken, companyId, "company.read");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const cutoverPlan = requireCutoverPlan(resolvedCompanyId, cutoverPlanId);
+    const acceptanceRecords = listMigrationAcceptanceRecords({
+      sessionToken,
+      companyId: resolvedCompanyId,
+      cutoverPlanId: cutoverPlan.cutoverPlanId
+    });
+    const parallelRunResults = listParallelRunResults({
+      sessionToken,
+      companyId: resolvedCompanyId,
+      cutoverPlanId: cutoverPlan.cutoverPlanId
+    });
+    return buildCutoverConciergeSnapshot({
+      cutoverPlan,
+      acceptanceRecords,
+      parallelRunResults,
+      currentTimestamp: nowIso(clock)
+    });
   }
 
   function createMigrationAcceptanceRecord({
@@ -675,6 +717,27 @@ export function createMigrationModule({
       correlationId
     });
     record.cutoverEvidenceBundle = bundle;
+    return clone(bundle);
+  }
+
+  function exportCutoverSignoffEvidence({
+    sessionToken,
+    companyId,
+    cutoverPlanId,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.read");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const cutoverPlan = requireCutoverPlan(resolvedCompanyId, cutoverPlanId);
+    const acceptanceRecord = findLatestMigrationAcceptanceRecord(state, resolvedCompanyId, cutoverPlan.cutoverPlanId);
+    const bundle = syncCutoverSignoffEvidenceBundle({
+      cutoverPlan,
+      acceptanceRecord,
+      actorId: principal.userId,
+      correlationId
+    });
+    cutoverPlan.signoffEvidenceBundle = bundle;
+    cutoverPlan.updatedAt = nowIso(clock);
     return clone(bundle);
   }
 
@@ -855,6 +918,128 @@ export function createMigrationModule({
     };
   }
 
+  function syncCutoverSignoffEvidenceBundle({ cutoverPlan, acceptanceRecord, actorId, correlationId }) {
+    const compatibilityPayload = {
+      companyId: cutoverPlan.companyId,
+      cutoverPlanId: cutoverPlan.cutoverPlanId,
+      signoffRefs: clone(cutoverPlan.signoffChain || []),
+      sourceExtractChecklist: clone(cutoverPlan.sourceExtractChecklist || []),
+      cutoverRehearsals: clone(cutoverPlan.cutoverRehearsals || []),
+      automatedVarianceReport: clone(cutoverPlan.automatedVarianceReport || null),
+      rollbackDrill: clone(cutoverPlan.rollbackDrill || null),
+      acceptanceRecordId: acceptanceRecord?.migrationAcceptanceRecordId || null
+    };
+    if (!evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+      return {
+        cutoverSignoffEvidenceBundleId: crypto.randomUUID(),
+        companyId: cutoverPlan.companyId,
+        cutoverPlanId: cutoverPlan.cutoverPlanId,
+        signoffRefs: compatibilityPayload.signoffRefs,
+        sourceExtractChecklistCount: compatibilityPayload.sourceExtractChecklist.length,
+        rehearsalCount: compatibilityPayload.cutoverRehearsals.length,
+        automatedVarianceReportId: compatibilityPayload.automatedVarianceReport?.cutoverVarianceReportId || null,
+        rollbackDrillRestoreDrillId: compatibilityPayload.rollbackDrill?.restoreDrillId || null,
+        acceptanceRecordId: compatibilityPayload.acceptanceRecordId,
+        status: "frozen",
+        frozenAt: nowIso(clock)
+      };
+    }
+    const bundle = evidencePlatform.createFrozenEvidenceBundleSnapshot({
+      companyId: cutoverPlan.companyId,
+      bundleType: "cutover_signoff",
+      sourceObjectType: "migration_cutover_plan",
+      sourceObjectId: cutoverPlan.cutoverPlanId,
+      sourceObjectVersion: cutoverPlan.updatedAt || cutoverPlan.createdAt,
+      title: `Cutover signoff ${cutoverPlan.cutoverPlanId}`,
+      retentionClass: "regulated",
+      classificationCode: "restricted_internal",
+      metadata: {
+        compatibilityPayload
+      },
+      artifactRefs: [
+        ...(cutoverPlan.sourceExtractChecklist || []).map((item) => ({
+          artifactType: "source_extract_checklist_item",
+          artifactRef: item.itemCode,
+          checksum: hashObject({
+            cutoverPlanId: cutoverPlan.cutoverPlanId,
+            itemCode: item.itemCode,
+            status: item.status,
+            sourceExtractRef: item.sourceExtractRef || null
+          })
+        })),
+        ...(cutoverPlan.cutoverRehearsals || []).map((rehearsal) => ({
+          artifactType: "cutover_rehearsal",
+          artifactRef: rehearsal.cutoverRehearsalId,
+          checksum: hashObject({
+            cutoverRehearsalId: rehearsal.cutoverRehearsalId,
+            status: rehearsal.status,
+            blockingReasonCodes: rehearsal.blockingReasonCodes || []
+          })
+        })),
+        ...(cutoverPlan.automatedVarianceReport
+          ? [
+              {
+                artifactType: "cutover_automated_variance_report",
+                artifactRef: cutoverPlan.automatedVarianceReport.cutoverVarianceReportId,
+                checksum: hashObject(cutoverPlan.automatedVarianceReport)
+              }
+            ]
+          : []),
+        ...(cutoverPlan.rollbackDrill
+          ? [
+              {
+                artifactType: "cutover_rollback_drill",
+                artifactRef: cutoverPlan.rollbackDrill.restoreDrillId,
+                checksum: hashObject(cutoverPlan.rollbackDrill)
+              }
+            ]
+          : [])
+      ],
+      auditRefs: clone(cutoverPlan.signoffChain || []),
+      signoffRefs: clone(cutoverPlan.signoffChain || []),
+      sourceRefs: [
+        { rollbackPointRef: cutoverPlan.rollbackPointRef || cutoverPlan.rollbackPoint || null },
+        ...(acceptanceRecord ? [{ migrationAcceptanceRecordId: acceptanceRecord.migrationAcceptanceRecordId }] : [])
+      ],
+      relatedObjectRefs: [
+        ...(acceptanceRecord
+          ? [
+              {
+                objectType: "migration_acceptance_record",
+                objectId: acceptanceRecord.migrationAcceptanceRecordId
+              }
+            ]
+          : []),
+        ...(cutoverPlan.rollbackDrill
+          ? [
+              {
+                objectType: "restore_drill",
+                objectId: cutoverPlan.rollbackDrill.restoreDrillId
+              }
+            ]
+          : [])
+      ],
+      actorId,
+      correlationId,
+      previousEvidenceBundleId: cutoverPlan.signoffEvidenceBundle?.cutoverSignoffEvidenceBundleId || null
+    });
+    return {
+      cutoverSignoffEvidenceBundleId: bundle.evidenceBundleId,
+      companyId: cutoverPlan.companyId,
+      cutoverPlanId: cutoverPlan.cutoverPlanId,
+      signoffRefs: clone(cutoverPlan.signoffChain || []),
+      sourceExtractChecklistCount: (cutoverPlan.sourceExtractChecklist || []).length,
+      rehearsalCount: (cutoverPlan.cutoverRehearsals || []).length,
+      automatedVarianceReportId: cutoverPlan.automatedVarianceReport?.cutoverVarianceReportId || null,
+      rollbackDrillRestoreDrillId: cutoverPlan.rollbackDrill?.restoreDrillId || null,
+      acceptanceRecordId: acceptanceRecord?.migrationAcceptanceRecordId || null,
+      checksum: bundle.checksum,
+      status: bundle.status,
+      frozenAt: bundle.frozenAt,
+      archivedAt: bundle.archivedAt
+    };
+  }
+
   function syncPayrollMigrationHistoryEvidenceBundle({ batch, actorId, correlationId }) {
     const records = listStoredEmployeeMigrationRecords(batch);
     if (records.length === 0) {
@@ -988,6 +1173,245 @@ export function createMigrationModule({
       explanation: `Updated checklist item ${checklistItem.itemCode} to ${checklistItem.status}.`
     });
     return clone(cutoverPlan);
+  }
+
+  function updateCutoverSourceExtractChecklistItem({
+    sessionToken,
+    companyId,
+    cutoverPlanId,
+    itemCode,
+    status,
+    sourceExtractRef = null,
+    verificationSummary = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const cutoverPlan = requireCutoverPlan(companyId, cutoverPlanId);
+    const checklistItem = cutoverPlan.sourceExtractChecklist.find(
+      (candidate) => candidate.itemCode === text(itemCode, "cutover_source_extract_item_code_required")
+    );
+    if (!checklistItem) {
+      throw error(404, "cutover_source_extract_item_not_found", "Cutover source extract checklist item was not found.");
+    }
+    checklistItem.status = normalizeChecklistStatus(status);
+    checklistItem.sourceExtractRef = optionalText(sourceExtractRef) || checklistItem.sourceExtractRef || null;
+    checklistItem.verificationSummary = optionalText(verificationSummary);
+    checklistItem.updatedByUserId = principal.userId;
+    checklistItem.updatedAt = nowIso(clock);
+    if (checklistItem.status === "completed") {
+      checklistItem.completedAt = checklistItem.updatedAt;
+      checklistItem.verifiedByUserId = principal.userId;
+    }
+    cutoverPlan.updatedAt = checklistItem.updatedAt;
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "migration.cutover.source_extract_checklist_updated",
+      entityType: "migration_cutover_plan",
+      entityId: cutoverPlan.cutoverPlanId,
+      explanation: `Updated source extract checklist item ${checklistItem.itemCode} to ${checklistItem.status}.`
+    });
+    return clone(cutoverPlan);
+  }
+
+  function recordCutoverRehearsal({
+    sessionToken,
+    companyId,
+    cutoverPlanId,
+    rehearsalType = "dress_rehearsal",
+    scopeCode = "full_company",
+    status = "completed",
+    summary = null,
+    scheduledFor = null,
+    observedIssueCount = 0,
+    diffReportIds = [],
+    parallelRunResultIds = [],
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const cutoverPlan = requireCutoverPlan(resolvedCompanyId, cutoverPlanId);
+    const normalizedDiffReportIds = normalizeExistingDiffReportIds(resolvedCompanyId, diffReportIds, state, error);
+    const normalizedParallelRunResultIds = normalizeExistingParallelRunResultIds(resolvedCompanyId, parallelRunResultIds, state, error);
+    const blockingReasonCodes = [];
+    for (const diffReportId of normalizedDiffReportIds) {
+      const diffReport = statefulRequire("diffReports", resolvedCompanyId, diffReportId, "diff_report_not_found", state, error);
+      if (diffReport.status !== "accepted") {
+        blockingReasonCodes.push("variance_report_not_accepted");
+        break;
+      }
+    }
+    for (const parallelRunResultId of normalizedParallelRunResultIds) {
+      const parallelRunResult = statefulRequire("parallelRunResults", resolvedCompanyId, parallelRunResultId, "parallel_run_result_not_found", state, error);
+      if (parallelRunResult.status !== "accepted") {
+        blockingReasonCodes.push(parallelRunResult.status === "blocked" ? "parallel_run_blocked" : "parallel_run_not_accepted");
+        break;
+      }
+    }
+    const resolvedObservedIssueCount = normalizeNonNegativeInteger(observedIssueCount);
+    if (resolvedObservedIssueCount > 0) {
+      blockingReasonCodes.push("rehearsal_issues_open");
+    }
+    const requestedStatus = assertAllowed(text(status, "cutover_rehearsal_status_required"), CUTOVER_REHEARSAL_STATUSES, "cutover_rehearsal_status_invalid");
+    const resolvedStatus = requestedStatus === "completed" && blockingReasonCodes.length > 0 ? "blocked" : requestedStatus;
+    const rehearsal = {
+      cutoverRehearsalId: crypto.randomUUID(),
+      rehearsalType: text(rehearsalType, "cutover_rehearsal_type_required"),
+      scopeCode: text(scopeCode, "cutover_rehearsal_scope_required"),
+      status: resolvedStatus,
+      summary: optionalText(summary),
+      scheduledFor: scheduledFor ? timestamp(scheduledFor, "cutover_rehearsal_scheduled_for_invalid") : null,
+      observedIssueCount: resolvedObservedIssueCount,
+      blockingReasonCodes: [...new Set(blockingReasonCodes)],
+      diffReportIds: normalizedDiffReportIds,
+      parallelRunResultIds: normalizedParallelRunResultIds,
+      recordedByUserId: principal.userId,
+      recordedAt: nowIso(clock)
+    };
+    cutoverPlan.cutoverRehearsals = [...(Array.isArray(cutoverPlan.cutoverRehearsals) ? cutoverPlan.cutoverRehearsals : []), rehearsal];
+    cutoverPlan.updatedAt = rehearsal.recordedAt;
+    audit({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "migration.cutover.rehearsal_recorded",
+      entityType: "migration_cutover_plan",
+      entityId: cutoverPlan.cutoverPlanId,
+      explanation: `Recorded cutover rehearsal ${rehearsal.cutoverRehearsalId} as ${rehearsal.status}.`
+    });
+    return clone(rehearsal);
+  }
+
+  function generateCutoverAutomatedVarianceReport({
+    sessionToken,
+    companyId,
+    cutoverPlanId,
+    diffReportIds = [],
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const cutoverPlan = requireCutoverPlan(resolvedCompanyId, cutoverPlanId);
+    const latestAcceptanceRecord = findLatestMigrationAcceptanceRecord(state, resolvedCompanyId, cutoverPlan.cutoverPlanId);
+    const normalizedDiffReportIds = Array.isArray(diffReportIds) && diffReportIds.length > 0
+      ? normalizeExistingDiffReportIds(resolvedCompanyId, diffReportIds, state, error)
+      : normalizeExistingDiffReportIds(resolvedCompanyId, latestAcceptanceRecord?.diffReportIds || [], state, error);
+    const parallelRunResults = [...state.parallelRunResults.values()]
+      .filter((parallelRunResult) => parallelRunResult.companyId === resolvedCompanyId)
+      .filter((parallelRunResult) => parallelRunResult.cutoverPlanId === cutoverPlan.cutoverPlanId);
+    const diffReports = normalizedDiffReportIds.map((diffReportId) =>
+      statefulRequire("diffReports", resolvedCompanyId, diffReportId, "diff_report_not_found", state, error)
+    );
+    const unresolvedMaterialDifferences = diffReports.reduce(
+      (sum, diffReport) => sum + Number(diffReport.summary?.material || 0),
+      0
+    );
+    const blockedDiffReportCount = diffReports.filter((diffReport) => diffReport.status === "remediation_required").length;
+    const pendingParallelRunAcceptanceCount = parallelRunResults.filter((result) => ["completed", "manual_review_required"].includes(result.status)).length;
+    const blockedParallelRunCount = parallelRunResults.filter((result) => result.status === "blocked").length;
+    const maxAbsDeltaValue = parallelRunResults.reduce(
+      (maxValue, result) => Math.max(maxValue, Number(result.differenceSummary?.maxAbsDeltaValue || 0)),
+      0
+    );
+    const maxAbsDeltaPercent = parallelRunResults.reduce(
+      (maxValue, result) => Math.max(maxValue, Number(result.differenceSummary?.maxAbsDeltaPercent || 0)),
+      0
+    );
+    const blockingReasonCodes = [];
+    if (diffReports.length === 0) {
+      blockingReasonCodes.push("variance_reports_missing");
+    }
+    if (parallelRunResults.length === 0) {
+      blockingReasonCodes.push("parallel_runs_missing");
+    }
+    if (unresolvedMaterialDifferences > 0 || blockedDiffReportCount > 0) {
+      blockingReasonCodes.push("material_variances_open");
+    }
+    if (pendingParallelRunAcceptanceCount > 0) {
+      blockingReasonCodes.push("parallel_run_acceptance_pending");
+    }
+    if (blockedParallelRunCount > 0) {
+      blockingReasonCodes.push("parallel_run_blocked");
+    }
+    const status = blockingReasonCodes.length === 0
+      ? "accepted"
+      : blockedDiffReportCount > 0 || blockedParallelRunCount > 0 || unresolvedMaterialDifferences > 0
+        ? "blocking"
+        : "generated";
+    const report = {
+      cutoverVarianceReportId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      cutoverPlanId: cutoverPlan.cutoverPlanId,
+      status,
+      diffReportIds: normalizedDiffReportIds,
+      parallelRunResultIds: parallelRunResults.map((result) => result.parallelRunResultId),
+      unresolvedMaterialDifferences,
+      blockedDiffReportCount,
+      pendingParallelRunAcceptanceCount,
+      blockedParallelRunCount,
+      maxAbsDeltaValue,
+      maxAbsDeltaPercent,
+      paritySummary: clone(latestAcceptanceRecord?.sourceParitySummary || {}),
+      blockingReasonCodes: [...new Set(blockingReasonCodes)],
+      generatedByUserId: principal.userId,
+      generatedAt: nowIso(clock)
+    };
+    cutoverPlan.automatedVarianceReport = report;
+    cutoverPlan.updatedAt = report.generatedAt;
+    audit({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "migration.cutover.variance_report_generated",
+      entityType: "migration_cutover_plan",
+      entityId: cutoverPlan.cutoverPlanId,
+      explanation: `Generated automated variance report ${report.cutoverVarianceReportId} as ${report.status}.`
+    });
+    return clone(report);
+  }
+
+  function recordCutoverRollbackDrill({
+    sessionToken,
+    companyId,
+    cutoverPlanId,
+    restoreDrillId,
+    drillCode = null,
+    verificationSummary = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const resolvedCompanyId = text(companyId, "company_id_required");
+    const cutoverPlan = requireCutoverPlan(resolvedCompanyId, cutoverPlanId);
+    const linkedRestoreDrill = state.restoreDrills.get(text(restoreDrillId, "restore_drill_id_required"));
+    if (!linkedRestoreDrill || linkedRestoreDrill.companyId !== resolvedCompanyId) {
+      throw error(404, "restore_drill_not_found", "Restore drill was not found.");
+    }
+    const rollbackDrill = {
+      restoreDrillId: linkedRestoreDrill.restoreDrillId,
+      drillCode: optionalText(drillCode) || linkedRestoreDrill.drillCode,
+      drillType: linkedRestoreDrill.drillType,
+      status: linkedRestoreDrill.status,
+      targetRtoMinutes: linkedRestoreDrill.targetRtoMinutes,
+      targetRpoMinutes: linkedRestoreDrill.targetRpoMinutes,
+      actualRtoMinutes: linkedRestoreDrill.actualRtoMinutes,
+      actualRpoMinutes: linkedRestoreDrill.actualRpoMinutes,
+      verificationSummary: optionalText(verificationSummary) || linkedRestoreDrill.verificationSummary || null,
+      recordedByUserId: principal.userId,
+      recordedAt: nowIso(clock)
+    };
+    cutoverPlan.rollbackDrill = rollbackDrill;
+    cutoverPlan.updatedAt = rollbackDrill.recordedAt;
+    audit({
+      companyId: resolvedCompanyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "migration.cutover.rollback_drill_linked",
+      entityType: "migration_cutover_plan",
+      entityId: cutoverPlan.cutoverPlanId,
+      explanation: `Linked rollback drill ${rollbackDrill.restoreDrillId} to ${cutoverPlan.cutoverPlanId}.`
+    });
+    return clone(rollbackDrill);
   }
 
   function startCutover({
@@ -1462,6 +1886,7 @@ export function createMigrationModule({
       acceptanceRecords,
       postCutoverCorrectionCases,
       datasetSummary: buildMigrationDatasetSummary({ importBatches, diffReports, parallelRunResults, acceptanceRecords, postCutoverCorrectionCases }),
+      conciergeSummary: buildMigrationConciergeSummary({ cutoverPlans }),
       cutoverBoard: buildMigrationCutoverBoard({
         companyId: resolvedCompanyId,
         cutoverPlans,
@@ -3055,6 +3480,96 @@ function normalizeChecklist(values) {
   }));
 }
 
+function normalizeSourceExtractChecklist(values) {
+  const resolvedValues = Array.isArray(values) && values.length > 0 ? values : buildDefaultSourceExtractChecklist();
+  return resolvedValues.map((value, index) => ({
+    itemCode: text(value?.itemCode || `extract_${index + 1}`, "cutover_source_extract_item_code_required"),
+    label: text(value?.label, "cutover_source_extract_label_required"),
+    mandatory: value?.mandatory !== false,
+    status: normalizeChecklistStatus(optionalText(value?.status) || "open"),
+    sourceExtractRef: optionalText(value?.sourceExtractRef),
+    verificationSummary: optionalText(value?.verificationSummary),
+    verifiedByUserId: null,
+    completedAt: null,
+    updatedByUserId: null,
+    updatedAt: null
+  }));
+}
+
+function buildDefaultSourceExtractChecklist() {
+  return [
+    { itemCode: "masterdata_extract", label: "Master data extract verified" },
+    { itemCode: "open_items_extract", label: "Open items extract verified" },
+    { itemCode: "history_extract", label: "Historical balances and reporting extract verified" },
+    { itemCode: "attachments_extract", label: "Documents and attachments extract verified" }
+  ];
+}
+
+function summarizeSourceExtractChecklist(values) {
+  const items = Array.isArray(values) ? values : [];
+  const mandatoryItems = items.filter((item) => item.mandatory !== false);
+  return {
+    total: mandatoryItems.length,
+    completed: mandatoryItems.filter((item) => item.status === "completed").length,
+    blocked: mandatoryItems.filter((item) => item.status === "blocked").length,
+    pending: mandatoryItems.filter((item) => item.status === "open").length
+  };
+}
+
+function summarizeCutoverRehearsals(values) {
+  const items = Array.isArray(values) ? values : [];
+  return {
+    total: items.length,
+    completed: items.filter((item) => item.status === "completed").length,
+    blocked: items.filter((item) => item.status === "blocked").length,
+    scheduled: items.filter((item) => item.status === "scheduled").length,
+    latestRecordedAt: items
+      .map((item) => item.recordedAt || item.scheduledFor || null)
+      .filter(Boolean)
+      .sort((left, right) => right.localeCompare(left))[0] || null
+  };
+}
+
+function resolveCutoverConciergeStageCode({
+  cutoverPlan,
+  sourceExtractSummary,
+  rehearsalSummary,
+  rollbackDrillStatus,
+  automatedVarianceStatus
+}) {
+  if (cutoverPlan.status === "rolled_back") {
+    return "rolled_back";
+  }
+  if (sourceExtractSummary.pending > 0 || sourceExtractSummary.blocked > 0) {
+    return "source_extract";
+  }
+  if (rehearsalSummary.total === 0 || rehearsalSummary.blocked > 0) {
+    return "rehearsal";
+  }
+  if (!automatedVarianceStatus || automatedVarianceStatus === "blocking") {
+    return "variance_review";
+  }
+  if (!rollbackDrillStatus || rollbackDrillStatus !== "passed") {
+    return "rollback_drill";
+  }
+  if ((cutoverPlan.signoffChain || []).some((step) => !step.approvedAt || !step.approvedByUserId)) {
+    return "signoff";
+  }
+  if ((cutoverPlan.goLiveChecklist || []).some((item) => item.mandatory !== false && item.status !== "completed")) {
+    return "go_live_checklist";
+  }
+  if (!cutoverPlan.signoffEvidenceBundle) {
+    return "signoff_evidence";
+  }
+  if (cutoverPlan.status === "validation_passed") {
+    return "ready_to_switch";
+  }
+  if (cutoverPlan.status === "switched" || cutoverPlan.status === "stabilized" || cutoverPlan.status === "closed") {
+    return "live_window";
+  }
+  return "guided_cutover";
+}
+
 function normalizeChecklistStatus(value) {
   const resolved = text(value, "cutover_checklist_status_required");
   if (!["open", "completed", "blocked"].includes(resolved)) {
@@ -3202,6 +3717,85 @@ function buildMigrationDatasetSummary({ importBatches, diffReports, parallelRunR
   };
 }
 
+function buildMigrationConciergeSummary({ cutoverPlans }) {
+  return {
+    totalPlans: cutoverPlans.length,
+    sourceExtractIncompleteCount: cutoverPlans.filter((cutoverPlan) => summarizeSourceExtractChecklist(cutoverPlan.sourceExtractChecklist).pending > 0).length,
+    rehearsalMissingCount: cutoverPlans.filter((cutoverPlan) => summarizeCutoverRehearsals(cutoverPlan.cutoverRehearsals).total === 0).length,
+    rollbackDrillMissingCount: cutoverPlans.filter((cutoverPlan) => !cutoverPlan.rollbackDrill).length,
+    varianceReportBlockingCount: cutoverPlans.filter((cutoverPlan) => cutoverPlan.automatedVarianceReport?.status === "blocking").length,
+    signoffEvidenceMissingCount: cutoverPlans.filter((cutoverPlan) => !cutoverPlan.signoffEvidenceBundle).length
+  };
+}
+
+function buildCutoverConciergeSnapshot({ cutoverPlan, acceptanceRecords, parallelRunResults, currentTimestamp }) {
+  const latestAcceptanceRecord = [...acceptanceRecords]
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] || null;
+  const sourceExtractSummary = summarizeSourceExtractChecklist(cutoverPlan.sourceExtractChecklist);
+  const rehearsalSummary = summarizeCutoverRehearsals(cutoverPlan.cutoverRehearsals);
+  const automatedVarianceReport = clone(cutoverPlan.automatedVarianceReport || null);
+  const rollbackDrill = clone(cutoverPlan.rollbackDrill || null);
+  return {
+    cutoverPlanId: cutoverPlan.cutoverPlanId,
+    conciergeStageCode: resolveCutoverConciergeStageCode({
+      cutoverPlan,
+      sourceExtractSummary,
+      rehearsalSummary,
+      rollbackDrillStatus: rollbackDrill?.status || null,
+      automatedVarianceStatus: automatedVarianceReport?.status || null
+    }),
+    sourceExtractChecklist: clone(cutoverPlan.sourceExtractChecklist || []),
+    sourceExtractSummary,
+    rehearsals: clone(cutoverPlan.cutoverRehearsals || []).sort((left, right) => (right.recordedAt || "").localeCompare(left.recordedAt || "")),
+    rehearsalSummary,
+    automatedVarianceReport,
+    rollbackDrill,
+    signoffEvidenceBundle: clone(cutoverPlan.signoffEvidenceBundle || null),
+    latestAcceptanceRecordId: latestAcceptanceRecord?.migrationAcceptanceRecordId || null,
+    latestAcceptanceStatus: latestAcceptanceRecord?.status || null,
+    parallelRunSummary: {
+      total: parallelRunResults.length,
+      accepted: parallelRunResults.filter((result) => result.status === "accepted").length,
+      blocked: parallelRunResults.filter((result) => result.status === "blocked").length,
+      pendingAcceptance: parallelRunResults.filter((result) => ["completed", "manual_review_required"].includes(result.status)).length
+    },
+    nextActionCodes: buildCutoverConciergeNextActionCodes({
+      cutoverPlan,
+      sourceExtractSummary,
+      rehearsalSummary,
+      automatedVarianceReport,
+      rollbackDrill
+    }),
+    generatedAt: currentTimestamp
+  };
+}
+
+function buildCutoverConciergeNextActionCodes({ cutoverPlan, sourceExtractSummary, rehearsalSummary, automatedVarianceReport, rollbackDrill }) {
+  const actionCodes = [];
+  if (sourceExtractSummary.pending > 0 || sourceExtractSummary.blocked > 0) {
+    actionCodes.push("migration.completeSourceExtractChecklist");
+  }
+  if (rehearsalSummary.total === 0 || rehearsalSummary.blocked > 0) {
+    actionCodes.push("migration.recordCutoverRehearsal");
+  }
+  if (!automatedVarianceReport || automatedVarianceReport.status === "blocking") {
+    actionCodes.push("migration.generateAutomatedVarianceReport");
+  }
+  if (!rollbackDrill || rollbackDrill.status !== "passed") {
+    actionCodes.push("migration.linkRollbackDrill");
+  }
+  if ((cutoverPlan.signoffChain || []).some((step) => !step.approvedAt || !step.approvedByUserId)) {
+    actionCodes.push("migration.completeSignoffChain");
+  }
+  if ((cutoverPlan.goLiveChecklist || []).some((item) => item.mandatory !== false && item.status !== "completed")) {
+    actionCodes.push("migration.completeGoLiveChecklist");
+  }
+  if (!cutoverPlan.signoffEvidenceBundle) {
+    actionCodes.push("migration.exportSignoffEvidence");
+  }
+  return actionCodes;
+}
+
 function buildMigrationCutoverBoard({
   companyId,
   cutoverPlans,
@@ -3342,6 +3936,17 @@ function buildMigrationCutoverBoardRow({ cutoverPlan, parallelRunResults, accept
     checklistSummary.totalMandatory - checklistSummary.completedMandatory - checklistSummary.blockedMandatory,
     0
   );
+  const sourceExtractSummary = summarizeSourceExtractChecklist(cutoverPlan.sourceExtractChecklist);
+  const rehearsalSummary = summarizeCutoverRehearsals(cutoverPlan.cutoverRehearsals);
+  const rollbackDrillStatus = cutoverPlan.rollbackDrill?.status || null;
+  const automatedVarianceStatus = cutoverPlan.automatedVarianceReport?.status || null;
+  const conciergeStageCode = resolveCutoverConciergeStageCode({
+    cutoverPlan,
+    sourceExtractSummary,
+    rehearsalSummary,
+    rollbackDrillStatus,
+    automatedVarianceStatus
+  });
   const openCorrectionCases = correctionCases.filter((correctionCase) => correctionCase.status === "open");
   const attentionReasonCodes = [];
   if (cutoverPlan.validationGateStatus === "blocked") {
@@ -3364,6 +3969,27 @@ function buildMigrationCutoverBoardRow({ cutoverPlan, parallelRunResults, accept
   }
   if (checklistSummary.blockedMandatory > 0) {
     attentionReasonCodes.push("checklist_blocked");
+  }
+  if (sourceExtractSummary.pending > 0 || sourceExtractSummary.blocked > 0) {
+    attentionReasonCodes.push("source_extract_incomplete");
+  }
+  if (rehearsalSummary.total === 0) {
+    attentionReasonCodes.push("cutover_rehearsal_missing");
+  } else if (rehearsalSummary.blocked > 0) {
+    attentionReasonCodes.push("cutover_rehearsal_blocked");
+  }
+  if (!automatedVarianceStatus) {
+    attentionReasonCodes.push("automated_variance_missing");
+  } else if (automatedVarianceStatus === "blocking") {
+    attentionReasonCodes.push("automated_variance_blocking");
+  }
+  if (!rollbackDrillStatus) {
+    attentionReasonCodes.push("rollback_drill_missing");
+  } else if (rollbackDrillStatus !== "passed") {
+    attentionReasonCodes.push("rollback_drill_not_passed");
+  }
+  if (signoffSummary.pending === 0 && !cutoverPlan.signoffEvidenceBundle) {
+    attentionReasonCodes.push("signoff_evidence_missing");
   }
   const boardTimestamp = resolveMigrationCutoverBoardTimestamp({
     rollbackCompletedAt: cutoverPlan.rollbackCompletedAt,
@@ -3389,14 +4015,23 @@ function buildMigrationCutoverBoardRow({ cutoverPlan, parallelRunResults, accept
     rollbackCompletedAt: cutoverPlan.rollbackCompletedAt || null,
     signoffSummary,
     checklistSummary,
+    sourceExtractSummary,
+    rehearsalSummary,
     parallelRunSummary,
+    conciergeStageCode,
     latestAcceptanceRecordId: latestAcceptanceRecord?.migrationAcceptanceRecordId || null,
     latestAcceptanceStatus: latestAcceptanceRecord?.status || null,
     latestAcceptanceRecordedAt: latestAcceptanceRecord?.recordedAt || null,
     latestAcceptanceBlockingReasonCodes: latestAcceptanceRecord?.blockingReasonCodes || [],
     validationBlockingReasonCodes: cutoverPlan.validationSummary?.blockingReasonCodes || [],
     rollbackExecutionMode: cutoverPlan.rollbackPlan?.rollbackExecutionMode || null,
+    rollbackDrillStatus,
+    rollbackDrillRestoreDrillId: cutoverPlan.rollbackDrill?.restoreDrillId || null,
     regulatedSubmissionRecoveryRequired: cutoverPlan.rollbackPlan?.regulatedSubmissionRecoveryPlan != null,
+    automatedVarianceStatus,
+    automatedVarianceBlockingReasonCodes: cutoverPlan.automatedVarianceReport?.blockingReasonCodes || [],
+    signoffEvidenceBundleId: cutoverPlan.signoffEvidenceBundle?.cutoverSignoffEvidenceBundleId || null,
+    signoffEvidenceStatus: cutoverPlan.signoffEvidenceBundle?.status || null,
     postCutoverCorrectionCaseCount: correctionCases.length,
     postCutoverCorrectionOpenCount: openCorrectionCases.length,
     queueCode: "MIGRATION_CUTOVER",
@@ -3407,6 +4042,13 @@ function buildMigrationCutoverBoardRow({ cutoverPlan, parallelRunResults, accept
       + parallelRunSummary.blocked
       + (cutoverPlan.validationSummary?.blockingReasonCodes?.length || 0)
       + checklistSummary.blockedMandatory
+      + sourceExtractSummary.pending
+      + sourceExtractSummary.blocked
+      + (rehearsalSummary.total === 0 ? 1 : 0)
+      + rehearsalSummary.blocked
+      + (!automatedVarianceStatus ? 1 : automatedVarianceStatus === "blocking" ? 1 : 0)
+      + (!rollbackDrillStatus ? 1 : rollbackDrillStatus !== "passed" ? 1 : 0)
+      + (signoffSummary.pending === 0 && !cutoverPlan.signoffEvidenceBundle ? 1 : 0)
       + signoffSummary.pending
       + openCorrectionCases.length,
     escalationPolicyCode: cutoverPlan.status === "rollback_in_progress"
@@ -3414,7 +4056,7 @@ function buildMigrationCutoverBoardRow({ cutoverPlan, parallelRunResults, accept
       : cutoverPlan.status === "validation_passed"
         ? "cutover_switch_window"
         : "cutover_go_live_blocker",
-    availableActionCodes: resolveMigrationCutoverActionCodes(cutoverPlan),
+    availableActionCodes: resolveMigrationCutoverActionCodes(cutoverPlan).concat("migration.openConcierge"),
     requiresAttention: attentionReasonCodes.length > 0,
     attentionReasonCodes: [...new Set(attentionReasonCodes)],
     ageHours: computeAgeHours(cutoverPlan.createdAt || cutoverPlan.freezeAt || currentTimestamp, currentTimestamp)
@@ -3726,6 +4368,13 @@ function findLatestAcceptedMigrationAcceptanceRecord(state, companyId, cutoverPl
     .filter((record) => record.companyId === companyId)
     .filter((record) => record.cutoverPlanId === cutoverPlanId)
     .filter((record) => record.status === "accepted")
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] || null;
+}
+
+function findLatestMigrationAcceptanceRecord(state, companyId, cutoverPlanId) {
+  return [...state.migrationAcceptanceRecords.values()]
+    .filter((record) => record.companyId === companyId)
+    .filter((record) => record.cutoverPlanId === cutoverPlanId)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] || null;
 }
 

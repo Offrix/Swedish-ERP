@@ -229,6 +229,16 @@ export async function tryHandlePhase14MigrationRoutes({ req, res, url, path, pla
     return true;
   }
 
+  const cutoverConciergeMatch = matchPath(path, "/v1/migration/cutover-plans/:cutoverPlanId/concierge");
+  if (req.method === "GET" && cutoverConciergeMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_cutover_plan", objectId: cutoverConciergeMatch.cutoverPlanId, scopeCode: "migration_cutover_plan" });
+    assertPayrollOperationsReadAccess({ principal });
+    writeJson(res, 200, platform.getCutoverConcierge({ sessionToken, companyId, cutoverPlanId: cutoverConciergeMatch.cutoverPlanId }));
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/migration/acceptance-records") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
@@ -349,6 +359,95 @@ export async function tryHandlePhase14MigrationRoutes({ req, res, url, path, pla
       itemCode: cutoverChecklistMatch.itemCode,
       status: body.status
     }));
+    return true;
+  }
+
+  const cutoverSourceChecklistMatch = matchPath(path, "/v1/migration/cutover-plans/:cutoverPlanId/source-extract-checklist/:itemCode");
+  if (req.method === "POST" && cutoverSourceChecklistMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "migration_cutover_plan", objectId: cutoverSourceChecklistMatch.cutoverPlanId, scopeCode: "migration_cutover_plan" });
+    writeJson(res, 200, platform.updateCutoverSourceExtractChecklistItem({
+      sessionToken,
+      companyId,
+      cutoverPlanId: cutoverSourceChecklistMatch.cutoverPlanId,
+      itemCode: cutoverSourceChecklistMatch.itemCode,
+      status: body.status,
+      sourceExtractRef: body.sourceExtractRef,
+      verificationSummary: body.verificationSummary
+    }));
+    return true;
+  }
+
+  const cutoverRehearsalMatch = matchPath(path, "/v1/migration/cutover-plans/:cutoverPlanId/rehearsals");
+  if (req.method === "POST" && cutoverRehearsalMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "migration_cutover_plan", objectId: cutoverRehearsalMatch.cutoverPlanId, scopeCode: "migration_cutover_plan" });
+    writeJson(res, 201, platform.recordCutoverRehearsal({
+      sessionToken,
+      companyId,
+      cutoverPlanId: cutoverRehearsalMatch.cutoverPlanId,
+      rehearsalType: body.rehearsalType,
+      scopeCode: body.scopeCode,
+      status: body.status,
+      summary: body.summary,
+      scheduledFor: body.scheduledFor,
+      observedIssueCount: body.observedIssueCount,
+      diffReportIds: body.diffReportIds,
+      parallelRunResultIds: body.parallelRunResultIds
+    }));
+    return true;
+  }
+
+  const cutoverVarianceReportMatch = matchPath(path, "/v1/migration/cutover-plans/:cutoverPlanId/variance-report");
+  if (req.method === "POST" && cutoverVarianceReportMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "migration_cutover_plan", objectId: cutoverVarianceReportMatch.cutoverPlanId, scopeCode: "migration_cutover_plan" });
+    writeJson(res, 201, platform.generateCutoverAutomatedVarianceReport({
+      sessionToken,
+      companyId,
+      cutoverPlanId: cutoverVarianceReportMatch.cutoverPlanId,
+      diffReportIds: body.diffReportIds
+    }));
+    return true;
+  }
+
+  const cutoverRollbackDrillMatch = matchPath(path, "/v1/migration/cutover-plans/:cutoverPlanId/rollback-drill");
+  if (req.method === "POST" && cutoverRollbackDrillMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "migration_cutover_plan", objectId: cutoverRollbackDrillMatch.cutoverPlanId, scopeCode: "migration_cutover_plan" });
+    writeJson(res, 201, platform.recordCutoverRollbackDrill({
+      sessionToken,
+      companyId,
+      cutoverPlanId: cutoverRollbackDrillMatch.cutoverPlanId,
+      restoreDrillId: body.restoreDrillId,
+      drillCode: body.drillCode,
+      verificationSummary: body.verificationSummary
+    }));
+    return true;
+  }
+
+  const cutoverSignoffEvidenceMatch = matchPath(path, "/v1/migration/cutover-plans/:cutoverPlanId/signoff-evidence");
+  if (req.method === "GET" && cutoverSignoffEvidenceMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "migration_cutover_plan", objectId: cutoverSignoffEvidenceMatch.cutoverPlanId, scopeCode: "migration_cutover_plan" });
+    assertPayrollOperationsReadAccess({ principal });
+    writeJson(res, 200, {
+      evidenceBundle: platform.exportCutoverSignoffEvidence({
+        sessionToken,
+        companyId,
+        cutoverPlanId: cutoverSignoffEvidenceMatch.cutoverPlanId,
+        correlationId: optionalText(url.searchParams.get("correlationId")) ?? undefined
+      })
+    });
     return true;
   }
 

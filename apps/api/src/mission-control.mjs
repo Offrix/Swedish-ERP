@@ -326,6 +326,12 @@ function buildCutoverControlDashboard({ platform, sessionToken, companyId, gener
       postCutoverCorrectionOpenCount: Number(item.postCutoverCorrectionOpenCount || 0),
       parallelRunPendingAcceptanceCount: Number(item.parallelRunSummary?.pendingAcceptance || 0),
       parallelRunBlockedCount: Number(item.parallelRunSummary?.blocked || 0),
+      conciergeStageCode: item.conciergeStageCode || null,
+      sourceExtractOpenCount: Number(item.sourceExtractSummary?.pending || 0) + Number(item.sourceExtractSummary?.blocked || 0),
+      rehearsalBlockedCount: Number(item.rehearsalSummary?.blocked || 0),
+      rollbackDrillStatus: item.rollbackDrillStatus || null,
+      automatedVarianceStatus: item.automatedVarianceStatus || null,
+      signoffEvidenceStatus: item.signoffEvidenceStatus || null,
       escalationPolicyCode: item.escalationPolicyCode || null,
       attentionReasonCodes: Array.isArray(item.attentionReasonCodes) ? item.attentionReasonCodes : [],
       drilldownTarget: {
@@ -344,7 +350,10 @@ function buildCutoverControlDashboard({ platform, sessionToken, companyId, gener
     rollbackInProgress: Number(cutoverBoard.counters?.rollbackInProgress || 0),
     acceptanceBlocked: Number(cutoverBoard.counters?.acceptanceBlocked || acceptanceBoard.items?.filter((item) => item.status === "blocked").length || 0),
     parallelRunReviewRequired: Number(parallelRunBoard.counters?.manualReviewRequired || 0) + Number(parallelRunBoard.counters?.completedAwaitingAcceptance || 0),
-    parallelRunBlocked: Number(parallelRunBoard.counters?.blocked || 0)
+    parallelRunBlocked: Number(parallelRunBoard.counters?.blocked || 0),
+    sourceExtractIncomplete: rows.filter((row) => row.sourceExtractOpenCount > 0).length,
+    rehearsalBlocked: rows.filter((row) => row.rehearsalBlockedCount > 0).length,
+    rollbackDrillMissing: rows.filter((row) => !row.rollbackDrillStatus || row.rollbackDrillStatus !== "passed").length
   };
 
   return {
@@ -362,12 +371,13 @@ function buildCutoverControlDashboard({ platform, sessionToken, companyId, gener
     summary: {
       acceptanceRecordCount: Array.isArray(acceptanceBoard.items) ? acceptanceBoard.items.length : 0,
       correctionOpenCount: rows.reduce((sum, row) => sum + row.postCutoverCorrectionOpenCount, 0),
-      parallelRunResultCount: Array.isArray(parallelRunBoard.items) ? parallelRunBoard.items.length : 0
+      parallelRunResultCount: Array.isArray(parallelRunBoard.items) ? parallelRunBoard.items.length : 0,
+      conciergeAttentionCount: rows.filter((row) => row.sourceExtractOpenCount > 0 || row.rehearsalBlockedCount > 0 || row.rollbackDrillStatus !== "passed" || row.automatedVarianceStatus === "blocking").length
     },
     counters,
     rows,
     actionBar: {
-      availableCommands: ["migration.openCockpit", "migration.openAcceptance", "migration.openCorrections"]
+      availableCommands: ["migration.openCockpit", "migration.openAcceptance", "migration.openCorrections", "migration.openConcierge"]
     },
     drilldownTarget: {
       routePath: "/v1/migration/cockpit",

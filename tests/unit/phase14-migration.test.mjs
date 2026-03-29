@@ -243,7 +243,9 @@ test("Phase 14.3 migration cockpit tracks import, diff, cutover and rollback det
   assert.equal(cockpit.cutoverBoard.queueSummary[0].queueCode, "MIGRATION_CUTOVER");
   assert.equal(cockpit.cutoverBoard.items[0].objectType, "migrationCutover");
   assert.equal(cockpit.cutoverBoard.items[0].rollbackExecutionMode, "post_switch_compensation");
-  assert.equal(cockpit.cutoverBoard.items[0].requiresAttention, false);
+  assert.equal(cockpit.cutoverBoard.items[0].requiresAttention, true);
+  assert.equal(cockpit.cutoverBoard.items[0].attentionReasonCodes.includes("source_extract_incomplete"), true);
+  assert.equal(cockpit.cutoverBoard.items[0].attentionReasonCodes.includes("rollback_drill_missing"), true);
   assert.equal(cockpit.cutoverBoard.items[0].ownerQueue, "migration_operator");
   assert.equal(cockpit.acceptanceBoard.boardCode, "MigrationAcceptanceBoard");
   assert.equal(cockpit.acceptanceBoard.items.length, 1);
