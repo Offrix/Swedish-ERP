@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import {
+  buildReceiptModePolicy,
+  resolveReceiptModeForEnvironment
+} from "./providers/provider-runtime-helpers.mjs";
 
 export const INTEGRATION_SURFACE_CODES = Object.freeze([
   "partner",
@@ -143,7 +147,8 @@ export function createIntegrationControlPlane({
       displayName: text(input.displayName, "integration_display_name_required"),
       environmentMode: resolvedEnvironmentMode,
       providerEnvironmentRef: providerEnvironmentRefForMode(resolvedEnvironmentMode),
-      supportsLegalEffect: supportsLegalEffect(resolvedEnvironmentMode) && manifest.supportsLegalEffect === true,
+      supportsLegalEffect: supportsLegalEffectForManifest(manifest, resolvedEnvironmentMode),
+      receiptMode: resolveReceiptModeForEnvironment(resolveManifestReceiptModePolicy(manifest), resolvedEnvironmentMode),
       sandboxSupported: manifest.sandboxSupported === true,
       trialSafe: manifest.trialSafe === true,
       modeMatrix: clone(manifest.modeMatrix),
@@ -177,7 +182,8 @@ export function createIntegrationControlPlane({
       displayName: partnerConnection.displayName,
       environmentMode: resolvedEnvironmentMode,
       providerEnvironmentRef: providerEnvironmentRefForMode(resolvedEnvironmentMode),
-      supportsLegalEffect: supportsLegalEffect(resolvedEnvironmentMode),
+      supportsLegalEffect: supportsLegalEffectForManifest(manifest, resolvedEnvironmentMode),
+      receiptMode: resolveReceiptModeForEnvironment(resolveManifestReceiptModePolicy(manifest), resolvedEnvironmentMode),
       sandboxSupported: manifest.sandboxSupported,
       trialSafe: manifest.trialSafe,
       modeMatrix: clone(manifest.modeMatrix),
@@ -234,6 +240,8 @@ export function createIntegrationControlPlane({
         sandboxSupported: manifest.sandboxSupported === true,
         trialSafe: manifest.trialSafe === true,
         supportsLegalEffect: manifest.supportsLegalEffect === true,
+        receiptMode: manifest.receiptMode || null,
+        receiptModePolicy: clone(manifest.receiptModePolicy || manifest.modeMatrix?.receiptModePolicy || {}),
         supportsAsyncCallback: manifest.supportsAsyncCallback === true,
         requiresCallbackRegistration: manifest.requiresCallbackRegistration === true,
         allowedEnvironmentModes: clone(manifest.allowedEnvironmentModes || modeMatrixToAllowedEnvironmentModes(manifest.modeMatrix)),
@@ -368,7 +376,17 @@ export function createIntegrationControlPlane({
       check("environment_isolation", hasCrossModeReuse(state, connection, credentials) ? "failed" : "passed", hasCrossModeReuse(state, connection, credentials) ? "Credential reuse across environments detected." : "Credentials isolated per environment.", clock),
       check("rate_limit_policy", connection.rateLimitPerMinute > 0 ? "passed" : "failed", connection.rateLimitPerMinute > 0 ? "Rate limit policy configured." : "Rate limit policy missing.", clock),
       check("fallback_mode", typeof connection.fallbackMode === "string" && connection.fallbackMode.length > 0 ? "passed" : "failed", connection.fallbackMode ? `Fallback mode ${connection.fallbackMode}.` : "Fallback mode missing.", clock),
-      check("provider_baseline", connection.providerBaselineRef ? "passed" : "warning", connection.providerBaselineRef ? "Provider baseline pinned." : "Provider baseline missing.", clock)
+      check("provider_baseline", connection.providerBaselineRef ? "passed" : "warning", connection.providerBaselineRef ? "Provider baseline pinned." : "Provider baseline missing.", clock),
+      check(
+        "trial_receipt_mode",
+        connection.environmentMode !== "trial" || (connection.receiptMode === "trial_simulated" && connection.supportsLegalEffect !== true) ? "passed" : "failed",
+        connection.environmentMode !== "trial"
+          ? `Receipt mode ${connection.receiptMode}.`
+          : connection.receiptMode === "trial_simulated" && connection.supportsLegalEffect !== true
+            ? "Trial connection is fenced to simulated receipts only."
+            : "Trial connection is not fenced away from legal-effect receipts.",
+        clock
+      )
     ];
     if (manifest.requiresCallbackRegistration === true) {
       results.push(
@@ -448,12 +466,20 @@ function requireIntegrationManifest({ partnerModule = null, surfaceCode, connect
 
 function buildPartnerManifest(entry, providerCode) {
   const sandboxSupported = entry.supportsSandbox === true;
+  const receiptModePolicy = buildReceiptModePolicy({
+    trialSafe: sandboxSupported,
+    sandboxSupported,
+    testSupported: true,
+    productionSupported: true,
+    supportsLegalEffectInProduction: true
+  });
   const modeMatrix = {
     trial_safe: sandboxSupported,
     sandbox_supported: sandboxSupported,
     test_supported: true,
     production_supported: true,
-    supportsLegalEffect: true
+    supportsLegalEffect: true,
+    receiptModePolicy: clone(receiptModePolicy)
   };
   return {
     manifestId: `partner:${entry.connectionType}:${providerCode}`,
@@ -464,9 +490,33 @@ function buildPartnerManifest(entry, providerCode) {
     sandboxSupported,
     trialSafe: sandboxSupported,
     supportsLegalEffect: true,
+    receiptMode: resolveReceiptModeForEnvironment(receiptModePolicy, sandboxSupported ? "trial" : "production"),
+    receiptModePolicy: clone(receiptModePolicy),
     allowedEnvironmentModes: sandboxSupported ? ["trial", "sandbox", "test", "pilot_parallel", "production"] : ["pilot_parallel", "production"],
     modeMatrix
   };
+}
+
+function resolveManifestReceiptModePolicy(manifest = {}) {
+  return manifest.receiptModePolicy
+    || manifest.modeMatrix?.receiptModePolicy
+    || buildReceiptModePolicy({
+      trialSafe: manifest.trialSafe === true,
+      sandboxSupported: manifest.sandboxSupported === true,
+      testSupported: true,
+      productionSupported: Array.isArray(manifest.allowedEnvironmentModes)
+        ? manifest.allowedEnvironmentModes.includes("production") || manifest.allowedEnvironmentModes.includes("pilot_parallel")
+        : true,
+      supportsLegalEffectInProduction: manifest.supportsLegalEffect === true
+    });
+}
+
+function supportsLegalEffectForManifest(manifest = {}, environmentMode = "test") {
+  try {
+    return resolveReceiptModeForEnvironment(resolveManifestReceiptModePolicy(manifest), environmentMode) === "provider_receipt_required";
+  } catch {
+    return false;
+  }
 }
 
 function listNonPartnerManifests(getAdapterProviders) {

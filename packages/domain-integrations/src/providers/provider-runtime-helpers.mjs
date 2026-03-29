@@ -83,19 +83,75 @@ export function defaultProviderEnvironmentRef(environmentMode, providerMode) {
   return providerMode === "production" ? "production" : "sandbox";
 }
 
+export const RECEIPT_MODE_CODES = Object.freeze([
+  "trial_simulated",
+  "provider_test_receipt",
+  "internal_audit_only",
+  "provider_receipt_required"
+]);
+
+export function buildReceiptModePolicy({
+  trialSafe,
+  sandboxSupported,
+  testSupported = true,
+  productionSupported = true,
+  supportsLegalEffectInProduction = true
+}) {
+  const policy = {};
+  if (trialSafe === true) {
+    policy.trial = "trial_simulated";
+  }
+  if (sandboxSupported === true) {
+    policy.sandbox = supportsLegalEffectInProduction === true ? "provider_test_receipt" : "internal_audit_only";
+  }
+  if (testSupported === true) {
+    policy.test = supportsLegalEffectInProduction === true ? "provider_test_receipt" : "internal_audit_only";
+  }
+  if (productionSupported === true) {
+    const productionMode = supportsLegalEffectInProduction === true ? "provider_receipt_required" : "internal_audit_only";
+    policy.pilot_parallel = productionMode;
+    policy.production = productionMode;
+  }
+  return Object.freeze(policy);
+}
+
+export function resolveReceiptModeForEnvironment(receiptModePolicy = {}, environmentMode = "test") {
+  const normalized = normalizeOptionalText(environmentMode) || "test";
+  const resolved = receiptModePolicy?.[normalized];
+  if (!resolved || !RECEIPT_MODE_CODES.includes(resolved)) {
+    throw createError(400, "provider_receipt_mode_invalid", `Receipt mode is not configured for ${normalized}.`);
+  }
+  return resolved;
+}
+
+export function resolveRuntimeReceiptMode(receiptModePolicy = {}, environmentMode = "test") {
+  const normalized = normalizeOptionalText(environmentMode) || "test";
+  if (receiptModePolicy?.[normalized]) {
+    return resolveReceiptModeForEnvironment(receiptModePolicy, normalized);
+  }
+  for (const fallbackMode of ["test", "sandbox", "pilot_parallel", "production", "trial"]) {
+    if (receiptModePolicy?.[fallbackMode]) {
+      return resolveReceiptModeForEnvironment(receiptModePolicy, fallbackMode);
+    }
+  }
+  throw createError(400, "provider_receipt_mode_invalid", "Receipt mode policy has no supported environments.");
+}
+
 export function buildModeMatrix({
   trialSafe,
   sandboxSupported,
   testSupported = true,
   productionSupported = true,
-  supportsLegalEffect
+  supportsLegalEffect,
+  receiptModePolicy = {}
 }) {
   return Object.freeze({
     trial_safe: trialSafe === true,
     sandbox_supported: sandboxSupported === true,
     test_supported: testSupported === true,
     production_supported: productionSupported === true,
-    supportsLegalEffect: supportsLegalEffect === true
+    supportsLegalEffect: supportsLegalEffect === true,
+    receiptModePolicy: clone(receiptModePolicy)
   });
 }
 
@@ -156,6 +212,14 @@ export function createStatelessProvider({
   const resolvedProviderEnvironmentRef =
     providerEnvironmentRef || defaultProviderEnvironmentRef(environmentMode, providerMode);
   const supportsLegalEffect = providerMode === "production" && supportsLegalEffectInProduction === true;
+  const receiptModePolicy = buildReceiptModePolicy({
+    trialSafe,
+    sandboxSupported,
+    testSupported: true,
+    productionSupported,
+    supportsLegalEffectInProduction
+  });
+  const receiptMode = resolveRuntimeReceiptMode(receiptModePolicy, environmentMode);
   const allowedEnvironmentModes = [];
   if (trialSafe === true) {
     allowedEnvironmentModes.push("trial");
@@ -172,7 +236,8 @@ export function createStatelessProvider({
     sandboxSupported,
     testSupported: true,
     productionSupported,
-    supportsLegalEffect
+    supportsLegalEffect,
+    receiptModePolicy
   });
   return {
     providerCode,
@@ -188,6 +253,8 @@ export function createStatelessProvider({
         sandboxSupported,
         trialSafe,
         supportsLegalEffect,
+        receiptMode,
+        receiptModePolicy: clone(receiptModePolicy),
         supportsAsyncCallback,
         supportsRerun,
         requiresCallbackRegistration,
