@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import {
+  DEMO_ADMIN_EMAIL,
   DEMO_APPROVER_EMAIL,
   DEMO_IDS,
   createOrgAuthPlatform
@@ -239,6 +240,204 @@ test("Phase 6 hardening API locks repeated invalid passkey assertions and revoke
       }
     });
     assert.equal(asserted.session.status, "active");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("Phase 6 hardening API locks repeated invalid BankID completion attempts and revokes the attacked session", async () => {
+  let now = new Date("2026-03-29T16:00:00Z");
+  const platform = createOrgAuthPlatform({
+    clock: () => new Date(now),
+    bootstrapScenarioCode: "test_default_demo"
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const login = await requestJson(`${baseUrl}/v1/auth/login`, {
+      method: "POST",
+      body: {
+        companyId: DEMO_IDS.companyId,
+        email: DEMO_ADMIN_EMAIL
+      }
+    });
+    await requestJson(`${baseUrl}/v1/auth/mfa/totp/verify`, {
+      method: "POST",
+      token: login.sessionToken,
+      body: {
+        code: platform.getTotpCodeForTesting({
+          companyId: DEMO_IDS.companyId,
+          email: DEMO_ADMIN_EMAIL,
+          now
+        })
+      }
+    });
+    const bankIdStart = await requestJson(`${baseUrl}/v1/auth/bankid/start`, {
+      method: "POST",
+      token: login.sessionToken
+    });
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const denied = await requestJson(`${baseUrl}/v1/auth/bankid/collect`, {
+        method: "POST",
+        token: login.sessionToken,
+        expectedStatus: 403,
+        body: {
+          orderRef: bankIdStart.orderRef,
+          completionToken: "wrong"
+        }
+      });
+      assert.equal(denied.error, "bankid_completion_token_invalid");
+    }
+
+    const blocked = await requestJson(`${baseUrl}/v1/auth/bankid/collect`, {
+      method: "POST",
+      token: login.sessionToken,
+      expectedStatus: 429,
+      body: {
+        orderRef: bankIdStart.orderRef,
+        completionToken: "wrong"
+      }
+    });
+    assert.equal(blocked.error, "bankid_temporarily_locked");
+    assert.throws(
+      () =>
+        platform.inspectSession({
+          sessionToken: login.sessionToken,
+          allowPending: true
+        }),
+      (error) => error?.code === "session_revoked" && error?.status === 401
+    );
+
+    now = new Date("2026-03-29T16:16:00Z");
+    const retried = await requestJson(`${baseUrl}/v1/auth/login`, {
+      method: "POST",
+      body: {
+        companyId: DEMO_IDS.companyId,
+        email: DEMO_ADMIN_EMAIL
+      }
+    });
+    await requestJson(`${baseUrl}/v1/auth/mfa/totp/verify`, {
+      method: "POST",
+      token: retried.sessionToken,
+      body: {
+        code: platform.getTotpCodeForTesting({
+          companyId: DEMO_IDS.companyId,
+          email: DEMO_ADMIN_EMAIL,
+          now
+        })
+      }
+    });
+    const retriedBankIdStart = await requestJson(`${baseUrl}/v1/auth/bankid/start`, {
+      method: "POST",
+      token: retried.sessionToken
+    });
+    const collected = await requestJson(`${baseUrl}/v1/auth/bankid/collect`, {
+      method: "POST",
+      token: retried.sessionToken,
+      body: {
+        orderRef: retriedBankIdStart.orderRef,
+        completionToken: platform.getBankIdCompletionTokenForTesting(retriedBankIdStart.orderRef)
+      }
+    });
+    assert.equal(collected.session.status, "active");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("Phase 6 hardening API locks repeated invalid federation completion attempts and revokes the attacked session", async () => {
+  let now = new Date("2026-03-29T16:30:00Z");
+  const platform = createOrgAuthPlatform({
+    clock: () => new Date(now),
+    bootstrapScenarioCode: "test_default_demo"
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const federationStart = await requestJson(`${baseUrl}/v1/auth/federation/start`, {
+      method: "POST",
+      body: {
+        companyId: DEMO_IDS.companyId,
+        email: DEMO_APPROVER_EMAIL,
+        connectionId: "acme-sso",
+        redirectUri: "https://app.example.test/auth/federation/callback"
+      }
+    });
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const denied = await requestJson(`${baseUrl}/v1/auth/federation/callback`, {
+        method: "POST",
+        token: federationStart.sessionToken,
+        expectedStatus: 403,
+        body: {
+          authRequestId: federationStart.authRequestId,
+          authorizationCode: "wrong",
+          state: "wrong"
+        }
+      });
+      assert.equal(
+        denied.error === "federation_state_invalid" || denied.error === "federation_authorization_code_invalid",
+        true
+      );
+    }
+
+    const blocked = await requestJson(`${baseUrl}/v1/auth/federation/callback`, {
+      method: "POST",
+      token: federationStart.sessionToken,
+      expectedStatus: 429,
+      body: {
+        authRequestId: federationStart.authRequestId,
+        authorizationCode: "wrong",
+        state: "wrong"
+      }
+    });
+    assert.equal(blocked.error, "federation_temporarily_locked");
+    assert.throws(
+      () =>
+        platform.inspectSession({
+          sessionToken: federationStart.sessionToken,
+          allowPending: true
+        }),
+      (error) => error?.code === "session_revoked" && error?.status === 401
+    );
+
+    now = new Date("2026-03-29T16:46:00Z");
+    const retried = await requestJson(`${baseUrl}/v1/auth/federation/start`, {
+      method: "POST",
+      body: {
+        companyId: DEMO_IDS.companyId,
+        email: DEMO_APPROVER_EMAIL,
+        connectionId: "acme-sso",
+        redirectUri: "https://app.example.test/auth/federation/callback"
+      }
+    });
+    const completed = await requestJson(`${baseUrl}/v1/auth/federation/callback`, {
+      method: "POST",
+      token: retried.sessionToken,
+      body: {
+        authRequestId: retried.authRequestId,
+        authorizationCode: platform.getFederationAuthorizationCodeForTesting(retried.authRequestId),
+        state: retried.state
+      }
+    });
+    assert.equal(completed.session.status, "active");
   } finally {
     await stopServer(server);
   }

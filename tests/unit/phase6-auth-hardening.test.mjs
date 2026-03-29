@@ -222,6 +222,147 @@ test("Phase 6 hardening seals auth broker challenge secrets in durable export an
   assert.equal(restoredFederationComplete.session.status, "active");
 });
 
+test("Phase 6 hardening locks repeated invalid BankID completion attempts and revokes the attacked session", () => {
+  let now = new Date("2026-03-29T14:45:00Z");
+  const platform = createOrgAuthPlatform({
+    clock: () => new Date(now),
+    bootstrapScenarioCode: "test_default_demo"
+  });
+
+  const login = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+  platform.verifyTotp({
+    sessionToken: login.sessionToken,
+    code: platform.getTotpCodeForTesting({
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL,
+      now
+    })
+  });
+  const bankIdStart = platform.startBankIdAuthentication({
+    sessionToken: login.sessionToken
+  });
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    assert.throws(
+      () =>
+        platform.collectBankIdAuthentication({
+          sessionToken: login.sessionToken,
+          orderRef: bankIdStart.orderRef,
+          completionToken: "wrong"
+        }),
+      (error) => error?.code === "bankid_completion_token_invalid" && error?.status === 403
+    );
+  }
+
+  assert.throws(
+    () =>
+      platform.collectBankIdAuthentication({
+        sessionToken: login.sessionToken,
+        orderRef: bankIdStart.orderRef,
+        completionToken: "wrong"
+      }),
+    (error) => error?.code === "bankid_temporarily_locked" && error?.status === 429
+  );
+  assert.throws(
+    () =>
+      platform.inspectSession({
+        sessionToken: login.sessionToken,
+        allowPending: true
+      }),
+    (error) => error?.code === "session_revoked" && error?.status === 401
+  );
+
+  now = new Date("2026-03-29T15:01:00Z");
+  const retried = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+  platform.verifyTotp({
+    sessionToken: retried.sessionToken,
+    code: platform.getTotpCodeForTesting({
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL,
+      now
+    })
+  });
+  const retriedBankIdStart = platform.startBankIdAuthentication({
+    sessionToken: retried.sessionToken
+  });
+  const collected = platform.collectBankIdAuthentication({
+    sessionToken: retried.sessionToken,
+    orderRef: retriedBankIdStart.orderRef,
+    completionToken: platform.getBankIdCompletionTokenForTesting(retriedBankIdStart.orderRef)
+  });
+  assert.equal(collected.session.status, "active");
+});
+
+test("Phase 6 hardening locks repeated invalid federation completion attempts and revokes the attacked session", () => {
+  let now = new Date("2026-03-29T15:10:00Z");
+  const platform = createOrgAuthPlatform({
+    clock: () => new Date(now),
+    bootstrapScenarioCode: "test_default_demo"
+  });
+
+  const federationStart = platform.startFederationAuthentication({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_APPROVER_EMAIL,
+    connectionId: "acme-sso",
+    redirectUri: "https://app.example.test/auth/federation/callback"
+  });
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    assert.throws(
+      () =>
+        platform.completeFederationAuthentication({
+          sessionToken: federationStart.sessionToken,
+          authRequestId: federationStart.authRequestId,
+          authorizationCode: "wrong",
+          state: "wrong"
+        }),
+      (error) =>
+        (error?.code === "federation_state_invalid" || error?.code === "federation_authorization_code_invalid")
+        && error?.status === 403
+    );
+  }
+
+  assert.throws(
+    () =>
+      platform.completeFederationAuthentication({
+        sessionToken: federationStart.sessionToken,
+        authRequestId: federationStart.authRequestId,
+        authorizationCode: "wrong",
+        state: "wrong"
+      }),
+    (error) => error?.code === "federation_temporarily_locked" && error?.status === 429
+  );
+  assert.throws(
+    () =>
+      platform.inspectSession({
+        sessionToken: federationStart.sessionToken,
+        allowPending: true
+      }),
+    (error) => error?.code === "session_revoked" && error?.status === 401
+  );
+
+  now = new Date("2026-03-29T15:26:00Z");
+  const retriedFederationStart = platform.startFederationAuthentication({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_APPROVER_EMAIL,
+    connectionId: "acme-sso",
+    redirectUri: "https://app.example.test/auth/federation/callback"
+  });
+  const completed = platform.completeFederationAuthentication({
+    sessionToken: retriedFederationStart.sessionToken,
+    authRequestId: retriedFederationStart.authRequestId,
+    authorizationCode: platform.getFederationAuthorizationCodeForTesting(retriedFederationStart.authRequestId),
+    state: retriedFederationStart.state
+  });
+  assert.equal(completed.session.status, "active");
+});
+
 test("Phase 6 hardening locks repeated invalid passkey assertions and revokes the attacked session", () => {
   let now = new Date("2026-03-29T15:00:00Z");
   const platform = createOrgAuthPlatform({

@@ -228,7 +228,13 @@ const TRUST_LEVEL_FRESHNESS_TTL_SECONDS = Object.freeze({
   mfa: 30 * 60,
   strong_mfa: 15 * 60
 });
-const AUTH_GUARDRAIL_SCOPES = Object.freeze(["login_identifier", "totp_factor", "passkey_factor"]);
+const AUTH_GUARDRAIL_SCOPES = Object.freeze([
+  "login_identifier",
+  "totp_factor",
+  "passkey_factor",
+  "bankid_challenge",
+  "federation_request"
+]);
 const LOGIN_IDENTIFIER_FAILURE_THRESHOLD = 5;
 const LOGIN_IDENTIFIER_FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_IDENTIFIER_LOCKOUT_MS = 15 * 60 * 1000;
@@ -240,6 +246,12 @@ const TOTP_LOCKOUT_MS = 15 * 60 * 1000;
 const PASSKEY_FAILURE_THRESHOLD = 5;
 const PASSKEY_FAILURE_WINDOW_MS = 10 * 60 * 1000;
 const PASSKEY_LOCKOUT_MS = 15 * 60 * 1000;
+const BANKID_FAILURE_THRESHOLD = 5;
+const BANKID_FAILURE_WINDOW_MS = 10 * 60 * 1000;
+const BANKID_LOCKOUT_MS = 15 * 60 * 1000;
+const FEDERATION_FAILURE_THRESHOLD = 5;
+const FEDERATION_FAILURE_WINDOW_MS = 10 * 60 * 1000;
+const FEDERATION_LOCKOUT_MS = 15 * 60 * 1000;
 
 export function createOrgAuthPlatform({
   clock = () => new Date(),
@@ -1356,10 +1368,59 @@ export function createOrgAuthPlatform({
     if (challenge.companyUserId !== session.companyUserId) {
       throw httpError(403, "bankid_scope_mismatch", "BankID challenge belongs to another user.");
     }
-
-    const providerResult = state.authBroker.collectBankIdChallenge({
-      orderRef,
-      completionToken
+    const bankIdGuardrail = resolveAuthGuardrail({
+      scope: "bankid_challenge",
+      key: createBankIdChallengeGuardrailKey(session.companyUserId, challenge.challengeId),
+      companyId: session.companyId,
+      companyUserId: session.companyUserId
+    });
+    assertAuthGuardrailOpen({
+      guardrail: bankIdGuardrail,
+      windowMs: BANKID_FAILURE_WINDOW_MS,
+      code: "bankid_temporarily_locked",
+      message: "Too many invalid BankID completion attempts. Try again later."
+    });
+    let providerResult;
+    try {
+      providerResult = state.authBroker.collectBankIdChallenge({
+        orderRef,
+        completionToken
+      });
+    } catch (error) {
+      if (error?.code === "bankid_completion_token_invalid") {
+        const failureGuardrail = recordAuthGuardrailFailure(bankIdGuardrail, {
+          windowMs: BANKID_FAILURE_WINDOW_MS,
+          threshold: BANKID_FAILURE_THRESHOLD,
+          lockoutMs: BANKID_LOCKOUT_MS
+        });
+        if (failureGuardrail.lockedUntil) {
+          revokeSessionForSecurityLockout(session, {
+            reasonCode: "bankid_temporarily_locked"
+          });
+        }
+        pushAudit({
+          companyId: session.companyId,
+          actorId: principal.userId,
+          action: "auth.bankid.completed",
+          result: failureGuardrail.lockedUntil ? "blocked" : "denied",
+          entityType: "auth_challenge",
+          entityId: orderRef,
+          explanation: failureGuardrail.lockedUntil
+            ? "BankID completion temporarily locked after repeated invalid completion tokens."
+            : "BankID completion token was invalid.",
+          metadata: {
+            failureCount: failureGuardrail.failureCount,
+            lockedUntil: failureGuardrail.lockedUntil
+          }
+        });
+        if (failureGuardrail.lockedUntil) {
+          throw httpError(429, "bankid_temporarily_locked", "Too many invalid BankID completion attempts. Try again later.");
+        }
+      }
+      throw error;
+    }
+    markAuthGuardrailSuccess(bankIdGuardrail, {
+      windowMs: BANKID_FAILURE_WINDOW_MS
     });
     const providerBaselineRef = resolveBankIdProviderBaselineRef(providerBaselines, currentDate());
     if (providerResult.status !== "complete") {
@@ -1513,10 +1574,64 @@ export function createOrgAuthPlatform({
     if (challenge.companyUserId !== session.companyUserId) {
       throw httpError(403, "federation_scope_mismatch", "Federation challenge belongs to another user.");
     }
-    const providerResult = state.authBroker.completeFederationAuthorization({
-      authRequestId,
-      authorizationCode,
-      state: providerState
+    const federationGuardrail = resolveAuthGuardrail({
+      scope: "federation_request",
+      key: createFederationRequestGuardrailKey(session.companyUserId, challenge.challengeId),
+      companyId: session.companyId,
+      companyUserId: session.companyUserId
+    });
+    assertAuthGuardrailOpen({
+      guardrail: federationGuardrail,
+      windowMs: FEDERATION_FAILURE_WINDOW_MS,
+      code: "federation_temporarily_locked",
+      message: "Too many invalid federation completion attempts. Try again later."
+    });
+    let providerResult;
+    try {
+      providerResult = state.authBroker.completeFederationAuthorization({
+        authRequestId,
+        authorizationCode,
+        state: providerState
+      });
+    } catch (error) {
+      if (error?.code === "federation_state_invalid" || error?.code === "federation_authorization_code_invalid") {
+        const failureGuardrail = recordAuthGuardrailFailure(federationGuardrail, {
+          windowMs: FEDERATION_FAILURE_WINDOW_MS,
+          threshold: FEDERATION_FAILURE_THRESHOLD,
+          lockoutMs: FEDERATION_LOCKOUT_MS
+        });
+        if (failureGuardrail.lockedUntil) {
+          revokeSessionForSecurityLockout(session, {
+            reasonCode: "federation_temporarily_locked"
+          });
+        }
+        pushAudit({
+          companyId: session.companyId,
+          actorId: principal.userId,
+          action: "auth.federation.completed",
+          result: failureGuardrail.lockedUntil ? "blocked" : "denied",
+          entityType: "auth_challenge",
+          entityId: authRequestId,
+          explanation: failureGuardrail.lockedUntil
+            ? "Federation callback temporarily locked after repeated invalid completion attempts."
+            : "Federation callback payload was invalid.",
+          metadata: {
+            failureCount: failureGuardrail.failureCount,
+            lockedUntil: failureGuardrail.lockedUntil
+          }
+        });
+        if (failureGuardrail.lockedUntil) {
+          throw httpError(
+            429,
+            "federation_temporarily_locked",
+            "Too many invalid federation completion attempts. Try again later."
+          );
+        }
+      }
+      throw error;
+    }
+    markAuthGuardrailSuccess(federationGuardrail, {
+      windowMs: FEDERATION_FAILURE_WINDOW_MS
     });
     const providerBaselineRef = resolveFederationProviderBaselineRef(providerBaselines, currentDate());
     challenge.status = "consumed";
@@ -2501,6 +2616,14 @@ export function createOrgAuthPlatform({
 
   function createPasskeyFactorGuardrailKey(companyUserId, factorId) {
     return `passkey_factor:${companyUserId}:${factorId}`;
+  }
+
+  function createBankIdChallengeGuardrailKey(companyUserId, challengeId) {
+    return `bankid_challenge:${companyUserId}:${challengeId}`;
+  }
+
+  function createFederationRequestGuardrailKey(companyUserId, challengeId) {
+    return `federation_request:${companyUserId}:${challengeId}`;
   }
 
   function resolveAuthGuardrail({ scope, key, companyId = null, normalizedEmail = null, companyUserId = null, factorId = null } = {}) {

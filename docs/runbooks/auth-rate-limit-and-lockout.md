@@ -25,6 +25,13 @@ This runbook governs login-start throttling and TOTP lockout in the phase 6 auth
 - When passkey lockout is triggered, the attacked pending session must be revoked immediately.
 - After the lockout window expires, a fresh login with a valid passkey assertion must succeed again.
 
+## Broker challenge guardrails
+
+- Invalid BankID collect completion attempts must be counted per pending BankID challenge.
+- Invalid federation callback completions must be counted per pending federation request.
+- Repeated invalid broker completion attempts must trigger a temporary lockout and return `429`.
+- When broker challenge lockout is triggered, the attacked pending session must be revoked immediately.
+
 ## Secret handling
 
 - TOTP plaintext must never be present in exported durable auth factor state.
@@ -39,9 +46,13 @@ This runbook governs login-start throttling and TOTP lockout in the phase 6 auth
 - Verify repeated unresolved login starts end in `login_temporarily_locked`.
 - Verify repeated invalid TOTP codes end in `totp_temporarily_locked`.
 - Verify repeated invalid passkey assertions end in `passkey_temporarily_locked`.
+- Verify repeated invalid BankID collect attempts end in `bankid_temporarily_locked`.
+- Verify repeated invalid federation callback attempts end in `federation_temporarily_locked`.
 - Verify the attacked session is revoked when TOTP lockout triggers.
 - Verify the attacked session is revoked when passkey lockout triggers.
+- Verify the attacked session is revoked when BankID or federation broker lockout triggers.
 - Verify auth audit contains blocked/denied records for both login-start and TOTP guardrails.
 - Verify auth audit contains blocked/denied records for passkey guardrails.
+- Verify auth audit contains blocked/denied records for broker challenge guardrails.
 - Verify exported durable state does not contain raw TOTP secrets.
 - Verify exported durable state does not contain raw BankID or federation broker challenge secrets.
