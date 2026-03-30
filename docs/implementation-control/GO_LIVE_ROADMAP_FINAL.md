@@ -358,7 +358,7 @@ Route-dekomposition och permission-policy kan gå parallellt med audit/evidence-
 Ingen ny partner/public API på gamla felkontrakt. Ingen support-write utan permission boundary från denna fas.
 
 **Delfaser**  
-- [ ] 4.1 [HARDEN] Inför canonical command-, event-, error-, receipt- och audit-envelope över alla domäner och workerflöden.
+- [x] 4.1 [HARDEN] Inför canonical command-, event-, error-, receipt- och audit-envelope över alla domäner och workerflöden.
 - [ ] 4.2 [NEW BUILD] Bygg evidence-bundle-kedja för filings, support, cutover, owner distributions, payroll approvals och close/reopen.
 - [ ] 4.3 [HARDEN] Inför invariant alarms, queue-age alarms, projection-lag, provider-health, risk alarms och restore-drill telemetry.
 - [ ] 4.4 [REWRITE] Bryt upp phasebucket-routes till domain-driven routefamiljer och tvinga inputvalidering, body limits, typed error codes och idempotency keys.

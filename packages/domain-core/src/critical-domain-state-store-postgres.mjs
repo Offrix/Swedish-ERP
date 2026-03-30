@@ -13,7 +13,9 @@ import {
   CRITICAL_DOMAIN_DOMAIN_EVENT_TABLE,
   CRITICAL_DOMAIN_OUTBOX_MESSAGE_TABLE,
   CRITICAL_DOMAIN_EVIDENCE_REF_TABLE,
-  CriticalDomainStateConflictError
+  CriticalDomainStateConflictError,
+  createCriticalDomainCommandEnvelope,
+  createCriticalDomainReceiptEnvelope
 } from "./critical-domain-state-store.mjs";
 
 const require = createRequire(import.meta.url);
@@ -796,13 +798,24 @@ export function createPostgresCriticalDomainStateStore({
                 order by recorded_at asc, evidence_ref_id asc
               `
             ]);
+            const existingDomainEvents = domainEventRows.map(mapDomainEventRow);
+            const existingOutboxMessages = outboxRows.map(mapOutboxMessageRow);
+            const existingEvidenceRefs = evidenceRows.map(mapEvidenceRefRow);
             return {
               duplicate: true,
               stateRecord: existingRecord,
+              commandEnvelope: createCriticalDomainCommandEnvelope(existingReceipt),
               commandReceipt: existingReceipt,
-              domainEvents: domainEventRows.map(mapDomainEventRow),
-              outboxMessages: outboxRows.map(mapOutboxMessageRow),
-              evidenceRefs: evidenceRows.map(mapEvidenceRefRow)
+              receiptEnvelope: createCriticalDomainReceiptEnvelope({
+                commandReceipt: existingReceipt,
+                domainEvents: existingDomainEvents,
+                outboxMessages: existingOutboxMessages,
+                evidenceRefs: existingEvidenceRefs,
+                status: "duplicate"
+              }),
+              domainEvents: existingDomainEvents,
+              outboxMessages: existingOutboxMessages,
+              evidenceRefs: existingEvidenceRefs
             };
           }
 
@@ -1129,7 +1142,14 @@ export function createPostgresCriticalDomainStateStore({
           return {
             duplicate: false,
             stateRecord,
+            commandEnvelope: createCriticalDomainCommandEnvelope(receipt),
             commandReceipt: receipt,
+            receiptEnvelope: createCriticalDomainReceiptEnvelope({
+              commandReceipt: receipt,
+              domainEvents: recordedDomainEvents,
+              outboxMessages: recordedOutboxMessages,
+              evidenceRefs: recordedEvidenceRefs
+            }),
             domainEvents: recordedDomainEvents,
             outboxMessages: recordedOutboxMessages,
             evidenceRefs: recordedEvidenceRefs

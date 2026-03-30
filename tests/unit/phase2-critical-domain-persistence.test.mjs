@@ -28,6 +28,90 @@ function cleanupTempDirectory(directory) {
   fs.rmSync(directory, { recursive: true, force: true });
 }
 
+function assertCanonicalMutationEnvelopes(result, { duplicate }) {
+  assert.equal(result.duplicate, duplicate);
+  assert.equal(result.commandEnvelope.commandEnvelopeVersion, 1);
+  assert.equal(result.commandEnvelope.commandType, "orgAuth.testMutation");
+  assert.equal(result.commandEnvelope.aggregateType, "orgAuth_aggregate_state");
+  assert.equal(result.commandEnvelope.aggregateId, "company-1");
+  assert.equal(result.commandEnvelope.companyId, "company-1");
+  assert.equal(result.commandEnvelope.actorId, "system");
+  assert.equal(result.commandEnvelope.idempotencyKey, "idem-1");
+  assert.equal(result.commandEnvelope.commandPayload.input.mode, "test");
+  assert.equal(result.commandEnvelope.metadata.source, "phase2-test");
+
+  assert.equal(result.receiptEnvelope.receiptEnvelopeVersion, 1);
+  assert.equal(result.receiptEnvelope.receiptType, "command_receipt");
+  assert.equal(result.receiptEnvelope.status, duplicate ? "duplicate" : "accepted");
+  assert.equal(result.receiptEnvelope.commandId, "cmd-1");
+  assert.equal(result.receiptEnvelope.commandType, "orgAuth.testMutation");
+  assert.equal(result.receiptEnvelope.aggregateType, "orgAuth_aggregate_state");
+  assert.equal(result.receiptEnvelope.aggregateId, "company-1");
+  assert.equal(result.receiptEnvelope.companyId, "company-1");
+  assert.equal(result.receiptEnvelope.payload.commandReceiptId, result.commandReceipt.commandReceiptId);
+  assert.equal(result.receiptEnvelope.payload.resultingObjectVersion, 1);
+  assert.equal(result.receiptEnvelope.payload.domainEventCount, 1);
+  assert.equal(result.receiptEnvelope.payload.outboxMessageCount, 1);
+  assert.equal(result.receiptEnvelope.payload.evidenceRefCount, 1);
+}
+
+function createMutationPayload() {
+  return {
+    domainKey: "orgAuth",
+    companyId: "company-1",
+    commandType: "orgAuth.testMutation",
+    aggregateType: "orgAuth_aggregate_state",
+    aggregateId: "company-1",
+    commandId: "cmd-1",
+    idempotencyKey: "idem-1",
+    actorId: "system",
+    sessionRevision: 1,
+    correlationId: "corr-1",
+    causationId: null,
+    commandPayload: {
+      input: {
+        mode: "test"
+      }
+    },
+    metadata: {
+      source: "phase2-test"
+    },
+    domainEventRecords: [
+      {
+        eventType: "orgAuth.testMutation.committed",
+        payload: {
+          committed: true
+        }
+      }
+    ],
+    outboxMessageRecords: [
+      {
+        eventType: "orgAuth.testMutation.committed",
+        payload: {
+          committed: true
+        }
+      }
+    ],
+    evidenceRefRecords: [
+      {
+        evidenceRefType: "mutation_trace",
+        evidenceRef: "evidence://phase2-test"
+      }
+    ],
+    snapshot: {
+      companies: [
+        {
+          companyId: "company-1",
+          legalName: "Phase 2 Envelope AB"
+        }
+      ]
+    },
+    persistedAt: "2026-03-30T10:00:00.000Z",
+    durabilityPolicy: "repository_envelope",
+    adapterKind: "critical_domain_repository"
+  };
+}
+
 test("Phase 2.5 sqlite critical domain state store publishes a bindande schema contract with indexes", () => {
   const temp = createTempSqlitePath("swedish-erp-phase25-critical-store-contract");
   const store = createSqliteCriticalDomainStateStore({
@@ -53,6 +137,34 @@ test("Phase 2.5 sqlite critical domain state store publishes a bindande schema c
       "critical_domain_evidence_refs_company_recorded_idx",
       "critical_domain_evidence_refs_receipt_idx"
     ]);
+  } finally {
+    store.close();
+    cleanupTempDirectory(temp.directory);
+  }
+});
+
+test("Phase 2.2 in-memory critical domain state store returns canonical envelopes for accepted and duplicate mutations", () => {
+  const store = createInMemoryCriticalDomainStateStore();
+
+  const accepted = store.recordMutation(createMutationPayload());
+  const duplicate = store.recordMutation(createMutationPayload());
+
+  assertCanonicalMutationEnvelopes(accepted, { duplicate: false });
+  assertCanonicalMutationEnvelopes(duplicate, { duplicate: true });
+});
+
+test("Phase 2.2 sqlite critical domain state store returns canonical envelopes for accepted and duplicate mutations", () => {
+  const temp = createTempSqlitePath("swedish-erp-phase22-critical-envelopes");
+  const store = createSqliteCriticalDomainStateStore({
+    filePath: temp.filePath
+  });
+
+  try {
+    const accepted = store.recordMutation(createMutationPayload());
+    const duplicate = store.recordMutation(createMutationPayload());
+
+    assertCanonicalMutationEnvelopes(accepted, { duplicate: false });
+    assertCanonicalMutationEnvelopes(duplicate, { duplicate: true });
   } finally {
     store.close();
     cleanupTempDirectory(temp.directory);

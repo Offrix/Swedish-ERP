@@ -2,7 +2,11 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { EVENT_ENVELOPE_VERSION } from "../../events/src/index.mjs";
+import {
+  EVENT_ENVELOPE_VERSION,
+  createCommandEnvelope,
+  createReceiptEnvelope
+} from "../../events/src/index.mjs";
 import {
   cloneSnapshotValue,
   deserializeSnapshotValue,
@@ -241,6 +245,71 @@ function mapEvidenceRefRecord(record) {
   return cloneSnapshotValue(record);
 }
 
+export function createCriticalDomainCommandEnvelope({
+  commandId,
+  commandType,
+  aggregateType,
+  aggregateId,
+  companyId,
+  actorId,
+  sessionRevision,
+  correlationId,
+  causationId = null,
+  idempotencyKey,
+  recordedAt,
+  commandPayload = {},
+  payloadHash,
+  metadata = {}
+}) {
+  return createCommandEnvelope({
+    commandId,
+    commandType,
+    aggregateType,
+    aggregateId,
+    companyId,
+    actorId,
+    sessionRevision,
+    correlationId,
+    causationId: causationId || undefined,
+    idempotencyKey,
+    recordedAt,
+    commandPayload,
+    payloadHash,
+    metadata
+  });
+}
+
+export function createCriticalDomainReceiptEnvelope({
+  commandReceipt,
+  domainEvents = [],
+  outboxMessages = [],
+  evidenceRefs = [],
+  status = null
+}) {
+  return createReceiptEnvelope({
+    receiptId: commandReceipt.commandReceiptId,
+    receiptType: "command_receipt",
+    status: status || commandReceipt.status,
+    companyId: commandReceipt.companyId,
+    actorId: commandReceipt.actorId,
+    correlationId: commandReceipt.correlationId,
+    causationId: commandReceipt.causationId || undefined,
+    idempotencyKey: commandReceipt.idempotencyKey,
+    commandId: commandReceipt.commandId,
+    commandType: commandReceipt.commandType,
+    aggregateType: commandReceipt.aggregateType,
+    aggregateId: commandReceipt.aggregateId,
+    recordedAt: commandReceipt.processedAt || commandReceipt.recordedAt,
+    payload: {
+      commandReceiptId: commandReceipt.commandReceiptId,
+      resultingObjectVersion: commandReceipt.resultingObjectVersion,
+      domainEventCount: domainEvents.length,
+      outboxMessageCount: outboxMessages.length,
+      evidenceRefCount: evidenceRefs.length
+    }
+  });
+}
+
 export function createInMemoryCriticalDomainStateStore() {
   const records = new Map();
   const commandReceipts = new Map();
@@ -358,19 +427,30 @@ export function createInMemoryCriticalDomainStateStore() {
       ) || null;
       if (existingByCommand || existingByIdempotency) {
         const existingReceipt = existingByCommand || existingByIdempotency;
+        const existingDomainEvents = [...domainEvents.values()]
+          .filter((record) => record.commandReceiptId === existingReceipt.commandReceiptId)
+          .map(mapDomainEventRecord);
+        const existingOutboxMessages = [...outboxMessages.values()]
+          .filter((record) => record.commandReceiptId === existingReceipt.commandReceiptId)
+          .map(mapOutboxMessageRecord);
+        const existingEvidenceRefs = [...evidenceRefs.values()]
+          .filter((record) => record.commandReceiptId === existingReceipt.commandReceiptId)
+          .map(mapEvidenceRefRecord);
         return Object.freeze({
           duplicate: true,
           stateRecord: this.load(normalizedDomainKey),
+          commandEnvelope: createCriticalDomainCommandEnvelope(existingReceipt),
           commandReceipt: mapCommandReceiptRecord(existingReceipt),
-          domainEvents: [...domainEvents.values()]
-            .filter((record) => record.commandReceiptId === existingReceipt.commandReceiptId)
-            .map(mapDomainEventRecord),
-          outboxMessages: [...outboxMessages.values()]
-            .filter((record) => record.commandReceiptId === existingReceipt.commandReceiptId)
-            .map(mapOutboxMessageRecord),
-          evidenceRefs: [...evidenceRefs.values()]
-            .filter((record) => record.commandReceiptId === existingReceipt.commandReceiptId)
-            .map(mapEvidenceRefRecord)
+          receiptEnvelope: createCriticalDomainReceiptEnvelope({
+            commandReceipt: existingReceipt,
+            domainEvents: existingDomainEvents,
+            outboxMessages: existingOutboxMessages,
+            evidenceRefs: existingEvidenceRefs,
+            status: "duplicate"
+          }),
+          domainEvents: existingDomainEvents,
+          outboxMessages: existingOutboxMessages,
+          evidenceRefs: existingEvidenceRefs
         });
       }
 
@@ -489,7 +569,14 @@ export function createInMemoryCriticalDomainStateStore() {
       return Object.freeze({
         duplicate: false,
         stateRecord: cloneSnapshotValue(stateRecord),
+        commandEnvelope: createCriticalDomainCommandEnvelope(receipt),
         commandReceipt: mapCommandReceiptRecord(receipt),
+        receiptEnvelope: createCriticalDomainReceiptEnvelope({
+          commandReceipt: receipt,
+          domainEvents: recordedDomainEvents,
+          outboxMessages: recordedOutboxMessages,
+          evidenceRefs: recordedEvidenceRefs
+        }),
         domainEvents: recordedDomainEvents.map(mapDomainEventRecord),
         outboxMessages: recordedOutboxMessages.map(mapOutboxMessageRecord),
         evidenceRefs: recordedEvidenceRefs.map(mapEvidenceRefRecord)
@@ -1026,19 +1113,30 @@ export function createSqliteCriticalDomainStateStore({ filePath }) {
     );
     if (existingByCommand || existingByIdempotency) {
       const existingReceipt = existingByCommand || existingByIdempotency;
+      const existingDomainEvents = listDomainEventsStatement
+        .all(null, null, normalizedCompanyId, normalizedCompanyId, existingReceipt.commandReceiptId, existingReceipt.commandReceiptId)
+        .map(mapSqliteDomainEventRow);
+      const existingOutboxMessages = listOutboxMessagesStatement
+        .all(null, null, normalizedCompanyId, normalizedCompanyId, existingReceipt.commandReceiptId, existingReceipt.commandReceiptId)
+        .map(mapSqliteOutboxRow);
+      const existingEvidenceRefs = listEvidenceRefsStatement
+        .all(null, null, normalizedCompanyId, normalizedCompanyId, existingReceipt.commandReceiptId, existingReceipt.commandReceiptId)
+        .map(mapSqliteEvidenceRefRow);
       return {
         duplicate: true,
         stateRecord: mapRow(selectStatement.get(normalizedDomainKey)),
+        commandEnvelope: createCriticalDomainCommandEnvelope(existingReceipt),
         commandReceipt: existingReceipt,
-        domainEvents: listDomainEventsStatement
-          .all(null, null, normalizedCompanyId, normalizedCompanyId, existingReceipt.commandReceiptId, existingReceipt.commandReceiptId)
-          .map(mapSqliteDomainEventRow),
-        outboxMessages: listOutboxMessagesStatement
-          .all(null, null, normalizedCompanyId, normalizedCompanyId, existingReceipt.commandReceiptId, existingReceipt.commandReceiptId)
-          .map(mapSqliteOutboxRow),
-        evidenceRefs: listEvidenceRefsStatement
-          .all(null, null, normalizedCompanyId, normalizedCompanyId, existingReceipt.commandReceiptId, existingReceipt.commandReceiptId)
-          .map(mapSqliteEvidenceRefRow)
+        receiptEnvelope: createCriticalDomainReceiptEnvelope({
+          commandReceipt: existingReceipt,
+          domainEvents: existingDomainEvents,
+          outboxMessages: existingOutboxMessages,
+          evidenceRefs: existingEvidenceRefs,
+          status: "duplicate"
+        }),
+        domainEvents: existingDomainEvents,
+        outboxMessages: existingOutboxMessages,
+        evidenceRefs: existingEvidenceRefs
       };
     }
 
@@ -1266,7 +1364,14 @@ export function createSqliteCriticalDomainStateStore({ filePath }) {
     result = {
       duplicate: false,
       stateRecord,
+      commandEnvelope: createCriticalDomainCommandEnvelope(receipt),
       commandReceipt: receipt,
+      receiptEnvelope: createCriticalDomainReceiptEnvelope({
+        commandReceipt: receipt,
+        domainEvents: recordedDomainEvents,
+        outboxMessages: recordedOutboxMessages,
+        evidenceRefs: recordedEvidenceRefs
+      }),
       domainEvents: recordedDomainEvents,
       outboxMessages: recordedOutboxMessages,
       evidenceRefs: recordedEvidenceRefs
