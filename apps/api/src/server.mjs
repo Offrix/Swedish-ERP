@@ -14,6 +14,7 @@ import {
 } from "./route-contracts.mjs";
 import {
   CANONICAL_API_VERSION,
+  DEFAULT_API_BODY_LIMIT_BYTES,
   createHttpError,
   readJsonBody,
   readSessionToken,
@@ -25,6 +26,22 @@ import { resolveSessionTrustLevel, trustLevelSatisfies } from "../../../packages
 import { isMainModule, stopServer } from "../../../scripts/lib/repo.mjs";
 import { assertRuntimeStartupAllowed } from "../../../scripts/lib/runtime-diagnostics.mjs";
 
+const PROTECTED_RUNTIME_MODES = new Set(["pilot_parallel", "production"]);
+const DEFAULT_API_EDGE_POLICY = Object.freeze({
+  requestTimeoutMs: 15_000,
+  defaultMaxBodyBytes: DEFAULT_API_BODY_LIMIT_BYTES,
+  allowedOrigins: Object.freeze([]),
+  allowLocalOriginsOutsideProtectedModes: true,
+  rateLimitProfiles: Object.freeze({
+    defaultMutation: Object.freeze({ limit: 5_000, windowMs: 60_000 }),
+    authLogin: Object.freeze({ limit: 200, windowMs: 60_000 }),
+    authTotpVerify: Object.freeze({ limit: 300, windowMs: 60_000 }),
+    federationCallback: Object.freeze({ limit: 180, windowMs: 60_000 }),
+    ocrProviderCallback: Object.freeze({ limit: 180, windowMs: 60_000 }),
+    webhookDispatch: Object.freeze({ limit: 300, windowMs: 60_000 })
+  })
+});
+
 export function createApiServer({
   platform = createDefaultApiPlatform({
     env: process.env,
@@ -35,13 +52,26 @@ export function createApiServer({
       "test",
     enforceExplicitRuntimeMode: true
   }),
-  flags = readFeatureFlags(process.env)
+  flags = readFeatureFlags(process.env),
+  edgePolicy = null
 } = {}) {
-  return http.createServer((req, res) => {
+  const resolvedEdgePolicy = resolveApiEdgePolicy({ env: process.env, overrides: edgePolicy });
+  const edgeState = createApiEdgeState();
+  const server = http.createServer((req, res) => {
     const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-    const requestContext = createRequestContext({ req, platform });
+    const requestContext = createRequestContext({
+      req,
+      platform,
+      edgePolicy: resolvedEdgePolicy,
+      path: requestUrl.pathname
+    });
     req.__swedishErpRequestContext = requestContext;
     res.__swedishErpRequestContext = requestContext;
+    armRequestTimeout({
+      req,
+      res,
+      timeoutMs: resolvedEdgePolicy.requestTimeoutMs
+    });
     const traceSpan =
       typeof platform.startTraceSpan === "function"
         ? platform.startTraceSpan({
@@ -58,7 +88,14 @@ export function createApiServer({
             }
           })
         : null;
-    handleRequest({ req, res, platform, flags }).then(() => {
+    handleRequest({
+      req,
+      res,
+      platform,
+      flags,
+      edgePolicy: resolvedEdgePolicy,
+      edgeState
+    }).then(() => {
       if (typeof platform.recordStructuredLog === "function") {
         platform.recordStructuredLog({
           companyId: readRequestCompanyId(req),
@@ -124,6 +161,9 @@ export function createApiServer({
       writeError(res, error);
     });
   });
+  server.requestTimeout = resolvedEdgePolicy.requestTimeoutMs;
+  server.headersTimeout = resolvedEdgePolicy.requestTimeoutMs + 1_000;
+  return server;
 }
 
 export async function startApiServer({
@@ -131,6 +171,7 @@ export async function startApiServer({
   logger = console.log,
   platform = null,
   flags = readFeatureFlags(process.env),
+  edgePolicy = null,
   runtimeMode = null,
   env = process.env,
   enforceExplicitRuntimeMode = true
@@ -154,7 +195,7 @@ export async function startApiServer({
   });
   await resolvedPlatform.verifyRuntimeCanonicalRepositorySchemaContract?.();
   await resolvedPlatform.verifyRuntimeCriticalDomainStateStoreSchemaContract?.();
-  const server = createApiServer({ platform: resolvedPlatform, flags });
+  const server = createApiServer({ platform: resolvedPlatform, flags, edgePolicy });
   await new Promise((resolve) => {
     server.listen(port, resolve);
   });
@@ -193,9 +234,13 @@ export async function startApiServer({
   };
 }
 
-async function handleRequest({ req, res, platform, flags }) {
+async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState }) {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
   const path = url.pathname;
+
+  if (!applyApiEdgePolicy({ req, res, url, path, platform, edgePolicy, edgeState })) {
+    return;
+  }
 
   if (req.method === "GET" && path === "/v1/system/runtime-mode") {
     const diagnostics =
@@ -16946,7 +16991,7 @@ async function handleRequest({ req, res, platform, flags }) {
 }
 
 function writeFeatureDisabledError(res, message) {
-  writeError(res, createHttpError(503, "feature_disabled", message));
+  writeError(res, createHttpError(503, "feature_disabled", message, { exposeMessage: true }));
 }
 
 function buildRouteContractResource({ routeContract, routeParams = {}, resource = {} }) {
@@ -17820,6 +17865,341 @@ function requireTenantControlDomain(platform) {
   throw new Error("Tenant control domain must be registered before tenant bootstrap routes can execute.");
 }
 
+function applyApiEdgePolicy({ req, res, url, path, platform, edgePolicy, edgeState }) {
+  const requestContext = req.__swedishErpRequestContext || createRequestContext({ req, platform, edgePolicy, path });
+  const routeProfile =
+    requestContext.routeProfile ||
+    resolveApiEdgeRouteProfile({
+      method: req.method || "GET",
+      path,
+      environmentMode: platform.environmentMode || "test",
+      edgePolicy
+    });
+  requestContext.routeProfile = routeProfile;
+  requestContext.maxBodyBytes = routeProfile.maxBodyBytes;
+  requestContext.transportSecurityEnabled = requestContext.transportSecurityEnabled === true || isTransportSecure(req);
+
+  if (
+    routeProfile.rejectCookieTransport
+    && hasCookieHeader(req)
+    && !hasAuthorizationHeader(req)
+  ) {
+    writeError(
+      res,
+      createHttpError(
+        403,
+        "cookie_transport_not_supported",
+        "Cookie-bound mutation is not supported on this API surface. Use bearer transport."
+      )
+    );
+    return false;
+  }
+
+  if (routeProfile.enforceOriginCheck) {
+    const originDecision = evaluateOriginPolicy({
+      req,
+      url,
+      environmentMode: platform.environmentMode || "test",
+      edgePolicy
+    });
+    if (!originDecision.allowed) {
+      writeError(
+        res,
+        createHttpError(
+          403,
+          "origin_not_allowed",
+          "Request origin is not allowed for this mutation surface."
+        )
+      );
+      return false;
+    }
+  }
+
+  if (routeProfile.rateLimitProfile) {
+    const throttleDecision = consumeApiEdgeRateLimit({
+      req,
+      routeProfile,
+      edgeState
+    });
+    if (!throttleDecision.allowed) {
+      writeError(
+        res,
+        createHttpError(
+          429,
+          "edge_rate_limited",
+          "Too many requests hit this API surface. Try again later.",
+          {
+            retryable: true,
+            headers: {
+              "retry-after": String(throttleDecision.retryAfterSeconds)
+            }
+          }
+        )
+      );
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function resolveApiEdgePolicy({ env = process.env, overrides = null } = {}) {
+  const overrideRateLimitProfiles =
+    overrides && typeof overrides === "object" && overrides.rateLimitProfiles && typeof overrides.rateLimitProfiles === "object"
+      ? overrides.rateLimitProfiles
+      : {};
+  const allowedOrigins = parseOriginList(overrides?.allowedOrigins ?? env.ERP_API_ALLOWED_ORIGINS ?? "");
+  return {
+    requestTimeoutMs: normalizePositiveInteger(overrides?.requestTimeoutMs, DEFAULT_API_EDGE_POLICY.requestTimeoutMs),
+    defaultMaxBodyBytes: normalizePositiveInteger(overrides?.defaultMaxBodyBytes, DEFAULT_API_EDGE_POLICY.defaultMaxBodyBytes),
+    allowedOrigins,
+    allowLocalOriginsOutsideProtectedModes:
+      overrides?.allowLocalOriginsOutsideProtectedModes ?? DEFAULT_API_EDGE_POLICY.allowLocalOriginsOutsideProtectedModes,
+    rateLimitProfiles: {
+      defaultMutation: mergeRateLimitProfile(DEFAULT_API_EDGE_POLICY.rateLimitProfiles.defaultMutation, overrideRateLimitProfiles.defaultMutation),
+      authLogin: mergeRateLimitProfile(DEFAULT_API_EDGE_POLICY.rateLimitProfiles.authLogin, overrideRateLimitProfiles.authLogin),
+      authTotpVerify: mergeRateLimitProfile(DEFAULT_API_EDGE_POLICY.rateLimitProfiles.authTotpVerify, overrideRateLimitProfiles.authTotpVerify),
+      federationCallback: mergeRateLimitProfile(DEFAULT_API_EDGE_POLICY.rateLimitProfiles.federationCallback, overrideRateLimitProfiles.federationCallback),
+      ocrProviderCallback: mergeRateLimitProfile(DEFAULT_API_EDGE_POLICY.rateLimitProfiles.ocrProviderCallback, overrideRateLimitProfiles.ocrProviderCallback),
+      webhookDispatch: mergeRateLimitProfile(DEFAULT_API_EDGE_POLICY.rateLimitProfiles.webhookDispatch, overrideRateLimitProfiles.webhookDispatch)
+    }
+  };
+}
+
+function mergeRateLimitProfile(baseProfile, overrideProfile = null) {
+  return {
+    limit: normalizePositiveInteger(overrideProfile?.limit, baseProfile.limit),
+    windowMs: normalizePositiveInteger(overrideProfile?.windowMs, baseProfile.windowMs)
+  };
+}
+
+function createApiEdgeState() {
+  return {
+    rateLimitWindows: new Map()
+  };
+}
+
+function resolveApiEdgeRouteProfile({ method, path, environmentMode, edgePolicy }) {
+  const normalizedMethod = String(method || "GET").toUpperCase();
+  const mutation = isMutationMethod(normalizedMethod);
+  const protectedMode = PROTECTED_RUNTIME_MODES.has(environmentMode);
+  const defaultMutationLimit = edgePolicy.rateLimitProfiles.defaultMutation;
+  const localBodyLimit =
+    normalizedMethod === "POST" && (
+      path === "/v1/auth/login"
+      || path === "/v1/auth/mfa/totp/verify"
+      || path === "/v1/auth/federation/callback"
+      || matchPath(path, "/v1/documents/:documentId/ocr/runs/:ocrRunId/provider-callback")
+    )
+      ? Math.min(edgePolicy.defaultMaxBodyBytes, 65_536)
+      : edgePolicy.defaultMaxBodyBytes;
+
+  if (normalizedMethod === "POST" && path === "/v1/auth/login") {
+    return {
+      profileCode: "auth_login",
+      maxBodyBytes: localBodyLimit,
+      enforceOriginCheck: true,
+      rejectCookieTransport: true,
+      rateLimitProfile: selectEdgeRateLimitProfile(edgePolicy.rateLimitProfiles.authLogin, protectedMode)
+    };
+  }
+  if (normalizedMethod === "POST" && path === "/v1/auth/mfa/totp/verify") {
+    return {
+      profileCode: "auth_totp_verify",
+      maxBodyBytes: localBodyLimit,
+      enforceOriginCheck: true,
+      rejectCookieTransport: true,
+      rateLimitProfile: selectEdgeRateLimitProfile(edgePolicy.rateLimitProfiles.authTotpVerify, protectedMode)
+    };
+  }
+  if (normalizedMethod === "POST" && path === "/v1/auth/federation/callback") {
+    return {
+      profileCode: "auth_federation_callback",
+      maxBodyBytes: localBodyLimit,
+      enforceOriginCheck: true,
+      rejectCookieTransport: true,
+      rateLimitProfile: selectEdgeRateLimitProfile(edgePolicy.rateLimitProfiles.federationCallback, protectedMode)
+    };
+  }
+  if (normalizedMethod === "POST" && matchPath(path, "/v1/documents/:documentId/ocr/runs/:ocrRunId/provider-callback")) {
+    return {
+      profileCode: "ocr_provider_callback",
+      maxBodyBytes: localBodyLimit,
+      enforceOriginCheck: false,
+      rejectCookieTransport: false,
+      rateLimitProfile: selectEdgeRateLimitProfile(edgePolicy.rateLimitProfiles.ocrProviderCallback, protectedMode)
+    };
+  }
+  if (normalizedMethod === "POST" && path === "/v1/public-api/webhook-deliveries/dispatch") {
+    return {
+      profileCode: "public_webhook_dispatch",
+      maxBodyBytes: Math.min(edgePolicy.defaultMaxBodyBytes, 131_072),
+      enforceOriginCheck: true,
+      rejectCookieTransport: true,
+      rateLimitProfile: selectEdgeRateLimitProfile(edgePolicy.rateLimitProfiles.webhookDispatch, protectedMode)
+    };
+  }
+  return {
+    profileCode: mutation ? "mutation_default" : "read_default",
+    maxBodyBytes: edgePolicy.defaultMaxBodyBytes,
+    enforceOriginCheck: mutation,
+    rejectCookieTransport: mutation,
+    rateLimitProfile: mutation ? selectEdgeRateLimitProfile(defaultMutationLimit, protectedMode) : null
+  };
+}
+
+function selectEdgeRateLimitProfile(profile, protectedMode) {
+  if (!profile) {
+    return null;
+  }
+  if (!protectedMode) {
+    return profile;
+  }
+  return {
+    limit: Math.max(10, Math.floor(profile.limit / 4)),
+    windowMs: profile.windowMs
+  };
+}
+
+function consumeApiEdgeRateLimit({ req, routeProfile, edgeState }) {
+  const profile = routeProfile.rateLimitProfile;
+  if (!profile) {
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  const remoteKey = resolveClientAddress(req);
+  const bucketKey = `${routeProfile.profileCode}:${remoteKey}`;
+  const now = Date.now();
+  const existing = edgeState.rateLimitWindows.get(bucketKey);
+  const windowStartedAt =
+    !existing || now >= existing.windowEndsAt
+      ? now
+      : existing.windowStartedAt;
+  const windowEndsAt =
+    !existing || now >= existing.windowEndsAt
+      ? now + profile.windowMs
+      : existing.windowEndsAt;
+  const nextCount =
+    !existing || now >= existing.windowEndsAt
+      ? 1
+      : existing.count + 1;
+  edgeState.rateLimitWindows.set(bucketKey, {
+    windowStartedAt,
+    windowEndsAt,
+    count: nextCount
+  });
+  if (nextCount <= profile.limit) {
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  return {
+    allowed: false,
+    retryAfterSeconds: Math.max(1, Math.ceil((windowEndsAt - now) / 1000))
+  };
+}
+
+function evaluateOriginPolicy({ req, url, environmentMode, edgePolicy }) {
+  const origin = readOptionalHeader(req, "origin");
+  if (!origin) {
+    return { allowed: true };
+  }
+  const resolvedHost = readOptionalHeader(req, "x-forwarded-host") || req.headers.host || url.host || "localhost";
+  const resolvedProto = readOptionalHeader(req, "x-forwarded-proto") || (req.socket?.encrypted ? "https" : "http");
+  const requestOrigin = `${resolvedProto}://${resolvedHost}`;
+  if (origin === requestOrigin) {
+    return { allowed: true };
+  }
+  if (edgePolicy.allowedOrigins.includes(origin)) {
+    return { allowed: true };
+  }
+  if (
+    edgePolicy.allowLocalOriginsOutsideProtectedModes
+    && !PROTECTED_RUNTIME_MODES.has(environmentMode)
+    && isLocalOrigin(origin)
+  ) {
+    return { allowed: true };
+  }
+  return { allowed: false };
+}
+
+function armRequestTimeout({ req, res, timeoutMs }) {
+  const resolvedTimeoutMs = normalizePositiveInteger(timeoutMs, DEFAULT_API_EDGE_POLICY.requestTimeoutMs);
+  const onTimeout = () => {
+    if (res.writableEnded) {
+      return;
+    }
+    writeError(
+      res,
+      createHttpError(408, "request_timeout", "Request timed out.", {
+        retryable: true
+      })
+    );
+    req.destroy();
+  };
+  req.setTimeout(resolvedTimeoutMs, onTimeout);
+  res.setTimeout(resolvedTimeoutMs, onTimeout);
+}
+
+function isTransportSecure(req) {
+  const forwardedProto = readOptionalHeader(req, "x-forwarded-proto");
+  if (forwardedProto) {
+    return forwardedProto.toLowerCase() === "https";
+  }
+  return req.socket?.encrypted === true;
+}
+
+function resolveClientAddress(req) {
+  const forwardedFor = readOptionalHeader(req, "x-forwarded-for");
+  if (forwardedFor) {
+    return forwardedFor.split(",")[0].trim();
+  }
+  return req.socket?.remoteAddress || "unknown";
+}
+
+function hasCookieHeader(req) {
+  return readOptionalHeader(req, "cookie") != null;
+}
+
+function hasAuthorizationHeader(req) {
+  return readOptionalHeader(req, "authorization") != null;
+}
+
+function isLocalOrigin(origin) {
+  return [
+    "http://localhost",
+    "https://localhost",
+    "http://127.0.0.1",
+    "https://127.0.0.1",
+    "http://[::1]",
+    "https://[::1]"
+  ].some((candidate) => origin === candidate || origin.startsWith(`${candidate}:`));
+}
+
+function isMutationMethod(method) {
+  return ["POST", "PUT", "PATCH", "DELETE"].includes(String(method || "GET").toUpperCase());
+}
+
+function parseOriginList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean);
+  }
+  if (typeof value !== "string") {
+    return [];
+  }
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function normalizePositiveInteger(value, fallback) {
+  const resolved = Number(value);
+  if (!Number.isInteger(resolved) || resolved <= 0) {
+    return fallback;
+  }
+  return resolved;
+}
+
 function readRequestCompanyId(req) {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
@@ -17845,16 +18225,25 @@ function createCorrelationId() {
   return crypto.randomUUID();
 }
 
-function createRequestContext({ req, platform }) {
+function createRequestContext({ req, platform, edgePolicy = DEFAULT_API_EDGE_POLICY, path = "/" }) {
   const requestId = readOptionalHeader(req, "x-request-id") || createCorrelationId();
   const correlationId = readRequestCorrelationId(req) || requestId;
   const idempotencyKey = readOptionalHeader(req, "idempotency-key");
+  const routeProfile = resolveApiEdgeRouteProfile({
+    method: req.method || "GET",
+    path,
+    environmentMode: platform.environmentMode || "test",
+    edgePolicy
+  });
   return {
     requestId,
     correlationId,
     idempotencyKey,
     apiVersion: CANONICAL_API_VERSION,
-    environmentMode: platform.environmentMode || null
+    environmentMode: platform.environmentMode || null,
+    transportSecurityEnabled: isTransportSecure(req),
+    maxBodyBytes: routeProfile.maxBodyBytes,
+    routeProfile
   };
 }
 

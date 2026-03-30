@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import { DEFAULT_WEBHOOK_REPLAY_WINDOW_SECONDS, verifyWebhookDeliverySignature } from "../../packages/domain-integrations/src/public-api.mjs";
 import { seedReportSnapshot } from "../helpers/reporting-fixtures.mjs";
 import { createSentWebhookDeliveryExecutor } from "../helpers/phase13-integrations-fixtures.mjs";
 
@@ -120,6 +121,44 @@ test("Phase 13.1 public API clients, compatibility baselines and webhook events 
   assert.equal(deliveries[0].status, "queued");
   assert.equal(deliveries[0].sequenceNo, 1);
   assert.equal(deliveries[0].signingKeyVersion, 1);
+  assert.equal(deliveries[0].signatureMetadata.scheme, "hmac-sha256-v2");
+  assert.equal(deliveries[0].signatureMetadata.deliveryId, deliveries[0].deliveryId);
+  assert.equal(deliveries[0].signatureMetadata.replayWindowSeconds, DEFAULT_WEBHOOK_REPLAY_WINDOW_SECONDS);
+  const signedBody = {
+    meta: {
+      requestId: deliveries[0].deliveryId,
+      correlationId: first.eventId,
+      apiVersion: "2026-03-27",
+      mode: "sandbox"
+    },
+    eventId: first.eventId,
+    subscriptionId: subscription.subscriptionId,
+    sequenceNo: deliveries[0].sequenceNo,
+    eventType: first.eventType,
+    resourceType: first.resourceType,
+    resourceId: first.resourceId,
+    payload: { snapshotId: "snapshot-1" }
+  };
+  assert.equal(
+    verifyWebhookDeliverySignature({
+      secret: subscription.secret,
+      body: signedBody,
+      signature: deliveries[0].signature,
+      signatureMetadata: deliveries[0].signatureMetadata,
+      now: new Date("2026-03-22T18:04:00Z")
+    }).valid,
+    true
+  );
+  assert.equal(
+    verifyWebhookDeliverySignature({
+      secret: subscription.secret,
+      body: signedBody,
+      signature: deliveries[0].signature,
+      signatureMetadata: deliveries[0].signatureMetadata,
+      now: new Date("2026-03-22T18:11:00Z")
+    }).errorCode,
+    "webhook_signature_replay_window_expired"
+  );
   const dispatch = await platform.dispatchWebhookDeliveries({
     companyId: DEMO_IDS.companyId,
     subscriptionId: subscription.subscriptionId,

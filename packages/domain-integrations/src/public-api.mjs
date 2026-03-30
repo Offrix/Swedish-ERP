@@ -10,6 +10,8 @@ const PROTECTED_RUNTIME_MODES = new Set(["pilot_parallel", "production"]);
 const OPAQUE_TOKEN_HASH_ALGORITHM = "blind_index_hmac_sha256";
 const PUBLIC_API_CLIENT_SECRET_HASH_PURPOSE = "public_api_client_secret_lookup";
 const PUBLIC_API_ACCESS_TOKEN_HASH_PURPOSE = "public_api_access_token_lookup";
+export const WEBHOOK_SIGNATURE_SCHEME = "hmac-sha256-v2";
+export const DEFAULT_WEBHOOK_REPLAY_WINDOW_SECONDS = 300;
 
 export const PUBLIC_API_MODES = Object.freeze(["sandbox", "production"]);
 export const PUBLIC_API_CLIENT_STATUSES = Object.freeze(["active", "revoked"]);
@@ -624,23 +626,29 @@ export function createPublicApiModule({
         resourceType: event.resourceType,
         resourceId: event.resourceId,
         payload: clone(event.payloadJson)
-      };
-      const sequenceNo = nextWebhookSequenceNo(state, subscription.subscriptionId);
-      const signingSecret = readWebhookSubscriptionSecret(subscription);
-      const delivery = {
-        deliveryId,
-        eventId: event.eventId,
-        subscriptionId: subscription.subscriptionId,
-        sequenceNo,
-        companyId: resolvedCompanyId,
-        mode: resolvedMode,
-        status: "queued",
-        deliveryAttemptNo: 0,
-        signature: signWebhookBody(signingSecret, body),
-        signingKeyVersion: subscription.signingKeyVersion,
-        bodyHash: hashObject(body),
-        bodyJson: clone(body),
-        targetUrl: subscription.targetUrl,
+        };
+        const sequenceNo = nextWebhookSequenceNo(state, subscription.subscriptionId);
+        const signingSecret = readWebhookSubscriptionSecret(subscription);
+        const signatureMetadata = createWebhookSignatureMetadata({
+          deliveryId,
+          body,
+          clock
+        });
+        const delivery = {
+          deliveryId,
+          eventId: event.eventId,
+          subscriptionId: subscription.subscriptionId,
+          sequenceNo,
+          companyId: resolvedCompanyId,
+          mode: resolvedMode,
+          status: "queued",
+          deliveryAttemptNo: 0,
+          signature: signWebhookBody(signingSecret, body, signatureMetadata),
+          signatureMetadata,
+          signingKeyVersion: subscription.signingKeyVersion,
+          bodyHash: signatureMetadata.bodyHash,
+          bodyJson: clone(body),
+          targetUrl: subscription.targetUrl,
         deliveredAt: null,
         lastAttemptedAt: null,
         lastHttpStatus: null,
@@ -1129,11 +1137,20 @@ async function executeWebhookDelivery({ executor, subscription, event, delivery 
 async function defaultWebhookDeliveryExecutor({ subscription, delivery, body }) {
   const startedAt = Date.now();
   try {
+    const signatureMetadata = normalizeWebhookSignatureMetadata(delivery.signatureMetadata, {
+      deliveryId: delivery.deliveryId,
+      bodyHash: delivery.bodyHash,
+      signedAt: delivery.createdAt
+    });
     const response = await fetch(subscription.targetUrl, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         "x-swedish-erp-signature": delivery.signature,
+        "x-swedish-erp-signature-scheme": signatureMetadata.scheme,
+        "x-swedish-erp-signature-timestamp": signatureMetadata.signedAt,
+        "x-swedish-erp-replay-window-seconds": String(signatureMetadata.replayWindowSeconds),
+        "x-swedish-erp-delivery-id": signatureMetadata.deliveryId,
         "x-swedish-erp-event-id": delivery.eventId,
         "x-swedish-erp-subscription-id": delivery.subscriptionId,
         "x-swedish-erp-sequence-no": String(delivery.sequenceNo),
@@ -1403,8 +1420,91 @@ function hashOpaqueToken(token) {
   return crypto.createHash("sha256").update(String(token)).digest("hex");
 }
 
-function signWebhookBody(secret, body) {
-  return crypto.createHmac("sha256", secret).update(stableStringify(body)).digest("hex");
+function createWebhookSignatureMetadata({ deliveryId, body, clock = () => new Date() } = {}) {
+  return Object.freeze({
+    scheme: WEBHOOK_SIGNATURE_SCHEME,
+    deliveryId: text(deliveryId, "webhook_delivery_id_required"),
+    signedAt: nowIso(clock),
+    replayWindowSeconds: DEFAULT_WEBHOOK_REPLAY_WINDOW_SECONDS,
+    bodyHash: hashObject(body)
+  });
+}
+
+function normalizeWebhookSignatureMetadata(metadata = null, fallback = {}) {
+  const resolved = metadata && typeof metadata === "object" ? metadata : {};
+  return Object.freeze({
+    scheme: optionalText(resolved.scheme) || WEBHOOK_SIGNATURE_SCHEME,
+    deliveryId: optionalText(resolved.deliveryId) || text(fallback.deliveryId, "webhook_delivery_id_required"),
+    signedAt: optionalText(resolved.signedAt) || nowIso(() => new Date(fallback.signedAt || Date.now())),
+    replayWindowSeconds:
+      normalizeNullablePositiveInteger(resolved.replayWindowSeconds)
+      || normalizeNullablePositiveInteger(fallback.replayWindowSeconds)
+      || DEFAULT_WEBHOOK_REPLAY_WINDOW_SECONDS,
+    bodyHash: optionalText(resolved.bodyHash) || optionalText(fallback.bodyHash) || null
+  });
+}
+
+function signWebhookBody(secret, body, metadata = null) {
+  const signatureMetadata = normalizeWebhookSignatureMetadata(metadata, {
+    deliveryId: crypto.randomUUID(),
+    bodyHash: hashObject(body),
+    signedAt: nowIso(),
+    replayWindowSeconds: DEFAULT_WEBHOOK_REPLAY_WINDOW_SECONDS
+  });
+  const signingEnvelope = {
+    deliveryId: signatureMetadata.deliveryId,
+    signedAt: signatureMetadata.signedAt,
+    replayWindowSeconds: signatureMetadata.replayWindowSeconds,
+    bodyHash: signatureMetadata.bodyHash || hashObject(body)
+  };
+  return crypto.createHmac("sha256", secret).update(stableStringify(signingEnvelope)).digest("hex");
+}
+
+export function verifyWebhookDeliverySignature({
+  secret,
+  body,
+  signature,
+  signatureMetadata = null,
+  now = new Date()
+} = {}) {
+  const resolvedMetadata = normalizeWebhookSignatureMetadata(signatureMetadata, {
+    deliveryId: signatureMetadata?.deliveryId || "webhook-delivery",
+    bodyHash: hashObject(body),
+    signedAt: signatureMetadata?.signedAt || nowIso(() => now),
+    replayWindowSeconds: signatureMetadata?.replayWindowSeconds || DEFAULT_WEBHOOK_REPLAY_WINDOW_SECONDS
+  });
+  const expectedSignature = signWebhookBody(secret, body, resolvedMetadata);
+  if (text(signature, "webhook_signature_required") !== expectedSignature) {
+    return Object.freeze({
+      valid: false,
+      errorCode: "webhook_signature_invalid"
+    });
+  }
+  const signedAtMs = Date.parse(resolvedMetadata.signedAt);
+  if (!Number.isFinite(signedAtMs)) {
+    return Object.freeze({
+      valid: false,
+      errorCode: "webhook_signature_timestamp_invalid"
+    });
+  }
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now));
+  if (!Number.isFinite(nowMs)) {
+    return Object.freeze({
+      valid: false,
+      errorCode: "webhook_signature_clock_invalid"
+    });
+  }
+  const expiresAtMs = signedAtMs + (resolvedMetadata.replayWindowSeconds * 1000);
+  if (nowMs > expiresAtMs) {
+    return Object.freeze({
+      valid: false,
+      errorCode: "webhook_signature_replay_window_expired"
+    });
+  }
+  return Object.freeze({
+    valid: true,
+    errorCode: null
+  });
 }
 
 function hashObject(value) {

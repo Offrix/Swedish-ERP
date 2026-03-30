@@ -1,10 +1,40 @@
 import crypto from "node:crypto";
 
 export const CANONICAL_API_VERSION = "2026-03-27";
+export const DEFAULT_API_BODY_LIMIT_BYTES = 1024 * 1024;
 
-export async function readJsonBody(req, allowEmpty = false) {
+const API_SECURITY_HEADERS = Object.freeze({
+  "cache-control": "no-store",
+  pragma: "no-cache",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "x-permitted-cross-domain-policies": "none",
+  "referrer-policy": "no-referrer",
+  "cross-origin-opener-policy": "same-origin",
+  "cross-origin-resource-policy": "same-origin",
+  "content-security-policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+  "permissions-policy":
+    "accelerometer=(), autoplay=(), camera=(), display-capture=(), fullscreen=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), publickey-credentials-get=(), usb=()"
+});
+
+export async function readJsonBody(req, allowEmpty = false, options = {}) {
+  const requestContext = ensureRequestContext(req);
+  const maxBodyBytes = resolveMaxBodyBytes(options.maxBodyBytes ?? requestContext.maxBodyBytes);
+  const declaredContentLength = parseIntegerHeader(readHeaderValue(req, "content-length"));
+  if (declaredContentLength != null && declaredContentLength > maxBodyBytes) {
+    throw createHttpError(413, "request_body_too_large", `Request body exceeded ${maxBodyBytes} bytes.`, {
+      retryable: false
+    });
+  }
   const chunks = [];
+  let totalBytes = 0;
   for await (const chunk of req) {
+    totalBytes += chunk.length;
+    if (totalBytes > maxBodyBytes) {
+      throw createHttpError(413, "request_body_too_large", `Request body exceeded ${maxBodyBytes} bytes.`, {
+        retryable: false
+      });
+    }
     chunks.push(chunk);
   }
   const text = Buffer.concat(chunks).toString("utf8");
@@ -29,6 +59,9 @@ export function readBearerToken(req) {
 }
 
 export function writeJson(res, statusCode, payload, options = {}) {
+  if (res.writableEnded) {
+    return;
+  }
   const meta = buildEnvelopeMeta(res, {
     classification: options.classification || classifySuccessStatus(statusCode)
   });
@@ -38,7 +71,13 @@ export function writeJson(res, statusCode, payload, options = {}) {
 }
 
 export function writeError(res, error) {
+  if (res.writableEnded) {
+    return;
+  }
   const statusCode = error.status || error.statusCode || 500;
+  if (statusCode >= 500 && !error.supportRef) {
+    error.supportRef = ensureRequestContext(res).requestId;
+  }
   const errorPayload = buildErrorPayload(error, statusCode);
   const meta = buildEnvelopeMeta(res, {
     classification: errorPayload.classification
@@ -57,7 +96,7 @@ export function writeError(res, error) {
     supportRef: errorPayload.supportRef,
     details: errorPayload.details
   };
-  res.writeHead(statusCode, buildEnvelopeHeaders(meta));
+  res.writeHead(statusCode, buildEnvelopeHeaders(meta, error.headers));
   res.end(`${JSON.stringify(envelope, null, 2)}\n`);
 }
 
@@ -216,10 +255,11 @@ function buildErrorPayload(error, statusCode) {
   const classification = error.classification || classifyErrorStatus(statusCode);
   const denialReasonCode =
     error.denialReasonCode || (classification === "permission" ? code : null);
-  const details = normalizeErrorDetails(error.details);
+  const internalError = statusCode >= 500 && error.exposeMessage !== true;
+  const details = internalError ? [] : normalizeErrorDetails(error.details);
   return {
     code,
-    message: error.message || "Unexpected error",
+    message: internalError ? "Internal server error." : error.message || "Unexpected error",
     classification,
     retryable: typeof error.retryable === "boolean" ? error.retryable : isRetryableErrorClassification(classification),
     reviewRequired: error.reviewRequired === true,
@@ -233,7 +273,7 @@ function buildEnvelopeMeta(res, { classification }) {
   const context = ensureRequestContext(res);
   const correlationId = context.correlationId || context.requestId || crypto.randomUUID();
   context.correlationId = correlationId;
-  return {
+  const meta = {
     requestId: context.requestId || crypto.randomUUID(),
     correlationId,
     apiVersion: context.apiVersion || CANONICAL_API_VERSION,
@@ -241,14 +281,24 @@ function buildEnvelopeMeta(res, { classification }) {
     classification,
     idempotencyKey: context.idempotencyKey || null
   };
+  Object.defineProperty(meta, "transportSecurityEnabled", {
+    configurable: true,
+    enumerable: false,
+    writable: false,
+    value: context.transportSecurityEnabled === true
+  });
+  return meta;
 }
 
 function buildEnvelopeHeaders(meta, extraHeaders = {}) {
+  const transportSecurityEnabled = meta?.transportSecurityEnabled === true;
   return {
     "content-type": "application/json; charset=utf-8",
     "x-request-id": meta.requestId,
     "x-correlation-id": meta.correlationId,
     "x-api-version": meta.apiVersion,
+    ...API_SECURITY_HEADERS,
+    ...(transportSecurityEnabled ? { "strict-transport-security": "max-age=63072000; includeSubDomains" } : {}),
     ...(meta.idempotencyKey ? { "idempotency-key": meta.idempotencyKey } : {}),
     ...extraHeaders
   };
@@ -298,6 +348,9 @@ function classifyErrorStatus(statusCode) {
   if (statusCode === 429) {
     return "rate_limited";
   }
+  if (statusCode === 408) {
+    return "technical";
+  }
   if (statusCode >= 500) {
     return "technical";
   }
@@ -331,9 +384,30 @@ function ensureRequestContext(target) {
         correlationId: null,
         apiVersion: CANONICAL_API_VERSION,
         environmentMode: null,
-        idempotencyKey: null
+        idempotencyKey: null,
+        maxBodyBytes: DEFAULT_API_BODY_LIMIT_BYTES,
+        transportSecurityEnabled: false
       }
     });
   }
   return target.__swedishErpRequestContext;
+}
+
+function resolveMaxBodyBytes(value) {
+  const resolved = Number(value);
+  if (!Number.isInteger(resolved) || resolved <= 0) {
+    return DEFAULT_API_BODY_LIMIT_BYTES;
+  }
+  return resolved;
+}
+
+function parseIntegerHeader(value) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return null;
+  }
+  return parsed;
 }
