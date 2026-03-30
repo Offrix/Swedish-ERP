@@ -426,6 +426,7 @@ export function createPayrollEngine({
     secretStore: payrollSecretStore
   });
   maskLegacyPayrollPayoutBatchLines(state);
+  maskLegacyStoredPayslipRenderPayloads(state);
   const presentPayoutBatch = (record) =>
     presentPayrollPayoutBatch(state, record, {
       secretStore: payrollSecretStore
@@ -514,6 +515,7 @@ export function createPayrollEngine({
       secretStore: payrollSecretStore
     });
     maskLegacyPayrollPayoutBatchLines(state);
+    maskLegacyStoredPayslipRenderPayloads(state);
     return {
       ...serializeDurableState(state),
       secretStoreBundle: payrollSecretStore.exportSecretBundle()
@@ -527,6 +529,7 @@ export function createPayrollEngine({
       secretStore: payrollSecretStore
     });
     maskLegacyPayrollPayoutBatchLines(state);
+    maskLegacyStoredPayslipRenderPayloads(state);
   }
 
   function listEmployerContributionRulePacks({ effectiveDate = null } = {}) {
@@ -3046,6 +3049,30 @@ function maskPayrollPayoutLineForState(line) {
 function maskLegacyPayrollPayoutBatchLines(state) {
   for (const batch of state.payrollPayoutBatches.values()) {
     batch.lines = Array.isArray(batch.lines) ? batch.lines.map(maskPayrollPayoutLineForState) : [];
+  }
+}
+
+function sanitizeStoredPayslipRenderPayload(renderPayload) {
+  if (!renderPayload || typeof renderPayload !== "object") {
+    return renderPayload;
+  }
+  const sanitized = copy(renderPayload);
+  if (sanitized.bankPaymentPreview && typeof sanitized.bankPaymentPreview === "object") {
+    sanitized.bankPaymentPreview = {
+      ...copy(sanitized.bankPaymentPreview),
+      accountTarget:
+        normalizeOptionalText(sanitized.bankPaymentPreview.accountTarget)?.startsWith("trial://")
+          ? sanitized.bankPaymentPreview.accountTarget
+          : maskSensitiveValue(sanitized.bankPaymentPreview.accountTarget)
+    };
+  }
+  return sanitized;
+}
+
+function maskLegacyStoredPayslipRenderPayloads(state) {
+  for (const payslip of state.payslips.values()) {
+    payslip.renderPayload = sanitizeStoredPayslipRenderPayload(payslip.renderPayload);
+    payslip.snapshotHash = buildSnapshotHash(payslip.renderPayload);
   }
 }
 
@@ -6993,7 +7020,7 @@ function requirePayrollException(state, companyId, payRunId, payrollExceptionId)
 }
 
 function createStoredPayslip({ companyId, payRunId, period, runType, result, generatedByActorId, generatedAt }) {
-  const renderPayload = copy({
+  const renderPayload = sanitizeStoredPayslipRenderPayload({
     reportingPeriod: period.reportingPeriod,
     payDate: period.payDate,
     runType,

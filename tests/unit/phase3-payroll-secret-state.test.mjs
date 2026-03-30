@@ -108,8 +108,14 @@ test("Phase 3.3 payroll durable export stores payout exports outside plain snaps
     payRunId: run.payRunId,
     actorId: "unit-test"
   });
+  const liveRun = payrollPlatform.getPayRun({
+    companyId: COMPANY_ID,
+    payRunId: run.payRunId
+  });
 
   assert.match(payoutBatch.exportPayload, /5000:1234567890/);
+  assert.equal(liveRun.payslips[0].bankPaymentPreview.accountTarget.includes("1234567890"), false);
+  assert.match(liveRun.payslips[0].bankPaymentPreview.accountTarget, /\*+7890$/u);
 
   const durableState = payrollPlatform.exportDurableState();
   const serialized = JSON.stringify(durableState);
@@ -132,9 +138,15 @@ test("Phase 3.3 payroll durable export stores payout exports outside plain snaps
     companyId: COMPANY_ID,
     payrollPayoutBatchId: payoutBatch.payrollPayoutBatchId
   });
+  const restoredRun = restoredPayrollPlatform.getPayRun({
+    companyId: COMPANY_ID,
+    payRunId: run.payRunId
+  });
 
   assert.match(restoredBatch.exportPayload, /5000:1234567890/);
   assert.equal(restoredBatch.lines[0].accountTarget.includes("1234567890"), false);
+  assert.equal(restoredRun.payslips[0].bankPaymentPreview.accountTarget.includes("1234567890"), false);
+  assert.match(restoredRun.payslips[0].bankPaymentPreview.accountTarget, /\*+7890$/u);
 });
 
 function createHourlyEmployee({ hrPlatform, givenName, familyName, identityValue, hourlyRate }) {
