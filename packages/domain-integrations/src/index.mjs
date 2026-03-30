@@ -25,7 +25,11 @@ import {
   HUBSPOT_CRM_PROVIDER_BASELINE_CODE,
   HUBSPOT_CRM_PROVIDER_CODE
 } from "./providers/hubspot-crm.mjs";
-import { createIso20022FilesProvider, ISO20022_FILES_PROVIDER_CODE } from "./providers/iso20022-files.mjs";
+import {
+  createIso20022FilesProvider,
+  ISO20022_FILES_PROVIDER_BASELINE_CODE,
+  ISO20022_FILES_PROVIDER_CODE
+} from "./providers/iso20022-files.mjs";
 import { createLocalPasskeyProvider, LOCAL_PASSKEY_PROVIDER_CODE } from "./providers/local-passkey.mjs";
 import { createLocalTotpProvider, LOCAL_TOTP_PROVIDER_CODE } from "./providers/local-totp.mjs";
 import { createPageroPeppolProvider, PAGERO_PEPPOL_PROVIDER_CODE } from "./providers/pagero-peppol.mjs";
@@ -97,6 +101,15 @@ export { MONDAY_WORK_MANAGEMENT_PROVIDER_CODE } from "./providers/monday-work-ma
 export { ODOO_PROJECTS_BILLING_PROVIDER_CODE } from "./providers/odoo-projects-billing.mjs";
 export { TEAMLEADER_FOCUS_PROVIDER_CODE } from "./providers/teamleader-focus.mjs";
 export { ZOHO_CRM_PROJECTS_PROVIDER_CODE } from "./providers/zoho-crm-projects.mjs";
+export const BANKGIRO_FILE_PROVIDER_BASELINE_CODE = "SE-BANKGIRO-FILE-CSV";
+export const SIE4_FILE_PROVIDER_CODE = "sie4_file_channel";
+export const SIE4_FILE_PROVIDER_BASELINE_CODE = "SE-SIE4-FILE";
+export const MIGRATION_CSV_TEMPLATE_PROVIDER_CODE = "migration_csv_template";
+export const MIGRATION_CSV_TEMPLATE_PROVIDER_BASELINE_CODE = "SE-MIGRATION-CSV-TEMPLATE";
+export const MIGRATION_EXCEL_TEMPLATE_PROVIDER_CODE = "migration_excel_template";
+export const MIGRATION_EXCEL_TEMPLATE_PROVIDER_BASELINE_CODE = "SE-MIGRATION-EXCEL-WORKBOOK";
+export const MIGRATION_BUREAU_PACKAGE_PROVIDER_CODE = "migration_bureau_package";
+export const MIGRATION_BUREAU_PACKAGE_PROVIDER_BASELINE_CODE = "SE-MIGRATION-BUREAU-PACKAGE";
 export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
   Object.freeze({
     providerBaselineId: "peppol-bis-billing-3-se-2026.1",
@@ -142,17 +155,87 @@ export const INTEGRATION_PROVIDER_BASELINES = Object.freeze([
   }),
   Object.freeze({
     providerBaselineId: "bank-file-format-se-2026.1",
-    baselineCode: "SE-BANK-FILE-FORMAT",
-    providerCode: "bank_file_channel",
+    baselineCode: ISO20022_FILES_PROVIDER_BASELINE_CODE,
+    providerCode: ISO20022_FILES_PROVIDER_CODE,
     domain: "integrations",
     jurisdiction: "SE",
-    formatFamily: "bank_file_format",
+    formatFamily: "iso20022_bank_file_family",
     effectiveFrom: "2026-01-01",
     version: "2026.1",
-    specVersion: "1.0",
+    specVersion: "pain.001/camt.053/camt.054 family",
     checksum: "bank-file-format-se-2026.1",
     sourceSnapshotDate: "2026-03-27",
-    semanticChangeSummary: "Bank file channel baseline for deterministic export/import file envelopes."
+    semanticChangeSummary: "ISO20022 bank-file baseline for pain.001 export plus camt.053/camt.054 import envelopes."
+  }),
+  Object.freeze({
+    providerBaselineId: "bankgiro-file-format-se-2026.1",
+    baselineCode: BANKGIRO_FILE_PROVIDER_BASELINE_CODE,
+    providerCode: ISO20022_FILES_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "bankgiro_file_csv",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "bankgiro_csv_v1",
+    checksum: "bankgiro-file-format-se-2026.1",
+    sourceSnapshotDate: "2026-03-30",
+    semanticChangeSummary: "Bankgiro file baseline for deterministic CSV export envelopes distinct from ISO20022 rails."
+  }),
+  Object.freeze({
+    providerBaselineId: "sie4-file-se-2026.1",
+    baselineCode: SIE4_FILE_PROVIDER_BASELINE_CODE,
+    providerCode: SIE4_FILE_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "sie4_file_format",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "4B",
+    checksum: "sie4-file-se-2026.1",
+    sourceSnapshotDate: "2026-03-30",
+    semanticChangeSummary: "SIE4 file baseline for governed import/export, audit roundtrips and migration handoff."
+  }),
+  Object.freeze({
+    providerBaselineId: "migration-csv-template-se-2026.1",
+    baselineCode: MIGRATION_CSV_TEMPLATE_PROVIDER_BASELINE_CODE,
+    providerCode: MIGRATION_CSV_TEMPLATE_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "migration_csv_template",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "swedish_erp_template_v1",
+    checksum: "migration-csv-template-se-2026.1",
+    sourceSnapshotDate: "2026-03-30",
+    semanticChangeSummary: "Migration CSV template baseline for header fingerprinting, typed column maps and deterministic source-family discovery."
+  }),
+  Object.freeze({
+    providerBaselineId: "migration-excel-workbook-se-2026.1",
+    baselineCode: MIGRATION_EXCEL_TEMPLATE_PROVIDER_BASELINE_CODE,
+    providerCode: MIGRATION_EXCEL_TEMPLATE_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "migration_excel_workbook",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "swedish_erp_workbook_v1",
+    checksum: "migration-excel-workbook-se-2026.1",
+    sourceSnapshotDate: "2026-03-30",
+    semanticChangeSummary: "Migration Excel workbook baseline for multi-sheet imports with typed tabs, validations and review-safe discovery."
+  }),
+  Object.freeze({
+    providerBaselineId: "migration-bureau-package-se-2026.1",
+    baselineCode: MIGRATION_BUREAU_PACKAGE_PROVIDER_BASELINE_CODE,
+    providerCode: MIGRATION_BUREAU_PACKAGE_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "migration_bureau_package",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "swedish_erp_bureau_package_v1",
+    checksum: "migration-bureau-package-se-2026.1",
+    sourceSnapshotDate: "2026-03-30",
+    semanticChangeSummary: "Migration bureau package baseline for zipped handoff bundles carrying finance, payroll and evidence extracts with manifest governance."
   }),
   Object.freeze({
     providerBaselineId: "postmark-email-api-se-2026.1",

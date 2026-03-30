@@ -122,7 +122,7 @@ export const PARTNER_CONNECTION_CATALOG = Object.freeze({
 const PARTNER_PROVIDER_BASELINE_SELECTIONS = Object.freeze({
   bank: Object.freeze({
     enable_banking: "SE-OPEN-BANKING-CORE",
-    bank_file_channel: "SE-BANK-FILE-FORMAT"
+    bank_file_channel: "SE-ISO20022-BANK-FILE"
   }),
   peppol: Object.freeze({
     pagero_online: "SE-PEPPOL-BIS-BILLING-3"

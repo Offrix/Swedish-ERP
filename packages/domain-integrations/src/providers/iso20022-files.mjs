@@ -7,6 +7,7 @@ import {
 } from "./provider-runtime-helpers.mjs";
 
 export const ISO20022_FILES_PROVIDER_CODE = "bank_file_channel";
+export const ISO20022_FILES_PROVIDER_BASELINE_CODE = "SE-ISO20022-BANK-FILE";
 
 export function createIso20022FilesProvider({
   clock = () => new Date(),
@@ -25,7 +26,7 @@ export function createIso20022FilesProvider({
     profiles: [
       {
         profileCode: "iso20022_files",
-        baselineCode: "SE-BANK-FILE-FORMAT",
+        baselineCode: ISO20022_FILES_PROVIDER_BASELINE_CODE,
         operationCodes: ["pain001_export", "camt053_import", "camt054_import"]
       }
     ]
@@ -44,7 +45,7 @@ export function createIso20022FilesProvider({
     const providerBaselineRef = buildProviderBaselineRef({
       providerBaselineRegistry,
       providerCode: ISO20022_FILES_PROVIDER_CODE,
-      baselineCode: "SE-BANK-FILE-FORMAT",
+      baselineCode: ISO20022_FILES_PROVIDER_BASELINE_CODE,
       effectiveDate: nowIso(clock).slice(0, 10),
       metadata: {
         sourceObjectId: resolvedSourceObjectId,

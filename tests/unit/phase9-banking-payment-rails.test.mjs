@@ -112,7 +112,7 @@ test("Phase 9.4/9.6 builds first-class payment rails while gating statement post
   assert.equal(settledLinks[0].status, "settled");
 });
 
-test("Phase 9.4 exports bank-file rail batches with explicit bank-file baseline", () => {
+test("Phase 9.4 exports ISO20022 rail batches with explicit ISO20022 baseline", () => {
   const platform = createPreparedPlatform();
   const bankAccount = platform.createBankAccount({
     companyId: COMPANY_ID,
@@ -137,7 +137,7 @@ test("Phase 9.4 exports bank-file rail batches with explicit bank-file baseline"
 
   assert.equal(exported.paymentBatch.paymentRailCode, "iso20022_file");
   assert.equal(exported.paymentBatch.providerCode, "bank_file_channel");
-  assert.equal(exported.paymentBatch.providerBaselineCode, "SE-BANK-FILE-FORMAT");
+  assert.equal(exported.paymentBatch.providerBaselineCode, "SE-ISO20022-BANK-FILE");
   assert.equal(exported.paymentBatch.paymentFileFormatCode, "pain.001");
   assert.match(exported.paymentBatch.exportFileName, /\.xml$/);
   assert.match(exported.paymentBatch.exportPayload, /format="pain\.001"/);

@@ -37,14 +37,14 @@ const PAYMENT_RAIL_CONFIG_BY_CODE = Object.freeze({
     paymentRailCode: "iso20022_file",
     paymentFileFormatCode: "pain.001",
     providerCode: "bank_file_channel",
-    baselineCode: "SE-BANK-FILE-FORMAT",
+    baselineCode: "SE-ISO20022-BANK-FILE",
     deliveryMode: "file_export"
   }),
   bankgiro_file: Object.freeze({
     paymentRailCode: "bankgiro_file",
     paymentFileFormatCode: "bankgiro_csv",
     providerCode: "bank_file_channel",
-    baselineCode: "SE-BANK-FILE-FORMAT",
+    baselineCode: "SE-BANKGIRO-FILE-CSV",
     deliveryMode: "file_export"
   })
 });
@@ -60,7 +60,7 @@ const STATEMENT_IMPORT_SOURCE_CONFIG_BY_CODE = Object.freeze({
     sourceChannelCode: "camt053_file",
     fileFormatCode: "camt.053",
     providerCode: "bank_file_channel",
-    baselineCode: "SE-BANK-FILE-FORMAT"
+    baselineCode: "SE-ISO20022-BANK-FILE"
   }),
   manual_statement: Object.freeze({
     sourceChannelCode: "manual_statement",

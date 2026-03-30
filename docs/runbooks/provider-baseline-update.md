@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This runbook governs publication, retirement and rollback of provider-specific baselines such as BankID RP API, Peppol BIS Billing, bank file formats, payment link APIs, SRU exports and authority support formats.
+This runbook governs publication, retirement and rollback of provider-specific baselines such as BankID RP API, signing archives, Peppol BIS Billing, ISO20022 bank files, Bankgiro CSV files, SIE4 files, migration CSV/Excel templates, bureau handoff packages, payment link APIs, SRU exports and authority support formats.
 
 ## Preconditions
 
@@ -76,6 +76,12 @@ Every published provider baseline must contain:
   - created link must include pinned provider baseline reference
 - Bank/open banking or bank file channels:
   - partner capabilities and connection metadata must expose the baseline reference
+- ISO20022 and bank file families:
+  - ISO20022 rails must pin a baseline distinct from Bankgiro CSV
+  - statement imports must retain the pinned ISO20022 baseline used for camt imports
+- SIE4 and migration file families:
+  - SIE4 import/export, CSV/Excel templates and bureau packages must each resolve their own baseline family
+  - source discovery must never infer a file family without an explicit pinned baseline on the prepared import artefact
 - Annual reporting:
   - each export artefact must expose the baseline it was generated against
   - annual tax declaration package must retain deduplicated `providerBaselineRefs`

@@ -243,6 +243,132 @@ test("Phase 9.4/9.6 API exposes payment rails while requiring explicit approval 
   }
 });
 
+test("Phase 9.4 API exports ISO20022 rail batches with explicit ISO20022 baseline", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-11-20T08:00:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true,
+      phase5ArEnabled: true,
+      phase6ApEnabled: true
+    }
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const sessionToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    platform.installLedgerCatalog({
+      companyId: COMPANY_ID,
+      actorId: "system"
+    });
+    const supplier = platform.createSupplier({
+      companyId: COMPANY_ID,
+      legalName: "ISO Rail Supplier AB",
+      countryCode: "SE",
+      currencyCode: "SEK",
+      paymentTermsCode: "NET30",
+      paymentRecipient: "ISO Rail Supplier AB",
+      bankgiro: "7777-5656",
+      defaultExpenseAccountNumber: "5410",
+      defaultVatCode: "VAT_SE_DOMESTIC_25",
+      requiresPo: false,
+      actorId: "admin"
+    });
+    const invoice = platform.ingestSupplierInvoice({
+      companyId: COMPANY_ID,
+      supplierId: supplier.supplierId,
+      externalInvoiceRef: "PHASE94-ISO-INV-1",
+      invoiceDate: "2026-11-20",
+      dueDate: "2026-12-20",
+      sourceChannel: "api",
+      lines: [
+        {
+          description: "ISO rail spend",
+          quantity: 1,
+          unitPrice: 1000,
+          expenseAccountNumber: "5410",
+          vatCode: "VAT_SE_DOMESTIC_25"
+        }
+      ],
+      actorId: "admin"
+    });
+    const matched = platform.runSupplierInvoiceMatch({
+      companyId: COMPANY_ID,
+      supplierInvoiceId: invoice.supplierInvoiceId,
+      actorId: "admin"
+    });
+    if (matched.invoice.status !== "approved") {
+      platform.approveSupplierInvoice({
+        companyId: COMPANY_ID,
+        supplierInvoiceId: invoice.supplierInvoiceId,
+        actorId: "admin"
+      });
+    }
+    const posted = platform.postSupplierInvoice({
+      companyId: COMPANY_ID,
+      supplierInvoiceId: invoice.supplierInvoiceId,
+      actorId: "admin"
+    });
+    const bankAccount = await requestJson(baseUrl, "/v1/banking/accounts", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        bankName: "Nordea",
+        ledgerAccountNumber: "1110",
+        accountNumber: "4455667788",
+        currencyCode: "SEK"
+      }
+    });
+    const proposal = await requestJson(baseUrl, "/v1/banking/payment-proposals", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        bankAccountId: bankAccount.bankAccountId,
+        apOpenItemIds: [posted.apOpenItemId],
+        paymentDate: "2026-12-20",
+        paymentRailCode: "iso20022_file"
+      }
+    });
+    await requestJson(baseUrl, `/v1/banking/payment-proposals/${proposal.paymentProposalId}/approve`, {
+      method: "POST",
+      token: sessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+    const exported = await requestJson(baseUrl, `/v1/banking/payment-proposals/${proposal.paymentProposalId}/export`, {
+      method: "POST",
+      token: sessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+
+    assert.equal(exported.paymentBatch.paymentRailCode, "iso20022_file");
+    assert.equal(exported.paymentBatch.providerCode, "bank_file_channel");
+    assert.equal(exported.paymentBatch.providerBaselineCode, "SE-ISO20022-BANK-FILE");
+    assert.equal(exported.paymentBatch.paymentFileFormatCode, "pain.001");
+    assert.match(exported.paymentBatch.exportFileName, /\.xml$/);
+    assert.match(exported.paymentBatch.exportPayload, /format=\"pain\.001\"/);
+  } finally {
+    await stopServer(server);
+  }
+});
+
 async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
   const started = await requestJson(baseUrl, "/v1/auth/login", {
     method: "POST",
