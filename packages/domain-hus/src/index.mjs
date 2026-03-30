@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
+import { createConfiguredSecretStore } from "../../domain-core/src/secret-runtime.mjs";
+import { applyDurableStateSnapshot, serializeDurableState } from "../../domain-core/src/state-snapshots.mjs";
 import {
   normalizeOptionalPaymentReference as normalizeOptionalPaymentReferenceKernel,
   normalizeOptionalSwedishOrganizationNumber as normalizeOptionalSwedishOrganizationNumberKernel,
@@ -108,12 +110,28 @@ export function createHusEngine({
   arPlatform = null,
   projectsPlatform = null,
   ledgerPlatform = null,
-  ruleRegistry = null
+  ruleRegistry = null,
+  environmentMode = "test",
+  env = process.env,
+  secretRuntimeBridgeRunner = null,
+  secretSealKey = null,
+  secretStore = null
 } = {}) {
   const rules = ruleRegistry || createRulePackRegistry({
     clock,
     seedRulePacks: HUS_RULE_PACKS
   });
+  const husSecretStore =
+    secretStore ||
+    createConfiguredSecretStore({
+      clock,
+      env,
+      bridgeRunner: secretRuntimeBridgeRunner || undefined,
+      environmentMode,
+      storeId: "hus",
+      masterKey: secretSealKey || `swedish-erp-hus-seal:${environmentMode}`,
+      activeKeyVersion: `hus:${environmentMode}:v1`
+    });
   const state = {
     husCases: new Map(),
     husCaseIdsByCompany: new Map(),
@@ -154,7 +172,10 @@ export function createHusEngine({
     listHusRecoveryCandidates,
     getHusRecoveryCandidate,
     recordHusRecovery,
-    listHusAuditEvents
+    listHusAuditEvents,
+    exportDurableState,
+    importDurableState,
+    listSecretStorePostures: () => [husSecretStore.getSecurityPosture()]
   };
 
   Object.defineProperty(engine, "rulePackGovernance", {
@@ -178,6 +199,39 @@ export function createHusEngine({
   });
 
   return engine;
+
+  function exportDurableState() {
+    return {
+      ...serializeDurableState(
+        {
+          husCases: state.husCases,
+          husCaseIdsByCompany: state.husCaseIdsByCompany,
+          auditEvents: state.auditEvents
+        },
+        {
+          customSerializers: {
+            husCases: (records) => serializeHusCasesForPersistence(records, { secretStore: husSecretStore })
+          }
+        }
+      ),
+      secretStoreBundle: husSecretStore.exportSecretBundle()
+    };
+  }
+
+  function importDurableState(snapshot) {
+    applyDurableStateSnapshot(
+      {
+        husCases: state.husCases,
+        husCaseIdsByCompany: state.husCaseIdsByCompany,
+        auditEvents: state.auditEvents
+      },
+      snapshot,
+      { preserveKeys: ["secretStoreBundle"] }
+    );
+    husSecretStore.importSecretBundle(snapshot?.secretStoreBundle);
+    rehydratePersistedHusCases(state, { secretStore: husSecretStore });
+    rebuildDerivedHusIndexes(state);
+  }
 
   function listHusCases({ companyId, status = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
@@ -1115,6 +1169,290 @@ export function createHusEngine({
       ...rulePack,
       ruleYear: resolvedRuleYear
     };
+  }
+
+  function serializeHusCasesForPersistence(records, { secretStore } = {}) {
+    if (!(records instanceof Map)) {
+      return new Map();
+    }
+    const serialized = new Map();
+    for (const [husCaseId, record] of records.entries()) {
+      serialized.set(husCaseId, sanitizePersistedHusCase(record, { secretStore }));
+    }
+    return serialized;
+  }
+
+  function sanitizePersistedHusCase(record, { secretStore } = {}) {
+    const sanitizedBuyers = (record.buyers || []).map((buyer) =>
+      sanitizePersistedHusBuyer(buyer, {
+        secretStore,
+        companyId: record.companyId,
+        husCaseId: record.husCaseId
+      })
+    );
+    const buyersById = new Map(sanitizedBuyers.map((buyer) => [buyer.husCaseBuyerId, buyer]));
+    return {
+      ...copy(record),
+      buyers: sanitizedBuyers,
+      claims: (record.claims || []).map((claim) => sanitizePersistedHusClaim(claim, { buyersById })),
+      decisions: (record.decisions || []).map((decision) => sanitizePersistedHusDecision(decision, { buyersById })),
+      decisionDifferences: (record.decisionDifferences || []).map(copy),
+      payouts: (record.payouts || []).map(copy),
+      recoveries: (record.recoveries || []).map(copy),
+      recoveryCandidates: (record.recoveryCandidates || []).map(copy),
+      creditAdjustments: (record.creditAdjustments || []).map(copy)
+    };
+  }
+
+  function sanitizePersistedHusBuyer(buyer, { secretStore, companyId, husCaseId } = {}) {
+    const identityNumber = normalizeOptionalText(buyer?.personalIdentityNumber);
+    if (!identityNumber || !secretStore?.storeSecretMaterial) {
+      return copy(buyer);
+    }
+    const maskedValue = maskIdentityNumber(identityNumber);
+    const lookupDigest = secretStore.createBlindIndex({
+      value: `${companyId}:${identityNumber}`,
+      purpose: "hus_buyer_identity_lookup"
+    }).digest;
+    const secretMeta = secretStore.storeSecretMaterial({
+      secretId: `hus-buyer-identity:${husCaseId}:${buyer.husCaseBuyerId}`,
+      classCode: "S3",
+      material: {
+        personalIdentityNumber: identityNumber
+      },
+      owner: {
+        domainKey: "hus",
+        companyId,
+        husCaseId,
+        husCaseBuyerId: buyer.husCaseBuyerId,
+        objectType: "hus_buyer_identity"
+      },
+      maskedValue,
+      blindIndexInputs: [
+        {
+          purpose: "hus_buyer_identity_lookup",
+          value: `${companyId}:${identityNumber}`
+        }
+      ],
+      fingerprintPurpose: "hus_buyer_identity"
+    });
+    return {
+      ...copy(buyer),
+      personalIdentityNumber: secretMeta.maskedValue,
+      personalIdentitySecretRef: secretMeta.secretRef,
+      personalIdentityMaskedValue: secretMeta.maskedValue,
+      personalIdentityFingerprint: secretMeta.fingerprint,
+      personalIdentityLookupDigest: lookupDigest
+    };
+  }
+
+  function sanitizePersistedHusClaim(claim, { buyersById } = {}) {
+    return {
+      ...copy(claim),
+      buyerAllocations: (claim.buyerAllocations || []).map((allocation) =>
+        sanitizePersistedHusBuyerLinkedRecord(allocation, { buyersById })
+      ),
+      versions: (claim.versions || []).map((version) => sanitizePersistedHusClaimVersion(version, { buyersById })),
+      statusEvents: (claim.statusEvents || []).map(copy)
+    };
+  }
+
+  function sanitizePersistedHusClaimVersion(version, { buyersById } = {}) {
+    return {
+      ...copy(version),
+      payloadJson: sanitizePersistedHusClaimPayload(version.payloadJson, { buyersById })
+    };
+  }
+
+  function sanitizePersistedHusClaimPayload(payload, { buyersById } = {}) {
+    if (!payload || typeof payload !== "object") {
+      return payload;
+    }
+    return {
+      ...copy(payload),
+      buyers: (payload.buyers || []).map((buyer) => sanitizePersistedHusBuyerLinkedRecord(buyer, { buyersById })),
+      buyerAllocations: (payload.buyerAllocations || []).map((allocation) =>
+        sanitizePersistedHusBuyerLinkedRecord(allocation, { buyersById })
+      ),
+      buyerCapacities: (payload.buyerCapacities || []).map((capacity) =>
+        sanitizePersistedHusBuyerLinkedRecord(capacity, { buyersById })
+      )
+    };
+  }
+
+  function sanitizePersistedHusDecision(decision, { buyersById } = {}) {
+    return {
+      ...copy(decision),
+      buyerOutcomeAllocations: (decision.buyerOutcomeAllocations || []).map((allocation) =>
+        sanitizePersistedHusBuyerLinkedRecord(allocation, { buyersById })
+      )
+    };
+  }
+
+  function sanitizePersistedHusBuyerLinkedRecord(record, { buyersById } = {}) {
+    if (!record || typeof record !== "object") {
+      return record;
+    }
+    const persistedBuyer = resolvePersistedHusBuyerById(buyersById, record.husCaseBuyerId);
+    const maskedIdentity =
+      persistedBuyer?.personalIdentityMaskedValue
+      || persistedBuyer?.personalIdentityNumber
+      || maskIdentityNumber(record.personalIdentityNumber);
+    return {
+      ...copy(record),
+      personalIdentityNumber: maskedIdentity
+    };
+  }
+
+  function rehydratePersistedHusCases(targetState, { secretStore } = {}) {
+    for (const [husCaseId, record] of targetState.husCases.entries()) {
+      targetState.husCases.set(husCaseId, rehydratePersistedHusCase(record, { secretStore }));
+    }
+  }
+
+  function rehydratePersistedHusCase(record, { secretStore } = {}) {
+    const rehydratedBuyers = (record.buyers || []).map((buyer) => rehydratePersistedHusBuyer(buyer, { secretStore }));
+    const buyersById = new Map(rehydratedBuyers.map((buyer) => [buyer.husCaseBuyerId, buyer]));
+    return {
+      ...copy(record),
+      buyers: rehydratedBuyers,
+      claims: (record.claims || []).map((claim) => rehydratePersistedHusClaim(claim, { buyersById })),
+      decisions: (record.decisions || []).map((decision) => rehydratePersistedHusDecision(decision, { buyersById })),
+      decisionDifferences: (record.decisionDifferences || []).map(copy),
+      payouts: (record.payouts || []).map(copy),
+      recoveries: (record.recoveries || []).map(copy),
+      recoveryCandidates: (record.recoveryCandidates || []).map(copy),
+      creditAdjustments: (record.creditAdjustments || []).map(copy)
+    };
+  }
+
+  function rehydratePersistedHusBuyer(buyer, { secretStore } = {}) {
+    const nextBuyer = copy(buyer);
+    const secretRef = normalizeOptionalText(buyer?.personalIdentitySecretRef);
+    if (!secretRef || !secretStore?.hasSecretMaterial?.({ secretId: secretRef })) {
+      return nextBuyer;
+    }
+    const secretValue = secretStore.readSecretMaterial({
+      secretId: secretRef,
+      parse: true
+    });
+    nextBuyer.personalIdentityNumber = normalizeIdentityNumber(
+      secretValue?.personalIdentityNumber,
+      "hus_buyer_identity_required"
+    );
+    delete nextBuyer.personalIdentitySecretRef;
+    delete nextBuyer.personalIdentityMaskedValue;
+    delete nextBuyer.personalIdentityFingerprint;
+    delete nextBuyer.personalIdentityLookupDigest;
+    return nextBuyer;
+  }
+
+  function rehydratePersistedHusClaim(claim, { buyersById } = {}) {
+    return {
+      ...copy(claim),
+      buyerAllocations: (claim.buyerAllocations || []).map((allocation) =>
+        rehydratePersistedHusBuyerLinkedRecord(allocation, { buyersById })
+      ),
+      versions: (claim.versions || []).map((version) => rehydratePersistedHusClaimVersion(version, { buyersById })),
+      statusEvents: (claim.statusEvents || []).map(copy)
+    };
+  }
+
+  function rehydratePersistedHusClaimVersion(version, { buyersById } = {}) {
+    return {
+      ...copy(version),
+      payloadJson: rehydratePersistedHusClaimPayload(version.payloadJson, { buyersById })
+    };
+  }
+
+  function rehydratePersistedHusClaimPayload(payload, { buyersById } = {}) {
+    if (!payload || typeof payload !== "object") {
+      return payload;
+    }
+    return {
+      ...copy(payload),
+      buyers: (payload.buyers || []).map((buyer) => rehydratePersistedHusBuyerLinkedRecord(buyer, { buyersById })),
+      buyerAllocations: (payload.buyerAllocations || []).map((allocation) =>
+        rehydratePersistedHusBuyerLinkedRecord(allocation, { buyersById })
+      ),
+      buyerCapacities: (payload.buyerCapacities || []).map((capacity) =>
+        rehydratePersistedHusBuyerLinkedRecord(capacity, { buyersById })
+      )
+    };
+  }
+
+  function rehydratePersistedHusDecision(decision, { buyersById } = {}) {
+    return {
+      ...copy(decision),
+      buyerOutcomeAllocations: (decision.buyerOutcomeAllocations || []).map((allocation) =>
+        rehydratePersistedHusBuyerLinkedRecord(allocation, { buyersById })
+      )
+    };
+  }
+
+  function rehydratePersistedHusBuyerLinkedRecord(record, { buyersById } = {}) {
+    if (!record || typeof record !== "object") {
+      return record;
+    }
+    const buyer = resolvePersistedHusBuyerById(buyersById, record.husCaseBuyerId);
+    if (!buyer?.personalIdentityNumber) {
+      return copy(record);
+    }
+    return {
+      ...copy(record),
+      personalIdentityNumber: buyer.personalIdentityNumber
+    };
+  }
+
+  function rebuildDerivedHusIndexes(targetState) {
+    targetState.husCaseIdsByCompany.clear();
+    targetState.husClaims.clear();
+    targetState.husDecisionDifferences.clear();
+    targetState.husDecisionDifferenceIdsByCompany.clear();
+    targetState.husRecoveryCandidates.clear();
+    targetState.husRecoveryCandidateIdsByCompany.clear();
+
+    for (const [husCaseId, record] of targetState.husCases.entries()) {
+      appendToIndex(targetState.husCaseIdsByCompany, record.companyId, husCaseId);
+      for (const claim of record.claims || []) {
+        targetState.husClaims.set(claim.husClaimId, claim);
+      }
+      for (const differenceRecord of record.decisionDifferences || []) {
+        targetState.husDecisionDifferences.set(differenceRecord.husDecisionDifferenceId, differenceRecord);
+        appendToIndex(
+          targetState.husDecisionDifferenceIdsByCompany,
+          record.companyId,
+          differenceRecord.husDecisionDifferenceId
+        );
+      }
+      for (const recoveryCandidate of record.recoveryCandidates || []) {
+        targetState.husRecoveryCandidates.set(recoveryCandidate.husRecoveryCandidateId, recoveryCandidate);
+        appendToIndex(
+          targetState.husRecoveryCandidateIdsByCompany,
+          record.companyId,
+          recoveryCandidate.husRecoveryCandidateId
+        );
+      }
+    }
+  }
+
+  function resolvePersistedHusBuyerById(buyersById, husCaseBuyerId) {
+    if (!(buyersById instanceof Map)) {
+      return null;
+    }
+    const resolvedBuyerId = normalizeOptionalText(husCaseBuyerId);
+    return resolvedBuyerId ? buyersById.get(resolvedBuyerId) || null : null;
+  }
+
+  function maskIdentityNumber(value) {
+    const normalized = normalizeOptionalText(value);
+    if (!normalized) {
+      return null;
+    }
+    if (normalized.length <= 4) {
+      return `****${normalized}`;
+    }
+    return `${"*".repeat(normalized.length - 4)}${normalized.slice(-4)}`;
   }
 
   function projectHusCase(record) {

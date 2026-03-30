@@ -306,7 +306,7 @@ Ingen live auth, ingen live providercredential, ingen live support-write, ingen 
 **Delfaser**  
 - [x] 3.1 [NEW BUILD][SECURE] Inför central data- och secretklassificering (`S0` offentlig metadata, `S1` intern drift, `S2` business confidential, `S3` regulated personal/finance, `S4` secrets/factors/credentials, `S5` non-exportable signing keys).
 - [x] 3.2 [NEW BUILD][SECURE] Inför KMS/HSM-baserad envelope encryption, separat secrets-lager, blind-index/HMAC för uppslag och full snapshot-redaction för S4/S5-data.
-- [ ] 3.3 [SECURE][REWRITE] Kryptera eller tokenisera personnummer, bankkonton, löne-/skattepayloads, provider tokens och webhook secrets enligt klassmatrisen. Sessiontokens lagras bara som HMAC-hash. TOTP-hemligheter lagras endast krypterade via secret-ref.
+- [x] 3.3 [SECURE][REWRITE] Kryptera eller tokenisera personnummer, bankkonton, löne-/skattepayloads, provider tokens och webhook secrets enligt klassmatrisen. Sessiontokens lagras bara som HMAC-hash. TOTP-hemligheter lagras endast krypterade via secret-ref.
 - [ ] 3.4 [SECURE][HARDEN] Härda API edge: body size limit, request timeout, origin policy, security headers, signed webhooks, anti-replay, abuse throttling, cookie/CSRF-regler där cookies används.
 - [ ] 3.5 [SECURE][NEW BUILD] Bygg rate limiting, lockout, anomaly detection och risk scoring för login, TOTP, passkey enrollment, BankID initiation, provider callback spikes, exportmassor, support access och break-glass.
 - [ ] 3.6 [SECURE][OPERATIONALIZE] Inför nyckelrotation, credential rotation, certifikatrotation, emergency revoke och incident response som operativ standard.
