@@ -1,6 +1,11 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
+import {
+  applyDurableStateSnapshot,
+  serializeDurableState
+} from "../../domain-core/src/state-snapshots.mjs";
+import { createConfiguredSecretStore } from "../../domain-core/src/secret-runtime.mjs";
 
 export const BANK_ACCOUNT_STATUSES = Object.freeze(["active", "blocked", "archived"]);
 export const PAYMENT_PROPOSAL_STATUSES = Object.freeze(["draft", "approved", "exported", "submitted", "accepted_by_bank", "partially_executed", "settled", "failed", "cancelled"]);
@@ -71,6 +76,9 @@ export function createBankingPlatform(options = {}) {
 
 export function createBankingEngine({
   clock = () => new Date(),
+  environmentMode = "test",
+  env = process.env,
+  secretRuntimeBridgeRunner = null,
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
@@ -78,12 +86,27 @@ export function createBankingEngine({
   integrationsPlatform = null,
   taxAccountPlatform = null,
   getTaxAccountPlatform = null,
-  getIntegrationsPlatform = null
+  getIntegrationsPlatform = null,
+  secretStore = null,
+  secretSealKey = null
 } = {}) {
+  const normalizedEnvironmentMode = normalizeRuntimeMode(environmentMode);
+  const bankingSecretStore =
+    secretStore ||
+    createConfiguredSecretStore({
+      clock,
+      env,
+      bridgeRunner: secretRuntimeBridgeRunner || undefined,
+      environmentMode: normalizedEnvironmentMode,
+      storeId: "banking",
+      masterKey: secretSealKey || `swedish-erp-banking-seal:${normalizedEnvironmentMode}`,
+      activeKeyVersion: `banking:${normalizedEnvironmentMode}:v1`
+    });
   const state = {
     bankAccounts: new Map(),
     bankAccountIdsByCompany: new Map(),
     bankAccountIdsByIdentity: new Map(),
+    bankAccountSecrets: new Map(),
     paymentProposals: new Map(),
     paymentProposalIdsByCompany: new Map(),
     paymentProposalIdsByKey: new Map(),
@@ -113,6 +136,13 @@ export function createBankingEngine({
   if (seedDemo) {
     seedDemoState();
   }
+  migrateLegacyBankAccountSecrets(state, {
+    secretStore: bankingSecretStore,
+    environmentMode: normalizedEnvironmentMode
+  });
+  rebuildBankAccountIdentityLookupIndex(state, {
+    secretStore: bankingSecretStore
+  });
 
   const engine = {
     bankAccountStatuses: BANK_ACCOUNT_STATUSES,
@@ -153,7 +183,10 @@ export function createBankingEngine({
     bookPaymentOrder,
     rejectPaymentOrder,
     returnPaymentOrder,
-    snapshotBanking
+    snapshotBanking,
+    exportDurableState,
+    importDurableState,
+    listSecretStorePostures: () => [bankingSecretStore.getSecurityPosture()]
   };
 
   Object.defineProperty(engine, "__durableState", {
@@ -170,11 +203,11 @@ export function createBankingEngine({
       .filter(Boolean)
       .filter((account) => (status ? account.status === status : true))
       .sort((left, right) => left.bankAccountNo.localeCompare(right.bankAccountNo))
-      .map(copy);
+      .map((account) => presentBankAccount(account));
   }
 
   function getBankAccount({ companyId, bankAccountId } = {}) {
-    return copy(requireBankAccountRecord(state, companyId, bankAccountId));
+    return presentBankAccount(requireBankAccountRecord(state, companyId, bankAccountId));
   }
 
   function createBankAccount({
@@ -194,13 +227,25 @@ export function createBankingEngine({
     correlationId = crypto.randomUUID()
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
-    const identity = [iban, accountNumber, bankgiro, plusgiro].map(normalizeOptionalText).find(Boolean);
+    const normalizedBankDetails = {
+      clearingNumber: normalizeOptionalText(clearingNumber),
+      accountNumber: normalizeOptionalText(accountNumber),
+      bankgiro: normalizeOptionalText(bankgiro),
+      plusgiro: normalizeOptionalText(plusgiro),
+      iban: normalizeOptionalText(iban),
+      bic: normalizeOptionalText(bic)
+    };
+    const identity = [normalizedBankDetails.iban, normalizedBankDetails.accountNumber, normalizedBankDetails.bankgiro, normalizedBankDetails.plusgiro].find(Boolean);
     if (!identity) {
       throw createError(409, "bank_account_identifier_required", "Bank account requires account number, IBAN, bankgiro or plusgiro.");
     }
-    const scopedIdentity = toCompanyScopedKey(resolvedCompanyId, identity.toUpperCase());
+    const scopedIdentity = buildBankAccountIdentityLookupKey({
+      companyId: resolvedCompanyId,
+      details: normalizedBankDetails,
+      secretStore: bankingSecretStore
+    });
     if (state.bankAccountIdsByIdentity.has(scopedIdentity)) {
-      return copy(state.bankAccounts.get(state.bankAccountIdsByIdentity.get(scopedIdentity)));
+      return presentBankAccount(state.bankAccounts.get(state.bankAccountIdsByIdentity.get(scopedIdentity)));
     }
 
     if (isDefault === true) {
@@ -220,18 +265,31 @@ export function createBankingEngine({
       bankName: requireText(bankName, "bank_name_required"),
       ledgerAccountNumber: requireText(ledgerAccountNumber, "bank_ledger_account_required"),
       currencyCode: normalizeUpperCode(currencyCode, "currency_code_required", 3),
-      clearingNumber: normalizeOptionalText(clearingNumber),
-      accountNumber: normalizeOptionalText(accountNumber),
-      bankgiro: normalizeOptionalText(bankgiro),
-      plusgiro: normalizeOptionalText(plusgiro),
-      iban: normalizeOptionalText(iban),
-      bic: normalizeOptionalText(bic),
+      clearingNumber: normalizedBankDetails.clearingNumber ? maskSensitiveValue(normalizedBankDetails.clearingNumber) : null,
+      accountNumber: normalizedBankDetails.accountNumber ? maskSensitiveValue(normalizedBankDetails.accountNumber) : null,
+      bankgiro: normalizedBankDetails.bankgiro ? maskSensitiveValue(normalizedBankDetails.bankgiro) : null,
+      plusgiro: normalizedBankDetails.plusgiro ? maskSensitiveValue(normalizedBankDetails.plusgiro) : null,
+      iban: normalizedBankDetails.iban ? maskSensitiveValue(normalizedBankDetails.iban) : null,
+      bic: normalizedBankDetails.bic,
+      last4: resolveBankAccountLast4(normalizedBankDetails),
+      maskedAccountDisplay: maskSensitiveValue(identity),
       status: assertAllowed(status, BANK_ACCOUNT_STATUSES, "bank_account_status_invalid"),
       isDefault: isDefault === true,
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
     };
     state.bankAccounts.set(account.bankAccountId, account);
+    state.bankAccountSecrets.set(
+      account.bankAccountId,
+      projectBankAccountSecretRecord({
+        companyId: resolvedCompanyId,
+        bankAccountId: account.bankAccountId,
+        details: normalizedBankDetails,
+        maskedValue: account.maskedAccountDisplay,
+        secretStore: bankingSecretStore,
+        environmentMode: normalizedEnvironmentMode
+      })
+    );
     ensureCollection(state.bankAccountIdsByCompany, resolvedCompanyId).push(account.bankAccountId);
     state.bankAccountIdsByIdentity.set(scopedIdentity, account.bankAccountId);
     pushAudit(state, clock, {
@@ -243,7 +301,7 @@ export function createBankingEngine({
       entityId: account.bankAccountId,
       explanation: `Created bank account ${account.bankAccountNo}.`
     });
-    return copy(account);
+    return presentBankAccount(account);
   }
 
   function listBankStatementEvents({ companyId, bankAccountId = null, matchStatus = null, processingStatus = null } = {}) {
@@ -1210,7 +1268,10 @@ export function createBankingEngine({
     const exportArtifact = buildPaymentBatchExportArtifact({
       paymentBatch,
       proposal,
-      bankAccount,
+      bankAccount: resolveBankAccountExecutionView(bankAccount, {
+        secretStore: bankingSecretStore,
+        secretRecord: state.bankAccountSecrets.get(bankAccount.bankAccountId) || null
+      }),
       orders
     });
     proposal.status = "exported";
@@ -1235,6 +1296,32 @@ export function createBankingEngine({
       explanation: `Exported payment proposal ${proposal.paymentProposalNo}.`
     });
     return presentPaymentProposal(state, proposal.paymentProposalId);
+  }
+
+  function exportDurableState() {
+    migrateLegacyBankAccountSecrets(state, {
+      secretStore: bankingSecretStore,
+      environmentMode: normalizedEnvironmentMode
+    });
+    rebuildBankAccountIdentityLookupIndex(state, {
+      secretStore: bankingSecretStore
+    });
+    return {
+      ...serializeDurableState(state),
+      secretStoreBundle: bankingSecretStore.exportSecretBundle()
+    };
+  }
+
+  function importDurableState(snapshot) {
+    applyDurableStateSnapshot(state, snapshot);
+    bankingSecretStore.importSecretBundle(snapshot?.secretStoreBundle);
+    migrateLegacyBankAccountSecrets(state, {
+      secretStore: bankingSecretStore,
+      environmentMode: normalizedEnvironmentMode
+    });
+    rebuildBankAccountIdentityLookupIndex(state, {
+      secretStore: bankingSecretStore
+    });
   }
 
   function submitPaymentProposal({ companyId, paymentProposalId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
@@ -1493,13 +1580,17 @@ function validateOpenItemForProposal({ openItem, invoice, supplier, bankAccount,
   if (!supplier.bankgiro && !supplier.plusgiro && !supplier.iban) throw createError(409, "supplier_payment_details_missing", "Supplier is missing payment details.");
 }
 
+function presentBankAccount(bankAccount) {
+  return bankAccount ? copy(bankAccount) : null;
+}
+
 function presentPaymentProposal(state, paymentProposalId) {
   const proposal = state.paymentProposals.get(paymentProposalId);
   if (!proposal) return null;
   const paymentBatchId = proposal.paymentBatchId || state.paymentBatchIdByProposal.get(proposal.paymentProposalId) || null;
   return copy({
     ...proposal,
-    bankAccount: state.bankAccounts.get(proposal.bankAccountId) || null,
+    bankAccount: presentBankAccount(state.bankAccounts.get(proposal.bankAccountId) || null),
     paymentBatch: paymentBatchId ? presentPaymentBatch(state, paymentBatchId) : null,
     orders: listProposalOrderRecords(state, paymentProposalId).map(copy)
   });
@@ -1515,7 +1606,7 @@ function presentPaymentBatch(state, paymentBatchId) {
   const proposal = state.paymentProposals.get(paymentBatch.paymentProposalId) || null;
   return copy({
     ...paymentBatch,
-    bankAccount: state.bankAccounts.get(paymentBatch.bankAccountId) || null,
+    bankAccount: presentBankAccount(state.bankAccounts.get(paymentBatch.bankAccountId) || null),
     proposal: proposal ? { paymentProposalId: proposal.paymentProposalId, paymentProposalNo: proposal.paymentProposalNo, status: proposal.status } : null,
     orders: proposal ? listProposalOrderRecords(state, proposal.paymentProposalId).map(copy) : []
   });
@@ -1530,7 +1621,7 @@ function presentStatementImport(state, statementImportId) {
     .map(copy);
   return copy({
     ...statementImport,
-    bankAccount: state.bankAccounts.get(statementImport.bankAccountId) || null,
+    bankAccount: presentBankAccount(state.bankAccounts.get(statementImport.bankAccountId) || null),
     items
   });
 }
@@ -1890,6 +1981,121 @@ function buildPaymentBatchExportArtifact({ paymentBatch, proposal, bankAccount, 
   }
 }
 
+function resolveBankAccountSecretDetails(secretStore, secretRecord) {
+  if (!secretRecord) {
+    return {};
+  }
+  if (secretRecord.secretRef && secretStore.hasSecretMaterial({ secretId: secretRecord.secretRef })) {
+    return secretStore.readSecretMaterial({
+      secretId: secretRecord.secretRef,
+      parse: true
+    });
+  }
+  return secretRecord;
+}
+
+function resolveBankAccountExecutionView(bankAccount, { secretStore = null, secretRecord = null } = {}) {
+  if (!bankAccount) {
+    return null;
+  }
+  const secretDetails = resolveBankAccountSecretDetails(secretStore, secretRecord);
+  return {
+    ...bankAccount,
+    clearingNumber: normalizeOptionalText(secretDetails.clearingNumber) || bankAccount.clearingNumber || null,
+    accountNumber: normalizeOptionalText(secretDetails.accountNumber) || bankAccount.accountNumber || null,
+    bankgiro: normalizeOptionalText(secretDetails.bankgiro) || bankAccount.bankgiro || null,
+    plusgiro: normalizeOptionalText(secretDetails.plusgiro) || bankAccount.plusgiro || null,
+    iban: normalizeOptionalText(secretDetails.iban) || bankAccount.iban || null,
+    bic: normalizeOptionalText(secretDetails.bic) || bankAccount.bic || null
+  };
+}
+
+function projectBankAccountSecretRecord({ companyId, bankAccountId, details, maskedValue, secretStore, environmentMode }) {
+  const secretMeta = secretStore.storeSecretMaterial({
+    secretId: `bank-account:${bankAccountId}`,
+    classCode: "S3",
+    material: copy(details),
+    owner: {
+      domainKey: "banking",
+      companyId,
+      bankAccountId,
+      objectType: "bank_account"
+    },
+    mode: environmentMode,
+    maskedValue,
+    blindIndexInputs: [
+      {
+        purpose: "banking_bank_account_lookup",
+        value: `${companyId}:${resolveBankAccountIdentityValue(details)}`
+      }
+    ],
+    fingerprintPurpose: "banking_bank_account"
+  });
+  return {
+    secretRef: secretMeta.secretRef,
+    maskedValue: secretMeta.maskedValue,
+    keyVersion: secretMeta.keyVersion,
+    fingerprint: secretMeta.fingerprint,
+    last4: resolveBankAccountLast4(details)
+  };
+}
+
+function migrateLegacyBankAccountSecrets(state, { secretStore, environmentMode }) {
+  for (const [bankAccountId, bankAccount] of state.bankAccounts.entries()) {
+    const existingSecret = state.bankAccountSecrets.get(bankAccountId) || null;
+    if (existingSecret?.secretRef) {
+      continue;
+    }
+    const normalizedDetails = {
+      clearingNumber: normalizeOptionalText(bankAccount.clearingNumber),
+      accountNumber: normalizeOptionalText(bankAccount.accountNumber),
+      bankgiro: normalizeOptionalText(bankAccount.bankgiro),
+      plusgiro: normalizeOptionalText(bankAccount.plusgiro),
+      iban: normalizeOptionalText(bankAccount.iban),
+      bic: normalizeOptionalText(bankAccount.bic)
+    };
+    if (!resolveBankAccountIdentityValue(normalizedDetails)) {
+      continue;
+    }
+    state.bankAccountSecrets.set(
+      bankAccountId,
+      projectBankAccountSecretRecord({
+        companyId: bankAccount.companyId,
+        bankAccountId,
+        details: normalizedDetails,
+        maskedValue: bankAccount.maskedAccountDisplay || maskSensitiveValue(resolveBankAccountIdentityValue(normalizedDetails)),
+        secretStore,
+        environmentMode
+      })
+    );
+    bankAccount.clearingNumber = normalizedDetails.clearingNumber ? maskSensitiveValue(normalizedDetails.clearingNumber) : null;
+    bankAccount.accountNumber = normalizedDetails.accountNumber ? maskSensitiveValue(normalizedDetails.accountNumber) : null;
+    bankAccount.bankgiro = normalizedDetails.bankgiro ? maskSensitiveValue(normalizedDetails.bankgiro) : null;
+    bankAccount.plusgiro = normalizedDetails.plusgiro ? maskSensitiveValue(normalizedDetails.plusgiro) : null;
+    bankAccount.iban = normalizedDetails.iban ? maskSensitiveValue(normalizedDetails.iban) : null;
+    bankAccount.last4 = resolveBankAccountLast4(normalizedDetails);
+    bankAccount.maskedAccountDisplay = bankAccount.maskedAccountDisplay || maskSensitiveValue(resolveBankAccountIdentityValue(normalizedDetails));
+  }
+}
+
+function rebuildBankAccountIdentityLookupIndex(state, { secretStore }) {
+  state.bankAccountIdsByIdentity.clear();
+  for (const [bankAccountId, bankAccount] of state.bankAccounts.entries()) {
+    const details = resolveBankAccountSecretDetails(secretStore, state.bankAccountSecrets.get(bankAccountId) || null);
+    if (!resolveBankAccountIdentityValue(details)) {
+      continue;
+    }
+    state.bankAccountIdsByIdentity.set(
+      buildBankAccountIdentityLookupKey({
+        companyId: bankAccount.companyId,
+        details,
+        secretStore
+      }),
+      bankAccountId
+    );
+  }
+}
+
 function escapeXml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -1959,6 +2165,16 @@ function pushAudit(state, clock, event) {
 function createError(statusCode, code, message) { const error = new Error(message); error.statusCode = statusCode; error.code = code; return error; }
 function toCompanyScopedKey(companyId, value) { return `${requireText(companyId, "company_id_required")}::${requireText(value, "scoped_key_required")}`; }
 function resolveDeferredPlatform({ platform = null, getter = null }) { if (platform) return platform; if (typeof getter === "function") return getter() || null; return null; }
+function resolveBankAccountIdentityValue(details) { return normalizeOptionalText(details?.iban) || normalizeOptionalText(details?.accountNumber) || normalizeOptionalText(details?.bankgiro) || normalizeOptionalText(details?.plusgiro) || null; }
+function resolveBankAccountLast4(details) { const value = resolveBankAccountIdentityValue(details); return value ? value.slice(-4) : null; }
+function maskSensitiveValue(value) { const normalized = normalizeOptionalText(value); if (!normalized) return null; const suffix = normalized.slice(-4); return `${"*".repeat(Math.max(normalized.length - 4, 4))}${suffix}`; }
+function buildBankAccountIdentityLookupKey({ companyId, details, secretStore }) {
+  return `${requireText(companyId, "company_id_required")}:${secretStore.createBlindIndex({
+    value: `${requireText(companyId, "company_id_required")}:${requireText(resolveBankAccountIdentityValue(details), "bank_account_identifier_required")}`,
+    purpose: "banking_bank_account_lookup"
+  }).digest}`;
+}
+function normalizeRuntimeMode(value) { return typeof value === "string" && value.trim().length > 0 ? value.trim() : "test"; }
 function buildStatementIdentityKey({ companyId, bankAccountId, externalReference, bookingDate, amount }) {
   return hashObject({
     companyId: requireText(companyId, "company_id_required"),

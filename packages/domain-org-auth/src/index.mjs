@@ -107,6 +107,9 @@ export const DEMO_TEAM_IDS = Object.freeze({
   fieldOps: "field_ops"
 });
 
+const SESSION_TOKEN_HASH_ALGORITHM = "blind_index_hmac_sha256";
+const SESSION_TOKEN_HASH_PURPOSE = "auth_session_token_lookup";
+
 const DEFAULT_OPERATIONAL_TEAMS = Object.freeze([
   Object.freeze({
     teamId: DEMO_TEAM_IDS.financeOps,
@@ -285,18 +288,38 @@ export function createOrgAuthPlatform({
     secretSealKey: secretSealKey || `swedish-erp-auth-seal:${normalizedEnvironmentMode}:${providerEnvironmentRef}`,
     keyId: `org-auth:${normalizedEnvironmentMode}:${providerEnvironmentRef}`
   });
-  const authSecretStore =
-    secretStore ||
-    createConfiguredSecretStore({
+    const authSecretStore =
+      secretStore ||
+      createConfiguredSecretStore({
       clock,
       env,
       bridgeRunner: secretRuntimeBridgeRunner || undefined,
       environmentMode: normalizedEnvironmentMode,
       storeId: `org-auth:${providerEnvironmentRef}`,
       masterKey: secretSealKey || `swedish-erp-auth-seal:${normalizedEnvironmentMode}:${providerEnvironmentRef}`,
-      activeKeyVersion: `org-auth:${normalizedEnvironmentMode}:${providerEnvironmentRef}:v1`
-    });
-  const state = {
+        activeKeyVersion: `org-auth:${normalizedEnvironmentMode}:${providerEnvironmentRef}:v1`
+      });
+
+    function hashSessionToken(sessionToken) {
+      return authSecretStore.createBlindIndex({
+        value: assertNonEmpty(sessionToken, "session_token_required"),
+        purpose: SESSION_TOKEN_HASH_PURPOSE
+      }).digest;
+    }
+
+    function sessionTokenMatchesRecord(session, sessionToken) {
+      const resolvedToken = assertNonEmpty(sessionToken, "session_token_required");
+      if (session.tokenHash === hashSessionToken(resolvedToken)) {
+        return true;
+      }
+      const algorithm = typeof session.tokenHashAlgorithm === "string" ? session.tokenHashAlgorithm : null;
+      if (!algorithm || algorithm === "sha256") {
+        return session.tokenHash === hashOpaqueToken(resolvedToken);
+      }
+      return false;
+    }
+
+    const state = {
     companies: new Map(),
     users: new Map(),
     companyUsers: new Map(),
@@ -872,14 +895,16 @@ export function createOrgAuthPlatform({
     const now = currentDate();
     const requiredFactorCount = companyUser.requiresMfa ? 2 : requiredFactorCountForRoles([companyUser.roleCode]);
     const sessionToken = issueOpaqueToken();
-    const session = {
-      sessionId: crypto.randomUUID(),
-      userId: companyUser.userId,
-      companyId,
-      companyUserId: companyUser.companyUserId,
-      tokenHash: hashOpaqueToken(sessionToken),
-      status: "pending",
-      requiredFactorCount,
+      const session = {
+        sessionId: crypto.randomUUID(),
+        userId: companyUser.userId,
+        companyId,
+        companyUserId: companyUser.companyUserId,
+        tokenHash: hashSessionToken(sessionToken),
+        tokenHashAlgorithm: SESSION_TOKEN_HASH_ALGORITHM,
+        tokenHashKeyVersion: authSecretStore.activeKeyVersion,
+        status: "pending",
+        requiredFactorCount,
       amr: [],
       freshTrustByActionClass: {},
       freshTrustByTrustLevel: {},
@@ -2453,8 +2478,7 @@ export function createOrgAuthPlatform({
   }
 
   function requireSession(sessionToken, { allowPending = false } = {}) {
-    const tokenHash = hashOpaqueToken(assertNonEmpty(sessionToken, "session_token_required"));
-    const session = [...state.authSessions.values()].find((candidate) => candidate.tokenHash === tokenHash);
+    const session = [...state.authSessions.values()].find((candidate) => sessionTokenMatchesRecord(candidate, sessionToken));
     if (!session) {
       throw httpError(401, "session_not_found", "Session token is unknown.");
     }

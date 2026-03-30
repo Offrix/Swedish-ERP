@@ -33,6 +33,18 @@ test("Phase 13.1 public API clients, compatibility baselines and webhook events 
     mode: "sandbox"
   });
   assert.equal(auth.token.clientId, client.clientId);
+  const durableState = platform.getDomain("integrations").exportDurableState();
+  const storedClient = durableState.publicApiClients.entries.find(([clientId]) => clientId === client.clientId)?.[1];
+  const storedToken = durableState.publicApiTokens.entries.find(([, candidate]) => candidate.clientId === client.clientId)?.[1];
+  const serializedDurableState = JSON.stringify(durableState);
+  assert.ok(storedClient);
+  assert.ok(storedToken);
+  assert.equal(storedClient.clientSecretHashAlgorithm, "blind_index_hmac_sha256");
+  assert.equal(storedToken.tokenHashAlgorithm, "blind_index_hmac_sha256");
+  assert.equal(serializedDurableState.includes(client.clientSecret), false);
+  assert.equal(serializedDurableState.includes(oauthToken.accessToken), false);
+  assert.notEqual(storedClient.clientSecretHash, client.clientSecret);
+  assert.notEqual(storedToken.tokenHash, oauthToken.accessToken);
 
   const baseline = platform.recordPublicApiCompatibilityBaseline({
     companyId: DEMO_IDS.companyId,

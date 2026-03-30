@@ -136,22 +136,34 @@ test("Phase 6 hardening exports sealed auth factor secrets instead of raw TOTP s
     clock,
     bootstrapScenarioCode: "test_default_demo"
   });
-
+  const started = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_APPROVER_EMAIL
+  });
   const durableState = platform.exportDurableState();
   const serialized = JSON.stringify(durableState);
+  const storedSession = durableState.authSessions.entries.find(
+    ([sessionId]) => sessionId === started.session.sessionId
+  )?.[1];
+
+  assert.ok(storedSession);
   assert.equal(serialized.includes(DEMO_TOTP_SECRET), false);
   assert.equal(serialized.includes(DEMO_APPROVER_TOTP_SECRET), false);
+  assert.equal(serialized.includes(started.sessionToken), false);
+  assert.equal(storedSession.tokenHashAlgorithm, "blind_index_hmac_sha256");
+  assert.equal(storedSession.tokenHashKeyVersion, "org-auth:test:test:v1");
+  assert.notEqual(storedSession.tokenHash, started.sessionToken);
 
   const restoredPlatform = createOrgAuthPlatform({
     clock
   });
   restoredPlatform.importDurableState(durableState);
-  const started = restoredPlatform.startLogin({
+  const restoredLogin = restoredPlatform.startLogin({
     companyId: DEMO_IDS.companyId,
     email: DEMO_APPROVER_EMAIL
   });
   const verified = restoredPlatform.verifyTotp({
-    sessionToken: started.sessionToken,
+    sessionToken: restoredLogin.sessionToken,
     code: restoredPlatform.getTotpCodeForTesting({
       companyId: DEMO_IDS.companyId,
       email: DEMO_APPROVER_EMAIL,

@@ -271,6 +271,39 @@ export function createSecretStore({
     });
   }
 
+  function createBlindIndex({ value, purpose, keyVersion = runtime.activeKeyVersion } = {}) {
+    return clone(
+      runtime.createBlindIndex(
+        text(value, "secret_blind_index_value_required", "Secret blind index value is required.", {
+          trim: false
+        }),
+        {
+          purpose: text(
+            purpose,
+            "secret_blind_index_purpose_required",
+            "Secret blind index purpose is required."
+          ),
+          keyVersion
+        }
+      )
+    );
+  }
+
+  function fingerprintValue({ value, purpose = "secret_material" } = {}) {
+    return runtime.fingerprint(
+      text(value, "secret_fingerprint_value_required", "Secret fingerprint value is required.", {
+        trim: false
+      }),
+      {
+        purpose: text(
+          purpose,
+          "secret_fingerprint_purpose_required",
+          "Secret fingerprint purpose is required."
+        )
+      }
+    );
+  }
+
   function importSecretBundle(bundle = null) {
     records.clear();
     if (!bundle || typeof bundle !== "object") {
@@ -314,6 +347,8 @@ export function createSecretStore({
     providerKind: runtime.providerKind,
     activeKeyVersion: runtime.activeKeyVersion,
     getSecurityPosture,
+    createBlindIndex,
+    fingerprintValue,
     storeSecretMaterial,
     readSecretMaterial,
     hasSecretMaterial,

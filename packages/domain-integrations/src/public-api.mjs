@@ -7,6 +7,9 @@ const CANONICAL_API_VERSION = "2026-03-27";
 const MAX_WEBHOOK_DELIVERY_ATTEMPTS = 5;
 const WEBHOOK_SECRET_SEAL_KEY_ID = "integrations-webhook-secret-seal-v1";
 const PROTECTED_RUNTIME_MODES = new Set(["pilot_parallel", "production"]);
+const OPAQUE_TOKEN_HASH_ALGORITHM = "blind_index_hmac_sha256";
+const PUBLIC_API_CLIENT_SECRET_HASH_PURPOSE = "public_api_client_secret_lookup";
+const PUBLIC_API_ACCESS_TOKEN_HASH_PURPOSE = "public_api_access_token_lookup";
 
 export const PUBLIC_API_MODES = Object.freeze(["sandbox", "production"]);
 export const PUBLIC_API_CLIENT_STATUSES = Object.freeze(["active", "revoked"]);
@@ -251,6 +254,44 @@ export function createPublicApiModule({
   if (!(state.webhookSubscriptionSecrets instanceof Map)) {
     state.webhookSubscriptionSecrets = new Map();
   }
+
+  function hashClientSecret(secret) {
+    return secretStore.createBlindIndex({
+      value: text(secret, "public_api_client_secret_required"),
+      purpose: PUBLIC_API_CLIENT_SECRET_HASH_PURPOSE
+    }).digest;
+  }
+
+  function hashAccessToken(accessToken) {
+    return secretStore.createBlindIndex({
+      value: text(accessToken, "public_api_access_token_required"),
+      purpose: PUBLIC_API_ACCESS_TOKEN_HASH_PURPOSE
+    }).digest;
+  }
+
+  function clientSecretMatches(client, clientSecret) {
+    const resolvedSecret = text(clientSecret, "public_api_client_secret_required");
+    if (client.clientSecretHash === hashClientSecret(resolvedSecret)) {
+      return true;
+    }
+    const algorithm = typeof client.clientSecretHashAlgorithm === "string" ? client.clientSecretHashAlgorithm : null;
+    if (!algorithm || algorithm === "sha256") {
+      return client.clientSecretHash === hashOpaqueToken(resolvedSecret);
+    }
+    return false;
+  }
+
+  function accessTokenMatches(token, accessToken) {
+    const resolvedToken = text(accessToken, "public_api_access_token_required");
+    if (token.tokenHash === hashAccessToken(resolvedToken)) {
+      return true;
+    }
+    const algorithm = typeof token.tokenHashAlgorithm === "string" ? token.tokenHashAlgorithm : null;
+    if (!algorithm || algorithm === "sha256") {
+      return token.tokenHash === hashOpaqueToken(resolvedToken);
+    }
+    return false;
+  }
   return {
     publicApiModes: PUBLIC_API_MODES,
     publicApiClientStatuses: PUBLIC_API_CLIENT_STATUSES,
@@ -350,7 +391,9 @@ export function createPublicApiModule({
       scopes: resolvedScopes,
       specVersion: PUBLIC_API_SPEC_VERSION,
       status: "active",
-      clientSecretHash: hashOpaqueToken(clientSecret),
+      clientSecretHash: hashClientSecret(clientSecret),
+      clientSecretHashAlgorithm: OPAQUE_TOKEN_HASH_ALGORITHM,
+      clientSecretHashKeyVersion: secretStore.activeKeyVersion,
       createdByActorId: text(actorId || "system", "actor_id_required"),
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
@@ -381,8 +424,7 @@ export function createPublicApiModule({
     expiresInMinutes = 60
   } = {}) {
     const client = requireClient(companyId, clientId);
-    const resolvedSecret = text(clientSecret, "public_api_client_secret_required");
-    if (client.clientSecretHash !== hashOpaqueToken(resolvedSecret)) {
+    if (!clientSecretMatches(client, clientSecret)) {
       throw createError(401, "public_api_client_credentials_invalid", "Client credentials are invalid.");
     }
     const issued = issuePublicApiToken({
@@ -429,7 +471,9 @@ export function createPublicApiModule({
       clientId: client.clientId,
       mode: client.mode,
       scopes: requestedScopes,
-      tokenHash: hashOpaqueToken(accessToken),
+      tokenHash: hashAccessToken(accessToken),
+      tokenHashAlgorithm: OPAQUE_TOKEN_HASH_ALGORITHM,
+      tokenHashKeyVersion: secretStore.activeKeyVersion,
       actorId: text(actorId || "system", "actor_id_required"),
       issuedAt,
       expiresAt: addMinutesIso(issuedAt, Number.isFinite(Number(expiresInMinutes)) ? Number(expiresInMinutes) : 60),
@@ -869,6 +913,8 @@ export function createPublicApiModule({
   function presentClient(client) {
     const cloneClient = clone(client);
     delete cloneClient.clientSecretHash;
+    delete cloneClient.clientSecretHashAlgorithm;
+    delete cloneClient.clientSecretHashKeyVersion;
     cloneClient.supportedGrantTypes = ["client_credentials"];
     cloneClient.tokenEndpoint = "/v1/public/oauth/token";
     return cloneClient;
@@ -1016,8 +1062,7 @@ export function createPublicApiModule({
   }
 
   function requireToken(accessToken) {
-    const tokenHash = hashOpaqueToken(text(accessToken, "public_api_access_token_required"));
-    const token = [...state.publicApiTokens.values()].find((candidate) => candidate.tokenHash === tokenHash);
+    const token = [...state.publicApiTokens.values()].find((candidate) => accessTokenMatches(candidate, accessToken));
     if (!token || token.revokedAt) {
       throw createError(401, "public_api_token_not_found", "Public API token is invalid.");
     }

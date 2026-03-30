@@ -223,3 +223,62 @@ test("Phase 7.1 direct platform supports multiple employments, preserves contrac
     (error) => error?.code === "employment_placement_overlaps"
   );
 });
+
+test("Phase 3.3 HR durable export stores identity and payout secrets outside plain snapshot state", () => {
+  const documentPlatform = createDocumentArchivePlatform({
+    clock: () => new Date("2026-12-02T08:00:00Z"),
+    seedDemo: false
+  });
+  const hrPlatform = createHrPlatform({
+    clock: () => new Date("2026-12-02T08:00:00Z"),
+    seedDemo: false,
+    documentPlatform
+  });
+
+  const employee = hrPlatform.createEmployee({
+    companyId: COMPANY_ID,
+    givenName: "Sara",
+    familyName: "Nyberg",
+    identityType: "personnummer",
+    identityValue: "800101-4326",
+    actorId: "unit-test",
+    correlationId: "hr-secret-employee"
+  });
+  hrPlatform.addEmployeeBankAccount({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    payoutMethod: "domestic_account",
+    accountHolderName: "Sara Nyberg",
+    clearingNumber: "5001",
+    accountNumber: "5566771234",
+    actorId: "unit-test",
+    correlationId: "hr-secret-bank"
+  });
+
+  const durableState = hrPlatform.exportDurableState();
+  const serialized = JSON.stringify(durableState);
+
+  assert.equal(serialized.includes("800101-4326"), false);
+  assert.equal(serialized.includes("5566771234"), false);
+  assert.equal(serialized.includes("****1234"), true);
+
+  const restoredPlatform = createHrPlatform({
+    clock: () => new Date("2026-12-02T08:00:00Z"),
+    seedDemo: false,
+    documentPlatform
+  });
+  restoredPlatform.importDurableState(durableState);
+
+  const restoredCompliance = restoredPlatform.getEmployeeComplianceSnapshot({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId
+  });
+  const restoredBankAccount = restoredPlatform.getEmployeeBankAccountDetails({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId
+  });
+
+  assert.equal(restoredCompliance.identityValue, "8001014326");
+  assert.equal(restoredBankAccount.clearingNumber, "5001");
+  assert.equal(restoredBankAccount.accountNumber, "5566771234");
+});

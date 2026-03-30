@@ -2,6 +2,11 @@ import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
+  applyDurableStateSnapshot,
+  serializeDurableState
+} from "../../domain-core/src/state-snapshots.mjs";
+import { createConfiguredSecretStore } from "../../domain-core/src/secret-runtime.mjs";
+import {
   normalizeOptionalIsoDate as normalizeOptionalIsoDateKernel,
   normalizeOptionalSwedishIdentityNumber as normalizeOptionalSwedishIdentityNumberKernel,
   normalizeRequiredCountryCode as normalizeRequiredCountryCodeKernel,
@@ -17,11 +22,28 @@ export function createHrPlatform(options = {}) {
 
 export function createHrEngine({
   clock = () => new Date(),
+  environmentMode = "test",
+  env = process.env,
+  secretRuntimeBridgeRunner = null,
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
-  documentPlatform = null
+  documentPlatform = null,
+  secretStore = null,
+  secretSealKey = null
 } = {}) {
+  const normalizedEnvironmentMode = normalizeRuntimeMode(environmentMode);
+  const hrSecretStore =
+    secretStore ||
+    createConfiguredSecretStore({
+      clock,
+      env,
+      bridgeRunner: secretRuntimeBridgeRunner || undefined,
+      environmentMode: normalizedEnvironmentMode,
+      storeId: "hr",
+      masterKey: secretSealKey || `swedish-erp-hr-seal:${normalizedEnvironmentMode}`,
+      activeKeyVersion: `hr:${normalizedEnvironmentMode}:v1`
+    });
   const state = {
     employees: new Map(),
     employeeIdsByCompany: new Map(),
@@ -54,6 +76,10 @@ export function createHrEngine({
   if (seedDemo) {
     seedDemoState();
   }
+  migrateLegacyEmployeeSecrets();
+  migrateLegacyEmployeeBankAccountSecrets();
+  rebuildEmployeeIdentityLookupIndex();
+  rebuildEmployeeBankAccountLookupIndex();
 
   const engine = {
     identityTypes: HR_IDENTITY_TYPES,
@@ -80,7 +106,10 @@ export function createHrEngine({
     addEmployeeBankAccount,
     listEmployeeDocuments,
     attachEmployeeDocument,
-    listEmployeeAuditEvents
+    listEmployeeAuditEvents,
+    exportDurableState,
+    importDurableState,
+    listSecretStorePostures: () => [hrSecretStore.getSecurityPosture()]
   };
 
   Object.defineProperty(engine, "__durableState", {
@@ -107,9 +136,10 @@ export function createHrEngine({
   function getEmployeeComplianceSnapshot({ companyId, employeeId } = {}) {
     const employee = requireEmployeeRecord(state, companyId, employeeId);
     const secret = state.employeeSecrets.get(employee.employeeId) || null;
+    const secretMaterial = readEmployeeIdentitySecret(secret);
     return {
       ...copy(employee),
-      identityValue: secret?.identityValue || null
+      identityValue: secretMaterial?.identityValue || null
     };
   }
 
@@ -205,8 +235,14 @@ export function createHrEngine({
       throw createError(400, "employee_identity_value_required", "Identity value is required for the chosen identity type.");
     }
 
-    const identityKey = normalizedIdentityValue ? `${resolvedCompanyId}:${resolvedIdentityType}:${normalizedIdentityValue}` : null;
-    if (identityKey && state.employeeIdsByIdentity.has(identityKey)) {
+    const identityLookupKey = normalizedIdentityValue
+      ? buildEmployeeIdentityLookupKey({
+          companyId: resolvedCompanyId,
+          identityType: resolvedIdentityType,
+          identityValue: normalizedIdentityValue
+        })
+      : null;
+    if (identityLookupKey && state.employeeIdsByIdentity.has(identityLookupKey)) {
       throw createError(409, "employee_identity_already_exists", "Employee identity already exists for this company.");
     }
 
@@ -243,12 +279,17 @@ export function createHrEngine({
     state.employees.set(record.employeeId, record);
     appendToIndex(state.employeeIdsByCompany, resolvedCompanyId, record.employeeId);
     setIndexValue(state.employeeIdsByCompanyNo, resolvedCompanyId, resolvedEmployeeNo, record.employeeId);
-    if (identityKey) {
-      state.employeeIdsByIdentity.set(identityKey, record.employeeId);
-      state.employeeSecrets.set(record.employeeId, {
-        identityType: resolvedIdentityType,
-        identityValue: normalizedIdentityValue
-      });
+    if (identityLookupKey) {
+      state.employeeIdsByIdentity.set(identityLookupKey, record.employeeId);
+      state.employeeSecrets.set(
+        record.employeeId,
+        projectEmployeeIdentitySecretRecord({
+          companyId: resolvedCompanyId,
+          employeeId: record.employeeId,
+          identityType: resolvedIdentityType,
+          identityValue: normalizedIdentityValue
+        })
+      );
     }
 
     pushAudit(state, clock, {
@@ -722,7 +763,7 @@ export function createHrEngine({
     if (!selected) {
       return null;
     }
-    const secret = state.bankAccountSecrets.get(selected.employeeBankAccountId) || {};
+    const secret = readEmployeeBankAccountSecret(state.bankAccountSecrets.get(selected.employeeBankAccountId) || null);
     return {
       ...copy(selected),
       clearingNumber: normalizeOptionalText(secret.clearingNumber) || selected.clearingNumber || null,
@@ -765,7 +806,12 @@ export function createHrEngine({
     };
 
     validatePayoutMethod(resolvedPayoutMethod, normalizedBankDetails);
-    const bankAccountKey = `${employee.companyId}:${employee.employeeId}:${resolvedPayoutMethod}:${buildBankAccountCanonicalValue(resolvedPayoutMethod, normalizedBankDetails)}`;
+    const bankAccountKey = buildEmployeeBankAccountLookupKey({
+      companyId: employee.companyId,
+      employeeId: employee.employeeId,
+      payoutMethod: resolvedPayoutMethod,
+      details: normalizedBankDetails
+    });
     if (state.bankAccountIdsByKey.has(bankAccountKey)) {
       const existingId = state.bankAccountIdsByKey.get(bankAccountKey);
       return copy(state.bankAccounts.get(existingId));
@@ -785,13 +831,14 @@ export function createHrEngine({
       payoutMethod: resolvedPayoutMethod,
       accountHolderName: requireText(accountHolderName, "employee_bank_account_holder_required"),
       countryCode: normalizeRequiredCountryCodeKernel(countryCode, "employee_bank_country_invalid", { errorFactory: createError }),
-      clearingNumber: normalizedBankDetails.clearingNumber,
+      clearingNumber: normalizedBankDetails.clearingNumber ? maskSensitiveValue(normalizedBankDetails.clearingNumber) : null,
       accountNumber: normalizedBankDetails.accountNumber ? maskSensitiveValue(normalizedBankDetails.accountNumber) : null,
       bankgiro: normalizedBankDetails.bankgiro ? maskSensitiveValue(normalizedBankDetails.bankgiro) : null,
       plusgiro: normalizedBankDetails.plusgiro ? maskSensitiveValue(normalizedBankDetails.plusgiro) : null,
       iban: normalizedBankDetails.iban ? maskSensitiveValue(normalizedBankDetails.iban) : null,
       bic: normalizedBankDetails.bic,
       bankName: normalizedBankDetails.bankName,
+      last4: resolveBankAccountLast4(normalizedBankDetails),
       maskedAccountDisplay: maskSensitiveValue(buildBankAccountCanonicalValue(resolvedPayoutMethod, normalizedBankDetails)),
       primaryAccount: primaryAccount === true,
       active: true,
@@ -799,7 +846,17 @@ export function createHrEngine({
     };
 
     state.bankAccounts.set(record.employeeBankAccountId, record);
-    state.bankAccountSecrets.set(record.employeeBankAccountId, normalizedBankDetails);
+    state.bankAccountSecrets.set(
+      record.employeeBankAccountId,
+      projectEmployeeBankAccountSecretRecord({
+        companyId: employee.companyId,
+        employeeId: employee.employeeId,
+        employeeBankAccountId: record.employeeBankAccountId,
+        payoutMethod: resolvedPayoutMethod,
+        details: normalizedBankDetails,
+        maskedAccountDisplay: record.maskedAccountDisplay
+      })
+    );
     state.bankAccountIdsByKey.set(bankAccountKey, record.employeeBankAccountId);
     appendToIndex(state.bankAccountIdsByEmployee, employee.employeeId, record.employeeBankAccountId);
 
@@ -890,8 +947,230 @@ export function createHrEngine({
       .map(copy);
   }
 
+  function exportDurableState() {
+    migrateLegacyEmployeeSecrets();
+    migrateLegacyEmployeeBankAccountSecrets();
+    rebuildEmployeeIdentityLookupIndex();
+    rebuildEmployeeBankAccountLookupIndex();
+    return {
+      ...serializeDurableState(state),
+      secretStoreBundle: hrSecretStore.exportSecretBundle()
+    };
+  }
+
+  function importDurableState(snapshot) {
+    applyDurableStateSnapshot(state, snapshot);
+    hrSecretStore.importSecretBundle(snapshot?.secretStoreBundle);
+    migrateLegacyEmployeeSecrets();
+    migrateLegacyEmployeeBankAccountSecrets();
+    rebuildEmployeeIdentityLookupIndex();
+    rebuildEmployeeBankAccountLookupIndex();
+  }
+
   function seedDemoState() {
     return null;
+  }
+
+  function readEmployeeIdentitySecret(secretRecord) {
+    if (!secretRecord) {
+      return null;
+    }
+    if (secretRecord.secretRef && hrSecretStore.hasSecretMaterial({ secretId: secretRecord.secretRef })) {
+      return hrSecretStore.readSecretMaterial({
+        secretId: secretRecord.secretRef,
+        parse: true
+      });
+    }
+    return secretRecord;
+  }
+
+  function readEmployeeBankAccountSecret(secretRecord) {
+    if (!secretRecord) {
+      return {};
+    }
+    if (secretRecord.secretRef && hrSecretStore.hasSecretMaterial({ secretId: secretRecord.secretRef })) {
+      return hrSecretStore.readSecretMaterial({
+        secretId: secretRecord.secretRef,
+        parse: true
+      });
+    }
+    return secretRecord;
+  }
+
+  function projectEmployeeIdentitySecretRecord({ companyId, employeeId, identityType, identityValue }) {
+    const maskedValue = maskSensitiveValue(identityValue);
+    const secretMeta = hrSecretStore.storeSecretMaterial({
+      secretId: `hr-employee-identity:${employeeId}`,
+      classCode: "S3",
+      material: {
+        identityType,
+        identityValue
+      },
+      owner: {
+        domainKey: "hr",
+        companyId,
+        employeeId,
+        objectType: "employee_identity"
+      },
+      mode: normalizedEnvironmentMode,
+      maskedValue,
+      blindIndexInputs: [
+        {
+          purpose: "hr_employee_identity_lookup",
+          value: `${companyId}:${identityType}:${identityValue}`
+        }
+      ],
+      fingerprintPurpose: "hr_employee_identity"
+    });
+    return {
+      identityType,
+      secretRef: secretMeta.secretRef,
+      maskedValue: secretMeta.maskedValue,
+      keyVersion: secretMeta.keyVersion,
+      fingerprint: secretMeta.fingerprint
+    };
+  }
+
+  function projectEmployeeBankAccountSecretRecord({
+    companyId,
+    employeeId,
+    employeeBankAccountId,
+    payoutMethod,
+    details,
+    maskedAccountDisplay
+  }) {
+    const secretMeta = hrSecretStore.storeSecretMaterial({
+      secretId: `hr-employee-bank-account:${employeeBankAccountId}`,
+      classCode: "S3",
+      material: copy(details),
+      owner: {
+        domainKey: "hr",
+        companyId,
+        employeeId,
+        employeeBankAccountId,
+        objectType: "employee_bank_account"
+      },
+      mode: normalizedEnvironmentMode,
+      maskedValue: maskedAccountDisplay,
+      blindIndexInputs: [
+        {
+          purpose: "hr_employee_bank_account_lookup",
+          value: `${companyId}:${employeeId}:${payoutMethod}:${buildBankAccountCanonicalValue(payoutMethod, details)}`
+        }
+      ],
+      fingerprintPurpose: "hr_employee_bank_account"
+    });
+    return {
+      secretRef: secretMeta.secretRef,
+      maskedValue: secretMeta.maskedValue,
+      keyVersion: secretMeta.keyVersion,
+      fingerprint: secretMeta.fingerprint,
+      last4: resolveBankAccountLast4(details)
+    };
+  }
+
+  function migrateLegacyEmployeeSecrets() {
+    for (const [employeeId, secretRecord] of state.employeeSecrets.entries()) {
+      if (!secretRecord || secretRecord.secretRef || !secretRecord.identityValue) {
+        continue;
+      }
+      const employee = state.employees.get(employeeId);
+      if (!employee) {
+        continue;
+      }
+      state.employeeSecrets.set(
+        employeeId,
+        projectEmployeeIdentitySecretRecord({
+          companyId: employee.companyId,
+          employeeId,
+          identityType: secretRecord.identityType || employee.identityType || "other",
+          identityValue: secretRecord.identityValue
+        })
+      );
+    }
+  }
+
+  function migrateLegacyEmployeeBankAccountSecrets() {
+    for (const [employeeBankAccountId, secretRecord] of state.bankAccountSecrets.entries()) {
+      if (!secretRecord || secretRecord.secretRef) {
+        continue;
+      }
+      const bankAccount = state.bankAccounts.get(employeeBankAccountId);
+      if (!bankAccount) {
+        continue;
+      }
+      state.bankAccountSecrets.set(
+        employeeBankAccountId,
+        projectEmployeeBankAccountSecretRecord({
+          companyId: bankAccount.companyId,
+          employeeId: bankAccount.employeeId,
+          employeeBankAccountId,
+          payoutMethod: bankAccount.payoutMethod,
+          details: {
+            clearingNumber: normalizeOptionalText(secretRecord.clearingNumber),
+            accountNumber: normalizeOptionalText(secretRecord.accountNumber),
+            bankgiro: normalizeOptionalText(secretRecord.bankgiro),
+            plusgiro: normalizeOptionalText(secretRecord.plusgiro),
+            iban: normalizeOptionalText(secretRecord.iban),
+            bic: normalizeOptionalText(secretRecord.bic),
+            bankName: normalizeOptionalText(secretRecord.bankName)
+          },
+          maskedAccountDisplay: bankAccount.maskedAccountDisplay
+        })
+      );
+    }
+  }
+
+  function rebuildEmployeeIdentityLookupIndex() {
+    state.employeeIdsByIdentity.clear();
+    for (const [employeeId, secretRecord] of state.employeeSecrets.entries()) {
+      const employee = state.employees.get(employeeId);
+      const secret = readEmployeeIdentitySecret(secretRecord);
+      if (!employee || !secret?.identityValue) {
+        continue;
+      }
+      state.employeeIdsByIdentity.set(
+        buildEmployeeIdentityLookupKey({
+          companyId: employee.companyId,
+          identityType: secret.identityType || employee.identityType || "other",
+          identityValue: secret.identityValue
+        }),
+        employeeId
+      );
+    }
+  }
+
+  function rebuildEmployeeBankAccountLookupIndex() {
+    state.bankAccountIdsByKey.clear();
+    for (const [employeeBankAccountId, bankAccount] of state.bankAccounts.entries()) {
+      const secret = readEmployeeBankAccountSecret(state.bankAccountSecrets.get(employeeBankAccountId) || null);
+      if (!secret) {
+        continue;
+      }
+      state.bankAccountIdsByKey.set(
+        buildEmployeeBankAccountLookupKey({
+          companyId: bankAccount.companyId,
+          employeeId: bankAccount.employeeId,
+          payoutMethod: bankAccount.payoutMethod,
+          details: secret
+        }),
+        employeeBankAccountId
+      );
+    }
+  }
+
+  function buildEmployeeIdentityLookupKey({ companyId, identityType, identityValue }) {
+    return `${requireText(companyId, "company_id_required")}:${hrSecretStore.createBlindIndex({
+      value: `${requireText(companyId, "company_id_required")}:${requireText(identityType, "employee_identity_type_invalid")}:${requireText(identityValue, "employee_identity_value_required")}`,
+      purpose: "hr_employee_identity_lookup"
+    }).digest}`;
+  }
+
+  function buildEmployeeBankAccountLookupKey({ companyId, employeeId, payoutMethod, details }) {
+    return `${requireText(companyId, "company_id_required")}:${requireText(employeeId, "employee_id_required")}:${hrSecretStore.createBlindIndex({
+      value: `${requireText(companyId, "company_id_required")}:${requireText(employeeId, "employee_id_required")}:${requireText(payoutMethod, "employee_bank_payout_method_invalid")}:${buildBankAccountCanonicalValue(payoutMethod, details)}`,
+      purpose: "hr_employee_bank_account_lookup"
+    }).digest}`;
   }
 
   function enrichEmployee(employee) {
@@ -1277,6 +1556,20 @@ function maskSensitiveValue(value) {
   }
   const suffix = normalized.slice(-4);
   return `${"*".repeat(Math.max(normalized.length - 4, 4))}${suffix}`;
+}
+
+function resolveBankAccountLast4(details) {
+  const value =
+    normalizeOptionalText(details?.accountNumber)
+    || normalizeOptionalText(details?.bankgiro)
+    || normalizeOptionalText(details?.plusgiro)
+    || normalizeOptionalText(details?.iban)
+    || null;
+  return value ? value.slice(-4) : null;
+}
+
+function normalizeRuntimeMode(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : "test";
 }
 
 function assertAllowed(value, allowedValues, errorCode) {
