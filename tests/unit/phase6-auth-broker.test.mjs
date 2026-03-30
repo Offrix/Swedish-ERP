@@ -45,6 +45,17 @@ test("Phase 6.1 broker-backed BankID and local factors create canonical identity
   assert.equal(bankIdCollect.provider.providerMode, "sandbox");
   assert.equal(bankIdCollect.session.status, "active");
 
+  const passkeyStepUp = platform.startBankIdAuthentication({
+    sessionToken: login.sessionToken,
+    actionClass: "identity_device_trust_manage"
+  });
+  platform.collectBankIdAuthentication({
+    sessionToken: login.sessionToken,
+    orderRef: passkeyStepUp.orderRef,
+    completionToken: platform.getBankIdCompletionTokenForTesting(passkeyStepUp.orderRef),
+    actionClass: "identity_device_trust_manage"
+  });
+
   const passkeyRegistration = platform.beginPasskeyRegistration({
     sessionToken: login.sessionToken,
     deviceName: "Finance laptop key"

@@ -384,15 +384,32 @@ test("Phase 6 hardening locks repeated invalid passkey assertions and revokes th
 
   const registrationLogin = platform.startLogin({
     companyId: DEMO_IDS.companyId,
-    email: DEMO_APPROVER_EMAIL
+    email: DEMO_ADMIN_EMAIL
   });
   platform.verifyTotp({
     sessionToken: registrationLogin.sessionToken,
     code: platform.getTotpCodeForTesting({
       companyId: DEMO_IDS.companyId,
-      email: DEMO_APPROVER_EMAIL,
+      email: DEMO_ADMIN_EMAIL,
       now
     })
+  });
+  const registrationActivation = platform.startBankIdAuthentication({
+    sessionToken: registrationLogin.sessionToken
+  });
+  platform.collectBankIdAuthentication({
+    sessionToken: registrationLogin.sessionToken,
+    orderRef: registrationActivation.orderRef,
+    completionToken: platform.getBankIdCompletionTokenForTesting(registrationActivation.orderRef)
+  });
+  const registrationStepUp = platform.startBankIdAuthentication({
+    sessionToken: registrationLogin.sessionToken,
+    actionClass: "identity_device_trust_manage"
+  });
+  platform.collectBankIdAuthentication({
+    sessionToken: registrationLogin.sessionToken,
+    orderRef: registrationStepUp.orderRef,
+    completionToken: platform.getBankIdCompletionTokenForTesting(registrationStepUp.orderRef)
   });
   const registration = platform.beginPasskeyRegistration({
     sessionToken: registrationLogin.sessionToken,
@@ -408,7 +425,15 @@ test("Phase 6 hardening locks repeated invalid passkey assertions and revokes th
 
   const login = platform.startLogin({
     companyId: DEMO_IDS.companyId,
-    email: DEMO_APPROVER_EMAIL
+    email: DEMO_ADMIN_EMAIL
+  });
+  platform.verifyTotp({
+    sessionToken: login.sessionToken,
+    code: platform.getTotpCodeForTesting({
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL,
+      now
+    })
   });
   for (let attempt = 0; attempt < 4; attempt += 1) {
     assert.throws(
@@ -443,7 +468,15 @@ test("Phase 6 hardening locks repeated invalid passkey assertions and revokes th
   now = new Date("2026-03-29T15:16:00Z");
   const retried = platform.startLogin({
     companyId: DEMO_IDS.companyId,
-    email: DEMO_APPROVER_EMAIL
+    email: DEMO_ADMIN_EMAIL
+  });
+  platform.verifyTotp({
+    sessionToken: retried.sessionToken,
+    code: platform.getTotpCodeForTesting({
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL,
+      now
+    })
   });
   const asserted = platform.assertPasskey({
     sessionToken: retried.sessionToken,

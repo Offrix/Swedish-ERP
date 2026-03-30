@@ -13,6 +13,7 @@ import {
   resolveSessionTrustLevel,
   sessionIsActive,
   timestamp,
+  trustLevelSatisfies,
   verifyTotpCode
 } from "../../auth-core/src/index.mjs";
 import {
@@ -253,6 +254,18 @@ const TOTP_LOCKOUT_MS = 15 * 60 * 1000;
 const PASSKEY_FAILURE_THRESHOLD = 5;
 const PASSKEY_FAILURE_WINDOW_MS = 10 * 60 * 1000;
 const PASSKEY_LOCKOUT_MS = 15 * 60 * 1000;
+const LOGIN_IP_FAILURE_THRESHOLD = 20;
+const LOGIN_IP_FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_IP_LOCKOUT_MS = 15 * 60 * 1000;
+const TOTP_ACCOUNT_FAILURE_THRESHOLD = 10;
+const TOTP_ACCOUNT_FAILURE_WINDOW_MS = 24 * 60 * 60 * 1000;
+const TOTP_ACCOUNT_LOCKOUT_MS = 24 * 60 * 60 * 1000;
+const PASSKEY_REGISTRATION_ATTEMPT_THRESHOLD = 3;
+const PASSKEY_REGISTRATION_ATTEMPT_WINDOW_MS = 30 * 60 * 1000;
+const BANKID_INITIATION_IP_THRESHOLD = 10;
+const BANKID_INITIATION_IP_WINDOW_MS = 10 * 60 * 1000;
+const BANKID_INITIATION_IP_LOCKOUT_MS = 10 * 60 * 1000;
+const BANKID_OPEN_INITIATION_LIMIT = 5;
 const BANKID_FAILURE_THRESHOLD = 5;
 const BANKID_FAILURE_WINDOW_MS = 10 * 60 * 1000;
 const BANKID_LOCKOUT_MS = 15 * 60 * 1000;
@@ -273,7 +286,8 @@ export function createOrgAuthPlatform({
   secretStore = null,
   providerBaselineRegistry = null,
   resolveIdentityModeIsolation = null,
-  identityModeCatalog = null
+  identityModeCatalog = null,
+  securityRuntimePlatform = null
 } = {}) {
   const providerBaselines =
     providerBaselineRegistry || createProviderBaselineRegistry({ clock, seedProviderBaselines: AUTH_PROVIDER_BASELINES });
@@ -305,6 +319,41 @@ export function createOrgAuthPlatform({
         value: assertNonEmpty(sessionToken, "session_token_required"),
         purpose: SESSION_TOKEN_HASH_PURPOSE
       }).digest;
+    }
+
+    function consumeSecurityBudget(options = {}) {
+      if (!securityRuntimePlatform?.consumeSecurityBudget) {
+        return null;
+      }
+      return securityRuntimePlatform.consumeSecurityBudget(options);
+    }
+
+    function assertSecurityFailureSeriesOpen(options = {}) {
+      if (!securityRuntimePlatform?.assertSecurityFailureSeriesOpen) {
+        return null;
+      }
+      return securityRuntimePlatform.assertSecurityFailureSeriesOpen(options);
+    }
+
+    function recordSecurityFailureSeries(options = {}) {
+      if (!securityRuntimePlatform?.recordSecurityFailureSeries) {
+        return null;
+      }
+      return securityRuntimePlatform.recordSecurityFailureSeries(options);
+    }
+
+    function clearSecurityFailureSeries(options = {}) {
+      if (!securityRuntimePlatform?.clearSecurityFailureSeries) {
+        return null;
+      }
+      return securityRuntimePlatform.clearSecurityFailureSeries(options);
+    }
+
+    function recordSecurityAnomaly(options = {}) {
+      if (!securityRuntimePlatform?.recordSecurityAnomaly) {
+        return null;
+      }
+      return securityRuntimePlatform.recordSecurityAnomaly(options);
     }
 
     function sessionTokenMatchesRecord(session, sessionToken) {
@@ -835,9 +884,27 @@ export function createOrgAuthPlatform({
     };
   }
 
-  function startLogin({ companyId, email } = {}) {
+  function startLogin({ companyId, email, requestIp = null } = {}) {
     const resolvedCompanyId = assertNonEmpty(companyId, "company_id_required");
     const normalizedEmail = normalizeEmailAddress(email);
+    const resolvedRequestIp = normalizeOptionalKeyPart(requestIp) || "unknown";
+    consumeSecurityBudget({
+      companyId: resolvedCompanyId,
+      budgetCode: "auth_login_ip",
+      subjectKey: `ip:${resolvedRequestIp}`,
+      subjectType: "ip_address",
+      subjectId: resolvedRequestIp,
+      actorId: `unresolved:${normalizedEmail}`,
+      ipAddress: resolvedRequestIp,
+      limit: LOGIN_IP_FAILURE_THRESHOLD,
+      windowMs: LOGIN_IP_FAILURE_WINDOW_MS,
+      lockoutMs: LOGIN_IP_LOCKOUT_MS,
+      errorCode: "login_ip_temporarily_locked",
+      errorMessage: "Too many login attempts came from this network address. Try again later.",
+      alertCode: "auth_login_ip_spike",
+      alertSeverity: "high",
+      riskScore: 25
+    });
     const loginGuardrail = resolveAuthGuardrail({
       scope: "login_identifier",
       key: createLoginIdentifierGuardrailKey(resolvedCompanyId, normalizedEmail),
@@ -873,9 +940,24 @@ export function createOrgAuthPlatform({
           metadata: {
             scope: failureGuardrail.scope,
             normalizedEmail,
+            requestIp: resolvedRequestIp,
             failureCount: failureGuardrail.failureCount,
             lockedUntil: failureGuardrail.lockedUntil,
             originalErrorCode: error.code
+          }
+        });
+        recordSecurityAnomaly({
+          companyId: resolvedCompanyId,
+          alertCode: "auth_login_unresolved_identifier",
+          subjectKey: `company_user:${normalizedEmail}`,
+          subjectType: "login_identifier",
+          subjectId: normalizedEmail,
+          actorId: `unresolved:${normalizedEmail}`,
+          ipAddress: resolvedRequestIp,
+          severity: failureGuardrail.lockedUntil ? "high" : "medium",
+          riskScore: failureGuardrail.lockedUntil ? 20 : 10,
+          metadata: {
+            failureCount: failureGuardrail.failureCount
           }
         });
         if (failureGuardrail.lockedUntil) {
@@ -1058,14 +1140,25 @@ export function createOrgAuthPlatform({
     };
   }
 
-  function verifyTotp({ sessionToken, code, factorId = null, actionClass = null, challengeId = null, deviceFingerprint = null } = {}) {
+  function verifyTotp({ sessionToken, code, factorId = null, actionClass = null, challengeId = null, deviceFingerprint = null, requestIp = null } = {}) {
     const { session, principal } = requireSession(sessionToken, { allowPending: true });
+    const resolvedRequestIp = normalizeOptionalKeyPart(requestIp) || "unknown";
     const factor =
       factorId !== null ? state.authFactors.get(factorId) : findFactor(session.companyUserId, "totp", ["active"]);
 
     if (!factor || factor.companyUserId !== session.companyUserId || factor.factorType !== "totp") {
       throw httpError(404, "totp_factor_not_found", "No matching TOTP factor was found.");
     }
+    if (factor.status === "locked") {
+      throw httpError(403, "totp_recovery_required", "TOTP factor is locked and must be re-enrolled before it can be used.");
+    }
+    assertSecurityFailureSeriesOpen({
+      companyId: session.companyId,
+      seriesCode: "auth_totp_account_failures",
+      subjectKey: `company_user:${session.companyUserId}`,
+      errorCode: "totp_recovery_required",
+      errorMessage: "TOTP factor is locked and must be re-enrolled before it can be used."
+    });
     const totpGuardrail = resolveAuthGuardrail({
       scope: "totp_factor",
       key: createTotpFactorGuardrailKey(session.companyUserId, factor.factorId),
@@ -1081,11 +1174,33 @@ export function createOrgAuthPlatform({
     });
 
     if (!verifyTotpCode({ secret: readAuthFactorSecret(factor), code, now: currentDate() })) {
+      const accountFailureSeries = recordSecurityFailureSeries({
+        companyId: session.companyId,
+        seriesCode: "auth_totp_account_failures",
+        subjectKey: `company_user:${session.companyUserId}`,
+        subjectType: "company_user",
+        subjectId: session.companyUserId,
+        actorId: principal.userId,
+        ipAddress: resolvedRequestIp,
+        threshold: TOTP_ACCOUNT_FAILURE_THRESHOLD,
+        windowMs: TOTP_ACCOUNT_FAILURE_WINDOW_MS,
+        lockoutMs: TOTP_ACCOUNT_LOCKOUT_MS,
+        alertCode: "auth_totp_account_locked",
+        alertSeverity: "high",
+        riskScore: 30,
+        metadata: {
+          factorId: factor.factorId
+        }
+      });
       const failureGuardrail = recordAuthGuardrailFailure(totpGuardrail, {
         windowMs: TOTP_FAILURE_WINDOW_MS,
         threshold: TOTP_FAILURE_THRESHOLD,
         lockoutMs: TOTP_LOCKOUT_MS
       });
+      if (accountFailureSeries?.lockedUntil) {
+        factor.status = "locked";
+        factor.updatedAt = nowIso();
+      }
       if (failureGuardrail.lockedUntil) {
         revokeSessionForSecurityLockout(session, {
           reasonCode: "totp_temporarily_locked"
@@ -1102,10 +1217,15 @@ export function createOrgAuthPlatform({
           ? "TOTP verification temporarily locked after repeated invalid codes."
           : "Provided TOTP code was invalid.",
         metadata: {
+          accountFailureCount: accountFailureSeries?.failureCount || 0,
+          accountLockedUntil: accountFailureSeries?.lockedUntil || null,
           failureCount: failureGuardrail.failureCount,
           lockedUntil: failureGuardrail.lockedUntil
         }
       });
+      if (accountFailureSeries?.lockedUntil) {
+        throw httpError(403, "totp_recovery_required", "TOTP factor is locked and must be re-enrolled before it can be used.");
+      }
       if (failureGuardrail.lockedUntil) {
         throw httpError(429, "totp_temporarily_locked", "Too many invalid TOTP attempts. Try again later.");
       }
@@ -1113,6 +1233,11 @@ export function createOrgAuthPlatform({
     }
     markAuthGuardrailSuccess(totpGuardrail, {
       windowMs: TOTP_FAILURE_WINDOW_MS
+    });
+    clearSecurityFailureSeries({
+      companyId: session.companyId,
+      seriesCode: "auth_totp_account_failures",
+      subjectKey: `company_user:${session.companyUserId}`
     });
 
     if (factor.status === "pending_enrollment") {
@@ -1160,8 +1285,39 @@ export function createOrgAuthPlatform({
     };
   }
 
-  function beginPasskeyRegistration({ sessionToken, deviceName = "Security key" } = {}) {
+  function beginPasskeyRegistration({ sessionToken, deviceName = "Security key", requestIp = null } = {}) {
     const { session, principal } = requireSession(sessionToken, { allowPending: false });
+    assertFreshTrust({
+      session,
+      requiredTrustLevel: "strong_mfa",
+      actionClass: "identity_device_trust_manage",
+      errorCode: "passkey_step_up_required",
+      errorMessage: "Passkey registration requires a fresh strong MFA step-up."
+    });
+    const resolvedRequestIp = normalizeOptionalKeyPart(requestIp) || "unknown";
+    const trustMarker =
+      session.freshTrustByActionClass?.identity_device_trust_manage
+      || session.freshTrustByTrustLevel?.strong_mfa
+      || session.lastVerifiedAt
+      || session.sessionRevisionId
+      || session.sessionId;
+    consumeSecurityBudget({
+      companyId: session.companyId,
+      budgetCode: "auth_passkey_registration_attempt",
+      subjectKey: `company_user:${session.companyUserId}:trust:${trustMarker}`,
+      subjectType: "company_user",
+      subjectId: session.companyUserId,
+      actorId: principal.userId,
+      ipAddress: resolvedRequestIp,
+      limit: PASSKEY_REGISTRATION_ATTEMPT_THRESHOLD,
+      windowMs: PASSKEY_REGISTRATION_ATTEMPT_WINDOW_MS,
+      lockoutMs: PASSKEY_REGISTRATION_ATTEMPT_WINDOW_MS,
+      errorCode: "passkey_step_up_required",
+      errorMessage: "Passkey registration requires a new strong MFA step-up before more attempts are allowed.",
+      alertCode: "auth_passkey_registration_spike",
+      alertSeverity: "high",
+      riskScore: 20
+    });
     const challenge = createPasskeyChallenge();
     const challengeState = {
       challengeId: challenge.challengeId,
@@ -1338,11 +1494,46 @@ export function createOrgAuthPlatform({
     };
   }
 
-  function startBankIdAuthentication({ sessionToken, actionClass = null } = {}) {
+  function startBankIdAuthentication({ sessionToken, actionClass = null, requestIp = null } = {}) {
     const { session, principal } = requireSession(sessionToken, { allowPending: true });
+    const resolvedRequestIp = normalizeOptionalKeyPart(requestIp) || "unknown";
     const factor = findFactor(session.companyUserId, "bankid", ["active"]);
     if (!factor) {
       throw httpError(404, "bankid_identity_missing", "No BankID identity is enrolled for this company user.");
+    }
+    consumeSecurityBudget({
+      companyId: session.companyId,
+      budgetCode: "auth_bankid_initiation_ip",
+      subjectKey: `ip:${resolvedRequestIp}`,
+      subjectType: "ip_address",
+      subjectId: resolvedRequestIp,
+      actorId: principal.userId,
+      ipAddress: resolvedRequestIp,
+      limit: BANKID_INITIATION_IP_THRESHOLD,
+      windowMs: BANKID_INITIATION_IP_WINDOW_MS,
+      lockoutMs: BANKID_INITIATION_IP_LOCKOUT_MS,
+      errorCode: "bankid_initiation_rate_limited",
+      errorMessage: "Too many BankID initiations came from this network address. Try again later.",
+      alertCode: "auth_bankid_initiation_ip_spike",
+      alertSeverity: "high",
+      riskScore: 25
+    });
+    if (countOpenBankIdInitiations(session.companyUserId) >= BANKID_OPEN_INITIATION_LIMIT) {
+      recordSecurityAnomaly({
+        companyId: session.companyId,
+        alertCode: "auth_bankid_open_limit_reached",
+        subjectKey: `company_user:${session.companyUserId}`,
+        subjectType: "company_user",
+        subjectId: session.companyUserId,
+        actorId: principal.userId,
+        ipAddress: resolvedRequestIp,
+        severity: "high",
+        riskScore: 30,
+        metadata: {
+          openInitiationLimit: BANKID_OPEN_INITIATION_LIMIT
+        }
+      });
+      throw httpError(429, "bankid_open_initiation_limit_reached", "Too many open BankID initiations exist for this account. Finish or let them expire before starting a new one.");
     }
     const isolationSummary = evaluateIdentityModeIsolation({
       state,
@@ -1396,6 +1587,22 @@ export function createOrgAuthPlatform({
       entityId: challenge.challengeId,
       explanation: "BankID authentication started."
     });
+    if (countOpenBankIdInitiations(session.companyUserId) >= 3) {
+      recordSecurityAnomaly({
+        companyId: session.companyId,
+        alertCode: "auth_bankid_repeated_open_initiations",
+        subjectKey: `company_user:${session.companyUserId}`,
+        subjectType: "company_user",
+        subjectId: session.companyUserId,
+        actorId: principal.userId,
+        ipAddress: resolvedRequestIp,
+        severity: "medium",
+        riskScore: 15,
+        metadata: {
+          openInitiations: countOpenBankIdInitiations(session.companyUserId)
+        }
+      });
+    }
 
     return {
       ...providerResult,
@@ -1734,13 +1941,14 @@ export function createOrgAuthPlatform({
     };
   }
 
-  function createChallenge({ sessionToken, factorType, actionClass = null, deviceName = "Security key" } = {}) {
+  function createChallenge({ sessionToken, factorType, actionClass = null, deviceName = "Security key", requestIp = null } = {}) {
     const { session, principal } = requireSession(sessionToken, { allowPending: false });
     const resolvedFactorType = assertAllowedValue(factorType, ["totp", "passkey", "bankid"], "challenge_factor_type_invalid");
     if (resolvedFactorType === "bankid") {
       return startBankIdAuthentication({
         sessionToken,
-        actionClass
+        actionClass,
+        requestIp
       });
     }
 
@@ -1793,7 +2001,8 @@ export function createOrgAuthPlatform({
     credentialId = null,
     assertion = null,
     completionToken = null,
-    deviceFingerprint = null
+    deviceFingerprint = null,
+    requestIp = null
   } = {}) {
     const challenge = requireChallenge(assertNonEmpty(challengeId, "challenge_id_required"), null);
     if (challenge.challengeType === "bankid_auth") {
@@ -1812,7 +2021,8 @@ export function createOrgAuthPlatform({
         factorId,
         actionClass: challenge.payloadJson?.actionClass || null,
         challengeId: challenge.challengeId,
-        deviceFingerprint
+        deviceFingerprint,
+        requestIp
       });
     }
     if (challenge.challengeType === "passkey_assertion") {
@@ -3381,6 +3591,35 @@ export function createOrgAuthPlatform({
       const actionClassTtlSeconds = ACTION_CLASS_FRESHNESS_TTL_SECONDS[actionClass] || trustLevelTtlSeconds;
       session.freshTrustByActionClass[actionClass] = timestamp(new Date(currentDate().getTime() + actionClassTtlSeconds * 1000));
     }
+  }
+
+  function assertFreshTrust({ session, requiredTrustLevel = null, actionClass = null, errorCode, errorMessage }) {
+    const now = currentDate();
+    const currentTrustLevel = resolveSessionTrustLevel(session);
+    if (requiredTrustLevel && !trustLevelSatisfies(currentTrustLevel, requiredTrustLevel)) {
+      throw httpError(403, errorCode, errorMessage);
+    }
+    if (requiredTrustLevel) {
+      const freshTrustUntil = session?.freshTrustByTrustLevel?.[requiredTrustLevel];
+      if (!freshTrustUntil || new Date(freshTrustUntil) < now) {
+        throw httpError(403, errorCode, errorMessage);
+      }
+    }
+    if (actionClass) {
+      const freshActionUntil = session?.freshTrustByActionClass?.[actionClass];
+      if (!freshActionUntil || new Date(freshActionUntil) < now) {
+        throw httpError(403, errorCode, errorMessage);
+      }
+    }
+  }
+
+  function countOpenBankIdInitiations(companyUserId) {
+    return [...state.authChallenges.values()]
+      .filter((challenge) => challenge.companyUserId === companyUserId)
+      .filter((challenge) => challenge.challengeType === "bankid_auth")
+      .filter((challenge) => challenge.status === "pending")
+      .filter((challenge) => new Date(challenge.expiresAt) >= currentDate())
+      .length;
   }
 
   function createChallengeCompletionReceipt({

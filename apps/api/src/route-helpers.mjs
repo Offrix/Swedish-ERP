@@ -158,6 +158,14 @@ export function readSessionToken(req, body = {}) {
   return readBearerToken(req) || body.sessionToken || null;
 }
 
+export function readClientAddress(req) {
+  const forwardedFor = readHeaderValue(req, "x-forwarded-for");
+  if (typeof forwardedFor === "string" && forwardedFor.trim().length > 0) {
+    return forwardedFor.split(",")[0].trim();
+  }
+  return req?.socket?.remoteAddress || "unknown";
+}
+
 export function authorizeCompanyAccess({
   platform,
   sessionToken,

@@ -1,4 +1,16 @@
 const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
+  "securityRuntime": Object.freeze({
+    "assertSecurityFailureSeriesOpen": "read",
+    "clearSecurityFailureSeries": "write",
+    "consumeSecurityBudget": "write",
+    "getSecurityRiskSummary": "read",
+    "listSecurityAlerts": "read",
+    "listSecurityBudgets": "read",
+    "listSecurityFailureSeries": "read",
+    "recordSecurityAnomaly": "write",
+    "recordSecurityFailureSeries": "write",
+    "snapshotSecurityRuntime": "read",
+  }),
   "orgAuth": Object.freeze({
     "activateModule": "write",
     "assertPasskey": "write",

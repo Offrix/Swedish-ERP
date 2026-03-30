@@ -30,6 +30,15 @@ export const ADMIN_DIAGNOSTIC_TYPES = Object.freeze([
 const WRITE_DIAGNOSTIC_TYPES = new Set(["plan_job_replay", "execute_job_replay"]);
 const SUPPORT_ACTION_IMPERSONATION_READ_ONLY = "impersonation_read_only";
 const SUPPORT_ACTION_IMPERSONATION_LIMITED_WRITE = "impersonation_limited_write";
+const IMPERSONATION_REQUEST_LIMIT = 5;
+const IMPERSONATION_REQUEST_WINDOW_MS = 30 * 60 * 1000;
+const IMPERSONATION_ACTIVATION_LIMIT = 5;
+const IMPERSONATION_ACTIVATION_WINDOW_MS = 30 * 60 * 1000;
+const BREAK_GLASS_REQUEST_LIMIT_PER_ACTOR = 3;
+const BREAK_GLASS_REQUEST_WINDOW_MS = 30 * 60 * 1000;
+const BREAK_GLASS_ACTIVATION_LIMIT = 2;
+const BREAK_GLASS_ACTIVATION_WINDOW_MS = 30 * 60 * 1000;
+const BREAK_GLASS_OPEN_REQUEST_LIMIT_PER_INCIDENT = 2;
 const CANONICAL_VAULT_MODE_CODES = Object.freeze(["trial", "sandbox_internal", "test", "pilot_parallel", "production"]);
 const VAULT_MODE_ALIASES = Object.freeze({
   trial: "trial",
@@ -48,6 +57,7 @@ export function createBackofficeModule({
   orgAuthPlatform,
   integrationPlatform,
   evidencePlatform = null,
+  securityRuntimePlatform = null,
   audit,
   error
 } = {}) {
@@ -69,6 +79,20 @@ export function createBackofficeModule({
       throw error(403, decision.reasonCode, decision.explanation);
     }
     return principal;
+  }
+
+  function consumeSecurityBudget(options = {}) {
+    if (!securityRuntimePlatform?.consumeSecurityBudget) {
+      return null;
+    }
+    return securityRuntimePlatform.consumeSecurityBudget(options);
+  }
+
+  function recordSecurityAnomaly(options = {}) {
+    if (!securityRuntimePlatform?.recordSecurityAnomaly) {
+      return null;
+    }
+    return securityRuntimePlatform.recordSecurityAnomaly(options);
   }
 
   return {
@@ -1008,9 +1032,26 @@ export function createBackofficeModule({
     mode = "read_only",
     expiresInMinutes = 30,
     restrictedActions = [],
+    requestIp = null,
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
+    consumeSecurityBudget({
+      companyId,
+      budgetCode: "support_impersonation_request_actor",
+      subjectKey: `user:${principal.userId}`,
+      subjectType: "user",
+      subjectId: principal.userId,
+      actorId: principal.userId,
+      ipAddress: optionalText(requestIp),
+      limit: IMPERSONATION_REQUEST_LIMIT,
+      windowMs: IMPERSONATION_REQUEST_WINDOW_MS,
+      errorCode: "impersonation_rate_limited",
+      errorMessage: "Too many impersonation requests were created in a short time. Try again later.",
+      alertCode: "support_impersonation_request_spike",
+      alertSeverity: "high",
+      riskScore: 20
+    });
     requireSupportCase(companyId, supportCaseId);
     const targetCompanyUser = requireCompanyUser(companyId, targetCompanyUserId, orgAuthPlatform, error);
     const resolvedMode = assertAllowed(mode, IMPERSONATION_MODES, "impersonation_mode_invalid");
@@ -1117,9 +1158,26 @@ export function createBackofficeModule({
     sessionToken,
     companyId,
     sessionId,
+    requestIp = null,
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
+    consumeSecurityBudget({
+      companyId,
+      budgetCode: "support_impersonation_activation_actor",
+      subjectKey: `user:${principal.userId}`,
+      subjectType: "user",
+      subjectId: principal.userId,
+      actorId: principal.userId,
+      ipAddress: optionalText(requestIp),
+      limit: IMPERSONATION_ACTIVATION_LIMIT,
+      windowMs: IMPERSONATION_ACTIVATION_WINDOW_MS,
+      errorCode: "impersonation_activation_rate_limited",
+      errorMessage: "Too many impersonation activations were attempted in a short time. Try again later.",
+      alertCode: "support_impersonation_activation_spike",
+      alertSeverity: "high",
+      riskScore: 25
+    });
     const session = requireImpersonationSession(companyId, sessionId);
     if (session.status === "active" || session.status === "terminated") {
       return clone(session);
@@ -1151,6 +1209,29 @@ export function createBackofficeModule({
       entityId: session.sessionId,
       explanation: `Started impersonation ${session.sessionId}.`
     });
+    if (countRecentImpersonationActivations({
+      companyId,
+      actorId: principal.userId,
+      sinceMs: IMPERSONATION_ACTIVATION_WINDOW_MS,
+      state,
+      now: new Date(clock())
+    }) >= 3) {
+      recordSecurityAnomaly({
+        companyId,
+        alertCode: "support_admin_many_impersonations",
+        subjectKey: `user:${principal.userId}`,
+        subjectType: "user",
+        subjectId: principal.userId,
+        actorId: principal.userId,
+        ipAddress: optionalText(requestIp),
+        severity: "high",
+        riskScore: 20,
+        metadata: {
+          activationThreshold: 3,
+          windowMs: IMPERSONATION_ACTIVATION_WINDOW_MS
+        }
+      });
+    }
     return clone(session);
   }
 
@@ -1293,19 +1374,54 @@ export function createBackofficeModule({
     purposeCode,
     requestedActions = [],
     expiresInMinutes = 30,
+    requestIp = null,
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
+    consumeSecurityBudget({
+      companyId,
+      budgetCode: "break_glass_request_actor",
+      subjectKey: `user:${principal.userId}`,
+      subjectType: "user",
+      subjectId: principal.userId,
+      actorId: principal.userId,
+      ipAddress: optionalText(requestIp),
+      limit: BREAK_GLASS_REQUEST_LIMIT_PER_ACTOR,
+      windowMs: BREAK_GLASS_REQUEST_WINDOW_MS,
+      errorCode: "break_glass_rate_limited",
+      errorMessage: "Too many break-glass requests were created in a short time. Try again later.",
+      alertCode: "break_glass_request_spike",
+      alertSeverity: "critical",
+      riskScore: 35
+    });
     const createdAt = nowIso(clock);
     const expiresAt = addMinutes(createdAt, normalizePositiveInteger(expiresInMinutes, "break_glass_expiry_invalid"));
     const normalizedRequestedActions = normalizeActions(requestedActions);
     if (normalizedRequestedActions.length === 0) {
       throw error(400, "break_glass_requested_actions_required", "Break-glass requires at least one allowlisted action.");
     }
+    const resolvedIncidentId = text(incidentId, "break_glass_incident_id_required");
+    if (countOpenBreakGlassRequestsByIncident(companyId, resolvedIncidentId, state, new Date(clock())) >= BREAK_GLASS_OPEN_REQUEST_LIMIT_PER_INCIDENT) {
+      recordSecurityAnomaly({
+        companyId,
+        alertCode: "break_glass_open_request_limit_hit",
+        subjectKey: `incident:${resolvedIncidentId}`,
+        subjectType: "runtime_incident",
+        subjectId: resolvedIncidentId,
+        actorId: principal.userId,
+        ipAddress: optionalText(requestIp),
+        severity: "critical",
+        riskScore: 40,
+        metadata: {
+          openRequestLimit: BREAK_GLASS_OPEN_REQUEST_LIMIT_PER_INCIDENT
+        }
+      });
+      throw error(429, "break_glass_open_request_limit_reached", "Incident already has the maximum number of open break-glass requests.");
+    }
     const request = {
       breakGlassId: crypto.randomUUID(),
       companyId,
-      incidentId: text(incidentId, "break_glass_incident_id_required"),
+      incidentId: resolvedIncidentId,
       purposeCode: text(purposeCode, "break_glass_purpose_required"),
       requestedActions: normalizedRequestedActions,
       requestedByUserId: principal.userId,
@@ -1387,9 +1503,26 @@ export function createBackofficeModule({
     sessionToken,
     companyId,
     breakGlassId,
+    requestIp = null,
     correlationId = crypto.randomUUID()
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
+    consumeSecurityBudget({
+      companyId,
+      budgetCode: "break_glass_activation_actor",
+      subjectKey: `user:${principal.userId}`,
+      subjectType: "user",
+      subjectId: principal.userId,
+      actorId: principal.userId,
+      ipAddress: optionalText(requestIp),
+      limit: BREAK_GLASS_ACTIVATION_LIMIT,
+      windowMs: BREAK_GLASS_ACTIVATION_WINDOW_MS,
+      errorCode: "break_glass_activation_rate_limited",
+      errorMessage: "Too many break-glass activations were attempted in a short time. Try again later.",
+      alertCode: "break_glass_activation_spike",
+      alertSeverity: "critical",
+      riskScore: 40
+    });
     const session = requireBreakGlass(companyId, breakGlassId);
     if (session.status === "active" || session.status === "ended") {
       return clone(session);
@@ -2191,6 +2324,24 @@ function expireBreakGlassSessionIfNeeded(session, clock = () => new Date()) {
   session.endedAt = session.endedAt || nowIso(clock);
   session.updatedAt = session.endedAt;
   return session;
+}
+
+function countRecentImpersonationActivations({ companyId, actorId, sinceMs, state, now = new Date() }) {
+  const cutoff = new Date(new Date(now).getTime() - sinceMs);
+  return [...state.impersonationSessions.values()]
+    .filter((session) => session.companyId === companyId)
+    .filter((session) => session.activatedByUserId === actorId)
+    .filter((session) => session.startedAt && new Date(session.startedAt) >= cutoff)
+    .length;
+}
+
+function countOpenBreakGlassRequestsByIncident(companyId, incidentId, state, now = new Date()) {
+  return [...state.breakGlassSessions.values()]
+    .filter((session) => session.companyId === companyId)
+    .filter((session) => session.incidentId === incidentId)
+    .filter((session) => ["requested", "dual_approved", "active"].includes(session.status))
+    .filter((session) => new Date(session.expiresAt) >= new Date(now))
+    .length;
 }
 
 function normalizeStringList(values, code) {

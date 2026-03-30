@@ -111,6 +111,12 @@ export {
   resolveAwsKmsSecretRuntimeConfig
 } from "./secret-runtime.mjs";
 export { createCommandMutationRuntime } from "./command-log.mjs";
+export {
+  SECURITY_ALERT_SEVERITIES,
+  SECURITY_ALERT_STATES,
+  SECURITY_RISK_LEVELS,
+  createSecurityRuntimePlatform
+} from "./security-runtime.mjs";
 import {
   CLOSE_BLOCKER_SEVERITIES,
   CLOSE_BLOCKER_STATUSES,
@@ -265,6 +271,7 @@ export function createCoreEngine({
   balancesPlatform = null,
   collectiveAgreementsPlatform = null,
   evidencePlatform = null,
+  securityRuntimePlatform = null,
   asyncJobStore = null,
   clock = () => new Date()
 } = {}) {
@@ -473,6 +480,7 @@ export function createCoreEngine({
     orgAuthPlatform,
     integrationPlatform,
     evidencePlatform,
+    securityRuntimePlatform,
     audit,
     error
   });

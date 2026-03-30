@@ -41,6 +41,7 @@ import { createIntegrationPlatform } from "../../../packages/domain-integrations
 import {
   createDurableStateSnapshotArtifact,
   createCorePlatform,
+  createSecurityRuntimePlatform,
   cloneSnapshotValue,
   validateDurableStateSnapshotArtifact,
   applyDurableStateSnapshot,
@@ -193,10 +194,21 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
 
 const API_DOMAIN_DEFINITIONS = Object.freeze([
   createDomainDefinition({
+    key: "securityRuntime",
+    label: "Security runtime",
+    packageName: "@swedish-erp/domain-core",
+    create: ({ options }) => createSecurityRuntimePlatform(options)
+  }),
+  createDomainDefinition({
     key: "orgAuth",
     label: "Org and auth",
     packageName: "@swedish-erp/domain-org-auth",
-    create: ({ options }) => createOrgAuthPlatform(options)
+    dependsOn: ["securityRuntime"],
+    create: ({ options, dependencies }) =>
+      createOrgAuthPlatform({
+        ...options,
+        securityRuntimePlatform: dependencies.securityRuntime
+      })
   }),
   createDomainDefinition({
     key: "tenantControl",
@@ -555,23 +567,24 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
       })
   }),
   createDomainDefinition({
-    key: "reporting",
-    label: "Reporting",
-    packageName: "@swedish-erp/domain-reporting",
-    dependsOn: ["ledger", "documents", "ar", "ap", "taxAccount", "integrations", "payroll", "projects"],
-    create: ({ options, dependencies }) =>
-      createReportingPlatform({
-        ...options,
-        ledgerPlatform: dependencies.ledger,
-        documentPlatform: dependencies.documents,
-        arPlatform: dependencies.ar,
-        apPlatform: dependencies.ap,
-        taxAccountPlatform: dependencies.taxAccount,
-        integrationPlatform: dependencies.integrations,
-        payrollPlatform: dependencies.payroll,
-        projectsPlatform: dependencies.projects
-      })
-  }),
+      key: "reporting",
+      label: "Reporting",
+      packageName: "@swedish-erp/domain-reporting",
+      dependsOn: ["ledger", "documents", "ar", "ap", "taxAccount", "integrations", "payroll", "projects", "securityRuntime"],
+      create: ({ options, dependencies }) =>
+        createReportingPlatform({
+          ...options,
+          ledgerPlatform: dependencies.ledger,
+          documentPlatform: dependencies.documents,
+          arPlatform: dependencies.ar,
+          apPlatform: dependencies.ap,
+          taxAccountPlatform: dependencies.taxAccount,
+          integrationPlatform: dependencies.integrations,
+          payrollPlatform: dependencies.payroll,
+          projectsPlatform: dependencies.projects,
+          securityRuntimePlatform: dependencies.securityRuntime
+        })
+    }),
   createDomainDefinition({
     key: "search",
     label: "Search",
@@ -604,23 +617,24 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
       })
   }),
   createDomainDefinition({
-    key: "core",
-    label: "Core operations",
-    packageName: "@swedish-erp/domain-core",
-    dependsOn: ["orgAuth", "reporting", "ledger", "integrations", "hr", "balances", "collectiveAgreements", "evidence"],
-    create: ({ options, dependencies }) =>
-      createCorePlatform({
-        ...options,
-        orgAuthPlatform: dependencies.orgAuth,
-        reportingPlatform: dependencies.reporting,
-        ledgerPlatform: dependencies.ledger,
-        integrationPlatform: dependencies.integrations,
-        hrPlatform: dependencies.hr,
-        balancesPlatform: dependencies.balances,
-        collectiveAgreementsPlatform: dependencies.collectiveAgreements,
-        evidencePlatform: dependencies.evidence
-      })
-  }),
+      key: "core",
+      label: "Core operations",
+      packageName: "@swedish-erp/domain-core",
+      dependsOn: ["orgAuth", "reporting", "ledger", "integrations", "hr", "balances", "collectiveAgreements", "evidence", "securityRuntime"],
+      create: ({ options, dependencies }) =>
+        createCorePlatform({
+          ...options,
+          orgAuthPlatform: dependencies.orgAuth,
+          reportingPlatform: dependencies.reporting,
+          ledgerPlatform: dependencies.ledger,
+          integrationPlatform: dependencies.integrations,
+          hrPlatform: dependencies.hr,
+          balancesPlatform: dependencies.balances,
+          collectiveAgreementsPlatform: dependencies.collectiveAgreements,
+          evidencePlatform: dependencies.evidence,
+          securityRuntimePlatform: dependencies.securityRuntime
+        })
+    }),
   createDomainDefinition({
     key: "hus",
     label: "HUS",
@@ -1878,13 +1892,22 @@ function decorateCriticalDomainPersistence({ domainKey, platform, store }) {
       ) {
         return value.bind(target);
       }
-      return (...args) => {
-        const beforeSnapshot = adapter.exportSnapshot();
-        const input = resolveMutationInput(args);
-        const restoreOnFailure = (error) => {
-          adapter.importSnapshot(beforeSnapshot);
-          throw error;
-        };
+        return (...args) => {
+          const beforeSnapshot = adapter.exportSnapshot();
+          const input = resolveMutationInput(args);
+          const restoreOnFailure = (error) => {
+            if (error?.preserveDurableStateOnFailure === true) {
+              try {
+                persist();
+              } catch (persistError) {
+                adapter.importSnapshot(beforeSnapshot);
+                throw persistError;
+              }
+              throw error;
+            }
+            adapter.importSnapshot(beforeSnapshot);
+            throw error;
+          };
         try {
           const result = value.apply(target, args);
           if (result && typeof result.then === "function") {

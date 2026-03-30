@@ -75,6 +75,8 @@ const CASHFLOW_BUCKET_LABELS = Object.freeze({
   financing: "Financing cashflow",
   unclassified: "Unclassified cashflow"
 });
+const REPORT_EXPORT_REQUEST_LIMIT = 10;
+const REPORT_EXPORT_REQUEST_WINDOW_MS = 15 * 60 * 1000;
 
 const REPORT_METRIC_DEFINITIONS = Object.freeze([
   createMetricDefinition("total_debit", "Total debit", "finance_manager", "journal_entry", "sum(journal_line.debit_amount)", ["ledger"]),
@@ -330,7 +332,8 @@ export function createReportingEngine({
   projectsPlatform = null,
   payrollPlatform = null,
   taxAccountPlatform = null,
-  integrationPlatform = null
+  integrationPlatform = null,
+  securityRuntimePlatform = null
 } = {}) {
   const ledger = ledgerPlatform || createLedgerEngine({ clock });
   const documents = documentPlatform || documentArchivePlatform || createDocumentArchiveEngine({ clock });
@@ -382,6 +385,13 @@ export function createReportingEngine({
   });
 
   return engine;
+
+  function consumeSecurityBudget(options = {}) {
+    if (!securityRuntimePlatform?.consumeSecurityBudget) {
+      return null;
+    }
+    return securityRuntimePlatform.consumeSecurityBudget(options);
+  }
 
   function listMetricDefinitions({ companyId, reportCode = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
@@ -611,11 +621,32 @@ export function createReportingEngine({
     format,
     watermarkMode = null,
     actorId = "system",
+    requestIp = null,
     correlationId = crypto.randomUUID()
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const snapshot = requireReportSnapshot(resolvedCompanyId, reportSnapshotId);
     const resolvedActorId = requireText(actorId, "actor_id_required");
+    consumeSecurityBudget({
+      companyId: resolvedCompanyId,
+      budgetCode: "report_export_request_actor",
+      subjectKey: `user:${resolvedActorId}`,
+      subjectType: "user",
+      subjectId: resolvedActorId,
+      actorId: resolvedActorId,
+      ipAddress: normalizeOptionalText(requestIp),
+      limit: REPORT_EXPORT_REQUEST_LIMIT,
+      windowMs: REPORT_EXPORT_REQUEST_WINDOW_MS,
+      lockoutMs: REPORT_EXPORT_REQUEST_WINDOW_MS,
+      errorCode: "report_export_rate_limited",
+      errorMessage: "Too many report exports were requested in a short time. Try again later.",
+      alertCode: "report_export_mass_request",
+      alertSeverity: "high",
+      riskScore: 20,
+      metadata: {
+        reportCode: snapshot.reportCode
+      }
+    });
     const resolvedFormat = assertAllowedValue(format, REPORT_EXPORT_FORMATS, "report_export_format_invalid");
     const resolvedWatermarkMode = resolveWatermarkMode(snapshot, watermarkMode);
     const createdAt = nowIso();

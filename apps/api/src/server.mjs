@@ -16,6 +16,7 @@ import {
   CANONICAL_API_VERSION,
   DEFAULT_API_BODY_LIMIT_BYTES,
   createHttpError,
+  readClientAddress,
   readJsonBody,
   readSessionToken,
   requireText,
@@ -1267,7 +1268,10 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
 
   if (req.method === "POST" && path === "/v1/auth/login") {
     const body = await readJsonBody(req);
-    writeJson(res, 200, platform.startLogin(body));
+    writeJson(res, 200, platform.startLogin({
+      ...body,
+      requestIp: readClientAddress(req)
+    }));
     return;
   }
 
@@ -1292,7 +1296,8 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
       platform.verifyTotp({
         sessionToken: readSessionToken(req, body),
         code: body.code,
-        factorId: body.factorId || null
+        factorId: body.factorId || null,
+        requestIp: readClientAddress(req)
       })
     );
     return;
@@ -1300,7 +1305,11 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
 
   if (req.method === "POST" && path === "/v1/auth/mfa/passkeys/register-options") {
     const body = await readJsonBody(req);
-    writeJson(res, 200, platform.beginPasskeyRegistration({ sessionToken: readSessionToken(req, body), deviceName: body.deviceName }));
+    writeJson(res, 200, platform.beginPasskeyRegistration({
+      sessionToken: readSessionToken(req, body),
+      deviceName: body.deviceName,
+      requestIp: readClientAddress(req)
+    }));
     return;
   }
 
@@ -3480,6 +3489,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         format: body.format,
         watermarkMode: body.watermarkMode || null,
         actorId: principal.userId,
+        requestIp: readClientAddress(req),
         correlationId: body.correlationId || createCorrelationId()
       })
     );
@@ -17922,6 +17932,29 @@ function applyApiEdgePolicy({ req, res, url, path, platform, edgePolicy, edgeSta
       edgeState
     });
     if (!throttleDecision.allowed) {
+        const securityRuntimePlatform =
+          typeof platform.getDomain === "function" ? platform.getDomain("securityRuntime") : null;
+        if (
+          typeof securityRuntimePlatform?.recordSecurityAnomaly === "function"
+          && ["ocr_provider_callback", "auth_federation_callback", "public_webhook_dispatch"].includes(routeProfile.profileCode)
+        ) {
+          const clientAddress = resolveClientAddress(req);
+          securityRuntimePlatform.recordSecurityAnomaly({
+            companyId: null,
+            alertCode: "provider_callback_spike",
+            subjectKey: `${routeProfile.profileCode}:${clientAddress}`,
+          subjectType: "ip_address",
+          subjectId: clientAddress,
+          actorId: "api_edge",
+          ipAddress: clientAddress,
+          severity: routeProfile.profileCode === "public_webhook_dispatch" ? "high" : "critical",
+          riskScore: routeProfile.profileCode === "public_webhook_dispatch" ? 20 : 35,
+          metadata: {
+            routeProfile: routeProfile.profileCode,
+            retryAfterSeconds: throttleDecision.retryAfterSeconds
+          }
+        });
+      }
       writeError(
         res,
         createHttpError(
@@ -18147,12 +18180,8 @@ function isTransportSecure(req) {
 }
 
 function resolveClientAddress(req) {
-  const forwardedFor = readOptionalHeader(req, "x-forwarded-for");
-  if (forwardedFor) {
-    return forwardedFor.split(",")[0].trim();
+    return readClientAddress(req);
   }
-  return req.socket?.remoteAddress || "unknown";
-}
 
 function hasCookieHeader(req) {
   return readOptionalHeader(req, "cookie") != null;
@@ -18235,17 +18264,18 @@ function createRequestContext({ req, platform, edgePolicy = DEFAULT_API_EDGE_POL
     environmentMode: platform.environmentMode || "test",
     edgePolicy
   });
-  return {
-    requestId,
-    correlationId,
-    idempotencyKey,
-    apiVersion: CANONICAL_API_VERSION,
-    environmentMode: platform.environmentMode || null,
-    transportSecurityEnabled: isTransportSecure(req),
-    maxBodyBytes: routeProfile.maxBodyBytes,
-    routeProfile
-  };
-}
+    return {
+      requestId,
+      correlationId,
+      idempotencyKey,
+      apiVersion: CANONICAL_API_VERSION,
+      environmentMode: platform.environmentMode || null,
+      transportSecurityEnabled: isTransportSecure(req),
+      clientAddress: readClientAddress(req),
+      maxBodyBytes: routeProfile.maxBodyBytes,
+      routeProfile
+    };
+  }
 
 function readOptionalHeader(req, headerName) {
   const value = req.headers[headerName];

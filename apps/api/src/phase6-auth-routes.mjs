@@ -1,4 +1,4 @@
-import { authorizeCompanyAccess, matchPath, readJsonBody, readSessionToken, requireText, writeJson } from "./route-helpers.mjs";
+import { authorizeCompanyAccess, matchPath, readClientAddress, readJsonBody, readSessionToken, requireText, writeJson } from "./route-helpers.mjs";
 
 export async function tryHandlePhase6AuthRoutes({ req, res, path, platform }) {
   const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
@@ -38,7 +38,8 @@ export async function tryHandlePhase6AuthRoutes({ req, res, path, platform }) {
       sessionToken: readSessionToken(req, body),
       factorType: body.factorType,
       actionClass: body.actionClass,
-      deviceName: body.deviceName
+      deviceName: body.deviceName,
+      requestIp: readClientAddress(req)
     }));
     return true;
   }
@@ -54,7 +55,8 @@ export async function tryHandlePhase6AuthRoutes({ req, res, path, platform }) {
       credentialId: body.credentialId,
       assertion: body.assertion,
       completionToken: body.completionToken,
-      deviceFingerprint: body.deviceFingerprint
+      deviceFingerprint: body.deviceFingerprint,
+      requestIp: readClientAddress(req)
     }));
     return true;
   }
@@ -97,7 +99,8 @@ export async function tryHandlePhase6AuthRoutes({ req, res, path, platform }) {
     const body = await readJsonBody(req);
     writeJson(res, 200, platform.startBankIdAuthentication({
       sessionToken: readSessionToken(req, body),
-      actionClass: body.actionClass
+      actionClass: body.actionClass,
+      requestIp: readClientAddress(req)
     }));
     return true;
   }

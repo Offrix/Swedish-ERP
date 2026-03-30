@@ -2,6 +2,7 @@
   authorizeCompanyAccess,
   matchPath,
   optionalText,
+  readClientAddress,
   readJsonBody,
   readSessionToken,
   requireText,
@@ -168,7 +169,8 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
       purposeCode: body.purposeCode,
       mode: body.mode,
       expiresInMinutes: body.expiresInMinutes,
-      restrictedActions: body.restrictedActions
+      restrictedActions: body.restrictedActions,
+      requestIp: readClientAddress(req)
     }));
     return true;
   }
@@ -215,7 +217,12 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "impersonation_session", objectId: impersonationStartMatch.sessionId, scopeCode: "impersonation_session" });
-    writeJson(res, 200, platform.activateImpersonation({ sessionToken, companyId, sessionId: impersonationStartMatch.sessionId }));
+    writeJson(res, 200, platform.activateImpersonation({
+      sessionToken,
+      companyId,
+      sessionId: impersonationStartMatch.sessionId,
+      requestIp: readClientAddress(req)
+    }));
     return true;
   }
 
@@ -281,7 +288,8 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
       incidentId: body.incidentId,
       purposeCode: body.purposeCode,
       requestedActions: body.requestedActions,
-      expiresInMinutes: body.expiresInMinutes
+      expiresInMinutes: body.expiresInMinutes,
+      requestIp: readClientAddress(req)
     }));
     return true;
   }
@@ -328,7 +336,12 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "break_glass_session", objectId: breakGlassStartMatch.breakGlassId, scopeCode: "break_glass_session" });
-    writeJson(res, 200, platform.activateBreakGlass({ sessionToken, companyId, breakGlassId: breakGlassStartMatch.breakGlassId }));
+    writeJson(res, 200, platform.activateBreakGlass({
+      sessionToken,
+      companyId,
+      breakGlassId: breakGlassStartMatch.breakGlassId,
+      requestIp: readClientAddress(req)
+    }));
     return true;
   }
 

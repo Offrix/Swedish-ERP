@@ -38,12 +38,13 @@ export async function loginWithTotpOnly({ baseUrl, platform, companyId, email })
   return started.sessionToken;
 }
 
-export async function requestJson(baseUrl, pathname, { method = "GET", body = null, token = null, expectedStatus = 200 } = {}) {
+export async function requestJson(baseUrl, pathname, { method = "GET", body = null, token = null, headers = {}, expectedStatus = 200 } = {}) {
   const response = await fetch(`${baseUrl}${pathname}`, {
     method,
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {})
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(headers && typeof headers === "object" ? headers : {})
     },
     body: body ? JSON.stringify(body) : undefined
   });

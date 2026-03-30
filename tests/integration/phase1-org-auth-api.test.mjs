@@ -255,6 +255,22 @@ test("Phase 1 API enforces company boundaries, delegation windows, MFA and onboa
     assert.equal(approvalChainRead.approvalChainId, approvalChain.approvalChainId);
     assert.equal(approvalChainRead.steps.length, 2);
 
+    const passkeyStepUp = await requestJson(`${baseUrl}/v1/auth/challenges`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      body: {
+        factorType: "bankid",
+        actionClass: "identity_device_trust_manage"
+      }
+    });
+    await requestJson(`${baseUrl}/v1/auth/challenges/${passkeyStepUp.orderRef}/complete`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      body: {
+        completionToken: platform.getBankIdCompletionTokenForTesting(passkeyStepUp.orderRef)
+      }
+    });
+
     const passkeyRegistration = await requestJson(`${baseUrl}/v1/auth/mfa/passkeys/register-options`, {
       method: "POST",
       token: adminSession.sessionToken,

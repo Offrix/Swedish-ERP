@@ -151,7 +151,7 @@ test("Phase 6 hardening API locks repeated invalid passkey assertions and revoke
       method: "POST",
       body: {
         companyId: DEMO_IDS.companyId,
-        email: DEMO_APPROVER_EMAIL
+        email: DEMO_ADMIN_EMAIL
       }
     });
     await requestJson(`${baseUrl}/v1/auth/mfa/totp/verify`, {
@@ -160,9 +160,36 @@ test("Phase 6 hardening API locks repeated invalid passkey assertions and revoke
       body: {
         code: platform.getTotpCodeForTesting({
           companyId: DEMO_IDS.companyId,
-          email: DEMO_APPROVER_EMAIL,
+          email: DEMO_ADMIN_EMAIL,
           now
         })
+      }
+    });
+    const registrationActivation = await requestJson(`${baseUrl}/v1/auth/bankid/start`, {
+      method: "POST",
+      token: registrationLogin.sessionToken
+    });
+    await requestJson(`${baseUrl}/v1/auth/bankid/collect`, {
+      method: "POST",
+      token: registrationLogin.sessionToken,
+      body: {
+        orderRef: registrationActivation.orderRef,
+        completionToken: platform.getBankIdCompletionTokenForTesting(registrationActivation.orderRef)
+      }
+    });
+    const registrationStepUp = await requestJson(`${baseUrl}/v1/auth/challenges`, {
+      method: "POST",
+      token: registrationLogin.sessionToken,
+      body: {
+        factorType: "bankid",
+        actionClass: "identity_device_trust_manage"
+      }
+    });
+    await requestJson(`${baseUrl}/v1/auth/challenges/${registrationStepUp.orderRef}/complete`, {
+      method: "POST",
+      token: registrationLogin.sessionToken,
+      body: {
+        completionToken: platform.getBankIdCompletionTokenForTesting(registrationStepUp.orderRef)
       }
     });
     const registration = await requestJson(`${baseUrl}/v1/auth/mfa/passkeys/register-options`, {
@@ -187,7 +214,18 @@ test("Phase 6 hardening API locks repeated invalid passkey assertions and revoke
       method: "POST",
       body: {
         companyId: DEMO_IDS.companyId,
-        email: DEMO_APPROVER_EMAIL
+        email: DEMO_ADMIN_EMAIL
+      }
+    });
+    await requestJson(`${baseUrl}/v1/auth/mfa/totp/verify`, {
+      method: "POST",
+      token: login.sessionToken,
+      body: {
+        code: platform.getTotpCodeForTesting({
+          companyId: DEMO_IDS.companyId,
+          email: DEMO_ADMIN_EMAIL,
+          now
+        })
       }
     });
 
@@ -228,7 +266,18 @@ test("Phase 6 hardening API locks repeated invalid passkey assertions and revoke
       method: "POST",
       body: {
         companyId: DEMO_IDS.companyId,
-        email: DEMO_APPROVER_EMAIL
+        email: DEMO_ADMIN_EMAIL
+      }
+    });
+    await requestJson(`${baseUrl}/v1/auth/mfa/totp/verify`, {
+      method: "POST",
+      token: retried.sessionToken,
+      body: {
+        code: platform.getTotpCodeForTesting({
+          companyId: DEMO_IDS.companyId,
+          email: DEMO_ADMIN_EMAIL,
+          now
+        })
       }
     });
     const asserted = await requestJson(`${baseUrl}/v1/auth/mfa/passkeys/assert`, {
