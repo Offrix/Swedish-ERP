@@ -19,7 +19,7 @@ import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
-import { createSecretStore } from "../../domain-core/src/secrets.mjs";
+import { createConfiguredSecretStore } from "../../domain-core/src/secret-runtime.mjs";
 import { assertSecurityClassCode } from "../../domain-core/src/security-classes.mjs";
 import { normalizeOptionalSwedishOrganizationNumber } from "../../domain-core/src/validation.mjs";
 import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
@@ -260,6 +260,8 @@ const FEDERATION_LOCKOUT_MS = 15 * 60 * 1000;
 export function createOrgAuthPlatform({
   clock = () => new Date(),
   environmentMode = "test",
+  env = process.env,
+  secretRuntimeBridgeRunner = null,
   providerEnvironmentRef = environmentMode,
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
@@ -285,8 +287,10 @@ export function createOrgAuthPlatform({
   });
   const authSecretStore =
     secretStore ||
-    createSecretStore({
+    createConfiguredSecretStore({
       clock,
+      env,
+      bridgeRunner: secretRuntimeBridgeRunner || undefined,
       environmentMode: normalizedEnvironmentMode,
       storeId: `org-auth:${providerEnvironmentRef}`,
       masterKey: secretSealKey || `swedish-erp-auth-seal:${normalizedEnvironmentMode}:${providerEnvironmentRef}`,

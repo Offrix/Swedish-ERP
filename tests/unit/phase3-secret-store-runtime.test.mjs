@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  createConfiguredSecretStore,
   createEnvelopeCrypto,
   createSecretStore,
   deserializeSnapshotValue
@@ -225,4 +226,61 @@ test("Phase 3.2 integrations durable export redacts webhook and OCR callback sec
   });
   assert.equal(dispatch.items[0].status, "sent");
   assert.equal(sentDeliveries.length >= 1, true);
+});
+
+test("Phase 3.2 configured secret store can boot from AWS KMS wrapped roots without exposing root material", () => {
+  const env = {
+    ERP_SECRET_RUNTIME_PROVIDER: "aws_kms",
+    ERP_AWS_KMS_REGION: "eu-north-1",
+    ERP_AWS_KMS_MODE_ROOT_KEY_ID: "swedish-erp/mode-root-key",
+    ERP_AWS_KMS_MODE_ROOT_WRAPPED_B64: Buffer.from("wrapped-mode-root").toString("base64"),
+    ERP_AWS_KMS_SERVICE_KEK_KEY_ID: "swedish-erp/service-kek",
+    ERP_AWS_KMS_SERVICE_KEK_WRAPPED_B64: Buffer.from("wrapped-service-kek").toString("base64"),
+    ERP_AWS_KMS_BLIND_INDEX_KEY_ID: "swedish-erp/blind-index-key",
+    ERP_AWS_KMS_BLIND_INDEX_WRAPPED_B64: Buffer.from("wrapped-blind-index").toString("base64")
+  };
+  const bridgeRunner = () => ({
+    region: "eu-north-1",
+    modeRoot: {
+      keyId: "alias/swedish-erp/mode-root-key",
+      plaintextKeyMaterialB64: Buffer.from("mode-root-material").toString("base64")
+    },
+    serviceKek: {
+      keyId: "alias/swedish-erp/service-kek",
+      plaintextKeyMaterialB64: Buffer.from("service-kek-material").toString("base64")
+    },
+    blindIndex: {
+      keyId: "alias/swedish-erp/blind-index-key",
+      plaintextKeyMaterialB64: Buffer.from("blind-index-material").toString("base64")
+    }
+  });
+
+  const secretStore = createConfiguredSecretStore({
+    clock: () => new Date("2026-03-30T06:30:00Z"),
+    env,
+    environmentMode: "production",
+    storeId: "phase3-aws-kms",
+    bridgeRunner
+  });
+
+  const metadata = secretStore.storeSecretMaterial({
+    secretId: "kms-secret",
+    classCode: "S4",
+    material: "kms-backed-refresh-token",
+    blindIndexInputs: [
+      {
+        purpose: "kms_lookup",
+        value: "kms-backed-refresh-token"
+      }
+    ]
+  });
+  const posture = secretStore.getSecurityPosture();
+
+  assert.equal(posture.providerKind, "aws_kms");
+  assert.equal(posture.bankGradeReady, true);
+  assert.equal(posture.externalKeyManagerConfigured, true);
+  assert.equal(secretStore.readSecretMaterial({ secretId: "kms-secret" }), "kms-backed-refresh-token");
+  assert.equal(metadata.blindIndexes.length, 1);
+  assert.equal(metadata.blindIndexes[0].purpose, "kms_lookup");
+  assert.equal(secretStore.exportSecretBundle().entries[0].envelope.providerKind, "aws_kms");
 });

@@ -93,6 +93,18 @@ function createDomainDefinition({ key, label, packageName, dependsOn = [], creat
   });
 }
 
+function resolveImplicitCriticalDomainStateSqlitePath(runtimeModeProfile) {
+  const workspaceFingerprint = crypto
+    .createHash("sha256")
+    .update(process.cwd(), "utf8")
+    .digest("hex")
+    .slice(0, 12);
+  return path.join(
+    os.tmpdir(),
+    `swedish-erp-${workspaceFingerprint}-${runtimeModeProfile.environmentMode}-critical-domain-state-v2.sqlite`
+  );
+}
+
 export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "orgAuth",
   "tenantControl",
@@ -1587,13 +1599,13 @@ function resolveCriticalDomainStateStore({
     return createInMemoryCriticalDomainStateStore();
   }
 
-  if (storeKind === "sqlite") {
-    const filePath =
-      options.criticalDomainStateStorePath ||
-      env.ERP_CRITICAL_DOMAIN_STATE_DB_PATH ||
-      path.join(os.tmpdir(), `swedish-erp-${runtimeModeProfile.environmentMode}-critical-domain-state.sqlite`);
-    return createSqliteCriticalDomainStateStore({ filePath });
-  }
+    if (storeKind === "sqlite") {
+      const filePath =
+        options.criticalDomainStateStorePath ||
+        env.ERP_CRITICAL_DOMAIN_STATE_DB_PATH ||
+        resolveImplicitCriticalDomainStateSqlitePath(runtimeModeProfile);
+      return createSqliteCriticalDomainStateStore({ filePath });
+    }
 
   if (storeKind === "postgres") {
     return createPostgresCriticalDomainStateStore({

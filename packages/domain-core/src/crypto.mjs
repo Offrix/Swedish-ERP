@@ -43,12 +43,48 @@ function normalizeAad(aad) {
   return stableStringify(clone(aad));
 }
 
-export function createEnvelopeCrypto({
-  masterKey = "swedish-erp-secret-root",
+function normalizeKeyMaterial(value, code, message) {
+  if (Buffer.isBuffer(value)) {
+    if (value.length === 0) {
+      throw createCryptoError(code, message);
+    }
+    return Buffer.from(value);
+  }
+  if (value instanceof Uint8Array) {
+    if (value.byteLength === 0) {
+      throw createCryptoError(code, message);
+    }
+    return Buffer.from(value);
+  }
+  if (value instanceof ArrayBuffer) {
+    if (value.byteLength === 0) {
+      throw createCryptoError(code, message);
+    }
+    return Buffer.from(value);
+  }
+  if (typeof value === "string") {
+    const normalized = text(value, code, message, { trim: false });
+    return Buffer.from(normalized, "utf8");
+  }
+  throw createCryptoError(code, message);
+}
+
+export function createKeyedEnvelopeCrypto({
+  envelopeRootKeyMaterial,
+  blindIndexRootKeyMaterial = envelopeRootKeyMaterial,
   activeKeyVersion = DEFAULT_SECRET_KEY_VERSION,
   providerKind = DEFAULT_SECRET_CRYPTO_PROVIDER_KIND
 } = {}) {
-  const rootKey = Buffer.from(text(masterKey, "crypto_master_key_required", "Envelope crypto master key is required."));
+  const envelopeRootKey = normalizeKeyMaterial(
+    envelopeRootKeyMaterial,
+    "crypto_envelope_root_key_required",
+    "Envelope crypto root key material is required."
+  );
+  const blindIndexRootKey = normalizeKeyMaterial(
+    blindIndexRootKeyMaterial,
+    "crypto_blind_index_root_key_required",
+    "Blind index root key material is required."
+  );
   const resolvedActiveKeyVersion = text(
     activeKeyVersion,
     "crypto_active_key_version_required",
@@ -61,15 +97,17 @@ export function createEnvelopeCrypto({
   );
   const derivedKeyCache = new Map();
 
-  function deriveKey(purpose, keyVersion = resolvedActiveKeyVersion) {
+  function deriveKey(purpose, keyVersion = resolvedActiveKeyVersion, { rootKind = "envelope" } = {}) {
     const resolvedPurpose = text(purpose, "crypto_key_purpose_required", "Envelope crypto key purpose is required.");
     const resolvedKeyVersion = text(
       keyVersion,
       "crypto_key_version_required",
       "Envelope crypto key version is required."
     );
-    const cacheKey = `${resolvedPurpose}:${resolvedKeyVersion}`;
+    const resolvedRootKind = rootKind === "blind_index" ? "blind_index" : "envelope";
+    const cacheKey = `${resolvedRootKind}:${resolvedPurpose}:${resolvedKeyVersion}`;
     if (!derivedKeyCache.has(cacheKey)) {
+      const rootKey = resolvedRootKind === "blind_index" ? blindIndexRootKey : envelopeRootKey;
       const derivedKey = crypto.hkdfSync(
         "sha256",
         rootKey,
@@ -95,7 +133,11 @@ export function createEnvelopeCrypto({
       "Envelope crypto key version is required."
     );
     const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv(SECRET_ENVELOPE_ALGORITHM, deriveKey("envelope", resolvedKeyVersion), iv);
+    const cipher = crypto.createCipheriv(
+      SECRET_ENVELOPE_ALGORITHM,
+      deriveKey("envelope", resolvedKeyVersion, { rootKind: "envelope" }),
+      iv
+    );
     const normalizedAad = normalizeAad(aad);
     if (normalizedAad) {
       cipher.setAAD(Buffer.from(normalizedAad, "utf8"));
@@ -130,7 +172,7 @@ export function createEnvelopeCrypto({
     );
     const decipher = crypto.createDecipheriv(
       SECRET_ENVELOPE_ALGORITHM,
-      deriveKey("envelope", resolvedKeyVersion),
+      deriveKey("envelope", resolvedKeyVersion, { rootKind: "envelope" }),
       Buffer.from(text(envelope.iv, "crypto_envelope_iv_required", "Envelope crypto IV is required."), "base64")
     );
     const normalizedAad = normalizeAad(aad);
@@ -164,7 +206,8 @@ export function createEnvelopeCrypto({
         "sha256",
         deriveKey(
           text(purpose, "crypto_fingerprint_purpose_required", "Fingerprint purpose is required."),
-          resolvedActiveKeyVersion
+          resolvedActiveKeyVersion,
+          { rootKind: "blind_index" }
         )
       )
       .update(text(value, "crypto_fingerprint_value_required", "Fingerprint value is required.", { trim: false }), "utf8")
@@ -185,10 +228,10 @@ export function createEnvelopeCrypto({
       purpose: resolvedPurpose,
       keyVersion: resolvedKeyVersion,
       algorithm: SECRET_BLIND_INDEX_ALGORITHM,
-      digest: crypto.createHmac("sha256", deriveKey(`blind_index:${resolvedPurpose}`, resolvedKeyVersion)).update(
-        resolvedValue,
-        "utf8"
-      ).digest("hex")
+      digest: crypto.createHmac(
+        "sha256",
+        deriveKey(`blind_index:${resolvedPurpose}`, resolvedKeyVersion, { rootKind: "blind_index" })
+      ).update(resolvedValue, "utf8").digest("hex")
     });
   }
 
@@ -201,5 +244,23 @@ export function createEnvelopeCrypto({
     open,
     fingerprint,
     createBlindIndex
+  });
+}
+
+export function createEnvelopeCrypto({
+  masterKey = "swedish-erp-secret-root",
+  activeKeyVersion = DEFAULT_SECRET_KEY_VERSION,
+  providerKind = DEFAULT_SECRET_CRYPTO_PROVIDER_KIND
+} = {}) {
+  const rootKey = normalizeKeyMaterial(
+    masterKey,
+    "crypto_master_key_required",
+    "Envelope crypto master key is required."
+  );
+  return createKeyedEnvelopeCrypto({
+    envelopeRootKeyMaterial: rootKey,
+    blindIndexRootKeyMaterial: rootKey,
+    activeKeyVersion,
+    providerKind
   });
 }

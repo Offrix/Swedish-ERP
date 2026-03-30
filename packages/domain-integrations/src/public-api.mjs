@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
-import { createSecretStore } from "../../domain-core/src/secrets.mjs";
+import { createConfiguredSecretStore } from "../../domain-core/src/secret-runtime.mjs";
 
 const PUBLIC_API_SPEC_VERSION = "2026-03-25";
 const CANONICAL_API_VERSION = "2026-03-27";
@@ -233,9 +233,11 @@ export function createPublicApiModule({
   state,
   clock = () => new Date(),
   environmentMode = "test",
+  env = process.env,
   deliveryExecutor = defaultWebhookDeliveryExecutor,
-  secretStore = createSecretStore({
+  secretStore = createConfiguredSecretStore({
     clock,
+    env,
     environmentMode,
     storeId: `integrations-webhooks:${environmentMode}`,
     masterKey: "swedish-erp-integrations-webhook-seal",

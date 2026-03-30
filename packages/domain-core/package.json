@@ -6,6 +6,7 @@
   "main": "src/index.mjs",
   "types": "src/index.ts",
   "dependencies": {
+    "@aws-sdk/client-kms": "3.1019.0",
     "postgres": "3.4.8"
   }
 }

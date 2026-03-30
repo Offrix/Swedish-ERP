@@ -223,3 +223,65 @@ test("phase 2.5 critical-domain URL infers Postgres truth without separate store
     platform.closeCriticalDomainStateStore?.();
   }
 });
+
+test("phase 3.2 protected runtime clears secret runtime finding when AWS KMS wrapped roots are configured", () => {
+  const baseStore = createInMemoryCriticalDomainStateStore();
+  const platform = createApiPlatform({
+    runtimeMode: "production",
+    env: {
+      POSTGRES_URL: "postgres://runtime-store",
+      ERP_CRITICAL_DOMAIN_STATE_STORE: "postgres",
+      ERP_SECRET_RUNTIME_PROVIDER: "aws_kms",
+      ERP_AWS_KMS_REGION: "eu-north-1",
+      ERP_AWS_KMS_MODE_ROOT_KEY_ID: "swedish-erp/mode-root-key",
+      ERP_AWS_KMS_MODE_ROOT_WRAPPED_B64: Buffer.from("wrapped-mode-root").toString("base64"),
+      ERP_AWS_KMS_SERVICE_KEK_KEY_ID: "swedish-erp/service-kek",
+      ERP_AWS_KMS_SERVICE_KEK_WRAPPED_B64: Buffer.from("wrapped-service-kek").toString("base64"),
+      ERP_AWS_KMS_BLIND_INDEX_KEY_ID: "swedish-erp/blind-index-key",
+      ERP_AWS_KMS_BLIND_INDEX_WRAPPED_B64: Buffer.from("wrapped-blind-index").toString("base64")
+    },
+    secretRuntimeBridgeRunner: () => ({
+      region: "eu-north-1",
+      modeRoot: {
+        keyId: "alias/swedish-erp/mode-root-key",
+        plaintextKeyMaterialB64: Buffer.from("mode-root-material").toString("base64")
+      },
+      serviceKek: {
+        keyId: "alias/swedish-erp/service-kek",
+        plaintextKeyMaterialB64: Buffer.from("service-kek-material").toString("base64")
+      },
+      blindIndex: {
+        keyId: "alias/swedish-erp/blind-index-key",
+        plaintextKeyMaterialB64: Buffer.from("blind-index-material").toString("base64")
+      }
+    }),
+    criticalDomainStateStore: {
+      ...baseStore,
+      kind: "postgres_critical_domain_state_store",
+      verifySchemaContract: () => ({ ok: true })
+    }
+  });
+
+  try {
+    const diagnostics = platform.getRuntimeStartupDiagnostics();
+    const orgAuthPosture = platform.getDomain("orgAuth").listSecretStorePostures()[0];
+    const integrationPosture = platform.getDomain("integrations").listSecretStorePostures()[0];
+    assert.equal(platform.environmentMode, "production");
+    assert.equal(
+      diagnostics.findings.some((finding) => finding.findingCode === "critical_domain_store_not_persistent"),
+      false
+    );
+    assert.equal(
+      diagnostics.findings.some((finding) => finding.findingCode === "secret_runtime_not_bank_grade"),
+      false
+    );
+    assert.equal(orgAuthPosture.providerKind, "aws_kms");
+    assert.equal(orgAuthPosture.environmentMode, "production");
+    assert.equal(orgAuthPosture.bankGradeReady, true);
+    assert.equal(integrationPosture.providerKind, "aws_kms");
+    assert.equal(integrationPosture.environmentMode, "production");
+    assert.equal(integrationPosture.bankGradeReady, true);
+  } finally {
+    platform.closeCriticalDomainStateStore?.();
+  }
+});

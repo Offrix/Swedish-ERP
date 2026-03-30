@@ -72,7 +72,7 @@ import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
-import { createSecretStore } from "../../domain-core/src/secrets.mjs";
+import { createConfiguredSecretStore } from "../../domain-core/src/secret-runtime.mjs";
 
 export const INVOICE_DELIVERY_CHANNELS = Object.freeze(["pdf_email", "peppol"]);
 export const PAYMENT_LINK_STATUSES = Object.freeze(["active", "consumed", "expired", "cancelled"]);
@@ -485,6 +485,8 @@ export function createIntegrationPlatform(options = {}) {
 export function createIntegrationEngine({
   clock = () => new Date(),
   environmentMode = "test",
+  env = process.env,
+  secretRuntimeBridgeRunner = null,
   secretSealKey = null,
   secretStore = null,
   paymentBaseUrl = "https://payments.local",
@@ -501,8 +503,10 @@ export function createIntegrationEngine({
   });
   const integrationSecretStore =
     secretStore ||
-    createSecretStore({
+    createConfiguredSecretStore({
       clock,
+      env,
+      bridgeRunner: secretRuntimeBridgeRunner || undefined,
       environmentMode,
       storeId: "integrations",
       masterKey: secretSealKey || `swedish-erp-integrations-seal:${environmentMode}`,

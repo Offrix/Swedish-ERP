@@ -96,12 +96,20 @@ export {
   DEFAULT_SECRET_KEY_VERSION,
   SECRET_BLIND_INDEX_ALGORITHM,
   SECRET_ENVELOPE_ALGORITHM,
+  createKeyedEnvelopeCrypto,
   createEnvelopeCrypto
 } from "./crypto.mjs";
 export {
   SECRET_STORE_BUNDLE_VERSION,
   createSecretStore
 } from "./secrets.mjs";
+export {
+  AWS_KMS_SECRET_RUNTIME_PROVIDER,
+  createAwsKmsBackedEnvelopeCrypto,
+  createConfiguredSecretStore,
+  provisionAwsKmsSecretRuntimeBundle,
+  resolveAwsKmsSecretRuntimeConfig
+} from "./secret-runtime.mjs";
 export { createCommandMutationRuntime } from "./command-log.mjs";
 import {
   CLOSE_BLOCKER_SEVERITIES,
