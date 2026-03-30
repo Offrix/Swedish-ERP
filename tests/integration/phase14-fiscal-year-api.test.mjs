@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
@@ -56,7 +57,7 @@ test("Step 8 API manages fiscal-year profiles, year changes, periods and active 
     const brokenYearDeniedResponse = await fetch(`${baseUrl}/v1/fiscal-years`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${adminToken}`,
+        authorization: `Bearer ${adminToken}`,        "idempotency-key": crypto.randomUUID(),
         "content-type": "application/json"
       },
       body: JSON.stringify({
@@ -207,7 +208,7 @@ test("Step 8 API requires group alignment references and blocks duplicate fiscal
     const missingAlignmentResponse = await fetch(`${baseUrl}/v1/fiscal-years/change-requests`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${adminToken}`,
+        authorization: `Bearer ${adminToken}`,        "idempotency-key": crypto.randomUUID(),
         "content-type": "application/json"
       },
       body: JSON.stringify({
@@ -239,7 +240,7 @@ test("Step 8 API requires group alignment references and blocks duplicate fiscal
     const duplicateResponse = await fetch(`${baseUrl}/v1/fiscal-years/change-requests`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${adminToken}`,
+        authorization: `Bearer ${adminToken}`,        "idempotency-key": crypto.randomUUID(),
         "content-type": "application/json"
       },
       body: JSON.stringify({

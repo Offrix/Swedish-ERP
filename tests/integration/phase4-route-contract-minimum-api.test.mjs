@@ -16,7 +16,7 @@ function envelope(data, { correlationId, idempotencyKey } = {}) {
   };
 }
 
-function assertCanonicalMeta(meta, { classification, correlationId = null, idempotencyKey = null }) {
+function assertCanonicalMeta(meta, { classification, correlationId = null, idempotencyKey } = {}) {
   assert.deepEqual(
     Object.keys(meta).sort(),
     ["apiVersion", "classification", "correlationId", "idempotencyKey", "mode", "requestId"].sort()
@@ -28,7 +28,15 @@ function assertCanonicalMeta(meta, { classification, correlationId = null, idemp
   } else {
     assert.equal(typeof meta.correlationId, "string");
   }
-  assert.equal(meta.idempotencyKey ?? null, idempotencyKey);
+  if (idempotencyKey !== undefined) {
+    assert.equal(meta.idempotencyKey ?? null, idempotencyKey);
+    return;
+  }
+  if (classification === "permission") {
+    assert.equal(meta.idempotencyKey ?? null, null);
+    return;
+  }
+  assert.equal(typeof meta.idempotencyKey, "string");
 }
 
 test("Phase 4.5 fiscal-year routes expose canonical envelopes, denial reasons, conflict semantics and idempotent period generation", async () => {

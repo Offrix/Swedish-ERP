@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_APPROVER_EMAIL } from "../../packages/domain-org-auth/src/index.mjs";
@@ -127,7 +128,7 @@ test("Phase 6.3 API blocks unauthorized payments, books payouts correctly and re
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${adminSessionToken}`
+        authorization: `Bearer ${adminSessionToken}`,        "idempotency-key": crypto.randomUUID()
       },
       body: JSON.stringify({ companyId: COMPANY_ID })
     });
@@ -185,7 +186,7 @@ test("Phase 6.3 API blocks unauthorized payments, books payouts correctly and re
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${approverSessionToken}`
+        authorization: `Bearer ${approverSessionToken}`,        "idempotency-key": crypto.randomUUID()
       },
       body: JSON.stringify({ companyId: COMPANY_ID })
     });
@@ -462,11 +463,13 @@ async function loginWithRequiredFactors({ baseUrl, platform, companyId, email })
 }
 
 async function requestJson(baseUrl, path, { method = "GET", body, token, expectedStatus = 200 } = {}) {
+  const mutationIdempotencyKey = ["POST", "PUT", "PATCH", "DELETE"].includes(String(method || "GET").toUpperCase()) ? crypto.randomUUID() : null;
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {})
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(mutationIdempotencyKey ? { "idempotency-key": mutationIdempotencyKey } : {})
     },
     body: body ? JSON.stringify(body) : undefined
   });

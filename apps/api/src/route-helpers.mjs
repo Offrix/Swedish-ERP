@@ -48,7 +48,32 @@ export async function readJsonBody(req, allowEmpty = false, options = {}) {
   } catch {
     throw createHttpError(400, "json_invalid", "Request body is not valid JSON.");
   }
-  return normalizeRequestPayload(req, parsed);
+  const normalizedPayload = normalizeRequestPayload(req, parsed);
+  if (options.allowPrimitiveJson !== true && !isPlainObject(normalizedPayload)) {
+    throw createHttpError(400, "json_body_object_required", "Request body must be a JSON object.");
+  }
+  const requiresIdempotencyKey =
+    typeof options.requireIdempotencyKey === "boolean"
+      ? options.requireIdempotencyKey
+      : requestContext.requireIdempotencyKey === true;
+  if (requiresIdempotencyKey && optionalText(requestContext.idempotencyKey) == null) {
+    throw createHttpError(
+      400,
+      "idempotency_key_required",
+      "Mutation requests must include an idempotency key.",
+      {
+        retryable: false,
+        details: [
+          {
+            code: "idempotency_key_required",
+            field: "idempotencyKey",
+            message: "Provide an Idempotency-Key header or canonical envelope idempotency key."
+          }
+        ]
+      }
+    );
+  }
+  return normalizedPayload;
 }
 
 export function readBearerToken(req) {
@@ -416,6 +441,7 @@ function ensureRequestContext(target) {
         apiVersion: CANONICAL_API_VERSION,
         environmentMode: null,
         idempotencyKey: null,
+        requireIdempotencyKey: false,
         maxBodyBytes: DEFAULT_API_BODY_LIMIT_BYTES,
         transportSecurityEnabled: false
       }

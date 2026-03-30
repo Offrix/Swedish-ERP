@@ -253,11 +253,13 @@ async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
 }
 
 async function requestJson(baseUrl, path, { method = "GET", body, token, expectedStatus = 200 } = {}) {
+  const mutationIdempotencyKey = ["POST", "PUT", "PATCH", "DELETE"].includes(String(method || "GET").toUpperCase()) ? crypto.randomUUID() : null;
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {})
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(mutationIdempotencyKey ? { "idempotency-key": mutationIdempotencyKey } : {})
     },
     body: body ? JSON.stringify(body) : undefined
   });

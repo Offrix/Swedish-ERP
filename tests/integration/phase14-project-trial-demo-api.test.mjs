@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { DEMO_ADMIN_EMAIL } from "../../packages/domain-org-auth/src/index.mjs";
@@ -229,10 +230,12 @@ async function loginWithRequiredFactors({ baseUrl, platform, companyId, email })
 }
 
 async function requestJson(baseUrl, route, { method = "GET", token = null, body = undefined, expectedStatus = 200 } = {}) {
+  const mutationIdempotencyKey = ["POST", "PUT", "PATCH", "DELETE"].includes(String(method || "GET").toUpperCase()) ? crypto.randomUUID() : null;
   const response = await fetch(`${baseUrl}${route}`, {
     method,
     headers: {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(mutationIdempotencyKey ? { "idempotency-key": mutationIdempotencyKey } : {}),
       ...(body ? { "content-type": "application/json" } : {})
     },
     body: body ? JSON.stringify(body) : undefined

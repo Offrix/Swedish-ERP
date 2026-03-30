@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
@@ -70,7 +71,7 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
     const disallowedCashProfileResponse = await fetch(`${baseUrl}/v1/accounting-method/profiles`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${adminToken}`,
+        authorization: `Bearer ${adminToken}`,        "idempotency-key": crypto.randomUUID(),
         "content-type": "application/json"
       },
       body: JSON.stringify({
@@ -228,7 +229,7 @@ test("Step 7 API requires fiscal-year boundary metadata and supersedes earlier m
     const missingBoundaryResponse = await fetch(`${baseUrl}/v1/accounting-method/change-requests`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${adminToken}`,
+        authorization: `Bearer ${adminToken}`,        "idempotency-key": crypto.randomUUID(),
         "content-type": "application/json"
       },
       body: JSON.stringify({

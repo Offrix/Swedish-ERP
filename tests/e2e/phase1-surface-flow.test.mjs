@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createDesktopWebServer } from "../../apps/desktop-web/src/server.mjs";
 import { DEMO_ADMIN_EMAIL, createOrgAuthPlatform } from "../../packages/domain-org-auth/src/index.mjs";
@@ -86,11 +87,13 @@ test("desktop-web exposes auth/onboarding entrypoints while API completes the ma
 });
 
 async function requestJson(url, { method = "GET", body, token } = {}) {
+  const mutationIdempotencyKey = ["POST", "PUT", "PATCH", "DELETE"].includes(String(method || "GET").toUpperCase()) ? crypto.randomUUID() : null;
   const response = await fetch(url, {
     method,
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {})
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(mutationIdempotencyKey ? { "idempotency-key": mutationIdempotencyKey } : {})
     },
     body: body ? JSON.stringify(body) : undefined
   });

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import {
@@ -250,11 +251,13 @@ test("Phase 6.5 production auth start is blocked until auth inventory exists and
 });
 
 async function requestJson(url, { method = "GET", body, token, expectedStatus = 200 } = {}) {
+  const mutationIdempotencyKey = ["POST", "PUT", "PATCH", "DELETE"].includes(String(method || "GET").toUpperCase()) ? crypto.randomUUID() : null;
   const response = await fetch(url, {
     method,
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {})
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(mutationIdempotencyKey ? { "idempotency-key": mutationIdempotencyKey } : {})
     },
     body: body ? JSON.stringify(body) : undefined
   });

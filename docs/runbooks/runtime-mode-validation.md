@@ -27,7 +27,7 @@ Ensure every starter chooses an explicit runtime mode and that non-live modes ne
    - flat platform merge collisions
    - Map-only critical truth in regulated domains
    - stub providers
-    - phasebucket route handlers still wired into protected API runtime
+   - phasebucket route handlers still wired into protected API runtime
    - missing provider capability truth
 8. Critical-domain snapshot persistence is never auto-provisioned for protected modes; if a durable store is required it must be configured explicitly.
 9. Protected runtime must not advertise sandbox-only surfaces in root route metadata or public API spec.
@@ -43,7 +43,7 @@ Ensure every starter chooses an explicit runtime mode and that non-live modes ne
 Run:
 
 ```powershell
-node scripts/runtime-honesty-scan.mjs --mode production --surface api --active-store-kind memory --critical-domain-state-store-kind memory --expect-finding missing_persistent_store --expect-finding map_only_critical_truth --expect-finding stub_provider_present --expect-finding phasebucket_route_runtime_present --require-startup-blocked --require-blocking --json
+node scripts/runtime-honesty-scan.mjs --mode production --surface api --active-store-kind memory --critical-domain-state-store-kind memory --expect-finding missing_persistent_store --expect-finding map_only_critical_truth --expect-finding stub_provider_present --require-startup-blocked --require-blocking --json
 node scripts/runtime-honesty-scan.mjs --mode production --surface api --active-store-kind memory --critical-domain-state-store-kind memory --bootstrap-mode scenario_seed --bootstrap-scenario-code phase1_protected_seed_probe --seed-demo --expect-finding seed_demo_forbidden --require-startup-blocked --require-blocking --json
 node scripts/runtime-honesty-scan.mjs --mode production --surface api --active-store-kind memory --critical-domain-state-store-kind memory --bootstrap-mode scenario_seed --bootstrap-scenario-code test_default_demo --seed-demo --expect-finding seed_demo_forbidden --expect-finding demo_data_present_in_protected_mode --require-startup-blocked --require-blocking --json
 node --test tests/unit/phase1-runtime-capability-truth.test.mjs
@@ -58,6 +58,8 @@ node --test tests/e2e/apps-smoke.test.mjs
 ```
 
 Then run the full verification suite before the next roadmap subphase.
+
+Protected API runtime should now keep `phasebucket_route_runtime_present` absent. The dedicated diagnostics tests assert that the finding appears only when transitional phasebucket handlers are still wired into the runtime.
 
 ## Failure conditions
 

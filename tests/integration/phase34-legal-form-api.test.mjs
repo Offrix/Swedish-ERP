@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
@@ -163,7 +164,7 @@ test("Step 34 API rejects invalid legal-form reporting obligation combinations",
     const invalidObligation = await fetch(`${baseUrl}/v1/legal-forms/reporting-obligations`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${adminToken}`,
+        authorization: `Bearer ${adminToken}`,        "idempotency-key": crypto.randomUUID(),
         "content-type": "application/json"
       },
       body: JSON.stringify({
@@ -222,11 +223,13 @@ function prepareAccounting(platform, companyId) {
 }
 
 async function requestJson(url, { method = "GET", body, token, expectedStatus = 200 } = {}) {
+  const mutationIdempotencyKey = ["POST", "PUT", "PATCH", "DELETE"].includes(String(method || "GET").toUpperCase()) ? crypto.randomUUID() : null;
   const response = await fetch(url, {
     method,
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {})
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(mutationIdempotencyKey ? { "idempotency-key": mutationIdempotencyKey } : {})
     },
     body: body ? JSON.stringify(body) : undefined
   });

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 
 export async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
   const started = await requestJson(baseUrl, "/v1/auth/login", {
@@ -39,11 +40,17 @@ export async function loginWithTotpOnly({ baseUrl, platform, companyId, email })
 }
 
 export async function requestJson(baseUrl, pathname, { method = "GET", body = null, token = null, headers = {}, expectedStatus = 200 } = {}) {
+  const normalizedMethod = String(method || "GET").toUpperCase();
+  const mutationIdempotencyKey =
+    ["POST", "PUT", "PATCH", "DELETE"].includes(normalizedMethod)
+      ? headers?.["idempotency-key"] || headers?.["Idempotency-Key"] || crypto.randomUUID()
+      : null;
   const response = await fetch(`${baseUrl}${pathname}`, {
-    method,
+    method: normalizedMethod,
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
       ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(mutationIdempotencyKey ? { "idempotency-key": mutationIdempotencyKey } : {}),
       ...(headers && typeof headers === "object" ? headers : {})
     },
     body: body ? JSON.stringify(body) : undefined

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { DEMO_ADMIN_EMAIL } from "../../packages/domain-org-auth/src/index.mjs";
@@ -199,7 +200,7 @@ test("Step 30 API creates templates, instances, deviations and sign-off chains",
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${sessionToken}`
+        authorization: `Bearer ${sessionToken}`,        "idempotency-key": crypto.randomUUID()
       },
       body: JSON.stringify({
         companyId: COMPANY_ID,
@@ -295,11 +296,13 @@ async function loginWithRequiredFactors({ baseUrl, platform, companyId, email })
 }
 
 async function requestJson(baseUrl, path, { method = "GET", body, token, expectedStatus = 200 } = {}) {
+  const mutationIdempotencyKey = ["POST", "PUT", "PATCH", "DELETE"].includes(String(method || "GET").toUpperCase()) ? crypto.randomUUID() : null;
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {})
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(mutationIdempotencyKey ? { "idempotency-key": mutationIdempotencyKey } : {})
     },
     body: body ? JSON.stringify(body) : undefined
   });

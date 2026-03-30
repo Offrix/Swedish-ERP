@@ -45,7 +45,7 @@ test("phase 1.4 runtime diagnostics surface flat merge collisions as warnings in
   assert.ok(stubProviderFinding);
   assert.equal(simulatedRuntimeFinding, undefined);
   assert.equal(forbiddenRouteFinding, undefined);
-  assert.ok(phasebucketRouteFinding);
+  assert.equal(phasebucketRouteFinding, undefined);
   assert.equal(secretRuntimeFinding, undefined);
   assert.equal(flatMergeFinding.severityCode, "warning");
   assert.equal(platform.getRuntimeStartupDiagnostics().startupAllowed, true);

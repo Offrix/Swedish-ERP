@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { DEMO_ADMIN_EMAIL } from "../../packages/domain-org-auth/src/index.mjs";
@@ -479,7 +480,7 @@ test("Step 24 API exposes invoice field evaluation and blocks reverse-charge iss
     const blockedIssue = await fetch(`${baseUrl}/v1/ar/invoices/${blockedInvoice.customerInvoiceId}/issue`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${sessionToken}`,
+        Authorization: `Bearer ${sessionToken}`,        "idempotency-key": crypto.randomUUID(),
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -722,7 +723,7 @@ test("Phase 9.1 API carries governed revenue dimensions into issued AR journals 
     const blockedIssue = await fetch(`${baseUrl}/v1/ar/invoices/${blockedInvoice.customerInvoiceId}/issue`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${sessionToken}`,
+        Authorization: `Bearer ${sessionToken}`,        "idempotency-key": crypto.randomUUID(),
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -772,11 +773,13 @@ async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
 }
 
 async function requestJson(baseUrl, path, { method = "GET", body, token, expectedStatus = 200 } = {}) {
+  const mutationIdempotencyKey = ["POST", "PUT", "PATCH", "DELETE"].includes(String(method || "GET").toUpperCase()) ? crypto.randomUUID() : null;
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {})
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(mutationIdempotencyKey ? { "idempotency-key": mutationIdempotencyKey } : {})
     },
     body: body ? JSON.stringify(body) : undefined
   });

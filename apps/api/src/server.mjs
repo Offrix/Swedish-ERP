@@ -2,10 +2,13 @@ import crypto from "node:crypto";
 import http from "node:http";
 import { createDefaultApiPlatform } from "./platform.mjs";
 import { getMissionControlDashboard, listMissionControlDashboards } from "./mission-control.mjs";
-import { tryHandlePhase6AuthRoutes } from "./phase6-auth-routes.mjs";
-import { tryHandlePhase13Route } from "./phase13-routes.mjs";
-import { tryHandlePhase14Route } from "./phase14-routes.mjs";
-import { tryHandlePhase16IntegrationRoutes } from "./phase16-integration-routes.mjs";
+import { tryHandleIdentityRoutes } from "./identity-routes.mjs";
+import { tryHandlePublicApiRoutes } from "./public-api-routes.mjs";
+import { tryHandlePartnerApiRoutes } from "./partner-api-routes.mjs";
+import { tryHandleJobRoutes } from "./job-routes.mjs";
+import { tryHandleAutomationRoutes } from "./automation-routes.mjs";
+import { tryHandleOperationsRoutes } from "./operations-routes.mjs";
+import { tryHandleIntegrationRoutes } from "./integration-routes.mjs";
 import {
   listPublishedReadRouteTemplates,
   listPublishedRouteContracts,
@@ -1253,19 +1256,31 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
 
   assertReadSurfaceRoleAccess({ platform, req, url, path });
 
-  if (await tryHandlePhase13Route({ req, res, url, path, platform })) {
+  if (await tryHandlePublicApiRoutes({ req, res, url, path, platform })) {
     return;
   }
 
-  if (await tryHandlePhase14Route({ req, res, url, path, platform })) {
+  if (await tryHandlePartnerApiRoutes({ req, res, url, path, platform })) {
     return;
   }
 
-  if (await tryHandlePhase16IntegrationRoutes({ req, res, url, path, platform })) {
+  if (await tryHandleJobRoutes({ req, res, url, path, platform })) {
     return;
   }
 
-  if (await tryHandlePhase6AuthRoutes({ req, res, path, platform })) {
+  if (await tryHandleAutomationRoutes({ req, res, url, path, platform })) {
+    return;
+  }
+
+  if (await tryHandleOperationsRoutes({ req, res, url, path, platform })) {
+    return;
+  }
+
+  if (await tryHandleIntegrationRoutes({ req, res, url, path, platform })) {
+    return;
+  }
+
+  if (await tryHandleIdentityRoutes({ req, res, path, platform })) {
     return;
   }
 
@@ -18020,6 +18035,7 @@ function resolveApiEdgeRouteProfile({ method, path, environmentMode, edgePolicy 
   const mutation = isMutationMethod(normalizedMethod);
   const protectedMode = PROTECTED_RUNTIME_MODES.has(environmentMode);
   const defaultMutationLimit = edgePolicy.rateLimitProfiles.defaultMutation;
+  const requireIdempotencyKey = shouldRequireRouteIdempotency({ method: normalizedMethod, path });
   const localBodyLimit =
     normalizedMethod === "POST" && (
       path === "/v1/auth/login"
@@ -18036,6 +18052,7 @@ function resolveApiEdgeRouteProfile({ method, path, environmentMode, edgePolicy 
       maxBodyBytes: localBodyLimit,
       enforceOriginCheck: true,
       rejectCookieTransport: true,
+      requireIdempotencyKey: false,
       rateLimitProfile: selectEdgeRateLimitProfile(edgePolicy.rateLimitProfiles.authLogin, protectedMode)
     };
   }
@@ -18045,6 +18062,7 @@ function resolveApiEdgeRouteProfile({ method, path, environmentMode, edgePolicy 
       maxBodyBytes: localBodyLimit,
       enforceOriginCheck: true,
       rejectCookieTransport: true,
+      requireIdempotencyKey: false,
       rateLimitProfile: selectEdgeRateLimitProfile(edgePolicy.rateLimitProfiles.authTotpVerify, protectedMode)
     };
   }
@@ -18054,6 +18072,7 @@ function resolveApiEdgeRouteProfile({ method, path, environmentMode, edgePolicy 
       maxBodyBytes: localBodyLimit,
       enforceOriginCheck: true,
       rejectCookieTransport: true,
+      requireIdempotencyKey: false,
       rateLimitProfile: selectEdgeRateLimitProfile(edgePolicy.rateLimitProfiles.federationCallback, protectedMode)
     };
   }
@@ -18063,6 +18082,7 @@ function resolveApiEdgeRouteProfile({ method, path, environmentMode, edgePolicy 
       maxBodyBytes: localBodyLimit,
       enforceOriginCheck: false,
       rejectCookieTransport: false,
+      requireIdempotencyKey: false,
       rateLimitProfile: selectEdgeRateLimitProfile(edgePolicy.rateLimitProfiles.ocrProviderCallback, protectedMode)
     };
   }
@@ -18072,6 +18092,7 @@ function resolveApiEdgeRouteProfile({ method, path, environmentMode, edgePolicy 
       maxBodyBytes: Math.min(edgePolicy.defaultMaxBodyBytes, 131_072),
       enforceOriginCheck: true,
       rejectCookieTransport: true,
+      requireIdempotencyKey: true,
       rateLimitProfile: selectEdgeRateLimitProfile(edgePolicy.rateLimitProfiles.webhookDispatch, protectedMode)
     };
   }
@@ -18080,8 +18101,24 @@ function resolveApiEdgeRouteProfile({ method, path, environmentMode, edgePolicy 
     maxBodyBytes: edgePolicy.defaultMaxBodyBytes,
     enforceOriginCheck: mutation,
     rejectCookieTransport: mutation,
+    requireIdempotencyKey,
     rateLimitProfile: mutation ? selectEdgeRateLimitProfile(defaultMutationLimit, protectedMode) : null
   };
+}
+
+function shouldRequireRouteIdempotency({ method, path }) {
+  if (!isMutationMethod(method)) {
+    return false;
+  }
+  if (
+    path === "/v1/system/bootstrap/validate"
+    || path === "/v1/authz/check"
+    || path.startsWith("/v1/auth/")
+    || matchPath(path, "/v1/documents/:documentId/ocr/runs/:ocrRunId/provider-callback")
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function selectEdgeRateLimitProfile(profile, protectedMode) {
@@ -18276,6 +18313,7 @@ function createRequestContext({ req, platform, edgePolicy = DEFAULT_API_EDGE_POL
       transportSecurityEnabled: isTransportSecure(req),
       clientAddress: readClientAddress(req),
       maxBodyBytes: routeProfile.maxBodyBytes,
+      requireIdempotencyKey: routeProfile.requireIdempotencyKey === true,
       routeProfile
     };
   }

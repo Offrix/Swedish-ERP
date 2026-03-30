@@ -69,7 +69,7 @@ test("phase 1.4 runtime endpoints expose startup diagnostics and bootstrap valid
       invariantsPayload.findings.some(
         (finding) => finding.findingCode === "phasebucket_route_runtime_present"
       ),
-      true
+      false
     );
     assert.equal(
       invariantsPayload.findings.some((finding) => finding.findingCode === "secret_runtime_not_bank_grade"),
