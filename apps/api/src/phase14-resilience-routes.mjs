@@ -12,6 +12,26 @@ import {
 export async function tryHandlePhase14ResilienceRoutes({ req, res, url, path, platform, helpers }) {
   const { assertBackofficeReadAccess, buildObservabilityPayload } = helpers;
 
+  function recordContainmentIncidentEvent({
+    sessionToken,
+    companyId,
+    incidentId,
+    note,
+    relatedObjectRefs
+  }) {
+    if (!incidentId) {
+      return null;
+    }
+    return platform.recordRuntimeIncidentEvent({
+      sessionToken,
+      companyId,
+      incidentId,
+      eventType: "mitigation_started",
+      note,
+      relatedObjectRefs
+    });
+  }
+
   if (req.method === "POST" && path === "/v1/ops/feature-flags") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
@@ -172,6 +192,34 @@ export async function tryHandlePhase14ResilienceRoutes({ req, res, url, path, pl
     return true;
   }
 
+  const revokeManagedSecretMatch = matchPath(path, "/v1/ops/secrets/:managedSecretId/revoke");
+  if (req.method === "POST" && revokeManagedSecretMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "managed_secret", objectId: revokeManagedSecretMatch.managedSecretId, scopeCode: "backoffice" });
+    const revoked = platform.revokeManagedSecret({
+      sessionToken,
+      companyId,
+      managedSecretId: revokeManagedSecretMatch.managedSecretId,
+      incidentId: body.incidentId,
+      reasonCode: body.reasonCode
+    });
+    recordContainmentIncidentEvent({
+      sessionToken,
+      companyId,
+      incidentId: body.incidentId || null,
+      note: `Emergency revoked managed secret ${revoked.managedSecret.managedSecretId}.`,
+      relatedObjectRefs: [
+        { objectType: "managed_secret", objectId: revoked.managedSecret.managedSecretId },
+        ...revoked.linkedCallbackSecrets.map((item) => ({ objectType: "callback_secret", objectId: item.callbackSecretId })),
+        ...revoked.linkedCertificateChains.map((item) => ({ objectType: "certificate_chain", objectId: item.certificateChainId }))
+      ]
+    });
+    writeJson(res, 200, revoked);
+    return true;
+  }
+
   if (req.method === "GET" && path === "/v1/ops/secret-rotations") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
@@ -230,6 +278,30 @@ export async function tryHandlePhase14ResilienceRoutes({ req, res, url, path, pl
     return true;
   }
 
+  const revokeCertificateChainMatch = matchPath(path, "/v1/ops/certificate-chains/:certificateChainId/revoke");
+  if (req.method === "POST" && revokeCertificateChainMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "certificate_chain", objectId: revokeCertificateChainMatch.certificateChainId, scopeCode: "backoffice" });
+    const revoked = platform.revokeCertificateChain({
+      sessionToken,
+      companyId,
+      certificateChainId: revokeCertificateChainMatch.certificateChainId,
+      incidentId: body.incidentId,
+      reasonCode: body.reasonCode
+    });
+    recordContainmentIncidentEvent({
+      sessionToken,
+      companyId,
+      incidentId: body.incidentId || null,
+      note: `Revoked certificate chain ${revoked.certificateChainId}.`,
+      relatedObjectRefs: [{ objectType: "certificate_chain", objectId: revoked.certificateChainId }]
+    });
+    writeJson(res, 200, revoked);
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/ops/callback-secrets") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
@@ -266,6 +338,30 @@ export async function tryHandlePhase14ResilienceRoutes({ req, res, url, path, pl
         providerCode: optionalText(url.searchParams.get("providerCode"))
       })
     });
+    return true;
+  }
+
+  const revokeCallbackSecretMatch = matchPath(path, "/v1/ops/callback-secrets/:callbackSecretId/revoke");
+  if (req.method === "POST" && revokeCallbackSecretMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "callback_secret", objectId: revokeCallbackSecretMatch.callbackSecretId, scopeCode: "backoffice" });
+    const revoked = platform.revokeCallbackSecret({
+      sessionToken,
+      companyId,
+      callbackSecretId: revokeCallbackSecretMatch.callbackSecretId,
+      incidentId: body.incidentId,
+      reasonCode: body.reasonCode
+    });
+    recordContainmentIncidentEvent({
+      sessionToken,
+      companyId,
+      incidentId: body.incidentId || null,
+      note: `Revoked callback secret ${revoked.callbackSecretId}.`,
+      relatedObjectRefs: [{ objectType: "callback_secret", objectId: revoked.callbackSecretId }]
+    });
+    writeJson(res, 200, revoked);
     return true;
   }
 

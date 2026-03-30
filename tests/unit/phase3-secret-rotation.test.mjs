@@ -136,3 +136,97 @@ test("Phase 3.5 formalizes managed secrets, callback overlap and certificate ren
   assert.equal(summary.expiringCertificateCount, 1);
   assert.equal(summary.modeIsolationViolationCount, 0);
 });
+
+test("Phase 3.6 emergency revoke retires linked secrets and marks containment state", () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-30T09:00:00Z")
+  });
+  const adminToken = loginWithStrongAuthOnPlatform({
+    platform,
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+
+  const managedSecret = platform.registerManagedSecret({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    mode: "production",
+    providerCode: "banking",
+    secretType: "api_secret",
+    secretRef: "vault://prod/banking/api-secret-v1",
+    ownerUserId: DEMO_IDS.userId,
+    backupOwnerUserId: DEMO_IDS.userId,
+    rotationCadenceDays: 30
+  });
+  const callbackSecret = platform.registerCallbackSecret({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    mode: "production",
+    providerCode: "banking",
+    callbackLabel: "banking-callback",
+    callbackDomain: "banking.example.test",
+    callbackPath: "/banking/webhook",
+    currentSecretRef: "vault://prod/banking/api-secret-v1",
+    managedSecretId: managedSecret.managedSecretId,
+    ownerUserId: DEMO_IDS.userId,
+    backupOwnerUserId: DEMO_IDS.userId,
+    rotationCadenceDays: 30
+  });
+  const certificateChain = platform.registerCertificateChain({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    mode: "production",
+    providerCode: "banking",
+    certificateLabel: "banking-cert",
+    callbackDomain: "banking.example.test",
+    subjectCommonName: "banking.example.test",
+    sanDomains: ["banking.example.test"],
+    privateKeySecretRef: "vault://prod/banking/api-secret-v1",
+    ownerUserId: DEMO_IDS.userId,
+    backupOwnerUserId: DEMO_IDS.userId,
+    notAfter: "2026-12-31T00:00:00.000Z",
+    renewalWindowDays: 30
+  });
+  const incident = platform.openRuntimeIncident({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    title: "Banking provider secret compromise",
+    summary: "Emergency revoke is required for compromised banking credentials.",
+    severity: "critical",
+    commanderUserId: DEMO_IDS.userId,
+    relatedObjectRefs: [{ objectType: "managed_secret", objectId: managedSecret.managedSecretId }]
+  });
+
+  const revoked = platform.revokeManagedSecret({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    managedSecretId: managedSecret.managedSecretId,
+    incidentId: incident.incident.incidentId,
+    reasonCode: "credential_compromise"
+  });
+
+  assert.equal(revoked.managedSecret.status, "retired");
+  assert.equal(revoked.managedSecret.revocationIncidentId, incident.incident.incidentId);
+  assert.equal(revoked.linkedCallbackSecrets.length, 1);
+  assert.equal(revoked.linkedCallbackSecrets[0].status, "retired");
+  assert.equal(revoked.linkedCertificateChains.length, 1);
+  assert.equal(revoked.linkedCertificateChains[0].status, "revoked");
+  assert.equal(revoked.rotationRecord.status, "revoked");
+  assert.equal(revoked.rotationRecord.nextSecretRef, null);
+  assert.equal(revoked.rotationRecord.incidentId, incident.incident.incidentId);
+
+  const summary = platform.getSecretManagementSummary({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId
+  });
+  assert.equal(summary.retiredManagedSecretCount, 1);
+  assert.equal(summary.retiredCallbackSecretCount, 1);
+  assert.equal(summary.revokedCertificateCount, 1);
+  assert.equal(summary.revokedSecretRotationCount, 1);
+
+  const listedCertificateChains = platform.listCertificateChains({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId
+  });
+  assert.equal(listedCertificateChains[0].status, "revoked");
+});

@@ -309,7 +309,7 @@ Ingen live auth, ingen live providercredential, ingen live support-write, ingen 
 - [x] 3.3 [SECURE][REWRITE] Kryptera eller tokenisera personnummer, bankkonton, löne-/skattepayloads, provider tokens och webhook secrets enligt klassmatrisen. Sessiontokens lagras bara som HMAC-hash. TOTP-hemligheter lagras endast krypterade via secret-ref.
 - [x] 3.4 [SECURE][HARDEN] Härda API edge: body size limit, request timeout, origin policy, security headers, signed webhooks, anti-replay, abuse throttling, cookie/CSRF-regler där cookies används.
 - [x] 3.5 [SECURE][NEW BUILD] Bygg rate limiting, lockout, anomaly detection och risk scoring för login, TOTP, passkey enrollment, BankID initiation, provider callback spikes, exportmassor, support access och break-glass.
-- [ ] 3.6 [SECURE][OPERATIONALIZE] Inför nyckelrotation, credential rotation, certifikatrotation, emergency revoke och incident response som operativ standard.
+- [x] 3.6 [SECURE][OPERATIONALIZE] Inför nyckelrotation, credential rotation, certifikatrotation, emergency revoke och incident response som operativ standard.
 
 **Exit gate**  
 - Ingen hemlighet, faktorhemlighet, provider token eller signing secret ligger i vanlig durable state eller snapshot.

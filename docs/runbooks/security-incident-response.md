@@ -67,6 +67,7 @@ It covers secret exposure, auth abuse, anomalous provider callbacks, suspicious 
 - rotate the affected secret class
 - revoke old tokens and sessions
 - freeze dependent adapters until smoke verification passes
+- if managed secrets, callback secrets or certificate chains are compromised, execute the matching `/v1/ops/*/revoke` route and record `mitigation_started` on the incident
 
 ### Auth or MFA abuse
 
@@ -105,6 +106,7 @@ It covers secret exposure, auth abuse, anomalous provider callbacks, suspicious 
 - containment timestamps
 - revoked sessions or credentials
 - rotation ids
+- revoke route targets and related object refs
 - verification results
 - customer or regulator notification decision
 - post-incident corrective actions

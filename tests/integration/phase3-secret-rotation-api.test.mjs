@@ -150,3 +150,230 @@ test("Phase 3.5 API formalizes secrets, callback overlap and observability summa
     await stopServer(server);
   }
 });
+
+test("Phase 3.6 API records emergency revoke containment against runtime incidents", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-30T09:00:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const managedSecret = await requestJson(baseUrl, "/v1/ops/secrets", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        mode: "production",
+        providerCode: "banking",
+        secretType: "api_secret",
+        secretRef: "vault://prod/banking/api-secret-v1",
+        ownerUserId: DEMO_IDS.userId,
+        backupOwnerUserId: DEMO_IDS.userId,
+        rotationCadenceDays: 30
+      }
+    });
+    const callbackSecret = await requestJson(baseUrl, "/v1/ops/callback-secrets", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        mode: "production",
+        providerCode: "banking",
+        callbackLabel: "banking-webhook",
+        callbackDomain: "banking.example.test",
+        callbackPath: "/banking/webhook",
+        currentSecretRef: "vault://production/banking/api-secret-v1",
+        managedSecretId: managedSecret.managedSecretId,
+        ownerUserId: DEMO_IDS.userId,
+        backupOwnerUserId: DEMO_IDS.userId,
+        rotationCadenceDays: 30
+      }
+    });
+    const certificateChain = await requestJson(baseUrl, "/v1/ops/certificate-chains", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        mode: "production",
+        providerCode: "banking",
+        certificateLabel: "banking-cert",
+        callbackDomain: "banking.example.test",
+        subjectCommonName: "banking.example.test",
+        sanDomains: ["banking.example.test"],
+        privateKeySecretRef: "vault://prod/banking/api-secret-v1",
+        ownerUserId: DEMO_IDS.userId,
+        backupOwnerUserId: DEMO_IDS.userId,
+        notAfter: "2026-12-31T00:00:00.000Z",
+        renewalWindowDays: 30
+      }
+    });
+    const incident = await requestJson(baseUrl, "/v1/backoffice/incidents", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        title: "Banking provider compromise",
+        summary: "Emergency revoke and containment are required.",
+        severity: "critical",
+        commanderUserId: DEMO_IDS.userId,
+        relatedObjectRefs: [{ objectType: "managed_secret", objectId: managedSecret.managedSecretId }]
+      }
+    });
+
+    const revoked = await requestJson(baseUrl, `/v1/ops/secrets/${managedSecret.managedSecretId}/revoke`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 200,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        incidentId: incident.incident.incidentId,
+        reasonCode: "credential_compromise"
+      }
+    });
+    assert.equal(revoked.managedSecret.status, "retired");
+    assert.equal(revoked.linkedCallbackSecrets[0].status, "retired");
+    assert.equal(revoked.linkedCertificateChains[0].status, "revoked");
+    assert.equal(revoked.rotationRecord.status, "revoked");
+
+    const incidentEvents = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/events?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken,
+      expectedStatus: 200
+    });
+    const mitigationEvent = incidentEvents.items.find((item) => item.eventType === "mitigation_started");
+    assert.equal(Boolean(mitigationEvent), true);
+    assert.equal(mitigationEvent.relatedObjectRefs.some((ref) => ref.objectType === "managed_secret" && ref.objectId === managedSecret.managedSecretId), true);
+    assert.equal(mitigationEvent.relatedObjectRefs.some((ref) => ref.objectType === "callback_secret" && ref.objectId === callbackSecret.callbackSecretId), true);
+    assert.equal(mitigationEvent.relatedObjectRefs.some((ref) => ref.objectType === "certificate_chain" && ref.objectId === certificateChain.certificateChainId), true);
+
+    const observability = await requestJson(baseUrl, `/v1/ops/observability?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken,
+      expectedStatus: 200
+    });
+    assert.equal(observability.secretManagement.retiredManagedSecretCount, 1);
+    assert.equal(observability.secretManagement.retiredCallbackSecretCount, 1);
+    assert.equal(observability.secretManagement.revokedCertificateCount, 1);
+    assert.equal(observability.secretManagement.revokedSecretRotationCount, 1);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("Phase 3.6 API supports direct callback and certificate emergency revoke routes", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-30T09:00:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const callbackSecret = await requestJson(baseUrl, "/v1/ops/callback-secrets", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        mode: "production",
+        providerCode: "ocr",
+        callbackLabel: "ocr-webhook",
+        callbackDomain: "ocr.example.test",
+        callbackPath: "/ocr/webhook",
+        currentSecretRef: "vault://prod/ocr/webhook-secret-v1",
+        ownerUserId: DEMO_IDS.userId,
+        backupOwnerUserId: DEMO_IDS.userId,
+        rotationCadenceDays: 30
+      }
+    });
+    const certificateChain = await requestJson(baseUrl, "/v1/ops/certificate-chains", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        mode: "production",
+        providerCode: "ocr",
+        certificateLabel: "ocr-cert",
+        callbackDomain: "ocr.example.test",
+        subjectCommonName: "ocr.example.test",
+        sanDomains: ["ocr.example.test"],
+        privateKeySecretRef: "vault://prod/ocr/private-key-v1",
+        ownerUserId: DEMO_IDS.userId,
+        backupOwnerUserId: DEMO_IDS.userId,
+        notAfter: "2026-12-31T00:00:00.000Z",
+        renewalWindowDays: 30
+      }
+    });
+    const incident = await requestJson(baseUrl, "/v1/backoffice/incidents", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        title: "OCR callback compromise",
+        summary: "Containment is required for callback and certificate assets.",
+        severity: "high",
+        commanderUserId: DEMO_IDS.userId
+      }
+    });
+
+    const revokedCallback = await requestJson(baseUrl, `/v1/ops/callback-secrets/${callbackSecret.callbackSecretId}/revoke`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 200,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        incidentId: incident.incident.incidentId,
+        reasonCode: "callback_secret_compromise"
+      }
+    });
+    assert.equal(revokedCallback.status, "retired");
+
+    const revokedCertificate = await requestJson(baseUrl, `/v1/ops/certificate-chains/${certificateChain.certificateChainId}/revoke`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 200,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        incidentId: incident.incident.incidentId,
+        reasonCode: "certificate_compromise"
+      }
+    });
+    assert.equal(revokedCertificate.status, "revoked");
+
+    const incidentEvents = await requestJson(baseUrl, `/v1/backoffice/incidents/${incident.incident.incidentId}/events?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken,
+      expectedStatus: 200
+    });
+    assert.equal(incidentEvents.items.filter((item) => item.eventType === "mitigation_started").length, 2);
+    assert.equal(
+      incidentEvents.items.some((item) => item.relatedObjectRefs.some((ref) => ref.objectType === "callback_secret" && ref.objectId === callbackSecret.callbackSecretId)),
+      true
+    );
+    assert.equal(
+      incidentEvents.items.some((item) => item.relatedObjectRefs.some((ref) => ref.objectType === "certificate_chain" && ref.objectId === certificateChain.certificateChainId)),
+      true
+    );
+  } finally {
+    await stopServer(server);
+  }
+});

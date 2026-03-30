@@ -117,6 +117,14 @@ Emergency rotation requires:
 - rollback owner
 - post-incident review
 
+Emergency revoke execution must:
+
+- use `/v1/ops/secrets/:managedSecretId/revoke` when the live managed secret itself is compromised
+- use `/v1/ops/callback-secrets/:callbackSecretId/revoke` when a callback verifier must be retired without rotating the parent secret
+- use `/v1/ops/certificate-chains/:certificateChainId/revoke` when a callback certificate or private key is no longer trusted
+- link every revoke action to the incident id so containment lands in the runtime incident event chain
+- verify that linked callback secrets, certificate chains and secret-rotation records moved to `retired` or `revoked`
+
 ## Required Tests
 
 - `node --test tests/unit/phase3-secret-store-runtime.test.mjs`
@@ -132,4 +140,5 @@ Phase `3.2` / `3.6` key rotation is green only when:
 - secret re-wrap coverage is complete
 - overlap behavior is verified
 - retirement evidence is frozen
+- emergency revoke paths are drill-tested for managed secrets, callback secrets and certificate chains
 - no plaintext secret leaked into durable export, logs or support projections

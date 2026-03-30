@@ -115,11 +115,14 @@ export function createBackofficeModule({
     registerManagedSecret,
     listManagedSecrets,
     rotateManagedSecret,
+    revokeManagedSecret,
     listSecretRotationRecords,
     registerCertificateChain,
     listCertificateChains,
+    revokeCertificateChain,
     registerCallbackSecret,
     listCallbackSecrets,
+    revokeCallbackSecret,
     getSecurityClassificationCatalog,
     getSecretManagementSummary,
     runAdminDiagnostic,
@@ -532,6 +535,9 @@ export function createBackofficeModule({
   } = {}) {
     const principal = authorize(sessionToken, companyId, "company.manage");
     const managedSecret = requireManagedSecret(state, error, companyId, managedSecretId);
+    if (managedSecret.status === "retired") {
+      throw error(409, "managed_secret_already_retired", "Retired managed secrets cannot be rotated.");
+    }
     const parsedNextSecretRef = parseVaultSecretRef(nextSecretRef, {
       code: "managed_secret_next_secret_ref_invalid",
       allowLegacyModeAliases: true
@@ -624,6 +630,102 @@ export function createBackofficeModule({
       }
     });
     return projectSecretRotationRecord(rotationRecord);
+  }
+
+  function revokeManagedSecret({
+    sessionToken,
+    companyId,
+    managedSecretId,
+    incidentId = null,
+    reasonCode,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const managedSecret = requireManagedSecret(state, error, companyId, managedSecretId);
+    if (managedSecret.status === "retired") {
+      throw error(409, "managed_secret_already_retired", "Managed secret is already retired.");
+    }
+    const revokedAt = nowIso(clock);
+    const resolvedIncidentId = optionalText(incidentId);
+    const resolvedReasonCode = text(reasonCode, "managed_secret_revocation_reason_required");
+    managedSecret.status = "retired";
+    managedSecret.retiredAt = revokedAt;
+    managedSecret.retiredByUserId = principal.userId;
+    managedSecret.revocationIncidentId = resolvedIncidentId;
+    managedSecret.revocationReasonCode = resolvedReasonCode;
+    managedSecret.updatedAt = revokedAt;
+
+    const linkedCallbackSecrets = [...state.callbackSecrets.values()].filter(
+      (record) => record.companyId === managedSecret.companyId && record.managedSecretId === managedSecret.managedSecretId && record.status !== "retired"
+    );
+    for (const callbackSecret of linkedCallbackSecrets) {
+      callbackSecret.status = "retired";
+      callbackSecret.overlapEndsAt = revokedAt;
+      callbackSecret.retiredAt = revokedAt;
+      callbackSecret.retiredByUserId = principal.userId;
+      callbackSecret.revocationIncidentId = resolvedIncidentId;
+      callbackSecret.revocationReasonCode = resolvedReasonCode;
+      callbackSecret.updatedAt = revokedAt;
+    }
+
+    const linkedCertificateChains = [...state.certificateChains.values()].filter(
+      (record) =>
+        record.companyId === managedSecret.companyId &&
+        record.privateKeySecretRef === managedSecret.currentSecretRef &&
+        resolveCertificateChainStatus(record, clock) !== "revoked"
+    );
+    for (const certificateChain of linkedCertificateChains) {
+      certificateChain.status = "revoked";
+      certificateChain.revokedAt = revokedAt;
+      certificateChain.revokedByUserId = principal.userId;
+      certificateChain.revocationIncidentId = resolvedIncidentId;
+      certificateChain.revocationReasonCode = resolvedReasonCode;
+      certificateChain.updatedAt = revokedAt;
+    }
+
+    const rotationRecord = {
+      secretRotationRecordId: crypto.randomUUID(),
+      companyId,
+      managedSecretId: managedSecret.managedSecretId,
+      mode: managedSecret.mode,
+      providerCode: managedSecret.providerCode,
+      secretType: managedSecret.secretType,
+      classCode: managedSecret.classCode,
+      previousSecretVersion: managedSecret.currentSecretVersion,
+      nextSecretVersion: null,
+      previousSecretRef: managedSecret.currentSecretRef,
+      nextSecretRef: null,
+      requestedByUserId: principal.userId,
+      verificationMode: "emergency_revoke",
+      dualRunningUntil: null,
+      linkedCallbackSecretIds: linkedCallbackSecrets.map((record) => record.callbackSecretId),
+      linkedCertificateChainIds: linkedCertificateChains.map((record) => record.certificateChainId),
+      rotatedAt: revokedAt,
+      status: "revoked",
+      revocationReasonCode: resolvedReasonCode,
+      incidentId: resolvedIncidentId
+    };
+    state.secretRotationRecords.set(rotationRecord.secretRotationRecordId, rotationRecord);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.secret.revoked",
+      entityType: "managed_secret",
+      entityId: managedSecret.managedSecretId,
+      explanation: `Emergency revoked ${managedSecret.secretType} for ${managedSecret.providerCode} in ${managedSecret.mode}.`,
+      metadata: {
+        secretRotationRecordId: rotationRecord.secretRotationRecordId,
+        incidentId: resolvedIncidentId,
+        reasonCode: resolvedReasonCode
+      }
+    });
+    return {
+      managedSecret: projectManagedSecret(managedSecret),
+      linkedCallbackSecrets: linkedCallbackSecrets.map(projectCallbackSecret),
+      linkedCertificateChains: linkedCertificateChains.map((record) => projectCertificateChain(record, clock)),
+      rotationRecord: projectSecretRotationRecord(rotationRecord)
+    };
   }
 
   function listSecretRotationRecords({ sessionToken, companyId, mode = null, providerCode = null } = {}) {
@@ -728,6 +830,44 @@ export function createBackofficeModule({
       .map((record) => projectCertificateChain(record, clock));
   }
 
+  function revokeCertificateChain({
+    sessionToken,
+    companyId,
+    certificateChainId,
+    incidentId = null,
+    reasonCode,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const certificateChain = requireCertificateChain(state, error, companyId, certificateChainId);
+    if (resolveCertificateChainStatus(certificateChain, clock) === "revoked") {
+      throw error(409, "certificate_chain_already_revoked", "Certificate chain is already revoked.");
+    }
+    const revokedAt = nowIso(clock);
+    const resolvedIncidentId = optionalText(incidentId);
+    const resolvedReasonCode = text(reasonCode, "certificate_chain_revocation_reason_required");
+    certificateChain.status = "revoked";
+    certificateChain.revokedAt = revokedAt;
+    certificateChain.revokedByUserId = principal.userId;
+    certificateChain.revocationIncidentId = resolvedIncidentId;
+    certificateChain.revocationReasonCode = resolvedReasonCode;
+    certificateChain.updatedAt = revokedAt;
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.certificate_chain.revoked",
+      entityType: "certificate_chain",
+      entityId: certificateChain.certificateChainId,
+      explanation: `Revoked certificate chain ${certificateChain.certificateLabel} for ${certificateChain.providerCode} in ${certificateChain.mode}.`,
+      metadata: {
+        incidentId: resolvedIncidentId,
+        reasonCode: resolvedReasonCode
+      }
+    });
+    return projectCertificateChain(certificateChain, clock);
+  }
+
   function registerCallbackSecret({
     sessionToken,
     companyId,
@@ -812,6 +952,45 @@ export function createBackofficeModule({
       .map(projectCallbackSecret);
   }
 
+  function revokeCallbackSecret({
+    sessionToken,
+    companyId,
+    callbackSecretId,
+    incidentId = null,
+    reasonCode,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const callbackSecret = requireCallbackSecret(state, error, companyId, callbackSecretId);
+    if (callbackSecret.status === "retired") {
+      throw error(409, "callback_secret_already_retired", "Callback secret is already retired.");
+    }
+    const revokedAt = nowIso(clock);
+    const resolvedIncidentId = optionalText(incidentId);
+    const resolvedReasonCode = text(reasonCode, "callback_secret_revocation_reason_required");
+    callbackSecret.status = "retired";
+    callbackSecret.overlapEndsAt = revokedAt;
+    callbackSecret.retiredAt = revokedAt;
+    callbackSecret.retiredByUserId = principal.userId;
+    callbackSecret.revocationIncidentId = resolvedIncidentId;
+    callbackSecret.revocationReasonCode = resolvedReasonCode;
+    callbackSecret.updatedAt = revokedAt;
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.callback_secret.revoked",
+      entityType: "callback_secret",
+      entityId: callbackSecret.callbackSecretId,
+      explanation: `Revoked callback secret ${callbackSecret.callbackLabel} for ${callbackSecret.providerCode} in ${callbackSecret.mode}.`,
+      metadata: {
+        incidentId: resolvedIncidentId,
+        reasonCode: resolvedReasonCode
+      }
+    });
+    return projectCallbackSecret(callbackSecret);
+  }
+
   function getSecretManagementSummary({ sessionToken, companyId } = {}) {
     authorize(sessionToken, companyId, "company.read");
     const resolvedCompanyId = text(companyId, "company_id_required");
@@ -829,12 +1008,16 @@ export function createBackofficeModule({
       companyId: resolvedCompanyId,
       generatedAt: nowIso(clock),
       managedSecretCount: managedSecrets.length,
-      rotationDueCount: managedSecrets.filter((record) => new Date(record.nextRotationDueAt) <= new Date(clock())).length,
+      rotationDueCount: managedSecrets.filter((record) => record.status !== "retired" && new Date(record.nextRotationDueAt) <= new Date(clock())).length,
       dualRunningSecretCount: managedSecrets.filter((record) => record.status === "dual_running").length,
+      retiredManagedSecretCount: managedSecrets.filter((record) => record.status === "retired").length,
       secretRotationRecordCount: secretRotationRecords.length,
+      revokedSecretRotationCount: secretRotationRecords.filter((record) => record.status === "revoked").length,
       expiringCertificateCount: evaluatedCertificateChains.filter((record) => record.status === "renewal_due").length,
       expiredCertificateCount: evaluatedCertificateChains.filter((record) => record.status === "expired").length,
+      revokedCertificateCount: evaluatedCertificateChains.filter((record) => record.status === "revoked").length,
       dualRunningCallbackSecretCount: callbackSecrets.filter((record) => record.status === "dual_running").length,
+      retiredCallbackSecretCount: callbackSecrets.filter((record) => record.status === "retired").length,
       modeIsolationViolationCount: modeIsolationViolations.length,
       modeIsolationViolations,
       classCounts: summarizeSecurityInventoryByClass({
@@ -2429,6 +2612,9 @@ function ensureSecretRefIsUniqueAcrossInventory({ state, companyId, secretRef, i
 }
 
 function resolveCertificateChainStatus(record, clock) {
+  if (record.status === "revoked") {
+    return "revoked";
+  }
   const now = new Date(clock());
   const notAfter = new Date(record.notAfter);
   if (notAfter < now) {
@@ -2463,6 +2649,10 @@ function projectManagedSecret(record) {
     nextRotationDueAt: record.nextRotationDueAt,
     supportsDualRunning: record.supportsDualRunning,
     status: record.status,
+    retiredAt: record.retiredAt || null,
+    retiredByUserId: record.retiredByUserId || null,
+    revocationIncidentId: record.revocationIncidentId || null,
+    revocationReasonCode: record.revocationReasonCode || null,
     metadataJson: clone(record.metadataJson),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
@@ -2480,18 +2670,21 @@ function projectSecretRotationRecord(record) {
     classCode: record.classCode || resolveManagedSecretClassCode(record.secretType),
     previousSecretRefClassCode:
       record.previousSecretRef ? record.classCode || resolveManagedSecretClassCode(record.secretType) : null,
-    nextSecretRefClassCode: record.classCode || resolveManagedSecretClassCode(record.secretType),
+    nextSecretRefClassCode:
+      record.nextSecretRef ? record.classCode || resolveManagedSecretClassCode(record.secretType) : null,
     previousSecretVersion: record.previousSecretVersion,
     nextSecretVersion: record.nextSecretVersion,
     previousSecretRef: record.previousSecretRef ? redactSecretRef(record.previousSecretRef) : null,
-    nextSecretRef: redactSecretRef(record.nextSecretRef),
+    nextSecretRef: record.nextSecretRef ? redactSecretRef(record.nextSecretRef) : null,
     requestedByUserId: record.requestedByUserId,
     verificationMode: record.verificationMode,
     dualRunningUntil: record.dualRunningUntil,
     linkedCallbackSecretIds: [...record.linkedCallbackSecretIds],
     linkedCertificateChainIds: [...record.linkedCertificateChainIds],
     rotatedAt: record.rotatedAt,
-    status: record.status
+    status: record.status,
+    revocationReasonCode: record.revocationReasonCode || null,
+    incidentId: record.incidentId || null
   };
 }
 
@@ -2519,6 +2712,10 @@ function projectCertificateChain(record, clock) {
     renewalWindowDays: record.renewalWindowDays,
     renewalDueAt: record.renewalDueAt,
     status,
+    revokedAt: record.revokedAt || null,
+    revokedByUserId: record.revokedByUserId || null,
+    revocationIncidentId: record.revocationIncidentId || null,
+    revocationReasonCode: record.revocationReasonCode || null,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
   };
@@ -2547,6 +2744,10 @@ function projectCallbackSecret(record) {
     status: record.status,
     lastRotatedAt: record.lastRotatedAt,
     nextRotationDueAt: record.nextRotationDueAt,
+    retiredAt: record.retiredAt || null,
+    retiredByUserId: record.retiredByUserId || null,
+    revocationIncidentId: record.revocationIncidentId || null,
+    revocationReasonCode: record.revocationReasonCode || null,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
   };
