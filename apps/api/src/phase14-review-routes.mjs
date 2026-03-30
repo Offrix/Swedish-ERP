@@ -1,5 +1,7 @@
 ﻿import {
   authorizeCompanyAccess,
+  authorizeSurfaceAccess,
+  canAccessSurface,
   createHttpError,
   matchPath,
   optionalText,
@@ -754,28 +756,16 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
   return false;
 }
 
-const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
-const BACKOFFICE_ACTIVITY_ROLE_CODES = new Set(["company_admin", "approver"]);
-const ACTIVITY_FEED_FULL_READ_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
-
-function assertReviewCenterReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedOperator = [...REVIEW_CENTER_OPERATOR_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedOperator) {
-    throw createHttpError(403, "review_center_role_forbidden", "Current actor is not allowed to access review-center worklists.");
-  }
+function assertReviewCenterReadAccess({ principal, objectId = null }) {
+  authorizeSurfaceAccess({ principal, policyCode: "review_center", objectId });
 }
 
-function assertActivityFeedFullReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...ACTIVITY_FEED_FULL_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(403, "activity_feed_role_forbidden", "Current actor is not allowed to access full activity-feed read models.");
-  }
+function assertActivityFeedFullReadAccess({ principal, objectId = null }) {
+  authorizeSurfaceAccess({ principal, policyCode: "activity_feed", objectId });
 }
 
 function assertReviewCenterActionAccess({ platform, principal, companyId, reviewItemId, operation }) {
-  assertReviewCenterReadAccess({ principal });
+  assertReviewCenterReadAccess({ principal, objectId: reviewItemId });
   const reviewItem = platform.getReviewCenterItem({
     companyId,
     reviewItemId,
@@ -796,8 +786,7 @@ function assertReviewCenterActionAccess({ platform, principal, companyId, review
 }
 
 function canReadBackofficeActivity({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  return [...BACKOFFICE_ACTIVITY_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
+  return canAccessSurface({ principal, policyCode: "activity_backoffice_context" });
 }
 
 function resolvePrincipalTeamIds(principal) {

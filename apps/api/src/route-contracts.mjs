@@ -457,77 +457,84 @@ const UI_PERMISSION_REASON_CATALOG = Object.freeze([
     reasonCode: "desktop_surface_role_forbidden",
     category: "surface",
     label: "Desktop surface denied",
-    explanation: "The actor role is not allowed to access desktop-only read models.",
+    explanation: "The current actor is not allowed to access desktop-only read models under the active server-side surface policy.",
     surfaceFamilyCodes: ["desktop"]
+  }),
+  Object.freeze({
+    reasonCode: "search_workspace_role_forbidden",
+    category: "surface",
+    label: "Search workspace denied",
+    explanation: "The current actor is not allowed to access search, object-profile or workbench read models under the active server-side surface policy.",
+    surfaceFamilyCodes: ["desktop", "backoffice"]
   }),
   Object.freeze({
     reasonCode: "finance_operations_role_forbidden",
     category: "surface",
     label: "Finance operations denied",
-    explanation: "The actor role is not allowed to access finance operations worklists.",
+    explanation: "The current actor is not allowed to access finance operations worklists under the active server-side surface policy.",
     surfaceFamilyCodes: ["desktop"]
   }),
   Object.freeze({
     reasonCode: "annual_operations_role_forbidden",
     category: "surface",
     label: "Annual operations denied",
-    explanation: "The actor role is not allowed to access annual reporting and filing operations.",
+    explanation: "The current actor is not allowed to access annual reporting and filing operations under the active server-side surface policy.",
     surfaceFamilyCodes: ["desktop"]
   }),
   Object.freeze({
     reasonCode: "payroll_operations_role_forbidden",
     category: "surface",
     label: "Payroll operations denied",
-    explanation: "The actor role is not allowed to access payroll operations worklists.",
+    explanation: "The current actor is not allowed to access payroll operations worklists under the active server-side surface policy.",
     surfaceFamilyCodes: ["desktop"]
   }),
   Object.freeze({
     reasonCode: "hr_operations_role_forbidden",
     category: "surface",
     label: "HR operations denied",
-    explanation: "The actor role is not allowed to access HR read models.",
+    explanation: "The current actor is not allowed to access HR read models under the active server-side surface policy.",
     surfaceFamilyCodes: ["desktop"]
   }),
   Object.freeze({
     reasonCode: "time_operations_role_forbidden",
     category: "surface",
     label: "Time operations denied",
-    explanation: "The actor role is not allowed to access time operations read models.",
+    explanation: "The current actor is not allowed to access time operations read models under the active server-side surface policy.",
     surfaceFamilyCodes: ["desktop"]
   }),
   Object.freeze({
     reasonCode: "project_workspace_role_forbidden",
     category: "surface",
     label: "Project workspace denied",
-    explanation: "The actor role is not allowed to access the project workspace surfaces.",
+    explanation: "The current actor is not allowed to access the project workspace surfaces under the active server-side surface policy.",
     surfaceFamilyCodes: ["desktop"]
   }),
   Object.freeze({
     reasonCode: "field_control_role_forbidden",
     category: "surface",
     label: "Field control denied",
-    explanation: "The actor role is not allowed to access field operations controls.",
+    explanation: "The current actor is not allowed to access field operations controls under the active server-side surface policy.",
     surfaceFamilyCodes: ["field"]
   }),
   Object.freeze({
     reasonCode: "personalliggare_control_role_forbidden",
     category: "surface",
     label: "Personalliggare control denied",
-    explanation: "The actor role is not allowed to access personalliggare controls.",
+    explanation: "The current actor is not allowed to access personalliggare controls under the active server-side surface policy.",
     surfaceFamilyCodes: ["field"]
   }),
   Object.freeze({
     reasonCode: "id06_control_role_forbidden",
     category: "surface",
     label: "ID06 control denied",
-    explanation: "The actor role is not allowed to access ID06 controls.",
+    explanation: "The current actor is not allowed to access ID06 controls under the active server-side surface policy.",
     surfaceFamilyCodes: ["field"]
   }),
   Object.freeze({
     reasonCode: "egenkontroll_control_role_forbidden",
     category: "surface",
     label: "Egenkontroll denied",
-    explanation: "The actor role is not allowed to access egenkontroll controls.",
+    explanation: "The current actor is not allowed to access egenkontroll controls under the active server-side surface policy.",
     surfaceFamilyCodes: ["field"]
   })
 ]);

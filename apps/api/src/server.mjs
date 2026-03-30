@@ -18,6 +18,7 @@ import {
 import {
   CANONICAL_API_VERSION,
   DEFAULT_API_BODY_LIMIT_BYTES,
+  authorizeSurfaceAccess,
   createHttpError,
   readClientAddress,
   readJsonBody,
@@ -26,6 +27,10 @@ import {
   writeError,
   writeJson
 } from "./route-helpers.mjs";
+import {
+  bindAuthorizationContextToPrincipal,
+  resolveReadSurfacePolicyCode
+} from "./surface-policies.mjs";
 import { resolveSessionTrustLevel, trustLevelSatisfies } from "../../../packages/auth-core/src/index.mjs";
 import { isMainModule, stopServer } from "../../../scripts/lib/repo.mjs";
 import { assertRuntimeStartupAllowed } from "../../../scripts/lib/runtime-diagnostics.mjs";
@@ -9326,6 +9331,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
     });
     assertPrincipalCanApproveLeaveEntry({
       platform,
+      sessionToken: readSessionToken(req, body),
       principal,
       companyId,
       leaveEntry
@@ -9360,6 +9366,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
     });
     assertPrincipalCanApproveLeaveEntry({
       platform,
+      sessionToken: readSessionToken(req, body),
       principal,
       companyId,
       leaveEntry
@@ -17318,7 +17325,11 @@ function authorizeCompanyAccess({ platform, sessionToken, companyId, permissionC
   if (!decision.allowed) {
     throw createHttpError(403, decision.reasonCode, decision.explanation);
   }
-  return principal;
+  return bindAuthorizationContextToPrincipal(principal, {
+    platform,
+    sessionToken,
+    companyId
+  });
 }
 
 function resolvePortalEmployee({ platform, companyId, email }) {
@@ -17338,8 +17349,18 @@ function assertPortalEmployeeOwnsLeaveEntry(employee, leaveEntry) {
   }
 }
 
-function assertPrincipalCanApproveLeaveEntry({ platform, principal, companyId, leaveEntry }) {
-  if (principal.roles.includes("company_admin")) {
+function assertPrincipalCanApproveLeaveEntry({ platform, sessionToken, principal, companyId, leaveEntry }) {
+  const overrideDecision = platform.checkAuthorization({
+    sessionToken,
+    action: "leave.approval.override",
+    resource: {
+      companyId,
+      objectType: "leave_entry",
+      objectId: leaveEntry.leaveEntryId,
+      scopeCode: "leave_entry"
+    }
+  });
+  if (overrideDecision.decision.allowed) {
     return;
   }
   const managerEmployee = principal.email
@@ -17360,136 +17381,56 @@ function assertPrincipalCanApproveLeaveEntry({ platform, principal, companyId, l
   }
 }
 
-const ANNUAL_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
-const FINANCE_OPERATIONS_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
-const DESKTOP_SURFACE_READ_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
-const PERSONALLIGGARE_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
-const ID06_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
-const PROJECT_WORKSPACE_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
-const EGENKONTROLL_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
-const FIELD_CONTROL_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
-const PAYROLL_OPERATIONS_READ_ROLE_CODES = new Set(["company_admin", "payroll_admin", "approver"]);
-const HR_OPERATIONS_READ_ROLE_CODES = new Set(["company_admin", "payroll_admin", "approver", "bureau_user"]);
-const TIME_OPERATIONS_READ_ROLE_CODES = new Set(["company_admin", "payroll_admin", "approver", "bureau_user"]);
-
 function assertAnnualOperationsAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedOperator = [...ANNUAL_OPERATIONS_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedOperator) {
-    throw createHttpError(403, "annual_operations_role_forbidden", "Current actor is not allowed to access annual reporting or filing operations.");
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "annual_operations" });
 }
 
 function assertFinanceOperationsAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedOperator = [...FINANCE_OPERATIONS_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedOperator) {
-    throw createHttpError(403, "finance_operations_role_forbidden", "Current actor is not allowed to access finance operations worklists.");
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "finance_operations" });
 }
 
 function assertDesktopSurfaceReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...DESKTOP_SURFACE_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(403, "desktop_surface_role_forbidden", "Current actor is not allowed to access desktop-only read models.");
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "desktop_surface" });
 }
 
 function assertPersonalliggareControlReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...PERSONALLIGGARE_CONTROL_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(
-      403,
-      "personalliggare_control_role_forbidden",
-      "Current actor is not allowed to access personalliggare control, export or audit read models."
-    );
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "personalliggare_control" });
 }
 
 function assertId06ControlReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...ID06_CONTROL_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(
-      403,
-      "id06_control_role_forbidden",
-      "Current actor is not allowed to access ID06 control, work-pass or audit read models."
-    );
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "id06_control" });
 }
 
 function assertProjectWorkspaceReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...PROJECT_WORKSPACE_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(
-      403,
-      "project_workspace_role_forbidden",
-      "Current actor is not allowed to access project workspace or project control read models."
-    );
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "project_workspace" });
 }
 
 function assertEgenkontrollControlReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...EGENKONTROLL_CONTROL_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(
-      403,
-      "egenkontroll_control_role_forbidden",
-      "Current actor is not allowed to access egenkontroll template, overview or deviation control read models."
-    );
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "egenkontroll_control" });
 }
 
 function assertFieldControlReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...FIELD_CONTROL_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(
-      403,
-      "field_control_role_forbidden",
-      "Current actor is not allowed to access field dispatch, planning or audit read models."
-    );
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "field_control" });
 }
 
 function assertPayrollOperationsReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...PAYROLL_OPERATIONS_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(403, "payroll_operations_role_forbidden", "Current actor is not allowed to access payroll operations worklists.");
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "payroll_operations" });
 }
 
 function assertHrOperationsReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...HR_OPERATIONS_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(403, "hr_operations_role_forbidden", "Current actor is not allowed to access HR operations read models.");
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "hr_operations" });
 }
 
 function assertTimeOperationsReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...TIME_OPERATIONS_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(403, "time_operations_role_forbidden", "Current actor is not allowed to access time operations read models.");
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "time_operations" });
 }
 
 function assertReadSurfaceRoleAccess({ platform, req, url, path }) {
   if (req.method !== "GET") {
     return;
   }
-  const requiresHrOperationsAccess = isHrOperationsReadPath(path);
-  const requiresTimeOperationsAccess = isTimeOperationsReadPath(path);
-  const requiresPayrollOperationsAccess = isPayrollOperationsReadPath(path);
-  const requiresFinanceOperationsAccess = isFinanceOperationsReadPath(path);
-  const requiresDesktopSurfaceAccess = isDesktopSurfaceReadPath(path);
-  if (!requiresHrOperationsAccess && !requiresTimeOperationsAccess && !requiresPayrollOperationsAccess && !requiresFinanceOperationsAccess && !requiresDesktopSurfaceAccess) {
+  const policyCode = resolveReadSurfacePolicyCode(path);
+  if (!policyCode) {
     return;
   }
   const companyId = url.searchParams.get("companyId");
@@ -17504,68 +17445,7 @@ function assertReadSurfaceRoleAccess({ platform, req, url, path }) {
     objectType: "company",
       scopeCode: "company"
   });
-  if (requiresHrOperationsAccess) {
-    assertHrOperationsReadAccess({ principal });
-    return;
-  }
-  if (requiresTimeOperationsAccess) {
-    assertTimeOperationsReadAccess({ principal });
-    return;
-  }
-  if (requiresPayrollOperationsAccess) {
-    assertPayrollOperationsReadAccess({ principal });
-    return;
-  }
-  if (requiresFinanceOperationsAccess) {
-    assertFinanceOperationsAccess({ principal });
-    return;
-  }
-  if (requiresDesktopSurfaceAccess) {
-    assertDesktopSurfaceReadAccess({ principal });
-  }
-}
-
-function isHrOperationsReadPath(path) {
-  return path.startsWith("/v1/hr") && !path.startsWith("/v1/hr/employee-portal");
-}
-
-function isTimeOperationsReadPath(path) {
-  return path.startsWith("/v1/time");
-}
-
-function isPayrollOperationsReadPath(path) {
-  return (
-    path.startsWith("/v1/payroll") ||
-    path.startsWith("/v1/benefits") ||
-    path.startsWith("/v1/travel") ||
-    path.startsWith("/v1/pension")
-  );
-}
-
-function isFinanceOperationsReadPath(path) {
-  return (
-    path.startsWith("/v1/ledger") ||
-    path.startsWith("/v1/reporting") ||
-    path.startsWith("/v1/vat") ||
-    path.startsWith("/v1/ar") ||
-    path.startsWith("/v1/ap")
-  );
-}
-
-function isDesktopSurfaceReadPath(path) {
-  if (path.includes("/classification-cases")) {
-    return false;
-  }
-  return (
-    path.startsWith("/v1/documents") ||
-    path.startsWith("/v1/inbox") ||
-    path.startsWith("/v1/review-tasks") ||
-    path.startsWith("/v1/search") ||
-    path.startsWith("/v1/object-profiles") ||
-    path.startsWith("/v1/workbenches") ||
-    path.startsWith("/v1/saved-views") ||
-    path.startsWith("/v1/dashboard")
-  );
+  authorizeSurfaceAccess({ principal, policyCode });
 }
 
 function buildSubmissionPayloadFromSource({ platform, companyId, sourceObjectType, sourceObjectId }) {

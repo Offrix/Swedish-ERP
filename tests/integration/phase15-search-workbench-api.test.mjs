@@ -78,7 +78,7 @@ function createSearchApiPlatform() {
         companyId: "company_phase15_2_api",
         companyUserId: "company_user_admin",
         roles: ["company_admin"],
-        permissions: ["company.read", "company.manage"],
+        permissions: ["company.read", "company.manage", "surface.search.read"],
         teamIds: ["payroll_ops"]
       }
     ],
@@ -89,7 +89,7 @@ function createSearchApiPlatform() {
         companyId: "company_phase15_2_api",
         companyUserId: "company_user_reader",
         roles: ["company_admin"],
-        permissions: ["company.read", "company.manage"],
+        permissions: ["company.read", "company.manage", "surface.search.read"],
         teamIds: ["finance_ops"]
       }
     ]

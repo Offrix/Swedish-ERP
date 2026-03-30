@@ -362,7 +362,7 @@ Ingen ny partner/public API på gamla felkontrakt. Ingen support-write utan perm
 - [x] 4.2 [NEW BUILD] Bygg evidence-bundle-kedja för filings, support, cutover, owner distributions, payroll approvals och close/reopen.
 - [x] 4.3 [HARDEN] Inför invariant alarms, queue-age alarms, projection-lag, provider-health, risk alarms och restore-drill telemetry.
 - [x] 4.4 [REWRITE] Bryt upp phasebucket-routes till domain-driven routefamiljer och tvinga inputvalidering, body limits, typed error codes och idempotency keys.
-- [ ] 4.5 [REWRITE][SECURE] Skriv om permissions från grova roller till action/resource-policys med separation of duties, review boundaries och masked projections.
+- [x] 4.5 [REWRITE][SECURE] Skriv om permissions från grova roller till action/resource-policys med separation of duties, review boundaries och masked projections.
 
 **Exit gate**  
 - Alla muterande calls använder canonical envelopes och idempotency keys.

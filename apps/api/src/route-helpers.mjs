@@ -1,5 +1,9 @@
 import crypto from "node:crypto";
 import { createErrorEnvelope } from "../../../packages/events/src/index.mjs";
+import {
+  bindAuthorizationContextToPrincipal,
+  evaluateSurfacePolicyAccess
+} from "./surface-policies.mjs";
 
 export const CANONICAL_API_VERSION = "2026-03-27";
 export const DEFAULT_API_BODY_LIMIT_BYTES = 1024 * 1024;
@@ -229,7 +233,62 @@ export function authorizeCompanyAccess({
   if (!decision.allowed) {
     throw createHttpError(403, decision.reasonCode, decision.explanation);
   }
-  return principal;
+  return bindAuthorizationContextToPrincipal(principal, {
+    platform,
+    sessionToken,
+    companyId
+  });
+}
+
+export function authorizeSurfaceAccess({ principal, policyCode, objectId = null }) {
+  const evaluation = evaluateSurfacePolicyAccess({
+    principal,
+    policyCode,
+    objectId
+  });
+  if (!evaluation.context) {
+    throw createHttpError(
+      500,
+      "surface_policy_context_missing",
+      "Surface policy evaluation requires a bound principal authorization context."
+    );
+  }
+  if (!evaluation.decision.allowed) {
+    throw createHttpError(403, evaluation.policy.denialReasonCode, evaluation.policy.denialExplanation, {
+      details: [
+        {
+          code: "surface_policy_code",
+          field: "policyCode",
+          message: evaluation.policy.policyCode
+        },
+        {
+          code: "surface_policy_action",
+          field: "action",
+          message: evaluation.policy.action
+        },
+        {
+          code: "surface_policy_review_boundary",
+          field: "reviewBoundaryCode",
+          message: evaluation.policy.reviewBoundaryCode
+        },
+        {
+          code: "surface_policy_masking_policy",
+          field: "maskingPolicyCode",
+          message: evaluation.policy.maskingPolicyCode
+        }
+      ]
+    });
+  }
+  return bindAuthorizationContextToPrincipal(evaluation.principal, evaluation.context);
+}
+
+export function canAccessSurface({ principal, policyCode, objectId = null }) {
+  const evaluation = evaluateSurfacePolicyAccess({
+    principal,
+    policyCode,
+    objectId
+  });
+  return evaluation.context != null && evaluation.decision.allowed === true;
 }
 
 export function authorizePublicAccess({

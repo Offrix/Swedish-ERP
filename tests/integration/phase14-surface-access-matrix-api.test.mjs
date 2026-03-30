@@ -298,9 +298,9 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
       { path: `/v1/vat/codes?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
       { path: `/v1/ar/customers?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
       { path: `/v1/ap/suppliers?companyId=${DEMO_IDS.companyId}`, error: "finance_operations_role_forbidden" },
-      { path: `/v1/search/contracts?companyId=${DEMO_IDS.companyId}`, error: "desktop_surface_role_forbidden" },
-      { path: `/v1/search/documents?companyId=${DEMO_IDS.companyId}&query=trial`, error: "desktop_surface_role_forbidden" },
-      { path: `/v1/saved-views?companyId=${DEMO_IDS.companyId}`, error: "desktop_surface_role_forbidden" },
+      { path: `/v1/search/contracts?companyId=${DEMO_IDS.companyId}`, error: "search_workspace_role_forbidden" },
+      { path: `/v1/search/documents?companyId=${DEMO_IDS.companyId}&query=trial`, error: "search_workspace_role_forbidden" },
+      { path: `/v1/saved-views?companyId=${DEMO_IDS.companyId}`, error: "search_workspace_role_forbidden" },
       { path: `/v1/dashboard/widgets?companyId=${DEMO_IDS.companyId}&surfaceCode=desktop_reporting`, error: "desktop_surface_role_forbidden" },
       { path: `/v1/documents/${document.documentId}/export?companyId=${DEMO_IDS.companyId}`, error: "desktop_surface_role_forbidden" },
       {

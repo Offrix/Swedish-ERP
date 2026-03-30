@@ -193,7 +193,13 @@ export async function tryHandlePhase14RuleGovernanceRoutes({ req, res, url, path
       objectId: approvalMatch.regulatoryChangeEntryId,
       scopeCode: "regulatory_change_entry"
     });
-    assertApprovalRoleAllowed({ principal, approvalRole: body.approvalRole });
+    assertApprovalRoleAllowed({
+      platform,
+      sessionToken,
+      companyId,
+      regulatoryChangeEntryId: approvalMatch.regulatoryChangeEntryId,
+      approvalRole: body.approvalRole
+    });
     writeJson(
       res,
       200,
@@ -268,13 +274,30 @@ export async function tryHandlePhase14RuleGovernanceRoutes({ req, res, url, path
   return false;
 }
 
-function assertApprovalRoleAllowed({ principal, approvalRole }) {
-  const roles = Array.isArray(principal?.roles) ? principal.roles : [];
-  if (approvalRole === "domain_owner" && roles.includes("company_admin")) {
-    return;
-  }
-  if (approvalRole === "compliance_owner" && (roles.includes("approver") || roles.includes("company_admin"))) {
+function assertApprovalRoleAllowed({ platform, sessionToken, companyId, regulatoryChangeEntryId, approvalRole }) {
+  const action = resolveRegulatoryChangeApprovalAction(approvalRole);
+  const decision = platform.checkAuthorization({
+    sessionToken,
+    action,
+    resource: {
+      companyId,
+      objectType: "regulatory_change_entry",
+      objectId: regulatoryChangeEntryId,
+      scopeCode: "regulatory_change_entry"
+    }
+  });
+  if (decision.decision.allowed) {
     return;
   }
   throw createHttpError(403, "regulatory_change_approval_role_forbidden", "Current actor is not allowed to sign this approval role.");
+}
+
+function resolveRegulatoryChangeApprovalAction(approvalRole) {
+  if (approvalRole === "domain_owner") {
+    return "regulatory_change.approve.domain_owner";
+  }
+  if (approvalRole === "compliance_owner") {
+    return "regulatory_change.approve.compliance_owner";
+  }
+  throw createHttpError(400, "regulatory_change_approval_role_invalid", "Approval role is not supported.");
 }

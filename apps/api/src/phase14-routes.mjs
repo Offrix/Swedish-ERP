@@ -1,5 +1,6 @@
 ﻿import {
   authorizeCompanyAccess,
+  authorizeSurfaceAccess,
   createHttpError,
   matchPath,
   optionalInteger,
@@ -1573,12 +1574,6 @@ function resolveWorkbenchIdentity(item) {
     || "";
 }
 
-const REVIEW_CENTER_OPERATOR_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
-const BACKOFFICE_READ_ROLE_CODES = new Set(["company_admin", "approver"]);
-const PAYROLL_OPERATIONS_ROLE_CODES = new Set(["company_admin", "payroll_admin", "approver"]);
-const FINANCE_OPERATIONS_READ_ROLE_CODES = new Set(["company_admin", "approver", "bureau_user"]);
-const ACTIVITY_FEED_FULL_READ_ROLE_CODES = new Set(["company_admin", "approver", "payroll_admin", "bureau_user"]);
-
 function resolveReviewSlaNotificationTarget({ escalation, principal }) {
   if (escalation.ownerTeamId) {
     return {
@@ -1609,47 +1604,27 @@ function mapQueuePriorityToIncidentSeverity(priority) {
 }
 
 function assertBackofficeReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...BACKOFFICE_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(403, "backoffice_role_forbidden", "Current actor is not allowed to access backoffice read models.");
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "backoffice" });
 }
 
 function assertPayrollOperationsReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...PAYROLL_OPERATIONS_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(403, "payroll_operations_role_forbidden", "Current actor is not allowed to access payroll operations worklists.");
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "payroll_operations" });
 }
 
 function assertFinanceOperationsReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...FINANCE_OPERATIONS_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(403, "finance_operations_role_forbidden", "Current actor is not allowed to access finance operations worklists.");
-  }
+  authorizeSurfaceAccess({ principal, policyCode: "finance_operations" });
 }
 
-function assertReviewCenterReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedOperator = [...REVIEW_CENTER_OPERATOR_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedOperator) {
-    throw createHttpError(403, "review_center_role_forbidden", "Current actor is not allowed to access review-center worklists.");
-  }
+function assertReviewCenterReadAccess({ principal, objectId = null }) {
+  authorizeSurfaceAccess({ principal, policyCode: "review_center", objectId });
 }
 
-function assertActivityFeedFullReadAccess({ principal }) {
-  const roleCodes = new Set((principal.roles || []).map((roleCode) => String(roleCode || "").toLowerCase()).filter(Boolean));
-  const isAllowedReader = [...ACTIVITY_FEED_FULL_READ_ROLE_CODES].some((roleCode) => roleCodes.has(roleCode));
-  if (!isAllowedReader) {
-    throw createHttpError(403, "activity_feed_role_forbidden", "Current actor is not allowed to access full activity-feed read models.");
-  }
+function assertActivityFeedFullReadAccess({ principal, objectId = null }) {
+  authorizeSurfaceAccess({ principal, policyCode: "activity_feed", objectId });
 }
 
 function assertReviewCenterActionAccess({ platform, principal, companyId, reviewItemId, operation }) {
-  assertReviewCenterReadAccess({ principal });
+  assertReviewCenterReadAccess({ principal, objectId: reviewItemId });
   const reviewItem = platform.getReviewCenterItem({ companyId, reviewItemId });
   const assignedUserId = reviewItem.currentAssignment?.assignedUserId || null;
   if (operation === "claim") {

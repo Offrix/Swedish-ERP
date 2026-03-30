@@ -78,7 +78,7 @@ test("Step 35 API exposes object profile and workbench contracts and enforces de
         token: fieldUserToken,
         expectedStatus: 403
       });
-      assert.equal(payload.error, "desktop_surface_role_forbidden");
+      assert.equal(payload.error, "search_workspace_role_forbidden");
     }
   } finally {
     await stopServer(server);

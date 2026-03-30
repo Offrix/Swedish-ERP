@@ -39,9 +39,28 @@ export const ACTIONS = Object.freeze({
   OBJECT_GRANT_MANAGE: "object_grant.manage",
   ATTEST_CHAIN_MANAGE: "attest_chain.manage",
   APPROVAL_APPROVE: "approval.approve",
+  LEAVE_APPROVAL_OVERRIDE: "leave.approval.override",
+  REGULATORY_CHANGE_APPROVE_DOMAIN_OWNER: "regulatory_change.approve.domain_owner",
+  REGULATORY_CHANGE_APPROVE_COMPLIANCE_OWNER: "regulatory_change.approve.compliance_owner",
   ONBOARDING_MANAGE: "onboarding.manage",
   AUTH_SESSION_REVOKE: "auth.session.revoke",
-  AUTH_FACTOR_MANAGE: "auth.factor.manage"
+  AUTH_FACTOR_MANAGE: "auth.factor.manage",
+  SURFACE_ANNUAL_READ: "surface.annual.read",
+  SURFACE_FINANCE_READ: "surface.finance.read",
+  SURFACE_SEARCH_READ: "surface.search.read",
+  SURFACE_DESKTOP_READ: "surface.desktop.read",
+  SURFACE_PERSONALLIGGARE_READ: "surface.personalliggare.read",
+  SURFACE_ID06_READ: "surface.id06.read",
+  SURFACE_PROJECT_WORKSPACE_READ: "surface.project_workspace.read",
+  SURFACE_EGENKONTROLL_READ: "surface.egenkontroll.read",
+  SURFACE_FIELD_READ: "surface.field.read",
+  SURFACE_PAYROLL_READ: "surface.payroll.read",
+  SURFACE_HR_READ: "surface.hr.read",
+  SURFACE_TIME_READ: "surface.time.read",
+  SURFACE_REVIEW_CENTER_READ: "surface.review_center.read",
+  SURFACE_ACTIVITY_READ: "surface.activity.read",
+  SURFACE_ACTIVITY_BACKOFFICE_CONTEXT_READ: "surface.activity.backoffice_context.read",
+  SURFACE_BACKOFFICE_READ: "surface.backoffice.read"
 });
 
 export const ONBOARDING_STEP_CODES = Object.freeze([
