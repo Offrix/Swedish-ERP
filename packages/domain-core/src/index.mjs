@@ -470,6 +470,7 @@ export function createCoreEngine({
     upsertWorkItem,
     reportingPlatform,
     ledgerPlatform,
+    evidencePlatform,
     now,
     audit,
     error

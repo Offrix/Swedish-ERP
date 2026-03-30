@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createOrgAuthPlatform } from "../../packages/domain-org-auth/src/index.mjs";
 import { createHrPlatform } from "../../packages/domain-hr/src/index.mjs";
 import { createTimePlatform } from "../../packages/domain-time/src/index.mjs";
+import { createEvidencePlatform } from "../../packages/domain-evidence/src/index.mjs";
 import { createPayrollPlatform } from "../../packages/domain-payroll/src/index.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
@@ -20,12 +21,17 @@ test("Phase 8.2 payroll resolves manual tax and SINK, locks AGI absence and crea
     clock: () => fixedNow,
     hrPlatform
   });
+  const evidencePlatform = createEvidencePlatform({
+    clock: () => fixedNow,
+    environmentMode: "test"
+  });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,
     bootstrapScenarioCode: "test_default_demo",
     orgAuthPlatform,
     hrPlatform,
-    timePlatform
+    timePlatform,
+    evidencePlatform
   });
 
   const manual = createEmployeeWithContract({
@@ -129,11 +135,13 @@ test("Phase 8.2 payroll resolves manual tax and SINK, locks AGI absence and crea
     ],
     actorId: "unit-test"
   });
-  payrollPlatform.approvePayRun({
+  const approvedRegularRun = payrollPlatform.approvePayRun({
     companyId: COMPANY_ID,
     payRunId: regularRun.payRunId,
     actorId: "unit-test"
   });
+  assert.ok(approvedRegularRun.approvalEvidenceBundleId);
+  assert.equal(approvedRegularRun.approvalEvidenceBundle?.status, "frozen");
 
   const draftSubmission = payrollPlatform.createAgiSubmission({
     companyId: COMPANY_ID,
@@ -219,11 +227,13 @@ test("Phase 8.2 payroll resolves manual tax and SINK, locks AGI absence and crea
     ],
     actorId: "unit-test"
   });
-  payrollPlatform.approvePayRun({
+  const approvedCorrectionRun = payrollPlatform.approvePayRun({
     companyId: COMPANY_ID,
     payRunId: correctionRun.payRunId,
     actorId: "unit-test"
   });
+  assert.ok(approvedCorrectionRun.approvalEvidenceBundleId);
+  assert.equal(approvedCorrectionRun.approvalEvidenceBundle?.status, "frozen");
 
   const correctionDraft = payrollPlatform.createAgiCorrectionVersion({
     companyId: COMPANY_ID,

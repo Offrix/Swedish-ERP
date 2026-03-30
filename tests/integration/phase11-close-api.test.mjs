@@ -115,6 +115,9 @@ test("Phase 11.3 API exposes close workbench, blocker handling, sign-off and reo
       }
     });
     assert.equal(pendingSignoff.status, "signoff_pending");
+    assert.ok(pendingSignoff.closeEvidenceBundleId);
+    assert.equal(pendingSignoff.closeEvidenceBundle?.status, "frozen");
+    assert.equal(pendingSignoff.signoffs[0]?.evidenceBundleId, pendingSignoff.closeEvidenceBundleId);
 
     const closed = await requestJson(`${baseUrl}/v1/close/checklists/${checklist.checklistId}/signoff`, {
       method: "POST",
@@ -126,6 +129,9 @@ test("Phase 11.3 API exposes close workbench, blocker handling, sign-off and reo
     });
     assert.equal(closed.status, "closed");
     assert.equal(closed.closeState, "hard_closed");
+    assert.ok(closed.closeEvidenceBundleId);
+    assert.equal(closed.closeEvidenceBundle?.status, "frozen");
+    assert.notEqual(closed.closeEvidenceBundleId, pendingSignoff.closeEvidenceBundleId);
 
     const reopened = await requestJson(`${baseUrl}/v1/close/checklists/${checklist.checklistId}/reopen`, {
       method: "POST",
@@ -144,6 +150,10 @@ test("Phase 11.3 API exposes close workbench, blocker handling, sign-off and reo
       }
     });
     assert.equal(reopened.successorChecklist.checklistVersion, 2);
+    assert.ok(reopened.reopenRequest.reopenEvidenceBundleId);
+    assert.equal(reopened.reopenRequest.reopenEvidenceBundle?.status, "frozen");
+    assert.ok(reopened.supersededChecklist.closeEvidenceBundleId);
+    assert.notEqual(reopened.supersededChecklist.closeEvidenceBundleId, closed.closeEvidenceBundleId);
 
     const reopenRequests = await requestJson(`${baseUrl}/v1/close/reopen-requests?bureauOrgId=${DEMO_IDS.companyId}&clientCompanyId=${clientCompany.companyId}`, {
       token: preparerToken
@@ -172,6 +182,12 @@ test("Phase 11.3 API exposes close workbench, blocker handling, sign-off and reo
     assert.ok(closeAdjustment.reversalJournalEntry);
     assert.ok(closeAdjustment.replacementJournalEntry);
 
+    const reopenAfterAdjustment = await requestJson(`${baseUrl}/v1/close/reopen-requests/${reopened.reopenRequest.reopenRequestId}?bureauOrgId=${DEMO_IDS.companyId}`, {
+      token: preparerToken
+    });
+    assert.ok(reopenAfterAdjustment.reopenEvidenceBundleId);
+    assert.notEqual(reopenAfterAdjustment.reopenEvidenceBundleId, reopened.reopenRequest.reopenEvidenceBundleId);
+
     const relocked = await requestJson(`${baseUrl}/v1/close/reopen-requests/${reopened.reopenRequest.reopenRequestId}/relock`, {
       method: "POST",
       token: preparerToken,
@@ -182,6 +198,9 @@ test("Phase 11.3 API exposes close workbench, blocker handling, sign-off and reo
       }
     });
     assert.equal(relocked.status, "relocked");
+    assert.ok(relocked.reopenEvidenceBundleId);
+    assert.equal(relocked.reopenEvidenceBundle?.status, "frozen");
+    assert.notEqual(relocked.reopenEvidenceBundleId, reopenAfterAdjustment.reopenEvidenceBundleId);
 
     const closeAdjustments = await requestJson(`${baseUrl}/v1/close/adjustments?bureauOrgId=${DEMO_IDS.companyId}&reopenRequestId=${reopened.reopenRequest.reopenRequestId}`, {
       token: preparerToken

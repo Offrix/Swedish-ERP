@@ -1325,12 +1325,12 @@ export function createPayrollEngine({
       .filter((candidate) => (runType ? candidate.runType === runType : true))
       .filter((candidate) => (employmentId ? candidate.employmentIds.includes(employmentId) : true))
       .sort((left, right) => left.reportingPeriod.localeCompare(right.reportingPeriod) || left.createdAt.localeCompare(right.createdAt))
-      .map((candidate) => enrichPayRun(state, candidate));
+      .map((candidate) => enrichPayRun(state, candidate, { evidencePlatform }));
   }
 
   function getPayRun({ companyId, payRunId } = {}) {
     const payRun = requirePayRun(state, companyId, payRunId);
-    return enrichPayRun(state, payRun);
+    return enrichPayRun(state, payRun, { evidencePlatform });
   }
 
   function listPayrollInputSnapshots({ companyId, payRunId = null } = {}) {
@@ -1412,7 +1412,10 @@ export function createPayrollEngine({
   function approvePayRun({ companyId, payRunId, actorId = "system" } = {}) {
     const payRun = requirePayRun(state, companyId, payRunId);
     if (payRun.status === "approved") {
-      return enrichPayRun(state, payRun);
+      if (!payRun.approvalEvidenceBundleId) {
+        syncPayRunApprovalEvidenceBundle({ state, payRun, actorId, evidencePlatform, environmentMode });
+      }
+      return enrichPayRun(state, payRun, { evidencePlatform });
     }
     const blockingExceptions = listPayrollExceptions({
       companyId,
@@ -1461,7 +1464,8 @@ export function createPayrollEngine({
         pensionPlatform
       });
     }
-    return enrichPayRun(state, payRun);
+    syncPayRunApprovalEvidenceBundle({ state, payRun, actorId, evidencePlatform, environmentMode });
+    return enrichPayRun(state, payRun, { evidencePlatform });
   }
 
   function createPayRun({
@@ -1587,7 +1591,8 @@ export function createPayrollEngine({
       postingStatus: null,
       postingJournalEntryId: null,
       payoutBatchStatus: null,
-      payoutBatchId: null
+      payoutBatchId: null,
+      approvalEvidenceBundleId: null
     };
 
     const employmentResults = [];
@@ -2643,7 +2648,7 @@ function presentPayrollPosting(state, record) {
   const journalEntry = record.journalEntryId ? copy(record.journalEntryId) : null;
   return {
     ...copy(record),
-    payRun: payRun ? enrichPayRun(state, payRun) : null,
+    payRun: payRun ? enrichPayRun(state, payRun, { evidencePlatform: null }) : null,
     journalEntryId: journalEntry
   };
 }
@@ -2684,7 +2689,7 @@ function presentPayrollPayoutBatch(state, record, { secretStore = null } = {}) {
     exportPayload: resolvePayrollPayoutBatchExportPayload(state, record, {
       secretStore
     }),
-    payRun: payRun ? enrichPayRun(state, payRun) : null
+    payRun: payRun ? enrichPayRun(state, payRun, { evidencePlatform: null }) : null
   };
 }
 
@@ -4263,6 +4268,144 @@ function assertTrialPayrollBankEventId(bankEventId) {
   }
 }
 
+function syncPayRunApprovalEvidenceBundle({ state, payRun, actorId = "system", evidencePlatform = null, environmentMode = "test" }) {
+  const payslips = (state.payslipIdsByRun.get(payRun.payRunId) || [])
+    .map((payslipId) => state.payslips.get(payslipId))
+    .filter(Boolean);
+  const remittanceInstructions = (state.remittanceInstructionIdsByRun.get(payRun.payRunId) || [])
+    .map((remittanceInstructionId) => state.remittanceInstructions.get(remittanceInstructionId))
+    .filter(Boolean);
+  const exceptions = listPayrollExceptionsFromState(state, payRun.payRunId).map(copy);
+  const events = (state.payRunEventIdsByRun.get(payRun.payRunId) || [])
+    .map((eventId) => state.payRunEvents.get(eventId))
+    .filter(Boolean)
+    .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt))
+    .map(copy);
+  const bundleId = registerPayrollEvidenceBundle({
+    evidencePlatform,
+    executionBoundary: payRun.executionBoundary,
+    companyId: payRun.companyId,
+    bundleType: "payroll_approval",
+    sourceObjectType: "pay_run",
+    sourceObjectId: payRun.payRunId,
+    sourceObjectVersion: payRun.updatedAt || payRun.approvedAt || payRun.createdAt,
+    title: `Payroll approval ${payRun.reportingPeriod}`,
+    actorId,
+    requireTrialGuard: false,
+    previousEvidenceBundleId: payRun.approvalEvidenceBundleId || null,
+    metadata: {
+      reportingPeriod: payRun.reportingPeriod,
+      runType: payRun.runType,
+      payDate: payRun.payDate,
+      payRunFingerprint: payRun.payRunFingerprint,
+      sourceSnapshotHash: payRun.sourceSnapshotHash,
+      postingIntentSnapshotHash: payRun.postingIntentSnapshotHash,
+      bankPaymentSnapshotHash: payRun.bankPaymentSnapshotHash,
+      exceptionSummary: summarizePayrollExceptions(exceptions)
+    },
+    artifactRefs: [
+      ...(payRun.payrollInputSnapshotId
+        ? [{
+            artifactType: "payroll_input_snapshot",
+            artifactRef: payRun.payrollInputSnapshotId,
+            checksum: payRun.payrollInputFingerprint || payRun.sourceSnapshotHash,
+            roleCode: "input_snapshot"
+          }]
+        : []),
+      ...payslips.map((payslip) => ({
+        artifactType: "payslip_snapshot",
+        artifactRef: payslip.payslipId,
+        checksum: payslip.snapshotHash,
+        roleCode: payslip.employeeId,
+        metadata: {
+          employeeId: payslip.employeeId
+        }
+      })),
+      ...remittanceInstructions.map((instruction) => ({
+        artifactType: "remittance_instruction",
+        artifactRef: instruction.remittanceInstructionId,
+        checksum: buildSnapshotHash({
+          remittanceInstructionId: instruction.remittanceInstructionId,
+          status: instruction.status,
+          amount: instruction.amount,
+          authorityCode: instruction.authorityCode,
+          employmentId: instruction.employmentId
+        }),
+        roleCode: instruction.authorityCode || instruction.remittanceType || "remittance"
+      })),
+      ...exceptions.map((exception) => ({
+        artifactType: "payroll_exception",
+        artifactRef: exception.payrollExceptionId,
+        checksum: buildSnapshotHash({
+          payrollExceptionId: exception.payrollExceptionId,
+          code: exception.code,
+          status: exception.status,
+          blocking: exception.blocking
+        }),
+        roleCode: exception.code
+      })),
+      ...events.map((event) => ({
+        artifactType: "pay_run_event",
+        artifactRef: event.payRunEventId,
+        checksum: buildSnapshotHash({
+          payRunEventId: event.payRunEventId,
+          eventType: event.eventType,
+          recordedAt: event.recordedAt
+        }),
+        roleCode: event.eventType
+      }))
+    ],
+    auditRefs: [
+      {
+        actorId: requireText(actorId, "actor_id_required"),
+        approvedAt: payRun.approvedAt,
+        payRunStatus: payRun.status
+      }
+    ],
+    signoffRefs: [
+      {
+        actorId: requireText(actorId, "actor_id_required"),
+        approvedAt: payRun.approvedAt,
+        payRunStatus: payRun.status
+      }
+    ],
+    sourceRefs: [
+      {
+        payrollInputSnapshotId: payRun.payrollInputSnapshotId,
+        payrollInputFingerprint: payRun.payrollInputFingerprint,
+        payRunFingerprint: payRun.payRunFingerprint,
+        sourceSnapshotHash: payRun.sourceSnapshotHash
+      },
+      ...copy(payRun.rulepackRefs || []),
+      ...copy(payRun.providerBaselineRefs || []),
+      ...copy(payRun.decisionSnapshotRefs || [])
+    ],
+    relatedObjectRefs: [
+      ...(payRun.payrollInputSnapshotId
+        ? [{
+            objectType: "payroll_input_snapshot",
+            objectId: payRun.payrollInputSnapshotId
+          }]
+        : []),
+      ...payRun.employmentIds.map((employmentId) => ({
+        objectType: "employment",
+        objectId: employmentId
+      })),
+      ...payslips.map((payslip) => ({
+        objectType: "payslip",
+        objectId: payslip.payslipId
+      })),
+      ...remittanceInstructions.map((instruction) => ({
+        objectType: "remittance_instruction",
+        objectId: instruction.remittanceInstructionId
+      }))
+    ],
+    environmentMode
+  });
+  payRun.approvalEvidenceBundleId = bundleId || payRun.approvalEvidenceBundleId || null;
+  return payRun.approvalEvidenceBundleId;
+}
+
 function registerPayrollEvidenceBundle({
   evidencePlatform,
   executionBoundary,
@@ -4275,10 +4418,15 @@ function registerPayrollEvidenceBundle({
   actorId = "system",
   metadata = {},
   artifactRefs = [],
+  auditRefs = [],
+  signoffRefs = [],
   sourceRefs = [],
-  relatedObjectRefs = []
+  relatedObjectRefs = [],
+  previousEvidenceBundleId = null,
+  requireTrialGuard = true,
+  environmentMode = "test"
 }) {
-  if (executionBoundary?.trialGuardActive !== true || typeof evidencePlatform?.createFrozenEvidenceBundleSnapshot !== "function") {
+  if ((requireTrialGuard && executionBoundary?.trialGuardActive !== true) || typeof evidencePlatform?.createFrozenEvidenceBundleSnapshot !== "function") {
     return null;
   }
   const bundle = evidencePlatform.createFrozenEvidenceBundleSnapshot({
@@ -4293,15 +4441,18 @@ function registerPayrollEvidenceBundle({
     metadata: {
       ...copy(metadata || {}),
       watermarkCode: executionBoundary.watermarkCode || null,
-      legalEffect: false,
-      modeCode: executionBoundary.modeCode,
+      legalEffect: executionBoundary?.supportsLegalEffect === true,
+      modeCode: executionBoundary?.modeCode || null,
       providerPolicyCode: executionBoundary.providerPolicyCode || null
     },
     artifactRefs,
+    auditRefs,
+    signoffRefs,
     sourceRefs,
     relatedObjectRefs,
     actorId,
-    environmentMode: executionBoundary.environmentMode || "trial"
+    previousEvidenceBundleId,
+    environmentMode: executionBoundary?.environmentMode || environmentMode || "test"
   });
   return bundle?.evidenceBundleId || null;
 }
@@ -7698,11 +7849,18 @@ function buildPayRunFingerprint({ state, run }) {
   });
 }
 
-function enrichPayRun(state, payRun) {
+function enrichPayRun(state, payRun, { evidencePlatform = null } = {}) {
   const exceptions = listPayrollExceptionsFromState(state, payRun.payRunId).map(copy);
   const payrollInputSnapshot = payRun.payrollInputSnapshotId
     ? state.payrollInputSnapshots.get(payRun.payrollInputSnapshotId) || null
     : null;
+  const approvalEvidenceBundle =
+    payRun.approvalEvidenceBundleId && typeof evidencePlatform?.getEvidenceBundle === "function"
+      ? evidencePlatform.getEvidenceBundle({
+          companyId: payRun.companyId,
+          evidenceBundleId: payRun.approvalEvidenceBundleId
+        })
+      : null;
   const remittanceInstructions = (state.remittanceInstructionIdsByRun.get(payRun.payRunId) || [])
     .map((remittanceInstructionId) => state.remittanceInstructions.get(remittanceInstructionId))
     .filter(Boolean)
@@ -7710,6 +7868,7 @@ function enrichPayRun(state, payRun) {
     .map((record) => presentRemittanceInstruction(state, record));
   return {
     ...copy(payRun),
+    approvalEvidenceBundle,
     payrollInputSnapshot: payrollInputSnapshot ? copy(payrollInputSnapshot) : null,
     exceptionSummary: summarizePayrollExceptions(exceptions),
     exceptions,

@@ -171,6 +171,9 @@ test("Phase 11.3 closes a month with checklist, blocks on hard stop, preserves r
     comment: "Prepared for hard close."
   });
   assert.equal(firstSignoff.status, "signoff_pending");
+  assert.ok(firstSignoff.closeEvidenceBundleId);
+  assert.equal(firstSignoff.closeEvidenceBundle?.status, "frozen");
+  assert.equal(firstSignoff.signoffs[0]?.evidenceBundleId, firstSignoff.closeEvidenceBundleId);
 
   const closedChecklist = platform.signOffCloseChecklist({
     sessionToken: adminToken,
@@ -181,6 +184,10 @@ test("Phase 11.3 closes a month with checklist, blocks on hard stop, preserves r
   assert.equal(closedChecklist.status, "closed");
   assert.equal(closedChecklist.closeState, "hard_closed");
   assert.equal(closedChecklist.signoffs.length, 2);
+  assert.ok(closedChecklist.closeEvidenceBundleId);
+  assert.equal(closedChecklist.closeEvidenceBundle?.status, "frozen");
+  assert.notEqual(closedChecklist.closeEvidenceBundleId, firstSignoff.closeEvidenceBundleId);
+  assert.equal(closedChecklist.signoffs[1]?.evidenceBundleId, closedChecklist.closeEvidenceBundleId);
 
   const reportAfterClose = platform.runReportSnapshot({
     companyId: client.companyId,
@@ -221,6 +228,11 @@ test("Phase 11.3 closes a month with checklist, blocks on hard stop, preserves r
   assert.equal(reopened.supersededChecklist.status, "reopened");
   assert.equal(reopened.supersededChecklist.signoffs.every((record) => typeof record.supersededAt === "string"), true);
   assert.equal(reopened.reopenRequest.status, "executed");
+  assert.ok(reopened.reopenRequest.reopenEvidenceBundleId);
+  assert.equal(reopened.reopenRequest.reopenEvidenceBundle?.status, "frozen");
+  assert.ok(reopened.supersededChecklist.closeEvidenceBundleId);
+  assert.equal(reopened.supersededChecklist.closeEvidenceBundle?.status, "frozen");
+  assert.notEqual(reopened.supersededChecklist.closeEvidenceBundleId, closedChecklist.closeEvidenceBundleId);
 
   const closeAdjustment = platform.createCloseAdjustment({
     sessionToken: preparerToken,
@@ -242,6 +254,14 @@ test("Phase 11.3 closes a month with checklist, blocks on hard stop, preserves r
   assert.ok(closeAdjustment.reversalJournalEntry);
   assert.ok(closeAdjustment.replacementJournalEntry);
 
+  const reopenAfterAdjustment = platform.getCloseReopenRequest({
+    sessionToken: preparerToken,
+    bureauOrgId: DEMO_IDS.companyId,
+    reopenRequestId: reopened.reopenRequest.reopenRequestId
+  });
+  assert.ok(reopenAfterAdjustment.reopenEvidenceBundleId);
+  assert.notEqual(reopenAfterAdjustment.reopenEvidenceBundleId, reopened.reopenRequest.reopenEvidenceBundleId);
+
   const relocked = platform.relockCloseReopenRequest({
     sessionToken: preparerToken,
     bureauOrgId: DEMO_IDS.companyId,
@@ -250,6 +270,9 @@ test("Phase 11.3 closes a month with checklist, blocks on hard stop, preserves r
     approvedByCompanyUserId: DEMO_IDS.companyUserId
   });
   assert.equal(relocked.status, "relocked");
+  assert.ok(relocked.reopenEvidenceBundleId);
+  assert.equal(relocked.reopenEvidenceBundle?.status, "frozen");
+  assert.notEqual(relocked.reopenEvidenceBundleId, reopenAfterAdjustment.reopenEvidenceBundleId);
   const relockedPeriod = platform
     .listAccountingPeriods({ companyId: client.companyId })
     .find((candidate) => candidate.accountingPeriodId === period.accountingPeriodId);

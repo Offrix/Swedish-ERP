@@ -198,6 +198,8 @@ test("Phase 8.1 API manages pay item catalog, payroll runs, retro traceability a
       }
     });
     assert.equal(approvedRun.status, "approved");
+    assert.ok(approvedRun.approvalEvidenceBundleId);
+    assert.equal(approvedRun.approvalEvidenceBundle?.status, "frozen");
 
     const youthEmployee = await requestJson(baseUrl, "/v1/hr/employees", {
       method: "POST",

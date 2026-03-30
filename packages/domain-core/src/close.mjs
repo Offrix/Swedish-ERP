@@ -38,6 +38,7 @@ function createCloseEngine({
   upsertWorkItem,
   reportingPlatform = null,
   ledgerPlatform = null,
+  evidencePlatform = null,
   now,
   audit,
   error
@@ -52,6 +53,7 @@ function createCloseEngine({
     upsertWorkItem,
     reportingPlatform,
     ledgerPlatform,
+    evidencePlatform,
     now,
     audit,
     error
@@ -173,6 +175,7 @@ function instantiateCloseChecklist(
     updatedAt: createdAt,
     signedOffAt: null,
     closedAt: null,
+    currentEvidenceBundleId: null,
     supersededByChecklistId: null,
     supersedesChecklistId: null
   };
@@ -484,6 +487,7 @@ function signOffCloseChecklist(
     decision: "approved",
     decisionAt: helpers.now(),
     evidenceSnapshotRef: workbench.evidenceSnapshotRef,
+    evidenceBundleId: null,
     comment: norm(comment),
     supersededAt: null
   };
@@ -491,6 +495,13 @@ function signOffCloseChecklist(
   if (!nextPendingSignatory(helpers, checklist)) {
     hardCloseChecklist(helpers, checklist, companyUser, principal, correlationId);
   }
+  const closeEvidenceBundle = syncCloseChecklistEvidenceBundle({
+    helpers,
+    checklist,
+    actorId: principal.userId,
+    correlationId
+  });
+  signoff.evidenceBundleId = closeEvidenceBundle.evidenceBundleId;
   helpers.audit({
     companyId: bureauOrgId,
     actorId: principal.userId,
@@ -554,6 +565,7 @@ function requestCloseReopen(
   successor.updatedAt = helpers.now();
   successor.closedAt = null;
   successor.signedOffAt = null;
+  successor.currentEvidenceBundleId = null;
   successor.supersedesChecklistId = checklist.checklistId;
   successor.supersededByChecklistId = null;
   successor.reopenRequestId = null;
@@ -593,11 +605,24 @@ function requestCloseReopen(
     relockReasonCode: null,
     relockTargetStatus: normalizedImpactAnalysis.relockTargetStatus,
     adjustmentIds: [],
+    currentEvidenceBundleId: null,
     createdAt: helpers.now(),
     updatedAt: helpers.now()
   };
   successor.reopenRequestId = reopenRequest.reopenRequestId;
   helpers.state.closeReopenRequests.set(reopenRequest.reopenRequestId, reopenRequest);
+  syncCloseChecklistEvidenceBundle({
+    helpers,
+    checklist,
+    actorId: principal.userId,
+    correlationId
+  });
+  syncCloseReopenEvidenceBundle({
+    helpers,
+    reopenRequest,
+    actorId: principal.userId,
+    correlationId
+  });
   helpers.upsertWorkItem({
     bureauOrgId,
     portfolioId: successor.portfolioId,
@@ -639,35 +664,15 @@ function snapshotClose(state) {
 }
 
 function materializeChecklist(helpers, checklist) {
-  const blockers = [...helpers.state.closeBlockers.values()]
-    .filter((candidate) => candidate.checklistId === checklist.checklistId)
-    .map(clone);
-  const signoffs = [...helpers.state.closeSignoffs.values()]
-    .filter((candidate) => candidate.checklistId === checklist.checklistId)
-    .sort((left, right) => left.sequence - right.sequence)
-    .map(clone);
+  const blockers = listChecklistBlockers(helpers, checklist);
+  const signoffs = listChecklistSignoffs(helpers, checklist);
   const reopenRequests = [...helpers.state.closeReopenRequests.values()]
     .filter((candidate) => candidate.checklistId === checklist.checklistId || candidate.successorChecklistId === checklist.checklistId)
     .map((candidate) => materializeReopenRequest(helpers, candidate));
   const requiredOpenBlockers = blockers.filter((candidate) => candidate.status === "open" && ["hard_stop", "critical"].includes(candidate.severity));
   const period = getAccountingPeriod(helpers, checklist.clientCompanyId, checklist.accountingPeriodId);
-  const evidenceSnapshotHash = hashSnapshot({
-    checklistId: checklist.checklistId,
-    checklistVersion: checklist.checklistVersion,
-    accountingPeriodId: checklist.accountingPeriodId,
-    steps: checklist.steps.map((step) => ({
-      stepCode: step.stepCode,
-      status: step.status,
-      reconciliationRunId: step.reconciliationRunId,
-      evidenceRefs: step.evidenceRefs
-    })),
-    blockers: blockers.map((blocker) => ({
-      blockerId: blocker.blockerId,
-      severity: blocker.severity,
-      status: blocker.status,
-      overrideState: blocker.overrideState
-    }))
-  });
+  const evidenceSnapshotRef = createChecklistEvidenceSnapshotRef(helpers, checklist, { blockers, signoffs });
+  const closeEvidenceBundle = materializeEvidenceBundleForCompany(helpers, checklist.clientCompanyId, checklist.currentEvidenceBundleId);
   return clone({
     ...checklist,
     accountingPeriod: period,
@@ -675,13 +680,9 @@ function materializeChecklist(helpers, checklist) {
     signoffs,
     reopenRequests,
     openHardStopBlockerCount: requiredOpenBlockers.length,
-    evidenceSnapshotRef: {
-      snapshotType: "close_workbench",
-      snapshotHash: evidenceSnapshotHash,
-      accountingPeriodId: checklist.accountingPeriodId,
-      checklistId: checklist.checklistId,
-      checklistVersion: checklist.checklistVersion
-    }
+    closeEvidenceBundleId: checklist.currentEvidenceBundleId || null,
+    closeEvidenceBundle,
+    evidenceSnapshotRef
   });
 }
 
@@ -864,6 +865,12 @@ function createCloseAdjustment(
     entityId: adjustment.adjustmentId,
     explanation: `Posted ${resolvedAdjustmentType} adjustment ${adjustment.adjustmentId} for reopen request ${reopenRequest.reopenRequestId}.`
   });
+  syncCloseReopenEvidenceBundle({
+    helpers,
+    reopenRequest,
+    actorId: principal.userId,
+    correlationId
+  });
   return materializeCloseAdjustment(helpers, adjustment);
 }
 
@@ -936,6 +943,12 @@ function relockCloseReopenRequest(
     correlationId,
     reasonCode: "close_reopen_relocked"
   });
+  syncCloseReopenEvidenceBundle({
+    helpers,
+    reopenRequest,
+    actorId: principal.userId,
+    correlationId
+  });
   helpers.audit({
     companyId: bureauOrgId,
     actorId: principal.userId,
@@ -1007,8 +1020,11 @@ function materializeReopenRequest(helpers, reopenRequest) {
     .filter((candidate) => candidate.reopenRequestId === reopenRequest.reopenRequestId)
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
     .map((candidate) => materializeCloseAdjustment(helpers, candidate));
+  const reopenEvidenceBundle = materializeEvidenceBundleForCompany(helpers, reopenRequest.clientCompanyId, reopenRequest.currentEvidenceBundleId);
   return clone({
     ...reopenRequest,
+    reopenEvidenceBundleId: reopenRequest.currentEvidenceBundleId || null,
+    reopenEvidenceBundle,
     adjustments
   });
 }
@@ -1054,6 +1070,417 @@ function hardCloseChecklist(helpers, checklist, companyUser, principal, correlat
   checklist.signedOffAt = helpers.now();
   checklist.closedAt = helpers.now();
   checklist.updatedAt = helpers.now();
+}
+
+function listChecklistBlockers(helpers, checklist) {
+  return [...helpers.state.closeBlockers.values()]
+    .filter((candidate) => candidate.checklistId === checklist.checklistId)
+    .map(clone);
+}
+
+function listChecklistSignoffs(helpers, checklist) {
+  return [...helpers.state.closeSignoffs.values()]
+    .filter((candidate) => candidate.checklistId === checklist.checklistId)
+    .sort((left, right) => left.sequence - right.sequence)
+    .map(clone);
+}
+
+function createChecklistEvidenceSnapshotRef(helpers, checklist, { blockers = null, signoffs = null } = {}) {
+  const resolvedBlockers = blockers || listChecklistBlockers(helpers, checklist);
+  const resolvedSignoffs = signoffs || listChecklistSignoffs(helpers, checklist);
+  const evidenceSnapshotHash = hashSnapshot({
+    checklistId: checklist.checklistId,
+    checklistVersion: checklist.checklistVersion,
+    accountingPeriodId: checklist.accountingPeriodId,
+    status: checklist.status,
+    closeState: checklist.closeState,
+    steps: checklist.steps.map((step) => ({
+      stepCode: step.stepCode,
+      status: step.status,
+      reconciliationRunId: step.reconciliationRunId,
+      evidenceRefs: step.evidenceRefs
+    })),
+    blockers: resolvedBlockers.map((blocker) => ({
+      blockerId: blocker.blockerId,
+      severity: blocker.severity,
+      status: blocker.status,
+      overrideState: blocker.overrideState
+    })),
+    signoffs: resolvedSignoffs.map((signoff) => ({
+      signoffId: signoff.signoffId,
+      sequence: signoff.sequence,
+      signatoryCompanyUserId: signoff.signatoryCompanyUserId,
+      decisionAt: signoff.decisionAt,
+      supersededAt: signoff.supersededAt
+    }))
+  });
+  return {
+    snapshotType: "close_workbench",
+    snapshotHash: evidenceSnapshotHash,
+    accountingPeriodId: checklist.accountingPeriodId,
+    checklistId: checklist.checklistId,
+    checklistVersion: checklist.checklistVersion
+  };
+}
+
+function materializeEvidenceBundleForCompany(helpers, companyId, evidenceBundleId) {
+  if (!companyId || !evidenceBundleId || !helpers.evidencePlatform?.getEvidenceBundle) {
+    return null;
+  }
+  return helpers.evidencePlatform.getEvidenceBundle({
+    companyId,
+    evidenceBundleId
+  });
+}
+
+function syncCloseChecklistEvidenceBundle({ helpers, checklist, actorId, correlationId }) {
+  if (!helpers.evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+    throw helpers.error(500, "evidence_platform_required", "Evidence platform is required.");
+  }
+  const blockers = listChecklistBlockers(helpers, checklist);
+  const signoffs = listChecklistSignoffs(helpers, checklist);
+  const period = getAccountingPeriod(helpers, checklist.clientCompanyId, checklist.accountingPeriodId);
+  const evidenceSnapshotRef = createChecklistEvidenceSnapshotRef(helpers, checklist, { blockers, signoffs });
+  const compatibilityPayload = {
+    bureauOrgId: checklist.bureauOrgId,
+    clientCompanyId: checklist.clientCompanyId,
+    checklistId: checklist.checklistId,
+    checklistVersion: checklist.checklistVersion,
+    accountingPeriodId: checklist.accountingPeriodId,
+    periodCode: checklist.periodCode,
+    status: checklist.status,
+    closeState: checklist.closeState,
+    reportSnapshotId: checklist.reportSnapshotId || null,
+    targetCloseDate: checklist.targetCloseDate,
+    deadlineAt: checklist.deadlineAt,
+    ownerCompanyUserId: checklist.ownerCompanyUserId,
+    evidenceSnapshotRef,
+    openHardStopBlockerCount: blockers.filter((candidate) => candidate.status === "open" && ["hard_stop", "critical"].includes(candidate.severity)).length,
+    accountingPeriodStatus: period?.status || null,
+    steps: checklist.steps.map((step) => ({
+      stepCode: step.stepCode,
+      title: step.title,
+      status: step.status,
+      evidenceType: step.evidenceType,
+      reconciliationAreaCode: step.reconciliationAreaCode,
+      reconciliationRunId: step.reconciliationRunId,
+      completedAt: step.completedAt,
+      completedByUserId: step.completedByUserId,
+      evidenceRefs: clone(step.evidenceRefs || [])
+    })),
+    blockers: blockers.map((blocker) => ({
+      blockerId: blocker.blockerId,
+      stepCode: blocker.stepCode,
+      severity: blocker.severity,
+      status: blocker.status,
+      reasonCode: blocker.reasonCode,
+      overrideState: blocker.overrideState,
+      comment: blocker.comment || null,
+      resolvedAt: blocker.resolvedAt || null
+    })),
+    signoffs: signoffs.map((signoff) => ({
+      signoffId: signoff.signoffId,
+      sequence: signoff.sequence,
+      signatoryRole: signoff.signatoryRole,
+      signatoryCompanyUserId: signoff.signatoryCompanyUserId,
+      signatoryUserId: signoff.signatoryUserId,
+      decisionAt: signoff.decisionAt,
+      supersededAt: signoff.supersededAt || null
+    }))
+  };
+  const bundle = helpers.evidencePlatform.createFrozenEvidenceBundleSnapshot({
+    companyId: checklist.clientCompanyId,
+    bundleType: "close_signoff",
+    sourceObjectType: "close_checklist",
+    sourceObjectId: checklist.checklistId,
+    sourceObjectVersion: checklist.updatedAt || checklist.createdAt,
+    title: `Close checklist ${checklist.periodCode}`,
+    retentionClass: "regulated",
+    classificationCode: "restricted_internal",
+    metadata: {
+      compatibilityPayload
+    },
+    artifactRefs: checklist.steps.flatMap((step) => {
+      const refs = [];
+      if (step.reconciliationRunId) {
+        refs.push({
+          artifactType: "close_reconciliation_run",
+          artifactRef: step.reconciliationRunId,
+          checksum: hashSnapshot({
+            stepCode: step.stepCode,
+            reconciliationRunId: step.reconciliationRunId,
+            status: step.status
+          }),
+          roleCode: step.stepCode,
+          metadata: {
+            reconciliationAreaCode: step.reconciliationAreaCode || null
+          }
+        });
+      }
+      for (const evidenceRef of step.evidenceRefs || []) {
+        refs.push({
+          artifactType: "close_step_evidence",
+          artifactRef: evidenceRef.documentId || evidenceRef.reportSnapshotId || evidenceRef.evidenceRefId || evidenceRef.note,
+          checksum: hashSnapshot({
+            stepCode: step.stepCode,
+            evidenceRef
+          }),
+          roleCode: step.stepCode,
+          metadata: {
+            evidenceType: evidenceRef.evidenceType || step.evidenceType,
+            documentId: evidenceRef.documentId || null,
+            reportSnapshotId: evidenceRef.reportSnapshotId || null
+          }
+        });
+      }
+      return refs;
+    }).concat(
+      blockers.map((blocker) => ({
+        artifactType: "close_blocker",
+        artifactRef: blocker.blockerId,
+        checksum: hashSnapshot({
+          blockerId: blocker.blockerId,
+          severity: blocker.severity,
+          status: blocker.status,
+          overrideState: blocker.overrideState
+        }),
+        roleCode: blocker.stepCode || null,
+        metadata: {
+          severity: blocker.severity,
+          reasonCode: blocker.reasonCode
+        }
+      })),
+      signoffs.map((signoff) => ({
+        artifactType: "close_signoff",
+        artifactRef: signoff.signoffId,
+        checksum: hashSnapshot({
+          signoffId: signoff.signoffId,
+          sequence: signoff.sequence,
+          decisionAt: signoff.decisionAt,
+          supersededAt: signoff.supersededAt
+        }),
+        roleCode: signoff.signatoryRole,
+        metadata: {
+          sequence: signoff.sequence,
+          signatoryCompanyUserId: signoff.signatoryCompanyUserId
+        }
+      }))
+    ),
+    auditRefs: signoffs.map((signoff) => ({
+      signoffId: signoff.signoffId,
+      signatoryUserId: signoff.signatoryUserId,
+      decisionAt: signoff.decisionAt
+    })),
+    signoffRefs: signoffs.map((signoff) => ({
+      signoffId: signoff.signoffId,
+      sequence: signoff.sequence,
+      signatoryRole: signoff.signatoryRole,
+      signatoryCompanyUserId: signoff.signatoryCompanyUserId
+    })),
+    sourceRefs: [
+      evidenceSnapshotRef,
+      {
+        accountingPeriodId: checklist.accountingPeriodId,
+        accountingPeriodStatus: period?.status || null
+      }
+    ],
+    relatedObjectRefs: [
+      {
+        objectType: "accounting_period",
+        objectId: checklist.accountingPeriodId
+      },
+      ...(checklist.reportSnapshotId
+        ? [
+            {
+              objectType: "report_snapshot",
+              objectId: checklist.reportSnapshotId
+            }
+          ]
+        : []),
+      ...signoffs.map((signoff) => ({
+        objectType: "company_user",
+        objectId: signoff.signatoryCompanyUserId
+      }))
+    ],
+    actorId,
+    correlationId,
+    previousEvidenceBundleId: checklist.currentEvidenceBundleId || null
+  });
+  checklist.currentEvidenceBundleId = bundle.evidenceBundleId;
+  return {
+    closeEvidenceBundleId: bundle.evidenceBundleId,
+    evidenceBundleId: bundle.evidenceBundleId,
+    checksum: bundle.checksum,
+    status: bundle.status,
+    frozenAt: bundle.frozenAt,
+    archivedAt: bundle.archivedAt
+  };
+}
+
+function syncCloseReopenEvidenceBundle({ helpers, reopenRequest, actorId, correlationId }) {
+  if (!helpers.evidencePlatform?.createFrozenEvidenceBundleSnapshot) {
+    throw helpers.error(500, "evidence_platform_required", "Evidence platform is required.");
+  }
+  const checklist = requireChecklist(helpers, reopenRequest.checklistId);
+  const successorChecklist = requireChecklist(helpers, reopenRequest.successorChecklistId);
+  const adjustments = [...helpers.state.closeAdjustments.values()]
+    .filter((candidate) => candidate.reopenRequestId === reopenRequest.reopenRequestId)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .map(clone);
+  const compatibilityPayload = {
+    bureauOrgId: reopenRequest.bureauOrgId,
+    clientCompanyId: reopenRequest.clientCompanyId,
+    reopenRequestId: reopenRequest.reopenRequestId,
+    checklistId: reopenRequest.checklistId,
+    successorChecklistId: reopenRequest.successorChecklistId,
+    accountingPeriodId: reopenRequest.accountingPeriodId,
+    requestedByUserId: reopenRequest.requestedByUserId,
+    approvedByUserId: reopenRequest.approvedByUserId,
+    approvedByRoleCode: reopenRequest.approvedByRoleCode,
+    reasonCode: reopenRequest.reasonCode,
+    impactSummary: reopenRequest.impactSummary,
+    impactAnalysis: clone(reopenRequest.impactAnalysis || {}),
+    status: reopenRequest.status,
+    impactAssessedAt: reopenRequest.impactAssessedAt,
+    approvedAt: reopenRequest.approvedAt,
+    executedAt: reopenRequest.executedAt,
+    relockedAt: reopenRequest.relockedAt || null,
+    relockedByUserId: reopenRequest.relockedByUserId || null,
+    relockApprovedByUserId: reopenRequest.relockApprovedByUserId || null,
+    relockApprovedByRoleCode: reopenRequest.relockApprovedByRoleCode || null,
+    relockReasonCode: reopenRequest.relockReasonCode || null,
+    relockTargetStatus: reopenRequest.relockTargetStatus,
+    adjustmentIds: [...(reopenRequest.adjustmentIds || [])],
+    supersededChecklistStatus: checklist.status,
+    successorChecklistStatus: successorChecklist.status,
+    successorCloseState: successorChecklist.closeState
+  };
+  const bundle = helpers.evidencePlatform.createFrozenEvidenceBundleSnapshot({
+    companyId: reopenRequest.clientCompanyId,
+    bundleType: "close_reopen",
+    sourceObjectType: "close_reopen_request",
+    sourceObjectId: reopenRequest.reopenRequestId,
+    sourceObjectVersion: reopenRequest.updatedAt || reopenRequest.createdAt,
+    title: `Close reopen ${reopenRequest.reopenRequestId}`,
+    retentionClass: "regulated",
+    classificationCode: "restricted_internal",
+    metadata: {
+      compatibilityPayload
+    },
+    artifactRefs: adjustments.flatMap((adjustment) => [
+      {
+        artifactType: "close_adjustment",
+        artifactRef: adjustment.adjustmentId,
+        checksum: hashSnapshot({
+          adjustmentId: adjustment.adjustmentId,
+          adjustmentType: adjustment.adjustmentType,
+          status: adjustment.status,
+          updatedAt: adjustment.updatedAt
+        }),
+        roleCode: adjustment.adjustmentType,
+        metadata: {
+          reasonCode: adjustment.reasonCode,
+          sourceJournalEntryId: adjustment.sourceJournalEntryId
+        }
+      },
+      ...(adjustment.reversalJournalEntryId
+        ? [{
+            artifactType: "journal_entry",
+            artifactRef: adjustment.reversalJournalEntryId,
+            checksum: hashSnapshot({
+              journalEntryId: adjustment.reversalJournalEntryId,
+              adjustmentId: adjustment.adjustmentId
+            }),
+            roleCode: "reversal"
+          }]
+        : []),
+      ...(adjustment.replacementJournalEntryId
+        ? [{
+            artifactType: "journal_entry",
+            artifactRef: adjustment.replacementJournalEntryId,
+            checksum: hashSnapshot({
+              journalEntryId: adjustment.replacementJournalEntryId,
+              adjustmentId: adjustment.adjustmentId
+            }),
+            roleCode: "replacement"
+          }]
+        : [])
+    ]),
+    auditRefs: [
+      {
+        requestedByUserId: reopenRequest.requestedByUserId,
+        approvedByUserId: reopenRequest.approvedByUserId,
+        approvedByRoleCode: reopenRequest.approvedByRoleCode
+      },
+      ...(reopenRequest.relockedByUserId
+        ? [{
+            relockedByUserId: reopenRequest.relockedByUserId,
+            relockApprovedByUserId: reopenRequest.relockApprovedByUserId,
+            relockApprovedByRoleCode: reopenRequest.relockApprovedByRoleCode
+          }]
+        : [])
+    ],
+    sourceRefs: [
+      ...(Array.isArray(reopenRequest.impactAnalysis?.affectedObjectRefs)
+        ? reopenRequest.impactAnalysis.affectedObjectRefs.map((candidate) => clone(candidate))
+        : []),
+      {
+        reasonCode: reopenRequest.reasonCode,
+        relockReasonCode: reopenRequest.relockReasonCode || null,
+        relockTargetStatus: reopenRequest.relockTargetStatus
+      }
+    ],
+    relatedObjectRefs: [
+      {
+        objectType: "close_checklist",
+        objectId: reopenRequest.checklistId
+      },
+      {
+        objectType: "close_checklist",
+        objectId: reopenRequest.successorChecklistId
+      },
+      {
+        objectType: "accounting_period",
+        objectId: reopenRequest.accountingPeriodId
+      },
+      ...adjustments.flatMap((adjustment) => [
+        {
+          objectType: "close_adjustment",
+          objectId: adjustment.adjustmentId
+        },
+        ...(adjustment.sourceJournalEntryId
+          ? [{
+              objectType: "journal_entry",
+              objectId: adjustment.sourceJournalEntryId
+            }]
+          : []),
+        ...(adjustment.reversalJournalEntryId
+          ? [{
+              objectType: "journal_entry",
+              objectId: adjustment.reversalJournalEntryId
+            }]
+          : []),
+        ...(adjustment.replacementJournalEntryId
+          ? [{
+              objectType: "journal_entry",
+              objectId: adjustment.replacementJournalEntryId
+            }]
+          : [])
+      ])
+    ],
+    actorId,
+    correlationId,
+    previousEvidenceBundleId: reopenRequest.currentEvidenceBundleId || null
+  });
+  reopenRequest.currentEvidenceBundleId = bundle.evidenceBundleId;
+  return {
+    reopenEvidenceBundleId: bundle.evidenceBundleId,
+    evidenceBundleId: bundle.evidenceBundleId,
+    checksum: bundle.checksum,
+    status: bundle.status,
+    frozenAt: bundle.frozenAt,
+    archivedAt: bundle.archivedAt
+  };
 }
 
 function hasAnyWaivers(helpers, checklist) {
