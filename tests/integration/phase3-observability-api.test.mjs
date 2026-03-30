@@ -22,6 +22,7 @@ test("Phase 3.3 API exposes observability metrics, alarms, provider health, queu
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
     });
+    const securityRuntime = platform.getDomain("securityRuntime");
 
     platform.createCompanyUser({
       sessionToken: adminToken,
@@ -126,6 +127,20 @@ test("Phase 3.3 API exposes observability metrics, alarms, provider health, queu
       spanId: traceSpan.spanId,
       outcomeCode: "integration_completed"
     });
+    securityRuntime.recordSecurityAnomaly({
+      companyId: DEMO_IDS.companyId,
+      alertCode: "phase3_observability_security_spike",
+      subjectKey: `company_user:${DEMO_IDS.companyUserId}`,
+      subjectType: "company_user",
+      subjectId: DEMO_IDS.companyUserId,
+      actorId: DEMO_IDS.userId,
+      ipAddress: "198.51.100.99",
+      severity: "high",
+      riskScore: 40,
+      metadata: {
+        reason: "observability_smoke"
+      }
+    });
 
     const fieldDenied = await requestJson(baseUrl, `/v1/ops/observability?companyId=${DEMO_IDS.companyId}`, {
       token: fieldUserToken,
@@ -146,7 +161,12 @@ test("Phase 3.3 API exposes observability metrics, alarms, provider health, queu
     assert.equal(payload.projectionLag.items.length > 0, true);
     assert.equal(payload.queueAgeAlerts.some((item) => item.alertCode === "review_queue_overdue"), true);
     assert.equal(payload.queueAgeAlerts.some((item) => item.alertCode === "async_job_queue_lag"), true);
+    assert.equal(payload.securityRisk.items.some((item) => item.alertCode === "phase3_observability_security_spike"), true);
+    assert.equal(payload.restoreDrillTelemetry.coverage.missingRestoreDrillTypes.length > 0, true);
     assert.equal(payload.invariantAlarms.some((item) => item.alarmCode === "provider_health_unhealthy"), true);
+    assert.equal(payload.invariantAlarms.some((item) => item.alarmCode === "queue_age.review_queue_overdue"), true);
+    assert.equal(payload.invariantAlarms.some((item) => item.alarmCode === "security_risk.phase3_observability_security_spike"), true);
+    assert.equal(payload.invariantAlarms.some((item) => item.alarmCode === "restore_drill_coverage_gap"), true);
     assert.equal(payload.structuredLogs.some((item) => item.eventCode === "phase3.integration.warning"), true);
     assert.equal(payload.structuredLogs.some((item) => item.eventCode === "worker.job.completed"), true);
     const workerCompletedLog = payload.structuredLogs.find((item) => item.eventCode === "worker.job.completed");
@@ -156,6 +176,8 @@ test("Phase 3.3 API exposes observability metrics, alarms, provider health, queu
     assert.equal(payload.traceChains.some((item) => item.traceCodes.includes("worker.job")), true);
     assert.equal(payload.metrics.openInvariantAlarmCount >= 1, true);
     assert.equal(payload.metrics.queueAgeAlertCount >= 2, true);
+    assert.equal(payload.metrics.openSecurityAlertCount >= 1, true);
+    assert.equal(payload.metrics.restoreDrillCoverageGapCount >= 1, true);
   } finally {
     await stopServer(server);
   }

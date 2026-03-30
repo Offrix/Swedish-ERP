@@ -852,6 +852,7 @@ async function buildObservabilityPayload({
     reviewItems,
     submissionQueueItems,
     transactionBoundary,
+    securityAlerts,
     structuredLogs,
     traceChains,
     auditCorrelations
@@ -889,6 +890,9 @@ async function buildObservabilityPayload({
     typeof platform.getTransactionBoundarySummary === "function"
       ? platform.getTransactionBoundarySummary({ companyId, asOf: resolvedAsOf })
       : null,
+    typeof platform.listSecurityAlerts === "function"
+      ? platform.listSecurityAlerts({ companyId, stateCode: "open" })
+      : [],
     typeof platform.listStructuredLogs === "function"
       ? platform.listStructuredLogs({ companyId, includeGlobal, limit: logLimit })
       : [],
@@ -913,12 +917,17 @@ async function buildObservabilityPayload({
     submissionQueueItems,
     asOf: resolvedAsOf
   });
+  const securityRisk = buildSecurityRiskPayload(securityAlerts);
+  const restoreDrillTelemetry = buildRestoreDrillTelemetryPayload(controlPlane);
   synchronizeObservabilityAlarms({
     platform,
     companyId,
     runtimeDiagnostics,
     providerHealthItems: providerHealth.items,
     projectionLagItems: projectionLag.items,
+    queueAgeAlerts,
+    securityAlerts: securityRisk.items,
+    restoreDrillTelemetry,
     actorId: principal.userId
   });
   const invariantAlarms =
@@ -935,8 +944,12 @@ async function buildObservabilityPayload({
       laggingProjectionCount: projectionLag.items.filter((item) => item.lagState !== "healthy").length,
       laggingCommitBoundaryCount: transactionBoundary?.commitLag?.summary?.laggingDomainCount || 0,
       queueAgeAlertCount: queueAgeAlerts.length,
+      openSecurityAlertCount: securityRisk.counters.total,
+      highSecurityAlertCount: securityRisk.counters.high + securityRisk.counters.critical,
       runtimeJobBacklogCount: runtimeJobs.filter((job) => ["queued", "retry_scheduled", "claimed", "running"].includes(job.status)).length,
       runtimeDeadLetterCount: deadLetters.filter((item) => item.operatorState !== "closed").length,
+      restoreDrillCoverageGapCount: restoreDrillTelemetry.counters.missingCoverageCount,
+      failedRestoreDrillTelemetryCount: restoreDrillTelemetry.counters.failedCount,
       structuredLogCount: structuredLogs.length,
       traceChainCount: traceChains.length,
       openIncidentCount: controlPlane?.openIncidentCount || 0,
@@ -952,6 +965,8 @@ async function buildObservabilityPayload({
     projectionLag,
     transactionBoundary,
     queueAgeAlerts,
+    securityRisk,
+    restoreDrillTelemetry,
     invariantAlarms,
     structuredLogs,
     traceChains,
@@ -1146,12 +1161,81 @@ function buildObservabilityQueueAgeAlerts({
   );
 }
 
+function buildSecurityRiskPayload(securityAlerts = []) {
+  const items = (securityAlerts || [])
+    .map((alert) => ({
+      securityAlertId: alert.securityAlertId,
+      alertCode: alert.alertCode,
+      severity: alert.severity,
+      state: alert.state,
+      subjectKey: alert.subjectKey,
+      subjectType: alert.subjectType || "security_subject",
+      subjectId: alert.subjectId || null,
+      budgetCode: alert.budgetCode,
+      eventCount: Number(alert.eventCount || 0),
+      lastSeenAt: alert.lastSeenAt || null,
+      lastActorId: alert.lastActorId || null,
+      lastIpAddress: alert.lastIpAddress || null,
+      metadata: alert.metadata || {}
+    }))
+    .sort((left, right) =>
+      compareObservabilitySeverity(left.severity, right.severity)
+      || (right.eventCount - left.eventCount)
+      || String(right.lastSeenAt || "").localeCompare(String(left.lastSeenAt || ""))
+    );
+  return {
+    items,
+    counters: {
+      total: items.length,
+      critical: items.filter((item) => item.severity === "critical").length,
+      high: items.filter((item) => item.severity === "high").length,
+      medium: items.filter((item) => item.severity === "medium").length,
+      low: items.filter((item) => item.severity === "low").length
+    }
+  };
+}
+
+function buildRestoreDrillTelemetryPayload(controlPlane = null) {
+  const coverage = controlPlane?.restoreDrillCoverage || {
+    items: [],
+    missingRestoreDrillTypes: [],
+    workerRestartChaosCovered: false
+  };
+  const items = [...(controlPlane?.recentRestoreDrills || [])]
+    .sort((left, right) => String(right.recordedAt || "").localeCompare(String(left.recordedAt || "")))
+    .map((drill) => ({
+      restoreDrillId: drill.restoreDrillId,
+      drillCode: drill.drillCode,
+      drillType: drill.drillType,
+      status: drill.status,
+      targetRtoMinutes: drill.targetRtoMinutes,
+      targetRpoMinutes: drill.targetRpoMinutes,
+      actualRtoMinutes: drill.actualRtoMinutes || null,
+      actualRpoMinutes: drill.actualRpoMinutes || null,
+      restorePlanId: drill.restorePlanId || null,
+      completedAt: drill.completedAt || null,
+      recordedAt: drill.recordedAt || null
+    }));
+  return {
+    coverage,
+    items,
+    counters: {
+      total: items.length,
+      failed: items.filter((item) => item.status === "failed").length,
+      missingCoverageCount: (coverage.missingRestoreDrillTypes || []).length + (coverage.workerRestartChaosCovered === true ? 0 : 1)
+    }
+  };
+}
+
 function synchronizeObservabilityAlarms({
   platform,
   companyId,
   runtimeDiagnostics,
   providerHealthItems = [],
   projectionLagItems = [],
+  queueAgeAlerts = [],
+  securityAlerts = [],
+  restoreDrillTelemetry = null,
   actorId = "system"
 }) {
   if (typeof platform.synchronizeInvariantAlarm !== "function" || typeof platform.listInvariantAlarms !== "function") {
@@ -1224,12 +1308,108 @@ function synchronizeObservabilityAlarms({
     });
   }
 
+  for (const item of aggregateQueueAgeAlertsForAlarmSync(queueAgeAlerts)) {
+    const alarmCode = `queue_age.${item.alertCode}`;
+    const sourceObjectType = `${item.queueType}_queue`;
+    const sourceObjectId = item.queueKey;
+    activeKeys.add(`${alarmCode}::${sourceObjectType}::${sourceObjectId}`);
+    platform.synchronizeInvariantAlarm({
+      companyId,
+      alarmCode,
+      sourceObjectType,
+      sourceObjectId,
+      severity: item.severity,
+      summary: `${item.queueType} queue ${item.queueKey} has aged work items.`,
+      metadata: {
+        openCount: item.openCount,
+        blockedCount: item.blockedCount || 0,
+        oldestOpenAgeMinutes: item.oldestOpenAgeMinutes,
+        sourceObjectRefs: item.sourceObjectRefs
+      },
+      actorId,
+      active: true
+    });
+  }
+
+  for (const alert of securityAlerts.filter((candidate) => candidate.state !== "resolved")) {
+    const alarmCode = `security_risk.${alert.alertCode}`;
+    const sourceObjectType = alert.subjectType || "security_subject";
+    const sourceObjectId = alert.subjectId || alert.subjectKey;
+    activeKeys.add(`${alarmCode}::${sourceObjectType}::${sourceObjectId}`);
+    platform.synchronizeInvariantAlarm({
+      companyId,
+      alarmCode,
+      sourceObjectType,
+      sourceObjectId,
+      severity: alert.severity,
+      summary: `Security alert ${alert.alertCode} is open for ${alert.subjectKey}.`,
+      metadata: {
+        subjectKey: alert.subjectKey,
+        eventCount: alert.eventCount,
+        lastSeenAt: alert.lastSeenAt,
+        lastIpAddress: alert.lastIpAddress,
+        budgetCode: alert.budgetCode
+      },
+      actorId,
+      active: true
+    });
+  }
+
+  if (
+    (restoreDrillTelemetry?.coverage?.missingRestoreDrillTypes || []).length > 0
+    || restoreDrillTelemetry?.coverage?.workerRestartChaosCovered !== true
+  ) {
+    const alarmCode = "restore_drill_coverage_gap";
+    const sourceObjectType = "restore_drill_coverage";
+    const sourceObjectId = companyId;
+    activeKeys.add(`${alarmCode}::${sourceObjectType}::${sourceObjectId}`);
+    platform.synchronizeInvariantAlarm({
+      companyId,
+      alarmCode,
+      sourceObjectType,
+      sourceObjectId,
+      severity: "high",
+      summary: "Restore drill coverage is incomplete.",
+      metadata: {
+        missingRestoreDrillTypes: restoreDrillTelemetry?.coverage?.missingRestoreDrillTypes || [],
+        workerRestartChaosCovered: restoreDrillTelemetry?.coverage?.workerRestartChaosCovered === true
+      },
+      actorId,
+      active: true
+    });
+  }
+
+  for (const drill of (restoreDrillTelemetry?.items || []).filter((candidate) => candidate.status === "failed")) {
+    const alarmCode = "restore_drill_failed";
+    const sourceObjectType = "restore_drill";
+    const sourceObjectId = drill.restoreDrillId;
+    activeKeys.add(`${alarmCode}::${sourceObjectType}::${sourceObjectId}`);
+    platform.synchronizeInvariantAlarm({
+      companyId,
+      alarmCode,
+      sourceObjectType,
+      sourceObjectId,
+      severity: "critical",
+      summary: `Restore drill ${drill.drillCode} failed.`,
+      metadata: {
+        drillType: drill.drillType,
+        targetRtoMinutes: drill.targetRtoMinutes,
+        targetRpoMinutes: drill.targetRpoMinutes,
+        actualRtoMinutes: drill.actualRtoMinutes,
+        actualRpoMinutes: drill.actualRpoMinutes
+      },
+      actorId,
+      active: true
+    });
+  }
+
   for (const alarm of platform.listInvariantAlarms({ companyId, includeGlobal: false, limit: 500 })) {
     const sourceObjectType = alarm.sourceObjectType || "_";
     const sourceObjectId = alarm.sourceObjectId || "_";
     const key = `${alarm.alarmCode}::${sourceObjectType}::${sourceObjectId}`;
     if (
-      ["runtime_invariant", "provider_health_unhealthy", "projection_lag"].some((prefix) => alarm.alarmCode.startsWith(prefix))
+      ["runtime_invariant", "provider_health_unhealthy", "projection_lag", "queue_age.", "security_risk.", "restore_drill_coverage_gap", "restore_drill_failed"]
+        .some((prefix) => alarm.alarmCode.startsWith(prefix))
       && !activeKeys.has(key)
     ) {
       platform.synchronizeInvariantAlarm({
@@ -1242,6 +1422,35 @@ function synchronizeObservabilityAlarms({
       });
     }
   }
+}
+
+function aggregateQueueAgeAlertsForAlarmSync(queueAgeAlerts = []) {
+  const grouped = new Map();
+  for (const alert of queueAgeAlerts || []) {
+    const key = `${alert.alertCode}::${alert.queueType}::${alert.queueKey}`;
+    const existing = grouped.get(key) || {
+      alertCode: alert.alertCode,
+      severity: alert.severity,
+      queueType: alert.queueType,
+      queueKey: alert.queueKey,
+      openCount: 0,
+      blockedCount: 0,
+      oldestOpenAgeMinutes: 0,
+      sourceObjectRefs: []
+    };
+    existing.severity = compareObservabilitySeverity(existing.severity, alert.severity) <= 0 ? existing.severity : alert.severity;
+    existing.openCount += Number(alert.openCount || 0);
+    existing.blockedCount += Number(alert.blockedCount || 0);
+    existing.oldestOpenAgeMinutes = Math.max(existing.oldestOpenAgeMinutes, Number(alert.oldestOpenAgeMinutes || 0));
+    existing.sourceObjectRefs.push(...(Array.isArray(alert.sourceObjectRefs) ? alert.sourceObjectRefs : []));
+    grouped.set(key, existing);
+  }
+  return [...grouped.values()].sort((left, right) =>
+    compareObservabilitySeverity(left.severity, right.severity)
+    || right.oldestOpenAgeMinutes - left.oldestOpenAgeMinutes
+    || left.queueType.localeCompare(right.queueType)
+    || left.queueKey.localeCompare(right.queueKey)
+  );
 }
 
 function compareObservabilitySeverity(left, right) {

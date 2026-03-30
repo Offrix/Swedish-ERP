@@ -1302,6 +1302,20 @@ export function createApiPlatform(options = {}) {
       value: () => defaultFlatMergeCollisions,
       enumerable: false
     },
+    listSecurityAlerts: {
+      value: (...args) =>
+        typeof registeredDomains.securityRuntime?.listSecurityAlerts === "function"
+          ? registeredDomains.securityRuntime.listSecurityAlerts(...args)
+          : [],
+      enumerable: false
+    },
+    getSecurityRiskSummary: {
+      value: (...args) =>
+        typeof registeredDomains.securityRuntime?.getSecurityRiskSummary === "function"
+          ? registeredDomains.securityRuntime.getSecurityRiskSummary(...args)
+          : null,
+      enumerable: false
+    },
     scanRuntimeInvariants: {
       value: (overrides = {}) =>
         buildRuntimeDiagnostics({
