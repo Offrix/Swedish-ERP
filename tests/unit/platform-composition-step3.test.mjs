@@ -99,7 +99,13 @@ test("Step 3 platform composition registers bounded contexts without breaking th
     ["ledger", "reporting", "orgAuth", "vat", "payroll", "hus", "pension", "fiscalYear", "legalForm", "integrations", "evidence"]
   );
   assert.equal(platform.platformContractVersions.eventEnvelopeVersion, 1);
+  assert.equal(platform.platformContractVersions.commandEnvelopeVersion, 1);
+  assert.equal(platform.platformContractVersions.receiptEnvelopeVersion, 1);
+  assert.equal(platform.platformContractVersions.errorEnvelopeVersion, 1);
   assert.equal(platform.platformContractVersions.auditEnvelopeVersion, 2);
+  assert.equal(typeof platform.createCommandEnvelope, "function");
+  assert.equal(typeof platform.createReceiptEnvelope, "function");
+  assert.equal(typeof platform.createErrorEnvelope, "function");
 });
 
 test("Step 3 platform composition exposes immutable shared event and audit envelopes", () => {
@@ -134,6 +140,49 @@ test("Step 3 platform composition exposes immutable shared event and audit envel
 
   assert.equal(Object.isFrozen(eventEnvelope), true);
   assert.equal(eventEnvelope.idempotencyKey, "idem_123");
+  const commandEnvelope = platform.createCommandEnvelope({
+    commandType: "ledger.journal_entry.create",
+    aggregateType: "journal_entry",
+    aggregateId: "je_123",
+    companyId: "company_123",
+    actorId: "user_123",
+    sessionRevision: 4,
+    correlationId: "corr_123",
+    idempotencyKey: "idem_123",
+    commandPayload: {
+      journalEntryId: "je_123"
+    }
+  });
+  const receiptEnvelope = platform.createReceiptEnvelope({
+    receiptType: "command_receipt",
+    status: "accepted",
+    companyId: "company_123",
+    actorId: "user_123",
+    correlationId: "corr_123",
+    commandId: commandEnvelope.commandId,
+    commandType: commandEnvelope.commandType,
+    aggregateType: "journal_entry",
+    aggregateId: "je_123",
+    payload: {
+      commandReceiptId: "receipt_123"
+    }
+  });
+  const errorEnvelope = platform.createErrorEnvelope({
+    errorCode: "journal_entry_invalid",
+    message: "Journal entry is invalid.",
+    httpStatus: 409,
+    classification: "validation",
+    retryable: false,
+    correlationId: "corr_123",
+    surfaceCode: "api"
+  });
+  assert.equal(Object.isFrozen(commandEnvelope), true);
+  assert.equal(commandEnvelope.commandEnvelopeVersion, 1);
+  assert.equal(Object.isFrozen(receiptEnvelope), true);
+  assert.equal(receiptEnvelope.receiptEnvelopeVersion, 1);
+  assert.equal(Object.isFrozen(errorEnvelope), true);
+  assert.equal(errorEnvelope.errorEnvelopeVersion, 1);
+  assert.equal(errorEnvelope.code, "journal_entry_invalid");
   assert.equal(Object.isFrozen(auditEnvelope), true);
   assert.equal(auditEnvelope.result, "success");
 });

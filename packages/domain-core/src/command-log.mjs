@@ -1,5 +1,5 @@
 import crypto, { createHash } from "node:crypto";
-import { createEventEnvelope } from "../../events/src/index.mjs";
+import { createCommandEnvelope, createEventEnvelope, createReceiptEnvelope } from "../../events/src/index.mjs";
 import { createCoreCanonicalRepositories } from "./repositories.mjs";
 import { cloneValue as clone } from "./clone.mjs";
 
@@ -78,6 +78,21 @@ export function createCommandMutationRuntime({
         commandPayload: clone(commandPayload ?? {}),
         metadata: clone(metadata || {})
       };
+      const commandEnvelope = createCommandEnvelope({
+        commandId: normalized.commandId,
+        commandType: normalized.commandType,
+        aggregateType: normalized.aggregateType,
+        aggregateId: normalized.aggregateId,
+        companyId: normalized.companyId,
+        actorId: normalized.actorId,
+        sessionRevision: normalized.sessionRevision,
+        correlationId: normalized.correlationId,
+        causationId: normalized.causationId,
+        idempotencyKey: normalized.idempotencyKey,
+        recordedAt: clock(),
+        commandPayload: normalized.commandPayload,
+        metadata: normalized.metadata
+      });
       if (typeof mutation !== "function") {
         throw new TypeError("mutation is required.");
       }
@@ -95,21 +110,62 @@ export function createCommandMutationRuntime({
             idempotencyKey: normalized.idempotencyKey
           });
         if (existingReceipt) {
+          const existingDomainEvents = await transaction.listDomainEvents({
+            companyId: normalized.companyId,
+            commandReceiptId: existingReceipt.commandReceiptId
+          });
+          const existingOutboxMessages = await transaction.listOutboxMessages({
+            companyId: normalized.companyId,
+            commandReceiptId: existingReceipt.commandReceiptId
+          });
+          const existingEvidenceRefs = await transaction.listEvidenceRefs({
+            companyId: normalized.companyId,
+            commandReceiptId: existingReceipt.commandReceiptId
+          });
           return {
             duplicate: true,
+            commandEnvelope: createCommandEnvelope({
+              commandId: existingReceipt.commandId,
+              commandType: existingReceipt.commandType,
+              aggregateType: existingReceipt.aggregateType,
+              aggregateId: existingReceipt.aggregateId,
+              companyId: existingReceipt.companyId,
+              actorId: existingReceipt.actorId,
+              sessionRevision: existingReceipt.sessionRevision,
+              correlationId: existingReceipt.correlationId,
+              causationId: existingReceipt.causationId,
+              idempotencyKey: existingReceipt.idempotencyKey,
+              recordedAt: existingReceipt.recordedAt,
+              commandPayload: existingReceipt.commandPayload,
+              payloadHash: existingReceipt.payloadHash,
+              metadata: existingReceipt.metadata
+            }),
             commandReceipt: existingReceipt,
-            domainEvents: await transaction.listDomainEvents({
-              companyId: normalized.companyId,
-              commandReceiptId: existingReceipt.commandReceiptId
+            receiptEnvelope: createReceiptEnvelope({
+              receiptId: existingReceipt.commandReceiptId,
+              receiptType: "command_receipt",
+              status: "duplicate",
+              companyId: existingReceipt.companyId,
+              actorId: existingReceipt.actorId,
+              correlationId: existingReceipt.correlationId,
+              causationId: existingReceipt.causationId,
+              idempotencyKey: existingReceipt.idempotencyKey,
+              commandId: existingReceipt.commandId,
+              commandType: existingReceipt.commandType,
+              aggregateType: existingReceipt.aggregateType,
+              aggregateId: existingReceipt.aggregateId,
+              recordedAt: existingReceipt.processedAt || existingReceipt.recordedAt,
+              payload: {
+                commandReceiptId: existingReceipt.commandReceiptId,
+                resultingObjectVersion: existingReceipt.resultingObjectVersion,
+                domainEventCount: existingDomainEvents.length,
+                outboxMessageCount: existingOutboxMessages.length,
+                evidenceRefCount: existingEvidenceRefs.length
+              }
             }),
-            outboxMessages: await transaction.listOutboxMessages({
-              companyId: normalized.companyId,
-              commandReceiptId: existingReceipt.commandReceiptId
-            }),
-            evidenceRefs: await transaction.listEvidenceRefs({
-              companyId: normalized.companyId,
-              commandReceiptId: existingReceipt.commandReceiptId
-            }),
+            domainEvents: existingDomainEvents,
+            outboxMessages: existingOutboxMessages,
+            evidenceRefs: existingEvidenceRefs,
             mutationResult: null
           };
         }
@@ -223,7 +279,30 @@ export function createCommandMutationRuntime({
 
         return {
           duplicate: false,
+          commandEnvelope,
           commandReceipt: receipt,
+          receiptEnvelope: createReceiptEnvelope({
+            receiptId: receipt.commandReceiptId,
+            receiptType: "command_receipt",
+            status: receipt.status,
+            companyId: receipt.companyId,
+            actorId: receipt.actorId,
+            correlationId: receipt.correlationId,
+            causationId: receipt.causationId,
+            idempotencyKey: receipt.idempotencyKey,
+            commandId: receipt.commandId,
+            commandType: receipt.commandType,
+            aggregateType: receipt.aggregateType,
+            aggregateId: receipt.aggregateId,
+            recordedAt: receipt.processedAt || receipt.recordedAt,
+            payload: {
+              commandReceiptId: receipt.commandReceiptId,
+              resultingObjectVersion: receipt.resultingObjectVersion,
+              domainEventCount: domainEvents.length,
+              outboxMessageCount: outboxMessages.length,
+              evidenceRefCount: evidenceRefs.length
+            }
+          }),
           domainEvents,
           outboxMessages,
           evidenceRefs,

@@ -149,6 +149,9 @@ test("Phase 3.3 API exposes observability metrics, alarms, provider health, queu
     assert.equal(payload.invariantAlarms.some((item) => item.alarmCode === "provider_health_unhealthy"), true);
     assert.equal(payload.structuredLogs.some((item) => item.eventCode === "phase3.integration.warning"), true);
     assert.equal(payload.structuredLogs.some((item) => item.eventCode === "worker.job.completed"), true);
+    const workerCompletedLog = payload.structuredLogs.find((item) => item.eventCode === "worker.job.completed");
+    assert.equal(workerCompletedLog.metadataJson.receiptEnvelope.receiptEnvelopeVersion, 1);
+    assert.equal(workerCompletedLog.metadataJson.receiptEnvelope.receiptType, "worker_job_result");
     assert.equal(payload.traceChains.some((item) => item.traceId === "phase3-trace-api"), true);
     assert.equal(payload.traceChains.some((item) => item.traceCodes.includes("worker.job")), true);
     assert.equal(payload.metrics.openInvariantAlarmCount >= 1, true);

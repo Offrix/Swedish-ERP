@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { EVENT_ENVELOPE_VERSION } from "../../events/src/index.mjs";
 import { cloneValue as clone } from "./clone.mjs";
 
 export const CORE_CANONICAL_REPOSITORY_TABLE = "core_domain_records";
@@ -176,6 +177,7 @@ function toOutboxMessageObject(record) {
     return null;
   }
   return {
+    eventEnvelopeVersion: record.eventEnvelopeVersion ?? EVENT_ENVELOPE_VERSION,
     eventId: record.eventId,
     companyId: record.companyId,
     eventType: record.eventType,

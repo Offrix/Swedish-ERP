@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { EVENT_ENVELOPE_VERSION } from "../../events/src/index.mjs";
 import {
   cloneSnapshotValue,
   deserializeSnapshotValue,
@@ -227,7 +228,10 @@ function mapOutboxMessageRecord(record) {
   if (!record) {
     return null;
   }
-  return cloneSnapshotValue(record);
+  return {
+    eventEnvelopeVersion: record.eventEnvelopeVersion ?? EVENT_ENVELOPE_VERSION,
+    ...cloneSnapshotValue(record)
+  };
 }
 
 function mapEvidenceRefRecord(record) {
@@ -609,6 +613,7 @@ function mapSqliteOutboxRow(row) {
     return null;
   }
   return {
+    eventEnvelopeVersion: EVENT_ENVELOPE_VERSION,
     outboxMessageId: row.outbox_message_id,
     domainKey: row.domain_key,
     companyId: row.company_id,

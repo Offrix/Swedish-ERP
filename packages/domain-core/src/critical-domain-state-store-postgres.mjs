@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
+import { EVENT_ENVELOPE_VERSION } from "../../events/src/index.mjs";
 import {
   cloneSnapshotValue,
   deserializeSnapshotValue,
@@ -332,6 +333,7 @@ function mapOutboxMessageRow(row) {
     return null;
   }
   return {
+    eventEnvelopeVersion: row.event_envelope_version == null ? EVENT_ENVELOPE_VERSION : Number(row.event_envelope_version),
     outboxMessageId: row.outbox_message_id,
     domainKey: row.domain_key,
     companyId: row.company_id,

@@ -74,13 +74,20 @@ test("Phase 2.2 command runtime writes repository mutation, command receipt and 
   });
 
   assert.equal(execution.duplicate, false);
+  assert.equal(execution.commandEnvelope.commandEnvelopeVersion, 1);
+  assert.equal(execution.commandEnvelope.commandId, "command-portfolio-1");
+  assert.equal(execution.commandEnvelope.payloadHash.length, 64);
   assert.equal(execution.commandReceipt.commandType, "core.portfolio_membership.create");
+  assert.equal(execution.receiptEnvelope.receiptEnvelopeVersion, 1);
+  assert.equal(execution.receiptEnvelope.status, "accepted");
+  assert.equal(execution.receiptEnvelope.commandId, execution.commandReceipt.commandId);
   assert.equal(execution.commandReceipt.expectedObjectVersion, null);
   assert.equal(execution.commandReceipt.resultingObjectVersion, 1);
   assert.equal(execution.commandReceipt.sessionRevision, 3);
   assert.equal(execution.domainEvents.length, 1);
   assert.equal(execution.domainEvents[0].commandReceiptId, execution.commandReceipt.commandReceiptId);
   assert.equal(execution.outboxMessages.length, 1);
+  assert.equal(execution.outboxMessages[0].eventEnvelopeVersion, 1);
   assert.equal(execution.outboxMessages[0].commandReceiptId, execution.commandReceipt.commandReceiptId);
   assert.equal(execution.evidenceRefs.length, 1);
   assert.equal(execution.evidenceRefs[0].commandReceiptId, execution.commandReceipt.commandReceiptId);
@@ -98,6 +105,7 @@ test("Phase 2.2 command runtime writes repository mutation, command receipt and 
   assert.equal(domainEvents.length, 1);
   const outboxMessages = await runtime.listOutboxMessages({ companyId: COMPANY_ID });
   assert.equal(outboxMessages.length, 1);
+  assert.equal(outboxMessages[0].eventEnvelopeVersion, 1);
   const evidenceRefs = await runtime.listEvidenceRefs({ companyId: COMPANY_ID });
   assert.equal(evidenceRefs.length, 1);
 });
@@ -150,6 +158,9 @@ test("Phase 2.2 command runtime suppresses duplicate commands by idempotency key
 
   assert.equal(first.duplicate, false);
   assert.equal(second.duplicate, true);
+  assert.equal(second.commandEnvelope.commandEnvelopeVersion, 1);
+  assert.equal(second.receiptEnvelope.receiptEnvelopeVersion, 1);
+  assert.equal(second.receiptEnvelope.status, "duplicate");
   assert.equal(mutationCalls, 1);
   assert.equal((await runtime.listCommandReceipts({ companyId: COMPANY_ID })).length, 1);
   assert.equal((await runtime.listDomainEvents({ companyId: COMPANY_ID })).length, 0);

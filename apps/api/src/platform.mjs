@@ -64,9 +64,16 @@ import {
 import { INTEGRATION_PROVIDER_BASELINES } from "../../../packages/domain-integrations/src/index.mjs";
 import {
   AUDIT_EVENT_VERSION,
+  COMMAND_ENVELOPE_VERSION,
+  ERROR_ENVELOPE_VERSION,
   EVENT_ENVELOPE_VERSION,
+  RECEIPT_ENVELOPE_VERSION,
   createAuditEnvelope,
+  createCommandEnvelope,
+  createErrorEnvelope,
   createEventEnvelope
+  ,
+  createReceiptEnvelope
 } from "../../../packages/events/src/index.mjs";
 import {
   createBootstrapModePolicy,
@@ -763,7 +770,13 @@ function buildRuntimeContracts(runtimeModeProfile, bootstrapModePolicy) {
     }),
     events: Object.freeze({
       eventEnvelopeVersion: EVENT_ENVELOPE_VERSION,
+      commandEnvelopeVersion: COMMAND_ENVELOPE_VERSION,
+      receiptEnvelopeVersion: RECEIPT_ENVELOPE_VERSION,
+      errorEnvelopeVersion: ERROR_ENVELOPE_VERSION,
       auditEnvelopeVersion: AUDIT_EVENT_VERSION,
+      createCommandEnvelope,
+      createReceiptEnvelope,
+      createErrorEnvelope,
       createEventEnvelope,
       createAuditEnvelope
     })
@@ -1008,6 +1021,9 @@ export function createApiPlatform(options = {}) {
   );
   const contractVersions = Object.freeze({
     eventEnvelopeVersion: EVENT_ENVELOPE_VERSION,
+    commandEnvelopeVersion: COMMAND_ENVELOPE_VERSION,
+    receiptEnvelopeVersion: RECEIPT_ENVELOPE_VERSION,
+    errorEnvelopeVersion: ERROR_ENVELOPE_VERSION,
     auditEnvelopeVersion: AUDIT_EVENT_VERSION
   });
   const regulatoryChangeCalendar = createRegulatoryChangeCalendar({
@@ -1332,6 +1348,18 @@ export function createApiPlatform(options = {}) {
     },
     createEventEnvelope: {
       value: (input) => createEventEnvelope(input),
+      enumerable: false
+    },
+    createCommandEnvelope: {
+      value: (input) => createCommandEnvelope(input),
+      enumerable: false
+    },
+    createReceiptEnvelope: {
+      value: (input) => createReceiptEnvelope(input),
+      enumerable: false
+    },
+    createErrorEnvelope: {
+      value: (input) => createErrorEnvelope(input),
       enumerable: false
     },
     createAuditEnvelope: {

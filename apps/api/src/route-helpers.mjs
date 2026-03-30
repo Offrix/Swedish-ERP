@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createErrorEnvelope } from "../../../packages/events/src/index.mjs";
 
 export const CANONICAL_API_VERSION = "2026-03-27";
 export const DEFAULT_API_BODY_LIMIT_BYTES = 1024 * 1024;
@@ -79,22 +80,37 @@ export function writeError(res, error) {
     error.supportRef = ensureRequestContext(res).requestId;
   }
   const errorPayload = buildErrorPayload(error, statusCode);
+  const errorEnvelopeClassification = normalizeErrorEnvelopeClassification(errorPayload.classification);
   const meta = buildEnvelopeMeta(res, {
     classification: errorPayload.classification
   });
-  const envelope = {
-    meta,
-    data: null,
-    error: errorPayload.code,
-    errorDetail: errorPayload,
+  const errorEnvelope = createErrorEnvelope({
     errorCode: errorPayload.code,
     message: errorPayload.message,
-    classification: errorPayload.classification,
+    httpStatus: statusCode,
+    classification: errorEnvelopeClassification,
     retryable: errorPayload.retryable,
     reviewRequired: errorPayload.reviewRequired,
     denialReasonCode: errorPayload.denialReasonCode,
     supportRef: errorPayload.supportRef,
-    details: errorPayload.details
+    details: errorPayload.details,
+    correlationId: meta.correlationId,
+    idempotencyKey: meta.idempotencyKey,
+    surfaceCode: "api"
+  });
+  const envelope = {
+    meta,
+    data: null,
+    error: errorEnvelope.errorCode,
+    errorDetail: errorEnvelope,
+    errorCode: errorEnvelope.errorCode,
+    message: errorEnvelope.message,
+    classification: meta.classification,
+    retryable: errorEnvelope.retryable,
+    reviewRequired: errorEnvelope.reviewRequired,
+    denialReasonCode: errorEnvelope.denialReasonCode || null,
+    supportRef: errorEnvelope.supportRef || null,
+    details: errorEnvelope.details
   };
   res.writeHead(statusCode, buildEnvelopeHeaders(meta, error.headers));
   res.end(`${JSON.stringify(envelope, null, 2)}\n`);
@@ -334,6 +350,13 @@ function normalizeErrorDetails(details) {
 
 function isRetryableErrorClassification(classification) {
   return classification === "technical" || classification === "downstream" || classification === "rate_limited";
+}
+
+function normalizeErrorEnvelopeClassification(classification) {
+  if (classification === "conflict") {
+    return "validation";
+  }
+  return classification;
 }
 
 function classifySuccessStatus(statusCode) {

@@ -82,6 +82,8 @@ test("Phase 4.1 API emits canonical success, error and webhook envelopes", async
     assert.equal(deniedPayload.meta.apiVersion, "2026-03-27");
     assert.equal(deniedPayload.meta.classification, "permission");
     assert.equal(deniedPayload.error, "public_api_scope_denied");
+    assert.equal(deniedPayload.errorDetail.errorEnvelopeVersion, 1);
+    assert.equal(deniedPayload.errorDetail.errorCode, "public_api_scope_denied");
     assert.equal(deniedPayload.errorDetail.code, "public_api_scope_denied");
     assert.equal(deniedPayload.errorDetail.denialReasonCode, "public_api_scope_denied");
     assert.equal(deniedPayload.errorCode, "public_api_scope_denied");
@@ -137,6 +139,7 @@ test("Phase 4.1 API emits canonical success, error and webhook envelopes", async
     assert.equal(deliveredWebhookBodies[0].meta.mode, "sandbox");
     assert.equal(deliveredWebhookBodies[0].meta.classification, "event");
     assert.equal(deliveredWebhookBodies[0].meta.idempotencyKey, "phase4-webhook-event");
+    assert.equal(deliveredWebhookBodies[0].data.eventEnvelopeVersion, 1);
     assert.equal(deliveredWebhookBodies[0].data.eventId, emitted.eventId);
     assert.equal(deliveredWebhookBodies[0].eventId, emitted.eventId);
   } finally {
@@ -171,6 +174,8 @@ test("Phase 4.1 feature-disabled and not-found routes emit canonical error envel
     assert.equal(disabledPayload.meta.apiVersion, "2026-03-27");
     assert.equal(disabledPayload.meta.classification, "technical");
     assert.equal(disabledPayload.error, "feature_disabled");
+    assert.equal(disabledPayload.errorDetail.errorEnvelopeVersion, 1);
+    assert.equal(disabledPayload.errorDetail.errorCode, "feature_disabled");
     assert.equal(disabledPayload.errorDetail.code, "feature_disabled");
     assert.equal(disabledPayload.errorDetail.retryable, true);
     assert.equal(disabledPayload.message, "FAS 4 VAT routes are disabled by configuration.");
@@ -183,6 +188,8 @@ test("Phase 4.1 feature-disabled and not-found routes emit canonical error envel
     assert.equal(missingPayload.meta.apiVersion, "2026-03-27");
     assert.equal(missingPayload.meta.classification, "validation");
     assert.equal(missingPayload.error, "not_found");
+    assert.equal(missingPayload.errorDetail.errorEnvelopeVersion, 1);
+    assert.equal(missingPayload.errorDetail.errorCode, "not_found");
     assert.equal(missingPayload.errorDetail.code, "not_found");
     assert.equal(missingPayload.errorDetail.retryable, false);
     assert.equal(missingPayload.message, "Route was not found.");

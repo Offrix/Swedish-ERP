@@ -3,9 +3,14 @@ import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
 
 export const EVENT_ENVELOPE_VERSION = 1;
 export const AUDIT_EVENT_VERSION = 2;
+export const COMMAND_ENVELOPE_VERSION = 1;
+export const RECEIPT_ENVELOPE_VERSION = 1;
+export const ERROR_ENVELOPE_VERSION = 1;
 
 const AUDIT_RESULTS = new Set(["success", "blocked", "failed"]);
 const AUDIT_ACTOR_TYPES = new Set(["user", "system", "support", "service"]);
+const RECEIPT_RESULTS = new Set(["accepted", "duplicate", "replayed", "completed", "skipped", "failed"]);
+const ERROR_CLASSIFICATIONS = new Set(["validation", "permission", "technical", "downstream", "rate_limited"]);
 const AUDIT_RESERVED_KEYS = new Set([
   "auditId",
   "auditEventId",
@@ -56,6 +61,13 @@ function requirePayload(payload) {
   return payload;
 }
 
+function requireBoolean(value, fieldName) {
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${fieldName} must be a boolean.`);
+  }
+  return value;
+}
+
 export function createEventEnvelope({
   eventId = crypto.randomUUID(),
   eventType,
@@ -71,6 +83,7 @@ export function createEventEnvelope({
   payload
 } = {}) {
   return Object.freeze({
+    eventEnvelopeVersion: EVENT_ENVELOPE_VERSION,
     eventId: requireText(eventId, "eventId"),
     eventType: requireText(eventType, "eventType"),
     aggregateType: requireText(aggregateType, "aggregateType"),
@@ -84,6 +97,133 @@ export function createEventEnvelope({
     ...(idempotencyKey ? { idempotencyKey: optionalText(idempotencyKey, "idempotencyKey") } : {}),
     payload: requirePayload(payload)
   });
+}
+
+export function createCommandEnvelope({
+  commandId = crypto.randomUUID(),
+  commandType,
+  aggregateType,
+  aggregateId,
+  companyId,
+  actorId,
+  sessionRevision,
+  correlationId,
+  causationId = undefined,
+  idempotencyKey,
+  recordedAt = new Date(),
+  commandPayload = {},
+  payloadHash = undefined,
+  metadata = {}
+} = {}) {
+  return Object.freeze({
+    commandEnvelopeVersion: COMMAND_ENVELOPE_VERSION,
+    commandId: requireText(commandId, "commandId"),
+    commandType: requireText(commandType, "commandType"),
+    aggregateType: requireText(aggregateType, "aggregateType"),
+    aggregateId: requireText(aggregateId, "aggregateId"),
+    companyId: requireText(companyId, "companyId"),
+    actorId: requireText(actorId, "actorId"),
+    sessionRevision: requireInteger(sessionRevision, "sessionRevision"),
+    correlationId: requireText(correlationId, "correlationId"),
+    ...(causationId ? { causationId: optionalText(causationId, "causationId") } : {}),
+    idempotencyKey: requireText(idempotencyKey, "idempotencyKey"),
+    recordedAt: normalizeIsoTimestamp(recordedAt, "recordedAt"),
+    payloadHash: requireText(payloadHash || hashPayload(commandPayload), "payloadHash"),
+    commandPayload: clone(commandPayload ?? {}),
+    metadata: clone(metadata || {})
+  });
+}
+
+export function createReceiptEnvelope({
+  receiptId = crypto.randomUUID(),
+  receiptType,
+  status,
+  companyId,
+  actorId,
+  correlationId,
+  causationId = undefined,
+  idempotencyKey = undefined,
+  commandId = undefined,
+  commandType = undefined,
+  aggregateType = undefined,
+  aggregateId = undefined,
+  recordedAt = new Date(),
+  payload = {}
+} = {}) {
+  const normalizedStatus = requireText(status, "status").toLowerCase();
+  if (!RECEIPT_RESULTS.has(normalizedStatus)) {
+    throw new TypeError(`status must be one of: ${[...RECEIPT_RESULTS].join(", ")}.`);
+  }
+  return Object.freeze({
+    receiptEnvelopeVersion: RECEIPT_ENVELOPE_VERSION,
+    receiptId: requireText(receiptId, "receiptId"),
+    receiptType: requireText(receiptType, "receiptType"),
+    status: normalizedStatus,
+    companyId: requireText(companyId, "companyId"),
+    actorId: requireText(actorId, "actorId"),
+    correlationId: requireText(correlationId, "correlationId"),
+    ...(causationId ? { causationId: optionalText(causationId, "causationId") } : {}),
+    ...(idempotencyKey ? { idempotencyKey: optionalText(idempotencyKey, "idempotencyKey") } : {}),
+    ...(commandId ? { commandId: optionalText(commandId, "commandId") } : {}),
+    ...(commandType ? { commandType: optionalText(commandType, "commandType") } : {}),
+    ...(aggregateType ? { aggregateType: optionalText(aggregateType, "aggregateType") } : {}),
+    ...(aggregateId ? { aggregateId: optionalText(aggregateId, "aggregateId") } : {}),
+    recordedAt: normalizeIsoTimestamp(recordedAt, "recordedAt"),
+    payload: clone(requirePayload(payload))
+  });
+}
+
+export function createErrorEnvelope({
+  errorId = crypto.randomUUID(),
+  errorCode,
+  message,
+  httpStatus,
+  classification,
+  retryable,
+  reviewRequired = false,
+  denialReasonCode = undefined,
+  supportRef = undefined,
+  details = [],
+  correlationId,
+  causationId = undefined,
+  idempotencyKey = undefined,
+  surfaceCode,
+  recordedAt = new Date()
+} = {}) {
+  const normalizedClassification = requireText(classification, "classification");
+  if (!ERROR_CLASSIFICATIONS.has(normalizedClassification)) {
+    throw new TypeError(`classification must be one of: ${[...ERROR_CLASSIFICATIONS].join(", ")}.`);
+  }
+  return Object.freeze({
+    errorEnvelopeVersion: ERROR_ENVELOPE_VERSION,
+    errorId: requireText(errorId, "errorId"),
+    errorCode: requireText(errorCode, "errorCode"),
+    code: requireText(errorCode, "errorCode"),
+    message: requireText(message, "message"),
+    httpStatus: requireInteger(httpStatus, "httpStatus"),
+    classification: normalizedClassification,
+    retryable: requireBoolean(retryable, "retryable"),
+    reviewRequired: requireBoolean(reviewRequired, "reviewRequired"),
+    ...(denialReasonCode ? { denialReasonCode: optionalText(denialReasonCode, "denialReasonCode") } : {}),
+    ...(supportRef ? { supportRef: optionalText(supportRef, "supportRef") } : {}),
+    details: clone(Array.isArray(details) ? details : []),
+    correlationId: requireText(correlationId, "correlationId"),
+    ...(causationId ? { causationId: optionalText(causationId, "causationId") } : {}),
+    ...(idempotencyKey ? { idempotencyKey: optionalText(idempotencyKey, "idempotencyKey") } : {}),
+    surfaceCode: requireText(surfaceCode, "surfaceCode"),
+    recordedAt: normalizeIsoTimestamp(recordedAt, "recordedAt")
+  });
+}
+
+function requireInteger(value, fieldName) {
+  if (!Number.isInteger(value)) {
+    throw new TypeError(`${fieldName} must be an integer.`);
+  }
+  return value;
+}
+
+function hashPayload(value) {
+  return crypto.createHash("sha256").update(stableStringify(value ?? null)).digest("hex");
 }
 
 export function createAuditEnvelope({
@@ -197,6 +337,7 @@ export function isEventEnvelope(value) {
   return Boolean(
     value
       && typeof value === "object"
+      && value.eventEnvelopeVersion === EVENT_ENVELOPE_VERSION
       && typeof value.eventId === "string"
       && typeof value.eventType === "string"
       && typeof value.aggregateType === "string"
@@ -230,6 +371,63 @@ export function isAuditEnvelope(value) {
       && typeof value.correlationId === "string"
       && typeof value.auditClass === "string"
       && typeof value.integrityHash === "string"
+  );
+}
+
+export function isCommandEnvelope(value) {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && value.commandEnvelopeVersion === COMMAND_ENVELOPE_VERSION
+      && typeof value.commandId === "string"
+      && typeof value.commandType === "string"
+      && typeof value.aggregateType === "string"
+      && typeof value.aggregateId === "string"
+      && typeof value.companyId === "string"
+      && typeof value.actorId === "string"
+      && Number.isInteger(value.sessionRevision)
+      && typeof value.correlationId === "string"
+      && typeof value.idempotencyKey === "string"
+      && typeof value.recordedAt === "string"
+      && typeof value.payloadHash === "string"
+      && "commandPayload" in value
+  );
+}
+
+export function isReceiptEnvelope(value) {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && value.receiptEnvelopeVersion === RECEIPT_ENVELOPE_VERSION
+      && typeof value.receiptId === "string"
+      && typeof value.receiptType === "string"
+      && typeof value.status === "string"
+      && RECEIPT_RESULTS.has(value.status)
+      && typeof value.companyId === "string"
+      && typeof value.actorId === "string"
+      && typeof value.correlationId === "string"
+      && typeof value.recordedAt === "string"
+      && "payload" in value
+  );
+}
+
+export function isErrorEnvelope(value) {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && value.errorEnvelopeVersion === ERROR_ENVELOPE_VERSION
+      && typeof value.errorId === "string"
+      && typeof value.errorCode === "string"
+      && typeof value.message === "string"
+      && Number.isInteger(value.httpStatus)
+      && typeof value.classification === "string"
+      && ERROR_CLASSIFICATIONS.has(value.classification)
+      && typeof value.retryable === "boolean"
+      && typeof value.reviewRequired === "boolean"
+      && Array.isArray(value.details)
+      && typeof value.correlationId === "string"
+      && typeof value.surfaceCode === "string"
+      && typeof value.recordedAt === "string"
   );
 }
 

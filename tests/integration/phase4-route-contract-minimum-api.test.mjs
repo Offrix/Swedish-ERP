@@ -98,6 +98,8 @@ test("Phase 4.5 fiscal-year routes expose canonical envelopes, denial reasons, c
     });
     assertCanonicalMeta(brokenYear.meta, { classification: "conflict" });
     assert.equal(brokenYear.error, "calendar_year_required");
+    assert.equal(brokenYear.errorDetail.errorEnvelopeVersion, 1);
+    assert.equal(brokenYear.errorDetail.errorCode, "calendar_year_required");
     assert.equal(brokenYear.errorDetail.code, "calendar_year_required");
 
     const calendarYear = await requestJson(baseUrl, "/v1/fiscal-years", {

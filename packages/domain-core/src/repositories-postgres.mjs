@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { EVENT_ENVELOPE_VERSION } from "../../events/src/index.mjs";
 import { cloneValue as clone } from "./clone.mjs";
 import {
   COMMAND_RECEIPT_STATUSES,
@@ -126,6 +127,7 @@ function mapOutboxRow(row) {
     return null;
   }
   return {
+    eventEnvelopeVersion: row.event_envelope_version == null ? EVENT_ENVELOPE_VERSION : Number(row.event_envelope_version),
     eventId: row.event_id,
     companyId: row.company_id,
     eventType: row.event_type,

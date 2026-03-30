@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { EVENT_ENVELOPE_VERSION } from "../../events/src/index.mjs";
 import { cloneValue as clone } from "../../domain-core/src/clone.mjs";
 import { createConfiguredSecretStore } from "../../domain-core/src/secret-runtime.mjs";
 
@@ -615,12 +616,14 @@ export function createPublicApiModule({
           idempotencyKey: resolvedEventKey
         },
         data: {
+          eventEnvelopeVersion: EVENT_ENVELOPE_VERSION,
           eventId: event.eventId,
           eventType: event.eventType,
           resourceType: event.resourceType,
           resourceId: event.resourceId,
           payload: clone(event.payloadJson)
         },
+        eventEnvelopeVersion: EVENT_ENVELOPE_VERSION,
         eventId: event.eventId,
         eventType: event.eventType,
         resourceType: event.resourceType,

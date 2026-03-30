@@ -1,6 +1,7 @@
 import os from "node:os";
 import { createApiPlatform } from "../../api/src/platform.mjs";
 import { createInMemoryAsyncJobStore, createPostgresAsyncJobStore } from "../../../packages/domain-core/src/jobs.mjs";
+import { createErrorEnvelope, createReceiptEnvelope } from "../../../packages/events/src/index.mjs";
 import { isMainModule } from "../../../scripts/lib/repo.mjs";
 import { assertRuntimeStartupAllowed } from "../../../scripts/lib/runtime-diagnostics.mjs";
 
@@ -251,6 +252,22 @@ export async function runWorkerBatch({
         workerId
       });
       if (started?.skipped) {
+        const skippedReceiptEnvelope = createReceiptEnvelope({
+          receiptId: started.job.jobId,
+          receiptType: "worker_job_result",
+          status: "skipped",
+          companyId: started.job.companyId,
+          actorId: workerId,
+          correlationId: started.job.correlationId || started.job.jobId,
+          causationId: started.job.jobId,
+          aggregateType: "async_job",
+          aggregateId: started.job.jobId,
+          recordedAt: new Date(),
+          payload: {
+            jobType: started.job.jobType,
+            skipReasonCode: started.skipReasonCode
+          }
+        });
         if (typeof platform.recordStructuredLog === "function") {
           platform.recordStructuredLog({
             companyId: claimedJob.companyId,
@@ -264,7 +281,8 @@ export async function runWorkerBatch({
             actorId: workerId,
             metadata: {
               jobType: started.job.jobType,
-              skipReasonCode: started.skipReasonCode
+              skipReasonCode: started.skipReasonCode,
+              receiptEnvelope: skippedReceiptEnvelope
             }
           });
         }
@@ -307,16 +325,36 @@ export async function runWorkerBatch({
             workerId,
             attemptId: started.attempt.jobAttemptId,
             claimTtlSeconds: overrideClaimTtlSeconds
-          }),
+        }),
         logger
       });
+      const completionReceiptEnvelope = createReceiptEnvelope({
+        receiptId: started.attempt.jobAttemptId,
+        receiptType: "worker_job_result",
+        status: "completed",
+        companyId: started.job.companyId,
+        actorId: workerId,
+        correlationId: started.job.correlationId || started.job.jobId,
+        causationId: started.job.jobId,
+        aggregateType: "async_job",
+        aggregateId: started.job.jobId,
+        recordedAt: new Date(),
+        payload: {
+          jobType: started.job.jobType,
+          resultCode: result?.resultCode || "succeeded"
+        }
+      });
+      const normalizedResultPayload = {
+        ...(result?.resultPayload || result?.payload || {}),
+        receiptEnvelope: completionReceiptEnvelope
+      };
       await platform.completeRuntimeJob({
         jobId: started.job.jobId,
         claimToken: started.job.claimToken,
         workerId,
         attemptId: started.attempt.jobAttemptId,
         resultCode: result?.resultCode || "succeeded",
-        resultPayload: result?.resultPayload || result?.payload || {}
+        resultPayload: normalizedResultPayload
       });
       if (typeof platform.recordStructuredLog === "function") {
         platform.recordStructuredLog({
@@ -333,7 +371,8 @@ export async function runWorkerBatch({
           actorId: workerId,
           metadata: {
             jobType: started.job.jobType,
-            resultCode: result?.resultCode || "succeeded"
+            resultCode: result?.resultCode || "succeeded",
+            receiptEnvelope: completionReceiptEnvelope
           }
         });
       }
@@ -352,6 +391,25 @@ export async function runWorkerBatch({
       const referenceJob = started?.job || claimedJob;
       const referenceAttempt = started?.attempt || { attemptNo: Number(referenceJob.attemptCount || 0) + 1, jobAttemptId: null };
       const failure = classifyWorkerFailure(error, referenceAttempt.attemptNo, referenceJob.maxAttempts || 1);
+      const failureErrorEnvelope = createErrorEnvelope({
+        errorCode: failure.errorCode,
+        message: failure.errorMessage,
+        httpStatus: 500,
+        classification: failure.errorClass === "persistent_business" ? "validation" : "technical",
+        retryable: failure.retryDelaySeconds != null,
+        reviewRequired: failure.errorClass === "persistent_business",
+        correlationId: referenceJob.correlationId || referenceJob.jobId,
+        causationId: referenceJob.jobId,
+        surfaceCode: "worker",
+        recordedAt: new Date(),
+        details: [
+          {
+            code: failure.errorClass,
+            field: null,
+            message: failure.terminalReason
+          }
+        ]
+      });
       await platform.failRuntimeJob({
         jobId: referenceJob.jobId,
         claimToken: referenceJob.claimToken,
@@ -382,7 +440,8 @@ export async function runWorkerBatch({
             errorCode: failure.errorCode,
             errorClass: failure.errorClass,
             retryDelaySeconds: failure.retryDelaySeconds,
-            terminalReason: failure.terminalReason
+            terminalReason: failure.terminalReason,
+            errorEnvelope: failureErrorEnvelope
           }
         });
       }

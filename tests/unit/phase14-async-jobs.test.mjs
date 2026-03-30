@@ -37,6 +37,8 @@ test("Phase 14 Step 4 async jobs support retry scheduling and completion", async
   assert.equal(typeof attempts[0].claimedAt, "string");
   assert.equal(typeof attempts[0].claimExpiresAt, "string");
   assert.equal(attempts[0].resultCode, "noop");
+  assert.equal(attempts[0].resultPayload.receiptEnvelope.receiptEnvelopeVersion, 1);
+  assert.equal(attempts[0].resultPayload.receiptEnvelope.receiptType, "worker_job_result");
 });
 
 test("Phase 14 Step 4 async jobs dead-letter unsupported handlers and allow replay planning", async () => {
@@ -65,11 +67,17 @@ test("Phase 14 Step 4 async jobs dead-letter unsupported handlers and allow repl
   const deadLetters = await platform.listRuntimeDeadLetters({
     companyId: queuedJob.companyId
   });
+  const failureLogs = platform.listStructuredLogs({
+    companyId: queuedJob.companyId
+  });
   const deadLetter = deadLetters.find((candidate) => candidate.jobId === queuedJob.jobId);
   assert.equal(deadLetteredJob.status, "dead_lettered");
   assert.equal(Boolean(deadLetter), true);
   assert.equal(deadLetter.poisonPillDetected, true);
   assert.equal(deadLetter.poisonReasonCode, "missing_handler");
+  const workerFailureLog = failureLogs.find((candidate) => candidate.eventCode === "worker.job.failed");
+  assert.equal(workerFailureLog.metadataJson.errorEnvelope.errorEnvelopeVersion, 1);
+  assert.equal(workerFailureLog.metadataJson.errorEnvelope.errorCode, "job_handler_missing");
 
   const replayPlan = await platform.planRuntimeJobReplay({
     jobId: queuedJob.jobId,
