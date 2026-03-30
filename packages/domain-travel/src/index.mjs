@@ -1,9 +1,11 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 import { COUNTRY_NAME_BY_CODE, FOREIGN_NORMAL_AMOUNTS_2026 } from "./normal-amounts-2026.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+export const TRAVEL_RULEPACK_CODE = "RP-TRAVEL-SE";
 const DEFAULT_RULE_VERSION = "travel-se-2026.1";
 
 const DOMESTIC_FULL_DAY_2026 = 300;
@@ -61,6 +63,49 @@ const COUNTRY_ALIAS_OVERRIDES = Object.freeze({
   "other countries and areas": "Ovriga lander och omraden"
 });
 
+const DEFAULT_TRAVEL_RULESET = Object.freeze({
+  ruleYear: 2026,
+  domesticAllowances: Object.freeze({
+    fullDay: DOMESTIC_FULL_DAY_2026,
+    halfDay: DOMESTIC_HALF_DAY_2026,
+    longTripThreeMonthsFullDay: DOMESTIC_LONG_TRIP_THREE_MONTHS_FULL_DAY_2026,
+    longTripTwoYearsFullDay: DOMESTIC_LONG_TRIP_TWO_YEARS_FULL_DAY_2026,
+    nightAllowance: DOMESTIC_NIGHT_ALLOWANCE_2026
+  }),
+  distanceThresholdKm: DOMESTIC_DISTANCE_THRESHOLD_KM,
+  preApprovalThresholdSek: TRAVEL_PREAPPROVAL_THRESHOLD_SEK,
+  domesticMealReductionTable: copy(DOMESTIC_MEAL_REDUCTION_TABLE_2026),
+  foreignMealReductionRates: copy(FOREIGN_MEAL_REDUCTION_RATES),
+  mileageRatesPerKm: copy(MILEAGE_RATES_PER_KM_2026),
+  foreignNormalAmounts: copy(FOREIGN_NORMAL_AMOUNTS_2026)
+});
+
+const TRAVEL_RULE_PACKS = Object.freeze([
+  {
+    rulePackId: "travel-se-2026.1",
+    rulePackCode: TRAVEL_RULEPACK_CODE,
+    domain: "travel",
+    jurisdiction: "SE",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    version: "2026.1",
+    checksum: "travel-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Pins Swedish 2026 travel allowances, mileage rates, meal reductions and foreign normal amounts.",
+    machineReadableRules: copy(DEFAULT_TRAVEL_RULESET),
+    humanReadableExplanation: [
+      "Travel allowances, mileage rates and foreign normal amounts are effective-dated via rulepacks.",
+      "Domestic and foreign travel calculations pin the published Swedish travel pack instead of hardcoded annual constants."
+    ],
+    testVectors: [
+      { vectorId: "travel-domestic-2026" },
+      { vectorId: "travel-foreign-2026" },
+      { vectorId: "travel-mileage-2026" }
+    ],
+    migrationNotes: ["Historical travel claims must pin rulepack refs on every valuation and downstream payroll handoff."]
+  }
+]);
+
 export function createTravelPlatform(options = {}) {
   return createTravelEngine(options);
 }
@@ -70,9 +115,11 @@ export function createTravelEngine({
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  ruleRegistry = null,
   hrPlatform = null,
   documentPlatform = null
 } = {}) {
+  const rules = ruleRegistry || createRulePackRegistry({ clock, seedRulePacks: TRAVEL_RULE_PACKS });
   const state = {
     foreignAllowanceTables: new Map(),
     foreignAllowanceIdsByTaxYear: new Map(),
@@ -102,7 +149,10 @@ export function createTravelEngine({
     auditEvents: []
   };
 
-  seedForeignAllowances(state, { taxYear: "2026", allowances: FOREIGN_NORMAL_AMOUNTS_2026, clock });
+  syncForeignAllowancesFromRulePacks(state, {
+    rulePacks: rules.listRulePacks({ domain: "travel", jurisdiction: "SE", status: "published" }),
+    clock
+  });
   if (seedDemo) {
     seedTravelDemo(state, { clock, companyId: DEMO_COMPANY_ID });
   }
@@ -111,6 +161,7 @@ export function createTravelEngine({
     travelApprovalStatuses: TRAVEL_APPROVAL_STATUSES,
     mileageVehicleTypes: MILEAGE_VEHICLE_TYPES,
     expensePaymentMethods: EXPENSE_PAYMENT_METHODS,
+    listTravelRulePacks,
     listForeignNormalAmounts,
     getForeignNormalAmount,
     listTravelClaims,
@@ -121,12 +172,47 @@ export function createTravelEngine({
     registerTravelPayrollConsumption
   };
 
+  Object.defineProperty(engine, "rulePackGovernance", {
+    value: Object.freeze({
+      listRulePacks: (filters = {}) => rules.listRulePacks({ domain: "travel", jurisdiction: "SE", ...filters }),
+      getRulePack: (filters) => rules.getRulePack(filters),
+      createDraftRulePackVersion: (input) => rules.createDraftRulePackVersion(input),
+      validateRulePackVersion: (input) => rules.validateRulePackVersion(input),
+      approveRulePackVersion: (input) => rules.approveRulePackVersion(input),
+      publishRulePackVersion(input) {
+        const published = rules.publishRulePackVersion(input);
+        syncForeignAllowancesFromRulePacks(state, {
+          rulePacks: rules.listRulePacks({ domain: "travel", jurisdiction: "SE", status: "published" }),
+          clock
+        });
+        return published;
+      },
+      rollbackRulePackVersion(input) {
+        const rollback = rules.rollbackRulePackVersion(input);
+        syncForeignAllowancesFromRulePacks(state, {
+          rulePacks: rules.listRulePacks({ domain: "travel", jurisdiction: "SE", status: "published" }),
+          clock
+        });
+        return rollback;
+      },
+      listRulePackRollbacks: (filters = {}) => rules.listRulePackRollbacks({ domain: "travel", jurisdiction: "SE", ...filters })
+    }),
+    enumerable: false
+  });
+
   Object.defineProperty(engine, "__durableState", {
     value: state,
     enumerable: false
   });
 
   return engine;
+
+  function listTravelRulePacks({ effectiveDate = null } = {}) {
+    return rules
+      .listRulePacks({ domain: "travel", jurisdiction: "SE" })
+      .filter((candidate) => !effectiveDate || (candidate.effectiveFrom <= effectiveDate && (!candidate.effectiveTo || candidate.effectiveTo > effectiveDate)))
+      .map(copy);
+  }
 
   function listForeignNormalAmounts({ taxYear = "2026" } = {}) {
     const resolvedTaxYear = normalizeTaxYear(taxYear);
@@ -258,8 +344,7 @@ export function createTravelEngine({
     const normalizedAdvances = normalizeTravelAdvances({ travelAdvances });
 
     const valuation = valueTravelClaim({
-      state,
-      clock,
+      rules,
       claim,
       countrySegments: resolvedSegments,
       mealEvents: normalizedMealEvents,
@@ -394,32 +479,35 @@ export function createTravelEngine({
   }
 }
 
-function valueTravelClaim({ state, claim, countrySegments, mealEvents, mileageLogs, expenseReceipts, travelAdvances }) {
+function valueTravelClaim({ rules, claim, countrySegments, mealEvents, mileageLogs, expenseReceipts, travelAdvances }) {
+  const rulePack = resolveTravelRulePack(rules, claim.startAt.slice(0, 10));
+  const travelRules = requireTravelRules(rulePack);
+  const ruleYear = resolveTravelRuleYear(rulePack);
   const travelType = countrySegments.every((segment) => segment.countryName === "Sverige") ? "domestic" : "foreign";
   const dateKeys = buildDateKeys(claim.startAt.slice(0, 10), claim.endAt.slice(0, 10));
   const hasOvernight = dateKeys.length > 1;
   const distanceRuleMet =
-    Number(claim.distanceFromHomeKm || 0) > DOMESTIC_DISTANCE_THRESHOLD_KM &&
-    Number(claim.distanceFromRegularWorkKm || 0) > DOMESTIC_DISTANCE_THRESHOLD_KM;
+    Number(claim.distanceFromHomeKm || 0) > Number(travelRules.distanceThresholdKm || 0) &&
+    Number(claim.distanceFromRegularWorkKm || 0) > Number(travelRules.distanceThresholdKm || 0);
   const statutoryTaxFreeAllowed = hasOvernight && distanceRuleMet;
 
   const dayRows = buildDayRows({
-    state,
     claim,
     travelType,
     countrySegments,
     mealEvents,
     hasOvernight,
-    statutoryTaxFreeAllowed
+    statutoryTaxFreeAllowed,
+    travelRules
   });
   const nightRows = buildNightRows({
-    state,
     claim,
     travelType,
     countrySegments,
     expenseReceipts,
     hasOvernight,
-    statutoryTaxFreeAllowed
+    statutoryTaxFreeAllowed,
+    travelRules
   });
 
   const statutoryTaxFreeMaxAllowance = roundMoney(
@@ -430,7 +518,7 @@ function valueTravelClaim({ state, claim, countrySegments, mealEvents, mileageLo
   const taxFreeTravelAllowance = roundMoney(Math.min(requestedAllowanceAmount, statutoryTaxFreeMaxAllowance));
   const taxableTravelAllowance = roundMoney(Math.max(0, requestedAllowanceAmount - taxFreeTravelAllowance));
 
-  const mileageRows = mileageLogs.map((log) => valueMileageLog(log));
+  const mileageRows = mileageLogs.map((log) => valueMileageLog(log, travelRules));
   const taxFreeMileage = roundMoney(mileageRows.reduce((sum, row) => sum + Number(row.taxFreeAmount || 0), 0));
   const taxableMileage = roundMoney(mileageRows.reduce((sum, row) => sum + Number(row.taxableAmount || 0), 0));
 
@@ -464,7 +552,7 @@ function valueTravelClaim({ state, claim, countrySegments, mealEvents, mileageLo
       expenseRows.reduce((sum, row) => sum + Number(row.amountSek || 0), 0)
   );
   const outsideNordic = countrySegments.some((segment) => !NORDIC_COUNTRIES.has(segment.countryName));
-  const preApprovalRequired = estimatedTotalCost > TRAVEL_PREAPPROVAL_THRESHOLD_SEK || outsideNordic;
+  const preApprovalRequired = estimatedTotalCost > Number(travelRules.preApprovalThresholdSek || 0) || outsideNordic;
 
   const warnings = [];
   if (!hasOvernight && requestedAllowanceAmount > 0) {
@@ -500,7 +588,11 @@ function valueTravelClaim({ state, claim, countrySegments, mealEvents, mileageLo
     companyId: claim.companyId,
     reportingPeriod: claim.reportingPeriod,
     taxYear: claim.reportingPeriod.slice(0, 4),
-    ruleVersion: DEFAULT_RULE_VERSION,
+    rulepackId: rulePack.rulePackId,
+    rulepackCode: rulePack.rulePackCode,
+    ruleVersion: rulePack.version || DEFAULT_RULE_VERSION,
+    ruleSelectionMode: rulePack.selectionMode || "effective_date",
+    ruleYear,
     travelType,
     statutoryTaxFreeAllowed,
     statutoryTaxFreeMaxAllowance,
@@ -531,7 +623,9 @@ function valueTravelClaim({ state, claim, countrySegments, mealEvents, mileageLo
       hasOvernight,
       distanceRuleMet,
       preApprovalRequired,
-      outsideNordic
+      outsideNordic,
+      distanceThresholdKm: travelRules.distanceThresholdKm,
+      ruleYear
     }),
     dayRows,
     nightRows,
@@ -549,7 +643,7 @@ function valueTravelClaim({ state, claim, countrySegments, mealEvents, mileageLo
   };
 }
 
-function buildDayRows({ state, claim, travelType, countrySegments, mealEvents, statutoryTaxFreeAllowed }) {
+function buildDayRows({ claim, travelType, countrySegments, mealEvents, statutoryTaxFreeAllowed, travelRules }) {
   const dateKeys = buildDateKeys(claim.startAt.slice(0, 10), claim.endAt.slice(0, 10));
   const rows = [];
   let currentLocationKey = null;
@@ -578,17 +672,17 @@ function buildDayRows({ state, claim, travelType, countrySegments, mealEvents, s
 
     const reductionBracket = resolveLongTripBracket(continuousDays);
     const baseAmount = resolveBaseTravelAmount({
-      state,
-      taxYear: claim.reportingPeriod.slice(0, 4),
       countryName: country.countryName,
       travelType,
       dayClassification,
-      reductionBracket
+      reductionBracket,
+      travelRules
     });
     const mealReduction = resolveMealReduction({
       travelType,
       baseAmount,
-      mealEvent: mealEvents.find((candidate) => candidate.date === dateKey) || null
+      mealEvent: mealEvents.find((candidate) => candidate.date === dateKey) || null,
+      travelRules
     });
     const statutoryAmount = statutoryTaxFreeAllowed ? roundMoney(Math.max(0, baseAmount - mealReduction.amount)) : 0;
 
@@ -611,7 +705,7 @@ function buildDayRows({ state, claim, travelType, countrySegments, mealEvents, s
   return rows;
 }
 
-function buildNightRows({ state, claim, travelType, countrySegments, expenseReceipts, hasOvernight, statutoryTaxFreeAllowed }) {
+function buildNightRows({ claim, travelType, countrySegments, expenseReceipts, hasOvernight, statutoryTaxFreeAllowed, travelRules }) {
   if (!hasOvernight) {
     return [];
   }
@@ -628,8 +722,8 @@ function buildNightRows({ state, claim, travelType, countrySegments, expenseRece
     if (statutoryTaxFreeAllowed && claim.lodgingPaidByEmployer !== true && !hasVerifiedLodging) {
       statutoryAmount =
         travelType === "domestic"
-          ? DOMESTIC_NIGHT_ALLOWANCE_2026
-          : roundMoney(resolveForeignNightAllowance({ state, taxYear: claim.reportingPeriod.slice(0, 4), countryName: country.countryName }));
+          ? normalizeMoney(travelRules.domesticAllowances?.nightAllowance, "travel_domestic_night_allowance_missing")
+          : roundMoney(resolveForeignNightAllowance({ countryName: country.countryName, travelRules }));
     }
     return {
       travelClaimDayId: crypto.randomUUID(),
@@ -1000,8 +1094,8 @@ function normalizeProcessingStep(value, code) {
   return resolved;
 }
 
-function valueMileageLog(log) {
-  const legalRatePerKm = MILEAGE_RATES_PER_KM_2026[log.vehicleType];
+function valueMileageLog(log, travelRules) {
+  const legalRatePerKm = normalizeMoney(travelRules.mileageRatesPerKm?.[log.vehicleType], "travel_mileage_rate_missing");
   const requestedAmount =
     log.claimedAmount != null ? roundMoney(log.claimedAmount) : roundMoney(Number(log.distanceKm || 0) * Number(log.claimedRatePerKm || legalRatePerKm));
   const taxFreeMaxAmount =
@@ -1072,17 +1166,19 @@ function resolveCountryByOverlap({ segments, windowStart, windowEnd, fallbackCou
   };
 }
 
-function resolveBaseTravelAmount({ state, taxYear, countryName, travelType, dayClassification, reductionBracket }) {
+function resolveBaseTravelAmount({ countryName, travelType, dayClassification, reductionBracket, travelRules }) {
   if (travelType === "domestic") {
     if (reductionBracket === "after_two_years") {
-      return DOMESTIC_LONG_TRIP_TWO_YEARS_FULL_DAY_2026;
+      return normalizeMoney(travelRules.domesticAllowances?.longTripTwoYearsFullDay, "travel_domestic_long_trip_two_years_missing");
     }
     if (reductionBracket === "after_three_months") {
-      return DOMESTIC_LONG_TRIP_THREE_MONTHS_FULL_DAY_2026;
+      return normalizeMoney(travelRules.domesticAllowances?.longTripThreeMonthsFullDay, "travel_domestic_long_trip_three_months_missing");
     }
-    return dayClassification === "half" ? DOMESTIC_HALF_DAY_2026 : DOMESTIC_FULL_DAY_2026;
+    return dayClassification === "half"
+      ? normalizeMoney(travelRules.domesticAllowances?.halfDay, "travel_domestic_half_day_missing")
+      : normalizeMoney(travelRules.domesticAllowances?.fullDay, "travel_domestic_full_day_missing");
   }
-  const normalAmount = lookupForeignNormalAmount(state, taxYear, countryName)?.amountSek;
+  const normalAmount = lookupForeignNormalAmountFromRules(travelRules, countryName)?.amountSek;
   if (!normalAmount) {
     throw createError(404, "travel_country_allowance_not_found", `Foreign normal amount was not found for ${countryName}.`);
   }
@@ -1095,15 +1191,15 @@ function resolveBaseTravelAmount({ state, taxYear, countryName, travelType, dayC
   return dayClassification === "half" ? roundMoney(normalAmount * 0.5) : normalAmount;
 }
 
-function resolveForeignNightAllowance({ state, taxYear, countryName }) {
-  const normalAmount = lookupForeignNormalAmount(state, taxYear, countryName)?.amountSek;
+function resolveForeignNightAllowance({ countryName, travelRules }) {
+  const normalAmount = lookupForeignNormalAmountFromRules(travelRules, countryName)?.amountSek;
   if (!normalAmount) {
     throw createError(404, "travel_country_allowance_not_found", `Foreign normal amount was not found for ${countryName}.`);
   }
   return roundMoney(normalAmount * 0.5);
 }
 
-function resolveMealReduction({ travelType, baseAmount, mealEvent }) {
+function resolveMealReduction({ travelType, baseAmount, mealEvent, travelRules }) {
   if (!mealEvent) {
     return {
       amount: 0,
@@ -1123,7 +1219,9 @@ function resolveMealReduction({ travelType, baseAmount, mealEvent }) {
   }
 
   if (travelType === "domestic") {
-    const reductionTable = DOMESTIC_MEAL_REDUCTION_TABLE_2026[String(baseAmount)] || DOMESTIC_MEAL_REDUCTION_TABLE_2026[300];
+    const reductionTable =
+      travelRules.domesticMealReductionTable?.[String(baseAmount)]
+      || travelRules.domesticMealReductionTable?.[String(normalizeMoney(travelRules.domesticAllowances?.fullDay, "travel_domestic_full_day_missing"))];
     const amount =
       breakfast && lunch && dinner
         ? reductionTable.fullDay
@@ -1141,12 +1239,12 @@ function resolveMealReduction({ travelType, baseAmount, mealEvent }) {
 
   const reductionRate =
     breakfast && lunch && dinner
-      ? FOREIGN_MEAL_REDUCTION_RATES.fullDay
+      ? Number(travelRules.foreignMealReductionRates?.fullDay || 0)
       : lunch && dinner
-        ? FOREIGN_MEAL_REDUCTION_RATES.lunchAndDinner
+        ? Number(travelRules.foreignMealReductionRates?.lunchAndDinner || 0)
         : lunch || dinner
-          ? FOREIGN_MEAL_REDUCTION_RATES.lunchOrDinner + (breakfast ? FOREIGN_MEAL_REDUCTION_RATES.breakfast : 0)
-          : FOREIGN_MEAL_REDUCTION_RATES.breakfast;
+          ? Number(travelRules.foreignMealReductionRates?.lunchOrDinner || 0) + (breakfast ? Number(travelRules.foreignMealReductionRates?.breakfast || 0) : 0)
+          : Number(travelRules.foreignMealReductionRates?.breakfast || 0);
   return {
     amount: Math.round(Number(baseAmount || 0) * reductionRate),
     code: breakfast && lunch && dinner ? "full_day" : lunch && dinner ? "lunch_and_dinner" : lunch || dinner ? "partial_meal" : "breakfast",
@@ -1281,6 +1379,22 @@ function normalizeTravelAdvances({ travelAdvances }) {
   }));
 }
 
+function syncForeignAllowancesFromRulePacks(state, { rulePacks, clock }) {
+  state.foreignAllowanceTables.clear();
+  state.foreignAllowanceIdsByTaxYear.clear();
+  for (const rulePack of Array.isArray(rulePacks) ? rulePacks : []) {
+    if (rulePack.status !== "published") {
+      continue;
+    }
+    const taxYear = String(resolveTravelRuleYear(rulePack));
+    seedForeignAllowances(state, {
+      taxYear,
+      allowances: rulePack.machineReadableRules?.foreignNormalAmounts || {},
+      clock
+    });
+  }
+}
+
 function seedForeignAllowances(state, { taxYear, allowances, clock }) {
   const resolvedTaxYear = normalizeTaxYear(taxYear);
   const aliasEntries = [];
@@ -1320,12 +1434,62 @@ function seedTravelDemo(state, { companyId, clock }) {
   });
 }
 
+function resolveTravelRulePack(rules, effectiveDate) {
+  const resolvedDate = normalizeRequiredDate(effectiveDate, "travel_rulepack_effective_date_required");
+  return rules.resolveRulePack({
+    rulePackCode: TRAVEL_RULEPACK_CODE,
+    domain: "travel",
+    jurisdiction: "SE",
+    effectiveDate: resolvedDate
+  });
+}
+
+function requireTravelRules(rulePack) {
+  const rules = rulePack?.machineReadableRules;
+  if (!rules || typeof rules !== "object") {
+    throw createError(500, "travel_rulepack_invalid", "Travel rulepack is missing machine-readable rules.");
+  }
+  return rules;
+}
+
+function resolveTravelRuleYear(rulePack) {
+  const explicitYear = Number(rulePack?.machineReadableRules?.ruleYear);
+  if (Number.isInteger(explicitYear) && explicitYear >= 2000) {
+    return explicitYear;
+  }
+  const effectiveFrom = normalizeRequiredDate(rulePack?.effectiveFrom, "travel_rulepack_effective_from_invalid");
+  return Number(effectiveFrom.slice(0, 4));
+}
+
 function lookupForeignNormalAmount(state, taxYear, countryName) {
   const resolvedName = requireCountryName(countryName, "travel_country_required");
   return (state.foreignAllowanceIdsByTaxYear.get(taxYear) || [])
     .map((allowanceId) => state.foreignAllowanceTables.get(allowanceId))
     .filter(Boolean)
     .find((allowance) => canonicalizeCountryKey(allowance.countryName) === canonicalizeCountryKey(resolvedName));
+}
+
+function lookupForeignNormalAmountFromRules(travelRules, countryName) {
+  const resolvedName = requireCountryName(countryName, "travel_country_required");
+  const allowances = travelRules?.foreignNormalAmounts || {};
+  const direct = Object.entries(allowances).find(
+    ([name]) => canonicalizeCountryKey(name) === canonicalizeCountryKey(resolvedName)
+  );
+  if (!direct) {
+    return null;
+  }
+  const [matchedName, matchedConfig] = direct;
+  if (matchedConfig?.aliasOf) {
+    return lookupForeignNormalAmountFromRules(travelRules, matchedConfig.aliasOf);
+  }
+  if (matchedConfig?.amountSek == null) {
+    return null;
+  }
+  return {
+    countryName: matchedName,
+    countryCode: resolveCountryCode(matchedName),
+    amountSek: roundMoney(matchedConfig.amountSek)
+  };
 }
 
 function requireCountryName(value, code) {
@@ -1384,9 +1548,9 @@ function requireTravelClaim(state, companyId, travelClaimId) {
   return claim;
 }
 
-function buildTravelExplanation({ travelType, statutoryTaxFreeAllowed, hasOvernight, distanceRuleMet, preApprovalRequired, outsideNordic }) {
+function buildTravelExplanation({ travelType, statutoryTaxFreeAllowed, hasOvernight, distanceRuleMet, preApprovalRequired, outsideNordic, distanceThresholdKm, ruleYear }) {
   const explanation = [];
-  explanation.push(travelType === "domestic" ? "Domestic travel rules applied." : "Foreign travel rules applied.");
+  explanation.push(travelType === "domestic" ? `Domestic travel rules applied from published ${ruleYear} rulepack.` : `Foreign travel rules applied from published ${ruleYear} rulepack.`);
   explanation.push(
     hasOvernight
       ? "Overnight condition is met."
@@ -1394,8 +1558,8 @@ function buildTravelExplanation({ travelType, statutoryTaxFreeAllowed, hasOverni
   );
   explanation.push(
     distanceRuleMet
-      ? "Distance threshold is met against both home and the regular workplace."
-      : "Distance threshold is not met against both home and the regular workplace."
+      ? `Distance threshold of ${distanceThresholdKm} km is met against both home and the regular workplace.`
+      : `Distance threshold of ${distanceThresholdKm} km is not met against both home and the regular workplace.`
   );
   explanation.push(
     statutoryTaxFreeAllowed

@@ -69,6 +69,9 @@ test("Phase 9.2 values domestic travel, meal reduction, mileage and taxable exce
   });
 
   assert.equal(claim.valuation.travelType, "domestic");
+  assert.equal(claim.valuation.rulepackId, "travel-se-2026.1");
+  assert.equal(claim.valuation.rulepackCode, "RP-TRAVEL-SE");
+  assert.equal(claim.valuation.ruleVersion, "2026.1");
   assert.equal(claim.valuation.statutoryTaxFreeMaxAllowance, 645);
   assert.equal(claim.valuation.taxFreeTravelAllowance, 645);
   assert.equal(claim.valuation.taxableTravelAllowance, 55);
@@ -128,6 +131,7 @@ test("Phase 9.2 resolves foreign multi-country days using the longest 06-24 over
   });
 
   const march17 = claim.travelDays.find((day) => day.date === "2026-03-17" && day.dayClassification === "full");
+  assert.equal(claim.valuation.rulepackId, "travel-se-2026.1");
   assert.equal(march17.countryName, "Tyskland");
   assert.equal(march17.baseAmount, 760);
   assert.equal(march17.mealReductionAmount, 266);

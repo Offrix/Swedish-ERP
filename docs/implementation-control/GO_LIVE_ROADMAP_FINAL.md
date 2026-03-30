@@ -411,7 +411,7 @@ Rulepackbyggande kan gå parallellt med domänimplementation så länge kärnreg
 Ingen live-regeländring direkt i domänkod. Ingen provider-formatuppdatering utan baseline-publicering.
 
 **Delfaser**  
-- [ ] 5.1 [NEW BUILD] Utöka rule-engine till regulatoriska rulepacks för BAS/DSAM, arbetsgivaravgifter, skattetabeller, SINK/A-SINK, växa-stöd, benefits, traktamente, HUS, VAT-klassificeringar, periodregler och legal-form obligations.
+- [x] 5.1 [NEW BUILD] Utöka rule-engine till regulatoriska rulepacks för BAS/DSAM, arbetsgivaravgifter, skattetabeller, SINK/A-SINK, växa-stöd, benefits, traktamente, HUS, VAT-klassificeringar, periodregler och legal-form obligations.
 - [ ] 5.2 [HARDEN] Inför provider baseline registry för BankID, signing archive, Peppol, ISO20022, Skatteverket transports, Bolagsverket annual, SIE4-format och migration file families.
 - [ ] 5.3 [OPERATIONALIZE] Bygg publiceringsprocess med källa, checksumma, effectiveFrom/effectiveTo, signoff, rollback och golden test vectors från officiella källor.
 - [ ] 5.4 [HARDEN] Gör historisk pinning obligatorisk: alla beslut, deklarationer och beräkningar måste bära rulepack- och baseline-ref.

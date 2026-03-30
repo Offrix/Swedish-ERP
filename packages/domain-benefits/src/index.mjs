@@ -1,30 +1,62 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
+import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+export const BENEFITS_RULEPACK_CODE = "RP-BENEFITS-SE";
 const DEFAULT_RULE_VERSION = "benefits-se-2026.1";
-const PRICE_BASE_AMOUNT_2026 = 59200;
-const CAR_BASE_FACTOR_2026 = 0.29;
-const CAR_PRICE_FACTOR_2026 = 0.02785;
-const CAR_ADDITIONAL_FACTOR_2026 = 0.13;
-const CAR_SERVICE_MILEAGE_THRESHOLD_KM = 30000;
+const DEFAULT_BENEFIT_RULESET = Object.freeze({
+  ruleYear: 2026,
+  priceBaseAmount: 59200,
+  carBaseFactor: 0.29,
+  carPriceFactor: 0.02785,
+  carAdditionalFactor: 0.13,
+  carServiceMileageThresholdKm: 30000,
+  fuelBenefitMultiplier: 1.2,
+  healthInsuranceDefaultRatio: 0.6,
+  wellnessTaxFreeLimit: 5000,
+  workplaceChargingTaxExemptUntil: "2026-06-30",
+  mealValues: Object.freeze({
+    BREAKFAST: 62,
+    LUNCH_OR_DINNER: 124,
+    FULL_DAY: 310
+  }),
+  giftLimits: Object.freeze({
+    CHRISTMAS: 600,
+    ANNIVERSARY: 1800,
+    MEMORIAL: 15000
+  })
+});
+const BENEFIT_RULE_PACKS = Object.freeze([
+  {
+    rulePackId: "benefits-se-2026.1",
+    rulePackCode: BENEFITS_RULEPACK_CODE,
+    domain: "benefits",
+    jurisdiction: "SE",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    version: "2026.1",
+    checksum: "benefits-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Pins 2026 Swedish benefit valuation tables for car, fuel, meal, wellness, gift and health insurance.",
+    machineReadableRules: copy(DEFAULT_BENEFIT_RULESET),
+    humanReadableExplanation: [
+      "Benefit valuations are effective-dated and carried by rulepack ref instead of hardcoded annual constants.",
+      "Car, fuel, meal, wellness, gift and health-insurance defaults all resolve from the published Swedish benefit pack."
+    ],
+    testVectors: [
+      { vectorId: "benefits-car-2026" },
+      { vectorId: "benefits-meal-2026" },
+      { vectorId: "benefits-wellness-2026" },
+      { vectorId: "benefits-gift-2026" }
+    ],
+    migrationNotes: ["Historical benefit events must pin the resolved rulepack id on every valuation and downstream payroll handoff."]
+  }
+]);
 const CAR_SERVICE_REDUCTION_FACTOR = 0.75;
 const CAR_PRIVATE_USE_LIMIT_OCCURRENCES = 10;
 const CAR_PRIVATE_USE_LIMIT_KM = 100;
-const FUEL_BENEFIT_MULTIPLIER = 1.2;
-const HEALTH_INSURANCE_DEFAULT_RATIO = 0.6;
-const WELLNESS_TAX_FREE_LIMIT_2026 = 5000;
-const MEAL_VALUES_2026 = Object.freeze({
-  BREAKFAST: 62,
-  LUNCH_OR_DINNER: 124,
-  FULL_DAY: 310
-});
-const GIFT_LIMITS_2026 = Object.freeze({
-  CHRISTMAS: 600,
-  ANNIVERSARY: 1800,
-  MEMORIAL: 15000
-});
 const TAX_FREE_MEAL_CONTEXTS = new Set([
   "internal_representation",
   "staff_party",
@@ -35,6 +67,14 @@ const TAX_FREE_MEAL_CONTEXTS = new Set([
 const BENEFIT_EVENT_STATUSES = Object.freeze(["valued", "approved", "dispatched_to_payroll", "corrected", "closed"]);
 const BENEFIT_VALUATION_STATUSES = Object.freeze(["proposed", "approved", "superseded"]);
 const PAYROLL_CONSUMPTION_STAGES = Object.freeze(["calculated", "approved"]);
+const LEGACY_BENEFIT_METHOD_ALIASES = Object.freeze({
+  car_formula_2026: "car_formula",
+  fuel_formula_2026: "fuel_formula",
+  health_insurance_2026: "health_insurance_policy",
+  meal_table_2026: "meal_table",
+  gift_threshold_2026: "gift_threshold",
+  wellness_policy_2026: "wellness_policy"
+});
 
 export const BENEFIT_CODES = Object.freeze([
   "CAR_BENEFIT",
@@ -46,12 +86,12 @@ export const BENEFIT_CODES = Object.freeze([
 ]);
 
 const BENEFIT_CATALOG_SEED = Object.freeze([
-  createCatalogSeed("CAR_BENEFIT", "Bilforman", "7210", ["car_formula_2026", "manual_taxable_value"]),
-  createCatalogSeed("FUEL_BENEFIT", "Drivmedelsforman", "7220", ["fuel_formula_2026", "manual_taxable_value"]),
-  createCatalogSeed("HEALTH_INSURANCE", "Sjukvardsforsakring", "7230", ["health_insurance_2026", "manual_taxable_value"]),
-  createCatalogSeed("MEAL_BENEFIT", "Kostforman", "7240", ["meal_table_2026", "manual_taxable_value"]),
-  createCatalogSeed("GIFT", "Gava", "7260", ["gift_threshold_2026", "manual_taxable_value"]),
-  createCatalogSeed("WELLNESS_ALLOWANCE", "Friskvardsbidrag", "7270", ["wellness_policy_2026", "manual_taxable_value"])
+  createCatalogSeed("CAR_BENEFIT", "Bilforman", "7210", ["car_formula", "manual_taxable_value"]),
+  createCatalogSeed("FUEL_BENEFIT", "Drivmedelsforman", "7220", ["fuel_formula", "manual_taxable_value"]),
+  createCatalogSeed("HEALTH_INSURANCE", "Sjukvardsforsakring", "7230", ["health_insurance_policy", "manual_taxable_value"]),
+  createCatalogSeed("MEAL_BENEFIT", "Kostforman", "7240", ["meal_table", "manual_taxable_value"]),
+  createCatalogSeed("GIFT", "Gava", "7260", ["gift_threshold", "manual_taxable_value"]),
+  createCatalogSeed("WELLNESS_ALLOWANCE", "Friskvardsbidrag", "7270", ["wellness_policy", "manual_taxable_value"])
 ]);
 
 export function createBenefitsPlatform(options = {}) {
@@ -63,9 +103,11 @@ export function createBenefitsEngine({
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  ruleRegistry = null,
   hrPlatform = null,
   documentPlatform = null
 } = {}) {
+  const rules = ruleRegistry || createRulePackRegistry({ clock, seedRulePacks: BENEFIT_RULE_PACKS });
   const state = {
     catalog: new Map(),
     catalogIdsByCompany: new Map(),
@@ -96,6 +138,7 @@ export function createBenefitsEngine({
 
   const engine = {
     benefitCodes: BENEFIT_CODES,
+    listBenefitRulePacks,
     listBenefitCatalog,
     getBenefitCatalogItem,
     listBenefitEvents,
@@ -107,12 +150,30 @@ export function createBenefitsEngine({
     registerBenefitPayrollConsumption
   };
 
+  Object.defineProperty(engine, "rulePackGovernance", {
+    value: Object.freeze({
+      listRulePacks: (filters = {}) => rules.listRulePacks({ domain: "benefits", jurisdiction: "SE", ...filters }),
+      getRulePack: (filters) => rules.getRulePack(filters),
+      createDraftRulePackVersion: (input) => rules.createDraftRulePackVersion(input),
+      validateRulePackVersion: (input) => rules.validateRulePackVersion(input),
+      approveRulePackVersion: (input) => rules.approveRulePackVersion(input),
+      publishRulePackVersion: (input) => rules.publishRulePackVersion(input),
+      rollbackRulePackVersion: (input) => rules.rollbackRulePackVersion(input),
+      listRulePackRollbacks: (filters = {}) => rules.listRulePackRollbacks({ domain: "benefits", jurisdiction: "SE", ...filters })
+    }),
+    enumerable: false
+  });
+
   Object.defineProperty(engine, "__durableState", {
     value: state,
     enumerable: false
   });
 
   return engine;
+
+  function listBenefitRulePacks(filters = {}) {
+    return rules.listRulePacks({ domain: "benefits", jurisdiction: "SE", ...filters });
+  }
 
   function listBenefitCatalog({ companyId } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
@@ -216,7 +277,8 @@ export function createBenefitsEngine({
       eventDraft,
       sourcePayload: eventDraft.payloadJson,
       employeePaidValue: normalizeMoney(employeePaidValue, "benefit_employee_paid_invalid"),
-      netDeductionValue: normalizeMoney(netDeductionValue, "benefit_net_deduction_invalid")
+      netDeductionValue: normalizeMoney(netDeductionValue, "benefit_net_deduction_invalid"),
+      rules
     });
 
     storeBenefitEvent({
@@ -375,12 +437,18 @@ export function createBenefitsEngine({
   }
 }
 
-function valueBenefitEvent({ catalogItem, eventDraft, sourcePayload, employeePaidValue, netDeductionValue }) {
-  const resolvedMethod = normalizeOptionalText(sourcePayload.valuationMethod) || catalogItem.supportedValuationMethods[0];
+function valueBenefitEvent({ catalogItem, eventDraft, sourcePayload, employeePaidValue, netDeductionValue, rules }) {
+  const resolvedMethod = resolveBenefitValuationMethod({
+    benefitCode: eventDraft.benefitCode,
+    requestedMethod: sourcePayload.valuationMethod,
+    supportedMethods: catalogItem.supportedValuationMethods
+  });
   const evaluator = BENEFIT_EVALUATORS[eventDraft.benefitCode];
   if (!evaluator) {
     throw createError(400, "benefit_code_unsupported", `Benefit code ${eventDraft.benefitCode} is not implemented.`);
   }
+  const rulePack = resolveBenefitRulePack(rules, eventDraft.occurredOn);
+  const benefitRules = requireBenefitRules(rulePack);
   const normalizedInputs = {
     reportingPeriod: eventDraft.reportingPeriod,
     taxYear: eventDraft.taxYear,
@@ -394,8 +462,11 @@ function valueBenefitEvent({ catalogItem, eventDraft, sourcePayload, employeePai
   const evaluated = evaluator({
     catalogItem,
     inputs: normalizedInputs,
-    resolvedMethod
+    resolvedMethod,
+    rulePack,
+    benefitRules
   });
+  const ruleVersion = rulePack.version || DEFAULT_RULE_VERSION;
   const reviewCodes = buildBenefitReviewCodes({
     benefitCode: eventDraft.benefitCode,
     warnings: evaluated.warnings,
@@ -410,7 +481,10 @@ function valueBenefitEvent({ catalogItem, eventDraft, sourcePayload, employeePai
       inputs: normalizedInputs,
       outputs: evaluated.outputs
     }),
-    ruleVersion: DEFAULT_RULE_VERSION,
+    rulePackId: rulePack.rulePackId,
+    rulePackCode: rulePack.rulePackCode,
+    ruleVersion,
+    selectionMode: rulePack.selectionMode || "effective_date",
     effectiveDate: eventDraft.occurredOn,
     outputs: copy(evaluated.outputs),
     warnings: copy(evaluated.warnings),
@@ -431,6 +505,9 @@ function valueBenefitEvent({ catalogItem, eventDraft, sourcePayload, employeePai
     benefitCode: eventDraft.benefitCode,
     reportingPeriod: eventDraft.reportingPeriod,
     taxYear: eventDraft.taxYear,
+    rulepackId: rulePack.rulePackId,
+    rulepackCode: rulePack.rulePackCode,
+    ruleVersion,
     valuationMethod: resolvedMethod,
     employerPaidValue: roundMoney(evaluated.employerPaidValue),
     marketValue: roundMoney(evaluated.marketValue),
@@ -604,7 +681,56 @@ const BENEFIT_EVALUATORS = {
   HEALTH_INSURANCE: evaluateHealthInsurance
 };
 
-function evaluateCarBenefit({ inputs, resolvedMethod }) {
+function resolveBenefitValuationMethod({ benefitCode, requestedMethod, supportedMethods }) {
+  const normalizedRequestedMethod = LEGACY_BENEFIT_METHOD_ALIASES[normalizeOptionalText(requestedMethod)] || normalizeOptionalText(requestedMethod);
+  if (!normalizedRequestedMethod) {
+    if (Array.isArray(supportedMethods) && supportedMethods.length > 0) {
+      return supportedMethods[0];
+    }
+    throw createError(400, "benefit_valuation_method_missing", `No valuation method is configured for ${benefitCode}.`);
+  }
+  const allowedMethods = Array.isArray(supportedMethods) ? supportedMethods : [];
+  if (!allowedMethods.includes(normalizedRequestedMethod)) {
+    throw createError(400, "benefit_valuation_method_invalid", `Valuation method ${normalizedRequestedMethod} is not allowed for ${benefitCode}.`);
+  }
+  return normalizedRequestedMethod;
+}
+
+function resolveBenefitRulePack(rules, effectiveDate) {
+  const resolvedDate = normalizeRequiredDate(effectiveDate, "benefit_rulepack_effective_date_required");
+  const rulePack = rules?.resolveRulePack({
+    rulePackCode: BENEFITS_RULEPACK_CODE,
+    domain: "benefits",
+    jurisdiction: "SE",
+    effectiveDate: resolvedDate
+  });
+  if (!rulePack) {
+    throw createError(409, "benefit_rulepack_missing", `No published benefit rulepack is available for ${resolvedDate}.`);
+  }
+  return rulePack;
+}
+
+function requireBenefitRules(rulePack) {
+  const rules = rulePack?.machineReadableRules;
+  if (!rules || typeof rules !== "object") {
+    throw createError(500, "benefit_rulepack_invalid", "Benefit rulepack is missing machine-readable rules.");
+  }
+  return rules;
+}
+
+function resolveBenefitRuleYear(rulePack) {
+  const explicitYear = Number(rulePack?.machineReadableRules?.ruleYear);
+  if (Number.isInteger(explicitYear) && explicitYear >= 2000) {
+    return explicitYear;
+  }
+  const effectiveFrom = normalizeOptionalDate(rulePack?.effectiveFrom, "benefit_rulepack_effective_from_invalid");
+  if (effectiveFrom) {
+    return Number(effectiveFrom.slice(0, 4));
+  }
+  return Number(new Date().getUTCFullYear());
+}
+
+function evaluateCarBenefit({ inputs, resolvedMethod, rulePack, benefitRules }) {
   if (resolvedMethod === "manual_taxable_value") {
     const manualTaxableValue = normalizeMoney(inputs.sourcePayload.manualTaxableValue, "benefit_car_manual_value_invalid");
     const employerPaidValue = normalizeMoney(inputs.sourcePayload.employerPaidValue ?? manualTaxableValue, "benefit_car_employer_paid_invalid");
@@ -666,21 +792,22 @@ function evaluateCarBenefit({ inputs, resolvedMethod }) {
   const extraEquipmentValue = normalizeMoney(inputs.sourcePayload.extraEquipmentValue ?? 0, "benefit_car_extra_equipment_invalid");
   const vehicleTaxAnnual = normalizeMoney(inputs.sourcePayload.vehicleTaxAnnual ?? 0, "benefit_car_vehicle_tax_invalid");
   const basePrice = roundMoney(newCarPrice + extraEquipmentValue);
+  const ruleYear = resolveBenefitRuleYear(rulePack);
   let annualValue = roundMoney(
-    PRICE_BASE_AMOUNT_2026 * CAR_BASE_FACTOR_2026 +
-      basePrice * CAR_PRICE_FACTOR_2026 +
-      basePrice * CAR_ADDITIONAL_FACTOR_2026 +
+    benefitRules.priceBaseAmount * benefitRules.carBaseFactor +
+      basePrice * benefitRules.carPriceFactor +
+      basePrice * benefitRules.carAdditionalFactor +
       vehicleTaxAnnual
   );
   const serviceMileageKm = normalizeMoney(inputs.sourcePayload.serviceMileageKm ?? 0, "benefit_car_service_mileage_invalid");
   const applyServiceMileageReduction = inputs.sourcePayload.applyServiceMileageReduction === true;
   const warnings = [];
   if (applyServiceMileageReduction) {
-    if (serviceMileageKm < CAR_SERVICE_MILEAGE_THRESHOLD_KM) {
+    if (serviceMileageKm < benefitRules.carServiceMileageThresholdKm) {
       throw createError(
         400,
         "benefit_car_service_mileage_threshold_not_met",
-        "Service mileage reduction requires at least 30 000 km in service for the year."
+        `Service mileage reduction requires at least ${benefitRules.carServiceMileageThresholdKm} km in service for the year.`
       );
     }
     annualValue = roundMoney(annualValue * CAR_SERVICE_REDUCTION_FACTOR);
@@ -690,7 +817,7 @@ function evaluateCarBenefit({ inputs, resolvedMethod }) {
   }
   const monthlyValue = roundMoney(annualValue / 12);
   return finalizeBenefitAmounts({
-    decisionCode: "BENEFIT_CAR_FORMULA_2026",
+    decisionCode: `BENEFIT_CAR_FORMULA_${ruleYear}`,
     marketValue: monthlyValue,
     employerPaidValue: monthlyValue,
     taxableValueBeforeOffsets: monthlyValue,
@@ -699,7 +826,11 @@ function evaluateCarBenefit({ inputs, resolvedMethod }) {
     ledgerAccountCode: "7210",
     outputs: {
       valuationMethod: resolvedMethod,
-      priceBaseAmount2026: PRICE_BASE_AMOUNT_2026,
+      rulePackId: rulePack.rulePackId,
+      rulePackCode: rulePack.rulePackCode,
+      ruleVersion: rulePack.version || DEFAULT_RULE_VERSION,
+      ruleYear,
+      priceBaseAmount: benefitRules.priceBaseAmount,
       newCarPrice,
       extraEquipmentValue,
       vehicleTaxAnnual,
@@ -715,7 +846,7 @@ function evaluateCarBenefit({ inputs, resolvedMethod }) {
     warnings,
     explanation: [
       "Any car benefit day in the reporting month values the full month.",
-      `Annual value uses 2026 factors with 0.29 x PBB, ${CAR_PRICE_FACTOR_2026 * 100}% of price base and 13% of price base plus annual vehicle tax.`,
+      `Annual value uses published ${ruleYear} factors with ${benefitRules.carBaseFactor} x PBB, ${benefitRules.carPriceFactor * 100}% of price base and ${benefitRules.carAdditionalFactor * 100}% of price base plus annual vehicle tax.`,
       applyServiceMileageReduction
         ? "Service mileage reduction was applied after the documented threshold was met."
         : "Service mileage reduction was not applied."
@@ -723,7 +854,7 @@ function evaluateCarBenefit({ inputs, resolvedMethod }) {
   });
 }
 
-function evaluateFuelBenefit({ inputs, resolvedMethod }) {
+function evaluateFuelBenefit({ inputs, resolvedMethod, rulePack, benefitRules }) {
   if (resolvedMethod === "manual_taxable_value") {
     const manualTaxableValue = normalizeMoney(inputs.sourcePayload.manualTaxableValue, "benefit_fuel_manual_value_invalid");
     return finalizeBenefitAmounts({
@@ -745,7 +876,12 @@ function evaluateFuelBenefit({ inputs, resolvedMethod }) {
 
   const fuelType = normalizeOptionalText(inputs.sourcePayload.fuelType) || "liquid_fuel";
   const workplaceChargingTaxExempt = inputs.sourcePayload.workplaceChargingTaxExempt === true;
-  if (fuelType === "electricity" && workplaceChargingTaxExempt === true && inputs.occurredOn <= "2026-06-30") {
+  const ruleYear = resolveBenefitRuleYear(rulePack);
+  if (
+    fuelType === "electricity" &&
+    workplaceChargingTaxExempt === true &&
+    (!benefitRules.workplaceChargingTaxExemptUntil || inputs.occurredOn <= benefitRules.workplaceChargingTaxExemptUntil)
+  ) {
     return finalizeBenefitAmounts({
       decisionCode: "BENEFIT_FUEL_WORKPLACE_CHARGING_TAX_FREE",
       marketValue: 0,
@@ -757,16 +893,22 @@ function evaluateFuelBenefit({ inputs, resolvedMethod }) {
       outputs: {
         valuationMethod: resolvedMethod,
         fuelType,
-        workplaceChargingTaxExempt
+        workplaceChargingTaxExempt,
+        rulePackId: rulePack.rulePackId,
+        rulePackCode: rulePack.rulePackCode,
+        ruleVersion: rulePack.version || DEFAULT_RULE_VERSION,
+        workplaceChargingTaxExemptUntil: benefitRules.workplaceChargingTaxExemptUntil || null
       },
       warnings: [],
-      explanation: ["Workplace charging remained tax free within the temporary exemption window ending 2026-06-30."]
+      explanation: [
+        `Workplace charging remained tax free within the temporary exemption window ending ${benefitRules.workplaceChargingTaxExemptUntil}.`
+      ]
     });
   }
 
   const vehicleContext = normalizeOptionalText(inputs.sourcePayload.vehicleContext) || "benefit_car";
   const marketValuePrivateFuel = resolveFuelMarketValue(inputs.sourcePayload);
-  const multiplier = vehicleContext === "private_car" ? 1 : FUEL_BENEFIT_MULTIPLIER;
+  const multiplier = vehicleContext === "private_car" ? 1 : benefitRules.fuelBenefitMultiplier;
   return finalizeBenefitAmounts({
     decisionCode: vehicleContext === "private_car" ? "BENEFIT_FUEL_PRIVATE_CAR" : "BENEFIT_FUEL_BENEFIT_CAR",
     marketValue: marketValuePrivateFuel,
@@ -780,19 +922,23 @@ function evaluateFuelBenefit({ inputs, resolvedMethod }) {
       vehicleContext,
       fuelType,
       marketValuePrivateFuel,
-      multiplier
+      multiplier,
+      rulePackId: rulePack.rulePackId,
+      rulePackCode: rulePack.rulePackCode,
+      ruleVersion: rulePack.version || DEFAULT_RULE_VERSION,
+      ruleYear
     },
     warnings: [],
     explanation: [
       vehicleContext === "private_car"
         ? "Employer-paid fuel for a private car is valued at market value."
-        : "Employer-paid private fuel for a benefit car is valued at market value times 1.2.",
+        : `Employer-paid private fuel for a benefit car is valued at market value times ${benefitRules.fuelBenefitMultiplier}.`,
       "Private and service use must be supportable through mileage documentation when total fuel costs are allocated."
     ]
   });
 }
 
-function evaluateMealBenefit({ inputs, resolvedMethod }) {
+function evaluateMealBenefit({ inputs, resolvedMethod, rulePack, benefitRules }) {
   if (resolvedMethod === "manual_taxable_value") {
     const manualTaxableValue = normalizeMoney(inputs.sourcePayload.manualTaxableValue, "benefit_meal_manual_value_invalid");
     return finalizeBenefitAmounts({
@@ -809,12 +955,17 @@ function evaluateMealBenefit({ inputs, resolvedMethod }) {
       },
       warnings: [],
       explanation: ["Manual taxable value was supplied for kostforman."]
-    });
+      });
   }
 
-  const mealCode = assertAllowed(normalizeCode(inputs.sourcePayload.mealCode || "LUNCH_OR_DINNER", "benefit_meal_code_required"), Object.keys(MEAL_VALUES_2026), "benefit_meal_code_invalid");
+  const mealCode = assertAllowed(
+    normalizeCode(inputs.sourcePayload.mealCode || "LUNCH_OR_DINNER", "benefit_meal_code_required"),
+    Object.keys(benefitRules.mealValues || {}),
+    "benefit_meal_code_invalid"
+  );
   const quantity = Math.max(1, normalizeInteger(inputs.sourcePayload.quantity ?? 1, "benefit_meal_quantity_invalid"));
   const taxExemptContextCode = normalizeOptionalText(inputs.sourcePayload.taxExemptContextCode);
+  const ruleYear = resolveBenefitRuleYear(rulePack);
   if (taxExemptContextCode && TAX_FREE_MEAL_CONTEXTS.has(taxExemptContextCode)) {
     return finalizeBenefitAmounts({
       decisionCode: "BENEFIT_MEAL_TAX_FREE_CONTEXT",
@@ -828,15 +979,20 @@ function evaluateMealBenefit({ inputs, resolvedMethod }) {
         valuationMethod: resolvedMethod,
         mealCode,
         quantity,
-        taxExemptContextCode
+        taxExemptContextCode,
+        rulePackId: rulePack.rulePackId,
+        rulePackCode: rulePack.rulePackCode,
+        ruleVersion: rulePack.version || DEFAULT_RULE_VERSION,
+        ruleYear
       },
       warnings: [],
       explanation: ["Meal context matched a tax-free situation under the configured rule set."]
     });
   }
-  const marketValue = roundMoney(MEAL_VALUES_2026[mealCode] * quantity);
+  const dailyRate = normalizeMoney(benefitRules.mealValues?.[mealCode], "benefit_meal_rate_missing");
+  const marketValue = roundMoney(dailyRate * quantity);
   return finalizeBenefitAmounts({
-    decisionCode: "BENEFIT_MEAL_TABLE_2026",
+    decisionCode: `BENEFIT_MEAL_TABLE_${ruleYear}`,
     marketValue,
     employerPaidValue: marketValue,
     taxableValueBeforeOffsets: marketValue,
@@ -847,14 +1003,18 @@ function evaluateMealBenefit({ inputs, resolvedMethod }) {
       valuationMethod: resolvedMethod,
       mealCode,
       quantity,
-      dailyRate: MEAL_VALUES_2026[mealCode]
+      dailyRate,
+      rulePackId: rulePack.rulePackId,
+      rulePackCode: rulePack.rulePackCode,
+      ruleVersion: rulePack.version || DEFAULT_RULE_VERSION,
+      ruleYear
     },
     warnings: [],
-    explanation: ["Meal benefit used the 2026 benefit table and allowed employee offsets to reduce the taxable value."]
+    explanation: [`Meal benefit used the published ${ruleYear} benefit table and allowed employee offsets to reduce the taxable value.`]
   });
 }
 
-function evaluateWellnessAllowance({ inputs, resolvedMethod }) {
+function evaluateWellnessAllowance({ inputs, resolvedMethod, rulePack, benefitRules }) {
   if (resolvedMethod === "manual_taxable_value") {
     const manualTaxableValue = normalizeMoney(inputs.sourcePayload.manualTaxableValue, "benefit_wellness_manual_value_invalid");
     const employerPaidValue = normalizeMoney(inputs.sourcePayload.employerPaidValue ?? manualTaxableValue, "benefit_wellness_employer_paid_invalid");
@@ -888,11 +1048,12 @@ function evaluateWellnessAllowance({ inputs, resolvedMethod }) {
   const providedAsGiftCard = inputs.sourcePayload.providedAsGiftCard === true;
   const carryOverFromPriorYear = inputs.sourcePayload.carryOverFromPriorYear === true;
   const hasRequiredReceiptFacts =
-    Boolean(normalizeOptionalText(inputs.sourcePayload.activityType)) &&
-    Boolean(normalizeOptionalText(inputs.sourcePayload.activityDate)) &&
-    Boolean(normalizeOptionalText(inputs.sourcePayload.vendorName));
+      Boolean(normalizeOptionalText(inputs.sourcePayload.activityType)) &&
+      Boolean(normalizeOptionalText(inputs.sourcePayload.activityDate)) &&
+      Boolean(normalizeOptionalText(inputs.sourcePayload.vendorName));
   const warnings = [];
-  if (totalForYear > WELLNESS_TAX_FREE_LIMIT_2026 && calendarYearGrantedBeforeEvent > 0) {
+  const ruleYear = resolveBenefitRuleYear(rulePack);
+  if (totalForYear > benefitRules.wellnessTaxFreeLimit && calendarYearGrantedBeforeEvent > 0) {
     warnings.push("benefit_wellness_prior_events_may_need_reassessment");
   }
   const taxFreeEligible =
@@ -900,7 +1061,7 @@ function evaluateWellnessAllowance({ inputs, resolvedMethod }) {
     !providedAsGiftCard &&
     !carryOverFromPriorYear &&
     hasRequiredReceiptFacts &&
-    totalForYear <= WELLNESS_TAX_FREE_LIMIT_2026;
+    totalForYear <= benefitRules.wellnessTaxFreeLimit;
   return finalizeBenefitAmounts({
     decisionCode: taxFreeEligible ? "BENEFIT_WELLNESS_TAX_FREE" : "BENEFIT_WELLNESS_TAXABLE",
     marketValue: reimbursementAmount,
@@ -917,18 +1078,23 @@ function evaluateWellnessAllowance({ inputs, resolvedMethod }) {
       equalTermsOffered,
       providedAsGiftCard,
       carryOverFromPriorYear,
-      hasRequiredReceiptFacts
+      hasRequiredReceiptFacts,
+      taxFreeLimit: benefitRules.wellnessTaxFreeLimit,
+      rulePackId: rulePack.rulePackId,
+      rulePackCode: rulePack.rulePackCode,
+      ruleVersion: rulePack.version || DEFAULT_RULE_VERSION,
+      ruleYear
     },
     warnings,
     explanation: [
       taxFreeEligible
         ? "Wellness reimbursement stayed within the tax-free annual limit and met the policy conditions."
-        : "Wellness reimbursement became taxable because one or more tax-free conditions failed or the annual limit was exceeded."
+        : `Wellness reimbursement became taxable because one or more tax-free conditions failed or the annual limit of ${benefitRules.wellnessTaxFreeLimit} SEK was exceeded.`
     ]
   });
 }
 
-function evaluateGift({ inputs, resolvedMethod }) {
+function evaluateGift({ inputs, resolvedMethod, rulePack, benefitRules }) {
   if (resolvedMethod === "manual_taxable_value") {
     const manualTaxableValue = normalizeMoney(inputs.sourcePayload.manualTaxableValue, "benefit_gift_manual_value_invalid");
     const employerPaidValue = normalizeMoney(inputs.sourcePayload.employerPaidValue ?? manualTaxableValue, "benefit_gift_employer_paid_invalid");
@@ -955,10 +1121,11 @@ function evaluateGift({ inputs, resolvedMethod }) {
   const employeeAge = normalizeInteger(inputs.sourcePayload.employeeAge ?? 0, "benefit_gift_employee_age_invalid");
   const employmentEnding = inputs.sourcePayload.employmentEnding === true;
   const roundBirthday = inputs.sourcePayload.roundBirthday === true;
+  const ruleYear = resolveBenefitRuleYear(rulePack);
   const qualifiesMemorialGift =
     giftType === "MEMORIAL" &&
     (employmentYears >= 20 || employmentEnding || (employeeAge >= 50 && roundBirthday === true));
-  const threshold = GIFT_LIMITS_2026[giftType] ?? 0;
+  const threshold = benefitRules.giftLimits?.[giftType] ?? 0;
   const taxFreeEligible =
     (giftType === "CHRISTMAS" || giftType === "ANNIVERSARY" || qualifiesMemorialGift) &&
     giftValueInclVat <= threshold;
@@ -979,7 +1146,11 @@ function evaluateGift({ inputs, resolvedMethod }) {
       employeeAge,
       employmentEnding,
       roundBirthday,
-      qualifiesMemorialGift
+      qualifiesMemorialGift,
+      rulePackId: rulePack.rulePackId,
+      rulePackCode: rulePack.rulePackCode,
+      ruleVersion: rulePack.version || DEFAULT_RULE_VERSION,
+      ruleYear
     },
     warnings: [],
     explanation: [
@@ -990,7 +1161,7 @@ function evaluateGift({ inputs, resolvedMethod }) {
   });
 }
 
-function evaluateHealthInsurance({ inputs, resolvedMethod }) {
+function evaluateHealthInsurance({ inputs, resolvedMethod, rulePack, benefitRules }) {
   if (resolvedMethod === "manual_taxable_value") {
     const manualTaxableValue = normalizeMoney(inputs.sourcePayload.manualTaxableValue, "benefit_health_manual_value_invalid");
     const employerPaidValue = normalizeMoney(inputs.sourcePayload.employerPaidValue ?? manualTaxableValue, "benefit_health_employer_paid_invalid");
@@ -1012,16 +1183,17 @@ function evaluateHealthInsurance({ inputs, resolvedMethod }) {
   }
 
   const insurancePremium = normalizeMoney(inputs.sourcePayload.insurancePremium, "benefit_health_premium_required");
-  const taxablePremiumRatio = normalizeRatio(inputs.sourcePayload.taxablePremiumRatio ?? HEALTH_INSURANCE_DEFAULT_RATIO, "benefit_health_ratio_invalid");
-  if (taxablePremiumRatio < HEALTH_INSURANCE_DEFAULT_RATIO && inputs.sourcePayload.documentedLowerRatio !== true) {
+  const taxablePremiumRatio = normalizeRatio(inputs.sourcePayload.taxablePremiumRatio ?? benefitRules.healthInsuranceDefaultRatio, "benefit_health_ratio_invalid");
+  const ruleYear = resolveBenefitRuleYear(rulePack);
+  if (taxablePremiumRatio < benefitRules.healthInsuranceDefaultRatio && inputs.sourcePayload.documentedLowerRatio !== true) {
     throw createError(
       400,
       "benefit_health_lower_ratio_documentation_required",
-      "A taxable premium ratio below 60 percent requires documented support."
+      `A taxable premium ratio below ${Math.round(benefitRules.healthInsuranceDefaultRatio * 100)} percent requires documented support.`
     );
   }
   return finalizeBenefitAmounts({
-    decisionCode: "BENEFIT_HEALTH_INSURANCE_2026",
+    decisionCode: `BENEFIT_HEALTH_INSURANCE_${ruleYear}`,
     marketValue: insurancePremium,
     employerPaidValue: insurancePremium,
     taxableValueBeforeOffsets: roundMoney(insurancePremium * taxablePremiumRatio),
@@ -1031,12 +1203,17 @@ function evaluateHealthInsurance({ inputs, resolvedMethod }) {
     outputs: {
       valuationMethod: resolvedMethod,
       insurancePremium,
-      taxablePremiumRatio
+      taxablePremiumRatio,
+      defaultTaxablePremiumRatio: benefitRules.healthInsuranceDefaultRatio,
+      rulePackId: rulePack.rulePackId,
+      rulePackCode: rulePack.rulePackCode,
+      ruleVersion: rulePack.version || DEFAULT_RULE_VERSION,
+      ruleYear
     },
     warnings: [],
     explanation: [
       "Health insurance used the taxable premium share for mixed taxable and tax-free coverage.",
-      "A documented lower ratio is required if the taxable share is set below the 60 percent default."
+      `A documented lower ratio is required if the taxable share is set below the ${Math.round(benefitRules.healthInsuranceDefaultRatio * 100)} percent default.`
     ]
   });
 }
