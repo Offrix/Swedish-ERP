@@ -11,6 +11,7 @@ import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
+import { createConfiguredSecretStore } from "../../domain-core/src/secret-runtime.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -310,6 +311,8 @@ export function createPayrollEngine({
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   environmentMode = "test",
+  env = process.env,
+  secretRuntimeBridgeRunner = null,
   supportsLegalEffect = false,
   modeWatermarkCode = null,
   orgAuthPlatform = null,
@@ -325,9 +328,22 @@ export function createPayrollEngine({
   tenantControlPlatform = null,
   evidencePlatform = null,
   ruleRegistry = null,
-  getCorePlatform = null
+  getCorePlatform = null,
+  secretStore = null,
+  secretSealKey = null
 } = {}) {
   const rules = ruleRegistry || createRulePackRegistry({ clock, seedRulePacks: EMPLOYER_CONTRIBUTION_RULE_PACKS });
+  const payrollSecretStore =
+    secretStore ||
+    createConfiguredSecretStore({
+      clock,
+      env,
+      bridgeRunner: secretRuntimeBridgeRunner || undefined,
+      environmentMode,
+      storeId: "payroll",
+      masterKey: secretSealKey || `swedish-erp-payroll-seal:${environmentMode}`,
+      activeKeyVersion: `payroll:${environmentMode}:v1`
+    });
   const state = {
     payItems: new Map(),
     payItemIdsByCompany: new Map(),
@@ -388,6 +404,7 @@ export function createPayrollEngine({
     payrollPostingIdsByCompany: new Map(),
     payrollPostingIdByRun: new Map(),
     payrollPayoutBatches: new Map(),
+    payrollPayoutBatchExportSecrets: new Map(),
     payrollPayoutBatchIdsByCompany: new Map(),
     payrollPayoutBatchIdByRun: new Map(),
     vacationLiabilitySnapshots: new Map(),
@@ -405,6 +422,14 @@ export function createPayrollEngine({
   if (seedDemo) {
     seedPayrollDemo(state, { clock, companyId: DEMO_COMPANY_ID });
   }
+  migrateLegacyPayrollPayoutExportSecrets(state, {
+    secretStore: payrollSecretStore
+  });
+  maskLegacyPayrollPayoutBatchLines(state);
+  const presentPayoutBatch = (record) =>
+    presentPayrollPayoutBatch(state, record, {
+      secretStore: payrollSecretStore
+    });
 
   const engine = {
     payRunTypes: PAY_RUN_TYPES,
@@ -485,11 +510,23 @@ export function createPayrollEngine({
   return engine;
 
   function exportDurableState() {
-    return serializeDurableState(state);
+    migrateLegacyPayrollPayoutExportSecrets(state, {
+      secretStore: payrollSecretStore
+    });
+    maskLegacyPayrollPayoutBatchLines(state);
+    return {
+      ...serializeDurableState(state),
+      secretStoreBundle: payrollSecretStore.exportSecretBundle()
+    };
   }
 
   function importDurableState(snapshot) {
     applyDurableStateSnapshot(state, snapshot);
+    payrollSecretStore.importSecretBundle(snapshot?.secretStoreBundle);
+    migrateLegacyPayrollPayoutExportSecrets(state, {
+      secretStore: payrollSecretStore
+    });
+    maskLegacyPayrollPayoutBatchLines(state);
   }
 
   function listEmployerContributionRulePacks({ effectiveDate = null } = {}) {
@@ -2192,18 +2229,18 @@ export function createPayrollEngine({
       .filter(Boolean)
       .filter((candidate) => (payRunId ? candidate.payRunId === payRunId : true))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-      .map((record) => presentPayrollPayoutBatch(state, record));
+      .map((record) => presentPayoutBatch(record));
   }
 
   function getPayrollPayoutBatch({ companyId, payrollPayoutBatchId } = {}) {
-    return presentPayrollPayoutBatch(state, requirePayrollPayoutBatch(state, companyId, payrollPayoutBatchId));
+    return presentPayoutBatch(requirePayrollPayoutBatch(state, companyId, payrollPayoutBatchId));
   }
 
   function createPayrollPayoutBatch({ companyId, payRunId, bankAccountId = null, actorId = "system" } = {}) {
     const payRun = requireApprovedPayRun(state, companyId, payRunId);
     const existingBatchId = state.payrollPayoutBatchIdByRun.get(payRun.payRunId);
     if (existingBatchId) {
-      return presentPayrollPayoutBatch(state, state.payrollPayoutBatches.get(existingBatchId));
+      return presentPayoutBatch(state.payrollPayoutBatches.get(existingBatchId));
     }
     const posting = state.payrollPostingIdByRun.get(payRun.payRunId)
       ? state.payrollPostings.get(state.payrollPostingIdByRun.get(payRun.payRunId))
@@ -2236,8 +2273,17 @@ export function createPayrollEngine({
       executionBoundary
     });
     const now = nowIso(clock);
+    const payoutBatchId = crypto.randomUUID();
+    const exportSecretRecord = projectPayrollPayoutBatchExportSecretRecord({
+      companyId: payRun.companyId,
+      payrollPayoutBatchId: payoutBatchId,
+      payRunId: payRun.payRunId,
+      exportFileName: batchModel.exportFileName,
+      exportPayload: batchModel.exportPayload,
+      secretStore: payrollSecretStore
+    });
     const record = {
-      payrollPayoutBatchId: crypto.randomUUID(),
+      payrollPayoutBatchId: payoutBatchId,
       companyId: payRun.companyId,
       payRunId: payRun.payRunId,
       reportingPeriod: payRun.reportingPeriod,
@@ -2249,7 +2295,7 @@ export function createPayrollEngine({
       totalAmount: batchModel.totalAmount,
       paymentDate: payRun.payDate,
       exportFileName: batchModel.exportFileName,
-      exportPayload: batchModel.exportPayload,
+      exportPayload: null,
       exportPayloadHash: batchModel.payloadHash,
       payrollInputSnapshotId: payRun.payrollInputSnapshotId,
       payrollInputFingerprint: payRun.payrollInputFingerprint,
@@ -2257,7 +2303,7 @@ export function createPayrollEngine({
       rulepackRefs: copy(payRun.rulepackRefs || []),
       providerBaselineRefs: copy(payRun.providerBaselineRefs || []),
       decisionSnapshotRefs: copy(payRun.decisionSnapshotRefs || []),
-      lines: batchModel.lines.map(copy),
+      lines: batchModel.lines.map(maskPayrollPayoutLineForState),
       evidenceBundleId: null,
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: now,
@@ -2267,6 +2313,7 @@ export function createPayrollEngine({
       matchedJournalEntryId: null,
       bankEventId: null
     };
+    state.payrollPayoutBatchExportSecrets.set(record.payrollPayoutBatchId, exportSecretRecord);
     state.payrollPayoutBatches.set(record.payrollPayoutBatchId, record);
     appendToIndex(state.payrollPayoutBatchIdsByCompany, record.companyId, record.payrollPayoutBatchId);
     state.payrollPayoutBatchIdByRun.set(record.payRunId, record.payrollPayoutBatchId);
@@ -2314,13 +2361,13 @@ export function createPayrollEngine({
       note: `Exported payroll payout batch ${record.payrollPayoutBatchId}.`,
       recordedAt: now
     });
-    return presentPayrollPayoutBatch(state, record);
+    return presentPayoutBatch(record);
   }
 
   function matchPayrollPayoutBatch({ companyId, payrollPayoutBatchId, bankEventId, matchedOn = null, actorId = "system" } = {}) {
     const batch = requirePayrollPayoutBatch(state, companyId, payrollPayoutBatchId);
     if (batch.status === "matched") {
-      return presentPayrollPayoutBatch(state, batch);
+      return presentPayoutBatch(batch);
     }
     if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
       throw createError(500, "ledger_platform_missing", "Ledger platform is required to match payroll payouts to bank.");
@@ -2404,7 +2451,7 @@ export function createPayrollEngine({
       note: `Matched payroll payout batch ${batch.payrollPayoutBatchId} to bank event ${batch.bankEventId}.`,
       recordedAt: batch.updatedAt
     });
-    return presentPayrollPayoutBatch(state, batch);
+    return presentPayoutBatch(batch);
   }
 
   function listVacationLiabilitySnapshots({ companyId, reportingPeriod = null } = {}) {
@@ -2606,13 +2653,34 @@ function requirePayrollPayoutBatch(state, companyId, payrollPayoutBatchId) {
   return record;
 }
 
-function presentPayrollPayoutBatch(state, record) {
+function resolvePayrollPayoutBatchExportPayload(state, record, { secretStore = null } = {}) {
+  if (!record) {
+    return null;
+  }
+  if (typeof record.exportPayload === "string") {
+    return record.exportPayload;
+  }
+  const secretRecord = state.payrollPayoutBatchExportSecrets.get(record.payrollPayoutBatchId) || null;
+  if (!secretRecord?.secretRef || !secretStore?.hasSecretMaterial?.({ secretId: secretRecord.secretRef })) {
+    return null;
+  }
+  const material = secretStore.readSecretMaterial({
+    secretId: secretRecord.secretRef,
+    parse: true
+  });
+  return typeof material?.exportPayload === "string" ? material.exportPayload : null;
+}
+
+function presentPayrollPayoutBatch(state, record, { secretStore = null } = {}) {
   if (!record) {
     return null;
   }
   const payRun = state.payRuns.get(record.payRunId) || null;
   return {
     ...copy(record),
+    exportPayload: resolvePayrollPayoutBatchExportPayload(state, record, {
+      secretStore
+    }),
     payRun: payRun ? enrichPayRun(state, payRun) : null
   };
 }
@@ -2916,6 +2984,92 @@ function buildPayrollPayoutBatchModel({ state, payRun, companyBankAccount, hrPla
       exportPayload
     })
   };
+}
+
+function projectPayrollPayoutBatchExportSecretRecord({
+  companyId,
+  payrollPayoutBatchId,
+  payRunId,
+  exportFileName,
+  exportPayload,
+  secretStore
+}) {
+  const secretMeta = secretStore.storeSecretMaterial({
+    secretId: `payroll-payout-export:${payrollPayoutBatchId}`,
+    classCode: "S3",
+    material: {
+      exportPayload
+    },
+    owner: {
+      domainKey: "payroll",
+      companyId,
+      payrollPayoutBatchId,
+      payRunId,
+      objectType: "payroll_payout_export"
+    },
+    maskedValue: normalizeOptionalText(exportFileName) || `payroll-payout-export:${payrollPayoutBatchId}`,
+    fingerprintPurpose: "payroll_payout_export"
+  });
+  return {
+    secretRef: secretMeta.secretRef,
+    keyVersion: secretMeta.keyVersion,
+    fingerprint: secretMeta.fingerprint,
+    maskedValue: secretMeta.maskedValue
+  };
+}
+
+function maskSensitiveValue(value) {
+  const normalized = normalizeOptionalText(value);
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.startsWith("trial://")) {
+    return normalized;
+  }
+  const suffix = normalized.slice(-4);
+  return `${"*".repeat(Math.max(normalized.length - 4, 4))}${suffix}`;
+}
+
+function maskPayrollPayoutLineForState(line) {
+  if (!line) {
+    return line;
+  }
+  return {
+    ...copy(line),
+    accountTarget:
+      normalizeOptionalText(line.accountTarget)?.startsWith("trial://")
+        ? line.accountTarget
+        : maskSensitiveValue(line.accountTarget)
+  };
+}
+
+function maskLegacyPayrollPayoutBatchLines(state) {
+  for (const batch of state.payrollPayoutBatches.values()) {
+    batch.lines = Array.isArray(batch.lines) ? batch.lines.map(maskPayrollPayoutLineForState) : [];
+  }
+}
+
+function migrateLegacyPayrollPayoutExportSecrets(state, { secretStore }) {
+  for (const [payrollPayoutBatchId, batch] of state.payrollPayoutBatches.entries()) {
+    const existingSecret = state.payrollPayoutBatchExportSecrets.get(payrollPayoutBatchId) || null;
+    if (typeof batch.exportPayload !== "string") {
+      continue;
+    }
+    if (!existingSecret?.secretRef) {
+      state.payrollPayoutBatchExportSecrets.set(
+        payrollPayoutBatchId,
+        projectPayrollPayoutBatchExportSecretRecord({
+          companyId: batch.companyId,
+          payrollPayoutBatchId,
+          payRunId: batch.payRunId,
+          exportFileName: batch.exportFileName,
+          exportPayload: batch.exportPayload,
+          secretStore
+        })
+      );
+    }
+    batch.exportPayload = null;
+  }
 }
 
 function buildVacationLiabilitySnapshotModel({ state, companyId, reportingPeriod } = {}) {

@@ -107,6 +107,8 @@ export function createBankingEngine({
     bankAccountIdsByCompany: new Map(),
     bankAccountIdsByIdentity: new Map(),
     bankAccountSecrets: new Map(),
+    paymentOrderSecrets: new Map(),
+    paymentBatchExportSecrets: new Map(),
     paymentProposals: new Map(),
     paymentProposalIdsByCompany: new Map(),
     paymentProposalIdsByKey: new Map(),
@@ -140,9 +142,24 @@ export function createBankingEngine({
     secretStore: bankingSecretStore,
     environmentMode: normalizedEnvironmentMode
   });
+  migrateLegacyPaymentOrderSecrets(state, {
+    secretStore: bankingSecretStore,
+    environmentMode: normalizedEnvironmentMode
+  });
+  migrateLegacyPaymentBatchExportSecrets(state, {
+    secretStore: bankingSecretStore
+  });
   rebuildBankAccountIdentityLookupIndex(state, {
     secretStore: bankingSecretStore
   });
+  const presentProposal = (paymentProposalId) =>
+    presentPaymentProposal(state, paymentProposalId, {
+      secretStore: bankingSecretStore
+    });
+  const presentBatch = (paymentBatchId) =>
+    presentPaymentBatch(state, paymentBatchId, {
+      secretStore: bankingSecretStore
+    });
 
   const engine = {
     bankAccountStatuses: BANK_ACCOUNT_STATUSES,
@@ -967,7 +984,7 @@ export function createBankingEngine({
   function listPaymentProposals({ companyId, status = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return (state.paymentProposalIdsByCompany.get(resolvedCompanyId) || [])
-      .map((paymentProposalId) => presentPaymentProposal(state, paymentProposalId))
+      .map((paymentProposalId) => presentProposal(paymentProposalId))
       .filter(Boolean)
       .filter((proposal) => (status ? proposal.status === status : true))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -975,7 +992,7 @@ export function createBankingEngine({
 
   function getPaymentProposal({ companyId, paymentProposalId } = {}) {
     const proposal = requirePaymentProposalRecord(state, companyId, paymentProposalId);
-    return presentPaymentProposal(state, proposal.paymentProposalId);
+    return presentProposal(proposal.paymentProposalId);
   }
 
   function listPaymentBatches({ companyId, status = null, paymentRailCode = null } = {}) {
@@ -984,7 +1001,7 @@ export function createBankingEngine({
     const resolvedPaymentRailCode =
       paymentRailCode == null ? null : assertAllowed(paymentRailCode, PAYMENT_RAIL_CODES, "payment_rail_code_invalid");
     return (state.paymentBatchIdsByCompany.get(resolvedCompanyId) || [])
-      .map((paymentBatchId) => presentPaymentBatch(state, paymentBatchId))
+      .map((paymentBatchId) => presentBatch(paymentBatchId))
       .filter(Boolean)
       .filter((paymentBatch) => (resolvedStatus ? paymentBatch.status === resolvedStatus : true))
       .filter((paymentBatch) => (resolvedPaymentRailCode ? paymentBatch.paymentRailCode === resolvedPaymentRailCode : true))
@@ -993,7 +1010,7 @@ export function createBankingEngine({
 
   function getPaymentBatch({ companyId, paymentBatchId } = {}) {
     const paymentBatch = requirePaymentBatchRecord(state, companyId, paymentBatchId);
-    return presentPaymentBatch(state, paymentBatch.paymentBatchId);
+    return presentBatch(paymentBatch.paymentBatchId);
   }
 
   function listSettlementLiabilityLinks({
@@ -1063,7 +1080,7 @@ export function createBankingEngine({
     });
     const scopedKey = toCompanyScopedKey(resolvedCompanyId, sourceOpenItemSetHash);
     if (state.paymentProposalIdsByKey.has(scopedKey)) {
-      return presentPaymentProposal(state, state.paymentProposalIdsByKey.get(scopedKey));
+      return presentProposal(state.paymentProposalIdsByKey.get(scopedKey));
     }
 
     const proposal = {
@@ -1152,8 +1169,19 @@ export function createBankingEngine({
           ? apPlatform.getApPaymentPreparation({ companyId: resolvedCompanyId, apOpenItemId })
           : null;
       validateOpenItemForProposal({ openItem, invoice, supplier, bankAccount, paymentPreparation });
+      const paymentOrderId = crypto.randomUUID();
+      const paymentOrderSecretRecord = projectPaymentOrderSecretRecord({
+        companyId: resolvedCompanyId,
+        paymentOrderId,
+        bankgiro: supplier.bankgiro,
+        plusgiro: supplier.plusgiro,
+        iban: supplier.iban,
+        bic: supplier.bic,
+        secretStore: bankingSecretStore,
+        environmentMode: normalizedEnvironmentMode
+      });
       const order = {
-        paymentOrderId: crypto.randomUUID(),
+        paymentOrderId,
         companyId: resolvedCompanyId,
         paymentProposalId: proposal.paymentProposalId,
         paymentBatchId: paymentBatch.paymentBatchId,
@@ -1170,10 +1198,10 @@ export function createBankingEngine({
         providerBaselineCode: railConfig.providerBaselineRef?.baselineCode || null,
         status: "prepared",
         payeeName: supplier.paymentRecipient || supplier.legalName,
-        bankgiro: supplier.bankgiro,
-        plusgiro: supplier.plusgiro,
-        iban: supplier.iban,
-        bic: supplier.bic,
+        bankgiro: paymentOrderSecretRecord.maskedBankgiro,
+        plusgiro: paymentOrderSecretRecord.maskedPlusgiro,
+        iban: paymentOrderSecretRecord.maskedIban,
+        bic: paymentOrderSecretRecord.maskedBic,
         paymentReference: invoice.paymentReference || invoice.externalInvoiceRef,
         amount: openItem.openAmount,
         currencyCode: invoice.currencyCode,
@@ -1189,6 +1217,7 @@ export function createBankingEngine({
         createdAt: nowIso(clock),
         updatedAt: nowIso(clock)
       };
+      state.paymentOrderSecrets.set(order.paymentOrderId, paymentOrderSecretRecord.secretRecord);
       state.paymentOrders.set(order.paymentOrderId, order);
       ensureCollection(state.paymentOrderIdsByCompany, resolvedCompanyId).push(order.paymentOrderId);
       ensureCollection(state.paymentOrderIdsByProposal, proposal.paymentProposalId).push(order.paymentOrderId);
@@ -1218,7 +1247,7 @@ export function createBankingEngine({
       entityId: proposal.paymentProposalId,
       explanation: `Created payment proposal ${proposal.paymentProposalNo}.`
     });
-    return presentPaymentProposal(state, proposal.paymentProposalId);
+    return presentProposal(proposal.paymentProposalId);
   }
 
   function approvePaymentProposal({ companyId, paymentProposalId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
@@ -1237,7 +1266,7 @@ export function createBankingEngine({
       entityId: proposal.paymentProposalId,
       explanation: `Approved payment proposal ${proposal.paymentProposalNo}.`
     });
-    return presentPaymentProposal(state, proposal.paymentProposalId);
+    return presentProposal(proposal.paymentProposalId);
   }
 
   function exportPaymentProposal({ companyId, paymentProposalId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
@@ -1264,7 +1293,12 @@ export function createBankingEngine({
         order.updatedAt = nowIso(clock);
       }
     }
-    const orders = listProposalOrderRecords(state, proposal.paymentProposalId);
+    const orders = listProposalOrderRecords(state, proposal.paymentProposalId).map((order) =>
+      resolvePaymentOrderExecutionView(order, {
+        secretStore: bankingSecretStore,
+        secretRecord: state.paymentOrderSecrets.get(order.paymentOrderId) || null
+      })
+    );
     const exportArtifact = buildPaymentBatchExportArtifact({
       paymentBatch,
       proposal,
@@ -1274,18 +1308,29 @@ export function createBankingEngine({
       }),
       orders
     });
+    const exportSecretRecord = projectPaymentBatchExportSecretRecord({
+      companyId: proposal.companyId,
+      paymentBatchId: paymentBatch.paymentBatchId,
+      paymentProposalId: proposal.paymentProposalId,
+      paymentRailCode: paymentBatch.paymentRailCode,
+      paymentFileFormatCode: paymentBatch.paymentFileFormatCode,
+      exportFileName: exportArtifact.exportFileName,
+      exportPayload: exportArtifact.exportPayload,
+      secretStore: bankingSecretStore
+    });
     proposal.status = "exported";
     proposal.exportedAt = proposal.exportedAt || nowIso(clock);
     proposal.exportFileName = exportArtifact.exportFileName;
-    proposal.exportPayload = exportArtifact.exportPayload;
-    proposal.exportPayloadHash = hashObject({ paymentProposalId: proposal.paymentProposalId, exportPayload: proposal.exportPayload });
+    proposal.exportPayload = null;
+    proposal.exportPayloadHash = hashObject({ paymentProposalId: proposal.paymentProposalId, exportPayload: exportArtifact.exportPayload });
     proposal.updatedAt = nowIso(clock);
     paymentBatch.status = "exported";
     paymentBatch.exportedAt = proposal.exportedAt;
     paymentBatch.exportFileName = exportArtifact.exportFileName;
-    paymentBatch.exportPayload = exportArtifact.exportPayload;
+    paymentBatch.exportPayload = null;
     paymentBatch.exportPayloadHash = hashObject({ paymentBatchId: paymentBatch.paymentBatchId, exportPayload: exportArtifact.exportPayload });
     paymentBatch.updatedAt = nowIso(clock);
+    state.paymentBatchExportSecrets.set(paymentBatch.paymentBatchId, exportSecretRecord);
     pushAudit(state, clock, {
       companyId: proposal.companyId,
       actorId,
@@ -1295,13 +1340,20 @@ export function createBankingEngine({
       entityId: proposal.paymentProposalId,
       explanation: `Exported payment proposal ${proposal.paymentProposalNo}.`
     });
-    return presentPaymentProposal(state, proposal.paymentProposalId);
+    return presentProposal(proposal.paymentProposalId);
   }
 
   function exportDurableState() {
     migrateLegacyBankAccountSecrets(state, {
       secretStore: bankingSecretStore,
       environmentMode: normalizedEnvironmentMode
+    });
+    migrateLegacyPaymentOrderSecrets(state, {
+      secretStore: bankingSecretStore,
+      environmentMode: normalizedEnvironmentMode
+    });
+    migrateLegacyPaymentBatchExportSecrets(state, {
+      secretStore: bankingSecretStore
     });
     rebuildBankAccountIdentityLookupIndex(state, {
       secretStore: bankingSecretStore
@@ -1318,6 +1370,13 @@ export function createBankingEngine({
     migrateLegacyBankAccountSecrets(state, {
       secretStore: bankingSecretStore,
       environmentMode: normalizedEnvironmentMode
+    });
+    migrateLegacyPaymentOrderSecrets(state, {
+      secretStore: bankingSecretStore,
+      environmentMode: normalizedEnvironmentMode
+    });
+    migrateLegacyPaymentBatchExportSecrets(state, {
+      secretStore: bankingSecretStore
     });
     rebuildBankAccountIdentityLookupIndex(state, {
       secretStore: bankingSecretStore
@@ -1351,7 +1410,7 @@ export function createBankingEngine({
       entityId: proposal.paymentProposalId,
       explanation: `Submitted payment proposal ${proposal.paymentProposalNo}.`
     });
-    return presentPaymentProposal(state, proposal.paymentProposalId);
+    return presentProposal(proposal.paymentProposalId);
   }
 
   function acceptPaymentProposal({ companyId, paymentProposalId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
@@ -1381,7 +1440,7 @@ export function createBankingEngine({
       entityId: proposal.paymentProposalId,
       explanation: `Registered bank acceptance for payment proposal ${proposal.paymentProposalNo}.`
     });
-    return presentPaymentProposal(state, proposal.paymentProposalId);
+    return presentProposal(proposal.paymentProposalId);
   }
 
   function bookPaymentOrder({
@@ -1399,7 +1458,7 @@ export function createBankingEngine({
     const bankAccount = requireBankAccountRecord(state, proposal.companyId, proposal.bankAccountId);
     const bankPaymentEvent = upsertBankPaymentEvent(state, proposal.companyId, order.paymentOrderId, bankEventId, "booked", clock);
     if (bankPaymentEvent.idempotentReplay) {
-      return { paymentProposal: presentPaymentProposal(state, proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: true };
+      return { paymentProposal: presentProposal(proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: true };
     }
     if (!["reserved", "sent", "accepted", "booked"].includes(order.status)) {
       throw createError(409, "payment_order_not_bookable", "Payment order is not in a bookable state.");
@@ -1431,7 +1490,7 @@ export function createBankingEngine({
       settledAmount: order.amount
     });
     refreshProposalStatus(state, proposal.paymentProposalId, clock);
-    return { paymentProposal: presentPaymentProposal(state, proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: false };
+    return { paymentProposal: presentProposal(proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: false };
   }
 
   function rejectPaymentOrder({
@@ -1448,7 +1507,7 @@ export function createBankingEngine({
     const proposal = requirePaymentProposalRecord(state, companyId, order.paymentProposalId);
     const bankPaymentEvent = upsertBankPaymentEvent(state, proposal.companyId, order.paymentOrderId, bankEventId, "rejected", clock);
     if (bankPaymentEvent.idempotentReplay) {
-      return { paymentProposal: presentPaymentProposal(state, proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: true };
+      return { paymentProposal: presentProposal(proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: true };
     }
     if (!["reserved", "sent", "accepted", "rejected"].includes(order.status)) {
       throw createError(409, "payment_order_not_rejectable", "Payment order is not in a rejectable state.");
@@ -1478,7 +1537,7 @@ export function createBankingEngine({
       settledAmount: 0
     });
     refreshProposalStatus(state, proposal.paymentProposalId, clock);
-    return { paymentProposal: presentPaymentProposal(state, proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: false };
+    return { paymentProposal: presentProposal(proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: false };
   }
 
   function returnPaymentOrder({
@@ -1496,7 +1555,7 @@ export function createBankingEngine({
     const bankAccount = requireBankAccountRecord(state, proposal.companyId, proposal.bankAccountId);
     const bankPaymentEvent = upsertBankPaymentEvent(state, proposal.companyId, order.paymentOrderId, bankEventId, "returned", clock);
     if (bankPaymentEvent.idempotentReplay) {
-      return { paymentProposal: presentPaymentProposal(state, proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: true };
+      return { paymentProposal: presentProposal(proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: true };
     }
     if (!["booked", "returned"].includes(order.status)) {
       throw createError(409, "payment_order_not_returnable", "Only booked payment orders can be returned.");
@@ -1528,7 +1587,7 @@ export function createBankingEngine({
       settledAmount: 0
     });
     refreshProposalStatus(state, proposal.paymentProposalId, clock);
-    return { paymentProposal: presentPaymentProposal(state, proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: false };
+    return { paymentProposal: presentProposal(proposal.paymentProposalId), paymentOrder: copy(order), bankPaymentEvent: copy(bankPaymentEvent.bankPaymentEvent), idempotentReplay: false };
   }
 
   function snapshotBanking() {
@@ -1584,14 +1643,28 @@ function presentBankAccount(bankAccount) {
   return bankAccount ? copy(bankAccount) : null;
 }
 
-function presentPaymentProposal(state, paymentProposalId) {
+function presentPaymentProposal(state, paymentProposalId, { secretStore = null } = {}) {
   const proposal = state.paymentProposals.get(paymentProposalId);
   if (!proposal) return null;
   const paymentBatchId = proposal.paymentBatchId || state.paymentBatchIdByProposal.get(proposal.paymentProposalId) || null;
+  const exportPayload =
+    paymentBatchId != null
+      ? resolvePaymentBatchExportPayload(state, paymentBatchId, {
+          secretStore
+        })
+      : resolveLegacyStoredExportPayload(proposal, {
+          secretStore
+        });
   return copy({
     ...proposal,
+    exportPayload,
     bankAccount: presentBankAccount(state.bankAccounts.get(proposal.bankAccountId) || null),
-    paymentBatch: paymentBatchId ? presentPaymentBatch(state, paymentBatchId) : null,
+    paymentBatch:
+      paymentBatchId
+        ? presentPaymentBatch(state, paymentBatchId, {
+            secretStore
+          })
+        : null,
     orders: listProposalOrderRecords(state, paymentProposalId).map(copy)
   });
 }
@@ -1600,12 +1673,15 @@ function listProposalOrderRecords(state, paymentProposalId) {
   return (state.paymentOrderIdsByProposal.get(paymentProposalId) || []).map((paymentOrderId) => state.paymentOrders.get(paymentOrderId)).filter(Boolean).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
-function presentPaymentBatch(state, paymentBatchId) {
+function presentPaymentBatch(state, paymentBatchId, { secretStore = null } = {}) {
   const paymentBatch = state.paymentBatches.get(paymentBatchId);
   if (!paymentBatch) return null;
   const proposal = state.paymentProposals.get(paymentBatch.paymentProposalId) || null;
   return copy({
     ...paymentBatch,
+    exportPayload: resolvePaymentBatchExportPayload(state, paymentBatchId, {
+      secretStore
+    }),
     bankAccount: presentBankAccount(state.bankAccounts.get(paymentBatch.bankAccountId) || null),
     proposal: proposal ? { paymentProposalId: proposal.paymentProposalId, paymentProposalNo: proposal.paymentProposalNo, status: proposal.status } : null,
     orders: proposal ? listProposalOrderRecords(state, proposal.paymentProposalId).map(copy) : []
@@ -1981,6 +2057,42 @@ function buildPaymentBatchExportArtifact({ paymentBatch, proposal, bankAccount, 
   }
 }
 
+function resolveLegacyStoredExportPayload(record, { secretStore = null } = {}) {
+  if (typeof record?.exportPayload === "string") {
+    return record.exportPayload;
+  }
+  const secretRef = normalizeOptionalText(record?.exportPayloadSecretRef);
+  if (!secretRef || !secretStore?.hasSecretMaterial?.({ secretId: secretRef })) {
+    return null;
+  }
+  const material = secretStore.readSecretMaterial({
+    secretId: secretRef,
+    parse: true
+  });
+  return typeof material?.exportPayload === "string" ? material.exportPayload : null;
+}
+
+function resolvePaymentBatchExportPayload(state, paymentBatchId, { secretStore = null } = {}) {
+  const paymentBatch = state.paymentBatches.get(paymentBatchId) || null;
+  if (!paymentBatch) {
+    return null;
+  }
+  if (typeof paymentBatch.exportPayload === "string") {
+    return paymentBatch.exportPayload;
+  }
+  const secretRecord = state.paymentBatchExportSecrets.get(paymentBatchId) || null;
+  if (!secretRecord?.secretRef || !secretStore?.hasSecretMaterial?.({ secretId: secretRecord.secretRef })) {
+    return resolveLegacyStoredExportPayload(paymentBatch, {
+      secretStore
+    });
+  }
+  const material = secretStore.readSecretMaterial({
+    secretId: secretRecord.secretRef,
+    parse: true
+  });
+  return typeof material?.exportPayload === "string" ? material.exportPayload : null;
+}
+
 function resolveBankAccountSecretDetails(secretStore, secretRecord) {
   if (!secretRecord) {
     return {};
@@ -2007,6 +2119,33 @@ function resolveBankAccountExecutionView(bankAccount, { secretStore = null, secr
     plusgiro: normalizeOptionalText(secretDetails.plusgiro) || bankAccount.plusgiro || null,
     iban: normalizeOptionalText(secretDetails.iban) || bankAccount.iban || null,
     bic: normalizeOptionalText(secretDetails.bic) || bankAccount.bic || null
+  };
+}
+
+function resolvePaymentOrderSecretDetails(secretStore, secretRecord) {
+  if (!secretRecord) {
+    return {};
+  }
+  if (secretRecord.secretRef && secretStore?.hasSecretMaterial?.({ secretId: secretRecord.secretRef })) {
+    return secretStore.readSecretMaterial({
+      secretId: secretRecord.secretRef,
+      parse: true
+    });
+  }
+  return secretRecord;
+}
+
+function resolvePaymentOrderExecutionView(paymentOrder, { secretStore = null, secretRecord = null } = {}) {
+  if (!paymentOrder) {
+    return null;
+  }
+  const secretDetails = resolvePaymentOrderSecretDetails(secretStore, secretRecord);
+  return {
+    ...paymentOrder,
+    bankgiro: normalizeOptionalText(secretDetails.bankgiro) || paymentOrder.bankgiro || null,
+    plusgiro: normalizeOptionalText(secretDetails.plusgiro) || paymentOrder.plusgiro || null,
+    iban: normalizeOptionalText(secretDetails.iban) || paymentOrder.iban || null,
+    bic: normalizeOptionalText(secretDetails.bic) || paymentOrder.bic || null
   };
 }
 
@@ -2037,6 +2176,87 @@ function projectBankAccountSecretRecord({ companyId, bankAccountId, details, mas
     keyVersion: secretMeta.keyVersion,
     fingerprint: secretMeta.fingerprint,
     last4: resolveBankAccountLast4(details)
+  };
+}
+
+function projectPaymentOrderSecretRecord({
+  companyId,
+  paymentOrderId,
+  bankgiro,
+  plusgiro,
+  iban,
+  bic,
+  secretStore,
+  environmentMode
+}) {
+  const details = {
+    bankgiro: normalizeOptionalText(bankgiro),
+    plusgiro: normalizeOptionalText(plusgiro),
+    iban: normalizeOptionalText(iban),
+    bic: normalizeOptionalText(bic)
+  };
+  const secretMeta = secretStore.storeSecretMaterial({
+    secretId: `payment-order:${paymentOrderId}`,
+    classCode: "S3",
+    material: copy(details),
+    owner: {
+      domainKey: "banking",
+      companyId,
+      paymentOrderId,
+      objectType: "payment_order"
+    },
+    mode: environmentMode,
+    maskedValue:
+      maskSensitiveValue(details.iban || details.bankgiro || details.plusgiro || details.bic || paymentOrderId),
+    fingerprintPurpose: "banking_payment_order_target"
+  });
+  return {
+    paymentOrderId,
+    secretRecord: {
+      secretRef: secretMeta.secretRef,
+      keyVersion: secretMeta.keyVersion,
+      fingerprint: secretMeta.fingerprint
+    },
+    maskedBankgiro: details.bankgiro ? maskSensitiveValue(details.bankgiro) : null,
+    maskedPlusgiro: details.plusgiro ? maskSensitiveValue(details.plusgiro) : null,
+    maskedIban: details.iban ? maskSensitiveValue(details.iban) : null,
+    maskedBic: details.bic ? maskSensitiveValue(details.bic) : null
+  };
+}
+
+function projectPaymentBatchExportSecretRecord({
+  companyId,
+  paymentBatchId,
+  paymentProposalId,
+  paymentRailCode,
+  paymentFileFormatCode,
+  exportFileName,
+  exportPayload,
+  secretStore
+}) {
+  const secretMeta = secretStore.storeSecretMaterial({
+    secretId: `payment-batch-export:${paymentBatchId}`,
+    classCode: "S3",
+    material: {
+      exportPayload
+    },
+    owner: {
+      domainKey: "banking",
+      companyId,
+      paymentBatchId,
+      paymentProposalId,
+      objectType: "payment_batch_export",
+      paymentRailCode,
+      paymentFileFormatCode
+    },
+    maskedValue: normalizeOptionalText(exportFileName) || `payment-batch-export:${paymentBatchId}`,
+    fingerprintPurpose: "banking_payment_batch_export"
+  });
+  return {
+    secretRef: secretMeta.secretRef,
+    keyVersion: secretMeta.keyVersion,
+    fingerprint: secretMeta.fingerprint,
+    maskedValue: secretMeta.maskedValue
   };
 }
 
@@ -2075,6 +2295,74 @@ function migrateLegacyBankAccountSecrets(state, { secretStore, environmentMode }
     bankAccount.iban = normalizedDetails.iban ? maskSensitiveValue(normalizedDetails.iban) : null;
     bankAccount.last4 = resolveBankAccountLast4(normalizedDetails);
     bankAccount.maskedAccountDisplay = bankAccount.maskedAccountDisplay || maskSensitiveValue(resolveBankAccountIdentityValue(normalizedDetails));
+  }
+}
+
+function migrateLegacyPaymentOrderSecrets(state, { secretStore, environmentMode }) {
+  for (const [paymentOrderId, paymentOrder] of state.paymentOrders.entries()) {
+    const existingSecret = state.paymentOrderSecrets.get(paymentOrderId) || null;
+    if (existingSecret?.secretRef) {
+      continue;
+    }
+    const details = {
+      bankgiro: normalizeOptionalText(paymentOrder.bankgiro),
+      plusgiro: normalizeOptionalText(paymentOrder.plusgiro),
+      iban: normalizeOptionalText(paymentOrder.iban),
+      bic: normalizeOptionalText(paymentOrder.bic)
+    };
+    if (!details.bankgiro && !details.plusgiro && !details.iban && !details.bic) {
+      continue;
+    }
+    const secret = projectPaymentOrderSecretRecord({
+      companyId: paymentOrder.companyId,
+      paymentOrderId,
+      ...details,
+      secretStore,
+      environmentMode
+    });
+    state.paymentOrderSecrets.set(paymentOrderId, secret.secretRecord);
+    paymentOrder.bankgiro = secret.maskedBankgiro;
+    paymentOrder.plusgiro = secret.maskedPlusgiro;
+    paymentOrder.iban = secret.maskedIban;
+    paymentOrder.bic = secret.maskedBic;
+  }
+}
+
+function migrateLegacyPaymentBatchExportSecrets(state, { secretStore }) {
+  for (const [paymentBatchId, paymentBatch] of state.paymentBatches.entries()) {
+    const existingSecret = state.paymentBatchExportSecrets.get(paymentBatchId) || null;
+    const proposal =
+      state.paymentProposals.get(paymentBatch.paymentProposalId)
+      || [...state.paymentProposals.values()].find((candidate) => candidate.paymentBatchId === paymentBatchId)
+      || null;
+    const exportPayload =
+      typeof paymentBatch.exportPayload === "string"
+        ? paymentBatch.exportPayload
+        : typeof proposal?.exportPayload === "string"
+          ? proposal.exportPayload
+          : null;
+    if (!exportPayload) {
+      continue;
+    }
+    if (!existingSecret?.secretRef) {
+      state.paymentBatchExportSecrets.set(
+        paymentBatchId,
+        projectPaymentBatchExportSecretRecord({
+          companyId: paymentBatch.companyId,
+          paymentBatchId,
+          paymentProposalId: paymentBatch.paymentProposalId,
+          paymentRailCode: paymentBatch.paymentRailCode,
+          paymentFileFormatCode: paymentBatch.paymentFileFormatCode,
+          exportFileName: paymentBatch.exportFileName || proposal?.exportFileName || null,
+          exportPayload,
+          secretStore
+        })
+      );
+    }
+    paymentBatch.exportPayload = null;
+    if (proposal) {
+      proposal.exportPayload = null;
+    }
   }
 }
 
