@@ -85,6 +85,68 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
     assert.equal(run.payslips[0].totals.taxDecision.outputs.decisionType, "tabell");
     assert.equal(run.payslips[0].totals.taxDecision.outputs.preliminaryTax, 11950);
 
+    const aSinkEmployee = await createMonthlyEmployee({
+      baseUrl,
+      token: sessionToken,
+      givenName: "Asta",
+      familyName: "Asinkapi",
+      identityValue: "19800112-7003"
+    });
+    const aSinkDecision = await requestJson(baseUrl, "/v1/payroll/tax-decisions", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: aSinkEmployee.employment.employmentId,
+        decisionType: "a_sink",
+        incomeYear: 2026,
+        validFrom: "2026-01-01",
+        validTo: "2026-12-31",
+        decisionSource: "skatteverket_asink_decision",
+        decisionReference: "asink-api-2026",
+        evidenceRef: "evidence-asink-api-2026"
+      }
+    });
+    assert.equal(aSinkDecision.status, "approved");
+
+    const aSinkRun = await requestJson(baseUrl, "/v1/payroll/pay-runs", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202603",
+        employmentIds: [aSinkEmployee.employment.employmentId]
+      }
+    });
+    assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.decisionType, "a_sink");
+    assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.taxFieldCode, "a_sink_tax");
+    assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 6000);
+    await requestJson(baseUrl, `/v1/payroll/pay-runs/${aSinkRun.payRunId}/approve`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+    const agiSubmission = await requestJson(baseUrl, "/v1/payroll/agi-submissions", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        reportingPeriod: "202603"
+      }
+    });
+    const aSinkAgiEmployee = agiSubmission.currentVersion.employees.find(
+      (candidate) => candidate.employeeId === aSinkEmployee.employee.employeeId
+    );
+    assert.equal(aSinkAgiEmployee.payloadJson.taxFields.preliminaryTax, null);
+    assert.equal(aSinkAgiEmployee.payloadJson.taxFields.sinkTax, null);
+    assert.equal(aSinkAgiEmployee.payloadJson.taxFields.aSinkTax, 6000);
+
     const emergencyEmployee = await createMonthlyEmployee({
       baseUrl,
       token: sessionToken,

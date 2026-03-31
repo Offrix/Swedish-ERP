@@ -136,6 +136,36 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
   assert.equal(extraRun.payslips[0].totals.taxDecision.outputs.decisionType, "engangsskatt");
   assert.equal(extraRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 3500);
 
+  const aSinkEmployee = createMonthlyEmployee({
+    hrPlatform,
+    givenName: "Aron",
+    familyName: "Asink",
+    monthlySalary: 40000,
+    identityValue: "19800112-5551"
+  });
+  payrollPlatform.createTaxDecisionSnapshot({
+    companyId: COMPANY_ID,
+    employmentId: aSinkEmployee.employment.employmentId,
+    decisionType: "a_sink",
+    incomeYear: 2026,
+    validFrom: "2026-01-01",
+    validTo: "2026-12-31",
+    decisionSource: "skatteverket_asink_decision",
+    decisionReference: "asink-2026-001",
+    evidenceRef: "evidence-asink-2026",
+    actorId: "unit-test"
+  });
+  const aSinkRun = payrollPlatform.createPayRun({
+    companyId: COMPANY_ID,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202603",
+    employmentIds: [aSinkEmployee.employment.employmentId],
+    actorId: "unit-test"
+  });
+  assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.decisionType, "a_sink");
+  assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.taxFieldCode, "a_sink_tax");
+  assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 6000);
+
   const emergencyEmployee = createMonthlyEmployee({
     hrPlatform,
     givenName: "Maja",

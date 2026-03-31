@@ -21,7 +21,7 @@ export const PAYROLL_EXCEPTION_STATUSES = Object.freeze(["open", "resolved", "wa
 export const PAYROLL_EXCEPTION_SEVERITIES = Object.freeze(["info", "warning", "error"]);
 export const PAYROLL_FREQUENCY_CODES = Object.freeze(["monthly"]);
 export const PAYROLL_TAX_MODES = Object.freeze(["pending", "manual_rate", "sink"]);
-export const PAYROLL_TAX_DECISION_TYPES = Object.freeze(["tabell", "jamkning", "engangsskatt", "sink", "emergency_manual"]);
+export const PAYROLL_TAX_DECISION_TYPES = Object.freeze(["tabell", "jamkning", "engangsskatt", "sink", "a_sink", "emergency_manual"]);
 export const PAYROLL_TAX_DECISION_STATUSES = Object.freeze(["draft", "approved", "superseded"]);
 export const PAYROLL_EMPLOYER_CONTRIBUTION_DECISION_TYPES = Object.freeze([
   "full",
@@ -237,13 +237,22 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
       sink: {
         standardRatePercent: 22.5,
         seaIncomeRatePercent: 15
+      },
+      aSink: {
+        standardRatePercent: 15
       }
     },
     humanReadableExplanation: [
       "Ordinary tax remains explicit through a configured rate until later tax-table phases.",
-      "SINK is versioned through the rule pack with standard and sea-income rates."
+      "SINK is versioned through the rule pack with standard and sea-income rates.",
+      "A-SINK is versioned as a separate fixed-rate path for foreign artists and athletes."
     ],
-    testVectors: [{ vectorId: "payroll-manual-rate-2026" }, { vectorId: "payroll-sink-2026" }, { vectorId: "payroll-sink-sea-2026" }],
+    testVectors: [
+      { vectorId: "payroll-manual-rate-2026" },
+      { vectorId: "payroll-sink-2026" },
+      { vectorId: "payroll-sink-sea-2026" },
+      { vectorId: "payroll-a-sink-2026" }
+    ],
     migrationNotes: ["Phase 8.2 uses this tax pack for AGI-ready payroll tax decisions."]
   },
   {
@@ -3925,6 +3934,11 @@ function materializeAgiEmployeeGroup({ companyId, reportingPeriod, group, create
       .filter((payslip) => payslip.renderPayload?.totals?.taxDecision?.outputs?.taxFieldCode === "sink_tax")
       .reduce((sum, payslip) => sum + Number(payslip.renderPayload?.totals?.preliminaryTax || 0), 0)
   );
+  const aSinkTaxAmount = roundMoney(
+    group.payslips
+      .filter((payslip) => payslip.renderPayload?.totals?.taxDecision?.outputs?.taxFieldCode === "a_sink_tax")
+      .reduce((sum, payslip) => sum + Number(payslip.renderPayload?.totals?.preliminaryTax || 0), 0)
+  );
 
   const absencePayloads = group.leaveSignals.map((signal) => ({
     agiAbsencePayloadId: crypto.randomUUID(),
@@ -3955,7 +3969,8 @@ function materializeAgiEmployeeGroup({ companyId, reportingPeriod, group, create
     compensationFields: fieldTotals,
     taxFields: {
       preliminaryTax: taxFieldCodes.has("preliminary_tax") ? preliminaryTaxAmount : null,
-      sinkTax: taxFieldCodes.has("sink_tax") ? sinkTaxAmount : null
+      sinkTax: taxFieldCodes.has("sink_tax") ? sinkTaxAmount : null,
+      aSinkTax: taxFieldCodes.has("a_sink_tax") ? aSinkTaxAmount : null
     },
     taxFieldCount: taxFieldCodes.size,
     sourcePayRunIds: [...new Set(group.lines.map((line) => line.payRunId).filter(Boolean))].sort(),
@@ -4006,6 +4021,7 @@ function summarizeAgiEmployeeTotals(employees) {
       summary.pensionPremiumAmount = roundMoney(summary.pensionPremiumAmount + Number(payload.compensationFields.pensionPremiumAmount || 0));
       summary.preliminaryTaxAmount = roundMoney(summary.preliminaryTaxAmount + Number(payload.taxFields.preliminaryTax || 0));
       summary.sinkTaxAmount = roundMoney(summary.sinkTaxAmount + Number(payload.taxFields.sinkTax || 0));
+      summary.aSinkTaxAmount = roundMoney(summary.aSinkTaxAmount + Number(payload.taxFields.aSinkTax || 0));
       return summary;
     },
     {
@@ -4015,7 +4031,8 @@ function summarizeAgiEmployeeTotals(employees) {
       taxFreeAllowanceAmount: 0,
       pensionPremiumAmount: 0,
       preliminaryTaxAmount: 0,
-      sinkTaxAmount: 0
+      sinkTaxAmount: 0,
+      aSinkTaxAmount: 0
     }
   );
 }
@@ -4093,6 +4110,7 @@ function evaluateAgiValidation({ state, submission, version, orgAuthPlatform, ti
     roundMoney(totals.taxableBenefitAmount) === roundMoney(expectedTotals.taxableBenefitAmount || 0) &&
     roundMoney(totals.preliminaryTaxAmount) === roundMoney(expectedTotals.preliminaryTaxAmount || 0) &&
     roundMoney(totals.sinkTaxAmount) === roundMoney(expectedTotals.sinkTaxAmount || 0) &&
+    roundMoney(totals.aSinkTaxAmount) === roundMoney(expectedTotals.aSinkTaxAmount || 0) &&
     totals.employeeCount === Number(expectedTotals.employeeCount || 0);
   if (!totalsMatch) {
     errors.push(createAgiValidationError("agi_totals_mismatch", "AGI totals do not match the employee payloads."));
@@ -5732,17 +5750,19 @@ function buildTaxPreview({
     const snapshotAmount = resolveTaxDecisionSnapshotAmount({
       taxDecisionSnapshot: effectiveTaxContext,
       taxableBase: normalizedTaxableBase,
-      sinkDefaults: rulePack.machineReadableRules?.sink || {}
+      sinkDefaults: rulePack.machineReadableRules?.sink || {},
+      aSinkDefaults: rulePack.machineReadableRules?.aSink || {}
     });
     if (snapshotAmount == null) {
       warnings.push(createWarning("tax_decision_snapshot_incomplete", "Tax decision snapshot could not resolve a withholding amount."));
+      const taxFieldCode = resolveTaxFieldCodeForDecisionType(effectiveTaxContext.decisionType);
       const decisionObject = {
         ...decisionObjectBase,
         decision_code: "PAYROLL_TAX_DECISION_INCOMPLETE",
         outputs: {
           ...decisionObjectBase.outputs,
           preliminaryTax: null,
-          taxFieldCode: effectiveTaxContext.decisionType === "sink" ? "sink_tax" : "preliminary_tax",
+          taxFieldCode,
           status: "pending"
         },
         warnings: ["tax_decision_snapshot_incomplete"],
@@ -5754,7 +5774,7 @@ function buildTaxPreview({
       return {
         amount: null,
         status: "pending",
-        taxFieldCode: effectiveTaxContext.decisionType === "sink" ? "sink_tax" : "preliminary_tax",
+        taxFieldCode,
         decisionObject,
         step: createPendingStep(11, {
           status: "pending",
@@ -5763,21 +5783,17 @@ function buildTaxPreview({
         })
       };
     }
-    const taxFieldCode = effectiveTaxContext.decisionType === "sink" ? "sink_tax" : "preliminary_tax";
-    const decisionCodeByType = {
-      tabell: "PAYROLL_TAX_TABLE",
-      jamkning: "PAYROLL_TAX_ADJUSTMENT",
-      engangsskatt: "PAYROLL_TAX_ONE_TIME",
-      sink: effectiveTaxContext.sinkSeaIncome ? "PAYROLL_TAX_SINK_SEA_INCOME" : "PAYROLL_TAX_SINK",
-      emergency_manual: "PAYROLL_TAX_EMERGENCY_MANUAL"
-    };
+    const taxFieldCode = resolveTaxFieldCodeForDecisionType(effectiveTaxContext.decisionType);
     const decisionObject = {
       ...decisionObjectBase,
-      decision_code: decisionCodeByType[effectiveTaxContext.decisionType] || "PAYROLL_TAX_DECISION",
+      decision_code: resolveTaxDecisionCode({
+        decisionType: effectiveTaxContext.decisionType,
+        sinkSeaIncome: effectiveTaxContext.sinkSeaIncome === true
+      }),
       outputs: {
         ...decisionObjectBase.outputs,
         decisionType: effectiveTaxContext.decisionType,
-        taxMode: effectiveTaxContext.decisionType === "sink" ? "sink" : effectiveTaxContext.decisionType,
+        taxMode: effectiveTaxContext.decisionType,
         taxFieldCode,
         preliminaryTax: snapshotAmount,
         municipalityCode: effectiveTaxContext.municipalityCode || null,
@@ -5993,13 +6009,39 @@ function assertTaxDecisionSourceAllowedForExecutionBoundary({ effectiveTaxContex
   );
 }
 
-function resolveTaxDecisionSnapshotAmount({ taxDecisionSnapshot, taxableBase, sinkDefaults = {} }) {
+function resolveTaxFieldCodeForDecisionType(decisionType) {
+  if (decisionType === "sink") {
+    return "sink_tax";
+  }
+  if (decisionType === "a_sink") {
+    return "a_sink_tax";
+  }
+  return "preliminary_tax";
+}
+
+function resolveTaxDecisionCode({ decisionType, sinkSeaIncome = false }) {
+  const decisionCodeByType = {
+    tabell: "PAYROLL_TAX_TABLE",
+    jamkning: "PAYROLL_TAX_ADJUSTMENT",
+    engangsskatt: "PAYROLL_TAX_ONE_TIME",
+    sink: sinkSeaIncome ? "PAYROLL_TAX_SINK_SEA_INCOME" : "PAYROLL_TAX_SINK",
+    a_sink: "PAYROLL_TAX_A_SINK",
+    emergency_manual: "PAYROLL_TAX_EMERGENCY_MANUAL"
+  };
+  return decisionCodeByType[decisionType] || "PAYROLL_TAX_DECISION";
+}
+
+function resolveTaxDecisionSnapshotAmount({ taxDecisionSnapshot, taxableBase, sinkDefaults = {}, aSinkDefaults = {} }) {
   if (!taxDecisionSnapshot) {
     return null;
   }
   if (taxDecisionSnapshot.decisionType === "sink") {
     const sinkRatePercent = taxDecisionSnapshot.sinkRatePercent ?? (taxDecisionSnapshot.sinkSeaIncome ? sinkDefaults.seaIncomeRatePercent : sinkDefaults.standardRatePercent);
     return sinkRatePercent == null ? null : roundMoney(taxableBase * (sinkRatePercent / 100));
+  }
+  if (taxDecisionSnapshot.decisionType === "a_sink") {
+    const aSinkRatePercent = taxDecisionSnapshot.withholdingRatePercent ?? aSinkDefaults.standardRatePercent;
+    return aSinkRatePercent == null ? null : roundMoney(taxableBase * (aSinkRatePercent / 100));
   }
   if (taxDecisionSnapshot.decisionType === "engangsskatt" || taxDecisionSnapshot.decisionType === "emergency_manual") {
     return taxDecisionSnapshot.withholdingRatePercent == null ? null : roundMoney(taxableBase * (taxDecisionSnapshot.withholdingRatePercent / 100));
@@ -7784,8 +7826,8 @@ function selectTaxDecisionSnapshot({
   const candidates = listApprovedTaxDecisionSnapshotsForEmployment(state, companyId, employmentId, effectiveDate);
   const preferredTypes =
     runType === "extra" || runType === "correction" || runType === "final"
-      ? ["engangsskatt", "sink", "jamkning", "tabell", "emergency_manual"]
-      : ["sink", "jamkning", "tabell", "engangsskatt", "emergency_manual"];
+      ? ["engangsskatt", "sink", "a_sink", "jamkning", "tabell", "emergency_manual"]
+      : ["sink", "a_sink", "jamkning", "tabell", "engangsskatt", "emergency_manual"];
   for (const decisionType of preferredTypes) {
     const match = candidates.find((candidate) => candidate.decisionType === decisionType);
     if (match) {

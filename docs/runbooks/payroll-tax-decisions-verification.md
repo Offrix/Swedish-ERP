@@ -12,6 +12,7 @@ The gate is only green when:
   - `jamkning`
   - `engangsskatt`
   - `sink`
+  - `a_sink`
   - `emergency_manual`
 - `emergency_manual` requires approval by a different actor
 - pay runs no longer depend on free-form manual rate as the primary happy path
@@ -23,6 +24,8 @@ Validate against official Skatteverket guidance before changing decision semanti
 - ordinary salary uses tax table or adjustment decision
 - one-time payouts use one-time tax rules
 - SINK requires a valid decision; SINK is 22.5 percent from the current official baseline
+- A-SINK requires a valid decision; A-SINK is 15 percent from the current official baseline
+- AGI must keep A-SINK tax separate from ordinary preliminary tax and ordinary SINK tax
 
 ## Targeted verification
 
@@ -39,6 +42,7 @@ Expected:
 - regular pay run can resolve `tabell`
 - adjusted decision can resolve `jamkning`
 - extra pay run can resolve `engangsskatt`
+- A-SINK decision resolves `a_sink_tax` and is reported on the AGI A-SINK field instead of ordinary preliminary tax
 - `emergency_manual` is created as `draft` and same-actor approval is rejected
 
 ## Full verification
