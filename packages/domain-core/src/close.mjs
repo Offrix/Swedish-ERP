@@ -38,6 +38,8 @@ function createCloseEngine({
   upsertWorkItem,
   reportingPlatform = null,
   ledgerPlatform = null,
+  legalFormPlatform = null,
+  fiscalYearPlatform = null,
   evidencePlatform = null,
   now,
   audit,
@@ -53,6 +55,8 @@ function createCloseEngine({
     upsertWorkItem,
     reportingPlatform,
     ledgerPlatform,
+    legalFormPlatform,
+    fiscalYearPlatform,
     evidencePlatform,
     now,
     audit,
@@ -145,6 +149,10 @@ function instantiateCloseChecklist(
   const deadline = deriveCloseDeadline(helpers, clientCompanyId, targetCloseDate || accountingPeriod.endsOn);
   const createdAt = helpers.now();
   const checklistId = crypto.randomUUID();
+  const closeRequirementSnapshot = resolveChecklistCloseRequirements(helpers, {
+    clientCompanyId,
+    accountingPeriod
+  });
   const checklist = {
     checklistId,
     bureauOrgId,
@@ -152,7 +160,7 @@ function instantiateCloseChecklist(
     clientCompanyId,
     accountingPeriodId: accountingPeriod.accountingPeriodId,
     periodCode: accountingPeriod.label || accountingPeriod.periodCode || accountingPeriod.accountingPeriodId,
-    checklistTemplateCode: "monthly_standard",
+    checklistTemplateCode: closeRequirementSnapshot.closeTemplateCode || "monthly_standard",
     checklistVersion: nextChecklistVersion(helpers.state, clientCompanyId, accountingPeriod.accountingPeriodId),
     status: "created",
     ownerCompanyUserId: owner.companyUserId,
@@ -161,13 +169,15 @@ function instantiateCloseChecklist(
     deadlineAt: deadline.deadlineAt,
     deadlineBasis: deadline.deadlineBasis,
     closeState: accountingPeriod.status === "hard_closed" ? "hard_closed" : "open",
+    closeRequirementSnapshot,
     reportSnapshotId: norm(reportSnapshotId),
     signoffChain: resolvedSignoffChain,
-    steps: createDefaultSteps({
+    steps: createChecklistSteps({
       bureauOrgId,
       ownerCompanyUserId: owner.companyUserId,
       deadlineAt: deadline.deadlineAt,
       accountingPeriodId: accountingPeriod.accountingPeriodId,
+      stepBlueprints: closeRequirementSnapshot.mandatoryStepBlueprints,
       reportSnapshotId,
       nowIso: createdAt
     }),
@@ -1536,8 +1546,16 @@ function normalizeEvidenceRefs(value, evidenceType) {
   }));
 }
 
-function createDefaultSteps({ bureauOrgId, ownerCompanyUserId, deadlineAt, accountingPeriodId, reportSnapshotId, nowIso }) {
-  return DEFAULT_STEP_BLUEPRINTS.map((blueprint, index) => ({
+function createChecklistSteps({
+  bureauOrgId,
+  ownerCompanyUserId,
+  deadlineAt,
+  accountingPeriodId,
+  stepBlueprints = DEFAULT_STEP_BLUEPRINTS,
+  reportSnapshotId,
+  nowIso
+}) {
+  return stepBlueprints.map((blueprint, index) => ({
     stepId: crypto.randomUUID(),
     stepCode: blueprint.stepCode,
     title: blueprint.title,
@@ -1560,6 +1578,78 @@ function createDefaultSteps({ bureauOrgId, ownerCompanyUserId, deadlineAt, accou
     createdAt: nowIso,
     updatedAt: nowIso
   }));
+}
+
+function resolveChecklistCloseRequirements(helpers, { clientCompanyId, accountingPeriod } = {}) {
+  const fiscalYearContext = resolveChecklistFiscalYearContext(helpers, { clientCompanyId, accountingPeriod });
+  const fallback = {
+    companyId: clientCompanyId,
+    legalFormProfileId: null,
+    legalFormCode: null,
+    reportingObligationProfileId: null,
+    fiscalYearKey: fiscalYearContext.fiscalYearKey,
+    fiscalYearId: fiscalYearContext.fiscalYearId,
+    accountingPeriodId: accountingPeriod.accountingPeriodId,
+    declarationProfileCode: null,
+    filingProfileCode: null,
+    signatoryClassCode: null,
+    packageFamilyCode: null,
+    requiresAnnualReport: false,
+    requiresYearEndAccounts: false,
+    allowsSimplifiedYearEnd: false,
+    requiresBolagsverketFiling: false,
+    requiresTaxDeclarationPackage: false,
+    isFiscalYearEnd: fiscalYearContext.isFiscalYearEnd,
+    closeTemplateCode: "monthly_standard",
+    mandatoryStepBlueprints: DEFAULT_STEP_BLUEPRINTS
+  };
+  if (!helpers.legalFormPlatform?.resolveCloseRequirements) {
+    return fallback;
+  }
+  try {
+    const resolved = helpers.legalFormPlatform.resolveCloseRequirements({
+      companyId: clientCompanyId,
+      accountingPeriodId: accountingPeriod.accountingPeriodId,
+      fiscalYearId: fiscalYearContext.fiscalYearId,
+      fiscalYearKey: fiscalYearContext.fiscalYearKey,
+      asOfDate: accountingPeriod.endsOn || accountingPeriod.toDate || accountingPeriod.endDate || accountingPeriod.startsOn,
+      isFiscalYearEnd: fiscalYearContext.isFiscalYearEnd
+    });
+    return {
+      ...fallback,
+      ...resolved,
+      mandatoryStepBlueprints: Array.isArray(resolved?.mandatoryStepBlueprints) && resolved.mandatoryStepBlueprints.length > 0
+        ? resolved.mandatoryStepBlueprints
+        : DEFAULT_STEP_BLUEPRINTS
+    };
+  } catch (caughtError) {
+    if (["legal_form_profile_missing", "reporting_obligation_profile_missing"].includes(caughtError?.code)) {
+      return fallback;
+    }
+    throw caughtError;
+  }
+}
+
+function resolveChecklistFiscalYearContext(helpers, { clientCompanyId, accountingPeriod } = {}) {
+  const fallback = {
+    fiscalYearId: null,
+    fiscalYearKey: formatFiscalYearKey(accountingPeriod.startsOn, accountingPeriod.endsOn || accountingPeriod.startsOn),
+    isFiscalYearEnd: false
+  };
+  if (!helpers.fiscalYearPlatform?.listFiscalYears) {
+    return fallback;
+  }
+  const periodEnd = accountingPeriod.endsOn || accountingPeriod.toDate || accountingPeriod.endDate || accountingPeriod.startsOn;
+  const matchingFiscalYear = (helpers.fiscalYearPlatform.listFiscalYears({ companyId: clientCompanyId }) || [])
+    .find((candidate) => coversDate(candidate.startDate, addOneDay(candidate.endDate), periodEnd));
+  if (!matchingFiscalYear) {
+    return fallback;
+  }
+  return {
+    fiscalYearId: matchingFiscalYear.fiscalYearId,
+    fiscalYearKey: formatFiscalYearKey(matchingFiscalYear.startDate, matchingFiscalYear.endDate),
+    isFiscalYearEnd: (matchingFiscalYear.endDate || null) === periodEnd
+  };
 }
 
 function normalizeSignoffChain(helpers, bureauOrgId, value) {
@@ -1789,6 +1879,25 @@ function subtractBusinessDays(value, amount) {
     }
   }
   return date.toISOString().slice(0, 10);
+}
+
+function addOneDay(value) {
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function coversDate(startDate, exclusiveEndDate, accountingDate) {
+  return startDate <= accountingDate && accountingDate < exclusiveEndDate;
+}
+
+function formatFiscalYearKey(startDate, endDate) {
+  const resolvedStartDate = String(startDate).slice(0, 10);
+  const resolvedEndDate = String(endDate).slice(0, 10);
+  if (resolvedStartDate.slice(5, 10) === "01-01" && resolvedEndDate.slice(5, 10) === "12-31") {
+    return resolvedStartDate.slice(0, 4);
+  }
+  return `${resolvedStartDate}/${resolvedEndDate}`;
 }
 
 function errorWithStatus(status, code, message) {

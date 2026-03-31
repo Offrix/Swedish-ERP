@@ -223,6 +223,7 @@ const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
     "listLegalFormProfiles": "read",
     "listReportingObligationProfiles": "read",
     "resolveActiveLegalFormProfile": "read",
+    "resolveCloseRequirements": "read",
     "resolveDeclarationProfile": "read",
     "resolveReportingObligationProfile": "read",
   }),

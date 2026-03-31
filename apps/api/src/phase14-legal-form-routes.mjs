@@ -292,5 +292,35 @@ export async function tryHandlePhase14LegalFormRoutes({ req, res, url, path, pla
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/legal-forms/close-requirements") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const asOfDate = requireText(url.searchParams.get("asOfDate"), "as_of_date_required", "asOfDate is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "legal_form_profile",
+      objectId: companyId,
+      scopeCode: "annual_reporting"
+    });
+    assertFinanceOperationsReadAccess({ principal });
+    const isFiscalYearEndValue = optionalText(url.searchParams.get("isFiscalYearEnd"));
+    writeJson(
+      res,
+      200,
+      platform.resolveCloseRequirements({
+        companyId,
+        asOfDate,
+        fiscalYearKey: optionalText(url.searchParams.get("fiscalYearKey")),
+        fiscalYearId: optionalText(url.searchParams.get("fiscalYearId")),
+        accountingPeriodId: optionalText(url.searchParams.get("accountingPeriodId")),
+        isFiscalYearEnd: ["1", "true", "yes"].includes(String(isFiscalYearEndValue || "").toLowerCase())
+      })
+    );
+    return true;
+  }
+
   return false;
 }

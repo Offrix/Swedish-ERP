@@ -635,6 +635,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/legal-forms/reporting-obligations/:reportingObligationProfileId",
               "/v1/legal-forms/reporting-obligations/:reportingObligationProfileId/approve",
               "/v1/legal-forms/declaration-profile",
+              "/v1/legal-forms/close-requirements",
               "/v1/annual-reporting/packages",
               "/v1/annual-reporting/packages/:packageId",
               "/v1/annual-reporting/packages/:packageId/versions",

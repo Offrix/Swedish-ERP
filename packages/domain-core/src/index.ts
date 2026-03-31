@@ -110,17 +110,49 @@ export interface CloseChecklistStep {
   readonly reconciliationAreaCode: string | null;
 }
 
+export interface CloseRequirementStepBlueprint {
+  readonly stepCode: string;
+  readonly title: string;
+  readonly mandatory: boolean;
+  readonly evidenceType: string;
+  readonly reconciliationAreaCode: string | null;
+}
+
+export interface CloseRequirementSnapshot {
+  readonly companyId: string;
+  readonly legalFormProfileId: string | null;
+  readonly legalFormCode: string | null;
+  readonly reportingObligationProfileId: string | null;
+  readonly fiscalYearKey: string | null;
+  readonly fiscalYearId: string | null;
+  readonly accountingPeriodId: string | null;
+  readonly declarationProfileCode: string | null;
+  readonly filingProfileCode: string | null;
+  readonly signatoryClassCode: string | null;
+  readonly packageFamilyCode: string | null;
+  readonly requiresAnnualReport: boolean;
+  readonly requiresYearEndAccounts: boolean;
+  readonly allowsSimplifiedYearEnd: boolean;
+  readonly requiresBolagsverketFiling: boolean;
+  readonly requiresTaxDeclarationPackage: boolean;
+  readonly isFiscalYearEnd: boolean;
+  readonly closeTemplateCode: string;
+  readonly mandatoryStepBlueprints: readonly CloseRequirementStepBlueprint[];
+}
+
 export interface CloseChecklist {
   readonly checklistId: string;
   readonly bureauOrgId: string;
   readonly portfolioId: string;
   readonly clientCompanyId: string;
   readonly accountingPeriodId: string;
+  readonly checklistTemplateCode: string;
   readonly checklistVersion: number;
   readonly status: string;
   readonly closeState: string;
   readonly ownerCompanyUserId: string;
   readonly deadlineAt: string;
+  readonly closeRequirementSnapshot: CloseRequirementSnapshot;
   readonly signoffChain: readonly {
     readonly sequence: number;
     readonly companyUserId: string;

@@ -26,10 +26,28 @@ export const FILING_PROFILE_CODES = Object.freeze([
   "PARTNERSHIP_INK4",
   "PARTNERSHIP_ANNUAL_REPORT_AND_INK4"
 ]);
+export const CLOSE_REQUIREMENT_TEMPLATE_CODES = Object.freeze([
+  "monthly_standard",
+  "year_end_accounts_only",
+  "year_end_simplified",
+  "year_end_annual_report",
+  "year_end_tax_only"
+]);
 export const LEGAL_FORM_RULEPACK_CODE = "RP-LEGAL-FORM-SE";
 export const ANNUAL_FILING_RULEPACK_CODE = "RP-ANNUAL-FILING-SE";
 export const LEGAL_FORM_RULEPACK_VERSION = "se-legal-form-2026.1";
 export const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+
+const BASE_CLOSE_STEP_BLUEPRINTS = Object.freeze([
+  Object.freeze({ stepCode: "bank_reconciliation", title: "Bank reconciliation", mandatory: true, evidenceType: "reconciliation_run", reconciliationAreaCode: "bank" }),
+  Object.freeze({ stepCode: "ar_reconciliation", title: "AR reconciliation", mandatory: true, evidenceType: "reconciliation_run", reconciliationAreaCode: "ar" }),
+  Object.freeze({ stepCode: "ap_reconciliation", title: "AP reconciliation", mandatory: true, evidenceType: "reconciliation_run", reconciliationAreaCode: "ap" }),
+  Object.freeze({ stepCode: "vat_reconciliation", title: "VAT reconciliation", mandatory: true, evidenceType: "reconciliation_run", reconciliationAreaCode: "vat" }),
+  Object.freeze({ stepCode: "suspense_followup", title: "Suspense follow-up", mandatory: true, evidenceType: "manual_evidence", reconciliationAreaCode: null }),
+  Object.freeze({ stepCode: "manual_journal_review", title: "Manual journal review", mandatory: true, evidenceType: "manual_evidence", reconciliationAreaCode: null }),
+  Object.freeze({ stepCode: "document_queue_review", title: "Document queue review", mandatory: true, evidenceType: "manual_evidence", reconciliationAreaCode: null }),
+  Object.freeze({ stepCode: "report_backup", title: "Report backup", mandatory: true, evidenceType: "report_snapshot", reconciliationAreaCode: null })
+]);
 
 const LEGAL_FORM_RULE_PACKS = Object.freeze([
   Object.freeze({
@@ -168,6 +186,7 @@ export function createLegalFormEngine({
     approveReportingObligationProfile,
     resolveReportingObligationProfile,
     resolveDeclarationProfile,
+    resolveCloseRequirements,
     listLegalFormAuditEvents
   };
 
@@ -508,6 +527,36 @@ export function createLegalFormEngine({
     });
   }
 
+  function resolveCloseRequirements(input = {}) {
+    const legalFormProfile = resolveActiveLegalFormProfile(input);
+    const reportingObligation = resolveReportingObligationProfile({
+      ...input,
+      legalFormProfileId: legalFormProfile.legalFormProfileId
+    });
+    const isFiscalYearEnd = input?.isFiscalYearEnd === true;
+    return copy({
+      companyId: legalFormProfile.companyId,
+      legalFormProfileId: legalFormProfile.legalFormProfileId,
+      legalFormCode: legalFormProfile.legalFormCode,
+      reportingObligationProfileId: reportingObligation.reportingObligationProfileId,
+      fiscalYearKey: reportingObligation.fiscalYearKey,
+      fiscalYearId: reportingObligation.fiscalYearId,
+      accountingPeriodId: reportingObligation.accountingPeriodId,
+      declarationProfileCode: reportingObligation.declarationProfileCode,
+      filingProfileCode: reportingObligation.filingProfileCode,
+      signatoryClassCode: reportingObligation.signatoryClassCode,
+      packageFamilyCode: reportingObligation.packageFamilyCode,
+      requiresAnnualReport: reportingObligation.requiresAnnualReport === true,
+      requiresYearEndAccounts: reportingObligation.requiresYearEndAccounts === true,
+      allowsSimplifiedYearEnd: reportingObligation.allowsSimplifiedYearEnd === true,
+      requiresBolagsverketFiling: reportingObligation.requiresBolagsverketFiling === true,
+      requiresTaxDeclarationPackage: reportingObligation.requiresTaxDeclarationPackage !== false,
+      isFiscalYearEnd,
+      closeTemplateCode: resolveCloseTemplateCode(reportingObligation, { isFiscalYearEnd }),
+      mandatoryStepBlueprints: buildCloseRequirementStepBlueprints(reportingObligation, { isFiscalYearEnd })
+    });
+  }
+
   function listLegalFormAuditEvents({ companyId } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     return state.auditEvents
@@ -613,6 +662,74 @@ function submissionFamilyCodeFor(reportingObligation) {
     return "bolagsverket_annual_plus_tax";
   }
   return "skatteverket_tax_only";
+}
+
+function resolveCloseTemplateCode(reportingObligation, { isFiscalYearEnd = false } = {}) {
+  if (!isFiscalYearEnd) {
+    return "monthly_standard";
+  }
+  if (reportingObligation.requiresAnnualReport && reportingObligation.requiresBolagsverketFiling) {
+    return "year_end_annual_report";
+  }
+  if (reportingObligation.requiresYearEndAccounts && reportingObligation.allowsSimplifiedYearEnd) {
+    return "year_end_simplified";
+  }
+  if (reportingObligation.requiresYearEndAccounts) {
+    return "year_end_accounts_only";
+  }
+  return "year_end_tax_only";
+}
+
+function buildCloseRequirementStepBlueprints(reportingObligation, { isFiscalYearEnd = false } = {}) {
+  const steps = [...BASE_CLOSE_STEP_BLUEPRINTS];
+  if (!isFiscalYearEnd) {
+    return Object.freeze(steps.map((step) => Object.freeze({ ...step })));
+  }
+  if (reportingObligation.requiresYearEndAccounts) {
+    steps.push(
+      Object.freeze({
+        stepCode: reportingObligation.allowsSimplifiedYearEnd ? "simplified_year_end_review" : "year_end_accounts_review",
+        title: reportingObligation.allowsSimplifiedYearEnd ? "Simplified year-end review" : "Year-end accounts review",
+        mandatory: true,
+        evidenceType: "manual_evidence",
+        reconciliationAreaCode: null
+      })
+    );
+  }
+  if (reportingObligation.requiresTaxDeclarationPackage) {
+    steps.push(
+      Object.freeze({
+        stepCode: "income_tax_package_review",
+        title: "Income tax package review",
+        mandatory: true,
+        evidenceType: "manual_evidence",
+        reconciliationAreaCode: null
+      })
+    );
+  }
+  if (reportingObligation.requiresAnnualReport) {
+    steps.push(
+      Object.freeze({
+        stepCode: "annual_report_package_review",
+        title: "Annual report package review",
+        mandatory: true,
+        evidenceType: "manual_evidence",
+        reconciliationAreaCode: null
+      })
+    );
+  }
+  if (reportingObligation.requiresBolagsverketFiling) {
+    steps.push(
+      Object.freeze({
+        stepCode: "bolagsverket_filing_readiness",
+        title: "Bolagsverket filing readiness",
+        mandatory: true,
+        evidenceType: "manual_evidence",
+        reconciliationAreaCode: null
+      })
+    );
+  }
+  return Object.freeze(steps.map((step) => Object.freeze({ ...step })));
 }
 
 function resolveAnnualObligationEffectiveDate(legalFormProfile, fiscalYearKey) {

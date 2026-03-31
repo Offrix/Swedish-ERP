@@ -40,3 +40,33 @@ export interface ReportingObligationProfileRef {
   readonly packageFamilyCode: string;
   readonly status: ReportingObligationProfileStatus;
 }
+
+export interface CloseRequirementStepBlueprint {
+  readonly stepCode: string;
+  readonly title: string;
+  readonly mandatory: boolean;
+  readonly evidenceType: string;
+  readonly reconciliationAreaCode: string | null;
+}
+
+export interface CloseRequirementProfile {
+  readonly companyId: string;
+  readonly legalFormProfileId: string;
+  readonly legalFormCode: LegalFormCode;
+  readonly reportingObligationProfileId: string;
+  readonly fiscalYearKey: string;
+  readonly fiscalYearId: string | null;
+  readonly accountingPeriodId: string | null;
+  readonly declarationProfileCode: DeclarationProfileCode;
+  readonly filingProfileCode: string;
+  readonly signatoryClassCode: string;
+  readonly packageFamilyCode: string;
+  readonly requiresAnnualReport: boolean;
+  readonly requiresYearEndAccounts: boolean;
+  readonly allowsSimplifiedYearEnd: boolean;
+  readonly requiresBolagsverketFiling: boolean;
+  readonly requiresTaxDeclarationPackage: boolean;
+  readonly isFiscalYearEnd: boolean;
+  readonly closeTemplateCode: string;
+  readonly mandatoryStepBlueprints: readonly CloseRequirementStepBlueprint[];
+}

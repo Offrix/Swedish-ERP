@@ -518,7 +518,7 @@ Legal form/fiscal year kan gå parallellt med ledger kernel och SIE4, men close 
 Ingen AR/AP/payroll/HUS- eller annual-automation på fel ledgerkärna.
 
 **Delfaser**  
-- [ ] 7.1 [HARDEN] Legal form och fiscal year profiles blir förstaklassiga obligationsmotorer; kalenderårskrav, deklarationsprofiler och close-krav styrs därifrån.
+- [x] 7.1 [HARDEN] Legal form och fiscal year profiles blir förstaklassiga obligationsmotorer; kalenderårskrav, deklarationsprofiler och close-krav styrs därifrån.
 - [ ] 7.2 [REWRITE][SECURE] Ledger posting kernel skrivs om för nummer-vid-postning, obligatorisk beskrivning, verifikationsserier, dual control för manuella poster och soft-lock override, samt canonical posting intents.
 - [ ] 7.3 [REWRITE][MIGRATE] BAS/DSAM chart externaliseras, accountClass rättas, fallback-konton verifieras och kontoplanen versioneras/testas mot källtabell.
 - [ ] 7.4 [REWRITE] Utländsk valuta bokförs alltid i redovisningsvaluta (SEK eller explicit europrofil), med originalvaluta som metadata och separat revaluation/realized FX-motor.

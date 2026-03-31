@@ -17,6 +17,13 @@ export const FISCAL_YEAR_CHANGE_REQUEST_STATUSES = Object.freeze([
 export const FISCAL_PERIOD_LOCK_STATES = Object.freeze(["open", "soft_locked", "hard_locked", "reopened"]);
 export const FISCAL_PERIOD_CLOSE_STATES = Object.freeze(["open", "closing", "closed"]);
 export const FISCAL_YEAR_KINDS = Object.freeze(["CALENDAR", "BROKEN", "SHORT", "EXTENDED"]);
+export const SUPPORTED_FISCAL_YEAR_LEGAL_FORM_CODES = Object.freeze([
+  "AKTIEBOLAG",
+  "EKONOMISK_FORENING",
+  "ENSKILD_NARINGSVERKSAMHET",
+  "HANDELSBOLAG",
+  "KOMMANDITBOLAG"
+]);
 export const LEGAL_FORM_CODES_REQUIRING_CALENDAR_YEAR = Object.freeze(["FYSISK_PERSON", "ENSKILD_NARINGSVERKSAMHET"]);
 export const OWNER_TAXATION_CODES = Object.freeze(["LEGAL_PERSON_ONLY", "PHYSICAL_PERSON_PARTICIPANT"]);
 export const FISCAL_YEAR_RULEPACK_CODE = "RP-FISCAL-YEAR-SE";
@@ -129,7 +136,11 @@ export function createFiscalYearEngine({
     actorId = "system"
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
-    const resolvedLegalFormCode = normalizeCode(legalFormCode, "legal_form_code_required");
+    const resolvedLegalFormCode = assertAllowed(
+      normalizeCode(legalFormCode, "legal_form_code_required"),
+      SUPPORTED_FISCAL_YEAR_LEGAL_FORM_CODES,
+      "legal_form_code_invalid"
+    );
     const resolvedOwnerTaxationCode = assertAllowed(
       normalizeCode(ownerTaxationCode, "owner_taxation_code_required"),
       OWNER_TAXATION_CODES,

@@ -627,13 +627,15 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
       key: "core",
       label: "Core operations",
       packageName: "@swedish-erp/domain-core",
-      dependsOn: ["orgAuth", "reporting", "ledger", "integrations", "hr", "balances", "collectiveAgreements", "evidence", "securityRuntime"],
+      dependsOn: ["orgAuth", "reporting", "ledger", "legalForm", "fiscalYear", "integrations", "hr", "balances", "collectiveAgreements", "evidence", "securityRuntime"],
       create: ({ options, dependencies }) =>
         createCorePlatform({
           ...options,
           orgAuthPlatform: dependencies.orgAuth,
           reportingPlatform: dependencies.reporting,
           ledgerPlatform: dependencies.ledger,
+          legalFormPlatform: dependencies.legalForm,
+          fiscalYearPlatform: dependencies.fiscalYear,
           integrationPlatform: dependencies.integrations,
           hrPlatform: dependencies.hr,
           balancesPlatform: dependencies.balances,
