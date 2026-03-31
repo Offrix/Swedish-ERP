@@ -3142,7 +3142,16 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         lines: body.lines,
         importedFlag: body.importedFlag === true,
         currencyCode: body.currencyCode || "SEK",
-        metadataJson: body.metadataJson || {},
+        metadataJson: {
+          ...(body.metadataJson || {}),
+          ...(body.periodLockOverrideApprovedByActorId
+            ? {
+                periodLockOverrideApprovedByActorId: body.periodLockOverrideApprovedByActorId,
+                periodLockOverrideApprovedByRoleCode: body.periodLockOverrideApprovedByRoleCode || null,
+                periodLockOverrideReasonCode: body.periodLockOverrideReasonCode || null
+              }
+            : {})
+        },
         correlationId: body.correlationId || createCorrelationId()
       })
     );
@@ -3253,6 +3262,8 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         actorId: principal.userId,
         reasonCode: body.reasonCode,
         correctionKey: body.correctionKey,
+        approvedByActorId: body.approvedByActorId || null,
+        approvedByRoleCode: body.approvedByRoleCode || null,
         journalDate: body.journalDate || null,
         voucherSeriesCode: body.voucherSeriesCode || null,
         metadataJson: body.metadataJson || {},
@@ -3283,6 +3294,8 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         actorId: principal.userId,
         reasonCode: body.reasonCode,
         correctionKey: body.correctionKey,
+        approvedByActorId: body.approvedByActorId || null,
+        approvedByRoleCode: body.approvedByRoleCode || null,
         lines: body.lines,
         journalDate: body.journalDate || null,
         voucherSeriesCode: body.voucherSeriesCode || null,
@@ -3338,6 +3351,8 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         companyId,
         journalEntryId: journalEntryPostMatch.journalEntryId,
         actorId: principal.userId,
+        approvedByActorId: body.approvedByActorId || null,
+        approvedByRoleCode: body.approvedByRoleCode || null,
         correlationId: body.correlationId || createCorrelationId()
       })
     );

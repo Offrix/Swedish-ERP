@@ -215,6 +215,8 @@ function createPostedJournal({ platform, companyId, actorId, journalDate, source
   return platform.postJournalEntry({
     companyId,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId
+    actorId,
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
 }

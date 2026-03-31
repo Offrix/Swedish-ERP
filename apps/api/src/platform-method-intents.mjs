@@ -231,6 +231,7 @@ const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
     "applyPostingIntent": "write",
     "correctJournalEntry": "write",
     "createJournalEntry": "write",
+    "createPostingIntent": "write",
     "ensureAccountingYearPeriod": "write",
     "exportDurableState": "read",
     "getAccountCatalogVersion": "read",

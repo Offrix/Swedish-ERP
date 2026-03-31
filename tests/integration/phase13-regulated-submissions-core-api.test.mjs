@@ -290,7 +290,9 @@ function prepareSignedTaxDeclarationPackage(platform) {
   platform.postJournalEntry({
     companyId: DEMO_IDS.companyId,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "phase13-3-api"
+    actorId: "phase13-3-api",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
   platform.lockAccountingPeriod({
     companyId: DEMO_IDS.companyId,

@@ -47,7 +47,9 @@ test("Phase 3.2 central evidence bundles cover annual reporting and regulated su
   platform.postJournalEntry({
     companyId: DEMO_IDS.companyId,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "phase3-2-unit"
+    actorId: "phase3-2-unit",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
   platform.lockAccountingPeriod({
     companyId: DEMO_IDS.companyId,

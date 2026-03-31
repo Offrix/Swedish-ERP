@@ -97,7 +97,11 @@ test("Phase 3.2 API exposes dimensions and periods, blocks locked-period mutatio
     await requestJson(`${baseUrl}/v1/ledger/journal-entries/${draft.journalEntry.journalEntryId}/post`, {
       method: "POST",
       token: adminSession.sessionToken,
-      body: { companyId: COMPANY_ID }
+      body: {
+        companyId: COMPANY_ID,
+        approvedByActorId: "finance-approver",
+        approvedByRoleCode: "finance_manager"
+      }
     });
 
     const hardClose = await requestJson(`${baseUrl}/v1/ledger/accounting-periods/${januaryPeriod.accountingPeriodId}/lock`, {
@@ -139,6 +143,8 @@ test("Phase 3.2 API exposes dimensions and periods, blocks locked-period mutatio
         token: adminSession.sessionToken,
         body: {
           companyId: COMPANY_ID,
+          approvedByActorId: "finance-approver",
+          approvedByRoleCode: "finance_manager",
           reasonCode: "project_reclass",
           correctionKey: "phase3-2-api-correction-001",
           reverseOriginal: true,

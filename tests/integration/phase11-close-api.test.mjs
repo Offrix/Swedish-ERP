@@ -302,7 +302,9 @@ function seedClientCloseSetup(platform, adminToken, responsibleConsultantId) {
   platform.postJournalEntry({
     companyId: clientCompany.companyId,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "phase11-close-api"
+    actorId: "phase11-close-api",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
   const reportSnapshot = platform.runReportSnapshot({
     companyId: clientCompany.companyId,

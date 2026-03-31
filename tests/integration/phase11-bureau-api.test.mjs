@@ -311,7 +311,9 @@ function seedClientReporting(platform, companyId) {
   platform.postJournalEntry({
     companyId,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "setup"
+    actorId: "setup",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
   const snapshot = platform.runReportSnapshot({
     companyId,

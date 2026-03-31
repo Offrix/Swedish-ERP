@@ -56,7 +56,7 @@ test("Phase 3.1 validates balance, preserves idempotency, marks imports and numb
       { accountNumber: "2010", creditAmount: 1250 }
     ]
   });
-  assert.equal(firstDraft.journalEntry.voucherNumber, 1);
+  assert.equal(firstDraft.journalEntry.voucherNumber, null);
   assert.equal(firstDraft.idempotentReplay, false);
 
   const replay = engine.createJournalEntry({
@@ -80,14 +80,17 @@ test("Phase 3.1 validates balance, preserves idempotency, marks imports and numb
     journalEntryId: firstDraft.journalEntry.journalEntryId,
     actorId: "user-1"
   });
-  assert.equal(validated.journalEntry.status, "validated");
+  assert.equal(validated.journalEntry.status, "approved_for_post");
 
   const posted = engine.postJournalEntry({
     companyId: "00000000-0000-4000-8000-000000000001",
     journalEntryId: firstDraft.journalEntry.journalEntryId,
-    actorId: "user-1"
+    actorId: "user-1",
+    approvedByActorId: "user-2",
+    approvedByRoleCode: "finance_manager"
   });
   assert.equal(posted.journalEntry.status, "posted");
+  assert.equal(posted.journalEntry.voucherNumber, 1);
 
   const importedDraft = engine.createJournalEntry({
     companyId: "00000000-0000-4000-8000-000000000001",
@@ -103,7 +106,7 @@ test("Phase 3.1 validates balance, preserves idempotency, marks imports and numb
       { accountNumber: "2650", creditAmount: 500 }
     ]
   });
-  assert.equal(importedDraft.journalEntry.voucherNumber, 2);
+  assert.equal(importedDraft.journalEntry.voucherNumber, null);
   assert.equal(importedDraft.journalEntry.importedFlag, true);
   assert.equal(importedDraft.journalEntry.metadataJson.importSourceType, "historical_import");
 

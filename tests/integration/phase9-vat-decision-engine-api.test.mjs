@@ -82,7 +82,11 @@ test("Phase 9.3 API resolves VAT review blockers, materializes declaration basis
     await requestJson(baseUrl, `/v1/ledger/journal-entries/${ledgerEntry.journalEntry.journalEntryId}/post`, {
       method: "POST",
       token: sessionToken,
-      body: { companyId: COMPANY_ID }
+      body: {
+        companyId: COMPANY_ID,
+        approvedByActorId: "finance-approver",
+        approvedByRoleCode: "finance_manager"
+      }
     });
 
     const review = await requestJson(baseUrl, "/v1/vat/decisions", {
@@ -153,7 +157,11 @@ test("Phase 9.3 API resolves VAT review blockers, materializes declaration basis
     await requestJson(baseUrl, `/v1/ledger/journal-entries/${resolvedLedgerEntry.journalEntry.journalEntryId}/post`, {
       method: "POST",
       token: sessionToken,
-      body: { companyId: COMPANY_ID }
+      body: {
+        companyId: COMPANY_ID,
+        approvedByActorId: "finance-approver",
+        approvedByRoleCode: "finance_manager"
+      }
     });
 
     const readyBasis = await requestJson(

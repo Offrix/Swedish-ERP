@@ -326,7 +326,9 @@ function createPostedJournal({ platform, companyId, sourceId, lines }) {
   const posted = platform.postJournalEntry({
     companyId,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "phase11-3-unit"
+    actorId: "phase11-3-unit",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
   return posted;
 }

@@ -101,7 +101,9 @@ test("Phase 3.2 end-to-end flow enforces dimension rules and supports hard-close
       method: "POST",
       token: sessionToken,
       body: {
-        companyId: COMPANY_ID
+        companyId: COMPANY_ID,
+        approvedByActorId: "finance-approver",
+        approvedByRoleCode: "finance_manager"
       }
     });
 
@@ -122,6 +124,8 @@ test("Phase 3.2 end-to-end flow enforces dimension rules and supports hard-close
       token: sessionToken,
       body: {
         companyId: COMPANY_ID,
+        approvedByActorId: "finance-approver",
+        approvedByRoleCode: "finance_manager",
         reasonCode: "project_reclass",
         correctionKey: "phase3-2-e2e-correction-001",
         reverseOriginal: true,

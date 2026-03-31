@@ -56,7 +56,9 @@ test("Phase 12.1 end-to-end flow exposes annual reporting routes and signs a pac
     platform.postJournalEntry({
       companyId: DEMO_IDS.companyId,
       journalEntryId: created.journalEntry.journalEntryId,
-      actorId: "phase12-e2e"
+      actorId: "phase12-e2e",
+      approvedByActorId: "finance-approver",
+      approvedByRoleCode: "finance_manager"
     });
     platform.lockAccountingPeriod({
       companyId: DEMO_IDS.companyId,

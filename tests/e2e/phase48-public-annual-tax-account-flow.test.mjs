@@ -261,7 +261,9 @@ function prepareAccounting(platform, companyId, actorId) {
   platform.postJournalEntry({
     companyId,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId
+    actorId,
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
   return period;
 }

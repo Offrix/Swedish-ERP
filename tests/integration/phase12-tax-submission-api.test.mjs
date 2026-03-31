@@ -609,7 +609,9 @@ function prepareUnsignedAnnualPackage(platform) {
   platform.postJournalEntry({
     companyId: DEMO_IDS.companyId,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "phase12-2-api"
+    actorId: "phase12-2-api",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
   platform.lockAccountingPeriod({
     companyId: DEMO_IDS.companyId,

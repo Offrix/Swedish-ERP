@@ -75,13 +75,17 @@ test("Phase 5.3 ledger reversals and corrections preserve normalized pinning met
   const posted = ledger.postJournalEntry({
     companyId: COMPANY_ID,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "phase5-3-unit"
+    actorId: "phase5-3-unit",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
 
   const reversal = ledger.reverseJournalEntry({
     companyId: COMPANY_ID,
     journalEntryId: posted.journalEntry.journalEntryId,
     actorId: "phase5-3-unit",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager",
     reasonCode: "test_reversal",
     correctionKey: "phase5-3-reversal"
   });
@@ -120,12 +124,16 @@ test("Phase 5.3 ledger reversals and corrections preserve normalized pinning met
   const correctedPosted = ledger.postJournalEntry({
     companyId: COMPANY_ID,
     journalEntryId: correctedSource.journalEntry.journalEntryId,
-    actorId: "phase5-3-unit"
+    actorId: "phase5-3-unit",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
   const correction = ledger.correctJournalEntry({
     companyId: COMPANY_ID,
     journalEntryId: correctedPosted.journalEntry.journalEntryId,
     actorId: "phase5-3-unit",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager",
     reasonCode: "test_correction",
     correctionKey: "phase5-3-correction",
     lines: [

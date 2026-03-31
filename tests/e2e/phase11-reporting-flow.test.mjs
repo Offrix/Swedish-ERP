@@ -118,7 +118,9 @@ function seedCashflow(platform) {
   platform.postJournalEntry({
     companyId: COMPANY_ID,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "e2e"
+    actorId: "e2e",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
 }
 

@@ -188,7 +188,9 @@ function prepareAnnualPackage(platform) {
   platform.postJournalEntry({
     companyId: DEMO_IDS.companyId,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "phase12-2-e2e"
+    actorId: "phase12-2-e2e",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
   platform.lockAccountingPeriod({
     companyId: DEMO_IDS.companyId,

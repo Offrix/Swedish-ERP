@@ -1,4 +1,4 @@
-export type LedgerState = "draft" | "validated" | "posted" | "reversed" | "locked_by_period";
+export type LedgerState = "draft" | "approved_for_post" | "posted" | "reversed" | "locked_by_period";
 export type VoucherSeriesCode = string;
 export type VoucherSeriesPurposeCode = string;
 export type VoucherSeriesStatus = "active" | "paused" | "archived";
@@ -25,9 +25,19 @@ export type PostingSourceType =
   | "PROJECT_WIP";
 
 export interface PostingIntent {
+  readonly intentId: string;
+  readonly recipeCode: string;
+  readonly recipeVersion: string;
+  readonly voucherSeriesCode: VoucherSeriesCode;
   readonly sourceType: PostingSourceType;
   readonly sourceId: string;
   readonly companyId: string;
+  readonly sourceObjectVersion: string;
+  readonly postingSignalCode: string;
+  readonly actorId: string;
+  readonly description: string;
+  readonly journalDate: string;
+  readonly metadataJson: Record<string, unknown>;
   readonly occurredAt: string;
   readonly idempotencyKey: string;
 }
@@ -154,7 +164,7 @@ export interface JournalEntry {
   readonly fiscalPeriodId: string | null;
   readonly accountingMethodProfileId: string | null;
   readonly journalDate: string;
-  readonly voucherNumber: number;
+  readonly voucherNumber: number | null;
   readonly description: string | null;
   readonly sourceType: PostingSourceType;
   readonly sourceId: string;
@@ -167,6 +177,7 @@ export interface JournalEntry {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly validatedAt: string | null;
+  readonly approvedForPostAt?: string | null;
   readonly postedAt: string | null;
   readonly reversalOfJournalEntryId: string | null;
   readonly reversedByJournalEntryId: string | null;

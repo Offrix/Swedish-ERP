@@ -15,7 +15,13 @@ export function seedReportSnapshot(platform, companyId, sourceId = "fixture") {
     ]
   });
   platform.validateJournalEntry({ companyId, journalEntryId: created.journalEntry.journalEntryId, actorId: sourceId });
-  platform.postJournalEntry({ companyId, journalEntryId: created.journalEntry.journalEntryId, actorId: sourceId });
+  platform.postJournalEntry({
+    companyId,
+    journalEntryId: created.journalEntry.journalEntryId,
+    actorId: sourceId,
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
+  });
   return platform.runReportSnapshot({
     companyId,
     reportCode: "income_statement",

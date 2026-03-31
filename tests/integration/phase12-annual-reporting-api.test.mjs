@@ -177,7 +177,9 @@ function postJournal(platform, sourceId, amount) {
   platform.postJournalEntry({
     companyId: DEMO_IDS.companyId,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "phase12-api"
+    actorId: "phase12-api",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
 }
 

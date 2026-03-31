@@ -38,7 +38,9 @@ test("Step 35 annual reporting emits evidence packs and opens explicit correctio
   platform.postJournalEntry({
     companyId: DEMO_IDS.companyId,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "phase35-unit"
+    actorId: "phase35-unit",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
   platform.lockAccountingPeriod({
     companyId: DEMO_IDS.companyId,

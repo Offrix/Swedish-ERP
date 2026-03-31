@@ -13,7 +13,7 @@ import {
   listAccountCatalogVersions
 } from "./account-catalog.mjs";
 
-export const LEDGER_STATES = Object.freeze(["draft", "validated", "posted", "reversed", "locked_by_period"]);
+export const LEDGER_STATES = Object.freeze(["draft", "approved_for_post", "posted", "reversed", "locked_by_period"]);
 export const DEFAULT_LEDGER_CURRENCY = "SEK";
 export const DEFAULT_VOUCHER_SERIES_CODES = Object.freeze("ABCDEFGHIJKLMNOPQRSTUVWXYZ".split(""));
 export const VOUCHER_SERIES_STATUSES = Object.freeze(["active", "paused", "archived"]);
@@ -360,6 +360,8 @@ export function createLedgerEngine({
     accountIdsByCompanyNumber: new Map(),
     voucherSeries: new Map(),
     voucherSeriesIdsByCompanyCode: new Map(),
+    postingIntents: new Map(),
+    postingIntentIdsByCompanyKey: new Map(),
     accountingPeriods: new Map(),
     dimensionCatalogsByCompanyId: new Map(),
     journalEntries: new Map(),
@@ -393,6 +395,7 @@ export function createLedgerEngine({
     upsertVoucherSeries,
     reserveImportedVoucherNumber,
     resolveVoucherSeriesForPurpose,
+    createPostingIntent,
     listAccountingPeriods,
     listLedgerDimensions,
     upsertLedgerDimensionValue,
@@ -825,7 +828,7 @@ export function createLedgerEngine({
     return copy(requirePostingRecipe(recipeCode));
   }
 
-  function applyPostingIntent({
+  function createPostingIntent({
     companyId,
     journalDate,
     voucherSeriesCode = null,
@@ -845,7 +848,11 @@ export function createLedgerEngine({
     correlationId = crypto.randomUUID()
   } = {}) {
     const recipe = requirePostingRecipe(recipeCode);
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedIdempotencyKey = requireText(idempotencyKey, "idempotency_key_required");
     const resolvedSourceType = assertPostingSourceType(sourceType);
+    const resolvedSourceId = requireText(sourceId, "source_id_required");
     const resolvedSourceObjectVersion = normalizeOptionalText(sourceObjectVersion);
     if (!resolvedSourceObjectVersion) {
       throw httpError(400, "source_object_version_required", "Posting intents must bind an explicit source object version.");
@@ -857,31 +864,137 @@ export function createLedgerEngine({
         `Posting recipe ${recipe.recipeCode} does not allow source type ${resolvedSourceType}.`
       );
     }
+
+    const replayKey = toCompanyScopedKey(resolvedCompanyId, resolvedIdempotencyKey);
+    if (state.postingIntentIdsByCompanyKey.has(replayKey)) {
+      const existingIntent = state.postingIntents.get(state.postingIntentIdsByCompanyKey.get(replayKey));
+      if (!existingIntent) {
+        throw httpError(409, "posting_intent_not_found", "Posting intent replay key points to a missing intent.");
+      }
+      if (existingIntent.sourceType !== resolvedSourceType || existingIntent.sourceId !== resolvedSourceId) {
+        throw httpError(409, "idempotency_key_conflict", "Idempotency key already belongs to another posting source.");
+      }
+      return {
+        postingIntent: copy(existingIntent),
+        idempotentReplay: true
+      };
+    }
+
+    const resolvedJournalDate = normalizeDate(journalDate, "journal_date_required");
     const resolvedVoucherSeriesCode = resolvePostingVoucherSeriesCode({
-      companyId,
+      companyId: resolvedCompanyId,
       explicitSeriesCode: voucherSeriesCode,
       purposeCode: voucherSeriesPurposeCode || recipe.defaultVoucherSeriesPurposeCode,
       fallbackSeriesCode: fallbackVoucherSeriesCode || recipe.fallbackVoucherSeriesCode
     });
-    const created = createJournalEntry({
-      companyId,
-      journalDate,
+    const resolvedDescription = resolvePostingIntentDescription({
+      recipe,
+      sourceType: resolvedSourceType,
+      sourceId: resolvedSourceId,
+      description
+    });
+    const normalizedMetadata = normalizeMetadata(metadataJson, false);
+    const now = nowIso();
+    const postingIntent = {
+      intentId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      recipeCode: recipe.recipeCode,
+      recipeVersion: recipe.version,
       voucherSeriesCode: resolvedVoucherSeriesCode,
       sourceType: resolvedSourceType,
-      sourceId,
-      description,
-      actorId,
-      idempotencyKey,
-      lines,
-      currencyCode,
+      sourceId: resolvedSourceId,
+      sourceObjectVersion: resolvedSourceObjectVersion,
+      postingSignalCode: normalizeOptionalText(postingSignalCode) || recipe.defaultSignalCode,
+      actorId: resolvedActorId,
+      description: resolvedDescription,
+      journalDate: resolvedJournalDate,
       metadataJson: {
-        ...copy(metadataJson || {}),
+        ...normalizedMetadata,
         journalType: recipe.journalType,
         postingRecipeCode: recipe.recipeCode,
         postingRecipeVersion: recipe.version,
         postingSignalCode: normalizeOptionalText(postingSignalCode) || recipe.defaultSignalCode,
         sourceDomain: recipe.sourceDomain,
-        sourceObjectVersion: resolvedSourceObjectVersion
+        sourceObjectVersion: resolvedSourceObjectVersion,
+        plannedCurrencyCode: normalizeCurrencyCode(currencyCode),
+        plannedLineCount: Array.isArray(lines) ? lines.length : 0
+      },
+      occurredAt: now,
+      idempotencyKey: resolvedIdempotencyKey
+    };
+
+    state.postingIntents.set(postingIntent.intentId, postingIntent);
+    state.postingIntentIdsByCompanyKey.set(replayKey, postingIntent.intentId);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.posting_intent.created",
+      entityType: "posting_intent",
+      entityId: postingIntent.intentId,
+      explanation: `Created posting intent ${postingIntent.recipeCode} for ${postingIntent.sourceType} ${postingIntent.sourceId}.`
+    });
+
+    return {
+      postingIntent: copy(postingIntent),
+      idempotentReplay: false
+    };
+  }
+
+  function applyPostingIntent({
+    companyId,
+    journalDate,
+    voucherSeriesCode = null,
+    voucherSeriesPurposeCode = null,
+    fallbackVoucherSeriesCode = null,
+    recipeCode,
+    postingSignalCode = null,
+    sourceType,
+    sourceId,
+    sourceObjectVersion = null,
+    description = null,
+    actorId,
+    idempotencyKey,
+    lines,
+    currencyCode = DEFAULT_LEDGER_CURRENCY,
+    metadataJson = {},
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const intent = createPostingIntent({
+      companyId,
+      journalDate,
+      voucherSeriesCode,
+      voucherSeriesPurposeCode,
+      fallbackVoucherSeriesCode,
+      recipeCode,
+      postingSignalCode,
+      sourceType,
+      sourceId,
+      sourceObjectVersion,
+      description,
+      actorId,
+      idempotencyKey,
+      lines,
+      currencyCode,
+      metadataJson,
+      correlationId
+    });
+    const recipe = requirePostingRecipe(recipeCode);
+    const created = createJournalEntry({
+      companyId,
+      journalDate,
+      voucherSeriesCode: intent.postingIntent.voucherSeriesCode,
+      sourceType: intent.postingIntent.sourceType,
+      sourceId,
+      description: intent.postingIntent.description,
+      actorId,
+      idempotencyKey,
+      lines,
+      currencyCode,
+      metadataJson: {
+        ...copy(intent.postingIntent.metadataJson || {}),
+        postingIntentId: intent.postingIntent.intentId
       },
       correlationId
     });
@@ -899,6 +1012,7 @@ export function createLedgerEngine({
     });
     return {
       journalEntry: posted.journalEntry,
+      postingIntent: intent.postingIntent,
       postingRecipe: copy(recipe),
       idempotentReplay: created.idempotentReplay === true
     };
@@ -1208,7 +1322,7 @@ export function createLedgerEngine({
     });
     const accountingPeriod = accountingContext.accountingPeriod;
     const normalizedMetadata = normalizeMetadata(metadataJson, importedFlag);
-    ensurePeriodAllowsEntryCreation(accountingPeriod, normalizedMetadata);
+    ensurePeriodAllowsEntryCreation(accountingPeriod, normalizedMetadata, resolvedActorId);
     const dimensionCatalog = ensureDimensionCatalog(resolvedCompanyId);
 
     const journalEntryId = crypto.randomUUID();
@@ -1225,9 +1339,11 @@ export function createLedgerEngine({
     });
     const totals = calculateTotals(draftLines);
     const now = nowIso();
-    const voucherNumber = resolvedVoucherSeries.nextNumber;
-    resolvedVoucherSeries.nextNumber += 1;
-    resolvedVoucherSeries.updatedAt = now;
+    const resolvedDescription = resolveDraftDescription({
+      sourceType: resolvedSourceType,
+      sourceId: resolvedSourceId,
+      description
+    });
 
     const entry = {
       journalEntryId,
@@ -1241,8 +1357,8 @@ export function createLedgerEngine({
       fiscalPeriodId: accountingContext.fiscalPeriod?.periodId || accountingPeriod.fiscalPeriodId || null,
       accountingMethodProfileId: accountingContext.accountingMethodProfile?.methodProfileId || null,
       journalDate: resolvedJournalDate,
-      voucherNumber,
-      description: description ? String(description).trim() : null,
+      voucherNumber: null,
+      description: resolvedDescription,
       sourceType: resolvedSourceType,
       sourceId: resolvedSourceId,
       actorId: resolvedActorId,
@@ -1254,6 +1370,7 @@ export function createLedgerEngine({
       createdAt: now,
       updatedAt: now,
       validatedAt: null,
+      approvedForPostAt: null,
       postedAt: null,
       reversalOfJournalEntryId: null,
       reversedByJournalEntryId: null,
@@ -1275,7 +1392,7 @@ export function createLedgerEngine({
       action: "ledger.journal_entry.created",
       entityType: "journal_entry",
       entityId: entry.journalEntryId,
-      explanation: `Created draft voucher ${entry.voucherSeriesCode}${entry.voucherNumber}.`
+      explanation: `Created draft journal in series ${entry.voucherSeriesCode}.`
     });
 
     return {
@@ -1294,10 +1411,10 @@ export function createLedgerEngine({
     if (entry.status === "locked_by_period") {
       throw httpError(409, "period_locked", "Journal entry belongs to a locked accounting period.");
     }
-    if (entry.status === "posted") {
+    if (entry.status === "posted" || entry.status === "approved_for_post") {
       return { journalEntry: presentJournalEntry(entry) };
     }
-    if (entry.status !== "draft" && entry.status !== "validated") {
+    if (entry.status !== "draft") {
       throw httpError(409, "ledger_state_invalid", `Journal entry cannot be validated from state ${entry.status}.`);
     }
 
@@ -1305,18 +1422,20 @@ export function createLedgerEngine({
     ensurePeriodAllowsEntryMutation(accountingPeriod, entry);
     const lines = requireJournalLines(entry.journalEntryId);
     validateLines(entry, lines);
+    assertJournalDescription(entry);
 
-    entry.status = "validated";
+    entry.status = "approved_for_post";
     entry.validatedAt = nowIso();
+    entry.approvedForPostAt = entry.validatedAt;
     entry.updatedAt = entry.validatedAt;
     pushAudit({
       companyId: entry.companyId,
       actorId: requireText(actorId, "actor_id_required"),
       correlationId,
-      action: "ledger.journal_entry.validated",
+      action: "ledger.journal_entry.approved_for_post",
       entityType: "journal_entry",
       entityId: entry.journalEntryId,
-      explanation: `Validated voucher ${entry.voucherSeriesCode}${entry.voucherNumber}.`
+      explanation: `Approved draft journal ${entry.journalEntryId} for posting in series ${entry.voucherSeriesCode}.`
     });
 
     return {
@@ -1328,19 +1447,36 @@ export function createLedgerEngine({
     companyId,
     journalEntryId,
     actorId,
+    approvedByActorId = null,
+    approvedByRoleCode = null,
     correlationId = crypto.randomUUID()
   } = {}) {
     const entry = requireJournalEntry(requireText(companyId, "company_id_required"), journalEntryId);
     if (entry.status === "posted") {
       return { journalEntry: presentJournalEntry(entry) };
     }
-    if (entry.status !== "validated") {
-      throw httpError(409, "journal_entry_not_validated", "Journal entry must be validated before posting.");
+    if (entry.status !== "approved_for_post") {
+      throw httpError(409, "journal_entry_not_approved_for_post", "Journal entry must be approved for post before posting.");
     }
 
     const accountingPeriod = requireAccountingPeriod(entry.accountingPeriodId);
     ensurePeriodAllowsEntryMutation(accountingPeriod, entry);
+    assertJournalDescription(entry);
+    assertJournalPostApproval({
+      entry,
+      actorId: requireText(actorId, "actor_id_required"),
+      approvedByActorId,
+      approvedByRoleCode
+    });
+
+    const voucherSeries = requireVoucherSeries(entry.companyId, entry.voucherSeriesCode);
+    ensureVoucherSeriesUsable(voucherSeries, false);
     const now = nowIso();
+    if (entry.voucherNumber == null) {
+      entry.voucherNumber = voucherSeries.nextNumber;
+      voucherSeries.nextNumber += 1;
+      voucherSeries.updatedAt = now;
+    }
     entry.status = "posted";
     entry.postedAt = now;
     entry.updatedAt = now;
@@ -1366,6 +1502,8 @@ export function createLedgerEngine({
     actorId,
     reasonCode,
     correctionKey,
+    approvedByActorId = null,
+    approvedByRoleCode = null,
     journalDate = null,
     voucherSeriesCode = null,
     metadataJson = {},
@@ -1436,6 +1574,8 @@ export function createLedgerEngine({
       companyId: originalEntry.companyId,
       journalEntryId: validated.journalEntry.journalEntryId,
       actorId: resolvedActorId,
+      approvedByActorId,
+      approvedByRoleCode,
       correlationId
     });
 
@@ -1470,6 +1610,8 @@ export function createLedgerEngine({
     actorId,
     reasonCode,
     correctionKey,
+    approvedByActorId = null,
+    approvedByRoleCode = null,
     lines,
     journalDate = null,
     voucherSeriesCode = null,
@@ -1500,6 +1642,8 @@ export function createLedgerEngine({
         actorId: resolvedActorId,
         reasonCode: resolvedReasonCode,
         correctionKey: `${resolvedCorrectionKey}:reversal`,
+        approvedByActorId,
+        approvedByRoleCode,
         journalDate: target.journalDate,
         correlationId
       }).reversalJournalEntry;
@@ -1545,6 +1689,8 @@ export function createLedgerEngine({
       companyId: originalEntry.companyId,
       journalEntryId: validated.journalEntry.journalEntryId,
       actorId: resolvedActorId,
+      approvedByActorId,
+      approvedByRoleCode,
       correlationId
     });
 
@@ -1575,6 +1721,7 @@ export function createLedgerEngine({
     return copy({
       accounts: [...state.accounts.values()],
       voucherSeries: [...state.voucherSeries.values()],
+      postingIntents: [...state.postingIntents.values()],
       accountingPeriods: [...state.accountingPeriods.values()],
       dimensionCatalogs: [...state.dimensionCatalogsByCompanyId.values()],
       journalEntries: [...state.journalEntries.values()].map((entry) => presentJournalEntry(entry)),
@@ -1838,11 +1985,15 @@ export function createLedgerEngine({
     return accountingPeriod;
   }
 
-  function ensurePeriodAllowsEntryCreation(accountingPeriod, metadataJson) {
+  function ensurePeriodAllowsEntryCreation(accountingPeriod, metadataJson, actorId) {
     if (accountingPeriod.status === "open") {
       return;
     }
     if (accountingPeriod.status === "soft_locked" && hasSoftLockOverride(metadataJson)) {
+      assertSoftLockOverrideApproval({
+        actorId,
+        metadataJson
+      });
       return;
     }
     throw httpError(409, "period_locked", "Journal entry belongs to a locked accounting period.");
@@ -1852,7 +2003,7 @@ export function createLedgerEngine({
     if (entry.status === "locked_by_period") {
       throw httpError(409, "period_locked", "Journal entry belongs to a locked accounting period.");
     }
-    ensurePeriodAllowsEntryCreation(accountingPeriod, entry.metadataJson);
+    ensurePeriodAllowsEntryCreation(accountingPeriod, entry.metadataJson, entry.actorId);
   }
 
   function ensureDimensionCatalog(companyId) {
@@ -1878,14 +2029,14 @@ export function createLedgerEngine({
       if (entry.accountingPeriodId !== accountingPeriodId) {
         continue;
       }
-      if (action === "lock" && (entry.status === "draft" || entry.status === "validated")) {
+      if (action === "lock" && (entry.status === "draft" || entry.status === "approved_for_post")) {
         entry.metadataJson.lockedByPeriodPreviousState = entry.status;
         entry.status = "locked_by_period";
         entry.updatedAt = now;
         affected.push(entry);
       }
       if (action === "unlock" && entry.status === "locked_by_period") {
-        const previousState = entry.metadataJson.lockedByPeriodPreviousState === "validated" ? "validated" : "draft";
+        const previousState = entry.metadataJson.lockedByPeriodPreviousState === "approved_for_post" ? "approved_for_post" : "draft";
         delete entry.metadataJson.lockedByPeriodPreviousState;
         entry.status = previousState;
         entry.updatedAt = now;
@@ -2226,6 +2377,45 @@ function normalizeVoucherSeriesPurposeCodes(values) {
   return [...new Set(values.map((value) => normalizeVoucherSeriesPurposeCode(value)))].sort();
 }
 
+function resolveDraftDescription({ sourceType, sourceId, description }) {
+  const normalizedDescription = normalizeOptionalText(description);
+  if (normalizedDescription) {
+    return normalizedDescription;
+  }
+  return `${requireText(sourceType, "source_type_required")}:${requireText(sourceId, "source_id_required")}`;
+}
+
+function resolvePostingIntentDescription({ recipe, sourceType, sourceId, description }) {
+  const normalizedDescription = normalizeOptionalText(description);
+  if (normalizedDescription) {
+    return normalizedDescription;
+  }
+  return `${requireText(recipe?.recipeCode, "posting_recipe_code_required")}:${requireText(sourceType, "source_type_required")}:${requireText(sourceId, "source_id_required")}`;
+}
+
+function assertJournalDescription(entry) {
+  if (normalizeOptionalText(entry?.description)) {
+    return;
+  }
+  throw httpError(400, "journal_description_required", "Description is required before a journal can be approved or posted.");
+}
+
+function assertJournalPostApproval({ entry, actorId, approvedByActorId, approvedByRoleCode }) {
+  if (entry?.sourceType !== "MANUAL_JOURNAL") {
+    return;
+  }
+  assertSeniorFinanceApproval({
+    actorId,
+    approvedByActorId,
+    approvedByRoleCode
+  });
+  entry.metadataJson = {
+    ...(entry.metadataJson || {}),
+    postingApprovalApprovedByActorId: requireText(approvedByActorId, "approved_by_actor_id_required"),
+    postingApprovalRoleCode: requireText(approvedByRoleCode, "approved_by_role_code_required").toLowerCase()
+  };
+}
+
 function normalizeAccountNumber(value) {
   const normalized = requireText(value, "account_number_required");
   if (!/^[1-8][0-9]{3}$/.test(normalized)) {
@@ -2538,8 +2728,18 @@ function hasSoftLockOverride(metadataJson) {
     metadataJson &&
       typeof metadataJson === "object" &&
       metadataJson.periodLockOverrideApprovedByActorId &&
+      metadataJson.periodLockOverrideApprovedByRoleCode &&
       metadataJson.periodLockOverrideReasonCode
   );
+}
+
+function assertSoftLockOverrideApproval({ actorId, metadataJson }) {
+  assertSeniorFinanceApproval({
+    actorId: requireText(actorId, "actor_id_required"),
+    approvedByActorId: metadataJson.periodLockOverrideApprovedByActorId,
+    approvedByRoleCode: metadataJson.periodLockOverrideApprovedByRoleCode
+  });
+  requireText(metadataJson.periodLockOverrideReasonCode, "period_lock_override_reason_code_required");
 }
 
 function assertLockStatus(status) {
@@ -2551,9 +2751,12 @@ function assertLockStatus(status) {
 }
 
 function assertSeniorFinanceApproval({ actorId, approvedByActorId, approvedByRoleCode }) {
-  const resolvedApprovedByActorId = requireText(approvedByActorId, "approved_by_actor_id_required");
+  const resolvedApprovedByActorId = normalizeOptionalText(approvedByActorId);
+  if (!resolvedApprovedByActorId) {
+    throw httpError(400, "dual_control_required", "Dual control requires a second approving actor for this operation.");
+  }
   if (resolvedApprovedByActorId === actorId) {
-    throw httpError(400, "dual_control_required", "Requester and approver must be different actors.");
+    throw httpError(400, "dual_control_required", "Dual control requires requester and approver to be different actors.");
   }
   const resolvedRoleCode = requireText(approvedByRoleCode, "approved_by_role_code_required").toLowerCase();
   if (!["close_signatory", "finance_manager", "company_admin"].includes(resolvedRoleCode)) {

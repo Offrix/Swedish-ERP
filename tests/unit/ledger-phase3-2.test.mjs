@@ -126,7 +126,9 @@ test("Phase 3.2 locks periods against mutation and corrections create new vouche
   const posted = engine.postJournalEntry({
     companyId: COMPANY_ID,
     journalEntryId: draft.journalEntry.journalEntryId,
-    actorId: "user-1"
+    actorId: "user-1",
+    approvedByActorId: "user-2",
+    approvedByRoleCode: "finance_manager"
   });
   assert.equal(posted.journalEntry.status, "posted");
 
@@ -144,6 +146,8 @@ test("Phase 3.2 locks periods against mutation and corrections create new vouche
     companyId: COMPANY_ID,
     journalEntryId: draft.journalEntry.journalEntryId,
     actorId: "user-1",
+    approvedByActorId: "user-2",
+    approvedByRoleCode: "finance_manager",
     reasonCode: "bank_reclass",
     correctionKey: "phase3-2-correction-001",
     reverseOriginal: true,

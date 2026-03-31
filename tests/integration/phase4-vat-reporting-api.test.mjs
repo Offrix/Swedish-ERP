@@ -103,7 +103,11 @@ test("Phase 4.3 API materializes declaration runs with ledger comparison and rep
     await requestJson(`${baseUrl}/v1/ledger/journal-entries/${ledgerEntry.journalEntry.journalEntryId}/post`, {
       method: "POST",
       token: adminSession.sessionToken,
-      body: { companyId: COMPANY_ID }
+      body: {
+        companyId: COMPANY_ID,
+        approvedByActorId: "finance-approver",
+        approvedByRoleCode: "finance_manager"
+      }
     });
 
     await requestJson(`${baseUrl}/v1/vat/decisions`, {
@@ -154,7 +158,11 @@ test("Phase 4.3 API materializes declaration runs with ledger comparison and rep
     await requestJson(`${baseUrl}/v1/ledger/journal-entries/${euGoodsLedgerEntry.journalEntry.journalEntryId}/post`, {
       method: "POST",
       token: adminSession.sessionToken,
-      body: { companyId: COMPANY_ID }
+      body: {
+        companyId: COMPANY_ID,
+        approvedByActorId: "finance-approver",
+        approvedByRoleCode: "finance_manager"
+      }
     });
 
     await requestJson(`${baseUrl}/v1/vat/decisions`, {
@@ -203,7 +211,11 @@ test("Phase 4.3 API materializes declaration runs with ledger comparison and rep
     await requestJson(`${baseUrl}/v1/ledger/journal-entries/${euServiceLedgerEntry.journalEntry.journalEntryId}/post`, {
       method: "POST",
       token: adminSession.sessionToken,
-      body: { companyId: COMPANY_ID }
+      body: {
+        companyId: COMPANY_ID,
+        approvedByActorId: "finance-approver",
+        approvedByRoleCode: "finance_manager"
+      }
     });
 
     await requestJson(`${baseUrl}/v1/vat/decisions`, {

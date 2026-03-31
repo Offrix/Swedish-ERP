@@ -55,7 +55,9 @@ test("Phase 9.3 materializes VAT declaration basis, resolves review blockers and
   ledger.postJournalEntry({
     companyId: COMPANY_ID,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "user-1"
+    actorId: "user-1",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
 
   const review = vat.evaluateVatDecision({
@@ -112,7 +114,9 @@ test("Phase 9.3 materializes VAT declaration basis, resolves review blockers and
   ledger.postJournalEntry({
     companyId: COMPANY_ID,
     journalEntryId: resolvedCreated.journalEntry.journalEntryId,
-    actorId: "user-1"
+    actorId: "user-1",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
 
   const readyBasis = vat.getVatDeclarationBasis({

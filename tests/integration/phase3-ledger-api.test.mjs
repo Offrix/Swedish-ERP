@@ -86,7 +86,7 @@ test("Phase 3.1 API installs ledger catalog, validates balanced journals and pre
       }
     });
     assert.equal(draft.journalEntry.status, "draft");
-    assert.equal(draft.journalEntry.voucherNumber, 1);
+    assert.equal(draft.journalEntry.voucherNumber, null);
 
     const replay = await requestJson(`${baseUrl}/v1/ledger/journal-entries`, {
       method: "POST",
@@ -115,16 +115,19 @@ test("Phase 3.1 API installs ledger catalog, validates balanced journals and pre
         companyId: "00000000-0000-4000-8000-000000000001"
       }
     });
-    assert.equal(validated.journalEntry.status, "validated");
+    assert.equal(validated.journalEntry.status, "approved_for_post");
 
     const posted = await requestJson(`${baseUrl}/v1/ledger/journal-entries/${draft.journalEntry.journalEntryId}/post`, {
       method: "POST",
       token: adminSession.sessionToken,
       body: {
-        companyId: "00000000-0000-4000-8000-000000000001"
+        companyId: "00000000-0000-4000-8000-000000000001",
+        approvedByActorId: "finance-approver",
+        approvedByRoleCode: "finance_manager"
       }
     });
     assert.equal(posted.journalEntry.status, "posted");
+    assert.equal(posted.journalEntry.voucherNumber, 1);
 
     const imported = await requestJson(`${baseUrl}/v1/ledger/journal-entries`, {
       method: "POST",
@@ -144,7 +147,7 @@ test("Phase 3.1 API installs ledger catalog, validates balanced journals and pre
         ]
       }
     });
-    assert.equal(imported.journalEntry.voucherNumber, 2);
+    assert.equal(imported.journalEntry.voucherNumber, null);
     assert.equal(imported.journalEntry.importedFlag, true);
     assert.equal(imported.journalEntry.metadataJson.importSourceType, "historical_import");
 

@@ -118,7 +118,9 @@ test("Phase 8.3 locks voucher-series purpose mapping and account class changes a
   engine.postJournalEntry({
     companyId: COMPANY_ID,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "unit-test"
+    actorId: "unit-test",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
 
   assert.throws(

@@ -124,7 +124,9 @@ test("Phase 8.3 API governs ledger accounts, dimensions and voucher-series profi
       token: adminToken,
       expectedStatus: 200,
       body: {
-        companyId: DEMO_IDS.companyId
+        companyId: DEMO_IDS.companyId,
+        approvedByActorId: "finance-approver",
+        approvedByRoleCode: "finance_manager"
       }
     });
 

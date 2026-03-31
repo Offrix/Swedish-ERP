@@ -6,7 +6,7 @@ import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/d
 import { DEMO_ADMIN_EMAIL } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 
-test("Phase 3.1 ledger routes can be disabled and enabled flow keeps deterministic voucher numbers", async () => {
+test("Phase 3.1 ledger routes can be disabled and enabled flow allocates deterministic voucher numbers on post", async () => {
   const now = new Date("2026-03-21T19:00:00Z");
   const enabledPlatform = createApiPlatform({
     clock: () => now
@@ -76,6 +76,7 @@ test("Phase 3.1 ledger routes can be disabled and enabled flow keeps determinist
         sourceType: "MANUAL_JOURNAL",
         sourceId: "phase3-e2e-001",
         idempotencyKey: "phase3-e2e-001",
+        description: "phase3 e2e journal 1",
         lines: [
           { accountNumber: "1110", debitAmount: 700 },
           { accountNumber: "2010", creditAmount: 700 }
@@ -94,6 +95,7 @@ test("Phase 3.1 ledger routes can be disabled and enabled flow keeps determinist
         sourceType: "MANUAL_JOURNAL",
         sourceId: "phase3-e2e-002",
         idempotencyKey: "phase3-e2e-002",
+        description: "phase3 e2e journal 2",
         lines: [
           { accountNumber: "1110", debitAmount: 900 },
           { accountNumber: "2010", creditAmount: 900 }
@@ -101,8 +103,46 @@ test("Phase 3.1 ledger routes can be disabled and enabled flow keeps determinist
       }
     });
 
-    assert.equal(first.journalEntry.voucherNumber, 1);
-    assert.equal(second.journalEntry.voucherNumber, 2);
+    assert.equal(first.journalEntry.voucherNumber, null);
+    assert.equal(second.journalEntry.voucherNumber, null);
+
+    const firstApproved = await requestJson(enabledBaseUrl, `/v1/ledger/journal-entries/${first.journalEntry.journalEntryId}/validate`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001"
+      }
+    });
+    assert.equal(firstApproved.journalEntry.status, "approved_for_post");
+    const firstPosted = await requestJson(enabledBaseUrl, `/v1/ledger/journal-entries/${first.journalEntry.journalEntryId}/post`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001",
+        approvedByActorId: "finance-approver",
+        approvedByRoleCode: "finance_manager"
+      }
+    });
+    const secondApproved = await requestJson(enabledBaseUrl, `/v1/ledger/journal-entries/${second.journalEntry.journalEntryId}/validate`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001"
+      }
+    });
+    assert.equal(secondApproved.journalEntry.status, "approved_for_post");
+    const secondPosted = await requestJson(enabledBaseUrl, `/v1/ledger/journal-entries/${second.journalEntry.journalEntryId}/post`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001",
+        approvedByActorId: "finance-approver-2",
+        approvedByRoleCode: "finance_manager"
+      }
+    });
+
+    assert.equal(firstPosted.journalEntry.voucherNumber, 1);
+    assert.equal(secondPosted.journalEntry.voucherNumber, 2);
   } finally {
     await stopServer(disabledServer);
     await stopServer(enabledServer);

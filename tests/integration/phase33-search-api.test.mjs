@@ -217,7 +217,9 @@ function seedLedger(platform) {
   platform.postJournalEntry({
     companyId: COMPANY_ID,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId: "seed"
+    actorId: "seed",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
 }
 

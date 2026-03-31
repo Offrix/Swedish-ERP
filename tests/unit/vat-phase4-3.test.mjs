@@ -308,7 +308,9 @@ test("Phase 4.3 declaration corrections diff changed boxes and can reconcile aga
   ledger.postJournalEntry({
     companyId: COMPANY_ID,
     journalEntryId: entry.journalEntry.journalEntryId,
-    actorId: "user-1"
+    actorId: "user-1",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
 
   vat.evaluateVatDecision({

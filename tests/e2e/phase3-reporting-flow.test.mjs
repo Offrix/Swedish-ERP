@@ -161,7 +161,11 @@ async function createPostedJournal({ baseUrl, token, companyId, journalDate, ide
   return requestJson(baseUrl, `/v1/ledger/journal-entries/${created.journalEntry.journalEntryId}/post`, {
     method: "POST",
     token,
-    body: { companyId }
+    body: {
+      companyId,
+      approvedByActorId: "finance-approver",
+      approvedByRoleCode: "finance_manager"
+    }
   });
 }
 

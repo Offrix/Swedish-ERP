@@ -182,6 +182,8 @@ function createPostedJournal({ ledger, companyId, actorId, journalDate, idempote
   return ledger.postJournalEntry({
     companyId,
     journalEntryId: created.journalEntry.journalEntryId,
-    actorId
+    actorId,
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
   });
 }
