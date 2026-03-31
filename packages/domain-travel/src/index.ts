@@ -2,6 +2,7 @@ export type TravelApprovalStatus = "submitted" | "approved" | "rejected";
 export type MileageVehicleType = "OWN_CAR" | "BENEFIT_CAR" | "BENEFIT_CAR_ELECTRIC";
 export type ExpensePaymentMethod = "private_card" | "company_card" | "cash";
 export type TravelPayrollConsumptionStage = "calculated" | "approved";
+export type TravelExpenseVatHandlingStatus = "not_classified" | "review_required" | "decided";
 
 export interface TravelClaimRef {
   readonly travelClaimId: string;
@@ -31,6 +32,10 @@ export interface TravelClaimValuation {
   readonly taxableMileage: number;
   readonly expenseReimbursementAmount: number;
   readonly companyCardExpenseAmount: number;
+  readonly deductibleExpenseVatAmount: number;
+  readonly expenseVatDecidedCount: number;
+  readonly expenseVatReviewCount: number;
+  readonly expenseVatNotClassifiedCount: number;
   readonly expenseSplit: {
     readonly privateCardExpenseAmount: number;
     readonly cashExpenseAmount: number;

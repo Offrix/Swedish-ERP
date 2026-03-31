@@ -262,6 +262,106 @@ test("Phase 9.2 travel routes disable cleanly behind the feature flag", async ()
   }
 });
 
+test("Phase 11.3 API separates travel receipt VAT truth from reimbursement and exposes review-required receipts", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-31T09:15:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: enabledFlags()
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const sessionToken = await loginWithRequiredFactors({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const employee = await createEmployeeWithContract({
+      baseUrl,
+      token: sessionToken,
+      givenName: "Vera",
+      familyName: "Vat",
+      workEmail: "vera.vat@example.com",
+      payModelCode: "monthly_salary",
+      monthlySalary: 42000
+    });
+
+    const claim = await requestJson(baseUrl, "/v1/travel/claims", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employeeId: employee.employee.employeeId,
+        employmentId: employee.employment.employmentId,
+        purpose: "VAT-backed travel receipts",
+        startAt: "2026-03-10T08:15:00+01:00",
+        endAt: "2026-03-10T18:30:00+01:00",
+        homeLocation: "Uppsala",
+        regularWorkLocation: "Uppsala",
+        firstDestination: "Stockholm",
+        distanceFromHomeKm: 70,
+        distanceFromRegularWorkKm: 70,
+        expenseReceipts: [
+          {
+            date: "2026-03-10",
+            expenseType: "parking",
+            paymentMethod: "private_card",
+            amount: 500,
+            currencyCode: "SEK",
+            sellerCountry: "SE",
+            goodsOrServices: "services",
+            amountExVat: 400,
+            vatRate: 25
+          },
+          {
+            date: "2026-03-10",
+            expenseType: "taxi",
+            paymentMethod: "private_card",
+            amount: 250,
+            currencyCode: "SEK",
+            sellerCountry: "SE",
+            vatRate: 25
+          }
+        ]
+      }
+    });
+
+    assert.equal(claim.valuation.expenseReimbursementAmount, 750);
+    assert.equal(claim.valuation.deductibleExpenseVatAmount, 100);
+    assert.equal(claim.valuation.expenseVatDecidedCount, 1);
+    assert.equal(claim.valuation.expenseVatReviewCount, 1);
+    assert.equal(claim.valuation.reviewCodes.includes("travel_receipt_vat_review"), true);
+    assert.equal(claim.valuation.reviewCodes.includes("travel_receipt_vat_facts_review"), true);
+    assert.equal(claim.expenseReceipts[0].valuation.vatHandlingStatus, "decided");
+    assert.equal(claim.expenseReceipts[0].valuation.vatDecisionId != null, true);
+    assert.equal(claim.expenseReceipts[1].valuation.vatHandlingStatus, "review_required");
+    assert.equal(claim.expenseReceipts[1].valuation.vatReviewReasonCode, "missing_mandatory_vat_fields");
+
+    const vatDecision = await requestJson(
+      baseUrl,
+      `/v1/vat/decisions/${claim.expenseReceipts[0].valuation.vatDecisionId}?companyId=${COMPANY_ID}`,
+      {
+        token: sessionToken
+      }
+    );
+    assert.equal(vatDecision.decisionCategory, "domestic_supplier_charged_purchase");
+    assert.deepEqual(vatDecision.declarationBoxAmounts, [{ boxCode: "48", amount: 100, amountType: "input_vat" }]);
+
+    const reviewQueue = await requestJson(baseUrl, `/v1/vat/review-queue?companyId=${COMPANY_ID}`, {
+      token: sessionToken
+    });
+    assert.equal(reviewQueue.items.some((item) => item.reviewReasonCode === "missing_mandatory_vat_fields"), true);
+  } finally {
+    await stopServer(server);
+  }
+});
+
 function enabledFlags() {
   return {
     phase1AuthOnboardingEnabled: true,

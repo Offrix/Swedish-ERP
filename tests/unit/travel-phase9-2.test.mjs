@@ -4,6 +4,7 @@ import { createHrPlatform } from "../../packages/domain-hr/src/index.mjs";
 import { createTimePlatform } from "../../packages/domain-time/src/index.mjs";
 import { createTravelPlatform } from "../../packages/domain-travel/src/index.mjs";
 import { createPayrollPlatform } from "../../packages/domain-payroll/src/index.mjs";
+import { createVatPlatform } from "../../packages/domain-vat/src/index.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 let employeeEmailCounter = 0;
@@ -224,6 +225,64 @@ test("Phase 9.2 feeds payroll with tax-free allowances, taxable mileage and adva
   assert.equal(consumedClaim.payrollConsumptions.every((record) => record.payRunId === payRun.payRunId), true);
 });
 
+test("Phase 11.3 separates travel receipt VAT truth from reimbursement and queues incomplete VAT facts", () => {
+  const { travelPlatform, employee, employment } = createTravelFixture({
+    payModelCode: "monthly_salary",
+    monthlySalary: 42000
+  });
+
+  const claim = travelPlatform.createTravelClaim({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    purpose: "VAT-backed travel receipts",
+    startAt: "2026-03-10T08:15:00+01:00",
+    endAt: "2026-03-10T18:30:00+01:00",
+    homeLocation: "Uppsala",
+    regularWorkLocation: "Uppsala",
+    firstDestination: "Stockholm",
+    distanceFromHomeKm: 70,
+    distanceFromRegularWorkKm: 70,
+    expenseReceipts: [
+      {
+        date: "2026-03-10",
+        expenseType: "parking",
+        paymentMethod: "private_card",
+        amount: 500,
+        currencyCode: "SEK",
+        sellerCountry: "SE",
+        goodsOrServices: "services",
+        amountExVat: 400,
+        vatRate: 25
+      },
+      {
+        date: "2026-03-10",
+        expenseType: "taxi",
+        paymentMethod: "private_card",
+        amount: 250,
+        currencyCode: "SEK",
+        sellerCountry: "SE",
+        vatRate: 25
+      }
+    ],
+    actorId: "unit-test"
+  });
+
+  assert.equal(claim.valuation.expenseReimbursementAmount, 750);
+  assert.equal(claim.valuation.deductibleExpenseVatAmount, 100);
+  assert.equal(claim.valuation.expenseVatDecidedCount, 1);
+  assert.equal(claim.valuation.expenseVatReviewCount, 1);
+  assert.equal(claim.valuation.reviewCodes.includes("travel_receipt_vat_review"), true);
+  assert.equal(claim.valuation.reviewCodes.includes("travel_receipt_vat_facts_review"), true);
+  assert.equal(claim.expenseReceipts[0].valuation.vatHandlingStatus, "decided");
+  assert.equal(claim.expenseReceipts[0].valuation.deductibleVatAmountSek, 100);
+  assert.equal(claim.expenseReceipts[0].valuation.vatDecisionId != null, true);
+  assert.deepEqual(claim.expenseReceipts[0].valuation.vatDeclarationBoxCodes, ["48"]);
+  assert.equal(claim.expenseReceipts[1].valuation.vatHandlingStatus, "review_required");
+  assert.equal(claim.expenseReceipts[1].valuation.vatReviewReasonCode, "missing_mandatory_vat_fields");
+  assert.equal(claim.expenseReceipts[1].valuation.vatReviewQueueItemId != null, true);
+});
+
 function createTravelFixture({ payModelCode, monthlySalary = null, hourlyRate = null }) {
   const fixedNow = new Date("2026-03-22T08:00:00Z");
   const hrPlatform = createHrPlatform({
@@ -233,9 +292,13 @@ function createTravelFixture({ payModelCode, monthlySalary = null, hourlyRate = 
     clock: () => fixedNow,
     hrPlatform
   });
+  const vatPlatform = createVatPlatform({
+    clock: () => fixedNow
+  });
   const travelPlatform = createTravelPlatform({
     clock: () => fixedNow,
-    hrPlatform
+    hrPlatform,
+    vatPlatform
   });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,

@@ -19,6 +19,7 @@ const TRAVEL_PREAPPROVAL_THRESHOLD_SEK = 5000;
 const TRAVEL_APPROVAL_STATUSES = Object.freeze(["submitted", "approved", "rejected"]);
 const MILEAGE_VEHICLE_TYPES = Object.freeze(["OWN_CAR", "BENEFIT_CAR", "BENEFIT_CAR_ELECTRIC"]);
 const EXPENSE_PAYMENT_METHODS = Object.freeze(["private_card", "company_card", "cash"]);
+const TRAVEL_EXPENSE_VAT_HANDLING_STATUSES = Object.freeze(["not_classified", "review_required", "decided"]);
 
 const DOMESTIC_MEAL_REDUCTION_TABLE_2026 = Object.freeze({
   300: Object.freeze({ breakfast: 60, lunchOrDinner: 105, lunchAndDinner: 210, fullDay: 270 }),
@@ -117,7 +118,8 @@ export function createTravelEngine({
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   ruleRegistry = null,
   hrPlatform = null,
-  documentPlatform = null
+  documentPlatform = null,
+  vatPlatform = null
 } = {}) {
   const rules = ruleRegistry || createRulePackRegistry({ clock, seedRulePacks: TRAVEL_RULE_PACKS });
   const state = {
@@ -161,6 +163,7 @@ export function createTravelEngine({
     travelApprovalStatuses: TRAVEL_APPROVAL_STATUSES,
     mileageVehicleTypes: MILEAGE_VEHICLE_TYPES,
     expensePaymentMethods: EXPENSE_PAYMENT_METHODS,
+    travelExpenseVatHandlingStatuses: TRAVEL_EXPENSE_VAT_HANDLING_STATUSES,
     listTravelRulePacks,
     listForeignNormalAmounts,
     getForeignNormalAmount,
@@ -350,7 +353,8 @@ export function createTravelEngine({
       mealEvents: normalizedMealEvents,
       mileageLogs: normalizedMileageLogs,
       expenseReceipts: normalizedExpenseReceipts,
-      travelAdvances: normalizedAdvances
+      travelAdvances: normalizedAdvances,
+      vatPlatform
     });
 
     storeTravelClaim({
@@ -479,7 +483,7 @@ export function createTravelEngine({
   }
 }
 
-function valueTravelClaim({ rules, claim, countrySegments, mealEvents, mileageLogs, expenseReceipts, travelAdvances }) {
+function valueTravelClaim({ rules, claim, countrySegments, mealEvents, mileageLogs, expenseReceipts, travelAdvances, vatPlatform = null }) {
   const rulePack = resolveTravelRulePack(rules, claim.startAt.slice(0, 10));
   const travelRules = requireTravelRules(rulePack);
   const ruleYear = resolveTravelRuleYear(rulePack);
@@ -522,7 +526,14 @@ function valueTravelClaim({ rules, claim, countrySegments, mealEvents, mileageLo
   const taxFreeMileage = roundMoney(mileageRows.reduce((sum, row) => sum + Number(row.taxFreeAmount || 0), 0));
   const taxableMileage = roundMoney(mileageRows.reduce((sum, row) => sum + Number(row.taxableAmount || 0), 0));
 
-  const expenseRows = expenseReceipts.map((receipt) => valueExpenseReceipt(receipt));
+  const expenseRows = expenseReceipts.map((receipt, receiptIndex) =>
+    valueExpenseReceipt({
+      claim,
+      receipt,
+      vatPlatform,
+      receiptIndex
+    })
+  );
   const expenseReimbursementAmount = roundMoney(
     expenseRows
       .filter((row) => row.paymentMethod === "private_card" || row.paymentMethod === "cash")
@@ -551,6 +562,12 @@ function valueTravelClaim({ rules, claim, countrySegments, mealEvents, mileageLo
       mileageRows.reduce((sum, row) => sum + Number(row.requestedAmount || 0), 0) +
       expenseRows.reduce((sum, row) => sum + Number(row.amountSek || 0), 0)
   );
+  const deductibleExpenseVatAmount = roundMoney(
+    expenseRows.reduce((sum, row) => sum + Number(row.deductibleVatAmountSek || 0), 0)
+  );
+  const expenseVatDecidedCount = expenseRows.filter((row) => row.vatHandlingStatus === "decided").length;
+  const expenseVatReviewCount = expenseRows.filter((row) => row.vatHandlingStatus === "review_required").length;
+  const expenseVatNotClassifiedCount = expenseRows.filter((row) => row.vatHandlingStatus === "not_classified").length;
   const outsideNordic = countrySegments.some((segment) => !NORDIC_COUNTRIES.has(segment.countryName));
   const preApprovalRequired = estimatedTotalCost > Number(travelRules.preApprovalThresholdSek || 0) || outsideNordic;
 
@@ -579,7 +596,8 @@ function valueTravelClaim({ rules, claim, countrySegments, mealEvents, mileageLo
   });
   const reviewCodes = buildTravelReviewCodes({
     warnings,
-    expenseSplit
+    expenseSplit,
+    expenseRows
   });
 
   return {
@@ -603,6 +621,10 @@ function valueTravelClaim({ rules, claim, countrySegments, mealEvents, mileageLo
     taxableMileage,
     expenseReimbursementAmount,
     companyCardExpenseAmount,
+    deductibleExpenseVatAmount,
+    expenseVatDecidedCount,
+    expenseVatReviewCount,
+    expenseVatNotClassifiedCount,
     expenseSplit,
     travelAdvanceAmount,
     netTravelPayoutAmount,
@@ -852,7 +874,7 @@ function buildTravelExpenseSplit({ privateCardExpenseAmount = 0, cashExpenseAmou
   };
 }
 
-function buildTravelReviewCodes({ warnings = [], expenseSplit = null }) {
+function buildTravelReviewCodes({ warnings = [], expenseSplit = null, expenseRows = [] }) {
   const reviewCodes = new Set();
   for (const warning of warnings || []) {
     switch (warning) {
@@ -877,6 +899,12 @@ function buildTravelReviewCodes({ warnings = [], expenseSplit = null }) {
   }
   if (expenseSplit?.mixedFundingSources) {
     reviewCodes.add("travel_expense_split_review");
+  }
+  if ((expenseRows || []).some((row) => row.vatHandlingStatus === "review_required")) {
+    reviewCodes.add("travel_receipt_vat_review");
+  }
+  if ((expenseRows || []).some((row) => row.vatReviewReasonCode === "missing_mandatory_vat_fields")) {
+    reviewCodes.add("travel_receipt_vat_facts_review");
   }
   return [...reviewCodes].sort();
 }
@@ -1118,11 +1146,154 @@ function valueMileageLog(log, travelRules) {
   };
 }
 
-function valueExpenseReceipt(receipt) {
+function valueExpenseReceipt({ claim, receipt, vatPlatform, receiptIndex }) {
   const amountSek = roundMoney(receipt.currencyCode === "SEK" ? receipt.amount : receipt.amount * receipt.exchangeRate);
+  const vatEvaluation = evaluateTravelExpenseReceiptVat({
+    claim,
+    receipt,
+    vatPlatform,
+    receiptIndex
+  });
   return {
     ...copy(receipt),
-    amountSek
+    amountSek,
+    ...vatEvaluation
+  };
+}
+
+function evaluateTravelExpenseReceiptVat({ claim, receipt, vatPlatform, receiptIndex }) {
+  const transactionLine = buildTravelExpenseVatTransactionLine({
+    claim,
+    receipt,
+    receiptIndex
+  });
+  if (!transactionLine) {
+    return buildTravelExpenseVatResult({
+      vatHandlingStatus: "not_classified"
+    });
+  }
+  if (!vatPlatform || typeof vatPlatform.evaluateVatDecision !== "function") {
+    throw createError(
+      409,
+      "travel_vat_platform_missing",
+      "VAT platform is required when travel expense receipts carry explicit VAT facts."
+    );
+  }
+  const vatEvaluation = vatPlatform.evaluateVatDecision({
+    companyId: claim.companyId,
+    actorId: claim.createdByActorId,
+    correlationId: claim.travelClaimId,
+    transactionLine
+  });
+  const vatDecision = vatEvaluation.vatDecision || null;
+  const reviewQueueItem = vatEvaluation.reviewQueueItem || null;
+  const postingEntries = vatDecision?.outputs?.postingEntries || vatDecision?.postingEntries || [];
+  const declarationBoxAmounts = vatDecision?.declarationBoxAmounts || vatDecision?.outputs?.declarationBoxAmounts || [];
+  return buildTravelExpenseVatResult({
+    vatHandlingStatus: vatDecision?.status === "review_required" || reviewQueueItem ? "review_required" : "decided",
+    vatDecisionStatus: vatDecision?.status || null,
+    vatDecisionId: vatDecision?.vatDecisionId || null,
+    vatReviewQueueItemId: reviewQueueItem?.vatReviewQueueItemId || null,
+    vatReviewReasonCode: reviewQueueItem?.reviewReasonCode || null,
+    vatReviewQueueCode: reviewQueueItem?.reviewQueueCode || null,
+    vatCode: vatDecision?.vatCode || null,
+    vatRulePackId: vatDecision?.rulePackId || null,
+    deductibleVatAmountSek: roundMoney(
+      postingEntries.reduce(
+        (sum, entry) => sum + (entry.vatEffect === "input_vat" ? Math.abs(Number(entry.amount || 0)) : 0),
+        0
+      )
+    ),
+    vatDeclarationBoxCodes: [...new Set(declarationBoxAmounts.map((row) => row.boxCode).filter(Boolean))].sort()
+  });
+}
+
+function buildTravelExpenseVatTransactionLine({ claim, receipt, receiptIndex }) {
+  if (!hasTravelExpenseVatFacts(receipt)) {
+    return null;
+  }
+  const sourceIdParts = [
+    claim.travelClaimId,
+    receipt.documentId || `expense-receipt-${receiptIndex + 1}`,
+    receipt.date
+  ].filter(Boolean);
+  return {
+    source_type: "TRAVEL_EXPENSE_RECEIPT",
+    source_id: sourceIdParts.join(":"),
+    supply_type: "purchase",
+    seller_country: receipt.sellerCountry,
+    seller_vat_registration_country: receipt.sellerVatRegistrationCountry || receipt.sellerCountry,
+    buyer_country: "SE",
+    goods_or_services: receipt.goodsOrServices,
+    supply_subtype: receipt.supplySubtype,
+    invoice_date: receipt.date,
+    delivery_date: receipt.deliveryDate || receipt.date,
+    tax_date: receipt.taxDate || receipt.date,
+    prepayment_date: receipt.prepaymentDate || receipt.date,
+    currency: receipt.currencyCode,
+    line_amount_ex_vat: receipt.amountExVat,
+    line_quantity: 1,
+    vat_rate: receipt.vatRate,
+    tax_rate_candidate: receipt.taxRateCandidate == null ? receipt.vatRate : receipt.taxRateCandidate,
+    reverse_charge_flag: receipt.reverseChargeFlag === true,
+    import_flag: receipt.importFlag === true,
+    export_flag: receipt.exportFlag === true,
+    buyer_is_taxable_person: receipt.buyerIsTaxablePerson !== false,
+    construction_service_flag: receipt.constructionServiceFlag === true,
+    property_related_flag: receipt.propertyRelatedFlag === true,
+    oss_flag: false,
+    ioss_flag: false,
+    vat_code_candidate: receipt.vatCodeCandidate,
+    deduction_ratio: receipt.deductionRatio == null ? 1 : receipt.deductionRatio
+  };
+}
+
+function hasTravelExpenseVatFacts(receipt) {
+  return [
+    receipt?.sellerCountry,
+    receipt?.sellerVatRegistrationCountry,
+    receipt?.goodsOrServices,
+    receipt?.supplySubtype,
+    receipt?.vatCodeCandidate,
+    receipt?.vatRate,
+    receipt?.taxRateCandidate,
+    receipt?.amountExVat,
+    receipt?.deductionRatio,
+    receipt?.taxDate,
+    receipt?.prepaymentDate,
+    receipt?.deliveryDate,
+    receipt?.reverseChargeFlag === true,
+    receipt?.importFlag === true,
+    receipt?.exportFlag === true,
+    receipt?.constructionServiceFlag === true,
+    receipt?.propertyRelatedFlag === true,
+    receipt?.buyerIsTaxablePerson === false
+  ].some((value) => value !== null && value !== false && value !== undefined);
+}
+
+function buildTravelExpenseVatResult({
+  vatHandlingStatus,
+  vatDecisionStatus = null,
+  vatDecisionId = null,
+  vatReviewQueueItemId = null,
+  vatReviewReasonCode = null,
+  vatReviewQueueCode = null,
+  vatCode = null,
+  vatRulePackId = null,
+  deductibleVatAmountSek = 0,
+  vatDeclarationBoxCodes = []
+}) {
+  return {
+    vatHandlingStatus,
+    vatDecisionStatus,
+    vatDecisionId,
+    vatReviewQueueItemId,
+    vatReviewReasonCode,
+    vatReviewQueueCode,
+    vatCode,
+    vatRulePackId,
+    deductibleVatAmountSek: roundMoney(deductibleVatAmountSek),
+    vatDeclarationBoxCodes: copy(vatDeclarationBoxCodes)
   };
 }
 
@@ -1366,7 +1537,28 @@ function normalizeExpenseReceipts({ expenseReceipts, startAt, endAt }) {
       currencyCode: normalizeUpperCode(receipt.currencyCode || "SEK", "travel_expense_currency_invalid", 3),
       exchangeRate: normalizeOptionalNumber(receipt.exchangeRate, "travel_expense_exchange_rate_invalid") || 1,
       documentId: normalizeOptionalText(receipt.documentId),
-      hasReceiptSupport: receipt.hasReceiptSupport !== false
+      hasReceiptSupport: receipt.hasReceiptSupport !== false,
+      sellerCountry: normalizeOptionalCountryCode(receipt.sellerCountry, "travel_expense_seller_country_invalid"),
+      sellerVatRegistrationCountry: normalizeOptionalCountryCode(
+        receipt.sellerVatRegistrationCountry,
+        "travel_expense_seller_vat_country_invalid"
+      ),
+      goodsOrServices: normalizeOptionalGoodsOrServices(receipt.goodsOrServices, "travel_expense_goods_or_services_invalid"),
+      supplySubtype: normalizeOptionalLowerCode(receipt.supplySubtype),
+      vatCodeCandidate: normalizeOptionalUpperCode(receipt.vatCodeCandidate),
+      vatRate: normalizeOptionalNumber(receipt.vatRate, "travel_expense_vat_rate_invalid"),
+      taxRateCandidate: normalizeOptionalNumber(receipt.taxRateCandidate, "travel_expense_tax_rate_candidate_invalid"),
+      amountExVat: normalizeOptionalMoney(receipt.amountExVat, "travel_expense_amount_ex_vat_invalid"),
+      deductionRatio: normalizeOptionalNumber(receipt.deductionRatio, "travel_expense_deduction_ratio_invalid"),
+      deliveryDate: normalizeOptionalDate(receipt.deliveryDate, "travel_expense_delivery_date_invalid"),
+      taxDate: normalizeOptionalDate(receipt.taxDate, "travel_expense_tax_date_invalid"),
+      prepaymentDate: normalizeOptionalDate(receipt.prepaymentDate, "travel_expense_prepayment_date_invalid"),
+      reverseChargeFlag: receipt.reverseChargeFlag === true,
+      importFlag: receipt.importFlag === true,
+      exportFlag: receipt.exportFlag === true,
+      constructionServiceFlag: receipt.constructionServiceFlag === true,
+      propertyRelatedFlag: receipt.propertyRelatedFlag === true,
+      buyerIsTaxablePerson: receipt.buyerIsTaxablePerson === false ? false : null
     };
   });
 }
@@ -1663,6 +1855,20 @@ function normalizeRequiredDate(value, code) {
   return resolvedValue;
 }
 
+function normalizeOptionalDate(value, code) {
+  const resolvedValue = normalizeOptionalText(value);
+  if (!resolvedValue) {
+    return null;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(resolvedValue)) {
+    throw createError(400, code, "Date must use YYYY-MM-DD format.");
+  }
+  if (!Number.isFinite(Date.parse(`${resolvedValue}T00:00:00Z`))) {
+    throw createError(400, code, "Date is invalid.");
+  }
+  return resolvedValue;
+}
+
 function normalizeRequiredDateTime(value, code) {
   const resolvedValue = requireText(value, code);
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?([+-]\d{2}:\d{2}|Z)?$/.test(resolvedValue)) {
@@ -1685,6 +1891,16 @@ function normalizeOptionalText(value) {
   return resolvedValue ? resolvedValue : null;
 }
 
+function normalizeOptionalLowerCode(value) {
+  const resolvedValue = normalizeOptionalText(value);
+  return resolvedValue ? resolvedValue.toLowerCase() : null;
+}
+
+function normalizeOptionalUpperCode(value) {
+  const resolvedValue = normalizeOptionalText(value);
+  return resolvedValue ? resolvedValue.toUpperCase() : null;
+}
+
 function requireText(value, code) {
   const resolvedValue = normalizeOptionalText(value);
   if (!resolvedValue) {
@@ -1697,6 +1913,29 @@ function normalizeUpperCode(value, code, expectedLength = null) {
   const resolvedValue = requireText(value, code).toUpperCase();
   if (expectedLength != null && resolvedValue.length !== Number(expectedLength)) {
     throw createError(400, code, `Code must be exactly ${expectedLength} characters.`);
+  }
+  return resolvedValue;
+}
+
+function normalizeOptionalCountryCode(value, code) {
+  const resolvedValue = normalizeOptionalText(value);
+  if (!resolvedValue) {
+    return null;
+  }
+  if (!/^[A-Za-z]{2}$/.test(resolvedValue)) {
+    throw createError(400, code, "Country code must contain exactly two letters.");
+  }
+  const normalized = resolvedValue.toUpperCase();
+  return normalized === "GR" ? "EL" : normalized;
+}
+
+function normalizeOptionalGoodsOrServices(value, code) {
+  const resolvedValue = normalizeOptionalLowerCode(value);
+  if (!resolvedValue) {
+    return null;
+  }
+  if (!["goods", "services"].includes(resolvedValue)) {
+    throw createError(400, code, "Value must be goods or services.");
   }
   return resolvedValue;
 }
