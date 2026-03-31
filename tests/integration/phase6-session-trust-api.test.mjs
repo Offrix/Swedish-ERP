@@ -54,11 +54,16 @@ test("Phase 6.2 API exposes challenge center and device trust lifecycle", async 
       }
     });
     assert.equal(createdChallenge.factorType, "totp");
+    assert.equal(createdChallenge.actionClass, "support_case_operate");
 
     const pendingChallenges = await requestJson(`${baseUrl}/v1/auth/challenges?status=pending`, {
       token: login.sessionToken
     });
-    assert.equal(pendingChallenges.items.some((item) => item.challengeId === createdChallenge.challengeId), true);
+    const pendingChallenge = pendingChallenges.items.find((item) => item.challengeId === createdChallenge.challengeId);
+    assert.ok(pendingChallenge);
+    assert.equal(pendingChallenge.actionClass, "support_case_operate");
+    assert.equal(pendingChallenge.trustRequired, "mfa");
+    assert.equal(pendingChallenge.completedAt, null);
 
     const completedChallenge = await requestJson(`${baseUrl}/v1/auth/challenges/${createdChallenge.challengeId}/complete`, {
       method: "POST",
@@ -73,6 +78,15 @@ test("Phase 6.2 API exposes challenge center and device trust lifecycle", async 
     });
     assert.equal(completedChallenge.receipt.actionClass, "support_case_operate");
     assert.equal(typeof completedChallenge.session.freshTrustByActionClass.support_case_operate, "string");
+
+    const allChallenges = await requestJson(`${baseUrl}/v1/auth/challenges`, {
+      token: login.sessionToken
+    });
+    const consumedChallenge = allChallenges.items.find((item) => item.challengeId === createdChallenge.challengeId);
+    assert.ok(consumedChallenge);
+    assert.equal(consumedChallenge.actionClass, "support_case_operate");
+    assert.equal(consumedChallenge.trustRequired, "mfa");
+    assert.equal(typeof consumedChallenge.completedAt, "string");
 
     const devices = await requestJson(`${baseUrl}/v1/auth/devices`, {
       token: login.sessionToken

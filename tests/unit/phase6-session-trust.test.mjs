@@ -41,6 +41,7 @@ test("Phase 6.2 session revisions, freshness TTL and challenge receipts are reco
     sessionToken: login.sessionToken
   });
   assert.equal(inspection.session.status, "active");
+  assert.equal(inspection.session.trustClass, "strong_mfa");
   assert.equal(inspection.session.trustLevel, "strong_mfa");
   assert.equal(typeof inspection.session.sessionRevisionId, "string");
   assert.equal(inspection.session.sessionRevisionNumber >= 3, true);
@@ -48,6 +49,17 @@ test("Phase 6.2 session revisions, freshness TTL and challenge receipts are reco
   assert.equal(typeof inspection.session.freshTrustByTrustLevel.strong_mfa, "string");
   assert.equal(inspection.sessionRevisions.some((revision) => revision.reasonCode === "login_started"), true);
   assert.equal(inspection.sessionRevisions.some((revision) => revision.reasonCode === "factor_completed"), true);
+  assert.equal(inspection.sessionRevisions.every((revision) => typeof revision.tokenHash === "string"), true);
+  assert.equal(inspection.sessionRevisions.every((revision) => typeof revision.expiresAt === "string"), true);
+  assert.equal(
+    inspection.sessionRevisions.some(
+      (revision) =>
+        revision.reasonCode === "factor_completed"
+        && revision.trustClass === "strong_mfa"
+        && typeof revision.deviceTrustId === "string"
+    ),
+    true
+  );
 
   const challenges = platform.listChallenges({
     sessionToken: login.sessionToken
@@ -55,6 +67,9 @@ test("Phase 6.2 session revisions, freshness TTL and challenge receipts are reco
   const bankIdChallenge = challenges.find((challenge) => challenge.challengeId === bankIdStart.orderRef);
   assert.ok(bankIdChallenge);
   assert.equal(bankIdChallenge.status, "consumed");
+  assert.equal(bankIdChallenge.actionClass, "identity_session_manage");
+  assert.equal(bankIdChallenge.trustRequired, "strong_mfa");
+  assert.equal(typeof bankIdChallenge.completedAt, "string");
   assert.equal(bankIdChallenge.receipts.length >= 1, true);
   assert.equal(bankIdCollect.receipt.actionClass, "identity_session_manage");
   assert.equal(bankIdCollect.receipt.sessionRevisionId, inspection.session.sessionRevisionId);
@@ -91,12 +106,17 @@ test("Phase 6.2 challenge center completes TOTP step-up and device trust lifecyc
     actionClass: "support_case_operate"
   });
   assert.equal(challenge.factorType, "totp");
+  assert.equal(challenge.actionClass, "support_case_operate");
 
   const pendingChallenges = platform.listChallenges({
     sessionToken: login.sessionToken,
     status: "pending"
   });
-  assert.equal(pendingChallenges.some((item) => item.challengeId === challenge.challengeId), true);
+  const pendingChallenge = pendingChallenges.find((item) => item.challengeId === challenge.challengeId);
+  assert.ok(pendingChallenge);
+  assert.equal(pendingChallenge.actionClass, "support_case_operate");
+  assert.equal(pendingChallenge.trustRequired, "mfa");
+  assert.equal(pendingChallenge.completedAt, null);
 
   const completion = platform.completeChallenge({
     sessionToken: login.sessionToken,
@@ -116,6 +136,9 @@ test("Phase 6.2 challenge center completes TOTP step-up and device trust lifecyc
   const consumedChallenge = allChallenges.find((item) => item.challengeId === challenge.challengeId);
   assert.ok(consumedChallenge);
   assert.equal(consumedChallenge.status, "consumed");
+  assert.equal(consumedChallenge.actionClass, "support_case_operate");
+  assert.equal(consumedChallenge.trustRequired, "mfa");
+  assert.equal(typeof consumedChallenge.completedAt, "string");
   assert.equal(consumedChallenge.receipts.length, 1);
 
   const device = platform.listDeviceTrustRecords({
@@ -167,6 +190,7 @@ test("Phase 6.2 durable auth state restores session trust, receipts and device t
   });
 
   const snapshot = platform.exportDurableState();
+  assert.equal(Object.prototype.hasOwnProperty.call(snapshot, "authSessionIdByTokenHash"), false);
   const restoredPlatform = createOrgAuthPlatform({
     clock: () => new Date("2026-03-27T14:05:00Z")
   });
@@ -176,13 +200,18 @@ test("Phase 6.2 durable auth state restores session trust, receipts and device t
     sessionToken: login.sessionToken
   });
   assert.equal(inspection.session.status, "active");
+  assert.equal(inspection.session.trustClass, "strong_mfa");
   assert.equal(inspection.session.trustLevel, "strong_mfa");
   assert.equal(inspection.sessionRevisions.some((revision) => revision.reasonCode === "factor_completed"), true);
+  assert.equal(inspection.sessionRevisions.every((revision) => typeof revision.tokenHash === "string"), true);
   const challenges = restoredPlatform.listChallenges({
     sessionToken: login.sessionToken
   });
   const consumedBankIdChallenge = challenges.find((challenge) => challenge.challengeId === bankIdStart.orderRef);
   assert.ok(consumedBankIdChallenge);
+  assert.equal(consumedBankIdChallenge.actionClass, "identity_session_manage");
+  assert.equal(consumedBankIdChallenge.trustRequired, "strong_mfa");
+  assert.equal(typeof consumedBankIdChallenge.completedAt, "string");
   assert.equal(consumedBankIdChallenge.receipts.length >= 1, true);
 
   const devices = restoredPlatform.listDeviceTrustRecords({
