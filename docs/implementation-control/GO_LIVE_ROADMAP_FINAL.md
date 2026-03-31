@@ -415,7 +415,7 @@ Ingen live-regeländring direkt i domänkod. Ingen provider-formatuppdatering ut
 - [x] 5.2 [HARDEN] Inför provider baseline registry för BankID, signing archive, Peppol, ISO20022, Skatteverket transports, Bolagsverket annual, SIE4-format och migration file families.
 - [x] 5.3 [OPERATIONALIZE] Bygg publiceringsprocess med källa, checksumma, effectiveFrom/effectiveTo, signoff, rollback och golden test vectors från officiella källor.
 - [ ] 5.4 [HARDEN] Gör historisk pinning obligatorisk: alla beslut, deklarationer och beräkningar måste bära rulepack- och baseline-ref.
-- [ ] 5.5 [SECURE] Emergency override av rulepack kräver dual review, reason code, time-boxing och återgångsplan.
+- [x] 5.5 [SECURE] Emergency override av rulepack kräver dual review, reason code, time-boxing och återgångsplan.
 
 **Exit gate**  
 - Alla regulatoriska värden och providerformat kommer från signerade rulepacks/baselines.

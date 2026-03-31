@@ -169,6 +169,62 @@ test("Phase 1.4 production runtime blocks AGI live submission until provider-bac
   );
 });
 
+test("Phase 5.5 production runtime blocks legacy statutory payroll tax paths until approved decision snapshots exist", () => {
+  const platform = createApiPlatform({
+    runtimeMode: "production",
+    env: {},
+    criticalDomainStateStoreKind: "memory",
+    clock: () => new Date("2026-03-30T08:15:00Z")
+  });
+  const onboardingRun = platform.createOnboardingRun({
+    legalName: "Protected Runtime Tax Snapshot AB",
+    orgNumber: "559900-2218",
+    adminEmail: "owner@protected-tax.test",
+    adminDisplayName: "Protected Tax Owner",
+    accountingYear: "2026"
+  });
+  platform.updateOnboardingStep({
+    runId: onboardingRun.runId,
+    resumeToken: onboardingRun.resumeToken,
+    stepCode: "registrations",
+    payload: {
+      registrations: [{ registrationType: "employer", registrationValue: "configured-employer", status: "configured" }]
+    }
+  });
+  const companyId = onboardingRun.companyId;
+  const payCalendar = createProductionPayrollBaseline(platform, companyId);
+  const employee = createEmployeeWithoutBankAccount({
+    platform,
+    companyId,
+    givenName: "Stina",
+    familyName: "Statutory",
+    workEmail: "stina.statutory@example.com",
+    identityValue: "19800112-1113",
+    monthlySalary: 36500
+  });
+
+  platform.upsertEmploymentStatutoryProfile({
+    companyId,
+    employmentId: employee.employment.employmentId,
+    taxMode: "manual_rate",
+    manualRateReasonCode: "emergency_manual_transition",
+    taxRatePercent: 30,
+    actorId: "unit-test"
+  });
+
+  assert.throws(
+    () =>
+      platform.createPayRun({
+        companyId,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202603",
+        employmentIds: [employee.employment.employmentId],
+        actorId: "unit-test"
+      }),
+    (error) => error?.code === "payroll_tax_decision_snapshot_required_for_legal_effect"
+  );
+});
+
 function createEmployeeWithoutBankAccount({ platform, companyId = COMPANY_ID, givenName, familyName, workEmail, identityValue, monthlySalary }) {
   const employee = platform.createEmployee({
     companyId,

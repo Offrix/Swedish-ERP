@@ -5155,6 +5155,7 @@ function calculateEmploymentRun({
     employee,
     statutoryProfile,
     taxDecisionSnapshot,
+    executionBoundary,
     warnings
   });
   steps[11] = taxPreview.step;
@@ -5621,7 +5622,16 @@ function createStepLinesFromManualInputs({ processingStep, employment, inputs, s
     });
 }
 
-function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfile, taxDecisionSnapshot = null, warnings }) {
+function buildTaxPreview({
+  rules,
+  taxableBase,
+  payDate,
+  employee,
+  statutoryProfile,
+  taxDecisionSnapshot = null,
+  executionBoundary = null,
+  warnings
+}) {
   const resolvedPayDate = normalizeRequiredDate(payDate, "pay_run_pay_date_invalid");
   const rulePack = rules.resolveRulePack({
     rulePackCode: PAYROLL_TAX_RULE_PACK_CODE,
@@ -5635,6 +5645,10 @@ function buildTaxPreview({ rules, taxableBase, payDate, employee, statutoryProfi
     statutoryProfile,
     effectiveDate: resolvedPayDate,
     rulePack
+  });
+  assertTaxDecisionSourceAllowedForExecutionBoundary({
+    effectiveTaxContext,
+    executionBoundary
   });
   const decisionObjectBase = {
     inputs_hash: buildSnapshotHash({
@@ -5962,6 +5976,21 @@ function resolveEffectiveTaxDecisionContext({ taxDecisionSnapshot = null, statut
     evidenceRef: effectiveProfile.sinkDecisionDocumentId || null,
     reasonCode: effectiveProfile.manualRateReasonCode || null
   };
+}
+
+function assertTaxDecisionSourceAllowedForExecutionBoundary({ effectiveTaxContext, executionBoundary = null }) {
+  if (!effectiveTaxContext || effectiveTaxContext.sourceType !== "legacy_statutory_profile") {
+    return;
+  }
+  if (executionBoundary?.supportsLegalEffect !== true) {
+    return;
+  }
+  const resolvedDecisionType = normalizeOptionalText(effectiveTaxContext.decisionType) || "pending";
+  throw createError(
+    409,
+    "payroll_tax_decision_snapshot_required_for_legal_effect",
+    `Protected runtime payroll requires an approved TaxDecisionSnapshot; legacy statutory profiles may not determine ${resolvedDecisionType} withholding in legal-effect mode.`
+  );
 }
 
 function resolveTaxDecisionSnapshotAmount({ taxDecisionSnapshot, taxableBase, sinkDefaults = {} }) {

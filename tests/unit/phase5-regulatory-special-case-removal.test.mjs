@@ -66,7 +66,76 @@ test("Phase 5.5 employer contribution age special case resolves from rulepack da
   assert.equal(payRun.payslips[0].totals.employerContributionPreviewAmount, 0);
 });
 
-function createPayrollFixture({ dateOfBirth = "1992-05-14", monthlySalary = 42000 } = {}) {
+test("Phase 5.5 production payroll blocks legacy statutory tax profiles from creating legal-effect withholding", () => {
+  const { payrollPlatform, employment } = createPayrollFixture({
+    environmentMode: "production",
+    supportsLegalEffect: true
+  });
+
+  payrollPlatform.upsertEmploymentStatutoryProfile({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    taxMode: "manual_rate",
+    manualRateReasonCode: "emergency_manual_transition",
+    taxRatePercent: 30,
+    actorId: "phase5-5-unit"
+  });
+
+  const payCalendar = payrollPlatform.listPayCalendars({ companyId: COMPANY_ID })[0];
+  assert.throws(
+    () =>
+      payrollPlatform.createPayRun({
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202603",
+        employmentIds: [employment.employmentId],
+        actorId: "phase5-5-unit"
+      }),
+    (error) => error?.code === "payroll_tax_decision_snapshot_required_for_legal_effect"
+  );
+});
+
+test("Phase 5.5 production payroll blocks legacy SINK fallback from bypassing approved tax decisions", () => {
+  const { payrollPlatform, employment } = createPayrollFixture({
+    environmentMode: "production",
+    supportsLegalEffect: true
+  });
+
+  payrollPlatform.upsertEmploymentStatutoryProfile({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    taxMode: "sink",
+    sinkDecisionType: "ordinary_sink",
+    sinkValidFrom: "2026-01-01",
+    sinkValidTo: "2026-02-28",
+    sinkRatePercent: 22.5,
+    sinkDecisionDocumentId: "sink-decision-2026",
+    fallbackTaxMode: "manual_rate",
+    fallbackManualRateReasonCode: "sink_fallback_pending_decision",
+    fallbackTaxRatePercent: 30,
+    actorId: "phase5-5-unit"
+  });
+
+  const payCalendar = payrollPlatform.listPayCalendars({ companyId: COMPANY_ID })[0];
+  assert.throws(
+    () =>
+      payrollPlatform.createPayRun({
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202603",
+        employmentIds: [employment.employmentId],
+        actorId: "phase5-5-unit"
+      }),
+    (error) => error?.code === "payroll_tax_decision_snapshot_required_for_legal_effect"
+  );
+});
+
+function createPayrollFixture({
+  dateOfBirth = "1992-05-14",
+  monthlySalary = 42000,
+  environmentMode = "test",
+  supportsLegalEffect = false
+} = {}) {
   const fixedNow = new Date("2026-03-27T08:00:00Z");
   const hrPlatform = createHrPlatform({
     clock: () => fixedNow
@@ -78,6 +147,8 @@ function createPayrollFixture({ dateOfBirth = "1992-05-14", monthlySalary = 4200
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,
     bootstrapScenarioCode: "test_default_demo",
+    environmentMode,
+    supportsLegalEffect,
     hrPlatform,
     timePlatform
   });
