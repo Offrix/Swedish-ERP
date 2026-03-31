@@ -73,6 +73,8 @@ export const YEAR_END_TRANSFER_KINDS = Object.freeze(["RESULT_TRANSFER", "RETAIN
 export const DEFAULT_CURRENT_YEAR_RESULT_ACCOUNT_NUMBER = "2040";
 export const DEFAULT_RETAINED_EARNINGS_ACCOUNT_NUMBER = "2030";
 export const DEFAULT_VAT_CLEARING_TARGET_ACCOUNT_NUMBER = "2650";
+export const ASSET_CARD_STATUSES = Object.freeze(["active", "fully_depreciated", "disposed"]);
+export const DEPRECIATION_METHOD_CODES = Object.freeze(["STRAIGHT_LINE_MONTHLY"]);
 
 export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
   Object.freeze({
@@ -274,6 +276,16 @@ export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
     defaultVoucherSeriesPurposeCode: "VAT_SETTLEMENT",
     fallbackVoucherSeriesCode: "I",
     defaultSignalCode: "vat.clearing.completed"
+  }),
+  Object.freeze({
+    recipeCode: "ASSET_DEPRECIATION",
+    version: "2026.1",
+    sourceDomain: "ledger",
+    journalType: "operational_posting",
+    allowedSourceTypes: Object.freeze(["ASSET_DEPRECIATION"]),
+    defaultVoucherSeriesPurposeCode: "LEDGER_MANUAL",
+    fallbackVoucherSeriesCode: "A",
+    defaultSignalCode: "asset.depreciation.booked"
   }),
   Object.freeze({
     recipeCode: "HUS_CLAIM_ACCEPTED",
@@ -499,6 +511,12 @@ export function createLedgerEngine({
     vatClearingRuns: new Map(),
     vatClearingRunIdsByCompany: new Map(),
     vatClearingRunIdsByCompanyKey: new Map(),
+    assetCards: new Map(),
+    assetCardIdsByCompany: new Map(),
+    assetCardIdsByCompanyKey: new Map(),
+    depreciationBatches: new Map(),
+    depreciationBatchIdsByCompany: new Map(),
+    depreciationBatchIdsByCompanyKey: new Map(),
     postingIntents: new Map(),
     postingIntentIdsByCompanyKey: new Map(),
     accountingPeriods: new Map(),
@@ -552,6 +570,13 @@ export function createLedgerEngine({
     listVatClearingRuns,
     getVatClearingRun,
     reverseVatClearingRun,
+    registerAssetCard,
+    listAssetCards,
+    getAssetCard,
+    runDepreciationBatch,
+    listDepreciationBatches,
+    getDepreciationBatch,
+    reverseDepreciationBatch,
     reserveImportedVoucherNumber,
     resolveVoucherSeriesForPurpose,
     createPostingIntent,
@@ -1604,6 +1629,418 @@ export function createLedgerEngine({
     });
 
     return copy(reversedRun);
+  }
+
+  function registerAssetCard({
+    companyId,
+    assetCode,
+    assetName,
+    acquisitionDate,
+    inServiceDate = null,
+    costAmount,
+    residualValueAmount = 0,
+    usefulLifeMonths,
+    assetAccountNumber,
+    accumulatedDepreciationAccountNumber,
+    depreciationExpenseAccountNumber,
+    depreciationMethodCode = "STRAIGHT_LINE_MONTHLY",
+    actorId,
+    idempotencyKey,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedIdempotencyKey = requireText(idempotencyKey, "idempotency_key_required");
+    const dedupeKey = toCompanyScopedKey(resolvedCompanyId, resolvedIdempotencyKey);
+    const existingAssetCardId = state.assetCardIdsByCompanyKey.get(dedupeKey);
+    if (existingAssetCardId) {
+      return copy(requireAssetCard(resolvedCompanyId, existingAssetCardId));
+    }
+
+    synchronizeLedgerPeriodsForCompany(resolvedCompanyId);
+    const resolvedAssetCode = normalizeCode(assetCode, "asset_code_required");
+    assertAssetCodeUnique({ companyId: resolvedCompanyId, assetCode: resolvedAssetCode });
+    const resolvedAcquisitionDate = normalizeDate(acquisitionDate, "asset_acquisition_date_invalid");
+    const resolvedInServiceDate = normalizeDate(inServiceDate || acquisitionDate, "asset_in_service_date_invalid");
+    if (resolvedInServiceDate < resolvedAcquisitionDate) {
+      throw httpError(409, "asset_in_service_before_acquisition", "Asset in-service date cannot be earlier than acquisition date.");
+    }
+    const resolvedMethodCode = assertDepreciationMethodCode(depreciationMethodCode);
+    const resolvedUsefulLifeMonths = normalizePositiveInteger(usefulLifeMonths, "asset_useful_life_months_invalid");
+    const resolvedCostAmount = normalizeSignedMoney(costAmount);
+    const resolvedResidualValueAmount = normalizeSignedMoney(residualValueAmount || 0);
+    if (!(resolvedCostAmount > 0)) {
+      throw httpError(400, "asset_cost_amount_invalid", "Asset cost amount must be greater than zero.");
+    }
+    if (resolvedResidualValueAmount < 0 || resolvedResidualValueAmount >= resolvedCostAmount) {
+      throw httpError(409, "asset_residual_value_invalid", "Asset residual value must be zero or less than the cost amount.");
+    }
+
+    const assetAccount = requireAssetBalanceSheetAccount({
+      companyId: resolvedCompanyId,
+      accountNumber: assetAccountNumber,
+      errorCode: "asset_account_required"
+    });
+    const accumulatedDepreciationAccount = requireAssetBalanceSheetAccount({
+      companyId: resolvedCompanyId,
+      accountNumber: accumulatedDepreciationAccountNumber,
+      errorCode: "asset_accumulated_depreciation_account_required"
+    });
+    const depreciationExpenseAccount = requireDepreciationExpenseAccount({
+      companyId: resolvedCompanyId,
+      accountNumber: depreciationExpenseAccountNumber
+    });
+    if (assetAccount.accountNumber === accumulatedDepreciationAccount.accountNumber) {
+      throw httpError(
+        409,
+        "asset_accumulated_depreciation_account_conflict",
+        "Asset account and accumulated depreciation account must be different."
+      );
+    }
+    if (
+      assetAccount.accountNumber === depreciationExpenseAccount.accountNumber
+      || accumulatedDepreciationAccount.accountNumber === depreciationExpenseAccount.accountNumber
+    ) {
+      throw httpError(
+        409,
+        "asset_depreciation_account_conflict",
+        "Depreciation expense account must be different from balance-sheet asset accounts."
+      );
+    }
+    const depreciableBaseAmount = normalizeSignedMoney(resolvedCostAmount - resolvedResidualValueAmount);
+    const monthlyDepreciationAmount = normalizeSignedMoney(depreciableBaseAmount / resolvedUsefulLifeMonths);
+    const assetCardId = crypto.randomUUID();
+    const assetCard = Object.freeze({
+      assetCardId,
+      companyId: resolvedCompanyId,
+      assetCode: resolvedAssetCode,
+      assetName: normalizeLedgerLabel(assetName, "asset_name_required"),
+      acquisitionDate: resolvedAcquisitionDate,
+      inServiceDate: resolvedInServiceDate,
+      costAmount: resolvedCostAmount,
+      residualValueAmount: resolvedResidualValueAmount,
+      depreciableBaseAmount,
+      bookedDepreciationAmount: 0,
+      remainingDepreciableAmount: depreciableBaseAmount,
+      usefulLifeMonths: resolvedUsefulLifeMonths,
+      bookedInstallmentCount: 0,
+      depreciationMethodCode: resolvedMethodCode,
+      monthlyDepreciationAmount,
+      assetAccountNumber: assetAccount.accountNumber,
+      accumulatedDepreciationAccountNumber: accumulatedDepreciationAccount.accountNumber,
+      depreciationExpenseAccountNumber: depreciationExpenseAccount.accountNumber,
+      nextDepreciationDate: endOfMonth(resolvedInServiceDate),
+      lastDepreciationBatchId: null,
+      status: "active",
+      createdByActorId: resolvedActorId,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      disposedAt: null,
+      disposedByActorId: null
+    });
+
+    state.assetCards.set(assetCard.assetCardId, assetCard);
+    appendToIndex(state.assetCardIdsByCompany, resolvedCompanyId, assetCard.assetCardId);
+    state.assetCardIdsByCompanyKey.set(dedupeKey, assetCard.assetCardId);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.asset_card.registered",
+      entityType: "asset_card",
+      entityId: assetCard.assetCardId,
+      explanation: `Registered asset card ${assetCard.assetCode}.`
+    });
+
+    return copy(assetCard);
+  }
+
+  function listAssetCards({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.assetCardIdsByCompany.get(resolvedCompanyId) || [])
+      .map((assetCardId) => state.assetCards.get(assetCardId))
+      .filter(Boolean)
+      .sort((left, right) => left.assetCode.localeCompare(right.assetCode))
+      .map(copy);
+  }
+
+  function getAssetCard({ companyId, assetCardId } = {}) {
+    return copy(requireAssetCard(requireText(companyId, "company_id_required"), assetCardId));
+  }
+
+  function runDepreciationBatch({
+    companyId,
+    throughDate,
+    description = null,
+    actorId,
+    idempotencyKey,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedIdempotencyKey = requireText(idempotencyKey, "idempotency_key_required");
+    const dedupeKey = toCompanyScopedKey(resolvedCompanyId, resolvedIdempotencyKey);
+    const existingBatchId = state.depreciationBatchIdsByCompanyKey.get(dedupeKey);
+    if (existingBatchId) {
+      return copy(requireDepreciationBatch(resolvedCompanyId, existingBatchId));
+    }
+
+    synchronizeLedgerPeriodsForCompany(resolvedCompanyId);
+    const resolvedThroughDate = normalizeDate(throughDate, "depreciation_through_date_invalid");
+    if (resolvedThroughDate !== endOfMonth(resolvedThroughDate)) {
+      throw httpError(
+        409,
+        "depreciation_through_date_must_be_month_end",
+        "Depreciation batches must run through a month-end date."
+      );
+    }
+    const accountingCurrencyProfile = ensureAccountingCurrencyProfile(resolvedCompanyId);
+    const accountingPeriod = resolveAccountingPeriod(resolvedCompanyId, resolvedThroughDate);
+    const depreciationBatchId = crypto.randomUUID();
+    const items = [];
+    const lines = [];
+
+    for (const assetCard of listAssetCards({ companyId: resolvedCompanyId })) {
+      if (assetCard.status !== "active") {
+        continue;
+      }
+      let scheduledDate = assetCard.nextDepreciationDate;
+      let bookedAmount = assetCard.bookedDepreciationAmount;
+      let bookedInstallmentCount = assetCard.bookedInstallmentCount;
+      let assetBatchAmount = 0;
+      let installmentCount = 0;
+      let firstScheduledDate = null;
+      let lastScheduledDate = null;
+      while (
+        scheduledDate
+        && scheduledDate <= resolvedThroughDate
+        && bookedAmount < assetCard.depreciableBaseAmount
+        && bookedInstallmentCount < assetCard.usefulLifeMonths
+      ) {
+        const remainingAmount = normalizeSignedMoney(assetCard.depreciableBaseAmount - bookedAmount);
+        const installmentAmount = bookedInstallmentCount >= assetCard.usefulLifeMonths - 1
+          ? remainingAmount
+          : Math.min(assetCard.monthlyDepreciationAmount, remainingAmount);
+        if (!(installmentAmount > 0)) {
+          break;
+        }
+        assetBatchAmount = normalizeSignedMoney(assetBatchAmount + installmentAmount);
+        bookedAmount = normalizeSignedMoney(bookedAmount + installmentAmount);
+        bookedInstallmentCount += 1;
+        installmentCount += 1;
+        firstScheduledDate = firstScheduledDate || scheduledDate;
+        lastScheduledDate = scheduledDate;
+        scheduledDate = advanceMonthlyScheduleDate(scheduledDate);
+      }
+      if (!(assetBatchAmount > 0)) {
+        continue;
+      }
+      items.push({
+        assetCardId: assetCard.assetCardId,
+        assetCode: assetCard.assetCode,
+        firstScheduledDate,
+        lastScheduledDate,
+        installmentCount,
+        depreciationAmount: assetBatchAmount,
+        priorBookedDepreciationAmount: assetCard.bookedDepreciationAmount,
+        priorBookedInstallmentCount: assetCard.bookedInstallmentCount,
+        priorNextDepreciationDate: assetCard.nextDepreciationDate,
+        priorStatus: assetCard.status,
+        priorLastDepreciationBatchId: assetCard.lastDepreciationBatchId
+      });
+      lines.push(
+        {
+          accountNumber: assetCard.depreciationExpenseAccountNumber,
+          debitAmount: assetBatchAmount,
+          sourceId: depreciationBatchId
+        },
+        {
+          accountNumber: assetCard.accumulatedDepreciationAccountNumber,
+          creditAmount: assetBatchAmount,
+          sourceId: depreciationBatchId
+        }
+      );
+    }
+
+    if (items.length === 0) {
+      throw httpError(409, "depreciation_batch_no_due_assets", "No active assets require depreciation for the supplied date.");
+    }
+
+    const normalizedLines = normalizeDepreciationLineInputs({
+      companyId: resolvedCompanyId,
+      lines,
+      sourceId: depreciationBatchId
+    });
+    const totals = calculateInputLineTotals(normalizedLines);
+    const posted = applyPostingIntent({
+      companyId: resolvedCompanyId,
+      journalDate: resolvedThroughDate,
+      recipeCode: "ASSET_DEPRECIATION",
+      sourceType: "ASSET_DEPRECIATION",
+      sourceId: depreciationBatchId,
+      sourceObjectVersion: "1",
+      description: normalizeOptionalText(description) || `Depreciation batch ${resolvedThroughDate}`,
+      actorId: resolvedActorId,
+      idempotencyKey: `${resolvedIdempotencyKey}:journal`,
+      lines: normalizedLines,
+      currencyCode: accountingCurrencyProfile.accountingCurrencyCode,
+      metadataJson: {
+        depreciationBatchId,
+        throughDate: resolvedThroughDate,
+        items: copy(items)
+      },
+      correlationId
+    });
+
+    for (const item of items) {
+      const existingAssetCard = requireAssetCard(resolvedCompanyId, item.assetCardId);
+      const bookedDepreciationAmount = normalizeSignedMoney(existingAssetCard.bookedDepreciationAmount + item.depreciationAmount);
+      const remainingDepreciableAmount = normalizeSignedMoney(existingAssetCard.depreciableBaseAmount - bookedDepreciationAmount);
+      const bookedInstallmentCount = existingAssetCard.bookedInstallmentCount + item.installmentCount;
+      const nextDepreciationDate =
+        remainingDepreciableAmount > 0 && bookedInstallmentCount < existingAssetCard.usefulLifeMonths
+          ? advanceMonthlyScheduleDate(item.lastScheduledDate)
+          : null;
+      state.assetCards.set(
+        existingAssetCard.assetCardId,
+        Object.freeze({
+          ...existingAssetCard,
+          bookedDepreciationAmount,
+          remainingDepreciableAmount,
+          bookedInstallmentCount,
+          nextDepreciationDate,
+          lastDepreciationBatchId: depreciationBatchId,
+          status: remainingDepreciableAmount > 0 ? "active" : "fully_depreciated",
+          updatedAt: nowIso()
+        })
+      );
+    }
+
+    const batch = Object.freeze({
+      depreciationBatchId,
+      companyId: resolvedCompanyId,
+      accountingPeriodId: accountingPeriod.accountingPeriodId,
+      throughDate: resolvedThroughDate,
+      status: "posted",
+      accountingCurrencyCode: accountingCurrencyProfile.accountingCurrencyCode,
+      lineCount: normalizedLines.length,
+      assetCount: items.length,
+      totals,
+      journalEntryId: posted.journalEntry.journalEntryId,
+      reversalJournalEntryId: null,
+      items: Object.freeze(items.map((item) => Object.freeze(copy(item)))),
+      createdByActorId: resolvedActorId,
+      createdAt: nowIso(),
+      reversedAt: null,
+      reversedByActorId: null
+    });
+
+    state.depreciationBatches.set(batch.depreciationBatchId, batch);
+    appendToIndex(state.depreciationBatchIdsByCompany, resolvedCompanyId, batch.depreciationBatchId);
+    state.depreciationBatchIdsByCompanyKey.set(dedupeKey, batch.depreciationBatchId);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.asset.depreciation.booked",
+      entityType: "depreciation_batch",
+      entityId: batch.depreciationBatchId,
+      explanation: `Posted depreciation batch through ${resolvedThroughDate}.`
+    });
+
+    return copy(batch);
+  }
+
+  function listDepreciationBatches({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.depreciationBatchIdsByCompany.get(resolvedCompanyId) || [])
+      .map((batchId) => state.depreciationBatches.get(batchId))
+      .filter(Boolean)
+      .sort((left, right) => left.throughDate.localeCompare(right.throughDate) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function getDepreciationBatch({ companyId, depreciationBatchId } = {}) {
+    return copy(requireDepreciationBatch(requireText(companyId, "company_id_required"), depreciationBatchId));
+  }
+
+  function reverseDepreciationBatch({
+    companyId,
+    depreciationBatchId,
+    reasonCode,
+    reversedOn = null,
+    actorId,
+    approvedByActorId,
+    approvedByRoleCode,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const batch = requireDepreciationBatch(resolvedCompanyId, depreciationBatchId);
+    if (batch.status === "reversed") {
+      return copy(batch);
+    }
+    for (const item of batch.items) {
+      const assetCard = requireAssetCard(resolvedCompanyId, item.assetCardId);
+      if (assetCard.lastDepreciationBatchId !== batch.depreciationBatchId) {
+        throw httpError(
+          409,
+          "depreciation_batch_reversal_order_invalid",
+          `Depreciation batch ${batch.depreciationBatchId} cannot be reversed after later depreciation postings for asset ${assetCard.assetCode}.`
+        );
+      }
+    }
+
+    const reversed = reverseJournalEntry({
+      companyId: resolvedCompanyId,
+      journalEntryId: batch.journalEntryId,
+      actorId: requireText(actorId, "actor_id_required"),
+      approvedByActorId: requireText(approvedByActorId, "approved_by_actor_id_required"),
+      approvedByRoleCode: requireText(approvedByRoleCode, "approved_by_role_code_required"),
+      reasonCode: requireText(reasonCode, "reason_code_required"),
+      correctionKey: `asset_depreciation:${batch.depreciationBatchId}`,
+      journalDate: reversedOn ? normalizeDate(reversedOn, "depreciation_reversed_on_invalid") : null,
+      correlationId
+    });
+
+    for (const item of batch.items) {
+      const assetCard = requireAssetCard(resolvedCompanyId, item.assetCardId);
+      state.assetCards.set(
+        assetCard.assetCardId,
+        Object.freeze({
+          ...assetCard,
+          bookedDepreciationAmount: item.priorBookedDepreciationAmount,
+          remainingDepreciableAmount: normalizeSignedMoney(assetCard.depreciableBaseAmount - item.priorBookedDepreciationAmount),
+          bookedInstallmentCount: item.priorBookedInstallmentCount,
+          nextDepreciationDate: item.priorNextDepreciationDate,
+          lastDepreciationBatchId: item.priorLastDepreciationBatchId,
+          status: item.priorStatus,
+          updatedAt: nowIso()
+        })
+      );
+    }
+
+    const reversedBatch = Object.freeze({
+      ...batch,
+      status: "reversed",
+      reversalJournalEntryId: reversed.reversalJournalEntry.journalEntryId,
+      reversedAt: nowIso(),
+      reversedByActorId: requireText(actorId, "actor_id_required")
+    });
+    state.depreciationBatches.set(reversedBatch.depreciationBatchId, reversedBatch);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "ledger.asset.depreciation.reversed",
+      entityType: "depreciation_batch",
+      entityId: reversedBatch.depreciationBatchId,
+      explanation: `Reversed depreciation batch ${reversedBatch.depreciationBatchId}.`
+    });
+
+    return copy(reversedBatch);
   }
 
   function resolveVoucherSeriesForPurpose({
@@ -2823,6 +3260,8 @@ export function createLedgerEngine({
       openingBalanceBatches: [...state.openingBalanceBatches.values()],
       yearEndTransferBatches: [...state.yearEndTransferBatches.values()],
       vatClearingRuns: [...state.vatClearingRuns.values()],
+      assetCards: [...state.assetCards.values()],
+      depreciationBatches: [...state.depreciationBatches.values()],
       postingIntents: [...state.postingIntents.values()],
       accountingPeriods: [...state.accountingPeriods.values()],
       dimensionCatalogs: [...state.dimensionCatalogsByCompanyId.values()],
@@ -3016,6 +3455,64 @@ export function createLedgerEngine({
       throw httpError(404, "vat_clearing_run_not_found", "VAT clearing run was not found.");
     }
     return run;
+  }
+
+  function assertDepreciationMethodCode(value) {
+    const normalized = requireText(value, "depreciation_method_code_required").toUpperCase();
+    if (!DEPRECIATION_METHOD_CODES.includes(normalized)) {
+      throw httpError(400, "depreciation_method_code_invalid", "Depreciation method code is not supported.");
+    }
+    return normalized;
+  }
+
+  function assertAssetCodeUnique({ companyId, assetCode }) {
+    const resolvedAssetCode = normalizeCode(assetCode, "asset_code_required");
+    for (const assetCard of state.assetCards.values()) {
+      if (assetCard.companyId === companyId && assetCard.assetCode === resolvedAssetCode) {
+        throw httpError(409, "asset_code_conflict", `Asset code ${resolvedAssetCode} already exists for the company.`);
+      }
+    }
+    return resolvedAssetCode;
+  }
+
+  function requireAssetCard(companyId, assetCardId) {
+    const assetCard = state.assetCards.get(requireText(assetCardId, "asset_card_id_required"));
+    if (!assetCard || assetCard.companyId !== companyId) {
+      throw httpError(404, "asset_card_not_found", "Asset card was not found.");
+    }
+    return assetCard;
+  }
+
+  function requireDepreciationBatch(companyId, depreciationBatchId) {
+    const batch = state.depreciationBatches.get(requireText(depreciationBatchId, "depreciation_batch_id_required"));
+    if (!batch || batch.companyId !== companyId) {
+      throw httpError(404, "depreciation_batch_not_found", "Depreciation batch was not found.");
+    }
+    return batch;
+  }
+
+  function requireAssetBalanceSheetAccount({ companyId, accountNumber, errorCode = "asset_balance_sheet_account_required" }) {
+    const account = requireAccount(companyId, normalizeAccountNumber(accountNumber));
+    if (account.accountClass !== "1") {
+      throw httpError(
+        409,
+        errorCode,
+        `Account ${account.accountNumber} must be a class 1 balance-sheet asset account.`
+      );
+    }
+    return account;
+  }
+
+  function requireDepreciationExpenseAccount({ companyId, accountNumber }) {
+    const account = requireAccount(companyId, normalizeAccountNumber(accountNumber));
+    if (account.accountClass !== "7") {
+      throw httpError(
+        409,
+        "asset_depreciation_expense_account_required",
+        `Account ${account.accountNumber} must be a class 7 depreciation expense account.`
+      );
+    }
+    return account;
   }
 
   function requireVatClearingTargetAccount({ companyId, accountNumber }) {
@@ -3336,6 +3833,36 @@ export function createLedgerEngine({
     const totals = calculateInputLineTotals(normalizedLines);
     if (totals.totalDebit !== totals.totalCredit) {
       throw httpError(400, "vat_clearing_unbalanced", "VAT clearing lines must balance debit and credit exactly.");
+    }
+    return Object.freeze(normalizedLines);
+  }
+
+  function normalizeDepreciationLineInputs({ companyId, lines, sourceId }) {
+    if (!Array.isArray(lines) || lines.length < 2) {
+      throw httpError(400, "depreciation_lines_required", "Depreciation requires at least two lines.");
+    }
+    const normalizedLines = lines.map((line) => {
+      const account = requireAccount(companyId, line.accountNumber);
+      const debitAmount = normalizeSignedMoney(line.debitAmount || 0);
+      const creditAmount = normalizeSignedMoney(line.creditAmount || 0);
+      if (debitAmount === 0 && creditAmount === 0) {
+        throw httpError(400, "depreciation_line_amount_required", "Each depreciation line requires a debit or credit amount.");
+      }
+      if (debitAmount > 0 && creditAmount > 0) {
+        throw httpError(400, "depreciation_line_single_sided_required", "Each depreciation line must be either debit or credit.");
+      }
+      return Object.freeze({
+        accountNumber: account.accountNumber,
+        debitAmount,
+        creditAmount,
+        dimensionJson: copy(line.dimensionJson || {}),
+        sourceType: "ASSET_DEPRECIATION",
+        sourceId: requireText(line.sourceId || sourceId, "line_source_id_required")
+      });
+    });
+    const totals = calculateInputLineTotals(normalizedLines);
+    if (totals.totalDebit !== totals.totalCredit) {
+      throw httpError(400, "depreciation_unbalanced", "Depreciation lines must balance debit and credit exactly.");
     }
     return Object.freeze(normalizedLines);
   }
@@ -4078,6 +4605,16 @@ function addDaysToIsoDate(value, days) {
   const normalized = new Date(`${normalizeDate(value, "date_invalid")}T00:00:00.000Z`);
   normalized.setUTCDate(normalized.getUTCDate() + Number(days || 0));
   return normalized.toISOString().slice(0, 10);
+}
+
+function endOfMonth(value) {
+  const normalized = new Date(`${normalizeDate(value, "date_invalid")}T00:00:00.000Z`);
+  return new Date(Date.UTC(normalized.getUTCFullYear(), normalized.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+}
+
+function advanceMonthlyScheduleDate(value) {
+  const normalized = new Date(`${normalizeDate(value, "date_invalid")}T00:00:00.000Z`);
+  return new Date(Date.UTC(normalized.getUTCFullYear(), normalized.getUTCMonth() + 2, 0)).toISOString().slice(0, 10);
 }
 
 function normalizeSeriesCode(value, code) {

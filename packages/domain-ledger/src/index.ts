@@ -310,6 +310,71 @@ export interface VatClearingRun {
   readonly reversedByActorId: string | null;
 }
 
+export interface AssetCard {
+  readonly assetCardId: string;
+  readonly companyId: string;
+  readonly assetCode: string;
+  readonly assetName: string;
+  readonly acquisitionDate: string;
+  readonly inServiceDate: string;
+  readonly costAmount: number;
+  readonly residualValueAmount: number;
+  readonly depreciableBaseAmount: number;
+  readonly bookedDepreciationAmount: number;
+  readonly remainingDepreciableAmount: number;
+  readonly usefulLifeMonths: number;
+  readonly bookedInstallmentCount: number;
+  readonly depreciationMethodCode: "STRAIGHT_LINE_MONTHLY";
+  readonly monthlyDepreciationAmount: number;
+  readonly assetAccountNumber: string;
+  readonly accumulatedDepreciationAccountNumber: string;
+  readonly depreciationExpenseAccountNumber: string;
+  readonly nextDepreciationDate: string | null;
+  readonly lastDepreciationBatchId: string | null;
+  readonly status: "active" | "fully_depreciated" | "disposed";
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly disposedAt: string | null;
+  readonly disposedByActorId: string | null;
+}
+
+export interface DepreciationBatchItem {
+  readonly assetCardId: string;
+  readonly assetCode: string;
+  readonly firstScheduledDate: string;
+  readonly lastScheduledDate: string;
+  readonly installmentCount: number;
+  readonly depreciationAmount: number;
+  readonly priorBookedDepreciationAmount: number;
+  readonly priorBookedInstallmentCount: number;
+  readonly priorNextDepreciationDate: string | null;
+  readonly priorStatus: "active" | "fully_depreciated" | "disposed";
+  readonly priorLastDepreciationBatchId: string | null;
+}
+
+export interface DepreciationBatch {
+  readonly depreciationBatchId: string;
+  readonly companyId: string;
+  readonly accountingPeriodId: string;
+  readonly throughDate: string;
+  readonly status: "posted" | "reversed";
+  readonly accountingCurrencyCode: string;
+  readonly lineCount: number;
+  readonly assetCount: number;
+  readonly totals: {
+    readonly totalDebit: number;
+    readonly totalCredit: number;
+  };
+  readonly journalEntryId: string;
+  readonly reversalJournalEntryId: string | null;
+  readonly items: readonly DepreciationBatchItem[];
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly reversedAt: string | null;
+  readonly reversedByActorId: string | null;
+}
+
 export interface CorrectionResult {
   readonly originalJournalEntry: JournalEntry;
   readonly reversalJournalEntry: JournalEntry | null;
@@ -468,3 +533,59 @@ export declare function reverseVatClearingRun(options: {
   approvedByRoleCode: string;
   correlationId?: string;
 }): VatClearingRun;
+
+export declare function registerAssetCard(options: {
+  companyId: string;
+  assetCode: string;
+  assetName: string;
+  acquisitionDate: string;
+  inServiceDate?: string | null;
+  costAmount: number | string;
+  residualValueAmount?: number | string;
+  usefulLifeMonths: number;
+  assetAccountNumber: string;
+  accumulatedDepreciationAccountNumber: string;
+  depreciationExpenseAccountNumber: string;
+  depreciationMethodCode?: "STRAIGHT_LINE_MONTHLY";
+  actorId: string;
+  idempotencyKey: string;
+  correlationId?: string;
+}): AssetCard;
+
+export declare function listAssetCards(options: {
+  companyId: string;
+}): readonly AssetCard[];
+
+export declare function getAssetCard(options: {
+  companyId: string;
+  assetCardId: string;
+}): AssetCard;
+
+export declare function runDepreciationBatch(options: {
+  companyId: string;
+  throughDate: string;
+  description?: string | null;
+  actorId: string;
+  idempotencyKey: string;
+  correlationId?: string;
+}): DepreciationBatch;
+
+export declare function listDepreciationBatches(options: {
+  companyId: string;
+}): readonly DepreciationBatch[];
+
+export declare function getDepreciationBatch(options: {
+  companyId: string;
+  depreciationBatchId: string;
+}): DepreciationBatch;
+
+export declare function reverseDepreciationBatch(options: {
+  companyId: string;
+  depreciationBatchId: string;
+  reasonCode: string;
+  reversedOn?: string | null;
+  actorId: string;
+  approvedByActorId: string;
+  approvedByRoleCode: string;
+  correlationId?: string;
+}): DepreciationBatch;

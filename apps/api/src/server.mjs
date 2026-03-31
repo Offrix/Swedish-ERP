@@ -474,6 +474,11 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/ledger/vat-clearing-runs",
               "/v1/ledger/vat-clearing-runs/:vatClearingRunId",
               "/v1/ledger/vat-clearing-runs/:vatClearingRunId/reverse",
+              "/v1/ledger/asset-cards",
+              "/v1/ledger/asset-cards/:assetCardId",
+              "/v1/ledger/depreciation-batches",
+              "/v1/ledger/depreciation-batches/:depreciationBatchId",
+              "/v1/ledger/depreciation-batches/:depreciationBatchId/reverse",
               "/v1/accounting-method/eligibility-assessments",
               "/v1/accounting-method/profiles",
               "/v1/accounting-method/profiles/:methodProfileId",
@@ -3483,6 +3488,191 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
       platform.reverseVatClearingRun({
         companyId,
         vatClearingRunId: vatClearingRunReverseMatch.vatClearingRunId,
+        reasonCode: body.reasonCode,
+        reversedOn: body.reversedOn || null,
+        actorId: principal.userId,
+        approvedByActorId: body.approvedByActorId,
+        approvedByRoleCode: body.approvedByRoleCode,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ledger/asset-cards") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "asset_card",
+      scopeCode: "ledger"
+    });
+    writeJson(res, 200, {
+      items: platform.listAssetCards({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ledger/asset-cards") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger_asset_depreciation",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.registerAssetCard({
+        companyId,
+        assetCode: body.assetCode,
+        assetName: body.assetName,
+        acquisitionDate: body.acquisitionDate,
+        inServiceDate: body.inServiceDate || null,
+        costAmount: body.costAmount,
+        residualValueAmount: body.residualValueAmount ?? 0,
+        usefulLifeMonths: body.usefulLifeMonths,
+        assetAccountNumber: body.assetAccountNumber,
+        accumulatedDepreciationAccountNumber: body.accumulatedDepreciationAccountNumber,
+        depreciationExpenseAccountNumber: body.depreciationExpenseAccountNumber,
+        depreciationMethodCode: body.depreciationMethodCode || "STRAIGHT_LINE_MONTHLY",
+        actorId: principal.userId,
+        idempotencyKey: body.idempotencyKey,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const assetCardMatch = matchPath(path, "/v1/ledger/asset-cards/:assetCardId");
+  if (assetCardMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "asset_card",
+      objectId: assetCardMatch.assetCardId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getAssetCard({
+        companyId,
+        assetCardId: assetCardMatch.assetCardId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ledger/depreciation-batches") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "depreciation_batch",
+      scopeCode: "ledger"
+    });
+    writeJson(res, 200, {
+      items: platform.listDepreciationBatches({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ledger/depreciation-batches") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger_asset_depreciation",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.runDepreciationBatch({
+        companyId,
+        throughDate: body.throughDate,
+        description: body.description || null,
+        actorId: principal.userId,
+        idempotencyKey: body.idempotencyKey,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const depreciationBatchMatch = matchPath(path, "/v1/ledger/depreciation-batches/:depreciationBatchId");
+  if (depreciationBatchMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "depreciation_batch",
+      objectId: depreciationBatchMatch.depreciationBatchId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getDepreciationBatch({
+        companyId,
+        depreciationBatchId: depreciationBatchMatch.depreciationBatchId
+      })
+    );
+    return;
+  }
+
+  const depreciationBatchReverseMatch = matchPath(path, "/v1/ledger/depreciation-batches/:depreciationBatchId/reverse");
+  if (depreciationBatchReverseMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "depreciation_batch",
+      objectId: depreciationBatchReverseMatch.depreciationBatchId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.reverseDepreciationBatch({
+        companyId,
+        depreciationBatchId: depreciationBatchReverseMatch.depreciationBatchId,
         reasonCode: body.reasonCode,
         reversedOn: body.reversedOn || null,
         actorId: principal.userId,
