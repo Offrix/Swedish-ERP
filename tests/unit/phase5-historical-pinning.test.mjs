@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createLedgerPlatform } from "../../packages/domain-ledger/src/index.mjs";
 import { createIntegrationPlatform } from "../../packages/domain-integrations/src/index.mjs";
+import { createVatEngine } from "../../packages/domain-vat/src/index.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -245,3 +246,130 @@ test("Phase 5.3 regulated submission retry and correction preserve pinning refs"
   assert.equal(evidencePack.providerBaselineRefs[0].baselineCode, "SE-ANNUAL-DECLARATION-JSON");
   assert.equal(evidencePack.decisionSnapshotRefs[0].snapshotTypeCode, "annual_tax_decision");
 });
+
+test("Phase 5.4 VAT declaration and periodic statement artifacts pin rulepacks, baselines and decision snapshots", () => {
+  const vat = createVatEngine({
+    clock: () => new Date("2026-03-30T09:00:00Z")
+  });
+
+  vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "phase5-4-unit",
+    transactionLine: buildVatTransactionLine({
+      source_id: "phase5-4-domestic",
+      vat_code_candidate: "VAT_SE_DOMESTIC_25",
+      line_amount_ex_vat: 1000
+    })
+  });
+  vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "phase5-4-unit",
+    transactionLine: buildVatTransactionLine({
+      source_id: "phase5-4-eu-service",
+      buyer_country: "DE",
+      buyer_type: "business",
+      buyer_vat_no: "DE123456789",
+      buyer_is_taxable_person: true,
+      buyer_vat_number: "DE123456789",
+      buyer_vat_number_status: "valid",
+      goods_or_services: "services",
+      vat_code_candidate: "VAT_SE_EU_SERVICES_B2B",
+      line_amount_ex_vat: 450
+    })
+  });
+
+  const basis = vat.getVatDeclarationBasis({
+    companyId: COMPANY_ID,
+    fromDate: "2026-03-01",
+    toDate: "2026-03-31"
+  });
+  assert.deepEqual(
+    basis.rulepackRefs.map((entry) => `${entry.rulepackCode}:${entry.rulepackVersion}`),
+    ["SE-VAT-CORE:2026.3"]
+  );
+  assert.deepEqual(
+    basis.providerBaselineRefs.map((entry) => entry.baselineCode),
+    ["SE-SKATTEVERKET-VAT-API"]
+  );
+  assert.equal(basis.decisionSnapshotRefs.length, 2);
+
+  const declarationRun = vat.createVatDeclarationRun({
+    companyId: COMPANY_ID,
+    fromDate: "2026-03-01",
+    toDate: "2026-03-31",
+    actorId: "phase5-4-unit",
+    signer: "phase5-4-signer"
+  });
+  const declarationReplay = vat.createVatDeclarationRun({
+    companyId: COMPANY_ID,
+    fromDate: "2026-03-01",
+    toDate: "2026-03-31",
+    actorId: "phase5-4-unit",
+    signer: "phase5-4-signer",
+    previousSubmissionId: declarationRun.vatDeclarationRunId,
+    correctionReason: "pinning_replay"
+  });
+  assert.deepEqual(declarationReplay.rulepackRefs, declarationRun.rulepackRefs);
+  assert.deepEqual(declarationReplay.providerBaselineRefs, declarationRun.providerBaselineRefs);
+  assert.deepEqual(declarationReplay.decisionSnapshotRefs, declarationRun.decisionSnapshotRefs);
+
+  const periodicRun = vat.createVatPeriodicStatementRun({
+    companyId: COMPANY_ID,
+    fromDate: "2026-03-01",
+    toDate: "2026-03-31",
+    actorId: "phase5-4-unit"
+  });
+  const periodicReplay = vat.createVatPeriodicStatementRun({
+    companyId: COMPANY_ID,
+    fromDate: "2026-03-01",
+    toDate: "2026-03-31",
+    actorId: "phase5-4-unit",
+    previousSubmissionId: periodicRun.vatPeriodicStatementRunId,
+    correctionReason: "pinning_replay"
+  });
+  assert.deepEqual(periodicReplay.rulepackRefs, periodicRun.rulepackRefs);
+  assert.deepEqual(periodicReplay.providerBaselineRefs, periodicRun.providerBaselineRefs);
+  assert.deepEqual(periodicReplay.decisionSnapshotRefs, periodicRun.decisionSnapshotRefs);
+});
+
+function buildVatTransactionLine(overrides = {}) {
+  return {
+    seller_country: "SE",
+    seller_vat_registration_country: "SE",
+    buyer_country: "SE",
+    buyer_type: "business",
+    buyer_vat_no: "SE556677889901",
+    buyer_is_taxable_person: true,
+    buyer_vat_number: "SE556677889901",
+    buyer_vat_number_status: "valid",
+    supply_type: "sale",
+    goods_or_services: "goods",
+    supply_subtype: "standard",
+    property_related_flag: false,
+    construction_service_flag: false,
+    transport_end_country: "SE",
+    import_flag: false,
+    export_flag: false,
+    reverse_charge_flag: false,
+    oss_flag: false,
+    ioss_flag: false,
+    currency: "SEK",
+    tax_date: "2026-03-21",
+    invoice_date: "2026-03-21",
+    delivery_date: "2026-03-21",
+    prepayment_date: "2026-03-21",
+    line_amount_ex_vat: 1000,
+    line_discount: 0,
+    line_quantity: 1,
+    line_uom: "ea",
+    vat_rate: 25,
+    tax_rate_candidate: 25,
+    vat_code_candidate: "VAT_SE_DOMESTIC_25",
+    exemption_reason: "not_applicable",
+    invoice_text_code: "domestic_standard",
+    report_box_code: "05",
+    source_type: "AR_INVOICE",
+    source_id: "phase5-4-default",
+    ...overrides
+  };
+}

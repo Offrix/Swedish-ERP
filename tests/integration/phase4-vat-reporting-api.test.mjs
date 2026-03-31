@@ -227,6 +227,22 @@ test("Phase 4.3 API materializes declaration runs with ledger comparison and rep
       }
     });
 
+    const basis = await requestJson(
+      `${baseUrl}/v1/vat/declaration-basis?companyId=${COMPANY_ID}&fromDate=2026-03-01&toDate=2026-03-31`,
+      {
+        token: adminSession.sessionToken
+      }
+    );
+    assert.deepEqual(
+      basis.rulepackRefs.map((entry) => `${entry.rulepackCode}:${entry.rulepackVersion}`),
+      ["SE-VAT-CORE:2026.3"]
+    );
+    assert.deepEqual(
+      basis.providerBaselineRefs.map((entry) => entry.baselineCode),
+      ["SE-SKATTEVERKET-VAT-API"]
+    );
+    assert.equal(basis.decisionSnapshotRefs.length, 4);
+
     const declarationRun = await requestJson(`${baseUrl}/v1/vat/declaration-runs`, {
       method: "POST",
       token: adminSession.sessionToken,
@@ -249,6 +265,15 @@ test("Phase 4.3 API materializes declaration runs with ledger comparison and rep
     assert.equal(declarationRun.ledgerComparison.matched, true);
     assert.equal(declarationRun.ledgerComparison.expectedCredit, 2400);
     assert.equal(declarationRun.ledgerComparison.actualCredit, 2400);
+    assert.deepEqual(
+      declarationRun.rulepackRefs.map((entry) => `${entry.rulepackCode}:${entry.rulepackVersion}`),
+      ["SE-VAT-CORE:2026.3"]
+    );
+    assert.deepEqual(
+      declarationRun.providerBaselineRefs.map((entry) => entry.baselineCode),
+      ["SE-SKATTEVERKET-VAT-API"]
+    );
+    assert.equal(declarationRun.decisionSnapshotRefs.length, 4);
 
     const fetchedDeclaration = await requestJson(
       `${baseUrl}/v1/vat/declaration-runs/${declarationRun.vatDeclarationRunId}?companyId=${COMPANY_ID}`,
@@ -257,6 +282,9 @@ test("Phase 4.3 API materializes declaration runs with ledger comparison and rep
       }
     );
     assert.equal(fetchedDeclaration.vatDeclarationRunId, declarationRun.vatDeclarationRunId);
+    assert.deepEqual(fetchedDeclaration.rulepackRefs, declarationRun.rulepackRefs);
+    assert.deepEqual(fetchedDeclaration.providerBaselineRefs, declarationRun.providerBaselineRefs);
+    assert.deepEqual(fetchedDeclaration.decisionSnapshotRefs, declarationRun.decisionSnapshotRefs);
 
     const periodicRun = await requestJson(`${baseUrl}/v1/vat/periodic-statements`, {
       method: "POST",
@@ -269,6 +297,15 @@ test("Phase 4.3 API materializes declaration runs with ledger comparison and rep
       }
     });
     assert.equal(periodicRun.lineCount, 2);
+    assert.deepEqual(
+      periodicRun.rulepackRefs.map((entry) => `${entry.rulepackCode}:${entry.rulepackVersion}`),
+      ["SE-VAT-CORE:2026.3"]
+    );
+    assert.deepEqual(
+      periodicRun.providerBaselineRefs.map((entry) => entry.baselineCode),
+      ["SE-SKATTEVERKET-VAT-API"]
+    );
+    assert.equal(periodicRun.decisionSnapshotRefs.length, 2);
     assert.deepEqual(
       periodicRun.lines.map((line) => ({
         customerCountry: line.customerCountry,
@@ -306,6 +343,9 @@ test("Phase 4.3 API materializes declaration runs with ledger comparison and rep
     });
     assert.deepEqual(periodicRunReplay.lines, periodicRun.lines);
     assert.equal(periodicRunReplay.sourceSnapshotHash, periodicRun.sourceSnapshotHash);
+    assert.deepEqual(periodicRunReplay.rulepackRefs, periodicRun.rulepackRefs);
+    assert.deepEqual(periodicRunReplay.providerBaselineRefs, periodicRun.providerBaselineRefs);
+    assert.deepEqual(periodicRunReplay.decisionSnapshotRefs, periodicRun.decisionSnapshotRefs);
 
     const fetchedPeriodicRun = await requestJson(
       `${baseUrl}/v1/vat/periodic-statements/${periodicRun.vatPeriodicStatementRunId}?companyId=${COMPANY_ID}`,
@@ -314,6 +354,9 @@ test("Phase 4.3 API materializes declaration runs with ledger comparison and rep
       }
     );
     assert.equal(fetchedPeriodicRun.vatPeriodicStatementRunId, periodicRun.vatPeriodicStatementRunId);
+    assert.deepEqual(fetchedPeriodicRun.rulepackRefs, periodicRun.rulepackRefs);
+    assert.deepEqual(fetchedPeriodicRun.providerBaselineRefs, periodicRun.providerBaselineRefs);
+    assert.deepEqual(fetchedPeriodicRun.decisionSnapshotRefs, periodicRun.decisionSnapshotRefs);
   } finally {
     await stopServer(server);
   }

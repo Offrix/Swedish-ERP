@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
-import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
+import { createProviderBaselineRegistry, createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
   normalizeOptionalIsoDate as normalizeOptionalIsoDateKernel,
@@ -101,6 +101,24 @@ const DOMESTIC_PURCHASE_CANDIDATE_ALIASES = Object.freeze({
   VAT_SE_DOMESTIC_PURCHASE_0: ["VAT_SE_EXEMPT", "VAT_SE_DOMESTIC_PURCHASE_0"]
 });
 const VAT_RULE_PACK_CODE = "SE-VAT-CORE";
+const VAT_PROVIDER_CODE = "skatteverket_vat";
+const VAT_PROVIDER_BASELINE_CODE = "SE-SKATTEVERKET-VAT-API";
+const SEEDED_PROVIDER_BASELINES = Object.freeze([
+  Object.freeze({
+    providerBaselineId: "skatteverket-vat-api-se-2026.1",
+    baselineCode: VAT_PROVIDER_BASELINE_CODE,
+    providerCode: VAT_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "authority_transport_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "skatteverket-vat-api-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Skatteverket VAT transport baseline for official dispatch and XML fallback governance."
+  })
+]);
 
 const VAT_CODE_DEFINITIONS = Object.freeze([
   createVatCodeDefinition("VAT_SE_DOMESTIC_25", "Domestic 25 %", 25, ["05", "10"], "vat_se_domestic_25"),
@@ -264,12 +282,15 @@ export function createVatEngine({
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
-  ledgerPlatform = null
+  ledgerPlatform = null,
+  providerBaselineRegistry = null
 } = {}) {
   const ruleRegistry = createRulePackRegistry({
     clock,
     seedRulePacks: SEEDED_RULE_PACKS
   });
+  const providerBaselines =
+    providerBaselineRegistry || createProviderBaselineRegistry({ clock, seedProviderBaselines: SEEDED_PROVIDER_BASELINES });
   const ledger = ledgerPlatform || null;
   const state = {
     vatCodes: new Map(),
@@ -444,6 +465,7 @@ export function createVatEngine({
       sourceSnapshotDate: rulePack.sourceSnapshotDate,
       inputsHash: classification.decision.inputsHash,
       effectiveDate: classification.decision.effectiveDate,
+      rulepackRef: buildVatRulepackRef(rulePack, classification.decision.effectiveDate),
       transactionLine: copy(normalizedLine),
       status: classification.decision.needsManualReview ? "review_required" : "decided",
       declarationBoxCodes: classification.outputs.declarationBoxCodes,
@@ -626,6 +648,7 @@ export function createVatEngine({
     return materializeVatDeclarationBasis({
       state,
       ledger,
+      providerBaselineRegistry: providerBaselines,
       companyId: resolvedCompanyId,
       fromDate: resolvedFromDate,
       toDate: resolvedToDate
@@ -676,6 +699,7 @@ export function createVatEngine({
     const basis = buildVatDeclarationBasis({
       state,
       ledger,
+      providerBaselineRegistry: providerBaselines,
       companyId: resolvedCompanyId,
       fromDate: resolvedFromDate,
       toDate: resolvedToDate
@@ -774,6 +798,7 @@ export function createVatEngine({
     const basis = buildVatDeclarationBasis({
       state,
       ledger,
+      providerBaselineRegistry: providerBaselines,
       companyId: resolvedCompanyId,
       fromDate: resolvedFromDate,
       toDate: resolvedToDate
@@ -819,7 +844,10 @@ export function createVatEngine({
       signer: requireText(signer || actorId, "signer_required"),
       submittedAt: nowIso(),
       sourceSnapshotHash: basis.sourceSnapshotHash,
-      periodLockId: basis.activePeriodLock?.vatPeriodLockId || null
+      periodLockId: basis.activePeriodLock?.vatPeriodLockId || null,
+      rulepackRefs: copy(basis.rulepackRefs || []),
+      providerBaselineRefs: copy(basis.providerBaselineRefs || []),
+      decisionSnapshotRefs: copy(basis.decisionSnapshotRefs || [])
     };
     state.vatDeclarationRuns.set(run.vatDeclarationRunId, run);
     ensureCollection(state.vatDeclarationRunIdsByCompany, resolvedCompanyId).push(run.vatDeclarationRunId);
@@ -860,6 +888,7 @@ export function createVatEngine({
     const basis = buildVatDeclarationBasis({
       state,
       ledger,
+      providerBaselineRegistry: providerBaselines,
       companyId: resolvedCompanyId,
       fromDate: resolvedFromDate,
       toDate: resolvedToDate
@@ -884,6 +913,16 @@ export function createVatEngine({
           vatPeriodicStatementRunId: previousSubmissionId
         })
       : null;
+    const providerBaselineRefs =
+      previousRun?.providerBaselineRefs?.length > 0
+        ? copy(previousRun.providerBaselineRefs)
+        : resolveVatProviderBaselineRefs({
+            providerBaselineRegistry: providerBaselines,
+            effectiveDate: resolvedToDate,
+            companyId: resolvedCompanyId,
+            sourceObjectType: "vat_periodic_statement_run",
+            sourceObjectId: null
+          });
     const run = {
       vatPeriodicStatementRunId: crypto.randomUUID(),
       companyId: resolvedCompanyId,
@@ -895,7 +934,10 @@ export function createVatEngine({
       correctionReason,
       sourceSnapshotHash: basis.sourceSnapshotHash,
       generatedAt: nowIso(),
-      generatedByActorId: actorId
+      generatedByActorId: actorId,
+      rulepackRefs: collectVatRulepackRefs(decisions),
+      providerBaselineRefs,
+      decisionSnapshotRefs: collectVatDecisionSnapshotRefs(decisions)
     };
     state.vatPeriodicStatementRuns.set(run.vatPeriodicStatementRunId, run);
     ensureCollection(state.vatPeriodicStatementRunIdsByCompany, resolvedCompanyId).push(run.vatPeriodicStatementRunId);
@@ -2001,7 +2043,7 @@ function collectOpenVatReviewQueueItemsForPeriod({ state, companyId, decisions }
     .map(copy);
 }
 
-function buildVatDeclarationBasis({ state, ledger, companyId, fromDate, toDate }) {
+function buildVatDeclarationBasis({ state, ledger, providerBaselineRegistry = null, companyId, fromDate, toDate }) {
   const periodDecisions = collectVatDecisionsForPeriod({ state, companyId, fromDate, toDate });
   const decidedDecisions = periodDecisions.filter((decision) => decision.status === "decided");
   const regularDecisions = decidedDecisions.filter((decision) => decision.outputs.reportingChannel === "regular_vat_return");
@@ -2035,6 +2077,13 @@ function buildVatDeclarationBasis({ state, ledger, companyId, fromDate, toDate }
     fromDate,
     toDate
   });
+  const providerBaselineRefs = resolveVatProviderBaselineRefs({
+    providerBaselineRegistry,
+    effectiveDate: toDate,
+    companyId,
+    sourceObjectType: "vat_declaration_basis",
+    sourceObjectId: `${companyId}:${fromDate}:${toDate}`
+  });
 
   return {
     companyId,
@@ -2057,6 +2106,9 @@ function buildVatDeclarationBasis({ state, ledger, companyId, fromDate, toDate }
     readyForLock: blockerCodes.length === 0,
     readyForDeclaration: blockerCodes.length === 0,
     activePeriodLock: activePeriodLock ? copy(activePeriodLock) : null,
+    rulepackRefs: collectVatRulepackRefs(periodDecisions),
+    providerBaselineRefs,
+    decisionSnapshotRefs: collectVatDecisionSnapshotRefs(decidedDecisions),
     sourceSnapshotHash: hashObject({
       companyId,
       fromDate,
@@ -2066,16 +2118,18 @@ function buildVatDeclarationBasis({ state, ledger, companyId, fromDate, toDate }
         status: decision.status,
         vatCode: decision.vatCode,
         effectiveDate: decision.effectiveDate,
-        inputsHash: decision.inputsHash
+        inputsHash: decision.inputsHash,
+        rulepackRef: toVatRulepackRef(decision)
       })),
       openReviewQueueItemIds: openReviewQueueItems.map((item) => item.vatReviewQueueItemId),
-      lockId: activePeriodLock?.vatPeriodLockId || null
+      lockId: activePeriodLock?.vatPeriodLockId || null,
+      providerBaselineRefs
     })
   };
 }
 
-function materializeVatDeclarationBasis({ state, ledger, companyId, fromDate, toDate }) {
-  const basis = buildVatDeclarationBasis({ state, ledger, companyId, fromDate, toDate });
+function materializeVatDeclarationBasis({ state, ledger, providerBaselineRegistry = null, companyId, fromDate, toDate }) {
+  const basis = buildVatDeclarationBasis({ state, ledger, providerBaselineRegistry, companyId, fromDate, toDate });
   return copy(basis);
 }
 
@@ -2200,6 +2254,154 @@ function normalizeGoodsOrServices(value) {
 
 function normalizeCountry(value) {
   return normalizeOptionalVatCountryCodeKernel(value, "vat_country_invalid", { errorFactory: createError });
+}
+
+function buildVatRulepackRef(rulePack, effectiveDate) {
+  if (!rulePack?.rulePackId || !rulePack?.rulePackCode || !rulePack?.version) {
+    return null;
+  }
+  return {
+    rulepackId: rulePack.rulePackId,
+    rulepackCode: rulePack.rulePackCode,
+    rulepackVersion: rulePack.version,
+    rulepackChecksum: rulePack.rulePackId,
+    effectiveDate: normalizeDate(effectiveDate || rulePack.effectiveFrom || new Date().toISOString().slice(0, 10), "vat_rulepack_ref_effective_date_invalid"),
+    sourceSnapshotDate: rulePack.sourceSnapshotDate || null
+  };
+}
+
+function toVatRulepackRef(decision) {
+  if (!decision || typeof decision !== "object") {
+    return null;
+  }
+  if (decision.rulepackRef && typeof decision.rulepackRef === "object") {
+    return copy(decision.rulepackRef);
+  }
+  if (!decision.rulePackId || !decision.rulePackVersion) {
+    return null;
+  }
+  return {
+    rulepackId: decision.rulePackId,
+    rulepackCode: VAT_RULE_PACK_CODE,
+    rulepackVersion: decision.rulePackVersion,
+    rulepackChecksum: decision.rulePackId,
+    effectiveDate: decision.effectiveDate || null,
+    sourceSnapshotDate: decision.sourceSnapshotDate || null
+  };
+}
+
+function collectVatRulepackRefs(decisions = []) {
+  return dedupeVatRulepackRefs(decisions.map((decision) => toVatRulepackRef(decision)).filter(Boolean));
+}
+
+function collectVatDecisionSnapshotRefs(decisions = []) {
+  return dedupeVatDecisionSnapshotRefs(decisions.map((decision) => buildVatDecisionSnapshotRef(decision)).filter(Boolean));
+}
+
+function buildVatDecisionSnapshotRef(decision) {
+  if (!decision?.vatDecisionId) {
+    return null;
+  }
+  const rulepackRef = toVatRulepackRef(decision);
+  return {
+    decisionSnapshotId: decision.vatDecisionId,
+    snapshotTypeCode: "vat_decision",
+    sourceDomain: "vat",
+    sourceObjectId: decision.vatDecisionId,
+    sourceObjectVersion: decision.inputsHash || null,
+    decisionHash: hashObject({
+      vatDecisionId: decision.vatDecisionId,
+      status: decision.status,
+      vatCode: decision.vatCode,
+      effectiveDate: decision.effectiveDate,
+      declarationBoxAmounts: decision.declarationBoxAmounts || [],
+      inputsHash: decision.inputsHash
+    }),
+    rulepackId: rulepackRef?.rulepackId || null,
+    rulepackCode: rulepackRef?.rulepackCode || null,
+    rulepackVersion: rulepackRef?.rulepackVersion || null,
+    rulepackChecksum: rulepackRef?.rulepackChecksum || null,
+    effectiveDate: decision.effectiveDate || null
+  };
+}
+
+function resolveVatProviderBaselineRefs({ providerBaselineRegistry, effectiveDate, companyId = null, sourceObjectType, sourceObjectId = null } = {}) {
+  if (
+    !providerBaselineRegistry
+    || typeof providerBaselineRegistry.resolveProviderBaseline !== "function"
+    || typeof providerBaselineRegistry.buildProviderBaselineRef !== "function"
+  ) {
+    return [];
+  }
+  const providerBaseline = providerBaselineRegistry.resolveProviderBaseline({
+    domain: "integrations",
+    jurisdiction: "SE",
+    providerCode: VAT_PROVIDER_CODE,
+    baselineCode: VAT_PROVIDER_BASELINE_CODE,
+    effectiveDate
+  });
+  return dedupeProviderBaselineRefs([
+    providerBaselineRegistry.buildProviderBaselineRef({
+      effectiveDate,
+      providerBaseline,
+      metadata: {
+        sourceDomain: "vat",
+        companyId,
+        sourceObjectType: sourceObjectType || null,
+        sourceObjectId
+      }
+    })
+  ]);
+}
+
+function dedupeVatRulepackRefs(values = []) {
+  const refs = [];
+  const seen = new Set();
+  for (const candidate of values) {
+    if (!candidate?.rulepackCode || !candidate?.rulepackVersion) {
+      continue;
+    }
+    const key = `${candidate.rulepackCode}:${candidate.rulepackVersion}:${candidate.effectiveDate || ""}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    refs.push(copy(candidate));
+  }
+  return refs;
+}
+
+function dedupeProviderBaselineRefs(values = []) {
+  const refs = [];
+  const seen = new Set();
+  for (const candidate of values) {
+    if (!candidate?.providerBaselineId && !candidate?.baselineCode) {
+      continue;
+    }
+    const key = candidate.providerBaselineId || candidate.baselineCode;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    refs.push(copy(candidate));
+  }
+  return refs;
+}
+
+function dedupeVatDecisionSnapshotRefs(values = []) {
+  const refs = [];
+  const seen = new Set();
+  for (const candidate of values) {
+    if (!candidate?.decisionSnapshotId) {
+      continue;
+    }
+    if (seen.has(candidate.decisionSnapshotId)) {
+      continue;
+    }
+    seen.add(candidate.decisionSnapshotId);
+    refs.push(copy(candidate));
+  }
+  return refs;
 }
 
 function normalizeOptionalDate(value) {

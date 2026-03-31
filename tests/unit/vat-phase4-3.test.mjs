@@ -103,10 +103,34 @@ test("Phase 4.3 classifies B2C threshold-below, OSS and IOSS while keeping speci
     actorId: "user-1",
     signer: "vat-signer"
   });
+  const basis = vat.getVatDeclarationBasis({
+    companyId: COMPANY_ID,
+    fromDate: "2026-03-01",
+    toDate: "2026-03-31"
+  });
+  assert.deepEqual(
+    basis.rulepackRefs.map((entry) => `${entry.rulepackCode}:${entry.rulepackVersion}`),
+    ["SE-VAT-CORE:2026.3"]
+  );
+  assert.deepEqual(
+    basis.providerBaselineRefs.map((entry) => entry.baselineCode),
+    ["SE-SKATTEVERKET-VAT-API"]
+  );
+  assert.equal(basis.decisionSnapshotRefs.length, 3);
+  assert.equal(basis.decisionSnapshotRefs.every((entry) => entry.snapshotTypeCode === "vat_decision"), true);
   assert.deepEqual(declarationRun.declarationBoxSummary, [
     { boxCode: "05", amount: 1000, amountType: "taxable_base" },
     { boxCode: "10", amount: 250, amountType: "output_vat" }
   ]);
+  assert.deepEqual(
+    declarationRun.rulepackRefs.map((entry) => `${entry.rulepackCode}:${entry.rulepackVersion}`),
+    ["SE-VAT-CORE:2026.3"]
+  );
+  assert.deepEqual(
+    declarationRun.providerBaselineRefs.map((entry) => entry.baselineCode),
+    ["SE-SKATTEVERKET-VAT-API"]
+  );
+  assert.equal(declarationRun.decisionSnapshotRefs.length, 3);
   assert.deepEqual(declarationRun.ossSummary, [
     {
       scheme: "oss",
@@ -205,6 +229,15 @@ test("Phase 4.3 builds reproducible periodic statements and separates goods from
   });
 
   assert.equal(firstRun.lineCount, 2);
+  assert.deepEqual(
+    firstRun.rulepackRefs.map((entry) => `${entry.rulepackCode}:${entry.rulepackVersion}`),
+    ["SE-VAT-CORE:2026.3"]
+  );
+  assert.deepEqual(
+    firstRun.providerBaselineRefs.map((entry) => entry.baselineCode),
+    ["SE-SKATTEVERKET-VAT-API"]
+  );
+  assert.equal(firstRun.decisionSnapshotRefs.length, 3);
   assert.deepEqual(firstRun.lines, [
     {
       customerCountry: "DE",
@@ -229,6 +262,9 @@ test("Phase 4.3 builds reproducible periodic statements and separates goods from
   assert.deepEqual(secondRun.lines, firstRun.lines);
   assert.equal(secondRun.sourceSnapshotHash, firstRun.sourceSnapshotHash);
   assert.equal(secondRun.previousSubmissionId, firstRun.vatPeriodicStatementRunId);
+  assert.deepEqual(secondRun.rulepackRefs, firstRun.rulepackRefs);
+  assert.deepEqual(secondRun.providerBaselineRefs, firstRun.providerBaselineRefs);
+  assert.deepEqual(secondRun.decisionSnapshotRefs, firstRun.decisionSnapshotRefs);
 });
 
 test("Phase 4.3 declaration corrections diff changed boxes and can reconcile against ledger evidence", () => {

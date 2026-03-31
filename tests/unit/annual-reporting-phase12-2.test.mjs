@@ -1,13 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
-import { createIntegrationPlatform } from "../../packages/domain-integrations/src/index.mjs";
+import { createIntegrationPlatform, INTEGRATION_PROVIDER_BASELINES } from "../../packages/domain-integrations/src/index.mjs";
 import { DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { createProviderBaselineRegistry } from "../../packages/rule-engine/src/index.mjs";
 import { PAYROLL_PROVIDER_BASELINES } from "../../packages/domain-payroll/src/index.mjs";
 
 const FIXED_NOW = new Date("2026-03-22T16:30:00Z");
 const COMPANY_ID = DEMO_IDS.companyId;
+const VAT_PROVIDER_BASELINE_ONLY = INTEGRATION_PROVIDER_BASELINES.filter(
+  (entry) => entry.baselineCode === "SE-SKATTEVERKET-VAT-API"
+);
 
 test("Phase 12.2 builds tax declaration underlag and authority overviews from locked annual-report evidence", () => {
   const platform = createApiPlatform({
@@ -176,7 +179,7 @@ test("Phase 5.4 annual reporting fails fast when provider baseline pinning is un
     clock: () => FIXED_NOW,
     providerBaselineRegistry: createProviderBaselineRegistry({
       clock: () => FIXED_NOW,
-      seedProviderBaselines: PAYROLL_PROVIDER_BASELINES
+      seedProviderBaselines: [...PAYROLL_PROVIDER_BASELINES, ...VAT_PROVIDER_BASELINE_ONLY]
     })
   });
 
