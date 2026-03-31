@@ -1300,6 +1300,7 @@ function buildSruRows(balanceSheet, incomeStatement, specialPayrollTax) {
 
 function createJsonExportArtifact(exportCode, fileName, payload, checks = [], providerBaselineRef = null) {
   const finalizedChecks = checks.map(finalizeCheck);
+  const pinnedProviderBaselineRef = requirePinnedAnnualProviderBaselineRef(providerBaselineRef, exportCode);
   return {
     exportCode,
     fileName,
@@ -1308,11 +1309,11 @@ function createJsonExportArtifact(exportCode, fileName, payload, checks = [], pr
     contentHash: hashPayload({ fileName, payload }),
     payload,
     content: JSON.stringify(payload, null, 2),
-    providerBaselineId: providerBaselineRef?.providerBaselineId || null,
-    providerBaselineCode: providerBaselineRef?.baselineCode || null,
-    providerBaselineVersion: providerBaselineRef?.providerBaselineVersion || null,
-    providerBaselineChecksum: providerBaselineRef?.providerBaselineChecksum || null,
-    providerBaselineRef: providerBaselineRef ? clone(providerBaselineRef) : null,
+    providerBaselineId: pinnedProviderBaselineRef.providerBaselineId,
+    providerBaselineCode: pinnedProviderBaselineRef.baselineCode,
+    providerBaselineVersion: pinnedProviderBaselineRef.providerBaselineVersion,
+    providerBaselineChecksum: pinnedProviderBaselineRef.providerBaselineChecksum,
+    providerBaselineRef: clone(pinnedProviderBaselineRef),
     checks: finalizedChecks,
     allChecksPassed: finalizedChecks.every((check) => check.passed)
   };
@@ -1320,6 +1321,7 @@ function createJsonExportArtifact(exportCode, fileName, payload, checks = [], pr
 
 function createTextExportArtifact(exportCode, fileName, payloadText, checks = [], providerBaselineRef = null) {
   const finalizedChecks = checks.map(finalizeCheck);
+  const pinnedProviderBaselineRef = requirePinnedAnnualProviderBaselineRef(providerBaselineRef, exportCode);
   return {
     exportCode,
     fileName,
@@ -1328,11 +1330,11 @@ function createTextExportArtifact(exportCode, fileName, payloadText, checks = []
     contentHash: hashPayload({ fileName, payloadText }),
     payloadText,
     content: payloadText,
-    providerBaselineId: providerBaselineRef?.providerBaselineId || null,
-    providerBaselineCode: providerBaselineRef?.baselineCode || null,
-    providerBaselineVersion: providerBaselineRef?.providerBaselineVersion || null,
-    providerBaselineChecksum: providerBaselineRef?.providerBaselineChecksum || null,
-    providerBaselineRef: providerBaselineRef ? clone(providerBaselineRef) : null,
+    providerBaselineId: pinnedProviderBaselineRef.providerBaselineId,
+    providerBaselineCode: pinnedProviderBaselineRef.baselineCode,
+    providerBaselineVersion: pinnedProviderBaselineRef.providerBaselineVersion,
+    providerBaselineChecksum: pinnedProviderBaselineRef.providerBaselineChecksum,
+    providerBaselineRef: clone(pinnedProviderBaselineRef),
     checks: finalizedChecks,
     allChecksPassed: finalizedChecks.every((check) => check.passed)
   };
@@ -1380,19 +1382,24 @@ function dedupeAnnualRulepackRefs(values = []) {
 }
 
 function buildAnnualRulepackRefs(annualContext) {
+  const legalFormRulepackRef = requirePinnedAnnualRulepackRef(annualContext.legalFormRulepackRef, "annual_reporting_legal_form_rulepack_ref_required");
+  const reportingObligationRulepackRef = requirePinnedAnnualRulepackRef(
+    annualContext.reportingObligationRulepackRef,
+    "annual_reporting_filing_rulepack_ref_required"
+  );
   return dedupeAnnualRulepackRefs([
     {
-      rulepackId: annualContext.rulepackId || null,
-      rulepackCode: "RP-LEGAL-FORM-SE",
-      rulepackVersion: annualContext.rulepackVersion,
-      rulepackChecksum: annualContext.rulepackChecksum || null,
+      rulepackId: legalFormRulepackRef.rulepackId,
+      rulepackCode: legalFormRulepackRef.rulepackCode,
+      rulepackVersion: legalFormRulepackRef.rulepackVersion,
+      rulepackChecksum: legalFormRulepackRef.rulepackChecksum,
       effectiveDate: annualContext.fiscalYearEndsOn || null
     },
     {
-      rulepackId: annualContext.rulepackId || null,
-      rulepackCode: "RP-ANNUAL-FILING-SE",
-      rulepackVersion: annualContext.rulepackVersion,
-      rulepackChecksum: annualContext.rulepackChecksum || null,
+      rulepackId: reportingObligationRulepackRef.rulepackId,
+      rulepackCode: reportingObligationRulepackRef.rulepackCode,
+      rulepackVersion: reportingObligationRulepackRef.rulepackVersion,
+      rulepackChecksum: reportingObligationRulepackRef.rulepackChecksum,
       effectiveDate: annualContext.fiscalYearEndsOn || null
     }
   ]);
@@ -1614,10 +1621,50 @@ function resolveAnnualContext({ fiscalYearPlatform, legalFormPlatform, companyId
     requiresAnnualReport: reportingObligationProfile.requiresAnnualReport === true,
     requiresBolagsverketFiling: reportingObligationProfile.requiresBolagsverketFiling === true,
     requiresTaxDeclarationPackage: reportingObligationProfile.requiresTaxDeclarationPackage !== false,
-    rulepackId: reportingObligationProfile.rulepackId || legalFormProfile.rulepackId || null,
-    rulepackCode: reportingObligationProfile.rulepackCode || legalFormProfile.rulepackCode || null,
-    rulepackChecksum: reportingObligationProfile.rulepackChecksum || legalFormProfile.rulepackChecksum || null,
-    rulepackVersion: reportingObligationProfile.rulepackVersion || legalFormProfile.rulepackVersion || "unknown"
+    legalFormRulepackRef: {
+      rulepackId: text(legalFormProfile.rulepackId, "annual_reporting_legal_form_rulepack_id_required"),
+      rulepackCode: text(legalFormProfile.rulepackCode, "annual_reporting_legal_form_rulepack_code_required"),
+      rulepackVersion: text(legalFormProfile.rulepackVersion, "annual_reporting_legal_form_rulepack_version_required"),
+      rulepackChecksum: text(legalFormProfile.rulepackChecksum, "annual_reporting_legal_form_rulepack_checksum_required")
+    },
+    reportingObligationRulepackRef: {
+      rulepackId: text(reportingObligationProfile.rulepackId, "annual_reporting_filing_rulepack_id_required"),
+      rulepackCode: text(reportingObligationProfile.rulepackCode, "annual_reporting_filing_rulepack_code_required"),
+      rulepackVersion: text(reportingObligationProfile.rulepackVersion, "annual_reporting_filing_rulepack_version_required"),
+      rulepackChecksum: text(reportingObligationProfile.rulepackChecksum, "annual_reporting_filing_rulepack_checksum_required")
+    }
+  };
+}
+
+function requirePinnedAnnualProviderBaselineRef(providerBaselineRef, exportCode) {
+  if (!providerBaselineRef?.providerBaselineId) {
+    throw error(
+      409,
+      "annual_reporting_provider_baseline_ref_required",
+      `Annual reporting export ${exportCode} requires a pinned provider baseline ref.`
+    );
+  }
+  return {
+    providerBaselineId: text(providerBaselineRef.providerBaselineId, "annual_reporting_provider_baseline_id_required"),
+    baselineCode: text(providerBaselineRef.baselineCode, "annual_reporting_provider_baseline_code_required"),
+    providerCode: text(providerBaselineRef.providerCode, "annual_reporting_provider_code_required"),
+    providerBaselineVersion: text(
+      providerBaselineRef.providerBaselineVersion,
+      "annual_reporting_provider_baseline_version_required"
+    ),
+    providerBaselineChecksum: text(
+      providerBaselineRef.providerBaselineChecksum,
+      "annual_reporting_provider_baseline_checksum_required"
+    )
+  };
+}
+
+function requirePinnedAnnualRulepackRef(rulepackRef, code) {
+  return {
+    rulepackId: text(rulepackRef?.rulepackId, code),
+    rulepackCode: text(rulepackRef?.rulepackCode, `${code}_code`),
+    rulepackVersion: text(rulepackRef?.rulepackVersion, `${code}_version`),
+    rulepackChecksum: text(rulepackRef?.rulepackChecksum, `${code}_checksum`)
   };
 }
 

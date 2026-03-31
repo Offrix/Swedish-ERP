@@ -80,6 +80,8 @@ test("Phase 3.3 banking durable export stores bank identifiers and payment expor
     actorId: "unit-test"
   });
 
+  assert.equal(proposal.providerBaselineId, "bankgiro-file-format-se-2026.1");
+  assert.equal(proposal.paymentBatch.providerBaselineId, "bankgiro-file-format-se-2026.1");
   assert.equal(exported.paymentBatch.providerBaselineCode, "SE-BANKGIRO-FILE-CSV");
   assert.match(exported.paymentBatch.exportPayload, /payee;account;amount;currency;due_date;reference/);
   assert.match(exported.paymentBatch.exportPayload, /9876543210/);

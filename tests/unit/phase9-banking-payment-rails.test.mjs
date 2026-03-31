@@ -23,6 +23,7 @@ test("Phase 9.4/9.6 builds first-class payment rails while gating statement post
 
   assert.equal(proposal.paymentBatch.paymentRailCode, "open_banking");
   assert.equal(proposal.paymentBatch.providerCode, "enable_banking");
+  assert.equal(proposal.paymentBatch.providerBaselineId, "open-banking-core-se-2026.1");
   assert.equal(proposal.paymentBatch.providerBaselineCode, "SE-OPEN-BANKING-CORE");
 
   const exported = platform.exportPaymentProposal({
@@ -65,6 +66,7 @@ test("Phase 9.4/9.6 builds first-class payment rails while gating statement post
 
   assert.equal(imported.statementImport.status, "reconciliation_required");
   assert.equal(imported.statementImport.providerCode, "enable_banking");
+  assert.equal(imported.statementImport.providerBaselineId, "open-banking-core-se-2026.1");
   assert.equal(imported.statementImport.providerBaselineCode, "SE-OPEN-BANKING-CORE");
   assert.equal(imported.statementImport.matchedPaymentOrderCount, 1);
   assert.equal(imported.statementImport.reconciliationRequiredCount, 1);
@@ -137,6 +139,7 @@ test("Phase 9.4 exports ISO20022 rail batches with explicit ISO20022 baseline", 
 
   assert.equal(exported.paymentBatch.paymentRailCode, "iso20022_file");
   assert.equal(exported.paymentBatch.providerCode, "bank_file_channel");
+  assert.equal(exported.paymentBatch.providerBaselineId, "bank-file-format-se-2026.1");
   assert.equal(exported.paymentBatch.providerBaselineCode, "SE-ISO20022-BANK-FILE");
   assert.equal(exported.paymentBatch.paymentFileFormatCode, "pain.001");
   assert.match(exported.paymentBatch.exportFileName, /\.xml$/);

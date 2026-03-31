@@ -135,6 +135,7 @@ test("Phase 9.4/9.6 API exposes payment rails while requiring explicit approval 
     const paymentOrderId = accepted.orders[0].paymentOrderId;
 
     assert.equal(approved.paymentBatch.paymentRailCode, "open_banking");
+    assert.equal(approved.paymentBatch.providerBaselineId, "open-banking-core-se-2026.1");
     assert.equal(exported.paymentBatch.providerBaselineCode, "SE-OPEN-BANKING-CORE");
 
     const imported = await requestJson(baseUrl, "/v1/banking/statement-events/import", {
@@ -168,6 +169,7 @@ test("Phase 9.4/9.6 API exposes payment rails while requiring explicit approval 
     });
 
     assert.equal(imported.statementImport.providerCode, "enable_banking");
+    assert.equal(imported.statementImport.providerBaselineId, "open-banking-core-se-2026.1");
     assert.equal(imported.statementImport.status, "reconciliation_required");
     assert.equal(imported.statementImport.matchedPaymentOrderCount, 1);
     assert.equal(imported.statementImport.matchedTaxAccountCount, 1);
@@ -184,6 +186,7 @@ test("Phase 9.4/9.6 API exposes payment rails while requiring explicit approval 
       `/v1/banking/payment-batches/${approved.paymentBatch.paymentBatchId}?companyId=${COMPANY_ID}`,
       { token: sessionToken }
     );
+    assert.equal(fetchedBatch.providerBaselineId, "open-banking-core-se-2026.1");
     assert.equal(fetchedBatch.providerBaselineCode, "SE-OPEN-BANKING-CORE");
 
     const statementImports = await requestJson(baseUrl, `/v1/banking/statement-imports?companyId=${COMPANY_ID}`, {
@@ -197,6 +200,7 @@ test("Phase 9.4/9.6 API exposes payment rails while requiring explicit approval 
       `/v1/banking/statement-imports/${imported.statementImport.statementImportId}?companyId=${COMPANY_ID}`,
       { token: sessionToken }
     );
+    assert.equal(fetchedImport.providerBaselineId, "open-banking-core-se-2026.1");
     assert.equal(fetchedImport.items.length, 2);
 
     const reconciliationCases = await requestJson(baseUrl, `/v1/banking/reconciliation-cases?companyId=${COMPANY_ID}&status=open`, {
@@ -360,6 +364,7 @@ test("Phase 9.4 API exports ISO20022 rail batches with explicit ISO20022 baselin
 
     assert.equal(exported.paymentBatch.paymentRailCode, "iso20022_file");
     assert.equal(exported.paymentBatch.providerCode, "bank_file_channel");
+    assert.equal(exported.paymentBatch.providerBaselineId, "bank-file-format-se-2026.1");
     assert.equal(exported.paymentBatch.providerBaselineCode, "SE-ISO20022-BANK-FILE");
     assert.equal(exported.paymentBatch.paymentFileFormatCode, "pain.001");
     assert.match(exported.paymentBatch.exportFileName, /\.xml$/);

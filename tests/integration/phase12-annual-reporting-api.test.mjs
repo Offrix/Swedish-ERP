@@ -70,6 +70,14 @@ test("Phase 12.1 API creates annual report package, signs it and versions change
       }
     });
     assert.equal(annualPackage.currentVersion.versionNo, 1);
+    assert.deepEqual(
+      annualPackage.currentVersion.rulepackRefs.map((entry) => entry.rulepackId).sort(),
+      ["annual-filing-se-2026.1", "legal-form-se-2026.1"]
+    );
+    assert.deepEqual(
+      annualPackage.currentVersion.providerBaselineRefs.map((entry) => entry.providerBaselineId),
+      ["annual-ixbrl-se-2026.1"]
+    );
 
     const listed = await requestJson(`${baseUrl}/v1/annual-reporting/packages?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken

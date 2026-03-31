@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { createAuditEnvelopeFromLegacyEvent } from "../../events/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
+import { createProviderBaselineRegistry } from "../../rule-engine/src/index.mjs";
 import {
   applyDurableStateSnapshot,
   serializeDurableState
@@ -70,6 +71,51 @@ const STATEMENT_IMPORT_SOURCE_CONFIG_BY_CODE = Object.freeze({
   })
 });
 
+const BANKING_PROVIDER_BASELINES = Object.freeze([
+  Object.freeze({
+    providerBaselineId: "open-banking-core-se-2026.1",
+    baselineCode: "SE-OPEN-BANKING-CORE",
+    providerCode: "enable_banking",
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "open_banking_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "open-banking-core-se-2026.1",
+    sourceSnapshotDate: "2026-03-27",
+    semanticChangeSummary: "Open-banking adapter baseline for statement sync, payment export and tax-account sync."
+  }),
+  Object.freeze({
+    providerBaselineId: "bank-file-format-se-2026.1",
+    baselineCode: "SE-ISO20022-BANK-FILE",
+    providerCode: "bank_file_channel",
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "iso20022_bank_file",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "pain.001/camt.053/camt.054 family",
+    checksum: "bank-file-format-se-2026.1",
+    sourceSnapshotDate: "2026-03-27",
+    semanticChangeSummary: "ISO20022 bank-file baseline for pain.001 export plus camt.053/camt.054 import envelopes."
+  }),
+  Object.freeze({
+    providerBaselineId: "bankgiro-file-format-se-2026.1",
+    baselineCode: "SE-BANKGIRO-FILE-CSV",
+    providerCode: "bank_file_channel",
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "bankgiro_csv_v1",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "bankgiro_csv_v1",
+    checksum: "bankgiro-file-format-se-2026.1",
+    sourceSnapshotDate: "2026-03-30",
+    semanticChangeSummary: "Bankgiro file baseline for deterministic CSV export envelopes distinct from ISO20022 rails."
+  })
+]);
+
 export function createBankingPlatform(options = {}) {
   return createBankingEngine(options);
 }
@@ -91,6 +137,10 @@ export function createBankingEngine({
   secretSealKey = null
 } = {}) {
   const normalizedEnvironmentMode = normalizeRuntimeMode(environmentMode);
+  const localProviderBaselineRegistry = createProviderBaselineRegistry({
+    clock,
+    seedProviderBaselines: BANKING_PROVIDER_BASELINES
+  });
   const bankingSecretStore =
     secretStore ||
     createConfiguredSecretStore({
@@ -388,7 +438,8 @@ export function createBankingEngine({
       providerCode,
       effectiveDate: resolvedStatementDate,
       integrationsPlatform,
-      getIntegrationsPlatform
+      getIntegrationsPlatform,
+      localProviderBaselineRegistry
     });
     const statementImport = {
       statementImportId: crypto.randomUUID(),
@@ -1068,7 +1119,8 @@ export function createBankingEngine({
       providerCode,
       effectiveDate: resolvedPaymentDate,
       integrationsPlatform,
-      getIntegrationsPlatform
+      getIntegrationsPlatform,
+      localProviderBaselineRegistry
     });
     const uniqueOpenItemIds = [...new Set(apOpenItemIds.map((value) => requireText(value, "ap_open_item_id_required")))].sort();
     const sourceOpenItemSetHash = hashObject({
@@ -1916,7 +1968,8 @@ function resolvePaymentRailConfig({
   providerCode = null,
   effectiveDate,
   integrationsPlatform = null,
-  getIntegrationsPlatform = null
+  getIntegrationsPlatform = null,
+  localProviderBaselineRegistry = null
 } = {}) {
   const railTemplate = PAYMENT_RAIL_CONFIG_BY_CODE[assertAllowed(paymentRailCode, PAYMENT_RAIL_CODES, "payment_rail_code_invalid")];
   const resolvedPaymentFileFormatCode =
@@ -1924,18 +1977,27 @@ function resolvePaymentRailConfig({
       ? railTemplate.paymentFileFormatCode
       : assertAllowed(paymentFileFormatCode, PAYMENT_FILE_FORMAT_CODES, "payment_file_format_code_invalid");
   const resolvedProviderCode = normalizeOptionalText(providerCode) || railTemplate.providerCode;
+  const providerBaselineRef = resolveProviderBaselineRef({
+    providerCode: resolvedProviderCode,
+    baselineCode: railTemplate.baselineCode,
+    effectiveDate,
+    integrationsPlatform,
+    getIntegrationsPlatform,
+    localProviderBaselineRegistry
+  });
+  if (railTemplate.baselineCode && !providerBaselineRef?.providerBaselineId) {
+    throw createError(
+      409,
+      "payment_rail_provider_baseline_missing",
+      `Payment rail ${paymentRailCode} requires a pinned provider baseline ref.`
+    );
+  }
   return {
     paymentRailCode: railTemplate.paymentRailCode,
     paymentFileFormatCode: resolvedPaymentFileFormatCode,
     providerCode: resolvedProviderCode,
     deliveryMode: railTemplate.deliveryMode,
-    providerBaselineRef: resolveProviderBaselineRef({
-      providerCode: resolvedProviderCode,
-      baselineCode: railTemplate.baselineCode,
-      effectiveDate,
-      integrationsPlatform,
-      getIntegrationsPlatform
-    })
+    providerBaselineRef
   };
 }
 
@@ -1945,29 +2007,46 @@ function resolveStatementImportConfig({
   providerCode = null,
   effectiveDate,
   integrationsPlatform = null,
-  getIntegrationsPlatform = null
+  getIntegrationsPlatform = null,
+  localProviderBaselineRegistry = null
 } = {}) {
   const sourceTemplate =
     STATEMENT_IMPORT_SOURCE_CONFIG_BY_CODE[assertAllowed(sourceChannelCode, STATEMENT_IMPORT_SOURCE_CODES, "statement_import_source_invalid")];
   const resolvedProviderCode = normalizeOptionalText(providerCode) || sourceTemplate.providerCode;
+  const providerBaselineRef =
+    sourceTemplate.baselineCode && resolvedProviderCode
+      ? resolveProviderBaselineRef({
+          providerCode: resolvedProviderCode,
+          baselineCode: sourceTemplate.baselineCode,
+          effectiveDate,
+          integrationsPlatform,
+          getIntegrationsPlatform,
+          localProviderBaselineRegistry
+        })
+      : null;
+  if (sourceTemplate.baselineCode && !providerBaselineRef?.providerBaselineId) {
+    throw createError(
+      409,
+      "statement_import_provider_baseline_missing",
+      `Statement import source ${sourceChannelCode} requires a pinned provider baseline ref.`
+    );
+  }
   return {
     sourceChannelCode: sourceTemplate.sourceChannelCode,
     statementFileFormatCode: normalizeOptionalText(statementFileFormatCode) || sourceTemplate.fileFormatCode,
     providerCode: resolvedProviderCode,
-    providerBaselineRef:
-      sourceTemplate.baselineCode && resolvedProviderCode
-        ? resolveProviderBaselineRef({
-            providerCode: resolvedProviderCode,
-            baselineCode: sourceTemplate.baselineCode,
-            effectiveDate,
-            integrationsPlatform,
-            getIntegrationsPlatform
-          })
-        : null
+    providerBaselineRef
   };
 }
 
-function resolveProviderBaselineRef({ providerCode, baselineCode, effectiveDate, integrationsPlatform = null, getIntegrationsPlatform = null } = {}) {
+function resolveProviderBaselineRef({
+  providerCode,
+  baselineCode,
+  effectiveDate,
+  integrationsPlatform = null,
+  getIntegrationsPlatform = null,
+  localProviderBaselineRegistry = null
+} = {}) {
   if (!providerCode || !baselineCode) {
     return null;
   }
@@ -1975,21 +2054,34 @@ function resolveProviderBaselineRef({ providerCode, baselineCode, effectiveDate,
     platform: integrationsPlatform,
     getter: getIntegrationsPlatform
   });
-  if (!integrationPlatform || typeof integrationPlatform.resolveProviderBaseline !== "function") {
-    return {
-      providerBaselineId: null,
-      baselineCode,
+  const resolvedEffectiveDate = normalizeDate(effectiveDate || new Date().toISOString().slice(0, 10), "provider_baseline_effective_date_invalid");
+  if (integrationPlatform && typeof integrationPlatform.resolveProviderBaseline === "function") {
+    const providerBaseline = integrationPlatform.resolveProviderBaseline({
+      domain: "integrations",
+      jurisdiction: "SE",
       providerCode,
-      providerBaselineVersion: null,
-      providerBaselineChecksum: null
-    };
+      baselineCode,
+      effectiveDate: resolvedEffectiveDate
+    });
+    if (providerBaseline) {
+      return {
+        providerBaselineId: providerBaseline.providerBaselineId,
+        baselineCode: providerBaseline.baselineCode,
+        providerCode: providerBaseline.providerCode,
+        providerBaselineVersion: providerBaseline.version,
+        providerBaselineChecksum: providerBaseline.checksum
+      };
+    }
   }
-  const providerBaseline = integrationPlatform.resolveProviderBaseline({
+  if (!localProviderBaselineRegistry) {
+    return null;
+  }
+  const providerBaseline = localProviderBaselineRegistry.resolveProviderBaseline({
     domain: "integrations",
     jurisdiction: "SE",
     providerCode,
     baselineCode,
-    effectiveDate: normalizeDate(effectiveDate || new Date().toISOString().slice(0, 10), "provider_baseline_effective_date_invalid")
+    effectiveDate: resolvedEffectiveDate
   });
   if (!providerBaseline) {
     return null;

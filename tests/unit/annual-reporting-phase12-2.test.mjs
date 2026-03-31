@@ -57,6 +57,10 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
     ["RP-ANNUAL-FILING-SE", "RP-LEGAL-FORM-SE"]
   );
   assert.deepEqual(
+    annualPackage.currentVersion.rulepackRefs.map((entry) => entry.rulepackId).sort(),
+    ["annual-filing-se-2026.1", "legal-form-se-2026.1"]
+  );
+  assert.deepEqual(
     annualPackage.currentVersion.providerBaselineRefs.map((entry) => entry.baselineCode),
     ["SE-IXBRL-FILING"]
   );
@@ -141,6 +145,11 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
     taxPackage.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
     ["RP-ANNUAL-FILING-SE", "RP-LEGAL-FORM-SE"]
   );
+  assert.deepEqual(
+    taxPackage.rulepackRefs.map((entry) => entry.rulepackId).sort(),
+    ["annual-filing-se-2026.1", "legal-form-se-2026.1"]
+  );
+  assert.equal(taxPackage.exports.every((entry) => typeof entry.providerBaselineId === "string" && entry.providerBaselineId.length > 0), true);
   assert.equal(taxPackage.signatoryClassCode, "BOARD_OR_CEO");
   assert.equal(taxPackage.filingProfileCode, "AB_ANNUAL_REPORT_AND_INK2");
   assert.equal(taxPackage.annualReportVersionChecksum, signedAnnualPackage.currentVersion.checksum);
