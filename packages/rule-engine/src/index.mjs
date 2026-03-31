@@ -80,6 +80,7 @@ export function createRulePackRegistry({ clock = () => new Date(), seedRulePacks
   function validateRulePackVersion({ rulePackId, actorId = "system" } = {}) {
     const rulePack = requireRulePack(rulePackId);
     assertRulePackStatus(rulePack, ["draft"], "rule_pack_cannot_be_validated");
+    assertRulePackPublicationArtifacts(rulePack);
     rulePack.status = "validated";
     rulePack.validatedAt = nowIso();
     rulePack.updatedAt = rulePack.validatedAt;
@@ -103,6 +104,7 @@ export function createRulePackRegistry({ clock = () => new Date(), seedRulePacks
   function publishRulePackVersion({ rulePackId, actorId = "system", approvalRef = null } = {}) {
     const rulePack = requireRulePack(rulePackId);
     assertRulePackStatus(rulePack, ["approved", "published"], "rule_pack_cannot_be_published");
+    assertRulePackPublicationArtifacts(rulePack);
     if (rulePack.status !== "published") {
       assertNoPublishedOverlap(rulePack);
     }
@@ -398,6 +400,7 @@ export function createProviderBaselineRegistry({ clock = () => new Date(), seedP
   function validateProviderBaselineVersion({ providerBaselineId, actorId = "system" } = {}) {
     const providerBaseline = requireProviderBaseline(providerBaselineId);
     assertProviderBaselineStatus(providerBaseline, ["draft"], "provider_baseline_cannot_be_validated");
+    assertProviderBaselinePublicationArtifacts(providerBaseline);
     providerBaseline.status = "validated";
     providerBaseline.validatedAt = nowIso();
     providerBaseline.updatedAt = providerBaseline.validatedAt;
@@ -421,6 +424,7 @@ export function createProviderBaselineRegistry({ clock = () => new Date(), seedP
   function publishProviderBaselineVersion({ providerBaselineId, actorId = "system", approvalRef = null } = {}) {
     const providerBaseline = requireProviderBaseline(providerBaselineId);
     assertProviderBaselineStatus(providerBaseline, ["approved", "published"], "provider_baseline_cannot_be_published");
+    assertProviderBaselinePublicationArtifacts(providerBaseline);
     if (providerBaseline.status !== "published") {
       assertNoPublishedProviderBaselineOverlap(providerBaseline);
     }
@@ -1604,6 +1608,7 @@ function normalizeRulePack(rulePackInput, { defaultStatus, nowIso }) {
     : [String(rulePackInput.humanReadableExplanation || "")].filter(Boolean);
   const testVectors = Array.isArray(rulePackInput.testVectors) ? copy(rulePackInput.testVectors) : [];
   const migrationNotes = Array.isArray(rulePackInput.migrationNotes) ? copy(rulePackInput.migrationNotes) : [];
+  const sourceRefs = normalizeGovernanceSourceRefs(rulePackInput.sourceRefs, "rule_pack");
   const sourceSnapshotDate = normalizeDate(
     rulePackInput.sourceSnapshotDate || effectiveFrom,
     "rule_pack_source_snapshot_date_invalid"
@@ -1663,6 +1668,7 @@ function normalizeRulePack(rulePackInput, { defaultStatus, nowIso }) {
       rulePackInput.semanticChangeSummary || "Initial rule pack registration.",
       "rule_pack_semantic_change_summary_required"
     ),
+    sourceRefs,
     machineReadableRules,
     humanReadableExplanation,
     testVectors,
@@ -1703,6 +1709,7 @@ function normalizeProviderBaseline(providerBaselineInput, { defaultStatus, nowIs
     : [String(providerBaselineInput.humanReadableExplanation || "")].filter(Boolean);
   const testVectors = Array.isArray(providerBaselineInput.testVectors) ? copy(providerBaselineInput.testVectors) : [];
   const migrationNotes = Array.isArray(providerBaselineInput.migrationNotes) ? copy(providerBaselineInput.migrationNotes) : [];
+  const sourceRefs = normalizeGovernanceSourceRefs(providerBaselineInput.sourceRefs, "provider_baseline");
   const sourceSnapshotDate = normalizeDate(
     providerBaselineInput.sourceSnapshotDate || effectiveFrom,
     "provider_baseline_source_snapshot_date_invalid"
@@ -1767,6 +1774,7 @@ function normalizeProviderBaseline(providerBaselineInput, { defaultStatus, nowIs
       providerBaselineInput.semanticChangeSummary || "Initial provider baseline registration.",
       "provider_baseline_semantic_change_summary_required"
     ),
+    sourceRefs,
     machineReadableRules,
     humanReadableExplanation,
     testVectors,
@@ -1781,6 +1789,57 @@ function normalizeProviderBaseline(providerBaselineInput, { defaultStatus, nowIs
       "provider_baseline_emergency_disabled_at_invalid"
     )
   };
+}
+
+function assertRulePackPublicationArtifacts(rulePack) {
+  if (!Array.isArray(rulePack?.sourceRefs) || rulePack.sourceRefs.length === 0) {
+    throw createError(409, "rule_pack_source_refs_required", "Rule pack must carry official source refs before validation or publish.");
+  }
+  if (!hasGoldenVectorCoverage(rulePack)) {
+    throw createError(409, "rule_pack_golden_vectors_required", "Rule pack must carry golden test vectors before validation or publish.");
+  }
+}
+
+function assertProviderBaselinePublicationArtifacts(providerBaseline) {
+  if (!Array.isArray(providerBaseline?.sourceRefs) || providerBaseline.sourceRefs.length === 0) {
+    throw createError(
+      409,
+      "provider_baseline_source_refs_required",
+      "Provider baseline must carry official source refs before validation or publish."
+    );
+  }
+  if (!hasGoldenVectorCoverage(providerBaseline)) {
+    throw createError(
+      409,
+      "provider_baseline_golden_vectors_required",
+      "Provider baseline must carry golden test vectors before validation or publish."
+    );
+  }
+}
+
+function hasGoldenVectorCoverage(candidate) {
+  return (Array.isArray(candidate?.testVectors) && candidate.testVectors.length > 0) || Boolean(normalizeOptionalText(candidate?.testVectorSetId));
+}
+
+function normalizeGovernanceSourceRefs(values, entityCode) {
+  return (Array.isArray(values) ? values : [])
+    .map((value, index) => {
+      const sourceType = requireText(value?.sourceType || "official_source", `${entityCode}_source_ref_type_required`);
+      const url = requireText(value?.url || value?.officialSourceUrl || value?.sourceUrl, `${entityCode}_source_ref_url_required`);
+      const checksum = requireText(value?.checksum || value?.sourceChecksum, `${entityCode}_source_ref_checksum_required`);
+      return {
+        sourceRefId: normalizeOptionalText(value?.sourceRefId) || `${entityCode}:${index + 1}`,
+        sourceType,
+        url,
+        checksum,
+        retrievedAt: normalizeOptionalTimestamp(value?.retrievedAt || null, `${entityCode}_source_ref_retrieved_at_invalid`),
+        sourceSnapshotDate: normalizeOptionalText(value?.sourceSnapshotDate)
+          ? normalizeDate(value.sourceSnapshotDate, `${entityCode}_source_ref_snapshot_date_invalid`)
+          : null,
+        note: normalizeOptionalText(value?.note)
+      };
+    })
+    .sort((left, right) => left.url.localeCompare(right.url) || left.checksum.localeCompare(right.checksum));
 }
 
 function normalizeCandidatePostings(values, evidence) {

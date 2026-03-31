@@ -109,6 +109,7 @@ export async function tryHandlePhase14RuleGovernanceRoutes({ req, res, url, path
         regulatoryChangeEntryId: sourceSnapshotMatch.regulatoryChangeEntryId,
         actorId: body.actorId || principal.userId || "session_user",
         officialSourceUrl: body.officialSourceUrl,
+        officialSourceRefs: body.officialSourceRefs,
         retrievedAt: body.retrievedAt,
         sourceChecksum: body.sourceChecksum,
         sourceSnapshotDate: body.sourceSnapshotDate,

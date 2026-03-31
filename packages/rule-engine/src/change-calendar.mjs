@@ -164,17 +164,29 @@ export function createRegulatoryChangeCalendar({
     regulatoryChangeEntryId,
     actorId = "system",
     officialSourceUrl,
+    officialSourceRefs = [],
     retrievedAt,
     sourceChecksum,
     sourceSnapshotDate = null,
     note = null
   } = {}) {
     const entry = requireOwnedChangeEntry(companyId, regulatoryChangeEntryId);
+    const normalizedSourceRefs = normalizeOfficialSourceRefs({
+      officialSourceRefs,
+      officialSourceUrl,
+      retrievedAt,
+      sourceChecksum,
+      sourceSnapshotDate,
+      note,
+      nowIso: nowIso(clock),
+      nowDate: nowDate(clock)
+    });
     entry.sourceSnapshot = {
-      officialSourceUrl: requireText(officialSourceUrl, "regulatory_source_url_required"),
-      retrievedAt: normalizeOptionalText(retrievedAt) || nowIso(clock),
-      sourceChecksum: requireText(sourceChecksum, "regulatory_source_checksum_required"),
-      sourceSnapshotDate: normalizeOptionalText(sourceSnapshotDate) || nowDate(clock),
+      officialSourceUrl: normalizedSourceRefs[0].url,
+      officialSourceRefs: normalizedSourceRefs,
+      retrievedAt: normalizedSourceRefs[0].retrievedAt,
+      sourceChecksum: normalizedSourceRefs[0].checksum,
+      sourceSnapshotDate: normalizedSourceRefs[0].sourceSnapshotDate,
       note: normalizeOptionalText(note),
       actorId: requireText(actorId, "actor_id_required"),
       recordedAt: nowIso(clock)
@@ -222,11 +234,27 @@ export function createRegulatoryChangeCalendar({
     const entry = requireOwnedChangeEntry(companyId, regulatoryChangeEntryId);
     requireApprovedDiffReview(entry);
     const resolvedResult = requireEnum(REGULATORY_CHANGE_SANDBOX_RESULTS, verificationResult, "regulatory_sandbox_result_invalid");
+    const resolvedScenarioRefs = normalizeStringArray(scenarioRefs);
+    const resolvedOutputChecksum = normalizeOptionalText(outputChecksum);
+    if (resolvedResult === "passed" && resolvedScenarioRefs.length === 0) {
+      throw createError(
+        409,
+        "regulatory_change_golden_vectors_required",
+        "Passed sandbox verification must cite at least one golden vector or scenario reference."
+      );
+    }
+    if (resolvedResult === "passed" && !resolvedOutputChecksum) {
+      throw createError(
+        409,
+        "regulatory_change_output_checksum_required",
+        "Passed sandbox verification must record an output checksum."
+      );
+    }
     entry.sandboxVerification = {
       verificationResult: resolvedResult,
       verificationEnvironment: requireText(verificationEnvironment, "regulatory_sandbox_environment_required"),
-      scenarioRefs: normalizeStringArray(scenarioRefs),
-      outputChecksum: normalizeOptionalText(outputChecksum),
+      scenarioRefs: resolvedScenarioRefs,
+      outputChecksum: resolvedOutputChecksum,
       evidenceRef: normalizeOptionalText(evidenceRef),
       actorId: requireText(actorId, "actor_id_required"),
       verifiedAt: nowIso(clock)
@@ -535,6 +563,41 @@ function normalizeStringArray(values) {
   return [...new Set((Array.isArray(values) ? values : []).map((value) => normalizeOptionalText(value)).filter(Boolean))];
 }
 
+function normalizeOfficialSourceRefs({
+  officialSourceRefs = [],
+  officialSourceUrl,
+  retrievedAt,
+  sourceChecksum,
+  sourceSnapshotDate,
+  note,
+  nowIso,
+  nowDate
+} = {}) {
+  const normalized = (Array.isArray(officialSourceRefs) ? officialSourceRefs : [])
+    .map((value, index) => ({
+      sourceRefId: normalizeOptionalText(value?.sourceRefId) || `official_source:${index + 1}`,
+      sourceType: requireText(value?.sourceType || "official_source", "regulatory_source_ref_type_required"),
+      url: requireText(value?.url || value?.officialSourceUrl || value?.sourceUrl, "regulatory_source_url_required"),
+      retrievedAt: normalizeOptionalIsoDateTime(value?.retrievedAt, "regulatory_source_ref_retrieved_at_invalid") || nowIso,
+      checksum: requireText(value?.checksum || value?.sourceChecksum, "regulatory_source_checksum_required"),
+      sourceSnapshotDate: normalizeOptionalIsoDate(value?.sourceSnapshotDate, "regulatory_source_ref_snapshot_date_invalid") || nowDate,
+      note: normalizeOptionalText(value?.note)
+    }))
+    .sort((left, right) => left.url.localeCompare(right.url) || left.checksum.localeCompare(right.checksum));
+  if (normalized.length > 0) {
+    return normalized;
+  }
+  return [{
+    sourceRefId: "official_source:1",
+    sourceType: "official_source",
+    url: requireText(officialSourceUrl, "regulatory_source_url_required"),
+    retrievedAt: normalizeOptionalIsoDateTime(retrievedAt, "regulatory_source_retrieved_at_invalid") || nowIso,
+    checksum: requireText(sourceChecksum, "regulatory_source_checksum_required"),
+    sourceSnapshotDate: normalizeOptionalIsoDate(sourceSnapshotDate, "regulatory_source_snapshot_date_invalid") || nowDate,
+    note: normalizeOptionalText(note)
+  }];
+}
+
 function normalizeOptionalIsoDateTime(value, code) {
   const normalized = normalizeOptionalText(value);
   if (!normalized) {
@@ -545,6 +608,17 @@ function normalizeOptionalIsoDateTime(value, code) {
     throw createError(400, code, `${code} is invalid.`);
   }
   return parsed.toISOString();
+}
+
+function normalizeOptionalIsoDate(value, code) {
+  const normalized = normalizeOptionalText(value);
+  if (!normalized) {
+    return null;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    throw createError(400, code, `${code} is invalid.`);
+  }
+  return normalized;
 }
 
 function appendToIndex(index, key, value) {

@@ -1,3 +1,13 @@
+export interface GovernanceSourceRef {
+  readonly sourceRefId: string;
+  readonly sourceType: string;
+  readonly url: string;
+  readonly checksum: string;
+  readonly retrievedAt?: string | null;
+  readonly sourceSnapshotDate?: string | null;
+  readonly note?: string | null;
+}
+
 export interface RulePackRef {
   readonly rulePackId: string;
   readonly rulePackCode: string;
@@ -20,6 +30,7 @@ export interface RulePackRef {
   readonly retiredAt?: string | null;
   readonly checksum: string;
   readonly sourceSnapshotDate: string;
+  readonly sourceRefs?: readonly GovernanceSourceRef[];
   readonly semanticChangeSummary: string;
   readonly selectionMode?: RulePackSelectionMode | null;
   readonly rollbackId?: string | null;
@@ -71,6 +82,7 @@ export interface RulePackDefinition {
   readonly retiredAt?: string | null;
   readonly checksum: string;
   readonly sourceSnapshotDate: string;
+  readonly sourceRefs?: readonly GovernanceSourceRef[];
   readonly semanticChangeSummary: string;
   readonly machineReadableRules: Record<string, unknown>;
   readonly humanReadableExplanation: readonly string[];

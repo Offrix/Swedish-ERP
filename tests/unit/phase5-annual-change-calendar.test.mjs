@@ -6,6 +6,57 @@ import {
   createRulePackRegistry
 } from "../../packages/rule-engine/src/index.mjs";
 
+test("Phase 5.3 governance blocks validation without source refs and golden vectors", () => {
+  const ruleRegistry = createRulePackRegistry({
+    clock: () => new Date("2026-03-27T10:00:00Z")
+  });
+  const draftRulePack = ruleRegistry.createDraftRulePackVersion({
+    rulePackId: "vat-phase5-3-missing-artifacts",
+    rulePackCode: "SE-VAT-RULES",
+    domain: "vat",
+    jurisdiction: "SE",
+    effectiveFrom: "2026-07-01",
+    version: "2026.2",
+    checksum: "vat-phase5-3-missing-artifacts",
+    semanticChangeSummary: "Missing governance artifacts.",
+    machineReadableRules: { boxMappings: [{ boxCode: "05", accountNumber: "3001" }] },
+    humanReadableExplanation: ["VAT update 2026.2"],
+    testVectors: []
+  });
+  assert.throws(
+    () => ruleRegistry.validateRulePackVersion({ rulePackId: draftRulePack.rulePackId, actorId: "reviewer-1" }),
+    (error) => error?.code === "rule_pack_source_refs_required"
+  );
+
+  const providerBaselineRegistry = createProviderBaselineRegistry({
+    clock: () => new Date("2026-03-27T10:00:00Z")
+  });
+  const draftBaseline = providerBaselineRegistry.createDraftProviderBaselineVersion({
+    providerBaselineId: "peppol-phase5-3-missing-vectors",
+    baselineCode: "SE-PEPPOL-BIS-BILLING-3",
+    providerCode: "pagero_online",
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "peppol_bis_billing_3",
+    effectiveFrom: "2026-07-01",
+    version: "2026.2",
+    specVersion: "3.0",
+    checksum: "peppol-phase5-3-missing-vectors",
+    sourceSnapshotDate: "2026-03-27",
+    sourceRefs: [
+      {
+        url: "https://example.test/peppol/2026.2",
+        checksum: "peppol-source-2026.2"
+      }
+    ],
+    semanticChangeSummary: "Missing golden vectors."
+  });
+  assert.throws(
+    () => providerBaselineRegistry.validateProviderBaselineVersion({ providerBaselineId: draftBaseline.providerBaselineId, actorId: "reviewer-1" }),
+    (error) => error?.code === "provider_baseline_golden_vectors_required"
+  );
+});
+
 test("Phase 5.4 annual change calendar enforces staged publish, dual control and rollback for rule packs", () => {
   let currentTime = "2026-03-27T11:00:00Z";
   const ruleRegistry = createRulePackRegistry({
@@ -22,7 +73,13 @@ test("Phase 5.4 annual change calendar enforces staged publish, dual control and
     semanticChangeSummary: "Updated VAT treatment for annual change calendar test.",
     machineReadableRules: { boxMappings: [{ boxCode: "05", accountNumber: "3001" }] },
     humanReadableExplanation: ["VAT update 2026.2"],
-    testVectors: []
+    sourceRefs: [
+      {
+        url: "https://example.test/skv/vat-2026",
+        checksum: "source-checksum-2026.2"
+      }
+    ],
+    testVectors: [{ vectorId: "golden-vat-2026-2", expectedBox: "05" }]
   });
   const calendar = createRegulatoryChangeCalendar({
     clock: () => new Date(currentTime),
@@ -145,6 +202,13 @@ test("Phase 5.4 annual change calendar publishes provider baseline targets with 
     specVersion: "2.0",
     checksum: "sru-phase5-4-2026.2",
     sourceSnapshotDate: "2026-03-27",
+    sourceRefs: [
+      {
+        url: "https://example.test/skv/sru-2026",
+        checksum: "sru-source-2026.2"
+      }
+    ],
+    testVectors: [{ vectorId: "annual-sru-export-2026-2", expectedFieldOrder: "updated" }],
     semanticChangeSummary: "SRU baseline update for annual change calendar test."
   });
   const calendar = createRegulatoryChangeCalendar({
@@ -180,7 +244,8 @@ test("Phase 5.4 annual change calendar publishes provider baseline targets with 
     regulatoryChangeEntryId: changeEntry.regulatoryChangeEntryId,
     actorId: "qa-1",
     verificationResult: "passed",
-    scenarioRefs: ["annual-sru-export-2026-2"]
+    scenarioRefs: ["annual-sru-export-2026-2"],
+    outputChecksum: "annual-sru-output-2026.2"
   });
   calendar.approveRegulatoryChange({
     companyId: "company-phase5-4",

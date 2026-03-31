@@ -22,8 +22,10 @@ It applies to accounting method, fiscal year, legal form, annual filing, VAT, pa
    - `effectiveTo`
    - `checksum`
    - `sourceSnapshotDate`
+   - `sourceRefs` with official URL and checksum per captured source artifact
    - machine-readable rules
    - human explanation
+   - golden test vectors or `testVectorSetId`
    - migration notes
 2. Validate the pack against:
    - date-boundary test vectors
@@ -46,6 +48,8 @@ It applies to accounting method, fiscal year, legal form, annual filing, VAT, pa
 - same-input deterministic reproduction
 - correction flow against prior published version
 - explanation payload snapshot
+- source refs present on the draft pack
+- golden vector ids or test-vector-set present on the draft pack
 
 ## Rollback Rules
 

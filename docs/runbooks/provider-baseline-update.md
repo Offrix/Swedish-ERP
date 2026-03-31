@@ -28,7 +28,9 @@ Every published provider baseline must contain:
 - `effectiveTo` where applicable
 - `checksum`
 - `sourceSnapshotDate`
+- `sourceRefs` with official URL and checksum per captured source artefact
 - `semanticChangeSummary`
+- golden `testVectors` or `testVectorSetId`
 
 ## Publication Flow
 
@@ -56,6 +58,8 @@ Every published provider baseline must contain:
 - historical replay with prior pinned baseline
 - payload generation test proving correct baseline id/checksum/version is emitted
 - fallback/rollback verification where the provider has rollback support
+- source refs present on the draft baseline
+- golden vector ids or test-vector-set present on the draft baseline
 
 ## Rollback Rules
 

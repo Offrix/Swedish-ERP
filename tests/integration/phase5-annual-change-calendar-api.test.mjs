@@ -23,6 +23,13 @@ test("Phase 5.4 API drives regulatory annual change calendar with dual approvals
     specVersion: "3.0",
     checksum: "peppol-phase5-4-2026.2",
     sourceSnapshotDate: "2026-03-27",
+    sourceRefs: [
+      {
+        url: "https://example.test/peppol/2026.2",
+        checksum: "peppol-source-2026.2"
+      }
+    ],
+    testVectors: [{ vectorId: "peppol-outbound-2026-2", expectedEnvelope: "2026.2" }],
     semanticChangeSummary: "Peppol baseline update 2026.2."
   });
   const vatRulePack = platform.domains.vat.rulePackGovernance.createDraftRulePackVersion({
@@ -36,7 +43,13 @@ test("Phase 5.4 API drives regulatory annual change calendar with dual approvals
     semanticChangeSummary: "VAT rulepack update 2026.2.",
     machineReadableRules: { boxMappings: [{ boxCode: "05", accountNumber: "3001" }] },
     humanReadableExplanation: ["VAT update 2026.2"],
-    testVectors: []
+    sourceRefs: [
+      {
+        url: "https://example.test/skv/vat-2026.2",
+        checksum: "vat-source-2026.2"
+      }
+    ],
+    testVectors: [{ vectorId: "golden-vat-2026-2", expectedBox: "05" }]
   });
 
   const server = createApiServer({ platform });
@@ -85,11 +98,35 @@ test("Phase 5.4 API drives regulatory annual change calendar with dual approvals
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId,
-        officialSourceUrl: "https://example.test/peppol/2026.2",
-        sourceChecksum: "peppol-source-2026.2",
-        sourceSnapshotDate: "2026-03-27"
+        officialSourceRefs: [
+          {
+            sourceRefId: "release-notes",
+            sourceType: "official_release_notes",
+            url: "https://example.test/peppol/2026.2",
+            checksum: "peppol-source-2026.2",
+            retrievedAt: "2026-03-27T12:05:00Z",
+            sourceSnapshotDate: "2026-03-27"
+          },
+          {
+            sourceRefId: "schema-zip",
+            sourceType: "official_schema",
+            url: "https://example.test/peppol/2026.2/schema.zip",
+            checksum: "peppol-schema-2026.2",
+            retrievedAt: "2026-03-27T12:06:00Z",
+            sourceSnapshotDate: "2026-03-27"
+          }
+        ]
       }
     });
+    const sourced = await requestJson(baseUrl, `/v1/ops/rule-governance/changes/${created.regulatoryChangeEntryId}?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(sourced.sourceSnapshot.officialSourceRefs.length, 2);
+    assert.deepEqual(
+      sourced.sourceSnapshot.officialSourceRefs.map((item) => item.sourceType),
+      ["official_release_notes", "official_schema"]
+    );
+    assert.equal(sourced.sourceSnapshot.sourceChecksum, "peppol-source-2026.2");
     await requestJson(baseUrl, `/v1/ops/rule-governance/changes/${created.regulatoryChangeEntryId}/diff-review`, {
       method: "POST",
       token: adminToken,
