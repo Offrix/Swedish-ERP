@@ -197,6 +197,24 @@ test("Phase 8.3 API persists VIES truth for EU goods and blocks invalid VAT numb
     assert.equal(invalidDecision.vatDecision.outputs.viesStatus, "invalid");
     assert.equal(invalidDecision.vatDecision.viesStatus, "invalid");
     assert.equal(invalidDecision.reviewQueueItem.reviewReasonCode, "buyer_vat_number_not_vies_valid");
+
+    const prepaymentDecision = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_id: "phase8-3-api-prepayment-effective-date",
+          invoice_date: "2026-01-10",
+          delivery_date: "2026-01-10",
+          tax_date: null,
+          prepayment_date: "2025-12-20"
+        })
+      }
+    });
+    assert.equal(prepaymentDecision.vatDecision.effectiveDate, "2025-12-20");
+    assert.equal(prepaymentDecision.vatDecision.rulePackId, "vat-se-2025.6");
   } finally {
     await stopServer(server);
   }

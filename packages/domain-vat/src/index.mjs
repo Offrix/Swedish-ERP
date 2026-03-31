@@ -416,7 +416,7 @@ export function createVatEngine({
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedActorId = requireText(actorId, "actor_id_required");
     const normalizedLine = normalizeTransactionLine(transactionLine);
-    const effectiveDate = normalizedLine.tax_date || normalizedLine.invoice_date;
+    const effectiveDate = resolveVatEffectiveDate(normalizedLine);
     const blockingPeriodLock = findLockedVatPeriodForDate({
       state,
       companyId: resolvedCompanyId,
@@ -1361,7 +1361,7 @@ function createVatDecision({ normalizedLine, rulePack, decisionCode, outputs, wa
     decisionCode,
     inputsHash: hashObject(normalizedLine),
     rulePackId: rulePack.rulePackId,
-    effectiveDate: normalizedLine.tax_date || normalizedLine.invoice_date,
+    effectiveDate: resolveVatEffectiveDate(normalizedLine),
     outputs,
     warnings,
     explanation,
@@ -1953,6 +1953,16 @@ function resolveDeductionRuleCode(normalizedLine) {
     return "full_deduction";
   }
   return "partial_deduction";
+}
+
+function resolveVatEffectiveDate(normalizedLine) {
+  if (normalizedLine.tax_date) {
+    return normalizedLine.tax_date;
+  }
+  if (normalizedLine.prepayment_date && (!normalizedLine.invoice_date || normalizedLine.prepayment_date < normalizedLine.invoice_date)) {
+    return normalizedLine.prepayment_date;
+  }
+  return normalizedLine.invoice_date;
 }
 
 function isCompatibleVatCodeCandidate(normalizedLine, derivedVatCode) {

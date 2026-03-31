@@ -123,6 +123,40 @@ test("Phase 8.3 persists VIES truth, normalizes Greece to EL and blocks EU goods
   assert.equal(invalidDecision.reviewQueueItem.reviewReasonCode, "buyer_vat_number_not_vies_valid");
 });
 
+test("Phase 8.3 uses prepayment date as effective VAT date when it precedes invoice date and no explicit tax date exists", () => {
+  const vat = createVatEngine({
+    clock: () => new Date("2026-03-31T11:00:00Z")
+  });
+
+  const prepaymentDecision = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_id: "phase8-3-unit-prepayment-effective-date",
+      invoice_date: "2026-01-10",
+      delivery_date: "2026-01-10",
+      tax_date: null,
+      prepayment_date: "2025-12-20"
+    })
+  });
+  assert.equal(prepaymentDecision.vatDecision.effectiveDate, "2025-12-20");
+  assert.equal(prepaymentDecision.vatDecision.rulePackId, "vat-se-2025.6");
+
+  const explicitTaxDateDecision = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_id: "phase8-3-unit-tax-date-wins",
+      invoice_date: "2026-01-10",
+      delivery_date: "2026-01-10",
+      tax_date: "2026-01-05",
+      prepayment_date: "2025-12-20"
+    })
+  });
+  assert.equal(explicitTaxDateDecision.vatDecision.effectiveDate, "2026-01-05");
+  assert.equal(explicitTaxDateDecision.vatDecision.rulePackId, "vat-se-2026.3");
+});
+
 function buildTransactionLine(overrides = {}) {
   return {
     seller_country: "SE",
