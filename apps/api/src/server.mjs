@@ -8156,8 +8156,10 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         writeoffAmount: body.writeoffAmount,
         writeoffDate: body.writeoffDate,
         reasonCode: body.reasonCode,
+        applyBadDebtVatRelief: body.applyBadDebtVatRelief === true,
         policyLimitAmount: body.policyLimitAmount ?? undefined,
         approvedByActorId: body.approvedByActorId || null,
+        approvedByRoleCode: body.approvedByRoleCode || null,
         ledgerAccountNumber: body.ledgerAccountNumber ?? undefined,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()

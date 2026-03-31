@@ -227,6 +227,243 @@ test("Phase 5.3 API handles payment matching, reversals, dunning and aging snaps
   }
 });
 
+test("Phase 8.1 API posts bad-debt VAT relief with dual control and blocks it after partial settlement", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-09-02T10:00:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true,
+      phase5ArEnabled: true
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const sessionToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    await requestJson(baseUrl, "/v1/ledger/chart/install", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: { companyId: COMPANY_ID }
+    });
+
+    const customer = await requestJson(baseUrl, "/v1/ar/customers", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        legalName: "Bad Debt Customer AB",
+        organizationNumber: "5566778899",
+        countryCode: "SE",
+        languageCode: "SV",
+        currencyCode: "SEK",
+        paymentTermsCode: "NET30",
+        invoiceDeliveryMethod: "pdf_email",
+        reminderProfileCode: "standard",
+        billingAddress: {
+          line1: "Fakturagatan 2",
+          postalCode: "11157",
+          city: "Stockholm",
+          countryCode: "SE"
+        },
+        deliveryAddress: {
+          line1: "Fakturagatan 2",
+          postalCode: "11157",
+          city: "Stockholm",
+          countryCode: "SE"
+        }
+      }
+    });
+
+    const item = await requestJson(baseUrl, "/v1/ar/items", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        itemCode: "API-AR-8101",
+        description: "Bad debt eligible service",
+        itemType: "service",
+        unitCode: "hour",
+        standardPrice: 1000,
+        revenueAccountNumber: "3010",
+        vatCode: "VAT_SE_DOMESTIC_25"
+      }
+    });
+
+    const firstInvoice = await requestJson(baseUrl, "/v1/ar/invoices", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        customerId: customer.customerId,
+        invoiceType: "standard",
+        issueDate: "2026-07-01",
+        dueDate: "2026-07-31",
+        lines: [
+          {
+            itemId: item.arItemId,
+            quantity: 1,
+            unitPrice: 1000
+          }
+        ]
+      }
+    });
+
+    await requestJson(baseUrl, `/v1/ar/invoices/${firstInvoice.customerInvoiceId}/issue`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 200,
+      body: { companyId: COMPANY_ID }
+    });
+
+    const firstOpenItems = await requestJson(baseUrl, `/v1/ar/open-items?companyId=${COMPANY_ID}`, {
+      token: sessionToken
+    });
+    const firstOpenItem = firstOpenItems.items.find((candidate) => candidate.customerInvoiceId === firstInvoice.customerInvoiceId);
+    assert.ok(firstOpenItem);
+
+    const writeoff = await requestJson(baseUrl, `/v1/ar/open-items/${firstOpenItem.arOpenItemId}/writeoffs`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        writeoffAmount: 1250,
+        writeoffDate: "2026-09-01",
+        reasonCode: "confirmed_customer_loss",
+        applyBadDebtVatRelief: true,
+        policyLimitAmount: 2000,
+        approvedByActorId: "finance-approver",
+        approvedByRoleCode: "finance_manager"
+      }
+    });
+    assert.equal(writeoff.badDebtVatReliefApplied, true);
+    assert.equal(writeoff.badDebtVatReliefAmount, 250);
+    assert.equal(writeoff.badDebtVatDecisionIds.length, 1);
+
+    const writeoffJournal = await requestJson(
+      baseUrl,
+      `/v1/ledger/journal-entries/${writeoff.journalEntryId}?companyId=${COMPANY_ID}`,
+      {
+        token: sessionToken
+      }
+    );
+    const vatDecision = await requestJson(
+      baseUrl,
+      `/v1/vat/decisions/${writeoff.badDebtVatDecisionIds[0]}?companyId=${COMPANY_ID}`,
+      {
+        token: sessionToken
+      }
+    );
+    const writtenOffOpenItem = await requestJson(
+      baseUrl,
+      `/v1/ar/open-items/${firstOpenItem.arOpenItemId}?companyId=${COMPANY_ID}`,
+      {
+        token: sessionToken
+      }
+    );
+
+    assert.equal(vatDecision.decisionCategory, "bad_debt_adjustment");
+    assert.equal(sumJournalAmount(writeoffJournal, "6900", "debit"), 1000);
+    assert.equal(sumJournalAmount(writeoffJournal, "2610", "debit"), 250);
+    assert.equal(sumJournalAmount(writeoffJournal, "1210", "credit"), 1250);
+    assert.equal(writeoffJournal.metadataJson.postingApprovalApprovedByActorId, "finance-approver");
+    assert.equal(writeoffJournal.metadataJson.postingApprovalRoleCode, "finance_manager");
+    assert.equal(writtenOffOpenItem.status, "written_off");
+    assert.equal(writtenOffOpenItem.openAmount, 0);
+
+    const secondInvoice = await requestJson(baseUrl, "/v1/ar/invoices", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        customerId: customer.customerId,
+        invoiceType: "standard",
+        issueDate: "2026-07-05",
+        dueDate: "2026-08-04",
+        lines: [
+          {
+            itemId: item.arItemId,
+            quantity: 1,
+            unitPrice: 1000
+          }
+        ]
+      }
+    });
+
+    const secondIssued = await requestJson(baseUrl, `/v1/ar/invoices/${secondInvoice.customerInvoiceId}/issue`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 200,
+      body: { companyId: COMPANY_ID }
+    });
+
+    const secondOpenItems = await requestJson(baseUrl, `/v1/ar/open-items?companyId=${COMPANY_ID}`, {
+      token: sessionToken
+    });
+    const secondOpenItem = secondOpenItems.items.find((candidate) => candidate.customerInvoiceId === secondInvoice.customerInvoiceId);
+    assert.ok(secondOpenItem);
+
+    const matchingRun = await requestJson(baseUrl, "/v1/ar/payment-matching-runs", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        sourceChannel: "bank_file",
+        transactions: [
+          {
+            bankTransactionUid: "api-bank-txn-8101-partial",
+            payerReference: secondIssued.paymentReference,
+            amount: 500,
+            currencyCode: "SEK",
+            valueDate: "2026-08-15"
+          }
+        ]
+      }
+    });
+    assert.equal(matchingRun.allocations.length, 1);
+
+    const blocked = await requestJson(baseUrl, `/v1/ar/open-items/${secondOpenItem.arOpenItemId}/writeoffs`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 409,
+      body: {
+        companyId: COMPANY_ID,
+        writeoffAmount: 750,
+        writeoffDate: "2026-09-02",
+        reasonCode: "confirmed_customer_loss",
+        applyBadDebtVatRelief: true,
+        policyLimitAmount: 2000,
+        approvedByActorId: "finance-approver",
+        approvedByRoleCode: "finance_manager"
+      }
+    });
+    assert.equal(blocked.error, "bad_debt_vat_review_required");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
   const started = await requestJson(baseUrl, "/v1/auth/login", {
     method: "POST",
@@ -275,4 +512,10 @@ async function requestJson(baseUrl, path, { method = "GET", body, token, expecte
   const payload = await response.json();
   assert.equal(response.status, expectedStatus);
   return payload;
+}
+
+function sumJournalAmount(journal, accountNumber, side) {
+  return journal.lines
+    .filter((line) => line.accountNumber === accountNumber)
+    .reduce((sum, line) => sum + Number(side === "debit" ? line.debitAmount || 0 : line.creditAmount || 0), 0);
 }

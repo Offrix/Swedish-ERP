@@ -3,14 +3,20 @@ import assert from "node:assert/strict";
 import { createHrPlatform } from "../../packages/domain-hr/src/index.mjs";
 import { createArPlatform } from "../../packages/domain-ar/src/index.mjs";
 import { createProjectsPlatform } from "../../packages/domain-projects/src/index.mjs";
+import { buildTestCompanyProfile } from "../helpers/company-profiles.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const AR_TEST_PLATFORM_OPTIONS = {
+  companyProfilesById: {
+    [COMPANY_ID]: buildTestCompanyProfile(COMPANY_ID)
+  }
+};
 let employeeCounter = 0;
 
 test("Phase 14.4 builds capacity, assignment, risk and portfolio views from canonical project objects", () => {
   const clock = () => new Date("2026-05-04T08:30:00Z");
   const hrPlatform = createHrPlatform({ clock, bootstrapMode: "none" });
-  const arPlatform = createArPlatform({ clock, bootstrapMode: "none" });
+  const arPlatform = createArPlatform({ clock, bootstrapMode: "none", ...AR_TEST_PLATFORM_OPTIONS });
   const projectsPlatform = createProjectsPlatform({
     clock,
     bootstrapMode: "none",

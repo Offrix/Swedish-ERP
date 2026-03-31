@@ -1,13 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createArEngine } from "../../packages/domain-ar/src/index.mjs";
+import { buildTestCompanyProfile } from "../helpers/company-profiles.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const AR_TEST_ENGINE_OPTIONS = {
+  companyProfilesById: {
+    [COMPANY_ID]: buildTestCompanyProfile(COMPANY_ID)
+  }
+};
 
 test("Phase 5.1 versions quotes after send without mutating the previously sent version", () => {
   const ar = createArEngine({
     clock: () => new Date("2026-03-22T09:00:00Z"),
-    seedDemo: false
+    seedDemo: false,
+    ...AR_TEST_ENGINE_OPTIONS
   });
 
   const customer = createCustomer(ar);
@@ -45,7 +52,8 @@ test("Phase 5.1 versions quotes after send without mutating the previously sent 
 test("Phase 5.1 generates a gap-free invoice plan when an accepted quote becomes an active contract", () => {
   const ar = createArEngine({
     clock: () => new Date("2026-03-22T09:30:00Z"),
-    seedDemo: false
+    seedDemo: false,
+    ...AR_TEST_ENGINE_OPTIONS
   });
 
   const customer = createCustomer(ar);
@@ -97,7 +105,8 @@ test("Phase 5.1 generates a gap-free invoice plan when an accepted quote becomes
 test("Phase 5.1 imports customers idempotently and updates the existing customer on a new batch", () => {
   const ar = createArEngine({
     clock: () => new Date("2026-03-22T10:00:00Z"),
-    seedDemo: false
+    seedDemo: false,
+    ...AR_TEST_ENGINE_OPTIONS
   });
 
   const firstRun = ar.importCustomers({
@@ -222,7 +231,8 @@ test("Phase 5.1 imports customers idempotently and updates the existing customer
 test("Step 25 freezes accepted quote versions into invoice drafts and materializes project links", () => {
   const ar = createArEngine({
     clock: () => new Date("2026-03-24T12:00:00Z"),
-    seedDemo: false
+    seedDemo: false,
+    ...AR_TEST_ENGINE_OPTIONS
   });
 
   const customer = createCustomer(ar);
@@ -266,7 +276,8 @@ test("Step 25 freezes accepted quote versions into invoice drafts and materializ
 test("Step 25 blocks invoice drafts from non-ready quote versions and quote-breaking overrides", () => {
   const ar = createArEngine({
     clock: () => new Date("2026-03-24T12:15:00Z"),
-    seedDemo: false
+    seedDemo: false,
+    ...AR_TEST_ENGINE_OPTIONS
   });
 
   const customer = createCustomer(ar);

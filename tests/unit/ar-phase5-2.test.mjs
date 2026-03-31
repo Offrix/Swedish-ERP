@@ -1,10 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createArEngine } from "../../packages/domain-ar/src/index.mjs";
+import { normalizeRequiredOcrReference } from "../../packages/domain-core/src/validation.mjs";
 import { createLedgerPlatform } from "../../packages/domain-ledger/src/index.mjs";
 import { createIntegrationEngine } from "../../packages/domain-integrations/src/index.mjs";
+import { buildTestCompanyProfile } from "../helpers/company-profiles.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const AR_TEST_ENGINE_OPTIONS = {
+  companyProfilesById: {
+    [COMPANY_ID]: buildTestCompanyProfile(COMPANY_ID)
+  }
+};
 
 test("Phase 5.2 issues an invoice only once and reuses the posted journal on repeated issue calls", () => {
   const clock = () => new Date("2026-03-22T12:30:00Z");
@@ -14,7 +21,8 @@ test("Phase 5.2 issues an invoice only once and reuses the posted journal on rep
     clock,
     seedDemo: false,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
   ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
@@ -49,6 +57,10 @@ test("Phase 5.2 issues an invoice only once and reuses the posted journal on rep
   assert.equal(typeof firstIssue.lines[0].vatDecisionId, "string");
   assert.equal(firstIssue.lines[0].vatDecisionCategory, "domestic_standard_sale");
   assert.deepEqual(firstIssue.lines[0].vatDeclarationBoxCodes, ["05", "10"]);
+  assert.equal(
+    normalizeRequiredOcrReference(firstIssue.paymentReference, "invoice_payment_reference_invalid", { controlMode: "mod10" }),
+    firstIssue.paymentReference
+  );
   assert.equal(postedEntries.length, 1);
   assert.equal(postedEntries[0].status, "posted");
   assert.equal(postedEntries[0].metadataJson.postingRecipeCode, "AR_INVOICE");
@@ -65,7 +77,8 @@ test("Phase 5.2 full credit note closes the credited invoice and posts a separat
     clock,
     seedDemo: false,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
   ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
@@ -138,7 +151,8 @@ test("Phase 5.2 validates Peppol delivery and creates payment links from issued 
     clock,
     seedDemo: false,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
   ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
@@ -211,7 +225,8 @@ test("Phase 5.2 requires explicit payment link provider selection", () => {
     clock,
     seedDemo: false,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
   ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
@@ -256,7 +271,8 @@ test("Phase 5.2 marks invoice delivery as failed when Peppol validation data is 
     clock,
     seedDemo: false,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
   ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
@@ -308,7 +324,8 @@ test("Step 24 blocks reverse-charge invoices until buyer VAT and legal text are 
     clock,
     seedDemo: false,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
   ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
@@ -377,7 +394,8 @@ test("Step 24 blocks export and HUS invoices until legal overlays are complete",
     clock,
     seedDemo: false,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
 
@@ -472,7 +490,8 @@ test("Phase 9.1 carries governed revenue dimensions into AR invoice journals and
     clock,
     seedDemo: false,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
   ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
@@ -552,6 +571,109 @@ test("Phase 9.1 carries governed revenue dimensions into AR invoice journals and
       ar.issueInvoice({
         companyId: COMPANY_ID,
         customerInvoiceId: blockedInvoice.customerInvoiceId,
+        actorId: "user-1"
+      }),
+    (error) => error?.code === "invoice_issue_blocked"
+  );
+});
+
+test("Phase 8.1 rejects corrupted invoice state when a draft already carries a journal entry", () => {
+  const clock = () => new Date("2026-03-29T09:00:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const integrations = createIntegrationEngine({ clock });
+  const ar = createArEngine({
+    clock,
+    seedDemo: false,
+    ledgerPlatform: ledger,
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
+
+  const customer = createCustomer(ar);
+  const item = createItem(ar);
+  const invoice = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-03-29",
+    dueDate: "2026-04-28",
+    lines: [{ itemId: item.arItemId, quantity: 1, unitPrice: 1000 }],
+    actorId: "user-1"
+  });
+  const issued = ar.issueInvoice({
+    companyId: COMPANY_ID,
+    customerInvoiceId: invoice.customerInvoiceId,
+    actorId: "user-1"
+  });
+  const corruptedState = ar.exportDurableState();
+  corruptedState.invoices.entries = corruptedState.invoices.entries.map(([invoiceId, entry]) => [
+    invoiceId,
+    entry.customerInvoiceId === invoice.customerInvoiceId ? { ...entry, status: "draft" } : entry
+  ]);
+
+  const restored = createArEngine({
+    clock,
+    seedDemo: false,
+    ledgerPlatform: ledger,
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
+  });
+  restored.importDurableState(corruptedState);
+
+  assert.throws(
+    () =>
+      restored.issueInvoice({
+        companyId: COMPANY_ID,
+        customerInvoiceId: invoice.customerInvoiceId,
+        actorId: "user-1"
+      }),
+    (error) => {
+      assert.equal(issued.status, "issued");
+      return error?.code === "invoice_issue_state_invalid";
+    }
+  );
+});
+
+test("Phase 8.1 blocks issue when the seller source of truth lacks a legal address", () => {
+  const clock = () => new Date("2026-03-29T09:30:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const integrations = createIntegrationEngine({ clock });
+  const ar = createArEngine({
+    clock,
+    seedDemo: false,
+    ledgerPlatform: ledger,
+    integrationPlatform: integrations,
+    companyProfilesById: {
+      [COMPANY_ID]: buildTestCompanyProfile(COMPANY_ID, {
+        address: null,
+        settingsJson: {}
+      })
+    }
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
+
+  const customer = createCustomer(ar);
+  const item = createItem(ar);
+  const invoice = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-03-29",
+    dueDate: "2026-04-28",
+    lines: [{ itemId: item.arItemId, quantity: 1, unitPrice: 1000 }],
+    actorId: "user-1"
+  });
+
+  assert.equal(invoice.invoiceFieldEvaluation.status, "blocked");
+  assert.equal(invoice.invoiceFieldEvaluation.missingFieldCodes.includes("seller_address"), true);
+  assert.throws(
+    () =>
+      ar.issueInvoice({
+        companyId: COMPANY_ID,
+        customerInvoiceId: invoice.customerInvoiceId,
         actorId: "user-1"
       }),
     (error) => error?.code === "invoice_issue_blocked"

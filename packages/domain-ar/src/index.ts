@@ -312,6 +312,10 @@ export interface ArInvoice {
   readonly issueDate: string;
   readonly dueDate: string;
   readonly currencyCode: string;
+  readonly sellerLegalName: string | null;
+  readonly sellerOrganizationNumber: string | null;
+  readonly sellerVatNumber: string | null;
+  readonly sellerAddress: ArAddress | null;
   readonly lines: readonly ArCommercialLine[];
   readonly totals: ArInvoiceTotals;
   readonly buyerReference: string | null;
@@ -520,6 +524,10 @@ export interface ArWriteoff {
   readonly writeoffAmount: number;
   readonly currencyCode: string;
   readonly functionalAmount: number;
+  readonly badDebtVatReliefApplied: boolean;
+  readonly badDebtVatReliefAmount: number;
+  readonly badDebtVatFunctionalReliefAmount: number;
+  readonly badDebtVatDecisionIds: readonly string[];
   readonly ledgerAccountNumber: string;
   readonly writeoffDate: string;
   readonly reversalOfWriteoffId: string | null;

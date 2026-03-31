@@ -5,7 +5,8 @@ import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
   normalizeOptionalSwedishOrganizationNumber,
   normalizeOptionalVatNumber,
-  normalizeRequiredIsoDate
+  normalizeRequiredIsoDate,
+  normalizeRequiredOcrReference
 } from "../../domain-core/src/validation.mjs";
 import {
   applyDurableStateSnapshot,
@@ -66,6 +67,24 @@ const DEFAULT_SMALL_DIFFERENCE_ACCOUNT_NUMBER = "6900";
 const DEFAULT_SMALL_DIFFERENCE_POLICY_LIMIT = 100;
 const DEFAULT_REMINDER_FEE_AMOUNT = 60;
 const DEFAULT_STATUTORY_INTEREST_PERCENT = 8;
+const STATUTORY_REFERENCE_RATE_BASELINES = Object.freeze([
+  Object.freeze({
+    effectiveFrom: "2026-01-01",
+    referenceRatePercent: 2
+  })
+]);
+const AR_INVOICE_ISSUE_READY_STATUSES = new Set(["draft", "validated", "approved"]);
+const AR_INVOICE_ALREADY_ISSUED_STATUSES = new Set([
+  "issued",
+  "delivered",
+  "delivery_failed",
+  "partially_paid",
+  "paid",
+  "overdue",
+  "disputed",
+  "credited",
+  "written_off"
+]);
 const DEFAULT_INVOICE_SERIES_DEFINITIONS = Object.freeze([
   Object.freeze({
     seriesCode: "B",
@@ -129,7 +148,9 @@ export function createArEngine({
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   vatPlatform = createVatPlatform({ clock, seedDemo: true }),
   ledgerPlatform = null,
-  integrationPlatform = null
+  integrationPlatform = null,
+  orgAuthPlatform = null,
+  companyProfilesById = null
 } = {}) {
   const state = {
     customers: new Map(),
@@ -1011,6 +1032,10 @@ export function createArEngine({
     lines = null,
     supplyDate = null,
     deliveryDate = null,
+    sellerLegalName = null,
+    sellerOrganizationNumber = null,
+    sellerVatNumber = null,
+    sellerAddress = null,
     buyerReference = null,
     purchaseOrderReference = null,
     buyerVatNumber = null,
@@ -1095,6 +1120,15 @@ export function createArEngine({
       });
     }
     const projectLinkSummary = summarizeInvoiceProjectLinks(invoiceLines);
+    const sellerSnapshot = resolveInvoiceSellerSnapshot({
+      companyId: resolvedCompanyId,
+      sellerLegalName,
+      sellerOrganizationNumber,
+      sellerVatNumber,
+      sellerAddress,
+      orgAuthPlatform,
+      companyProfilesById
+    });
     const totals = calculateInvoiceTotals({
       vatPlatform,
       companyId: resolvedCompanyId,
@@ -1125,6 +1159,7 @@ export function createArEngine({
       exchangeRate: normalizeOptionalPositiveNumber(exchangeRate, "invoice_exchange_rate_invalid"),
       supplyDate: resolvedSupplyDate,
       deliveryDate: resolvedDeliveryDate,
+      sellerSnapshot,
       deliveryChannel,
       buyerReference: normalizeOptionalText(buyerReference),
       purchaseOrderReference: normalizeOptionalText(purchaseOrderReference),
@@ -1175,6 +1210,10 @@ export function createArEngine({
       totals,
       supplyDate: resolvedSupplyDate,
       deliveryDate: resolvedDeliveryDate,
+      sellerLegalName: sellerSnapshot.legalName,
+      sellerOrganizationNumber: sellerSnapshot.organizationNumber,
+      sellerVatNumber: sellerSnapshot.vatNumber,
+      sellerAddress: sellerSnapshot.address,
       buyerReference: normalizeOptionalText(buyerReference),
       purchaseOrderReference: normalizeOptionalText(purchaseOrderReference),
       buyerVatNumber: resolvedBuyerVatNumber,
@@ -1229,7 +1268,10 @@ export function createArEngine({
 
   function issueInvoice({ companyId, customerInvoiceId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
     const invoice = requireInvoiceRecord(state, companyId, customerInvoiceId);
-    if (invoice.journalEntryId) {
+    if (AR_INVOICE_ALREADY_ISSUED_STATUSES.has(invoice.status)) {
+      if (!invoice.journalEntryId) {
+        throw createError(409, "invoice_issue_state_invalid", "Issued invoice is missing its ledger posting.");
+      }
       if (invoice.invoiceType !== "credit_note") {
         ensureOpenItemForInvoice({
           state,
@@ -1240,6 +1282,12 @@ export function createArEngine({
         });
       }
       return copy(invoice);
+    }
+    if (!AR_INVOICE_ISSUE_READY_STATUSES.has(invoice.status)) {
+      throw createError(409, "invoice_issue_illegal_state", `Invoice cannot be issued from status ${invoice.status}.`);
+    }
+    if (invoice.journalEntryId) {
+      throw createError(409, "invoice_issue_state_invalid", "Draft invoice carries a journal entry even though it is not issued.");
     }
     if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
       throw createError(500, "ledger_platform_missing", "Ledger platform is required to issue invoices.");
@@ -1272,7 +1320,6 @@ export function createArEngine({
     ensureDefaultInvoiceSeriesForCompany(state, invoice.companyId, clock);
     invoice.validatedAt = invoice.validatedAt || nowIso(clock);
     invoice.approvedAt = invoice.approvedAt || nowIso(clock);
-    invoice.status = "approved";
     const series = resolveConfiguredInvoiceSeries(state, invoice.companyId, invoice.invoiceType, invoice.invoiceSeriesCode || null, clock);
     if (!invoice.invoiceNumber) {
       const sequenceNumber = nextInvoiceSeriesNumber(series, clock);
@@ -1291,7 +1338,14 @@ export function createArEngine({
     }
     invoice.invoiceSeriesCode = invoice.invoiceSeriesCode || series.seriesCode;
     invoice.issueIdempotencyKey = invoice.issueIdempotencyKey || `invoice.issue:${invoice.invoiceGenerationKey}`;
-    invoice.paymentReference = invoice.paymentReference || String(invoice.invoiceSequenceNumber || 0).padStart(10, "0");
+    invoice.paymentReference = normalizeRequiredOcrReference(
+      invoice.paymentReference || buildInvoiceOcrReference(invoice.invoiceSequenceNumber || 0),
+      "invoice_payment_reference_invalid",
+      {
+        errorFactory: createError,
+        controlMode: "mod10"
+      }
+    );
     evaluateInvoiceVatDecisions({
       vatPlatform,
       companyId: invoice.companyId,
@@ -2004,7 +2058,7 @@ export function createArEngine({
     companyId,
     runDate,
     stageCode,
-    annualInterestRatePercent = DEFAULT_STATUTORY_INTEREST_PERCENT,
+    annualInterestRatePercent = null,
     reminderFeeAmount = DEFAULT_REMINDER_FEE_AMOUNT,
     idempotencyKey = null,
     actorId = "system",
@@ -2013,6 +2067,10 @@ export function createArEngine({
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedRunDate = normalizeDate(runDate, "ar_dunning_run_date_invalid");
     const resolvedStageCode = assertAllowed(stageCode, ["stage_1", "stage_2", "escalated"], "ar_dunning_stage_invalid");
+    const resolvedInterestRate = normalizePositiveNumber(
+      annualInterestRatePercent ?? resolveStatutoryInterestPercent(resolvedRunDate),
+      "ar_dunning_interest_rate_invalid"
+    );
     const calculationWindowStart = firstDayOfMonthIso(resolvedRunDate);
     const calculationWindowEnd = resolvedRunDate;
     const resolvedIdempotencyKey =
@@ -2077,7 +2135,7 @@ export function createArEngine({
 
       item.feeAmount = customer.allowReminderFee && resolvedStageCode === "stage_1" ? roundMoney(reminderFeeAmount) : 0;
       item.interestAmount = customer.allowInterest
-        ? calculateLateInterestAmount(openItem.openAmount, openItem.dueOn, resolvedRunDate, annualInterestRatePercent)
+        ? calculateLateInterestAmount(openItem.openAmount, openItem.dueOn, resolvedRunDate, resolvedInterestRate)
         : 0;
 
       if (item.feeAmount > 0 || item.interestAmount > 0) {
@@ -2096,6 +2154,7 @@ export function createArEngine({
             stageCode: resolvedStageCode,
             feeAmount: item.feeAmount,
             interestAmount: item.interestAmount,
+            annualInterestRatePercent: resolvedInterestRate,
             calculationWindowEnd
           }),
           actorId,
@@ -2153,14 +2212,16 @@ export function createArEngine({
     return copy(run);
   }
 
-  function createWriteoff({
+function createWriteoff({
     companyId,
     arOpenItemId,
     writeoffAmount,
     writeoffDate,
     reasonCode,
+    applyBadDebtVatRelief = false,
     policyLimitAmount = DEFAULT_SMALL_DIFFERENCE_POLICY_LIMIT,
     approvedByActorId = null,
+    approvedByRoleCode = null,
     ledgerAccountNumber = DEFAULT_SMALL_DIFFERENCE_ACCOUNT_NUMBER,
     actorId = "system",
     correlationId = crypto.randomUUID()
@@ -2182,6 +2243,20 @@ export function createArEngine({
     if (requiresApproval && !normalizeOptionalText(approvedByActorId)) {
       throw createError(409, "writeoff_approval_required", "Write-off exceeds the configured automatic policy limit.");
     }
+    const resolvedApplyBadDebtVatRelief = applyBadDebtVatRelief === true;
+    const badDebtVatAdjustment = resolvedApplyBadDebtVatRelief
+      ? resolveBadDebtVatAdjustment({
+          state,
+          vatPlatform,
+          ledgerPlatform,
+          companyId,
+          openItem,
+          writeoffAmount: resolvedWriteoffAmount,
+          writeoffDate: resolvedWriteoffDate,
+          actorId,
+          correlationId
+        })
+      : null;
 
     const writeoff = {
       arWriteoffId: crypto.randomUUID(),
@@ -2197,11 +2272,22 @@ export function createArEngine({
       writeoffAmount: resolvedWriteoffAmount,
       currencyCode: openItem.currencyCode,
       functionalAmount: resolveFunctionalAmount({ amount: resolvedWriteoffAmount, openItem }),
+      badDebtVatReliefApplied: badDebtVatAdjustment != null,
+      badDebtVatReliefAmount: badDebtVatAdjustment?.vatReliefAmount || 0,
+      badDebtVatFunctionalReliefAmount: badDebtVatAdjustment?.functionalVatReliefAmount || 0,
+      badDebtVatDecisionIds: copy(badDebtVatAdjustment?.vatDecisionIds || []),
       ledgerAccountNumber: requireText(ledgerAccountNumber, "ar_writeoff_account_required"),
       writeoffDate: resolvedWriteoffDate,
       reversalOfWriteoffId: null,
       journalEntryId: null,
-      metadataJson: {},
+      metadataJson:
+        badDebtVatAdjustment == null
+          ? {}
+          : {
+              badDebtVatReliefApplied: true,
+              badDebtVatReliefAmount: badDebtVatAdjustment.vatReliefAmount,
+              badDebtVatDecisionIds: copy(badDebtVatAdjustment.vatDecisionIds)
+            },
       createdByActorId: actorId,
       createdAt: nowIso(clock)
     };
@@ -2219,15 +2305,20 @@ export function createArEngine({
         arOpenItemId: openItem.arOpenItemId,
         writeoffDate: resolvedWriteoffDate,
         writeoffAmount: resolvedWriteoffAmount,
-        reasonCode: writeoff.reasonCode
+        reasonCode: writeoff.reasonCode,
+        badDebtVatReliefApplied: writeoff.badDebtVatReliefApplied,
+        badDebtVatDecisionIds: writeoff.badDebtVatDecisionIds
       }),
       actorId,
-      idempotencyKey: `ar_writeoff:${openItem.arOpenItemId}:${resolvedWriteoffDate}:${resolvedWriteoffAmount}`,
+      approvedByActorId: writeoff.approvedByActorId,
+      approvedByRoleCode,
+      idempotencyKey: `ar_writeoff:${openItem.arOpenItemId}:${resolvedWriteoffDate}:${resolvedWriteoffAmount}:${resolvedApplyBadDebtVatRelief ? "vat_relief" : "plain"}`,
       description: `AR writeoff ${writeoff.arWriteoffId}`,
       lines: buildWriteoffJournalLines({
         openItem,
         ledgerAccountNumber: writeoff.ledgerAccountNumber,
-        writeoffAmount: resolvedWriteoffAmount
+        writeoffAmount: resolvedWriteoffAmount,
+        badDebtVatAdjustment
       })
     });
     writeoff.journalEntryId = journal.journalEntryId;
@@ -2258,6 +2349,8 @@ export function createArEngine({
       openAmountAfter: openItem.openAmount,
       snapshotJson: {
         journalEntryId: writeoff.journalEntryId,
+        badDebtVatReliefApplied: writeoff.badDebtVatReliefApplied,
+        badDebtVatDecisionIds: writeoff.badDebtVatDecisionIds,
         functionalOpenAmountBefore: beforeFunctionalAmount,
         functionalOpenAmountAfter: openItem.functionalOpenAmount
       },
@@ -2271,7 +2364,10 @@ export function createArEngine({
       action: "ar.writeoff.posted",
       entityType: "ar_writeoff",
       entityId: writeoff.arWriteoffId,
-      explanation: `Posted write-off ${writeoff.arWriteoffId} for open item ${openItem.arOpenItemId}.`
+      explanation:
+        badDebtVatAdjustment == null
+          ? `Posted write-off ${writeoff.arWriteoffId} for open item ${openItem.arOpenItemId}.`
+          : `Posted write-off ${writeoff.arWriteoffId} with bad-debt VAT relief for open item ${openItem.arOpenItemId}.`
     });
     return copy(writeoff);
   }
@@ -3133,19 +3229,261 @@ function buildDunningJournalLines({ openItem, feeAmount, interestAmount }) {
   return lines;
 }
 
-function buildWriteoffJournalLines({ openItem, ledgerAccountNumber, writeoffAmount }) {
+function resolveBadDebtVatAdjustment({
+  state,
+  vatPlatform,
+  ledgerPlatform,
+  companyId,
+  openItem,
+  writeoffAmount,
+  writeoffDate,
+  actorId,
+  correlationId
+}) {
+  if (!vatPlatform || typeof vatPlatform.evaluateVatDecision !== "function" || typeof vatPlatform.getVatDecision !== "function") {
+    throw createError(500, "vat_platform_missing", "VAT platform is required for bad-debt VAT relief.");
+  }
+  if (!openItem.customerInvoiceId) {
+    throw createError(409, "bad_debt_vat_review_required", "Bad-debt VAT relief requires an originating customer invoice.");
+  }
+  const invoice = requireInvoiceRecord(state, companyId, openItem.customerInvoiceId);
+  if (invoice.invoiceType !== "standard" || !invoice.journalEntryId) {
+    throw createError(409, "bad_debt_vat_review_required", "Bad-debt VAT relief only supports posted standard invoices.");
+  }
+  if (
+    roundMoney(writeoffAmount) !== roundMoney(openItem.openAmount) ||
+    roundMoney(writeoffAmount) !== roundMoney(invoice.remainingAmount) ||
+    roundMoney(openItem.originalAmount) !== roundMoney(invoice.totals.grossAmount) ||
+    roundMoney(openItem.openAmount) !== roundMoney(invoice.totals.grossAmount)
+  ) {
+    throw createError(
+      409,
+      "bad_debt_vat_review_required",
+      "Bad-debt VAT relief currently requires a full write-off of an untouched unpaid invoice."
+    );
+  }
+  if (
+    roundMoney(openItem.paidAmount || 0) > 0 ||
+    roundMoney(openItem.creditedAmount || 0) > 0 ||
+    roundMoney(openItem.writeoffAmount || 0) > 0 ||
+    roundMoney(invoice.creditedAmount || 0) > 0
+  ) {
+    throw createError(
+      409,
+      "bad_debt_vat_review_required",
+      "Bad-debt VAT relief requires an unpaid invoice without prior settlements, credits or write-offs."
+    );
+  }
+
+  const accountingCurrencyCode = resolveLedgerFunctionalCurrencyCode({ ledgerPlatform, companyId });
+  const usesForeignCurrency = invoice.currencyCode !== accountingCurrencyCode;
+  const exchangeRate = usesForeignCurrency ? normalizePositiveNumber(invoice.exchangeRate, "invoice_exchange_rate_required") : null;
+  const functionalVatAmounts = usesForeignCurrency
+    ? allocateFunctionalVatAmounts({
+        invoice,
+        accountingCurrencyCode,
+        exchangeRate
+      })
+    : (invoice.lines || []).map((line) => calculateInvoiceLineOutputVatAmount(line));
+  const vatReliefLineMap = new Map();
+  const vatDecisionIds = [];
+  let totalVatReliefAmount = 0;
+  let totalFunctionalVatReliefAmount = 0;
+
+  for (const [index, line] of (invoice.lines || []).entries()) {
+    const vatAmount = calculateInvoiceLineOutputVatAmount(line);
+    if (vatAmount <= 0) {
+      continue;
+    }
+    if (!line.vatDecisionId) {
+      throw createError(
+        409,
+        "bad_debt_vat_review_required",
+        `Bad-debt VAT relief requires original VAT decision references for VAT-bearing line ${line.lineNumber}.`
+      );
+    }
+    const originalDecision = vatPlatform.getVatDecision({
+      companyId,
+      vatDecisionId: line.vatDecisionId
+    });
+    const vatDecisionResult = vatPlatform.evaluateVatDecision({
+      companyId,
+      actorId,
+      correlationId,
+      transactionLine: {
+        ...(originalDecision.transactionLine || {}),
+        source_type: "AR_BAD_DEBT_ADJUSTMENT",
+        source_id: `ar_writeoff_bad_debt:${openItem.arOpenItemId}:${writeoffDate}:${roundMoney(writeoffAmount)}:${line.lineId}`,
+        invoice_date: writeoffDate,
+        tax_date: writeoffDate,
+        credit_note_flag: false,
+        bad_debt_adjustment_flag: true,
+        original_vat_decision_id: line.vatDecisionId,
+        line_amount_ex_vat: originalDecision.transactionLine?.line_amount_ex_vat ?? line.lineAmount,
+        line_quantity: originalDecision.transactionLine?.line_quantity ?? line.quantity,
+        vat_rate: originalDecision.transactionLine?.vat_rate ?? line.vatEffectiveRate ?? resolveVatRate(vatPlatform, companyId, line.vatCode),
+        vat_code_candidate: originalDecision.transactionLine?.vat_code_candidate ?? line.vatCode,
+        project_id: originalDecision.transactionLine?.project_id ?? line.projectId ?? null
+      }
+    });
+    if (vatDecisionResult.reviewQueueItem || vatDecisionResult.vatDecision.status !== "decided") {
+      throw createError(
+        409,
+        "bad_debt_vat_review_required",
+        `Bad-debt VAT relief is blocked until VAT review is resolved for line ${line.lineNumber}.`
+      );
+    }
+
+    const vatAccountNumber = resolveOutputVatAccountNumber(line.vatEffectiveRate);
+    if (!vatAccountNumber) {
+      throw createError(
+        409,
+        "bad_debt_vat_review_required",
+        `Bad-debt VAT relief is missing an output VAT account for line ${line.lineNumber}.`
+      );
+    }
+    const functionalVatAmount = roundMoney(functionalVatAmounts[index] || 0);
+    const existingLine = vatReliefLineMap.get(vatAccountNumber) || {
+      accountNumber: vatAccountNumber,
+      amount: 0,
+      functionalAmount: 0,
+      vatDecisionIds: []
+    };
+    existingLine.amount = roundMoney(existingLine.amount + vatAmount);
+    existingLine.functionalAmount = roundMoney(existingLine.functionalAmount + functionalVatAmount);
+    existingLine.vatDecisionIds.push(vatDecisionResult.vatDecision.vatDecisionId);
+    vatReliefLineMap.set(vatAccountNumber, existingLine);
+    totalVatReliefAmount = roundMoney(totalVatReliefAmount + vatAmount);
+    totalFunctionalVatReliefAmount = roundMoney(totalFunctionalVatReliefAmount + functionalVatAmount);
+    vatDecisionIds.push(vatDecisionResult.vatDecision.vatDecisionId);
+  }
+
+  if (totalVatReliefAmount <= 0) {
+    throw createError(
+      409,
+      "bad_debt_vat_not_applicable",
+      "Bad-debt VAT relief can only be applied to invoices with output VAT."
+    );
+  }
+
+  const functionalWriteoffAmount = resolveFunctionalAmount({ amount: writeoffAmount, openItem });
+  const netLossAmount = roundMoney(writeoffAmount - totalVatReliefAmount);
+  const functionalNetLossAmount = roundMoney(functionalWriteoffAmount - totalFunctionalVatReliefAmount);
+  if (netLossAmount < 0 || functionalNetLossAmount < 0) {
+    throw createError(
+      409,
+      "bad_debt_vat_amount_invalid",
+      "Bad-debt VAT relief exceeds the write-off amount."
+    );
+  }
+
+  return {
+    vatDecisionIds,
+    vatReliefAmount: totalVatReliefAmount,
+    functionalVatReliefAmount: totalFunctionalVatReliefAmount,
+    functionalWriteoffAmount,
+    netLossAmount,
+    functionalNetLossAmount,
+    vatReliefLines: [...vatReliefLineMap.values()]
+  };
+}
+
+function buildWriteoffJournalLines({ openItem, ledgerAccountNumber, writeoffAmount, badDebtVatAdjustment = null }) {
   return [
-    createJournalLine(ledgerAccountNumber, 1, writeoffAmount, 0, "MANUAL_JOURNAL", openItem.arOpenItemId, buildOpenItemJournalOptions({
-      openItem,
-      debitAmount: writeoffAmount,
-      creditAmount: 0
-    })),
-    createJournalLine(resolveOpenItemReceivableAccount(openItem), 2, 0, writeoffAmount, "MANUAL_JOURNAL", openItem.arOpenItemId, buildOpenItemJournalOptions({
-      openItem,
-      debitAmount: 0,
-      creditAmount: writeoffAmount
-    }))
+    ...(badDebtVatAdjustment == null
+      ? [
+          createJournalLine(
+            ledgerAccountNumber,
+            1,
+            writeoffAmount,
+            0,
+            "MANUAL_JOURNAL",
+            openItem.arOpenItemId,
+            buildOpenItemJournalOptions({
+              openItem,
+              debitAmount: writeoffAmount,
+              creditAmount: 0
+            })
+          ),
+          createJournalLine(
+            resolveOpenItemReceivableAccount(openItem),
+            2,
+            0,
+            writeoffAmount,
+            "MANUAL_JOURNAL",
+            openItem.arOpenItemId,
+            buildOpenItemJournalOptions({
+              openItem,
+              debitAmount: 0,
+              creditAmount: writeoffAmount
+            })
+          )
+        ]
+      : buildBadDebtWriteoffJournalLines({
+          openItem,
+          ledgerAccountNumber,
+          writeoffAmount,
+          badDebtVatAdjustment
+        }))
   ];
+}
+
+function buildBadDebtWriteoffJournalLines({ openItem, ledgerAccountNumber, writeoffAmount, badDebtVatAdjustment }) {
+  const lines = [];
+  let lineNumber = 1;
+  if (badDebtVatAdjustment.netLossAmount > 0) {
+    lines.push(
+      createJournalLine(
+        ledgerAccountNumber,
+        lineNumber++,
+        badDebtVatAdjustment.netLossAmount,
+        0,
+        "MANUAL_JOURNAL",
+        openItem.arOpenItemId,
+        buildOpenItemJournalOptions({
+          openItem,
+          debitAmount: badDebtVatAdjustment.netLossAmount,
+          creditAmount: 0,
+          functionalDebitAmount: badDebtVatAdjustment.functionalNetLossAmount
+        })
+      )
+    );
+  }
+  for (const vatLine of badDebtVatAdjustment.vatReliefLines) {
+    lines.push(
+      createJournalLine(
+        vatLine.accountNumber,
+        lineNumber++,
+        vatLine.amount,
+        0,
+        "MANUAL_JOURNAL",
+        vatLine.vatDecisionIds[0] || openItem.arOpenItemId,
+        buildOpenItemJournalOptions({
+          openItem,
+          debitAmount: vatLine.amount,
+          creditAmount: 0,
+          functionalDebitAmount: vatLine.functionalAmount
+        })
+      )
+    );
+  }
+  lines.push(
+    createJournalLine(
+      resolveOpenItemReceivableAccount(openItem),
+      lineNumber,
+      0,
+      writeoffAmount,
+      "MANUAL_JOURNAL",
+      openItem.arOpenItemId,
+      buildOpenItemJournalOptions({
+        openItem,
+        debitAmount: 0,
+        creditAmount: writeoffAmount,
+        functionalCreditAmount: badDebtVatAdjustment.functionalWriteoffAmount
+      })
+    )
+  );
+  return lines;
 }
 
 function postArJournal({
@@ -3161,6 +3499,8 @@ function postArJournal({
   sourceId,
   sourceObjectVersion = null,
   actorId,
+  approvedByActorId = null,
+  approvedByRoleCode = null,
   idempotencyKey,
   description,
   lines
@@ -3177,6 +3517,8 @@ function postArJournal({
     sourceId,
     sourceObjectVersion,
     actorId,
+    approvedByActorId,
+    approvedByRoleCode,
     idempotencyKey,
     description,
     lines
@@ -3211,6 +3553,21 @@ function calculateLateInterestAmount(openAmount, dueOn, runDate, annualInterestR
     return 0;
   }
   return roundMoney((roundMoney(openAmount) * Number(annualInterestRatePercent || 0) * overdueDays) / 36500);
+}
+
+function resolveStatutoryInterestPercent(runDate) {
+  return roundMoney(resolveReferenceRatePercent(runDate) + DEFAULT_STATUTORY_INTEREST_PERCENT);
+}
+
+function resolveReferenceRatePercent(runDate) {
+  const resolvedRunDate = normalizeDate(runDate, "ar_reference_rate_date_invalid");
+  let matchedReferenceRate = 0;
+  for (const baseline of STATUTORY_REFERENCE_RATE_BASELINES) {
+    if (baseline.effectiveFrom <= resolvedRunDate) {
+      matchedReferenceRate = baseline.referenceRatePercent;
+    }
+  }
+  return matchedReferenceRate;
 }
 
 function firstDayOfMonthIso(date) {
@@ -3772,6 +4129,15 @@ function evaluateInvoiceFieldRulesSnapshot({
     (line) => resolveVatRate(vatPlatform, invoice.companyId, line.vatCode) > 0
   );
 
+  if (!invoice.sellerLegalName) {
+    missingFieldCodes.push("seller_identity");
+  }
+  if (!invoice?.sellerAddress?.line1 || !invoice?.sellerAddress?.postalCode || !invoice?.sellerAddress?.city) {
+    missingFieldCodes.push("seller_address");
+  }
+  if (!invoice.sellerVatNumber) {
+    missingFieldCodes.push("seller_vat_number");
+  }
   if (!invoice.issueDate) {
     missingFieldCodes.push("issue_date");
   }
@@ -3872,6 +4238,10 @@ function evaluateInvoiceFieldRulesSnapshot({
     evaluatedAt: nowIso(clock),
     evidence: {
       invoiceType: invoice.invoiceType,
+      sellerLegalName: invoice.sellerLegalName || null,
+      sellerOrganizationNumber: invoice.sellerOrganizationNumber || null,
+      sellerVatNumber: invoice.sellerVatNumber || null,
+      sellerAddress: copy(invoice.sellerAddress || null),
       customerCountryCode: customer.countryCode,
       invoiceLineVatCodes: (invoice.lines || []).map((line) => line.vatCode),
       revenueDimensions: (invoice.lines || []).map((line) => ({
@@ -3909,6 +4279,9 @@ function resolveInvoiceLegalScenarioCode({ invoice, customer }) {
 
 function collectRequiredInvoiceFieldCodes({ scenarioCode, invoice, customer, vatPlatform, ledgerPlatform = null }) {
   const requiredFieldCodes = [
+    "seller_identity",
+    "seller_address",
+    "seller_vat_number",
     "issue_date",
     "due_date",
     "supply_date",
@@ -4135,14 +4508,30 @@ function resolveAllocationFunctionalReceiptAmounts({
   };
 }
 
-function buildOpenItemJournalOptions({ openItem, debitAmount, creditAmount }) {
+function buildOpenItemJournalOptions({
+  openItem,
+  debitAmount,
+  creditAmount,
+  functionalDebitAmount = null,
+  functionalCreditAmount = null
+}) {
   const functionalCurrencyCode = openItem.functionalCurrencyCode || "SEK";
   const usesForeignCurrency = (openItem.currencyCode || functionalCurrencyCode) !== functionalCurrencyCode;
   return {
     currencyCode: openItem.currencyCode || functionalCurrencyCode,
     exchangeRate: usesForeignCurrency ? Number(openItem.functionalExchangeRate || 1) : null,
-    functionalDebitAmount: usesForeignCurrency ? resolveFunctionalAmount({ amount: debitAmount, openItem }) : roundMoney(debitAmount),
-    functionalCreditAmount: usesForeignCurrency ? resolveFunctionalAmount({ amount: creditAmount, openItem }) : roundMoney(creditAmount)
+    functionalDebitAmount:
+      functionalDebitAmount != null
+        ? roundMoney(functionalDebitAmount)
+        : usesForeignCurrency
+          ? resolveFunctionalAmount({ amount: debitAmount, openItem })
+          : roundMoney(debitAmount),
+    functionalCreditAmount:
+      functionalCreditAmount != null
+        ? roundMoney(functionalCreditAmount)
+        : usesForeignCurrency
+          ? resolveFunctionalAmount({ amount: creditAmount, openItem })
+          : roundMoney(creditAmount)
   };
 }
 
@@ -4889,6 +5278,118 @@ function normalizeOptionalText(value) {
     return null;
   }
   return String(value).trim();
+}
+
+function resolveInvoiceSellerSnapshot({
+  companyId,
+  sellerLegalName = null,
+  sellerOrganizationNumber = null,
+  sellerVatNumber = null,
+  sellerAddress = null,
+  orgAuthPlatform = null,
+  companyProfilesById = null
+} = {}) {
+  const companyProfile = resolveCompanyProfileSnapshot({ companyId, orgAuthPlatform, companyProfilesById });
+  const address =
+    normalizeOptionalAddress(
+      sellerAddress
+      || companyProfile?.address
+      || companyProfile?.businessAddress
+      || companyProfile?.registeredAddress
+      || companyProfile?.settingsJson?.businessAddress
+      || companyProfile?.settingsJson?.registeredAddress
+      || companyProfile?.settingsJson?.invoiceAddress
+      || null,
+      "invoice_seller_address_invalid"
+    );
+  const organizationNumber = normalizeCustomerOrganizationNumber(
+    address?.countryCode || "SE",
+    sellerOrganizationNumber ?? companyProfile?.orgNumber ?? companyProfile?.organizationNumber ?? null
+  );
+  const derivedVatNumber =
+    sellerVatNumber
+    || companyProfile?.vatNumber
+    || companyProfile?.settingsJson?.vatNumber
+    || deriveSwedishVatNumberFromOrganizationNumber(address?.countryCode || "SE", organizationNumber);
+  return {
+    legalName: requireOptionalTextOrNull(
+      sellerLegalName ?? companyProfile?.legalName ?? null,
+      "invoice_seller_legal_name_invalid"
+    ),
+    organizationNumber,
+    vatNumber: normalizeOptionalVatNumber(derivedVatNumber, "invoice_seller_vat_number_invalid", {
+      errorFactory: createError,
+      countryCode: address?.countryCode || "SE"
+    }),
+    address
+  };
+}
+
+function resolveCompanyProfileSnapshot({ companyId, orgAuthPlatform = null, companyProfilesById = null } = {}) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  if (orgAuthPlatform?.getCompanyProfile) {
+    try {
+      return copy(orgAuthPlatform.getCompanyProfile({ companyId: resolvedCompanyId }));
+    } catch {
+      // Fall through to explicit fixtures when AR is used outside the full platform.
+    }
+  }
+  if (companyProfilesById instanceof Map) {
+    return copy(companyProfilesById.get(resolvedCompanyId) || null);
+  }
+  if (companyProfilesById && typeof companyProfilesById === "object") {
+    return copy(companyProfilesById[resolvedCompanyId] || null);
+  }
+  return null;
+}
+
+function requireOptionalTextOrNull(value, code) {
+  const normalized = normalizeOptionalText(value);
+  if (normalized === null) {
+    return null;
+  }
+  return requireText(normalized, code);
+}
+
+function normalizeOptionalAddress(address, code) {
+  if (address === null || address === undefined) {
+    return null;
+  }
+  return normalizeAddress(address, code);
+}
+
+function deriveSwedishVatNumberFromOrganizationNumber(countryCode, organizationNumber) {
+  if (normalizeOptionalText(countryCode)?.toUpperCase() !== "SE" || !organizationNumber) {
+    return null;
+  }
+  const digits = String(organizationNumber).replace(/\D+/g, "");
+  if (digits.length !== 10) {
+    return null;
+  }
+  return `SE${digits}01`;
+}
+
+function buildInvoiceOcrReference(sequenceNumber) {
+  const payload = String(normalizePositiveInteger(sequenceNumber, "invoice_sequence_number_invalid")).padStart(9, "0");
+  return `${payload}${calculateMod10CheckDigit(payload)}`;
+}
+
+function calculateMod10CheckDigit(digits) {
+  const normalizedDigits = String(digits || "").replace(/\D+/g, "");
+  let sum = 0;
+  let doubleDigit = true;
+  for (let index = normalizedDigits.length - 1; index >= 0; index -= 1) {
+    let digit = Number(normalizedDigits[index]);
+    if (doubleDigit) {
+      digit *= 2;
+      if (digit > 9) {
+        digit -= 9;
+      }
+    }
+    sum += digit;
+    doubleDigit = !doubleDigit;
+  }
+  return String((10 - (sum % 10)) % 10);
 }
 
 function normalizeEmail(value) {

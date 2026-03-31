@@ -10,8 +10,14 @@ import { createVatPlatform } from "../../packages/domain-vat/src/index.mjs";
 import { createArPlatform } from "../../packages/domain-ar/src/index.mjs";
 import { createPayrollPlatform } from "../../packages/domain-payroll/src/index.mjs";
 import { createProjectsPlatform } from "../../packages/domain-projects/src/index.mjs";
+import { buildTestCompanyProfile } from "../helpers/company-profiles.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const AR_TEST_PLATFORM_OPTIONS = {
+  companyProfilesById: {
+    [COMPANY_ID]: buildTestCompanyProfile(COMPANY_ID)
+  }
+};
 let employeeEmailCounter = 0;
 
 test("Phase 10.1 combines salary, benefits, pension and travel into project actuals, WIP and forecast", () => {
@@ -298,7 +304,8 @@ function createProjectsFixture() {
   const arPlatform = createArPlatform({
     clock: () => fixedNow,
     vatPlatform,
-    ledgerPlatform
+    ledgerPlatform,
+    ...AR_TEST_PLATFORM_OPTIONS
   });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,

@@ -2682,6 +2682,8 @@ export function createLedgerEngine({
     sourceObjectVersion = null,
     description = null,
     actorId,
+    approvedByActorId = null,
+    approvedByRoleCode = null,
     idempotencyKey,
     lines,
     currencyCode = DEFAULT_LEDGER_CURRENCY,
@@ -2735,6 +2737,8 @@ export function createLedgerEngine({
       companyId,
       journalEntryId: validated.journalEntry.journalEntryId,
       actorId,
+      approvedByActorId,
+      approvedByRoleCode,
       correlationId
     });
     return {

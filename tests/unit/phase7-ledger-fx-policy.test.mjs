@@ -4,8 +4,14 @@ import { createLedgerPlatform } from "../../packages/domain-ledger/src/index.mjs
 import { createArEngine } from "../../packages/domain-ar/src/index.mjs";
 import { createApEngine } from "../../packages/domain-ap/src/index.mjs";
 import { createIntegrationEngine } from "../../packages/domain-integrations/src/index.mjs";
+import { buildTestCompanyProfile } from "../helpers/company-profiles.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const AR_TEST_ENGINE_OPTIONS = {
+  companyProfilesById: {
+    [COMPANY_ID]: buildTestCompanyProfile(COMPANY_ID)
+  }
+};
 
 test("Phase 7.4 books foreign-currency manual journals in accounting currency and preserves original currency metadata", () => {
   const ledger = createLedgerPlatform({
@@ -121,7 +127,8 @@ test("Phase 7.4 realizes FX gains on AR settlement while keeping the open item i
     clock,
     seedDemo: false,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "tester" });
   ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "tester" });

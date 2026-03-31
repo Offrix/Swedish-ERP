@@ -74,6 +74,7 @@ const REQUIRED_DECISION_FIELDS = Object.freeze([
 
 const OPTIONAL_DECISION_FIELDS = Object.freeze([
   "credit_note_flag",
+  "bad_debt_adjustment_flag",
   "original_vat_decision_id",
   "deduction_ratio",
   "ecb_exchange_rate_to_eur",
@@ -1073,6 +1074,10 @@ function classifyVatDecision({ companyId, normalizedLine, rulePack, state }) {
     return classifyCreditNoteMirror({ companyId, normalizedLine, rulePack, state });
   }
 
+  if (normalizedLine.bad_debt_adjustment_flag === true) {
+    return classifyBadDebtAdjustment({ companyId, normalizedLine, rulePack, state });
+  }
+
   if (normalizedLine.deduction_ratio !== null && (normalizedLine.deduction_ratio < 0 || normalizedLine.deduction_ratio > 1)) {
     return buildReviewDecision({
       normalizedLine,
@@ -1265,6 +1270,92 @@ function classifyCreditNoteMirror({ companyId, normalizedLine, rulePack, state }
   };
 }
 
+function classifyBadDebtAdjustment({ companyId, normalizedLine, rulePack, state }) {
+  if (!normalizedLine.original_vat_decision_id) {
+    return buildReviewDecision({
+      normalizedLine,
+      rulePack,
+      reviewReasonCode: "missing_original_vat_decision",
+      warningCode: "missing_original_vat_decision",
+      warningMessage: "Bad-debt VAT adjustment requires original_vat_decision_id.",
+      explanation: [
+        `rule_pack_id=${rulePack.rulePackId}`,
+        "Decision routed to manual review because the bad-debt adjustment does not reference an original VAT decision."
+      ]
+    });
+  }
+
+  const originalDecision = state.vatDecisions.get(normalizedLine.original_vat_decision_id);
+  if (!originalDecision || originalDecision.companyId !== companyId) {
+    return buildReviewDecision({
+      normalizedLine,
+      rulePack,
+      reviewReasonCode: "original_vat_decision_missing",
+      warningCode: "original_vat_decision_missing",
+      warningMessage: `Original VAT decision ${normalizedLine.original_vat_decision_id} was not found for bad-debt adjustment.`,
+      explanation: [
+        `rule_pack_id=${rulePack.rulePackId}`,
+        `original_vat_decision_id=${normalizedLine.original_vat_decision_id}`,
+        "Decision routed to manual review because the original VAT decision could not be found."
+      ]
+    });
+  }
+
+  const originalPostingEntries = originalDecision.outputs?.postingEntries || originalDecision.postingEntries || [];
+  const originalDeclarationBoxAmounts =
+    originalDecision.outputs?.declarationBoxAmounts || originalDecision.declarationBoxAmounts || [];
+  const outputVatAmount = roundMoney(
+    originalPostingEntries.reduce(
+      (sum, entry) => (entry?.vatEffect === "output_vat" ? sum + Math.abs(Number(entry.amount || 0)) : sum),
+      0
+    )
+  );
+  if (outputVatAmount <= 0) {
+    return buildReviewDecision({
+      normalizedLine,
+      rulePack,
+      reviewReasonCode: "original_vat_decision_not_output_vat",
+      warningCode: "original_vat_decision_not_output_vat",
+      warningMessage: "Bad-debt VAT adjustment requires an original decision with output VAT.",
+      explanation: [
+        `rule_pack_id=${rulePack.rulePackId}`,
+        `original_vat_decision_id=${normalizedLine.original_vat_decision_id}`,
+        "Decision routed to manual review because the original VAT decision does not contain output VAT to reverse."
+      ]
+    });
+  }
+
+  const outputs = {
+    ...copy(originalDecision.outputs || {}),
+    decisionCategory: "bad_debt_adjustment",
+    declarationBoxAmounts: invertAmounts(originalDeclarationBoxAmounts),
+    postingEntries: invertAmounts(originalPostingEntries),
+    declarationBoxCodes: uniqueBoxCodes(originalDeclarationBoxAmounts),
+    invoiceTextRequirements: []
+  };
+  const decision = createVatDecision({
+    normalizedLine,
+    rulePack,
+    decisionCode: originalDecision.vatCode,
+    outputs,
+    warnings: [],
+    explanation: [
+      `rule_pack_id=${rulePack.rulePackId}`,
+      `mirrored_original_vat_decision_id=${normalizedLine.original_vat_decision_id}`,
+      `original_vat_code=${originalDecision.vatCode}`,
+      "Bad-debt VAT adjustment mirrored the original VAT decision with inverted declaration-box amounts and posting entries."
+    ],
+    needsManualReview: false
+  });
+
+  return {
+    decision,
+    outputs,
+    reviewReasonCode: null,
+    reviewQueueCode: null
+  };
+}
+
 function createVatDecision({ normalizedLine, rulePack, decisionCode, outputs, warnings, explanation, needsManualReview }) {
   return {
     decisionCode,
@@ -1325,6 +1416,7 @@ function normalizeTransactionLine(transactionLine) {
   normalized.construction_service_flag = normalizeOptionalBoolean(candidate.construction_service_flag);
   normalized.buyer_is_taxable_person = normalizeOptionalBoolean(candidate.buyer_is_taxable_person);
   normalized.credit_note_flag = normalizeOptionalBoolean(candidate.credit_note_flag);
+  normalized.bad_debt_adjustment_flag = normalizeOptionalBoolean(candidate.bad_debt_adjustment_flag);
   normalized.original_vat_decision_id =
     typeof candidate.original_vat_decision_id === "string" ? candidate.original_vat_decision_id.trim() : null;
   normalized.deduction_ratio = normalizeOptionalNumber(candidate.deduction_ratio);

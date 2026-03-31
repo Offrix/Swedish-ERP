@@ -346,13 +346,14 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "ar",
     label: "Accounts receivable",
     packageName: "@swedish-erp/domain-ar",
-    dependsOn: ["vat", "ledger", "integrations"],
+    dependsOn: ["vat", "ledger", "integrations", "orgAuth"],
     create: ({ options, dependencies }) =>
       createArPlatform({
         ...options,
         vatPlatform: dependencies.vat,
         ledgerPlatform: dependencies.ledger,
-        integrationPlatform: dependencies.integrations
+        integrationPlatform: dependencies.integrations,
+        orgAuthPlatform: dependencies.orgAuth
       })
   }),
   createDomainDefinition({

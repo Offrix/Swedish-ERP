@@ -5,8 +5,14 @@ import { createVatPlatform } from "../../packages/domain-vat/src/index.mjs";
 import { createArPlatform } from "../../packages/domain-ar/src/index.mjs";
 import { createEvidencePlatform } from "../../packages/domain-evidence/src/index.mjs";
 import { createProjectsPlatform } from "../../packages/domain-projects/src/index.mjs";
+import { buildTestCompanyProfile } from "../helpers/company-profiles.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const AR_TEST_PLATFORM_OPTIONS = {
+  companyProfilesById: {
+    [COMPANY_ID]: buildTestCompanyProfile(COMPANY_ID)
+  }
+};
 
 test("Phase 14.2 accepted quote handoff creates canonical project links, plans and status chain", () => {
   const { arPlatform, projectsPlatform, quote } = createQuoteHandoffFixture();
@@ -101,7 +107,8 @@ function createQuoteHandoffFixture() {
   const arPlatform = createArPlatform({
     clock,
     vatPlatform,
-    ledgerPlatform
+    ledgerPlatform,
+    ...AR_TEST_PLATFORM_OPTIONS
   });
   const evidencePlatform = createEvidencePlatform({ clock });
   const projectsPlatform = createProjectsPlatform({

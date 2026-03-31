@@ -15,8 +15,14 @@ import { createHusPlatform } from "../../packages/domain-hus/src/index.mjs";
 import { createPersonalliggarePlatform } from "../../packages/domain-personalliggare/src/index.mjs";
 import { createEgenkontrollPlatform } from "../../packages/domain-egenkontroll/src/index.mjs";
 import { createKalkylPlatform } from "../../packages/domain-kalkyl/src/index.mjs";
+import { buildTestCompanyProfile } from "../helpers/company-profiles.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const AR_TEST_PLATFORM_OPTIONS = {
+  companyProfilesById: {
+    [COMPANY_ID]: buildTestCompanyProfile(COMPANY_ID)
+  }
+};
 let employeeEmailCounter = 0;
 
 test("Step 32 project workspace aggregates field, HUS, personalliggare, egenkontroll and kalkyl signals", () => {
@@ -440,7 +446,8 @@ function createProjectWorkspaceFixture() {
   const arPlatform = createArPlatform({
     clock,
     vatPlatform,
-    ledgerPlatform
+    ledgerPlatform,
+    ...AR_TEST_PLATFORM_OPTIONS
   });
   const payrollPlatform = createPayrollPlatform({
     clock,

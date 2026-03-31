@@ -3,8 +3,15 @@ import assert from "node:assert/strict";
 import { createArEngine } from "../../packages/domain-ar/src/index.mjs";
 import { createLedgerPlatform } from "../../packages/domain-ledger/src/index.mjs";
 import { createIntegrationEngine } from "../../packages/domain-integrations/src/index.mjs";
+import { createVatPlatform } from "../../packages/domain-vat/src/index.mjs";
+import { buildTestCompanyProfile } from "../helpers/company-profiles.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const AR_TEST_ENGINE_OPTIONS = {
+  companyProfilesById: {
+    [COMPANY_ID]: buildTestCompanyProfile(COMPANY_ID)
+  }
+};
 
 test("Phase 5.3 creates open items, handles partial payments and captures deterministic aging", () => {
   const clock = () => new Date("2026-08-01T09:00:00Z");
@@ -14,7 +21,8 @@ test("Phase 5.3 creates open items, handles partial payments and captures determ
     clock,
     seedDemo: false,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
   ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
@@ -90,7 +98,8 @@ test("Phase 5.3 bank matching keeps overpayments in unmatched receipts and marks
     clock,
     seedDemo: false,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
   ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
@@ -144,7 +153,8 @@ test("Phase 5.3 can reverse a mis-match and reopen the open item without losing 
     clock,
     seedDemo: false,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
   ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
@@ -206,7 +216,8 @@ test("Phase 5.3 blocks dunning on held disputes and books deterministic reminder
     clock,
     seedDemo: false,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
   ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
@@ -242,8 +253,10 @@ test("Phase 5.3 blocks dunning on held disputes and books deterministic reminder
   });
   assert.equal(bookedRun.summary.items, 1);
   assert.equal(bookedRun.summary.feesGenerated, 1);
+  assert.equal(bookedRun.items[0].feeAmount, 60);
+  assert.equal(bookedRun.items[0].interestAmount, 9.59);
   assert.equal(afterDunning.collectionStageCode, "stage_1");
-  assert.equal(afterDunning.openAmount > 1000, true);
+  assert.equal(afterDunning.openAmount, 1319.59);
 
   ar.updateOpenItemCollectionState({
     companyId: COMPANY_ID,
@@ -259,6 +272,147 @@ test("Phase 5.3 blocks dunning on held disputes and books deterministic reminder
   });
   assert.equal(skippedRun.summary.skipped, 1);
   assert.equal(skippedRun.items[0].skipReasonCode, "dunning_hold");
+});
+
+test("Phase 8.1 posts full-invoice bad debt VAT relief as split loss and VAT journal lines", () => {
+  const clock = () => new Date("2026-09-01T08:00:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const vat = createVatPlatform({ clock, ledgerPlatform: ledger });
+  const integrations = createIntegrationEngine({ clock });
+  const ar = createArEngine({
+    clock,
+    seedDemo: false,
+    vatPlatform: vat,
+    ledgerPlatform: ledger,
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
+  vat.installVatCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+
+  const customer = createCustomer(ar);
+  const item = createItem(ar);
+  const invoice = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-07-01",
+    dueDate: "2026-07-31",
+    currencyCode: "SEK",
+    lines: [{ itemId: item.arItemId, quantity: 1, unitPrice: 1000 }],
+    actorId: "user-1"
+  });
+  ar.issueInvoice({
+    companyId: COMPANY_ID,
+    customerInvoiceId: invoice.customerInvoiceId,
+    actorId: "user-1"
+  });
+  const openItem = ar.listOpenItems({ companyId: COMPANY_ID })[0];
+
+  const writeoff = ar.createWriteoff({
+    companyId: COMPANY_ID,
+    arOpenItemId: openItem.arOpenItemId,
+    writeoffAmount: 1250,
+    writeoffDate: "2026-09-01",
+    reasonCode: "confirmed_customer_loss",
+    applyBadDebtVatRelief: true,
+    policyLimitAmount: 2000,
+    approvedByActorId: "finance-approver-1",
+    approvedByRoleCode: "finance_manager",
+    actorId: "user-1"
+  });
+  const journal = ledger.getJournalEntry({
+    companyId: COMPANY_ID,
+    journalEntryId: writeoff.journalEntryId
+  });
+  const vatDecision = vat.getVatDecision({
+    companyId: COMPANY_ID,
+    vatDecisionId: writeoff.badDebtVatDecisionIds[0]
+  });
+  const writtenOffOpenItem = ar.getOpenItem({
+    companyId: COMPANY_ID,
+    arOpenItemId: openItem.arOpenItemId
+  });
+
+  assert.equal(writeoff.badDebtVatReliefApplied, true);
+  assert.equal(writeoff.badDebtVatReliefAmount, 250);
+  assert.equal(writeoff.badDebtVatDecisionIds.length, 1);
+  assert.equal(vatDecision.decisionCategory, "bad_debt_adjustment");
+  assert.equal(sumJournalAmount(journal, "6900", "debit"), 1000);
+  assert.equal(sumJournalAmount(journal, "2610", "debit"), 250);
+  assert.equal(sumJournalAmount(journal, "1210", "credit"), 1250);
+  assert.equal(writtenOffOpenItem.status, "written_off");
+  assert.equal(writtenOffOpenItem.openAmount, 0);
+  assert.equal(journal.metadataJson.postingApprovalApprovedByActorId, "finance-approver-1");
+  assert.equal(journal.metadataJson.postingApprovalRoleCode, "finance_manager");
+});
+
+test("Phase 8.1 blocks automatic bad debt VAT relief after partial settlement", () => {
+  const clock = () => new Date("2026-09-02T08:00:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const vat = createVatPlatform({ clock, ledgerPlatform: ledger });
+  const integrations = createIntegrationEngine({ clock });
+  const ar = createArEngine({
+    clock,
+    seedDemo: false,
+    vatPlatform: vat,
+    ledgerPlatform: ledger,
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
+  vat.installVatCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+
+  const customer = createCustomer(ar);
+  const item = createItem(ar);
+  const invoice = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-07-01",
+    dueDate: "2026-07-31",
+    currencyCode: "SEK",
+    lines: [{ itemId: item.arItemId, quantity: 1, unitPrice: 1000 }],
+    actorId: "user-1"
+  });
+  ar.issueInvoice({
+    companyId: COMPANY_ID,
+    customerInvoiceId: invoice.customerInvoiceId,
+    actorId: "user-1"
+  });
+  const openItem = ar.listOpenItems({ companyId: COMPANY_ID })[0];
+  ar.createOpenItemAllocation({
+    companyId: COMPANY_ID,
+    arOpenItemId: openItem.arOpenItemId,
+    allocationAmount: 500,
+    receiptAmount: 500,
+    allocatedOn: "2026-08-01",
+    sourceChannel: "manual",
+    bankTransactionUid: "bank-txn-bad-debt-block",
+    reasonCode: "partial_payment",
+    actorId: "user-1"
+  });
+  const partiallySettled = ar.getOpenItem({
+    companyId: COMPANY_ID,
+    arOpenItemId: openItem.arOpenItemId
+  });
+
+  assert.throws(
+    () =>
+      ar.createWriteoff({
+        companyId: COMPANY_ID,
+        arOpenItemId: partiallySettled.arOpenItemId,
+        writeoffAmount: 750,
+        writeoffDate: "2026-09-02",
+        reasonCode: "confirmed_customer_loss",
+        applyBadDebtVatRelief: true,
+        policyLimitAmount: 2000,
+        actorId: "user-1"
+      }),
+    (error) => error?.code === "bad_debt_vat_review_required"
+  );
 });
 
 function createCustomer(ar, overrides = {}) {
@@ -299,4 +453,10 @@ function createItem(ar) {
     vatCode: "VAT_SE_DOMESTIC_25",
     recurringFlag: true
   });
+}
+
+function sumJournalAmount(journal, accountNumber, side) {
+  return journal.lines
+    .filter((line) => line.accountNumber === accountNumber)
+    .reduce((sum, line) => sum + Number(side === "debit" ? line.debitAmount || 0 : line.creditAmount || 0), 0);
 }

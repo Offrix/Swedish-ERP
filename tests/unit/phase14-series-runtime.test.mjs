@@ -10,8 +10,14 @@ import { createHrPlatform } from "../../packages/domain-hr/src/index.mjs";
 import { createTimePlatform } from "../../packages/domain-time/src/index.mjs";
 import { createBankingPlatform } from "../../packages/domain-banking/src/index.mjs";
 import { createPayrollPlatform } from "../../packages/domain-payroll/src/index.mjs";
+import { buildTestCompanyProfile } from "../helpers/company-profiles.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const AR_TEST_ENGINE_OPTIONS = {
+  companyProfilesById: {
+    [COMPANY_ID]: buildTestCompanyProfile(COMPANY_ID)
+  }
+};
 
 test("Step 10 ledger voucher series resolves by purpose and preserves imported numbering", () => {
   const ledger = createLedgerPlatform({
@@ -76,7 +82,8 @@ test("Step 10 AR invoice numbering and ledger voucher series are configurable in
     seedDemo: false,
     vatPlatform: vat,
     ledgerPlatform: ledger,
-    integrationPlatform: integrations
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
   });
 
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "unit-test" });

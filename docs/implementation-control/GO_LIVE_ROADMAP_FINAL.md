@@ -573,7 +573,7 @@ AR/AP kan utvecklas parallellt efter VAT truth model är låst; banking/tax acco
 Ingen live fakturering, leverantörsbetalning, VAT filing eller bankautomation före full source-of-truth-kedja.
 
 **Delfaser**  
-- [ ] 8.1 [REWRITE] AR state machine härdas: draft->issued->partially_paid->paid->credited->written_off, med riktiga invoice requirements, advance payments, credit notes, bad debt VAT, OCR-kontroll och dröjsmålsränta enligt referensränta + 8.
+- [x] 8.1 [REWRITE] AR state machine härdas: draft->issued->partially_paid->paid->credited->written_off, med riktiga invoice requirements, advance payments, credit notes, bad debt VAT, OCR-kontroll och dröjsmålsränta enligt referensränta + 8.
 - [ ] 8.2 [REWRITE] AP state machine härdas: domestic VAT går genom riktig `VatDecision`, F-skatt/A-skatt-konsekvenser modelleras, credits och payment blocks/release blir explicita.
 - [ ] 8.3 [REWRITE][HARDEN] VAT truth model gör `VatDecision` obligatoriskt för alla VAT-affecting events; `GR`/`EL`, VIES, reverse charge-undantag, OSS, import VAT, pro rata och blocked deductions implementeras i scenariomotorn.
 - [ ] 8.4 [NEW BUILD] Banking får statement/event core för avgifter, räntor, settlements och matchning, inte bara AP-disbursement rail.

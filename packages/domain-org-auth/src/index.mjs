@@ -4413,7 +4413,21 @@ function seedDemoState(state, clock, authSecretStore) {
       chartTemplateId: DEFAULT_CHART_TEMPLATE_ID,
       vatScheme: DEFAULT_VAT_SCHEME,
       vatFilingPeriod: DEFAULT_VAT_FILING_PERIOD,
-      accountingYear: "2026"
+      accountingYear: "2026",
+      businessAddress: {
+        line1: "Sveavagen 10",
+        line2: null,
+        postalCode: "11157",
+        city: "Stockholm",
+        countryCode: "SE"
+      },
+      invoiceAddress: {
+        line1: "Sveavagen 10",
+        line2: null,
+        postalCode: "11157",
+        city: "Stockholm",
+        countryCode: "SE"
+      }
     },
     createdAt: now,
     updatedAt: now
