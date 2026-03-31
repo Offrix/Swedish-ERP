@@ -1341,13 +1341,25 @@ function createTextExportArtifact(exportCode, fileName, payloadText, checks = []
 }
 
 function resolveAnnualProviderBaselineRef(providerBaselineRegistry, { providerCode, baselineCode, effectiveDate, metadata = {} }) {
-  const providerBaseline = providerBaselineRegistry.resolveProviderBaseline({
-    domain: "annual_reporting",
-    jurisdiction: "SE",
-    providerCode,
-    baselineCode,
-    effectiveDate
-  });
+  let providerBaseline = null;
+  try {
+    providerBaseline = providerBaselineRegistry.resolveProviderBaseline({
+      domain: "annual_reporting",
+      jurisdiction: "SE",
+      providerCode,
+      baselineCode,
+      effectiveDate
+    });
+  } catch {
+    providerBaseline = null;
+  }
+  if (!providerBaseline) {
+    throw error(
+      409,
+      "annual_reporting_provider_baseline_missing",
+      `Annual reporting requires a pinned provider baseline ref for ${providerCode}/${baselineCode} on ${effectiveDate}.`
+    );
+  }
   return providerBaselineRegistry.buildProviderBaselineRef({
     effectiveDate,
     providerBaseline,
@@ -1358,11 +1370,12 @@ function resolveAnnualProviderBaselineRef(providerBaselineRegistry, { providerCo
 function dedupeProviderBaselineRefs(values = []) {
   const refs = [];
   for (const candidate of values) {
-    if (!candidate?.providerBaselineId) {
+    if (!candidate?.providerBaselineId && !candidate?.baselineCode && !candidate?.providerBaselineCode) {
       continue;
     }
-    if (!refs.some((existing) => existing.providerBaselineId === candidate.providerBaselineId)) {
-      refs.push(clone(candidate));
+    const normalized = normalizePinnedAnnualProviderBaselineRef(candidate);
+    if (!refs.some((existing) => existing.providerBaselineId === normalized.providerBaselineId)) {
+      refs.push(clone(normalized));
     }
   }
   return refs;
@@ -1644,9 +1657,16 @@ function requirePinnedAnnualProviderBaselineRef(providerBaselineRef, exportCode)
       `Annual reporting export ${exportCode} requires a pinned provider baseline ref.`
     );
   }
+  return normalizePinnedAnnualProviderBaselineRef(providerBaselineRef);
+}
+
+function normalizePinnedAnnualProviderBaselineRef(providerBaselineRef) {
   return {
     providerBaselineId: text(providerBaselineRef.providerBaselineId, "annual_reporting_provider_baseline_id_required"),
-    baselineCode: text(providerBaselineRef.baselineCode, "annual_reporting_provider_baseline_code_required"),
+    baselineCode: text(
+      providerBaselineRef.baselineCode || providerBaselineRef.providerBaselineCode,
+      "annual_reporting_provider_baseline_code_required"
+    ),
     providerCode: text(providerBaselineRef.providerCode, "annual_reporting_provider_code_required"),
     providerBaselineVersion: text(
       providerBaselineRef.providerBaselineVersion,
@@ -1655,7 +1675,15 @@ function requirePinnedAnnualProviderBaselineRef(providerBaselineRef, exportCode)
     providerBaselineChecksum: text(
       providerBaselineRef.providerBaselineChecksum,
       "annual_reporting_provider_baseline_checksum_required"
-    )
+    ),
+    domain: normalizeText(providerBaselineRef.domain),
+    jurisdiction: normalizeText(providerBaselineRef.jurisdiction),
+    selectionMode: normalizeText(providerBaselineRef.selectionMode),
+    effectiveDate: normalizeText(providerBaselineRef.effectiveDate),
+    specVersion: normalizeText(providerBaselineRef.specVersion),
+    formatFamily: normalizeText(providerBaselineRef.formatFamily),
+    metadata: clone(providerBaselineRef.metadata || {}),
+    rollbackId: normalizeText(providerBaselineRef.rollbackId)
   };
 }
 

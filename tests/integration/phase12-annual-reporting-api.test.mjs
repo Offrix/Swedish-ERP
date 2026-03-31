@@ -78,6 +78,8 @@ test("Phase 12.1 API creates annual report package, signs it and versions change
       annualPackage.currentVersion.providerBaselineRefs.map((entry) => entry.providerBaselineId),
       ["annual-ixbrl-se-2026.1"]
     );
+    assert.equal(typeof annualPackage.currentVersion.providerBaselineRefs[0].providerBaselineVersion, "string");
+    assert.equal(typeof annualPackage.currentVersion.providerBaselineRefs[0].providerBaselineChecksum, "string");
 
     const listed = await requestJson(`${baseUrl}/v1/annual-reporting/packages?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken

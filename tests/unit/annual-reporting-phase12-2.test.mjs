@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { createIntegrationPlatform } from "../../packages/domain-integrations/src/index.mjs";
 import { DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import { createProviderBaselineRegistry } from "../../packages/rule-engine/src/index.mjs";
+import { PAYROLL_PROVIDER_BASELINES } from "../../packages/domain-payroll/src/index.mjs";
 
 const FIXED_NOW = new Date("2026-03-22T16:30:00Z");
 const COMPANY_ID = DEMO_IDS.companyId;
@@ -64,6 +66,8 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
     annualPackage.currentVersion.providerBaselineRefs.map((entry) => entry.baselineCode),
     ["SE-IXBRL-FILING"]
   );
+  assert.equal(typeof annualPackage.currentVersion.providerBaselineRefs[0].providerBaselineVersion, "string");
+  assert.equal(typeof annualPackage.currentVersion.providerBaselineRefs[0].providerBaselineChecksum, "string");
 
   const authorityOverview = platform.getAnnualAuthorityOverview({
     companyId: COMPANY_ID,
@@ -132,6 +136,8 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
     taxPackage.providerBaselineRefs.map((entry) => entry.baselineCode).sort(),
     ["SE-ANNUAL-DECLARATION-JSON", "SE-AUTHORITY-AUDIT-JSON", "SE-SRU-FILE"]
   );
+  assert.equal(taxPackage.providerBaselineRefs.every((entry) => typeof entry.providerBaselineVersion === "string"), true);
+  assert.equal(taxPackage.providerBaselineRefs.every((entry) => typeof entry.providerBaselineChecksum === "string"), true);
   assert.equal(taxPackage.exports.every((entry) => typeof entry.providerBaselineChecksum === "string"), true);
   assert.equal(
     taxPackage.exports.find((entry) => entry.exportCode === "sru_rows_csv").providerBaselineCode,
@@ -163,6 +169,61 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
   assert.equal(second.taxDeclarationPackageId, taxPackage.taxDeclarationPackageId);
   assert.equal(second.outputChecksum, taxPackage.outputChecksum);
   assert.deepEqual(second.providerBaselineRefs, taxPackage.providerBaselineRefs);
+});
+
+test("Phase 5.4 annual reporting fails fast when provider baseline pinning is unavailable", () => {
+  const platform = createApiPlatform({
+    clock: () => FIXED_NOW,
+    providerBaselineRegistry: createProviderBaselineRegistry({
+      clock: () => FIXED_NOW,
+      seedProviderBaselines: PAYROLL_PROVIDER_BASELINES
+    })
+  });
+
+  platform.installLedgerCatalog({
+    companyId: COMPANY_ID,
+    actorId: "phase12-2-unit"
+  });
+
+  const period = platform.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
+    actorId: "phase12-2-unit"
+  });
+
+  postJournal(platform, "phase12-2-missing-baseline-income", 12000);
+  materializeVatOverview(platform);
+  materializePayrollAndAgiOverview(platform);
+  materializeHusOverview(platform);
+
+  platform.lockAccountingPeriod({
+    companyId: COMPANY_ID,
+    accountingPeriodId: period.accountingPeriodId,
+    status: "hard_closed",
+    actorId: "phase12-2-close-requester",
+    reasonCode: "annual_reporting_ready",
+    approvedByActorId: DEMO_IDS.userId,
+    approvedByRoleCode: "company_admin"
+  });
+
+  assert.throws(
+    () =>
+      platform.createAnnualReportPackage({
+        companyId: COMPANY_ID,
+        accountingPeriodId: period.accountingPeriodId,
+        profileCode: "k2",
+        actorId: DEMO_IDS.userId,
+        textSections: {
+          management_report: "Phase 5.4 missing baseline test",
+          accounting_policies: "K2 policy baseline"
+        },
+        noteSections: {
+          notes_bundle: "Annual notes",
+          simplified_notes: "Simplified notes"
+        }
+      }),
+    (error) => error?.code === "annual_reporting_provider_baseline_missing"
+  );
 });
 
 test("Phase 12.2 submission engine separates accepted from finalized and deduplicates identical receipts", async () => {
