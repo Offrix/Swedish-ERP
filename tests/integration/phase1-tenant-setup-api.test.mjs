@@ -271,6 +271,9 @@ test("Phase 1 API routes tenant setup, trial and module lifecycles through tenan
     assert.equal(trialEnvironment.supportsLegalEffect, false);
     assert.equal(trialEnvironment.promotionEligibleFlag, true);
     assert.equal(trialEnvironment.trialIsolationStatus, "isolated");
+    assert.notEqual(trialEnvironment.tenantId, DEMO_IDS.companyId);
+    assert.equal(trialEnvironment.isolationRefs.receiptNamespaceRef.startsWith("trial-receipts://"), true);
+    assert.equal(trialEnvironment.isolationRefs.kmsKeyRef.startsWith("trial-kms://"), true);
     assert.equal(trialEnvironment.blockedOperationClasses.includes("live_credentials"), true);
     assert.equal(trialEnvironment.providerPolicy.authProviders.length >= 2, true);
     assert.equal(trialEnvironment.requestedSeedScenarioCode, "agency_trial_seed");
@@ -319,6 +322,9 @@ test("Phase 1 API routes tenant setup, trial and module lifecycles through tenan
     });
     assert.equal(promotion.status, "approved");
     assert.equal(promotion.validationReport.status, "eligible");
+    assert.equal(promotion.sourceTrialTenantId, trialEnvironment.tenantId);
+    assert.equal(promotion.allowedObjectRefs.some((item) => item.objectType === "company_profile"), true);
+    assert.equal(promotion.allowedObjectRefs.some((item) => item.objectType === "submission_receipt"), false);
 
     const promotions = await requestJson(baseUrl, `/v1/trial/promotions?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
@@ -338,6 +344,12 @@ test("Phase 1 API routes tenant setup, trial and module lifecycles through tenan
     assert.equal(executedPromotion.status, "executed");
     assert.equal(executedPromotion.liveCompanyId != null, true);
     assert.notEqual(executedPromotion.liveCompanyId, DEMO_IDS.companyId);
+    assert.equal(executedPromotion.targetLiveTenantId, executedPromotion.liveCompanyId);
+    assert.equal(executedPromotion.executionSummary.isolationMoveSummary.reusedNamespaceRefs.length, 0);
+    assert.notEqual(
+      executedPromotion.executionSummary.isolationMoveSummary.sourceIsolationRefs.receiptNamespaceRef,
+      executedPromotion.executionSummary.isolationMoveSummary.targetIsolationRefs.receiptNamespaceRef
+    );
 
     const liveAdminToken = await loginWithStrongAuth({
       baseUrl,

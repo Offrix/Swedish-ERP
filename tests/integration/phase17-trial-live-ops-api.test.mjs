@@ -60,6 +60,9 @@ test("Phase 17.5 API exposes trial/live operations split with policy, queues, al
         expiresAt: "2026-04-03T00:00:00Z"
       }
     });
+    assert.notEqual(resetRightsTrial.tenantId, DEMO_IDS.companyId);
+    assert.equal(resetRightsTrial.isolationRefs.sequenceSpaceRef.startsWith("trial-sequences://"), true);
+    assert.equal(resetRightsTrial.isolationRefs.providerRefNamespaceRef.startsWith("trial-providers://"), true);
     for (const companyUserId of [approver.companyUserId, bureauUser.companyUserId]) {
       platform.createObjectGrant({
         sessionToken: adminToken,
@@ -149,6 +152,9 @@ test("Phase 17.5 API exposes trial/live operations split with policy, queues, al
         approvalActorIds: [DEMO_IDS.userId]
       }
     });
+    assert.equal(promotionPlan.sourceTrialTenantId, expiringTrial.tenantId);
+    assert.equal(promotionPlan.allowedObjectRefs.some((item) => item.objectType === "company_profile"), true);
+    assert.equal(promotionPlan.allowedObjectRefs.some((item) => item.objectType === "submission_receipt"), false);
     await requestJson(baseUrl, "/v1/tenant/parallel-runs", {
       method: "POST",
       token: refreshedAdminToken,

@@ -272,6 +272,9 @@ test("Phase 1 tenant setup flows through tenant-control with finance-ready state
   assert.equal(trialEnvironment.supportsLegalEffect, false);
   assert.equal(trialEnvironment.promotionEligibleFlag, true);
   assert.equal(trialEnvironment.trialIsolationStatus, "isolated");
+  assert.notEqual(trialEnvironment.tenantId, DEMO_IDS.companyId);
+  assert.equal(trialEnvironment.isolationRefs.receiptNamespaceRef.startsWith("trial-receipts://"), true);
+  assert.equal(trialEnvironment.isolationRefs.kmsKeyRef.startsWith("trial-kms://"), true);
   assert.equal(trialEnvironment.blockedOperationClasses.includes("live_credentials"), true);
   assert.equal(trialEnvironment.providerPolicy.authProviders.length >= 2, true);
   assert.equal(trialEnvironment.providerPolicy.adapters.submissions.supportsLegalEffect, false);
@@ -311,6 +314,9 @@ test("Phase 1 tenant setup flows through tenant-control with finance-ready state
   assert.equal(promotionPlan.status, "approved");
   assert.equal(promotionPlan.validationReport.status, "eligible");
   assert.equal(promotionPlan.portableDataBundle.liveForbiddenArtifacts.length > 0, true);
+  assert.equal(promotionPlan.sourceTrialTenantId, trialEnvironment.tenantId);
+  assert.equal(promotionPlan.allowedObjectRefs.some((item) => item.objectType === "company_profile"), true);
+  assert.equal(promotionPlan.allowedObjectRefs.some((item) => item.objectType === "submission_receipt"), false);
 
   const executedPromotionPlan = tenantControl.executePromotionPlan({
     sessionToken: adminToken,
@@ -319,6 +325,12 @@ test("Phase 1 tenant setup flows through tenant-control with finance-ready state
   assert.equal(executedPromotionPlan.status, "executed");
   assert.equal(executedPromotionPlan.liveCompanyId != null, true);
   assert.notEqual(executedPromotionPlan.liveCompanyId, DEMO_IDS.companyId);
+  assert.equal(executedPromotionPlan.targetLiveTenantId, executedPromotionPlan.liveCompanyId);
+  assert.equal(executedPromotionPlan.executionSummary.isolationMoveSummary.reusedNamespaceRefs.length, 0);
+  assert.notEqual(
+    executedPromotionPlan.executionSummary.isolationMoveSummary.sourceIsolationRefs.receiptNamespaceRef,
+    executedPromotionPlan.executionSummary.isolationMoveSummary.targetIsolationRefs.receiptNamespaceRef
+  );
   assert.equal(executedPromotionPlan.executionSummary.requiredPostPromotionTaskCodes.includes("configure_live_provider_credentials"), true);
 
   const liveAdminToken = loginWithStrongAuthOnPlatform({

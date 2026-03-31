@@ -637,6 +637,18 @@ const FORBIDDEN_TRIAL_LIVE_ARTIFACT_CODES = Object.freeze([
   "synthetic_tax_account_events",
   "synthetic_support_artifacts"
 ]);
+const FORBIDDEN_TRIAL_LIVE_OBJECT_TYPES = Object.freeze([
+  "session_revision",
+  "challenge_record",
+  "auth_factor_secret",
+  "auth_broker_secret",
+  "submission_receipt",
+  "queued_job",
+  "provider_credential",
+  "provider_webhook_secret",
+  "trial_evidence_bundle",
+  "trial_sequence_number"
+]);
 const DEFAULT_POST_PROMOTION_TASK_CODES = Object.freeze([
   "configure_live_provider_credentials",
   "import_opening_balances",
@@ -1140,6 +1152,14 @@ export function createTenantControlEngine({
       companyId: resolvedCompanyId,
       watermarkCode
     });
+    const trialEnvironmentProfileId = crypto.randomUUID();
+    const trialTenantId = `trial_tenant::${trialEnvironmentProfileId}`;
+    const trialIsolationRefs = buildModeIsolationRefs({
+      mode: DEFAULT_TRIAL_MODE,
+      tenantId: trialTenantId,
+      companyId: resolvedCompanyId,
+      scopeId: trialEnvironmentProfileId
+    });
     const resolvedScenario = resolveTrialSeedScenario(seedScenarioCode);
     const seededAt = nowIso();
     const seedMaterialization = materializeTrialSeedScenario({
@@ -1149,13 +1169,14 @@ export function createTenantControlEngine({
       label
     });
     const record = {
-      trialEnvironmentProfileId: crypto.randomUUID(),
-      trialEnvironmentId: null,
-      tenantId: resolvedCompanyId,
+      trialEnvironmentProfileId,
+      trialEnvironmentId: trialEnvironmentProfileId,
+      tenantId: trialTenantId,
       companyId: resolvedCompanyId,
       label: normalizeOptionalText(label) || `Trial ${resolvedCompanyId.slice(0, 8)}`,
       mode: trialIsolationProfile.mode,
       status: "active",
+      isolationRefs: trialIsolationRefs,
       watermarkCode: trialIsolationProfile.watermarkCode,
       watermarkPolicy: trialIsolationProfile.watermarkPolicy,
       requestedSeedScenarioCode: normalizeOptionalText(seedScenarioCode),
@@ -1198,7 +1219,6 @@ export function createTenantControlEngine({
       createdAt: now,
       updatedAt: now
     };
-    record.trialEnvironmentId = record.trialEnvironmentProfileId;
     state.trialEnvironmentProfiles.set(record.trialEnvironmentProfileId, record);
     appendToIndex(state.trialEnvironmentIdsByCompany, resolvedCompanyId, record.trialEnvironmentProfileId);
     appendDomainEvent("trial.environment.created", {
@@ -1646,9 +1666,14 @@ export function createTenantControlEngine({
       trialEnvironmentProfileId,
       status: approvalCoverage.complete ? "approved" : "validated",
       sourceCompanyId: trialEnvironment.companyId,
+      sourceTrialTenantId: trialEnvironment.tenantId,
+      targetLiveTenantId: null,
       sourceMasterdataSnapshotHash: validationReport.sourceMasterdataSnapshotHash,
       carryOverPolicyCode: "portable_masterdata_only",
       carryOverSelectionCodes: normalizedCarryOverSelectionCodes,
+      allowedObjectRefs: buildPromotionAllowedObjectRefs({ carryOverSelectionCodes: normalizedCarryOverSelectionCodes }),
+      sourceIsolationRefs: copy(trialEnvironment.isolationRefs || null),
+      targetIsolationRefs: null,
       approvalActorIds: normalizedApprovalActorIds,
       approvalCoverage,
       validationReportId: validationReport.promotionValidationReportId,
@@ -1749,13 +1774,27 @@ export function createTenantControlEngine({
     });
     const liveCompanySetupProfile = state.companySetupProfiles.get(requireCompanySetupProfileId(liveBootstrap.companyId));
     const liveFinanceFoundation = state.financeFoundationRecordsByCompany.get(liveBootstrap.companyId) || null;
+    const isolationMoveSummary = buildPromotionIsolationMoveSummary({
+      sourceIsolationRefs: trialEnvironment.isolationRefs || null,
+      targetIsolationRefs: liveBootstrap.isolationRefs || null,
+      allowedObjectRefs: plan.allowedObjectRefs || portableDataBundle.allowedObjectRefs || [],
+      blockedObjectTypes: portableDataBundle.blockedObjectTypes || FORBIDDEN_TRIAL_LIVE_OBJECT_TYPES
+    });
+    if (isolationMoveSummary.reusedNamespaceRefs.length > 0) {
+      throw httpError(
+        409,
+        "trial_promotion_isolation_reuse_detected",
+        `Trial promotion cannot reuse namespaces in live: ${isolationMoveSummary.reusedNamespaceRefs.join(", ")}.`
+      );
+    }
     const promotionEvidenceBundle = createPromotionEvidenceBundle({
       trialEnvironment,
       plan,
       validationReport,
       portableDataBundle,
       actorId: principal.userId,
-      liveCompanyId: liveBootstrap.companyId
+      liveCompanyId: liveBootstrap.companyId,
+      isolationMoveSummary
     });
 
     trialEnvironment.status = "archived";
@@ -1771,17 +1810,21 @@ export function createTenantControlEngine({
     plan.executedAt = nowIso();
     plan.updatedAt = plan.executedAt;
     plan.liveCompanyId = liveBootstrap.companyId;
+    plan.targetLiveTenantId = liveBootstrap.tenantId;
     plan.liveTenantBootstrapId = liveBootstrap.tenantBootstrapId;
     plan.liveCompanySetupProfileId = liveCompanySetupProfile?.companySetupProfileId || null;
     plan.liveFinanceFoundationStatus = liveFinanceFoundation?.status || null;
+    plan.targetIsolationRefs = copy(liveBootstrap.isolationRefs || null);
     plan.executionSummary = {
       liveCompanyId: liveBootstrap.companyId,
+      liveTenantId: liveBootstrap.tenantId,
       liveTenantBootstrapId: liveBootstrap.tenantBootstrapId,
       promotedAt: plan.executedAt,
       liveFinanceFoundationStatus: liveFinanceFoundation?.status || "pending",
       liveCompanySetupStatus: liveCompanySetupProfile?.status || null,
       evidenceBundleId: promotionEvidenceBundle.evidenceBundleId,
-      requiredPostPromotionTaskCodes: copy(DEFAULT_POST_PROMOTION_TASK_CODES)
+      requiredPostPromotionTaskCodes: copy(DEFAULT_POST_PROMOTION_TASK_CODES),
+      isolationMoveSummary
     };
 
     appendDomainEvent("trial.promoted_to_live", {
@@ -4730,13 +4773,17 @@ export function createTenantControlEngine({
     const stagedImportBatches = [...new Set(
       carryOverSelectionCodes.map((selectionCode) => PORTABLE_CARRY_OVER_SELECTIONS[selectionCode].importBatchCode)
     )].sort();
+    const allowedObjectRefs = buildPromotionAllowedObjectRefs({ carryOverSelectionCodes });
     return {
       portableDataBundleId: crypto.randomUUID(),
       companyId: trialEnvironment.companyId,
       trialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
+      sourceTrialTenantId: trialEnvironment.tenantId,
       validationReportId: validationReport.promotionValidationReportId,
       version: PROMOTION_PORTABLE_DATA_VERSION,
       carryOverSelectionCodes: copy(carryOverSelectionCodes),
+      sourceIsolationRefs: copy(trialEnvironment.isolationRefs || null),
+      allowedObjectRefs,
       companyMasterdata: company
         ? {
             legalName: company.legalName,
@@ -4760,6 +4807,7 @@ export function createTenantControlEngine({
       portableProjectTemplates,
       stagedUsers,
       stagedImportBatches,
+      blockedObjectTypes: copy(FORBIDDEN_TRIAL_LIVE_OBJECT_TYPES),
       liveForbiddenArtifacts: FORBIDDEN_TRIAL_LIVE_ARTIFACT_CODES.map((artifactCode) => ({
         artifactCode,
         policy: "archive_in_trial_only"
@@ -4836,6 +4884,12 @@ export function createTenantControlEngine({
       sourceTrialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
       promotionPlanId: plan.promotionPlanId
     });
+    const liveIsolationRefs = buildModeIsolationRefs({
+      mode: "live",
+      tenantId: liveBootstrap.companyId,
+      companyId: liveBootstrap.companyId,
+      scopeId: liveBootstrap.companyId
+    });
     state.bootstrapReadinessByCompany.set(liveBootstrap.companyId, {
       tenantBootstrapId: liveBootstrap.runId,
       companyId: liveBootstrap.companyId,
@@ -4907,7 +4961,9 @@ export function createTenantControlEngine({
     return {
       tenantBootstrapId: liveBootstrap.runId,
       resumeToken: liveBootstrap.resumeToken,
-      companyId: liveBootstrap.companyId
+      companyId: liveBootstrap.companyId,
+      tenantId: liveBootstrap.companyId,
+      isolationRefs: liveIsolationRefs
     };
   }
 
@@ -4936,9 +4992,9 @@ export function createTenantControlEngine({
     );
   }
 
-  function buildDefaultPromotionRegistrations() {
-    const effectiveFrom = nowIso();
-    return [
+function buildDefaultPromotionRegistrations() {
+  const effectiveFrom = nowIso();
+  return [
       {
         registrationType: "f_tax",
         registrationValue: "f_tax_pending_confirmation",
@@ -4957,10 +5013,81 @@ export function createTenantControlEngine({
         status: "configured",
         effectiveFrom
       }
-    ];
-  }
+  ];
+}
 
-  function listSourceCompanyUsersSnapshot(companyId) {
+function buildModeIsolationRefs({ mode, tenantId, companyId, scopeId } = {}) {
+  const resolvedMode = requireText(mode, "trial_live_mode_required");
+  const resolvedTenantId = requireText(tenantId, "tenant_id_required");
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const resolvedScopeId = requireText(scopeId, "isolation_scope_id_required");
+  return {
+    tenantId: resolvedTenantId,
+    credentialNamespaceRef: `${resolvedMode}-credentials://${resolvedTenantId}`,
+    receiptNamespaceRef: `${resolvedMode}-receipts://${resolvedScopeId}`,
+    sequenceSpaceRef: `${resolvedMode}-sequences://${resolvedCompanyId}`,
+    evidenceNamespaceRef: `${resolvedMode}-evidence://${resolvedScopeId}`,
+    providerRefNamespaceRef: `${resolvedMode}-providers://${resolvedScopeId}`,
+    jobNamespaceRef: `${resolvedMode}-jobs://${resolvedScopeId}`,
+    dashboardNamespaceRef: `${resolvedMode}-dashboards://${resolvedScopeId}`,
+    kmsKeyRef: `${resolvedMode}-kms://${resolvedTenantId}`
+  };
+}
+
+function buildPromotionAllowedObjectRefs({ carryOverSelectionCodes = [] } = {}) {
+  const seen = new Set();
+  const refs = [];
+  for (const selectionCode of normalizeStringList(carryOverSelectionCodes)) {
+    const selection = PORTABLE_CARRY_OVER_SELECTIONS[selectionCode];
+    if (!selection) {
+      continue;
+    }
+    for (const objectType of selection.portableObjectTypes || []) {
+      const key = `${selection.importBatchCode}::${objectType}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      refs.push({
+        selectionCode,
+        objectType,
+        importBatchCode: selection.importBatchCode,
+        sourceEnvironment: DEFAULT_TRIAL_MODE,
+        liveReusePolicy: "portable_copy_only"
+      });
+    }
+  }
+  return refs;
+}
+
+function buildPromotionIsolationMoveSummary({
+  sourceIsolationRefs = null,
+  targetIsolationRefs = null,
+  allowedObjectRefs = [],
+  blockedObjectTypes = []
+} = {}) {
+  const source = sourceIsolationRefs || {};
+  const target = targetIsolationRefs || {};
+  const reusedNamespaceRefs = [];
+  for (const refKey of Object.keys(source)) {
+    if (refKey === "tenantId") {
+      continue;
+    }
+    if (source[refKey] && target[refKey] && source[refKey] === target[refKey]) {
+      reusedNamespaceRefs.push(refKey);
+    }
+  }
+  return {
+    sourceIsolationRefs: copy(source),
+    targetIsolationRefs: copy(target),
+    reusedNamespaceRefs,
+    allowedObjectRefs: copy(allowedObjectRefs),
+    blockedObjectTypes: copy(blockedObjectTypes),
+    promotionMode: "copy_to_new_live_tenant"
+  };
+}
+
+function listSourceCompanyUsersSnapshot(companyId) {
     const orgAuthSnapshot = getOrgAuthSnapshot();
     const usersById = new Map((orgAuthSnapshot?.users || []).map((record) => [record.userId, record]));
     return ((orgAuthSnapshot?.companyUsers || [])
@@ -4982,15 +5109,20 @@ export function createTenantControlEngine({
     validationReport,
     portableDataBundle,
     actorId,
-    liveCompanyId
+    liveCompanyId,
+    isolationMoveSummary = null
   } = {}) {
     const evidenceDomain = getOptionalDomain("evidence");
     const metadata = {
       promotionPlanId: plan.promotionPlanId,
+      sourceTrialTenantId: plan.sourceTrialTenantId || trialEnvironment.tenantId || null,
+      targetLiveTenantId: plan.targetLiveTenantId || liveCompanyId || null,
       liveCompanyId,
       validationReportId: validationReport.promotionValidationReportId,
       portableDataBundleId: portableDataBundle.portableDataBundleId,
-      carryOverSelectionCodes: copy(plan.carryOverSelectionCodes)
+      carryOverSelectionCodes: copy(plan.carryOverSelectionCodes),
+      allowedObjectRefs: copy(plan.allowedObjectRefs || portableDataBundle.allowedObjectRefs || []),
+      isolationMoveSummary: copy(isolationMoveSummary)
     };
     const artifactRefs = [
       {
@@ -5009,6 +5141,16 @@ export function createTenantControlEngine({
         roleCode: "tenant_control",
         metadata: {
           version: portableDataBundle.version
+        }
+      },
+      {
+        artifactType: "trial_live_isolation_summary",
+        artifactRef: `trial-live-isolation://${plan.promotionPlanId}`,
+        checksum: hashJson(isolationMoveSummary || {}),
+        roleCode: "tenant_control",
+        metadata: {
+          sourceTrialTenantId: plan.sourceTrialTenantId || trialEnvironment.tenantId || null,
+          targetLiveTenantId: plan.targetLiveTenantId || liveCompanyId || null
         }
       }
     ];
