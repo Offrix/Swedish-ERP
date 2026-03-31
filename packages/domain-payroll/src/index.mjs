@@ -3537,22 +3537,17 @@ function collectPayRunDecisionSnapshotRefs(run, employmentResults = []) {
 }
 
 function buildPayrollRulepackRef(decisionObject) {
-  if (!decisionObject?.rule_pack_id || !decisionObject?.rule_pack_code || !decisionObject?.rule_pack_version) {
+  if (!decisionObject) {
     return null;
   }
-  return {
-    rulepackId: decisionObject.rule_pack_id,
-    rulepackCode: decisionObject.rule_pack_code,
-    rulepackVersion: decisionObject.rule_pack_version,
-    rulepackChecksum: decisionObject.rule_pack_checksum || null,
-    effectiveDate: decisionObject.effective_date || null
-  };
+  return requirePinnedPayrollDecisionRulepackRef(decisionObject, "payroll_rulepack_ref");
 }
 
 function buildPayrollDecisionSnapshotRef({ payRunId, employmentId, employeeId, snapshotTypeCode, decisionObject }) {
   if (!decisionObject || !decisionObject.inputs_hash) {
     return null;
   }
+  const rulepackRef = requirePinnedPayrollDecisionRulepackRef(decisionObject, snapshotTypeCode);
   const decisionHash = buildSnapshotHash(decisionObject);
   return {
     decisionSnapshotId: buildSnapshotHash({
@@ -3569,11 +3564,11 @@ function buildPayrollDecisionSnapshotRef({ payRunId, employmentId, employeeId, s
     employeeId: employeeId || null,
     employmentId: employmentId || null,
     decisionHash,
-    rulepackId: decisionObject.rule_pack_id || null,
-    rulepackCode: decisionObject.rule_pack_code || null,
-    rulepackVersion: decisionObject.rule_pack_version || null,
-    rulepackChecksum: decisionObject.rule_pack_checksum || null,
-    effectiveDate: decisionObject.effective_date || null
+    rulepackId: rulepackRef.rulepackId,
+    rulepackCode: rulepackRef.rulepackCode,
+    rulepackVersion: rulepackRef.rulepackVersion,
+    rulepackChecksum: rulepackRef.rulepackChecksum,
+    effectiveDate: rulepackRef.effectiveDate
   };
 }
 
@@ -8735,14 +8730,19 @@ function deriveGarnishmentProtectedAmountBaseline({
   protectedAmountAmount
 }) {
   const yearStart = `${String(normalizeIntegerInRange(incomeYear, 2000, 2100, "garnishment_decision_snapshot_income_year_invalid"))}-01-01`;
+  if (!rules || typeof rules.resolveRulePack !== "function") {
+    throw createError(409, "garnishment_rulepack_missing", "Garnishment protected amount baseline requires a pinned payroll rulepack.");
+  }
   const rulePack = rules
-    ? rules.resolveRulePack({
-        rulePackCode: PAYROLL_GARNISHMENT_RULE_PACK_CODE,
-        domain: "payroll",
-        jurisdiction: "SE",
-        effectiveDate: yearStart
-      })
-    : null;
+    .resolveRulePack({
+      rulePackCode: PAYROLL_GARNISHMENT_RULE_PACK_CODE,
+      domain: "payroll",
+      jurisdiction: "SE",
+      effectiveDate: yearStart
+    });
+  if (!rulePack?.rulePackId || !rulePack?.rulePackCode || !rulePack?.version || !rulePack?.checksum) {
+    throw createError(409, "garnishment_rulepack_missing", "Garnishment protected amount baseline requires a pinned payroll rulepack.");
+  }
   const machineRules = rulePack?.machineReadableRules || {};
   const adultBaseAmount = roundMoney(
     Number(machineRules.normalAmountByHouseholdType?.[householdProfile.householdTypeCode] || 0)
@@ -8757,9 +8757,11 @@ function deriveGarnishmentProtectedAmountBaseline({
   const resolvedHousingCostAmount = roundMoney(Number(housingCostAmount || 0));
   const resolvedAdditionalAllowanceAmount = roundMoney(Number(additionalAllowanceAmount || 0));
   return {
-    rulePackId: rulePack?.rulePackId || null,
-    rulePackCode: rulePack?.rulePackCode || PAYROLL_GARNISHMENT_RULE_PACK_CODE,
-    rulePackVersion: rulePack?.version || null,
+    rulePackId: rulePack.rulePackId,
+    rulePackCode: rulePack.rulePackCode,
+    rulePackVersion: rulePack.version,
+    rulePackChecksum: rulePack.checksum,
+    effectiveDate: yearStart,
     householdTypeCode: householdProfile.householdTypeCode,
     householdAdultCount: householdProfile.householdAdultCount,
     householdChildCount: householdProfile.householdChildCount,
@@ -8772,6 +8774,28 @@ function deriveGarnishmentProtectedAmountBaseline({
       adultBaseAmount + childNormalAmount + resolvedHousingCostAmount + resolvedAdditionalAllowanceAmount
     ),
     decisionProtectedAmountAmount: roundMoney(protectedAmountAmount || 0)
+  };
+}
+
+function requirePinnedPayrollDecisionRulepackRef(decisionObject, contextCode = "payroll_decision") {
+  if (
+    !decisionObject?.rule_pack_id
+    || !decisionObject?.rule_pack_code
+    || !decisionObject?.rule_pack_version
+    || !decisionObject?.rule_pack_checksum
+  ) {
+    throw createError(
+      409,
+      "payroll_decision_rulepack_missing",
+      `${contextCode} requires a pinned payroll rulepack ref.`
+    );
+  }
+  return {
+    rulepackId: decisionObject.rule_pack_id,
+    rulepackCode: decisionObject.rule_pack_code,
+    rulepackVersion: decisionObject.rule_pack_version,
+    rulepackChecksum: decisionObject.rule_pack_checksum,
+    effectiveDate: decisionObject.effective_date || null
   };
 }
 

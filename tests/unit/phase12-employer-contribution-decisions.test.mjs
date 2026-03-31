@@ -40,6 +40,8 @@ test("Phase 12.2 employer contribution decisions handle age buckets, threshold s
   assert.equal(olderRun.payslips[0].totals.employerContributionPreviewAmount, 3063);
   assert.equal(olderRun.payslips[0].totals.employerContributionDecision.outputs.decisionType, "reduced_age_pension_only");
   assert.equal(olderRun.payslips[0].totals.employerContributionDecision.outputs.ageBucket, "year_start_67_plus");
+  assert.equal(olderRun.payslips[0].totals.employerContributionDecision.rule_pack_id, "payroll-employer-contribution-se-2026.1");
+  assert.equal(olderRun.payslips[0].totals.employerContributionDecision.rule_pack_checksum, "phase8-payroll-employer-contribution-se-2026-1");
 
   const youthEmployee = createMonthlyEmployee({
     hrPlatform,
@@ -66,6 +68,8 @@ test("Phase 12.2 employer contribution decisions handle age buckets, threshold s
     ["temporary_youth_reduction_band", "standard_overflow_band"]
   );
   assert.equal(youthRun.payslips[0].totals.employerContributionDecision.outputs.referenceFullContributionAmount, 9426);
+  assert.equal(youthRun.payslips[0].totals.employerContributionDecision.rule_pack_id, "payroll-employer-contribution-se-2026.2");
+  assert.equal(youthRun.payslips[0].totals.employerContributionDecision.rule_pack_checksum, "phase8-payroll-employer-contribution-se-2026-2");
 
   const vaxaEmployee = createMonthlyEmployee({
     hrPlatform,
@@ -127,6 +131,8 @@ test("Phase 12.2 employer contribution decisions handle age buckets, threshold s
     vaxaRun.payslips[0].totals.employerContributionDecision.outputs.taxAccountConsequence.creditAmount,
     5302.5
   );
+  assert.equal(vaxaRun.payslips[0].totals.employerContributionDecision.rule_pack_id, "payroll-employer-contribution-se-2026.1");
+  assert.equal(vaxaRun.payslips[0].totals.employerContributionDecision.rule_pack_checksum, "phase8-payroll-employer-contribution-se-2026-1");
 });
 
 function createMonthlyEmployee({ hrPlatform, givenName, familyName, monthlySalary, identityValue, dateOfBirth }) {

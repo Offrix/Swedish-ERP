@@ -77,6 +77,8 @@ test("Phase 12.6 garnishment decisions drive withholding and remittance instruct
   });
   assert.equal(garnishmentDecision.status, "approved");
   assert.equal(garnishmentDecision.protectedAmountBaseline.adultBaseAmount, 6243);
+  assert.equal(garnishmentDecision.protectedAmountBaseline.rulePackId, "payroll-garnishment-se-2026.1");
+  assert.equal(garnishmentDecision.protectedAmountBaseline.rulePackChecksum, "phase12-payroll-garnishment-se-2026-1");
 
   const manualOverrideDraft = payrollPlatform.createGarnishmentDecisionSnapshot({
     companyId: COMPANY_ID,
@@ -128,6 +130,8 @@ test("Phase 12.6 garnishment decisions drive withholding and remittance instruct
   const payslip = payRun.payslips[0];
   assert.equal(payslip.totals.preliminaryTax, 10000);
   assert.equal(payslip.totals.garnishmentAmount, 7000);
+  assert.equal(payslip.totals.garnishmentDecision.rule_pack_id, "payroll-garnishment-se-2026.1");
+  assert.equal(payslip.totals.garnishmentDecision.rule_pack_checksum, "phase12-payroll-garnishment-se-2026-1");
   assert.equal(payslip.totals.garnishmentDecision.outputs.availableAboveProtected, 8000);
   assert.equal(payslip.totals.garnishmentDecision.outputs.remittanceBankgiro, "5050-1234");
   const garnishmentLine = payRun.lines.find((line) => line.payItemCode === "GARNISHMENT");

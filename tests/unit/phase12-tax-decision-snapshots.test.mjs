@@ -60,6 +60,8 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
   });
   assert.equal(tableRun.payslips[0].totals.taxDecision.outputs.decisionType, "tabell");
   assert.equal(tableRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 11800);
+  assert.equal(tableRun.payslips[0].totals.taxDecision.rule_pack_id, "payroll-tax-se-2026.1");
+  assert.equal(tableRun.payslips[0].totals.taxDecision.rule_pack_checksum, "phase8-payroll-tax-se-2026-1");
 
   const jamkningEmployee = createMonthlyEmployee({
     hrPlatform,
@@ -180,6 +182,8 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
   });
   assert.equal(emergencyRun.payslips[0].totals.taxDecision.outputs.decisionType, "emergency_manual");
   assert.equal(emergencyRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 8700);
+  assert.equal(emergencyRun.payslips[0].totals.taxDecision.rule_pack_id, "payroll-tax-se-2026.1");
+  assert.equal(emergencyRun.payslips[0].totals.taxDecision.rule_pack_checksum, "phase8-payroll-tax-se-2026-1");
 });
 
 function createMonthlyEmployee({ hrPlatform, givenName, familyName, monthlySalary, identityValue }) {
