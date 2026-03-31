@@ -84,6 +84,15 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
     assert.equal(connections.length, PARTNER_CONNECTION_TYPES.length);
     assert.equal("credentialsRef" in connections[0], false);
     assert.equal(connections[0].credentialsPresent, true);
+    const bankConnection = connections.find((connection) => connection.connectionType === "bank");
+    assert.equal(bankConnection.providerBaselineGoverned, true);
+    assert.equal(bankConnection.providerBaselineSelectionCode, "SE-OPEN-BANKING-CORE");
+    assert.equal(typeof bankConnection.providerBaselineId, "string");
+    assert.equal(bankConnection.providerBaselineRef.providerBaselineId, bankConnection.providerBaselineId);
+    const crmConnection = connections.find((connection) => connection.connectionType === "crm");
+    assert.equal(crmConnection.providerBaselineGoverned, false);
+    assert.equal(crmConnection.providerBaselineSelectionCode, null);
+    assert.equal(crmConnection.providerBaselineId, null);
 
     const listed = await requestJson(baseUrl, `/v1/partners/connections?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
@@ -92,18 +101,24 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
     assert.equal("credentialsRef" in listed.items[0], false);
     assert.equal(listed.items[0].credentialsPresent, true);
     assert.equal(listed.items.find((item) => item.connectionType === "bank").providerCode, PROVIDER_CODES.bank);
+    assert.equal(typeof listed.items.find((item) => item.connectionType === "bank").providerBaselineId, "string");
 
-    const bankCapabilities = await requestJson(baseUrl, `/v1/partners/connections/${connections.find((connection) => connection.connectionType === "bank").connectionId}/capabilities?companyId=${DEMO_IDS.companyId}`, {
+    const bankCapabilities = await requestJson(baseUrl, `/v1/partners/connections/${bankConnection.connectionId}/capabilities?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
     });
     assert.equal(bankCapabilities.operationCodes.includes("tax_account_sync"), true);
     assert.equal(bankCapabilities.mode, "sandbox");
     assert.equal(bankCapabilities.providerCode, PROVIDER_CODES.bank);
+    assert.equal(bankCapabilities.providerBaselineGoverned, true);
+    assert.equal(bankCapabilities.providerBaselineSelectionCode, "SE-OPEN-BANKING-CORE");
+    assert.equal(typeof bankCapabilities.providerBaselineId, "string");
+    assert.equal(bankCapabilities.providerBaselineCode, "SE-OPEN-BANKING-CORE");
+    assert.equal(bankCapabilities.providerBaselineRef.providerBaselineId, bankCapabilities.providerBaselineId);
     assert.equal(Array.isArray(bankCapabilities.objectMappings), true);
     assert.equal(Array.isArray(bankCapabilities.requiredEvents), true);
     assert.equal("credentialsRef" in bankCapabilities, false);
 
-    const bankHealthCheck = await requestJson(baseUrl, `/v1/partners/connections/${connections.find((connection) => connection.connectionType === "bank").connectionId}/health-checks`, {
+    const bankHealthCheck = await requestJson(baseUrl, `/v1/partners/connections/${bankConnection.connectionId}/health-checks`, {
       method: "POST",
       token: adminToken,
       expectedStatus: 201,
@@ -131,7 +146,6 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
     });
     assert.equal(contractResults.items.length, PARTNER_CONNECTION_TYPES.length);
 
-    const bankConnection = connections.find((connection) => connection.connectionType === "bank");
     await requestJson(baseUrl, `/v1/partners/connections/${bankConnection.connectionId}/health`, {
       method: "POST",
       token: adminToken,
@@ -190,7 +204,6 @@ test("Phase 13.2 API covers partner adapters, fallback, rate limits and replay-s
     assert.equal(bankReplay.originalJob.status, "replayed");
     assert.equal(bankReplay.replayJob.replayOfJobId, bankOperation.jobId);
 
-    const crmConnection = connections.find((connection) => connection.connectionType === "crm");
     const firstCrmOperation = await requestJson(baseUrl, "/v1/partners/operations", {
       method: "POST",
       token: adminToken,

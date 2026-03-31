@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
 import { DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import { createPartnerModule } from "../../packages/domain-integrations/src/partners.mjs";
 import {
   createPassingPartnerContractTestExecutors,
   createSuccessfulPartnerOperationExecutors
@@ -70,6 +71,10 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   assert.equal(contractResults.find((result) => result.connectionType === "id06").mode, "production");
 
   const bankConnection = connections.find((connection) => connection.connectionType === "bank");
+  assert.equal(bankConnection.providerBaselineGoverned, true);
+  assert.equal(bankConnection.providerBaselineSelectionCode, "SE-OPEN-BANKING-CORE");
+  assert.equal(typeof bankConnection.providerBaselineId, "string");
+  assert.equal(bankConnection.providerBaselineRef.providerBaselineId, bankConnection.providerBaselineId);
   const bankCapabilities = platform.getPartnerConnectionCapabilities({
     companyId: DEMO_IDS.companyId,
     connectionId: bankConnection.connectionId
@@ -77,8 +82,12 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   assert.equal(bankCapabilities.operationCodes.includes("tax_account_sync"), true);
   assert.equal(bankCapabilities.mode, "sandbox");
   assert.equal(bankCapabilities.providerCode, PROVIDER_CODES.bank);
+  assert.equal(bankCapabilities.providerBaselineGoverned, true);
+  assert.equal(bankCapabilities.providerBaselineSelectionCode, "SE-OPEN-BANKING-CORE");
+  assert.equal(typeof bankCapabilities.providerBaselineId, "string");
   assert.equal(bankCapabilities.providerBaselineCode, "SE-OPEN-BANKING-CORE");
   assert.equal(typeof bankCapabilities.providerBaselineChecksum, "string");
+  assert.equal(bankCapabilities.providerBaselineRef.providerBaselineId, bankCapabilities.providerBaselineId);
   assert.equal(Array.isArray(bankCapabilities.objectMappings), true);
   assert.equal(Array.isArray(bankCapabilities.requiredEvents), true);
   assert.equal("credentialsRef" in bankCapabilities, false);
@@ -183,12 +192,19 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   assert.equal(replayed.replayJob.replayOfJobId, rateLimited.jobId);
 
   const id06Connection = connections.find((connection) => connection.connectionType === "id06");
+  assert.equal(id06Connection.providerBaselineGoverned, true);
+  assert.equal(id06Connection.providerBaselineSelectionCode, "SE-ID06-API");
+  assert.equal(typeof id06Connection.providerBaselineId, "string");
   const id06Capabilities = platform.getPartnerConnectionCapabilities({
     companyId: DEMO_IDS.companyId,
     connectionId: id06Connection.connectionId
   });
+  assert.equal(id06Capabilities.providerBaselineGoverned, true);
+  assert.equal(id06Capabilities.providerBaselineSelectionCode, "SE-ID06-API");
+  assert.equal(typeof id06Capabilities.providerBaselineId, "string");
   assert.equal(id06Capabilities.providerBaselineCode, "SE-ID06-API");
   assert.equal(typeof id06Capabilities.providerBaselineChecksum, "string");
+  assert.equal(id06Capabilities.providerBaselineRef.providerBaselineId, id06Capabilities.providerBaselineId);
 
   const retryJob = platform.enqueueAsyncJob({
     companyId: DEMO_IDS.companyId,
@@ -227,6 +243,41 @@ test("Phase 13.2 partner adapters expose contract tests, fallback and replay-saf
   assert.equal(claimedRetry.status, "claimed");
 });
 
+test("Phase 13.2 governed partner providers expose full pinned baseline refs in contract-test packs", () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-22T18:30:00Z")
+  });
+
+  const bankPack = platform.listAdapterContractTestPacks({
+    connectionType: "bank",
+    providerCode: PROVIDER_CODES.bank
+  })[0];
+  assert.equal(bankPack.providerBaselineGoverned, true);
+  assert.equal(bankPack.providerBaselineSelectionCode, "SE-OPEN-BANKING-CORE");
+  assert.equal(typeof bankPack.providerBaselineId, "string");
+  assert.equal(bankPack.providerBaselineCode, "SE-OPEN-BANKING-CORE");
+  assert.equal(typeof bankPack.providerBaselineChecksum, "string");
+  assert.equal(bankPack.providerBaselineRef.providerBaselineId, bankPack.providerBaselineId);
+
+  const peppolPack = platform.listAdapterContractTestPacks({
+    connectionType: "peppol",
+    providerCode: PROVIDER_CODES.peppol
+  })[0];
+  assert.equal(peppolPack.providerBaselineGoverned, true);
+  assert.equal(peppolPack.providerBaselineSelectionCode, "SE-PEPPOL-BIS-BILLING-3");
+  assert.equal(typeof peppolPack.providerBaselineId, "string");
+
+  const crmPack = platform.listAdapterContractTestPacks({
+    connectionType: "crm",
+    providerCode: PROVIDER_CODES.crm
+  })[0];
+  assert.equal(crmPack.providerBaselineGoverned, false);
+  assert.equal(crmPack.providerBaselineSelectionCode, null);
+  assert.equal(crmPack.providerBaselineId, null);
+  assert.equal(crmPack.providerBaselineCode, null);
+  assert.equal(crmPack.providerBaselineRef, null);
+});
+
 test("Phase 13.2 partner connections require explicit credentials refs in every environment", () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-22T18:30:00Z")
@@ -244,5 +295,45 @@ test("Phase 13.2 partner connections require explicit credentials refs in every 
         actorId: "phase13-2-unit"
       }),
     (error) => error?.code === "partner_credentials_ref_required"
+  );
+});
+
+test("Phase 13.2 governed partner providers require provider-baseline registry", () => {
+  const module = createPartnerModule({
+    state: {
+      partnerConnections: new Map(),
+      partnerOperations: new Map(),
+      partnerContractResults: new Map(),
+      partnerHealthChecks: new Map(),
+      partnerRateLimitCounters: new Map(),
+      asyncJobs: new Map(),
+      asyncDeadLetters: new Map(),
+      jobReplayPlans: new Map()
+    },
+    clock: () => new Date("2026-03-22T18:30:00Z")
+  });
+
+  assert.throws(
+    () =>
+      module.listAdapterContractTestPacks({
+        connectionType: "bank",
+        providerCode: PROVIDER_CODES.bank
+      }),
+    (error) => error?.code === "partner_provider_baseline_registry_missing"
+  );
+
+  assert.throws(
+    () =>
+      module.createPartnerConnection({
+        companyId: DEMO_IDS.companyId,
+        connectionType: "bank",
+        providerCode: PROVIDER_CODES.bank,
+        displayName: "Bank partner",
+        mode: "sandbox",
+        fallbackMode: "queue_retry",
+        credentialsRef: "secret://bank",
+        actorId: "phase13-2-unit"
+      }),
+    (error) => error?.code === "partner_provider_baseline_registry_missing"
   );
 });

@@ -189,32 +189,54 @@ export function createPartnerModule({
     return connectionTypes.flatMap((type) => {
       const catalog = partnerCatalogEntry(type);
       const providers = resolvedProviderCode ? catalog.supportedProviders.filter((candidate) => candidate === resolvedProviderCode) : catalog.supportedProviders;
-      return providers.map((provider) => ({
-        testPackCode: catalog.contractTestPackCode,
-        connectionType: type,
-        providerCode: provider,
-        supportedModes: catalog.supportsSandbox ? ["sandbox", "test", "production"] : ["test", "production"],
-        assertions: contractAssertionsFor(type),
-        requiredEvents: clone(catalog.requiredEvents),
-        replaySafe: catalog.replaySafe,
-        operationCodes: clone(catalog.operationCodes),
-        defaultRateLimitPerMinute: catalog.defaultRateLimitPerMinute,
-        providerBaselineCode: PARTNER_PROVIDER_BASELINE_SELECTIONS[type]?.[provider] || null
-      }));
+      return providers.map((provider) => {
+        const providerBaselineSelectionCode = resolvePartnerProviderBaselineSelectionCode(type, provider);
+        const providerBaselineRef = resolvePartnerProviderBaseline({
+          providerBaselineRegistry,
+          connectionType: type,
+          providerCode: provider,
+          effectiveDate: nowIso(clock).slice(0, 10),
+          mode: "test",
+          required: providerBaselineSelectionCode != null,
+          contextCode: "partner_contract_test_provider_baseline_missing"
+        });
+        return {
+          testPackCode: catalog.contractTestPackCode,
+          connectionType: type,
+          providerCode: provider,
+          supportedModes: catalog.supportsSandbox ? ["sandbox", "test", "production"] : ["test", "production"],
+          assertions: contractAssertionsFor(type),
+          requiredEvents: clone(catalog.requiredEvents),
+          replaySafe: catalog.replaySafe,
+          operationCodes: clone(catalog.operationCodes),
+          defaultRateLimitPerMinute: catalog.defaultRateLimitPerMinute,
+          providerBaselineGoverned: providerBaselineSelectionCode != null,
+          providerBaselineSelectionCode,
+          providerBaselineId: providerBaselineRef?.providerBaselineId || null,
+          providerBaselineCode: providerBaselineRef?.baselineCode || providerBaselineSelectionCode || null,
+          providerBaselineVersion: providerBaselineRef?.providerBaselineVersion || null,
+          providerBaselineChecksum: providerBaselineRef?.providerBaselineChecksum || null,
+          providerBaselineRef: clone(providerBaselineRef || null)
+        };
+      });
     });
   }
 
     function getPartnerConnectionCapabilities({ companyId, connectionId } = {}) {
       const connection = requireConnection(companyId, connectionId);
       const catalog = partnerCatalogEntry(connection.connectionType);
+      const providerBaselineSelectionCode = resolvePartnerProviderBaselineSelectionCode(connection.connectionType, connection.providerCode);
+      const providerBaselineRef = requirePartnerConnectionProviderBaselineRef(connection, "partner_provider_baseline_missing");
       return {
         connectionId: connection.connectionId,
         providerCode: connection.providerCode,
-        providerBaselineId: connection.providerBaselineId || null,
-        providerBaselineCode: connection.providerBaselineCode || null,
-        providerBaselineVersion: connection.providerBaselineVersion || null,
-        providerBaselineChecksum: connection.providerBaselineChecksum || null,
-        providerBaselineRef: clone(connection.providerBaselineRef || null),
+        providerBaselineGoverned: providerBaselineSelectionCode != null,
+        providerBaselineSelectionCode,
+        providerBaselineId: providerBaselineRef?.providerBaselineId || null,
+        providerBaselineCode: providerBaselineRef?.baselineCode || providerBaselineSelectionCode || null,
+        providerBaselineVersion: providerBaselineRef?.providerBaselineVersion || null,
+        providerBaselineChecksum: providerBaselineRef?.providerBaselineChecksum || null,
+        providerBaselineRef: clone(providerBaselineRef || null),
         operationCodes: catalog.supportedOperations,
       objectMappings: catalog.objectMappings,
       replaySafe: catalog.replaySafe,
@@ -269,7 +291,9 @@ export function createPartnerModule({
         connectionType: resolvedConnectionType,
         providerCode: resolvedProviderCode,
         effectiveDate: nowIso(clock).slice(0, 10),
-        mode: resolvedMode
+        mode: resolvedMode,
+        required: resolvePartnerProviderBaselineSelectionCode(resolvedConnectionType, resolvedProviderCode) != null,
+        contextCode: "partner_provider_baseline_missing"
       });
       const connection = {
         connectionId: crypto.randomUUID(),
@@ -410,6 +434,7 @@ export function createPartnerModule({
 
   async function runAdapterContractTest({ companyId, connectionId, testPackCode = null, mode = null, actorId = "system" } = {}) {
     const connection = requireConnection(companyId, connectionId);
+    requirePartnerConnectionProviderBaselineRef(connection, "partner_contract_test_provider_baseline_missing");
     const assertions = contractAssertionsFor(connection.connectionType);
     const resolvedTestPackCode = text(testPackCode || partnerCatalogEntry(connection.connectionType).contractTestPackCode, "partner_contract_test_pack_code_required");
     const resolvedMode = optionalText(mode) || connection.mode;
@@ -479,6 +504,7 @@ export function createPartnerModule({
     actorId = "system"
   } = {}) {
     const connection = requireConnection(companyId, connectionId);
+    requirePartnerConnectionProviderBaselineRef(connection, "partner_operation_provider_baseline_missing");
     if (connection.mode === "production" && !hasPassingContractTest(state, connection)) {
       throw createError(409, "partner_contract_test_required", "Production partner operations require a passing contract-test result.");
     }
@@ -1119,10 +1145,13 @@ function partnerCatalogEntry(connectionType) {
 function presentPartnerConnection(connection) {
   const cloneConnection = clone(connection);
   const credentialsPresent = cloneConnection.credentialsRef != null;
+  const providerBaselineSelectionCode = resolvePartnerProviderBaselineSelectionCode(cloneConnection.connectionType, cloneConnection.providerCode);
   delete cloneConnection.credentialsRef;
   cloneConnection.credentialsConfigured = credentialsPresent;
   cloneConnection.credentialsPresent = credentialsPresent;
   cloneConnection.partnerCode = cloneConnection.providerCode;
+  cloneConnection.providerBaselineGoverned = providerBaselineSelectionCode != null;
+  cloneConnection.providerBaselineSelectionCode = providerBaselineSelectionCode;
   cloneConnection.healthStatus = cloneConnection.healthStatus || "unknown";
   cloneConnection.latestReceiptAt = cloneConnection.latestReceiptAt || null;
   return cloneConnection;
@@ -1269,37 +1298,97 @@ function normalizePartnerConfig(value = {}) {
   return config;
 }
 
-function resolvePartnerProviderBaseline({ providerBaselineRegistry, connectionType, providerCode, effectiveDate, mode }) {
-  if (!providerBaselineRegistry || typeof providerBaselineRegistry.resolveProviderBaseline !== "function") {
-    return null;
-  }
+function resolvePartnerProviderBaselineSelectionCode(connectionType, providerCode) {
   const resolvedConnectionType = text(connectionType, "partner_connection_type_required");
   const resolvedProviderCode = text(providerCode, "partner_provider_code_required");
-  const baselineCode = PARTNER_PROVIDER_BASELINE_SELECTIONS[resolvedConnectionType]?.[resolvedProviderCode] || null;
+  return PARTNER_PROVIDER_BASELINE_SELECTIONS[resolvedConnectionType]?.[resolvedProviderCode] || null;
+}
+
+function requirePartnerConnectionProviderBaselineRef(connection, contextCode = "partner_provider_baseline_missing") {
+  const baselineSelectionCode = resolvePartnerProviderBaselineSelectionCode(connection.connectionType, connection.providerCode);
+  if (!baselineSelectionCode) {
+    return null;
+  }
+  const providerBaselineRef = connection.providerBaselineRef && typeof connection.providerBaselineRef === "object" ? clone(connection.providerBaselineRef) : {};
+  const normalizedBaselineCode = providerBaselineRef.baselineCode || connection.providerBaselineCode || null;
+  const normalizedRef = {
+    providerCode: providerBaselineRef.providerCode || connection.providerCode,
+    baselineCode: normalizedBaselineCode,
+    providerBaselineId: providerBaselineRef.providerBaselineId || connection.providerBaselineId || null,
+    providerBaselineVersion: providerBaselineRef.providerBaselineVersion || connection.providerBaselineVersion || null,
+    providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum || connection.providerBaselineChecksum || null,
+    effectiveDate: providerBaselineRef.effectiveDate || null,
+    metadata: clone(providerBaselineRef.metadata || {})
+  };
+  if (
+    normalizedRef.baselineCode !== baselineSelectionCode
+    || !normalizedRef.providerBaselineId
+    || !normalizedRef.providerBaselineVersion
+    || !normalizedRef.providerBaselineChecksum
+  ) {
+    throw createError(
+      409,
+      contextCode,
+      `Partner connection ${connection.connectionType}/${connection.providerCode} must carry a pinned provider baseline ref for ${baselineSelectionCode}.`
+    );
+  }
+  return normalizedRef;
+}
+
+function resolvePartnerProviderBaseline({ providerBaselineRegistry, connectionType, providerCode, effectiveDate, mode, required = false, contextCode = "partner_provider_baseline_missing" }) {
+  const baselineCode = resolvePartnerProviderBaselineSelectionCode(connectionType, providerCode);
   if (!baselineCode) {
     return null;
+  }
+  if (
+    !providerBaselineRegistry
+    || typeof providerBaselineRegistry.resolveProviderBaseline !== "function"
+    || typeof providerBaselineRegistry.buildProviderBaselineRef !== "function"
+  ) {
+    if (!required) {
+      return null;
+    }
+    throw createError(
+      409,
+      "partner_provider_baseline_registry_missing",
+      `Partner provider baseline registry is required for ${connectionType}/${providerCode} (${baselineCode}).`
+    );
   }
   try {
     const providerBaseline = providerBaselineRegistry.resolveProviderBaseline({
       domain: "integrations",
       jurisdiction: "SE",
-      providerCode: resolvedProviderCode,
+      providerCode,
       baselineCode,
       effectiveDate,
       environmentMode: mode
     });
-    return providerBaselineRegistry.buildProviderBaselineRef({
-      effectiveDate,
-      providerBaseline,
-      metadata: {
-        connectionType: resolvedConnectionType,
-        mode,
-        baselineSelectionCode: baselineCode
-      }
-    });
+    return requirePartnerConnectionProviderBaselineRef(
+      {
+        connectionType,
+        providerCode,
+        providerBaselineRef: providerBaselineRegistry.buildProviderBaselineRef({
+          effectiveDate,
+          providerBaseline,
+          metadata: {
+            connectionType,
+            mode,
+            baselineSelectionCode: baselineCode
+          }
+        })
+      },
+      contextCode
+    );
   } catch (error) {
     if (error?.code === "provider_baseline_not_found") {
-      return null;
+      if (!required) {
+        return null;
+      }
+      throw createError(
+        409,
+        contextCode,
+        `Partner provider baseline ${baselineCode} is missing for ${connectionType}/${providerCode} on ${effectiveDate}.`
+      );
     }
     throw error;
   }
