@@ -208,6 +208,19 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
       }),
     (error) => error?.code === "impersonation_restricted_actions_required"
   );
+  assert.throws(
+    () =>
+      platform.requestImpersonation({
+        sessionToken: secondApproverToken,
+        companyId: DEMO_IDS.companyId,
+        supportCaseId: supportCase.supportCaseId,
+        targetCompanyUserId: DEMO_APPROVER_IDS.companyUserId,
+        purposeCode: "support_limited_write_invalid_allowlist",
+        mode: "limited_write",
+        restrictedActions: ["ledger.force_post"]
+      }),
+    (error) => error?.code === "impersonation_restricted_action_not_allowlisted"
+  );
   const limitedWriteImpersonation = platform.requestImpersonation({
     sessionToken: adminToken,
     companyId: DEMO_IDS.companyId,
@@ -331,7 +344,35 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
     decision: "accepted",
     remediationNote: "Phase 14 unit test"
   });
-  assert.equal(["in_review", "signed_off", "remediated"].includes(reviewed.status), true);
+  assert.equal(reviewed.status, "in_review");
+  const remediated = platform.recordAccessReviewDecision({
+    sessionToken: adminToken,
+    companyId: DEMO_IDS.companyId,
+    reviewBatchId: accessReview.reviewBatchId,
+    findingId: staleDelegationFinding.findingId,
+    decision: "removed",
+    remediationNote: "Phase 14 stale delegation cleanup"
+  });
+  assert.equal(remediated.status, "remediated");
+  assert.throws(
+    () =>
+      platform.signOffAccessReview({
+        sessionToken: adminToken,
+        companyId: DEMO_IDS.companyId,
+        reviewBatchId: accessReview.reviewBatchId,
+        attestationNote: "Self sign-off should fail"
+      }),
+    (error) => error?.code === "access_review_signoff_separation_required"
+  );
+  const signedOffReview = platform.signOffAccessReview({
+    sessionToken: secondApproverToken,
+    companyId: DEMO_IDS.companyId,
+    reviewBatchId: accessReview.reviewBatchId,
+    attestationNote: "Independent attestation complete"
+  });
+  assert.equal(signedOffReview.status, "signed_off");
+  assert.equal(signedOffReview.signedOffByUserId, secondApprover.user.userId);
+  assert.equal(typeof signedOffReview.signedOffAt, "string");
 
   const breakGlass = platform.requestBreakGlass({
     sessionToken: adminToken,
@@ -340,6 +381,17 @@ test("Phase 14.1 backoffice, SoD, impersonation and break-glass stay policy-boun
     purposeCode: "incident_investigation",
     requestedActions: ["list_feature_flags"]
   });
+  assert.throws(
+    () =>
+      platform.requestBreakGlass({
+        sessionToken: adminToken,
+        companyId: DEMO_IDS.companyId,
+        incidentId: "INC-1402",
+        purposeCode: "invalid_break_glass_request",
+        requestedActions: ["dangerous_live_mutation"]
+      }),
+    (error) => error?.code === "break_glass_requested_action_not_allowlisted"
+  );
   assert.throws(
     () =>
       platform.approveBreakGlass({

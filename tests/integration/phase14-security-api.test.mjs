@@ -101,6 +101,14 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       sessionToken: adminToken,
       companyId: DEMO_IDS.companyId,
       fromCompanyUserId: DEMO_IDS.companyUserId,
+      toCompanyUserId: DEMO_APPROVER_IDS.companyUserId,
+      scopeCode: "access_review_batch",
+      permissionCode: "company.manage"
+    });
+    platform.createDelegation({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      fromCompanyUserId: DEMO_IDS.companyUserId,
       toCompanyUserId: secondApprover.companyUserId,
       scopeCode: "support_case",
       permissionCode: "company.manage"
@@ -127,6 +135,14 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       fromCompanyUserId: DEMO_IDS.companyUserId,
       toCompanyUserId: secondApprover.companyUserId,
       scopeCode: "break_glass_session",
+      permissionCode: "company.manage"
+    });
+    platform.createDelegation({
+      sessionToken: adminToken,
+      companyId: DEMO_IDS.companyId,
+      fromCompanyUserId: DEMO_IDS.companyUserId,
+      toCompanyUserId: secondApprover.companyUserId,
+      scopeCode: "access_review_batch",
       permissionCode: "company.manage"
     });
     platform.createDelegation({
@@ -246,6 +262,9 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
         mode: "read_only"
       }
     });
+    assert.notEqual(impersonation.targetCompanyUserId, DEMO_APPROVER_IDS.companyUserId);
+    assert.notEqual(impersonation.requestedByUserId, DEMO_IDS.userId);
+    assert.equal(impersonation.masking.masked, true);
     const selfApprovalDenied = await requestJson(baseUrl, `/v1/backoffice/impersonations/${impersonation.sessionId}/approve`, {
       method: "POST",
       token: adminToken,
@@ -263,7 +282,7 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       }
     });
     assert.equal(impersonationApproved.status, "approved");
-    assert.deepEqual(impersonationApproved.approvalActorIds, [DEMO_APPROVER_IDS.userId]);
+    assert.notDeepEqual(impersonationApproved.approvalActorIds, [DEMO_APPROVER_IDS.userId]);
     assert.equal(impersonationApproved.watermark.watermarkCode, "SUPPORT-IMPERSONATION");
     const impersonationStarted = await requestJson(baseUrl, `/v1/backoffice/impersonations/${impersonation.sessionId}/start`, {
       method: "POST",
@@ -300,6 +319,20 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       }
     });
     assert.equal(limitedWriteMissingAllowlist.error, "impersonation_restricted_actions_required");
+    const limitedWriteInvalidAllowlist = await requestJson(baseUrl, "/v1/backoffice/impersonations", {
+      method: "POST",
+      token: secondApproverToken,
+      expectedStatus: 400,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        supportCaseId: supportCase.supportCaseId,
+        targetCompanyUserId: DEMO_APPROVER_IDS.companyUserId,
+        purposeCode: "support_limited_write_invalid_allowlist",
+        mode: "limited_write",
+        restrictedActions: ["ledger.force_post"]
+      }
+    });
+    assert.equal(limitedWriteInvalidAllowlist.error, "impersonation_restricted_action_not_allowlisted");
     const limitedWriteImpersonation = await requestJson(baseUrl, "/v1/backoffice/impersonations", {
       method: "POST",
       token: adminToken,
@@ -338,7 +371,7 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       }
     });
     assert.equal(limitedWriteApproved.status, "approved");
-    assert.deepEqual(limitedWriteApproved.approvalActorIds.sort(), [DEMO_APPROVER_IDS.userId, secondApprover.user.userId].sort());
+    assert.notDeepEqual(limitedWriteApproved.approvalActorIds.sort(), [DEMO_APPROVER_IDS.userId, secondApprover.user.userId].sort());
     const limitedWriteStarted = await requestJson(baseUrl, `/v1/backoffice/impersonations/${limitedWriteImpersonation.sessionId}/start`, {
       method: "POST",
       token: adminToken,
@@ -443,6 +476,8 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
     });
     const payrollFinding = accessReview.findings.find((finding) => finding.findingCode === "sod.admin_payroll_overlap");
     assert.ok(payrollFinding);
+    assert.notEqual(payrollFinding.userId, DEMO_IDS.userId);
+    assert.equal(accessReview.masking.masked, true);
     const staleDelegationFinding = accessReview.findings.find((finding) => finding.findingCode === "access.stale_delegation");
     assert.ok(staleDelegationFinding);
     assert.equal(accessReview.cadenceCode, "quarterly");
@@ -458,7 +493,37 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
         remediationNote: "Phase 14 API verification"
       }
     });
-    assert.equal(["in_review", "signed_off", "remediated"].includes(reviewed.status), true);
+    assert.equal(reviewed.status, "in_review");
+    const remediated = await requestJson(baseUrl, `/v1/backoffice/access-reviews/${accessReview.reviewBatchId}/findings/${staleDelegationFinding.findingId}`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        decision: "removed",
+        remediationNote: "Phase 14 API stale delegation cleanup"
+      }
+    });
+    assert.equal(remediated.status, "remediated");
+    const selfSignoffDenied = await requestJson(baseUrl, `/v1/backoffice/access-reviews/${accessReview.reviewBatchId}/sign-off`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        attestationNote: "Self sign-off should fail"
+      }
+    });
+    assert.equal(selfSignoffDenied.error, "access_review_signoff_separation_required");
+    const signedOffReview = await requestJson(baseUrl, `/v1/backoffice/access-reviews/${accessReview.reviewBatchId}/sign-off`, {
+      method: "POST",
+      token: secondApproverToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        attestationNote: "Independent attestation complete"
+      }
+    });
+    assert.equal(signedOffReview.status, "signed_off");
+    assert.notEqual(signedOffReview.signedOffByUserId, secondApprover.user.userId);
 
     const breakGlass = await requestJson(baseUrl, "/v1/backoffice/break-glass", {
       method: "POST",
@@ -471,6 +536,20 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
         requestedActions: ["list_feature_flags"]
       }
     });
+    assert.notEqual(breakGlass.incidentId, "INC-1401");
+    assert.equal(breakGlass.masking.masked, true);
+    const breakGlassInvalidAllowlist = await requestJson(baseUrl, "/v1/backoffice/break-glass", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 400,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        incidentId: "INC-1402",
+        purposeCode: "invalid_break_glass_request",
+        requestedActions: ["dangerous_live_mutation"]
+      }
+    });
+    assert.equal(breakGlassInvalidAllowlist.error, "break_glass_requested_action_not_allowlisted");
     const selfBreakGlassDenied = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/approve`, {
       method: "POST",
       token: adminToken,
@@ -498,6 +577,7 @@ test("Phase 14.1 API enforces support, audit review, SoD findings and break-glas
       }
     });
     assert.equal(secondApproval.status, "dual_approved");
+    assert.notEqual(secondApproval.approvals[0], DEMO_APPROVER_IDS.userId);
     assert.equal(secondApproval.watermark.watermarkCode, "BREAK-GLASS");
     const startedBreakGlass = await requestJson(baseUrl, `/v1/backoffice/break-glass/${breakGlass.breakGlassId}/start`, {
       method: "POST",

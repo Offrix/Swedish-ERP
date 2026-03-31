@@ -30,6 +30,8 @@ export const ADMIN_DIAGNOSTIC_TYPES = Object.freeze([
 const WRITE_DIAGNOSTIC_TYPES = new Set(["plan_job_replay", "execute_job_replay"]);
 const SUPPORT_ACTION_IMPERSONATION_READ_ONLY = "impersonation_read_only";
 const SUPPORT_ACTION_IMPERSONATION_LIMITED_WRITE = "impersonation_limited_write";
+const IMPERSONATION_RESTRICTED_ACTION_ALLOWLIST = Object.freeze(["jobs.cancel", "jobs.retry"]);
+const BREAK_GLASS_REQUEST_ACTION_ALLOWLIST = Object.freeze([...ADMIN_DIAGNOSTIC_TYPES]);
 const IMPERSONATION_REQUEST_LIMIT = 5;
 const IMPERSONATION_REQUEST_WINDOW_MS = 30 * 60 * 1000;
 const IMPERSONATION_ACTIVATION_LIMIT = 5;
@@ -135,6 +137,7 @@ export function createBackofficeModule({
     generateAccessReview,
     listAccessReviews,
     recordAccessReviewDecision,
+    signOffAccessReview,
     requestBreakGlass,
     listBreakGlassSessions,
     approveBreakGlass,
@@ -1238,7 +1241,10 @@ export function createBackofficeModule({
     requireSupportCase(companyId, supportCaseId);
     const targetCompanyUser = requireCompanyUser(companyId, targetCompanyUserId, orgAuthPlatform, error);
     const resolvedMode = assertAllowed(mode, IMPERSONATION_MODES, "impersonation_mode_invalid");
-    const normalizedRestrictedActions = normalizeActions(restrictedActions);
+    const normalizedRestrictedActions = normalizeActions(restrictedActions, {
+      allowedValues: IMPERSONATION_RESTRICTED_ACTION_ALLOWLIST,
+      invalidCode: "impersonation_restricted_action_not_allowlisted"
+    });
     const createdAt = nowIso(clock);
     const expiresAt = addMinutes(createdAt, normalizePositiveInteger(expiresInMinutes, "impersonation_expiry_invalid"));
     if (resolvedMode === "read_only" && normalizedRestrictedActions.length > 0) {
@@ -1258,6 +1264,7 @@ export function createBackofficeModule({
       purposeCode: text(purposeCode, "impersonation_purpose_required"),
       mode: resolvedMode,
       restrictedActions: normalizedRestrictedActions,
+      allowlistPolicyCode: "support_impersonation.default_allowlist",
       approvalActorIds: [],
       status: "requested",
       approvedAt: null,
@@ -1491,7 +1498,10 @@ export function createBackofficeModule({
       status: findings.length > 0 ? "in_review" : "generated",
       findings,
       coverageSummary: summarizeAccessReviewCoverage(companyId, orgAuthPlatform, findings),
-      signedOffByUserId: null
+      generatedByUserId: principal.userId,
+      signedOffByUserId: null,
+      signedOffAt: null,
+      attestationNote: null
     };
     state.accessReviewBatches.set(review.reviewBatchId, review);
     audit({
@@ -1534,10 +1544,6 @@ export function createBackofficeModule({
     finding.decidedByUserId = principal.userId;
     finding.decidedAt = nowIso(clock);
     review.status = review.findings.every((candidate) => candidate.decision && candidate.decision !== "pending") ? "remediated" : "in_review";
-    if (review.status === "remediated") {
-      review.signedOffByUserId = principal.userId;
-      review.status = "signed_off";
-    }
     audit({
       companyId,
       actorId: principal.userId,
@@ -1546,6 +1552,46 @@ export function createBackofficeModule({
       entityType: "access_review_batch",
       entityId: review.reviewBatchId,
       explanation: `Recorded ${finding.decision} on finding ${finding.findingCode}.`
+    });
+    return clone(review);
+  }
+
+  function signOffAccessReview({
+    sessionToken,
+    companyId,
+    reviewBatchId,
+    attestationNote = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const principal = authorize(sessionToken, companyId, "company.manage");
+    const review = requireAccessReview(companyId, reviewBatchId);
+    if (review.status === "signed_off") {
+      return clone(review);
+    }
+    const hasPendingFindings = review.findings.some((candidate) => !candidate.decision || candidate.decision === "pending");
+    if (hasPendingFindings) {
+      throw error(409, "access_review_pending_findings", "Access review cannot be signed off while findings are still pending.");
+    }
+    const reviewDecisionActorIds = [...new Set(review.findings.map((candidate) => candidate.decidedByUserId).filter(Boolean))];
+    if (reviewDecisionActorIds.includes(principal.userId) || (!reviewDecisionActorIds.length && principal.userId === review.generatedByUserId)) {
+      throw error(
+        409,
+        "access_review_signoff_separation_required",
+        "Access review sign-off requires a separate attestation actor."
+      );
+    }
+    review.status = "signed_off";
+    review.signedOffByUserId = principal.userId;
+    review.signedOffAt = nowIso(clock);
+    review.attestationNote = optionalText(attestationNote);
+    audit({
+      companyId,
+      actorId: principal.userId,
+      correlationId,
+      action: "backoffice.access_review.signed_off",
+      entityType: "access_review_batch",
+      entityId: review.reviewBatchId,
+      explanation: `Signed off access review ${review.reviewBatchId}.`
     });
     return clone(review);
   }
@@ -1579,7 +1625,10 @@ export function createBackofficeModule({
     });
     const createdAt = nowIso(clock);
     const expiresAt = addMinutes(createdAt, normalizePositiveInteger(expiresInMinutes, "break_glass_expiry_invalid"));
-    const normalizedRequestedActions = normalizeActions(requestedActions);
+    const normalizedRequestedActions = normalizeActions(requestedActions, {
+      allowedValues: BREAK_GLASS_REQUEST_ACTION_ALLOWLIST,
+      invalidCode: "break_glass_requested_action_not_allowlisted"
+    });
     if (normalizedRequestedActions.length === 0) {
       throw error(400, "break_glass_requested_actions_required", "Break-glass requires at least one allowlisted action.");
     }
@@ -1607,6 +1656,7 @@ export function createBackofficeModule({
       incidentId: resolvedIncidentId,
       purposeCode: text(purposeCode, "break_glass_purpose_required"),
       requestedActions: normalizedRequestedActions,
+      allowlistPolicyCode: "break_glass.default_allowlist",
       requestedByUserId: principal.userId,
       approvals: [],
       status: "requested",
@@ -1955,6 +2005,7 @@ export function createBackofficeModule({
       purposeCode: session.purposeCode,
       mode: session.mode,
       restrictedActions: [...session.restrictedActions],
+      allowlistPolicyCode: session.allowlistPolicyCode || null,
       approvalActorIds: [...session.approvalActorIds],
       status: session.status,
       approvedAt: session.approvedAt,
@@ -2045,6 +2096,7 @@ export function createBackofficeModule({
       incidentId: session.incidentId,
       purposeCode: session.purposeCode,
       requestedActions: [...session.requestedActions],
+      allowlistPolicyCode: session.allowlistPolicyCode || null,
       requestedByUserId: session.requestedByUserId,
       approvals: [...session.approvals],
       status: session.status,
@@ -2253,11 +2305,19 @@ function normalizeRefs(values) {
   }));
 }
 
-function normalizeActions(values) {
+function normalizeActions(values, { allowedValues = null, invalidCode = "support_case_action_invalid" } = {}) {
   if (!Array.isArray(values)) {
     return [];
   }
-  return [...new Set(values.map((value) => text(value, "support_case_action_invalid")))].sort();
+  const normalized = [...new Set(values.map((value) => text(value, invalidCode)))].sort();
+  if (Array.isArray(allowedValues) && allowedValues.length > 0) {
+    for (const action of normalized) {
+      if (!allowedValues.includes(action)) {
+        throw createValidationError(invalidCode, `${action} is not allowlisted.`);
+      }
+    }
+  }
+  return normalized;
 }
 
 function hashObject(value) {

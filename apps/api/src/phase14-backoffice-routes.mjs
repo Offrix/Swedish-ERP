@@ -161,7 +161,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "impersonation_session", objectId: companyId, scopeCode: "impersonation_session" });
-    writeJson(res, 201, platform.requestImpersonation({
+    writeJson(res, 201, projectMaskedImpersonationView(platform.requestImpersonation({
       sessionToken,
       companyId,
       supportCaseId: body.supportCaseId,
@@ -171,7 +171,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
       expiresInMinutes: body.expiresInMinutes,
       restrictedActions: body.restrictedActions,
       requestIp: readClientAddress(req)
-    }));
+    })));
     return true;
   }
 
@@ -197,7 +197,11 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const sessionToken = readSessionToken(req);
     const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "impersonation_session", objectId: companyId, scopeCode: "impersonation_session" });
     assertBackofficeReadAccess({ principal });
-    writeJson(res, 200, { items: platform.listImpersonationSessions({ sessionToken, companyId, status: optionalText(url.searchParams.get("status")) }) });
+    writeJson(res, 200, {
+      items: platform
+        .listImpersonationSessions({ sessionToken, companyId, status: optionalText(url.searchParams.get("status")) })
+        .map(projectMaskedImpersonationView)
+    });
     return true;
   }
 
@@ -207,7 +211,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "impersonation_session", objectId: impersonationApproveMatch.sessionId, scopeCode: "impersonation_session" });
-    writeJson(res, 200, platform.approveImpersonation({ sessionToken, companyId, sessionId: impersonationApproveMatch.sessionId }));
+    writeJson(res, 200, projectMaskedImpersonationView(platform.approveImpersonation({ sessionToken, companyId, sessionId: impersonationApproveMatch.sessionId })));
     return true;
   }
 
@@ -217,12 +221,12 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "impersonation_session", objectId: impersonationStartMatch.sessionId, scopeCode: "impersonation_session" });
-    writeJson(res, 200, platform.activateImpersonation({
+    writeJson(res, 200, projectMaskedImpersonationView(platform.activateImpersonation({
       sessionToken,
       companyId,
       sessionId: impersonationStartMatch.sessionId,
       requestIp: readClientAddress(req)
-    }));
+    })));
     return true;
   }
 
@@ -232,7 +236,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "impersonation_session", objectId: impersonationEndMatch.sessionId, scopeCode: "impersonation_session" });
-    writeJson(res, 200, platform.terminateImpersonation({ sessionToken, companyId, sessionId: impersonationEndMatch.sessionId, reasonCode: body.reasonCode }));
+    writeJson(res, 200, projectMaskedImpersonationView(platform.terminateImpersonation({ sessionToken, companyId, sessionId: impersonationEndMatch.sessionId, reasonCode: body.reasonCode })));
     return true;
   }
 
@@ -241,13 +245,13 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "access_review_batch", objectId: companyId, scopeCode: "access_review_batch" });
-    writeJson(res, 201, platform.generateAccessReview({
+    writeJson(res, 201, projectMaskedAccessReviewView(platform.generateAccessReview({
       sessionToken,
       companyId,
       scopeType: body.scopeType,
       scopeRef: body.scopeRef,
       dueInDays: body.dueInDays
-    }));
+    })));
     return true;
   }
 
@@ -256,7 +260,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const sessionToken = readSessionToken(req);
     const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "access_review_batch", objectId: companyId, scopeCode: "access_review_batch" });
     assertBackofficeReadAccess({ principal });
-    writeJson(res, 200, { items: platform.listAccessReviews({ sessionToken, companyId }) });
+    writeJson(res, 200, { items: platform.listAccessReviews({ sessionToken, companyId }).map(projectMaskedAccessReviewView) });
     return true;
   }
 
@@ -266,14 +270,29 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "access_review_batch", objectId: accessReviewDecisionMatch.reviewBatchId, scopeCode: "access_review_batch" });
-    writeJson(res, 200, platform.recordAccessReviewDecision({
+    writeJson(res, 200, projectMaskedAccessReviewView(platform.recordAccessReviewDecision({
       sessionToken,
       companyId,
       reviewBatchId: accessReviewDecisionMatch.reviewBatchId,
       findingId: accessReviewDecisionMatch.findingId,
       decision: body.decision,
       remediationNote: body.remediationNote
-    }));
+    })));
+    return true;
+  }
+
+  const accessReviewSignoffMatch = matchPath(path, "/v1/backoffice/access-reviews/:reviewBatchId/sign-off");
+  if (req.method === "POST" && accessReviewSignoffMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "access_review_batch", objectId: accessReviewSignoffMatch.reviewBatchId, scopeCode: "access_review_batch" });
+    writeJson(res, 200, projectMaskedAccessReviewView(platform.signOffAccessReview({
+      sessionToken,
+      companyId,
+      reviewBatchId: accessReviewSignoffMatch.reviewBatchId,
+      attestationNote: body.attestationNote
+    })));
     return true;
   }
 
@@ -282,7 +301,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "break_glass_session", objectId: companyId, scopeCode: "break_glass_session" });
-    writeJson(res, 201, platform.requestBreakGlass({
+    writeJson(res, 201, projectMaskedBreakGlassView(platform.requestBreakGlass({
       sessionToken,
       companyId,
       incidentId: body.incidentId,
@@ -290,7 +309,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
       requestedActions: body.requestedActions,
       expiresInMinutes: body.expiresInMinutes,
       requestIp: readClientAddress(req)
-    }));
+    })));
     return true;
   }
 
@@ -316,7 +335,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const sessionToken = readSessionToken(req);
     const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "break_glass_session", objectId: companyId, scopeCode: "break_glass_session" });
     assertBackofficeReadAccess({ principal });
-    writeJson(res, 200, { items: platform.listBreakGlassSessions({ sessionToken, companyId }) });
+    writeJson(res, 200, { items: platform.listBreakGlassSessions({ sessionToken, companyId }).map(projectMaskedBreakGlassView) });
     return true;
   }
 
@@ -326,7 +345,7 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "break_glass_session", objectId: breakGlassApproveMatch.breakGlassId, scopeCode: "break_glass_session" });
-    writeJson(res, 200, platform.approveBreakGlass({ sessionToken, companyId, breakGlassId: breakGlassApproveMatch.breakGlassId }));
+    writeJson(res, 200, projectMaskedBreakGlassView(platform.approveBreakGlass({ sessionToken, companyId, breakGlassId: breakGlassApproveMatch.breakGlassId })));
     return true;
   }
 
@@ -336,12 +355,12 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "break_glass_session", objectId: breakGlassStartMatch.breakGlassId, scopeCode: "break_glass_session" });
-    writeJson(res, 200, platform.activateBreakGlass({
+    writeJson(res, 200, projectMaskedBreakGlassView(platform.activateBreakGlass({
       sessionToken,
       companyId,
       breakGlassId: breakGlassStartMatch.breakGlassId,
       requestIp: readClientAddress(req)
-    }));
+    })));
     return true;
   }
 
@@ -351,12 +370,12 @@ export async function tryHandlePhase14BackofficeRoutes({ req, res, url, path, pl
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req, body);
     authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.manage", objectType: "break_glass_session", objectId: breakGlassCloseMatch.breakGlassId, scopeCode: "break_glass_session" });
-    writeJson(res, 200, platform.closeBreakGlassSession({
+    writeJson(res, 200, projectMaskedBreakGlassView(platform.closeBreakGlassSession({
       sessionToken,
       companyId,
       breakGlassId: breakGlassCloseMatch.breakGlassId,
       reasonCode: body.reasonCode
-    }));
+    })));
     return true;
   }
 
@@ -1077,6 +1096,90 @@ function projectMaskedRuntimeIncidentView(response) {
   };
 }
 
+function projectMaskedImpersonationView(session) {
+  return {
+    ...session,
+    targetCompanyUserId: maskValue(session?.targetCompanyUserId),
+    targetUserId: maskValue(session?.targetUserId),
+    requestedByUserId: maskValue(session?.requestedByUserId),
+    approvedByUserId: maskValue(session?.approvedByUserId),
+    activatedByUserId: maskValue(session?.activatedByUserId),
+    approvalActorIds: maskStringArray(session?.approvalActorIds || []),
+    watermark: maskWatermark(session?.watermark, { maskReferenceCode: false }),
+    masking: {
+      masked: true,
+      maskedFields: [
+        "targetCompanyUserId",
+        "targetUserId",
+        "requestedByUserId",
+        "approvedByUserId",
+        "activatedByUserId",
+        "approvalActorIds",
+        "watermark.label",
+        "watermark.bannerText"
+      ],
+      maskingPolicyCode: "impersonation_session.default_masked_view"
+    }
+  };
+}
+
+function projectMaskedBreakGlassView(session) {
+  return {
+    ...session,
+    incidentId: maskValue(session?.incidentId),
+    requestedByUserId: maskValue(session?.requestedByUserId),
+    activatedByUserId: maskValue(session?.activatedByUserId),
+    approvals: maskStringArray(session?.approvals || []),
+    watermark: maskWatermark(session?.watermark),
+    masking: {
+      masked: true,
+      maskedFields: [
+        "incidentId",
+        "requestedByUserId",
+        "activatedByUserId",
+        "approvals",
+        "watermark.referenceCode",
+        "watermark.label",
+        "watermark.bannerText"
+      ],
+      maskingPolicyCode: "break_glass_session.default_masked_view"
+    }
+  };
+}
+
+function projectMaskedAccessReviewView(review) {
+  return {
+    ...review,
+    generatedByUserId: maskValue(review?.generatedByUserId),
+    signedOffByUserId: maskValue(review?.signedOffByUserId),
+    findings: (Array.isArray(review?.findings) ? review.findings : []).map(projectMaskedAccessReviewFinding),
+    masking: {
+      masked: true,
+      maskedFields: [
+        "generatedByUserId",
+        "signedOffByUserId",
+        "findings.userId",
+        "findings.relatedCompanyUserIds",
+        "findings.relatedDelegationIds",
+        "findings.relatedObjectGrantIds",
+        "findings.decidedByUserId"
+      ],
+      maskingPolicyCode: "access_review.default_masked_view"
+    }
+  };
+}
+
+function projectMaskedAccessReviewFinding(finding) {
+  return {
+    ...finding,
+    userId: maskValue(finding?.userId),
+    relatedCompanyUserIds: maskStringArray(finding?.relatedCompanyUserIds || []),
+    relatedDelegationIds: maskStringArray(finding?.relatedDelegationIds || []),
+    relatedObjectGrantIds: maskStringArray(finding?.relatedObjectGrantIds || []),
+    decidedByUserId: maskValue(finding?.decidedByUserId)
+  };
+}
+
 function maskRequester(requester) {
   if (!requester || typeof requester !== "object") {
     return requester;
@@ -1099,6 +1202,23 @@ function maskObjectRefs(objectRefs) {
     objectId: typeof objectRef?.objectId === "string" ? maskValue(objectRef.objectId) : objectRef?.objectId,
     rawObjectIdRedacted: typeof objectRef?.objectId === "string"
   }));
+}
+
+function maskStringArray(values) {
+  return (Array.isArray(values) ? values : []).map((value) => (typeof value === "string" ? maskValue(value) : value));
+}
+
+function maskWatermark(watermark, { maskReferenceCode = true } = {}) {
+  if (!watermark || typeof watermark !== "object") {
+    return watermark;
+  }
+  return {
+    ...watermark,
+    referenceCode: maskReferenceCode ? maskValue(watermark.referenceCode) : watermark.referenceCode,
+    targetCompanyUserId: maskValue(watermark.targetCompanyUserId),
+    label: maskValue(watermark.label),
+    bannerText: maskValue(watermark.bannerText)
+  };
 }
 
 function maskValue(value) {

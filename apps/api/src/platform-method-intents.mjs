@@ -1106,6 +1106,7 @@ const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
     "requestCloseReopen": "write",
     "requestEmergencyDisable": "write",
     "requestImpersonation": "write",
+    "signOffAccessReview": "write",
     "resolveCloseBlocker": "write",
     "resolveOperationalWorkItem": "write",
     "resolveRuntimeFlags": "write",

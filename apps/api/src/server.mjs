@@ -1070,6 +1070,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/backoffice/impersonations/:sessionId/evidence",
               "/v1/backoffice/access-reviews",
               "/v1/backoffice/access-reviews/:reviewBatchId/findings/:findingId",
+              "/v1/backoffice/access-reviews/:reviewBatchId/sign-off",
               "/v1/backoffice/break-glass",
               "/v1/backoffice/break-glass/:breakGlassId/approve",
               "/v1/backoffice/break-glass/:breakGlassId/start",

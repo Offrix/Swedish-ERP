@@ -647,6 +647,7 @@ export function createCoreEngine({
       generateAccessReview: backofficeModule.generateAccessReview,
       listAccessReviews: backofficeModule.listAccessReviews,
       recordAccessReviewDecision: backofficeModule.recordAccessReviewDecision,
+      signOffAccessReview: backofficeModule.signOffAccessReview,
       requestBreakGlass: backofficeModule.requestBreakGlass,
       listBreakGlassSessions: backofficeModule.listBreakGlassSessions,
       approveBreakGlass: backofficeModule.approveBreakGlass,

@@ -279,6 +279,7 @@ const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["POST /v1/backoffice/replay-drills", override("backoffice", "replay_drill_record", "strong_mfa", "company", "replay_drill", "replay_drill", "company.manage", false)],
   ["POST /v1/backoffice/replay-drills/:replayDrillId/start", override("backoffice", "replay_drill_start", "strong_mfa", "replay_drill", "replay_drill", "replay_drill", "company.manage", true)],
   ["POST /v1/backoffice/replay-drills/:replayDrillId/complete", override("backoffice", "replay_drill_complete", "strong_mfa", "replay_drill", "replay_drill", "replay_drill", "company.manage", true)],
+  ["POST /v1/backoffice/access-reviews/:reviewBatchId/sign-off", override("backoffice", "access_review_signoff", "strong_mfa", "access_review_batch", "access_review_batch", "access_review_batch", "company.manage", true)],
   ["POST /v1/backoffice/impersonations/:sessionId/start", override("backoffice", "support_impersonation_start", "strong_mfa", "impersonation_session", "impersonation_session", "impersonation_session", "company.manage", true)],
   ["POST /v1/backoffice/break-glass/:breakGlassId/start", override("backoffice", "break_glass_activate", "strong_mfa", "break_glass_session", "break_glass_session", "break_glass_session", "company.manage", true)],
   ["GET /v1/ops/transaction-boundary", { ...override("ops", "transaction_boundary_read", "strong_mfa", "company", "transaction_boundary", "transaction_boundary", "company.read", false), mutation: false }],
