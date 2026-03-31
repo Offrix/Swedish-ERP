@@ -140,6 +140,87 @@ test("Phase 4.2 API returns derived declaration-box amounts and mirrored credit 
   }
 });
 
+test("Phase 8.3 API models domestic supplier-charged partial and blocked deduction without forcing review", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-31T09:00:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminSession = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const partial = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_type: "AP_INVOICE",
+          source_id: "phase8-3-api-domestic-partial-deduction",
+          supply_type: "purchase",
+          seller_country: "SE",
+          buyer_country: "SE",
+          goods_or_services: "services",
+          vat_rate: 25,
+          tax_rate_candidate: 25,
+          vat_code_candidate: "VAT_SE_DOMESTIC_25",
+          line_amount_ex_vat: 1200,
+          deduction_ratio: 0.5
+        })
+      }
+    });
+    assert.equal(partial.vatDecision.status, "decided");
+    assert.equal(partial.vatDecision.deductionRuleCode, "partial_deduction");
+    assert.deepEqual(partial.vatDecision.declarationBoxAmounts, [{ boxCode: "48", amount: 150, amountType: "input_vat" }]);
+
+    const blocked = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_type: "AP_INVOICE",
+          source_id: "phase8-3-api-domestic-blocked-deduction",
+          supply_type: "purchase",
+          seller_country: "SE",
+          buyer_country: "SE",
+          goods_or_services: "services",
+          vat_rate: 25,
+          tax_rate_candidate: 25,
+          vat_code_candidate: "VAT_SE_DOMESTIC_25",
+          line_amount_ex_vat: 1200,
+          deduction_ratio: 0
+        })
+      }
+    });
+    assert.equal(blocked.vatDecision.status, "decided");
+    assert.equal(blocked.vatDecision.deductionRuleCode, "blocked_deduction");
+    assert.deepEqual(blocked.vatDecision.declarationBoxAmounts, []);
+  } finally {
+    await stopServer(server);
+  }
+});
+
 async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
   const started = await requestJson(`${baseUrl}/v1/auth/login`, {
     method: "POST",

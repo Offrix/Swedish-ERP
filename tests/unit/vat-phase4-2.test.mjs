@@ -166,6 +166,58 @@ test("Phase 4.2 mirrors original VAT decisions for credit notes and reviews miss
   assert.equal(missingOriginal.reviewQueueItem.reviewReasonCode, "original_vat_decision_missing");
 });
 
+test("Phase 8.3 models domestic supplier-charged partial and blocked deduction without forced review", () => {
+  const vat = createVatEngine({
+    clock: () => new Date("2026-03-31T08:45:00Z")
+  });
+
+  const partial = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_type: "AP_INVOICE",
+      source_id: "phase8-3-unit-domestic-partial-deduction",
+      supply_type: "purchase",
+      seller_country: "SE",
+      buyer_country: "SE",
+      goods_or_services: "services",
+      vat_rate: 25,
+      tax_rate_candidate: 25,
+      vat_code_candidate: "VAT_SE_DOMESTIC_25",
+      line_amount_ex_vat: 1200,
+      deduction_ratio: 0.5
+    })
+  });
+  assert.equal(partial.vatDecision.status, "decided");
+  assert.equal(partial.vatDecision.deductionRuleCode, "partial_deduction");
+  assert.deepEqual(partial.vatDecision.declarationBoxAmounts, [{ boxCode: "48", amount: 150, amountType: "input_vat" }]);
+  assert.deepEqual(partial.vatDecision.postingEntries, [
+    { entryCode: "input_vat_supplier_charged", direction: "debit", amount: 150, vatEffect: "input_vat" }
+  ]);
+
+  const blocked = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_type: "AP_INVOICE",
+      source_id: "phase8-3-unit-domestic-blocked-deduction",
+      supply_type: "purchase",
+      seller_country: "SE",
+      buyer_country: "SE",
+      goods_or_services: "services",
+      vat_rate: 25,
+      tax_rate_candidate: 25,
+      vat_code_candidate: "VAT_SE_DOMESTIC_25",
+      line_amount_ex_vat: 1200,
+      deduction_ratio: 0
+    })
+  });
+  assert.equal(blocked.vatDecision.status, "decided");
+  assert.equal(blocked.vatDecision.deductionRuleCode, "blocked_deduction");
+  assert.deepEqual(blocked.vatDecision.declarationBoxAmounts, []);
+  assert.deepEqual(blocked.vatDecision.postingEntries, []);
+});
+
 function buildTransactionLine(overrides = {}) {
   return {
     seller_country: "SE",

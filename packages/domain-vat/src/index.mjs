@@ -1138,25 +1138,6 @@ function classifyVatDecision({ companyId, normalizedLine, rulePack, state }) {
     });
   }
 
-  if (
-    scenario.decisionCategory === "domestic_supplier_charged_purchase" &&
-    normalizedLine.deduction_ratio !== null &&
-    normalizedLine.deduction_ratio !== 1
-  ) {
-    return buildReviewDecision({
-      normalizedLine,
-      rulePack,
-      reviewReasonCode: "unsupported_domestic_purchase_deduction_ratio",
-      warningCode: "unsupported_domestic_purchase_deduction_ratio",
-      warningMessage: "Domestic supplier-charged purchases with partial deduction must be reviewed before posting.",
-      explanation: [
-        `rule_pack_id=${rulePack.rulePackId}`,
-        `deduction_ratio=${normalizedLine.deduction_ratio}`,
-        "Decision routed to manual review because domestic supplier-charged purchases do not yet support partial deduction auto-booking."
-      ]
-    });
-  }
-
   const outputs = buildScenarioOutputs(normalizedLine, scenario);
   const explanation = [
     `rule_pack_id=${rulePack.rulePackId}`,
@@ -1687,10 +1668,11 @@ function buildScenarioOutputs(normalizedLine, scenario) {
       break;
     case "domestic_supplier_charged_purchase": {
       const inputVat = calculateVat(baseAmount, rate);
-      declarationBoxAmounts = inputVat > 0 ? [createBoxAmount("48", inputVat, "input_vat")] : [];
+      const deductibleVat = deductionRatio > 0 ? roundMoney(inputVat * deductionRatio) : 0;
+      declarationBoxAmounts = deductibleVat > 0 ? [createBoxAmount("48", deductibleVat, "input_vat")] : [];
       postingEntries =
-        inputVat > 0
-          ? [createPostingEntry("input_vat_supplier_charged", "debit", inputVat, "input_vat")]
+        deductibleVat > 0
+          ? [createPostingEntry("input_vat_supplier_charged", "debit", deductibleVat, "input_vat")]
           : [];
       break;
     }
