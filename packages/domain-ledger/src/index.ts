@@ -111,6 +111,11 @@ export interface AccountingPeriod {
   readonly lockReasonCode?: string | null;
   readonly lockedByActorId?: string | null;
   readonly lockedAt?: string | null;
+  readonly lockApprovalMode?: "direct_approval" | "close_signoff_chain" | null;
+  readonly lockApprovalActorIds?: readonly string[];
+  readonly lockApprovalEvidenceRef?: string | null;
+  readonly lockApprovedByActorId?: string | null;
+  readonly lockApprovedByRoleCode?: string | null;
   readonly reopenedByActorId?: string | null;
   readonly reopenedAt?: string | null;
   readonly createdAt: string;

@@ -185,6 +185,9 @@ function instantiateCloseChecklist(
     updatedAt: createdAt,
     signedOffAt: null,
     closedAt: null,
+    closedByUserId: null,
+    closedByCompanyUserId: null,
+    hardCloseEvidenceRef: null,
     currentEvidenceBundleId: null,
     supersededByChecklistId: null,
     supersedesChecklistId: null
@@ -574,6 +577,9 @@ function requestCloseReopen(
   successor.createdAt = helpers.now();
   successor.updatedAt = helpers.now();
   successor.closedAt = null;
+  successor.closedByUserId = null;
+  successor.closedByCompanyUserId = null;
+  successor.hardCloseEvidenceRef = null;
   successor.signedOffAt = null;
   successor.currentEvidenceBundleId = null;
   successor.supersedesChecklistId = checklist.checklistId;
@@ -1069,20 +1075,38 @@ function hardCloseChecklist(helpers, checklist, companyUser, principal, correlat
   if (!["close_signatory", "finance_manager", "company_admin"].includes(String(companyUser.roleCode || "").toLowerCase())) {
     throw helpers.error(403, "close_signatory_role_required", "Final close sign-off requires a senior finance role.");
   }
+  const closeSignoffs = listChecklistSignoffs(helpers, checklist);
+  const approvalActorIds = [...new Set(
+    closeSignoffs
+      .map((candidate) => norm(candidate.signatoryUserId))
+      .filter((candidate) => candidate && candidate !== principal.userId)
+  )];
+  if (approvalActorIds.length === 0) {
+    throw helpers.error(
+      400,
+      "close_signoff_chain_incomplete",
+      "Hard close requires at least two distinct signatories in the sign-off chain."
+    );
+  }
+  const workbench = materializeChecklist(helpers, checklist);
   helpers.ledgerPlatform?.lockAccountingPeriod?.({
     companyId: checklist.clientCompanyId,
     accountingPeriodId: checklist.accountingPeriodId,
     status: "hard_closed",
-    actorId: checklist.createdByUserId,
+    actorId: principal.userId,
     reasonCode: "close_signoff",
-    approvedByActorId: principal.userId,
-    approvedByRoleCode: String(companyUser.roleCode || "").toLowerCase(),
+    approvalMode: "close_signoff_chain",
+    approvalChainActorIds: approvalActorIds,
+    approvalEvidenceRef: JSON.stringify(workbench.evidenceSnapshotRef),
     correlationId
   });
   checklist.status = "closed";
   checklist.closeState = "hard_closed";
   checklist.signedOffAt = helpers.now();
   checklist.closedAt = helpers.now();
+  checklist.closedByUserId = principal.userId;
+  checklist.closedByCompanyUserId = companyUser.companyUserId;
+  checklist.hardCloseEvidenceRef = workbench.evidenceSnapshotRef;
   checklist.updatedAt = helpers.now();
 }
 

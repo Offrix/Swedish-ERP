@@ -130,6 +130,13 @@ test("Phase 11.3 API exposes close workbench, blocker handling, sign-off and reo
     });
     assert.equal(closed.status, "closed");
     assert.equal(closed.closeState, "hard_closed");
+    assert.equal(closed.closedByUserId, DEMO_IDS.userId);
+    assert.equal(closed.closedByCompanyUserId, DEMO_IDS.companyUserId);
+    assert.ok(closed.hardCloseEvidenceRef);
+    assert.equal(closed.accountingPeriod.lockedByActorId, DEMO_IDS.userId);
+    assert.equal(closed.accountingPeriod.lockApprovalMode, "close_signoff_chain");
+    assert.deepEqual(closed.accountingPeriod.lockApprovalActorIds, [preparer.user.userId]);
+    assert.ok(closed.accountingPeriod.lockApprovalEvidenceRef);
     assert.ok(closed.closeEvidenceBundleId);
     assert.equal(closed.closeEvidenceBundle?.status, "frozen");
     assert.notEqual(closed.closeEvidenceBundleId, pendingSignoff.closeEvidenceBundleId);

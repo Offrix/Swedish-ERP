@@ -2789,6 +2789,11 @@ export function createLedgerEngine({
       lockReasonCode: null,
       lockedByActorId: null,
       lockedAt: null,
+      lockApprovalMode: null,
+      lockApprovalActorIds: [],
+      lockApprovalEvidenceRef: null,
+      lockApprovedByActorId: null,
+      lockApprovedByRoleCode: null,
       reopenedByActorId: null,
       reopenedAt: null,
       createdAt: nowIso(),
@@ -2897,6 +2902,9 @@ export function createLedgerEngine({
     reasonCode,
     approvedByActorId = null,
     approvedByRoleCode = null,
+    approvalMode = null,
+    approvalChainActorIds = [],
+    approvalEvidenceRef = null,
     correlationId = crypto.randomUUID()
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
@@ -2916,19 +2924,27 @@ export function createLedgerEngine({
       throw httpError(409, "accounting_period_transition_invalid", "A hard-closed period must be reopened before its lock status changes.");
     }
 
-    if (targetStatus === "hard_closed") {
-      assertSeniorFinanceApproval({
+    const hardCloseApproval = targetStatus === "hard_closed"
+      ? resolveHardCloseApproval({
         actorId: resolvedActorId,
         approvedByActorId,
-        approvedByRoleCode
-      });
-    }
+        approvedByRoleCode,
+        approvalMode,
+        approvalChainActorIds,
+        approvalEvidenceRef
+      })
+      : null;
 
     const now = nowIso();
     accountingPeriod.status = targetStatus;
     accountingPeriod.lockReasonCode = resolvedReasonCode;
     accountingPeriod.lockedByActorId = resolvedActorId;
     accountingPeriod.lockedAt = now;
+    accountingPeriod.lockApprovalMode = hardCloseApproval?.approvalMode || null;
+    accountingPeriod.lockApprovalActorIds = hardCloseApproval?.approvalActorIds || [];
+    accountingPeriod.lockApprovalEvidenceRef = hardCloseApproval?.approvalEvidenceRef || null;
+    accountingPeriod.lockApprovedByActorId = hardCloseApproval?.approvedByActorId || null;
+    accountingPeriod.lockApprovedByRoleCode = hardCloseApproval?.approvedByRoleCode || null;
     accountingPeriod.updatedAt = now;
 
     const affectedJournalEntries = toggleEntriesForLockedPeriod({
@@ -4740,6 +4756,11 @@ export function createLedgerEngine({
       lockReasonCode: null,
       lockedByActorId: null,
       lockedAt: null,
+      lockApprovalMode: null,
+      lockApprovalActorIds: [],
+      lockApprovalEvidenceRef: null,
+      lockApprovedByActorId: null,
+      lockApprovedByRoleCode: null,
       reopenedByActorId: null,
       reopenedAt: null,
       createdAt: now,
@@ -5093,6 +5114,11 @@ function seedDemoState(state, clock) {
       lockReasonCode: null,
       lockedByActorId: null,
       lockedAt: null,
+      lockApprovalMode: null,
+      lockApprovalActorIds: [],
+      lockApprovalEvidenceRef: null,
+      lockApprovedByActorId: null,
+      lockApprovedByRoleCode: null,
       reopenedByActorId: null,
       reopenedAt: null,
       createdAt: now,
@@ -5762,6 +5788,46 @@ function assertSeniorFinanceApproval({ actorId, approvedByActorId, approvedByRol
   if (!["close_signatory", "finance_manager", "company_admin"].includes(resolvedRoleCode)) {
     throw httpError(400, "senior_finance_role_required", "A senior finance approver is required for this operation.");
   }
+}
+
+function resolveHardCloseApproval({
+  actorId,
+  approvedByActorId,
+  approvedByRoleCode,
+  approvalMode = null,
+  approvalChainActorIds = [],
+  approvalEvidenceRef = null
+}) {
+  const resolvedApprovalMode = normalizeOptionalText(approvalMode);
+  if (resolvedApprovalMode === "close_signoff_chain") {
+    const resolvedApprovalActorIds = [...new Set(
+      (Array.isArray(approvalChainActorIds) ? approvalChainActorIds : [])
+        .map((candidate) => normalizeOptionalText(candidate))
+        .filter(Boolean)
+    )];
+    if (resolvedApprovalActorIds.length === 0) {
+      throw httpError(400, "approval_chain_actor_required", "Hard close via sign-off chain requires at least one prior approving actor.");
+    }
+    if (!resolvedApprovalActorIds.some((candidate) => candidate !== actorId)) {
+      throw httpError(400, "dual_control_required", "Hard close sign-off chain requires a second actor in the approval chain.");
+    }
+    return {
+      approvalMode: "close_signoff_chain",
+      approvalActorIds: resolvedApprovalActorIds,
+      approvalEvidenceRef: requireText(approvalEvidenceRef, "approval_evidence_ref_required"),
+      approvedByActorId: null,
+      approvedByRoleCode: null
+    };
+  }
+
+  assertSeniorFinanceApproval({ actorId, approvedByActorId, approvedByRoleCode });
+  return {
+    approvalMode: "direct_approval",
+    approvalActorIds: [requireText(approvedByActorId, "approved_by_actor_id_required")],
+    approvalEvidenceRef: normalizeOptionalText(approvalEvidenceRef),
+    approvedByActorId: requireText(approvedByActorId, "approved_by_actor_id_required"),
+    approvedByRoleCode: requireText(approvedByRoleCode, "approved_by_role_code_required").toLowerCase()
+  };
 }
 
 function assertCorrectionType(correctionType) {

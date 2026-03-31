@@ -184,10 +184,17 @@ test("Phase 11.3 closes a month with checklist, blocks on hard stop, preserves r
   assert.equal(closedChecklist.status, "closed");
   assert.equal(closedChecklist.closeState, "hard_closed");
   assert.equal(closedChecklist.signoffs.length, 2);
+  assert.equal(closedChecklist.closedByUserId, DEMO_IDS.userId);
+  assert.equal(closedChecklist.closedByCompanyUserId, DEMO_IDS.companyUserId);
+  assert.ok(closedChecklist.hardCloseEvidenceRef);
   assert.ok(closedChecklist.closeEvidenceBundleId);
   assert.equal(closedChecklist.closeEvidenceBundle?.status, "frozen");
   assert.notEqual(closedChecklist.closeEvidenceBundleId, firstSignoff.closeEvidenceBundleId);
   assert.equal(closedChecklist.signoffs[1]?.evidenceBundleId, closedChecklist.closeEvidenceBundleId);
+  assert.equal(closedChecklist.accountingPeriod.lockedByActorId, DEMO_IDS.userId);
+  assert.equal(closedChecklist.accountingPeriod.lockApprovalMode, "close_signoff_chain");
+  assert.deepEqual(closedChecklist.accountingPeriod.lockApprovalActorIds, [preparer.user.userId]);
+  assert.ok(closedChecklist.accountingPeriod.lockApprovalEvidenceRef);
 
   const reportAfterClose = platform.runReportSnapshot({
     companyId: client.companyId,
@@ -283,6 +290,125 @@ test("Phase 11.3 closes a month with checklist, blocks on hard stop, preserves r
     checklistId: reopened.successorChecklist.checklistId
   });
   assert.equal(successorWorkbench.closeState, "subledger_locked");
+});
+
+test("Phase 11.3 hard close rejects a single-signatory chain", () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-22T13:30:00Z")
+  });
+
+  const adminToken = loginWithStrongAuth(platform, DEMO_IDS.companyId, DEMO_ADMIN_EMAIL);
+  const client = platform.createCompany({
+    legalName: "Close Single Signatory AB",
+    orgNumber: "559900-4347",
+    settingsJson: {
+      bureauDelivery: {
+        closeLeadBusinessDays: 3,
+        reportingLeadBusinessDays: 2,
+        submissionLeadBusinessDays: 2,
+        generalLeadBusinessDays: 1,
+        approvalLeadBusinessDays: 2,
+        reminderProfile: "standard"
+      }
+    }
+  });
+
+  platform.createPortfolioMembership({
+    sessionToken: adminToken,
+    bureauOrgId: DEMO_IDS.companyId,
+    clientCompanyId: client.companyId,
+    responsibleConsultantId: DEMO_IDS.companyUserId,
+    activeFrom: "2026-01-01"
+  });
+  const assessment = platform.assessCashMethodEligibility({
+    companyId: client.companyId,
+    annualNetTurnoverSek: 410000,
+    legalFormCode: "AB",
+    actorId: "phase11-3-single"
+  });
+  const method = platform.createMethodProfile({
+    companyId: client.companyId,
+    methodCode: "FAKTURERINGSMETOD",
+    effectiveFrom: "2026-01-01",
+    fiscalYearStartDate: "2026-01-01",
+    eligibilityAssessmentId: assessment.assessmentId,
+    onboardingOverride: true,
+    actorId: "phase11-3-single"
+  });
+  platform.activateMethodProfile({
+    companyId: client.companyId,
+    methodProfileId: method.methodProfileId,
+    actorId: "phase11-3-single"
+  });
+  const fiscalYearProfile = platform.createFiscalYearProfile({
+    companyId: client.companyId,
+    legalFormCode: "AKTIEBOLAG",
+    actorId: "phase11-3-single"
+  });
+  const fiscalYear = platform.createFiscalYear({
+    companyId: client.companyId,
+    fiscalYearProfileId: fiscalYearProfile.fiscalYearProfileId,
+    startDate: "2026-01-01",
+    endDate: "2026-12-31",
+    approvalBasisCode: "BASELINE",
+    actorId: "phase11-3-single"
+  });
+  platform.activateFiscalYear({
+    companyId: client.companyId,
+    fiscalYearId: fiscalYear.fiscalYearId,
+    actorId: "phase11-3-single"
+  });
+  platform.installLedgerCatalog({
+    companyId: client.companyId,
+    actorId: "phase11-3-single"
+  });
+  const period = platform.ensureAccountingYearPeriod({
+    companyId: client.companyId,
+    fiscalYear: 2026,
+    actorId: "phase11-3-single"
+  });
+  const reconciliationRuns = createSignedReconciliations(platform, client.companyId, period.accountingPeriodId);
+  const reportSnapshot = platform.runReportSnapshot({
+    companyId: client.companyId,
+    reportCode: "income_statement",
+    fromDate: "2026-01-01",
+    toDate: "2026-01-31",
+    actorId: "phase11-3-single"
+  });
+  const checklist = platform.instantiateCloseChecklist({
+    sessionToken: adminToken,
+    bureauOrgId: DEMO_IDS.companyId,
+    clientCompanyId: client.companyId,
+    accountingPeriodId: period.accountingPeriodId,
+    reportSnapshotId: reportSnapshot.reportSnapshotId,
+    signoffChain: [{ companyUserId: DEMO_IDS.companyUserId, roleCode: "close_signatory" }]
+  });
+
+  for (const step of checklist.steps) {
+    const payload = step.reconciliationAreaCode
+      ? { reconciliationRunId: reconciliationRuns[step.reconciliationAreaCode] }
+      : step.evidenceType === "report_snapshot"
+        ? { evidenceRefs: [{ reportSnapshotId: reportSnapshot.reportSnapshotId }] }
+        : { evidenceRefs: [{ note: `${step.stepCode} complete` }] };
+    platform.completeCloseChecklistStep({
+      sessionToken: adminToken,
+      bureauOrgId: DEMO_IDS.companyId,
+      checklistId: checklist.checklistId,
+      stepCode: step.stepCode,
+      ...payload
+    });
+  }
+
+  assert.throws(
+    () => {
+      platform.signOffCloseChecklist({
+        sessionToken: adminToken,
+        bureauOrgId: DEMO_IDS.companyId,
+        checklistId: checklist.checklistId
+      });
+    },
+    (error) => error.code === "close_signoff_chain_incomplete"
+  );
 });
 
 function createSignedReconciliations(platform, companyId, accountingPeriodId) {
