@@ -1463,6 +1463,10 @@ function deriveScenario(normalizedLine) {
   if (goodsOrServices !== "goods" && goodsOrServices !== "services") {
     return reviewScenario("unsupported_goods_or_services", "goods_or_services must be goods or services.");
   }
+  const servicePlaceOfSupplyException = deriveServicePlaceOfSupplyException(normalizedLine, goodsOrServices);
+  if (servicePlaceOfSupplyException) {
+    return servicePlaceOfSupplyException;
+  }
 
   if (normalizedLine.supply_type === "sale") {
     if (normalizedLine.seller_country !== "SE") {
@@ -1734,6 +1738,49 @@ function buildScenarioOutputs(normalizedLine, scenario) {
     vatRate: rate,
     rateType: definition.rateType
   };
+}
+
+function deriveServicePlaceOfSupplyException(normalizedLine, goodsOrServices) {
+  if (goodsOrServices !== "services") {
+    return null;
+  }
+  const crossBorderService =
+    (normalizedLine.supply_type === "sale" && normalizedLine.buyer_country && normalizedLine.buyer_country !== "SE") ||
+    (normalizedLine.supply_type === "purchase" && normalizedLine.seller_country && normalizedLine.seller_country !== "SE");
+  if (!crossBorderService) {
+    return null;
+  }
+  const supplySubtype = String(normalizedLine.supply_subtype || "").trim().toLowerCase();
+  if (normalizedLine.property_related_flag === true) {
+    return reviewScenario(
+      "property_service_requires_property_jurisdiction",
+      "Property-related services are taxed where the property is located and require explicit property jurisdiction in the VAT model."
+    );
+  }
+  if (supplySubtype === "passenger_transport" || supplySubtype === "passenger_transport_service") {
+    return reviewScenario(
+      "passenger_transport_requires_route_jurisdiction",
+      "Passenger transport services are taxed where the transport is carried out and require route jurisdiction before VAT can be decided."
+    );
+  }
+  if (supplySubtype === "event_admission" || supplySubtype === "event_entry" || supplySubtype === "event_access") {
+    return reviewScenario(
+      "event_admission_requires_event_jurisdiction",
+      "Admission to events is taxed where the event takes place and requires explicit event jurisdiction before VAT can be decided."
+    );
+  }
+  if (
+    supplySubtype === "restaurant" ||
+    supplySubtype === "catering" ||
+    supplySubtype === "restaurant_catering" ||
+    supplySubtype === "restaurant_and_catering"
+  ) {
+    return reviewScenario(
+      "restaurant_service_requires_service_jurisdiction",
+      "Restaurant and catering services are taxed where the service is physically carried out and require explicit service jurisdiction before VAT can be decided."
+    );
+  }
+  return null;
 }
 
 function buildReverseChargePurchaseOutputs(baseBox, baseAmount, rate, deductionRatio, definition, decisionCategory, normalizedLine) {

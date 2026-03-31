@@ -218,6 +218,74 @@ test("Phase 8.3 models domestic supplier-charged partial and blocked deduction w
   assert.deepEqual(blocked.vatDecision.postingEntries, []);
 });
 
+test("Phase 8.3 blocks cross-border service place-of-supply exceptions from default reverse-charge automation", () => {
+  const vat = createVatEngine({
+    clock: () => new Date("2026-03-31T09:15:00Z")
+  });
+
+  const propertyService = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_id: "phase8-3-unit-property-service",
+      buyer_country: "DE",
+      goods_or_services: "services",
+      property_related_flag: true,
+      vat_code_candidate: "VAT_SE_EU_SERVICES_B2B"
+    })
+  });
+  assert.equal(propertyService.vatDecision.status, "review_required");
+  assert.equal(propertyService.reviewQueueItem.reviewReasonCode, "property_service_requires_property_jurisdiction");
+
+  const passengerTransport = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_type: "AP_INVOICE",
+      source_id: "phase8-3-unit-passenger-transport",
+      supply_type: "purchase",
+      seller_country: "DE",
+      buyer_country: "SE",
+      goods_or_services: "services",
+      supply_subtype: "passenger_transport",
+      vat_code_candidate: "VAT_SE_EU_SERVICES_PURCHASE_RC"
+    })
+  });
+  assert.equal(passengerTransport.vatDecision.status, "review_required");
+  assert.equal(passengerTransport.reviewQueueItem.reviewReasonCode, "passenger_transport_requires_route_jurisdiction");
+
+  const eventAdmission = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_id: "phase8-3-unit-event-admission",
+      buyer_country: "FR",
+      goods_or_services: "services",
+      supply_subtype: "event_admission",
+      vat_code_candidate: "VAT_SE_EU_SERVICES_B2B"
+    })
+  });
+  assert.equal(eventAdmission.vatDecision.status, "review_required");
+  assert.equal(eventAdmission.reviewQueueItem.reviewReasonCode, "event_admission_requires_event_jurisdiction");
+
+  const restaurantService = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_type: "AP_INVOICE",
+      source_id: "phase8-3-unit-restaurant-service",
+      supply_type: "purchase",
+      seller_country: "DK",
+      buyer_country: "SE",
+      goods_or_services: "services",
+      supply_subtype: "restaurant_catering",
+      vat_code_candidate: "VAT_SE_EU_SERVICES_PURCHASE_RC"
+    })
+  });
+  assert.equal(restaurantService.vatDecision.status, "review_required");
+  assert.equal(restaurantService.reviewQueueItem.reviewReasonCode, "restaurant_service_requires_service_jurisdiction");
+});
+
 function buildTransactionLine(overrides = {}) {
   return {
     seller_country: "SE",

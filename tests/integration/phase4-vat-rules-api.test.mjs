@@ -216,6 +216,84 @@ test("Phase 8.3 API models domestic supplier-charged partial and blocked deducti
     assert.equal(blocked.vatDecision.status, "decided");
     assert.equal(blocked.vatDecision.deductionRuleCode, "blocked_deduction");
     assert.deepEqual(blocked.vatDecision.declarationBoxAmounts, []);
+
+    const propertyService = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_id: "phase8-3-api-property-service",
+          buyer_country: "DE",
+          goods_or_services: "services",
+          property_related_flag: true,
+          vat_code_candidate: "VAT_SE_EU_SERVICES_B2B"
+        })
+      }
+    });
+    assert.equal(propertyService.vatDecision.status, "review_required");
+    assert.equal(propertyService.reviewQueueItem.reviewReasonCode, "property_service_requires_property_jurisdiction");
+
+    const passengerTransport = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_type: "AP_INVOICE",
+          source_id: "phase8-3-api-passenger-transport",
+          supply_type: "purchase",
+          seller_country: "DE",
+          buyer_country: "SE",
+          goods_or_services: "services",
+          supply_subtype: "passenger_transport",
+          vat_code_candidate: "VAT_SE_EU_SERVICES_PURCHASE_RC"
+        })
+      }
+    });
+    assert.equal(passengerTransport.vatDecision.status, "review_required");
+    assert.equal(passengerTransport.reviewQueueItem.reviewReasonCode, "passenger_transport_requires_route_jurisdiction");
+
+    const eventAdmission = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_id: "phase8-3-api-event-admission",
+          buyer_country: "FR",
+          goods_or_services: "services",
+          supply_subtype: "event_admission",
+          vat_code_candidate: "VAT_SE_EU_SERVICES_B2B"
+        })
+      }
+    });
+    assert.equal(eventAdmission.vatDecision.status, "review_required");
+    assert.equal(eventAdmission.reviewQueueItem.reviewReasonCode, "event_admission_requires_event_jurisdiction");
+
+    const restaurantService = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_type: "AP_INVOICE",
+          source_id: "phase8-3-api-restaurant-service",
+          supply_type: "purchase",
+          seller_country: "DK",
+          buyer_country: "SE",
+          goods_or_services: "services",
+          supply_subtype: "restaurant_catering",
+          vat_code_candidate: "VAT_SE_EU_SERVICES_PURCHASE_RC"
+        })
+      }
+    });
+    assert.equal(restaurantService.vatDecision.status, "review_required");
+    assert.equal(restaurantService.reviewQueueItem.reviewReasonCode, "restaurant_service_requires_service_jurisdiction");
   } finally {
     await stopServer(server);
   }
