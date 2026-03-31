@@ -1039,6 +1039,7 @@ export function createArEngine({
     buyerReference = null,
     purchaseOrderReference = null,
     buyerVatNumber = null,
+    buyerVatNumberStatus = null,
     specialLegalText = null,
     amendmentReason = null,
     exportEvidenceReference = null,
@@ -1092,6 +1093,9 @@ export function createArEngine({
       errorFactory: createError,
       countryCode: customer.countryCode
     });
+    const resolvedBuyerVatNumberStatus = normalizeOptionalVatNumberStatus(
+      buyerVatNumberStatus ?? originalInvoice?.buyerVatNumberStatus ?? null
+    );
     const resolvedCurrencyCode = normalizeUpperCode(
       currencyCode || contract?.currencyCode || sourceQuoteVersion?.currencyCode || customer.currencyCode,
       "currency_code_required",
@@ -1164,6 +1168,7 @@ export function createArEngine({
       buyerReference: normalizeOptionalText(buyerReference),
       purchaseOrderReference: normalizeOptionalText(purchaseOrderReference),
       buyerVatNumber: resolvedBuyerVatNumber,
+      buyerVatNumberStatus: resolvedBuyerVatNumberStatus,
       specialLegalText: normalizeOptionalText(specialLegalText),
       amendmentReason: normalizeOptionalText(amendmentReason),
       exportEvidenceReference: normalizeOptionalText(exportEvidenceReference),
@@ -1217,6 +1222,7 @@ export function createArEngine({
       buyerReference: normalizeOptionalText(buyerReference),
       purchaseOrderReference: normalizeOptionalText(purchaseOrderReference),
       buyerVatNumber: resolvedBuyerVatNumber,
+      buyerVatNumberStatus: resolvedBuyerVatNumberStatus,
       specialLegalText: normalizeOptionalText(specialLegalText),
       amendmentReason: normalizeOptionalText(amendmentReason),
       exportEvidenceReference: normalizeOptionalText(exportEvidenceReference),
@@ -3978,6 +3984,7 @@ function evaluateInvoiceVatDecisions({
         vat_code_candidate: line.vatCode,
         buyer_is_taxable_person: Boolean(invoice.buyerVatNumber),
         buyer_vat_number: invoice.buyerVatNumber || null,
+        buyer_vat_number_status: invoice.buyerVatNumberStatus || null,
         import_flag: false,
         reverse_charge_flag: reverseChargeFlag,
         export_flag: exportFlag,
@@ -4220,6 +4227,10 @@ function evaluateInvoiceFieldRulesSnapshot({
   if (scenarioCode === "eu_cross_border_invoice" && !invoice.buyerVatNumber) {
     warningCodes.push("buyer_vat_number_missing_review");
   }
+  if (scenarioCode === "eu_cross_border_invoice" && invoiceRequiresValidatedEuVatNumber(invoice) && invoice.buyerVatNumberStatus !== "valid") {
+    missingFieldCodes.push("buyer_vat_number_status_valid");
+    warningCodes.push("buyer_vat_number_vies_validation_required");
+  }
 
   const dedupedMissingFieldCodes = [...new Set(missingFieldCodes)].sort();
   const status = dedupedMissingFieldCodes.length > 0 ? "blocked" : "passed";
@@ -4243,6 +4254,8 @@ function evaluateInvoiceFieldRulesSnapshot({
       sellerVatNumber: invoice.sellerVatNumber || null,
       sellerAddress: copy(invoice.sellerAddress || null),
       customerCountryCode: customer.countryCode,
+      buyerVatNumber: invoice.buyerVatNumber || null,
+      buyerVatNumberStatus: invoice.buyerVatNumberStatus || null,
       invoiceLineVatCodes: (invoice.lines || []).map((line) => line.vatCode),
       revenueDimensions: (invoice.lines || []).map((line) => ({
         lineId: line.lineId,
@@ -4310,6 +4323,9 @@ function collectRequiredInvoiceFieldCodes({ scenarioCode, invoice, customer, vat
   }
   if (scenarioCode === "eu_cross_border_invoice" && customer.countryCode !== "SE") {
     requiredFieldCodes.push("buyer_vat_number");
+    if (invoiceRequiresValidatedEuVatNumber(invoice)) {
+      requiredFieldCodes.push("buyer_vat_number_status_valid");
+    }
   }
   return [...new Set(requiredFieldCodes)].sort();
 }
@@ -5278,6 +5294,34 @@ function normalizeOptionalText(value) {
     return null;
   }
   return String(value).trim();
+}
+
+function normalizeOptionalVatNumberStatus(value) {
+  const normalized = normalizeOptionalText(value)?.toLowerCase() || null;
+  if (!normalized) {
+    return null;
+  }
+  if (["valid", "verified", "confirmed"].includes(normalized)) {
+    return "valid";
+  }
+  if (["invalid", "rejected"].includes(normalized)) {
+    return "invalid";
+  }
+  if (["unchecked", "unverified", "unknown", "pending", "service_unavailable", "unavailable"].includes(normalized)) {
+    return "unverified";
+  }
+  if (["missing", "not_applicable", "na"].includes(normalized)) {
+    return normalized === "missing" ? "missing" : "not_applicable";
+  }
+  throw createError(
+    400,
+    "invoice_buyer_vat_number_status_invalid",
+    "buyerVatNumberStatus must be valid, invalid, unverified, missing or not_applicable."
+  );
+}
+
+function invoiceRequiresValidatedEuVatNumber(invoice) {
+  return Array.isArray(invoice?.lines) && invoice.lines.some((line) => line?.goodsOrServices === "goods");
 }
 
 function resolveInvoiceSellerSnapshot({

@@ -525,6 +525,172 @@ test("Step 24 API exposes invoice field evaluation and blocks reverse-charge iss
   }
 });
 
+test("Phase 8.3 API stores buyer VAT status and blocks EU goods issue until VIES truth is valid", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-31T08:00:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true,
+      phase5ArEnabled: true
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const sessionToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    await requestJson(baseUrl, "/v1/ledger/chart/install", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+
+    const euCustomer = await requestJson(baseUrl, "/v1/ar/customers", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        legalName: "Europa Handel GmbH",
+        organizationNumber: "HRB123456",
+        countryCode: "DE",
+        languageCode: "EN",
+        currencyCode: "EUR",
+        paymentTermsCode: "NET30",
+        invoiceDeliveryMethod: "pdf_email",
+        reminderProfileCode: "standard",
+        billingAddress: {
+          line1: "Handelsplatz 4",
+          postalCode: "10115",
+          city: "Berlin",
+          countryCode: "DE"
+        },
+        deliveryAddress: {
+          line1: "Handelsplatz 4",
+          postalCode: "10115",
+          city: "Berlin",
+          countryCode: "DE"
+        }
+      }
+    });
+
+    const euGoodsItem = await requestJson(baseUrl, "/v1/ar/items", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        itemCode: "API-EU-GOODS-001",
+        description: "EU goods shipment",
+        itemType: "goods",
+        unitCode: "ea",
+        standardPrice: 1000,
+        revenueAccountNumber: "3010",
+        vatCode: "VAT_SE_EU_GOODS_B2B"
+      }
+    });
+
+    const blockedInvoice = await requestJson(baseUrl, "/v1/ar/invoices", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        customerId: euCustomer.customerId,
+        invoiceType: "standard",
+        issueDate: "2026-03-31",
+        dueDate: "2026-04-30",
+        currencyCode: "SEK",
+        buyerVatNumber: "DE123456789",
+        lines: [
+          {
+            itemId: euGoodsItem.arItemId,
+            quantity: 1,
+            unitPrice: 1000
+          }
+        ]
+      }
+    });
+    const blockedEvaluation = await requestJson(
+      baseUrl,
+      `/v1/ar/invoices/${blockedInvoice.customerInvoiceId}/field-evaluation?companyId=${COMPANY_ID}`,
+      {
+        token: sessionToken
+      }
+    );
+    assert.equal(blockedEvaluation.status, "blocked");
+    assert.equal(blockedEvaluation.missingFieldCodes.includes("buyer_vat_number_status_valid"), true);
+
+    const blockedIssue = await fetch(`${baseUrl}/v1/ar/invoices/${blockedInvoice.customerInvoiceId}/issue`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${sessionToken}`,
+        "idempotency-key": crypto.randomUUID(),
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        companyId: COMPANY_ID
+      })
+    });
+    const blockedPayload = await blockedIssue.json();
+    assert.equal(blockedIssue.status, 409);
+    assert.equal(blockedPayload.error, "invoice_issue_blocked");
+
+    const passableInvoice = await requestJson(baseUrl, "/v1/ar/invoices", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        customerId: euCustomer.customerId,
+        invoiceType: "standard",
+        issueDate: "2026-03-31",
+        dueDate: "2026-04-30",
+        currencyCode: "SEK",
+        buyerVatNumber: "DE123456789",
+        buyerVatNumberStatus: "valid",
+        lines: [
+          {
+            itemId: euGoodsItem.arItemId,
+            quantity: 1,
+            unitPrice: 1000
+          }
+        ]
+      }
+    });
+    assert.equal(passableInvoice.buyerVatNumberStatus, "valid");
+
+    const issued = await requestJson(baseUrl, `/v1/ar/invoices/${passableInvoice.customerInvoiceId}/issue`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+    assert.equal(issued.status, "issued");
+    assert.equal(issued.lines[0].vatDecisionCategory, "eu_goods_b2b_sale");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("Phase 9.1 API carries governed revenue dimensions into issued AR journals and blocks missing dimension readiness", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-28T14:30:00Z")

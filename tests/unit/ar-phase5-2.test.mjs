@@ -386,6 +386,100 @@ test("Step 24 blocks reverse-charge invoices until buyer VAT and legal text are 
   assert.equal(issued.status, "issued");
 });
 
+test("Phase 8.3 AR stores buyer VAT status and blocks EU goods issue until VIES truth is valid", () => {
+  const clock = () => new Date("2026-03-31T07:30:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const integrations = createIntegrationEngine({ clock });
+  const ar = createArEngine({
+    clock,
+    seedDemo: false,
+    ledgerPlatform: ledger,
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
+
+  const euCustomer = createCustomer(ar, {
+    legalName: "Europa Handel GmbH",
+    organizationNumber: "HRB123456",
+    countryCode: "DE",
+    languageCode: "EN",
+    billingAddress: {
+      line1: "Handelsplatz 4",
+      postalCode: "10115",
+      city: "Berlin",
+      countryCode: "DE"
+    },
+    deliveryAddress: {
+      line1: "Handelsplatz 4",
+      postalCode: "10115",
+      city: "Berlin",
+      countryCode: "DE"
+    }
+  });
+  const euGoodsItem = createItem(ar, {
+    description: "EU goods shipment",
+    itemType: "goods",
+    unitCode: "ea",
+    revenueAccountNumber: "3010",
+    vatCode: "VAT_SE_EU_GOODS_B2B",
+    recurringFlag: false
+  });
+
+  const blocked = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: euCustomer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-03-31",
+    dueDate: "2026-04-30",
+    buyerVatNumber: "DE123456789",
+    lines: [{ itemId: euGoodsItem.arItemId, quantity: 1, unitPrice: 1000 }],
+    actorId: "user-1"
+  });
+  const blockedEvaluation = ar.getInvoiceFieldEvaluation({
+    companyId: COMPANY_ID,
+    customerInvoiceId: blocked.customerInvoiceId
+  });
+  assert.equal(blockedEvaluation.scenarioCode, "eu_cross_border_invoice");
+  assert.equal(blockedEvaluation.status, "blocked");
+  assert.equal(blockedEvaluation.missingFieldCodes.includes("buyer_vat_number_status_valid"), true);
+  assert.throws(
+    () =>
+      ar.issueInvoice({
+        companyId: COMPANY_ID,
+        customerInvoiceId: blocked.customerInvoiceId,
+        actorId: "user-1"
+      }),
+    (error) => error.code === "invoice_issue_blocked"
+  );
+
+  const passable = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: euCustomer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-03-31",
+    dueDate: "2026-04-30",
+    buyerVatNumber: "DE123456789",
+    buyerVatNumberStatus: "valid",
+    lines: [{ itemId: euGoodsItem.arItemId, quantity: 1, unitPrice: 1000 }],
+    actorId: "user-1"
+  });
+  assert.equal(passable.buyerVatNumberStatus, "valid");
+  const passedEvaluation = ar.getInvoiceFieldEvaluation({
+    companyId: COMPANY_ID,
+    customerInvoiceId: passable.customerInvoiceId
+  });
+  assert.equal(passedEvaluation.status, "passed");
+  const issued = ar.issueInvoice({
+    companyId: COMPANY_ID,
+    customerInvoiceId: passable.customerInvoiceId,
+    actorId: "user-1"
+  });
+  assert.equal(issued.status, "issued");
+  assert.equal(issued.lines[0].vatDecisionCategory, "eu_goods_b2b_sale");
+});
+
 test("Step 24 blocks export and HUS invoices until legal overlays are complete", () => {
   const clock = () => new Date("2026-03-24T09:30:00Z");
   const ledger = createLedgerPlatform({ clock });
