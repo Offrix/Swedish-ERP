@@ -1611,6 +1611,15 @@ export function createApEngine({
       },
       lines: groupedJournalLines
     });
+    if (vatPlatform && typeof vatPlatform.recordVatDecisionPosting === "function") {
+      vatPlatform.recordVatDecisionPosting({
+        companyId: invoice.companyId,
+        vatDecisionIds: [...new Set((invoice.lines || []).map((line) => line.vatProposal?.vatDecisionId).filter(Boolean))],
+        journalEntryId: posted.journalEntry.journalEntryId,
+        actorId,
+        correlationId
+      });
+    }
     invoice.status = "posted";
     invoice.journalEntryId = posted.journalEntry.journalEntryId;
     invoice.postedAt = nowIso(clock);

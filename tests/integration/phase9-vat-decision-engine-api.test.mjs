@@ -43,7 +43,7 @@ test("Phase 9.3 API resolves VAT review blockers, materializes declaration basis
       body: { companyId: COMPANY_ID }
     });
 
-    await requestJson(baseUrl, "/v1/vat/decisions", {
+    const domestic = await requestJson(baseUrl, "/v1/vat/decisions", {
       method: "POST",
       token: sessionToken,
       expectedStatus: 201,
@@ -102,6 +102,7 @@ test("Phase 9.3 API resolves VAT review blockers, materializes declaration basis
       }
     });
     assert.equal(review.vatDecision.status, "review_required");
+    assert.equal(review.vatDecision.lifecycleStatus, "pending_review");
 
     const blockedBasis = await requestJson(
       baseUrl,
@@ -129,6 +130,7 @@ test("Phase 9.3 API resolves VAT review blockers, materializes declaration basis
     );
     assert.equal(resolved.reviewQueueItem.status, "resolved");
     assert.equal(resolved.vatDecision.status, "decided");
+    assert.equal(resolved.vatDecision.lifecycleStatus, "approved");
 
     const resolvedLedgerEntry = await requestJson(baseUrl, "/v1/ledger/journal-entries", {
       method: "POST",
@@ -173,6 +175,8 @@ test("Phase 9.3 API resolves VAT review blockers, materializes declaration basis
     );
     assert.deepEqual(readyBasis.blockerCodes, []);
     assert.equal(readyBasis.readyForLock, true);
+    assert.equal(readyBasis.approvedDecisionCount, 2);
+    assert.equal(readyBasis.pendingReviewDecisionCount, 0);
 
     const lock = await requestJson(baseUrl, "/v1/vat/period-locks", {
       method: "POST",
@@ -221,6 +225,24 @@ test("Phase 9.3 API resolves VAT review blockers, materializes declaration basis
       }
     });
     assert.equal(declarationRun.periodLockId, lock.vatPeriodLockId);
+    const declaredDomestic = await requestJson(
+      baseUrl,
+      `/v1/vat/decisions/${domestic.vatDecision.vatDecisionId}?companyId=${COMPANY_ID}`,
+      {
+        token: sessionToken
+      }
+    );
+    const declaredResolved = await requestJson(
+      baseUrl,
+      `/v1/vat/decisions/${resolved.vatDecision.vatDecisionId}?companyId=${COMPANY_ID}`,
+      {
+        token: sessionToken
+      }
+    );
+    assert.equal(declaredDomestic.lifecycleStatus, "declared");
+    assert.equal(declaredResolved.lifecycleStatus, "declared");
+    assert.equal(declaredDomestic.vatDeclarationRunIds.includes(declarationRun.vatDeclarationRunId), true);
+    assert.equal(declaredResolved.vatDeclarationRunIds.includes(declarationRun.vatDeclarationRunId), true);
 
     const unlocked = await requestJson(baseUrl, `/v1/vat/period-locks/${lock.vatPeriodLockId}/unlock`, {
       method: "POST",
@@ -247,6 +269,7 @@ test("Phase 9.3 API resolves VAT review blockers, materializes declaration basis
       }
     });
     assert.equal(afterUnlock.vatDecision.status, "decided");
+    assert.equal(afterUnlock.vatDecision.lifecycleStatus, "approved");
   } finally {
     await stopServer(server);
   }

@@ -88,6 +88,7 @@ test("Phase 4.1 API exposes VAT masterdata, dated rule packs, explainable decisi
       }
     });
     assert.equal(review.vatDecision.status, "review_required");
+    assert.equal(review.vatDecision.lifecycleStatus, "pending_review");
     assert.equal(review.reviewQueueItem.reviewReasonCode, "missing_mandatory_vat_fields");
 
     const decision = await requestJson(`${baseUrl}/v1/vat/decisions`, {
@@ -102,6 +103,7 @@ test("Phase 4.1 API exposes VAT masterdata, dated rule packs, explainable decisi
       }
     });
     assert.equal(decision.vatDecision.status, "decided");
+    assert.equal(decision.vatDecision.lifecycleStatus, "approved");
     assert.ok(decision.vatDecision.inputsHash);
     assert.equal(decision.vatDecision.rulePackId, "vat-se-2026.3");
 
@@ -169,6 +171,7 @@ test("Phase 8.3 API persists VIES truth for EU goods and blocks invalid VAT numb
       }
     });
     assert.equal(greekDecision.vatDecision.status, "decided");
+    assert.equal(greekDecision.vatDecision.lifecycleStatus, "approved");
     assert.equal(greekDecision.vatDecision.transactionLine.buyer_country, "EL");
     assert.equal(greekDecision.vatDecision.transactionLine.buyer_vat_number, "EL123456789");
     assert.equal(greekDecision.vatDecision.outputs.viesStatus, "valid");
@@ -194,6 +197,7 @@ test("Phase 8.3 API persists VIES truth for EU goods and blocks invalid VAT numb
       }
     });
     assert.equal(invalidDecision.vatDecision.status, "review_required");
+    assert.equal(invalidDecision.vatDecision.lifecycleStatus, "pending_review");
     assert.equal(invalidDecision.vatDecision.outputs.viesStatus, "invalid");
     assert.equal(invalidDecision.vatDecision.viesStatus, "invalid");
     assert.equal(invalidDecision.reviewQueueItem.reviewReasonCode, "buyer_vat_number_not_vies_valid");
@@ -217,6 +221,7 @@ test("Phase 8.3 API persists VIES truth for EU goods and blocks invalid VAT numb
       }
     });
     assert.equal(serviceDecision.vatDecision.status, "decided");
+    assert.equal(serviceDecision.vatDecision.lifecycleStatus, "approved");
     assert.equal(serviceDecision.vatDecision.decisionCategory, "eu_services_b2b_sale");
     assert.equal(serviceDecision.vatDecision.outputs.viesStatus, "valid");
     assert.equal(serviceDecision.vatDecision.outputs.euListEligible, true);
@@ -241,6 +246,7 @@ test("Phase 8.3 API persists VIES truth for EU goods and blocks invalid VAT numb
       }
     });
     assert.equal(invalidServiceDecision.vatDecision.status, "review_required");
+    assert.equal(invalidServiceDecision.vatDecision.lifecycleStatus, "pending_review");
     assert.equal(invalidServiceDecision.vatDecision.outputs.viesStatus, "invalid");
     assert.equal(invalidServiceDecision.reviewQueueItem.reviewReasonCode, "buyer_vat_number_not_vies_valid");
 

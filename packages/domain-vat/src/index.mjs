@@ -14,6 +14,7 @@ import {
 } from "../../domain-core/src/state-snapshots.mjs";
 
 export const VAT_DECISION_STATUSES = Object.freeze(["decided", "review_required"]);
+export const VAT_DECISION_LIFECYCLE_STATUSES = Object.freeze(["pending_review", "approved", "posted", "declared", "corrected"]);
 export const VAT_REVIEW_QUEUE_STATUSES = Object.freeze(["open", "resolved", "waived"]);
 export const VAT_PERIOD_LOCK_STATUSES = Object.freeze(["locked", "unlocked"]);
 export const VAT_BOX_AMOUNT_TYPES = Object.freeze(["taxable_base", "output_vat", "input_vat"]);
@@ -104,6 +105,14 @@ const DOMESTIC_PURCHASE_CANDIDATE_ALIASES = Object.freeze({
 const VAT_RULE_PACK_CODE = "SE-VAT-CORE";
 const VAT_PROVIDER_CODE = "skatteverket_vat";
 const VAT_PROVIDER_BASELINE_CODE = "SE-SKATTEVERKET-VAT-API";
+const VAT_DECISION_DECLARATION_ELIGIBLE_STATUSES = new Set(["approved", "posted", "declared", "corrected"]);
+const VAT_DECISION_LIFECYCLE_ORDER = Object.freeze({
+  pending_review: 0,
+  approved: 1,
+  posted: 2,
+  declared: 3,
+  corrected: 4
+});
 const SEEDED_PROVIDER_BASELINES = Object.freeze([
   Object.freeze({
     providerBaselineId: "skatteverket-vat-api-se-2026.1",
@@ -335,6 +344,8 @@ export function createVatEngine({
     getVatDeclarationRun,
     createVatPeriodicStatementRun,
     getVatPeriodicStatementRun,
+    recordVatDecisionPosting,
+    recordVatDecisionDeclaration,
     summarizeVatDeclarationBoxes,
     snapshotVat,
     exportDurableState,
@@ -469,6 +480,7 @@ export function createVatEngine({
       rulepackRef: buildVatRulepackRef(rulePack, classification.decision.effectiveDate),
       transactionLine: copy(normalizedLine),
       status: classification.decision.needsManualReview ? "review_required" : "decided",
+      lifecycleStatus: classification.decision.needsManualReview ? "pending_review" : "approved",
       declarationBoxCodes: classification.outputs.declarationBoxCodes,
       declarationBoxAmounts: classification.outputs.declarationBoxAmounts,
       postingEntries: classification.outputs.postingEntries,
@@ -488,7 +500,20 @@ export function createVatEngine({
       reviewQueueCode: classification.reviewQueueCode,
       reviewQueueItemId: null,
       createdByActorId: resolvedActorId,
-      createdAt: nowIso()
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      approvedAt: classification.decision.needsManualReview ? null : nowIso(),
+      approvedByActorId: classification.decision.needsManualReview ? null : resolvedActorId,
+      postedAt: null,
+      postedByActorId: null,
+      journalEntryIds: [],
+      declaredAt: null,
+      declaredByActorId: null,
+      vatDeclarationRunIds: [],
+      vatPeriodicStatementRunIds: [],
+      correctedAt: null,
+      correctedByActorId: null,
+      lifecycleUpdatedAt: nowIso()
     };
 
     let reviewQueueItem = null;
@@ -595,6 +620,7 @@ export function createVatEngine({
     vatDecision.vatCode = resolvedVatCode;
     vatDecision.decisionCode = resolvedVatCode;
     vatDecision.status = "decided";
+    vatDecision.lifecycleStatus = "approved";
     vatDecision.declarationBoxCodes = resolvedOutputs.declarationBoxCodes;
     vatDecision.declarationBoxAmounts = resolvedOutputs.declarationBoxAmounts;
     vatDecision.postingEntries = resolvedOutputs.postingEntries;
@@ -620,6 +646,9 @@ export function createVatEngine({
       `resolved_by_actor_id=${resolvedActorId}`
     ];
     vatDecision.updatedAt = now;
+    vatDecision.approvedAt = vatDecision.approvedAt || now;
+    vatDecision.approvedByActorId = resolvedActorId;
+    vatDecision.lifecycleUpdatedAt = now;
 
     reviewQueueItem.status = "resolved";
     reviewQueueItem.resolutionCode = normalizeLowerString(resolutionCode) || "manual_vat_resolution";
@@ -862,6 +891,13 @@ export function createVatEngine({
     };
     state.vatDeclarationRuns.set(run.vatDeclarationRunId, run);
     ensureCollection(state.vatDeclarationRunIdsByCompany, resolvedCompanyId).push(run.vatDeclarationRunId);
+    recordVatDecisionDeclaration({
+      companyId: resolvedCompanyId,
+      vatDecisionIds: decisions.map((decision) => decision.vatDecisionId),
+      vatDeclarationRunId: run.vatDeclarationRunId,
+      actorId,
+      correlationId
+    });
     pushAudit({
       companyId: resolvedCompanyId,
       actorId,
@@ -952,6 +988,13 @@ export function createVatEngine({
     };
     state.vatPeriodicStatementRuns.set(run.vatPeriodicStatementRunId, run);
     ensureCollection(state.vatPeriodicStatementRunIdsByCompany, resolvedCompanyId).push(run.vatPeriodicStatementRunId);
+    recordVatDecisionDeclaration({
+      companyId: resolvedCompanyId,
+      vatDecisionIds: decisions.map((decision) => decision.vatDecisionId),
+      vatPeriodicStatementRunId: run.vatPeriodicStatementRunId,
+      actorId,
+      correlationId
+    });
     pushAudit({
       companyId: resolvedCompanyId,
       actorId,
@@ -1047,6 +1090,98 @@ export function createVatEngine({
       throw createError(404, "vat_decision_not_found", "VAT decision for review queue item was not found.");
     }
     return decision;
+  }
+
+  function requireVatDecisionForCompany({ companyId, vatDecisionId }) {
+    const decision = state.vatDecisions.get(requireText(vatDecisionId, "vat_decision_id_required"));
+    if (!decision || decision.companyId !== companyId) {
+      throw createError(404, "vat_decision_not_found", "VAT decision was not found.");
+    }
+    return decision;
+  }
+
+  function recordVatDecisionPosting({
+    companyId,
+    vatDecisionIds = [],
+    journalEntryId,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedJournalEntryId = requireText(journalEntryId, "journal_entry_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const uniqueDecisionIds = [...new Set((Array.isArray(vatDecisionIds) ? vatDecisionIds : []).filter(Boolean))];
+    const updatedDecisions = [];
+    for (const vatDecisionId of uniqueDecisionIds) {
+      const decision = requireVatDecisionForCompany({
+        companyId: resolvedCompanyId,
+        vatDecisionId
+      });
+      const nextLifecycleStatus =
+        getVatDecisionLifecycleRank(decision) >= getVatDecisionLifecycleRank({ lifecycleStatus: "declared" })
+          ? getVatDecisionLifecycleStatus(decision)
+          : "posted";
+      applyVatDecisionLifecycleTransition(decision, {
+        nextLifecycleStatus,
+        actorId: resolvedActorId,
+        journalEntryId: resolvedJournalEntryId
+      });
+      updatedDecisions.push(copy(decision));
+    }
+    if (updatedDecisions.length > 0) {
+      pushAudit({
+        companyId: resolvedCompanyId,
+        actorId: resolvedActorId,
+        correlationId,
+        action: "vat.decision.posting_recorded",
+        entityType: "vat_decision",
+        entityId: updatedDecisions[0].vatDecisionId,
+        explanation: `Recorded VAT posting journal ${resolvedJournalEntryId} for ${updatedDecisions.length} VAT decisions.`
+      });
+    }
+    return { items: updatedDecisions };
+  }
+
+  function recordVatDecisionDeclaration({
+    companyId,
+    vatDecisionIds = [],
+    vatDeclarationRunId = null,
+    vatPeriodicStatementRunId = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const uniqueDecisionIds = [...new Set((Array.isArray(vatDecisionIds) ? vatDecisionIds : []).filter(Boolean))];
+    const updatedDecisions = [];
+    for (const vatDecisionId of uniqueDecisionIds) {
+      const decision = requireVatDecisionForCompany({
+        companyId: resolvedCompanyId,
+        vatDecisionId
+      });
+      applyVatDecisionLifecycleTransition(decision, {
+        nextLifecycleStatus: "declared",
+        actorId: resolvedActorId,
+        vatDeclarationRunId: typeof vatDeclarationRunId === "string" && vatDeclarationRunId.trim() ? vatDeclarationRunId.trim() : null,
+        vatPeriodicStatementRunId:
+          typeof vatPeriodicStatementRunId === "string" && vatPeriodicStatementRunId.trim()
+            ? vatPeriodicStatementRunId.trim()
+            : null
+      });
+      updatedDecisions.push(copy(decision));
+    }
+    if (updatedDecisions.length > 0) {
+      pushAudit({
+        companyId: resolvedCompanyId,
+        actorId: resolvedActorId,
+        correlationId,
+        action: "vat.decision.declared",
+        entityType: "vat_decision",
+        entityId: updatedDecisions[0].vatDecisionId,
+        explanation: `Recorded VAT declaration lifecycle for ${updatedDecisions.length} VAT decisions.`
+      });
+    }
+    return { items: updatedDecisions };
   }
 
   function requireVatPeriodLockForCompany({ companyId, vatPeriodLockId }) {
@@ -2304,7 +2439,7 @@ function collectDecidedVatDecisions({ state, companyId, fromDate, toDate }) {
   return (state.vatDecisionIdsByCompany.get(companyId) || [])
     .map((decisionId) => state.vatDecisions.get(decisionId))
     .filter(Boolean)
-    .filter((decision) => decision.status === "decided")
+    .filter((decision) => isVatDecisionDeclarationEligible(decision))
     .filter((decision) => decision.effectiveDate >= fromDate && decision.effectiveDate <= toDate)
     .map(copy);
 }
@@ -2319,7 +2454,7 @@ function collectVatDecisionsForPeriod({ state, companyId, fromDate, toDate }) {
 
 function collectOpenVatReviewQueueItemsForPeriod({ state, companyId, decisions }) {
   return decisions
-    .filter((decision) => decision.status === "review_required" && decision.reviewQueueItemId)
+    .filter((decision) => getVatDecisionLifecycleStatus(decision) === "pending_review" && decision.reviewQueueItemId)
     .map((decision) => state.vatReviewQueueItems.get(decision.reviewQueueItemId))
     .filter(Boolean)
     .filter((reviewQueueItem) => reviewQueueItem.companyId === companyId && reviewQueueItem.status === "open")
@@ -2328,10 +2463,11 @@ function collectOpenVatReviewQueueItemsForPeriod({ state, companyId, decisions }
 
 function buildVatDeclarationBasis({ state, ledger, providerBaselineRegistry = null, companyId, fromDate, toDate }) {
   const periodDecisions = collectVatDecisionsForPeriod({ state, companyId, fromDate, toDate });
-  const decidedDecisions = periodDecisions.filter((decision) => decision.status === "decided");
-  const regularDecisions = decidedDecisions.filter((decision) => decision.outputs.reportingChannel === "regular_vat_return");
-  const ossDecisions = decidedDecisions.filter((decision) => decision.outputs.reportingChannel === "oss");
-  const iossDecisions = decidedDecisions.filter((decision) => decision.outputs.reportingChannel === "ioss");
+  const declarationEligibleDecisions = periodDecisions.filter((decision) => isVatDecisionDeclarationEligible(decision));
+  const pendingReviewDecisions = periodDecisions.filter((decision) => getVatDecisionLifecycleStatus(decision) === "pending_review");
+  const regularDecisions = declarationEligibleDecisions.filter((decision) => decision.outputs.reportingChannel === "regular_vat_return");
+  const ossDecisions = declarationEligibleDecisions.filter((decision) => decision.outputs.reportingChannel === "oss");
+  const iossDecisions = declarationEligibleDecisions.filter((decision) => decision.outputs.reportingChannel === "ioss");
   const openReviewQueueItems = collectOpenVatReviewQueueItemsForPeriod({
     state,
     companyId,
@@ -2373,8 +2509,11 @@ function buildVatDeclarationBasis({ state, ledger, providerBaselineRegistry = nu
     fromDate,
     toDate,
     decisionCount: periodDecisions.length,
-    decidedDecisionCount: decidedDecisions.length,
-    reviewRequiredDecisionCount: periodDecisions.length - decidedDecisions.length,
+    approvedDecisionCount: declarationEligibleDecisions.length,
+    pendingReviewDecisionCount: pendingReviewDecisions.length,
+    declarationEligibleDecisionCount: declarationEligibleDecisions.length,
+    decidedDecisionCount: declarationEligibleDecisions.length,
+    reviewRequiredDecisionCount: pendingReviewDecisions.length,
     regularDecisionCount: regularDecisions.length,
     ossDecisionCount: ossDecisions.length,
     iossDecisionCount: iossDecisions.length,
@@ -2391,16 +2530,16 @@ function buildVatDeclarationBasis({ state, ledger, providerBaselineRegistry = nu
     activePeriodLock: activePeriodLock ? copy(activePeriodLock) : null,
     rulepackRefs: collectVatRulepackRefs(periodDecisions),
     providerBaselineRefs,
-    decisionSnapshotRefs: collectVatDecisionSnapshotRefs(decidedDecisions),
+    decisionSnapshotRefs: collectVatDecisionSnapshotRefs(declarationEligibleDecisions),
     sourceSnapshotHash: hashObject({
       companyId,
       fromDate,
       toDate,
       decisions: periodDecisions.map((decision) => ({
         vatDecisionId: decision.vatDecisionId,
-        status: decision.status,
         vatCode: decision.vatCode,
         effectiveDate: decision.effectiveDate,
+        declarationBoxAmounts: decision.declarationBoxAmounts || [],
         inputsHash: decision.inputsHash,
         rulepackRef: toVatRulepackRef(decision)
       })),
@@ -2414,6 +2553,68 @@ function buildVatDeclarationBasis({ state, ledger, providerBaselineRegistry = nu
 function materializeVatDeclarationBasis({ state, ledger, providerBaselineRegistry = null, companyId, fromDate, toDate }) {
   const basis = buildVatDeclarationBasis({ state, ledger, providerBaselineRegistry, companyId, fromDate, toDate });
   return copy(basis);
+}
+
+function getVatDecisionLifecycleStatus(decision) {
+  if (!decision || typeof decision !== "object") {
+    return "pending_review";
+  }
+  if (VAT_DECISION_LIFECYCLE_STATUSES.includes(decision.lifecycleStatus)) {
+    return decision.lifecycleStatus;
+  }
+  return decision.status === "review_required" ? "pending_review" : "approved";
+}
+
+function getVatDecisionLifecycleRank(decision) {
+  return VAT_DECISION_LIFECYCLE_ORDER[getVatDecisionLifecycleStatus(decision)] ?? 0;
+}
+
+function isVatDecisionDeclarationEligible(decision) {
+  return VAT_DECISION_DECLARATION_ELIGIBLE_STATUSES.has(getVatDecisionLifecycleStatus(decision));
+}
+
+function applyVatDecisionLifecycleTransition(
+  decision,
+  {
+    nextLifecycleStatus,
+    actorId,
+    journalEntryId = null,
+    vatDeclarationRunId = null,
+    vatPeriodicStatementRunId = null
+  } = {}
+) {
+  const resolvedNextLifecycleStatus = requireText(nextLifecycleStatus, "vat_decision_lifecycle_status_required");
+  const currentLifecycleStatus = getVatDecisionLifecycleStatus(decision);
+  const currentRank = VAT_DECISION_LIFECYCLE_ORDER[currentLifecycleStatus] ?? 0;
+  const nextRank = VAT_DECISION_LIFECYCLE_ORDER[resolvedNextLifecycleStatus] ?? currentRank;
+  const now = new Date().toISOString();
+  if (nextRank >= currentRank) {
+    decision.lifecycleStatus = resolvedNextLifecycleStatus;
+    decision.lifecycleUpdatedAt = now;
+  }
+  decision.status = decision.lifecycleStatus === "pending_review" ? "review_required" : "decided";
+  if (decision.lifecycleStatus !== "pending_review") {
+    decision.approvedAt = decision.approvedAt || now;
+    decision.approvedByActorId = decision.approvedByActorId || actorId || null;
+  }
+  if (journalEntryId) {
+    decision.journalEntryIds = [...new Set([...(decision.journalEntryIds || []), journalEntryId])];
+    if (nextRank >= VAT_DECISION_LIFECYCLE_ORDER.posted) {
+      decision.postedAt = decision.postedAt || now;
+      decision.postedByActorId = decision.postedByActorId || actorId || null;
+    }
+  }
+  if (vatDeclarationRunId) {
+    decision.vatDeclarationRunIds = [...new Set([...(decision.vatDeclarationRunIds || []), vatDeclarationRunId])];
+  }
+  if (vatPeriodicStatementRunId) {
+    decision.vatPeriodicStatementRunIds = [...new Set([...(decision.vatPeriodicStatementRunIds || []), vatPeriodicStatementRunId])];
+  }
+  if (vatDeclarationRunId || vatPeriodicStatementRunId) {
+    decision.declaredAt = decision.declaredAt || now;
+    decision.declaredByActorId = decision.declaredByActorId || actorId || null;
+  }
+  decision.updatedAt = now;
 }
 
 function listLockedVatPeriodsForRange({ state, companyId, fromDate, toDate }) {
@@ -2594,7 +2795,6 @@ function buildVatDecisionSnapshotRef(decision) {
     sourceObjectVersion: decision.inputsHash || null,
     decisionHash: hashObject({
       vatDecisionId: decision.vatDecisionId,
-      status: decision.status,
       vatCode: decision.vatCode,
       effectiveDate: decision.effectiveDate,
       declarationBoxAmounts: decision.declarationBoxAmounts || [],

@@ -22,6 +22,7 @@ test("Phase 4.1 returns traceable VAT decisions and replays historical rule pack
   });
   assert.equal(historical.vatDecision.rulePackId, "vat-se-2025.6");
   assert.equal(historical.vatDecision.status, "decided");
+  assert.equal(historical.vatDecision.lifecycleStatus, "approved");
   assert.ok(historical.vatDecision.inputsHash);
   assert.match(historical.vatDecision.explanation.join(" "), /rule_pack_id=vat-se-2025\.6/);
 
@@ -68,6 +69,7 @@ test("Phase 4.1 routes unclear VAT cases to review queue instead of silent auto-
   });
 
   assert.equal(review.vatDecision.status, "review_required");
+  assert.equal(review.vatDecision.lifecycleStatus, "pending_review");
   assert.equal(review.vatDecision.vatCode, "VAT_REVIEW_REQUIRED");
   assert.equal(review.reviewQueueItem.reviewReasonCode, "missing_mandatory_vat_fields");
   assert.equal(vat.listVatReviewQueue({ companyId: COMPANY_ID }).length, 1);
@@ -94,6 +96,7 @@ test("Phase 8.3 persists VIES truth, normalizes Greece to EL and blocks EU goods
   });
 
   assert.equal(greekDecision.vatDecision.status, "decided");
+  assert.equal(greekDecision.vatDecision.lifecycleStatus, "approved");
   assert.equal(greekDecision.vatDecision.transactionLine.buyer_country, "EL");
   assert.equal(greekDecision.vatDecision.transactionLine.buyer_vat_number, "EL123456789");
   assert.equal(greekDecision.vatDecision.outputs.viesStatus, "valid");
@@ -118,6 +121,7 @@ test("Phase 8.3 persists VIES truth, normalizes Greece to EL and blocks EU goods
   });
 
   assert.equal(invalidDecision.vatDecision.status, "review_required");
+  assert.equal(invalidDecision.vatDecision.lifecycleStatus, "pending_review");
   assert.equal(invalidDecision.vatDecision.outputs.viesStatus, "invalid");
   assert.equal(invalidDecision.vatDecision.viesStatus, "invalid");
   assert.equal(invalidDecision.reviewQueueItem.reviewReasonCode, "buyer_vat_number_not_vies_valid");
@@ -144,6 +148,7 @@ test("Phase 8.3 requires valid VIES truth for EU B2B services before reverse-cha
   });
 
   assert.equal(validServiceDecision.vatDecision.status, "decided");
+  assert.equal(validServiceDecision.vatDecision.lifecycleStatus, "approved");
   assert.equal(validServiceDecision.vatDecision.decisionCategory, "eu_services_b2b_sale");
   assert.equal(validServiceDecision.vatDecision.outputs.viesStatus, "valid");
   assert.equal(validServiceDecision.vatDecision.outputs.euListEligible, true);
@@ -169,6 +174,7 @@ test("Phase 8.3 requires valid VIES truth for EU B2B services before reverse-cha
   });
 
   assert.equal(invalidServiceDecision.vatDecision.status, "review_required");
+  assert.equal(invalidServiceDecision.vatDecision.lifecycleStatus, "pending_review");
   assert.equal(invalidServiceDecision.vatDecision.outputs.viesStatus, "invalid");
   assert.equal(invalidServiceDecision.reviewQueueItem.reviewReasonCode, "buyer_vat_number_not_vies_valid");
 });

@@ -321,6 +321,8 @@ const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
     "listVatReviewQueue": "read",
     "listVatRulePacks": "read",
     "lockVatPeriod": "write",
+    "recordVatDecisionDeclaration": "write",
+    "recordVatDecisionPosting": "write",
     "resolveVatReviewQueueItem": "write",
     "snapshotVat": "read",
     "summarizeVatDeclarationBoxes": "read",

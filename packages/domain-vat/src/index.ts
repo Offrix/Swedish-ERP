@@ -42,6 +42,7 @@ export interface VatDecisionRecord {
   readonly effectiveDate: string;
   readonly transactionLine: VatTransactionLine;
   readonly status: string;
+  readonly lifecycleStatus?: "pending_review" | "approved" | "posted" | "declared" | "corrected";
   readonly declarationBoxCodes: readonly string[];
   readonly declarationBoxAmounts: readonly VatDecisionBoxAmount[];
   readonly postingEntries: readonly VatDecisionPostingEntry[];
@@ -63,6 +64,18 @@ export interface VatDecisionRecord {
   readonly createdByActorId: string;
   readonly createdAt: string;
   readonly updatedAt?: string;
+  readonly approvedAt?: string | null;
+  readonly approvedByActorId?: string | null;
+  readonly postedAt?: string | null;
+  readonly postedByActorId?: string | null;
+  readonly journalEntryIds?: readonly string[];
+  readonly declaredAt?: string | null;
+  readonly declaredByActorId?: string | null;
+  readonly vatDeclarationRunIds?: readonly string[];
+  readonly vatPeriodicStatementRunIds?: readonly string[];
+  readonly correctedAt?: string | null;
+  readonly correctedByActorId?: string | null;
+  readonly lifecycleUpdatedAt?: string | null;
 }
 
 export interface VatDecisionBoxAmount {
@@ -259,6 +272,9 @@ export interface VatDeclarationBasis {
   readonly fromDate: string;
   readonly toDate: string;
   readonly decisionCount: number;
+  readonly approvedDecisionCount?: number;
+  readonly pendingReviewDecisionCount?: number;
+  readonly declarationEligibleDecisionCount?: number;
   readonly decidedDecisionCount: number;
   readonly reviewRequiredDecisionCount: number;
   readonly regularDecisionCount: number;

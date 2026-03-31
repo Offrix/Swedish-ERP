@@ -1381,6 +1381,15 @@ export function createArEngine({
       description: `${invoice.invoiceType} ${invoice.invoiceNumber}`,
       lines: journalLines
     });
+    if (vatPlatform && typeof vatPlatform.recordVatDecisionPosting === "function") {
+      vatPlatform.recordVatDecisionPosting({
+        companyId: invoice.companyId,
+        vatDecisionIds: [...new Set(invoice.lines.map((line) => line.vatDecisionId).filter(Boolean))],
+        journalEntryId: posted.journalEntry.journalEntryId,
+        actorId,
+        correlationId
+      });
+    }
 
     invoice.status = "issued";
     invoice.journalEntryId = posted.journalEntry.journalEntryId;
@@ -2327,6 +2336,19 @@ function createWriteoff({
         badDebtVatAdjustment
       })
     });
+    if (
+      badDebtVatAdjustment?.vatDecisionIds?.length > 0
+      && vatPlatform
+      && typeof vatPlatform.recordVatDecisionPosting === "function"
+    ) {
+      vatPlatform.recordVatDecisionPosting({
+        companyId: openItem.companyId,
+        vatDecisionIds: badDebtVatAdjustment.vatDecisionIds,
+        journalEntryId: journal.journalEntryId,
+        actorId,
+        correlationId
+      });
+    }
     writeoff.journalEntryId = journal.journalEntryId;
     state.writeoffs.set(writeoff.arWriteoffId, writeoff);
     ensureCollection(state.writeoffIdsByCompany, openItem.companyId).push(writeoff.arWriteoffId);

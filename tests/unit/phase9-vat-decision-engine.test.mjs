@@ -23,7 +23,7 @@ test("Phase 9.3 materializes VAT declaration basis, resolves review blockers and
   });
 
   const domesticSourceId = "phase9-3-unit-domestic";
-  vat.evaluateVatDecision({
+  const domesticDecision = vat.evaluateVatDecision({
     companyId: COMPANY_ID,
     actorId: "user-1",
     transactionLine: buildTransactionLine({
@@ -69,6 +69,7 @@ test("Phase 9.3 materializes VAT declaration basis, resolves review blockers and
     })
   });
   assert.equal(review.vatDecision.status, "review_required");
+  assert.equal(review.vatDecision.lifecycleStatus, "pending_review");
 
   const blockedBasis = vat.getVatDeclarationBasis({
     companyId: COMPANY_ID,
@@ -89,6 +90,7 @@ test("Phase 9.3 materializes VAT declaration basis, resolves review blockers and
   });
   assert.equal(resolved.reviewQueueItem.status, "resolved");
   assert.equal(resolved.vatDecision.status, "decided");
+  assert.equal(resolved.vatDecision.lifecycleStatus, "approved");
   assert.equal(resolved.vatDecision.outputs.reportingChannel, "regular_vat_return");
 
   const resolvedCreated = ledger.createJournalEntry({
@@ -126,6 +128,7 @@ test("Phase 9.3 materializes VAT declaration basis, resolves review blockers and
   });
   assert.equal(readyBasis.readyForLock, true);
   assert.deepEqual(readyBasis.blockerCodes, []);
+  assert.equal(readyBasis.approvedDecisionCount, 2);
   assert.equal(readyBasis.decidedDecisionCount, 2);
 
   const lock = vat.lockVatPeriod({
@@ -172,6 +175,27 @@ test("Phase 9.3 materializes VAT declaration basis, resolves review blockers and
     })
   });
   assert.equal(afterUnlock.vatDecision.status, "decided");
+  assert.equal(afterUnlock.vatDecision.lifecycleStatus, "approved");
+
+  const declarationRun = vat.createVatDeclarationRun({
+    companyId: COMPANY_ID,
+    fromDate: "2026-03-01",
+    toDate: "2026-03-31",
+    signer: "finance-signer",
+    actorId: "user-1"
+  });
+  const declaredDomestic = vat.getVatDecision({
+    companyId: COMPANY_ID,
+    vatDecisionId: domesticDecision.vatDecision.vatDecisionId
+  });
+  const declaredResolved = vat.getVatDecision({
+    companyId: COMPANY_ID,
+    vatDecisionId: resolved.vatDecision.vatDecisionId
+  });
+  assert.equal(declaredDomestic.lifecycleStatus, "declared");
+  assert.equal(declaredResolved.lifecycleStatus, "declared");
+  assert.equal(declaredDomestic.vatDeclarationRunIds.includes(declarationRun.vatDeclarationRunId), true);
+  assert.equal(declaredResolved.vatDeclarationRunIds.includes(declarationRun.vatDeclarationRunId), true);
 });
 
 function buildTransactionLine(overrides = {}) {
