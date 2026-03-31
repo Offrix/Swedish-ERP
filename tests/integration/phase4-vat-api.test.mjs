@@ -198,6 +198,52 @@ test("Phase 8.3 API persists VIES truth for EU goods and blocks invalid VAT numb
     assert.equal(invalidDecision.vatDecision.viesStatus, "invalid");
     assert.equal(invalidDecision.reviewQueueItem.reviewReasonCode, "buyer_vat_number_not_vies_valid");
 
+    const serviceDecision = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_id: "phase8-3-api-service-vies-valid",
+          buyer_country: "DE",
+          buyer_vat_no: "DE123456789",
+          buyer_vat_number: "DE123456789",
+          buyer_is_taxable_person: true,
+          buyer_vat_number_status: "valid",
+          goods_or_services: "services",
+          vat_code_candidate: "VAT_SE_EU_SERVICES_B2B"
+        })
+      }
+    });
+    assert.equal(serviceDecision.vatDecision.status, "decided");
+    assert.equal(serviceDecision.vatDecision.decisionCategory, "eu_services_b2b_sale");
+    assert.equal(serviceDecision.vatDecision.outputs.viesStatus, "valid");
+    assert.equal(serviceDecision.vatDecision.outputs.euListEligible, true);
+    assert.deepEqual(serviceDecision.vatDecision.declarationBoxCodes, ["39"]);
+
+    const invalidServiceDecision = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_id: "phase8-3-api-service-vies-invalid",
+          buyer_country: "DE",
+          buyer_vat_no: "DE123456789",
+          buyer_vat_number: "DE123456789",
+          buyer_is_taxable_person: true,
+          buyer_vat_number_status: "invalid",
+          goods_or_services: "services",
+          vat_code_candidate: "VAT_SE_EU_SERVICES_B2B"
+        })
+      }
+    });
+    assert.equal(invalidServiceDecision.vatDecision.status, "review_required");
+    assert.equal(invalidServiceDecision.vatDecision.outputs.viesStatus, "invalid");
+    assert.equal(invalidServiceDecision.reviewQueueItem.reviewReasonCode, "buyer_vat_number_not_vies_valid");
+
     const prepaymentDecision = await requestJson(`${baseUrl}/v1/vat/decisions`, {
       method: "POST",
       token: adminSession.sessionToken,

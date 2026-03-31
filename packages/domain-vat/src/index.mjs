@@ -1502,16 +1502,16 @@ function deriveScenario(normalizedLine) {
       return acceptScenario(domesticCode, "domestic_standard_sale");
     }
     if (region === "EU" && normalizedLine.buyer_is_taxable_person === true) {
-      if (goodsOrServices === "goods" && !normalizedLine.buyer_vat_number) {
+      if (!normalizedLine.buyer_vat_number) {
         return reviewScenario(
           "missing_buyer_vat_number",
-          "EU B2B goods sales require the buyer VAT number before VAT-free treatment can be decided."
+          "EU B2B goods and services require the buyer VAT number before VAT-free treatment can be decided."
         );
       }
-      if (goodsOrServices === "goods" && viesStatus !== "valid") {
+      if (viesStatus !== "valid") {
         return reviewScenario(
           "buyer_vat_number_not_vies_valid",
-          `EU B2B goods sales require a VAT number with VIES-valid status; current status is ${viesStatus}.`
+          `EU B2B goods and services require a VAT number with VIES-valid status; current status is ${viesStatus}.`
         );
       }
       return acceptScenario(

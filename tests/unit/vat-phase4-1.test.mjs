@@ -123,6 +123,56 @@ test("Phase 8.3 persists VIES truth, normalizes Greece to EL and blocks EU goods
   assert.equal(invalidDecision.reviewQueueItem.reviewReasonCode, "buyer_vat_number_not_vies_valid");
 });
 
+test("Phase 8.3 requires valid VIES truth for EU B2B services before reverse-charge treatment is accepted", () => {
+  const vat = createVatEngine({
+    clock: () => new Date("2026-03-31T00:25:00Z")
+  });
+
+  const validServiceDecision = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_id: "phase8-3-unit-eu-service-vies-valid",
+      buyer_country: "DE",
+      buyer_vat_no: "DE123456789",
+      buyer_vat_number: "DE123456789",
+      buyer_is_taxable_person: true,
+      buyer_vat_number_status: "valid",
+      goods_or_services: "services",
+      vat_code_candidate: "VAT_SE_EU_SERVICES_B2B"
+    })
+  });
+
+  assert.equal(validServiceDecision.vatDecision.status, "decided");
+  assert.equal(validServiceDecision.vatDecision.decisionCategory, "eu_services_b2b_sale");
+  assert.equal(validServiceDecision.vatDecision.outputs.viesStatus, "valid");
+  assert.equal(validServiceDecision.vatDecision.outputs.euListEligible, true);
+  assert.deepEqual(validServiceDecision.vatDecision.declarationBoxCodes, ["39"]);
+  assert.equal(
+    validServiceDecision.vatDecision.invoiceTextRequirements.includes("reverse_charge_invoice_text_required"),
+    true
+  );
+
+  const invalidServiceDecision = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_id: "phase8-3-unit-eu-service-vies-invalid",
+      buyer_country: "DE",
+      buyer_vat_no: "DE123456789",
+      buyer_vat_number: "DE123456789",
+      buyer_is_taxable_person: true,
+      buyer_vat_number_status: "invalid",
+      goods_or_services: "services",
+      vat_code_candidate: "VAT_SE_EU_SERVICES_B2B"
+    })
+  });
+
+  assert.equal(invalidServiceDecision.vatDecision.status, "review_required");
+  assert.equal(invalidServiceDecision.vatDecision.outputs.viesStatus, "invalid");
+  assert.equal(invalidServiceDecision.reviewQueueItem.reviewReasonCode, "buyer_vat_number_not_vies_valid");
+});
+
 test("Phase 8.3 uses prepayment date as effective VAT date when it precedes invoice date and no explicit tax date exists", () => {
   const vat = createVatEngine({
     clock: () => new Date("2026-03-31T11:00:00Z")
