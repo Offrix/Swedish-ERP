@@ -1467,6 +1467,10 @@ function deriveScenario(normalizedLine) {
   if (servicePlaceOfSupplyException) {
     return servicePlaceOfSupplyException;
   }
+  const deductionRestriction = deriveDeductionRestrictionReview(normalizedLine);
+  if (deductionRestriction) {
+    return deductionRestriction;
+  }
 
   if (normalizedLine.supply_type === "sale") {
     if (normalizedLine.seller_country !== "SE") {
@@ -1778,6 +1782,50 @@ function deriveServicePlaceOfSupplyException(normalizedLine, goodsOrServices) {
     return reviewScenario(
       "restaurant_service_requires_service_jurisdiction",
       "Restaurant and catering services are taxed where the service is physically carried out and require explicit service jurisdiction before VAT can be decided."
+    );
+  }
+  return null;
+}
+
+function deriveDeductionRestrictionReview(normalizedLine) {
+  if (normalizedLine.supply_type !== "purchase") {
+    return null;
+  }
+  const supplySubtype = String(normalizedLine.supply_subtype || "").trim().toLowerCase();
+  if (
+    supplySubtype === "passenger_car_purchase" ||
+    supplySubtype === "personbil_purchase" ||
+    supplySubtype === "passenger_car_finance_lease" ||
+    supplySubtype === "passenger_car_financial_lease"
+  ) {
+    return reviewScenario(
+      "passenger_car_purchase_requires_exception_review",
+      "VAT deduction on passenger car purchases is generally blocked and requires explicit business-exception review before VAT can be decided."
+    );
+  }
+  if (supplySubtype === "passenger_car_lease" || supplySubtype === "personbil_lease") {
+    if (normalizedLine.deduction_ratio === null) {
+      return reviewScenario(
+        "passenger_car_lease_requires_explicit_deduction_ratio",
+        "Passenger car leasing requires an explicit deduction ratio from policy or review before VAT can be decided."
+      );
+    }
+    if (normalizedLine.deduction_ratio > 0.5) {
+      return reviewScenario(
+        "passenger_car_lease_full_deduction_requires_exception_review",
+        "Passenger car leasing above 50 percent VAT deduction requires explicit business-exception review before VAT can be decided."
+      );
+    }
+  }
+  if (
+    supplySubtype === "representation" ||
+    supplySubtype === "representation_meal" ||
+    supplySubtype === "representation_event" ||
+    supplySubtype === "internal_representation"
+  ) {
+    return reviewScenario(
+      "representation_requires_explicit_vat_basis",
+      "Representation VAT deduction requires explicit per-person basis, rate split and policy-backed deduction handling before VAT can be decided."
     );
   }
   return null;

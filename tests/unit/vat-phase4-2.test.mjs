@@ -286,6 +286,88 @@ test("Phase 8.3 blocks cross-border service place-of-supply exceptions from defa
   assert.equal(restaurantService.reviewQueueItem.reviewReasonCode, "restaurant_service_requires_service_jurisdiction");
 });
 
+test("Phase 8.3 blocks passenger-car purchase and representation auto-deduction while allowing explicit 50 percent lease deduction", () => {
+  const vat = createVatEngine({
+    clock: () => new Date("2026-03-31T09:30:00Z")
+  });
+
+  const passengerCarPurchase = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_type: "AP_INVOICE",
+      source_id: "phase8-3-unit-passenger-car-purchase",
+      supply_type: "purchase",
+      seller_country: "SE",
+      buyer_country: "SE",
+      goods_or_services: "goods",
+      supply_subtype: "passenger_car_purchase",
+      vat_code_candidate: "VAT_SE_DOMESTIC_25",
+      line_amount_ex_vat: 200000
+    })
+  });
+  assert.equal(passengerCarPurchase.vatDecision.status, "review_required");
+  assert.equal(passengerCarPurchase.reviewQueueItem.reviewReasonCode, "passenger_car_purchase_requires_exception_review");
+
+  const passengerCarLease = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_type: "AP_INVOICE",
+      source_id: "phase8-3-unit-passenger-car-lease",
+      supply_type: "purchase",
+      seller_country: "SE",
+      buyer_country: "SE",
+      goods_or_services: "services",
+      supply_subtype: "passenger_car_lease",
+      vat_code_candidate: "VAT_SE_DOMESTIC_25",
+      line_amount_ex_vat: 1200,
+      deduction_ratio: 0.5
+    })
+  });
+  assert.equal(passengerCarLease.vatDecision.status, "decided");
+  assert.equal(passengerCarLease.vatDecision.deductionRuleCode, "partial_deduction");
+  assert.deepEqual(passengerCarLease.vatDecision.declarationBoxAmounts, [{ boxCode: "48", amount: 150, amountType: "input_vat" }]);
+
+  const passengerCarLeaseWithoutRatio = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_type: "AP_INVOICE",
+      source_id: "phase8-3-unit-passenger-car-lease-missing-ratio",
+      supply_type: "purchase",
+      seller_country: "SE",
+      buyer_country: "SE",
+      goods_or_services: "services",
+      supply_subtype: "passenger_car_lease",
+      vat_code_candidate: "VAT_SE_DOMESTIC_25",
+      line_amount_ex_vat: 1200
+    })
+  });
+  assert.equal(passengerCarLeaseWithoutRatio.vatDecision.status, "review_required");
+  assert.equal(passengerCarLeaseWithoutRatio.reviewQueueItem.reviewReasonCode, "passenger_car_lease_requires_explicit_deduction_ratio");
+
+  const representation = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_type: "AP_INVOICE",
+      source_id: "phase8-3-unit-representation",
+      supply_type: "purchase",
+      seller_country: "SE",
+      buyer_country: "SE",
+      goods_or_services: "services",
+      supply_subtype: "representation",
+      vat_code_candidate: "VAT_SE_DOMESTIC_12",
+      vat_rate: 12,
+      tax_rate_candidate: 12,
+      line_amount_ex_vat: 1000
+    })
+  });
+  assert.equal(representation.vatDecision.status, "review_required");
+  assert.equal(representation.reviewQueueItem.reviewReasonCode, "representation_requires_explicit_vat_basis");
+});
+
 function buildTransactionLine(overrides = {}) {
   return {
     seller_country: "SE",

@@ -294,6 +294,76 @@ test("Phase 8.3 API models domestic supplier-charged partial and blocked deducti
     });
     assert.equal(restaurantService.vatDecision.status, "review_required");
     assert.equal(restaurantService.reviewQueueItem.reviewReasonCode, "restaurant_service_requires_service_jurisdiction");
+
+    const passengerCarPurchase = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_type: "AP_INVOICE",
+          source_id: "phase8-3-api-passenger-car-purchase",
+          supply_type: "purchase",
+          seller_country: "SE",
+          buyer_country: "SE",
+          goods_or_services: "goods",
+          supply_subtype: "passenger_car_purchase",
+          vat_code_candidate: "VAT_SE_DOMESTIC_25",
+          line_amount_ex_vat: 200000
+        })
+      }
+    });
+    assert.equal(passengerCarPurchase.vatDecision.status, "review_required");
+    assert.equal(passengerCarPurchase.reviewQueueItem.reviewReasonCode, "passenger_car_purchase_requires_exception_review");
+
+    const passengerCarLease = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_type: "AP_INVOICE",
+          source_id: "phase8-3-api-passenger-car-lease",
+          supply_type: "purchase",
+          seller_country: "SE",
+          buyer_country: "SE",
+          goods_or_services: "services",
+          supply_subtype: "passenger_car_lease",
+          vat_code_candidate: "VAT_SE_DOMESTIC_25",
+          line_amount_ex_vat: 1200,
+          deduction_ratio: 0.5
+        })
+      }
+    });
+    assert.equal(passengerCarLease.vatDecision.status, "decided");
+    assert.equal(passengerCarLease.vatDecision.deductionRuleCode, "partial_deduction");
+    assert.deepEqual(passengerCarLease.vatDecision.declarationBoxAmounts, [{ boxCode: "48", amount: 150, amountType: "input_vat" }]);
+
+    const representation = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_type: "AP_INVOICE",
+          source_id: "phase8-3-api-representation",
+          supply_type: "purchase",
+          seller_country: "SE",
+          buyer_country: "SE",
+          goods_or_services: "services",
+          supply_subtype: "representation",
+          vat_code_candidate: "VAT_SE_DOMESTIC_12",
+          vat_rate: 12,
+          tax_rate_candidate: 12,
+          line_amount_ex_vat: 1000
+        })
+      }
+    });
+    assert.equal(representation.vatDecision.status, "review_required");
+    assert.equal(representation.reviewQueueItem.reviewReasonCode, "representation_requires_explicit_vat_basis");
   } finally {
     await stopServer(server);
   }
