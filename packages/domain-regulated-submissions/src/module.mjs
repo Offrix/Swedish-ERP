@@ -1589,12 +1589,26 @@ export function createCanonicalSubmissionEvidencePackRef(payload = {}) {
 }
 
 function buildSignatureArchiveRef(signatureArchive, signatureReference) {
+  const providerBaselineRef = normalizePinnedProviderBaselineRef(
+    signatureArchive.providerBaselineRef || {
+      providerBaselineId: signatureArchive.providerBaselineId,
+      providerCode: signatureArchive.providerCode,
+      baselineCode: signatureArchive.providerBaselineCode,
+      providerBaselineVersion: signatureArchive.providerBaselineVersion,
+      providerBaselineChecksum: signatureArchive.providerBaselineChecksum,
+      effectiveDate: signatureArchive.providerBaselineRef?.effectiveDate || null
+    },
+    "submission_signature_archive_provider_baseline"
+  );
   return {
     providerCode: signatureArchive.providerCode,
     providerMode: signatureArchive.providerMode,
     providerEnvironmentRef: signatureArchive.providerEnvironmentRef,
-    providerBaselineRef: clone(signatureArchive.providerBaselineRef || null),
-    providerBaselineCode: signatureArchive.providerBaselineCode || null,
+    providerBaselineId: providerBaselineRef.providerBaselineId,
+    providerBaselineRef: clone(providerBaselineRef),
+    providerBaselineCode: providerBaselineRef.baselineCode,
+    providerBaselineVersion: providerBaselineRef.providerBaselineVersion,
+    providerBaselineChecksum: providerBaselineRef.providerBaselineChecksum,
     signatureReference: normalizeOptionalText(signatureReference) || signatureArchive.signatureReference,
     signatureArchiveRef: signatureArchive.signatureArchiveRef,
     evidenceArchiveId: signatureArchive.evidenceArchiveId,
@@ -2584,19 +2598,23 @@ function normalizeRulepackRefs(values = []) {
 function normalizeProviderBaselineRefs(values = []) {
   return dedupeRefs(
     values,
-    (candidate) =>
-      normalizeOptionalText(candidate.providerBaselineId)
-      || requireText(candidate.baselineCode || candidate.providerBaselineCode, "submission_provider_baseline_code_required"),
+    (candidate) => requireText(candidate.providerBaselineId, "submission_provider_baseline_id_required"),
     (candidate) => ({
-      providerBaselineId: normalizeOptionalText(candidate.providerBaselineId),
-      providerCode: normalizeOptionalText(candidate.providerCode),
-      baselineCode: requireText(candidate.baselineCode || candidate.providerBaselineCode, "submission_provider_baseline_code_required"),
-      providerBaselineVersion: requireText(candidate.providerBaselineVersion, "submission_provider_baseline_version_required"),
-      providerBaselineChecksum: normalizeOptionalText(candidate.providerBaselineChecksum),
-      effectiveDate: normalizeOptionalText(candidate.effectiveDate),
+      ...normalizePinnedProviderBaselineRef(candidate, "submission_provider_baseline"),
       formatFamily: normalizeOptionalText(candidate.formatFamily)
     })
   );
+}
+
+function normalizePinnedProviderBaselineRef(candidate = {}, codePrefix = "submission_provider_baseline") {
+  return {
+    providerBaselineId: requireText(candidate.providerBaselineId, `${codePrefix}_id_required`),
+    providerCode: requireText(candidate.providerCode, `${codePrefix}_provider_code_required`),
+    baselineCode: requireText(candidate.baselineCode || candidate.providerBaselineCode, `${codePrefix}_code_required`),
+    providerBaselineVersion: requireText(candidate.providerBaselineVersion, `${codePrefix}_version_required`),
+    providerBaselineChecksum: requireText(candidate.providerBaselineChecksum, `${codePrefix}_checksum_required`),
+    effectiveDate: normalizeOptionalText(candidate.effectiveDate)
+  };
 }
 
 function normalizeDecisionSnapshotRefs(values = []) {

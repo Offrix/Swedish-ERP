@@ -82,6 +82,13 @@ test("Phase 13.2 canonical submission core persists attempts, canonical envelope
   });
   assert.equal(submission.currentEvidencePack.signatureArchiveRefs.length, 1);
   assert.equal(typeof submission.currentEvidencePack.signatureArchiveRefs[0].signatureArchiveRef, "string");
+  assert.equal(typeof submission.currentEvidencePack.signatureArchiveRefs[0].providerBaselineId, "string");
+  assert.equal(submission.currentEvidencePack.signatureArchiveRefs[0].providerBaselineCode, "SE-SIGNICAT-SIGNING-ARCHIVE");
+  assert.equal(typeof submission.currentEvidencePack.signatureArchiveRefs[0].providerBaselineChecksum, "string");
+  assert.equal(
+    submission.currentEvidencePack.signatureArchiveRefs[0].providerBaselineRef.providerBaselineId,
+    submission.currentEvidencePack.signatureArchiveRefs[0].providerBaselineId
+  );
   submission = await platform.submitAuthoritySubmission({
     companyId: "company-13-2",
     submissionId: submission.submissionId,
@@ -116,6 +123,100 @@ test("Phase 13.2 canonical submission core persists attempts, canonical envelope
   assert.equal(attempts.length, 2);
   assert.equal(attempts[0].submissionAttemptNo, 1);
   assert.equal(attempts[1].submissionAttemptNo, 2);
+});
+
+test("Phase 13.2 canonical submission core rejects provider baseline refs without checksum", () => {
+  const platform = createIntegrationPlatform({
+    clock: () => new Date("2026-03-28T12:00:00Z")
+  });
+
+  assert.throws(
+    () =>
+      platform.prepareAuthoritySubmission({
+        companyId: "company-13-2-invalid-baseline",
+        submissionType: "income_tax_return",
+        sourceObjectType: "tax_declaration_package",
+        sourceObjectId: "tax-package-invalid-baseline",
+        payloadVersion: "phase13.2-invalid",
+        providerKey: "skatteverket",
+        recipientId: "skatteverket:income-tax",
+        payload: {
+          sourceObjectVersion: "tax-package-invalid-baseline:v1"
+        },
+        providerBaselineRefs: [
+          {
+            providerBaselineId: "annual-sru-export-se-2026.1",
+            providerCode: "skatteverket",
+            baselineCode: "SE-SRU-FILE",
+            providerBaselineVersion: "2026.1"
+          }
+        ],
+        actorId: "phase13-2-unit"
+      }),
+    (error) => error?.code === "submission_provider_baseline_checksum_required"
+  );
+});
+
+test("Phase 13.2 canonical submission core rejects signature archives without pinned provider baseline refs", () => {
+  const module = createRegulatedSubmissionsModule({
+    state: {
+      submissions: new Map(),
+      submissionIdsByCompany: new Map(),
+      submissionIdsByReuseKey: new Map(),
+      submissionAttempts: new Map(),
+      submissionAttemptIdsBySubmission: new Map(),
+      receipts: new Map(),
+      receiptIdsBySubmission: new Map(),
+      correctionLinks: new Map(),
+      correctionLinkIdsByOriginalSubmission: new Map(),
+      correctionLinkIdsByCorrectingSubmission: new Map(),
+      submissionEvidencePacks: new Map(),
+      queueItems: new Map(),
+      queueItemIdsByCompany: new Map(),
+      queueItemIdsBySubmission: new Map()
+    },
+    clock: () => new Date("2026-03-28T12:05:00Z"),
+    signingArchiveProvider: {
+      archiveSignedEvidence() {
+        return {
+          providerCode: "signicat_signing_archive",
+          providerMode: "test",
+          providerEnvironmentRef: "sandbox",
+          providerBaselineCode: "SE-SIGNICAT-SIGNING-ARCHIVE",
+          signatureReference: "signature:test",
+          signatureArchiveRef: "signicat-archive:test",
+          evidenceArchiveId: "archive:test",
+          archiveChecksum: "archive-checksum",
+          signerActorId: "phase13-2-unit",
+          createdAt: new Date("2026-03-28T12:05:00Z").toISOString()
+        };
+      }
+    }
+  });
+
+  const submission = module.prepareAuthoritySubmission({
+    companyId: "company-13-2-invalid-signature-archive",
+    submissionType: "vat_declaration",
+    sourceObjectType: "vat_return",
+    sourceObjectId: "vat-invalid-signature-archive",
+    payloadVersion: "phase13.2-invalid-signature-archive",
+    providerKey: "skatteverket",
+    recipientId: "skatteverket:vat",
+    payload: {
+      sourceObjectVersion: "vat-invalid-signature-archive:v1"
+    },
+    actorId: "phase13-2-unit"
+  });
+
+  assert.throws(
+    () =>
+      module.signAuthoritySubmission({
+        companyId: "company-13-2-invalid-signature-archive",
+        submissionId: submission.submissionId,
+        actorId: "phase13-2-unit"
+      }),
+    (error) => error?.code === "submission_signature_archive_provider_baseline_id_required"
+  );
 });
 
 test("Phase 13.3 submission transport resolves adapter metadata instead of live-path synthetic outcome injection", async () => {

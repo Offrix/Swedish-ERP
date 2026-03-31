@@ -94,6 +94,10 @@ test("Phase 13.2 API exposes canonical submission attempts and evidence-pack sta
     assert.equal(evidencePack.envelopeState, "technically_accepted");
     assert.equal(evidencePack.attemptRefs.length, 1);
     assert.equal(evidencePack.attemptRefs[0].attemptStageCode, "transport");
+    assert.equal(evidencePack.signatureArchiveRefs.length, 1);
+    assert.equal(typeof evidencePack.signatureArchiveRefs[0].providerBaselineId, "string");
+    assert.equal(evidencePack.signatureArchiveRefs[0].providerBaselineCode, "SE-SIGNICAT-SIGNING-ARCHIVE");
+    assert.equal(typeof evidencePack.signatureArchiveRefs[0].providerBaselineChecksum, "string");
   } finally {
     await stopServer(server);
   }
