@@ -12,6 +12,10 @@ import {
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
 import { createConfiguredSecretStore } from "../../domain-core/src/secret-runtime.mjs";
+import {
+  getSkatteverketMonthlyTaxTable2026Meta,
+  lookupSkatteverketMonthlyTaxTable2026
+} from "./skatteverket-tax-tables.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -91,6 +95,7 @@ export const PAYROLL_CALCULATION_BASES = Object.freeze([
 const PAYROLL_EMPLOYER_CONTRIBUTION_RULE_PACK_CODE = "SE-EMPLOYER-CONTRIBUTIONS";
 const PAYROLL_TAX_RULE_PACK_CODE = "SE-PAYROLL-TAX";
 const PAYROLL_GARNISHMENT_RULE_PACK_CODE = "SE-GARNISHMENT";
+const PAYROLL_TAX_TABLE_BASELINE_2026 = Object.freeze(getSkatteverketMonthlyTaxTable2026Meta());
 const PAYROLL_EXCEPTION_RULES = Object.freeze({
   employment_contract_missing: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
   payroll_tax_profile_missing: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
@@ -226,13 +231,20 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
     effectiveTo: null,
     version: "2026.1",
     checksum: "phase8-payroll-tax-se-2026-1",
-    sourceSnapshotDate: "2026-03-22",
-    semanticChangeSummary: "Phase 8.2 payroll tax pack for manual-rate ordinary tax and SINK.",
+    sourceSnapshotDate: PAYROLL_TAX_TABLE_BASELINE_2026.sourceSnapshotDate,
+    semanticChangeSummary: "Phase 11.1 payroll tax pack pins official 2026 monthly tax tables plus SINK and A-SINK baselines.",
     machineReadableRules: {
       ordinaryTaxModes: {
         manual_rate: {
           requiresExplicitRate: true
         }
+      },
+      tableBaseline: {
+        sourceUrl: PAYROLL_TAX_TABLE_BASELINE_2026.sourceUrl,
+        sourceSnapshotDate: PAYROLL_TAX_TABLE_BASELINE_2026.sourceSnapshotDate,
+        sourceSha256: PAYROLL_TAX_TABLE_BASELINE_2026.sourceSha256,
+        tableFormatCode: "skatteverket_allmanna_tabeller_manad_2026_txt",
+        monthlyThresholdForPercentageRows: 80001
       },
       sink: {
         standardRatePercent: 22.5,
@@ -243,11 +255,13 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
       }
     },
     humanReadableExplanation: [
-      "Ordinary tax remains explicit through a configured rate until later tax-table phases.",
+      "Ordinary table tax resolves from the official Skatteverket 2026 monthly tax-table baseline by table and column.",
       "SINK is versioned through the rule pack with standard and sea-income rates.",
       "A-SINK is versioned as a separate fixed-rate path for foreign artists and athletes."
     ],
     testVectors: [
+      { vectorId: "payroll-tax-table-34-col1-40000-2026" },
+      { vectorId: "payroll-tax-table-34-col1-82000-2026" },
       { vectorId: "payroll-manual-rate-2026" },
       { vectorId: "payroll-sink-2026" },
       { vectorId: "payroll-sink-sea-2026" },
@@ -5721,6 +5735,10 @@ function buildTaxPreview({
   }
 
   if (effectiveTaxContext.sourceType === "tax_decision_snapshot") {
+    const taxTableLookup = resolveOfficialTaxTableLookupForDecisionSnapshot({
+      taxDecisionSnapshot: effectiveTaxContext,
+      taxableBase: normalizedTaxableBase
+    });
     if (effectiveTaxContext.status !== "approved") {
       warnings.push(createWarning("tax_decision_snapshot_not_approved", "Tax decision snapshot must be approved before payroll calculation."));
       const decisionObject = {
@@ -5751,7 +5769,8 @@ function buildTaxPreview({
       taxDecisionSnapshot: effectiveTaxContext,
       taxableBase: normalizedTaxableBase,
       sinkDefaults: rulePack.machineReadableRules?.sink || {},
-      aSinkDefaults: rulePack.machineReadableRules?.aSink || {}
+      aSinkDefaults: rulePack.machineReadableRules?.aSink || {},
+      taxTableLookup
     });
     if (snapshotAmount == null) {
       warnings.push(createWarning("tax_decision_snapshot_incomplete", "Tax decision snapshot could not resolve a withholding amount."));
@@ -5803,6 +5822,13 @@ function buildTaxPreview({
         adjustmentPercentage: effectiveTaxContext.adjustmentPercentage ?? null,
         withholdingRatePercent: effectiveTaxContext.withholdingRatePercent ?? null,
         withholdingFixedAmount: effectiveTaxContext.withholdingFixedAmount ?? null,
+        tableLookupMode: taxTableLookup?.valueMode ?? null,
+        tableLookupValue: taxTableLookup?.sourceValue ?? null,
+        tableLookupRowCode: taxTableLookup?.rowCode ?? null,
+        tableLookupLowerBound: taxTableLookup?.lowerBound ?? null,
+        tableLookupUpperBound: taxTableLookup?.upperBound ?? null,
+        tableLookupSourceUrl: taxTableLookup?.sourceUrl ?? null,
+        tableLookupSourceSha256: taxTableLookup?.sourceSha256 ?? null,
         sinkRatePercent: effectiveTaxContext.sinkRatePercent ?? null,
         sinkSeaIncome: effectiveTaxContext.sinkSeaIncome === true,
         decisionSource: effectiveTaxContext.decisionSource,
@@ -6031,7 +6057,24 @@ function resolveTaxDecisionCode({ decisionType, sinkSeaIncome = false }) {
   return decisionCodeByType[decisionType] || "PAYROLL_TAX_DECISION";
 }
 
-function resolveTaxDecisionSnapshotAmount({ taxDecisionSnapshot, taxableBase, sinkDefaults = {}, aSinkDefaults = {} }) {
+function resolveOfficialTaxTableLookupForDecisionSnapshot({ taxDecisionSnapshot, taxableBase }) {
+  if (!taxDecisionSnapshot || taxDecisionSnapshot.decisionType !== "tabell") {
+    return null;
+  }
+  return lookupSkatteverketMonthlyTaxTable2026({
+    tableCode: taxDecisionSnapshot.tableCode,
+    columnCode: taxDecisionSnapshot.columnCode,
+    grossMonthlyAmount: taxableBase
+  });
+}
+
+function resolveTaxDecisionSnapshotAmount({
+  taxDecisionSnapshot,
+  taxableBase,
+  sinkDefaults = {},
+  aSinkDefaults = {},
+  taxTableLookup = null
+}) {
   if (!taxDecisionSnapshot) {
     return null;
   }
@@ -6047,13 +6090,7 @@ function resolveTaxDecisionSnapshotAmount({ taxDecisionSnapshot, taxableBase, si
     return taxDecisionSnapshot.withholdingRatePercent == null ? null : roundMoney(taxableBase * (taxDecisionSnapshot.withholdingRatePercent / 100));
   }
   if (taxDecisionSnapshot.decisionType === "tabell") {
-    if (taxDecisionSnapshot.withholdingFixedAmount != null) {
-      return roundMoney(taxDecisionSnapshot.withholdingFixedAmount);
-    }
-    if (taxDecisionSnapshot.withholdingRatePercent != null) {
-      return roundMoney(taxableBase * (taxDecisionSnapshot.withholdingRatePercent / 100));
-    }
-    return null;
+    return taxTableLookup?.withholdingAmount ?? null;
   }
   if (taxDecisionSnapshot.decisionType === "jamkning") {
     let amount = null;
@@ -8714,11 +8751,11 @@ function normalizeTaxDecisionSnapshot(snapshot = {}) {
         "Table tax decisions require municipalityCode, tableCode and columnCode."
       );
     }
-    if (normalized.withholdingRatePercent == null && normalized.withholdingFixedAmount == null) {
+    if (normalized.withholdingRatePercent != null || normalized.withholdingFixedAmount != null) {
       throw createError(
         400,
-        "tax_decision_snapshot_table_withholding_required",
-        "Table tax decisions require withholdingRatePercent or withholdingFixedAmount."
+        "tax_decision_snapshot_table_manual_withholding_forbidden",
+        "Table tax decisions must resolve withholding from the official tax-table baseline, not from inline withholding values."
       );
     }
   }

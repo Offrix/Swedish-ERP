@@ -39,7 +39,6 @@ test("Phase 12.6 garnishment decisions drive withholding and remittance instruct
     municipalityCode: "0180",
     tableCode: "34",
     columnCode: "1",
-    withholdingFixedAmount: 10000,
     decisionSource: "skatteverket_table_import",
     decisionReference: "tabell-34-1-2026",
     evidenceRef: "evidence-tax-kfm-2026",
@@ -128,11 +127,11 @@ test("Phase 12.6 garnishment decisions drive withholding and remittance instruct
     actorId: "unit-test"
   });
   const payslip = payRun.payslips[0];
-  assert.equal(payslip.totals.preliminaryTax, 10000);
+  assert.equal(payslip.totals.preliminaryTax, 6054);
   assert.equal(payslip.totals.garnishmentAmount, 7000);
   assert.equal(payslip.totals.garnishmentDecision.rule_pack_id, "payroll-garnishment-se-2026.1");
   assert.equal(payslip.totals.garnishmentDecision.rule_pack_checksum, "phase12-payroll-garnishment-se-2026-1");
-  assert.equal(payslip.totals.garnishmentDecision.outputs.availableAboveProtected, 8000);
+  assert.equal(payslip.totals.garnishmentDecision.outputs.availableAboveProtected, 11946);
   assert.equal(payslip.totals.garnishmentDecision.outputs.remittanceBankgiro, "5050-1234");
   const garnishmentLine = payRun.lines.find((line) => line.payItemCode === "GARNISHMENT");
   assert.ok(garnishmentLine);

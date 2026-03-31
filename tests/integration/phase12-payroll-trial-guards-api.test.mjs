@@ -62,7 +62,6 @@ test("Phase 12.7 API keeps payroll trial flows non-live end-to-end", async () =>
         municipalityCode: "0180",
         tableCode: "34",
         columnCode: "1",
-        withholdingFixedAmount: 9800,
         decisionSource: "skatteverket_table_import",
         decisionReference: "tabell-34-1-2026-trial",
         evidenceRef: "evidence-tax-trial-2026"

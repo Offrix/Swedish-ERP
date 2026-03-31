@@ -26,6 +26,7 @@ Validate against official Skatteverket guidance before changing decision semanti
 - SINK requires a valid decision; SINK is 22.5 percent from the current official baseline
 - A-SINK requires a valid decision; A-SINK is 15 percent from the current official baseline
 - AGI must keep A-SINK tax separate from ordinary preliminary tax and ordinary SINK tax
+- table tax decisions must resolve from the official Skatteverket 2026 monthly tax-table baseline, not from inline withholding values
 
 ## Targeted verification
 
@@ -40,6 +41,7 @@ Expected:
 
 - all tests green
 - regular pay run can resolve `tabell`
+- `tabell` resolves from official monthly table data for both fixed-amount rows and percentage rows over SEK 80,000
 - adjusted decision can resolve `jamkning`
 - extra pay run can resolve `engangsskatt`
 - A-SINK decision resolves `a_sink_tax` and is reported on the AGI A-SINK field instead of ordinary preliminary tax
@@ -68,5 +70,6 @@ Expected:
 ## Failure handling
 
 - If pay runs still require legacy `manual_rate` on the primary path, do not mark `12.1` complete.
+- If `tabell` accepts inline withholding amounts instead of the official baseline lookup, treat that as a blocker.
 - If `emergency_manual` can be self-approved, treat that as a blocker.
 - If a decision snapshot is not time-bound or evidence-linked, treat the implementation as incomplete.

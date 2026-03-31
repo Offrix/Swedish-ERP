@@ -53,7 +53,6 @@ test("Phase 12.6 e2e payroll flow creates and settles Kronofogden remittance", a
         municipalityCode: "0180",
         tableCode: "34",
         columnCode: "1",
-        withholdingFixedAmount: 10000,
         decisionSource: "skatteverket_table_import",
         decisionReference: "tabell-34-1-2026",
         evidenceRef: "evidence-e2e-tax-2026"

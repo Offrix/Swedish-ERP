@@ -53,7 +53,6 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
         municipalityCode: "0180",
         tableCode: "34",
         columnCode: "1",
-        withholdingFixedAmount: 11950,
         decisionSource: "skatteverket_table_import",
         decisionReference: "tabell-34-1-2026",
         evidenceRef: "evidence-tax-api-2026"
@@ -83,7 +82,51 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
       }
     });
     assert.equal(run.payslips[0].totals.taxDecision.outputs.decisionType, "tabell");
-    assert.equal(run.payslips[0].totals.taxDecision.outputs.preliminaryTax, 11950);
+    assert.equal(run.payslips[0].totals.taxDecision.outputs.preliminaryTax, 8652);
+    assert.equal(run.payslips[0].totals.taxDecision.outputs.tableLookupMode, "fixed_amount");
+    assert.equal(run.payslips[0].totals.taxDecision.outputs.tableLookupRowCode, "30B34");
+
+    const highIncomeEmployee = await createMonthlyEmployee({
+      baseUrl,
+      token: sessionToken,
+      givenName: "Hilda",
+      familyName: "Hightableapi",
+      identityValue: "19800112-8886",
+      monthlySalary: 82000
+    });
+    await requestJson(baseUrl, "/v1/payroll/tax-decisions", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: highIncomeEmployee.employment.employmentId,
+        decisionType: "tabell",
+        incomeYear: 2026,
+        validFrom: "2026-01-01",
+        validTo: "2026-12-31",
+        municipalityCode: "0180",
+        tableCode: "34",
+        columnCode: "1",
+        decisionSource: "skatteverket_table_import",
+        decisionReference: "tabell-34-1-2026-high",
+        evidenceRef: "evidence-tax-api-2026-high"
+      }
+    });
+    const highIncomeRun = await requestJson(baseUrl, "/v1/payroll/pay-runs", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202603",
+        employmentIds: [highIncomeEmployee.employment.employmentId]
+      }
+    });
+    assert.equal(highIncomeRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 28700);
+    assert.equal(highIncomeRun.payslips[0].totals.taxDecision.outputs.tableLookupMode, "percentage");
+    assert.equal(highIncomeRun.payslips[0].totals.taxDecision.outputs.tableLookupRowCode, "30%34");
 
     const aSinkEmployee = await createMonthlyEmployee({
       baseUrl,
@@ -216,7 +259,7 @@ function enabledFlags() {
   };
 }
 
-async function createMonthlyEmployee({ baseUrl, token, givenName, familyName, identityValue }) {
+async function createMonthlyEmployee({ baseUrl, token, givenName, familyName, identityValue, monthlySalary = 40000 }) {
   const employee = await requestJson(baseUrl, "/v1/hr/employees", {
     method: "POST",
     token,
@@ -251,7 +294,7 @@ async function createMonthlyEmployee({ baseUrl, token, givenName, familyName, id
       employmentId: employment.employmentId,
       validFrom: "2025-01-01",
       salaryModelCode: "monthly_salary",
-      monthlySalary: 40000
+      monthlySalary
     }
   });
   await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/bank-accounts`, {

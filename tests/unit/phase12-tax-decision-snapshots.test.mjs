@@ -45,7 +45,6 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
     municipalityCode: "0180",
     tableCode: "34",
     columnCode: "1",
-    withholdingFixedAmount: 11800,
     decisionSource: "skatteverket_table_import",
     decisionReference: "tabell-34-kolumn-1-2026",
     evidenceRef: "evidence-tax-table-2026",
@@ -59,9 +58,44 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
     actorId: "unit-test"
   });
   assert.equal(tableRun.payslips[0].totals.taxDecision.outputs.decisionType, "tabell");
-  assert.equal(tableRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 11800);
+  assert.equal(tableRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 8652);
+  assert.equal(tableRun.payslips[0].totals.taxDecision.outputs.tableLookupMode, "fixed_amount");
+  assert.equal(tableRun.payslips[0].totals.taxDecision.outputs.tableLookupRowCode, "30B34");
   assert.equal(tableRun.payslips[0].totals.taxDecision.rule_pack_id, "payroll-tax-se-2026.1");
   assert.equal(tableRun.payslips[0].totals.taxDecision.rule_pack_checksum, "phase8-payroll-tax-se-2026-1");
+
+  const highIncomeEmployee = createMonthlyEmployee({
+    hrPlatform,
+    givenName: "Helge",
+    familyName: "Hogtabell",
+    monthlySalary: 82000,
+    identityValue: "19800112-8886"
+  });
+  payrollPlatform.createTaxDecisionSnapshot({
+    companyId: COMPANY_ID,
+    employmentId: highIncomeEmployee.employment.employmentId,
+    decisionType: "tabell",
+    incomeYear: 2026,
+    validFrom: "2026-01-01",
+    validTo: "2026-12-31",
+    municipalityCode: "0180",
+    tableCode: "34",
+    columnCode: "1",
+    decisionSource: "skatteverket_table_import",
+    decisionReference: "tabell-34-kolumn-1-2026-high",
+    evidenceRef: "evidence-tax-table-2026-high",
+    actorId: "unit-test"
+  });
+  const highIncomeRun = payrollPlatform.createPayRun({
+    companyId: COMPANY_ID,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202603",
+    employmentIds: [highIncomeEmployee.employment.employmentId],
+    actorId: "unit-test"
+  });
+  assert.equal(highIncomeRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 28700);
+  assert.equal(highIncomeRun.payslips[0].totals.taxDecision.outputs.tableLookupMode, "percentage");
+  assert.equal(highIncomeRun.payslips[0].totals.taxDecision.outputs.tableLookupRowCode, "30%34");
 
   const jamkningEmployee = createMonthlyEmployee({
     hrPlatform,
@@ -311,6 +345,49 @@ test("Phase 5.5 emergency tax overrides require explicit time-box, rollback plan
         actorId: "unit-test"
       }),
     (error) => error?.code === "payroll_tax_decision_snapshot_approval_required"
+  );
+});
+
+test("Phase 11.1 table tax decisions reject inline withholding overrides", () => {
+  const fixedNow = new Date("2026-03-28T09:30:00Z");
+  const hrPlatform = createHrPlatform({ clock: () => fixedNow });
+  const timePlatform = createTimePlatform({
+    clock: () => fixedNow,
+    hrPlatform
+  });
+  const payrollPlatform = createPayrollPlatform({
+    clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
+    hrPlatform,
+    timePlatform
+  });
+  const employee = createMonthlyEmployee({
+    hrPlatform,
+    givenName: "Tove",
+    familyName: "Tabellguard",
+    monthlySalary: 40000,
+    identityValue: "19800112-9991"
+  });
+
+  assert.throws(
+    () =>
+      payrollPlatform.createTaxDecisionSnapshot({
+        companyId: COMPANY_ID,
+        employmentId: employee.employment.employmentId,
+        decisionType: "tabell",
+        incomeYear: 2026,
+        validFrom: "2026-01-01",
+        validTo: "2026-12-31",
+        municipalityCode: "0180",
+        tableCode: "34",
+        columnCode: "1",
+        withholdingFixedAmount: 8652,
+        decisionSource: "skatteverket_table_import",
+        decisionReference: "tabell-inline-blocked-2026",
+        evidenceRef: "evidence-tabell-inline-blocked-2026",
+        actorId: "unit-test"
+      }),
+    (error) => error?.code === "tax_decision_snapshot_table_manual_withholding_forbidden"
   );
 });
 

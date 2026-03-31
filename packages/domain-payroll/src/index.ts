@@ -318,7 +318,7 @@ export interface TaxDecisionSnapshot {
   readonly taxDecisionSnapshotId: string;
   readonly companyId: string;
   readonly employmentId: string;
-  readonly decisionType: "tabell" | "jamkning" | "engangsskatt" | "sink" | "emergency_manual";
+  readonly decisionType: "tabell" | "jamkning" | "engangsskatt" | "sink" | "a_sink" | "emergency_manual";
   readonly incomeYear: number;
   readonly validFrom: string;
   readonly validTo: string | null;

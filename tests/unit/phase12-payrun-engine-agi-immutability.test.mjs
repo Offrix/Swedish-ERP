@@ -223,7 +223,6 @@ function createTabellDecision(employmentId) {
     municipalityCode: "0180",
     tableCode: "34",
     columnCode: "1",
-    withholdingFixedAmount: 11800,
     decisionSource: "skatteverket_table_import",
     decisionReference: "tabell-34-kolumn-1-2026",
     evidenceRef: "evidence-tax-table-2026"
