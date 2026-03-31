@@ -1134,7 +1134,7 @@ export function createOrgAuthPlatform({
       status: "pending_enrollment",
       secretRef: null,
       credentialId: null,
-      publicKey: null,
+      publicKeyRef: null,
       providerSubject: null,
       deviceName: label || "Authenticator app",
       verifiedAt: null,
@@ -1389,13 +1389,14 @@ export function createOrgAuthPlatform({
       status: "active",
       secretRef: null,
       credentialId: resolvedCredentialId,
-      publicKey: resolvedPublicKey,
+      publicKeyRef: null,
       providerSubject: null,
       deviceName: deviceName || challenge.payloadJson.deviceName || "Security key",
       verifiedAt: nowIso(),
       createdAt: nowIso(),
       updatedAt: nowIso()
     };
+    writeAuthFactorPublicKey(factor, resolvedPublicKey);
     state.authFactors.set(factor.factorId, factor);
     upsertIdentityAccount({
       companyId: session.companyId,
@@ -1437,6 +1438,7 @@ export function createOrgAuthPlatform({
     if (!factor) {
       throw httpError(404, "passkey_not_found", "No passkey credential matched the supplied credential id.");
     }
+    readAuthFactorPublicKey(factor);
     const passkeyGuardrail = resolveAuthGuardrail({
       scope: "passkey_factor",
       key: createPasskeyFactorGuardrailKey(session.companyUserId, factor.factorId),
@@ -2623,6 +2625,7 @@ export function createOrgAuthPlatform({
         preserveKeys: ["authBroker", "authBrokerEnvelope", "authBrokerSecretRef", "secretStoreBundle"]
       });
       migrateLegacyAuthFactorSecrets();
+      migrateLegacyAuthFactorPublicKeys();
       migrateLegacyAuthChallengeSecrets();
       migrateLegacyAuthFactorSecretRecords();
       migrateLegacyAuthChallengeSecretRecords();
@@ -2808,7 +2811,7 @@ export function createOrgAuthPlatform({
       status: "active",
       secretRef: null,
       credentialId: null,
-      publicKey: null,
+      publicKeyRef: null,
       providerSubject: null,
       deviceName: "Provisioned authenticator",
       verifiedAt: factorTimestamp,
@@ -2843,7 +2846,7 @@ export function createOrgAuthPlatform({
       status: "active",
       secretRef: null,
       credentialId: null,
-      publicKey: null,
+      publicKeyRef: null,
       providerSubject: `bankid:${company.companyId}:${companyUser.companyUserId}`,
       deviceName: "Provisioned BankID",
       verifiedAt: factorTimestamp,
@@ -3078,6 +3081,27 @@ export function createOrgAuthPlatform({
     return secretRef;
   }
 
+  function writeAuthFactorPublicKey(factor, publicKey) {
+    const resolvedPublicKey = assertNonEmpty(publicKey, "auth_factor_public_key_required");
+    const publicKeyRef = factor.publicKeyRef || `${factor.factorId}:public-key`;
+    factor.publicKeyRef = publicKeyRef;
+    delete factor.publicKey;
+    authSecretStore.storeSecretMaterial({
+      secretId: publicKeyRef,
+      classCode: "S2",
+      material: resolvedPublicKey,
+      owner: {
+        domainKey: "orgAuth",
+        objectFamily: "auth_factor_public_key",
+        factorId: factor.factorId
+      },
+      mode: normalizedEnvironmentMode,
+      fingerprintPurpose: "org_auth_factor_public_key"
+    });
+    factor.updatedAt = nowIso();
+    return publicKeyRef;
+  }
+
   function persistAuthChallenge(challenge, secret) {
     const challengeRef = writeAuthChallengeSecret(challenge, secret);
     challenge.challengeRef = challengeRef;
@@ -3157,9 +3181,25 @@ export function createOrgAuthPlatform({
     throw httpError(500, "auth_factor_secret_missing", "Auth factor secret was missing.");
   }
 
+  function readAuthFactorPublicKey(factor) {
+    if (factor.publicKeyRef) {
+      if (!authSecretStore.hasSecretMaterial({ secretId: factor.publicKeyRef })) {
+        throw httpError(500, "auth_factor_public_key_missing", "Auth factor public key was missing from the secret store.");
+      }
+      return authSecretStore.readSecretMaterial({ secretId: factor.publicKeyRef });
+    }
+    if (factor.publicKey) {
+      const legacyPublicKey = factor.publicKey;
+      writeAuthFactorPublicKey(factor, legacyPublicKey);
+      return legacyPublicKey;
+    }
+    throw httpError(500, "auth_factor_public_key_missing", "Auth factor public key was missing.");
+  }
+
   function sanitizeAuthFactorForPersistence(factor) {
     const sanitized = copy(factor);
     delete sanitized.secret;
+    delete sanitized.publicKey;
     return sanitized;
   }
 
@@ -3192,6 +3232,27 @@ export function createOrgAuthPlatform({
         continue;
       }
       throw httpError(500, "auth_factor_secret_missing", `Missing TOTP secret for factor ${factor.factorId}.`);
+    }
+  }
+
+  function migrateLegacyAuthFactorPublicKeys() {
+    for (const factor of state.authFactors.values()) {
+      if (factor.factorType !== "passkey") {
+        delete factor.publicKey;
+        if (!Object.prototype.hasOwnProperty.call(factor, "publicKeyRef")) {
+          factor.publicKeyRef = null;
+        }
+        continue;
+      }
+      if (factor.publicKeyRef) {
+        delete factor.publicKey;
+        continue;
+      }
+      if (factor.publicKey) {
+        writeAuthFactorPublicKey(factor, factor.publicKey);
+        continue;
+      }
+      throw httpError(500, "auth_factor_public_key_missing", `Missing passkey public key for factor ${factor.factorId}.`);
     }
   }
 
@@ -4047,7 +4108,7 @@ function seedDemoState(state, clock, authSecretStore) {
     status: "active",
     secretRef: null,
     credentialId: null,
-    publicKey: null,
+    publicKeyRef: null,
     providerSubject: null,
     deviceName: "Demo authenticator",
     verifiedAt: now,
@@ -4062,7 +4123,7 @@ function seedDemoState(state, clock, authSecretStore) {
     status: "active",
     secretRef: null,
     credentialId: null,
-    publicKey: null,
+    publicKeyRef: null,
     providerSubject: DEMO_BANKID_SUBJECT,
     deviceName: "Demo BankID",
     verifiedAt: now,
@@ -4077,7 +4138,7 @@ function seedDemoState(state, clock, authSecretStore) {
     status: "active",
     secretRef: null,
     credentialId: null,
-    publicKey: null,
+    publicKeyRef: null,
     providerSubject: null,
     deviceName: "Approver authenticator",
     verifiedAt: now,
@@ -4634,6 +4695,8 @@ function stripSecret(factor) {
   const clone = copy(factor);
   delete clone.secret;
   delete clone.secretRef;
+  delete clone.publicKey;
+  delete clone.publicKeyRef;
   return clone;
 }
 

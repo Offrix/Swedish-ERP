@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { BANKID_PROVIDER_CODE } from "../../packages/auth-core/src/index.mjs";
+import { deserializeSnapshotValue, serializeSnapshotValue } from "../../packages/domain-core/src/index.mjs";
 import {
   DEMO_ADMIN_EMAIL,
   DEMO_APPROVER_EMAIL,
@@ -60,13 +61,24 @@ test("Phase 6.1 broker-backed BankID and local factors create canonical identity
     sessionToken: login.sessionToken,
     deviceName: "Finance laptop key"
   });
-  platform.finishPasskeyRegistration({
+  const passkeyEnrollment = platform.finishPasskeyRegistration({
     sessionToken: login.sessionToken,
     challengeId: passkeyRegistration.challengeId,
     credentialId: "cred-finance-laptop",
     publicKey: "pk-finance-laptop",
     deviceName: "Finance laptop key"
   });
+  assert.equal("publicKey" in passkeyEnrollment, false);
+  assert.equal("publicKeyRef" in passkeyEnrollment, false);
+
+  const durableState = platform.exportDurableState();
+  const serialized = JSON.stringify(durableState);
+  const durableFactors = [...deserializeSnapshotValue(durableState.authFactors).values()];
+  const durablePasskeyFactor = durableFactors.find((factor) => factor.credentialId === "cred-finance-laptop");
+  assert.equal(serialized.includes("pk-finance-laptop"), false);
+  assert.equal(typeof durablePasskeyFactor?.publicKeyRef, "string");
+  assert.equal("publicKey" in durablePasskeyFactor, false);
+  assert.equal(Array.isArray(durableState.secretStoreBundle?.entries), true);
 
   const identityAccounts = platform.listIdentityAccounts({
     companyUserId: DEMO_IDS.companyUserId
@@ -103,6 +115,77 @@ test("Phase 6.1 broker-backed BankID and local factors create canonical identity
     ),
     true
   );
+});
+
+test("Phase 6.1 import migrates legacy raw passkey public keys into publicKeyRef-backed storage", () => {
+  const clock = () => new Date("2026-03-27T08:30:00Z");
+  const platform = createOrgAuthPlatform({
+    clock,
+    bootstrapScenarioCode: "test_default_demo"
+  });
+
+  const login = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+  platform.verifyTotp({
+    sessionToken: login.sessionToken,
+    code: platform.getTotpCodeForTesting({
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    })
+  });
+  const stepUp = platform.startBankIdAuthentication({
+    sessionToken: login.sessionToken,
+    actionClass: "identity_device_trust_manage"
+  });
+  platform.collectBankIdAuthentication({
+    sessionToken: login.sessionToken,
+    orderRef: stepUp.orderRef,
+    completionToken: platform.getBankIdCompletionTokenForTesting(stepUp.orderRef),
+    actionClass: "identity_device_trust_manage"
+  });
+  const registration = platform.beginPasskeyRegistration({
+    sessionToken: login.sessionToken,
+    deviceName: "Legacy migration key"
+  });
+  platform.finishPasskeyRegistration({
+    sessionToken: login.sessionToken,
+    challengeId: registration.challengeId,
+    credentialId: "cred-legacy-migration",
+    publicKey: "pk-legacy-migration",
+    deviceName: "Legacy migration key"
+  });
+
+  const durableState = platform.exportDurableState();
+  const legacyState = JSON.parse(JSON.stringify(durableState));
+  const legacyFactors = deserializeSnapshotValue(legacyState.authFactors);
+  const legacyFactor = [...legacyFactors.values()].find((factor) => factor.credentialId === "cred-legacy-migration");
+  assert.ok(legacyFactor);
+  const publicKeyRef = legacyFactor.publicKeyRef;
+  legacyFactor.publicKey = "pk-legacy-migration";
+  legacyFactor.publicKeyRef = null;
+  legacyFactors.set(legacyFactor.factorId, legacyFactor);
+  legacyState.authFactors = serializeSnapshotValue(legacyFactors);
+  legacyState.secretStoreBundle.entries = legacyState.secretStoreBundle.entries.filter((entry) => entry.secretId !== publicKeyRef);
+
+  const restoredPlatform = createOrgAuthPlatform({ clock });
+  restoredPlatform.importDurableState(legacyState);
+
+  const asserted = restoredPlatform.assertPasskey({
+    sessionToken: login.sessionToken,
+    credentialId: "cred-legacy-migration",
+    assertion: "passkey:cred-legacy-migration"
+  });
+  assert.equal(asserted.session.status, "active");
+
+  const rematerializedState = restoredPlatform.exportDurableState();
+  const rematerializedSerialized = JSON.stringify(rematerializedState);
+  const rematerializedFactors = [...deserializeSnapshotValue(rematerializedState.authFactors).values()];
+  const rematerializedFactor = rematerializedFactors.find((factor) => factor.credentialId === "cred-legacy-migration");
+  assert.equal(rematerializedSerialized.includes("pk-legacy-migration"), false);
+  assert.equal(typeof rematerializedFactor?.publicKeyRef, "string");
+  assert.equal(rematerializedFactor.publicKey, undefined);
 });
 
 test("Phase 6.1 durable auth broker state survives export/import for BankID and federation", () => {

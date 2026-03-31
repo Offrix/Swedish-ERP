@@ -464,7 +464,7 @@ Session trust, tenant bootstrap och support attestation kan byggas parallellt ef
 Ingen filing, payout, payroll approval, period reopen eller support-write utan step-up och trust model.
 
 **Delfaser**  
-- [ ] 6.1 [REPLACE][SECURE] Auth broker blir enda väg för BankID/federation; lokala passkeys/TOTP lever som factor types med secret refs, inte rå state.
+- [x] 6.1 [REPLACE][SECURE] Auth broker blir enda väg för BankID/federation; lokala passkeys/TOTP lever som factor types med secret refs, inte rå state.
 - [ ] 6.2 [NEW BUILD][SECURE] Inför `SessionRevision`, `ChallengeRecord`, device trust, fresh step-up och action-classade TTL:er; sessionuppslag indexeras på tokenhash.
 - [ ] 6.3 [HARDEN] Tenant/company bootstrap validerar organisationsnummer, legal form, VAT-registrering, fiscal-year profile och finance readiness redan vid skapande.
 - [ ] 6.4 [NEW BUILD][MIGRATE] Trial/live separeras i tenant, credentials, receipts, sequence space, evidence, provider refs, jobs, dashboards och KMS-nycklar; promotion är aldrig in-place.

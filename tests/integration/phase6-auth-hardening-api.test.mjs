@@ -200,7 +200,7 @@ test("Phase 6 hardening API locks repeated invalid passkey assertions and revoke
         deviceName: "Approver key"
       }
     });
-    await requestJson(`${baseUrl}/v1/auth/mfa/passkeys/register-verify`, {
+    const verifiedRegistration = await requestJson(`${baseUrl}/v1/auth/mfa/passkeys/register-verify`, {
       method: "POST",
       token: registrationLogin.sessionToken,
       body: {
@@ -210,6 +210,8 @@ test("Phase 6 hardening API locks repeated invalid passkey assertions and revoke
         deviceName: "Approver key"
       }
     });
+    assert.equal("publicKey" in verifiedRegistration, false);
+    assert.equal("publicKeyRef" in verifiedRegistration, false);
 
     const login = await requestJson(`${baseUrl}/v1/auth/login`, {
       method: "POST",
