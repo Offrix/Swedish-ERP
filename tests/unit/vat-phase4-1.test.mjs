@@ -73,6 +73,56 @@ test("Phase 4.1 routes unclear VAT cases to review queue instead of silent auto-
   assert.equal(vat.listVatReviewQueue({ companyId: COMPANY_ID }).length, 1);
 });
 
+test("Phase 8.3 persists VIES truth, normalizes Greece to EL and blocks EU goods without valid VIES status", () => {
+  const vat = createVatEngine({
+    clock: () => new Date("2026-03-31T00:15:00Z")
+  });
+
+  const greekDecision = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_id: "phase8-3-unit-el-vies-valid",
+      buyer_country: "GR",
+      buyer_vat_no: "GR123456789",
+      buyer_vat_number: "GR123456789",
+      buyer_is_taxable_person: true,
+      buyer_vat_number_status: "valid",
+      goods_or_services: "goods",
+      vat_code_candidate: "VAT_SE_EU_GOODS_B2B"
+    })
+  });
+
+  assert.equal(greekDecision.vatDecision.status, "decided");
+  assert.equal(greekDecision.vatDecision.transactionLine.buyer_country, "EL");
+  assert.equal(greekDecision.vatDecision.transactionLine.buyer_vat_number, "EL123456789");
+  assert.equal(greekDecision.vatDecision.outputs.viesStatus, "valid");
+  assert.equal(greekDecision.vatDecision.viesStatus, "valid");
+  assert.equal(greekDecision.vatDecision.outputs.euListEligible, true);
+  assert.equal(greekDecision.vatDecision.decisionCategory, "eu_goods_b2b_sale");
+  assert.deepEqual(greekDecision.vatDecision.declarationBoxCodes, ["35"]);
+
+  const invalidDecision = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_id: "phase8-3-unit-invalid-vies",
+      buyer_country: "DE",
+      buyer_vat_no: "DE123456789",
+      buyer_vat_number: "DE123456789",
+      buyer_is_taxable_person: true,
+      buyer_vat_number_status: "invalid",
+      goods_or_services: "goods",
+      vat_code_candidate: "VAT_SE_EU_GOODS_B2B"
+    })
+  });
+
+  assert.equal(invalidDecision.vatDecision.status, "review_required");
+  assert.equal(invalidDecision.vatDecision.outputs.viesStatus, "invalid");
+  assert.equal(invalidDecision.vatDecision.viesStatus, "invalid");
+  assert.equal(invalidDecision.reviewQueueItem.reviewReasonCode, "buyer_vat_number_not_vies_valid");
+});
+
 function buildTransactionLine(overrides = {}) {
   return {
     seller_country: "SE",

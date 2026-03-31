@@ -475,6 +475,11 @@ export function createVatEngine({
       bookingTemplateCode: classification.outputs.bookingTemplateCode,
       decisionCategory: classification.outputs.decisionCategory,
       invoiceTextRequirements: classification.outputs.invoiceTextRequirements,
+      viesStatus: classification.outputs.viesStatus,
+      deductionRuleCode: classification.outputs.deductionRuleCode,
+      reverseChargeFlag: classification.outputs.reverseChargeFlag,
+      ossFlag: classification.outputs.ossFlag,
+      importFlag: classification.outputs.importFlag,
       creditNoteFlag: normalizedLine.credit_note_flag === true,
       originalVatDecisionId: normalizedLine.original_vat_decision_id || null,
       outputs: classification.decision.outputs,
@@ -596,6 +601,11 @@ export function createVatEngine({
     vatDecision.bookingTemplateCode = resolvedOutputs.bookingTemplateCode;
     vatDecision.decisionCategory = resolvedOutputs.decisionCategory;
     vatDecision.invoiceTextRequirements = resolvedOutputs.invoiceTextRequirements;
+    vatDecision.viesStatus = resolvedOutputs.viesStatus;
+    vatDecision.deductionRuleCode = resolvedOutputs.deductionRuleCode;
+    vatDecision.reverseChargeFlag = resolvedOutputs.reverseChargeFlag;
+    vatDecision.ossFlag = resolvedOutputs.ossFlag;
+    vatDecision.importFlag = resolvedOutputs.importFlag;
     vatDecision.outputs = resolvedOutputs;
     vatDecision.warnings = [
       {
@@ -1187,6 +1197,15 @@ function buildReviewDecision({ normalizedLine, rulePack, reviewReasonCode, warni
     postingEntries: [],
     bookingTemplateCode: reviewCode.bookingTemplateCode,
     invoiceTextRequirements: [],
+    viesStatus: resolveViesStatus(normalizedLine),
+    deductionRuleCode: resolveDeductionRuleCode(normalizedLine),
+    reverseChargeFlag: normalizedLine.reverse_charge_flag === true,
+    ossFlag: normalizedLine.oss_flag === true,
+    importFlag: normalizedLine.import_flag === true,
+    reportingChannel: "regular_vat_return",
+    euListEligible: false,
+    ossRecord: null,
+    iossRecord: null,
     vatRate: 0,
     rateType: reviewCode.rateType
   };
@@ -1398,7 +1417,7 @@ function normalizeTransactionLine(transactionLine) {
   normalized.project_id = typeof candidate.project_id === "string" ? candidate.project_id.trim() : candidate.project_id;
   normalized.buyer_vat_no = normalizeOptionalVatNumber(candidate.buyer_vat_no, normalized.buyer_country);
   normalized.buyer_vat_number = normalizeOptionalVatNumber(candidate.buyer_vat_number, normalized.buyer_country);
-  normalized.buyer_vat_number_status = normalizeLowerString(candidate.buyer_vat_number_status);
+  normalized.buyer_vat_number_status = normalizeVatNumberStatus(candidate.buyer_vat_number_status);
   normalized.invoice_text_code = typeof candidate.invoice_text_code === "string" ? candidate.invoice_text_code.trim() : candidate.invoice_text_code;
   normalized.report_box_code = typeof candidate.report_box_code === "string" ? candidate.report_box_code.trim() : candidate.report_box_code;
   normalized.exemption_reason = typeof candidate.exemption_reason === "string" ? candidate.exemption_reason.trim() : candidate.exemption_reason;
@@ -1459,6 +1478,7 @@ function createVatCodeDefinition(vatCode, label, vatRate, declarationBoxCodes, b
 function deriveScenario(normalizedLine) {
   const region = normalizedLine.region;
   const goodsOrServices = normalizeGoodsOrServices(normalizedLine.goods_or_services);
+  const viesStatus = resolveViesStatus(normalizedLine);
   if (goodsOrServices !== "goods" && goodsOrServices !== "services") {
     return reviewScenario("unsupported_goods_or_services", "goods_or_services must be goods or services.");
   }
@@ -1493,6 +1513,18 @@ function deriveScenario(normalizedLine) {
       return acceptScenario(domesticCode, "domestic_standard_sale");
     }
     if (region === "EU" && normalizedLine.buyer_is_taxable_person === true) {
+      if (goodsOrServices === "goods" && !normalizedLine.buyer_vat_number) {
+        return reviewScenario(
+          "missing_buyer_vat_number",
+          "EU B2B goods sales require the buyer VAT number before VAT-free treatment can be decided."
+        );
+      }
+      if (goodsOrServices === "goods" && viesStatus !== "valid") {
+        return reviewScenario(
+          "buyer_vat_number_not_vies_valid",
+          `EU B2B goods sales require a VAT number with VIES-valid status; current status is ${viesStatus}.`
+        );
+      }
       return acceptScenario(
         goodsOrServices === "goods" ? "VAT_SE_EU_GOODS_B2B" : "VAT_SE_EU_SERVICES_B2B",
         goodsOrServices === "goods" ? "eu_goods_b2b_sale" : "eu_services_b2b_sale",
@@ -1571,6 +1603,12 @@ function buildScenarioOutputs(normalizedLine, scenario) {
   const baseAmount = roundMoney(normalizedLine.line_amount_ex_vat - (normalizedLine.line_discount || 0));
   const rate = resolveVatRate(normalizedLine, definition);
   const deductionRatio = normalizedLine.deduction_ratio === null ? 1 : normalizedLine.deduction_ratio;
+  const viesStatus = resolveViesStatus(normalizedLine);
+  const deductionRuleCode = resolveDeductionRuleCode(normalizedLine);
+  const reverseChargeFlag =
+    normalizedLine.reverse_charge_flag === true || String(scenario.decisionCategory || "").includes("reverse_charge");
+  const ossFlag = normalizedLine.oss_flag === true || scenario.decisionCategory === "eu_b2c_oss_sale";
+  const importFlag = normalizedLine.import_flag === true || scenario.decisionCategory === "import_goods_purchase";
   let declarationBoxAmounts = [];
   let postingEntries = [];
   let invoiceTextRequirements = copy(scenario.invoiceTextRequirements || []);
@@ -1672,16 +1710,16 @@ function buildScenarioOutputs(normalizedLine, scenario) {
       break;
     }
     case "eu_goods_purchase_reverse_charge":
-      return buildReverseChargePurchaseOutputs("20", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory);
+      return buildReverseChargePurchaseOutputs("20", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory, normalizedLine);
     case "eu_services_purchase_reverse_charge":
-      return buildReverseChargePurchaseOutputs("21", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory);
+      return buildReverseChargePurchaseOutputs("21", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory, normalizedLine);
     case "non_eu_service_purchase_reverse_charge":
-      return buildReverseChargePurchaseOutputs("22", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory);
+      return buildReverseChargePurchaseOutputs("22", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory, normalizedLine);
     case "domestic_goods_purchase_reverse_charge":
-      return buildReverseChargePurchaseOutputs("23", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory);
+      return buildReverseChargePurchaseOutputs("23", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory, normalizedLine);
     case "domestic_services_purchase_reverse_charge":
     case "construction_reverse_charge_purchase":
-      return buildReverseChargePurchaseOutputs("24", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory);
+      return buildReverseChargePurchaseOutputs("24", baseAmount, rate, deductionRatio, definition, scenario.decisionCategory, normalizedLine);
     default:
       throw createError(500, "vat_scenario_not_supported", `Unsupported VAT scenario ${scenario.decisionCategory}.`);
   }
@@ -1694,8 +1732,15 @@ function buildScenarioOutputs(normalizedLine, scenario) {
     postingEntries,
     bookingTemplateCode: definition.bookingTemplateCode,
     invoiceTextRequirements,
+    viesStatus,
+    deductionRuleCode,
+    reverseChargeFlag,
+    ossFlag,
+    importFlag,
     reportingChannel: resolveReportingChannel(scenario.decisionCategory),
-    euListEligible: scenario.decisionCategory === "eu_goods_b2b_sale" || scenario.decisionCategory === "eu_services_b2b_sale",
+    euListEligible:
+      (scenario.decisionCategory === "eu_goods_b2b_sale" || scenario.decisionCategory === "eu_services_b2b_sale") &&
+      viesStatus === "valid",
     ossRecord:
       scenario.decisionCategory === "eu_b2c_oss_sale"
         ? buildSpecialSchemeRecord("oss", normalizedLine, baseAmount, rate)
@@ -1709,7 +1754,7 @@ function buildScenarioOutputs(normalizedLine, scenario) {
   };
 }
 
-function buildReverseChargePurchaseOutputs(baseBox, baseAmount, rate, deductionRatio, definition, decisionCategory) {
+function buildReverseChargePurchaseOutputs(baseBox, baseAmount, rate, deductionRatio, definition, decisionCategory, normalizedLine) {
   const outputBox = requireBox(REVERSE_CHARGE_OUTPUT_BOX_BY_RATE, rate, "unsupported_reverse_charge_vat_rate");
   const vatAmount = calculateVat(baseAmount, rate);
   const declarationBoxAmounts = [
@@ -1730,6 +1775,11 @@ function buildReverseChargePurchaseOutputs(baseBox, baseAmount, rate, deductionR
     postingEntries,
     bookingTemplateCode: definition.bookingTemplateCode,
     invoiceTextRequirements: [],
+    viesStatus: resolveViesStatus(normalizedLine),
+    deductionRuleCode: resolveDeductionRuleCode(normalizedLine),
+    reverseChargeFlag: true,
+    ossFlag: false,
+    importFlag: false,
     reportingChannel: "regular_vat_return",
     euListEligible: false,
     ossRecord: null,
@@ -1820,6 +1870,60 @@ function createPostingEntry(entryCode, direction, amount, vatEffect) {
     amount: roundMoney(amount),
     vatEffect
   };
+}
+
+function normalizeVatNumberStatus(value) {
+  const normalized = normalizeLowerString(value);
+  if (!normalized) {
+    return null;
+  }
+  if (["valid", "verified", "confirmed"].includes(normalized)) {
+    return "valid";
+  }
+  if (["invalid", "rejected"].includes(normalized)) {
+    return "invalid";
+  }
+  if (["not_applicable", "na"].includes(normalized)) {
+    return "not_applicable";
+  }
+  if (["unchecked", "unverified", "unknown", "pending", "service_unavailable", "unavailable"].includes(normalized)) {
+    return "unverified";
+  }
+  return normalized;
+}
+
+function resolveViesStatus(normalizedLine) {
+  if (!normalizedLine || normalizedLine.region !== "EU" || normalizedLine.buyer_is_taxable_person !== true) {
+    return "not_applicable";
+  }
+  if (!normalizedLine.buyer_vat_number) {
+    return "missing";
+  }
+  const status = normalizeVatNumberStatus(normalizedLine.buyer_vat_number_status);
+  if (status === "valid") {
+    return "valid";
+  }
+  if (status === "invalid") {
+    return "invalid";
+  }
+  if (status === "not_applicable") {
+    return "unverified";
+  }
+  if (!status) {
+    return "unverified";
+  }
+  return "unverified";
+}
+
+function resolveDeductionRuleCode(normalizedLine) {
+  const deductionRatio = Number(normalizedLine?.deduction_ratio ?? 1);
+  if (deductionRatio <= 0) {
+    return "blocked_deduction";
+  }
+  if (deductionRatio >= 1) {
+    return "full_deduction";
+  }
+  return "partial_deduction";
 }
 
 function isCompatibleVatCodeCandidate(normalizedLine, derivedVatCode) {

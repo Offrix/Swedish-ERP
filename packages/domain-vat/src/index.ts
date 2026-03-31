@@ -48,6 +48,11 @@ export interface VatDecisionRecord {
   readonly bookingTemplateCode: string;
   readonly decisionCategory: string;
   readonly invoiceTextRequirements: readonly string[];
+  readonly viesStatus: "valid" | "invalid" | "unverified" | "missing" | "not_applicable";
+  readonly deductionRuleCode: "full_deduction" | "partial_deduction" | "blocked_deduction";
+  readonly reverseChargeFlag: boolean;
+  readonly ossFlag: boolean;
+  readonly importFlag: boolean;
   readonly creditNoteFlag: boolean;
   readonly originalVatDecisionId: string | null;
   readonly outputs: VatDecisionOutputs;
@@ -81,6 +86,11 @@ export interface VatDecisionOutputs {
   readonly postingEntries: readonly VatDecisionPostingEntry[];
   readonly bookingTemplateCode: string;
   readonly invoiceTextRequirements: readonly string[];
+  readonly viesStatus: "valid" | "invalid" | "unverified" | "missing" | "not_applicable";
+  readonly deductionRuleCode: "full_deduction" | "partial_deduction" | "blocked_deduction";
+  readonly reverseChargeFlag: boolean;
+  readonly ossFlag: boolean;
+  readonly importFlag: boolean;
   readonly reportingChannel: "regular_vat_return" | "oss" | "ioss";
   readonly euListEligible: boolean;
   readonly ossRecord: VatSpecialSchemeRecord | null;

@@ -123,6 +123,85 @@ test("Phase 4.1 API exposes VAT masterdata, dated rule packs, explainable decisi
   }
 });
 
+test("Phase 8.3 API persists VIES truth for EU goods and blocks invalid VAT numbers", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-31T00:20:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminSession = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const greekDecision = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_id: "phase8-3-api-el-vies-valid",
+          buyer_country: "GR",
+          buyer_vat_no: "GR123456789",
+          buyer_vat_number: "GR123456789",
+          buyer_is_taxable_person: true,
+          buyer_vat_number_status: "valid",
+          goods_or_services: "goods",
+          vat_code_candidate: "VAT_SE_EU_GOODS_B2B"
+        })
+      }
+    });
+    assert.equal(greekDecision.vatDecision.status, "decided");
+    assert.equal(greekDecision.vatDecision.transactionLine.buyer_country, "EL");
+    assert.equal(greekDecision.vatDecision.transactionLine.buyer_vat_number, "EL123456789");
+    assert.equal(greekDecision.vatDecision.outputs.viesStatus, "valid");
+    assert.equal(greekDecision.vatDecision.viesStatus, "valid");
+    assert.equal(greekDecision.vatDecision.outputs.euListEligible, true);
+
+    const invalidDecision = await requestJson(`${baseUrl}/v1/vat/decisions`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_id: "phase8-3-api-invalid-vies",
+          buyer_country: "DE",
+          buyer_vat_no: "DE123456789",
+          buyer_vat_number: "DE123456789",
+          buyer_is_taxable_person: true,
+          buyer_vat_number_status: "invalid",
+          goods_or_services: "goods",
+          vat_code_candidate: "VAT_SE_EU_GOODS_B2B"
+        })
+      }
+    });
+    assert.equal(invalidDecision.vatDecision.status, "review_required");
+    assert.equal(invalidDecision.vatDecision.outputs.viesStatus, "invalid");
+    assert.equal(invalidDecision.vatDecision.viesStatus, "invalid");
+    assert.equal(invalidDecision.reviewQueueItem.reviewReasonCode, "buyer_vat_number_not_vies_valid");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
   const started = await requestJson(`${baseUrl}/v1/auth/login`, {
     method: "POST",
