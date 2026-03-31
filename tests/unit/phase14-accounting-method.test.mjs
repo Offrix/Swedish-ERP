@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createAccountingMethodEngine } from "../../packages/domain-accounting-method/src/index.mjs";
+import { createLedgerPlatform } from "../../packages/domain-ledger/src/index.mjs";
 
 test("Step 7 accounting method eligibility blocks high turnover and excluded entities", () => {
   const engine = createAccountingMethodEngine({
@@ -101,9 +102,25 @@ test("Step 7 accounting method profiles switch deterministically across a fiscal
 });
 
 test("Step 7 year-end catch-up is idempotent and only allowed for cash method", () => {
+  let ledger = null;
   const engine = createAccountingMethodEngine({
     seedDemo: false,
-    clock: () => new Date("2027-12-31T15:00:00Z")
+    clock: () => new Date("2027-12-31T15:00:00Z"),
+    getLedgerPlatform: () => ledger
+  });
+  ledger = createLedgerPlatform({
+    seedDemo: false,
+    clock: () => new Date("2027-12-31T15:00:00Z"),
+    accountingMethodPlatform: engine
+  });
+  ledger.installLedgerCatalog({
+    companyId: "company_catchup",
+    actorId: "tester"
+  });
+  ledger.ensureAccountingYearPeriod({
+    companyId: "company_catchup",
+    fiscalYear: 2027,
+    actorId: "tester"
   });
 
   const cashAssessment = engine.assessCashMethodEligibility({
@@ -130,8 +147,28 @@ test("Step 7 year-end catch-up is idempotent and only allowed for cash method", 
     companyId: "company_catchup",
     fiscalYearEndDate: "2027-12-31",
     openItems: [
-      { openItemType: "customer_invoice", sourceId: "inv_1", unpaidAmount: 1250, recognitionDate: "2027-12-15" },
-      { openItemType: "supplier_invoice", sourceId: "sup_1", unpaidAmount: 400, recognitionDate: "2027-12-20" }
+      {
+        openItemType: "customer_invoice",
+        sourceId: "inv_1",
+        openItemAccountNumber: "1210",
+        unpaidAmount: 1250,
+        recognitionDate: "2027-12-15",
+        postingLines: [
+          { accountNumber: "3010", creditAmount: 1000 },
+          { accountNumber: "2610", creditAmount: 250 }
+        ]
+      },
+      {
+        openItemType: "supplier_invoice",
+        sourceId: "sup_1",
+        openItemAccountNumber: "2410",
+        unpaidAmount: 400,
+        recognitionDate: "2027-12-20",
+        postingLines: [
+          { accountNumber: "5410", debitAmount: 320 },
+          { accountNumber: "2640", debitAmount: 80 }
+        ]
+      }
     ],
     actorId: "tester"
   });
@@ -139,17 +176,55 @@ test("Step 7 year-end catch-up is idempotent and only allowed for cash method", 
     companyId: "company_catchup",
     fiscalYearEndDate: "2027-12-31",
     openItems: [
-      { openItemType: "customer_invoice", sourceId: "inv_1", unpaidAmount: 1250, recognitionDate: "2027-12-15" },
-      { openItemType: "supplier_invoice", sourceId: "sup_1", unpaidAmount: 400, recognitionDate: "2027-12-20" }
+      {
+        openItemType: "customer_invoice",
+        sourceId: "inv_1",
+        openItemAccountNumber: "1210",
+        unpaidAmount: 1250,
+        recognitionDate: "2027-12-15",
+        postingLines: [
+          { accountNumber: "3010", creditAmount: 1000 },
+          { accountNumber: "2610", creditAmount: 250 }
+        ]
+      },
+      {
+        openItemType: "supplier_invoice",
+        sourceId: "sup_1",
+        openItemAccountNumber: "2410",
+        unpaidAmount: 400,
+        recognitionDate: "2027-12-20",
+        postingLines: [
+          { accountNumber: "5410", debitAmount: 320 },
+          { accountNumber: "2640", debitAmount: 80 }
+        ]
+      }
     ],
     actorId: "tester"
   });
+  const catchUpJournal = ledger.getJournalEntry({
+    companyId: "company_catchup",
+    journalEntryId: firstRun.journalEntryId
+  });
+  const reversedRun = engine.reverseYearEndCatchUpRun({
+    companyId: "company_catchup",
+    yearEndCatchUpRunId: firstRun.yearEndCatchUpRunId,
+    reasonCode: "year_end_reversal",
+    actorId: "tester",
+    approvedByActorId: "finance-approver",
+    approvedByRoleCode: "finance_manager"
+  });
 
   assert.equal(firstRun.yearEndCatchUpRunId, replayRun.yearEndCatchUpRunId);
+  assert.equal(typeof firstRun.journalEntryId, "string");
+  assert.equal(catchUpJournal.sourceType, "YEAR_END_TRANSFER");
+  assert.equal(catchUpJournal.lines.some((line) => line.accountNumber === "1210" && Number(line.debitAmount) === 1250), true);
+  assert.equal(catchUpJournal.lines.some((line) => line.accountNumber === "2410" && Number(line.creditAmount) === 400), true);
   assert.deepEqual(firstRun.totals, {
     receivablesAmount: 1250,
     payablesAmount: 400
   });
+  assert.equal(reversedRun.status, "reversed");
+  assert.equal(typeof reversedRun.reversalJournalEntryId, "string");
 });
 
 test("Step 7 accounting method requires explicit fiscal-year boundary unless onboarding override is used", () => {

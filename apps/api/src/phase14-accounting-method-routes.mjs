@@ -344,6 +344,36 @@ export async function tryHandlePhase14AccountingMethodRoutes({ req, res, url, pa
     return true;
   }
 
+  const reverseYearEndCatchUpRunMatch = matchPath(path, "/v1/accounting-method/year-end-catch-up-runs/:yearEndCatchUpRunId/reverse");
+  if (req.method === "POST" && reverseYearEndCatchUpRunMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "accounting_method",
+      objectId: reverseYearEndCatchUpRunMatch.yearEndCatchUpRunId,
+      scopeCode: "accounting_method"
+    });
+    writeJson(
+      res,
+      200,
+      platform.reverseYearEndCatchUpRun({
+        companyId,
+        yearEndCatchUpRunId: reverseYearEndCatchUpRunMatch.yearEndCatchUpRunId,
+        reasonCode: body.reasonCode,
+        reversedOn: body.reversedOn,
+        actorId: principal.userId,
+        approvedByActorId: body.approvedByActorId,
+        approvedByRoleCode: body.approvedByRoleCode
+      })
+    );
+    return true;
+  }
+
   const yearEndCatchUpRunMatch = matchPath(path, "/v1/accounting-method/year-end-catch-up-runs/:yearEndCatchUpRunId");
   if (req.method === "GET" && yearEndCatchUpRunMatch) {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");

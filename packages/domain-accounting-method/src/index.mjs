@@ -16,7 +16,7 @@ export const METHOD_CHANGE_REQUEST_STATUSES = Object.freeze([
   "superseded",
   "implemented"
 ]);
-export const YEAR_END_CATCH_UP_RUN_STATUSES = Object.freeze(["completed"]);
+export const YEAR_END_CATCH_UP_RUN_STATUSES = Object.freeze(["completed", "reversed"]);
 export const FINANCIAL_ENTITY_CLASSIFICATIONS = Object.freeze([
   "NON_FINANCIAL",
   "CREDIT_INSTITUTION",
@@ -27,6 +27,8 @@ export const FINANCIAL_ENTITY_CLASSIFICATIONS = Object.freeze([
 export const CASH_METHOD_NET_TURNOVER_LIMIT_SEK = 3_000_000;
 export const ACCOUNTING_METHOD_RULEPACK_CODE = "RP-ACCOUNTING-METHOD-SE";
 export const ACCOUNTING_METHOD_RULEPACK_VERSION = "se-accounting-method-2026.1";
+const DEFAULT_CASH_METHOD_RECEIVABLE_ACCOUNT_NUMBER = "1210";
+const DEFAULT_CASH_METHOD_PAYABLE_ACCOUNT_NUMBER = "2410";
 
 const ACCOUNTING_METHOD_RULE_PACKS = Object.freeze([
   Object.freeze({
@@ -69,7 +71,8 @@ export function createAccountingMethodEngine({
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
-  ruleRegistry = null
+  ruleRegistry = null,
+  getLedgerPlatform = null
 } = {}) {
   const rules = ruleRegistry || createRulePackRegistry({
     clock,
@@ -111,6 +114,7 @@ export function createAccountingMethodEngine({
     approveMethodChangeRequest,
     rejectMethodChangeRequest,
     runYearEndCatchUp,
+    reverseYearEndCatchUpRun,
     listYearEndCatchUpRuns,
     getYearEndCatchUpRun,
     listAccountingMethodAuditEvents
@@ -356,7 +360,7 @@ export function createAccountingMethodEngine({
     const incompleteCatchUpRun = (state.yearEndCatchUpRunIdsByCompany.get(resolvedCompanyId) || [])
       .map((runId) => state.yearEndCatchUpRuns.get(runId))
       .filter(Boolean)
-      .find((run) => run.status !== "completed");
+      .find((run) => !["completed", "reversed"].includes(run.status));
     if (incompleteCatchUpRun) {
       throw createError(409, "year_end_catch_up_pending", "An incomplete year-end catch-up run must be resolved before activating a new method profile.");
     }
@@ -610,7 +614,9 @@ export function createAccountingMethodEngine({
       throw createError(409, "year_end_catch_up_requires_cash_method", "Year-end catch-up may only run when the active method is cash accounting.");
     }
 
-    const normalizedOpenItems = normalizeOpenItems(openItems, resolvedFiscalYearEndDate);
+    const ledgerPlatform = requireYearEndLedgerPlatform(getLedgerPlatform);
+    const accountingCurrencyCode = resolveAccountingCurrencyCode(ledgerPlatform, resolvedCompanyId);
+    const normalizedOpenItems = normalizeOpenItems(openItems, resolvedFiscalYearEndDate, accountingCurrencyCode);
     const capturedItems = normalizedOpenItems.filter((item) => item.recognitionDate <= resolvedFiscalYearEndDate && item.unpaidAmount > 0);
     const rulePack = resolveAccountingMethodRulePack(resolvedFiscalYearEndDate);
     const snapshotHash = buildSnapshotHash({
@@ -635,6 +641,19 @@ export function createAccountingMethodEngine({
       },
       { receivablesAmount: 0, payablesAmount: 0 }
     );
+    const journalEntryId =
+      capturedItems.length === 0
+        ? null
+        : postYearEndCatchUpJournal({
+          ledgerPlatform,
+          companyId: resolvedCompanyId,
+          fiscalYearEndDate: resolvedFiscalYearEndDate,
+          snapshotHash,
+          activeMethod,
+          actorId: resolvedActorId,
+          items: capturedItems,
+          rulePack
+        });
 
     const run = Object.freeze({
       yearEndCatchUpRunId: crypto.randomUUID(),
@@ -650,6 +669,9 @@ export function createAccountingMethodEngine({
       status: "completed",
       snapshotHash,
       capturedItemCount: capturedItems.length,
+      accountingCurrencyCode,
+      journalEntryId,
+      reversalJournalEntryId: null,
       totals,
       items: Object.freeze(
         capturedItems.map((item) =>
@@ -677,6 +699,51 @@ export function createAccountingMethodEngine({
       explanation: `Captured ${run.capturedItemCount} unpaid items for cash-method year-end catch-up on ${resolvedFiscalYearEndDate}.`
     });
     return copy(run);
+  }
+
+  function reverseYearEndCatchUpRun({
+    companyId,
+    yearEndCatchUpRunId,
+    reasonCode,
+    reversedOn = null,
+    actorId = "system",
+    approvedByActorId = null,
+    approvedByRoleCode = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const run = requireYearEndCatchUpRun(state, resolvedCompanyId, yearEndCatchUpRunId);
+    if (run.status === "reversed") {
+      return copy(run);
+    }
+    if (!run.journalEntryId) {
+      throw createError(409, "year_end_catch_up_not_posted", "Year-end catch-up run does not have a posted journal to reverse.");
+    }
+    const ledgerPlatform = requireYearEndLedgerPlatform(getLedgerPlatform);
+    const reversed = ledgerPlatform.reverseJournalEntry({
+      companyId: resolvedCompanyId,
+      journalEntryId: run.journalEntryId,
+      actorId: requireText(actorId, "actor_id_required"),
+      approvedByActorId: requireText(approvedByActorId, "approved_by_actor_id_required"),
+      approvedByRoleCode: requireText(approvedByRoleCode, "approved_by_role_code_required"),
+      reasonCode: requireText(reasonCode, "reason_code_required"),
+      correctionKey: `year_end_catch_up:${run.yearEndCatchUpRunId}`,
+      journalDate: reversedOn ? normalizeDate(reversedOn, "year_end_catch_up_reversed_on_invalid") : null
+    });
+    const reversedRun = replaceYearEndCatchUpRun(state, run.yearEndCatchUpRunId, {
+      status: "reversed",
+      reversalJournalEntryId: reversed.reversalJournalEntry.journalEntryId,
+      reversedAt: nowIso(clock),
+      reversedByActorId: requireText(actorId, "actor_id_required")
+    });
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      action: "accounting_method.year_end_catch_up_reversed",
+      entityType: "accounting_method_year_end_catch_up_run",
+      entityId: reversedRun.yearEndCatchUpRunId,
+      explanation: `Reversed year-end catch-up run ${reversedRun.yearEndCatchUpRunId}.`
+    });
+    return copy(reversedRun);
   }
 
   function listYearEndCatchUpRuns({ companyId } = {}) {
@@ -802,6 +869,14 @@ function requireMethodChangeRequest(state, companyId, methodChangeRequestId) {
   return request;
 }
 
+function requireYearEndCatchUpRun(state, companyId, yearEndCatchUpRunId) {
+  const run = state.yearEndCatchUpRuns.get(requireText(yearEndCatchUpRunId, "year_end_catch_up_run_id_required"));
+  if (!run || run.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "year_end_catch_up_run_not_found", "Year-end catch-up run was not found.");
+  }
+  return run;
+}
+
 function requireEligibilityAssessment(state, companyId, assessmentId) {
   const assessment = state.eligibilityAssessments.get(requireText(assessmentId, "eligibility_assessment_id_required"));
   if (!assessment || assessment.companyId !== requireText(companyId, "company_id_required")) {
@@ -830,6 +905,16 @@ function replaceMethodChangeRequest(state, methodChangeRequestId, updates) {
   return next;
 }
 
+function replaceYearEndCatchUpRun(state, yearEndCatchUpRunId, updates) {
+  const existing = state.yearEndCatchUpRuns.get(yearEndCatchUpRunId);
+  const next = Object.freeze({
+    ...existing,
+    ...copy(updates)
+  });
+  state.yearEndCatchUpRuns.set(yearEndCatchUpRunId, next);
+  return next;
+}
+
 function assertNoPlannedProfileOverlap({ state, companyId, effectiveFrom, effectiveTo }) {
   const overlappingPlannedProfile = listProfilesByCompany(state, companyId).find(
     (profile) => profile.status === "planned" && intervalsOverlap(profile.effectiveFrom, profile.effectiveTo, effectiveFrom, effectiveTo)
@@ -839,7 +924,7 @@ function assertNoPlannedProfileOverlap({ state, companyId, effectiveFrom, effect
   }
 }
 
-function normalizeOpenItems(openItems, fiscalYearEndDate) {
+function normalizeOpenItems(openItems, fiscalYearEndDate, accountingCurrencyCode = "SEK") {
   if (!Array.isArray(openItems)) {
     throw createError(400, "year_end_open_items_invalid", "openItems must be an array.");
   }
@@ -856,6 +941,25 @@ function normalizeOpenItems(openItems, fiscalYearEndDate) {
       item.recognitionDate || item.invoiceDate || item.documentDate || fiscalYearEndDate,
       "year_end_open_item_recognition_date_invalid"
     );
+    const currencyCode = normalizeOptionalText(item.currency) || accountingCurrencyCode;
+    const functionalUnpaidAmount = resolveFunctionalAmount({
+      amount: item.unpaidAmount,
+      currencyCode,
+      accountingCurrencyCode,
+      exchangeRate: item.exchangeRate,
+      functionalAmount: item.functionalUnpaidAmount,
+      amountCode: "year_end_open_item_unpaid_amount_invalid",
+      functionalAmountCode: "year_end_open_item_functional_unpaid_amount_invalid",
+      exchangeRateCode: "year_end_open_item_exchange_rate_invalid"
+    });
+    const openItemTypeIsReceivable = isReceivableItemType(openItemType);
+    const postingLines = normalizeCatchUpPostingLines({
+      postingLines: item.postingLines,
+      openItemType,
+      sourceId: item.sourceId,
+      accountingCurrencyCode,
+      openItemFunctionalAmount: functionalUnpaidAmount
+    });
     return Object.freeze({
       openItemType,
       sourceType: normalizeOptionalText(item.sourceType) || openItemType.toLowerCase(),
@@ -863,11 +967,211 @@ function normalizeOpenItems(openItems, fiscalYearEndDate) {
       recognitionDate,
       dueDate: normalizeOptionalDate(item.dueDate, "year_end_open_item_due_date_invalid"),
       unpaidAmount: normalizeMoney(item.unpaidAmount, "year_end_open_item_unpaid_amount_invalid"),
-      currency: normalizeOptionalText(item.currency) || "SEK",
+      functionalUnpaidAmount,
+      currency: currencyCode,
+      exchangeRate:
+        currencyCode === accountingCurrencyCode
+          ? null
+          : normalizePositiveNumber(item.exchangeRate, "year_end_open_item_exchange_rate_invalid"),
       vatAmount: normalizeOptionalMoney(item.vatAmount, "year_end_open_item_vat_amount_invalid"),
-      counterpartyId: normalizeOptionalText(item.counterpartyId)
+      counterpartyId: normalizeOptionalText(item.counterpartyId),
+      openItemAccountNumber: normalizeAccountNumber(
+        item.openItemAccountNumber
+          || (openItemTypeIsReceivable ? DEFAULT_CASH_METHOD_RECEIVABLE_ACCOUNT_NUMBER : DEFAULT_CASH_METHOD_PAYABLE_ACCOUNT_NUMBER),
+        "year_end_open_item_account_number_required"
+      ),
+      accountingCurrencyCode,
+      postingLines
     });
   });
+}
+
+function requireYearEndLedgerPlatform(getLedgerPlatform) {
+  const ledgerPlatform = typeof getLedgerPlatform === "function" ? getLedgerPlatform() : null;
+  if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function" || typeof ledgerPlatform.reverseJournalEntry !== "function") {
+    throw createError(500, "ledger_platform_required_for_year_end_catch_up", "Ledger platform is required for real year-end catch-up postings.");
+  }
+  return ledgerPlatform;
+}
+
+function resolveAccountingCurrencyCode(ledgerPlatform, companyId) {
+  if (!ledgerPlatform || typeof ledgerPlatform.getAccountingCurrencyProfile !== "function") {
+    return "SEK";
+  }
+  return ledgerPlatform.getAccountingCurrencyProfile({ companyId }).accountingCurrencyCode || "SEK";
+}
+
+function postYearEndCatchUpJournal({
+  ledgerPlatform,
+  companyId,
+  fiscalYearEndDate,
+  snapshotHash,
+  activeMethod,
+  actorId,
+  items,
+  rulePack
+}) {
+  if (typeof ledgerPlatform.ensureAccountingYearPeriod === "function") {
+    ledgerPlatform.ensureAccountingYearPeriod({
+      companyId,
+      fiscalYear: Number(fiscalYearEndDate.slice(0, 4)),
+      actorId
+    });
+  }
+  const journalLines = buildYearEndCatchUpJournalLines(items);
+  const posted = ledgerPlatform.applyPostingIntent({
+    companyId,
+    journalDate: fiscalYearEndDate,
+    recipeCode: "YEAR_END_ADJUSTMENT",
+    postingSignalCode: "accounting_method.year_end_catch_up.completed",
+    sourceType: "YEAR_END_TRANSFER",
+    sourceId: `cash_method_year_end_catch_up:${companyId}:${fiscalYearEndDate}:${snapshotHash}`,
+    sourceObjectVersion: snapshotHash,
+    actorId,
+    idempotencyKey: `cash_method_year_end_catch_up:${companyId}:${fiscalYearEndDate}:${snapshotHash}`,
+    description: `Cash-method year-end catch-up ${fiscalYearEndDate}`,
+    metadataJson: {
+      pipelineStage: "cash_method_year_end_catch_up",
+      accountingMethodProfileId: activeMethod.methodProfileId,
+      accountingMethodCode: activeMethod.methodCode,
+      timingSignal: "year_end_catch_up",
+      snapshotHash,
+      rulepackId: rulePack.rulePackId,
+      rulepackCode: rulePack.rulePackCode,
+      rulepackVersion: rulePack.version,
+      rulepackChecksum: rulePack.checksum
+    },
+    lines: journalLines
+  });
+  return posted.journalEntry.journalEntryId;
+}
+
+function buildYearEndCatchUpJournalLines(items) {
+  let lineNumber = 1;
+  const lines = [];
+  for (const item of items) {
+    const receivable = isReceivableItemType(item.openItemType);
+    lines.push({
+      accountNumber: item.openItemAccountNumber,
+      debitAmount: receivable ? item.unpaidAmount : 0,
+      creditAmount: receivable ? 0 : item.unpaidAmount,
+      currencyCode: item.currency,
+      exchangeRate: item.exchangeRate,
+      functionalDebitAmount: receivable ? item.functionalUnpaidAmount : 0,
+      functionalCreditAmount: receivable ? 0 : item.functionalUnpaidAmount,
+      lineNumber,
+      sourceType: "YEAR_END_TRANSFER",
+      sourceId: `${item.sourceId}:open_item`
+    });
+    lineNumber += 1;
+    for (const postingLine of item.postingLines) {
+      lines.push({
+        ...postingLine,
+        lineNumber,
+        sourceType: "YEAR_END_TRANSFER",
+        sourceId: postingLine.sourceId || item.sourceId
+      });
+      lineNumber += 1;
+    }
+  }
+  return lines;
+}
+
+function normalizeCatchUpPostingLines({
+  postingLines,
+  openItemType,
+  sourceId,
+  accountingCurrencyCode,
+  openItemFunctionalAmount
+}) {
+  if (!Array.isArray(postingLines) || postingLines.length === 0) {
+    throw createError(409, "year_end_open_item_posting_lines_required", "Year-end catch-up items require explicit posting lines.");
+  }
+  const receivable = isReceivableItemType(openItemType);
+  let totalFunctionalDebit = 0;
+  let totalFunctionalCredit = 0;
+  const normalizedLines = postingLines.map((line, index) => {
+    if (!line || typeof line !== "object" || Array.isArray(line)) {
+      throw createError(400, "year_end_open_item_posting_line_invalid", `Posting line ${index + 1} must be an object.`);
+    }
+    const debitAmount = normalizeMoney(line.debitAmount || 0, "year_end_open_item_posting_line_amount_invalid");
+    const creditAmount = normalizeMoney(line.creditAmount || 0, "year_end_open_item_posting_line_amount_invalid");
+    if ((debitAmount > 0 && creditAmount > 0) || (debitAmount === 0 && creditAmount === 0)) {
+      throw createError(409, "year_end_open_item_posting_line_side_invalid", "Each posting line must be either debit or credit.");
+    }
+    if (receivable && debitAmount > 0) {
+      throw createError(409, "year_end_open_item_posting_line_direction_invalid", "Receivable catch-up lines must credit revenue/VAT side accounts.");
+    }
+    if (!receivable && creditAmount > 0) {
+      throw createError(409, "year_end_open_item_posting_line_direction_invalid", "Payable catch-up lines must debit expense/VAT side accounts.");
+    }
+    const currencyCode = normalizeOptionalText(line.currencyCode) || accountingCurrencyCode;
+    const exchangeRate =
+      currencyCode === accountingCurrencyCode
+        ? null
+        : normalizePositiveNumber(line.exchangeRate, "year_end_open_item_posting_line_exchange_rate_invalid");
+    const functionalDebitAmount = resolveFunctionalAmount({
+      amount: debitAmount,
+      currencyCode,
+      accountingCurrencyCode,
+      exchangeRate,
+      functionalAmount: line.functionalDebitAmount,
+      amountCode: "year_end_open_item_posting_line_amount_invalid",
+      functionalAmountCode: "year_end_open_item_posting_line_functional_amount_invalid",
+      exchangeRateCode: "year_end_open_item_posting_line_exchange_rate_invalid"
+    });
+    const functionalCreditAmount = resolveFunctionalAmount({
+      amount: creditAmount,
+      currencyCode,
+      accountingCurrencyCode,
+      exchangeRate,
+      functionalAmount: line.functionalCreditAmount,
+      amountCode: "year_end_open_item_posting_line_amount_invalid",
+      functionalAmountCode: "year_end_open_item_posting_line_functional_amount_invalid",
+      exchangeRateCode: "year_end_open_item_posting_line_exchange_rate_invalid"
+    });
+    totalFunctionalDebit = roundMoney(totalFunctionalDebit + functionalDebitAmount);
+    totalFunctionalCredit = roundMoney(totalFunctionalCredit + functionalCreditAmount);
+    return Object.freeze({
+      accountNumber: normalizeAccountNumber(line.accountNumber, "year_end_open_item_posting_line_account_required"),
+      debitAmount,
+      creditAmount,
+      currencyCode,
+      exchangeRate,
+      functionalDebitAmount,
+      functionalCreditAmount,
+      dimensionJson: copy(line.dimensionJson || {}),
+      sourceId: normalizeOptionalText(line.sourceId) || requireText(sourceId, "year_end_open_item_source_id_required")
+    });
+  });
+  if (receivable && totalFunctionalCredit !== openItemFunctionalAmount) {
+    throw createError(409, "year_end_open_item_balance_mismatch", "Receivable catch-up lines must credit the full functional unpaid amount.");
+  }
+  if (!receivable && totalFunctionalDebit !== openItemFunctionalAmount) {
+    throw createError(409, "year_end_open_item_balance_mismatch", "Payable catch-up lines must debit the full functional unpaid amount.");
+  }
+  return Object.freeze(normalizedLines);
+}
+
+function resolveFunctionalAmount({
+  amount,
+  currencyCode,
+  accountingCurrencyCode,
+  exchangeRate,
+  functionalAmount,
+  amountCode,
+  functionalAmountCode,
+  exchangeRateCode
+}) {
+  const normalizedAmount = normalizeMoney(amount, amountCode);
+  const resolvedCurrencyCode = normalizeOptionalText(currencyCode) || accountingCurrencyCode;
+  if (resolvedCurrencyCode === accountingCurrencyCode) {
+    return normalizedAmount;
+  }
+  if (functionalAmount != null && functionalAmount !== "") {
+    return normalizeMoney(functionalAmount, functionalAmountCode);
+  }
+  return roundMoney(normalizedAmount * normalizePositiveNumber(exchangeRate, exchangeRateCode));
 }
 
 function intervalsOverlap(leftStart, leftEnd, rightStart, rightEnd) {
@@ -952,6 +1256,14 @@ function normalizeMoney(value, code) {
   return roundMoney(numeric);
 }
 
+function normalizePositiveNumber(value, code) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    throw createError(400, code, "Amount must be a positive number.");
+  }
+  return roundMoney(numeric);
+}
+
 function normalizeOptionalMoney(value, code) {
   if (value == null || value === "") {
     return null;
@@ -981,6 +1293,14 @@ function normalizeOptionalText(value) {
   }
   const resolved = String(value).trim();
   return resolved.length > 0 ? resolved : null;
+}
+
+function normalizeAccountNumber(value, code) {
+  const resolved = requireText(String(value || ""), code);
+  if (!/^\d{4}$/.test(resolved)) {
+    throw createError(400, code, "Account number must be a four-digit BAS account.");
+  }
+  return resolved;
 }
 
 function requireText(value, code) {

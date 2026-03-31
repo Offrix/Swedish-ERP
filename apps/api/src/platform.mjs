@@ -255,7 +255,11 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "accountingMethod",
     label: "Accounting method",
     packageName: "@swedish-erp/domain-accounting-method",
-    create: ({ options }) => createAccountingMethodPlatform(options)
+    create: ({ options, getDomain }) =>
+      createAccountingMethodPlatform({
+        ...options,
+        getLedgerPlatform: () => getDomain("ledger")
+      })
   }),
   createDomainDefinition({
     key: "fiscalYear",

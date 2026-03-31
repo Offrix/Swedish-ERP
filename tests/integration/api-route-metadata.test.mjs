@@ -84,6 +84,9 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/ledger/accounting-periods/:accountingPeriodId/lock",
   "/v1/ledger/accounting-periods/:accountingPeriodId/reopen",
   "/v1/ledger/accounts",
+  "/v1/ledger/opening-balances",
+  "/v1/ledger/opening-balances/:openingBalanceBatchId",
+  "/v1/ledger/opening-balances/:openingBalanceBatchId/reverse",
   "/v1/ledger/dimensions/:dimensionType",
   "/v1/ledger/voucher-series",
   "/v1/ledger/journal-entries/:journalEntryId/validate",
@@ -145,6 +148,9 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/close/reopen-requests/:reopenRequestId/relock",
   "/v1/close/adjustments",
   "/v1/close/adjustments/:adjustmentId",
+  "/v1/ledger/year-end-transfers",
+  "/v1/ledger/year-end-transfers/:yearEndTransferBatchId",
+  "/v1/ledger/year-end-transfers/:yearEndTransferBatchId/reverse",
   "/v1/submissions/:submissionId/evidence-pack",
   "/v1/submissions/:submissionId/attempts",
   "/v1/submissions/:submissionId/recoveries",
@@ -443,6 +449,22 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(closeRelockContract.requiredActionClass, "close_reopen_request_relock");
     assert.equal(closeRelockContract.requiredTrustLevel, "strong_mfa");
     assert.equal(closeRelockContract.requiredScopeType, "close_reopen_request");
+
+    const yearEndTransferContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/ledger/year-end-transfers"
+    );
+    assert.ok(yearEndTransferContract);
+    assert.equal(yearEndTransferContract.requiredActionClass, "ledger_year_end_transfer_post");
+    assert.equal(yearEndTransferContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(yearEndTransferContract.requiredScopeType, "company");
+
+    const yearEndTransferReverseContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/ledger/year-end-transfers/:yearEndTransferBatchId/reverse"
+    );
+    assert.ok(yearEndTransferReverseContract);
+    assert.equal(yearEndTransferReverseContract.requiredActionClass, "ledger_year_end_transfer_reverse");
+    assert.equal(yearEndTransferReverseContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(yearEndTransferReverseContract.requiredScopeType, "year_end_transfer_batch");
 
     const vatReviewResolveContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/vat/review-queue/:vatReviewQueueItemId/resolve"

@@ -144,6 +144,25 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
     );
     assert.equal(currentActive.methodCode, "KONTANTMETOD");
 
+    const fiscalYearProfile = platform.createFiscalYearProfile({
+      companyId: DEMO_IDS.companyId,
+      legalFormCode: "AKTIEBOLAG",
+      actorId: "tester"
+    });
+    const fiscalYear = platform.createFiscalYear({
+      companyId: DEMO_IDS.companyId,
+      fiscalYearProfileId: fiscalYearProfile.fiscalYearProfileId,
+      startDate: "2027-01-01",
+      endDate: "2027-12-31",
+      approvalBasisCode: "BASELINE",
+      actorId: "tester"
+    });
+    platform.activateFiscalYear({
+      companyId: DEMO_IDS.companyId,
+      fiscalYearId: fiscalYear.fiscalYearId,
+      actorId: "tester"
+    });
+
     const catchUpRun = await requestJson(baseUrl, "/v1/accounting-method/year-end-catch-up-runs", {
       method: "POST",
       token: adminToken,
@@ -156,13 +175,35 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
             openItemType: "customer_invoice",
             sourceId: "inv_2027_1",
             unpaidAmount: 1000,
-            recognitionDate: "2027-12-20"
+            recognitionDate: "2027-12-20",
+            openItemAccountNumber: "1210",
+            postingLines: [
+              {
+                accountNumber: "3010",
+                creditAmount: 800
+              },
+              {
+                accountNumber: "2610",
+                creditAmount: 200
+              }
+            ]
           },
           {
             openItemType: "supplier_invoice",
             sourceId: "sup_2027_1",
             unpaidAmount: 400,
-            recognitionDate: "2027-12-21"
+            recognitionDate: "2027-12-21",
+            openItemAccountNumber: "2410",
+            postingLines: [
+              {
+                accountNumber: "5410",
+                debitAmount: 320
+              },
+              {
+                accountNumber: "2640",
+                debitAmount: 80
+              }
+            ]
           }
         ]
       }
@@ -179,18 +220,58 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
             openItemType: "customer_invoice",
             sourceId: "inv_2027_1",
             unpaidAmount: 1000,
-            recognitionDate: "2027-12-20"
+            recognitionDate: "2027-12-20",
+            openItemAccountNumber: "1210",
+            postingLines: [
+              {
+                accountNumber: "3010",
+                creditAmount: 800
+              },
+              {
+                accountNumber: "2610",
+                creditAmount: 200
+              }
+            ]
           },
           {
             openItemType: "supplier_invoice",
             sourceId: "sup_2027_1",
             unpaidAmount: 400,
-            recognitionDate: "2027-12-21"
+            recognitionDate: "2027-12-21",
+            openItemAccountNumber: "2410",
+            postingLines: [
+              {
+                accountNumber: "5410",
+                debitAmount: 320
+              },
+              {
+                accountNumber: "2640",
+                debitAmount: 80
+              }
+            ]
           }
         ]
       }
     });
     assert.equal(catchUpRun.yearEndCatchUpRunId, replayCatchUpRun.yearEndCatchUpRunId);
+    assert.equal(typeof catchUpRun.journalEntryId, "string");
+
+    const reversedCatchUpRun = await requestJson(
+      baseUrl,
+      `/v1/accounting-method/year-end-catch-up-runs/${catchUpRun.yearEndCatchUpRunId}/reverse`,
+      {
+        method: "POST",
+        token: adminToken,
+        body: {
+          companyId: DEMO_IDS.companyId,
+          reasonCode: "year_end_adjustment_reversal",
+          approvedByActorId: "finance-approver",
+          approvedByRoleCode: "finance_manager"
+        }
+      }
+    );
+    assert.equal(reversedCatchUpRun.status, "reversed");
+    assert.equal(typeof reversedCatchUpRun.reversalJournalEntryId, "string");
 
     const history = await requestJson(baseUrl, `/v1/accounting-method/history?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken

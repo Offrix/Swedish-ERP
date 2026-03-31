@@ -49,6 +49,7 @@ export const POSTING_SOURCE_TYPES = Object.freeze([
   "TRAVEL_CLAIM",
   "VAT_SETTLEMENT",
   "BANK_IMPORT",
+  "HISTORICAL_IMPORT",
   "MANUAL_JOURNAL",
   "ASSET_DEPRECIATION",
   "PERIOD_ACCRUAL",
@@ -67,8 +68,21 @@ export const POSTING_JOURNAL_TYPES = Object.freeze([
   "correction_replacement",
   "historical_import"
 ]);
+export const YEAR_END_TRANSFER_KINDS = Object.freeze(["RESULT_TRANSFER", "RETAINED_EARNINGS_TRANSFER"]);
+export const DEFAULT_CURRENT_YEAR_RESULT_ACCOUNT_NUMBER = "2040";
+export const DEFAULT_RETAINED_EARNINGS_ACCOUNT_NUMBER = "2030";
 
 export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
+  Object.freeze({
+    recipeCode: "OPENING_BALANCE",
+    version: "2026.1",
+    sourceDomain: "ledger",
+    journalType: "historical_import",
+    allowedSourceTypes: Object.freeze(["HISTORICAL_IMPORT"]),
+    defaultVoucherSeriesPurposeCode: "HISTORICAL_IMPORT",
+    fallbackVoucherSeriesCode: "W",
+    defaultSignalCode: "ledger.opening_balance.posted"
+  }),
   Object.freeze({
     recipeCode: "LEDGER_MANUAL_JOURNAL",
     version: "2026.1",
@@ -463,6 +477,12 @@ export function createLedgerEngine({
     fxRevaluationBatchIdsByCompanyKey: new Map(),
     voucherSeries: new Map(),
     voucherSeriesIdsByCompanyCode: new Map(),
+    openingBalanceBatches: new Map(),
+    openingBalanceBatchIdsByCompany: new Map(),
+    openingBalanceBatchIdsByCompanyKey: new Map(),
+    yearEndTransferBatches: new Map(),
+    yearEndTransferBatchIdsByCompany: new Map(),
+    yearEndTransferBatchIdsByCompanyKey: new Map(),
     postingIntents: new Map(),
     postingIntentIdsByCompanyKey: new Map(),
     accountingPeriods: new Map(),
@@ -504,6 +524,14 @@ export function createLedgerEngine({
     listVoucherSeries,
     getVoucherSeries,
     upsertVoucherSeries,
+    createOpeningBalanceBatch,
+    listOpeningBalanceBatches,
+    getOpeningBalanceBatch,
+    reverseOpeningBalanceBatch,
+    createYearEndTransferBatch,
+    listYearEndTransferBatches,
+    getYearEndTransferBatch,
+    reverseYearEndTransferBatch,
     reserveImportedVoucherNumber,
     resolveVoucherSeriesForPurpose,
     createPostingIntent,
@@ -926,6 +954,429 @@ export function createLedgerEngine({
       voucherSeries: copy(series),
       nextNumberAdjusted
     };
+  }
+
+  function createOpeningBalanceBatch({
+    companyId,
+    fiscalYearId,
+    openingDate,
+    sourceCode,
+    externalReference = null,
+    description = null,
+    evidenceRefs = [],
+    lines,
+    actorId,
+    idempotencyKey,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedIdempotencyKey = requireText(idempotencyKey, "idempotency_key_required");
+    const dedupeKey = toCompanyScopedKey(resolvedCompanyId, resolvedIdempotencyKey);
+    const existingBatchId = state.openingBalanceBatchIdsByCompanyKey.get(dedupeKey);
+    if (existingBatchId) {
+      return copy(requireOpeningBalanceBatch(resolvedCompanyId, existingBatchId));
+    }
+
+    synchronizeLedgerPeriodsForCompany(resolvedCompanyId);
+    const fiscalYear = requireOpeningBalanceFiscalYear({
+      companyId: resolvedCompanyId,
+      fiscalYearId,
+      openingDate
+    });
+    assertOpeningBalanceUniqueness({
+      companyId: resolvedCompanyId,
+      fiscalYearId: fiscalYear.fiscalYearId
+    });
+
+    const openingBalanceBatchId = crypto.randomUUID();
+    const accountingCurrencyProfile = ensureAccountingCurrencyProfile(resolvedCompanyId);
+    const accountingPeriod = resolveAccountingPeriod(resolvedCompanyId, fiscalYear.startDate);
+    const normalizedLines = normalizeOpeningBalanceLineInputs({
+      companyId: resolvedCompanyId,
+      lines,
+      sourceId: openingBalanceBatchId
+    });
+    const totals = calculateInputLineTotals(normalizedLines);
+    const resolvedSourceCode = normalizeCode(sourceCode, "opening_balance_source_code_required");
+    const resolvedEvidenceRefs = normalizeReferenceList(evidenceRefs);
+    const resolvedDescription = normalizeOptionalText(description) || `Opening balance ${fiscalYear.startDate}`;
+
+    const posted = applyPostingIntent({
+      companyId: resolvedCompanyId,
+      journalDate: fiscalYear.startDate,
+      recipeCode: "OPENING_BALANCE",
+      sourceType: "HISTORICAL_IMPORT",
+      sourceId: openingBalanceBatchId,
+      sourceObjectVersion: "1",
+      description: resolvedDescription,
+      actorId: resolvedActorId,
+      idempotencyKey: `${resolvedIdempotencyKey}:journal`,
+      lines: normalizedLines,
+      currencyCode: accountingCurrencyProfile.accountingCurrencyCode,
+      metadataJson: {
+        openingBalanceBatchId,
+        openingBalanceSourceCode: resolvedSourceCode,
+        openingBalanceExternalReference: normalizeOptionalText(externalReference),
+        openingBalanceEvidenceRefs: resolvedEvidenceRefs,
+        fiscalYearId: fiscalYear.fiscalYearId,
+        fiscalYearStartDate: fiscalYear.startDate
+      },
+      correlationId
+    });
+
+    const batch = Object.freeze({
+      openingBalanceBatchId,
+      companyId: resolvedCompanyId,
+      fiscalYearId: fiscalYear.fiscalYearId,
+      fiscalYearStartDate: fiscalYear.startDate,
+      accountingPeriodId: accountingPeriod.accountingPeriodId,
+      openingDate: fiscalYear.startDate,
+      status: "posted",
+      sourceCode: resolvedSourceCode,
+      externalReference: normalizeOptionalText(externalReference),
+      accountingCurrencyCode: accountingCurrencyProfile.accountingCurrencyCode,
+      lineCount: normalizedLines.length,
+      totals,
+      journalEntryId: posted.journalEntry.journalEntryId,
+      reversalJournalEntryId: null,
+      evidenceRefs: resolvedEvidenceRefs,
+      lines: Object.freeze(normalizedLines.map(copy)),
+      createdByActorId: resolvedActorId,
+      createdAt: nowIso(),
+      reversedAt: null,
+      reversedByActorId: null
+    });
+
+    state.openingBalanceBatches.set(batch.openingBalanceBatchId, batch);
+    appendToIndex(state.openingBalanceBatchIdsByCompany, resolvedCompanyId, batch.openingBalanceBatchId);
+    state.openingBalanceBatchIdsByCompanyKey.set(dedupeKey, batch.openingBalanceBatchId);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.opening_balance.posted",
+      entityType: "opening_balance_batch",
+      entityId: batch.openingBalanceBatchId,
+      explanation: `Posted opening balance batch for fiscal year ${fiscalYear.startDate}.`
+    });
+
+    return copy(batch);
+  }
+
+  function listOpeningBalanceBatches({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.openingBalanceBatchIdsByCompany.get(resolvedCompanyId) || [])
+      .map((batchId) => state.openingBalanceBatches.get(batchId))
+      .filter(Boolean)
+      .sort((left, right) => left.openingDate.localeCompare(right.openingDate) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function getOpeningBalanceBatch({ companyId, openingBalanceBatchId } = {}) {
+    return copy(requireOpeningBalanceBatch(requireText(companyId, "company_id_required"), openingBalanceBatchId));
+  }
+
+  function reverseOpeningBalanceBatch({
+    companyId,
+    openingBalanceBatchId,
+    reasonCode,
+    reversedOn = null,
+    actorId,
+    approvedByActorId,
+    approvedByRoleCode,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const batch = requireOpeningBalanceBatch(resolvedCompanyId, openingBalanceBatchId);
+    if (batch.status === "reversed") {
+      return copy(batch);
+    }
+
+    const reversed = reverseJournalEntry({
+      companyId: resolvedCompanyId,
+      journalEntryId: batch.journalEntryId,
+      actorId: requireText(actorId, "actor_id_required"),
+      approvedByActorId: requireText(approvedByActorId, "approved_by_actor_id_required"),
+      approvedByRoleCode: requireText(approvedByRoleCode, "approved_by_role_code_required"),
+      reasonCode: requireText(reasonCode, "reason_code_required"),
+      correctionKey: `opening_balance:${batch.openingBalanceBatchId}`,
+      journalDate: reversedOn ? normalizeDate(reversedOn, "opening_balance_reversed_on_invalid") : null,
+      correlationId
+    });
+
+    const reversedBatch = Object.freeze({
+      ...batch,
+      status: "reversed",
+      reversalJournalEntryId: reversed.reversalJournalEntry.journalEntryId,
+      reversedAt: nowIso(),
+      reversedByActorId: requireText(actorId, "actor_id_required")
+    });
+    state.openingBalanceBatches.set(reversedBatch.openingBalanceBatchId, reversedBatch);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "ledger.opening_balance.reversed",
+      entityType: "opening_balance_batch",
+      entityId: reversedBatch.openingBalanceBatchId,
+      explanation: `Reversed opening balance batch ${reversedBatch.openingBalanceBatchId}.`
+    });
+
+    return copy(reversedBatch);
+  }
+
+  function createYearEndTransferBatch({
+    companyId,
+    fiscalYearId,
+    transferKind,
+    transferDate = null,
+    sourceCode,
+    externalReference = null,
+    description = null,
+    evidenceRefs = [],
+    resultAccountNumber = DEFAULT_CURRENT_YEAR_RESULT_ACCOUNT_NUMBER,
+    retainedEarningsAccountNumber = DEFAULT_RETAINED_EARNINGS_ACCOUNT_NUMBER,
+    actorId,
+    idempotencyKey,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedIdempotencyKey = requireText(idempotencyKey, "idempotency_key_required");
+    const resolvedTransferKind = assertYearEndTransferKind(transferKind);
+    const dedupeKey = toCompanyScopedKey(resolvedCompanyId, resolvedIdempotencyKey);
+    const existingBatchId = state.yearEndTransferBatchIdsByCompanyKey.get(dedupeKey);
+    if (existingBatchId) {
+      return copy(requireYearEndTransferBatch(resolvedCompanyId, existingBatchId));
+    }
+
+    synchronizeLedgerPeriodsForCompany(resolvedCompanyId);
+    const fiscalYear = requireYearEndTransferFiscalYear({
+      companyId: resolvedCompanyId,
+      fiscalYearId
+    });
+    assertYearEndTransferUniqueness({
+      companyId: resolvedCompanyId,
+      fiscalYearId: fiscalYear.fiscalYearId,
+      transferKind: resolvedTransferKind
+    });
+
+    const resolvedTransferDate = resolveYearEndTransferDate({
+      transferKind: resolvedTransferKind,
+      fiscalYear,
+      transferDate
+    });
+    const yearEndTransferBatchId = crypto.randomUUID();
+    const accountingCurrencyProfile = ensureAccountingCurrencyProfile(resolvedCompanyId);
+    const accountingPeriod = resolveAccountingPeriod(resolvedCompanyId, resolvedTransferDate);
+    const resolvedSourceCode = normalizeCode(sourceCode, "year_end_transfer_source_code_required");
+    const resolvedEvidenceRefs = normalizeReferenceList(evidenceRefs);
+    let normalizedLines;
+    let resolvedDescription;
+    let resolvedResultAccountNumber = null;
+    let resolvedRetainedEarningsAccountNumber = null;
+    let capturedBalances = [];
+    let sourceBalanceAmount = null;
+    let resultTransferBatchId = null;
+
+    if (resolvedTransferKind === "RESULT_TRANSFER") {
+      const resultAccount = requireYearEndTransferEquityAccount({
+        companyId: resolvedCompanyId,
+        accountNumber: resultAccountNumber,
+        errorCode: "year_end_transfer_result_account_required"
+      });
+      const prepared = buildResultTransferLineInputs({
+        companyId: resolvedCompanyId,
+        fiscalYear,
+        resultAccountNumber: resultAccount.accountNumber,
+        sourceId: yearEndTransferBatchId
+      });
+      normalizedLines = prepared.lines;
+      capturedBalances = prepared.capturedBalances;
+      resolvedResultAccountNumber = resultAccount.accountNumber;
+      resolvedDescription =
+        normalizeOptionalText(description) || `Year-end result transfer ${fiscalYear.endDate}`;
+    } else {
+      const resultTransferBatch = requireActiveYearEndTransferBatch({
+        companyId: resolvedCompanyId,
+        fiscalYearId: fiscalYear.fiscalYearId,
+        transferKind: "RESULT_TRANSFER"
+      });
+      const sourceAccount = requireYearEndTransferEquityAccount({
+        companyId: resolvedCompanyId,
+        accountNumber: resultAccountNumber,
+        errorCode: "retained_earnings_source_account_required"
+      });
+      const destinationAccount = requireYearEndTransferEquityAccount({
+        companyId: resolvedCompanyId,
+        accountNumber: retainedEarningsAccountNumber,
+        errorCode: "retained_earnings_destination_account_required"
+      });
+      if (sourceAccount.accountNumber === destinationAccount.accountNumber) {
+        throw httpError(
+          409,
+          "retained_earnings_account_conflict",
+          "Retained earnings transfer requires different source and destination equity accounts."
+        );
+      }
+      const prepared = buildRetainedEarningsTransferLineInputs({
+        companyId: resolvedCompanyId,
+        transferDate: resolvedTransferDate,
+        sourceAccountNumber: sourceAccount.accountNumber,
+        destinationAccountNumber: destinationAccount.accountNumber,
+        sourceId: yearEndTransferBatchId
+      });
+      normalizedLines = prepared.lines;
+      sourceBalanceAmount = prepared.sourceBalanceAmount;
+      resolvedResultAccountNumber = sourceAccount.accountNumber;
+      resolvedRetainedEarningsAccountNumber = destinationAccount.accountNumber;
+      resultTransferBatchId = resultTransferBatch.yearEndTransferBatchId;
+      resolvedDescription =
+        normalizeOptionalText(description) || `Retained earnings transfer ${resolvedTransferDate}`;
+    }
+
+    const totals = calculateInputLineTotals(normalizedLines);
+    const posted = applyPostingIntent({
+      companyId: resolvedCompanyId,
+      journalDate: resolvedTransferDate,
+      recipeCode: "YEAR_END_ADJUSTMENT",
+      sourceType: "YEAR_END_TRANSFER",
+      sourceId: yearEndTransferBatchId,
+      sourceObjectVersion: "1",
+      description: resolvedDescription,
+      actorId: resolvedActorId,
+      idempotencyKey: `${resolvedIdempotencyKey}:journal`,
+      lines: normalizedLines,
+      currencyCode: accountingCurrencyProfile.accountingCurrencyCode,
+      metadataJson: {
+        yearEndTransferBatchId,
+        yearEndTransferKind: resolvedTransferKind,
+        yearEndTransferSourceCode: resolvedSourceCode,
+        yearEndTransferExternalReference: normalizeOptionalText(externalReference),
+        yearEndTransferEvidenceRefs: resolvedEvidenceRefs,
+        fiscalYearId: fiscalYear.fiscalYearId,
+        fiscalYearStartDate: fiscalYear.startDate,
+        fiscalYearEndDate: fiscalYear.endDate,
+        resultAccountNumber: resolvedResultAccountNumber,
+        retainedEarningsAccountNumber: resolvedRetainedEarningsAccountNumber,
+        sourceBalanceAmount,
+        resultTransferBatchId,
+        capturedBalances
+      },
+      correlationId
+    });
+
+    const batch = Object.freeze({
+      yearEndTransferBatchId,
+      companyId: resolvedCompanyId,
+      fiscalYearId: fiscalYear.fiscalYearId,
+      fiscalYearStartDate: fiscalYear.startDate,
+      fiscalYearEndDate: fiscalYear.endDate,
+      accountingPeriodId: accountingPeriod.accountingPeriodId,
+      transferKind: resolvedTransferKind,
+      transferDate: resolvedTransferDate,
+      status: "posted",
+      sourceCode: resolvedSourceCode,
+      externalReference: normalizeOptionalText(externalReference),
+      accountingCurrencyCode: accountingCurrencyProfile.accountingCurrencyCode,
+      resultAccountNumber: resolvedResultAccountNumber,
+      retainedEarningsAccountNumber: resolvedRetainedEarningsAccountNumber,
+      lineCount: normalizedLines.length,
+      totals,
+      journalEntryId: posted.journalEntry.journalEntryId,
+      reversalJournalEntryId: null,
+      evidenceRefs: resolvedEvidenceRefs,
+      capturedBalances: Object.freeze(capturedBalances.map(copy)),
+      sourceBalanceAmount,
+      resultTransferBatchId,
+      lines: Object.freeze(normalizedLines.map(copy)),
+      createdByActorId: resolvedActorId,
+      createdAt: nowIso(),
+      reversedAt: null,
+      reversedByActorId: null
+    });
+
+    state.yearEndTransferBatches.set(batch.yearEndTransferBatchId, batch);
+    appendToIndex(state.yearEndTransferBatchIdsByCompany, resolvedCompanyId, batch.yearEndTransferBatchId);
+    state.yearEndTransferBatchIdsByCompanyKey.set(dedupeKey, batch.yearEndTransferBatchId);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.year_end_transfer.posted",
+      entityType: "year_end_transfer_batch",
+      entityId: batch.yearEndTransferBatchId,
+      explanation: `Posted ${resolvedTransferKind.toLowerCase()} batch for fiscal year ${fiscalYear.endDate}.`
+    });
+
+    return copy(batch);
+  }
+
+  function listYearEndTransferBatches({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.yearEndTransferBatchIdsByCompany.get(resolvedCompanyId) || [])
+      .map((batchId) => state.yearEndTransferBatches.get(batchId))
+      .filter(Boolean)
+      .sort((left, right) => left.transferDate.localeCompare(right.transferDate) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function getYearEndTransferBatch({ companyId, yearEndTransferBatchId } = {}) {
+    return copy(requireYearEndTransferBatch(requireText(companyId, "company_id_required"), yearEndTransferBatchId));
+  }
+
+  function reverseYearEndTransferBatch({
+    companyId,
+    yearEndTransferBatchId,
+    reasonCode,
+    reversedOn = null,
+    actorId,
+    approvedByActorId,
+    approvedByRoleCode,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const batch = requireYearEndTransferBatch(resolvedCompanyId, yearEndTransferBatchId);
+    if (batch.status === "reversed") {
+      return copy(batch);
+    }
+
+    const reversed = reverseJournalEntry({
+      companyId: resolvedCompanyId,
+      journalEntryId: batch.journalEntryId,
+      actorId: requireText(actorId, "actor_id_required"),
+      approvedByActorId: requireText(approvedByActorId, "approved_by_actor_id_required"),
+      approvedByRoleCode: requireText(approvedByRoleCode, "approved_by_role_code_required"),
+      reasonCode: requireText(reasonCode, "reason_code_required"),
+      correctionKey: `year_end_transfer:${batch.yearEndTransferBatchId}`,
+      journalDate: reversedOn ? normalizeDate(reversedOn, "year_end_transfer_reversed_on_invalid") : null,
+      correlationId
+    });
+
+    const reversedBatch = Object.freeze({
+      ...batch,
+      status: "reversed",
+      reversalJournalEntryId: reversed.reversalJournalEntry.journalEntryId,
+      reversedAt: nowIso(),
+      reversedByActorId: requireText(actorId, "actor_id_required")
+    });
+    state.yearEndTransferBatches.set(reversedBatch.yearEndTransferBatchId, reversedBatch);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "ledger.year_end_transfer.reversed",
+      entityType: "year_end_transfer_batch",
+      entityId: reversedBatch.yearEndTransferBatchId,
+      explanation: `Reversed year-end transfer batch ${reversedBatch.yearEndTransferBatchId}.`
+    });
+
+    return copy(reversedBatch);
   }
 
   function resolveVoucherSeriesForPurpose({
@@ -2142,6 +2593,8 @@ export function createLedgerEngine({
       accountingCurrencyProfiles: [...state.accountingCurrencyProfilesByCompanyId.values()],
       fxRevaluationBatches: [...state.fxRevaluationBatches.values()],
       voucherSeries: [...state.voucherSeries.values()],
+      openingBalanceBatches: [...state.openingBalanceBatches.values()],
+      yearEndTransferBatches: [...state.yearEndTransferBatches.values()],
       postingIntents: [...state.postingIntents.values()],
       accountingPeriods: [...state.accountingPeriods.values()],
       dimensionCatalogs: [...state.dimensionCatalogsByCompanyId.values()],
@@ -2185,6 +2638,366 @@ export function createLedgerEngine({
       }
     }
     return false;
+  }
+
+  function requireOpeningBalanceFiscalYear({ companyId, fiscalYearId, openingDate }) {
+    if (!fiscalYearPlatform || typeof fiscalYearPlatform.getFiscalYear !== "function") {
+      throw httpError(409, "fiscal_year_runtime_required", "Opening balance posting requires the fiscal-year runtime.");
+    }
+    const fiscalYear = fiscalYearPlatform.getFiscalYear({
+      companyId,
+      fiscalYearId: requireText(fiscalYearId, "fiscal_year_id_required")
+    });
+    const resolvedOpeningDate = normalizeDate(openingDate, "opening_balance_date_invalid");
+    if (resolvedOpeningDate !== fiscalYear.startDate) {
+      throw httpError(409, "opening_balance_must_match_fiscal_year_start", "Opening balance date must match the fiscal-year start date.");
+    }
+    return fiscalYear;
+  }
+
+  function assertOpeningBalanceUniqueness({ companyId, fiscalYearId }) {
+    for (const batch of state.openingBalanceBatches.values()) {
+      if (batch.companyId === companyId && batch.fiscalYearId === fiscalYearId && batch.status !== "reversed") {
+        throw httpError(409, "opening_balance_already_posted", "An opening balance batch is already posted for the fiscal year.");
+      }
+    }
+  }
+
+  function requireOpeningBalanceBatch(companyId, openingBalanceBatchId) {
+    const batch = state.openingBalanceBatches.get(requireText(openingBalanceBatchId, "opening_balance_batch_id_required"));
+    if (!batch || batch.companyId !== companyId) {
+      throw httpError(404, "opening_balance_batch_not_found", "Opening balance batch was not found.");
+    }
+    return batch;
+  }
+
+  function requireYearEndTransferFiscalYear({ companyId, fiscalYearId }) {
+    if (!fiscalYearPlatform || typeof fiscalYearPlatform.getFiscalYear !== "function") {
+      throw httpError(409, "fiscal_year_runtime_required", "Year-end transfer posting requires the fiscal-year runtime.");
+    }
+    return fiscalYearPlatform.getFiscalYear({
+      companyId,
+      fiscalYearId: requireText(fiscalYearId, "fiscal_year_id_required")
+    });
+  }
+
+  function assertYearEndTransferKind(value) {
+    const normalized = requireText(value, "year_end_transfer_kind_required").toUpperCase();
+    if (!YEAR_END_TRANSFER_KINDS.includes(normalized)) {
+      throw httpError(400, "year_end_transfer_kind_invalid", "Year-end transfer kind is not supported.");
+    }
+    return normalized;
+  }
+
+  function resolveYearEndTransferDate({ transferKind, fiscalYear, transferDate }) {
+    if (transferKind === "RESULT_TRANSFER") {
+      const resolved = normalizeDate(transferDate || fiscalYear.endDate, "year_end_transfer_date_invalid");
+      if (resolved !== fiscalYear.endDate) {
+        throw httpError(
+          409,
+          "year_end_transfer_must_match_fiscal_year_end",
+          "Result transfer must be posted on the fiscal-year end date."
+        );
+      }
+      return resolved;
+    }
+    const resolved = normalizeDate(
+      transferDate || addDaysToIsoDate(fiscalYear.endDate, 1),
+      "retained_earnings_transfer_date_invalid"
+    );
+    if (resolved <= fiscalYear.endDate) {
+      throw httpError(
+        409,
+        "retained_earnings_transfer_must_follow_fiscal_year_end",
+        "Retained earnings transfer must be posted after the fiscal-year end date."
+      );
+    }
+    return resolved;
+  }
+
+  function assertYearEndTransferUniqueness({ companyId, fiscalYearId, transferKind }) {
+    for (const batch of state.yearEndTransferBatches.values()) {
+      if (
+        batch.companyId === companyId
+        && batch.fiscalYearId === fiscalYearId
+        && batch.transferKind === transferKind
+        && batch.status !== "reversed"
+      ) {
+        throw httpError(
+          409,
+          "year_end_transfer_already_posted",
+          `A ${transferKind.toLowerCase()} batch is already posted for the fiscal year.`
+        );
+      }
+    }
+  }
+
+  function requireYearEndTransferBatch(companyId, yearEndTransferBatchId) {
+    const batch = state.yearEndTransferBatches.get(requireText(yearEndTransferBatchId, "year_end_transfer_batch_id_required"));
+    if (!batch || batch.companyId !== companyId) {
+      throw httpError(404, "year_end_transfer_batch_not_found", "Year-end transfer batch was not found.");
+    }
+    return batch;
+  }
+
+  function requireActiveYearEndTransferBatch({ companyId, fiscalYearId, transferKind }) {
+    const batch = [...state.yearEndTransferBatches.values()].find(
+      (candidate) =>
+        candidate.companyId === companyId
+        && candidate.fiscalYearId === fiscalYearId
+        && candidate.transferKind === transferKind
+        && candidate.status !== "reversed"
+    );
+    if (!batch) {
+      throw httpError(
+        409,
+        "year_end_transfer_dependency_missing",
+        `Required ${transferKind.toLowerCase()} batch is not posted for the fiscal year.`
+      );
+    }
+    return batch;
+  }
+
+  function requireYearEndTransferEquityAccount({ companyId, accountNumber, errorCode }) {
+    const account = requireAccount(companyId, accountNumber);
+    if (account.accountClass !== "2") {
+      throw httpError(409, "year_end_transfer_equity_account_required", `Account ${account.accountNumber} must be an equity account (class 2).`);
+    }
+    return account;
+  }
+
+  function buildResultTransferLineInputs({ companyId, fiscalYear, resultAccountNumber, sourceId }) {
+    const balances = summarizePostedAccountBalances({
+      companyId,
+      fromDate: fiscalYear.startDate,
+      toDate: fiscalYear.endDate,
+      accountClasses: ["3", "4", "5", "6", "7", "8"],
+      excludeSourceTypes: ["YEAR_END_TRANSFER"]
+    });
+    if (balances.length === 0) {
+      throw httpError(409, "year_end_transfer_no_profit_loss_balance", "No posted profit-and-loss balances exist for the fiscal year.");
+    }
+    const generatedLines = [];
+    let netResultAmount = 0;
+    for (const balance of balances) {
+      netResultAmount = normalizeSignedMoney(netResultAmount + balance.balanceAmount);
+      if (balance.balanceAmount > 0) {
+        generatedLines.push({
+          accountNumber: balance.accountNumber,
+          creditAmount: balance.balanceAmount,
+          sourceId
+        });
+      } else {
+        generatedLines.push({
+          accountNumber: balance.accountNumber,
+          debitAmount: normalizeSignedMoney(0 - balance.balanceAmount),
+          sourceId
+        });
+      }
+    }
+    if (netResultAmount > 0) {
+      generatedLines.push({
+        accountNumber: resultAccountNumber,
+        debitAmount: netResultAmount,
+        sourceId
+      });
+    } else if (netResultAmount < 0) {
+      generatedLines.push({
+        accountNumber: resultAccountNumber,
+        creditAmount: normalizeSignedMoney(0 - netResultAmount),
+        sourceId
+      });
+    }
+    return {
+      lines: normalizeYearEndTransferLineInputs({
+        companyId,
+        lines: generatedLines,
+        sourceId
+      }),
+      capturedBalances: balances
+    };
+  }
+
+  function buildRetainedEarningsTransferLineInputs({
+    companyId,
+    transferDate,
+    sourceAccountNumber,
+    destinationAccountNumber,
+    sourceId
+  }) {
+    const balances = summarizePostedAccountBalances({
+      companyId,
+      toDate: transferDate,
+      accountNumbers: [sourceAccountNumber]
+    });
+    const sourceBalanceAmount = balances[0]?.balanceAmount ?? 0;
+    if (sourceBalanceAmount === 0) {
+      throw httpError(
+        409,
+        "retained_earnings_source_balance_missing",
+        "Source result account has no posted balance to transfer into retained earnings."
+      );
+    }
+    return {
+      lines: normalizeYearEndTransferLineInputs({
+        companyId,
+        sourceId,
+        lines: [
+          sourceBalanceAmount > 0
+            ? { accountNumber: sourceAccountNumber, creditAmount: sourceBalanceAmount, sourceId }
+            : { accountNumber: sourceAccountNumber, debitAmount: normalizeSignedMoney(0 - sourceBalanceAmount), sourceId },
+          sourceBalanceAmount > 0
+            ? { accountNumber: destinationAccountNumber, debitAmount: sourceBalanceAmount, sourceId }
+            : { accountNumber: destinationAccountNumber, creditAmount: normalizeSignedMoney(0 - sourceBalanceAmount), sourceId }
+        ]
+      }),
+      sourceBalanceAmount
+    };
+  }
+
+  function summarizePostedAccountBalances({
+    companyId,
+    fromDate = null,
+    toDate = null,
+    accountClasses = null,
+    accountNumbers = null,
+    excludeSourceTypes = []
+  }) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const accountClassSet = Array.isArray(accountClasses) && accountClasses.length > 0
+      ? new Set(accountClasses.map((value) => requireText(String(value), "account_class_required")))
+      : null;
+    const accountNumberSet = Array.isArray(accountNumbers) && accountNumbers.length > 0
+      ? new Set(accountNumbers.map((value) => normalizeAccountNumber(value)))
+      : null;
+    const excludedSourceTypes = new Set(
+      (excludeSourceTypes || []).map((value) => assertPostingSourceType(requireText(value, "posting_source_type_required")))
+    );
+    const grouped = new Map();
+
+    for (const entry of state.journalEntries.values()) {
+      if (entry.companyId !== resolvedCompanyId || entry.status !== "posted") {
+        continue;
+      }
+      if (fromDate && entry.journalDate < fromDate) {
+        continue;
+      }
+      if (toDate && entry.journalDate > toDate) {
+        continue;
+      }
+      if (excludedSourceTypes.has(entry.sourceType)) {
+        continue;
+      }
+      for (const line of requireJournalLines(entry.journalEntryId)) {
+        const account = state.accounts.get(line.accountId) || {
+          accountNumber: line.accountNumber,
+          accountName: line.accountName || `Account ${line.accountNumber}`,
+          accountClass: String(line.accountNumber).slice(0, 1)
+        };
+        if (accountClassSet && !accountClassSet.has(account.accountClass)) {
+          continue;
+        }
+        if (accountNumberSet && !accountNumberSet.has(account.accountNumber)) {
+          continue;
+        }
+        const existing = grouped.get(account.accountNumber) || {
+          accountNumber: account.accountNumber,
+          accountName: account.accountName,
+          accountClass: account.accountClass,
+          balanceAmount: 0
+        };
+        existing.balanceAmount = normalizeSignedMoney(
+          Number(existing.balanceAmount || 0) + Number(line.debitAmount || 0) - Number(line.creditAmount || 0)
+        );
+        grouped.set(account.accountNumber, existing);
+      }
+    }
+
+    return [...grouped.values()]
+      .filter((candidate) => candidate.balanceAmount !== 0)
+      .sort((left, right) => left.accountNumber.localeCompare(right.accountNumber))
+      .map((candidate) => Object.freeze(copy(candidate)));
+  }
+
+  function normalizeOpeningBalanceLineInputs({ companyId, lines, sourceId }) {
+    if (!Array.isArray(lines) || lines.length < 2) {
+      throw httpError(400, "opening_balance_lines_required", "Opening balance requires at least two lines.");
+    }
+    const normalizedLines = lines.map((line) => {
+      const accountNumber = normalizeAccountNumber(line.accountNumber);
+      const account = requireAccount(companyId, accountNumber);
+      if (!["1", "2"].includes(account.accountClass)) {
+        throw httpError(
+          409,
+          "opening_balance_profit_loss_account_forbidden",
+          `Opening balance line ${account.accountNumber} must use a balance-sheet account class (1-2).`
+        );
+      }
+      const debitAmount = normalizeMoney(line.debitAmount || 0);
+      const creditAmount = normalizeMoney(line.creditAmount || 0);
+      if (!isPositiveMoney(debitAmount) && !isPositiveMoney(creditAmount)) {
+        throw httpError(400, "opening_balance_line_amount_required", "Each opening balance line requires a debit or credit amount.");
+      }
+      if (isPositiveMoney(debitAmount) && isPositiveMoney(creditAmount)) {
+        throw httpError(400, "opening_balance_line_single_sided_required", "Each opening balance line must be either debit or credit.");
+      }
+      return Object.freeze({
+        accountNumber,
+        debitAmount,
+        creditAmount,
+        dimensionJson: copy(line.dimensionJson || {}),
+        sourceType: "HISTORICAL_IMPORT",
+        sourceId: requireText(line.sourceId || sourceId, "source_id_required")
+      });
+    });
+    const totals = calculateInputLineTotals(normalizedLines);
+    if (totals.totalDebit !== totals.totalCredit) {
+      throw httpError(400, "opening_balance_unbalanced", "Opening balance lines must balance debit and credit exactly.");
+    }
+    return Object.freeze(normalizedLines);
+  }
+
+  function normalizeYearEndTransferLineInputs({ companyId, lines, sourceId }) {
+    if (!Array.isArray(lines) || lines.length < 2) {
+      throw httpError(400, "year_end_transfer_lines_required", "Year-end transfer requires at least two lines.");
+    }
+    const normalizedLines = lines.map((line) => {
+      const account = requireAccount(companyId, line.accountNumber);
+      const debitAmount = normalizeSignedMoney(line.debitAmount || 0);
+      const creditAmount = normalizeSignedMoney(line.creditAmount || 0);
+      if (debitAmount === 0 && creditAmount === 0) {
+        throw httpError(400, "year_end_transfer_line_amount_required", "Each year-end transfer line requires a debit or credit amount.");
+      }
+      if (debitAmount > 0 && creditAmount > 0) {
+        throw httpError(400, "year_end_transfer_line_single_sided_required", "Each year-end transfer line must be either debit or credit.");
+      }
+      return Object.freeze({
+        accountNumber: account.accountNumber,
+        debitAmount,
+        creditAmount,
+        dimensionJson: copy(line.dimensionJson || {}),
+        sourceType: "YEAR_END_TRANSFER",
+        sourceId: requireText(line.sourceId || sourceId, "line_source_id_required")
+      });
+    });
+    const totals = calculateInputLineTotals(normalizedLines);
+    if (totals.totalDebit !== totals.totalCredit) {
+      throw httpError(400, "year_end_transfer_unbalanced", "Year-end transfer lines must balance debit and credit exactly.");
+    }
+    return Object.freeze(normalizedLines);
+  }
+
+  function calculateInputLineTotals(lines) {
+    let totalDebit = 0;
+    let totalCredit = 0;
+    for (const line of lines) {
+      totalDebit = normalizeMoney(totalDebit + normalizeMoney(line.debitAmount || 0));
+      totalCredit = normalizeMoney(totalCredit + normalizeMoney(line.creditAmount || 0));
+    }
+    return Object.freeze({
+      totalDebit,
+      totalCredit
+    });
   }
 
   function findVoucherSeries(runtimeState, companyId, seriesCode) {
@@ -2714,6 +3527,7 @@ export function createLedgerEngine({
 
 function seedDemoState(state, clock) {
   const now = new Date(clock()).toISOString();
+  const catalogVersion = getAccountCatalogVersion(DEFAULT_CHART_TEMPLATE_ID);
   state.accountingCurrencyProfilesByCompanyId.set(DEMO_LEDGER_COMPANY_ID, {
     accountingCurrencyProfileId: crypto.randomUUID(),
     companyId: DEMO_LEDGER_COMPANY_ID,
@@ -2755,6 +3569,87 @@ function seedDemoState(state, clock) {
     createdAt: now,
     updatedAt: now
   });
+  seedChartTemplateAccounts(state, DEMO_LEDGER_COMPANY_ID, catalogVersion, now, "demo_seed");
+  seedDefaultVoucherSeries(state, DEMO_LEDGER_COMPANY_ID, now, "demo_seed");
+}
+
+function seedChartTemplateAccounts(state, companyId, catalogVersion, now, changeReasonCode) {
+  for (const definition of catalogVersion.accounts) {
+    const key = toCompanyScopedKey(companyId, definition.accountNumber);
+    if (state.accountIdsByCompanyNumber.has(key)) {
+      continue;
+    }
+    const account = {
+      accountId: crypto.randomUUID(),
+      companyId,
+      accountNumber: definition.accountNumber,
+      accountName: definition.accountName,
+      accountClass: definition.accountClass,
+      status: "active",
+      governanceVersion: 1,
+      locked: true,
+      systemManaged: true,
+      allowManualPosting: true,
+      requiredDimensionKeys: [],
+      metadataJson: {
+        chartTemplateId: catalogVersion.versionId,
+        chartTemplateSourceName: catalogVersion.sourceName,
+        chartTemplateSourceDocumentName: catalogVersion.sourceDocumentName,
+        chartTemplateChecksumAlgorithm: catalogVersion.checksumAlgorithm,
+        chartTemplateChecksum: catalogVersion.checksum,
+        chartTemplateEffectiveFrom: catalogVersion.effectiveFrom,
+        chartTemplatePublishedAt: catalogVersion.publishedAt,
+        seedSource: "account_catalog_version",
+        chartGovernanceStatus: "published",
+        lastChangeReasonCode: changeReasonCode
+      },
+      createdAt: now,
+      updatedAt: now
+    };
+    state.accounts.set(account.accountId, account);
+    state.accountIdsByCompanyNumber.set(key, account.accountId);
+  }
+}
+
+function seedDefaultVoucherSeries(state, companyId, now, changeReasonCode) {
+  for (const seriesCode of DEFAULT_VOUCHER_SERIES_CODES) {
+    const key = toCompanyScopedKey(companyId, seriesCode);
+    if (state.voucherSeriesIdsByCompanyCode.has(key)) {
+      continue;
+    }
+    const voucherSeries = {
+      voucherSeriesId: crypto.randomUUID(),
+      companyId,
+      seriesCode,
+      description: defaultSeriesDescription(seriesCode),
+      nextNumber: 1,
+      status: "active",
+      purposeCodes: defaultSeriesPurposeCodes(seriesCode),
+      importedSequencePreservationEnabled: true,
+      profileVersion: 1,
+      locked: true,
+      systemManaged: true,
+      changeReasonCode,
+      createdAt: now,
+      updatedAt: now
+    };
+    state.voucherSeries.set(voucherSeries.voucherSeriesId, voucherSeries);
+    state.voucherSeriesIdsByCompanyCode.set(key, voucherSeries.voucherSeriesId);
+  }
+}
+
+function appendToIndex(index, key, value) {
+  const items = index.get(key) || [];
+  items.push(value);
+  index.set(key, items);
+}
+
+function normalizeReferenceList(values) {
+  if (!Array.isArray(values)) {
+    return Object.freeze([]);
+  }
+  const normalizedValues = [...new Set(values.map((value) => normalizeOptionalText(value)).filter(Boolean))];
+  return Object.freeze(normalizedValues);
 }
 
 function defaultSeriesDescription(seriesCode) {
@@ -2779,7 +3674,7 @@ function defaultSeriesPurposeCodes(seriesCode) {
   return copy(DEFAULT_VOUCHER_SERIES_PURPOSE_MAP[seriesCode] || []);
 }
 
-function requirePostingRecipe(recipeCode) {
+  function requirePostingRecipe(recipeCode) {
   const resolvedRecipeCode = requireText(recipeCode, "posting_recipe_code_required").toUpperCase();
   const recipe = POSTING_RECIPES_BY_CODE.get(resolvedRecipeCode);
   if (!recipe) {
@@ -2818,6 +3713,12 @@ function normalizeDate(value, code) {
   if (Number.isNaN(normalized.getTime())) {
     throw httpError(400, code, "Date is invalid.");
   }
+  return normalized.toISOString().slice(0, 10);
+}
+
+function addDaysToIsoDate(value, days) {
+  const normalized = new Date(`${normalizeDate(value, "date_invalid")}T00:00:00.000Z`);
+  normalized.setUTCDate(normalized.getUTCDate() + Number(days || 0));
   return normalized.toISOString().slice(0, 10);
 }
 
@@ -2933,6 +3834,18 @@ function normalizeDimensionValueStatus(value) {
 
 function normalizeLedgerLabel(value, code) {
   const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    throw httpError(400, code, `${code} is required.`);
+  }
+  return normalized;
+}
+
+function normalizeCode(value, code) {
+  const normalized = requireText(value, code)
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase();
   if (!normalized) {
     throw httpError(400, code, `${code} is required.`);
   }

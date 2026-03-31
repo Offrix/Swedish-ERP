@@ -465,6 +465,12 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/ledger/accounting-periods",
               "/v1/ledger/accounting-periods/:accountingPeriodId/lock",
               "/v1/ledger/accounting-periods/:accountingPeriodId/reopen",
+              "/v1/ledger/opening-balances",
+              "/v1/ledger/opening-balances/:openingBalanceBatchId",
+              "/v1/ledger/opening-balances/:openingBalanceBatchId/reverse",
+              "/v1/ledger/year-end-transfers",
+              "/v1/ledger/year-end-transfers/:yearEndTransferBatchId",
+              "/v1/ledger/year-end-transfers/:yearEndTransferBatchId/reverse",
               "/v1/accounting-method/eligibility-assessments",
               "/v1/accounting-method/profiles",
               "/v1/accounting-method/profiles/:methodProfileId",
@@ -476,6 +482,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/accounting-method/change-requests/:methodChangeRequestId/reject",
               "/v1/accounting-method/year-end-catch-up-runs",
               "/v1/accounting-method/year-end-catch-up-runs/:yearEndCatchUpRunId",
+              "/v1/accounting-method/year-end-catch-up-runs/:yearEndCatchUpRunId/reverse",
               "/v1/fiscal-years/profiles",
               "/v1/fiscal-years/change-requests",
               "/v1/fiscal-years/change-requests/:changeRequestId/approve",
@@ -3110,6 +3117,224 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         locked: body.locked,
         changeReasonCode: body.changeReasonCode ?? null,
         actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ledger/opening-balances") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger_opening_balance",
+      scopeCode: "ledger"
+    });
+    writeJson(res, 200, {
+      items: platform.listOpeningBalanceBatches({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ledger/opening-balances") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger_opening_balance",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createOpeningBalanceBatch({
+        companyId,
+        fiscalYearId: body.fiscalYearId,
+        openingDate: body.openingDate,
+        sourceCode: body.sourceCode,
+        externalReference: body.externalReference || null,
+        description: body.description || null,
+        evidenceRefs: body.evidenceRefs || [],
+        lines: body.lines,
+        actorId: principal.userId,
+        idempotencyKey: body.idempotencyKey,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const openingBalanceBatchMatch = matchPath(path, "/v1/ledger/opening-balances/:openingBalanceBatchId");
+  if (openingBalanceBatchMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger_opening_balance",
+      objectId: openingBalanceBatchMatch.openingBalanceBatchId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getOpeningBalanceBatch({
+        companyId,
+        openingBalanceBatchId: openingBalanceBatchMatch.openingBalanceBatchId
+      })
+    );
+    return;
+  }
+
+  const openingBalanceReverseMatch = matchPath(path, "/v1/ledger/opening-balances/:openingBalanceBatchId/reverse");
+  if (openingBalanceReverseMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger_opening_balance",
+      objectId: openingBalanceReverseMatch.openingBalanceBatchId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.reverseOpeningBalanceBatch({
+        companyId,
+        openingBalanceBatchId: openingBalanceReverseMatch.openingBalanceBatchId,
+        reasonCode: body.reasonCode,
+        reversedOn: body.reversedOn || null,
+        actorId: principal.userId,
+        approvedByActorId: body.approvedByActorId,
+        approvedByRoleCode: body.approvedByRoleCode,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ledger/year-end-transfers") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger_year_end_transfer",
+      scopeCode: "ledger"
+    });
+    writeJson(res, 200, {
+      items: platform.listYearEndTransferBatches({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ledger/year-end-transfers") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger_year_end_transfer",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createYearEndTransferBatch({
+        companyId,
+        fiscalYearId: body.fiscalYearId,
+        transferKind: body.transferKind,
+        transferDate: body.transferDate || null,
+        sourceCode: body.sourceCode,
+        externalReference: body.externalReference || null,
+        description: body.description || null,
+        evidenceRefs: body.evidenceRefs || [],
+        resultAccountNumber: body.resultAccountNumber,
+        retainedEarningsAccountNumber: body.retainedEarningsAccountNumber,
+        actorId: principal.userId,
+        idempotencyKey: body.idempotencyKey,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const yearEndTransferBatchMatch = matchPath(path, "/v1/ledger/year-end-transfers/:yearEndTransferBatchId");
+  if (yearEndTransferBatchMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger_year_end_transfer",
+      objectId: yearEndTransferBatchMatch.yearEndTransferBatchId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getYearEndTransferBatch({
+        companyId,
+        yearEndTransferBatchId: yearEndTransferBatchMatch.yearEndTransferBatchId
+      })
+    );
+    return;
+  }
+
+  const yearEndTransferReverseMatch = matchPath(path, "/v1/ledger/year-end-transfers/:yearEndTransferBatchId/reverse");
+  if (yearEndTransferReverseMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger_year_end_transfer",
+      objectId: yearEndTransferReverseMatch.yearEndTransferBatchId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.reverseYearEndTransferBatch({
+        companyId,
+        yearEndTransferBatchId: yearEndTransferReverseMatch.yearEndTransferBatchId,
+        reasonCode: body.reasonCode,
+        reversedOn: body.reversedOn || null,
+        actorId: principal.userId,
+        approvedByActorId: body.approvedByActorId,
+        approvedByRoleCode: body.approvedByRoleCode,
         correlationId: body.correlationId || createCorrelationId()
       })
     );

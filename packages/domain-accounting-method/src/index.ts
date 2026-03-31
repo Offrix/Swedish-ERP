@@ -81,6 +81,18 @@ export interface MethodChangeRequest {
   readonly updatedAt: string;
 }
 
+export interface YearEndCatchUpPostingLine {
+  readonly accountNumber: string;
+  readonly debitAmount: number;
+  readonly creditAmount: number;
+  readonly currencyCode: string;
+  readonly exchangeRate: number | null;
+  readonly functionalDebitAmount: number;
+  readonly functionalCreditAmount: number;
+  readonly dimensionJson: Record<string, unknown>;
+  readonly sourceId: string;
+}
+
 export interface YearEndCatchUpItem {
   readonly openItemType: string;
   readonly sourceType: string;
@@ -88,10 +100,15 @@ export interface YearEndCatchUpItem {
   readonly recognitionDate: string;
   readonly dueDate: string | null;
   readonly unpaidAmount: number;
+  readonly functionalUnpaidAmount: number;
   readonly currency: string;
+  readonly exchangeRate: number | null;
   readonly vatAmount: number | null;
   readonly counterpartyId: string | null;
+  readonly openItemAccountNumber: string;
+  readonly accountingCurrencyCode: string;
   readonly postingIntentCode: string;
+  readonly postingLines: readonly YearEndCatchUpPostingLine[];
 }
 
 export interface YearEndCatchUpRun {
@@ -102,9 +119,12 @@ export interface YearEndCatchUpRun {
   readonly methodCode: AccountingMethodCode;
   readonly rulepackVersion: string;
   readonly timingSignal: "year_end_catch_up";
-  readonly status: "completed";
+  readonly status: "completed" | "reversed";
   readonly snapshotHash: string;
   readonly capturedItemCount: number;
+  readonly accountingCurrencyCode: string;
+  readonly journalEntryId: string | null;
+  readonly reversalJournalEntryId: string | null;
   readonly totals: {
     readonly receivablesAmount: number;
     readonly payablesAmount: number;
@@ -112,4 +132,6 @@ export interface YearEndCatchUpRun {
   readonly items: readonly YearEndCatchUpItem[];
   readonly createdByActorId: string;
   readonly createdAt: string;
+  readonly reversedAt?: string;
+  readonly reversedByActorId?: string;
 }

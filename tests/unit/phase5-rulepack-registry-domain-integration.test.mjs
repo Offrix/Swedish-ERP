@@ -23,6 +23,7 @@ import {
   TAX_ACCOUNT_RULEPACK_CODE,
   TAX_ACCOUNT_OFFSET_RULEPACK_CODE
 } from "../../packages/domain-tax-account/src/constants.mjs";
+import { createLedgerPlatform } from "../../packages/domain-ledger/src/index.mjs";
 
 const TEST_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -55,6 +56,7 @@ function buildRulePack({
 }
 
 test("phase 5.1 accounting-method pins registry rulepacks by assessment and effective date", () => {
+  let ledger = null;
   const registry = createRulePackRegistry({
     seedRulePacks: [
       buildRulePack({
@@ -77,7 +79,22 @@ test("phase 5.1 accounting-method pins registry rulepacks by assessment and effe
   const engine = createAccountingMethodEngine({
     seedDemo: false,
     ruleRegistry: registry,
-    clock: () => new Date("2027-01-05T09:00:00Z")
+    clock: () => new Date("2027-01-05T09:00:00Z"),
+    getLedgerPlatform: () => ledger
+  });
+  ledger = createLedgerPlatform({
+    seedDemo: false,
+    accountingMethodPlatform: engine,
+    clock: () => new Date("2027-12-31T09:00:00Z")
+  });
+  ledger.installLedgerCatalog({
+    companyId: "company_accounting_method",
+    actorId: "tester"
+  });
+  ledger.ensureAccountingYearPeriod({
+    companyId: "company_accounting_method",
+    fiscalYear: 2027,
+    actorId: "tester"
   });
 
   const assessment2026 = engine.assessCashMethodEligibility({
@@ -110,7 +127,19 @@ test("phase 5.1 accounting-method pins registry rulepacks by assessment and effe
   const catchUp = engine.runYearEndCatchUp({
     companyId: "company_accounting_method",
     fiscalYearEndDate: "2027-12-31",
-    openItems: [{ openItemType: "customer_invoice", sourceId: "inv_1", unpaidAmount: 500, recognitionDate: "2027-12-20" }],
+    openItems: [
+      {
+        openItemType: "customer_invoice",
+        sourceId: "inv_1",
+        openItemAccountNumber: "1210",
+        unpaidAmount: 500,
+        recognitionDate: "2027-12-20",
+        postingLines: [
+          { accountNumber: "3010", creditAmount: 400 },
+          { accountNumber: "2610", creditAmount: 100 }
+        ]
+      }
+    ],
     actorId: "tester"
   });
 
@@ -119,6 +148,7 @@ test("phase 5.1 accounting-method pins registry rulepacks by assessment and effe
   assert.equal(profile2027.rulepackId, "accounting-method-se-2027.1");
   assert.equal(profile2027.eligibilitySnapshot.rulepackId, "accounting-method-se-2027.1");
   assert.equal(catchUp.rulepackId, "accounting-method-se-2027.1");
+  assert.equal(typeof catchUp.journalEntryId, "string");
 });
 
 test("phase 5.1 fiscal-year pins registry rulepacks on profile, request and fiscal year", () => {

@@ -3,6 +3,7 @@ export type VoucherSeriesCode = string;
 export type VoucherSeriesPurposeCode = string;
 export type VoucherSeriesStatus = "active" | "paused" | "archived";
 export type AccountingCurrencyCode = "SEK" | "EUR";
+export type YearEndTransferKind = "RESULT_TRANSFER" | "RETAINED_EARNINGS_TRANSFER";
 
 export type PostingSourceType =
   | "AR_INVOICE"
@@ -17,6 +18,7 @@ export type PostingSourceType =
   | "TRAVEL_CLAIM"
   | "VAT_SETTLEMENT"
   | "BANK_IMPORT"
+  | "HISTORICAL_IMPORT"
   | "MANUAL_JOURNAL"
   | "ASSET_DEPRECIATION"
   | "PERIOD_ACCRUAL"
@@ -173,6 +175,90 @@ export interface JournalLine {
   readonly createdAt: string;
 }
 
+export interface OpeningBalanceBatchLine {
+  readonly accountNumber: string;
+  readonly debitAmount: number;
+  readonly creditAmount: number;
+  readonly dimensionJson: Record<string, unknown>;
+  readonly sourceType: "HISTORICAL_IMPORT";
+  readonly sourceId: string;
+}
+
+export interface OpeningBalanceBatch {
+  readonly openingBalanceBatchId: string;
+  readonly companyId: string;
+  readonly fiscalYearId: string;
+  readonly fiscalYearStartDate: string;
+  readonly accountingPeriodId: string;
+  readonly openingDate: string;
+  readonly status: "posted" | "reversed";
+  readonly sourceCode: string;
+  readonly externalReference: string | null;
+  readonly accountingCurrencyCode: string;
+  readonly lineCount: number;
+  readonly totals: {
+    readonly totalDebit: number;
+    readonly totalCredit: number;
+  };
+  readonly journalEntryId: string;
+  readonly reversalJournalEntryId: string | null;
+  readonly evidenceRefs: readonly string[];
+  readonly lines: readonly OpeningBalanceBatchLine[];
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly reversedAt: string | null;
+  readonly reversedByActorId: string | null;
+}
+
+export interface YearEndTransferBatchLine {
+  readonly accountNumber: string;
+  readonly debitAmount: number;
+  readonly creditAmount: number;
+  readonly dimensionJson: Record<string, unknown>;
+  readonly sourceType: "YEAR_END_TRANSFER";
+  readonly sourceId: string;
+}
+
+export interface YearEndTransferCapturedBalance {
+  readonly accountNumber: string;
+  readonly accountName: string;
+  readonly accountClass: string;
+  readonly balanceAmount: number;
+}
+
+export interface YearEndTransferBatch {
+  readonly yearEndTransferBatchId: string;
+  readonly companyId: string;
+  readonly fiscalYearId: string;
+  readonly fiscalYearStartDate: string;
+  readonly fiscalYearEndDate: string;
+  readonly accountingPeriodId: string;
+  readonly transferKind: YearEndTransferKind;
+  readonly transferDate: string;
+  readonly status: "posted" | "reversed";
+  readonly sourceCode: string;
+  readonly externalReference: string | null;
+  readonly accountingCurrencyCode: string;
+  readonly resultAccountNumber: string | null;
+  readonly retainedEarningsAccountNumber: string | null;
+  readonly lineCount: number;
+  readonly totals: {
+    readonly totalDebit: number;
+    readonly totalCredit: number;
+  };
+  readonly journalEntryId: string;
+  readonly reversalJournalEntryId: string | null;
+  readonly evidenceRefs: readonly string[];
+  readonly capturedBalances: readonly YearEndTransferCapturedBalance[];
+  readonly sourceBalanceAmount: number | null;
+  readonly resultTransferBatchId: string | null;
+  readonly lines: readonly YearEndTransferBatchLine[];
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly reversedAt: string | null;
+  readonly reversedByActorId: string | null;
+}
+
 export interface CorrectionResult {
   readonly originalJournalEntry: JournalEntry;
   readonly reversalJournalEntry: JournalEntry | null;
@@ -229,3 +315,71 @@ export interface JournalEntry {
   readonly totalCredit: number;
   readonly lines: readonly JournalLine[];
 }
+
+export declare function createOpeningBalanceBatch(options: {
+  companyId: string;
+  fiscalYearId: string;
+  openingDate: string;
+  sourceCode: string;
+  externalReference?: string | null;
+  description?: string | null;
+  evidenceRefs?: readonly string[];
+  lines: readonly JournalLineInput[];
+  actorId: string;
+  idempotencyKey: string;
+  correlationId?: string;
+}): OpeningBalanceBatch;
+
+export declare function listOpeningBalanceBatches(options: { companyId: string }): readonly OpeningBalanceBatch[];
+
+export declare function getOpeningBalanceBatch(options: {
+  companyId: string;
+  openingBalanceBatchId: string;
+}): OpeningBalanceBatch;
+
+export declare function reverseOpeningBalanceBatch(options: {
+  companyId: string;
+  openingBalanceBatchId: string;
+  reasonCode: string;
+  reversedOn?: string | null;
+  actorId: string;
+  approvedByActorId: string;
+  approvedByRoleCode: string;
+  correlationId?: string;
+}): OpeningBalanceBatch;
+
+export declare function createYearEndTransferBatch(options: {
+  companyId: string;
+  fiscalYearId: string;
+  transferKind: YearEndTransferKind;
+  transferDate?: string | null;
+  sourceCode: string;
+  externalReference?: string | null;
+  description?: string | null;
+  evidenceRefs?: readonly string[];
+  resultAccountNumber?: string;
+  retainedEarningsAccountNumber?: string;
+  actorId: string;
+  idempotencyKey: string;
+  correlationId?: string;
+}): YearEndTransferBatch;
+
+export declare function listYearEndTransferBatches(options: {
+  companyId: string;
+}): readonly YearEndTransferBatch[];
+
+export declare function getYearEndTransferBatch(options: {
+  companyId: string;
+  yearEndTransferBatchId: string;
+}): YearEndTransferBatch;
+
+export declare function reverseYearEndTransferBatch(options: {
+  companyId: string;
+  yearEndTransferBatchId: string;
+  reasonCode: string;
+  reversedOn?: string | null;
+  actorId: string;
+  approvedByActorId: string;
+  approvedByRoleCode: string;
+  correlationId?: string;
+}): YearEndTransferBatch;
