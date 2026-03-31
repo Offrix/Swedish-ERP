@@ -11,6 +11,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/system/bootstrap/validate",
   "/v1/auth/providers/isolation",
   "/v1/auth/logout",
+  "/v1/auth/factors",
   "/v1/auth/challenges",
   "/v1/auth/challenges/:challengeId/complete",
   "/v1/auth/devices",
@@ -124,6 +125,10 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/backoffice/break-glass/:breakGlassId/evidence",
   "/v1/backoffice/break-glass/:breakGlassId/start",
   "/v1/security/classes",
+  "/v1/ops/security/alerts",
+  "/v1/ops/security/budgets",
+  "/v1/ops/security/failure-series",
+  "/v1/ops/security/risk-summary",
   "/v1/ops/observability",
   "/v1/ops/transaction-boundary",
   "/v1/ops/secrets",
@@ -345,6 +350,20 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
       assert.equal(workItemDualApproveContract.requiredActionClass, "operational_work_item_dual_approve");
       assert.equal(workItemDualApproveContract.requiredTrustLevel, "strong_mfa");
       assert.equal(workItemDualApproveContract.requiredScopeType, "operational_work_item");
+
+    const totpEnrollContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/auth/mfa/totp/enroll"
+    );
+    assert.ok(totpEnrollContract);
+    assert.equal(totpEnrollContract.requiredActionClass, "identity_factor_manage");
+    assert.equal(totpEnrollContract.requiredTrustLevel, "mfa");
+
+    const passkeyRegistrationContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/auth/mfa/passkeys/register-options"
+    );
+    assert.ok(passkeyRegistrationContract);
+    assert.equal(passkeyRegistrationContract.requiredActionClass, "identity_factor_manage");
+    assert.equal(passkeyRegistrationContract.requiredTrustLevel, "strong_mfa");
 
     const tenantBootstrapContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/tenant/bootstrap"

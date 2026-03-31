@@ -41,6 +41,7 @@ const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
     "getTotpCodeForTesting": "read",
     "importDurableState": "write",
     "inspectSession": "read",
+    "listAuthFactors": "read",
     "listActiveTeamIds": "read",
     "listChallenges": "read",
     "listCompanyRegistrations": "read",

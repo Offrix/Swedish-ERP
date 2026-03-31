@@ -469,7 +469,7 @@ Ingen filing, payout, payroll approval, period reopen eller support-write utan s
 - [x] 6.3 [HARDEN] Tenant/company bootstrap validerar organisationsnummer, legal form, VAT-registrering, fiscal-year profile och finance readiness redan vid skapande.
 - [x] 6.4 [NEW BUILD][MIGRATE] Trial/live separeras i tenant, credentials, receipts, sequence space, evidence, provider refs, jobs, dashboards och KMS-nycklar; promotion är aldrig in-place.
 - [x] 6.5 [SECURE][HARDEN] Support impersonation, break-glass och access attestation kräver masked views, allowlists, incident id, two-person approval och vattenmärkt session.
-- [ ] 6.6 [SECURE][OPERATIONALIZE] Login/TOTP/passkey/BankID riskkontroller, lockouts, anomaly rules och recovery-flöden körs live.
+- [x] 6.6 [SECURE][OPERATIONALIZE] Login/TOTP/passkey/BankID riskkontroller, lockouts, anomaly rules och recovery-flöden körs live.
 
 **Exit gate**  
 - Auth-factorer och sessioner följer bank-grade storage-regler.

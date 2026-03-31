@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { generateTotpCode } from "../../packages/auth-core/src/index.mjs";
+import { createApiPlatform } from "../../apps/api/src/platform.mjs";
 import {
   DEMO_ADMIN_EMAIL,
   DEMO_APPROVER_TOTP_SECRET,
@@ -484,4 +486,166 @@ test("Phase 6 hardening locks repeated invalid passkey assertions and revokes th
     assertion: "passkey:cred-approver-key"
   });
   assert.equal(asserted.session.status, "active");
+});
+
+test("Phase 6 hardening exposes locked TOTP recovery state and requires alternate-factor step-up before re-enrollment", () => {
+  let now = new Date("2026-03-29T17:00:00Z");
+  const platform = createApiPlatform({
+    clock: () => new Date(now),
+    bootstrapScenarioCode: "test_default_demo"
+  });
+
+  const registrationLogin = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+  platform.verifyTotp({
+    sessionToken: registrationLogin.sessionToken,
+    code: platform.getTotpCodeForTesting({
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL,
+      now
+    })
+  });
+  const registrationActivation = platform.startBankIdAuthentication({
+    sessionToken: registrationLogin.sessionToken
+  });
+  platform.collectBankIdAuthentication({
+    sessionToken: registrationLogin.sessionToken,
+    orderRef: registrationActivation.orderRef,
+    completionToken: platform.getBankIdCompletionTokenForTesting(registrationActivation.orderRef)
+  });
+  const registrationStepUp = platform.startBankIdAuthentication({
+    sessionToken: registrationLogin.sessionToken,
+    actionClass: "identity_device_trust_manage"
+  });
+  platform.collectBankIdAuthentication({
+    sessionToken: registrationLogin.sessionToken,
+    orderRef: registrationStepUp.orderRef,
+    completionToken: platform.getBankIdCompletionTokenForTesting(registrationStepUp.orderRef)
+  });
+  const passkeyRegistration = platform.beginPasskeyRegistration({
+    sessionToken: registrationLogin.sessionToken,
+    deviceName: "Recovery key"
+  });
+  platform.finishPasskeyRegistration({
+    sessionToken: registrationLogin.sessionToken,
+    challengeId: passkeyRegistration.challengeId,
+    credentialId: "cred-recovery-key",
+    publicKey: "pk-recovery-key",
+    deviceName: "Recovery key"
+  });
+
+  const firstLogin = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    assert.throws(
+      () =>
+        platform.verifyTotp({
+          sessionToken: firstLogin.sessionToken,
+          code: "000000"
+        }),
+      (error) => error?.code === "totp_code_invalid" && error?.status === 403
+    );
+  }
+  assert.throws(
+    () =>
+      platform.verifyTotp({
+        sessionToken: firstLogin.sessionToken,
+        code: "000000"
+      }),
+    (error) => error?.code === "totp_temporarily_locked" && error?.status === 429
+  );
+
+  now = new Date("2026-03-29T17:16:00Z");
+  const secondLogin = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    assert.throws(
+      () =>
+        platform.verifyTotp({
+          sessionToken: secondLogin.sessionToken,
+          code: "000000"
+        }),
+      (error) => error?.code === "totp_code_invalid" && error?.status === 403
+    );
+  }
+  assert.throws(
+    () =>
+      platform.verifyTotp({
+        sessionToken: secondLogin.sessionToken,
+        code: "000000"
+      }),
+    (error) => error?.code === "totp_recovery_required" && error?.status === 403
+  );
+
+  now = new Date("2026-03-29T17:17:00Z");
+  const recoveryLogin = platform.startLogin({
+    companyId: DEMO_IDS.companyId,
+    email: DEMO_ADMIN_EMAIL
+  });
+  const recoveryBankIdStart = platform.startBankIdAuthentication({
+    sessionToken: recoveryLogin.sessionToken
+  });
+  platform.collectBankIdAuthentication({
+    sessionToken: recoveryLogin.sessionToken,
+    orderRef: recoveryBankIdStart.orderRef,
+    completionToken: platform.getBankIdCompletionTokenForTesting(recoveryBankIdStart.orderRef)
+  });
+  platform.assertPasskey({
+    sessionToken: recoveryLogin.sessionToken,
+    credentialId: "cred-recovery-key",
+    assertion: "passkey:cred-recovery-key"
+  });
+
+  const beforeRecovery = platform.listAuthFactors({
+    sessionToken: recoveryLogin.sessionToken
+  });
+  const lockedTotp = beforeRecovery.items.find((factor) => factor.factorType === "totp" && factor.status === "locked");
+  assert.ok(lockedTotp);
+  assert.equal(lockedTotp.recoveryRequired, true);
+  assert.equal(lockedTotp.canCurrentSessionPerformRecovery, false);
+  assert.equal(lockedTotp.availableRecoveryFactorTypes.includes("bankid"), true);
+  assert.equal(lockedTotp.availableRecoveryFactorTypes.includes("passkey"), true);
+
+  assert.throws(
+    () =>
+      platform.beginTotpEnrollment({
+        sessionToken: recoveryLogin.sessionToken,
+        label: "Recovered authenticator"
+      }),
+    (error) => error?.code === "auth_factor_manage_step_up_required" && error?.status === 403
+  );
+
+  const recoveryStepUp = platform.startBankIdAuthentication({
+    sessionToken: recoveryLogin.sessionToken,
+    actionClass: "identity_factor_manage"
+  });
+  platform.collectBankIdAuthentication({
+    sessionToken: recoveryLogin.sessionToken,
+    orderRef: recoveryStepUp.orderRef,
+    completionToken: platform.getBankIdCompletionTokenForTesting(recoveryStepUp.orderRef)
+  });
+
+  const reenrollment = platform.beginTotpEnrollment({
+    sessionToken: recoveryLogin.sessionToken,
+    label: "Recovered authenticator"
+  });
+  assert.equal(reenrollment.recoveryMode, true);
+  const verified = platform.verifyTotp({
+    sessionToken: recoveryLogin.sessionToken,
+    factorId: reenrollment.factorId,
+    code: generateTotpCode({ secret: reenrollment.secret, now })
+  });
+  assert.equal(verified.factor.status, "active");
+
+  const afterRecovery = platform.listAuthFactors({
+    sessionToken: recoveryLogin.sessionToken
+  });
+  assert.equal(afterRecovery.items.some((factor) => factor.factorId === reenrollment.factorId && factor.status === "active"), true);
+  assert.equal(afterRecovery.items.some((factor) => factor.factorId === lockedTotp.factorId && factor.status === "superseded"), true);
 });

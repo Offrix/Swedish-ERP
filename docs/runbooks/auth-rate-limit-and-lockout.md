@@ -17,6 +17,8 @@ This runbook governs login-start throttling and TOTP lockout in the phase 6 auth
 - Repeated invalid TOTP codes must trigger a temporary lockout and return `429`.
 - When TOTP lockout is triggered, the attacked pending session must be revoked immediately.
 - After the lockout window expires, a fresh login with a valid TOTP code must succeed again.
+- Reaching the 24-hour account failure cap must lock the affected TOTP factor and return `totp_recovery_required`.
+- Locked TOTP factors must only be recoverable through fresh step-up with another factor and a new TOTP enrollment.
 
 ## Passkey guardrails
 
@@ -31,6 +33,20 @@ This runbook governs login-start throttling and TOTP lockout in the phase 6 auth
 - Invalid federation callback completions must be counted per pending federation request.
 - Repeated invalid broker completion attempts must trigger a temporary lockout and return `429`.
 - When broker challenge lockout is triggered, the attacked pending session must be revoked immediately.
+
+## Live ops surface
+
+- `GET /v1/ops/security/alerts` must expose current auth-related anomaly and lockout alerts for backoffice operators.
+- `GET /v1/ops/security/budgets` must expose live budget counters such as login IP throttling.
+- `GET /v1/ops/security/failure-series` must expose lockout-driving failure series such as `auth_totp_account_failures`.
+- `GET /v1/ops/security/risk-summary` must expose the aggregated subject risk summary for a specific `subjectKey`.
+
+## Recovery flow
+
+- `GET /v1/auth/factors` must expose the user-visible factor inventory and whether a factor is in recovery-required state.
+- TOTP recovery must require `identity_factor_manage` fresh trust from another factor than TOTP.
+- Starting recovery must never expose raw factor secrets from durable state.
+- Completing recovery must supersede the locked TOTP factor and activate the newly enrolled factor.
 
 ## Secret handling
 
@@ -54,5 +70,8 @@ This runbook governs login-start throttling and TOTP lockout in the phase 6 auth
 - Verify auth audit contains blocked/denied records for both login-start and TOTP guardrails.
 - Verify auth audit contains blocked/denied records for passkey guardrails.
 - Verify auth audit contains blocked/denied records for broker challenge guardrails.
+- Verify locked TOTP factors are visible through `GET /v1/auth/factors` with `recoveryRequired: true`.
+- Verify `POST /v1/auth/mfa/totp/enroll` is blocked without fresh alternate-factor step-up when recovery is required.
+- Verify `GET /v1/ops/security/alerts`, `/v1/ops/security/budgets`, `/v1/ops/security/failure-series` and `/v1/ops/security/risk-summary` expose live auth-risk state.
 - Verify exported durable state does not contain raw TOTP secrets.
 - Verify exported durable state does not contain raw BankID or federation broker challenge secrets.

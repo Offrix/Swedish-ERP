@@ -377,6 +377,65 @@ export async function tryHandlePhase14ResilienceRoutes({ req, res, url, path, pl
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/ops/security/alerts") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "security_alert", objectId: companyId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listSecurityAlerts({
+        companyId,
+        alertCode: optionalText(url.searchParams.get("alertCode")),
+        stateCode: optionalText(url.searchParams.get("stateCode")),
+        severity: optionalText(url.searchParams.get("severity"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/ops/security/budgets") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "security_budget", objectId: companyId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listSecurityBudgets({
+        companyId,
+        budgetCode: optionalText(url.searchParams.get("budgetCode"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/ops/security/failure-series") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "security_failure_series", objectId: companyId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listSecurityFailureSeries({
+        companyId,
+        seriesCode: optionalText(url.searchParams.get("seriesCode"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/ops/security/risk-summary") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const subjectKey = requireText(url.searchParams.get("subjectKey"), "security_subject_key_required", "subjectKey is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "security_risk_summary", objectId: companyId, scopeCode: "backoffice" });
+    assertBackofficeReadAccess({ principal });
+    writeJson(res, 200, {
+      summary: platform.getSecurityRiskSummary({
+        companyId,
+        subjectKey
+      })
+    });
+    return true;
+  }
+
   if (req.method === "POST" && path === "/v1/ops/restore-drills") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");

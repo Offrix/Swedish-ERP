@@ -240,6 +240,7 @@ const AUTH_IDENTITY_PROVIDER_DEFINITIONS = Object.freeze({
 });
 
 const ACTION_CLASS_FRESHNESS_TTL_SECONDS = Object.freeze({
+  identity_factor_manage: 1800,
   identity_session_manage: 600,
   identity_device_trust_manage: 1800,
   identity_federation_complete: 900,
@@ -520,6 +521,7 @@ export function createOrgAuthPlatform({
     getIdentityIsolationSummary,
     createChallenge,
     completeChallenge,
+    listAuthFactors,
     listChallenges,
     listDeviceTrustRecords,
     trustDevice,
@@ -1026,8 +1028,11 @@ export function createOrgAuthPlatform({
             failureCount: failureGuardrail.failureCount
           }
         });
+        preserveDurableStateOnFailure(error);
         if (failureGuardrail.lockedUntil) {
-          throw httpError(429, "login_temporarily_locked", "Too many failed login attempts. Try again later.");
+          throw httpError(429, "login_temporarily_locked", "Too many failed login attempts. Try again later.", {
+            preserveDurableStateOnFailure: true
+          });
         }
       }
       throw error;
@@ -1171,6 +1176,26 @@ export function createOrgAuthPlatform({
 
   function beginTotpEnrollment({ sessionToken, label } = {}) {
     const { session, principal } = requireSession(sessionToken, { allowPending: false });
+    const existingTotpFactors = listCompanyUserAuthFactors(session.companyUserId).filter((factor) => factor.factorType === "totp");
+    let recoveryMode = false;
+    if (existingTotpFactors.length > 0) {
+      assertFreshAlternativeFactorForFactorChange({
+        session,
+        factorType: "totp",
+        errorCode: "auth_factor_manage_step_up_required",
+        errorMessage: "TOTP recovery and replacement require a fresh step-up with another factor."
+      });
+      retirePendingEnrollmentFactors({
+        companyUserId: session.companyUserId,
+        factorType: "totp"
+      });
+      clearSecurityFailureSeries({
+        companyId: session.companyId,
+        seriesCode: "auth_totp_account_failures",
+        subjectKey: `company_user:${session.companyUserId}`
+      });
+      recoveryMode = true;
+    }
     const enrollment = generateTotpEnrollment({
       label: label || principal.userId
     });
@@ -1202,6 +1227,7 @@ export function createOrgAuthPlatform({
     });
     return {
       factorId: factor.factorId,
+      recoveryMode,
       secret: enrollment.secret,
       otpauthUrl: enrollment.otpauthUrl
     };
@@ -1291,12 +1317,18 @@ export function createOrgAuthPlatform({
         }
       });
       if (accountFailureSeries?.lockedUntil) {
-        throw httpError(403, "totp_recovery_required", "TOTP factor is locked and must be re-enrolled before it can be used.");
+        throw httpError(403, "totp_recovery_required", "TOTP factor is locked and must be re-enrolled before it can be used.", {
+          preserveDurableStateOnFailure: true
+        });
       }
       if (failureGuardrail.lockedUntil) {
-        throw httpError(429, "totp_temporarily_locked", "Too many invalid TOTP attempts. Try again later.");
+        throw httpError(429, "totp_temporarily_locked", "Too many invalid TOTP attempts. Try again later.", {
+          preserveDurableStateOnFailure: true
+        });
       }
-      throw httpError(403, "totp_code_invalid", "The provided TOTP code was invalid.");
+      throw httpError(403, "totp_code_invalid", "The provided TOTP code was invalid.", {
+        preserveDurableStateOnFailure: true
+      });
     }
     markAuthGuardrailSuccess(totpGuardrail, {
       windowMs: TOTP_FAILURE_WINDOW_MS
@@ -1311,6 +1343,30 @@ export function createOrgAuthPlatform({
       factor.status = "active";
       factor.verifiedAt = nowIso();
       factor.updatedAt = nowIso();
+      const recoveredFactorIds = retireSupersededFactors({
+        companyUserId: session.companyUserId,
+        factorType: "totp",
+        exceptFactorId: factor.factorId
+      });
+      clearSecurityFailureSeries({
+        companyId: session.companyId,
+        seriesCode: "auth_totp_account_failures",
+        subjectKey: `company_user:${session.companyUserId}`
+      });
+      if (recoveredFactorIds.length > 0) {
+        pushAudit({
+          companyId: session.companyId,
+          actorId: principal.userId,
+          action: "auth.mfa.totp.recovery_completed",
+          result: "success",
+          entityType: "auth_factor",
+          entityId: factor.factorId,
+          explanation: "TOTP recovery completed through alternate-factor step-up and re-enrollment.",
+          metadata: {
+            recoveredFactorIds
+          }
+        });
+      }
     }
 
     const challenge = challengeId ? consumeOwnedChallenge({ challengeId, session, allowedTypes: ["totp_step_up"] }) : null;
@@ -1530,9 +1586,13 @@ export function createOrgAuthPlatform({
         }
       });
       if (failureGuardrail.lockedUntil) {
-        throw httpError(429, "passkey_temporarily_locked", "Too many invalid passkey assertions. Try again later.");
+        throw httpError(429, "passkey_temporarily_locked", "Too many invalid passkey assertions. Try again later.", {
+          preserveDurableStateOnFailure: true
+        });
       }
-      throw httpError(403, "passkey_assertion_invalid", "Passkey assertion was invalid.");
+      throw httpError(403, "passkey_assertion_invalid", "Passkey assertion was invalid.", {
+        preserveDurableStateOnFailure: true
+      });
     }
     markAuthGuardrailSuccess(passkeyGuardrail, {
       windowMs: PASSKEY_FAILURE_WINDOW_MS
@@ -1740,8 +1800,11 @@ export function createOrgAuthPlatform({
           }
         });
         if (failureGuardrail.lockedUntil) {
-          throw httpError(429, "bankid_temporarily_locked", "Too many invalid BankID completion attempts. Try again later.");
+          throw httpError(429, "bankid_temporarily_locked", "Too many invalid BankID completion attempts. Try again later.", {
+            preserveDurableStateOnFailure: true
+          });
         }
+        preserveDurableStateOnFailure(error);
       }
       throw error;
     }
@@ -1955,9 +2018,13 @@ export function createOrgAuthPlatform({
           throw httpError(
             429,
             "federation_temporarily_locked",
-            "Too many invalid federation completion attempts. Try again later."
+            "Too many invalid federation completion attempts. Try again later.",
+            {
+              preserveDurableStateOnFailure: true
+            }
           );
         }
+        preserveDurableStateOnFailure(error);
       }
       throw error;
     }
@@ -2863,6 +2930,39 @@ export function createOrgAuthPlatform({
 
   function listAvailableMethods(companyUserId) {
     return [...new Set([...state.authFactors.values()].filter((factor) => factor.companyUserId === companyUserId && factor.status === "active").map((factor) => factor.factorType))];
+  }
+
+  function listAuthFactors({ sessionToken } = {}) {
+    const { session } = requireSession(sessionToken, { allowPending: true });
+    const availableRecoveryFactorTypes = listAvailableMethods(session.companyUserId).filter((factorType) => factorType !== "totp");
+    return {
+      items: listCompanyUserAuthFactors(session.companyUserId).map((factor) => {
+        const recoveryRequired = factor.factorType === "totp" && factor.status === "locked";
+        return {
+          factorId: factor.factorId,
+          factorType: factor.factorType,
+          status: factor.status,
+          deviceName: factor.deviceName || null,
+          createdAt: factor.createdAt || null,
+          verifiedAt: factor.verifiedAt || null,
+          updatedAt: factor.updatedAt || null,
+          recoveryRequired,
+          recoveryActionClass: recoveryRequired ? "identity_factor_manage" : null,
+          availableRecoveryFactorTypes: recoveryRequired ? [...availableRecoveryFactorTypes] : [],
+          canCurrentSessionPerformRecovery: recoveryRequired
+            ? canSatisfyAlternativeFactorStepUp({ session, factorType: "totp" })
+            : false
+        };
+      }),
+      sessionTrustLevel: resolveSessionTrustLevel(session),
+      authenticatedFactorTypes: [...new Set(session.amr || [])],
+      freshActionClasses: Object.keys(session.freshTrustByActionClass || {})
+        .filter((actionClass) => {
+          const freshUntil = session.freshTrustByActionClass?.[actionClass];
+          return freshUntil && new Date(freshUntil) >= currentDate();
+        })
+        .sort()
+    };
   }
 
   function provisionDefaultAuthFactors({ company, user, companyUser, now = nowIso() } = {}) {
@@ -4008,6 +4108,80 @@ export function createOrgAuthPlatform({
     );
   }
 
+  function listCompanyUserAuthFactors(companyUserId) {
+    return [...state.authFactors.values()]
+      .filter((candidate) => candidate.companyUserId === companyUserId)
+      .sort((left, right) => {
+        const leftTime = new Date(left.updatedAt || left.createdAt || 0).getTime();
+        const rightTime = new Date(right.updatedAt || right.createdAt || 0).getTime();
+        return rightTime - leftTime;
+      });
+  }
+
+  function canSatisfyAlternativeFactorStepUp({ session, factorType } = {}) {
+    try {
+      assertFreshAlternativeFactorForFactorChange({
+        session,
+        factorType,
+        errorCode: "auth_factor_manage_step_up_required",
+        errorMessage: "A fresh step-up with another factor is required to manage auth factors."
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function assertFreshAlternativeFactorForFactorChange({
+    session,
+    factorType,
+    errorCode = "auth_factor_manage_step_up_required",
+    errorMessage = "A fresh step-up with another factor is required to manage auth factors."
+  } = {}) {
+    const resolvedFactorType = assertNonEmpty(factorType, "auth_factor_type_required");
+    assertFreshTrust({
+      session,
+      requiredTrustLevel: "mfa",
+      actionClass: "identity_factor_manage",
+      errorCode,
+      errorMessage
+    });
+    const authenticatedFactorTypes = new Set(Array.isArray(session?.amr) ? session.amr : []);
+    if (![...authenticatedFactorTypes].some((candidate) => candidate !== resolvedFactorType)) {
+      throw httpError(403, errorCode, errorMessage);
+    }
+  }
+
+  function retirePendingEnrollmentFactors({ companyUserId, factorType } = {}) {
+    for (const factor of state.authFactors.values()) {
+      if (
+        factor.companyUserId === companyUserId
+        && factor.factorType === factorType
+        && factor.status === "pending_enrollment"
+      ) {
+        factor.status = "superseded";
+        factor.updatedAt = nowIso();
+      }
+    }
+  }
+
+  function retireSupersededFactors({ companyUserId, factorType, exceptFactorId } = {}) {
+    const retiredFactorIds = [];
+    for (const factor of state.authFactors.values()) {
+      if (
+        factor.companyUserId === companyUserId
+        && factor.factorType === factorType
+        && factor.factorId !== exceptFactorId
+        && ["active", "locked", "pending_enrollment"].includes(factor.status)
+      ) {
+        factor.status = "superseded";
+        factor.updatedAt = nowIso();
+        retiredFactorIds.push(factor.factorId);
+      }
+    }
+    return retiredFactorIds;
+  }
+
   function requireChallenge(challengeId, challengeType = null) {
     const challenge = state.authChallenges.get(challengeId);
     if (!challenge || (challengeType && challenge.challengeType !== challengeType)) {
@@ -5080,9 +5254,19 @@ function redactFederationAuthorizationUrlForPersistence(authorizationUrl) {
   }
 }
 
-function httpError(status, code, message) {
+function httpError(status, code, message, options = {}) {
   const error = new Error(message);
   error.status = status;
   error.code = code;
+  if (options.preserveDurableStateOnFailure === true) {
+    error.preserveDurableStateOnFailure = true;
+  }
+  return error;
+}
+
+function preserveDurableStateOnFailure(error) {
+  if (error && typeof error === "object") {
+    error.preserveDurableStateOnFailure = true;
+  }
   return error;
 }

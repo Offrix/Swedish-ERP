@@ -1309,6 +1309,20 @@ export function createApiPlatform(options = {}) {
           : [],
       enumerable: false
     },
+    listSecurityBudgets: {
+      value: (...args) =>
+        typeof registeredDomains.securityRuntime?.listSecurityBudgets === "function"
+          ? registeredDomains.securityRuntime.listSecurityBudgets(...args)
+          : [],
+      enumerable: false
+    },
+    listSecurityFailureSeries: {
+      value: (...args) =>
+        typeof registeredDomains.securityRuntime?.listSecurityFailureSeries === "function"
+          ? registeredDomains.securityRuntime.listSecurityFailureSeries(...args)
+          : [],
+      enumerable: false
+    },
     getSecurityRiskSummary: {
       value: (...args) =>
         typeof registeredDomains.securityRuntime?.getSecurityRiskSummary === "function"

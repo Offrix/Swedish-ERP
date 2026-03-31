@@ -22,6 +22,13 @@ export async function tryHandlePhase6AuthRoutes({ req, res, path, platform }) {
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/auth/factors") {
+    writeJson(res, 200, platform.listAuthFactors({
+      sessionToken: readSessionToken(req)
+    }));
+    return true;
+  }
+
   if (req.method === "GET" && path === "/v1/auth/challenges") {
     writeJson(res, 200, {
       items: platform.listChallenges({
