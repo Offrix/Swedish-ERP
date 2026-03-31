@@ -142,6 +142,84 @@ test("Phase 9.2 resolves foreign multi-country days using the longest 06-24 over
   assert.equal(march16.mealReductionAmount, 128);
 });
 
+test("Phase 11.3 resolves foreign travel day country using each segment's local timezone window", () => {
+  const { travelPlatform, employee, employment } = createTravelFixture({
+    payModelCode: "monthly_salary",
+    monthlySalary: 42000
+  });
+
+  const claim = travelPlatform.createTravelClaim({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    purpose: "Offset shift from Paris to Seattle",
+    startAt: "2026-03-17T06:00:00+01:00",
+    endAt: "2026-03-19T08:00:00-07:00",
+    homeLocation: "Stockholm",
+    regularWorkLocation: "Stockholm",
+    distanceFromHomeKm: 720,
+    distanceFromRegularWorkKm: 720,
+    countrySegments: [
+      {
+        startAt: "2026-03-17T06:00:00+01:00",
+        endAt: "2026-03-17T11:00:00+01:00",
+        countryCode: "FR",
+        locationKey: "Paris"
+      },
+      {
+        startAt: "2026-03-17T18:00:00-07:00",
+        endAt: "2026-03-19T08:00:00-07:00",
+        countryCode: "US",
+        locationKey: "Seattle"
+      }
+    ],
+    actorId: "unit-test"
+  });
+
+  const march17 = claim.travelDays.find((day) => day.date === "2026-03-17" && day.dayClassification === "full");
+  assert.equal(march17.countryName, "USA");
+  assert.equal(march17.baseAmount, 1049);
+});
+
+test("Phase 11.3 resolves foreign night country using each segment's local timezone window", () => {
+  const { travelPlatform, employee, employment } = createTravelFixture({
+    payModelCode: "monthly_salary",
+    monthlySalary: 42000
+  });
+
+  const claim = travelPlatform.createTravelClaim({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    purpose: "Offset shift night allowance",
+    startAt: "2026-03-18T00:00:00+01:00",
+    endAt: "2026-03-19T08:00:00-07:00",
+    homeLocation: "Stockholm",
+    regularWorkLocation: "Stockholm",
+    distanceFromHomeKm: 720,
+    distanceFromRegularWorkKm: 720,
+    countrySegments: [
+      {
+        startAt: "2026-03-18T00:00:00+01:00",
+        endAt: "2026-03-18T05:00:00+01:00",
+        countryCode: "FR",
+        locationKey: "Paris"
+      },
+      {
+        startAt: "2026-03-18T00:30:00-07:00",
+        endAt: "2026-03-19T08:00:00-07:00",
+        countryCode: "US",
+        locationKey: "Seattle"
+      }
+    ],
+    actorId: "unit-test"
+  });
+
+  const night = claim.travelDays.find((day) => day.date === "2026-03-18" && day.dayClassification === "night");
+  assert.equal(night.countryName, "USA");
+  assert.equal(night.baseAmount, 524.5);
+});
+
 test("Phase 9.2 feeds payroll with tax-free allowances, taxable mileage and advance settlement", () => {
   const { travelPlatform, payrollPlatform, employee, employment } = createTravelFixture({
     payModelCode: "monthly_salary",

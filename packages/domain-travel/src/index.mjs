@@ -1298,24 +1298,35 @@ function buildTravelExpenseVatResult({
 }
 
 function resolveCountryForTravelDay({ segments, dateKey, fallbackCountryName }) {
-  const offset = extractOffset(segments[0]?.startAt || `${dateKey}T00:00:00+00:00`);
-  const windowStart = `${dateKey}T06:00:00${offset}`;
-  const windowEnd = `${addDays(dateKey, 1)}T00:00:00${offset}`;
-  return resolveCountryByOverlap({ segments, windowStart, windowEnd, fallbackCountryName });
+  return resolveCountryByOverlap({
+    segments,
+    fallbackCountryName,
+    resolveWindow: (segment) => buildSegmentOverlapWindow({
+      segment,
+      dateKey,
+      windowType: "day"
+    })
+  });
 }
 
 function resolveCountryForNight({ segments, dateKey, fallbackCountryName }) {
-  const offset = extractOffset(segments[0]?.startAt || `${dateKey}T00:00:00+00:00`);
-  const windowStart = `${dateKey}T00:00:00${offset}`;
-  const windowEnd = `${dateKey}T06:00:00${offset}`;
-  return resolveCountryByOverlap({ segments, windowStart, windowEnd, fallbackCountryName });
+  return resolveCountryByOverlap({
+    segments,
+    fallbackCountryName,
+    resolveWindow: (segment) => buildSegmentOverlapWindow({
+      segment,
+      dateKey,
+      windowType: "night"
+    })
+  });
 }
 
-function resolveCountryByOverlap({ segments, windowStart, windowEnd, fallbackCountryName }) {
+function resolveCountryByOverlap({ segments, resolveWindow, fallbackCountryName }) {
   const ranked = (segments || [])
     .map((segment) => {
-      const overlapStart = Math.max(toTimestamp(windowStart), toTimestamp(segment.startAt));
-      const overlapEnd = Math.min(toTimestamp(windowEnd), toTimestamp(segment.endAt));
+      const window = resolveWindow(segment);
+      const overlapStart = Math.max(toTimestamp(window.windowStart), toTimestamp(segment.startAt));
+      const overlapEnd = Math.min(toTimestamp(window.windowEnd), toTimestamp(segment.endAt));
       return {
         ...segment,
         overlapMs: Math.max(0, overlapEnd - overlapStart)
@@ -1335,6 +1346,39 @@ function resolveCountryByOverlap({ segments, windowStart, windowEnd, fallbackCou
     countryCode: fallbackCountryName === "Sverige" ? "SE" : null,
     locationKey: fallbackCountryName
   };
+}
+
+function buildSegmentOverlapWindow({ segment, dateKey, windowType }) {
+  if (windowType === "night") {
+    return {
+      windowStart: `${dateKey}T00:00:00${resolveSegmentOffsetForLocalDate(segment, dateKey)}`,
+      windowEnd: `${dateKey}T06:00:00${resolveSegmentOffsetForLocalDate(segment, dateKey)}`
+    };
+  }
+  const nextDateKey = addDays(dateKey, 1);
+  return {
+    windowStart: `${dateKey}T06:00:00${resolveSegmentOffsetForLocalDate(segment, dateKey)}`,
+    windowEnd: `${nextDateKey}T00:00:00${resolveSegmentOffsetForLocalDate(segment, nextDateKey)}`
+  };
+}
+
+function resolveSegmentOffsetForLocalDate(segment, dateKey) {
+  const startOffset = extractOffset(segment.startAt);
+  const endOffset = extractOffset(segment.endAt);
+  const startDate = segment.startAt.slice(0, 10);
+  const endDate = segment.endAt.slice(0, 10);
+  if (dateKey === startDate) {
+    return startOffset;
+  }
+  if (dateKey === endDate) {
+    return endOffset;
+  }
+  if (startOffset === endOffset) {
+    return startOffset;
+  }
+  const distanceFromStart = Math.abs(daysBetweenDateKeys(startDate, dateKey));
+  const distanceToEnd = Math.abs(daysBetweenDateKeys(dateKey, endDate));
+  return distanceToEnd < distanceFromStart ? endOffset : startOffset;
 }
 
 function resolveBaseTravelAmount({ countryName, travelType, dayClassification, reductionBracket, travelRules }) {
@@ -1791,6 +1835,12 @@ function addDays(dateKey, days) {
   const date = new Date(`${dateKey}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + Number(days || 0));
   return date.toISOString().slice(0, 10);
+}
+
+function daysBetweenDateKeys(leftDateKey, rightDateKey) {
+  const left = new Date(`${leftDateKey}T00:00:00Z`);
+  const right = new Date(`${rightDateKey}T00:00:00Z`);
+  return Math.round((right.getTime() - left.getTime()) / 86_400_000);
 }
 
 function extractOffset(value) {

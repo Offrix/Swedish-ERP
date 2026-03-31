@@ -7,6 +7,7 @@ Verifiera att travel receipt VAT inte längre göms i vanlig expense reimburseme
 - skapar riktig `VatDecision` när receipt-fakta räcker
 - skickar ofullständiga VAT-fakta till review i stället för att gissa
 - behåller reimbursement på gross/outlay-nivå för payroll
+- klassificerar travel day och night country utifrån varje segments lokala offset i stället för första segmentets offset
 
 ## Required checks
 
@@ -26,10 +27,12 @@ Verifiera att travel receipt VAT inte längre göms i vanlig expense reimburseme
 - decided receipt bär `vatDecisionId`, `deductibleVatAmountSek` och declaration box `48` när avdrag finns
 - claimnivån summerar `deductibleExpenseVatAmount`, `expenseVatDecidedCount` och `expenseVatReviewCount`
 - payroll reimbursement fortsätter använda gross/outlay och blandas inte ihop med VAT truth
+- multi-offset foreign travel väljer rätt country för både `06-24`-dagfönster och `00-06`-nattfönster
 
 ## Exit gate
 
 - [ ] Travel receipt VAT separeras från payroll reimbursement
 - [ ] Kompletta receipt-fakta ger riktig `VatDecision`
 - [ ] Ofullständiga receipt-fakta går till review i stället för auto-bokning
+- [ ] Travel day och night country använder segments lokala offset vid landsval och traktamentesats
 - [ ] Riktade tester och full gate är gröna

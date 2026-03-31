@@ -242,6 +242,76 @@ test("Phase 9.2 API manages travel claims and carries them into payroll, posting
   }
 });
 
+test("Phase 11.3 API resolves travel day and night countries using segment-local offsets", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-31T10:10:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: enabledFlags()
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const sessionToken = await loginWithRequiredFactors({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const employee = await createEmployeeWithContract({
+      baseUrl,
+      token: sessionToken,
+      givenName: "Tilda",
+      familyName: "Timezone",
+      workEmail: "tilda.timezone@example.com",
+      payModelCode: "monthly_salary",
+      monthlySalary: 42000
+    });
+
+    const claim = await requestJson(baseUrl, "/v1/travel/claims", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employeeId: employee.employee.employeeId,
+        employmentId: employee.employment.employmentId,
+        purpose: "Timezone-shifted foreign travel",
+        startAt: "2026-03-17T06:00:00+01:00",
+        endAt: "2026-03-19T08:00:00-07:00",
+        homeLocation: "Stockholm",
+        regularWorkLocation: "Stockholm",
+        distanceFromHomeKm: 720,
+        distanceFromRegularWorkKm: 720,
+        countrySegments: [
+          {
+            startAt: "2026-03-17T06:00:00+01:00",
+            endAt: "2026-03-17T11:00:00+01:00",
+            countryCode: "FR",
+            locationKey: "Paris"
+          },
+          {
+            startAt: "2026-03-17T18:00:00-07:00",
+            endAt: "2026-03-19T08:00:00-07:00",
+            countryCode: "US",
+            locationKey: "Seattle"
+          }
+        ]
+      }
+    });
+
+    const march17 = claim.travelDays.find((day) => day.date === "2026-03-17" && day.dayClassification === "full");
+    const march18Night = claim.travelDays.find((day) => day.date === "2026-03-18" && day.dayClassification === "night");
+    assert.equal(march17.countryName, "USA");
+    assert.equal(march18Night.countryName, "USA");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("Phase 9.2 travel routes disable cleanly behind the feature flag", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-22T10:20:00Z")
