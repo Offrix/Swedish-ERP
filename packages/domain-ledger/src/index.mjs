@@ -623,6 +623,7 @@ export function createLedgerEngine({
     reverseJournalEntry,
     correctJournalEntry,
     getJournalEntry,
+    listJournalEntries,
     snapshotLedger,
     exportDurableState,
     importDurableState
@@ -3183,6 +3184,7 @@ export function createLedgerEngine({
     actorId,
     approvedByActorId = null,
     approvedByRoleCode = null,
+    importedVoucherNumber = null,
     correlationId = crypto.randomUUID()
   } = {}) {
     const entry = requireJournalEntry(requireText(companyId, "company_id_required"), journalEntryId);
@@ -3206,9 +3208,47 @@ export function createLedgerEngine({
     const voucherSeries = requireVoucherSeries(entry.companyId, entry.voucherSeriesCode);
     ensureVoucherSeriesUsable(voucherSeries, false);
     const now = nowIso();
+    const resolvedImportedVoucherNumber = importedVoucherNumber == null
+      ? null
+      : normalizePositiveInteger(importedVoucherNumber, "imported_voucher_number_invalid");
     if (entry.voucherNumber == null) {
-      entry.voucherNumber = voucherSeries.nextNumber;
-      voucherSeries.nextNumber += 1;
+      if (resolvedImportedVoucherNumber != null) {
+        if (entry.importedFlag !== true) {
+          throw httpError(
+            409,
+            "journal_entry_imported_voucher_number_requires_imported_entry",
+            "Imported voucher numbers may only be preserved for imported journal entries."
+          );
+        }
+        if (voucherSeries.importedSequencePreservationEnabled !== true) {
+          throw httpError(
+            409,
+            "voucher_series_imported_sequence_disabled",
+            `Voucher series ${voucherSeries.seriesCode} does not allow imported voucher-number preservation.`
+          );
+        }
+        for (const candidate of state.journalEntries.values()) {
+          if (
+            candidate.companyId === entry.companyId &&
+            candidate.journalEntryId !== entry.journalEntryId &&
+            candidate.voucherSeriesCode === voucherSeries.seriesCode &&
+            candidate.voucherNumber === resolvedImportedVoucherNumber
+          ) {
+            throw httpError(
+              409,
+              "journal_entry_imported_voucher_number_conflict",
+              `Voucher ${voucherSeries.seriesCode}${resolvedImportedVoucherNumber} is already in use.`
+            );
+          }
+        }
+        entry.voucherNumber = resolvedImportedVoucherNumber;
+        if (voucherSeries.nextNumber <= resolvedImportedVoucherNumber) {
+          voucherSeries.nextNumber = resolvedImportedVoucherNumber + 1;
+        }
+      } else {
+        entry.voucherNumber = voucherSeries.nextNumber;
+        voucherSeries.nextNumber += 1;
+      }
       voucherSeries.updatedAt = now;
     }
     entry.status = "posted";
@@ -3449,6 +3489,51 @@ export function createLedgerEngine({
 
   function getJournalEntry({ companyId, journalEntryId } = {}) {
     return presentJournalEntry(requireJournalEntry(requireText(companyId, "company_id_required"), journalEntryId));
+  }
+
+  function listJournalEntries({
+    companyId,
+    fiscalYearId = null,
+    fromDate = null,
+    toDate = null,
+    statuses = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedFiscalYearId = fiscalYearId == null ? null : requireText(fiscalYearId, "fiscal_year_id_required");
+    const resolvedFromDate = fromDate == null ? null : normalizeDate(fromDate, "from_date_invalid");
+    const resolvedToDate = toDate == null ? null : normalizeDate(toDate, "to_date_invalid");
+    const allowedStatuses = statuses == null
+      ? null
+      : new Set(
+          (Array.isArray(statuses) ? statuses : [statuses]).map((status) => {
+            const normalizedStatus = requireText(status, "ledger_state_invalid");
+            if (!LEDGER_STATES.includes(normalizedStatus)) {
+              throw httpError(400, "ledger_state_invalid", `Ledger state ${normalizedStatus} is invalid.`);
+            }
+            return normalizedStatus;
+          })
+        );
+
+    return [...state.journalEntries.values()]
+      .filter((entry) => entry.companyId === resolvedCompanyId)
+      .filter((entry) => resolvedFiscalYearId == null || entry.fiscalYearId === resolvedFiscalYearId)
+      .filter((entry) => resolvedFromDate == null || entry.journalDate >= resolvedFromDate)
+      .filter((entry) => resolvedToDate == null || entry.journalDate <= resolvedToDate)
+      .filter((entry) => allowedStatuses == null || allowedStatuses.has(entry.status))
+      .sort((left, right) => {
+        const byDate = left.journalDate.localeCompare(right.journalDate);
+        if (byDate !== 0) {
+          return byDate;
+        }
+        const leftVoucher = left.voucherNumber == null ? Number.MAX_SAFE_INTEGER : left.voucherNumber;
+        const rightVoucher = right.voucherNumber == null ? Number.MAX_SAFE_INTEGER : right.voucherNumber;
+        const bySeries = left.voucherSeriesCode.localeCompare(right.voucherSeriesCode);
+        if (bySeries !== 0) {
+          return bySeries;
+        }
+        return leftVoucher - rightVoucher || left.createdAt.localeCompare(right.createdAt);
+      })
+      .map((entry) => presentJournalEntry(entry));
   }
 
   function createFxRevaluationBatch({

@@ -707,3 +707,86 @@ export declare function reverseAccrualBatch(options: {
   approvedByRoleCode: string;
   correlationId?: string;
 }): AccrualBatch;
+
+export declare function createJournalEntry(options: {
+  companyId: string;
+  journalDate: string;
+  voucherSeriesCode: string;
+  sourceType: PostingSourceType;
+  sourceId: string;
+  description?: string | null;
+  actorId: string;
+  idempotencyKey: string;
+  lines: readonly JournalLineInput[];
+  importedFlag?: boolean;
+  currencyCode?: string;
+  metadataJson?: Record<string, unknown>;
+  correctionOfJournalEntryId?: string | null;
+  correctionKey?: string | null;
+  correctionType?: JournalCorrectionType | null;
+  correlationId?: string;
+}): { journalEntry: JournalEntry; idempotentReplay?: boolean };
+
+export declare function validateJournalEntry(options: {
+  companyId: string;
+  journalEntryId: string;
+  actorId: string;
+  correlationId?: string;
+}): { journalEntry: JournalEntry };
+
+export declare function postJournalEntry(options: {
+  companyId: string;
+  journalEntryId: string;
+  actorId: string;
+  approvedByActorId?: string | null;
+  approvedByRoleCode?: string | null;
+  importedVoucherNumber?: number | string | null;
+  correlationId?: string;
+}): { journalEntry: JournalEntry };
+
+export declare function reverseJournalEntry(options: {
+  companyId: string;
+  journalEntryId: string;
+  actorId: string;
+  reasonCode: string;
+  correctionKey: string;
+  approvedByActorId?: string | null;
+  approvedByRoleCode?: string | null;
+  journalDate?: string | null;
+  voucherSeriesCode?: string | null;
+  metadataJson?: Record<string, unknown>;
+  correlationId?: string;
+}): {
+  originalJournalEntry: JournalEntry;
+  reversalJournalEntry: JournalEntry;
+  idempotentReplay?: boolean;
+};
+
+export declare function correctJournalEntry(options: {
+  companyId: string;
+  journalEntryId: string;
+  actorId: string;
+  reasonCode: string;
+  correctionKey: string;
+  approvedByActorId?: string | null;
+  approvedByRoleCode?: string | null;
+  lines: readonly JournalLineInput[];
+  journalDate?: string | null;
+  voucherSeriesCode?: string | null;
+  reverseOriginal?: boolean;
+  metadataJson?: Record<string, unknown>;
+  correlationId?: string;
+}): CorrectionResult & { idempotentReplay?: boolean };
+
+export declare function getJournalEntry(options: {
+  companyId: string;
+  journalEntryId: string;
+}): JournalEntry;
+
+export declare function listJournalEntries(options: {
+  companyId: string;
+  fiscalYearId?: string | null;
+  fromDate?: string | null;
+  toDate?: string | null;
+  statuses?: readonly LedgerState[] | LedgerState | null;
+}): readonly JournalEntry[];

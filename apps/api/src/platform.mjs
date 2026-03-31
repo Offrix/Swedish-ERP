@@ -7,6 +7,7 @@ import { createDocumentArchivePlatform } from "../../../packages/domain-document
 import { createEvidencePlatform } from "../../../packages/domain-evidence/src/index.mjs";
 import { createObservabilityPlatform } from "../../../packages/domain-observability/src/index.mjs";
 import { createLedgerPlatform } from "../../../packages/domain-ledger/src/index.mjs";
+import { createSiePlatform } from "../../../packages/domain-sie/src/index.mjs";
 import { createAccountingMethodPlatform } from "../../../packages/domain-accounting-method/src/index.mjs";
 import { createFiscalYearPlatform } from "../../../packages/domain-fiscal-year/src/index.mjs";
 import { createLegalFormPlatform } from "../../../packages/domain-legal-form/src/index.mjs";
@@ -123,6 +124,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "fiscalYear",
   "legalForm",
   "ledger",
+  "sie",
   "vat",
   "integrations",
   "automation",
@@ -166,6 +168,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "fiscalYear",
   "legalForm",
   "ledger",
+  "sie",
   "reporting",
   "search",
   "automation",
@@ -284,6 +287,19 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         accountingMethodPlatform: dependencies.accountingMethod,
         fiscalYearPlatform: dependencies.fiscalYear,
         getVatPlatform: () => getDomain("vat")
+      })
+  }),
+  createDomainDefinition({
+    key: "sie",
+    label: "SIE",
+    packageName: "@swedish-erp/domain-sie",
+    dependsOn: ["orgAuth", "fiscalYear", "ledger"],
+    create: ({ options, dependencies }) =>
+      createSiePlatform({
+        ...options,
+        orgAuthPlatform: dependencies.orgAuth,
+        fiscalYearPlatform: dependencies.fiscalYear,
+        ledgerPlatform: dependencies.ledger
       })
   }),
   createDomainDefinition({

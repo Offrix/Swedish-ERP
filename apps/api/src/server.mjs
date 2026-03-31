@@ -484,6 +484,10 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/ledger/accrual-batches",
               "/v1/ledger/accrual-batches/:accrualBatchId",
               "/v1/ledger/accrual-batches/:accrualBatchId/reverse",
+              "/v1/sie/exports",
+              "/v1/sie/exports/:sieExportJobId",
+              "/v1/sie/imports",
+              "/v1/sie/imports/:sieImportJobId",
               "/v1/accounting-method/eligibility-assessments",
               "/v1/accounting-method/profiles",
               "/v1/accounting-method/profiles/:methodProfileId",
@@ -3868,6 +3872,160 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         approvedByActorId: body.approvedByActorId,
         approvedByRoleCode: body.approvedByRoleCode,
         correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/sie/exports") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(res, 200, {
+      items: platform.listSieExportJobs({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/sie/exports") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.exportSie4({
+        companyId,
+        fiscalYearId: body.fiscalYearId || null,
+        fromDate: body.fromDate || null,
+        toDate: body.toDate || null,
+        fileName: body.fileName || null,
+        actorId: principal.userId,
+        idempotencyKey: body.idempotencyKey,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const sieExportJobMatch = matchPath(path, "/v1/sie/exports/:sieExportJobId");
+  if (sieExportJobMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger",
+      objectId: sieExportJobMatch.sieExportJobId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getSieExportJob({
+        companyId,
+        sieExportJobId: sieExportJobMatch.sieExportJobId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/sie/imports") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(res, 200, {
+      items: platform.listSieImportJobs({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/sie/imports") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.importSie4({
+        companyId,
+        modeCode: body.modeCode,
+        content: body.content,
+        fileName: body.fileName || null,
+        fiscalYearId: body.fiscalYearId || null,
+        openingDate: body.openingDate || null,
+        sourceCode: body.sourceCode || null,
+        externalReference: body.externalReference || null,
+        evidenceRefs: body.evidenceRefs || [],
+        actorId: principal.userId,
+        idempotencyKey: body.idempotencyKey,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const sieImportJobMatch = matchPath(path, "/v1/sie/imports/:sieImportJobId");
+  if (sieImportJobMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger",
+      objectId: sieImportJobMatch.sieImportJobId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getSieImportJob({
+        companyId,
+        sieImportJobId: sieImportJobMatch.sieImportJobId
       })
     );
     return;

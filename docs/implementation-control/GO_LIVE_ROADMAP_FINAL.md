@@ -523,7 +523,7 @@ Ingen AR/AP/payroll/HUS- eller annual-automation på fel ledgerkärna.
 - [x] 7.3 [REWRITE][MIGRATE] BAS/DSAM chart externaliseras, accountClass rättas, fallback-konton verifieras och kontoplanen versioneras/testas mot källtabell.
 - [x] 7.4 [REWRITE] Utländsk valuta bokförs alltid i redovisningsvaluta (SEK eller explicit europrofil), med originalvaluta som metadata och separat revaluation/realized FX-motor.
 - [x] 7.5 [NEW BUILD] Opening balances, retained earnings transfer, accounting-method catch-up, fiscal-year open/close och resultatoverföring blir riktiga posting-flöden.
-- [ ] 7.6 [NEW BUILD] Bygg depreciation, accrual/prepaid engine, VAT clearing 2610–2640 -> 2650 och `packages/domain-sie/src/index.mjs` för SIE4 import/export.
+- [x] 7.6 [NEW BUILD] Bygg depreciation, accrual/prepaid engine, VAT clearing 2610–2640 -> 2650 och `packages/domain-sie/src/index.mjs` för SIE4 import/export.
 - [ ] 7.7 [HARDEN] Close/reopen/hard-close kräver rätt actor attribution, evidence och signoff chain.
 
 **Exit gate**  
