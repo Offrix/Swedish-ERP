@@ -47,6 +47,9 @@ export const AP_SUPPLIER_INVOICE_DUPLICATE_STATUSES = Object.freeze([
 ]);
 export const AP_MATCH_VARIANCE_STATUSES = Object.freeze(["open", "accepted", "corrected", "closed"]);
 export const AP_MATCH_MODES = Object.freeze(["none", "two_way", "three_way"]);
+export const AP_SUPPLIER_TAX_STATUS_CODES = Object.freeze(["f_skatt", "fa_skatt", "a_skatt", "unknown"]);
+export const AP_SUPPLIER_COUNTERPARTY_TYPE_CODES = Object.freeze(["legal_entity", "sole_trader", "individual"]);
+export const AP_SUPPLIER_SOCIAL_FEE_EXEMPTION_CODES = Object.freeze(["none", "a1_certificate"]);
 
 const DEFAULT_PURCHASE_ORDER_PREFIX = "PO";
 const DEFAULT_SUPPLIER_PREFIX = "SUP";
@@ -170,6 +173,8 @@ export function createApEngine({
     getSupplier,
     createSupplier,
     transitionSupplierStatus,
+    blockSupplierPayments,
+    releaseSupplierPaymentBlock,
     importSuppliers,
     getSupplierImportBatch,
     listPurchaseOrders,
@@ -233,7 +238,13 @@ export function createApEngine({
     defaultDimensions = {},
     defaultUnitPrice = null,
     paymentBlocked = false,
+    paymentBlockReasonCodes = [],
     bookingBlocked = false,
+    taxStatusCode = "unknown",
+    counterpartyTypeCode = null,
+    fTaxInvoked = false,
+    socialFeeExemptionCode = "none",
+    taxStatusValidatedOn = null,
     riskClassCode = "standard",
     attestChainId = null,
     requiresPo = true,
@@ -291,7 +302,19 @@ export function createApEngine({
       defaultDimensionsJson: normalizeDimensions(defaultDimensions),
       defaultUnitPrice: normalizeOptionalMoney(defaultUnitPrice, "supplier_default_unit_price_invalid"),
       paymentBlocked: paymentBlocked === true,
+      paymentBlockReasonCodes: normalizeSupplierPaymentBlockReasonCodes({
+        paymentBlocked,
+        paymentBlockReasonCodes
+      }),
       bookingBlocked: bookingBlocked === true,
+      taxStatusCode: normalizeSupplierTaxStatusCode(taxStatusCode),
+      counterpartyTypeCode: normalizeSupplierCounterpartyTypeCode(counterpartyTypeCode, {
+        countryCode: resolvedCountryCode,
+        organizationNumber
+      }),
+      fTaxInvoked: fTaxInvoked === true,
+      socialFeeExemptionCode: normalizeSupplierSocialFeeExemptionCode(socialFeeExemptionCode),
+      taxStatusValidatedOn: normalizeOptionalDate(taxStatusValidatedOn, "supplier_tax_status_validated_on_invalid"),
       riskClassCode: requireText(riskClassCode, "supplier_risk_class_required"),
       attestChainId: normalizeOptionalText(attestChainId),
       requiresPo: requiresPo !== false,
@@ -303,6 +326,7 @@ export function createApEngine({
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
     };
+    record.paymentBlocked = record.paymentBlockReasonCodes.length > 0;
     state.suppliers.set(record.supplierId, record);
     ensureCollection(state.supplierIdsByCompany, resolvedCompanyId).push(record.supplierId);
     state.supplierIdsByCompanyNo.set(toCompanyScopedKey(resolvedCompanyId, resolvedSupplierNo), record.supplierId);
@@ -319,6 +343,90 @@ export function createApEngine({
       explanation: `Created supplier ${resolvedSupplierNo}.`
     });
     return copy(record);
+  }
+
+  function blockSupplierPayments({
+    companyId,
+    supplierId,
+    reasonCodes = ["manual_payment_block"],
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const supplier = requireSupplierRecord(state, companyId, supplierId);
+    const normalizedReasonCodes = normalizeRequiredPaymentBlockReasonCodes(reasonCodes);
+    const previousReasonCodes = [...(supplier.paymentBlockReasonCodes || [])];
+    supplier.paymentBlockReasonCodes = uniqueStrings([...(supplier.paymentBlockReasonCodes || []), ...normalizedReasonCodes]);
+    supplier.paymentBlocked = supplier.paymentBlockReasonCodes.length > 0;
+    supplier.updatedAt = nowIso(clock);
+    refreshSupplierInvoicesForControlChanges({
+      state,
+      clock,
+      supplier,
+      actorId,
+      correlationId,
+      documentClassificationPlatform,
+      importCasesPlatform,
+      getDocumentClassificationPlatform,
+      getImportCasesPlatform
+    });
+    pushAudit(state, clock, {
+      companyId: supplier.companyId,
+      actorId,
+      correlationId,
+      action: "ap.supplier.payment_blocked",
+      entityType: "ap_supplier",
+      entityId: supplier.supplierId,
+      explanation: `Blocked supplier payments for ${supplier.supplierNo} with reasons ${supplier.paymentBlockReasonCodes.join(", ")}.`
+    });
+    return copy({
+      ...supplier,
+      previousPaymentBlockReasonCodes: previousReasonCodes
+    });
+  }
+
+  function releaseSupplierPaymentBlock({
+    companyId,
+    supplierId,
+    reasonCodes = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const supplier = requireSupplierRecord(state, companyId, supplierId);
+    const previousReasonCodes = [...(supplier.paymentBlockReasonCodes || [])];
+    const normalizedReasonCodes = Array.isArray(reasonCodes) ? normalizeReasonCodeList(reasonCodes) : null;
+    supplier.paymentBlockReasonCodes =
+      normalizedReasonCodes && normalizedReasonCodes.length > 0
+        ? (supplier.paymentBlockReasonCodes || []).filter((reasonCode) => !normalizedReasonCodes.includes(reasonCode))
+        : [];
+    supplier.paymentBlocked = supplier.paymentBlockReasonCodes.length > 0;
+    supplier.updatedAt = nowIso(clock);
+    refreshSupplierInvoicesForControlChanges({
+      state,
+      clock,
+      supplier,
+      actorId,
+      correlationId,
+      documentClassificationPlatform,
+      importCasesPlatform,
+      getDocumentClassificationPlatform,
+      getImportCasesPlatform
+    });
+    pushAudit(state, clock, {
+      companyId: supplier.companyId,
+      actorId,
+      correlationId,
+      action: "ap.supplier.payment_block_released",
+      entityType: "ap_supplier",
+      entityId: supplier.supplierId,
+      explanation:
+        normalizedReasonCodes && normalizedReasonCodes.length > 0
+          ? `Released supplier payment block reasons ${normalizedReasonCodes.join(", ")} for ${supplier.supplierNo}.`
+          : `Released all supplier payment blocks for ${supplier.supplierNo}.`
+    });
+    return copy({
+      ...supplier,
+      previousPaymentBlockReasonCodes: previousReasonCodes
+    });
   }
 
   function transitionSupplierStatus({
@@ -409,7 +517,11 @@ export function createApEngine({
         supplier: existingSupplier,
         incoming,
         companyId: resolvedCompanyId,
-        actorId
+        actorId,
+        documentClassificationPlatform,
+        importCasesPlatform,
+        getDocumentClassificationPlatform,
+        getImportCasesPlatform
       });
       updated += 1;
       itemResults.push({
@@ -1056,8 +1168,6 @@ export function createApEngine({
       actorId,
       clock
     });
-    const staticPaymentHoldReasonCodes = supplier.paymentBlocked === true ? ["payment_hold"] : [];
-
     const invoice = {
       supplierInvoiceId: crypto.randomUUID(),
       companyId: resolvedCompanyId,
@@ -1106,12 +1216,15 @@ export function createApEngine({
       approvalChainId: supplier.attestChainId || null,
       approvalStatus: approvalSteps.length > 0 ? "pending" : "not_required",
       approvalSteps,
-      staticPaymentHoldReasonCodes,
+      staticPaymentHoldReasonCodes: [],
       dynamicPaymentHoldReasonCodes: [],
-      paymentHold: staticPaymentHoldReasonCodes.length > 0,
-      paymentHoldReasonCodes: staticPaymentHoldReasonCodes,
+      paymentHold: false,
+      paymentHoldReasonCodes: [],
       paymentReadinessStatus: "not_ready",
       paymentReadinessReasonCodes: ["invoice_not_posted"],
+      supplierTaxAssessmentStatus: "not_applicable",
+      supplierTaxConsequenceCodes: [],
+      supplierTaxAnnualCompensationAmount: 0,
       lines: normalizedLines,
       latestMatchRunId: null,
       journalEntryId: null,
@@ -2194,6 +2307,11 @@ function refreshSupplierInvoiceControls({
     supplier,
     importCase
   });
+  const supplierTaxAssessment = assessSupplierTaxConsequences({
+    state,
+    invoice,
+    supplier
+  });
 
   invoice.classificationCaseId = classificationCase?.classificationCaseId || normalizeOptionalText(invoice.classificationCaseId);
   invoice.classificationCaseStatus = classificationCase?.status || null;
@@ -2211,7 +2329,8 @@ function refreshSupplierInvoiceControls({
 
   invoice.dynamicReviewQueueCodes = uniqueStrings([
     ...classificationAssessment.reviewQueueCodes,
-    ...importAssessment.reviewQueueCodes
+    ...importAssessment.reviewQueueCodes,
+    ...supplierTaxAssessment.reviewQueueCodes
   ]);
   invoice.reviewQueueCodes = uniqueStrings([
     ...(invoice.staticReviewQueueCodes || []),
@@ -2222,7 +2341,9 @@ function refreshSupplierInvoiceControls({
 
   invoice.dynamicPaymentHoldReasonCodes = uniqueStrings([
     ...classificationAssessment.paymentHoldReasonCodes,
-    ...importAssessment.paymentHoldReasonCodes
+    ...importAssessment.paymentHoldReasonCodes,
+    ...(supplier.paymentBlockReasonCodes || []),
+    ...supplierTaxAssessment.paymentHoldReasonCodes
   ]);
   invoice.paymentHoldReasonCodes = uniqueStrings([
     ...(invoice.staticPaymentHoldReasonCodes || []),
@@ -2237,6 +2358,9 @@ function refreshSupplierInvoiceControls({
     ...(invoice.invoiceType === "credit_note" ? ["credit_note_not_payable"] : []),
     ...(hasSupplierPaymentDetails(supplier) ? [] : ["supplier_payment_details_missing"])
   ]);
+  invoice.supplierTaxAssessmentStatus = supplierTaxAssessment.status;
+  invoice.supplierTaxConsequenceCodes = [...supplierTaxAssessment.consequenceCodes];
+  invoice.supplierTaxAnnualCompensationAmount = supplierTaxAssessment.annualWorkCompensationAmount;
   invoice.paymentReadinessStatus =
     invoice.invoiceType === "credit_note"
       ? "not_applicable"
@@ -2245,6 +2369,146 @@ function refreshSupplierInvoiceControls({
       : invoice.status === "posted"
         ? "blocked"
         : "not_ready";
+}
+
+function assessSupplierTaxConsequences({ state, invoice, supplier }) {
+  const workCompensationAmount = roundMoney(
+    (invoice.lines || [])
+      .filter((line) => line.workCompensationFlag === true)
+      .reduce((sum, line) => sum + Number(line.netAmount || 0), 0) * (invoice.invoiceType === "credit_note" ? -1 : 1)
+  );
+  if (workCompensationAmount === 0) {
+    return {
+      status: "not_applicable",
+      reviewQueueCodes: [],
+      paymentHoldReasonCodes: [],
+      consequenceCodes: [],
+      annualWorkCompensationAmount: 0
+    };
+  }
+
+  const annualWorkCompensationAmount = resolveSupplierAnnualWorkCompensationAmount({
+    state,
+    invoice,
+    supplierId: supplier.supplierId
+  });
+  const taxStatusCode = normalizeSupplierTaxStatusCode(supplier.taxStatusCode || "unknown");
+  const counterpartyTypeCode = normalizeSupplierCounterpartyTypeCode(supplier.counterpartyTypeCode, {
+    countryCode: supplier.countryCode,
+    organizationNumber: supplier.organizationNumber
+  });
+  const socialFeeExemptionCode = normalizeSupplierSocialFeeExemptionCode(supplier.socialFeeExemptionCode || "none");
+  const hasQualifyingFTax = taxStatusCode === "f_skatt" || (taxStatusCode === "fa_skatt" && supplier.fTaxInvoked === true);
+  if (hasQualifyingFTax) {
+    return {
+      status: "clear",
+      reviewQueueCodes: [],
+      paymentHoldReasonCodes: [],
+      consequenceCodes: taxStatusCode === "fa_skatt" ? ["f_tax_invoked_for_assignment"] : ["f_tax_cleared"],
+      annualWorkCompensationAmount
+    };
+  }
+
+  if (taxStatusCode === "unknown") {
+    return {
+      status: "review_required",
+      reviewQueueCodes: ["supplier_tax_review_required"],
+      paymentHoldReasonCodes: ["supplier_tax_status_unverified"],
+      consequenceCodes: ["supplier_tax_status_unverified"],
+      annualWorkCompensationAmount
+    };
+  }
+
+  const consequenceCodes = [];
+  if (taxStatusCode === "fa_skatt" && supplier.fTaxInvoked !== true) {
+    consequenceCodes.push("fa_tax_without_written_f_tax_invocation");
+  }
+  if (annualWorkCompensationAmount >= 10000) {
+    consequenceCodes.push("tax_withholding_30_required");
+    if (counterpartyTypeCode === "individual" || counterpartyTypeCode === "sole_trader") {
+      if (socialFeeExemptionCode === "a1_certificate") {
+        consequenceCodes.push("social_fee_exemption_a1_applied");
+      } else {
+        consequenceCodes.push("employer_contributions_required");
+      }
+    }
+    return {
+      status: "review_required",
+      reviewQueueCodes: ["supplier_tax_review_required"],
+      paymentHoldReasonCodes: [
+        "supplier_tax_withholding_required",
+        ...(consequenceCodes.includes("employer_contributions_required") ? ["supplier_employer_contributions_required"] : [])
+      ],
+      consequenceCodes,
+      annualWorkCompensationAmount
+    };
+  }
+
+  return {
+    status: "monitoring",
+    reviewQueueCodes: [],
+    paymentHoldReasonCodes: [],
+    consequenceCodes: uniqueStrings([...consequenceCodes, "annual_work_compensation_threshold_monitoring_required"]),
+    annualWorkCompensationAmount
+  };
+}
+
+function resolveSupplierAnnualWorkCompensationAmount({ state, invoice, supplierId }) {
+  const fiscalYear = String(invoice.invoiceDate || "").slice(0, 4);
+  return roundMoney(
+    (state.supplierInvoiceIdsByCompany.get(invoice.companyId) || [])
+      .map((supplierInvoiceId) => state.supplierInvoices.get(supplierInvoiceId))
+      .filter(Boolean)
+      .filter((candidate) => candidate.supplierId === supplierId)
+      .filter((candidate) => String(candidate.invoiceDate || "").startsWith(fiscalYear))
+      .reduce((sum, candidate) => {
+        const lineAmount = (candidate.lines || [])
+          .filter((line) => line.workCompensationFlag === true)
+          .reduce((lineSum, line) => lineSum + Number(line.netAmount || 0), 0);
+        const signedLineAmount = candidate.invoiceType === "credit_note" ? 0 - lineAmount : lineAmount;
+        return sum + signedLineAmount;
+      }, 0)
+  );
+}
+
+function refreshSupplierInvoicesForControlChanges({
+  state,
+  clock,
+  supplier,
+  actorId = "system",
+  correlationId = crypto.randomUUID(),
+  documentClassificationPlatform = null,
+  importCasesPlatform = null,
+  getDocumentClassificationPlatform = null,
+  getImportCasesPlatform = null
+}) {
+  for (const supplierInvoiceId of state.supplierInvoiceIdsByCompany.get(supplier.companyId) || []) {
+    const invoice = state.supplierInvoices.get(supplierInvoiceId);
+    if (!invoice || invoice.supplierId !== supplier.supplierId || invoice.status === "voided") {
+      continue;
+    }
+    refreshSupplierInvoiceControls({
+      state,
+      invoice,
+      supplier,
+      actorId,
+      correlationId,
+      documentClassificationPlatform,
+      importCasesPlatform,
+      getDocumentClassificationPlatform,
+      getImportCasesPlatform
+    });
+    if (invoice.apOpenItemId) {
+      const openItem = state.apOpenItems.get(invoice.apOpenItemId);
+      if (openItem) {
+        openItem.paymentHold = invoice.paymentHold === true;
+        openItem.paymentHoldReasonCodes = [...(invoice.paymentHoldReasonCodes || [])];
+        openItem.paymentReadinessStatus = invoice.paymentReadinessStatus || null;
+        openItem.paymentReadinessReasonCodes = [...(invoice.paymentReadinessReasonCodes || [])];
+        openItem.updatedAt = nowIso(clock);
+      }
+    }
+  }
 }
 
 function resolveDeferredPlatform({ platform = null, getter = null }) {
@@ -2694,6 +2958,7 @@ function normalizeSupplierInvoiceLines({
       allocationInvalidFieldCodes: allocationRequirements.invalidFieldCodes,
       allocationReviewRequired: allocationRequirements.reviewRequired,
       goodsOrServices: normalizeOptionalText(line.goodsOrServices)?.toLowerCase() === "goods" ? "goods" : "services",
+      workCompensationFlag: line.workCompensationFlag === true,
       importCaseRequired: line.importCaseRequired === true,
       reverseChargeFlag: line.reverseChargeFlag === true || supplier.reverseChargeDefault === true,
       constructionServiceFlag: line.constructionServiceFlag === true,
@@ -2931,6 +3196,7 @@ function buildCreditNoteLineInputs({ originalInvoice, lines = null }) {
     expenseAccountNumber: line.expenseAccountNumber,
     dimensionsJson: copy(line.dimensionsJson || {}),
     goodsOrServices: line.goodsOrServices,
+    workCompensationFlag: line.workCompensationFlag === true,
     importCaseRequired: line.importCaseRequired === true,
     reverseChargeFlag: line.reverseChargeFlag === true,
     constructionServiceFlag: line.constructionServiceFlag === true,
@@ -3373,6 +3639,51 @@ function uniqueStrings(values) {
   return [...new Set((values || []).filter(Boolean))];
 }
 
+function normalizeReasonCodeList(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return uniqueStrings(values.map((value) => normalizeOptionalText(value)).filter(Boolean));
+}
+
+function normalizeSupplierPaymentBlockReasonCodes({ paymentBlocked = false, paymentBlockReasonCodes = [] } = {}) {
+  const normalized = normalizeReasonCodeList(paymentBlockReasonCodes);
+  if (normalized.length > 0) {
+    return normalized;
+  }
+  return paymentBlocked === true ? ["manual_payment_block"] : [];
+}
+
+function normalizeRequiredPaymentBlockReasonCodes(reasonCodes) {
+  const normalized = normalizeReasonCodeList(Array.isArray(reasonCodes) ? reasonCodes : [reasonCodes]);
+  if (normalized.length === 0) {
+    throw createError(400, "supplier_payment_block_reason_required", "At least one payment block reason code is required.");
+  }
+  return normalized;
+}
+
+function normalizeSupplierTaxStatusCode(value) {
+  return assertAllowed(normalizeOptionalText(value) || "unknown", AP_SUPPLIER_TAX_STATUS_CODES, "supplier_tax_status_invalid");
+}
+
+function normalizeSupplierCounterpartyTypeCode(value, { countryCode = "SE", organizationNumber = null } = {}) {
+  if (normalizeOptionalText(value)) {
+    return assertAllowed(normalizeOptionalText(value), AP_SUPPLIER_COUNTERPARTY_TYPE_CODES, "supplier_counterparty_type_invalid");
+  }
+  if (normalizeOptionalText(organizationNumber)) {
+    return countryCode === "SE" ? "legal_entity" : "legal_entity";
+  }
+  return "individual";
+}
+
+function normalizeSupplierSocialFeeExemptionCode(value) {
+  return assertAllowed(
+    normalizeOptionalText(value) || "none",
+    AP_SUPPLIER_SOCIAL_FEE_EXEMPTION_CODES,
+    "supplier_social_fee_exemption_invalid"
+  );
+}
+
 function resolveSupplierForImport(state, companyId, incoming) {
   const importSourceKey = normalizeOptionalText(incoming.importSourceKey);
   if (importSourceKey) {
@@ -3391,7 +3702,19 @@ function resolveSupplierForImport(state, companyId, incoming) {
   return null;
 }
 
-function updateSupplierFromImport({ state, clock, vatPlatform, supplier, incoming, companyId, actorId }) {
+function updateSupplierFromImport({
+  state,
+  clock,
+  vatPlatform,
+  supplier,
+  incoming,
+  companyId,
+  actorId,
+  documentClassificationPlatform = null,
+  importCasesPlatform = null,
+  getDocumentClassificationPlatform = null,
+  getImportCasesPlatform = null
+}) {
   const previousBankFingerprint = hashObject({
     paymentRecipient: supplier.paymentRecipient,
     bankgiro: supplier.bankgiro,
@@ -3440,8 +3763,33 @@ function updateSupplierFromImport({ state, clock, vatPlatform, supplier, incomin
       incoming.defaultUnitPrice ?? supplier.defaultUnitPrice,
       "supplier_default_unit_price_invalid"
     ) ?? null;
-  supplier.paymentBlocked = incoming.paymentBlocked === true || supplier.paymentBlocked === true;
+  supplier.paymentBlockReasonCodes = uniqueStrings([
+    ...(supplier.paymentBlockReasonCodes || []),
+    ...normalizeSupplierPaymentBlockReasonCodes({
+      paymentBlocked: incoming.paymentBlocked,
+      paymentBlockReasonCodes: incoming.paymentBlockReasonCodes
+    })
+  ]);
+  supplier.paymentBlocked = supplier.paymentBlockReasonCodes.length > 0;
   supplier.bookingBlocked = incoming.bookingBlocked === true || supplier.bookingBlocked === true;
+  supplier.taxStatusCode =
+    incoming.taxStatusCode !== undefined ? normalizeSupplierTaxStatusCode(incoming.taxStatusCode) : supplier.taxStatusCode;
+  supplier.counterpartyTypeCode =
+    incoming.counterpartyTypeCode !== undefined
+      ? normalizeSupplierCounterpartyTypeCode(incoming.counterpartyTypeCode, {
+          countryCode: supplier.countryCode,
+          organizationNumber: supplier.organizationNumber
+        })
+      : supplier.counterpartyTypeCode;
+  supplier.fTaxInvoked = incoming.fTaxInvoked !== undefined ? incoming.fTaxInvoked === true : supplier.fTaxInvoked === true;
+  supplier.socialFeeExemptionCode =
+    incoming.socialFeeExemptionCode !== undefined
+      ? normalizeSupplierSocialFeeExemptionCode(incoming.socialFeeExemptionCode)
+      : normalizeSupplierSocialFeeExemptionCode(supplier.socialFeeExemptionCode || "none");
+  supplier.taxStatusValidatedOn =
+    incoming.taxStatusValidatedOn !== undefined
+      ? normalizeOptionalDate(incoming.taxStatusValidatedOn, "supplier_tax_status_validated_on_invalid")
+      : supplier.taxStatusValidatedOn || null;
   supplier.requiresPo = incoming.requiresPo !== undefined ? incoming.requiresPo !== false : supplier.requiresPo;
   supplier.requiresReceipt = incoming.requiresReceipt !== undefined ? incoming.requiresReceipt === true : supplier.requiresReceipt;
   supplier.allowCreditWithoutLink =
@@ -3460,6 +3808,7 @@ function updateSupplierFromImport({ state, clock, vatPlatform, supplier, incomin
     bic: supplier.bic
   });
   if (previousBankFingerprint !== nextBankFingerprint) {
+    supplier.paymentBlockReasonCodes = uniqueStrings([...(supplier.paymentBlockReasonCodes || []), "bank_details_changed"]);
     supplier.paymentBlocked = true;
     pushAudit(state, clock, {
       companyId: supplier.companyId,
@@ -3468,9 +3817,20 @@ function updateSupplierFromImport({ state, clock, vatPlatform, supplier, incomin
       action: "ap.supplier.bank_details_changed",
       entityType: "ap_supplier",
       entityId: supplier.supplierId,
-      explanation: `Bank details changed for supplier ${supplier.supplierNo}; payment hold activated.`
-    });
+        explanation: `Bank details changed for supplier ${supplier.supplierNo}; payment hold activated.`
+      });
   }
+  refreshSupplierInvoicesForControlChanges({
+    state,
+    clock,
+    supplier,
+    actorId,
+    correlationId: crypto.randomUUID(),
+    documentClassificationPlatform,
+    importCasesPlatform,
+    getDocumentClassificationPlatform,
+    getImportCasesPlatform
+  });
 }
 
 function resolvePurchaseOrderForImport(state, companyId, incoming) {

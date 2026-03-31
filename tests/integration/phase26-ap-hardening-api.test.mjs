@@ -270,6 +270,127 @@ test("Step 26 AP stays blocked when a supplier invoice is both import-linked and
   }
 });
 
+test("Phase 8.2 API exposes explicit AP supplier payment block and release without leaving stale invoice holds", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-25T09:00:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    await requestJson(baseUrl, "/v1/ledger/chart/install", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+
+    const supplier = await requestJson(baseUrl, "/v1/ap/suppliers", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        legalName: "Blocked Supplier AB",
+        countryCode: "SE",
+        currencyCode: "SEK",
+        paymentTermsCode: "NET30",
+        bankgiro: "5555-2222",
+        paymentRecipient: "Blocked Supplier AB",
+        defaultExpenseAccountNumber: "5410",
+        defaultVatCode: "VAT_SE_DOMESTIC_25",
+        requiresPo: false
+      }
+    });
+
+    const invoice = await requestJson(baseUrl, "/v1/ap/invoices/ingest", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        supplierId: supplier.supplierId,
+        externalInvoiceRef: "STEP26-BLOCK-001",
+        invoiceDate: "2026-03-25",
+        dueDate: "2026-04-24",
+        sourceChannel: "api",
+        lines: [
+          {
+            description: "Standard office cost",
+            quantity: 1,
+            unitPrice: 1000,
+            expenseAccountNumber: "5410",
+            vatCode: "VAT_SE_DOMESTIC_25"
+          }
+        ]
+      }
+    });
+
+    await requestJson(baseUrl, `/v1/ap/invoices/${invoice.supplierInvoiceId}/match`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    await requestJson(baseUrl, `/v1/ap/invoices/${invoice.supplierInvoiceId}/post`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+
+    const blockedSupplier = await requestJson(baseUrl, `/v1/ap/suppliers/${supplier.supplierId}/payment-block`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCodes: ["manual_payment_block"]
+      }
+    });
+    assert.equal(blockedSupplier.paymentBlocked, true);
+    assert.equal(blockedSupplier.paymentBlockReasonCodes.includes("manual_payment_block"), true);
+
+    const blockedInvoice = await requestJson(baseUrl, `/v1/ap/invoices/${invoice.supplierInvoiceId}?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(blockedInvoice.paymentHold, true);
+    assert.equal(blockedInvoice.paymentHoldReasonCodes.includes("manual_payment_block"), true);
+
+    const releasedSupplier = await requestJson(
+      baseUrl,
+      `/v1/ap/suppliers/${supplier.supplierId}/payment-block/release`,
+      {
+        method: "POST",
+        token: adminToken,
+        body: {
+          companyId: DEMO_IDS.companyId
+        }
+      }
+    );
+    assert.equal(releasedSupplier.paymentBlocked, false);
+
+    const releasedInvoice = await requestJson(baseUrl, `/v1/ap/invoices/${invoice.supplierInvoiceId}?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(releasedInvoice.paymentHold, false);
+    assert.equal(releasedInvoice.paymentHoldReasonCodes.includes("manual_payment_block"), false);
+  } finally {
+    await stopServer(server);
+  }
+});
+
 async function ingestSingleDocument({ baseUrl, token, companyId, recipientAddress, messageId, filename, contentText }) {
   const ingested = await requestJson(baseUrl, "/v1/inbox/messages", {
     method: "POST",

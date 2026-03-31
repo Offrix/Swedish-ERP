@@ -348,6 +348,91 @@ test("Phase 6.4 direct platform flow blocks person-linked AP documents from post
   assert.equal(rematched.invoice.reviewRequired, true);
 });
 
+test("Phase 8.2 AP models F-skatt and A-skatt work-compensation consequences without overblocking low annual amounts", () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-09-27T08:00:00Z")
+  });
+
+  const supplier = platform.createSupplier({
+    companyId: COMPANY_ID,
+    legalName: "A-skatt Consultant",
+    countryCode: "SE",
+    currencyCode: "SEK",
+    paymentTermsCode: "NET30",
+    paymentRecipient: "A-skatt Consultant",
+    bankgiro: "4444-0000",
+    defaultExpenseAccountNumber: "6540",
+    defaultVatCode: "VAT_SE_EXEMPT",
+    requiresPo: false,
+    taxStatusCode: "a_skatt",
+    counterpartyTypeCode: "sole_trader",
+    actorId: "admin"
+  });
+
+  const firstInvoice = platform.ingestSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierId: supplier.supplierId,
+    externalInvoiceRef: "SUP-TAX-8201",
+    invoiceDate: "2026-09-27",
+    dueDate: "2026-10-27",
+    sourceChannel: "api",
+    lines: [
+      {
+        description: "Consulting day 1",
+        quantity: 1,
+        unitPrice: 5000,
+        expenseAccountNumber: "6540",
+        vatCode: "VAT_SE_EXEMPT",
+        workCompensationFlag: true
+      }
+    ],
+    actorId: "admin"
+  });
+  const firstMatch = platform.runSupplierInvoiceMatch({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: firstInvoice.supplierInvoiceId,
+    actorId: "admin"
+  });
+  assert.equal(firstMatch.invoice.reviewRequired, false);
+  assert.equal(firstMatch.invoice.paymentHold, false);
+  assert.equal(firstMatch.invoice.supplierTaxAssessmentStatus, "monitoring");
+  assert.equal(firstMatch.invoice.supplierTaxConsequenceCodes.includes("annual_work_compensation_threshold_monitoring_required"), true);
+
+  const secondInvoice = platform.ingestSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierId: supplier.supplierId,
+    externalInvoiceRef: "SUP-TAX-8202",
+    invoiceDate: "2026-10-02",
+    dueDate: "2026-11-01",
+    sourceChannel: "api",
+    lines: [
+      {
+        description: "Consulting day 2",
+        quantity: 1,
+        unitPrice: 6000,
+        expenseAccountNumber: "6540",
+        vatCode: "VAT_SE_EXEMPT",
+        workCompensationFlag: true
+      }
+    ],
+    actorId: "admin"
+  });
+  const secondMatch = platform.runSupplierInvoiceMatch({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: secondInvoice.supplierInvoiceId,
+    actorId: "admin"
+  });
+  assert.equal(secondMatch.invoice.reviewRequired, true);
+  assert.equal(secondMatch.invoice.paymentHold, true);
+  assert.equal(secondMatch.invoice.supplierTaxAssessmentStatus, "review_required");
+  assert.equal(secondMatch.invoice.reviewQueueCodes.includes("supplier_tax_review_required"), true);
+  assert.equal(secondMatch.invoice.paymentHoldReasonCodes.includes("supplier_tax_withholding_required"), true);
+  assert.equal(secondMatch.invoice.paymentHoldReasonCodes.includes("supplier_employer_contributions_required"), true);
+  assert.equal(secondMatch.invoice.supplierTaxConsequenceCodes.includes("tax_withholding_30_required"), true);
+  assert.equal(secondMatch.invoice.supplierTaxConsequenceCodes.includes("employer_contributions_required"), true);
+  assert.equal(secondMatch.invoice.supplierTaxAnnualCompensationAmount, 11000);
+});
+
 test("Phase 9.2 direct platform flow posts AP credit notes with dedicated recipe and exposes non-payable payment prep", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-10-28T08:00:00Z")

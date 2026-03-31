@@ -738,6 +738,8 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/ap/suppliers",
               "/v1/ap/suppliers/:supplierId",
               "/v1/ap/suppliers/:supplierId/status",
+              "/v1/ap/suppliers/:supplierId/payment-block",
+              "/v1/ap/suppliers/:supplierId/payment-block/release",
               "/v1/ap/suppliers/imports",
               "/v1/ap/suppliers/imports/:supplierImportBatchId",
               "/v1/ap/purchase-orders",
@@ -8481,6 +8483,58 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         companyId,
         supplierId: apSupplierStatusMatch.supplierId,
         targetStatus: body.targetStatus,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const apSupplierPaymentBlockMatch = matchPath(path, "/v1/ap/suppliers/:supplierId/payment-block");
+  if (apSupplierPaymentBlockMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ap_supplier",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.blockSupplierPayments({
+        companyId,
+        supplierId: apSupplierPaymentBlockMatch.supplierId,
+        reasonCodes: body.reasonCodes,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const apSupplierPaymentReleaseMatch = matchPath(path, "/v1/ap/suppliers/:supplierId/payment-block/release");
+  if (apSupplierPaymentReleaseMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ap_supplier",
+      scopeCode: "ap"
+    });
+    writeJson(
+      res,
+      200,
+      platform.releaseSupplierPaymentBlock({
+        companyId,
+        supplierId: apSupplierPaymentReleaseMatch.supplierId,
+        reasonCodes: body.reasonCodes ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })

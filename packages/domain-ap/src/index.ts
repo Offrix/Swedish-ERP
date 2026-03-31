@@ -1,4 +1,7 @@
 export type ApSupplierStatus = "draft" | "active" | "blocked" | "archived";
+export type ApSupplierTaxStatusCode = "f_skatt" | "fa_skatt" | "a_skatt" | "unknown";
+export type ApSupplierCounterpartyTypeCode = "legal_entity" | "sole_trader" | "individual";
+export type ApSupplierSocialFeeExemptionCode = "none" | "a1_certificate";
 export type ApPurchaseOrderStatus =
   | "draft"
   | "approved"
@@ -44,7 +47,13 @@ export interface ApSupplier {
   readonly defaultDimensionsJson: Record<string, string>;
   readonly defaultUnitPrice: number | null;
   readonly paymentBlocked: boolean;
+  readonly paymentBlockReasonCodes: readonly string[];
   readonly bookingBlocked: boolean;
+  readonly taxStatusCode: ApSupplierTaxStatusCode;
+  readonly counterpartyTypeCode: ApSupplierCounterpartyTypeCode;
+  readonly fTaxInvoked: boolean;
+  readonly socialFeeExemptionCode: ApSupplierSocialFeeExemptionCode;
+  readonly taxStatusValidatedOn: string | null;
   readonly riskClassCode: string;
   readonly attestChainId: string | null;
   readonly requiresPo: boolean;
@@ -160,6 +169,7 @@ export interface ApSupplierInvoiceLine {
   readonly allocationInvalidFieldCodes: readonly string[];
   readonly allocationReviewRequired: boolean;
   readonly goodsOrServices: "goods" | "services";
+  readonly workCompensationFlag: boolean;
   readonly reverseChargeFlag: boolean;
   readonly constructionServiceFlag: boolean;
   readonly deductionRatio: number;
@@ -299,6 +309,9 @@ export interface ApSupplierInvoice {
   readonly paymentHoldReasonCodes: readonly string[];
   readonly paymentReadinessStatus?: string | null;
   readonly paymentReadinessReasonCodes?: readonly string[];
+  readonly supplierTaxAssessmentStatus?: string | null;
+  readonly supplierTaxConsequenceCodes?: readonly string[];
+  readonly supplierTaxAnnualCompensationAmount?: number | null;
   readonly lines: readonly ApSupplierInvoiceLine[];
   readonly latestMatchRunId: string | null;
   readonly journalEntryId: string | null;

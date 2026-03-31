@@ -68,6 +68,51 @@ test("Phase 6.1 imports suppliers idempotently and flags bank-detail changes", (
   assert.equal(updateBatch.summary.updated, 1);
   assert.equal(suppliers.length, 1);
   assert.equal(suppliers[0].paymentBlocked, true);
+  assert.equal(suppliers[0].paymentBlockReasonCodes.includes("bank_details_changed"), true);
+});
+
+test("Phase 8.2 explicit supplier payment blocks can be added and released per reason code", () => {
+  const vat = createVatPlatform({ seedDemo: true });
+  const ap = createApEngine({
+    clock: () => new Date("2026-09-02T08:00:00Z"),
+    vatPlatform: vat
+  });
+
+  const supplier = ap.createSupplier({
+    companyId: COMPANY_ID,
+    supplierNo: "SUP1002",
+    legalName: "Reasoned Block Supplier AB",
+    countryCode: "SE",
+    currencyCode: "SEK",
+    paymentTermsCode: "NET30",
+    paymentRecipient: "Reasoned Block Supplier AB",
+    bankgiro: "2233-4455",
+    defaultExpenseAccountNumber: "5410",
+    defaultVatCode: "VAT_SE_DOMESTIC_25"
+  });
+
+  const blocked = ap.blockSupplierPayments({
+    companyId: COMPANY_ID,
+    supplierId: supplier.supplierId,
+    reasonCodes: ["manual_payment_block", "supplier_tax_review_required"]
+  });
+  assert.equal(blocked.paymentBlocked, true);
+  assert.deepEqual(blocked.paymentBlockReasonCodes, ["manual_payment_block", "supplier_tax_review_required"]);
+
+  const partiallyReleased = ap.releaseSupplierPaymentBlock({
+    companyId: COMPANY_ID,
+    supplierId: supplier.supplierId,
+    reasonCodes: ["manual_payment_block"]
+  });
+  assert.equal(partiallyReleased.paymentBlocked, true);
+  assert.deepEqual(partiallyReleased.paymentBlockReasonCodes, ["supplier_tax_review_required"]);
+
+  const fullyReleased = ap.releaseSupplierPaymentBlock({
+    companyId: COMPANY_ID,
+    supplierId: supplier.supplierId
+  });
+  assert.equal(fullyReleased.paymentBlocked, false);
+  assert.deepEqual(fullyReleased.paymentBlockReasonCodes, []);
 });
 
 test("Phase 6.1 purchase orders inherit defaults and receipts enforce duplicate protection", () => {

@@ -492,6 +492,7 @@ const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
   }),
   "ap": Object.freeze({
     "approveSupplierInvoice": "write",
+    "blockSupplierPayments": "write",
     "createPurchaseOrder": "write",
     "createReceipt": "write",
     "createSupplier": "write",
@@ -515,6 +516,7 @@ const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
     "listSupplierInvoices": "read",
     "listSuppliers": "read",
     "postSupplierInvoice": "write",
+    "releaseSupplierPaymentBlock": "write",
     "releaseApOpenItemReservation": "write",
     "reopenApOpenItem": "write",
     "reserveApOpenItem": "write",
