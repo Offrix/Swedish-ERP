@@ -113,6 +113,10 @@ test("Phase 8.2 e2e flow handles payroll tax, AGI signing, leave locks and corre
         ]
       }
     });
+    assert.deepEqual(
+      regularRun.providerBaselineRefs.map((entry) => entry.baselineCode),
+      ["SE-SKATTEVERKET-AGI-API"]
+    );
     await requestJson(baseUrl, `/v1/payroll/pay-runs/${regularRun.payRunId}/approve`, {
       method: "POST",
       token: adminToken,
@@ -131,6 +135,10 @@ test("Phase 8.2 e2e flow handles payroll tax, AGI signing, leave locks and corre
       }
     });
     const draftEmployee = createdSubmission.currentVersion.employees[0];
+    assert.deepEqual(
+      createdSubmission.currentVersion.providerBaselineRefs.map((entry) => entry.baselineCode),
+      ["SE-SKATTEVERKET-AGI-API"]
+    );
     assert.equal(draftEmployee.payloadJson.taxFields.sinkTax > 0, true);
     assert.equal(draftEmployee.payloadJson.absence.signalCount, 2);
 

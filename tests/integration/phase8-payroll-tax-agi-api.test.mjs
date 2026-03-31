@@ -183,6 +183,13 @@ test("Phase 8.2 API manages statutory profiles and AGI submissions with correcti
         ]
       }
     });
+    assert.deepEqual(
+      regularRun.providerBaselineRefs.map((entry) => entry.baselineCode),
+      ["SE-SKATTEVERKET-AGI-API"]
+    );
+    assert.equal(typeof regularRun.providerBaselineRefs[0].providerBaselineId, "string");
+    assert.equal(typeof regularRun.providerBaselineRefs[0].providerBaselineVersion, "string");
+    assert.equal(typeof regularRun.providerBaselineRefs[0].providerBaselineChecksum, "string");
     await requestJson(baseUrl, `/v1/payroll/pay-runs/${regularRun.payRunId}/approve`, {
       method: "POST",
       token: sessionToken,
@@ -201,6 +208,13 @@ test("Phase 8.2 API manages statutory profiles and AGI submissions with correcti
       }
     });
     assert.equal(createdSubmission.currentVersion.employees.length, 2);
+    assert.deepEqual(
+      createdSubmission.currentVersion.providerBaselineRefs.map((entry) => entry.baselineCode),
+      ["SE-SKATTEVERKET-AGI-API"]
+    );
+    assert.equal(typeof createdSubmission.currentVersion.providerBaselineRefs[0].providerBaselineId, "string");
+    assert.equal(typeof createdSubmission.currentVersion.providerBaselineRefs[0].providerBaselineVersion, "string");
+    assert.equal(typeof createdSubmission.currentVersion.providerBaselineRefs[0].providerBaselineChecksum, "string");
 
     const validated = await requestJson(
       baseUrl,

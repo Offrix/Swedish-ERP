@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { createRulePackRegistry } from "../../rule-engine/src/index.mjs";
+import { createProviderBaselineRegistry, createRulePackRegistry } from "../../rule-engine/src/index.mjs";
 import { cloneValue as copy } from "../../domain-core/src/clone.mjs";
 import {
   normalizeOptionalIsoDate as normalizeOptionalIsoDateKernel,
@@ -55,6 +55,24 @@ export const AGI_SUBMISSION_STATES = Object.freeze([
 export const PAYROLL_POSTING_STATUSES = Object.freeze(["draft", "posted"]);
 export const PAYROLL_PAYOUT_BATCH_STATUSES = Object.freeze(["exported", "matched"]);
 const PAYROLL_EXTERNAL_CONSUMPTION_STAGES = Object.freeze(["calculated", "approved"]);
+export const PAYROLL_AGI_PROVIDER_CODE = "skatteverket_agi";
+export const PAYROLL_AGI_PROVIDER_BASELINE_CODE = "SE-SKATTEVERKET-AGI-API";
+export const PAYROLL_PROVIDER_BASELINES = Object.freeze([
+  Object.freeze({
+    providerBaselineId: "skatteverket-agi-api-se-2026.1",
+    baselineCode: PAYROLL_AGI_PROVIDER_BASELINE_CODE,
+    providerCode: PAYROLL_AGI_PROVIDER_CODE,
+    domain: "integrations",
+    jurisdiction: "SE",
+    formatFamily: "authority_transport_api",
+    effectiveFrom: "2026-01-01",
+    version: "2026.1",
+    specVersion: "1.0",
+    checksum: "skatteverket-agi-api-se-2026.1",
+    sourceSnapshotDate: "2026-03-29",
+    semanticChangeSummary: "Skatteverket AGI transport baseline for official dispatch and receipt collection."
+  })
+]);
 export const PAYROLL_COMPENSATION_BUCKETS = Object.freeze([
   "gross_addition",
   "gross_deduction",
@@ -328,11 +346,15 @@ export function createPayrollEngine({
   tenantControlPlatform = null,
   evidencePlatform = null,
   ruleRegistry = null,
+  providerBaselineRegistry = null,
   getCorePlatform = null,
   secretStore = null,
   secretSealKey = null
 } = {}) {
   const rules = ruleRegistry || createRulePackRegistry({ clock, seedRulePacks: EMPLOYER_CONTRIBUTION_RULE_PACKS });
+  const providerBaselines =
+    providerBaselineRegistry
+    || createProviderBaselineRegistry({ clock, seedProviderBaselines: PAYROLL_PROVIDER_BASELINES });
   const payrollSecretStore =
     secretStore ||
     createConfiguredSecretStore({
@@ -1690,6 +1712,10 @@ export function createPayrollEngine({
     run.postingIntentSnapshotHash = buildPayrollEmploymentPreviewHash(employmentResults, "postingIntentPreview");
     run.bankPaymentSnapshotHash = buildPayrollEmploymentPreviewHash(employmentResults, "bankPaymentPreview");
     run.rulepackRefs = collectPayRunRulepackRefs(employmentResults);
+    run.providerBaselineRefs = collectPayRunProviderBaselineRefs({
+      providerBaselineRegistry: providerBaselines,
+      payRun: run
+    });
     run.decisionSnapshotRefs = collectPayRunDecisionSnapshotRefs(run, employmentResults);
     const inputSnapshotRecord = createPayrollInputSnapshotRecord({
       run,
@@ -3503,6 +3529,24 @@ function collectPayRunRulepackRefs(employmentResults = []) {
   );
 }
 
+function collectPayRunProviderBaselineRefs({ providerBaselineRegistry, payRun } = {}) {
+  const agiTransportBaselineRef = resolvePayrollProviderBaselineRef({
+    providerBaselineRegistry,
+    providerCode: PAYROLL_AGI_PROVIDER_CODE,
+    baselineCode: PAYROLL_AGI_PROVIDER_BASELINE_CODE,
+    effectiveDate: payRun?.payDate,
+    contextCode: "payroll_provider_baseline_missing",
+    metadata: {
+      sourceDomain: "payroll",
+      sourceObjectType: "pay_run",
+      sourceObjectId: payRun?.payRunId || null,
+      reportingPeriod: payRun?.reportingPeriod || null,
+      profileCode: "agi_transport"
+    }
+  });
+  return dedupeProviderBaselineRefs([agiTransportBaselineRef]);
+}
+
 function collectPayRunDecisionSnapshotRefs(run, employmentResults = []) {
   return dedupeDecisionSnapshotRefs(
     employmentResults.flatMap((result) => {
@@ -3604,25 +3648,99 @@ function dedupeProviderBaselineRefs(values = []) {
     if (!candidate?.providerBaselineId && !candidate?.baselineCode && !candidate?.providerBaselineCode) {
       continue;
     }
-    const baselineCode = candidate.baselineCode || candidate.providerBaselineCode;
+    const normalized = requirePinnedPayrollProviderBaselineRef(candidate, "payroll_provider_baseline");
+    const baselineCode = normalized.baselineCode;
     if (
       !refs.some(
         (existing) =>
-          (existing.providerBaselineId || null) === (candidate.providerBaselineId || null)
+          (existing.providerBaselineId || null) === normalized.providerBaselineId
           && (existing.baselineCode || existing.providerBaselineCode) === baselineCode
       )
     ) {
-      refs.push(copy({
-        providerBaselineId: candidate.providerBaselineId || null,
-        providerCode: candidate.providerCode || null,
-        baselineCode,
-        providerBaselineVersion: candidate.providerBaselineVersion || null,
-        providerBaselineChecksum: candidate.providerBaselineChecksum || null,
-        effectiveDate: candidate.effectiveDate || null
-      }));
+      refs.push(copy(normalized));
     }
   }
   return refs;
+}
+
+function requirePinnedPayrollProviderBaselineRef(candidate = {}, codePrefix = "payroll_provider_baseline") {
+  const baselineCode = normalizeOptionalText(candidate.baselineCode) || normalizeOptionalText(candidate.providerBaselineCode);
+  const providerBaselineId = normalizeOptionalText(candidate.providerBaselineId);
+  const providerCode = normalizeOptionalText(candidate.providerCode);
+  const providerBaselineVersion = normalizeOptionalText(candidate.providerBaselineVersion);
+  const providerBaselineChecksum = normalizeOptionalText(candidate.providerBaselineChecksum);
+  if (!providerBaselineId) {
+    throw createError(409, `${codePrefix}_id_required`, "Provider baseline id is required.");
+  }
+  if (!providerCode) {
+    throw createError(409, `${codePrefix}_provider_code_required`, "Provider code is required for payroll provider pinning.");
+  }
+  if (!baselineCode) {
+    throw createError(409, `${codePrefix}_code_required`, "Provider baseline code is required for payroll provider pinning.");
+  }
+  if (!providerBaselineVersion) {
+    throw createError(409, `${codePrefix}_version_required`, "Provider baseline version is required for payroll provider pinning.");
+  }
+  if (!providerBaselineChecksum) {
+    throw createError(409, `${codePrefix}_checksum_required`, "Provider baseline checksum is required for payroll provider pinning.");
+  }
+  return {
+    providerBaselineId,
+    providerCode,
+    baselineCode,
+    providerBaselineVersion,
+    providerBaselineChecksum,
+    domain: normalizeOptionalText(candidate.domain),
+    jurisdiction: normalizeOptionalText(candidate.jurisdiction),
+    selectionMode: normalizeOptionalText(candidate.selectionMode),
+    effectiveDate: normalizeOptionalText(candidate.effectiveDate),
+    specVersion: normalizeOptionalText(candidate.specVersion),
+    formatFamily: normalizeOptionalText(candidate.formatFamily),
+    metadata: copy(candidate.metadata || {}),
+    rollbackId: normalizeOptionalText(candidate.rollbackId)
+  };
+}
+
+function resolvePayrollProviderBaselineRef({
+  providerBaselineRegistry,
+  providerCode,
+  baselineCode,
+  effectiveDate,
+  contextCode = "payroll_provider_baseline_missing",
+  metadata = {}
+} = {}) {
+  if (
+    !providerBaselineRegistry
+    || typeof providerBaselineRegistry.resolveProviderBaseline !== "function"
+    || typeof providerBaselineRegistry.buildProviderBaselineRef !== "function"
+  ) {
+    throw createError(409, contextCode, "Payroll requires a provider baseline registry for historical pinning.");
+  }
+  const resolvedEffectiveDate = normalizeRequiredDate(effectiveDate || new Date().toISOString().slice(0, 10), "payroll_provider_baseline_effective_date_invalid");
+  let providerBaseline = null;
+  try {
+    providerBaseline = providerBaselineRegistry.resolveProviderBaseline({
+      domain: "integrations",
+      jurisdiction: "SE",
+      providerCode: requireText(providerCode, "payroll_provider_code_required"),
+      baselineCode: requireText(baselineCode, "payroll_provider_baseline_code_required"),
+      effectiveDate: resolvedEffectiveDate
+    });
+  } catch {
+    providerBaseline = null;
+  }
+  if (!providerBaseline) {
+    throw createError(
+      409,
+      contextCode,
+      `Payroll requires a pinned provider baseline ref for ${providerCode}/${baselineCode} on ${resolvedEffectiveDate}.`
+    );
+  }
+  return providerBaselineRegistry.buildProviderBaselineRef({
+    effectiveDate: resolvedEffectiveDate,
+    providerBaseline,
+    metadata
+  });
 }
 
 function buildAgiEmployeeGroups({ state, companyId, reportingPeriod, approvedRuns, hrPlatform, timePlatform }) {
