@@ -206,6 +206,7 @@ test("Phase 9.2 feeds payroll with tax-free allowances, taxable mileage and adva
     payRunId: payRun.payRunId,
     actorId: "unit-test"
   });
+  const expenseReimbursementLine = payRun.lines.find((line) => line.payItemCode === "EXPENSE_REIMBURSEMENT");
   const consumedClaim = travelPlatform.listTravelClaims({
     companyId: COMPANY_ID,
     employmentId: employment.employmentId,
@@ -216,6 +217,9 @@ test("Phase 9.2 feeds payroll with tax-free allowances, taxable mileage and adva
   assert.equal(payRun.lines.some((line) => line.payItemCode === "TAXABLE_TRAVEL_ALLOWANCE" && line.amount === 55), true);
   assert.equal(payRun.lines.some((line) => line.payItemCode === "TAXABLE_MILEAGE" && line.amount === 294), true);
   assert.equal(payRun.lines.some((line) => line.payItemCode === "EXPENSE_REIMBURSEMENT" && line.amount === 100), true);
+  assert.equal(expenseReimbursementLine.taxTreatmentCode, "non_taxable");
+  assert.equal(expenseReimbursementLine.employerContributionTreatmentCode, "excluded");
+  assert.equal(expenseReimbursementLine.agiMappingCode, "not_reported");
   assert.equal(payRun.lines.some((line) => line.payItemCode === "ADVANCE" && line.amount === 106), true);
   assert.equal(payRun.payslips[0].totals.taxFreeAllowanceAmount, 645);
   assert.equal(payRun.payslips[0].totals.expenseReimbursementAmount, 100);

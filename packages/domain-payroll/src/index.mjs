@@ -9272,7 +9272,7 @@ function resolveDefaultTaxTreatmentCode(payItemCode) {
   const resolvedCode = normalizeCode(payItemCode, "pay_item_code_required");
   if (
     resolvedCode.startsWith("TAX_FREE_") ||
-    ["NET_DEDUCTION", "GARNISHMENT", "ADVANCE", "RECLAIM", "PENSION_PREMIUM", "FORA_PREMIUM", "EXTRA_PENSION_PREMIUM", "PENSION_SPECIAL_PAYROLL_TAX"].includes(
+    ["NET_DEDUCTION", "GARNISHMENT", "ADVANCE", "RECLAIM", "EXPENSE_REIMBURSEMENT", "PENSION_PREMIUM", "FORA_PREMIUM", "EXTRA_PENSION_PREMIUM", "PENSION_SPECIAL_PAYROLL_TAX"].includes(
       resolvedCode
     )
   ) {
@@ -9285,7 +9285,7 @@ function resolveDefaultEmployerContributionTreatmentCode(payItemCode) {
   const resolvedCode = normalizeCode(payItemCode, "pay_item_code_required");
   if (
     resolvedCode.startsWith("TAX_FREE_") ||
-    ["NET_DEDUCTION", "GARNISHMENT", "ADVANCE", "RECLAIM", "PENSION_PREMIUM", "FORA_PREMIUM", "EXTRA_PENSION_PREMIUM", "PENSION_SPECIAL_PAYROLL_TAX"].includes(
+    ["NET_DEDUCTION", "GARNISHMENT", "ADVANCE", "RECLAIM", "EXPENSE_REIMBURSEMENT", "PENSION_PREMIUM", "FORA_PREMIUM", "EXTRA_PENSION_PREMIUM", "PENSION_SPECIAL_PAYROLL_TAX"].includes(
       resolvedCode
     )
   ) {

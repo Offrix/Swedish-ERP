@@ -130,11 +130,15 @@ test("Step 22 bridges benefits, travel and pension payloads into one payroll run
     payRunId: payRun.payRunId,
     actorId: "unit-test"
   });
+  const expenseReimbursementLine = approved.lines.find((line) => line.payItemCode === "EXPENSE_REIMBURSEMENT");
 
   assert.equal(approved.lines.some((line) => line.payItemCode === "MONTHLY_SALARY"), true);
   assert.equal(approved.lines.some((line) => line.payItemCode === "TAX_FREE_TRAVEL_ALLOWANCE" && line.amount === 645), true);
   assert.equal(approved.lines.some((line) => line.payItemCode === "TAXABLE_TRAVEL_ALLOWANCE" && line.amount === 55), true);
   assert.equal(approved.lines.some((line) => line.payItemCode === "EXPENSE_REIMBURSEMENT" && line.amount === 100), true);
+  assert.equal(expenseReimbursementLine.taxTreatmentCode, "non_taxable");
+  assert.equal(expenseReimbursementLine.employerContributionTreatmentCode, "excluded");
+  assert.equal(expenseReimbursementLine.agiMappingCode, "not_reported");
   assert.equal(approved.lines.some((line) => line.payItemCode === "ADVANCE" && line.amount === 106), true);
   assert.equal(approved.lines.some((line) => line.payItemCode === "PENSION_PREMIUM" && line.amount === 2925), true);
   assert.equal(approved.lines.some((line) => line.payItemCode === "EXTRA_PENSION_PREMIUM" && line.amount === 1500), true);

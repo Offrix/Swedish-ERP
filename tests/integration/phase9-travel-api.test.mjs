@@ -193,10 +193,14 @@ test("Phase 9.2 API manages travel claims and carries them into payroll, posting
         employmentIds: [employee.employment.employmentId]
       }
     });
+    const expenseReimbursementLine = payRun.lines.find((line) => line.payItemCode === "EXPENSE_REIMBURSEMENT");
     assert.equal(payRun.lines.some((line) => line.payItemCode === "TAX_FREE_TRAVEL_ALLOWANCE" && line.amount === 645), true);
     assert.equal(payRun.lines.some((line) => line.payItemCode === "TAXABLE_TRAVEL_ALLOWANCE" && line.amount === 55), true);
     assert.equal(payRun.lines.some((line) => line.payItemCode === "TAX_FREE_MILEAGE" && line.amount === 950), true);
     assert.equal(payRun.lines.some((line) => line.payItemCode === "EXPENSE_REIMBURSEMENT" && line.amount === 140), true);
+    assert.equal(expenseReimbursementLine.taxTreatmentCode, "non_taxable");
+    assert.equal(expenseReimbursementLine.employerContributionTreatmentCode, "excluded");
+    assert.equal(expenseReimbursementLine.agiMappingCode, "not_reported");
 
     await requestJson(baseUrl, `/v1/payroll/pay-runs/${payRun.payRunId}/approve`, {
       method: "POST",
