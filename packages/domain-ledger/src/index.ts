@@ -2,6 +2,7 @@ export type LedgerState = "draft" | "approved_for_post" | "posted" | "reversed" 
 export type VoucherSeriesCode = string;
 export type VoucherSeriesPurposeCode = string;
 export type VoucherSeriesStatus = "active" | "paused" | "archived";
+export type AccountingCurrencyCode = "SEK" | "EUR";
 
 export type PostingSourceType =
   | "AR_INVOICE"
@@ -73,6 +74,16 @@ export interface AccountCatalogVersion {
   readonly accounts: readonly AccountCatalogAccount[];
 }
 
+export type RequiredEngineAccounts = Readonly<Record<string, readonly string[]>>;
+
+export declare const REQUIRED_ENGINE_ACCOUNTS: RequiredEngineAccounts;
+export declare const ALLOWED_ACCOUNTING_CURRENCY_CODES: readonly AccountingCurrencyCode[];
+
+export declare function validateRequiredEngineAccounts(
+  catalogVersion: AccountCatalogVersion,
+  requiredEngineAccounts?: RequiredEngineAccounts
+): AccountCatalogVersion;
+
 export interface VoucherSeries {
   readonly voucherSeriesId: string;
   readonly companyId: string;
@@ -103,6 +114,17 @@ export interface AccountingPeriod {
   readonly updatedAt: string;
 }
 
+export interface AccountingCurrencyProfile {
+  readonly accountingCurrencyProfileId: string;
+  readonly companyId: string;
+  readonly accountingCurrencyCode: AccountingCurrencyCode;
+  readonly reportingCurrencyCode: AccountingCurrencyCode;
+  readonly profileVersion: number;
+  readonly sourceCode: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface LedgerDimensionCatalog {
   readonly companyId: string;
   readonly projects: readonly LedgerDimensionValue[];
@@ -122,6 +144,8 @@ export interface JournalLineInput {
   readonly creditAmount?: number | string;
   readonly currencyCode?: string;
   readonly exchangeRate?: number | string | null;
+  readonly functionalDebitAmount?: number | string | null;
+  readonly functionalCreditAmount?: number | string | null;
   readonly dimensionJson?: Record<string, unknown>;
   readonly sourceType?: PostingSourceType;
   readonly sourceId?: string | null;
@@ -139,6 +163,9 @@ export interface JournalLine {
   readonly creditAmount: number;
   readonly currencyCode: string;
   readonly exchangeRate: number | null;
+  readonly originalCurrencyCode?: string | null;
+  readonly originalDebitAmount?: number | null;
+  readonly originalCreditAmount?: number | null;
   readonly dimensionJson: Record<string, unknown>;
   readonly sourceType: PostingSourceType;
   readonly sourceId: string;
@@ -151,6 +178,16 @@ export interface CorrectionResult {
   readonly reversalJournalEntry: JournalEntry | null;
   readonly correctedJournalEntry: JournalEntry;
 }
+
+export declare function getAccountingCurrencyProfile(options: { companyId: string }): AccountingCurrencyProfile;
+
+export declare function upsertAccountingCurrencyProfile(options: {
+  companyId: string;
+  accountingCurrencyCode: AccountingCurrencyCode;
+  actorId: string;
+  sourceCode?: string;
+  correlationId?: string;
+}): AccountingCurrencyProfile;
 
 export type JournalCorrectionType = "delta" | "full_reversal" | "reversal_and_rebook";
 
@@ -172,6 +209,10 @@ export interface JournalEntry {
   readonly status: LedgerState;
   readonly importedFlag: boolean;
   readonly currencyCode: string;
+  readonly accountingCurrencyCode: string;
+  readonly accountingCurrencyProfileId?: string | null;
+  readonly accountingCurrencyProfileVersion?: number | null;
+  readonly originalCurrencyCode?: string | null;
   readonly idempotencyKey: string;
   readonly metadataJson: Record<string, unknown>;
   readonly createdAt: string;

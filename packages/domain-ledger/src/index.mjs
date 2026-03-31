@@ -10,11 +10,17 @@ import {
   DSAM_ACCOUNTS,
   DEFAULT_CHART_TEMPLATE_ID,
   getAccountCatalogVersion,
-  listAccountCatalogVersions
+  listAccountCatalogVersions,
+  REQUIRED_ENGINE_ACCOUNTS,
+  validateRequiredEngineAccounts
 } from "./account-catalog.mjs";
 
 export const LEDGER_STATES = Object.freeze(["draft", "approved_for_post", "posted", "reversed", "locked_by_period"]);
 export const DEFAULT_LEDGER_CURRENCY = "SEK";
+export const ALLOWED_ACCOUNTING_CURRENCY_CODES = Object.freeze(["SEK", "EUR"]);
+export const FX_BALANCE_ORIENTATIONS = Object.freeze(["asset", "liability"]);
+export const DEFAULT_REALIZED_FX_LOSS_ACCOUNT_NUMBER = "7930";
+export const DEFAULT_REALIZED_FX_GAIN_ACCOUNT_NUMBER = "7940";
 export const DEFAULT_VOUCHER_SERIES_CODES = Object.freeze("ABCDEFGHIJKLMNOPQRSTUVWXYZ".split(""));
 export const VOUCHER_SERIES_STATUSES = Object.freeze(["active", "paused", "archived"]);
 export const LEDGER_ACCOUNT_STATUSES = Object.freeze(["active", "archived"]);
@@ -287,25 +293,119 @@ export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
 
 const POSTING_RECIPES_BY_CODE = new Map(POSTING_RECIPE_DEFINITIONS.map((recipe) => [recipe.recipeCode, recipe]));
 
-export const REQUIRED_ENGINE_ACCOUNTS = Object.freeze({
-  customerInvoices: Object.freeze(["1210", "2610", "2620", "2630", "3010-3490", "2650"]),
-  supplierInvoices: Object.freeze(["2410", "2640", "4010-6990", "2650"]),
-  payroll: Object.freeze(["7010-7390", "2710", "2720", "2730", "2740", "7110-7160"]),
-  pension: Object.freeze(["7130-7160", "2740", "2760"]),
-  travel: Object.freeze(["5330_or_7310"]),
-  rotRut: Object.freeze(["3070", "3080", "2560"]),
-  projectCost: Object.freeze(["project_dimension_required"]),
-  bank: Object.freeze(["1110", "1170", "1180", "1190"]),
-  tax: Object.freeze(["1120", "2570", "2510-2590"])
-});
-
 export {
   ACCOUNT_CATALOG_VERSIONS,
   DSAM_ACCOUNTS,
   DEFAULT_CHART_TEMPLATE_ID,
   getAccountCatalogVersion,
-  listAccountCatalogVersions
+  listAccountCatalogVersions,
+  REQUIRED_ENGINE_ACCOUNTS,
+  validateRequiredEngineAccounts
 };
+
+export function buildJournalReversalLineInputs(lines = [], { sourceTypeOverride = null } = {}) {
+  if (!Array.isArray(lines)) {
+    throw httpError(400, "journal_lines_required", "Journal entry lines are required.");
+  }
+  return lines.map((line) => ({
+    accountNumber: line.accountNumber,
+    debitAmount: normalizeSignedMoney(line.originalCreditAmount ?? line.creditAmount ?? 0),
+    creditAmount: normalizeSignedMoney(line.originalDebitAmount ?? line.debitAmount ?? 0),
+    currencyCode: line.originalCurrencyCode || line.currencyCode || DEFAULT_LEDGER_CURRENCY,
+    exchangeRate: line.exchangeRate == null ? null : normalizeRate(line.exchangeRate),
+    functionalDebitAmount: normalizeSignedMoney(line.creditAmount ?? 0),
+    functionalCreditAmount: normalizeSignedMoney(line.debitAmount ?? 0),
+    dimensionJson: copy(line.dimensionJson),
+    sourceType: sourceTypeOverride ? assertPostingSourceType(sourceTypeOverride) : assertPostingSourceType(line.sourceType || "MANUAL_JOURNAL"),
+    sourceId: requireText(line.sourceId || "journal_reversal", "source_id_required")
+  }));
+}
+
+export function buildRealizedFxJournalLine({
+  differenceAmount,
+  balanceOrientation,
+  sourceType = "MANUAL_JOURNAL",
+  sourceId,
+  lineNumber = 1,
+  gainAccountNumber = DEFAULT_REALIZED_FX_GAIN_ACCOUNT_NUMBER,
+  lossAccountNumber = DEFAULT_REALIZED_FX_LOSS_ACCOUNT_NUMBER,
+  dimensionJson = null
+} = {}) {
+  const normalizedDifferenceAmount = normalizeSignedMoney(differenceAmount);
+  if (normalizedDifferenceAmount === 0) {
+    return null;
+  }
+  const normalizedBalanceOrientation = assertFxBalanceOrientation(balanceOrientation);
+  const gain =
+    (normalizedBalanceOrientation === "asset" && normalizedDifferenceAmount > 0)
+    || (normalizedBalanceOrientation === "liability" && normalizedDifferenceAmount < 0);
+  const absoluteAmount = normalizeSignedMoney(Math.abs(normalizedDifferenceAmount));
+  const line = {
+    accountNumber: gain ? normalizeAccountNumber(gainAccountNumber) : normalizeAccountNumber(lossAccountNumber),
+    debitAmount: gain ? 0 : absoluteAmount,
+    creditAmount: gain ? absoluteAmount : 0,
+    lineNumber,
+    sourceType: assertPostingSourceType(sourceType),
+    sourceId: requireText(sourceId, "source_id_required")
+  };
+  if (dimensionJson && Object.keys(dimensionJson).length > 0) {
+    line.dimensionJson = copy(dimensionJson);
+  }
+  return line;
+}
+
+export function buildFxRevaluationJournalLines({
+  carryingAccountNumber,
+  differenceAmount,
+  balanceOrientation,
+  sourceType = "MANUAL_JOURNAL",
+  sourceId,
+  lineNumberStart = 1,
+  gainAccountNumber = DEFAULT_REALIZED_FX_GAIN_ACCOUNT_NUMBER,
+  lossAccountNumber = DEFAULT_REALIZED_FX_LOSS_ACCOUNT_NUMBER,
+  carryingDimensionJson = null,
+  fxDimensionJson = null
+} = {}) {
+  const normalizedDifferenceAmount = normalizeSignedMoney(differenceAmount);
+  if (normalizedDifferenceAmount === 0) {
+    return [];
+  }
+  const normalizedBalanceOrientation = assertFxBalanceOrientation(balanceOrientation);
+  const absoluteAmount = normalizeSignedMoney(Math.abs(normalizedDifferenceAmount));
+  const carryingLine = {
+    accountNumber: normalizeAccountNumber(carryingAccountNumber),
+    debitAmount: 0,
+    creditAmount: 0,
+    lineNumber: lineNumberStart,
+    sourceType: assertPostingSourceType(sourceType),
+    sourceId: requireText(sourceId, "source_id_required")
+  };
+  if (carryingDimensionJson && Object.keys(carryingDimensionJson).length > 0) {
+    carryingLine.dimensionJson = copy(carryingDimensionJson);
+  }
+  if (normalizedBalanceOrientation === "asset") {
+    if (normalizedDifferenceAmount > 0) {
+      carryingLine.debitAmount = absoluteAmount;
+    } else {
+      carryingLine.creditAmount = absoluteAmount;
+    }
+  } else if (normalizedDifferenceAmount > 0) {
+    carryingLine.creditAmount = absoluteAmount;
+  } else {
+    carryingLine.debitAmount = absoluteAmount;
+  }
+  const fxLine = buildRealizedFxJournalLine({
+    differenceAmount: normalizedBalanceOrientation === "asset" ? normalizedDifferenceAmount : 0 - normalizedDifferenceAmount,
+    balanceOrientation: "asset",
+    sourceType,
+    sourceId,
+    lineNumber: lineNumberStart + 1,
+    gainAccountNumber,
+    lossAccountNumber,
+    dimensionJson: fxDimensionJson
+  });
+  return fxLine ? [carryingLine, fxLine] : [carryingLine];
+}
 
 const DEMO_LEDGER_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 const DIMENSION_TYPES = Object.freeze(["projects", "costCenters", "businessAreas", "serviceLines"]);
@@ -358,6 +458,9 @@ export function createLedgerEngine({
   const state = {
     accounts: new Map(),
     accountIdsByCompanyNumber: new Map(),
+    accountingCurrencyProfilesByCompanyId: new Map(),
+    fxRevaluationBatches: new Map(),
+    fxRevaluationBatchIdsByCompanyKey: new Map(),
     voucherSeries: new Map(),
     voucherSeriesIdsByCompanyCode: new Map(),
     postingIntents: new Map(),
@@ -385,6 +488,14 @@ export function createLedgerEngine({
     listAccountCatalogVersions,
     getAccountCatalogVersion,
     installLedgerCatalog,
+    getAccountingCurrencyProfile,
+    upsertAccountingCurrencyProfile,
+    createFxRevaluationBatch,
+    approveFxRevaluationBatch,
+    postFxRevaluationBatch,
+    reverseFxRevaluationBatch,
+    getFxRevaluationBatch,
+    listFxRevaluationBatches,
     ensureAccountingYearPeriod,
     listPostingRecipes,
     getPostingRecipe,
@@ -416,6 +527,7 @@ export function createLedgerEngine({
   function installLedgerCatalog({
     companyId,
     chartTemplateId = DEFAULT_CHART_TEMPLATE_ID,
+    accountingCurrencyCode = null,
     actorId = "system",
     correlationId = crypto.randomUUID()
   } = {}) {
@@ -430,9 +542,25 @@ export function createLedgerEngine({
         `Ledger chart template ${chartTemplateId} is not published.`
       );
     }
+    try {
+      validateRequiredEngineAccounts(catalogVersion);
+    } catch (error) {
+      throw httpError(
+        422,
+        "ledger_chart_template_missing_required_accounts",
+        `Ledger chart template ${catalogVersion.versionId} is missing required fallback account coverage.`
+      );
+    }
     const now = nowIso();
     let installedAccounts = 0;
     let installedVoucherSeries = 0;
+    upsertAccountingCurrencyProfile({
+      companyId: resolvedCompanyId,
+      accountingCurrencyCode: accountingCurrencyCode || DEFAULT_LEDGER_CURRENCY,
+      actorId,
+      correlationId,
+      sourceCode: "chart_install"
+    });
 
     for (const definition of catalogVersion.accounts) {
       const key = toCompanyScopedKey(resolvedCompanyId, definition.accountNumber);
@@ -528,6 +656,55 @@ export function createLedgerEngine({
       .filter((account) => account.companyId === resolvedCompanyId)
       .sort((left, right) => left.accountNumber.localeCompare(right.accountNumber))
       .map(copy);
+  }
+
+  function getAccountingCurrencyProfile({ companyId } = {}) {
+    return copy(ensureAccountingCurrencyProfile(requireText(companyId, "company_id_required")));
+  }
+
+  function upsertAccountingCurrencyProfile({
+    companyId,
+    accountingCurrencyCode,
+    actorId,
+    sourceCode = "manual_update",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const normalizedAccountingCurrencyCode = assertAccountingCurrencyCode(accountingCurrencyCode);
+    const now = nowIso();
+    const existing = state.accountingCurrencyProfilesByCompanyId.get(resolvedCompanyId);
+    if (existing && existing.accountingCurrencyCode === normalizedAccountingCurrencyCode) {
+      return copy(existing);
+    }
+    if (existing && accountingCurrencyProfileHasUsage(resolvedCompanyId)) {
+      throw httpError(
+        409,
+        "ledger_accounting_currency_locked_after_use",
+        `Accounting currency for company ${resolvedCompanyId} cannot change after journals exist.`
+      );
+    }
+    const profile = existing || {
+      accountingCurrencyProfileId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      createdAt: now
+    };
+    profile.accountingCurrencyCode = normalizedAccountingCurrencyCode;
+    profile.reportingCurrencyCode = normalizedAccountingCurrencyCode;
+    profile.profileVersion = Number(profile.profileVersion || 0) + 1;
+    profile.sourceCode = requireText(sourceCode, "ledger_accounting_currency_source_code_required");
+    profile.updatedAt = now;
+    state.accountingCurrencyProfilesByCompanyId.set(resolvedCompanyId, profile);
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: existing ? "ledger.accounting_currency.updated" : "ledger.accounting_currency.created",
+      entityType: "ledger_accounting_currency_profile",
+      entityId: profile.accountingCurrencyProfileId,
+      explanation: `${existing ? "Updated" : "Created"} accounting currency profile ${normalizedAccountingCurrencyCode}.`
+    });
+    return copy(profile);
   }
 
   function upsertLedgerAccount({
@@ -1321,9 +1498,12 @@ export function createLedgerEngine({
       journalDate: resolvedJournalDate
     });
     const accountingPeriod = accountingContext.accountingPeriod;
+    const accountingCurrencyProfile = ensureAccountingCurrencyProfile(resolvedCompanyId);
+    const accountingCurrencyCode = accountingCurrencyProfile.accountingCurrencyCode;
     const normalizedMetadata = normalizeMetadata(metadataJson, importedFlag);
     ensurePeriodAllowsEntryCreation(accountingPeriod, normalizedMetadata, resolvedActorId);
     const dimensionCatalog = ensureDimensionCatalog(resolvedCompanyId);
+    const requestedCurrencyCode = normalizeCurrencyCode(currencyCode);
 
     const journalEntryId = crypto.randomUUID();
     const draftLines = normalizeJournalLines({
@@ -1332,7 +1512,8 @@ export function createLedgerEngine({
       actorId: resolvedActorId,
       sourceType: resolvedSourceType,
       sourceId: resolvedSourceId,
-      entryCurrencyCode: normalizeCurrencyCode(currencyCode),
+      entryCurrencyCode: requestedCurrencyCode,
+      accountingCurrencyCode,
       metadataJson: normalizedMetadata,
       dimensionCatalogVersion: dimensionCatalog.catalogVersion,
       lines
@@ -1364,7 +1545,11 @@ export function createLedgerEngine({
       actorId: resolvedActorId,
       status: "draft",
       importedFlag: Boolean(importedFlag),
-      currencyCode: normalizeCurrencyCode(currencyCode),
+      currencyCode: accountingCurrencyCode,
+      accountingCurrencyCode,
+      accountingCurrencyProfileId: accountingCurrencyProfile.accountingCurrencyProfileId,
+      accountingCurrencyProfileVersion: accountingCurrencyProfile.profileVersion || 1,
+      originalCurrencyCode: requestedCurrencyCode !== accountingCurrencyCode ? requestedCurrencyCode : null,
       idempotencyKey: resolvedIdempotencyKey,
       metadataJson: normalizedMetadata,
       createdAt: now,
@@ -1717,9 +1902,245 @@ export function createLedgerEngine({
     return presentJournalEntry(requireJournalEntry(requireText(companyId, "company_id_required"), journalEntryId));
   }
 
+  function createFxRevaluationBatch({
+    companyId,
+    cutoffDate,
+    scopeCode = "open_items",
+    description = null,
+    autoReverseOn = null,
+    sourceRateSetCode = null,
+    items,
+    actorId,
+    idempotencyKey,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedIdempotencyKey = requireText(idempotencyKey, "idempotency_key_required");
+    const scopedKey = toCompanyScopedKey(resolvedCompanyId, resolvedIdempotencyKey);
+    const existingBatchId = state.fxRevaluationBatchIdsByCompanyKey.get(scopedKey);
+    if (existingBatchId) {
+      return copy(requireFxRevaluationBatch(resolvedCompanyId, existingBatchId));
+    }
+    const normalizedItems = normalizeFxRevaluationItems(items);
+    const now = nowIso();
+    const batch = {
+      fxRevaluationBatchId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      cutoffDate: normalizeDate(cutoffDate, "fx_revaluation_cutoff_date_invalid"),
+      scopeCode: requireText(scopeCode, "fx_revaluation_scope_code_required"),
+      description: normalizeOptionalText(description) || `FX revaluation ${scopeCode} ${cutoffDate}`,
+      autoReverseOn: autoReverseOn ? normalizeDate(autoReverseOn, "fx_revaluation_auto_reverse_date_invalid") : null,
+      sourceRateSetCode: normalizeOptionalText(sourceRateSetCode),
+      idempotencyKey: resolvedIdempotencyKey,
+      status: "draft",
+      items: normalizedItems,
+      totals: summarizeFxRevaluationItems(normalizedItems),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      approvedByActorId: null,
+      approvedByRoleCode: null,
+      journalEntryId: null,
+      reversalJournalEntryId: null,
+      createdAt: now,
+      updatedAt: now
+    };
+    state.fxRevaluationBatches.set(batch.fxRevaluationBatchId, batch);
+    state.fxRevaluationBatchIdsByCompanyKey.set(scopedKey, batch.fxRevaluationBatchId);
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: batch.createdByActorId,
+      correlationId,
+      action: "ledger.fx_revaluation_batch.created",
+      entityType: "fx_revaluation_batch",
+      entityId: batch.fxRevaluationBatchId,
+      explanation: `Created FX revaluation batch ${batch.fxRevaluationBatchId} for ${batch.cutoffDate}.`
+    });
+    return copy(batch);
+  }
+
+  function approveFxRevaluationBatch({
+    companyId,
+    fxRevaluationBatchId,
+    actorId,
+    approvedByActorId,
+    approvedByRoleCode,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const batch = requireFxRevaluationBatch(requireText(companyId, "company_id_required"), fxRevaluationBatchId);
+    if (batch.status === "approved" || batch.status === "posted") {
+      return copy(batch);
+    }
+    if (batch.status !== "draft") {
+      throw httpError(409, "fx_revaluation_batch_state_invalid", `FX revaluation batch cannot be approved from state ${batch.status}.`);
+    }
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    assertSeniorFinanceApproval({
+      actorId: resolvedActorId,
+      approvedByActorId,
+      approvedByRoleCode
+    });
+    batch.status = "approved";
+    batch.approvedByActorId = normalizeOptionalText(approvedByActorId);
+    batch.approvedByRoleCode = requireText(approvedByRoleCode, "approved_by_role_code_required").toLowerCase();
+    batch.updatedAt = nowIso();
+    pushAudit({
+      companyId: batch.companyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.fx_revaluation_batch.approved",
+      entityType: "fx_revaluation_batch",
+      entityId: batch.fxRevaluationBatchId,
+      explanation: `Approved FX revaluation batch ${batch.fxRevaluationBatchId}.`
+    });
+    return copy(batch);
+  }
+
+  function postFxRevaluationBatch({
+    companyId,
+    fxRevaluationBatchId,
+    actorId,
+    approvedByActorId,
+    approvedByRoleCode,
+    journalDate = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const batch = requireFxRevaluationBatch(requireText(companyId, "company_id_required"), fxRevaluationBatchId);
+    if (batch.status === "posted") {
+      return copy(batch);
+    }
+    if (batch.status !== "approved") {
+      throw httpError(409, "fx_revaluation_batch_not_approved", "FX revaluation batch must be approved before posting.");
+    }
+    const lines = batch.items.flatMap((item, index) =>
+      buildFxRevaluationJournalLines({
+        carryingAccountNumber: item.accountNumber,
+        differenceAmount: item.revaluationDeltaAmount,
+        balanceOrientation: item.balanceOrientation,
+        sourceType: "MANUAL_JOURNAL",
+        sourceId: item.itemId,
+        lineNumberStart: index * 2 + 1,
+        carryingDimensionJson: item.dimensionJson,
+        fxDimensionJson: item.dimensionJson
+      })
+    );
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const created = createJournalEntry({
+      companyId: batch.companyId,
+      journalDate: normalizeDate(journalDate || batch.cutoffDate, "fx_revaluation_posting_date_invalid"),
+      voucherSeriesCode: "N",
+      sourceType: "MANUAL_JOURNAL",
+      sourceId: `fx_revaluation_batch:${batch.fxRevaluationBatchId}`,
+      actorId: resolvedActorId,
+      idempotencyKey: `fx_revaluation_post:${batch.fxRevaluationBatchId}`,
+      description: batch.description,
+      metadataJson: {
+        pipelineStage: "fx_revaluation_batch",
+        fxRevaluationBatchId: batch.fxRevaluationBatchId,
+        cutoffDate: batch.cutoffDate,
+        scopeCode: batch.scopeCode,
+        sourceRateSetCode: batch.sourceRateSetCode,
+        autoReverseOn: batch.autoReverseOn
+      },
+      lines,
+      correlationId
+    });
+    validateJournalEntry({
+      companyId: batch.companyId,
+      journalEntryId: created.journalEntry.journalEntryId,
+      actorId: resolvedActorId,
+      correlationId
+    });
+    const posted = postJournalEntry({
+      companyId: batch.companyId,
+      journalEntryId: created.journalEntry.journalEntryId,
+      actorId: resolvedActorId,
+      approvedByActorId,
+      approvedByRoleCode,
+      correlationId
+    });
+    batch.status = "posted";
+    batch.journalEntryId = posted.journalEntry.journalEntryId;
+    batch.updatedAt = nowIso();
+    pushAudit({
+      companyId: batch.companyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.fx_revaluation_batch.posted",
+      entityType: "fx_revaluation_batch",
+      entityId: batch.fxRevaluationBatchId,
+      explanation: `Posted FX revaluation batch ${batch.fxRevaluationBatchId}.`
+    });
+    return copy(batch);
+  }
+
+  function reverseFxRevaluationBatch({
+    companyId,
+    fxRevaluationBatchId,
+    actorId,
+    reasonCode,
+    approvedByActorId = null,
+    approvedByRoleCode = null,
+    journalDate = null,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const batch = requireFxRevaluationBatch(requireText(companyId, "company_id_required"), fxRevaluationBatchId);
+    if (batch.status === "reversed") {
+      return copy(batch);
+    }
+    if (!batch.journalEntryId) {
+      throw httpError(409, "fx_revaluation_batch_not_posted", "FX revaluation batch must be posted before reversal.");
+    }
+    const reversed = reverseJournalEntry({
+      companyId: batch.companyId,
+      journalEntryId: batch.journalEntryId,
+      actorId: requireText(actorId, "actor_id_required"),
+      reasonCode: requireText(reasonCode, "reason_code_required"),
+      correctionKey: `fx_revaluation_reversal:${batch.fxRevaluationBatchId}`,
+      approvedByActorId,
+      approvedByRoleCode,
+      journalDate,
+      voucherSeriesCode: "N",
+      correlationId
+    });
+    batch.status = "reversed";
+    batch.reversalJournalEntryId = reversed.reversalJournalEntry.journalEntryId;
+    batch.updatedAt = nowIso();
+    pushAudit({
+      companyId: batch.companyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "ledger.fx_revaluation_batch.reversed",
+      entityType: "fx_revaluation_batch",
+      entityId: batch.fxRevaluationBatchId,
+      explanation: `Reversed FX revaluation batch ${batch.fxRevaluationBatchId}.`
+    });
+    return copy(batch);
+  }
+
+  function getFxRevaluationBatch({ companyId, fxRevaluationBatchId } = {}) {
+    return copy(requireFxRevaluationBatch(requireText(companyId, "company_id_required"), fxRevaluationBatchId));
+  }
+
+  function listFxRevaluationBatches({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return [...state.fxRevaluationBatches.values()]
+      .filter((batch) => batch.companyId === resolvedCompanyId)
+      .sort((left, right) => left.cutoffDate.localeCompare(right.cutoffDate) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function requireFxRevaluationBatch(companyId, fxRevaluationBatchId) {
+    const batch = state.fxRevaluationBatches.get(requireText(fxRevaluationBatchId, "fx_revaluation_batch_id_required"));
+    if (!batch || batch.companyId !== companyId) {
+      throw httpError(404, "fx_revaluation_batch_not_found", "FX revaluation batch was not found for the company.");
+    }
+    return batch;
+  }
+
   function snapshotLedger() {
     return copy({
       accounts: [...state.accounts.values()],
+      accountingCurrencyProfiles: [...state.accountingCurrencyProfilesByCompanyId.values()],
+      fxRevaluationBatches: [...state.fxRevaluationBatches.values()],
       voucherSeries: [...state.voucherSeries.values()],
       postingIntents: [...state.postingIntents.values()],
       accountingPeriods: [...state.accountingPeriods.values()],
@@ -1735,6 +2156,35 @@ export function createLedgerEngine({
 
   function importDurableState(snapshot) {
     applyDurableStateSnapshot(state, snapshot);
+  }
+
+  function ensureAccountingCurrencyProfile(companyId) {
+    const existing = state.accountingCurrencyProfilesByCompanyId.get(companyId);
+    if (existing) {
+      return existing;
+    }
+    const now = nowIso();
+    const profile = {
+      accountingCurrencyProfileId: crypto.randomUUID(),
+      companyId,
+      accountingCurrencyCode: DEFAULT_LEDGER_CURRENCY,
+      reportingCurrencyCode: DEFAULT_LEDGER_CURRENCY,
+      profileVersion: 1,
+      sourceCode: "default_profile",
+      createdAt: now,
+      updatedAt: now
+    };
+    state.accountingCurrencyProfilesByCompanyId.set(companyId, profile);
+    return profile;
+  }
+
+  function accountingCurrencyProfileHasUsage(companyId) {
+    for (const entry of state.journalEntries.values()) {
+      if (entry.companyId === companyId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function findVoucherSeries(runtimeState, companyId, seriesCode) {
@@ -2120,7 +2570,10 @@ export function createLedgerEngine({
       if (isPositiveMoney(line.debitAmount) && isPositiveMoney(line.creditAmount)) {
         throw httpError(400, "journal_line_single_sided_required", "Each journal line must be either debit or credit.");
       }
-      if (line.currencyCode !== DEFAULT_LEDGER_CURRENCY && !(Number(line.exchangeRate) > 0)) {
+      if (line.currencyCode !== entry.accountingCurrencyCode) {
+        throw httpError(400, "journal_line_accounting_currency_invalid", "Journal lines must be stored in the company accounting currency.");
+      }
+      if (line.originalCurrencyCode && line.originalCurrencyCode !== entry.accountingCurrencyCode && !(Number(line.exchangeRate) > 0)) {
         throw httpError(400, "journal_line_exchange_rate_required", "Foreign-currency lines require a positive exchange rate.");
       }
       ensureRequiredDimensions({
@@ -2149,6 +2602,7 @@ export function createLedgerEngine({
     sourceType,
     sourceId,
     entryCurrencyCode,
+    accountingCurrencyCode,
     metadataJson,
     dimensionCatalogVersion,
     lines
@@ -2161,13 +2615,27 @@ export function createLedgerEngine({
     return lines.map((line, index) => {
       const account = requireAccount(companyId, line.accountNumber);
       const lineSourceType = line.sourceType ? assertPostingSourceType(line.sourceType) : sourceType;
-      const debitAmount = normalizeMoney(line.debitAmount || 0);
-      const creditAmount = normalizeMoney(line.creditAmount || 0);
-      const currencyCode = normalizeCurrencyCode(line.currencyCode || entryCurrencyCode);
+      const originalDebitAmount = normalizeMoney(line.debitAmount || 0);
+      const originalCreditAmount = normalizeMoney(line.creditAmount || 0);
+      const originalCurrencyCode = normalizeCurrencyCode(line.currencyCode || entryCurrencyCode || accountingCurrencyCode);
       const exchangeRate = line.exchangeRate == null ? null : normalizeRate(line.exchangeRate);
-      if (currencyCode !== DEFAULT_LEDGER_CURRENCY && exchangeRate == null) {
+      const functionalDebitAmount = line.functionalDebitAmount == null ? null : normalizeMoney(line.functionalDebitAmount);
+      const functionalCreditAmount = line.functionalCreditAmount == null ? null : normalizeMoney(line.functionalCreditAmount);
+      if (originalCurrencyCode !== accountingCurrencyCode && exchangeRate == null) {
         throw httpError(400, "journal_line_exchange_rate_required", "Foreign-currency lines require a positive exchange rate.");
       }
+      const debitAmount =
+        functionalDebitAmount != null
+          ? functionalDebitAmount
+          : originalCurrencyCode === accountingCurrencyCode
+            ? originalDebitAmount
+            : normalizeMoney(originalDebitAmount * exchangeRate);
+      const creditAmount =
+        functionalCreditAmount != null
+          ? functionalCreditAmount
+          : originalCurrencyCode === accountingCurrencyCode
+            ? originalCreditAmount
+            : normalizeMoney(originalCreditAmount * exchangeRate);
       const dimensionJson = normalizeDimensionJson({
         account,
         catalog,
@@ -2188,8 +2656,11 @@ export function createLedgerEngine({
         accountVersion: account.governanceVersion || 1,
         debitAmount,
         creditAmount,
-        currencyCode,
+        currencyCode: accountingCurrencyCode,
         exchangeRate,
+        originalCurrencyCode: originalCurrencyCode !== accountingCurrencyCode ? originalCurrencyCode : null,
+        originalDebitAmount: originalCurrencyCode !== accountingCurrencyCode ? originalDebitAmount : null,
+        originalCreditAmount: originalCurrencyCode !== accountingCurrencyCode ? originalCreditAmount : null,
         dimensionJson,
         dimensionCatalogVersion: dimensionCatalogVersion || 1,
         sourceType: lineSourceType,
@@ -2217,6 +2688,8 @@ export function createLedgerEngine({
     const lines = (state.journalLinesByEntryId.get(entry.journalEntryId) || []).map(copy);
     return copy({
       ...entry,
+      accountingCurrencyCode: entry.accountingCurrencyCode || entry.currencyCode || DEFAULT_LEDGER_CURRENCY,
+      originalCurrencyCode: entry.originalCurrencyCode || null,
       fiscalYearId: entry.fiscalYearId || null,
       fiscalPeriodId: entry.fiscalPeriodId || null,
       accountingMethodProfileId: entry.accountingMethodProfileId || null,
@@ -2241,6 +2714,16 @@ export function createLedgerEngine({
 
 function seedDemoState(state, clock) {
   const now = new Date(clock()).toISOString();
+  state.accountingCurrencyProfilesByCompanyId.set(DEMO_LEDGER_COMPANY_ID, {
+    accountingCurrencyProfileId: crypto.randomUUID(),
+    companyId: DEMO_LEDGER_COMPANY_ID,
+    accountingCurrencyCode: DEFAULT_LEDGER_CURRENCY,
+    reportingCurrencyCode: DEFAULT_LEDGER_CURRENCY,
+    profileVersion: 1,
+    sourceCode: "demo_seed",
+    createdAt: now,
+    updatedAt: now
+  });
   for (let month = 0; month < 12; month += 1) {
     const startsOn = new Date(Date.UTC(2026, month, 1)).toISOString().slice(0, 10);
     const endsOn = new Date(Date.UTC(2026, month + 1, 0)).toISOString().slice(0, 10);
@@ -2507,10 +2990,26 @@ function normalizeCurrencyCode(value) {
   return code;
 }
 
+function assertAccountingCurrencyCode(value) {
+  const code = normalizeCurrencyCode(value);
+  if (!ALLOWED_ACCOUNTING_CURRENCY_CODES.includes(code)) {
+    throw httpError(400, "ledger_accounting_currency_invalid", "Accounting currency must be SEK or EUR.");
+  }
+  return code;
+}
+
 function normalizeMoney(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0) {
     throw httpError(400, "money_invalid", "Amounts must be numeric and non-negative.");
+  }
+  return Number(number.toFixed(2));
+}
+
+function normalizeSignedMoney(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) {
+    throw httpError(400, "money_invalid", "Amounts must be numeric.");
   }
   return Number(number.toFixed(2));
 }
@@ -2528,6 +3027,14 @@ function calculateTotals(lines) {
     totalDebit: Number(lines.reduce((sum, line) => sum + Number(line.debitAmount), 0).toFixed(2)),
     totalCredit: Number(lines.reduce((sum, line) => sum + Number(line.creditAmount), 0).toFixed(2))
   };
+}
+
+function assertFxBalanceOrientation(value) {
+  const normalizedValue = requireText(value, "fx_balance_orientation_required").toLowerCase();
+  if (!FX_BALANCE_ORIENTATIONS.includes(normalizedValue)) {
+    throw httpError(400, "fx_balance_orientation_invalid", "FX balance orientation must be asset or liability.");
+  }
+  return normalizedValue;
 }
 
 function normalizeMetadata(metadataJson, importedFlag) {
@@ -2711,16 +3218,45 @@ function requiresProjectDimension({ accountNumber, sourceType, metadataJson }) {
 }
 
 function reverseLines(lines) {
-  return lines.map((line) => ({
-    accountNumber: line.accountNumber,
-    debitAmount: line.creditAmount,
-    creditAmount: line.debitAmount,
-    currencyCode: line.currencyCode,
-    exchangeRate: line.exchangeRate,
-    dimensionJson: copy(line.dimensionJson),
-    sourceType: "MANUAL_JOURNAL",
-    sourceId: line.sourceId
-  }));
+  return buildJournalReversalLineInputs(lines, { sourceTypeOverride: "MANUAL_JOURNAL" });
+}
+
+function normalizeFxRevaluationItems(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw httpError(400, "fx_revaluation_items_required", "FX revaluation batch requires at least one item.");
+  }
+  const seenItemIds = new Set();
+  return items
+    .map((item) => {
+      const normalizedItemId = requireText(item.itemId, "fx_revaluation_item_id_required");
+      if (seenItemIds.has(normalizedItemId)) {
+        throw httpError(409, "revaluation_conflict", `FX revaluation item ${normalizedItemId} appears more than once in the batch.`);
+      }
+      seenItemIds.add(normalizedItemId);
+      const carryingFunctionalAmount = normalizeSignedMoney(item.carryingFunctionalAmount);
+      const revaluedFunctionalAmount = normalizeSignedMoney(item.revaluedFunctionalAmount);
+        return {
+          itemId: normalizedItemId,
+          itemType: requireText(item.itemType, "fx_revaluation_item_type_required"),
+          accountNumber: normalizeAccountNumber(item.accountNumber),
+          balanceOrientation: assertFxBalanceOrientation(item.balanceOrientation),
+          originalCurrencyCode: normalizeCurrencyCode(item.originalCurrencyCode || DEFAULT_LEDGER_CURRENCY),
+          originalAmount: normalizeSignedMoney(item.originalAmount),
+          carryingFunctionalAmount,
+          revaluedFunctionalAmount,
+          revaluationDeltaAmount: normalizeSignedMoney(revaluedFunctionalAmount - carryingFunctionalAmount),
+          dimensionJson: copy(item.dimensionJson || {}),
+          metadataJson: copy(item.metadataJson || {})
+        };
+      })
+      .filter((item) => item.revaluationDeltaAmount !== 0);
+}
+
+function summarizeFxRevaluationItems(items) {
+  return {
+    itemCount: items.length,
+    totalDeltaAmount: normalizeSignedMoney(items.reduce((sum, item) => sum + Number(item.revaluationDeltaAmount || 0), 0))
+  };
 }
 
 function hasSoftLockOverride(metadataJson) {

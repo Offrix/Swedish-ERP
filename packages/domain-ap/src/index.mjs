@@ -11,6 +11,10 @@ import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
+import {
+  buildJournalReversalLineInputs,
+  buildRealizedFxJournalLine
+} from "../../domain-ledger/src/index.mjs";
 
 export const AP_SUPPLIER_STATUSES = Object.freeze(["draft", "active", "blocked", "archived"]);
 export const AP_PURCHASE_ORDER_STATUSES = Object.freeze([
@@ -921,6 +925,7 @@ export function createApEngine({
     invoiceDate = null,
     dueDate = null,
     currencyCode = null,
+    exchangeRate = null,
     paymentReference = null,
     lines = null,
     actorId = "system",
@@ -1018,6 +1023,7 @@ export function createApEngine({
       invoiceDate: resolvedInvoiceDate,
       grossAmount,
       currencyCode: resolvedCurrencyCode,
+      exchangeRate: normalizeOptionalPositiveNumber(exchangeRate),
       documentHash,
       paymentReference: paymentReference || documentContext?.paymentReference || documentContext?.reference || null
     });
@@ -1066,6 +1072,7 @@ export function createApEngine({
       invoiceDate: resolvedInvoiceDate,
       dueDate: resolvedDueDate,
       currencyCode: resolvedCurrencyCode,
+      exchangeRate: normalizeOptionalPositiveNumber(exchangeRate),
       netAmount,
       vatAmount,
       grossAmount,
@@ -1464,7 +1471,8 @@ export function createApEngine({
 
     const journalLines = buildSupplierInvoiceJournalLines({
       invoice,
-      supplier
+      supplier,
+      ledgerPlatform
     });
     const groupedJournalLines = mergeJournalLines(journalLines);
     const isCreditNote = invoice.invoiceType === "credit_note";
@@ -1506,14 +1514,29 @@ export function createApEngine({
       getImportCasesPlatform
     });
 
+    const functionalCurrencyCode = resolveLedgerFunctionalCurrencyCode({ ledgerPlatform, companyId: invoice.companyId });
+    const functionalExchangeRate =
+      invoice.currencyCode === functionalCurrencyCode
+        ? 1
+        : normalizePositiveNumber(invoice.exchangeRate, "supplier_invoice_exchange_rate_required");
+    const functionalGrossAmount =
+      invoice.currencyCode === functionalCurrencyCode
+        ? roundMoney(invoice.grossAmount)
+        : roundMoney(invoice.grossAmount * functionalExchangeRate);
     const openItem = {
       apOpenItemId: crypto.randomUUID(),
       companyId: invoice.companyId,
       supplierInvoiceId: invoice.supplierInvoiceId,
       originalAmount: isCreditNote ? roundMoney(0 - invoice.grossAmount) : invoice.grossAmount,
       openAmount: isCreditNote ? roundMoney(0 - invoice.grossAmount) : invoice.grossAmount,
+      functionalCurrencyCode,
+      functionalExchangeRate,
+      functionalOriginalAmount: isCreditNote ? roundMoney(0 - functionalGrossAmount) : functionalGrossAmount,
+      functionalOpenAmount: isCreditNote ? roundMoney(0 - functionalGrossAmount) : functionalGrossAmount,
       reservedAmount: 0,
+      functionalReservedAmount: 0,
       paidAmount: 0,
+      functionalPaidAmount: 0,
       dueOn: invoice.dueDate,
       status: "open",
       paymentHold: invoice.paymentHold === true,
@@ -1528,6 +1551,8 @@ export function createApEngine({
       lastBankEventId: null,
       lastReservationJournalEntryId: null,
       lastSettlementJournalEntryId: null,
+      lastSettlementFunctionalAmount: null,
+      lastSettlementRealizedFxAmount: null,
       lastReturnJournalEntryId: null,
       lastRejectionJournalEntryId: null,
       journalEntryId: posted.journalEntry.journalEntryId,
@@ -1646,12 +1671,20 @@ export function createApEngine({
           accountNumber: resolveLiabilityAccountNumber(supplier),
           debitAmount: openItem.openAmount,
           creditAmount: 0,
+          currencyCode: openItem.currencyCode,
+          exchangeRate: openItem.currencyCode === (openItem.functionalCurrencyCode || "SEK") ? null : openItem.functionalExchangeRate,
+          functionalDebitAmount: roundMoney(openItem.functionalOpenAmount || 0),
+          functionalCreditAmount: 0,
           dimensionJson: {}
         },
         {
           accountNumber: "2450",
           debitAmount: 0,
           creditAmount: openItem.openAmount,
+          currencyCode: openItem.currencyCode,
+          exchangeRate: openItem.currencyCode === (openItem.functionalCurrencyCode || "SEK") ? null : openItem.functionalExchangeRate,
+          functionalDebitAmount: 0,
+          functionalCreditAmount: roundMoney(openItem.functionalOpenAmount || 0),
           dimensionJson: {}
         }
       ])
@@ -1659,6 +1692,7 @@ export function createApEngine({
 
     openItem.status = "reserved";
     openItem.reservedAmount = openItem.openAmount;
+    openItem.functionalReservedAmount = roundMoney(openItem.functionalOpenAmount || 0);
     openItem.paymentProposalId = normalizeOptionalText(paymentProposalId);
     openItem.paymentOrderId = requireText(paymentOrderId, "payment_order_id_required");
     openItem.lastPaymentOrderId = openItem.paymentOrderId;
@@ -1731,12 +1765,20 @@ export function createApEngine({
           accountNumber: "2450",
           debitAmount: openItem.reservedAmount || openItem.openAmount,
           creditAmount: 0,
+          currencyCode: openItem.currencyCode,
+          exchangeRate: openItem.currencyCode === (openItem.functionalCurrencyCode || "SEK") ? null : openItem.functionalExchangeRate,
+          functionalDebitAmount: roundMoney(openItem.functionalReservedAmount || openItem.functionalOpenAmount || 0),
+          functionalCreditAmount: 0,
           dimensionJson: {}
         },
         {
           accountNumber: resolveLiabilityAccountNumber(supplier),
           debitAmount: 0,
           creditAmount: openItem.reservedAmount || openItem.openAmount,
+          currencyCode: openItem.currencyCode,
+          exchangeRate: openItem.currencyCode === (openItem.functionalCurrencyCode || "SEK") ? null : openItem.functionalExchangeRate,
+          functionalDebitAmount: 0,
+          functionalCreditAmount: roundMoney(openItem.functionalReservedAmount || openItem.functionalOpenAmount || 0),
           dimensionJson: {}
         }
       ])
@@ -1744,6 +1786,7 @@ export function createApEngine({
 
     openItem.status = "open";
     openItem.reservedAmount = 0;
+    openItem.functionalReservedAmount = 0;
     openItem.paymentProposalId = null;
     openItem.paymentOrderId = null;
     openItem.lastRejectionJournalEntryId = journalEntry.journalEntryId;
@@ -1776,6 +1819,8 @@ export function createApEngine({
     bankAccountNumber,
     bankEventId = null,
     bookedOn = null,
+    settlementExchangeRate = null,
+    functionalSettledAmount = null,
     actorId = "system",
     correlationId = crypto.randomUUID()
   } = {}) {
@@ -1796,6 +1841,50 @@ export function createApEngine({
     }
     const invoice = requireSupplierInvoiceRecord(state, companyId, openItem.supplierInvoiceId);
     const resolvedBookedOn = normalizeDate(bookedOn || nowIso(clock).slice(0, 10), "payment_booked_date_invalid");
+    const carryingFunctionalAmount = roundMoney(openItem.functionalReservedAmount || openItem.functionalOpenAmount || 0);
+    const settledFunctionalAmount = resolveApFunctionalSettledAmount({
+      openItem,
+      functionalSettledAmount,
+      settlementExchangeRate
+    });
+    const realizedFxAmount = roundMoney(settledFunctionalAmount - carryingFunctionalAmount);
+    const settlementExchangeRateValue = resolveApOptionalSettlementExchangeRate({
+      openItem,
+      functionalSettledAmount: settledFunctionalAmount,
+      settlementExchangeRate
+    });
+    const settlementLines = [
+      {
+        accountNumber: "2450",
+        debitAmount: openItem.reservedAmount || openItem.openAmount,
+        creditAmount: 0,
+        currencyCode: openItem.currencyCode,
+        exchangeRate: openItem.currencyCode === (openItem.functionalCurrencyCode || "SEK") ? null : openItem.functionalExchangeRate,
+        functionalDebitAmount: carryingFunctionalAmount,
+        functionalCreditAmount: 0,
+        dimensionJson: {}
+      },
+      {
+        accountNumber: requireText(bankAccountNumber, "bank_account_number_required"),
+        debitAmount: 0,
+        creditAmount: openItem.reservedAmount || openItem.openAmount,
+        currencyCode: openItem.currencyCode,
+        exchangeRate: settlementExchangeRateValue,
+        functionalDebitAmount: 0,
+        functionalCreditAmount: settledFunctionalAmount,
+        dimensionJson: {}
+      }
+    ];
+    const fxLine = buildRealizedFxJournalLine({
+      differenceAmount: realizedFxAmount,
+      balanceOrientation: "liability",
+      sourceType: "AP_PAYMENT",
+      sourceId: `${openItem.paymentOrderId || paymentOrderId}:book`,
+      lineNumber: settlementLines.length + 1
+    });
+    if (fxLine) {
+      settlementLines.push(fxLine);
+    }
     const journalEntry = postApLifecycleJournal({
       ledgerPlatform,
       companyId: openItem.companyId,
@@ -1816,31 +1905,25 @@ export function createApEngine({
         pipelineStage: "ap_payment_settlement",
         apOpenItemId: openItem.apOpenItemId,
         paymentOrderId: openItem.paymentOrderId || paymentOrderId,
-        bankEventId
+        bankEventId,
+        settledFunctionalAmount,
+        realizedFxAmount
       },
-      lines: mergeJournalLines([
-        {
-          accountNumber: "2450",
-          debitAmount: openItem.reservedAmount || openItem.openAmount,
-          creditAmount: 0,
-          dimensionJson: {}
-        },
-        {
-          accountNumber: requireText(bankAccountNumber, "bank_account_number_required"),
-          debitAmount: 0,
-          creditAmount: openItem.reservedAmount || openItem.openAmount,
-          dimensionJson: {}
-        }
-      ])
+      lines: mergeJournalLines(settlementLines)
     });
 
     openItem.paidAmount = roundMoney(openItem.paidAmount + openItem.openAmount);
+    openItem.functionalPaidAmount = roundMoney((openItem.functionalPaidAmount || 0) + carryingFunctionalAmount);
     openItem.openAmount = 0;
+    openItem.functionalOpenAmount = 0;
     openItem.reservedAmount = 0;
+    openItem.functionalReservedAmount = 0;
     openItem.status = "paid";
     openItem.closedAt = `${resolvedBookedOn}T00:00:00.000Z`;
     openItem.lastBankEventId = normalizeOptionalText(bankEventId);
     openItem.lastSettlementJournalEntryId = journalEntry.journalEntryId;
+    openItem.lastSettlementFunctionalAmount = settledFunctionalAmount;
+    openItem.lastSettlementRealizedFxAmount = realizedFxAmount;
     openItem.updatedAt = nowIso(clock);
 
     invoice.status = "paid";
@@ -1888,8 +1971,14 @@ export function createApEngine({
       throw createError(409, "ap_open_item_not_paid", "Only paid AP items can be reopened from a bank return.");
     }
     const invoice = requireSupplierInvoiceRecord(state, companyId, openItem.supplierInvoiceId);
-    const supplier = requireSupplierRecord(state, companyId, invoice.supplierId);
     const resolvedReturnedOn = normalizeDate(returnedOn || nowIso(clock).slice(0, 10), "payment_return_date_invalid");
+    const originalSettlementJournal = ledgerPlatform.getJournalEntry({
+      companyId: openItem.companyId,
+      journalEntryId: openItem.lastSettlementJournalEntryId
+    });
+    const fxReversalLines = buildJournalReversalLineInputs(
+      (originalSettlementJournal.lines || []).filter((line) => ["7930", "7940"].includes(line.accountNumber))
+    );
     const journalEntry = postApLifecycleJournal({
       ledgerPlatform,
       companyId: openItem.companyId,
@@ -1917,26 +2006,44 @@ export function createApEngine({
           accountNumber: requireText(bankAccountNumber, "bank_account_number_required"),
           debitAmount: openItem.originalAmount || invoice.grossAmount,
           creditAmount: 0,
+          currencyCode: openItem.currencyCode,
+          exchangeRate: resolveApOptionalSettlementExchangeRate({
+            openItem,
+            functionalSettledAmount: openItem.lastSettlementFunctionalAmount,
+            settlementExchangeRate: null
+          }),
+          functionalDebitAmount: roundMoney(openItem.lastSettlementFunctionalAmount || openItem.functionalOriginalAmount || invoice.grossAmount),
+          functionalCreditAmount: 0,
           dimensionJson: {}
         },
         {
-          accountNumber: resolveLiabilityAccountNumber(supplier),
+          accountNumber: resolveLiabilityAccountNumber(requireSupplierRecord(state, companyId, invoice.supplierId)),
           debitAmount: 0,
           creditAmount: openItem.originalAmount || invoice.grossAmount,
+          currencyCode: openItem.currencyCode,
+          exchangeRate: openItem.currencyCode === (openItem.functionalCurrencyCode || "SEK") ? null : openItem.functionalExchangeRate,
+          functionalDebitAmount: 0,
+          functionalCreditAmount: roundMoney(openItem.functionalOriginalAmount || invoice.grossAmount),
           dimensionJson: {}
-        }
+        },
+        ...fxReversalLines
       ])
     });
 
     openItem.openAmount = openItem.originalAmount || invoice.grossAmount;
+    openItem.functionalOpenAmount = openItem.functionalOriginalAmount || invoice.grossAmount;
     openItem.paidAmount = 0;
+    openItem.functionalPaidAmount = 0;
     openItem.reservedAmount = 0;
+    openItem.functionalReservedAmount = 0;
     openItem.status = "open";
     openItem.paymentProposalId = null;
     openItem.paymentOrderId = null;
     openItem.closedAt = null;
     openItem.lastBankEventId = requireText(bankEventId, "bank_event_id_required");
     openItem.lastReturnJournalEntryId = journalEntry.journalEntryId;
+    openItem.lastSettlementFunctionalAmount = null;
+    openItem.lastSettlementRealizedFxAmount = null;
     openItem.updatedAt = nowIso(clock);
 
     invoice.status = "posted";
@@ -2963,9 +3070,12 @@ function resolveToleranceProfile(toleranceProfileCode) {
   return copy(DEFAULT_TOLERANCE_PROFILES[normalized] || DEFAULT_TOLERANCE_PROFILES.standard);
 }
 
-function buildSupplierInvoiceJournalLines({ invoice, supplier }) {
+function buildSupplierInvoiceJournalLines({ invoice, supplier, ledgerPlatform = null }) {
   const lines = [];
   const isCreditNote = invoice.invoiceType === "credit_note";
+  const accountingCurrencyCode = resolveLedgerFunctionalCurrencyCode({ ledgerPlatform, companyId: invoice.companyId });
+  const usesForeignCurrency = invoice.currencyCode !== accountingCurrencyCode;
+  const exchangeRate = usesForeignCurrency ? normalizePositiveNumber(invoice.exchangeRate, "supplier_invoice_exchange_rate_required") : null;
   for (const invoiceLine of invoice.lines) {
     if (!invoiceLine.expenseAccountNumber) {
       throw createError(409, "supplier_invoice_line_account_required", "Supplier invoice line account is required before posting.");
@@ -2974,25 +3084,35 @@ function buildSupplierInvoiceJournalLines({ invoice, supplier }) {
       accountNumber: invoiceLine.expenseAccountNumber,
       debitAmount: isCreditNote ? 0 : invoiceLine.netAmount,
       creditAmount: isCreditNote ? invoiceLine.netAmount : 0,
+      currencyCode: invoice.currencyCode,
+      exchangeRate,
+      functionalDebitAmount: isCreditNote ? 0 : roundFunctionalAmount(invoiceLine.netAmount, usesForeignCurrency, exchangeRate),
+      functionalCreditAmount: isCreditNote ? roundFunctionalAmount(invoiceLine.netAmount, usesForeignCurrency, exchangeRate) : 0,
       dimensionJson: copy(invoiceLine.dimensionsJson || {})
     });
     for (const vatPostingEntry of invoiceLine.vatProposal.postingEntries || []) {
+      const originalDebitAmount = isCreditNote
+        ? vatPostingEntry.direction === "credit"
+          ? Math.abs(Number(vatPostingEntry.amount || 0))
+          : 0
+        : vatPostingEntry.direction === "debit"
+          ? Math.abs(Number(vatPostingEntry.amount || 0))
+          : 0;
+      const originalCreditAmount = isCreditNote
+        ? vatPostingEntry.direction === "debit"
+          ? Math.abs(Number(vatPostingEntry.amount || 0))
+          : 0
+        : vatPostingEntry.direction === "credit"
+          ? Math.abs(Number(vatPostingEntry.amount || 0))
+          : 0;
       lines.push({
         accountNumber: resolveVatAccountNumber(vatPostingEntry, invoiceLine.vatProposal),
-        debitAmount: isCreditNote
-          ? vatPostingEntry.direction === "credit"
-            ? Math.abs(Number(vatPostingEntry.amount || 0))
-            : 0
-          : vatPostingEntry.direction === "debit"
-            ? Math.abs(Number(vatPostingEntry.amount || 0))
-            : 0,
-        creditAmount: isCreditNote
-          ? vatPostingEntry.direction === "debit"
-            ? Math.abs(Number(vatPostingEntry.amount || 0))
-            : 0
-          : vatPostingEntry.direction === "credit"
-            ? Math.abs(Number(vatPostingEntry.amount || 0))
-            : 0,
+        debitAmount: originalDebitAmount,
+        creditAmount: originalCreditAmount,
+        currencyCode: invoice.currencyCode,
+        exchangeRate,
+        functionalDebitAmount: roundFunctionalAmount(originalDebitAmount, usesForeignCurrency, exchangeRate),
+        functionalCreditAmount: roundFunctionalAmount(originalCreditAmount, usesForeignCurrency, exchangeRate),
         dimensionJson: copy(invoiceLine.dimensionsJson || {})
       });
     }
@@ -3001,6 +3121,10 @@ function buildSupplierInvoiceJournalLines({ invoice, supplier }) {
     accountNumber: resolveLiabilityAccountNumber(supplier),
     debitAmount: isCreditNote ? invoice.grossAmount : 0,
     creditAmount: isCreditNote ? 0 : invoice.grossAmount,
+    currencyCode: invoice.currencyCode,
+    exchangeRate,
+    functionalDebitAmount: isCreditNote ? roundFunctionalAmount(invoice.grossAmount, usesForeignCurrency, exchangeRate) : 0,
+    functionalCreditAmount: isCreditNote ? 0 : roundFunctionalAmount(invoice.grossAmount, usesForeignCurrency, exchangeRate),
     dimensionJson: {}
   });
   return lines;
@@ -3011,18 +3135,26 @@ function mergeJournalLines(lines) {
   for (const line of lines) {
     const key = stableStringify({
       accountNumber: line.accountNumber,
+      currencyCode: line.currencyCode || null,
+      exchangeRate: line.exchangeRate || null,
       dimensionJson: line.dimensionJson || {}
     });
     const existing = grouped.get(key);
     if (existing) {
       existing.debitAmount = roundMoney(existing.debitAmount + Number(line.debitAmount || 0));
       existing.creditAmount = roundMoney(existing.creditAmount + Number(line.creditAmount || 0));
+      existing.functionalDebitAmount = roundMoney(Number(existing.functionalDebitAmount || 0) + Number(line.functionalDebitAmount || 0));
+      existing.functionalCreditAmount = roundMoney(Number(existing.functionalCreditAmount || 0) + Number(line.functionalCreditAmount || 0));
       continue;
     }
     grouped.set(key, {
       accountNumber: line.accountNumber,
       debitAmount: roundMoney(Number(line.debitAmount || 0)),
       creditAmount: roundMoney(Number(line.creditAmount || 0)),
+      currencyCode: normalizeOptionalText(line.currencyCode),
+      exchangeRate: line.exchangeRate == null ? null : Number(line.exchangeRate),
+      functionalDebitAmount: roundMoney(Number(line.functionalDebitAmount || 0)),
+      functionalCreditAmount: roundMoney(Number(line.functionalCreditAmount || 0)),
       dimensionJson: copy(line.dimensionJson || {})
     });
   }
@@ -3078,6 +3210,16 @@ function postApLifecycleJournal({
   if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
     throw createError(500, "ledger_platform_missing", "Ledger platform is required for AP payment lifecycle postings.");
   }
+  const normalizedLines = (Array.isArray(lines) ? lines : [])
+    .map((line) => ({
+      ...line,
+      debitAmount: roundMoney(Number(line?.debitAmount || 0)),
+      creditAmount: roundMoney(Number(line?.creditAmount || 0))
+    }))
+    .filter((line) => line.debitAmount > 0 || line.creditAmount > 0);
+  if (normalizedLines.length < 2) {
+    throw createError(409, "ap_payment_lifecycle_lines_invalid", "AP payment lifecycle journal requires at least two non-zero lines.");
+  }
   const posted = ledgerPlatform.applyPostingIntent({
     companyId,
     journalDate,
@@ -3091,12 +3233,12 @@ function postApLifecycleJournal({
     actorId,
     idempotencyKey: requireText(idempotencyKey, "idempotency_key_required"),
     description: requireText(description, "journal_description_required"),
-    metadataJson: {
-      ...copy(metadataJson),
-      pipelineArea: "ap_payment"
-    },
-    lines
-  });
+      metadataJson: {
+        ...copy(metadataJson),
+        pipelineArea: "ap_payment"
+      },
+      lines: normalizedLines
+    });
   return posted.journalEntry;
 }
 
@@ -3108,6 +3250,7 @@ function buildSupplierInvoiceFingerprint({
   invoiceDate,
   grossAmount,
   currencyCode,
+  exchangeRate = null,
   documentHash,
   paymentReference = null
 }) {
@@ -3119,6 +3262,7 @@ function buildSupplierInvoiceFingerprint({
     invoiceDate,
     grossAmount: roundMoney(grossAmount),
     currencyCode: normalizeUpperCode(currencyCode, "currency_code_required", 3),
+    exchangeRate: normalizeOptionalPositiveNumber(exchangeRate),
     documentHash: requireText(documentHash, "document_hash_required"),
     paymentReference: normalizeOptionalText(paymentReference)
   });
@@ -3772,6 +3916,13 @@ function normalizeOptionalMoney(value, code) {
   return normalizeMoney(value, code);
 }
 
+function normalizeOptionalPositiveNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  return normalizePositiveNumber(value, "numeric_value_invalid");
+}
+
 function normalizeMoney(value, code) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
@@ -3782,6 +3933,48 @@ function normalizeMoney(value, code) {
 
 function roundMoney(value) {
   return Math.round(Number(value) * 100) / 100;
+}
+
+function roundFunctionalAmount(amount, usesForeignCurrency, exchangeRate) {
+  if (!usesForeignCurrency) {
+    return roundMoney(amount);
+  }
+  return roundMoney(Number(amount || 0) * Number(exchangeRate || 1));
+}
+
+function resolveLedgerFunctionalCurrencyCode({ ledgerPlatform, companyId }) {
+  if (!ledgerPlatform || typeof ledgerPlatform.getAccountingCurrencyProfile !== "function") {
+    return "SEK";
+  }
+  return ledgerPlatform.getAccountingCurrencyProfile({ companyId }).accountingCurrencyCode || "SEK";
+}
+
+function resolveApOptionalSettlementExchangeRate({ openItem, functionalSettledAmount, settlementExchangeRate }) {
+  const functionalCurrencyCode = openItem.functionalCurrencyCode || "SEK";
+  if ((openItem.currencyCode || functionalCurrencyCode) === functionalCurrencyCode) {
+    return null;
+  }
+  if (settlementExchangeRate != null && settlementExchangeRate !== "") {
+    return normalizePositiveNumber(settlementExchangeRate, "ap_settlement_exchange_rate_invalid");
+  }
+  if (functionalSettledAmount != null && Number(openItem.openAmount || 0) > 0) {
+    return roundMoney(Number(functionalSettledAmount) / Number(openItem.openAmount || 1));
+  }
+  return Number(openItem.functionalExchangeRate || 1);
+}
+
+function resolveApFunctionalSettledAmount({ openItem, functionalSettledAmount, settlementExchangeRate }) {
+  if (functionalSettledAmount != null && functionalSettledAmount !== "") {
+    return normalizePositiveNumber(functionalSettledAmount, "ap_functional_settled_amount_invalid");
+  }
+  const functionalCurrencyCode = openItem.functionalCurrencyCode || "SEK";
+  if ((openItem.currencyCode || functionalCurrencyCode) === functionalCurrencyCode) {
+    return roundMoney(openItem.openAmount || 0);
+  }
+  const rate = settlementExchangeRate != null && settlementExchangeRate !== ""
+    ? normalizePositiveNumber(settlementExchangeRate, "ap_settlement_exchange_rate_invalid")
+    : Number(openItem.functionalExchangeRate || 1);
+  return roundMoney(Number(openItem.openAmount || 0) * rate);
 }
 
 function roundQuantity(value) {

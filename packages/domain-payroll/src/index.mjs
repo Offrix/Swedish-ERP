@@ -2789,7 +2789,7 @@ function resolvePayrollSettlementRail({ companyId, bankAccountId = null, banking
     }
     return {
       bankAccountId: `trial:${requireText(companyId, "company_id_required")}:payroll_rail`,
-      ledgerAccountNumber: preferredAccount?.ledgerAccountNumber || "1930",
+      ledgerAccountNumber: preferredAccount?.ledgerAccountNumber || "1110",
       railMode: "trial_non_live",
       sourceBankAccountId: preferredAccount?.bankAccountId || null
     };
