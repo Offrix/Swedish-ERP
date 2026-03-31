@@ -375,6 +375,69 @@ export interface DepreciationBatch {
   readonly reversedByActorId: string | null;
 }
 
+export interface AccrualSchedule {
+  readonly accrualScheduleId: string;
+  readonly companyId: string;
+  readonly scheduleCode: string;
+  readonly scheduleName: string;
+  readonly sourceReference: string | null;
+  readonly scheduleKind: "PREPAID_EXPENSE" | "ACCRUED_EXPENSE" | "PREPAID_REVENUE" | "ACCRUED_REVENUE";
+  readonly patternCode: "STRAIGHT_LINE_MONTHLY";
+  readonly startDate: string;
+  readonly endDate: string;
+  readonly totalAmount: number;
+  readonly recognizedAmount: number;
+  readonly remainingAmount: number;
+  readonly totalPeriods: number;
+  readonly recognizedInstallmentCount: number;
+  readonly monthlyRecognitionAmount: number;
+  readonly profitAndLossAccountNumber: string;
+  readonly balanceSheetAccountNumber: string;
+  readonly nextRecognitionDate: string | null;
+  readonly lastAccrualBatchId: string | null;
+  readonly status: "active" | "completed" | "reversed";
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface AccrualBatchItem {
+  readonly accrualScheduleId: string;
+  readonly scheduleCode: string;
+  readonly scheduleKind: "PREPAID_EXPENSE" | "ACCRUED_EXPENSE" | "PREPAID_REVENUE" | "ACCRUED_REVENUE";
+  readonly firstScheduledDate: string;
+  readonly lastScheduledDate: string;
+  readonly installmentCount: number;
+  readonly recognitionAmount: number;
+  readonly priorRecognizedAmount: number;
+  readonly priorRecognizedInstallmentCount: number;
+  readonly priorNextRecognitionDate: string | null;
+  readonly priorStatus: "active" | "completed" | "reversed";
+  readonly priorLastAccrualBatchId: string | null;
+}
+
+export interface AccrualBatch {
+  readonly accrualBatchId: string;
+  readonly companyId: string;
+  readonly accountingPeriodId: string;
+  readonly throughDate: string;
+  readonly status: "posted" | "reversed";
+  readonly accountingCurrencyCode: string;
+  readonly lineCount: number;
+  readonly scheduleCount: number;
+  readonly totals: {
+    readonly totalDebit: number;
+    readonly totalCredit: number;
+  };
+  readonly journalEntryId: string;
+  readonly reversalJournalEntryId: string | null;
+  readonly items: readonly AccrualBatchItem[];
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly reversedAt: string | null;
+  readonly reversedByActorId: string | null;
+}
+
 export interface CorrectionResult {
   readonly originalJournalEntry: JournalEntry;
   readonly reversalJournalEntry: JournalEntry | null;
@@ -589,3 +652,58 @@ export declare function reverseDepreciationBatch(options: {
   approvedByRoleCode: string;
   correlationId?: string;
 }): DepreciationBatch;
+
+export declare function registerAccrualSchedule(options: {
+  companyId: string;
+  scheduleCode: string;
+  scheduleName: string;
+  sourceReference?: string | null;
+  scheduleKind: "PREPAID_EXPENSE" | "ACCRUED_EXPENSE" | "PREPAID_REVENUE" | "ACCRUED_REVENUE";
+  startDate: string;
+  endDate: string;
+  totalAmount: number | string;
+  patternCode?: "STRAIGHT_LINE_MONTHLY";
+  profitAndLossAccountNumber: string;
+  balanceSheetAccountNumber: string;
+  actorId: string;
+  idempotencyKey: string;
+  correlationId?: string;
+}): AccrualSchedule;
+
+export declare function listAccrualSchedules(options: {
+  companyId: string;
+}): readonly AccrualSchedule[];
+
+export declare function getAccrualSchedule(options: {
+  companyId: string;
+  accrualScheduleId: string;
+}): AccrualSchedule;
+
+export declare function runAccrualBatch(options: {
+  companyId: string;
+  throughDate: string;
+  description?: string | null;
+  actorId: string;
+  idempotencyKey: string;
+  correlationId?: string;
+}): AccrualBatch;
+
+export declare function listAccrualBatches(options: {
+  companyId: string;
+}): readonly AccrualBatch[];
+
+export declare function getAccrualBatch(options: {
+  companyId: string;
+  accrualBatchId: string;
+}): AccrualBatch;
+
+export declare function reverseAccrualBatch(options: {
+  companyId: string;
+  accrualBatchId: string;
+  reasonCode: string;
+  reversedOn?: string | null;
+  actorId: string;
+  approvedByActorId: string;
+  approvedByRoleCode: string;
+  correlationId?: string;
+}): AccrualBatch;

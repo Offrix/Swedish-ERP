@@ -75,6 +75,14 @@ export const DEFAULT_RETAINED_EARNINGS_ACCOUNT_NUMBER = "2030";
 export const DEFAULT_VAT_CLEARING_TARGET_ACCOUNT_NUMBER = "2650";
 export const ASSET_CARD_STATUSES = Object.freeze(["active", "fully_depreciated", "disposed"]);
 export const DEPRECIATION_METHOD_CODES = Object.freeze(["STRAIGHT_LINE_MONTHLY"]);
+export const ACCRUAL_SCHEDULE_STATUSES = Object.freeze(["active", "completed", "reversed"]);
+export const ACCRUAL_SCHEDULE_KINDS = Object.freeze([
+  "PREPAID_EXPENSE",
+  "ACCRUED_EXPENSE",
+  "PREPAID_REVENUE",
+  "ACCRUED_REVENUE"
+]);
+export const ACCRUAL_PATTERN_CODES = Object.freeze(["STRAIGHT_LINE_MONTHLY"]);
 
 export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
   Object.freeze({
@@ -286,6 +294,16 @@ export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
     defaultVoucherSeriesPurposeCode: "LEDGER_MANUAL",
     fallbackVoucherSeriesCode: "A",
     defaultSignalCode: "asset.depreciation.booked"
+  }),
+  Object.freeze({
+    recipeCode: "PERIOD_ACCRUAL",
+    version: "2026.1",
+    sourceDomain: "ledger",
+    journalType: "operational_posting",
+    allowedSourceTypes: Object.freeze(["PERIOD_ACCRUAL"]),
+    defaultVoucherSeriesPurposeCode: "LEDGER_MANUAL",
+    fallbackVoucherSeriesCode: "A",
+    defaultSignalCode: "accrual.booked"
   }),
   Object.freeze({
     recipeCode: "HUS_CLAIM_ACCEPTED",
@@ -517,6 +535,12 @@ export function createLedgerEngine({
     depreciationBatches: new Map(),
     depreciationBatchIdsByCompany: new Map(),
     depreciationBatchIdsByCompanyKey: new Map(),
+    accrualSchedules: new Map(),
+    accrualScheduleIdsByCompany: new Map(),
+    accrualScheduleIdsByCompanyKey: new Map(),
+    accrualBatches: new Map(),
+    accrualBatchIdsByCompany: new Map(),
+    accrualBatchIdsByCompanyKey: new Map(),
     postingIntents: new Map(),
     postingIntentIdsByCompanyKey: new Map(),
     accountingPeriods: new Map(),
@@ -577,6 +601,13 @@ export function createLedgerEngine({
     listDepreciationBatches,
     getDepreciationBatch,
     reverseDepreciationBatch,
+    registerAccrualSchedule,
+    listAccrualSchedules,
+    getAccrualSchedule,
+    runAccrualBatch,
+    listAccrualBatches,
+    getAccrualBatch,
+    reverseAccrualBatch,
     reserveImportedVoucherNumber,
     resolveVoucherSeriesForPurpose,
     createPostingIntent,
@@ -2043,6 +2074,409 @@ export function createLedgerEngine({
     return copy(reversedBatch);
   }
 
+  function registerAccrualSchedule({
+    companyId,
+    scheduleCode,
+    scheduleName,
+    sourceReference = null,
+    scheduleKind,
+    startDate,
+    endDate,
+    totalAmount,
+    patternCode = "STRAIGHT_LINE_MONTHLY",
+    profitAndLossAccountNumber,
+    balanceSheetAccountNumber,
+    actorId,
+    idempotencyKey,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedIdempotencyKey = requireText(idempotencyKey, "idempotency_key_required");
+    const dedupeKey = toCompanyScopedKey(resolvedCompanyId, resolvedIdempotencyKey);
+    const existingScheduleId = state.accrualScheduleIdsByCompanyKey.get(dedupeKey);
+    if (existingScheduleId) {
+      return copy(requireAccrualSchedule(resolvedCompanyId, existingScheduleId));
+    }
+
+    synchronizeLedgerPeriodsForCompany(resolvedCompanyId);
+    const resolvedScheduleCode = normalizeCode(scheduleCode, "accrual_schedule_code_required");
+    assertAccrualScheduleCodeUnique({ companyId: resolvedCompanyId, scheduleCode: resolvedScheduleCode });
+    const resolvedScheduleKind = assertAccrualScheduleKind(scheduleKind);
+    const resolvedPatternCode = assertAccrualPatternCode(patternCode);
+    const resolvedStartDate = normalizeDate(startDate, "accrual_start_date_invalid");
+    const resolvedEndDate = normalizeDate(endDate, "accrual_end_date_invalid");
+    if (resolvedEndDate < resolvedStartDate) {
+      throw httpError(409, "accrual_end_before_start", "Accrual end date cannot be earlier than start date.");
+    }
+    const resolvedTotalAmount = normalizeSignedMoney(totalAmount);
+    if (!(resolvedTotalAmount > 0)) {
+      throw httpError(400, "accrual_total_amount_invalid", "Accrual total amount must be greater than zero.");
+    }
+
+    const profitAndLossAccount = requireAccrualProfitLossAccount({
+      companyId: resolvedCompanyId,
+      accountNumber: profitAndLossAccountNumber,
+      scheduleKind: resolvedScheduleKind
+    });
+    const balanceSheetAccount = requireAccrualBalanceSheetAccount({
+      companyId: resolvedCompanyId,
+      accountNumber: balanceSheetAccountNumber,
+      scheduleKind: resolvedScheduleKind
+    });
+    if (profitAndLossAccount.accountNumber === balanceSheetAccount.accountNumber) {
+      throw httpError(409, "accrual_account_conflict", "Profit-and-loss and balance-sheet accounts must be different.");
+    }
+
+    let totalPeriods = 0;
+    let recognitionDate = endOfMonth(resolvedStartDate);
+    const lastRecognitionDate = endOfMonth(resolvedEndDate);
+    while (recognitionDate <= lastRecognitionDate) {
+      totalPeriods += 1;
+      recognitionDate = advanceMonthlyScheduleDate(recognitionDate);
+    }
+    if (totalPeriods < 1) {
+      throw httpError(409, "accrual_schedule_has_no_periods", "Accrual schedule must cover at least one month-end.");
+    }
+
+    const monthlyRecognitionAmount = normalizeSignedMoney(resolvedTotalAmount / totalPeriods);
+    const accrualScheduleId = crypto.randomUUID();
+    const accrualSchedule = Object.freeze({
+      accrualScheduleId,
+      companyId: resolvedCompanyId,
+      scheduleCode: resolvedScheduleCode,
+      scheduleName: normalizeLedgerLabel(scheduleName, "accrual_schedule_name_required"),
+      sourceReference: normalizeOptionalText(sourceReference),
+      scheduleKind: resolvedScheduleKind,
+      patternCode: resolvedPatternCode,
+      startDate: resolvedStartDate,
+      endDate: resolvedEndDate,
+      totalAmount: resolvedTotalAmount,
+      recognizedAmount: 0,
+      remainingAmount: resolvedTotalAmount,
+      totalPeriods,
+      recognizedInstallmentCount: 0,
+      monthlyRecognitionAmount,
+      profitAndLossAccountNumber: profitAndLossAccount.accountNumber,
+      balanceSheetAccountNumber: balanceSheetAccount.accountNumber,
+      nextRecognitionDate: endOfMonth(resolvedStartDate),
+      lastAccrualBatchId: null,
+      status: "active",
+      createdByActorId: resolvedActorId,
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    });
+
+    state.accrualSchedules.set(accrualSchedule.accrualScheduleId, accrualSchedule);
+    appendToIndex(state.accrualScheduleIdsByCompany, resolvedCompanyId, accrualSchedule.accrualScheduleId);
+    state.accrualScheduleIdsByCompanyKey.set(dedupeKey, accrualSchedule.accrualScheduleId);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.accrual_schedule.registered",
+      entityType: "accrual_schedule",
+      entityId: accrualSchedule.accrualScheduleId,
+      explanation: `Registered accrual schedule ${accrualSchedule.scheduleCode}.`
+    });
+
+    return copy(accrualSchedule);
+  }
+
+  function listAccrualSchedules({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.accrualScheduleIdsByCompany.get(resolvedCompanyId) || [])
+      .map((scheduleId) => state.accrualSchedules.get(scheduleId))
+      .filter(Boolean)
+      .sort((left, right) => left.scheduleCode.localeCompare(right.scheduleCode))
+      .map(copy);
+  }
+
+  function getAccrualSchedule({ companyId, accrualScheduleId } = {}) {
+    return copy(requireAccrualSchedule(requireText(companyId, "company_id_required"), accrualScheduleId));
+  }
+
+  function runAccrualBatch({
+    companyId,
+    throughDate,
+    description = null,
+    actorId,
+    idempotencyKey,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedIdempotencyKey = requireText(idempotencyKey, "idempotency_key_required");
+    const dedupeKey = toCompanyScopedKey(resolvedCompanyId, resolvedIdempotencyKey);
+    const existingBatchId = state.accrualBatchIdsByCompanyKey.get(dedupeKey);
+    if (existingBatchId) {
+      return copy(requireAccrualBatch(resolvedCompanyId, existingBatchId));
+    }
+
+    synchronizeLedgerPeriodsForCompany(resolvedCompanyId);
+    const resolvedThroughDate = normalizeDate(throughDate, "accrual_through_date_invalid");
+    if (resolvedThroughDate !== endOfMonth(resolvedThroughDate)) {
+      throw httpError(
+        409,
+        "accrual_through_date_must_be_month_end",
+        "Accrual batches must run through a month-end date."
+      );
+    }
+    const accountingCurrencyProfile = ensureAccountingCurrencyProfile(resolvedCompanyId);
+    const accountingPeriod = resolveAccountingPeriod(resolvedCompanyId, resolvedThroughDate);
+    const accrualBatchId = crypto.randomUUID();
+    const items = [];
+    const lines = [];
+
+    for (const accrualSchedule of listAccrualSchedules({ companyId: resolvedCompanyId })) {
+      if (accrualSchedule.status !== "active") {
+        continue;
+      }
+      let scheduledDate = accrualSchedule.nextRecognitionDate;
+      let recognizedAmount = accrualSchedule.recognizedAmount;
+      let recognizedInstallmentCount = accrualSchedule.recognizedInstallmentCount;
+      let scheduleBatchAmount = 0;
+      let installmentCount = 0;
+      let firstScheduledDate = null;
+      let lastScheduledDate = null;
+      while (
+        scheduledDate
+        && scheduledDate <= resolvedThroughDate
+        && recognizedAmount < accrualSchedule.totalAmount
+        && recognizedInstallmentCount < accrualSchedule.totalPeriods
+      ) {
+        const remainingAmount = normalizeSignedMoney(accrualSchedule.totalAmount - recognizedAmount);
+        const installmentAmount = recognizedInstallmentCount >= accrualSchedule.totalPeriods - 1
+          ? remainingAmount
+          : Math.min(accrualSchedule.monthlyRecognitionAmount, remainingAmount);
+        if (!(installmentAmount > 0)) {
+          break;
+        }
+        scheduleBatchAmount = normalizeSignedMoney(scheduleBatchAmount + installmentAmount);
+        recognizedAmount = normalizeSignedMoney(recognizedAmount + installmentAmount);
+        recognizedInstallmentCount += 1;
+        installmentCount += 1;
+        firstScheduledDate = firstScheduledDate || scheduledDate;
+        lastScheduledDate = scheduledDate;
+        scheduledDate = advanceMonthlyScheduleDate(scheduledDate);
+      }
+      if (!(scheduleBatchAmount > 0)) {
+        continue;
+      }
+      const postingProfile = resolveAccrualPostingProfile(accrualSchedule.scheduleKind);
+      items.push({
+        accrualScheduleId: accrualSchedule.accrualScheduleId,
+        scheduleCode: accrualSchedule.scheduleCode,
+        scheduleKind: accrualSchedule.scheduleKind,
+        firstScheduledDate,
+        lastScheduledDate,
+        installmentCount,
+        recognitionAmount: scheduleBatchAmount,
+        priorRecognizedAmount: accrualSchedule.recognizedAmount,
+        priorRecognizedInstallmentCount: accrualSchedule.recognizedInstallmentCount,
+        priorNextRecognitionDate: accrualSchedule.nextRecognitionDate,
+        priorStatus: accrualSchedule.status,
+        priorLastAccrualBatchId: accrualSchedule.lastAccrualBatchId
+      });
+      lines.push(
+        {
+          accountNumber: postingProfile.debitAccountRole === "profit_and_loss"
+            ? accrualSchedule.profitAndLossAccountNumber
+            : accrualSchedule.balanceSheetAccountNumber,
+          debitAmount: scheduleBatchAmount,
+          sourceId: accrualBatchId
+        },
+        {
+          accountNumber: postingProfile.creditAccountRole === "profit_and_loss"
+            ? accrualSchedule.profitAndLossAccountNumber
+            : accrualSchedule.balanceSheetAccountNumber,
+          creditAmount: scheduleBatchAmount,
+          sourceId: accrualBatchId
+        }
+      );
+    }
+
+    if (items.length === 0) {
+      throw httpError(409, "accrual_batch_no_due_schedules", "No active accrual schedules require recognition for the supplied date.");
+    }
+
+    const normalizedLines = normalizeAccrualLineInputs({
+      companyId: resolvedCompanyId,
+      lines,
+      sourceId: accrualBatchId
+    });
+    const totals = calculateInputLineTotals(normalizedLines);
+    const posted = applyPostingIntent({
+      companyId: resolvedCompanyId,
+      journalDate: resolvedThroughDate,
+      recipeCode: "PERIOD_ACCRUAL",
+      sourceType: "PERIOD_ACCRUAL",
+      sourceId: accrualBatchId,
+      sourceObjectVersion: "1",
+      description: normalizeOptionalText(description) || `Accrual batch ${resolvedThroughDate}`,
+      actorId: resolvedActorId,
+      idempotencyKey: `${resolvedIdempotencyKey}:journal`,
+      lines: normalizedLines,
+      currencyCode: accountingCurrencyProfile.accountingCurrencyCode,
+      metadataJson: {
+        accrualBatchId,
+        throughDate: resolvedThroughDate,
+        items: copy(items)
+      },
+      correlationId
+    });
+
+    for (const item of items) {
+      const existingSchedule = requireAccrualSchedule(resolvedCompanyId, item.accrualScheduleId);
+      const recognizedAmount = normalizeSignedMoney(existingSchedule.recognizedAmount + item.recognitionAmount);
+      const remainingAmount = normalizeSignedMoney(existingSchedule.totalAmount - recognizedAmount);
+      const recognizedInstallmentCount = existingSchedule.recognizedInstallmentCount + item.installmentCount;
+      const nextRecognitionDate =
+        remainingAmount > 0 && recognizedInstallmentCount < existingSchedule.totalPeriods
+          ? advanceMonthlyScheduleDate(item.lastScheduledDate)
+          : null;
+      state.accrualSchedules.set(
+        existingSchedule.accrualScheduleId,
+        Object.freeze({
+          ...existingSchedule,
+          recognizedAmount,
+          remainingAmount,
+          recognizedInstallmentCount,
+          nextRecognitionDate,
+          lastAccrualBatchId: accrualBatchId,
+          status: remainingAmount > 0 ? "active" : "completed",
+          updatedAt: nowIso()
+        })
+      );
+    }
+
+    const batch = Object.freeze({
+      accrualBatchId,
+      companyId: resolvedCompanyId,
+      accountingPeriodId: accountingPeriod.accountingPeriodId,
+      throughDate: resolvedThroughDate,
+      status: "posted",
+      accountingCurrencyCode: accountingCurrencyProfile.accountingCurrencyCode,
+      lineCount: normalizedLines.length,
+      scheduleCount: items.length,
+      totals,
+      journalEntryId: posted.journalEntry.journalEntryId,
+      reversalJournalEntryId: null,
+      items: Object.freeze(items.map((item) => Object.freeze(copy(item)))),
+      createdByActorId: resolvedActorId,
+      createdAt: nowIso(),
+      reversedAt: null,
+      reversedByActorId: null
+    });
+
+    state.accrualBatches.set(batch.accrualBatchId, batch);
+    appendToIndex(state.accrualBatchIdsByCompany, resolvedCompanyId, batch.accrualBatchId);
+    state.accrualBatchIdsByCompanyKey.set(dedupeKey, batch.accrualBatchId);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.accrual.booked",
+      entityType: "accrual_batch",
+      entityId: batch.accrualBatchId,
+      explanation: `Posted accrual batch through ${resolvedThroughDate}.`
+    });
+
+    return copy(batch);
+  }
+
+  function listAccrualBatches({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.accrualBatchIdsByCompany.get(resolvedCompanyId) || [])
+      .map((batchId) => state.accrualBatches.get(batchId))
+      .filter(Boolean)
+      .sort((left, right) => left.throughDate.localeCompare(right.throughDate) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function getAccrualBatch({ companyId, accrualBatchId } = {}) {
+    return copy(requireAccrualBatch(requireText(companyId, "company_id_required"), accrualBatchId));
+  }
+
+  function reverseAccrualBatch({
+    companyId,
+    accrualBatchId,
+    reasonCode,
+    reversedOn = null,
+    actorId,
+    approvedByActorId,
+    approvedByRoleCode,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const batch = requireAccrualBatch(resolvedCompanyId, accrualBatchId);
+    if (batch.status === "reversed") {
+      return copy(batch);
+    }
+    for (const item of batch.items) {
+      const accrualSchedule = requireAccrualSchedule(resolvedCompanyId, item.accrualScheduleId);
+      if (accrualSchedule.lastAccrualBatchId !== batch.accrualBatchId) {
+        throw httpError(
+          409,
+          "accrual_batch_reversal_order_invalid",
+          `Accrual batch ${batch.accrualBatchId} cannot be reversed after later accrual postings for schedule ${accrualSchedule.scheduleCode}.`
+        );
+      }
+    }
+
+    const reversed = reverseJournalEntry({
+      companyId: resolvedCompanyId,
+      journalEntryId: batch.journalEntryId,
+      actorId: requireText(actorId, "actor_id_required"),
+      approvedByActorId: requireText(approvedByActorId, "approved_by_actor_id_required"),
+      approvedByRoleCode: requireText(approvedByRoleCode, "approved_by_role_code_required"),
+      reasonCode: requireText(reasonCode, "reason_code_required"),
+      correctionKey: `period_accrual:${batch.accrualBatchId}`,
+      journalDate: reversedOn ? normalizeDate(reversedOn, "accrual_reversed_on_invalid") : null,
+      correlationId
+    });
+
+    for (const item of batch.items) {
+      const accrualSchedule = requireAccrualSchedule(resolvedCompanyId, item.accrualScheduleId);
+      state.accrualSchedules.set(
+        accrualSchedule.accrualScheduleId,
+        Object.freeze({
+          ...accrualSchedule,
+          recognizedAmount: item.priorRecognizedAmount,
+          remainingAmount: normalizeSignedMoney(accrualSchedule.totalAmount - item.priorRecognizedAmount),
+          recognizedInstallmentCount: item.priorRecognizedInstallmentCount,
+          nextRecognitionDate: item.priorNextRecognitionDate,
+          lastAccrualBatchId: item.priorLastAccrualBatchId,
+          status: item.priorStatus,
+          updatedAt: nowIso()
+        })
+      );
+    }
+
+    const reversedBatch = Object.freeze({
+      ...batch,
+      status: "reversed",
+      reversalJournalEntryId: reversed.reversalJournalEntry.journalEntryId,
+      reversedAt: nowIso(),
+      reversedByActorId: requireText(actorId, "actor_id_required")
+    });
+    state.accrualBatches.set(reversedBatch.accrualBatchId, reversedBatch);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "ledger.accrual.reversed",
+      entityType: "accrual_batch",
+      entityId: reversedBatch.accrualBatchId,
+      explanation: `Reversed accrual batch ${reversedBatch.accrualBatchId}.`
+    });
+
+    return copy(reversedBatch);
+  }
+
   function resolveVoucherSeriesForPurpose({
     companyId,
     purposeCode,
@@ -3262,6 +3696,8 @@ export function createLedgerEngine({
       vatClearingRuns: [...state.vatClearingRuns.values()],
       assetCards: [...state.assetCards.values()],
       depreciationBatches: [...state.depreciationBatches.values()],
+      accrualSchedules: [...state.accrualSchedules.values()],
+      accrualBatches: [...state.accrualBatches.values()],
       postingIntents: [...state.postingIntents.values()],
       accountingPeriods: [...state.accountingPeriods.values()],
       dimensionCatalogs: [...state.dimensionCatalogsByCompanyId.values()],
@@ -3513,6 +3949,111 @@ export function createLedgerEngine({
       );
     }
     return account;
+  }
+
+  function assertAccrualScheduleKind(value) {
+    const normalized = requireText(value, "accrual_schedule_kind_required").toUpperCase();
+    if (!ACCRUAL_SCHEDULE_KINDS.includes(normalized)) {
+      throw httpError(400, "accrual_schedule_kind_invalid", "Accrual schedule kind is not supported.");
+    }
+    return normalized;
+  }
+
+  function assertAccrualPatternCode(value) {
+    const normalized = requireText(value, "accrual_pattern_code_required").toUpperCase();
+    if (!ACCRUAL_PATTERN_CODES.includes(normalized)) {
+      throw httpError(400, "accrual_pattern_code_invalid", "Accrual pattern code is not supported.");
+    }
+    return normalized;
+  }
+
+  function assertAccrualScheduleCodeUnique({ companyId, scheduleCode }) {
+    const resolvedScheduleCode = normalizeCode(scheduleCode, "accrual_schedule_code_required");
+    for (const schedule of state.accrualSchedules.values()) {
+      if (schedule.companyId === companyId && schedule.scheduleCode === resolvedScheduleCode) {
+        throw httpError(409, "accrual_schedule_code_conflict", `Accrual schedule code ${resolvedScheduleCode} already exists for the company.`);
+      }
+    }
+    return resolvedScheduleCode;
+  }
+
+  function requireAccrualSchedule(companyId, accrualScheduleId) {
+    const schedule = state.accrualSchedules.get(requireText(accrualScheduleId, "accrual_schedule_id_required"));
+    if (!schedule || schedule.companyId !== companyId) {
+      throw httpError(404, "accrual_schedule_not_found", "Accrual schedule was not found.");
+    }
+    return schedule;
+  }
+
+  function requireAccrualBatch(companyId, accrualBatchId) {
+    const batch = state.accrualBatches.get(requireText(accrualBatchId, "accrual_batch_id_required"));
+    if (!batch || batch.companyId !== companyId) {
+      throw httpError(404, "accrual_batch_not_found", "Accrual batch was not found.");
+    }
+    return batch;
+  }
+
+  function requireAccrualProfitLossAccount({ companyId, accountNumber, scheduleKind }) {
+    const account = requireAccount(companyId, normalizeAccountNumber(accountNumber));
+    if (["PREPAID_REVENUE", "ACCRUED_REVENUE"].includes(scheduleKind)) {
+      if (account.accountClass !== "3") {
+        throw httpError(
+          409,
+          "accrual_revenue_account_required",
+          `Account ${account.accountNumber} must be a class 3 revenue account for revenue accrual schedules.`
+        );
+      }
+      return account;
+    }
+    if (!["4", "5", "6", "7", "8"].includes(account.accountClass)) {
+      throw httpError(
+        409,
+        "accrual_expense_account_required",
+        `Account ${account.accountNumber} must be a class 4-8 expense account for expense accrual schedules.`
+      );
+    }
+    return account;
+  }
+
+  function requireAccrualBalanceSheetAccount({ companyId, accountNumber, scheduleKind }) {
+    const account = requireAccount(companyId, normalizeAccountNumber(accountNumber));
+    if (["PREPAID_EXPENSE", "ACCRUED_REVENUE"].includes(scheduleKind)) {
+      if (account.accountClass !== "1") {
+        throw httpError(
+          409,
+          "accrual_asset_account_required",
+          `Account ${account.accountNumber} must be a class 1 asset account for this accrual schedule kind.`
+        );
+      }
+      return account;
+    }
+    if (account.accountClass !== "2") {
+      throw httpError(
+        409,
+        "accrual_liability_account_required",
+        `Account ${account.accountNumber} must be a class 2 liability account for this accrual schedule kind.`
+      );
+    }
+    return account;
+  }
+
+  function resolveAccrualPostingProfile(scheduleKind) {
+    switch (scheduleKind) {
+      case "PREPAID_EXPENSE":
+      case "ACCRUED_EXPENSE":
+        return Object.freeze({
+          debitAccountRole: "profit_and_loss",
+          creditAccountRole: "balance_sheet"
+        });
+      case "PREPAID_REVENUE":
+      case "ACCRUED_REVENUE":
+        return Object.freeze({
+          debitAccountRole: "balance_sheet",
+          creditAccountRole: "profit_and_loss"
+        });
+      default:
+        throw httpError(400, "accrual_schedule_kind_invalid", "Accrual schedule kind is not supported.");
+    }
   }
 
   function requireVatClearingTargetAccount({ companyId, accountNumber }) {
@@ -3863,6 +4404,36 @@ export function createLedgerEngine({
     const totals = calculateInputLineTotals(normalizedLines);
     if (totals.totalDebit !== totals.totalCredit) {
       throw httpError(400, "depreciation_unbalanced", "Depreciation lines must balance debit and credit exactly.");
+    }
+    return Object.freeze(normalizedLines);
+  }
+
+  function normalizeAccrualLineInputs({ companyId, lines, sourceId }) {
+    if (!Array.isArray(lines) || lines.length < 2) {
+      throw httpError(400, "accrual_lines_required", "Accrual requires at least two lines.");
+    }
+    const normalizedLines = lines.map((line) => {
+      const account = requireAccount(companyId, line.accountNumber);
+      const debitAmount = normalizeSignedMoney(line.debitAmount || 0);
+      const creditAmount = normalizeSignedMoney(line.creditAmount || 0);
+      if (debitAmount === 0 && creditAmount === 0) {
+        throw httpError(400, "accrual_line_amount_required", "Each accrual line requires a debit or credit amount.");
+      }
+      if (debitAmount > 0 && creditAmount > 0) {
+        throw httpError(400, "accrual_line_single_sided_required", "Each accrual line must be either debit or credit.");
+      }
+      return Object.freeze({
+        accountNumber: account.accountNumber,
+        debitAmount,
+        creditAmount,
+        dimensionJson: copy(line.dimensionJson || {}),
+        sourceType: "PERIOD_ACCRUAL",
+        sourceId: requireText(line.sourceId || sourceId, "line_source_id_required")
+      });
+    });
+    const totals = calculateInputLineTotals(normalizedLines);
+    if (totals.totalDebit !== totals.totalCredit) {
+      throw httpError(400, "accrual_unbalanced", "Accrual lines must balance debit and credit exactly.");
     }
     return Object.freeze(normalizedLines);
   }

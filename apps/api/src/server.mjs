@@ -479,6 +479,11 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/ledger/depreciation-batches",
               "/v1/ledger/depreciation-batches/:depreciationBatchId",
               "/v1/ledger/depreciation-batches/:depreciationBatchId/reverse",
+              "/v1/ledger/accrual-schedules",
+              "/v1/ledger/accrual-schedules/:accrualScheduleId",
+              "/v1/ledger/accrual-batches",
+              "/v1/ledger/accrual-batches/:accrualBatchId",
+              "/v1/ledger/accrual-batches/:accrualBatchId/reverse",
               "/v1/accounting-method/eligibility-assessments",
               "/v1/accounting-method/profiles",
               "/v1/accounting-method/profiles/:methodProfileId",
@@ -3673,6 +3678,190 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
       platform.reverseDepreciationBatch({
         companyId,
         depreciationBatchId: depreciationBatchReverseMatch.depreciationBatchId,
+        reasonCode: body.reasonCode,
+        reversedOn: body.reversedOn || null,
+        actorId: principal.userId,
+        approvedByActorId: body.approvedByActorId,
+        approvedByRoleCode: body.approvedByRoleCode,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ledger/accrual-schedules") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "accrual_schedule",
+      scopeCode: "ledger"
+    });
+    writeJson(res, 200, {
+      items: platform.listAccrualSchedules({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ledger/accrual-schedules") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger_period_accrual",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.registerAccrualSchedule({
+        companyId,
+        scheduleCode: body.scheduleCode,
+        scheduleName: body.scheduleName,
+        sourceReference: body.sourceReference || null,
+        scheduleKind: body.scheduleKind,
+        startDate: body.startDate,
+        endDate: body.endDate,
+        totalAmount: body.totalAmount,
+        patternCode: body.patternCode || "STRAIGHT_LINE_MONTHLY",
+        profitAndLossAccountNumber: body.profitAndLossAccountNumber,
+        balanceSheetAccountNumber: body.balanceSheetAccountNumber,
+        actorId: principal.userId,
+        idempotencyKey: body.idempotencyKey,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const accrualScheduleMatch = matchPath(path, "/v1/ledger/accrual-schedules/:accrualScheduleId");
+  if (accrualScheduleMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "accrual_schedule",
+      objectId: accrualScheduleMatch.accrualScheduleId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getAccrualSchedule({
+        companyId,
+        accrualScheduleId: accrualScheduleMatch.accrualScheduleId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ledger/accrual-batches") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "accrual_batch",
+      scopeCode: "ledger"
+    });
+    writeJson(res, 200, {
+      items: platform.listAccrualBatches({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ledger/accrual-batches") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger_period_accrual",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.runAccrualBatch({
+        companyId,
+        throughDate: body.throughDate,
+        description: body.description || null,
+        actorId: principal.userId,
+        idempotencyKey: body.idempotencyKey,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const accrualBatchMatch = matchPath(path, "/v1/ledger/accrual-batches/:accrualBatchId");
+  if (accrualBatchMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "accrual_batch",
+      objectId: accrualBatchMatch.accrualBatchId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getAccrualBatch({
+        companyId,
+        accrualBatchId: accrualBatchMatch.accrualBatchId
+      })
+    );
+    return;
+  }
+
+  const accrualBatchReverseMatch = matchPath(path, "/v1/ledger/accrual-batches/:accrualBatchId/reverse");
+  if (accrualBatchReverseMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "accrual_batch",
+      objectId: accrualBatchReverseMatch.accrualBatchId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.reverseAccrualBatch({
+        companyId,
+        accrualBatchId: accrualBatchReverseMatch.accrualBatchId,
         reasonCode: body.reasonCode,
         reversedOn: body.reversedOn || null,
         actorId: principal.userId,
