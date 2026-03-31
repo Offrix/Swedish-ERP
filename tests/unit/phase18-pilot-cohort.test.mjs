@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
@@ -138,7 +138,12 @@ function bootstrapFinanceReadyCompany({ tenantControl, legalName, orgNumber, adm
     orgNumber,
     adminEmail,
     adminDisplayName: "Phase 18 Cohort Owner",
-    accountingYear: "2026"
+    legalFormCode: "AKTIEBOLAG",
+    registrations: [{ registrationType: "vat", registrationValue: "configured-vat", status: "configured" }],
+    fiscalYearStartDate: "2026-01-01",
+    fiscalYearEndDate: "2026-12-31",
+    vatScheme: "se_standard",
+    vatFilingPeriod: "monthly",    accountingYear: "2026"
   });
   tenantControl.updateTenantBootstrapStep({
     tenantBootstrapId: onboardingRun.tenantBootstrapId,
@@ -183,3 +188,5 @@ function bootstrapFinanceReadyCompany({ tenantControl, legalName, orgNumber, adm
     adminEmail
   };
 }
+
+

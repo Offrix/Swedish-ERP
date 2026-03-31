@@ -4,6 +4,11 @@ import {
   applyDurableStateSnapshot,
   serializeDurableState
 } from "../../domain-core/src/state-snapshots.mjs";
+import {
+  normalizeRequiredIsoDate,
+  normalizeRequiredSwedishOrganizationNumber
+} from "../../domain-core/src/validation.mjs";
+import { LEGAL_FORM_CODES } from "../../domain-legal-form/src/index.mjs";
 
 export const COMPANY_SETUP_PROFILE_STATUSES = Object.freeze([
   "draft",
@@ -98,6 +103,7 @@ const DEFAULT_VAT_SCHEME = "se_standard";
 const DEFAULT_VAT_FILING_PERIOD = "monthly";
 const DEFAULT_ACCOUNTING_METHOD_CODE = "FAKTURERINGSMETOD";
 const DEFAULT_LEGAL_FORM_CODE = "AKTIEBOLAG";
+const BOOTSTRAP_REQUIRED_REGISTRATION_TYPES = Object.freeze(["vat"]);
 const TENANT_BOOTSTRAP_ACTOR_ID = "tenant_control_bootstrap";
 const DEFAULT_TRIAL_MODE = "trial";
 const DEFAULT_TRIAL_WATERMARK_CODE = "TRIAL";
@@ -751,6 +757,7 @@ export function createTenantControlEngine({
   const state = {
     tenantBootstraps: new Map(),
     bootstrapStepStates: new Map(),
+    bootstrapReadinessByCompany: new Map(),
     companySetupProfiles: new Map(),
     companySetupProfileIdByCompany: new Map(),
     moduleDefinitions: new Map(),
@@ -867,6 +874,7 @@ export function createTenantControlEngine({
     adminEmail,
     adminDisplayName,
     accountingYear,
+    registrations = [],
     legalFormCode = null,
     accountingMethodCode = null,
     ownerTaxationCode = null,
@@ -879,9 +887,11 @@ export function createTenantControlEngine({
     roleTemplateCode = null,
     queueStructureCode = null
   } = {}) {
-    const financeBlueprint = normalizeFinanceBlueprint({
+    const bootstrapContract = normalizeTenantBootstrapContract({
       legalName,
+      orgNumber,
       accountingYear,
+      registrations,
       legalFormCode,
       accountingMethodCode,
       ownerTaxationCode,
@@ -896,13 +906,31 @@ export function createTenantControlEngine({
     });
     const delegated = requireOrgAuthPlatform().createOnboardingRun({
       legalName,
-      orgNumber,
+      orgNumber: bootstrapContract.orgNumber,
       adminEmail,
       adminDisplayName,
-      accountingYear
+      accountingYear: bootstrapContract.financeBlueprint.accountingYear
     });
     syncRunFromOrgAuth(delegated.runId);
-    state.financeBlueprintsByCompany.set(delegated.companyId, financeBlueprint);
+    state.financeBlueprintsByCompany.set(delegated.companyId, bootstrapContract.financeBlueprint);
+    state.bootstrapReadinessByCompany.set(delegated.companyId, {
+      tenantBootstrapId: delegated.runId,
+      companyId: delegated.companyId,
+      orgNumberFingerprint: bootstrapContract.orgNumberFingerprint,
+      legalFormCode: bootstrapContract.financeBlueprint.legalFormCode,
+      vatRegistration: copy(bootstrapContract.vatRegistration),
+      readinessFlags: copy(bootstrapContract.readinessFlags),
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    });
+    const bootstrapRecord = state.tenantBootstraps.get(delegated.runId);
+    if (bootstrapRecord) {
+      bootstrapRecord.orgNumberFingerprint = bootstrapContract.orgNumberFingerprint;
+      bootstrapRecord.legalFormCode = bootstrapContract.financeBlueprint.legalFormCode;
+      bootstrapRecord.readinessFlags = copy(bootstrapContract.readinessFlags);
+      bootstrapRecord.vatRegistrationJson = copy(bootstrapContract.vatRegistration);
+      bootstrapRecord.updatedAt = nowIso();
+    }
     refreshCompanySetupProfile(delegated.companyId);
     return presentTenantBootstrap(delegated.runId);
   }
@@ -960,18 +988,26 @@ export function createTenantControlEngine({
 
   function getFinanceReadinessValidation({ sessionToken, companyId } = {}) {
     getCompanySetupProfile({ sessionToken, companyId });
-    const record = state.financeFoundationRecordsByCompany.get(requireText(companyId, "company_id_required"));
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const record = state.financeFoundationRecordsByCompany.get(resolvedCompanyId);
     if (!record) {
+      const bootstrap = findTenantBootstrapByCompanyId(resolvedCompanyId);
+      const financeBlueprint = state.financeBlueprintsByCompany.get(resolvedCompanyId) || null;
+      const bootstrapReadiness = state.bootstrapReadinessByCompany.get(resolvedCompanyId) || null;
+      const checks = buildFinanceReadinessChecks({
+        foundation: null,
+        checklist: bootstrap ? buildChecklist(bootstrap.tenantBootstrapId) : [],
+        financeBlueprint,
+        bootstrapReadiness
+      });
       return {
-        companyId: requireText(companyId, "company_id_required"),
-        status: "pending",
-        checks: buildFinanceReadinessChecks({
-          foundation: null,
-          checklist: (() => {
-            const bootstrap = findTenantBootstrapByCompanyId(companyId);
-            return bootstrap ? buildChecklist(bootstrap.tenantBootstrapId) : [];
-          })()
-        })
+        companyId: resolvedCompanyId,
+        status: checks.every((item) => item.status === "completed")
+          ? "finance_ready"
+          : checks.some((item) => item.status === "blocked")
+            ? "blocked"
+            : "pending",
+        checks
       };
     }
     return copy({
@@ -3487,6 +3523,7 @@ export function createTenantControlEngine({
         company,
         checklist: bootstrap ? buildChecklist(bootstrap.tenantBootstrapId) : []
       });
+    const bootstrapReadiness = state.bootstrapReadinessByCompany.get(companyId) || null;
 
     const legalFormProfile = legalFormDomain
       ? ensureActiveLegalFormProfile({ legalFormDomain, companyId, financeBlueprint })
@@ -3543,7 +3580,8 @@ export function createTenantControlEngine({
         queueStructure
       },
       checklist: bootstrap ? buildChecklist(bootstrap.tenantBootstrapId) : [],
-      financeBlueprint
+      financeBlueprint,
+      bootstrapReadiness
     });
     const status = checks.every((item) => item.status === "completed")
       ? "finance_ready"
@@ -3786,6 +3824,7 @@ export function createTenantControlEngine({
     return copy({
       tenantBootstraps: [...state.tenantBootstraps.values()],
       bootstrapStepStates: [...state.bootstrapStepStates.values()],
+      bootstrapReadinessRecords: [...state.bootstrapReadinessByCompany.values()],
       companySetupProfiles: [...state.companySetupProfiles.values()],
       moduleDefinitions: [...state.moduleDefinitions.values()],
       moduleActivationProfiles: [...state.moduleActivationProfiles.values()],
@@ -3897,6 +3936,7 @@ export function createTenantControlEngine({
 
   function upsertBootstrapMirror({ run, stepStates, tenantSetupProfile, company } = {}) {
     const existing = state.tenantBootstraps.get(run.runId) || null;
+    const bootstrapReadiness = state.bootstrapReadinessByCompany.get(run.companyId) || null;
     for (const stepState of stepStates) {
       state.bootstrapStepStates.set(createStepStateKey(stepState.runId, stepState.stepCode), copy(stepState));
     }
@@ -3910,6 +3950,10 @@ export function createTenantControlEngine({
       currentStep: run.currentStep,
       legalName: company?.legalName || null,
       orgNumber: company?.orgNumber || null,
+      orgNumberFingerprint: bootstrapReadiness?.orgNumberFingerprint || null,
+      legalFormCode: bootstrapReadiness?.legalFormCode || null,
+      readinessFlags: copy(bootstrapReadiness?.readinessFlags || {}),
+      vatRegistrationJson: copy(bootstrapReadiness?.vatRegistration || null),
       companyStatus: company?.status || null,
       payloadJson: copy(run.payloadJson || {}),
       createdAt: existing?.createdAt || run.createdAt || nowIso(),
@@ -3947,6 +3991,7 @@ export function createTenantControlEngine({
       company,
       checklist: tenantBootstrapId ? buildChecklist(tenantBootstrapId) : []
     });
+    const bootstrapReadiness = state.bootstrapReadinessByCompany.get(companyId) || null;
     const financeFoundation = state.financeFoundationRecordsByCompany.get(companyId) || null;
     const financeReadinessChecks = Array.isArray(financeFoundation?.financeReadinessChecks)
       ? copy(financeFoundation.financeReadinessChecks)
@@ -3956,7 +4001,8 @@ export function createTenantControlEngine({
             const bootstrap = findTenantBootstrapByCompanyId(companyId);
             return bootstrap ? buildChecklist(bootstrap.tenantBootstrapId) : [];
           })(),
-          financeBlueprint
+          financeBlueprint,
+          bootstrapReadiness
         });
     const record = {
       companySetupProfileId,
@@ -3974,6 +4020,8 @@ export function createTenantControlEngine({
         status === "finance_ready" || status === "pilot" || status === "production_live"
           ? tenantSetupProfile?.onboardingCompletedAt || nowIso()
           : null,
+      orgNumberFingerprint: bootstrapReadiness?.orgNumberFingerprint || null,
+      tenantBootstrapReadinessJson: copy(bootstrapReadiness?.readinessFlags || {}),
       financeBlueprintJson: copy(financeBlueprint),
       financeFoundationJson: copy(financeFoundation),
       financeReadinessChecks,
@@ -4032,6 +4080,8 @@ export function createTenantControlEngine({
     const bootstrap = requireTenantBootstrap(tenantBootstrapId);
     const financeBlueprint = state.financeBlueprintsByCompany.get(bootstrap.companyId) || null;
     const financeFoundation = state.financeFoundationRecordsByCompany.get(bootstrap.companyId) || null;
+    const companySetupProfileId = state.companySetupProfileIdByCompany.get(bootstrap.companyId);
+    const companySetupProfile = companySetupProfileId ? state.companySetupProfiles.get(companySetupProfileId) || null : null;
     return {
       tenantBootstrapId: bootstrap.tenantBootstrapId,
       runId: bootstrap.onboardingRunId,
@@ -4041,8 +4091,13 @@ export function createTenantControlEngine({
       companySetupStatus: bootstrap.status,
       currentStep: bootstrap.currentStep,
       payloadJson: copy(bootstrap.payloadJson || {}),
+      orgNumberFingerprint: bootstrap.orgNumberFingerprint || null,
+      legalFormCode: bootstrap.legalFormCode || financeBlueprint?.legalFormCode || null,
+      readinessFlags: copy(bootstrap.readinessFlags || {}),
+      vatRegistrationJson: copy(bootstrap.vatRegistrationJson || null),
       financeBlueprintJson: copy(financeBlueprint),
       financeFoundationJson: copy(financeFoundation),
+      financeReadinessChecks: copy(companySetupProfile?.financeReadinessChecks || []),
       checklist: buildChecklist(bootstrap.tenantBootstrapId)
     };
   }
@@ -4761,6 +4816,12 @@ export function createTenantControlEngine({
       preferredUserId: principal.userId
     });
     const financeBlueprint = copy(portableDataBundle.financeBlueprintJson || {});
+    const registrations = copy(portableDataBundle.registrations || []);
+    const vatRegistration = requireBootstrapRegistration(
+      normalizeBootstrapRegistrations(registrations),
+      "vat",
+      "vat_registration_required"
+    );
     const accountingYear = String(financeBlueprint.accountingYear || currentDateUtcYear());
     const liveBootstrap = authPlatform.createOnboardingRun({
       legalName: portableDataBundle.companyMasterdata?.legalName || `Live ${trialEnvironment.label}`,
@@ -4775,12 +4836,29 @@ export function createTenantControlEngine({
       sourceTrialEnvironmentProfileId: trialEnvironment.trialEnvironmentProfileId,
       promotionPlanId: plan.promotionPlanId
     });
+    state.bootstrapReadinessByCompany.set(liveBootstrap.companyId, {
+      tenantBootstrapId: liveBootstrap.runId,
+      companyId: liveBootstrap.companyId,
+      orgNumberFingerprint: createOrgNumberFingerprint(portableDataBundle.companyMasterdata?.orgNumber || ""),
+      legalFormCode: financeBlueprint.legalFormCode || null,
+      vatRegistration: copy(vatRegistration),
+      readinessFlags: Object.freeze({
+        orgNumberValidated: true,
+        legalFormCaptured: true,
+        vatRegistrationCaptured: true,
+        vatProfileCaptured: true,
+        fiscalYearProfileCaptured: true,
+        financeBlueprintCaptured: true
+      }),
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    });
     authPlatform.updateOnboardingStep({
       runId: liveBootstrap.runId,
       resumeToken: liveBootstrap.resumeToken,
       stepCode: "registrations",
       payload: {
-        registrations: copy(portableDataBundle.registrations || [])
+        registrations
       }
     });
     authPlatform.updateOnboardingStep({
@@ -4810,6 +4888,21 @@ export function createTenantControlEngine({
       }
     });
     syncRunFromOrgAuth(liveBootstrap.runId);
+    const bootstrapRecord = state.tenantBootstraps.get(liveBootstrap.runId);
+    if (bootstrapRecord) {
+      bootstrapRecord.orgNumberFingerprint = createOrgNumberFingerprint(portableDataBundle.companyMasterdata?.orgNumber || "");
+      bootstrapRecord.legalFormCode = financeBlueprint.legalFormCode || null;
+      bootstrapRecord.readinessFlags = {
+        orgNumberValidated: true,
+        legalFormCaptured: true,
+        vatRegistrationCaptured: true,
+        vatProfileCaptured: true,
+        fiscalYearProfileCaptured: true,
+        financeBlueprintCaptured: true
+      };
+      bootstrapRecord.vatRegistrationJson = copy(vatRegistration);
+      bootstrapRecord.updatedAt = nowIso();
+    }
     maybeMaterializeFinanceReadyFoundation(liveBootstrap.companyId);
     return {
       tenantBootstrapId: liveBootstrap.runId,
@@ -6344,6 +6437,78 @@ function normalizeFinanceBlueprint({
   };
 }
 
+function normalizeTenantBootstrapContract({
+  legalName = null,
+  orgNumber = null,
+  accountingYear = null,
+  registrations = [],
+  legalFormCode = null,
+  accountingMethodCode = null,
+  ownerTaxationCode = null,
+  annualNetTurnoverSek = null,
+  fiscalYearStartDate = null,
+  fiscalYearEndDate = null,
+  chartTemplateId = null,
+  vatScheme = null,
+  vatFilingPeriod = null,
+  roleTemplateCode = null,
+  queueStructureCode = null
+} = {}) {
+  const resolvedLegalName = requireText(legalName, "legal_name_required");
+  const resolvedOrgNumber = normalizeRequiredSwedishOrganizationNumber(orgNumber, "organization_number_invalid", {
+    errorFactory: httpError
+  });
+  const resolvedLegalFormCode = assertAllowedCode({
+    value: legalFormCode,
+    code: "legal_form_code_required",
+    invalidCode: "legal_form_code_invalid",
+    allowedValues: LEGAL_FORM_CODES
+  });
+  const resolvedOwnerTaxationCode =
+    normalizeOptionalText(ownerTaxationCode) || defaultOwnerTaxationCode(resolvedLegalFormCode);
+  const fiscalYearProfile = normalizeBootstrapFiscalYearProfile({
+    accountingYear,
+    fiscalYearStartDate,
+    fiscalYearEndDate,
+    legalFormCode: resolvedLegalFormCode,
+    ownerTaxationCode: resolvedOwnerTaxationCode
+  });
+  const resolvedVatScheme = requireText(vatScheme, "vat_scheme_required");
+  const resolvedVatFilingPeriod = requireText(vatFilingPeriod, "vat_filing_period_required");
+  const resolvedRegistrations = normalizeBootstrapRegistrations(registrations);
+  const vatRegistration = requireBootstrapRegistration(resolvedRegistrations, "vat", "vat_registration_required");
+  const financeBlueprint = normalizeFinanceBlueprint({
+    legalName: resolvedLegalName,
+    accountingYear: fiscalYearProfile.accountingYear,
+    legalFormCode: resolvedLegalFormCode,
+    accountingMethodCode,
+    ownerTaxationCode: resolvedOwnerTaxationCode,
+    annualNetTurnoverSek,
+    fiscalYearStartDate: fiscalYearProfile.fiscalYearStartDate,
+    fiscalYearEndDate: fiscalYearProfile.fiscalYearEndDate,
+    chartTemplateId,
+    vatScheme: resolvedVatScheme,
+    vatFilingPeriod: resolvedVatFilingPeriod,
+    roleTemplateCode,
+    queueStructureCode
+  });
+
+  return {
+    orgNumber: resolvedOrgNumber,
+    orgNumberFingerprint: createOrgNumberFingerprint(resolvedOrgNumber),
+    vatRegistration,
+    financeBlueprint,
+    readinessFlags: Object.freeze({
+      orgNumberValidated: true,
+      legalFormCaptured: true,
+      vatRegistrationCaptured: true,
+      vatProfileCaptured: true,
+      fiscalYearProfileCaptured: true,
+      financeBlueprintCaptured: true
+    })
+  };
+}
+
 function inferFinanceBlueprint({ companyId, bootstrap = null, company = null, checklist = [] } = {}) {
   const chartStep = checklist.find((step) => step.stepCode === "chart_template")?.dataJson || {};
   const vatStep = checklist.find((step) => step.stepCode === "vat_setup")?.dataJson || {};
@@ -6370,11 +6535,36 @@ function inferFinanceBlueprint({ companyId, bootstrap = null, company = null, ch
   });
 }
 
-function buildFinanceReadinessChecks({ foundation, checklist = [], financeBlueprint = null } = {}) {
+function buildFinanceReadinessChecks({ foundation, checklist = [], financeBlueprint = null, bootstrapReadiness = null } = {}) {
   const bootstrapCompleted = checklist.length > 0 && checklist.every((step) => step.status === "completed");
   const roleTemplateAssignments = foundation?.roleTemplate?.assignments || [];
   const queueCodes = foundation?.queueStructure?.queueCodes || [];
   return [
+    buildCheck(
+      "org_number_validated",
+      Boolean(bootstrapReadiness?.readinessFlags?.orgNumberValidated),
+      "validated organization number is missing"
+    ),
+    buildCheck(
+      "legal_form_captured",
+      Boolean(bootstrapReadiness?.readinessFlags?.legalFormCaptured),
+      "explicit legal form is missing"
+    ),
+    buildCheck(
+      "vat_registration_captured",
+      Boolean(bootstrapReadiness?.readinessFlags?.vatRegistrationCaptured),
+      "VAT registration must be captured at bootstrap"
+    ),
+    buildCheck(
+      "fiscal_year_profile_captured",
+      Boolean(bootstrapReadiness?.readinessFlags?.fiscalYearProfileCaptured),
+      "fiscal-year profile must be captured at bootstrap"
+    ),
+    buildCheck(
+      "finance_blueprint_captured",
+      Boolean(bootstrapReadiness?.readinessFlags?.financeBlueprintCaptured),
+      "finance readiness inputs must be captured at bootstrap"
+    ),
     buildCheck("bootstrap_completed", bootstrapCompleted, bootstrapCompleted ? null : "onboarding steps are incomplete"),
     buildCheck("legal_form_profile", Boolean(foundation?.legalFormProfile), "legal form profile is missing"),
     buildCheck("accounting_method_profile", Boolean(foundation?.accountingMethod), "accounting method profile is missing"),
@@ -6393,6 +6583,119 @@ function buildCheck(code, completed, blockerMessage = null) {
     status: completed ? "completed" : blockerMessage ? "blocked" : "pending",
     blockerMessage: completed ? null : blockerMessage
   };
+}
+
+function assertAllowedCode({ value, code, invalidCode, allowedValues } = {}) {
+  const resolved = requireText(value, code).toUpperCase();
+  if (!allowedValues.includes(resolved)) {
+    throw httpError(400, invalidCode, `${invalidCode.replaceAll("_", " ")}.`);
+  }
+  return resolved;
+}
+
+function normalizeBootstrapFiscalYearProfile({
+  accountingYear = null,
+  fiscalYearStartDate = null,
+  fiscalYearEndDate = null,
+  legalFormCode,
+  ownerTaxationCode
+} = {}) {
+  const resolvedStartDate = normalizeRequiredIsoDate(fiscalYearStartDate, "fiscal_year_start_date_required", {
+    errorFactory: httpError
+  });
+  const resolvedEndDate = normalizeRequiredIsoDate(fiscalYearEndDate, "fiscal_year_end_date_required", {
+    errorFactory: httpError
+  });
+  if (resolvedEndDate < resolvedStartDate) {
+    throw httpError(400, "fiscal_year_interval_invalid", "Fiscal year end date must not be earlier than start date.");
+  }
+  if (!isMonthBoundaryStartDate(resolvedStartDate)) {
+    throw httpError(400, "fiscal_year_start_date_boundary_invalid", "Fiscal year start date must start on the first day of a month.");
+  }
+  if (!isMonthBoundaryEndDate(resolvedEndDate)) {
+    throw httpError(400, "fiscal_year_end_date_boundary_invalid", "Fiscal year end date must end on the last day of a month.");
+  }
+  if (calendarMonthSpan(resolvedStartDate, resolvedEndDate) > 18) {
+    throw httpError(409, "fiscal_year_too_long", "An extended fiscal year must not exceed 18 calendar months.");
+  }
+  if (mustUseCalendarYearBootstrap({ legalFormCode, ownerTaxationCode })) {
+    if (resolvedStartDate.slice(5, 10) !== "01-01" || resolvedEndDate.slice(5, 10) !== "12-31") {
+      throw httpError(409, "fiscal_year_calendar_required", "This legal form must use a calendar-year fiscal year.");
+    }
+  }
+  const resolvedAccountingYear = normalizeOptionalText(accountingYear) || resolvedStartDate.slice(0, 4);
+  if (resolvedAccountingYear !== resolvedStartDate.slice(0, 4)) {
+    throw httpError(409, "accounting_year_mismatch", "Accounting year must match the fiscal year start year.");
+  }
+  return {
+    accountingYear: resolvedAccountingYear,
+    fiscalYearStartDate: resolvedStartDate,
+    fiscalYearEndDate: resolvedEndDate
+  };
+}
+
+function normalizeBootstrapRegistrations(registrations = []) {
+  if (!Array.isArray(registrations) || registrations.length === 0) {
+    throw httpError(400, "registrations_required", "Registrations must be provided at bootstrap.");
+  }
+  return registrations.map((registration, index) => {
+    if (!registration || typeof registration !== "object") {
+      throw httpError(400, "registration_payload_invalid", `Registration payload at index ${index} is invalid.`);
+    }
+    return {
+      registrationType: requireText(registration.registrationType, "registration_type_required"),
+      registrationValue: requireText(registration.registrationValue, "registration_value_required"),
+      status: requireText(registration.status, "registration_status_required"),
+      effectiveFrom: normalizeOptionalText(registration.effectiveFrom)
+    };
+  });
+}
+
+function requireBootstrapRegistration(registrations, registrationType, code) {
+  if (!BOOTSTRAP_REQUIRED_REGISTRATION_TYPES.includes(registrationType)) {
+    throw httpError(500, "bootstrap_registration_type_invalid", "Unsupported bootstrap registration requirement.");
+  }
+  const record = registrations.find((registration) => registration.registrationType === registrationType);
+  if (!record) {
+    throw httpError(400, code, `${registrationType} registration is required at bootstrap.`);
+  }
+  return copy(record);
+}
+
+function createOrgNumberFingerprint(orgNumber) {
+  return crypto.createHash("sha256").update(`tenant-bootstrap::${orgNumber}`, "utf8").digest("hex");
+}
+
+function mustUseCalendarYearBootstrap({ legalFormCode, ownerTaxationCode } = {}) {
+  if (legalFormCode === "ENSKILD_NARINGSVERKSAMHET") {
+    return true;
+  }
+  if (["HANDELSBOLAG", "KOMMANDITBOLAG"].includes(legalFormCode) && ownerTaxationCode === "PHYSICAL_PERSON_PARTICIPANT") {
+    return true;
+  }
+  return false;
+}
+
+function isMonthBoundaryStartDate(isoDate) {
+  return isoDate.slice(8, 10) === "01";
+}
+
+function isMonthBoundaryEndDate(isoDate) {
+  return isoDate === lastDayOfMonth(isoDate);
+}
+
+function lastDayOfMonth(isoDate) {
+  const year = Number(isoDate.slice(0, 4));
+  const month = Number(isoDate.slice(5, 7));
+  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+}
+
+function calendarMonthSpan(startDate, endDate) {
+  const startYear = Number(startDate.slice(0, 4));
+  const startMonth = Number(startDate.slice(5, 7));
+  const endYear = Number(endDate.slice(0, 4));
+  const endMonth = Number(endDate.slice(5, 7));
+  return (endYear - startYear) * 12 + (endMonth - startMonth) + 1;
 }
 
 function inferLegalFormCode({ legalName = null, legalFormCode = null } = {}) {

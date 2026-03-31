@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
@@ -57,10 +57,18 @@ test("Phase 1 API routes tenant setup, trial and module lifecycles through tenan
         legalName: "API Tenant Bootstrap AB",
         orgNumber: "559900-6763",
         adminEmail: "api-owner@example.test",
-        adminDisplayName: "API Owner"
+        adminDisplayName: "API Owner",
+        legalFormCode: "AKTIEBOLAG",
+        registrations: [{ registrationType: "vat", registrationValue: "configured-vat", status: "configured" }],
+        fiscalYearStartDate: "2026-01-01",
+        fiscalYearEndDate: "2026-12-31",
+        vatScheme: "se_standard",
+        vatFilingPeriod: "monthly"
       }
     });
     assert.equal(onboardingRun.companySetupStatus, "bootstrap_running");
+    assert.equal(onboardingRun.readinessFlags.financeBlueprintCaptured, true);
+    assert.equal(onboardingRun.financeReadinessChecks.some((item) => item.checkCode === "org_number_validated"), true);
 
     const onboardingRead = await requestJson(baseUrl, `/v1/onboarding/runs/${onboardingRun.tenantBootstrapId}?resumeToken=${onboardingRun.resumeToken}`);
     assert.equal(onboardingRead.companyId, onboardingRun.companyId);
@@ -358,3 +366,46 @@ test("Phase 1 API routes tenant setup, trial and module lifecycles through tenan
     await stopServer(server);
   }
 });
+
+test("Phase 6.3 API bootstrap rejects missing legal form and finance-readiness inputs", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-25T09:00:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const missingLegalForm = await requestJson(baseUrl, "/v1/tenant/bootstrap", {
+      method: "POST",
+      expectedStatus: 400,
+      body: {
+        legalName: "Missing Legal Form AB",
+        orgNumber: "559900-6763",
+        adminEmail: "missing-legal-form@example.test",
+        adminDisplayName: "Missing Legal Form"
+      }
+    });
+    assert.equal(missingLegalForm.error, "legal_form_code_required");
+
+    const missingVatRegistration = await requestJson(baseUrl, "/v1/tenant/bootstrap", {
+      method: "POST",
+      expectedStatus: 400,
+      body: {
+        legalName: "Missing VAT Registration AB",
+        orgNumber: "559900-6763",
+        adminEmail: "missing-vat-registration@example.test",
+        adminDisplayName: "Missing VAT Registration",
+        legalFormCode: "AKTIEBOLAG",
+        fiscalYearStartDate: "2026-01-01",
+        fiscalYearEndDate: "2026-12-31",
+        vatScheme: "se_standard",
+        vatFilingPeriod: "monthly"
+      }
+    });
+    assert.equal(missingVatRegistration.error, "registrations_required");
+  } finally {
+    await stopServer(server);
+  }
+});
+

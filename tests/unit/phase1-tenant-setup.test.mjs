@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
@@ -16,6 +16,12 @@ test("Phase 1 tenant setup flows through tenant-control with finance-ready state
     orgNumber: "559900-4248",
     adminEmail: "owner@tenant-setup.test",
     adminDisplayName: "Owner Admin",
+    legalFormCode: "AKTIEBOLAG",
+    registrations: [{ registrationType: "vat", registrationValue: "configured-vat", status: "configured" }],
+    fiscalYearStartDate: "2026-01-01",
+    fiscalYearEndDate: "2026-12-31",
+    vatScheme: "se_standard",
+    vatFilingPeriod: "monthly",
     accountingYear: "2026"
   });
 
@@ -25,6 +31,25 @@ test("Phase 1 tenant setup flows through tenant-control with finance-ready state
   assert.equal(createdBootstrap.bootstrapStatus, "in_progress");
   assert.equal(createdProfile.status, "bootstrap_running");
   assert.equal(onboardingRun.companySetupStatus, "bootstrap_running");
+  assert.equal(onboardingRun.readinessFlags.orgNumberValidated, true);
+  assert.equal(onboardingRun.readinessFlags.legalFormCaptured, true);
+  assert.equal(onboardingRun.readinessFlags.vatRegistrationCaptured, true);
+  assert.equal(onboardingRun.readinessFlags.fiscalYearProfileCaptured, true);
+  assert.equal(onboardingRun.orgNumberFingerprint.length > 10, true);
+  assert.equal(
+    onboardingRun.financeReadinessChecks.some(
+      (item) => item.checkCode === "org_number_validated" && item.status === "completed"
+    ),
+    true
+  );
+  assert.equal(
+    onboardingRun.financeReadinessChecks.some(
+      (item) => item.checkCode === "bootstrap_completed" && item.status === "blocked"
+    ),
+    true
+  );
+  assert.equal(createdProfile.tenantBootstrapReadinessJson.financeBlueprintCaptured, true);
+  assert.equal(createdProfile.orgNumberFingerprint, onboardingRun.orgNumberFingerprint);
 
   tenantControl.updateTenantBootstrapStep({
     tenantBootstrapId: onboardingRun.tenantBootstrapId,
@@ -388,3 +413,42 @@ test("Phase 7.3 trial isolation blocks promotion and parallel run when the isola
     (error) => error?.code === "trial_environment_legal_effect_not_blocked"
   );
 });
+
+test("Phase 6.3 tenant bootstrap requires explicit legal form, VAT registration and fiscal year profile", () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-25T08:00:00Z"),
+    bootstrapScenarioCode: "test_default_demo"
+  });
+  const tenantControl = platform.getDomain("tenantControl");
+
+  assert.throws(
+    () =>
+      tenantControl.createTenantBootstrap({
+        legalName: "Missing Bootstrap Inputs AB",
+        orgNumber: "559900-4248",
+        adminEmail: "missing@example.test",
+        adminDisplayName: "Missing Owner",
+        accountingYear: "2026"
+      }),
+    (error) => error?.code === "legal_form_code_required"
+  );
+
+  assert.throws(
+    () =>
+      tenantControl.createTenantBootstrap({
+        legalName: "Missing VAT Bootstrap AB",
+        orgNumber: "559900-4248",
+        adminEmail: "missing-vat@example.test",
+        adminDisplayName: "Missing VAT",
+        legalFormCode: "AKTIEBOLAG",
+        fiscalYearStartDate: "2026-01-01",
+        fiscalYearEndDate: "2026-12-31",
+        vatScheme: "se_standard",
+        vatFilingPeriod: "monthly",
+        accountingYear: "2026"
+      }),
+    (error) => error?.code === "registrations_required"
+  );
+});
+
+

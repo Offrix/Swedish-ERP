@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
@@ -169,8 +169,13 @@ async function bootstrapFinanceReadyCompany({ baseUrl, adminEmail, legalName, or
       legalName,
       orgNumber,
       adminEmail,
-      adminDisplayName: "Phase 18 Parity API Owner"
-    }
+      adminDisplayName: "Phase 18 Parity API Owner",
+    legalFormCode: "AKTIEBOLAG",
+    registrations: [{ registrationType: "vat", registrationValue: "configured-vat", status: "configured" }],
+    fiscalYearStartDate: "2026-01-01",
+    fiscalYearEndDate: "2026-12-31",
+    vatScheme: "se_standard",
+    vatFilingPeriod: "monthly",    }
   });
   for (const [routePath, body] of [
     [
@@ -218,3 +223,4 @@ async function bootstrapFinanceReadyCompany({ baseUrl, adminEmail, legalName, or
     adminEmail
   };
 }
+
