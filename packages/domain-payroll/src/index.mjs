@@ -55,6 +55,8 @@ export const AGI_SUBMISSION_STATES = Object.freeze([
 export const PAYROLL_POSTING_STATUSES = Object.freeze(["draft", "posted"]);
 export const PAYROLL_PAYOUT_BATCH_STATUSES = Object.freeze(["exported", "matched"]);
 const PAYROLL_EXTERNAL_CONSUMPTION_STAGES = Object.freeze(["calculated", "approved"]);
+const PAYROLL_EMERGENCY_OVERRIDE_DECISION_TYPES = Object.freeze(["emergency_manual"]);
+const PAYROLL_DUAL_REVIEW_EMPLOYER_CONTRIBUTION_DECISION_TYPES = Object.freeze(["vaxa", "emergency_manual"]);
 export const PAYROLL_AGI_PROVIDER_CODE = "skatteverket_agi";
 export const PAYROLL_AGI_PROVIDER_BASELINE_CODE = "SE-SKATTEVERKET-AGI-API";
 export const PAYROLL_PROVIDER_BASELINES = Object.freeze([
@@ -764,6 +766,8 @@ export function createPayrollEngine({
     decisionReference,
     evidenceRef,
     reasonCode = null,
+    overrideEndsOn = null,
+    rollbackPlanRef = null,
     sinkRatePercent = null,
     sinkSeaIncome = false,
     actorId = "system"
@@ -798,6 +802,8 @@ export function createPayrollEngine({
       decisionReference,
       evidenceRef,
       reasonCode,
+      overrideEndsOn,
+      rollbackPlanRef,
       sinkRatePercent,
       sinkSeaIncome
     });
@@ -812,6 +818,8 @@ export function createPayrollEngine({
       requiresDualReview,
       approvedAt: status === "approved" ? now : null,
       approvedByActorId: status === "approved" ? requireText(actorId, "actor_id_required") : null,
+      overrideEndsOn: normalized.overrideEndsOn,
+      rollbackPlanRef: normalized.rollbackPlanRef,
       supersededAt: null,
       supersededBySnapshotId: null,
       createdByActorId: requireText(actorId, "actor_id_required"),
@@ -852,6 +860,12 @@ export function createPayrollEngine({
         "Emergency manual tax decisions require approval by a different actor."
       );
     }
+    assertEmergencyOverrideApprovalWindow({
+      snapshot: record,
+      currentDate: nowIso(clock).slice(0, 10),
+      subjectLabel: "Emergency manual tax decisions",
+      errorCode: "tax_decision_snapshot_override_expired"
+    });
     record.status = "approved";
     record.approvedAt = nowIso(clock);
     record.approvedByActorId = resolvedActorId;
@@ -914,6 +928,8 @@ export function createPayrollEngine({
     decisionReference,
     evidenceRef,
     reasonCode = null,
+    overrideEndsOn = null,
+    rollbackPlanRef = null,
     actorId = "system"
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
@@ -943,7 +959,9 @@ export function createPayrollEngine({
       decisionSource,
       decisionReference,
       evidenceRef,
-      reasonCode
+      reasonCode,
+      overrideEndsOn,
+      rollbackPlanRef
     });
     const requiresDualReview = normalized.decisionType === "vaxa" || normalized.decisionType === "emergency_manual";
     const status = requiresDualReview ? "draft" : "approved";
@@ -956,6 +974,8 @@ export function createPayrollEngine({
       requiresDualReview,
       approvedAt: status === "approved" ? now : null,
       approvedByActorId: status === "approved" ? requireText(actorId, "actor_id_required") : null,
+      overrideEndsOn: normalized.overrideEndsOn,
+      rollbackPlanRef: normalized.rollbackPlanRef,
       supersededAt: null,
       supersededBySnapshotId: null,
       createdByActorId: requireText(actorId, "actor_id_required"),
@@ -995,6 +1015,14 @@ export function createPayrollEngine({
         "employer_contribution_decision_snapshot_dual_review_required",
         "Employer contribution decisions of this type require approval by a different actor."
       );
+    }
+    if (record.decisionType === "emergency_manual") {
+      assertEmergencyOverrideApprovalWindow({
+        snapshot: record,
+        currentDate: nowIso(clock).slice(0, 10),
+        subjectLabel: "Emergency manual employer contribution decisions",
+        errorCode: "employer_contribution_decision_snapshot_override_expired"
+      });
     }
     record.status = "approved";
     record.approvedAt = nowIso(clock);
@@ -7624,7 +7652,11 @@ function requireRemittanceInstruction(state, companyId, remittanceInstructionId)
 
 function decisionSnapshotCoversDate(snapshot, effectiveDate) {
   const resolvedDate = normalizeRequiredDate(effectiveDate, "tax_decision_snapshot_effective_date_invalid");
-  return snapshot.validFrom <= resolvedDate && (!snapshot.validTo || snapshot.validTo >= resolvedDate);
+  return (
+    snapshot.validFrom <= resolvedDate
+    && (!snapshot.validTo || snapshot.validTo >= resolvedDate)
+    && (!snapshot.overrideEndsOn || snapshot.overrideEndsOn >= resolvedDate)
+  );
 }
 
 function supersedeOverlappingTaxDecisionSnapshots(state, approvedSnapshot) {
@@ -8464,6 +8496,71 @@ function normalizeStatutoryProfiles(statutoryProfiles) {
   return map;
 }
 
+function assertEmergencyOverrideSnapshotFields({
+  snapshot,
+  subjectLabel,
+  validToRequiredCode,
+  overrideEndsOnRequiredCode,
+  overrideWindowInvalidCode,
+  rollbackPlanRequiredCode
+}) {
+  if (!snapshot.validTo) {
+    throw createError(400, validToRequiredCode, `${subjectLabel} require validTo.`);
+  }
+  if (!snapshot.overrideEndsOn) {
+    throw createError(400, overrideEndsOnRequiredCode, `${subjectLabel} require overrideEndsOn.`);
+  }
+  if (snapshot.overrideEndsOn < snapshot.validFrom || snapshot.overrideEndsOn > snapshot.validTo) {
+    throw createError(
+      400,
+      overrideWindowInvalidCode,
+      `${subjectLabel} require overrideEndsOn within the validity interval.`
+    );
+  }
+  if (!snapshot.rollbackPlanRef) {
+    throw createError(400, rollbackPlanRequiredCode, `${subjectLabel} require rollbackPlanRef.`);
+  }
+}
+
+function assertEmergencyOverrideApprovalWindow({ snapshot, currentDate, subjectLabel, errorCode }) {
+  if (snapshot.overrideEndsOn && snapshot.overrideEndsOn < currentDate) {
+    throw createError(409, errorCode, `${subjectLabel} cannot be approved after the override window has expired.`);
+  }
+}
+
+function assertInlineDualReviewedSnapshot(snapshot, { statusValues, requiresDualReview, codePrefix, subjectLabel }) {
+  if (snapshot.status !== "approved") {
+    throw createError(409, `${codePrefix}_approval_required`, `${subjectLabel} must be approved before pay-run use.`);
+  }
+  if (!snapshot.createdByActorId) {
+    throw createError(
+      409,
+      `${codePrefix}_created_by_actor_required`,
+      `${subjectLabel} must include createdByActorId before pay-run use.`
+    );
+  }
+  if (!snapshot.approvedByActorId) {
+    throw createError(
+      409,
+      `${codePrefix}_approved_by_actor_required`,
+      `${subjectLabel} must include approvedByActorId before pay-run use.`
+    );
+  }
+  if (!snapshot.approvedAt) {
+    throw createError(409, `${codePrefix}_approved_at_required`, `${subjectLabel} must include approvedAt before pay-run use.`);
+  }
+  if (requiresDualReview && snapshot.createdByActorId === snapshot.approvedByActorId) {
+    throw createError(
+      409,
+      `${codePrefix}_dual_review_required`,
+      `${subjectLabel} require approval by a different actor.`
+    );
+  }
+  if (statusValues && !statusValues.includes(snapshot.status)) {
+    throw createError(400, `${codePrefix}_status_invalid`, `${snapshot.status} is not a valid decision status.`);
+  }
+}
+
 function normalizeTaxDecisionSnapshots(taxDecisionSnapshots) {
   const map = new Map();
   if (!Array.isArray(taxDecisionSnapshots)) {
@@ -8471,6 +8568,14 @@ function normalizeTaxDecisionSnapshots(taxDecisionSnapshots) {
   }
   for (const snapshot of taxDecisionSnapshots) {
     const normalized = normalizeTaxDecisionSnapshot(snapshot);
+    if (normalized.decisionType === "emergency_manual") {
+      assertInlineDualReviewedSnapshot(normalized, {
+        statusValues: PAYROLL_TAX_DECISION_STATUSES,
+        requiresDualReview: true,
+        codePrefix: "payroll_tax_decision_snapshot",
+        subjectLabel: "Emergency manual tax decision snapshots"
+      });
+    }
     map.set(normalized.employmentId, normalized);
   }
   return map;
@@ -8493,6 +8598,16 @@ function normalizeTaxDecisionSnapshot(snapshot = {}) {
     incomeYear: normalizeIntegerInRange(snapshot.incomeYear, 2000, 2100, "tax_decision_snapshot_income_year_invalid"),
     validFrom,
     validTo,
+    overrideEndsOn: normalizeOptionalDate(snapshot.overrideEndsOn, "tax_decision_snapshot_override_ends_on_invalid"),
+    rollbackPlanRef: normalizeOptionalText(snapshot.rollbackPlanRef),
+    status: normalizeOptionalSnapshotStatus(
+      snapshot.status,
+      PAYROLL_TAX_DECISION_STATUSES,
+      "tax_decision_snapshot_status_invalid"
+    ),
+    createdByActorId: normalizeOptionalText(snapshot.createdByActorId),
+    approvedByActorId: normalizeOptionalText(snapshot.approvedByActorId),
+    approvedAt: normalizeOptionalIsoTimestamp(snapshot.approvedAt, "tax_decision_snapshot_approved_at_invalid"),
     municipalityCode: normalizeOptionalText(snapshot.municipalityCode),
     tableCode: normalizeOptionalText(snapshot.tableCode),
     columnCode: normalizeOptionalText(snapshot.columnCode),
@@ -8589,6 +8704,14 @@ function normalizeTaxDecisionSnapshot(snapshot = {}) {
         "Emergency manual tax decisions require reasonCode."
       );
     }
+    assertEmergencyOverrideSnapshotFields({
+      snapshot: normalized,
+      subjectLabel: "Emergency manual tax decisions",
+      validToRequiredCode: "tax_decision_snapshot_emergency_valid_to_required",
+      overrideEndsOnRequiredCode: "tax_decision_snapshot_emergency_override_ends_on_required",
+      overrideWindowInvalidCode: "tax_decision_snapshot_emergency_override_window_invalid",
+      rollbackPlanRequiredCode: "tax_decision_snapshot_emergency_rollback_plan_required"
+    });
   }
 
   return normalized;
@@ -8601,6 +8724,14 @@ function normalizeEmployerContributionDecisionSnapshots(employerContributionDeci
   }
   for (const snapshot of employerContributionDecisionSnapshots) {
     const normalized = normalizeEmployerContributionDecisionSnapshot(snapshot);
+    if (PAYROLL_DUAL_REVIEW_EMPLOYER_CONTRIBUTION_DECISION_TYPES.includes(normalized.decisionType)) {
+      assertInlineDualReviewedSnapshot(normalized, {
+        statusValues: PAYROLL_EMPLOYER_CONTRIBUTION_DECISION_STATUSES,
+        requiresDualReview: true,
+        codePrefix: "payroll_employer_contribution_decision_snapshot",
+        subjectLabel: "Dual-review employer contribution decision snapshots"
+      });
+    }
     map.set(normalized.employmentId, normalized);
   }
   return map;
@@ -8631,6 +8762,22 @@ function normalizeEmployerContributionDecisionSnapshot(snapshot = {}) {
     legalBasisCode: requireText(snapshot.legalBasisCode, "employer_contribution_decision_snapshot_legal_basis_required"),
     validFrom,
     validTo,
+    overrideEndsOn: normalizeOptionalDate(
+      snapshot.overrideEndsOn,
+      "employer_contribution_decision_snapshot_override_ends_on_invalid"
+    ),
+    rollbackPlanRef: normalizeOptionalText(snapshot.rollbackPlanRef),
+    status: normalizeOptionalSnapshotStatus(
+      snapshot.status,
+      PAYROLL_EMPLOYER_CONTRIBUTION_DECISION_STATUSES,
+      "employer_contribution_decision_snapshot_status_invalid"
+    ),
+    createdByActorId: normalizeOptionalText(snapshot.createdByActorId),
+    approvedByActorId: normalizeOptionalText(snapshot.approvedByActorId),
+    approvedAt: normalizeOptionalIsoTimestamp(
+      snapshot.approvedAt,
+      "employer_contribution_decision_snapshot_approved_at_invalid"
+    ),
     baseLimit: normalizeOptionalMoney(
       snapshot.baseLimit,
       "employer_contribution_decision_snapshot_base_limit_invalid"
@@ -8691,6 +8838,14 @@ function normalizeEmployerContributionDecisionSnapshot(snapshot = {}) {
         "Emergency manual employer contribution decisions require a rate."
       );
     }
+    assertEmergencyOverrideSnapshotFields({
+      snapshot: normalized,
+      subjectLabel: "Emergency manual employer contribution decisions",
+      validToRequiredCode: "employer_contribution_decision_snapshot_valid_to_required",
+      overrideEndsOnRequiredCode: "employer_contribution_decision_snapshot_override_ends_on_required",
+      overrideWindowInvalidCode: "employer_contribution_decision_snapshot_override_window_invalid",
+      rollbackPlanRequiredCode: "employer_contribution_decision_snapshot_rollback_plan_required"
+    });
   }
 
   return normalized;
@@ -9278,6 +9433,18 @@ function normalizeOptionalDate(value, code) {
   return normalizeOptionalIsoDateKernel(value, code, { errorFactory: createError });
 }
 
+function normalizeOptionalIsoTimestamp(value, code) {
+  const resolved = normalizeOptionalText(value);
+  if (!resolved) {
+    return null;
+  }
+  const parsed = new Date(resolved);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== resolved) {
+    throw createError(400, code, `${value} must be a full ISO-8601 UTC timestamp.`);
+  }
+  return resolved;
+}
+
 function buildPayDate(year, month, payDay) {
   const resolvedDay = String(Math.min(payDay, daysInMonth(year, month))).padStart(2, "0");
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${resolvedDay}`;
@@ -9395,6 +9562,14 @@ function normalizeOptionalReportingPeriod(value) {
 
 function normalizeOptionalText(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeOptionalSnapshotStatus(value, allowedValues, code) {
+  const resolved = normalizeOptionalText(value);
+  if (!resolved) {
+    return null;
+  }
+  return assertAllowed(resolved, allowedValues, code);
 }
 
 function normalizeCode(value, code) {

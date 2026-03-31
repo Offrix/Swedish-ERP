@@ -10364,6 +10364,8 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         decisionReference: body.decisionReference,
         evidenceRef: body.evidenceRef,
         reasonCode: body.reasonCode ?? null,
+        overrideEndsOn: body.overrideEndsOn ?? null,
+        rollbackPlanRef: body.rollbackPlanRef ?? null,
         sinkRatePercent: body.sinkRatePercent ?? null,
         sinkSeaIncome: body.sinkSeaIncome === true,
         actorId: principal.userId
@@ -10428,6 +10430,8 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         decisionReference: body.decisionReference,
         evidenceRef: body.evidenceRef,
         reasonCode: body.reasonCode ?? null,
+        overrideEndsOn: body.overrideEndsOn ?? null,
+        rollbackPlanRef: body.rollbackPlanRef ?? null,
         actorId: principal.userId
       })
     );

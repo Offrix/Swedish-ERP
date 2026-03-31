@@ -107,10 +107,14 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
         decisionSource: "manual_emergency_override",
         decisionReference: "emergency-api-2026",
         evidenceRef: "evidence-emergency-api-2026",
-        reasonCode: "skattebeslut_saknas_vid_cutover"
+        reasonCode: "skattebeslut_saknas_vid_cutover",
+        overrideEndsOn: "2026-03-31",
+        rollbackPlanRef: "rollback-plan-tax-api-emergency-202603"
       }
     });
     assert.equal(emergencyDraft.status, "draft");
+    assert.equal(emergencyDraft.overrideEndsOn, "2026-03-31");
+    assert.equal(emergencyDraft.rollbackPlanRef, "rollback-plan-tax-api-emergency-202603");
 
     const approveResponse = await fetch(
       `${baseUrl}/v1/payroll/tax-decisions/${emergencyDraft.taxDecisionSnapshotId}/approve`,

@@ -155,9 +155,13 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
     decisionReference: "emergency-2026-001",
     evidenceRef: "evidence-emergency-2026",
     reasonCode: "skattebeslut_saknas_vid_cutover",
+    overrideEndsOn: "2026-03-31",
+    rollbackPlanRef: "rollback-plan-tax-emergency-202603",
     actorId: "payroll-agent-1"
   });
   assert.equal(emergencyDraft.status, "draft");
+  assert.equal(emergencyDraft.overrideEndsOn, "2026-03-31");
+  assert.equal(emergencyDraft.rollbackPlanRef, "rollback-plan-tax-emergency-202603");
   assert.throws(
     () =>
       payrollPlatform.approveTaxDecisionSnapshot({
@@ -173,6 +177,8 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
     actorId: "payroll-agent-2"
   });
   assert.equal(emergencyApproved.status, "approved");
+  assert.equal(emergencyApproved.overrideEndsOn, "2026-03-31");
+  assert.equal(emergencyApproved.rollbackPlanRef, "rollback-plan-tax-emergency-202603");
   const emergencyRun = payrollPlatform.createPayRun({
     companyId: COMPANY_ID,
     payCalendarId: payCalendar.payCalendarId,
@@ -184,6 +190,98 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
   assert.equal(emergencyRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 8700);
   assert.equal(emergencyRun.payslips[0].totals.taxDecision.rule_pack_id, "payroll-tax-se-2026.1");
   assert.equal(emergencyRun.payslips[0].totals.taxDecision.rule_pack_checksum, "phase8-payroll-tax-se-2026-1");
+});
+
+test("Phase 5.5 emergency tax overrides require explicit time-box, rollback plan and approved inline evidence", () => {
+  const fixedNow = new Date("2026-03-28T09:30:00Z");
+  const hrPlatform = createHrPlatform({ clock: () => fixedNow });
+  const timePlatform = createTimePlatform({
+    clock: () => fixedNow,
+    hrPlatform
+  });
+  const payrollPlatform = createPayrollPlatform({
+    clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
+    hrPlatform,
+    timePlatform
+  });
+
+  const payCalendar = payrollPlatform.listPayCalendars({ companyId: COMPANY_ID })[0];
+  const employee = createMonthlyEmployee({
+    hrPlatform,
+    givenName: "Elin",
+    familyName: "Override",
+    monthlySalary: 32000,
+    identityValue: "19800112-1113"
+  });
+
+  assert.throws(
+    () =>
+      payrollPlatform.createTaxDecisionSnapshot({
+        companyId: COMPANY_ID,
+        employmentId: employee.employment.employmentId,
+        decisionType: "emergency_manual",
+        incomeYear: 2026,
+        validFrom: "2026-03-01",
+        validTo: "2026-12-31",
+        withholdingRatePercent: 28,
+        decisionSource: "manual_emergency_override",
+        decisionReference: "missing-window",
+        evidenceRef: "evidence-missing-window",
+        reasonCode: "cutover_gap",
+        rollbackPlanRef: "rollback-plan-tax-emergency-missing-window",
+        actorId: "payroll-agent-1"
+      }),
+    (error) => error?.code === "tax_decision_snapshot_emergency_override_ends_on_required"
+  );
+
+  assert.throws(
+    () =>
+      payrollPlatform.createTaxDecisionSnapshot({
+        companyId: COMPANY_ID,
+        employmentId: employee.employment.employmentId,
+        decisionType: "emergency_manual",
+        incomeYear: 2026,
+        validFrom: "2026-03-01",
+        validTo: "2026-12-31",
+        withholdingRatePercent: 28,
+        decisionSource: "manual_emergency_override",
+        decisionReference: "missing-rollback",
+        evidenceRef: "evidence-missing-rollback",
+        reasonCode: "cutover_gap",
+        overrideEndsOn: "2026-03-31",
+        actorId: "payroll-agent-1"
+      }),
+    (error) => error?.code === "tax_decision_snapshot_emergency_rollback_plan_required"
+  );
+
+  assert.throws(
+    () =>
+      payrollPlatform.createPayRun({
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202603",
+        employmentIds: [employee.employment.employmentId],
+        taxDecisionSnapshots: [
+          {
+            employmentId: employee.employment.employmentId,
+            decisionType: "emergency_manual",
+            incomeYear: 2026,
+            validFrom: "2026-03-01",
+            validTo: "2026-12-31",
+            overrideEndsOn: "2026-03-31",
+            withholdingRatePercent: 28,
+            decisionSource: "manual_emergency_override",
+            decisionReference: "inline-unapproved",
+            evidenceRef: "evidence-inline-unapproved",
+            reasonCode: "cutover_gap",
+            rollbackPlanRef: "rollback-plan-inline-unapproved"
+          }
+        ],
+        actorId: "unit-test"
+      }),
+    (error) => error?.code === "payroll_tax_decision_snapshot_approval_required"
+  );
 });
 
 function createMonthlyEmployee({ hrPlatform, givenName, familyName, monthlySalary, identityValue }) {

@@ -135,6 +135,91 @@ test("Phase 12.2 employer contribution decisions handle age buckets, threshold s
   assert.equal(vaxaRun.payslips[0].totals.employerContributionDecision.rule_pack_checksum, "phase8-payroll-employer-contribution-se-2026-1");
 });
 
+test("Phase 5.5 emergency employer contribution overrides require rollback plan and time-box", () => {
+  const fixedNow = new Date("2026-03-28T09:45:00Z");
+  const hrPlatform = createHrPlatform({ clock: () => fixedNow });
+  const timePlatform = createTimePlatform({
+    clock: () => fixedNow,
+    hrPlatform
+  });
+  const payrollPlatform = createPayrollPlatform({
+    clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
+    hrPlatform,
+    timePlatform
+  });
+
+  const employee = createMonthlyEmployee({
+    hrPlatform,
+    givenName: "Emil",
+    familyName: "Emergencyavgift",
+    monthlySalary: 30000,
+    identityValue: "19900112-3331",
+    dateOfBirth: "1991-02-03"
+  });
+
+  assert.throws(
+    () =>
+      payrollPlatform.createEmployerContributionDecisionSnapshot({
+        companyId: COMPANY_ID,
+        employmentId: employee.employment.employmentId,
+        decisionType: "emergency_manual",
+        ageBucket: "standard",
+        legalBasisCode: "manual_emergency_override",
+        validFrom: "2026-03-01",
+        validTo: "2026-12-31",
+        fullRate: 31.42,
+        decisionSource: "manual_emergency_override",
+        decisionReference: "emergency-contribution-missing-window",
+        evidenceRef: "evidence-emergency-contribution-missing-window",
+        reasonCode: "provider_gap",
+        rollbackPlanRef: "rollback-plan-contribution-emergency-202603",
+        actorId: "payroll-agent-1"
+      }),
+    (error) => error?.code === "employer_contribution_decision_snapshot_override_ends_on_required"
+  );
+
+  const emergencyDraft = payrollPlatform.createEmployerContributionDecisionSnapshot({
+    companyId: COMPANY_ID,
+    employmentId: employee.employment.employmentId,
+    decisionType: "emergency_manual",
+    ageBucket: "standard",
+    legalBasisCode: "manual_emergency_override",
+    validFrom: "2026-03-01",
+    validTo: "2026-12-31",
+    overrideEndsOn: "2026-03-31",
+    fullRate: 31.42,
+    decisionSource: "manual_emergency_override",
+    decisionReference: "emergency-contribution-2026-001",
+    evidenceRef: "evidence-emergency-contribution-2026-001",
+    reasonCode: "provider_gap",
+    rollbackPlanRef: "rollback-plan-contribution-emergency-202603",
+    actorId: "payroll-agent-1"
+  });
+  assert.equal(emergencyDraft.status, "draft");
+  assert.equal(emergencyDraft.overrideEndsOn, "2026-03-31");
+  assert.equal(emergencyDraft.rollbackPlanRef, "rollback-plan-contribution-emergency-202603");
+
+  assert.throws(
+    () =>
+      payrollPlatform.approveEmployerContributionDecisionSnapshot({
+        companyId: COMPANY_ID,
+        employerContributionDecisionSnapshotId: emergencyDraft.employerContributionDecisionSnapshotId,
+        actorId: "payroll-agent-1"
+      }),
+    (error) => error?.code === "employer_contribution_decision_snapshot_dual_review_required"
+  );
+
+  const emergencyApproved = payrollPlatform.approveEmployerContributionDecisionSnapshot({
+    companyId: COMPANY_ID,
+    employerContributionDecisionSnapshotId: emergencyDraft.employerContributionDecisionSnapshotId,
+    actorId: "payroll-agent-2"
+  });
+  assert.equal(emergencyApproved.status, "approved");
+  assert.equal(emergencyApproved.overrideEndsOn, "2026-03-31");
+  assert.equal(emergencyApproved.rollbackPlanRef, "rollback-plan-contribution-emergency-202603");
+});
+
 function createMonthlyEmployee({ hrPlatform, givenName, familyName, monthlySalary, identityValue, dateOfBirth }) {
   const employee = hrPlatform.createEmployee({
     companyId: COMPANY_ID,
