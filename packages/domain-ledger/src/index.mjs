@@ -48,6 +48,7 @@ export const POSTING_SOURCE_TYPES = Object.freeze([
   "BENEFIT_EVENT",
   "TRAVEL_CLAIM",
   "VAT_SETTLEMENT",
+  "VAT_CLEARING",
   "BANK_IMPORT",
   "HISTORICAL_IMPORT",
   "MANUAL_JOURNAL",
@@ -71,6 +72,7 @@ export const POSTING_JOURNAL_TYPES = Object.freeze([
 export const YEAR_END_TRANSFER_KINDS = Object.freeze(["RESULT_TRANSFER", "RETAINED_EARNINGS_TRANSFER"]);
 export const DEFAULT_CURRENT_YEAR_RESULT_ACCOUNT_NUMBER = "2040";
 export const DEFAULT_RETAINED_EARNINGS_ACCOUNT_NUMBER = "2030";
+export const DEFAULT_VAT_CLEARING_TARGET_ACCOUNT_NUMBER = "2650";
 
 export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
   Object.freeze({
@@ -262,6 +264,16 @@ export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
     defaultVoucherSeriesPurposeCode: "VAT_SETTLEMENT",
     fallbackVoucherSeriesCode: "I",
     defaultSignalCode: "tax_account.event.classified_and_approved"
+  }),
+  Object.freeze({
+    recipeCode: "VAT_CLEARING",
+    version: "2026.1",
+    sourceDomain: "vat",
+    journalType: "tax_account_posting",
+    allowedSourceTypes: Object.freeze(["VAT_CLEARING"]),
+    defaultVoucherSeriesPurposeCode: "VAT_SETTLEMENT",
+    fallbackVoucherSeriesCode: "I",
+    defaultSignalCode: "vat.clearing.completed"
   }),
   Object.freeze({
     recipeCode: "HUS_CLAIM_ACCEPTED",
@@ -467,7 +479,8 @@ export function createLedgerEngine({
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   accountingMethodPlatform = null,
-  fiscalYearPlatform = null
+  fiscalYearPlatform = null,
+  getVatPlatform = null
 } = {}) {
   const state = {
     accounts: new Map(),
@@ -483,6 +496,9 @@ export function createLedgerEngine({
     yearEndTransferBatches: new Map(),
     yearEndTransferBatchIdsByCompany: new Map(),
     yearEndTransferBatchIdsByCompanyKey: new Map(),
+    vatClearingRuns: new Map(),
+    vatClearingRunIdsByCompany: new Map(),
+    vatClearingRunIdsByCompanyKey: new Map(),
     postingIntents: new Map(),
     postingIntentIdsByCompanyKey: new Map(),
     accountingPeriods: new Map(),
@@ -532,6 +548,10 @@ export function createLedgerEngine({
     listYearEndTransferBatches,
     getYearEndTransferBatch,
     reverseYearEndTransferBatch,
+    createVatClearingRun,
+    listVatClearingRuns,
+    getVatClearingRun,
+    reverseVatClearingRun,
     reserveImportedVoucherNumber,
     resolveVoucherSeriesForPurpose,
     createPostingIntent,
@@ -1377,6 +1397,213 @@ export function createLedgerEngine({
     });
 
     return copy(reversedBatch);
+  }
+
+  function createVatClearingRun({
+    companyId,
+    vatDeclarationRunId,
+    clearingDate = null,
+    sourceCode,
+    targetAccountNumber = DEFAULT_VAT_CLEARING_TARGET_ACCOUNT_NUMBER,
+    externalReference = null,
+    description = null,
+    evidenceRefs = [],
+    actorId,
+    idempotencyKey,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedVatDeclarationRunId = requireText(vatDeclarationRunId, "vat_declaration_run_id_required");
+    const resolvedIdempotencyKey = requireText(idempotencyKey, "idempotency_key_required");
+    const dedupeKey = toCompanyScopedKey(resolvedCompanyId, resolvedIdempotencyKey);
+    const existingRunId = state.vatClearingRunIdsByCompanyKey.get(dedupeKey);
+    if (existingRunId) {
+      return copy(requireVatClearingRun(resolvedCompanyId, existingRunId));
+    }
+
+    synchronizeLedgerPeriodsForCompany(resolvedCompanyId);
+    const vatDeclarationRun = requireVatDeclarationRunForClearing({
+      companyId: resolvedCompanyId,
+      vatDeclarationRunId: resolvedVatDeclarationRunId
+    });
+    assertVatClearingUniqueness({
+      companyId: resolvedCompanyId,
+      vatDeclarationRunId: resolvedVatDeclarationRunId
+    });
+
+    const resolvedClearingDate = normalizeDate(
+      clearingDate || vatDeclarationRun.toDate,
+      "vat_clearing_date_invalid"
+    );
+    if (resolvedClearingDate !== vatDeclarationRun.toDate) {
+      throw httpError(
+        409,
+        "vat_clearing_must_match_declaration_end",
+        "VAT clearing must be posted on the VAT declaration end date."
+      );
+    }
+
+    const vatClearingRunId = crypto.randomUUID();
+    const accountingCurrencyProfile = ensureAccountingCurrencyProfile(resolvedCompanyId);
+    const accountingPeriod = resolveAccountingPeriod(resolvedCompanyId, resolvedClearingDate);
+    const resolvedSourceCode = normalizeCode(sourceCode, "vat_clearing_source_code_required");
+    const resolvedEvidenceRefs = normalizeReferenceList(evidenceRefs);
+    const resolvedTargetAccount = requireVatClearingTargetAccount({
+      companyId: resolvedCompanyId,
+      accountNumber: targetAccountNumber
+    });
+    const prepared = buildVatClearingLineInputs({
+      companyId: resolvedCompanyId,
+      fromDate: vatDeclarationRun.fromDate,
+      toDate: vatDeclarationRun.toDate,
+      targetAccountNumber: resolvedTargetAccount.accountNumber,
+      sourceId: vatClearingRunId
+    });
+    const resolvedDescription =
+      normalizeOptionalText(description) || `VAT clearing ${vatDeclarationRun.fromDate}..${vatDeclarationRun.toDate}`;
+    const totals = calculateInputLineTotals(prepared.lines);
+    const posted = applyPostingIntent({
+      companyId: resolvedCompanyId,
+      journalDate: resolvedClearingDate,
+      recipeCode: "VAT_CLEARING",
+      sourceType: "VAT_CLEARING",
+      sourceId: vatClearingRunId,
+      sourceObjectVersion: "1",
+      description: resolvedDescription,
+      actorId: resolvedActorId,
+      idempotencyKey: `${resolvedIdempotencyKey}:journal`,
+      lines: prepared.lines,
+      currencyCode: accountingCurrencyProfile.accountingCurrencyCode,
+      metadataJson: {
+        vatClearingRunId,
+        vatDeclarationRunId: vatDeclarationRun.vatDeclarationRunId,
+        vatDeclarationPeriodLockId: vatDeclarationRun.periodLockId || null,
+        vatClearingSourceCode: resolvedSourceCode,
+        vatClearingExternalReference: normalizeOptionalText(externalReference),
+        vatClearingEvidenceRefs: resolvedEvidenceRefs,
+        fromDate: vatDeclarationRun.fromDate,
+        toDate: vatDeclarationRun.toDate,
+        targetAccountNumber: resolvedTargetAccount.accountNumber,
+        declarationBoxSummary: copy(vatDeclarationRun.declarationBoxSummary || []),
+        decisionSnapshotRefs: copy(vatDeclarationRun.decisionSnapshotRefs || []),
+        providerBaselineRefs: copy(vatDeclarationRun.providerBaselineRefs || []),
+        rulepackRefs: copy(vatDeclarationRun.rulepackRefs || []),
+        capturedBalances: prepared.capturedBalances,
+        sourceNetBalanceAmount: prepared.sourceNetBalanceAmount
+      },
+      correlationId
+    });
+
+    const run = Object.freeze({
+      vatClearingRunId,
+      companyId: resolvedCompanyId,
+      accountingPeriodId: accountingPeriod.accountingPeriodId,
+      vatDeclarationRunId: vatDeclarationRun.vatDeclarationRunId,
+      fromDate: vatDeclarationRun.fromDate,
+      toDate: vatDeclarationRun.toDate,
+      clearingDate: resolvedClearingDate,
+      status: "posted",
+      sourceCode: resolvedSourceCode,
+      externalReference: normalizeOptionalText(externalReference),
+      accountingCurrencyCode: accountingCurrencyProfile.accountingCurrencyCode,
+      targetAccountNumber: resolvedTargetAccount.accountNumber,
+      lineCount: prepared.lines.length,
+      totals,
+      journalEntryId: posted.journalEntry.journalEntryId,
+      reversalJournalEntryId: null,
+      evidenceRefs: resolvedEvidenceRefs,
+      declarationBoxSummary: Object.freeze(copy(vatDeclarationRun.declarationBoxSummary || [])),
+      decisionSnapshotRefs: Object.freeze(copy(vatDeclarationRun.decisionSnapshotRefs || [])),
+      providerBaselineRefs: Object.freeze(copy(vatDeclarationRun.providerBaselineRefs || [])),
+      rulepackRefs: Object.freeze(copy(vatDeclarationRun.rulepackRefs || [])),
+      capturedBalances: Object.freeze(prepared.capturedBalances.map(copy)),
+      sourceNetBalanceAmount: prepared.sourceNetBalanceAmount,
+      lines: Object.freeze(prepared.lines.map(copy)),
+      createdByActorId: resolvedActorId,
+      createdAt: nowIso(),
+      reversedAt: null,
+      reversedByActorId: null
+    });
+
+    state.vatClearingRuns.set(run.vatClearingRunId, run);
+    appendToIndex(state.vatClearingRunIdsByCompany, resolvedCompanyId, run.vatClearingRunId);
+    state.vatClearingRunIdsByCompanyKey.set(dedupeKey, run.vatClearingRunId);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "ledger.vat_clearing.completed",
+      entityType: "vat_clearing_run",
+      entityId: run.vatClearingRunId,
+      explanation: `Posted VAT clearing run ${vatDeclarationRun.fromDate}..${vatDeclarationRun.toDate}.`
+    });
+
+    return copy(run);
+  }
+
+  function listVatClearingRuns({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.vatClearingRunIdsByCompany.get(resolvedCompanyId) || [])
+      .map((runId) => state.vatClearingRuns.get(runId))
+      .filter(Boolean)
+      .sort((left, right) => left.toDate.localeCompare(right.toDate) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function getVatClearingRun({ companyId, vatClearingRunId } = {}) {
+    return copy(requireVatClearingRun(requireText(companyId, "company_id_required"), vatClearingRunId));
+  }
+
+  function reverseVatClearingRun({
+    companyId,
+    vatClearingRunId,
+    reasonCode,
+    reversedOn = null,
+    actorId,
+    approvedByActorId,
+    approvedByRoleCode,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const run = requireVatClearingRun(resolvedCompanyId, vatClearingRunId);
+    if (run.status === "reversed") {
+      return copy(run);
+    }
+
+    const reversed = reverseJournalEntry({
+      companyId: resolvedCompanyId,
+      journalEntryId: run.journalEntryId,
+      actorId: requireText(actorId, "actor_id_required"),
+      approvedByActorId: requireText(approvedByActorId, "approved_by_actor_id_required"),
+      approvedByRoleCode: requireText(approvedByRoleCode, "approved_by_role_code_required"),
+      reasonCode: requireText(reasonCode, "reason_code_required"),
+      correctionKey: `vat_clearing:${run.vatClearingRunId}`,
+      journalDate: reversedOn ? normalizeDate(reversedOn, "vat_clearing_reversed_on_invalid") : null,
+      correlationId
+    });
+
+    const reversedRun = Object.freeze({
+      ...run,
+      status: "reversed",
+      reversalJournalEntryId: reversed.reversalJournalEntry.journalEntryId,
+      reversedAt: nowIso(),
+      reversedByActorId: requireText(actorId, "actor_id_required")
+    });
+    state.vatClearingRuns.set(reversedRun.vatClearingRunId, reversedRun);
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: requireText(actorId, "actor_id_required"),
+      correlationId,
+      action: "ledger.vat_clearing.reversed",
+      entityType: "vat_clearing_run",
+      entityId: reversedRun.vatClearingRunId,
+      explanation: `Reversed VAT clearing run ${reversedRun.vatClearingRunId}.`
+    });
+
+    return copy(reversedRun);
   }
 
   function resolveVoucherSeriesForPurpose({
@@ -2595,6 +2822,7 @@ export function createLedgerEngine({
       voucherSeries: [...state.voucherSeries.values()],
       openingBalanceBatches: [...state.openingBalanceBatches.values()],
       yearEndTransferBatches: [...state.yearEndTransferBatches.values()],
+      vatClearingRuns: [...state.vatClearingRuns.values()],
       postingIntents: [...state.postingIntents.values()],
       accountingPeriods: [...state.accountingPeriods.values()],
       dimensionCatalogs: [...state.dimensionCatalogsByCompanyId.values()],
@@ -2766,6 +2994,46 @@ export function createLedgerEngine({
     return account;
   }
 
+  function requireVatDeclarationRunForClearing({ companyId, vatDeclarationRunId }) {
+    const vatPlatform = resolveVatPlatformForLedger();
+    return vatPlatform.getVatDeclarationRun({
+      companyId,
+      vatDeclarationRunId: requireText(vatDeclarationRunId, "vat_declaration_run_id_required")
+    });
+  }
+
+  function assertVatClearingUniqueness({ companyId, vatDeclarationRunId }) {
+    for (const run of state.vatClearingRuns.values()) {
+      if (run.companyId === companyId && run.vatDeclarationRunId === vatDeclarationRunId && run.status !== "reversed") {
+        throw httpError(409, "vat_clearing_already_posted", "A VAT clearing run is already posted for the VAT declaration.");
+      }
+    }
+  }
+
+  function requireVatClearingRun(companyId, vatClearingRunId) {
+    const run = state.vatClearingRuns.get(requireText(vatClearingRunId, "vat_clearing_run_id_required"));
+    if (!run || run.companyId !== companyId) {
+      throw httpError(404, "vat_clearing_run_not_found", "VAT clearing run was not found.");
+    }
+    return run;
+  }
+
+  function requireVatClearingTargetAccount({ companyId, accountNumber }) {
+    const account = requireAccount(companyId, normalizeAccountNumber(accountNumber));
+    if (account.accountClass !== "2") {
+      throw httpError(409, "vat_clearing_target_account_invalid", `Account ${account.accountNumber} must be a balance-sheet VAT settlement account.`);
+    }
+    return account;
+  }
+
+  function resolveVatPlatformForLedger() {
+    const platform = typeof getVatPlatform === "function" ? getVatPlatform() : null;
+    if (!platform || typeof platform.getVatDeclarationRun !== "function") {
+      throw httpError(409, "vat_runtime_required", "VAT clearing requires the VAT runtime.");
+    }
+    return platform;
+  }
+
   function buildResultTransferLineInputs({ companyId, fiscalYear, resultAccountNumber, sourceId }) {
     const balances = summarizePostedAccountBalances({
       companyId,
@@ -2852,6 +3120,61 @@ export function createLedgerEngine({
         ]
       }),
       sourceBalanceAmount
+    };
+  }
+
+  function buildVatClearingLineInputs({ companyId, fromDate, toDate, targetAccountNumber, sourceId }) {
+    const capturedBalances = summarizePostedAccountBalances({
+      companyId,
+      fromDate,
+      toDate,
+      excludeSourceTypes: ["VAT_CLEARING"]
+    }).filter((candidate) => isVatClearingSourceAccountNumber(candidate.accountNumber));
+    if (capturedBalances.length === 0) {
+      throw httpError(409, "vat_clearing_no_vat_balance", "No VAT balances are available to clear for the declaration period.");
+    }
+
+    const generatedLines = [];
+    let sourceNetBalanceAmount = 0;
+    for (const balance of capturedBalances) {
+      sourceNetBalanceAmount = normalizeSignedMoney(sourceNetBalanceAmount + balance.balanceAmount);
+      if (balance.balanceAmount > 0) {
+        generatedLines.push({
+          accountNumber: balance.accountNumber,
+          creditAmount: balance.balanceAmount,
+          sourceId
+        });
+      } else {
+        generatedLines.push({
+          accountNumber: balance.accountNumber,
+          debitAmount: normalizeSignedMoney(0 - balance.balanceAmount),
+          sourceId
+        });
+      }
+    }
+
+    if (sourceNetBalanceAmount > 0) {
+      generatedLines.push({
+        accountNumber: targetAccountNumber,
+        debitAmount: sourceNetBalanceAmount,
+        sourceId
+      });
+    } else if (sourceNetBalanceAmount < 0) {
+      generatedLines.push({
+        accountNumber: targetAccountNumber,
+        creditAmount: normalizeSignedMoney(0 - sourceNetBalanceAmount),
+        sourceId
+      });
+    }
+
+    return {
+      lines: normalizeVatClearingLineInputs({
+        companyId,
+        lines: generatedLines,
+        sourceId
+      }),
+      capturedBalances,
+      sourceNetBalanceAmount
     };
   }
 
@@ -2985,6 +3308,41 @@ export function createLedgerEngine({
       throw httpError(400, "year_end_transfer_unbalanced", "Year-end transfer lines must balance debit and credit exactly.");
     }
     return Object.freeze(normalizedLines);
+  }
+
+  function normalizeVatClearingLineInputs({ companyId, lines, sourceId }) {
+    if (!Array.isArray(lines) || lines.length < 2) {
+      throw httpError(400, "vat_clearing_lines_required", "VAT clearing requires at least two lines.");
+    }
+    const normalizedLines = lines.map((line) => {
+      const account = requireAccount(companyId, line.accountNumber);
+      const debitAmount = normalizeSignedMoney(line.debitAmount || 0);
+      const creditAmount = normalizeSignedMoney(line.creditAmount || 0);
+      if (debitAmount === 0 && creditAmount === 0) {
+        throw httpError(400, "vat_clearing_line_amount_required", "Each VAT clearing line requires a debit or credit amount.");
+      }
+      if (debitAmount > 0 && creditAmount > 0) {
+        throw httpError(400, "vat_clearing_line_single_sided_required", "Each VAT clearing line must be either debit or credit.");
+      }
+      return Object.freeze({
+        accountNumber: account.accountNumber,
+        debitAmount,
+        creditAmount,
+        dimensionJson: copy(line.dimensionJson || {}),
+        sourceType: "VAT_CLEARING",
+        sourceId: requireText(line.sourceId || sourceId, "line_source_id_required")
+      });
+    });
+    const totals = calculateInputLineTotals(normalizedLines);
+    if (totals.totalDebit !== totals.totalCredit) {
+      throw httpError(400, "vat_clearing_unbalanced", "VAT clearing lines must balance debit and credit exactly.");
+    }
+    return Object.freeze(normalizedLines);
+  }
+
+  function isVatClearingSourceAccountNumber(accountNumber) {
+    const numeric = Number(normalizeAccountNumber(accountNumber));
+    return Number.isInteger(numeric) && numeric >= 2610 && numeric <= 2640;
   }
 
   function calculateInputLineTotals(lines) {

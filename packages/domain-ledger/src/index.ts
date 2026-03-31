@@ -17,6 +17,7 @@ export type PostingSourceType =
   | "BENEFIT_EVENT"
   | "TRAVEL_CLAIM"
   | "VAT_SETTLEMENT"
+  | "VAT_CLEARING"
   | "BANK_IMPORT"
   | "HISTORICAL_IMPORT"
   | "MANUAL_JOURNAL"
@@ -259,6 +260,56 @@ export interface YearEndTransferBatch {
   readonly reversedByActorId: string | null;
 }
 
+export interface VatClearingCapturedBalance {
+  readonly accountNumber: string;
+  readonly accountName: string;
+  readonly accountClass: string;
+  readonly balanceAmount: number;
+}
+
+export interface VatClearingBatchLine {
+  readonly accountNumber: string;
+  readonly debitAmount: number;
+  readonly creditAmount: number;
+  readonly dimensionJson: Record<string, unknown>;
+  readonly sourceType: "VAT_CLEARING";
+  readonly sourceId: string;
+}
+
+export interface VatClearingRun {
+  readonly vatClearingRunId: string;
+  readonly companyId: string;
+  readonly accountingPeriodId: string;
+  readonly vatDeclarationRunId: string;
+  readonly fromDate: string;
+  readonly toDate: string;
+  readonly clearingDate: string;
+  readonly status: "posted" | "reversed";
+  readonly sourceCode: string;
+  readonly externalReference: string | null;
+  readonly accountingCurrencyCode: string;
+  readonly targetAccountNumber: string;
+  readonly lineCount: number;
+  readonly totals: {
+    readonly totalDebit: number;
+    readonly totalCredit: number;
+  };
+  readonly journalEntryId: string;
+  readonly reversalJournalEntryId: string | null;
+  readonly evidenceRefs: readonly string[];
+  readonly declarationBoxSummary: readonly Record<string, unknown>[];
+  readonly decisionSnapshotRefs: readonly Record<string, unknown>[];
+  readonly providerBaselineRefs: readonly Record<string, unknown>[];
+  readonly rulepackRefs: readonly Record<string, unknown>[];
+  readonly capturedBalances: readonly VatClearingCapturedBalance[];
+  readonly sourceNetBalanceAmount: number;
+  readonly lines: readonly VatClearingBatchLine[];
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly reversedAt: string | null;
+  readonly reversedByActorId: string | null;
+}
+
 export interface CorrectionResult {
   readonly originalJournalEntry: JournalEntry;
   readonly reversalJournalEntry: JournalEntry | null;
@@ -383,3 +434,37 @@ export declare function reverseYearEndTransferBatch(options: {
   approvedByRoleCode: string;
   correlationId?: string;
 }): YearEndTransferBatch;
+
+export declare function createVatClearingRun(options: {
+  companyId: string;
+  vatDeclarationRunId: string;
+  clearingDate?: string | null;
+  sourceCode: string;
+  targetAccountNumber?: string;
+  externalReference?: string | null;
+  description?: string | null;
+  evidenceRefs?: readonly string[];
+  actorId: string;
+  idempotencyKey: string;
+  correlationId?: string;
+}): VatClearingRun;
+
+export declare function listVatClearingRuns(options: {
+  companyId: string;
+}): readonly VatClearingRun[];
+
+export declare function getVatClearingRun(options: {
+  companyId: string;
+  vatClearingRunId: string;
+}): VatClearingRun;
+
+export declare function reverseVatClearingRun(options: {
+  companyId: string;
+  vatClearingRunId: string;
+  reasonCode: string;
+  reversedOn?: string | null;
+  actorId: string;
+  approvedByActorId: string;
+  approvedByRoleCode: string;
+  correlationId?: string;
+}): VatClearingRun;

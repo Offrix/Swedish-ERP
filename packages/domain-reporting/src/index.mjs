@@ -2630,7 +2630,7 @@ export function createReportingEngine({
 
   function classifyCashflowBucket({ entry, accountMap, bankAccountNumbers }) {
     const sourceType = normalizeOptionalText(entry.sourceType) || "MANUAL_JOURNAL";
-    if (["AR_PAYMENT", "AP_PAYMENT", "PAYROLL_RUN", "PAYROLL_CORRECTION", "BENEFIT_EVENT", "TRAVEL_CLAIM", "VAT_SETTLEMENT", "ROT_RUT_CLAIM", "PENSION_REPORT", "BANK_IMPORT"].includes(sourceType)) {
+    if (["AR_PAYMENT", "AP_PAYMENT", "PAYROLL_RUN", "PAYROLL_CORRECTION", "BENEFIT_EVENT", "TRAVEL_CLAIM", "VAT_SETTLEMENT", "VAT_CLEARING", "ROT_RUT_CLAIM", "PENSION_REPORT", "BANK_IMPORT"].includes(sourceType)) {
       return "operating";
     }
     const counterpartClasses = dedupeStringValues(

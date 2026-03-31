@@ -471,6 +471,9 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/ledger/year-end-transfers",
               "/v1/ledger/year-end-transfers/:yearEndTransferBatchId",
               "/v1/ledger/year-end-transfers/:yearEndTransferBatchId/reverse",
+              "/v1/ledger/vat-clearing-runs",
+              "/v1/ledger/vat-clearing-runs/:vatClearingRunId",
+              "/v1/ledger/vat-clearing-runs/:vatClearingRunId/reverse",
               "/v1/accounting-method/eligibility-assessments",
               "/v1/accounting-method/profiles",
               "/v1/accounting-method/profiles/:methodProfileId",
@@ -3377,6 +3380,114 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               }
             : {})
         },
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/ledger/vat-clearing-runs") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger_vat_clearing",
+      scopeCode: "ledger"
+    });
+    writeJson(res, 200, {
+      items: platform.listVatClearingRuns({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/ledger/vat-clearing-runs") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger_vat_clearing",
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createVatClearingRun({
+        companyId,
+        vatDeclarationRunId: body.vatDeclarationRunId,
+        clearingDate: body.clearingDate || null,
+        sourceCode: body.sourceCode,
+        targetAccountNumber: body.targetAccountNumber,
+        externalReference: body.externalReference || null,
+        description: body.description || null,
+        evidenceRefs: body.evidenceRefs || [],
+        actorId: principal.userId,
+        idempotencyKey: body.idempotencyKey,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const vatClearingRunMatch = matchPath(path, "/v1/ledger/vat-clearing-runs/:vatClearingRunId");
+  if (vatClearingRunMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "ledger_vat_clearing",
+      objectId: vatClearingRunMatch.vatClearingRunId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getVatClearingRun({
+        companyId,
+        vatClearingRunId: vatClearingRunMatch.vatClearingRunId
+      })
+    );
+    return;
+  }
+
+  const vatClearingRunReverseMatch = matchPath(path, "/v1/ledger/vat-clearing-runs/:vatClearingRunId/reverse");
+  if (vatClearingRunReverseMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "ledger_vat_clearing",
+      objectId: vatClearingRunReverseMatch.vatClearingRunId,
+      scopeCode: "ledger"
+    });
+    writeJson(
+      res,
+      200,
+      platform.reverseVatClearingRun({
+        companyId,
+        vatClearingRunId: vatClearingRunReverseMatch.vatClearingRunId,
+        reasonCode: body.reasonCode,
+        reversedOn: body.reversedOn || null,
+        actorId: principal.userId,
+        approvedByActorId: body.approvedByActorId,
+        approvedByRoleCode: body.approvedByRoleCode,
         correlationId: body.correlationId || createCorrelationId()
       })
     );

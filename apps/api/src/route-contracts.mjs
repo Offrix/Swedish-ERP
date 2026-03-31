@@ -295,6 +295,8 @@ const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["POST /v1/ledger/opening-balances/:openingBalanceBatchId/reverse", override("ledger", "ledger_opening_balance_reverse", "strong_mfa", "opening_balance_batch", "ledger_opening_balance", "opening_balance_batch", "company.manage", true)],
   ["POST /v1/ledger/year-end-transfers", override("ledger", "ledger_year_end_transfer_post", "strong_mfa", "company", "ledger_year_end_transfer", "year_end_transfer_batch", "company.manage", true)],
   ["POST /v1/ledger/year-end-transfers/:yearEndTransferBatchId/reverse", override("ledger", "ledger_year_end_transfer_reverse", "strong_mfa", "year_end_transfer_batch", "ledger_year_end_transfer", "year_end_transfer_batch", "company.manage", true)],
+  ["POST /v1/ledger/vat-clearing-runs", override("ledger", "ledger_vat_clearing_post", "strong_mfa", "company", "ledger_vat_clearing", "vat_clearing_run", "company.manage", true)],
+  ["POST /v1/ledger/vat-clearing-runs/:vatClearingRunId/reverse", override("ledger", "ledger_vat_clearing_reverse", "strong_mfa", "vat_clearing_run", "ledger_vat_clearing", "vat_clearing_run", "company.manage", true)],
   ["POST /v1/vat/review-queue/:vatReviewQueueItemId/resolve", override("vat", "vat_review_resolve", "strong_mfa", "vat_review_queue_item", "vat", "vat_review_queue_item", "company.manage", true)],
   ["POST /v1/vat/period-locks", override("vat", "vat_period_lock", "strong_mfa", "company", "vat", "vat_period_lock", "company.manage", false)],
   ["POST /v1/vat/period-locks/:vatPeriodLockId/unlock", override("vat", "vat_period_unlock", "strong_mfa", "vat_period_lock", "vat", "vat_period_lock", "company.manage", true)],

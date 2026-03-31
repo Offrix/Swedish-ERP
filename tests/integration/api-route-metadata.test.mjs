@@ -151,6 +151,9 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/ledger/year-end-transfers",
   "/v1/ledger/year-end-transfers/:yearEndTransferBatchId",
   "/v1/ledger/year-end-transfers/:yearEndTransferBatchId/reverse",
+  "/v1/ledger/vat-clearing-runs",
+  "/v1/ledger/vat-clearing-runs/:vatClearingRunId",
+  "/v1/ledger/vat-clearing-runs/:vatClearingRunId/reverse",
   "/v1/submissions/:submissionId/evidence-pack",
   "/v1/submissions/:submissionId/attempts",
   "/v1/submissions/:submissionId/recoveries",
@@ -465,6 +468,22 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(yearEndTransferReverseContract.requiredActionClass, "ledger_year_end_transfer_reverse");
     assert.equal(yearEndTransferReverseContract.requiredTrustLevel, "strong_mfa");
     assert.equal(yearEndTransferReverseContract.requiredScopeType, "year_end_transfer_batch");
+
+    const vatClearingContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/ledger/vat-clearing-runs"
+    );
+    assert.ok(vatClearingContract);
+    assert.equal(vatClearingContract.requiredActionClass, "ledger_vat_clearing_post");
+    assert.equal(vatClearingContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(vatClearingContract.requiredScopeType, "company");
+
+    const vatClearingReverseContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/ledger/vat-clearing-runs/:vatClearingRunId/reverse"
+    );
+    assert.ok(vatClearingReverseContract);
+    assert.equal(vatClearingReverseContract.requiredActionClass, "ledger_vat_clearing_reverse");
+    assert.equal(vatClearingReverseContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(vatClearingReverseContract.requiredScopeType, "vat_clearing_run");
 
     const vatReviewResolveContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/vat/review-queue/:vatReviewQueueItemId/resolve"

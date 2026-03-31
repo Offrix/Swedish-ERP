@@ -278,11 +278,12 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     label: "Ledger",
     packageName: "@swedish-erp/domain-ledger",
     dependsOn: ["accountingMethod", "fiscalYear"],
-    create: ({ options, dependencies }) =>
+    create: ({ options, dependencies, getDomain }) =>
       createLedgerPlatform({
         ...options,
         accountingMethodPlatform: dependencies.accountingMethod,
-        fiscalYearPlatform: dependencies.fiscalYear
+        fiscalYearPlatform: dependencies.fiscalYear,
+        getVatPlatform: () => getDomain("vat")
       })
   }),
   createDomainDefinition({
