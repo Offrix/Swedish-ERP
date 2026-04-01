@@ -1,28 +1,30 @@
 # Bank Statement And Payment Reconciliation
 
-Detta runbook gäller fas 9.4 och beskriver den bindande operatörskedjan för:
+This runbook covers phases 8.4 and 9.4/9.6 and defines the operator chain for:
 - `PaymentBatch`
 - `StatementImport`
 - `SettlementLiabilityLink`
 - `PaymentProposal` / `PaymentOrder`
-- statement matchning mot `payment_order` och `tax_account_event`
+- statement matching against `payment_order` and `tax_account_event`
+- first-class statement posting for bank fees, bank interest and explicit settlements
 
-## Mål
+## Goal
 
-Säkerställa att bankrörelser aldrig bokas eller betraktas som avstämda utan spårbar rail, importkedja och liability-link.
+Ensure that no bank movement is treated as reconciled or posted without a traceable rail, import chain, approval case and ledger path.
 
-## Förutsättningar
+## Preconditions
 
-- bolaget har aktivt bankkonto i `banking`
-- relevant rail är vald:
+- the company has an active bank account in `banking`
+- a valid rail is configured where payment export is used:
   - `open_banking`
   - `iso20022_file`
   - `bankgiro_file`
-- AP-open item eller tax-account-händelse finns som faktisk liability-källa
+- a real source object exists for payment-order or tax-account bridges
+- ledger is installed and available for first-class statement posting
 
-## 1. Kontrollera payment batch före export
+## 1. Check Payment Batch Before Export
 
-Verifiera på `PaymentBatch`:
+Verify on `PaymentBatch`:
 - `paymentRailCode`
 - `paymentFileFormatCode`
 - `providerCode`
@@ -31,114 +33,119 @@ Verifiera på `PaymentBatch`:
 - `orderCount`
 - `totalAmount`
 
-Blockera export om:
-- batch saknar rail eller baseline
-- någon order saknar liability mapping
-- proposal inte är approved
+Block export if:
+- the batch lacks rail or baseline
+- any order lacks liability mapping
+- the proposal is not `approved`
 
-## 2. Kontrollera exportartefakt
+## 2. Check Export Artifact
 
-Efter export måste följande finnas:
+After export, all of the following must exist:
 - `exportFileName`
 - `exportPayload`
 - `exportPayloadHash`
 - `status = exported`
 
-Rail-specifikt:
-- `open_banking`: JSON-payload med orders och beneficiary account
-- `iso20022_file`: XML-envelope med `format="pain.001"`
-- `bankgiro_file`: CSV-envelope
+Rail-specific expectations:
+- `open_banking`: JSON payload with orders and beneficiary account
+- `iso20022_file`: XML envelope with `format="pain.001"`
+- `bankgiro_file`: CSV envelope
 
-## 3. Kontrollera submission till bankrail
+## 3. Check Submission To Bank Rail
 
-Efter submit/accept:
-- `PaymentBatch.status` ska gå `submitted -> accepted_by_bank`
-- alla ingående `PaymentOrder` ska gå `reserved -> sent -> accepted`
-- `providerReference` ska sparas om extern rail lämnar referens
+After submit and accept:
+- `PaymentBatch.status` must move `submitted -> accepted_by_bank`
+- all included `PaymentOrder` records must move `reserved -> sent -> accepted`
+- `providerReference` must be retained when the rail returns one
 
-## 4. Kontrollera statement import
+## 4. Check Statement Import
 
-Varje statementimport måste skapa ett first-class `StatementImport` med:
+Each statement import must create a first-class `StatementImport` with:
 - `statementImportNo`
 - `sourceChannelCode`
 - `statementFileFormatCode`
 - `providerCode`
-- `providerBaselineCode` där rail inte är manuell
+- `providerBaselineCode` where the rail is not manual
 - `providerReference`
 - `importedCount`
 - `duplicateCount`
 - `matchedPaymentOrderCount`
 - `matchedTaxAccountCount`
+- `matchedStatementPostingCount`
 - `reconciliationRequiredCount`
 
-VIKTIGT:
-- statement import får identifiera matchad `payment_order` eller tax-account-riktning
-- statement import får INTE bokföra eller skapa tax-account bridge direkt
-- sådan effekt kräver öppet `BankReconciliationCase` med explicit approve-resolution
+Important:
+- statement import may classify a line as `matched_payment_order`, `matched_tax_account` or `matched_statement_posting`
+- statement import must never create AP settlement, tax-account bridge or ledger journal directly
+- those effects require an open `BankReconciliationCase` and an explicit approve resolution
 
-Tillåtna `sourceChannelCode` i nuläget:
+Allowed `sourceChannelCode` values:
 - `open_banking_sync`
 - `camt053_file`
 - `manual_statement`
 
-## 5. Kontrollera settlement liability links
+## 5. Check Settlement Liability Links
 
-Varje railhändelse som påverkar skuld eller fordran ska ha `SettlementLiabilityLink`.
+Every rail event that affects a payable or receivable must have a `SettlementLiabilityLink`.
 
-För AP-betalning:
+For AP payment:
 - `liabilityObjectType = ap_open_item`
-- `paymentOrderId` måste finnas
-- `status` går `pending -> matched -> settled | rejected | returned`
-- `bankStatementEventId` sätts när statement matchar
-- `matched` betyder att bankraden är identifierad men ännu inte explicit godkänd för posting
+- `paymentOrderId` must exist
+- `status` moves `pending -> matched -> settled | rejected | returned`
+- `bankStatementEventId` is set when a statement line matches the payment
+- `matched` means the line is identified but still blocked behind explicit approval
 
-För skattekonto via statement bridge:
+For tax-account statement bridge:
 - `liabilityObjectType = tax_account_event`
-- `bankStatementEventId` måste finnas
-- `status = settled` först när tax-account-event faktiskt skapats
+- `bankStatementEventId` must exist
+- `status = settled` only after the tax-account event is actually created
 
-## 6. Reconciliation required
+## 6. Reconciliation Required
 
-Om statementrad inte kan matchas:
+If a statement line cannot be matched:
 - `BankStatementEvent.processingStatus = reconciliation_required`
 - `BankReconciliationCase.status = open`
-- ingen ledgerpåverkan får skapas från statementraden
+- no ledger effect may be created from the statement line
 
-Om statementrad MATCHAR men leder till posting-gate:
-- `BankStatementEvent.matchStatus` får vara `matched_payment_order` eller `matched_tax_account`
-- `BankStatementEvent.processingStatus` ska fortfarande vara `reconciliation_required`
-- `BankReconciliationCase.pendingActionCode` ska bära exakt approve-action
-- ingen AP-settlement eller tax-account bridge får köras innan case löses med approve-resolution
+If a statement line matches but still requires a posting gate:
+- `BankStatementEvent.matchStatus` may be `matched_payment_order`, `matched_tax_account` or `matched_statement_posting`
+- `BankStatementEvent.processingStatus` must still be `reconciliation_required`
+- `BankReconciliationCase.pendingActionCode` must carry the exact approve action
+- no AP settlement, tax-account bridge or statement posting may run before explicit approval
 
-Detta gäller särskilt:
-- fel `paymentOrderId`
-- ofullständig tax-account bridge
-- okänd motpart utan explicit liability-källa
+This applies especially to:
+- wrong `paymentOrderId`
+- incomplete tax-account bridge
+- bank fee, bank interest or settlement without a valid offset account
+- unknown counterparty without a real liability source
 
-## 7. Operatörschecklista
+## 7. Operator Checklist
 
-1. Läs `PaymentBatch`
-2. Kontrollera rail, baseline och orderantal
-3. Verifiera exportartefakt
-4. Verifiera `StatementImport`
-5. Verifiera `SettlementLiabilityLink`
-6. Verifiera att inga statementrader med `reconciliation_required` saknar case
-7. Verifiera att `matched` payment-order-link inte gått till `settled` före explicit approval
-8. Verifiera att settled payment order faktiskt har liability-link i `settled`
+1. Read `PaymentBatch`.
+2. Verify rail, baseline and order count.
+3. Verify export artifact.
+4. Verify `StatementImport`.
+5. Verify `SettlementLiabilityLink`.
+6. Verify that every line with `reconciliation_required` has a case.
+7. Verify that `matched_payment_order` does not move to settled before explicit approval.
+8. Verify that `matched_statement_posting` gets `journalEntryId` only after explicit approval.
+9. Verify that a settled payment order has a liability link in `settled`.
 
-## 8. Felindikatorer
+## 8. Failure Indicators
 
-Stoppa fortsatt drift om något av följande inträffar:
-- statement import utan `StatementImport`
-- payment order bokad utan `SettlementLiabilityLink`
-- payment order eller tax-account bridge som körts direkt under import utan approve-case
-- rail/baseline tappas mellan proposal och batch
-- tax-account-bridge skapar statement match utan liability-link
-- batch når `accepted_by_bank` utan exportartefakt
+Stop further operations if any of the following happens:
+- statement import exists without a first-class `StatementImport`
+- payment order is booked without a `SettlementLiabilityLink`
+- payment order or tax-account bridge runs directly during import without approval
+- bank fee, bank interest or settlement is posted during import without approval
+- bank fee, bank interest or settlement lacks `journalEntryId` after approval
+- rail or baseline disappears between proposal and batch
+- tax-account bridge creates a statement match without a liability link
+- batch reaches `accepted_by_bank` without an export artifact
 
-## 9. Obligatoriska tester
+## 9. Required Tests
 
-Följande sviter ska vara gröna:
+The following suites must be green:
 - `tests/unit/phase27-banking-runtime.test.mjs`
 - `tests/integration/phase27-banking-runtime-api.test.mjs`
 - `tests/unit/phase9-banking-payment-rails.test.mjs`

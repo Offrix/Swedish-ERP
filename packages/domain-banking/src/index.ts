@@ -24,7 +24,10 @@ export type PaymentFileFormatCode = "open_banking_api" | "pain.001" | "bankgiro_
 export type StatementImportSourceCode = "open_banking_sync" | "camt053_file" | "manual_statement";
 export type StatementImportStatus = "processed" | "reconciliation_required";
 export type BankReconciliationCaseStatus = "open" | "in_review" | "resolved" | "written_off";
-export type BankReconciliationPendingActionCode = "approve_payment_order_statement" | "approve_tax_account_statement_bridge";
+export type BankReconciliationPendingActionCode =
+  | "approve_payment_order_statement"
+  | "approve_tax_account_statement_bridge"
+  | "approve_bank_statement_posting";
 export type BankPaymentEventType = "booked" | "rejected" | "returned";
 export type SettlementLiabilityObjectType = "ap_open_item" | "tax_account_event";
 export type SettlementLiabilityLinkStatus = "pending" | "matched" | "settled" | "returned" | "rejected";
@@ -187,6 +190,8 @@ export interface BankStatementEvent {
   readonly matchedObjectId: string | null;
   readonly reconciliationCaseId: string | null;
   readonly taxAccountEventId: string | null;
+  readonly offsetLedgerAccountNumber: string | null;
+  readonly journalEntryId: string | null;
   readonly failureReasonCode: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -212,6 +217,7 @@ export interface StatementImport {
   readonly duplicateCount: number;
   readonly matchedPaymentOrderCount: number;
   readonly matchedTaxAccountCount: number;
+  readonly matchedStatementPostingCount: number;
   readonly reconciliationRequiredCount: number;
   readonly eventCount: number;
   readonly createdByActorId: string;

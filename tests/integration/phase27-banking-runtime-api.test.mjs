@@ -290,6 +290,152 @@ test("Step 27 API gates statement-driven payment and tax-account effects behind 
   }
 });
 
+test("Step 27 API posts bank fees, interest and settlements through statement approval", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-11-18T08:00:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true,
+      phase5ArEnabled: true,
+      phase6ApEnabled: true
+    }
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const sessionToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    platform.installLedgerCatalog({
+      companyId: COMPANY_ID,
+      actorId: "system"
+    });
+    const bankAccount = platform.createBankAccount({
+      companyId: COMPANY_ID,
+      bankName: "SEB",
+      ledgerAccountNumber: "1110",
+      accountNumber: "5544332211",
+      currencyCode: "SEK",
+      actorId: "admin"
+    });
+
+    const imported = await requestJson(baseUrl, "/v1/banking/statement-events/import", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        bankAccountId: bankAccount.bankAccountId,
+        statementDate: "2026-11-19",
+        events: [
+          {
+            externalReference: "BANK-API-STEP27-FEE",
+            bookingDate: "2026-11-19",
+            amount: -39,
+            statementCategoryCode: "bank_fee",
+            referenceText: "Monthly service fee"
+          },
+          {
+            externalReference: "BANK-API-STEP27-INT",
+            bookingDate: "2026-11-19",
+            amount: 18.75,
+            statementCategoryCode: "interest_income",
+            referenceText: "Bank interest"
+          },
+          {
+            externalReference: "BANK-API-STEP27-SETTLE",
+            bookingDate: "2026-11-19",
+            amount: -450,
+            statementCategoryCode: "settlement",
+            offsetLedgerAccountNumber: "2310",
+            referenceText: "Loan repayment"
+          }
+        ]
+      }
+    });
+    assert.equal(imported.importedCount, 3);
+    assert.equal(imported.matchedStatementPostingCount, 3);
+
+    const events = await requestJson(baseUrl, `/v1/banking/statement-events?companyId=${COMPANY_ID}`, {
+      token: sessionToken
+    });
+    const statementPostingEvents = events.items.filter((event) => event.matchStatus === "matched_statement_posting");
+    assert.equal(statementPostingEvents.length, 3);
+    assert.equal(statementPostingEvents.every((event) => event.processingStatus === "reconciliation_required"), true);
+
+    const reconciliationCases = await requestJson(baseUrl, `/v1/banking/reconciliation-cases?companyId=${COMPANY_ID}&status=open`, {
+      token: sessionToken
+    });
+    assert.equal(reconciliationCases.items.length, 3);
+    assert.equal(reconciliationCases.items.every((item) => item.caseTypeCode === "bank_statement_posting_gate"), true);
+
+    for (const reconciliationCase of reconciliationCases.items) {
+      const resolved = await requestJson(
+        baseUrl,
+        `/v1/banking/reconciliation-cases/${reconciliationCase.reconciliationCaseId}/resolve`,
+        {
+          method: "POST",
+          token: sessionToken,
+          body: {
+            companyId: COMPANY_ID,
+            resolutionCode: "approve_bank_statement_posting",
+            resolutionNote: "Approved statement posting."
+          }
+        }
+      );
+      assert.equal(resolved.executedActionCode, "approve_bank_statement_posting");
+    }
+
+    const resolvedEvents = await requestJson(baseUrl, `/v1/banking/statement-events?companyId=${COMPANY_ID}`, {
+      token: sessionToken
+    });
+    const feeEvent = resolvedEvents.items.find((event) => event.externalReference === "BANK-API-STEP27-FEE");
+    const interestEvent = resolvedEvents.items.find((event) => event.externalReference === "BANK-API-STEP27-INT");
+    const settlementEvent = resolvedEvents.items.find((event) => event.externalReference === "BANK-API-STEP27-SETTLE");
+
+    for (const event of [feeEvent, interestEvent, settlementEvent]) {
+      assert.equal(event.processingStatus, "processed");
+      assert.equal(event.matchedObjectType, "journal_entry");
+      assert.ok(event.journalEntryId);
+    }
+
+    const feeJournal = platform.getJournalEntry({
+      companyId: COMPANY_ID,
+      journalEntryId: feeEvent.journalEntryId
+    });
+    assert.equal(feeJournal.lines.some((line) => line.accountNumber === "6060" && line.debitAmount === 39), true);
+    assert.equal(feeJournal.lines.some((line) => line.accountNumber === "1110" && line.creditAmount === 39), true);
+
+    const interestJournal = platform.getJournalEntry({
+      companyId: COMPANY_ID,
+      journalEntryId: interestEvent.journalEntryId
+    });
+    assert.equal(interestJournal.lines.some((line) => line.accountNumber === "1110" && line.debitAmount === 18.75), true);
+    assert.equal(interestJournal.lines.some((line) => line.accountNumber === "7950" && line.creditAmount === 18.75), true);
+
+    const settlementJournal = platform.getJournalEntry({
+      companyId: COMPANY_ID,
+      journalEntryId: settlementEvent.journalEntryId
+    });
+    assert.equal(settlementJournal.lines.some((line) => line.accountNumber === "2310" && line.debitAmount === 450), true);
+    assert.equal(settlementJournal.lines.some((line) => line.accountNumber === "1110" && line.creditAmount === 450), true);
+  } finally {
+    await stopServer(server);
+  }
+});
+
 async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
   const started = await requestJson(baseUrl, "/v1/auth/login", {
     method: "POST",

@@ -13,11 +13,27 @@ export const PAYMENT_PROPOSAL_STATUSES = Object.freeze(["draft", "approved", "ex
 export const PAYMENT_ORDER_STATUSES = Object.freeze(["prepared", "reserved", "sent", "accepted", "booked", "returned", "rejected"]);
 export const PAYMENT_BATCH_STATUSES = Object.freeze(["draft", "exported", "submitted", "accepted_by_bank", "partially_executed", "settled", "failed", "cancelled"]);
 export const BANK_PAYMENT_EVENT_TYPES = Object.freeze(["booked", "rejected", "returned"]);
-export const BANK_STATEMENT_EVENT_MATCH_STATUSES = Object.freeze(["matched_payment_order", "matched_tax_account", "reconciliation_required"]);
+export const BANK_STATEMENT_EVENT_MATCH_STATUSES = Object.freeze([
+  "matched_payment_order",
+  "matched_tax_account",
+  "matched_statement_posting",
+  "reconciliation_required"
+]);
 export const BANK_STATEMENT_EVENT_PROCESSING_STATUSES = Object.freeze(["received", "processed", "reconciliation_required"]);
 export const BANK_RECONCILIATION_CASE_STATUSES = Object.freeze(["open", "in_review", "resolved", "written_off"]);
-export const BANK_RECONCILIATION_PENDING_ACTION_CODES = Object.freeze(["approve_payment_order_statement", "approve_tax_account_statement_bridge"]);
-export const BANK_STATEMENT_CATEGORY_CODES = Object.freeze(["generic", "tax_account"]);
+export const BANK_RECONCILIATION_PENDING_ACTION_CODES = Object.freeze([
+  "approve_payment_order_statement",
+  "approve_tax_account_statement_bridge",
+  "approve_bank_statement_posting"
+]);
+export const BANK_STATEMENT_CATEGORY_CODES = Object.freeze([
+  "generic",
+  "tax_account",
+  "bank_fee",
+  "interest_income",
+  "interest_expense",
+  "settlement"
+]);
 export const BANK_PAYMENT_ORDER_ACTIONS = Object.freeze(["booked", "rejected", "returned"]);
 export const PAYMENT_RAIL_CODES = Object.freeze(["open_banking", "iso20022_file", "bankgiro_file"]);
 export const PAYMENT_FILE_FORMAT_CODES = Object.freeze(["open_banking_api", "pain.001", "bankgiro_csv"]);
@@ -25,6 +41,10 @@ export const STATEMENT_IMPORT_SOURCE_CODES = Object.freeze(["open_banking_sync",
 export const STATEMENT_IMPORT_STATUSES = Object.freeze(["processed", "reconciliation_required"]);
 export const SETTLEMENT_LIABILITY_LINK_STATUSES = Object.freeze(["pending", "matched", "settled", "returned", "rejected"]);
 export const SETTLEMENT_LIABILITY_OBJECT_TYPES = Object.freeze(["ap_open_item", "tax_account_event"]);
+
+const DEFAULT_BANK_FEE_ACCOUNT_NUMBER = "6060";
+const DEFAULT_BANK_INTEREST_INCOME_ACCOUNT_NUMBER = "7950";
+const DEFAULT_BANK_INTEREST_EXPENSE_ACCOUNT_NUMBER = "7910";
 
 const PAYMENT_RAIL_CONFIG_BY_CODE = Object.freeze({
   open_banking: Object.freeze({
@@ -129,6 +149,7 @@ export function createBankingEngine({
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   apPlatform = null,
+  ledgerPlatform = null,
   integrationsPlatform = null,
   taxAccountPlatform = null,
   getTaxAccountPlatform = null,
@@ -461,6 +482,7 @@ export function createBankingEngine({
       duplicateCount: 0,
       matchedPaymentOrderCount: 0,
       matchedTaxAccountCount: 0,
+      matchedStatementPostingCount: 0,
       reconciliationRequiredCount: 0,
       eventCount: 0,
       createdByActorId: resolvedActorId,
@@ -473,6 +495,7 @@ export function createBankingEngine({
     let duplicateCount = 0;
     let matchedPaymentOrderCount = 0;
     let matchedTaxAccountCount = 0;
+    let matchedStatementPostingCount = 0;
     let reconciliationRequiredCount = 0;
     for (const rawEvent of events) {
       const normalized = normalizeBankStatementEventInput({
@@ -519,6 +542,8 @@ export function createBankingEngine({
         matchedObjectId: null,
         reconciliationCaseId: null,
         taxAccountEventId: null,
+        offsetLedgerAccountNumber: normalized.offsetLedgerAccountNumber,
+        journalEntryId: null,
         failureReasonCode: null,
         createdAt: nowIso(clock),
         updatedAt: nowIso(clock)
@@ -531,6 +556,7 @@ export function createBankingEngine({
         state,
         statementEvent,
         apPlatform,
+        ledgerPlatform,
         taxAccountPlatform,
         getTaxAccountPlatform,
         bankAccount,
@@ -545,6 +571,9 @@ export function createBankingEngine({
       if (statementEvent.matchStatus === "matched_tax_account") {
         matchedTaxAccountCount += 1;
       }
+      if (statementEvent.matchStatus === "matched_statement_posting") {
+        matchedStatementPostingCount += 1;
+      }
       if (statementEvent.processingStatus === "reconciliation_required") {
         reconciliationRequiredCount += 1;
       }
@@ -555,6 +584,7 @@ export function createBankingEngine({
     statementImport.duplicateCount = duplicateCount;
     statementImport.matchedPaymentOrderCount = matchedPaymentOrderCount;
     statementImport.matchedTaxAccountCount = matchedTaxAccountCount;
+    statementImport.matchedStatementPostingCount = matchedStatementPostingCount;
     statementImport.reconciliationRequiredCount = reconciliationRequiredCount;
     statementImport.eventCount = importedEvents.length;
     statementImport.status = reconciliationRequiredCount > 0 ? "reconciliation_required" : "processed";
@@ -575,6 +605,10 @@ export function createBankingEngine({
       statementDate: resolvedStatementDate,
       importedCount: importedEvents.length - duplicateCount,
       duplicateCount,
+      matchedPaymentOrderCount,
+      matchedTaxAccountCount,
+      matchedStatementPostingCount,
+      reconciliationRequiredCount,
       items: importedEvents
     });
   }
@@ -650,6 +684,20 @@ export function createBankingEngine({
         clock
       });
       executedActionCode = resolvedResolutionCode;
+    } else if (
+      reconciliationCase.pendingActionCode === "approve_bank_statement_posting" &&
+      resolvedResolutionCode === "approve_bank_statement_posting"
+    ) {
+      executeBankStatementPostingApproval({
+        state,
+        reconciliationCase,
+        statementEvent,
+        ledgerPlatform,
+        actorId: resolvedActorId,
+        correlationId,
+        clock
+      });
+      executedActionCode = resolvedResolutionCode;
     }
 
     reconciliationCase.status = resolvedResolutionCode === "written_off" ? "written_off" : "resolved";
@@ -700,6 +748,7 @@ export function createBankingEngine({
     state,
     statementEvent,
     apPlatform,
+    ledgerPlatform,
     taxAccountPlatform,
     getTaxAccountPlatform,
     bankAccount,
@@ -807,6 +856,60 @@ export function createBankingEngine({
         statementEvent.matchStatus = "reconciliation_required";
         statementEvent.processingStatus = "reconciliation_required";
         statementEvent.failureReasonCode = error?.code || "tax_account_bridge_failed";
+        statementEvent.updatedAt = nowIso(clock);
+        return reconciliationCase;
+      }
+    }
+
+    if (requiresBankStatementPostingApproval(statementEvent)) {
+      try {
+        assertBankStatementPostingAvailable({
+          ledgerPlatform,
+          companyId: statementEvent.companyId,
+          bankAccount,
+          statementEvent
+        });
+        const reconciliationCase = openBankReconciliationCase({
+          companyId: statementEvent.companyId,
+          bankAccountId: statementEvent.bankAccountId,
+          bankStatementEventId: statementEvent.bankStatementEventId,
+          caseTypeCode: "bank_statement_posting_gate",
+          differenceAmount: statementEvent.amount,
+          reasonCode: "bank_statement_requires_domain_approval",
+          actorId,
+          pendingActionCode: "approve_bank_statement_posting",
+          pendingTargetObjectType: "bank_statement_event",
+          pendingTargetObjectId: statementEvent.bankStatementEventId,
+          pendingPayload: {
+            statementCategoryCode: statementEvent.statementCategoryCode,
+            bookingDate: statementEvent.bookingDate,
+            bankEventId: statementEvent.externalReference,
+            offsetLedgerAccountNumber: statementEvent.offsetLedgerAccountNumber
+          }
+        });
+        statementEvent.matchStatus = "matched_statement_posting";
+        statementEvent.processingStatus = "reconciliation_required";
+        statementEvent.reconciliationCaseId = reconciliationCase.reconciliationCaseId;
+        statementEvent.matchedObjectType = null;
+        statementEvent.matchedObjectId = null;
+        statementEvent.taxAccountEventId = null;
+        statementEvent.failureReasonCode = null;
+        statementEvent.updatedAt = nowIso(clock);
+        return reconciliationCase;
+      } catch (error) {
+        const reconciliationCase = openBankReconciliationCase({
+          companyId: statementEvent.companyId,
+          bankAccountId: statementEvent.bankAccountId,
+          bankStatementEventId: statementEvent.bankStatementEventId,
+          caseTypeCode: "bank_statement_posting_failed",
+          differenceAmount: statementEvent.amount,
+          reasonCode: error?.code || "bank_statement_posting_failed",
+          actorId
+        });
+        statementEvent.reconciliationCaseId = reconciliationCase.reconciliationCaseId;
+        statementEvent.matchStatus = "reconciliation_required";
+        statementEvent.processingStatus = "reconciliation_required";
+        statementEvent.failureReasonCode = error?.code || "bank_statement_posting_failed";
         statementEvent.updatedAt = nowIso(clock);
         return reconciliationCase;
       }
@@ -926,6 +1029,40 @@ export function createBankingEngine({
       order.lastStatementEventId = resolvedStatementEvent.bankStatementEventId;
     }
     return paymentActionResult;
+  }
+
+  function executeBankStatementPostingApproval({
+    state,
+    reconciliationCase,
+    statementEvent,
+    ledgerPlatform,
+    actorId,
+    correlationId,
+    clock
+  }) {
+    const resolvedStatementEvent =
+      statementEvent ||
+      state.bankStatementEvents.get(requireText(reconciliationCase.bankStatementEventId, "bank_statement_event_id_required"));
+    if (!resolvedStatementEvent) {
+      throw createError(404, "bank_statement_event_not_found", "Bank statement event was not found for reconciliation case.");
+    }
+    const bankAccount = requireBankAccountRecord(state, resolvedStatementEvent.companyId, resolvedStatementEvent.bankAccountId);
+    const journalEntry = postBankStatementLifecycleJournal({
+      ledgerPlatform,
+      statementEvent: resolvedStatementEvent,
+      bankAccount,
+      actorId,
+      correlationId
+    });
+    resolvedStatementEvent.matchStatus = "matched_statement_posting";
+    resolvedStatementEvent.processingStatus = "processed";
+    resolvedStatementEvent.matchedObjectType = "journal_entry";
+    resolvedStatementEvent.matchedObjectId = journalEntry.journalEntryId;
+    resolvedStatementEvent.taxAccountEventId = null;
+    resolvedStatementEvent.journalEntryId = journalEntry.journalEntryId;
+    resolvedStatementEvent.failureReasonCode = null;
+    resolvedStatementEvent.updatedAt = nowIso(clock);
+    return journalEntry;
   }
 
   function executeTaxAccountStatementApproval({
@@ -2564,6 +2701,167 @@ function buildStatementIdentityKey({ companyId, bankAccountId, externalReference
     amount: roundMoney(amount)
   });
 }
+function buildBankStatementPostingSourceVersion(statementEvent) {
+  return hashObject({
+    bankStatementEventId: requireText(statementEvent?.bankStatementEventId, "bank_statement_event_id_required"),
+    bookingDate: normalizeDate(statementEvent?.bookingDate, "bank_statement_booking_date_invalid"),
+    amount: roundMoney(Number(statementEvent?.amount || 0)),
+    currencyCode: normalizeUpperCode(statementEvent?.currencyCode || "SEK", "currency_code_required", 3),
+    statementCategoryCode: requireText(statementEvent?.statementCategoryCode, "bank_statement_category_invalid"),
+    offsetLedgerAccountNumber: normalizeOptionalText(statementEvent?.offsetLedgerAccountNumber),
+    externalReference: requireText(statementEvent?.externalReference, "bank_statement_external_reference_required")
+  });
+}
+function requiresBankStatementPostingApproval(statementEvent) {
+  return ["bank_fee", "interest_income", "interest_expense", "settlement"].includes(statementEvent?.statementCategoryCode);
+}
+function assertBankStatementPostingAvailable({ ledgerPlatform, companyId, bankAccount, statementEvent }) {
+  if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
+    throw createError(500, "ledger_platform_missing", "Ledger platform is required for bank statement postings.");
+  }
+  const postingSpec = resolveBankStatementPostingSpec(statementEvent);
+  assertLedgerAccountAvailable({
+    ledgerPlatform,
+    companyId,
+    accountNumber: requireText(bankAccount?.ledgerAccountNumber, "bank_ledger_account_required"),
+    errorCode: "bank_statement_bank_account_missing"
+  });
+  assertLedgerAccountAvailable({
+    ledgerPlatform,
+    companyId,
+    accountNumber: postingSpec.offsetLedgerAccountNumber,
+    errorCode: "bank_statement_offset_account_missing"
+  });
+}
+function resolveBankStatementPostingSpec(statementEvent) {
+  switch (statementEvent?.statementCategoryCode) {
+    case "bank_fee":
+      return Object.freeze({
+        categoryCode: "bank_fee",
+        offsetLedgerAccountNumber: DEFAULT_BANK_FEE_ACCOUNT_NUMBER,
+        descriptionPrefix: "Bank fee"
+      });
+    case "interest_income":
+      return Object.freeze({
+        categoryCode: "interest_income",
+        offsetLedgerAccountNumber: DEFAULT_BANK_INTEREST_INCOME_ACCOUNT_NUMBER,
+        descriptionPrefix: "Bank interest income"
+      });
+    case "interest_expense":
+      return Object.freeze({
+        categoryCode: "interest_expense",
+        offsetLedgerAccountNumber: DEFAULT_BANK_INTEREST_EXPENSE_ACCOUNT_NUMBER,
+        descriptionPrefix: "Bank interest expense"
+      });
+    case "settlement":
+      return Object.freeze({
+        categoryCode: "settlement",
+        offsetLedgerAccountNumber: requireText(
+          statementEvent?.offsetLedgerAccountNumber,
+          "bank_statement_offset_account_required"
+        ),
+        descriptionPrefix: "Bank settlement"
+      });
+    default:
+      throw createError(
+        409,
+        "bank_statement_posting_category_invalid",
+        "Bank statement posting requires a supported posting category."
+      );
+  }
+}
+function assertLedgerAccountAvailable({ ledgerPlatform, companyId, accountNumber, errorCode }) {
+  if (!ledgerPlatform || typeof ledgerPlatform.listLedgerAccounts !== "function") {
+    return;
+  }
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const resolvedAccountNumber = requireText(accountNumber, "account_number_required");
+  const exists = ledgerPlatform
+    .listLedgerAccounts({ companyId: resolvedCompanyId })
+    .some((account) => account.accountNumber === resolvedAccountNumber);
+  if (!exists) {
+    throw createError(409, errorCode, `Ledger account ${resolvedAccountNumber} is not available for bank statement posting.`);
+  }
+}
+function buildBankStatementPostingLines({ statementEvent, bankAccountNumber, offsetLedgerAccountNumber }) {
+  const absoluteAmount = Math.abs(roundMoney(Number(statementEvent?.amount || 0)));
+  if (absoluteAmount <= 0) {
+    throw createError(409, "bank_statement_posting_amount_invalid", "Bank statement posting requires a non-zero amount.");
+  }
+  const resolvedBankAccountNumber = requireText(bankAccountNumber, "bank_ledger_account_required");
+  const resolvedOffsetLedgerAccountNumber = requireText(
+    offsetLedgerAccountNumber,
+    "bank_statement_offset_account_required"
+  );
+  if (resolvedBankAccountNumber === resolvedOffsetLedgerAccountNumber) {
+    throw createError(409, "bank_statement_posting_account_conflict", "Bank statement posting requires a distinct offset ledger account.");
+  }
+  const isInbound = roundMoney(Number(statementEvent.amount || 0)) > 0;
+  return [
+    {
+      accountNumber: resolvedBankAccountNumber,
+      debitAmount: isInbound ? absoluteAmount : 0,
+      creditAmount: isInbound ? 0 : absoluteAmount,
+      sourceType: "BANK_IMPORT",
+      sourceId: statementEvent.bankStatementEventId
+    },
+    {
+      accountNumber: resolvedOffsetLedgerAccountNumber,
+      debitAmount: isInbound ? 0 : absoluteAmount,
+      creditAmount: isInbound ? absoluteAmount : 0,
+      sourceType: "BANK_IMPORT",
+      sourceId: statementEvent.bankStatementEventId
+    }
+  ];
+}
+function buildBankStatementPostingDescription({ statementEvent, postingSpec }) {
+  const reference = normalizeOptionalText(statementEvent?.referenceText) || normalizeOptionalText(statementEvent?.counterpartyName);
+  return reference
+    ? `${postingSpec.descriptionPrefix} ${reference}`.slice(0, 255)
+    : `${postingSpec.descriptionPrefix} ${requireText(statementEvent?.externalReference, "bank_statement_external_reference_required")}`.slice(0, 255);
+}
+function postBankStatementLifecycleJournal({
+  ledgerPlatform,
+  statementEvent,
+  bankAccount,
+  actorId,
+  correlationId
+}) {
+  if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
+    throw createError(500, "ledger_platform_missing", "Ledger platform is required for bank statement postings.");
+  }
+  const postingSpec = resolveBankStatementPostingSpec(statementEvent);
+  const posted = ledgerPlatform.applyPostingIntent({
+    companyId: statementEvent.companyId,
+    journalDate: statementEvent.bookingDate,
+    recipeCode: "BANK_STATEMENT_MATCH",
+    postingSignalCode: "bank.statement.line.matched_and_approved",
+    fallbackVoucherSeriesCode: "D",
+    sourceType: "BANK_IMPORT",
+    sourceId: requireText(statementEvent.bankStatementEventId, "bank_statement_event_id_required"),
+    sourceObjectVersion: buildBankStatementPostingSourceVersion(statementEvent),
+    actorId: requireText(actorId, "actor_id_required"),
+    idempotencyKey: `bank_statement_post:${requireText(statementEvent.bankStatementEventId, "bank_statement_event_id_required")}`,
+    description: buildBankStatementPostingDescription({ statementEvent, postingSpec }),
+    metadataJson: {
+      pipelineArea: "bank_statement_posting",
+      statementCategoryCode: statementEvent.statementCategoryCode,
+      bankAccountId: statementEvent.bankAccountId,
+      bankLedgerAccountNumber: bankAccount.ledgerAccountNumber,
+      offsetLedgerAccountNumber: postingSpec.offsetLedgerAccountNumber,
+      externalReference: statementEvent.externalReference,
+      counterpartyName: statementEvent.counterpartyName || null,
+      referenceText: statementEvent.referenceText || null
+    },
+    lines: buildBankStatementPostingLines({
+      statementEvent,
+      bankAccountNumber: bankAccount.ledgerAccountNumber,
+      offsetLedgerAccountNumber: postingSpec.offsetLedgerAccountNumber
+    }),
+    correlationId
+  });
+  return posted.journalEntry;
+}
 function normalizeBankStatementEventInput({ bankAccount, rawEvent, statementDate }) {
   const externalReference = requireText(rawEvent?.externalReference || rawEvent?.bankEventId, "bank_statement_external_reference_required");
   const bookingDate = normalizeDate(rawEvent?.bookingDate || rawEvent?.eventDate || statementDate, "bank_statement_booking_date_invalid");
@@ -2575,6 +2873,7 @@ function normalizeBankStatementEventInput({ bankAccount, rawEvent, statementDate
     counterpartyName: normalizeOptionalText(rawEvent?.counterpartyName),
     referenceText: normalizeOptionalText(rawEvent?.referenceText),
     statementCategoryCode: assertAllowed(rawEvent?.statementCategoryCode || "generic", BANK_STATEMENT_CATEGORY_CODES, "bank_statement_category_invalid"),
+    offsetLedgerAccountNumber: normalizeOptionalText(rawEvent?.offsetLedgerAccountNumber),
     linkedPaymentOrderId: normalizeOptionalText(rawEvent?.linkedPaymentOrderId),
     paymentOrderAction: normalizeOptionalText(rawEvent?.paymentOrderAction)
       ? assertAllowed(rawEvent.paymentOrderAction, BANK_PAYMENT_ORDER_ACTIONS, "bank_payment_order_action_invalid")

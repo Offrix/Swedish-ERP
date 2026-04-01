@@ -376,11 +376,12 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     key: "banking",
     label: "Banking",
     packageName: "@swedish-erp/domain-banking",
-    dependsOn: ["ap", "integrations"],
+    dependsOn: ["ap", "integrations", "ledger"],
     create: ({ options, dependencies, getDomain }) =>
       createBankingPlatform({
         ...options,
         apPlatform: dependencies.ap,
+        ledgerPlatform: dependencies.ledger,
         integrationsPlatform: dependencies.integrations,
         getTaxAccountPlatform: () => getDomain("taxAccount")
       })

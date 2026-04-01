@@ -226,3 +226,111 @@ test("Step 27 banking runtime gates statement-driven payment and tax-account eff
   });
   assert.equal(resolved.status, "written_off");
 });
+
+test("Step 27 banking runtime posts fees, interest and settlements through explicit approval", () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-10-12T08:00:00Z")
+  });
+  platform.installLedgerCatalog({
+    companyId: COMPANY_ID,
+    actorId: "system"
+  });
+
+  const bankAccount = platform.createBankAccount({
+    companyId: COMPANY_ID,
+    bankName: "Handelsbanken",
+    ledgerAccountNumber: "1110",
+    accountNumber: "6677889900",
+    currencyCode: "SEK",
+    actorId: "admin"
+  });
+
+  const imported = platform.importBankStatementEvents({
+    companyId: COMPANY_ID,
+    bankAccountId: bankAccount.bankAccountId,
+    statementDate: "2026-11-13",
+    events: [
+      {
+        externalReference: "BANK-STMT-2702-FEE",
+        bookingDate: "2026-11-13",
+        amount: -25,
+        statementCategoryCode: "bank_fee",
+        referenceText: "Monthly fee"
+      },
+      {
+        externalReference: "BANK-STMT-2702-INT",
+        bookingDate: "2026-11-13",
+        amount: 12.5,
+        statementCategoryCode: "interest_income",
+        referenceText: "Interest income"
+      },
+      {
+        externalReference: "BANK-STMT-2702-SETTLE",
+        bookingDate: "2026-11-13",
+        amount: -300,
+        statementCategoryCode: "settlement",
+        offsetLedgerAccountNumber: "2310",
+        referenceText: "Loan settlement"
+      }
+    ],
+    actorId: "admin"
+  });
+
+  assert.equal(imported.importedCount, 3);
+  assert.equal(imported.matchedStatementPostingCount, 3);
+  for (const item of imported.items) {
+    assert.equal(item.matchStatus, "matched_statement_posting");
+    assert.equal(item.processingStatus, "reconciliation_required");
+  }
+
+  for (const item of imported.items) {
+    const resolved = platform.resolveBankReconciliationCase({
+      companyId: COMPANY_ID,
+      reconciliationCaseId: item.reconciliationCaseId,
+      resolutionCode: "approve_bank_statement_posting",
+      resolutionNote: "Approved bank statement posting.",
+      actorId: "admin"
+    });
+    assert.equal(resolved.executedActionCode, "approve_bank_statement_posting");
+  }
+
+  const feeEvent = platform.getBankStatementEvent({
+    companyId: COMPANY_ID,
+    bankStatementEventId: imported.items.find((item) => item.externalReference === "BANK-STMT-2702-FEE").bankStatementEventId
+  });
+  assert.equal(feeEvent.processingStatus, "processed");
+  assert.equal(feeEvent.matchedObjectType, "journal_entry");
+  assert.ok(feeEvent.journalEntryId);
+  const feeJournal = platform.getJournalEntry({
+    companyId: COMPANY_ID,
+    journalEntryId: feeEvent.journalEntryId
+  });
+  assert.equal(feeJournal.lines.some((line) => line.accountNumber === "6060" && line.debitAmount === 25), true);
+  assert.equal(feeJournal.lines.some((line) => line.accountNumber === "1110" && line.creditAmount === 25), true);
+
+  const interestEvent = platform.getBankStatementEvent({
+    companyId: COMPANY_ID,
+    bankStatementEventId: imported.items.find((item) => item.externalReference === "BANK-STMT-2702-INT").bankStatementEventId
+  });
+  assert.equal(interestEvent.processingStatus, "processed");
+  assert.ok(interestEvent.journalEntryId);
+  const interestJournal = platform.getJournalEntry({
+    companyId: COMPANY_ID,
+    journalEntryId: interestEvent.journalEntryId
+  });
+  assert.equal(interestJournal.lines.some((line) => line.accountNumber === "1110" && line.debitAmount === 12.5), true);
+  assert.equal(interestJournal.lines.some((line) => line.accountNumber === "7950" && line.creditAmount === 12.5), true);
+
+  const settlementEvent = platform.getBankStatementEvent({
+    companyId: COMPANY_ID,
+    bankStatementEventId: imported.items.find((item) => item.externalReference === "BANK-STMT-2702-SETTLE").bankStatementEventId
+  });
+  assert.equal(settlementEvent.processingStatus, "processed");
+  assert.ok(settlementEvent.journalEntryId);
+  const settlementJournal = platform.getJournalEntry({
+    companyId: COMPANY_ID,
+    journalEntryId: settlementEvent.journalEntryId
+  });
+  assert.equal(settlementJournal.lines.some((line) => line.accountNumber === "2310" && line.debitAmount === 300), true);
+  assert.equal(settlementJournal.lines.some((line) => line.accountNumber === "1110" && line.creditAmount === 300), true);
+});
