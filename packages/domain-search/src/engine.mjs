@@ -1121,19 +1121,19 @@ export function createSearchEngine({
       if (typeof resolver !== "function") {
         continue;
       }
-      const candidate = resolver();
-      const listProjectionContracts =
-        typeof candidate?.listSearchProjectionContracts === "function"
-          ? (input) => candidate.listSearchProjectionContracts(input)
-          : typeof candidate?.listDocumentClassificationSearchProjectionContracts === "function"
-            ? (input) => candidate.listDocumentClassificationSearchProjectionContracts(input)
-            : null;
-      const listProjectionDocuments =
-        typeof candidate?.listSearchProjectionDocuments === "function"
-          ? (input) => candidate.listSearchProjectionDocuments(input)
-          : typeof candidate?.listDocumentClassificationSearchProjectionDocuments === "function"
-            ? (input) => candidate.listDocumentClassificationSearchProjectionDocuments(input)
-            : null;
+        const candidate = resolver();
+        const listProjectionContracts =
+          typeof candidate?.listSearchProjectionContracts === "function"
+            ? (input) => candidate.listSearchProjectionContracts(input)
+            : typeof candidate?.listDocumentClassificationSearchProjectionContracts === "function"
+              ? (input) => candidate.listDocumentClassificationSearchProjectionContracts(input)
+              : null;
+        const listProjectionDocuments =
+          typeof candidate?.listSearchProjectionDocuments === "function"
+            ? (input) => candidate.listSearchProjectionDocuments(input)
+            : typeof candidate?.listDocumentClassificationSearchProjectionDocuments === "function"
+              ? (input) => candidate.listDocumentClassificationSearchProjectionDocuments(input)
+              : null;
       if (
         candidate &&
         typeof listProjectionContracts === "function" &&

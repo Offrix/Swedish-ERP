@@ -5,6 +5,7 @@ import { createDocumentArchivePlatform } from "../../packages/domain-documents/s
 import { createReviewCenterPlatform } from "../../packages/domain-review-center/src/index.mjs";
 import { createHrPlatform } from "../../packages/domain-hr/src/index.mjs";
 import { createDocumentClassificationEngine } from "../../packages/domain-document-classification/src/index.mjs";
+import { createImportCasesEngine, DEMO_COMPANY_ID } from "../../packages/domain-import-cases/src/index.mjs";
 
 test("Step 35 search exposes object profile and workbench contracts with normalized object types", async () => {
   const engine = createSearchEngine({
@@ -172,4 +173,80 @@ test("Phase 9.3 search builds classification case profile from masked document c
     profile.sections.find((section) => section.sectionCode === "reviewBoundary").fields.some((field) => field.fieldCode === "reviewBoundaryCode" && field.value === "review_center.payroll"),
     true
   );
+});
+
+test("Phase 9.4 search builds import case profile from canonical import case projection", async () => {
+  const clock = () => new Date("2026-04-01T10:30:00Z");
+  const documentPlatform = createDocumentArchivePlatform({ clock });
+  const reviewCenterPlatform = createReviewCenterPlatform({ clock, seedDemo: true });
+  const importCasesPlatform = createImportCasesEngine({
+    clock,
+    seedDemo: false,
+    documentPlatform,
+    reviewCenterPlatform
+  });
+
+  const supplierDocument = documentPlatform.createDocumentRecord({
+    companyId: DEMO_COMPANY_ID,
+    documentType: "supplier_invoice",
+    sourceReference: "phase35-import-case-search",
+    actorId: "user_phase35_import"
+  });
+
+  const importCase = importCasesPlatform.createImportCase({
+    companyId: DEMO_COMPANY_ID,
+    caseReference: "IMP-PHASE35-001",
+    goodsOriginCountry: "CN",
+    customsReference: "PHASE35-CUST-001",
+    initialDocuments: [{ documentId: supplierDocument.documentId, roleCode: "PRIMARY_SUPPLIER_DOCUMENT" }],
+    initialComponents: [{ componentType: "GOODS", amount: 4200 }],
+    actorId: "user_phase35_import"
+  });
+
+  importCasesPlatform.requestImportCaseCorrection({
+    companyId: DEMO_COMPANY_ID,
+    importCaseId: importCase.importCaseId,
+    reasonCode: "missing_evidence",
+    actorId: "user_phase35_import"
+  });
+
+  const engine = createSearchEngine({
+    clock,
+    getImportCasesPlatform: () => importCasesPlatform
+  });
+
+  const reindex = await engine.requestSearchReindex({
+    companyId: DEMO_COMPANY_ID,
+    actorId: "user_phase35_import"
+  });
+  assert.equal(reindex.reindexRequest.status, "completed");
+
+  const contracts = engine.listObjectProfileContracts({ companyId: DEMO_COMPANY_ID });
+  assert.equal(contracts.some((contract) => contract.objectType === "importCase"), true);
+
+  const profile = engine.getObjectProfile({
+    companyId: DEMO_COMPANY_ID,
+    objectType: "import_case",
+    objectId: importCase.importCaseId
+  });
+  assert.equal(profile.profileType, "ImportCaseProfile");
+  assert.equal(profile.objectType, "importCase");
+  assert.equal(profile.header.title, "Import case IMP-PHASE35-001");
+  assert.equal(profile.blockers.some((blocker) => blocker.blockerCode === "open_correction_requests"), true);
+  assert.equal(
+    profile.sections.find((section) => section.sectionCode === "reviewBoundary").fields.some((field) => field.fieldCode === "reviewBoundaryCode" && field.value === "review_center.finance"),
+    true
+  );
+  assert.equal(
+    profile.sections.find((section) => section.sectionCode === "correctionRequests").fields.some((field) => field.fieldCode === "hasOpenCorrectionRequest" && field.value === true),
+    true
+  );
+
+  const financeWorkbench = engine.getWorkbench({
+    companyId: DEMO_COMPANY_ID,
+    workbenchCode: "FinanceWorkbench"
+  });
+  assert.equal(financeWorkbench.rows.some((row) => row.objectType === "importCase" && row.objectId === importCase.importCaseId), true);
+  assert.equal(financeWorkbench.counters.postingBlockedCount >= 1, true);
+  assert.equal(financeWorkbench.counters.vatReviewCount >= 1, true);
 });

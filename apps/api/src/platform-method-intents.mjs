@@ -857,6 +857,8 @@ const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
     "createImportCase": "write",
     "decideImportCaseCorrectionRequest": "write",
     "getImportCase": "read",
+    "listImportCaseSearchProjectionContracts": "read",
+    "listImportCaseSearchProjectionDocuments": "read",
     "listImportCases": "read",
     "openImportCase": "write",
     "recalculateImportCase": "write",

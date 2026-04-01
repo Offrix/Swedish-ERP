@@ -16,6 +16,7 @@ export interface ImportCaseCorrectionRequest {
   readonly status: "open" | "approved" | "rejected" | "superseded";
   readonly reasonCode: string;
   readonly reasonNote: string | null;
+  readonly evidenceRefs: readonly string[];
   readonly requestedByActorId: string;
   readonly requestedAt: string;
   readonly decidedAt: string | null;

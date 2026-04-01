@@ -10,9 +10,12 @@ test("app baselines expose green health checks and worker heartbeats", async () 
   let heartbeatSeen = false;
 
   try {
-    runtimes.push(await startApiServer({ port: 4300, logger: () => {}, runtimeMode: "test" }));
-    runtimes.push(await startDesktopWebServer({ port: 4301, logger: () => {}, runtimeMode: "test" }));
-    runtimes.push(await startFieldMobileServer({ port: 4302, logger: () => {}, runtimeMode: "test" }));
+    const apiRuntime = await startApiServer({ port: 0, logger: () => {}, runtimeMode: "test" });
+    const desktopRuntime = await startDesktopWebServer({ port: 0, logger: () => {}, runtimeMode: "test" });
+    const fieldRuntime = await startFieldMobileServer({ port: 0, logger: () => {}, runtimeMode: "test" });
+    runtimes.push(apiRuntime);
+    runtimes.push(desktopRuntime);
+    runtimes.push(fieldRuntime);
     runtimes.push(
       await startWorker({
         intervalMs: 25,
@@ -29,9 +32,9 @@ test("app baselines expose green health checks and worker heartbeats", async () 
     assert.equal(heartbeatSeen, true);
 
     for (const service of [
-      { port: 4300, healthPath: "/healthz", expected: "ok" },
-      { port: 4301, healthPath: "/healthz", expected: "Desktop-web" },
-      { port: 4302, healthPath: "/healthz", expected: "Field-mobile" }
+      { port: apiRuntime.server.address().port, healthPath: "/healthz", expected: "ok" },
+      { port: desktopRuntime.server.address().port, healthPath: "/healthz", expected: "Desktop-web" },
+      { port: fieldRuntime.server.address().port, healthPath: "/healthz", expected: "Field-mobile" }
     ]) {
       const response = await fetch(`http://127.0.0.1:${service.port}${service.healthPath}`);
       const body = await response.text();

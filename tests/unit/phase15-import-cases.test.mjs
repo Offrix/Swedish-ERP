@@ -219,10 +219,15 @@ test("Step 15 import cases create correction requests that block approval until 
     importCaseId: created.importCaseId,
     reasonCode: "component_mapping_incorrect",
     reasonNote: "Fel komponentstruktur.",
+    evidenceRefs: ["document:import-supplier-0104-001", "note:component-split"],
     actorId: "user_3"
   });
   assert.equal(correctionRequested.completeness.status, "blocking");
   assert.deepEqual(correctionRequested.completeness.blockingReasonCodes, ["OPEN_CORRECTION_REQUESTS"]);
+  assert.deepEqual(correctionRequested.correctionRequests[0].evidenceRefs, [
+    "document:import-supplier-0104-001",
+    "note:component-split"
+  ]);
 
   assert.throws(
     () =>
@@ -321,4 +326,62 @@ test("Step 15 import cases apply downstream idempotently and conflict on diverge
       }),
     (error) => error?.code === "import_case_downstream_mapping_conflict"
   );
+});
+
+test("Phase 9.4 import cases expose canonical search projections with correction and replacement lineage", () => {
+  const clock = () => new Date("2026-04-01T10:00:00Z");
+  const documentPlatform = createDocumentArchivePlatform({ clock });
+  const reviewCenterPlatform = createReviewCenterPlatform({ clock, seedDemo: true });
+  const importCases = createImportCasesEngine({
+    clock,
+    seedDemo: false,
+    documentPlatform,
+    reviewCenterPlatform
+  });
+
+  const supplierDocument = documentPlatform.createDocumentRecord({
+    companyId: DEMO_COMPANY_ID,
+    documentType: "supplier_invoice",
+    sourceReference: "import-search-001",
+    actorId: "user_6"
+  });
+
+  const created = importCases.createImportCase({
+    companyId: DEMO_COMPANY_ID,
+    caseReference: "IMP-SEARCH-001",
+    goodsOriginCountry: "CN",
+    customsReference: "CUST-SEARCH-001",
+    initialDocuments: [{ documentId: supplierDocument.documentId, roleCode: "PRIMARY_SUPPLIER_DOCUMENT" }],
+    initialComponents: [{ componentType: "GOODS", amount: 9400 }],
+    actorId: "user_6"
+  });
+
+  importCases.requestImportCaseCorrection({
+    companyId: DEMO_COMPANY_ID,
+    importCaseId: created.importCaseId,
+    reasonCode: "missing_evidence",
+    reasonNote: "Tullunderlag saknas fortfarande.",
+    evidenceRefs: [`document:${supplierDocument.documentId}`, "note:broker-statement-missing"],
+    actorId: "user_6"
+  });
+
+  const contracts = importCases.listImportCaseSearchProjectionContracts({
+    companyId: DEMO_COMPANY_ID
+  });
+  assert.equal(contracts.some((contract) => contract.projectionCode === "import_cases.import_case"), true);
+
+  const documents = importCases.listImportCaseSearchProjectionDocuments({
+    companyId: DEMO_COMPANY_ID
+  });
+  const projected = documents.find((item) => item.objectId === created.importCaseId);
+  assert.equal(Boolean(projected), true);
+  assert.equal(projected.objectType, "import_case");
+  assert.equal(projected.displayTitle, "Import case IMP-SEARCH-001");
+  assert.equal(projected.filterPayload.reviewBoundaryCode, "review_center.finance");
+  assert.equal(projected.filterPayload.hasOpenCorrectionRequest, true);
+  assert.equal(projected.workbenchPayload.blockerCodes.includes("open_correction_requests"), true);
+  assert.equal(projected.detailPayload.sections.some((section) => section.sectionCode === "correctionRequests"), true);
+  assert.equal(projected.detailPayload.relatedObjects.some((item) => item.objectType === "reviewItem"), true);
+  assert.equal(projected.detailPayload.evidence.some((item) => item.evidenceId === "note:broker-statement-missing"), true);
+  assert.equal(projected.detailPayload.auditRefs.auditEventIds.length > 0, true);
 });

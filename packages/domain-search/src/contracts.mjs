@@ -111,6 +111,31 @@ export const OBJECT_PROFILE_CONTRACTS = Object.freeze([
     actionContracts: ["documentClassification.approve", "documentClassification.dispatch", "documentClassification.correct"].map(action)
   },
   {
+    profileType: "ImportCaseProfile",
+    objectType: "importCase",
+    surfaceCodes: ["desktop.finance", "desktop.search", "desktop.review_center"],
+    sectionCodes: ["documentLineage", "componentsAndVatBase", "reviewBoundary", "correctionRequests", "replacementChain", "downstreamApply", "audit"],
+    blockerCodes: [
+      "primary_supplier_document_missing",
+      "customs_evidence_missing",
+      "import_components_missing",
+      "import_vat_amount_missing",
+      "source_classification_not_approved",
+      "open_correction_requests",
+      "review_pending",
+      "superseded_by_correction"
+    ],
+    actionContracts: [
+      "importCase.attachDocument",
+      "importCase.addComponent",
+      "importCase.approve",
+      "importCase.requestCorrection",
+      "importCase.decideCorrection",
+      "importCase.apply",
+      "importCase.correct"
+    ].map(action)
+  },
+  {
     profileType: "WorkItemProfile",
     objectType: "workItem",
     surfaceCodes: ["desktop.review_center", "desktop.search"],

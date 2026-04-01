@@ -85,6 +85,8 @@ export function createImportCasesEngine({
     createImportCase,
     listImportCases,
     getImportCase,
+    listImportCaseSearchProjectionContracts,
+    listImportCaseSearchProjectionDocuments,
     attachDocumentToImportCase,
     addImportCaseComponent,
     recalculateImportCase,
@@ -250,6 +252,41 @@ export function createImportCasesEngine({
 
   function getImportCase({ companyId, importCaseId } = {}) {
     return presentCase(state, requireCase(state, companyId, importCaseId));
+  }
+
+  function listImportCaseSearchProjectionContracts({ companyId } = {}) {
+    requireText(companyId, "company_id_required");
+    return copy([
+      {
+        projectionCode: "import_cases.import_case",
+        objectType: "import_case",
+        sourceDomainCode: "importCases",
+        displayName: "Import cases",
+        projectionVersionNo: 1,
+        visibilityScope: "company",
+        supportsGlobalSearch: true,
+        supportsSavedViews: true,
+        surfaceCodes: ["desktop.search", "desktop.finance", "desktop.review_center"],
+        filterFieldCodes: [
+          "status",
+          "completenessStatus",
+          "applicationStatus",
+          "reviewBoundaryCode",
+          "reviewQueueCode",
+          "hasOpenCorrectionRequest",
+          "goodsOriginCountry"
+        ]
+      }
+    ]);
+  }
+
+  function listImportCaseSearchProjectionDocuments({ companyId } = {}) {
+    return listImportCases({ companyId }).map((importCase) =>
+      buildSearchProjectionDocument({
+        state,
+        importCase
+      })
+    );
   }
 
   function attachDocumentToImportCase({
@@ -436,6 +473,7 @@ export function createImportCasesEngine({
     importCaseId,
     reasonCode,
     reasonNote = null,
+    evidenceRefs = [],
     actorId = "system"
   } = {}) {
     const importCase = requireCase(state, companyId, importCaseId);
@@ -454,6 +492,7 @@ export function createImportCasesEngine({
         "import_case_correction_request_reason_invalid"
       ),
       reasonNote: normalizeOptionalText(reasonNote),
+      evidenceRefs: normalizeEvidenceRefs(evidenceRefs),
       requestedByActorId: resolvedActorId,
       requestedAt: nowIso(clock),
       decidedAt: null,
@@ -467,12 +506,16 @@ export function createImportCasesEngine({
     pushAudit(state, {
       companyId: importCase.companyId,
       actorId: resolvedActorId,
-      action: "import_case.correction_requested",
-      entityType: "import_case_correction_request",
-      entityId: correctionRequest.importCaseCorrectionRequestId,
-      explanation: `Opened correction request for import case ${importCase.caseReference}.`,
-      recordedAt: correctionRequest.requestedAt
-    });
+        action: "import_case.correction_requested",
+        entityType: "import_case_correction_request",
+        entityId: correctionRequest.importCaseCorrectionRequestId,
+        explanation: `Opened correction request for import case ${importCase.caseReference}.`,
+        recordedAt: correctionRequest.requestedAt,
+        metadata: {
+          reasonCode: correctionRequest.reasonCode,
+          evidenceRefs: correctionRequest.evidenceRefs
+        }
+      });
     return recalculateImportCase({
       companyId: importCase.companyId,
       importCaseId: importCase.importCaseId,
@@ -1025,6 +1068,398 @@ function presentCase(state, importCase) {
       appliedByActorId: importCase.appliedByActorId
     }
   };
+}
+
+function buildSearchProjectionDocument({ state, importCase }) {
+  const blockerCodes = buildSearchBlockerCodes(importCase);
+  const reviewBoundaryCode = deriveSearchReviewBoundaryCode(importCase);
+  const hasOpenCorrectionRequest = importCase.correctionRequests.some((request) => request.status === "open");
+  const documentIds = importCase.documentLinks
+    .map((link) => normalizeOptionalText(link.documentId))
+    .filter(Boolean);
+  const evidenceRefs = compactStringList([
+    ...documentIds.map((documentId) => `document:${documentId}`),
+    ...importCase.correctionRequests.flatMap((request) => request.evidenceRefs || [])
+  ]);
+  const auditEventIds = listSearchAuditEventIds({
+    state,
+    importCase
+  });
+  const owner = importCase.reviewQueueCode
+    ? {
+        ownerType: "queue",
+        ownerId: importCase.reviewQueueCode,
+        displayName: importCase.reviewQueueCode
+      }
+    : null;
+  const relatedObjects = [
+    ...documentIds.map((documentId) => ({
+      objectType: "document",
+      objectId: documentId,
+      relationCode: "supporting_document"
+    })),
+    importCase.reviewItemId
+      ? {
+          objectType: "reviewItem",
+          objectId: importCase.reviewItemId,
+          relationCode: "review_item"
+        }
+      : null,
+    importCase.sourceClassificationCaseId
+      ? {
+          objectType: "classificationCase",
+          objectId: importCase.sourceClassificationCaseId,
+          relationCode: "source_classification"
+        }
+      : null,
+    importCase.correctedToImportCaseId
+      ? {
+          objectType: "importCase",
+          objectId: importCase.correctedToImportCaseId,
+          relationCode: "replacement_case"
+        }
+      : null,
+    importCase.parentImportCaseId
+      ? {
+          objectType: "importCase",
+          objectId: importCase.parentImportCaseId,
+          relationCode: "prior_case"
+        }
+      : null
+  ].filter(Boolean);
+
+  const detailPayload = {
+    snapshot: {
+      identityFields: [
+        { fieldCode: "importCaseId", value: importCase.importCaseId },
+        { fieldCode: "caseReference", value: importCase.caseReference }
+      ],
+      financialFields: [
+        { fieldCode: "currencyCode", value: importCase.currencyCode },
+        { fieldCode: "importVatBaseAmount", value: importCase.completeness.importVatBaseAmount },
+        { fieldCode: "importVatAmount", value: importCase.completeness.importVatAmount }
+      ],
+      complianceFields: [
+        { fieldCode: "status", value: importCase.status },
+        { fieldCode: "completenessStatus", value: importCase.completeness.status },
+        { fieldCode: "reviewBoundaryCode", value: reviewBoundaryCode },
+        { fieldCode: "applicationStatus", value: importCase.downstreamApplication.applicationStatus }
+      ],
+      responsibilityFields: [
+        { fieldCode: "reviewQueueCode", value: importCase.reviewQueueCode || "none" },
+        { fieldCode: "reviewItemId", value: importCase.reviewItemId || "none" }
+      ],
+      periodFields: [
+        { fieldCode: "createdAt", value: importCase.createdAt },
+        { fieldCode: "updatedAt", value: importCase.updatedAt }
+      ]
+    },
+    sections: [
+      {
+        sectionCode: "documentLineage",
+        title: "Document lineage",
+        fields: [
+          { fieldCode: "documentCount", value: importCase.documentLinks.length },
+          {
+            fieldCode: "documentRoles",
+            value: importCase.documentLinks.map((link) => link.roleCode).join(", ") || "none"
+          },
+          { fieldCode: "sourceClassificationCaseId", value: importCase.sourceClassificationCaseId || "none" }
+        ]
+      },
+      {
+        sectionCode: "componentsAndVatBase",
+        title: "Components and VAT base",
+        fields: [
+          { fieldCode: "componentCount", value: importCase.components.length },
+          { fieldCode: "componentTotals", value: JSON.stringify(importCase.completeness.componentTotals || {}) },
+          { fieldCode: "importVatBaseAmount", value: importCase.completeness.importVatBaseAmount },
+          { fieldCode: "importVatAmount", value: importCase.completeness.importVatAmount }
+        ]
+      },
+      {
+        sectionCode: "reviewBoundary",
+        title: "Review boundary",
+        fields: [
+          { fieldCode: "reviewBoundaryCode", value: reviewBoundaryCode },
+          { fieldCode: "reviewQueueCode", value: importCase.reviewQueueCode || "none" },
+          { fieldCode: "reviewItemId", value: importCase.reviewItemId || "none" },
+          { fieldCode: "reviewRequired", value: importCase.reviewRequired === true }
+        ]
+      },
+      {
+        sectionCode: "correctionRequests",
+        title: "Correction requests",
+        fields: [
+          { fieldCode: "hasOpenCorrectionRequest", value: hasOpenCorrectionRequest },
+          { fieldCode: "correctionRequestCount", value: importCase.correctionRequests.length },
+          {
+            fieldCode: "evidenceRefCount",
+            value: importCase.correctionRequests.reduce(
+              (sum, request) => sum + ((request.evidenceRefs || []).length),
+              0
+            )
+          },
+          {
+            fieldCode: "correctionRequestStatuses",
+            value: importCase.correctionRequests.map((request) => request.status).join(", ") || "none"
+          }
+        ],
+        warnings: hasOpenCorrectionRequest ? ["Open correction requests are blocking approval/apply."] : []
+      },
+      {
+        sectionCode: "replacementChain",
+        title: "Replacement chain",
+        fields: [
+          { fieldCode: "parentImportCaseId", value: importCase.parentImportCaseId || "none" },
+          { fieldCode: "correctedToImportCaseId", value: importCase.correctedToImportCaseId || "none" },
+          { fieldCode: "correctionCount", value: importCase.corrections.length }
+        ]
+      },
+      {
+        sectionCode: "downstreamApply",
+        title: "Downstream apply",
+        fields: [
+          { fieldCode: "applicationStatus", value: importCase.downstreamApplication.applicationStatus },
+          { fieldCode: "targetDomainCode", value: importCase.downstreamApplication.targetDomainCode || "none" },
+          { fieldCode: "targetObjectType", value: importCase.downstreamApplication.targetObjectType || "none" },
+          { fieldCode: "targetObjectId", value: importCase.downstreamApplication.targetObjectId || "none" }
+        ]
+      },
+      {
+        sectionCode: "audit",
+        title: "Audit",
+        fields: [
+          { fieldCode: "createdByActorId", value: importCase.createdByActorId },
+          { fieldCode: "approvedByActorId", value: importCase.approvedByActorId || "none" },
+          { fieldCode: "appliedByActorId", value: importCase.downstreamApplication.appliedByActorId || "none" }
+        ]
+      }
+    ],
+    blockers: blockerCodes.map((blockerCode) => ({
+      blockerCode,
+      title: blockerCode,
+      severity: blockerCode === "ready_for_review" ? "warning" : "blocking",
+      sectionCode: deriveSearchBlockerSectionCode(blockerCode),
+      source: "projection"
+    })),
+    relatedObjects,
+    evidence: evidenceRefs.map((evidenceRef) => ({
+      evidenceId: evidenceRef,
+      evidenceType: evidenceRef.startsWith("document:") ? "document" : "reference",
+      label: evidenceRef
+    })),
+    owner,
+    permissionSummary: {
+      scope: "company",
+      visibilityCode: "desktop_only",
+      allowedRoleCodes: ["company_admin", "approver", "bureau_user"],
+      requiresStepUp: true,
+      requiresDualControl: false
+    },
+    correctionLineage: {
+      parentImportCaseId: importCase.parentImportCaseId,
+      correctedToImportCaseId: importCase.correctedToImportCaseId,
+      correctionRequestIds: importCase.correctionRequests.map((request) => request.importCaseCorrectionRequestId),
+      correctionIds: importCase.corrections.map((correction) => correction.importCaseCorrectionId)
+    },
+    auditRefs: {
+      auditClass: "import_case",
+      auditEventIds,
+      evidenceBundleIds: evidenceRefs,
+      receiptIds: [],
+      correlationIds: [
+        importCase.importCaseId,
+        importCase.caseReference,
+        importCase.customsReference || null
+      ].filter(Boolean)
+    }
+  };
+
+  return {
+    projectionCode: "import_cases.import_case",
+    objectId: importCase.importCaseId,
+    objectType: "import_case",
+    displayTitle: buildSearchDisplayTitle(importCase),
+    displaySubtitle: buildSearchDisplaySubtitle(importCase),
+    documentStatus: importCase.status,
+    snippet: buildSearchSnippet(importCase, blockerCodes),
+    searchText: buildSearchText(importCase, reviewBoundaryCode, blockerCodes),
+    filterPayload: {
+      status: importCase.status,
+      completenessStatus: importCase.completeness.status,
+      applicationStatus: importCase.downstreamApplication.applicationStatus,
+      reviewBoundaryCode,
+      reviewQueueCode: importCase.reviewQueueCode || null,
+      hasOpenCorrectionRequest,
+      goodsOriginCountry: importCase.goodsOriginCountry || null
+    },
+    surfaceCodes: ["desktop.search", "desktop.finance", "desktop.review_center"],
+    detailPayload,
+    workbenchPayload: {
+      blockerCodes,
+      blockerBadges: blockerCodes.map((blockerCode) => ({ blockerCode, label: blockerCode })),
+      counterTags: compactStringList([
+        importCase.completeness.status === "blocking" ? "postingBlockedCount" : null,
+        importCase.status === "ready_for_review" || importCase.reviewRequired === true ? "vatReviewCount" : null
+      ]),
+      owner,
+      pillars: [
+        { pillarCode: "evidence", statusCode: importCase.completeness.status === "complete" ? "ready" : "attention" },
+        {
+          pillarCode: "review",
+          statusCode: importCase.reviewRequired === true || importCase.status === "ready_for_review" ? "attention" : "ready"
+        },
+        {
+          pillarCode: "downstream",
+          statusCode: importCase.downstreamApplication.applicationStatus === "applied" ? "complete" : "pending"
+        }
+      ]
+    },
+    sourceVersion: buildSearchProjectionVersion({
+      importCase,
+      reviewBoundaryCode,
+      blockerCodes,
+      hasOpenCorrectionRequest
+    }),
+    sourceUpdatedAt: importCase.updatedAt
+  };
+}
+
+function buildSearchDisplayTitle(importCase) {
+  if (importCase.status === "corrected") {
+    return `Superseded import case ${importCase.caseReference}`;
+  }
+  if (importCase.downstreamApplication.applicationStatus === "applied") {
+    return `Applied import case ${importCase.caseReference}`;
+  }
+  return `Import case ${importCase.caseReference}`;
+}
+
+function buildSearchDisplaySubtitle(importCase) {
+  return compactStringList([
+    importCase.status,
+    importCase.customsReference,
+    importCase.goodsOriginCountry
+  ]).join(" - ");
+}
+
+function buildSearchSnippet(importCase, blockerCodes) {
+  if (blockerCodes.length > 0) {
+    return `Blocking reasons: ${blockerCodes.join(", ")}.`;
+  }
+  return `Import VAT base ${importCase.completeness.importVatBaseAmount} SEK, import VAT ${importCase.completeness.importVatAmount} SEK.`;
+}
+
+function buildSearchText(importCase, reviewBoundaryCode, blockerCodes) {
+  return compactStringList([
+    "import case",
+    "importmoms",
+    "tull",
+    importCase.importCaseId,
+    importCase.caseReference,
+    importCase.status,
+    importCase.customsReference,
+    importCase.goodsOriginCountry,
+    importCase.reviewQueueCode,
+    reviewBoundaryCode,
+    importCase.downstreamApplication.applicationStatus,
+    importCase.downstreamApplication.targetDomainCode,
+    ...importCase.documentLinks.map((link) => link.roleCode),
+    ...importCase.components.map((component) => component.componentType),
+    ...importCase.correctionRequests.map((request) => request.reasonCode),
+    ...blockerCodes
+  ]).join(" ");
+}
+
+function buildSearchProjectionVersion({ importCase, reviewBoundaryCode, blockerCodes, hasOpenCorrectionRequest }) {
+  return buildHash({
+    importCaseId: importCase.importCaseId,
+    status: importCase.status,
+    completenessStatus: importCase.completeness.status,
+    reviewBoundaryCode,
+    reviewItemId: importCase.reviewItemId,
+    correctionRequestStatuses: importCase.correctionRequests.map((request) => request.status),
+    correctedToImportCaseId: importCase.correctedToImportCaseId,
+    parentImportCaseId: importCase.parentImportCaseId,
+    applicationStatus: importCase.downstreamApplication.applicationStatus,
+    appliedTargetDomainCode: importCase.downstreamApplication.targetDomainCode,
+    appliedTargetObjectId: importCase.downstreamApplication.targetObjectId,
+    blockerCodes,
+    hasOpenCorrectionRequest,
+    updatedAt: importCase.updatedAt
+  });
+}
+
+function buildSearchBlockerCodes(importCase) {
+  const blockerCodes = new Set(
+    (Array.isArray(importCase.completeness?.blockingReasonCodes) ? importCase.completeness.blockingReasonCodes : [])
+      .filter((value) => typeof value === "string" && value.trim().length > 0)
+      .map((value) => normalizeCode(value, "import_case_search_blocker_code_required").toLowerCase())
+  );
+  if (importCase.status === "ready_for_review") {
+    blockerCodes.add("ready_for_review");
+  }
+  if (importCase.reviewRequired === true && !["approved", "applied", "posted", "corrected", "closed"].includes(importCase.status)) {
+    blockerCodes.add("review_pending");
+  }
+  if (importCase.status === "corrected") {
+    blockerCodes.add("superseded_by_correction");
+  }
+  return [...blockerCodes].sort();
+}
+
+function deriveSearchReviewBoundaryCode(importCase) {
+  if (importCase.reviewQueueCode === "VAT_REVIEW" || importCase.reviewItemId) {
+    return "review_center.finance";
+  }
+  return "import_case.direct";
+}
+
+function deriveSearchBlockerSectionCode(blockerCode) {
+  if (blockerCode.includes("correction")) {
+    return "correctionRequests";
+  }
+  if (blockerCode.includes("review")) {
+    return "reviewBoundary";
+  }
+  if (blockerCode.includes("document") || blockerCode.includes("classification")) {
+    return "documentLineage";
+  }
+  return "componentsAndVatBase";
+}
+
+function compactStringList(values) {
+  return Array.from(
+    new Set(
+      (Array.isArray(values) ? values : [values])
+        .flat()
+        .map((value) => normalizeOptionalText(value))
+        .filter(Boolean)
+    )
+  );
+}
+
+function normalizeEvidenceRefs(values) {
+  return compactStringList(values);
+}
+
+function listSearchAuditEventIds({ state, importCase }) {
+  const relatedEntityIds = new Set([
+    importCase.importCaseId,
+    ...importCase.documentLinks.map((link) => link.importCaseDocumentLinkId),
+    ...importCase.components.map((component) => component.importCaseComponentId),
+    ...importCase.correctionRequests.map((request) => request.importCaseCorrectionRequestId),
+    ...importCase.corrections.map((correction) => correction.importCaseCorrectionId)
+  ]);
+  return state.auditEvents
+    .filter(
+      (event) =>
+        event.companyId === importCase.companyId &&
+        typeof event.auditEventId === "string" &&
+        relatedEntityIds.has(event.entityId)
+    )
+    .map((event) => event.auditEventId);
 }
 
 function buildReviewSummary(importCase) {

@@ -234,6 +234,7 @@ export async function tryHandlePhase14MigrationIntakeRoutes({ req, res, url, pat
         importCaseId: importCaseCorrectionRequestMatch.importCaseId,
         reasonCode: body.reasonCode,
         reasonNote: body.reasonNote || null,
+        evidenceRefs: body.evidenceRefs || [],
         actorId: principal.userId
       })
     );
