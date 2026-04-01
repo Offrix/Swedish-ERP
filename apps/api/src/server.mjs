@@ -11381,8 +11381,8 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         municipalityCode: body.municipalityCode ?? null,
         tableCode: body.tableCode ?? null,
         columnCode: body.columnCode ?? null,
-        adjustmentFixedAmount: body.adjustmentFixedAmount ?? null,
-        adjustmentPercentage: body.adjustmentPercentage ?? null,
+        adjustmentFixedAmount: body.fixedAdjustmentAmount ?? body.adjustmentFixedAmount ?? null,
+        adjustmentPercentage: body.percentageAdjustment ?? body.adjustmentPercentage ?? null,
         withholdingRatePercent: body.withholdingRatePercent ?? null,
         withholdingFixedAmount: body.withholdingFixedAmount ?? null,
         decisionSource: body.decisionSource,
@@ -11391,6 +11391,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         reasonCode: body.reasonCode ?? null,
         overrideEndsOn: body.overrideEndsOn ?? null,
         rollbackPlanRef: body.rollbackPlanRef ?? null,
+        annualIncomeBasisAmount: body.annualIncomeBasisAmount ?? null,
         sinkRatePercent: body.sinkRatePercent ?? null,
         sinkSeaIncome: body.sinkSeaIncome === true,
         actorId: principal.userId

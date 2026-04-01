@@ -604,9 +604,12 @@ VAT declaration byggs endast från `VatDecision` med status `approved` eller sen
 - `validTo`
 - `fixedAdjustmentAmount`
 - `percentageAdjustment`
+- `annualIncomeBasisAmount` för `engangsskatt`
 - `decisionSource`
 - `decisionReference`
 - `evidenceRef`
+
+Legacy-importer och gamla API-klienter får tillfälligt skicka `jamkning` respektive `a_sink`, men runtimebeteendet måste mappa dessa till samma regler som de kanoniska typerna ovan.
 
 ### `EmployerContributionDecisionSnapshot` måste bära
 
@@ -2350,7 +2353,7 @@ Bygga en verklig svensk payrollmotor med skattetabeller, SINK/A-SINK, sjuklön, 
 - Existing pay items and runs to classified pay items and receivable-aware postings.
 
 **Nya objekt / objektmodell**  
-- `TaxDecisionSnapshot(decisionId, decisionType, municipalityCode, tableCode, columnCode, validFrom, validTo, evidenceRef)`
+- `TaxDecisionSnapshot(decisionId, decisionType, municipalityCode, tableCode, columnCode, annualIncomeBasisAmount, validFrom, validTo, evidenceRef)`
 - `SinglePaymentTaxProfile(profileId, validFrom, validTo, thresholdBands)`
 - `EmployerContributionDecisionSnapshot(decisionId, ageBucket, rates, thresholds, legalBasisCode)`
 - `EmployeeReceivable(receivableId, employeeId, sourcePayRunId, amount, status)`

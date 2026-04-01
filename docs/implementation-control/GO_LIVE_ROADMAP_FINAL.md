@@ -733,7 +733,7 @@ Tax table engine, employer contributions, travel/benefits classification och vac
 Ingen live pay run, AGI submission eller pay batch före regulatorisk correctness är bevisad.
 
 **Delfaser**  
-- [ ] 11.1 [REWRITE] Bygg tax table engine med municipality/table/column, engångsskatt, jämkning, SINK, A-SINK och emergency manual fallback endast under dual review.
+- [x] 11.1 [REWRITE] Bygg tax table engine med municipality/table/column, engångsskatt, jämkning, SINK, A-SINK och emergency manual fallback endast under dual review.
 - [ ] 11.2 [REWRITE] Bygg employer contribution engine med full rate, 67+-regim, youth reduction, 1937-or-earlier no-contribution, special cases och växa-stöd som 2026 refund process mot skattekonto.
 - [ ] 11.3 [REWRITE] Splitta utlägg, kostnadsersättningar, traktamente, milersättning, benefits och pension contributions korrekt före skatt/AGI mapping. Travel receipt VAT separeras från payroll reimbursement.
 - [ ] 11.4 [NEW BUILD] Inför sjuklön dag 2–14, karensavdrag, semesterlön, semestertillägg, sparade dagar och semesterskuld inklusive arbetsgivaravgifter.

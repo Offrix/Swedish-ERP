@@ -107,14 +107,13 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
   payrollPlatform.createTaxDecisionSnapshot({
     companyId: COMPANY_ID,
     employmentId: jamkningEmployee.employment.employmentId,
-    decisionType: "jamkning",
+    decisionType: "jamkning_fast",
     incomeYear: 2026,
     validFrom: "2026-01-01",
     validTo: "2026-12-31",
     municipalityCode: "0180",
     tableCode: "34",
     columnCode: "1",
-    withholdingRatePercent: 30,
     adjustmentFixedAmount: -1200,
     decisionSource: "skatteverket_adjustment_decision",
     decisionReference: "jamkning-2026-001",
@@ -128,14 +127,44 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
     employmentIds: [jamkningEmployee.employment.employmentId],
     actorId: "unit-test"
   });
-  assert.equal(jamkningRun.payslips[0].totals.taxDecision.outputs.decisionType, "jamkning");
-  assert.equal(jamkningRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 10800);
+  assert.equal(jamkningRun.payslips[0].totals.taxDecision.outputs.decisionType, "jamkning_fast");
+  assert.equal(jamkningRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 7452);
+
+  const jamkningPercentEmployee = createMonthlyEmployee({
+    hrPlatform,
+    givenName: "Pia",
+    familyName: "Jamkningprocent",
+    monthlySalary: 40000,
+    identityValue: "19800112-2129"
+  });
+  payrollPlatform.createTaxDecisionSnapshot({
+    companyId: COMPANY_ID,
+    employmentId: jamkningPercentEmployee.employment.employmentId,
+    decisionType: "jamkning_procent",
+    incomeYear: 2026,
+    validFrom: "2026-01-01",
+    validTo: "2026-12-31",
+    adjustmentPercentage: 27,
+    decisionSource: "skatteverket_adjustment_decision",
+    decisionReference: "jamkning-2026-002",
+    evidenceRef: "evidence-jamkning-2026-002",
+    actorId: "unit-test"
+  });
+  const jamkningPercentRun = payrollPlatform.createPayRun({
+    companyId: COMPANY_ID,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202603",
+    employmentIds: [jamkningPercentEmployee.employment.employmentId],
+    actorId: "unit-test"
+  });
+  assert.equal(jamkningPercentRun.payslips[0].totals.taxDecision.outputs.decisionType, "jamkning_procent");
+  assert.equal(jamkningPercentRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 10800);
 
   const extraEmployee = createMonthlyEmployee({
     hrPlatform,
     givenName: "Ella",
     familyName: "Engang",
-    monthlySalary: 0,
+    monthlySalary: 40000,
     identityValue: "19800112-3333"
   });
   payrollPlatform.createTaxDecisionSnapshot({
@@ -145,7 +174,8 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
     incomeYear: 2026,
     validFrom: "2026-01-01",
     validTo: "2026-12-31",
-    withholdingRatePercent: 35,
+    columnCode: "1",
+    annualIncomeBasisAmount: 480000,
     decisionSource: "skatteverket_one_time_profile",
     decisionReference: "engang-2026-001",
     evidenceRef: "evidence-engang-2026",
@@ -168,7 +198,9 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
     actorId: "unit-test"
   });
   assert.equal(extraRun.payslips[0].totals.taxDecision.outputs.decisionType, "engangsskatt");
-  assert.equal(extraRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 3500);
+  assert.equal(extraRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 3400);
+  assert.equal(extraRun.payslips[0].totals.taxDecision.outputs.oneTimeLookupRatePercent, 34);
+  assert.equal(extraRun.payslips[0].totals.taxDecision.outputs.annualIncomeBasisAmount, 480000);
 
   const aSinkEmployee = createMonthlyEmployee({
     hrPlatform,
@@ -180,7 +212,7 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
   payrollPlatform.createTaxDecisionSnapshot({
     companyId: COMPANY_ID,
     employmentId: aSinkEmployee.employment.employmentId,
-    decisionType: "a_sink",
+    decisionType: "asink",
     incomeYear: 2026,
     validFrom: "2026-01-01",
     validTo: "2026-12-31",
@@ -196,7 +228,7 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
     employmentIds: [aSinkEmployee.employment.employmentId],
     actorId: "unit-test"
   });
-  assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.decisionType, "a_sink");
+  assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.decisionType, "asink");
   assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.taxFieldCode, "a_sink_tax");
   assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 6000);
 
@@ -388,6 +420,66 @@ test("Phase 11.1 table tax decisions reject inline withholding overrides", () =>
         actorId: "unit-test"
       }),
     (error) => error?.code === "tax_decision_snapshot_table_manual_withholding_forbidden"
+  );
+});
+
+test("Phase 11.1 one-time tax decisions require annual income basis and official lookup", () => {
+  const fixedNow = new Date("2026-03-28T09:30:00Z");
+  const hrPlatform = createHrPlatform({ clock: () => fixedNow });
+  const timePlatform = createTimePlatform({
+    clock: () => fixedNow,
+    hrPlatform
+  });
+  const payrollPlatform = createPayrollPlatform({
+    clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
+    hrPlatform,
+    timePlatform
+  });
+  const employee = createMonthlyEmployee({
+    hrPlatform,
+    givenName: "Ola",
+    familyName: "Engangguard",
+    monthlySalary: 40000,
+    identityValue: "19800112-9793"
+  });
+
+  assert.throws(
+    () =>
+      payrollPlatform.createTaxDecisionSnapshot({
+        companyId: COMPANY_ID,
+        employmentId: employee.employment.employmentId,
+        decisionType: "engangsskatt",
+        incomeYear: 2026,
+        validFrom: "2026-01-01",
+        validTo: "2026-12-31",
+        columnCode: "1",
+        decisionSource: "skatteverket_one_time_profile",
+        decisionReference: "engang-missing-annual-basis-2026",
+        evidenceRef: "evidence-engang-missing-annual-basis-2026",
+        actorId: "unit-test"
+      }),
+    (error) => error?.code === "tax_decision_snapshot_one_time_annual_income_basis_required"
+  );
+
+  assert.throws(
+    () =>
+      payrollPlatform.createTaxDecisionSnapshot({
+        companyId: COMPANY_ID,
+        employmentId: employee.employment.employmentId,
+        decisionType: "engangsskatt",
+        incomeYear: 2026,
+        validFrom: "2026-01-01",
+        validTo: "2026-12-31",
+        columnCode: "1",
+        annualIncomeBasisAmount: 480000,
+        withholdingRatePercent: 35,
+        decisionSource: "skatteverket_one_time_profile",
+        decisionReference: "engang-inline-rate-2026",
+        evidenceRef: "evidence-engang-inline-rate-2026",
+        actorId: "unit-test"
+      }),
+    (error) => error?.code === "tax_decision_snapshot_one_time_inline_withholding_forbidden"
   );
 });
 

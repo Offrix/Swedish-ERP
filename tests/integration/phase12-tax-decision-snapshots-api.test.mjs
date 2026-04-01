@@ -142,7 +142,7 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
       body: {
         companyId: COMPANY_ID,
         employmentId: aSinkEmployee.employment.employmentId,
-        decisionType: "a_sink",
+        decisionType: "asink",
         incomeYear: 2026,
         validFrom: "2026-01-01",
         validTo: "2026-12-31",
@@ -164,7 +164,7 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
         employmentIds: [aSinkEmployee.employment.employmentId]
       }
     });
-    assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.decisionType, "a_sink");
+    assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.decisionType, "asink");
     assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.taxFieldCode, "a_sink_tax");
     assert.equal(aSinkRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 6000);
     await requestJson(baseUrl, `/v1/payroll/pay-runs/${aSinkRun.payRunId}/approve`, {
@@ -189,6 +189,58 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
     assert.equal(aSinkAgiEmployee.payloadJson.taxFields.preliminaryTax, null);
     assert.equal(aSinkAgiEmployee.payloadJson.taxFields.sinkTax, null);
     assert.equal(aSinkAgiEmployee.payloadJson.taxFields.aSinkTax, 6000);
+
+    const oneTimeEmployee = await createMonthlyEmployee({
+      baseUrl,
+      token: sessionToken,
+      givenName: "Egon",
+      familyName: "Engangapi",
+      identityValue: "19800112-7110"
+    });
+    const oneTimeDecision = await requestJson(baseUrl, "/v1/payroll/tax-decisions", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: oneTimeEmployee.employment.employmentId,
+        decisionType: "engangsskatt",
+        incomeYear: 2026,
+        validFrom: "2026-01-01",
+        validTo: "2026-12-31",
+        columnCode: "1",
+        annualIncomeBasisAmount: 480000,
+        decisionSource: "skatteverket_one_time_profile",
+        decisionReference: "engang-api-2026",
+        evidenceRef: "evidence-engang-api-2026"
+      }
+    });
+    assert.equal(oneTimeDecision.status, "approved");
+
+    const oneTimeRun = await requestJson(baseUrl, "/v1/payroll/pay-runs", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202603",
+        runType: "extra",
+        employmentIds: [oneTimeEmployee.employment.employmentId],
+        manualInputs: [
+          {
+            employmentId: oneTimeEmployee.employment.employmentId,
+            payItemCode: "BONUS",
+            amount: 10000,
+            processingStep: 4
+          }
+        ]
+      }
+    });
+    assert.equal(oneTimeRun.payslips[0].totals.taxDecision.outputs.decisionType, "engangsskatt");
+    assert.equal(oneTimeRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 3400);
+    assert.equal(oneTimeRun.payslips[0].totals.taxDecision.outputs.oneTimeLookupRatePercent, 34);
+    assert.equal(oneTimeRun.payslips[0].totals.taxDecision.outputs.annualIncomeBasisAmount, 480000);
 
     const emergencyEmployee = await createMonthlyEmployee({
       baseUrl,

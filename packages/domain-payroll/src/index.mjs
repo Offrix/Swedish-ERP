@@ -14,7 +14,9 @@ import {
 import { createConfiguredSecretStore } from "../../domain-core/src/secret-runtime.mjs";
 import {
   getSkatteverketMonthlyTaxTable2026Meta,
-  lookupSkatteverketMonthlyTaxTable2026
+  getSkatteverketOneTimeTaxTable2026Meta,
+  lookupSkatteverketMonthlyTaxTable2026,
+  lookupSkatteverketOneTimeTaxTable2026
 } from "./skatteverket-tax-tables.mjs";
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
@@ -25,7 +27,17 @@ export const PAYROLL_EXCEPTION_STATUSES = Object.freeze(["open", "resolved", "wa
 export const PAYROLL_EXCEPTION_SEVERITIES = Object.freeze(["info", "warning", "error"]);
 export const PAYROLL_FREQUENCY_CODES = Object.freeze(["monthly"]);
 export const PAYROLL_TAX_MODES = Object.freeze(["pending", "manual_rate", "sink"]);
-export const PAYROLL_TAX_DECISION_TYPES = Object.freeze(["tabell", "jamkning", "engangsskatt", "sink", "a_sink", "emergency_manual"]);
+export const PAYROLL_TAX_DECISION_TYPES = Object.freeze([
+  "tabell",
+  "jamkning",
+  "jamkning_fast",
+  "jamkning_procent",
+  "engangsskatt",
+  "sink",
+  "a_sink",
+  "asink",
+  "emergency_manual"
+]);
 export const PAYROLL_TAX_DECISION_STATUSES = Object.freeze(["draft", "approved", "superseded"]);
 export const PAYROLL_EMPLOYER_CONTRIBUTION_DECISION_TYPES = Object.freeze([
   "full",
@@ -61,6 +73,14 @@ export const PAYROLL_PAYOUT_BATCH_STATUSES = Object.freeze(["exported", "matched
 const PAYROLL_EXTERNAL_CONSUMPTION_STAGES = Object.freeze(["calculated", "approved"]);
 const PAYROLL_EMERGENCY_OVERRIDE_DECISION_TYPES = Object.freeze(["emergency_manual"]);
 const PAYROLL_DUAL_REVIEW_EMPLOYER_CONTRIBUTION_DECISION_TYPES = Object.freeze(["vaxa", "emergency_manual"]);
+
+function isJamkningDecisionType(decisionType) {
+  return decisionType === "jamkning" || decisionType === "jamkning_fast" || decisionType === "jamkning_procent";
+}
+
+function isASinkDecisionType(decisionType) {
+  return decisionType === "a_sink" || decisionType === "asink";
+}
 export const PAYROLL_AGI_PROVIDER_CODE = "skatteverket_agi";
 export const PAYROLL_AGI_PROVIDER_BASELINE_CODE = "SE-SKATTEVERKET-AGI-API";
 export const PAYROLL_PROVIDER_BASELINES = Object.freeze([
@@ -96,6 +116,7 @@ const PAYROLL_EMPLOYER_CONTRIBUTION_RULE_PACK_CODE = "SE-EMPLOYER-CONTRIBUTIONS"
 const PAYROLL_TAX_RULE_PACK_CODE = "SE-PAYROLL-TAX";
 const PAYROLL_GARNISHMENT_RULE_PACK_CODE = "SE-GARNISHMENT";
 const PAYROLL_TAX_TABLE_BASELINE_2026 = Object.freeze(getSkatteverketMonthlyTaxTable2026Meta());
+const PAYROLL_ONE_TIME_TAX_TABLE_BASELINE_2026 = Object.freeze(getSkatteverketOneTimeTaxTable2026Meta());
 const PAYROLL_EXCEPTION_RULES = Object.freeze({
   employment_contract_missing: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
   payroll_tax_profile_missing: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
@@ -250,6 +271,12 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
         tableFormatCode: "skatteverket_allmanna_tabeller_manad_2026_txt",
         monthlyThresholdForPercentageRows: 80001
       },
+      oneTimeTableBaseline: {
+        sourceUrl: PAYROLL_ONE_TIME_TAX_TABLE_BASELINE_2026.sourceUrl,
+        sourceSnapshotDate: PAYROLL_ONE_TIME_TAX_TABLE_BASELINE_2026.sourceSnapshotDate,
+        sourceSha256: PAYROLL_ONE_TIME_TAX_TABLE_BASELINE_2026.sourceSha256,
+        tableFormatCode: "skatteverket_teknisk_beskrivning_skv_433_2026_engangsbelopp"
+      },
       sink: {
         standardRatePercent: 22.5,
         seaIncomeRatePercent: 15
@@ -260,12 +287,14 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
     },
     humanReadableExplanation: [
       "Ordinary table tax resolves from the official Skatteverket 2026 monthly tax-table baseline by table and column.",
+      "One-time tax resolves from the official 2026 engångstabell by annual income basis and tax column.",
       "SINK is versioned through the rule pack with standard and sea-income rates.",
       "A-SINK is versioned as a separate fixed-rate path for foreign artists and athletes."
     ],
     testVectors: [
       { vectorId: "payroll-tax-table-34-col1-40000-2026" },
       { vectorId: "payroll-tax-table-34-col1-82000-2026" },
+      { vectorId: "payroll-one-time-tax-col1-annual-480000-10000-2026" },
       { vectorId: "payroll-manual-rate-2026" },
       { vectorId: "payroll-sink-2026" },
       { vectorId: "payroll-sink-sea-2026" },
@@ -787,6 +816,8 @@ export function createPayrollEngine({
     columnCode = null,
     adjustmentFixedAmount = null,
     adjustmentPercentage = null,
+    fixedAdjustmentAmount = null,
+    percentageAdjustment = null,
     withholdingRatePercent = null,
     withholdingFixedAmount = null,
     decisionSource,
@@ -795,6 +826,7 @@ export function createPayrollEngine({
     reasonCode = null,
     overrideEndsOn = null,
     rollbackPlanRef = null,
+    annualIncomeBasisAmount = null,
     sinkRatePercent = null,
     sinkSeaIncome = false,
     actorId = "system"
@@ -821,8 +853,8 @@ export function createPayrollEngine({
       municipalityCode,
       tableCode,
       columnCode,
-      adjustmentFixedAmount,
-      adjustmentPercentage,
+      adjustmentFixedAmount: fixedAdjustmentAmount ?? adjustmentFixedAmount,
+      adjustmentPercentage: percentageAdjustment ?? adjustmentPercentage,
       withholdingRatePercent,
       withholdingFixedAmount,
       decisionSource,
@@ -831,6 +863,7 @@ export function createPayrollEngine({
       reasonCode,
       overrideEndsOn,
       rollbackPlanRef,
+      annualIncomeBasisAmount,
       sinkRatePercent,
       sinkSeaIncome
     });
@@ -5221,6 +5254,7 @@ function calculateEmploymentRun({
     taxableBase,
     payDate: period.payDate,
     employee,
+    employmentContract: contract,
     statutoryProfile,
     taxDecisionSnapshot,
     executionBoundary,
@@ -5759,6 +5793,7 @@ function buildTaxPreview({
   taxableBase,
   payDate,
   employee,
+  employmentContract = null,
   statutoryProfile,
   taxDecisionSnapshot = null,
   executionBoundary = null,
@@ -5839,6 +5874,11 @@ function buildTaxPreview({
       taxDecisionSnapshot: effectiveTaxContext,
       taxableBase: normalizedTaxableBase
     });
+    const oneTimeTaxLookup = resolveOfficialOneTimeTaxLookupForDecisionSnapshot({
+      taxDecisionSnapshot: effectiveTaxContext,
+      taxableBase: normalizedTaxableBase,
+      employmentContract
+    });
     if (effectiveTaxContext.status !== "approved") {
       warnings.push(createWarning("tax_decision_snapshot_not_approved", "Tax decision snapshot must be approved before payroll calculation."));
       const decisionObject = {
@@ -5870,7 +5910,8 @@ function buildTaxPreview({
       taxableBase: normalizedTaxableBase,
       sinkDefaults: rulePack.machineReadableRules?.sink || {},
       aSinkDefaults: rulePack.machineReadableRules?.aSink || {},
-      taxTableLookup
+      taxTableLookup,
+      oneTimeTaxLookup
     });
     if (snapshotAmount == null) {
       warnings.push(createWarning("tax_decision_snapshot_incomplete", "Tax decision snapshot could not resolve a withholding amount."));
@@ -5929,6 +5970,13 @@ function buildTaxPreview({
         tableLookupUpperBound: taxTableLookup?.upperBound ?? null,
         tableLookupSourceUrl: taxTableLookup?.sourceUrl ?? null,
         tableLookupSourceSha256: taxTableLookup?.sourceSha256 ?? null,
+        annualIncomeBasisAmount: oneTimeTaxLookup?.annualIncomeBasisAmount ?? effectiveTaxContext.annualIncomeBasisAmount ?? null,
+        oneTimeLookupRatePercent: oneTimeTaxLookup?.ratePercent ?? null,
+        oneTimeLookupRowCode: oneTimeTaxLookup?.rowCode ?? null,
+        oneTimeLookupLowerBound: oneTimeTaxLookup?.lowerBound ?? null,
+        oneTimeLookupUpperBound: oneTimeTaxLookup?.upperBound ?? null,
+        oneTimeLookupSourceUrl: oneTimeTaxLookup?.sourceUrl ?? null,
+        oneTimeLookupSourceSha256: oneTimeTaxLookup?.sourceSha256 ?? null,
         sinkRatePercent: effectiveTaxContext.sinkRatePercent ?? null,
         sinkSeaIncome: effectiveTaxContext.sinkSeaIncome === true,
         decisionSource: effectiveTaxContext.decisionSource,
@@ -5940,8 +5988,9 @@ function buildTaxPreview({
         `decisionType=${effectiveTaxContext.decisionType}`,
         `decisionSource=${effectiveTaxContext.decisionSource}`,
         `decisionReference=${effectiveTaxContext.decisionReference}`,
+        oneTimeTaxLookup ? `annualIncomeBasisAmount=${oneTimeTaxLookup.annualIncomeBasisAmount}` : null,
         `taxableBase=${normalizedTaxableBase}`
-      ]
+      ].filter(Boolean)
     };
     return {
       amount: snapshotAmount,
@@ -6139,7 +6188,7 @@ function resolveTaxFieldCodeForDecisionType(decisionType) {
   if (decisionType === "sink") {
     return "sink_tax";
   }
-  if (decisionType === "a_sink") {
+  if (isASinkDecisionType(decisionType)) {
     return "a_sink_tax";
   }
   return "preliminary_tax";
@@ -6149,16 +6198,25 @@ function resolveTaxDecisionCode({ decisionType, sinkSeaIncome = false }) {
   const decisionCodeByType = {
     tabell: "PAYROLL_TAX_TABLE",
     jamkning: "PAYROLL_TAX_ADJUSTMENT",
+    jamkning_fast: "PAYROLL_TAX_ADJUSTMENT_FIXED",
+    jamkning_procent: "PAYROLL_TAX_ADJUSTMENT_PERCENT",
     engangsskatt: "PAYROLL_TAX_ONE_TIME",
     sink: sinkSeaIncome ? "PAYROLL_TAX_SINK_SEA_INCOME" : "PAYROLL_TAX_SINK",
     a_sink: "PAYROLL_TAX_A_SINK",
+    asink: "PAYROLL_TAX_A_SINK",
     emergency_manual: "PAYROLL_TAX_EMERGENCY_MANUAL"
   };
   return decisionCodeByType[decisionType] || "PAYROLL_TAX_DECISION";
 }
 
 function resolveOfficialTaxTableLookupForDecisionSnapshot({ taxDecisionSnapshot, taxableBase }) {
-  if (!taxDecisionSnapshot || taxDecisionSnapshot.decisionType !== "tabell") {
+  if (!taxDecisionSnapshot) {
+    return null;
+  }
+  const usesTableLookup =
+    taxDecisionSnapshot.decisionType === "tabell"
+    || (isJamkningDecisionType(taxDecisionSnapshot.decisionType) && taxDecisionSnapshot.tableCode && taxDecisionSnapshot.columnCode);
+  if (!usesTableLookup) {
     return null;
   }
   return lookupSkatteverketMonthlyTaxTable2026({
@@ -6168,12 +6226,48 @@ function resolveOfficialTaxTableLookupForDecisionSnapshot({ taxDecisionSnapshot,
   });
 }
 
+function resolveOfficialOneTimeTaxLookupForDecisionSnapshot({
+  taxDecisionSnapshot,
+  taxableBase,
+  employmentContract = null
+}) {
+  if (!taxDecisionSnapshot || taxDecisionSnapshot.decisionType !== "engangsskatt") {
+    return null;
+  }
+  const annualIncomeBasisAmount = resolveAnnualIncomeBasisAmountForOneTimeTaxDecision({
+    taxDecisionSnapshot,
+    employmentContract
+  });
+  if (annualIncomeBasisAmount == null) {
+    return null;
+  }
+  return lookupSkatteverketOneTimeTaxTable2026({
+    columnCode: taxDecisionSnapshot.columnCode,
+    annualIncomeBasisAmount,
+    oneTimeAmount: taxableBase
+  });
+}
+
+function resolveAnnualIncomeBasisAmountForOneTimeTaxDecision({
+  taxDecisionSnapshot,
+  employmentContract = null
+}) {
+  if (taxDecisionSnapshot?.annualIncomeBasisAmount != null) {
+    return roundMoney(Math.max(0, taxDecisionSnapshot.annualIncomeBasisAmount));
+  }
+  if (employmentContract?.salaryModelCode === "monthly_salary" && Number.isFinite(Number(employmentContract.monthlySalary))) {
+    return roundMoney(Math.max(0, Number(employmentContract.monthlySalary)) * 12);
+  }
+  return null;
+}
+
 function resolveTaxDecisionSnapshotAmount({
   taxDecisionSnapshot,
   taxableBase,
   sinkDefaults = {},
   aSinkDefaults = {},
-  taxTableLookup = null
+  taxTableLookup = null,
+  oneTimeTaxLookup = null
 }) {
   if (!taxDecisionSnapshot) {
     return null;
@@ -6182,24 +6276,35 @@ function resolveTaxDecisionSnapshotAmount({
     const sinkRatePercent = taxDecisionSnapshot.sinkRatePercent ?? (taxDecisionSnapshot.sinkSeaIncome ? sinkDefaults.seaIncomeRatePercent : sinkDefaults.standardRatePercent);
     return sinkRatePercent == null ? null : roundMoney(taxableBase * (sinkRatePercent / 100));
   }
-  if (taxDecisionSnapshot.decisionType === "a_sink") {
+  if (isASinkDecisionType(taxDecisionSnapshot.decisionType)) {
     const aSinkRatePercent = taxDecisionSnapshot.withholdingRatePercent ?? aSinkDefaults.standardRatePercent;
     return aSinkRatePercent == null ? null : roundMoney(taxableBase * (aSinkRatePercent / 100));
   }
-  if (taxDecisionSnapshot.decisionType === "engangsskatt" || taxDecisionSnapshot.decisionType === "emergency_manual") {
+  if (taxDecisionSnapshot.decisionType === "engangsskatt") {
+    return oneTimeTaxLookup?.withholdingAmount ?? null;
+  }
+  if (taxDecisionSnapshot.decisionType === "emergency_manual") {
     return taxDecisionSnapshot.withholdingRatePercent == null ? null : roundMoney(taxableBase * (taxDecisionSnapshot.withholdingRatePercent / 100));
   }
   if (taxDecisionSnapshot.decisionType === "tabell") {
     return taxTableLookup?.withholdingAmount ?? null;
   }
-  if (taxDecisionSnapshot.decisionType === "jamkning") {
+  if (isJamkningDecisionType(taxDecisionSnapshot.decisionType)) {
     let amount = null;
-    if (taxDecisionSnapshot.withholdingFixedAmount != null) {
+    if (
+      taxDecisionSnapshot.decisionType === "jamkning_fast" &&
+      taxDecisionSnapshot.withholdingFixedAmount == null &&
+      taxTableLookup?.withholdingAmount != null
+    ) {
+      amount = roundMoney(taxTableLookup.withholdingAmount);
+    } else if (taxDecisionSnapshot.withholdingFixedAmount != null) {
       amount = roundMoney(taxDecisionSnapshot.withholdingFixedAmount);
     } else if (taxDecisionSnapshot.withholdingRatePercent != null) {
       amount = roundMoney(taxableBase * (taxDecisionSnapshot.withholdingRatePercent / 100));
     } else if (taxDecisionSnapshot.adjustmentPercentage != null) {
       amount = roundMoney(taxableBase * (taxDecisionSnapshot.adjustmentPercentage / 100));
+    } else if (taxTableLookup?.withholdingAmount != null) {
+      amount = roundMoney(taxTableLookup.withholdingAmount);
     }
     if (amount == null) {
       return null;
@@ -8028,8 +8133,8 @@ function selectTaxDecisionSnapshot({
   const candidates = listApprovedTaxDecisionSnapshotsForEmployment(state, companyId, employmentId, effectiveDate);
   const preferredTypes =
     runType === "extra" || runType === "correction" || runType === "final"
-      ? ["engangsskatt", "sink", "a_sink", "jamkning", "tabell", "emergency_manual"]
-      : ["sink", "a_sink", "jamkning", "tabell", "engangsskatt", "emergency_manual"];
+      ? ["engangsskatt", "sink", "asink", "a_sink", "jamkning_fast", "jamkning_procent", "jamkning", "tabell", "emergency_manual"]
+      : ["sink", "asink", "a_sink", "jamkning_fast", "jamkning_procent", "jamkning", "tabell", "engangsskatt", "emergency_manual"];
   for (const decisionType of preferredTypes) {
     const match = candidates.find((candidate) => candidate.decisionType === decisionType);
     if (match) {
@@ -9134,11 +9239,11 @@ function normalizeTaxDecisionSnapshot(snapshot = {}) {
     tableCode: normalizeOptionalText(snapshot.tableCode),
     columnCode: normalizeOptionalText(snapshot.columnCode),
     adjustmentFixedAmount: normalizeOptionalMoney(
-      snapshot.adjustmentFixedAmount,
+      snapshot.fixedAdjustmentAmount ?? snapshot.adjustmentFixedAmount,
       "tax_decision_snapshot_adjustment_fixed_amount_invalid"
     ),
     adjustmentPercentage: normalizeOptionalNumber(
-      snapshot.adjustmentPercentage,
+      snapshot.percentageAdjustment ?? snapshot.adjustmentPercentage,
       "tax_decision_snapshot_adjustment_percentage_invalid"
     ),
     withholdingRatePercent: normalizeOptionalNumber(
@@ -9153,6 +9258,10 @@ function normalizeTaxDecisionSnapshot(snapshot = {}) {
     decisionReference: requireText(snapshot.decisionReference, "tax_decision_snapshot_decision_reference_required"),
     evidenceRef: requireText(snapshot.evidenceRef, "tax_decision_snapshot_evidence_ref_required"),
     reasonCode: normalizeOptionalText(snapshot.reasonCode),
+    annualIncomeBasisAmount: normalizeOptionalMoney(
+      snapshot.annualIncomeBasisAmount,
+      "tax_decision_snapshot_annual_income_basis_amount_invalid"
+    ),
     sinkRatePercent: normalizeOptionalNumber(snapshot.sinkRatePercent, "tax_decision_snapshot_sink_rate_invalid"),
     sinkSeaIncome: snapshot.sinkSeaIncome === true
   };
@@ -9174,15 +9283,30 @@ function normalizeTaxDecisionSnapshot(snapshot = {}) {
     }
   }
 
-  if (decisionType === "jamkning") {
+  if (isJamkningDecisionType(decisionType)) {
+    if (decisionType === "jamkning_fast" && normalized.adjustmentPercentage != null) {
+      throw createError(
+        400,
+        "tax_decision_snapshot_adjustment_percentage_forbidden_for_fast_adjustment",
+        "Fixed adjustment decisions may not carry adjustmentPercentage."
+      );
+    }
+    if (decisionType === "jamkning_procent" && normalized.adjustmentFixedAmount != null) {
+      throw createError(
+        400,
+        "tax_decision_snapshot_adjustment_fixed_amount_forbidden_for_percent_adjustment",
+        "Percentage adjustment decisions may not carry adjustmentFixedAmount."
+      );
+    }
     if (normalized.adjustmentFixedAmount == null && normalized.adjustmentPercentage == null) {
       throw createError(
         400,
         "tax_decision_snapshot_adjustment_required",
-        "Jämkning decisions require adjustmentFixedAmount or adjustmentPercentage."
+        "Jamkning decisions require adjustmentFixedAmount or adjustmentPercentage."
       );
     }
     if (
+      decisionType !== "jamkning_procent" &&
       normalized.withholdingRatePercent == null &&
       normalized.withholdingFixedAmount == null &&
       (!normalized.tableCode || !normalized.columnCode)
@@ -9190,17 +9314,33 @@ function normalizeTaxDecisionSnapshot(snapshot = {}) {
       throw createError(
         400,
         "tax_decision_snapshot_jamkning_withholding_required",
-        "Jämkning decisions require a withholding instruction or table reference."
+        "Jamkning decisions require a withholding instruction or table reference."
       );
     }
   }
 
-  if (decisionType === "engangsskatt" && normalized.withholdingRatePercent == null) {
-    throw createError(
-      400,
-      "tax_decision_snapshot_one_time_rate_required",
-      "Engångsskatt decisions require withholdingRatePercent."
-    );
+  if (decisionType === "engangsskatt") {
+    if (!normalized.columnCode) {
+      throw createError(
+        400,
+        "tax_decision_snapshot_one_time_column_required",
+        "Engangsskatt decisions require columnCode."
+      );
+    }
+    if (normalized.annualIncomeBasisAmount == null) {
+      throw createError(
+        400,
+        "tax_decision_snapshot_one_time_annual_income_basis_required",
+        "Engangsskatt decisions require annualIncomeBasisAmount."
+      );
+    }
+    if (normalized.withholdingRatePercent != null || normalized.withholdingFixedAmount != null) {
+      throw createError(
+        400,
+        "tax_decision_snapshot_one_time_inline_withholding_forbidden",
+        "Engangsskatt decisions must resolve withholding from the official one-time tax baseline, not from inline withholding values."
+      );
+    }
   }
 
   if (decisionType === "sink" && normalized.sinkRatePercent == null) {
@@ -9208,6 +9348,14 @@ function normalizeTaxDecisionSnapshot(snapshot = {}) {
       400,
       "tax_decision_snapshot_sink_rate_required",
       "SINK decisions require sinkRatePercent."
+    );
+  }
+
+  if (isASinkDecisionType(decisionType) && normalized.sinkRatePercent != null) {
+    throw createError(
+      400,
+      "tax_decision_snapshot_asink_sink_rate_forbidden",
+      "A-SINK decisions use withholdingRatePercent or the official A-SINK default, not sinkRatePercent."
     );
   }
 

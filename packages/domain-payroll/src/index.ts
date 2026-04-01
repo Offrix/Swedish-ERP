@@ -318,7 +318,16 @@ export interface TaxDecisionSnapshot {
   readonly taxDecisionSnapshotId: string;
   readonly companyId: string;
   readonly employmentId: string;
-  readonly decisionType: "tabell" | "jamkning" | "engangsskatt" | "sink" | "a_sink" | "emergency_manual";
+  readonly decisionType:
+    | "tabell"
+    | "jamkning"
+    | "jamkning_fast"
+    | "jamkning_procent"
+    | "engangsskatt"
+    | "sink"
+    | "a_sink"
+    | "asink"
+    | "emergency_manual";
   readonly incomeYear: number;
   readonly validFrom: string;
   readonly validTo: string | null;
@@ -329,6 +338,7 @@ export interface TaxDecisionSnapshot {
   readonly adjustmentPercentage: number | null;
   readonly withholdingRatePercent: number | null;
   readonly withholdingFixedAmount: number | null;
+  readonly annualIncomeBasisAmount: number | null;
   readonly decisionSource: string;
   readonly decisionReference: string;
   readonly evidenceRef: string;
