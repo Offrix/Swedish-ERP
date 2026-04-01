@@ -109,6 +109,106 @@ test("Phase 10.1 API exposes hardened document chain fields and read routes", as
   }
 });
 
+test("Phase 10.1 API rejects retention rewrites while keeping document identity anchored", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-28T09:00:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const session = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: "00000000-0000-4000-8000-000000000001",
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const created = await requestJson(`${baseUrl}/v1/documents`, {
+      method: "POST",
+      token: session.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001",
+        documentType: "supplier_invoice",
+        sourceChannel: "email_inbox",
+        sourceReference: "phase10-doc-immutable-001",
+        retentionPolicyCode: "supplier_invoice_standard",
+        metadataJson: {
+          filename: "phase10-doc-immutable-001.pdf",
+          senderAddress: "supplier@example.com",
+          mailboxCode: "ap-inbox"
+        }
+      }
+    });
+
+    const original = await requestJson(`${baseUrl}/v1/documents/${created.documentId}/versions`, {
+      method: "POST",
+      token: session.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: created.companyId,
+        variantType: "original",
+        storageKey: "documents/originals/phase10-doc-immutable-001.pdf",
+        mimeType: "application/pdf",
+        contentText: "phase10 immutable original content"
+      }
+    });
+
+    const retentionRewrite = await requestJson(`${baseUrl}/v1/documents/${created.documentId}/versions`, {
+      method: "POST",
+      token: session.sessionToken,
+      expectedStatus: 409,
+      body: {
+        companyId: created.companyId,
+        variantType: "ocr",
+        storageKey: "documents/ocr/phase10-doc-immutable-001.txt",
+        mimeType: "text/plain",
+        contentText: "phase10 immutable ocr content",
+        derivesFromDocumentVersionId: original.version.documentVersionId,
+        retentionClassCode: "payroll_sensitive"
+      }
+    });
+    assert.equal(retentionRewrite.error, "document_retention_class_immutable");
+
+    const sourceVariant = await requestJson(`${baseUrl}/v1/documents/${created.documentId}/versions`, {
+      method: "POST",
+      token: session.sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: created.companyId,
+        variantType: "ocr",
+        storageKey: "documents/ocr/phase10-doc-immutable-001-alt.txt",
+        mimeType: "text/plain",
+        contentText: "phase10 immutable ocr content",
+        derivesFromDocumentVersionId: original.version.documentVersionId,
+        sourceReference: "phase10-doc-immutable-override"
+      }
+    });
+    assert.equal(sourceVariant.version.sourceReference, "phase10-doc-immutable-override");
+
+    const fetched = await requestJson(
+      `${baseUrl}/v1/documents/${created.documentId}?companyId=${created.companyId}`,
+      {
+        token: session.sessionToken
+      }
+    );
+    assert.equal(fetched.retentionClassCode, "supplier_invoice_standard");
+    assert.equal(fetched.sourceReference, "phase10-doc-immutable-001");
+    assert.notEqual(sourceVariant.version.sourceFingerprint, fetched.sourceFingerprint);
+  } finally {
+    await stopServer(server);
+  }
+});
+
 async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
   const started = await requestJson(`${baseUrl}/v1/auth/login`, {
     method: "POST",

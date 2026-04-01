@@ -81,3 +81,78 @@ test("Phase 10.1 document chain carries source fingerprint, retention class and 
     true
   );
 });
+
+test("Phase 10.1 document chain rejects retention rewrites while keeping document identity anchored", () => {
+  const engine = createDocumentArchiveEngine({
+    clock: () => new Date("2026-03-28T09:00:00Z")
+  });
+
+  const document = engine.createDocumentRecord({
+    companyId: "company-1",
+    documentType: "supplier_invoice",
+    sourceChannel: "email_inbox",
+    sourceReference: "mail-immutable-100",
+    retentionPolicyCode: "supplier_invoice_standard",
+    metadataJson: {
+      filename: "invoice-immutable-100.pdf",
+      senderAddress: "supplier@example.com",
+      mailboxCode: "ap-inbox"
+    },
+    actorId: "user-1"
+  });
+
+  const original = engine.appendDocumentVersion({
+    companyId: document.companyId,
+    documentId: document.documentId,
+    variantType: "original",
+    storageKey: "documents/originals/invoice-immutable-100.pdf",
+    mimeType: "application/pdf",
+    contentText: "original immutable bytes",
+    actorId: "user-1"
+  });
+
+  assert.throws(
+    () =>
+      engine.appendDocumentVersion({
+        companyId: document.companyId,
+        documentId: document.documentId,
+        variantType: "ocr",
+        storageKey: "documents/ocr/invoice-immutable-100.txt",
+        mimeType: "text/plain",
+        contentText: "ocr text",
+        derivesFromDocumentVersionId: original.version.documentVersionId,
+        retentionClassCode: "payroll_sensitive",
+        actorId: "user-1"
+      }),
+    (error) => {
+      assert.equal(error?.status, 409);
+      assert.equal(error?.code, "document_retention_class_immutable");
+      return true;
+    }
+  );
+
+  const derivative = engine.appendDocumentVersion({
+    companyId: document.companyId,
+    documentId: document.documentId,
+    variantType: "ocr",
+    storageKey: "documents/ocr/invoice-immutable-100-alt.txt",
+    mimeType: "text/plain",
+    contentText: "ocr text",
+    derivesFromDocumentVersionId: original.version.documentVersionId,
+    sourceReference: "mail-immutable-override",
+    actorId: "user-1"
+  });
+
+  const currentDocument = engine.getDocumentRecord({
+    companyId: document.companyId,
+    documentId: document.documentId
+  });
+  assert.equal(currentDocument.retentionClassCode, "supplier_invoice_standard");
+  assert.equal(currentDocument.sourceFingerprint, original.document.sourceFingerprint);
+  assert.notEqual(derivative.version.sourceFingerprint, currentDocument.sourceFingerprint);
+  assert.equal(derivative.version.sourceReference, "mail-immutable-override");
+  assert.equal(
+    currentDocument.evidenceRefs.includes(`retention_class:${currentDocument.retentionClassCode}`),
+    true
+  );
+});

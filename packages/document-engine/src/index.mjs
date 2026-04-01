@@ -246,6 +246,17 @@ export function createDocumentArchiveEngine({
         ...storedMetadata
       }
     });
+    const baseIdentityLocked = Boolean(document.originalDocumentVersionId);
+    const explicitRetentionClassCode = normalizeOptionalText(retentionClassCode) || normalizeOptionalText(storedMetadata.retentionClassCode);
+    if (baseIdentityLocked && explicitRetentionClassCode && explicitRetentionClassCode !== document.retentionClassCode) {
+      throw createError(
+        409,
+        "document_retention_class_immutable",
+        "Document retention class is immutable after the original version exists."
+      );
+    }
+    const effectiveRetentionClassCode = baseIdentityLocked ? document.retentionClassCode : resolvedRetentionClassCode;
+    const documentSourceFingerprint = baseIdentityLocked ? document.sourceFingerprint : sourceFingerprint;
 
     const version = {
       documentVersionId: crypto.randomUUID(),
@@ -261,7 +272,7 @@ export function createDocumentArchiveEngine({
       fileSizeBytes: resolvedSize,
       sourceReference: resolvedSourceReference,
       sourceFingerprint,
-      retentionClassCode: resolvedRetentionClassCode,
+      retentionClassCode: effectiveRetentionClassCode,
       derivesFromDocumentVersionId: derivedFromVersionId,
       evidenceRefs: buildDocumentVersionEvidenceRefs({
         documentId: document.documentId,
@@ -269,7 +280,7 @@ export function createDocumentArchiveEngine({
         storageKey: resolvedStorageKey,
         checksumSha256: resolvedHash,
         sourceFingerprint,
-        retentionClassCode: resolvedRetentionClassCode,
+        retentionClassCode: effectiveRetentionClassCode,
         derivesFromDocumentVersionId: derivedFromVersionId
       }),
       metadataJson: storedMetadata,
@@ -281,7 +292,7 @@ export function createDocumentArchiveEngine({
       storageKey: resolvedStorageKey,
       checksumSha256: resolvedHash,
       sourceFingerprint,
-      retentionClassCode: resolvedRetentionClassCode,
+      retentionClassCode: effectiveRetentionClassCode,
       derivesFromDocumentVersionId: derivedFromVersionId
     });
 
@@ -296,14 +307,14 @@ export function createDocumentArchiveEngine({
     state.versionIdsByDocument.get(document.documentId).push(version.documentVersionId);
     document.status = "stored";
     document.storageConfirmedAt ??= nowIso();
-    document.retentionClassCode = resolvedRetentionClassCode;
-    document.sourceFingerprint = sourceFingerprint;
+    document.retentionClassCode = effectiveRetentionClassCode;
+    document.sourceFingerprint = documentSourceFingerprint;
     document.originalDocumentVersionId ??= version.documentVersionId;
     document.latestDocumentVersionId = version.documentVersionId;
     document.evidenceRefs = buildDocumentEvidenceRefs({
       documentId: document.documentId,
-      sourceFingerprint,
-      retentionClassCode: resolvedRetentionClassCode,
+      sourceFingerprint: document.sourceFingerprint,
+      retentionClassCode: document.retentionClassCode,
       originalDocumentVersionId: document.originalDocumentVersionId,
       latestDocumentVersionId: document.latestDocumentVersionId
     });
