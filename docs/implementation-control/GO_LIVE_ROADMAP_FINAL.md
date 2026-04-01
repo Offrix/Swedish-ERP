@@ -631,7 +631,7 @@ Ingen automatisk downstream-posting från OCR utan klassificering, confidence oc
 - [x] 9.2 [HARDEN] OCR/extraction materialiserar canonical extraction projections med confidence, field lineage, attachment refs och payload hash.
 - [x] 9.3 [REWRITE] Document classification styr målobjekt, downstream domain, blocker codes och review boundary; person-/lönekänsligt innehåll får aldrig gå till sökindex i klartext.
 - [x] 9.4 [NEW BUILD] Import cases och correction requests blir eget styrt flöde för tull/importmoms, saknade underlag och replacement chains.
-- [ ] 9.5 [HARDEN] Review center blir enda vägen för manuella undantag, inte spridda domänlokala flaggor.
+- [x] 9.5 [HARDEN] Review center blir enda vägen för manuella undantag, inte spridda domänlokala flaggor.
 
 **Exit gate**  
 - Alla dokument har versionkedja, checksumma och retentionclass.

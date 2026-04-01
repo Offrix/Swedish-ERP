@@ -179,26 +179,34 @@ test("Step 14 document classification opens review for private spend and preserv
     reviewItemId: created.reviewItemId,
     actorId: "user_2"
   });
-  reviewCenterPlatform.decideReviewCenterItem({
-    companyId: DEMO_COMPANY_ID,
-    reviewItemId: created.reviewItemId,
-    decisionCode: "approve",
-    reasonCode: "classification_confirmed",
-    actorId: "user_2"
-  });
-  const approved = classification.approveClassificationCase({
-    companyId: DEMO_COMPANY_ID,
-    classificationCaseId: created.classificationCaseId,
-    actorId: "user_2",
-    reviewCenterManaged: true
-  });
-  assert.equal(approved.status, "approved");
+  assert.throws(
+    () =>
+      classification.correctClassificationCase({
+        companyId: DEMO_COMPANY_ID,
+        classificationCaseId: created.classificationCaseId,
+        actorId: "user_2",
+        reasonCode: "manual_reclassification",
+        lineInputs: [
+          {
+            description: "Utlagg med aterbetalning",
+            amount: 1499,
+            treatmentCode: "REIMBURSABLE_OUTLAY",
+            person: {
+              employeeId: employee.employeeId,
+              employmentId: employment.employmentId
+            }
+          }
+        ]
+      }),
+    (error) => error?.code === "classification_case_review_center_required"
+  );
 
   const correction = classification.correctClassificationCase({
     companyId: DEMO_COMPANY_ID,
     classificationCaseId: created.classificationCaseId,
     actorId: "user_2",
     reasonCode: "manual_reclassification",
+    reviewCenterManaged: true,
     lineInputs: [
       {
         description: "Utlagg med aterbetalning",
@@ -211,11 +219,27 @@ test("Step 14 document classification opens review for private spend and preserv
       }
     ]
   });
-
   assert.equal(correction.priorCase.status, "corrected");
   assert.equal(correction.priorCase.correctedToCaseId, correction.replacementCase.classificationCaseId);
+  assert.equal(correction.priorCase.reviewItemId, null);
   assert.equal(correction.replacementCase.parentClassificationCaseId, created.classificationCaseId);
+  assert.equal(correction.replacementCase.reviewItemId, created.reviewItemId);
   assert.equal(correction.replacementCase.treatmentIntents[0].status, "draft");
+
+  reviewCenterPlatform.decideReviewCenterItem({
+    companyId: DEMO_COMPANY_ID,
+    reviewItemId: created.reviewItemId,
+    decisionCode: "approve",
+    reasonCode: "classification_confirmed",
+    actorId: "user_2"
+  });
+  const approved = classification.approveClassificationCase({
+    companyId: DEMO_COMPANY_ID,
+    classificationCaseId: correction.replacementCase.classificationCaseId,
+    actorId: "user_2",
+    reviewCenterManaged: true
+  });
+  assert.equal(approved.status, "approved");
 });
 
 test("Step 14 document classification dispatches payroll intents into pay runs without duplicating AGI payloads", () => {

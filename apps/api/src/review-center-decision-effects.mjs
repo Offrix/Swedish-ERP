@@ -38,7 +38,13 @@ export function resolveReviewCenterDecisionReasonCode({
   if (typeof reasonCode === "string" && reasonCode.trim().length > 0) {
     return reasonCode;
   }
-  if (!reviewItem || decisionCode !== "approve") {
+  if (!reviewItem) {
+    return reasonCode;
+  }
+  if (reviewItem.sourceDomainCode === "IMPORT_CASES" && reviewItem.sourceObjectType === "import_case_correction_request") {
+    return decisionCode === "approve" ? "import_case_correction_approved" : "import_case_correction_rejected";
+  }
+  if (decisionCode !== "approve") {
     return reasonCode;
   }
   if (reviewItem.sourceDomainCode === "DOCUMENT_CLASSIFICATION" && reviewItem.sourceObjectType === "classification_case") {
@@ -64,13 +70,41 @@ export function applyReviewCenterDecisionSideEffects({
   note = null,
   actorId
 } = {}) {
-  if (!reviewItem || decisionCode !== "approve") {
+  if (!reviewItem) {
     return null;
   }
 
   const resolvedActorId = typeof actorId === "string" && actorId.trim().length > 0 ? actorId.trim() : null;
   if (!resolvedActorId) {
     throw createHttpError(400, "actor_id_required", "actorId is required.");
+  }
+
+  if (reviewItem.sourceDomainCode === "IMPORT_CASES" && reviewItem.sourceObjectType === "import_case_correction_request") {
+    if (typeof platform.decideImportCaseCorrectionRequest !== "function") {
+      throw createHttpError(409, "review_center_source_action_unavailable", "Import-case correction runtime is unavailable.");
+    }
+    const requestedPayload = reviewItem.requestedPayloadJson || {};
+    const importCaseId = typeof requestedPayload.importCaseId === "string" && requestedPayload.importCaseId.trim().length > 0
+      ? requestedPayload.importCaseId.trim()
+      : null;
+    if (!importCaseId) {
+      throw createHttpError(409, "review_center_import_case_payload_missing", "Import-case correction reviews must reference the importCaseId in requestedPayload.");
+    }
+    const decisionPayload = reviewItem.latestDecision?.decisionPayloadJson || {};
+    return platform.decideImportCaseCorrectionRequest({
+      companyId,
+      importCaseId,
+      importCaseCorrectionRequestId: reviewItem.sourceObjectId,
+      decisionCode,
+      decisionNote: decisionPayload.decisionNote || note || null,
+      replacementCaseReference: decisionPayload.replacementCaseReference || null,
+      actorId: resolvedActorId,
+      reviewCenterManaged: true
+    });
+  }
+
+  if (decisionCode !== "approve") {
+    return null;
   }
 
   if (reviewItem.sourceDomainCode === "DOCUMENT_CLASSIFICATION" && reviewItem.sourceObjectType === "classification_case") {
@@ -167,6 +201,23 @@ export function applyReviewCenterSourceAction({
       correctedDocumentType: actionPayload.correctedDocumentType,
       correctedFieldsJson: actionPayload.correctedFieldsJson || {},
       correctionComment: actionPayload.correctionComment || null,
+      actorId: resolvedActorId,
+      reviewCenterManaged: true
+    });
+  }
+
+  if (reviewItem.sourceDomainCode === "DOCUMENT_CLASSIFICATION" && reviewItem.sourceObjectType === "classification_case" && resolvedActionCode === "correct") {
+    if (typeof platform.correctClassificationCase !== "function") {
+      throw createHttpError(409, "review_center_source_action_unavailable", "Classification correction runtime is unavailable.");
+    }
+    return platform.correctClassificationCase({
+      companyId,
+      classificationCaseId: reviewItem.sourceObjectId,
+      lineInputs: actionPayload.lineInputs || [],
+      extractedFields: actionPayload.extractedFields || {},
+      sourceOcrRunId: actionPayload.sourceOcrRunId || null,
+      reasonCode: actionPayload.reasonCode || "correction",
+      reasonNote: actionPayload.reasonNote || null,
       actorId: resolvedActorId,
       reviewCenterManaged: true
     });

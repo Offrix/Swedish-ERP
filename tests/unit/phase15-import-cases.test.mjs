@@ -247,6 +247,7 @@ test("Step 15 import cases create correction requests that block approval until 
   });
   assert.equal(correctionRequested.completeness.status, "blocking");
   assert.deepEqual(correctionRequested.completeness.blockingReasonCodes, ["OPEN_CORRECTION_REQUESTS"]);
+  assert.equal(Boolean(correctionRequested.correctionRequests[0].reviewItemId), true);
   assert.deepEqual(correctionRequested.correctionRequests[0].evidenceRefs, [
     "document:import-supplier-0104-001",
     "note:component-split"
@@ -262,13 +263,40 @@ test("Step 15 import cases create correction requests that block approval until 
     (error) => error?.code === "import_case_incomplete"
   );
 
+  assert.throws(
+    () =>
+      importCases.decideImportCaseCorrectionRequest({
+        companyId: DEMO_COMPANY_ID,
+        importCaseId: created.importCaseId,
+        importCaseCorrectionRequestId: correctionRequested.correctionRequests[0].importCaseCorrectionRequestId,
+        decisionCode: "reject",
+        decisionNote: "Nuvarande mapping är korrekt.",
+        actorId: "user_4"
+      }),
+    (error) => error?.code === "import_case_correction_request_review_center_required"
+  );
+
+  reviewCenterPlatform.claimReviewCenterItem({
+    companyId: DEMO_COMPANY_ID,
+    reviewItemId: correctionRequested.correctionRequests[0].reviewItemId,
+    actorId: "user_4"
+  });
+  reviewCenterPlatform.decideReviewCenterItem({
+    companyId: DEMO_COMPANY_ID,
+    reviewItemId: correctionRequested.correctionRequests[0].reviewItemId,
+    decisionCode: "reject",
+    reasonCode: "import_case_correction_rejected",
+    actorId: "user_4"
+  });
+
   const decision = importCases.decideImportCaseCorrectionRequest({
     companyId: DEMO_COMPANY_ID,
     importCaseId: created.importCaseId,
     importCaseCorrectionRequestId: correctionRequested.correctionRequests[0].importCaseCorrectionRequestId,
     decisionCode: "reject",
     decisionNote: "Nuvarande mapping är korrekt.",
-    actorId: "user_4"
+    actorId: "user_4",
+    reviewCenterManaged: true
   });
   assert.equal(decision.correctionRequest.status, "rejected");
   assert.equal(decision.importCase.completeness.status, "complete");
@@ -417,7 +445,17 @@ test("Phase 9.4 import cases expose canonical search projections with correction
   assert.equal(projected.filterPayload.hasOpenCorrectionRequest, true);
   assert.equal(projected.workbenchPayload.blockerCodes.includes("open_correction_requests"), true);
   assert.equal(projected.detailPayload.sections.some((section) => section.sectionCode === "correctionRequests"), true);
+  assert.equal(
+    projected.detailPayload.sections
+      .find((section) => section.sectionCode === "correctionRequests")
+      .fields.some((field) => field.fieldCode === "correctionRequestReviewItemIds" && typeof field.value === "string" && field.value.length > 0),
+    true
+  );
   assert.equal(projected.detailPayload.relatedObjects.some((item) => item.objectType === "reviewItem"), true);
+  assert.equal(
+    projected.detailPayload.relatedObjects.some((item) => item.objectType === "reviewItem" && item.relationCode === "correction_request_review_item"),
+    true
+  );
   assert.equal(projected.detailPayload.evidence.some((item) => item.evidenceId === "note:broker-statement-missing"), true);
   assert.equal(projected.detailPayload.auditRefs.auditEventIds.length > 0, true);
 });

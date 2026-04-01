@@ -10,6 +10,10 @@ import { tryHandleAutomationRoutes } from "./automation-routes.mjs";
 import { tryHandleOperationsRoutes } from "./operations-routes.mjs";
 import { tryHandleIntegrationRoutes } from "./integration-routes.mjs";
 import {
+  applyReviewCenterDecisionSideEffects,
+  resolveReviewCenterDecisionReasonCode
+} from "./review-center-decision-effects.mjs";
+import {
   listPublishedReadRouteTemplates,
   listPublishedRouteContracts,
   listUiPermissionReasonCatalog,
@@ -6634,18 +6638,83 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
       objectType: "vat_review_queue_item",
       scopeCode: "vat"
     });
+    const vatDecisionSnapshot =
+      typeof platform.snapshotVat === "function"
+        ? platform.snapshotVat({ companyId })
+        : null;
+    const vatDecision = Array.isArray(vatDecisionSnapshot?.vatDecisions)
+      ? vatDecisionSnapshot.vatDecisions.find(
+          (candidate) => candidate.reviewQueueItemId === vatReviewQueueResolveMatch.vatReviewQueueItemId
+        )
+      : null;
+    if (!vatDecision?.reviewQueueItemId) {
+      throw createHttpError(404, "vat_decision_not_found", "VAT decision for review queue item was not found.");
+    }
+    if (typeof platform.getReviewCenterItem !== "function") {
+      throw createHttpError(
+        409,
+        "review_center_runtime_unavailable",
+        "VAT review queue resolution requires review center runtime."
+      );
+    }
+    assertReviewCenterActionAccess({
+      platform,
+      principal,
+      companyId,
+      reviewItemId: vatDecision.reviewQueueItemId,
+      operation: "claim"
+    });
+    const reviewItem = platform.getReviewCenterItem({
+      companyId,
+      reviewItemId: vatDecision.reviewQueueItemId,
+      viewerUserId: principal.userId,
+      viewerTeamIds: resolvePrincipalTeamIds(principal)
+    });
+    if (reviewItem.status === "open") {
+      platform.claimReviewCenterItem({
+        companyId,
+        reviewItemId: reviewItem.reviewItemId,
+        actorId: principal.userId
+      });
+    }
+    const activeReviewItem = platform.getReviewCenterItem({
+      companyId,
+      reviewItemId: vatDecision.reviewQueueItemId,
+      viewerUserId: principal.userId,
+      viewerTeamIds: resolvePrincipalTeamIds(principal)
+    });
+    const resolvedReasonCode = resolveReviewCenterDecisionReasonCode({
+      reviewItem: activeReviewItem,
+      decisionCode: "approve",
+      reasonCode: body.reasonCode || null
+    });
+    const decided = platform.decideReviewCenterItem({
+      companyId,
+      reviewItemId: vatDecision.reviewQueueItemId,
+      decisionCode: "approve",
+      reasonCode: resolvedReasonCode,
+      note: body.resolutionNote || null,
+      decisionPayload: {
+        vatCode: body.vatCode,
+        resolutionCode: body.resolutionCode || "manual_vat_resolution",
+        resolutionNote: body.resolutionNote || null
+      },
+      actorId: principal.userId,
+      viewerUserId: principal.userId,
+      viewerTeamIds: resolvePrincipalTeamIds(principal)
+    });
+    const sourceObjectSnapshot = applyReviewCenterDecisionSideEffects({
+      platform,
+      companyId,
+      reviewItem: decided,
+      decisionCode: "approve",
+      note: body.resolutionNote || null,
+      actorId: principal.userId
+    });
     writeJson(
       res,
       200,
-      platform.resolveVatReviewQueueItem({
-        companyId,
-        vatReviewQueueItemId: vatReviewQueueResolveMatch.vatReviewQueueItemId,
-        vatCode: body.vatCode,
-        resolutionCode: body.resolutionCode || "manual_vat_resolution",
-        resolutionNote: body.resolutionNote || null,
-        actorId: principal.userId,
-        correlationId: body.correlationId || createCorrelationId()
-      })
+      sourceObjectSnapshot || decided
     );
     return;
   }
@@ -18552,6 +18621,27 @@ function resolvePrincipalTeamIds(principal) {
   return Array.isArray(principal?.teamIds)
     ? [...new Set(principal.teamIds.filter((teamId) => typeof teamId === "string" && teamId.trim().length > 0))]
     : [];
+}
+
+function assertReviewCenterActionAccess({ platform, principal, companyId, reviewItemId, operation }) {
+  authorizeSurfaceAccess({ principal, policyCode: "review_center", objectId: reviewItemId });
+  const reviewItem = platform.getReviewCenterItem({
+    companyId,
+    reviewItemId,
+    viewerUserId: principal.userId,
+    viewerTeamIds: resolvePrincipalTeamIds(principal)
+  });
+  const assignedUserId = reviewItem.currentAssignment?.assignedUserId || null;
+  if (operation === "claim") {
+    if (assignedUserId && assignedUserId !== principal.userId) {
+      throw createHttpError(409, "review_center_claimed_by_other_user", "Review item is already claimed by another actor.");
+    }
+    return;
+  }
+
+  if (assignedUserId !== principal.userId) {
+    throw createHttpError(403, "review_center_assignment_required", "Review decisions require the current actor to hold the active assignment.");
+  }
 }
 
 function isPhase1Route(path) {

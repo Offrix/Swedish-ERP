@@ -177,7 +177,9 @@ export function createDocumentClassificationEngine({
     const materialized = materializeCaseArtifacts({ classificationCase, lineInputs });
     persistCaseArtifacts({ state, classificationCase, materialized, companyId, documentId });
     linkCaseToDocument({ documentPlatform, companyId, documentId, classificationCase });
-    maybeCreateReviewItem({ reviewCenterPlatform, classificationCase });
+    if (input.suppressReviewCenterItem !== true) {
+      maybeCreateReviewItem({ reviewCenterPlatform, classificationCase });
+    }
     pushAudit(state, clock, {
       companyId,
       actorId: classificationCase.createdByActorId,
@@ -318,13 +320,31 @@ export function createDocumentClassificationEngine({
     sourceOcrRunId = null,
     actorId = "system",
     reasonCode,
-    reasonNote = null
+    reasonNote = null,
+    reviewCenterManaged = false
   } = {}) {
     const priorCase = requireCase(state, companyId, classificationCaseId);
     if (priorCase.status === "corrected") {
       throw createError(409, "classification_case_already_corrected", "Classification case has already been corrected.");
     }
     const resolvedActorId = requireText(actorId, "actor_id_required");
+    if (priorCase.reviewItemId && reviewCenterPlatform && !reviewCenterManaged) {
+      throw createError(
+        409,
+        "classification_case_review_center_required",
+        "Classification case correction must go through review center."
+      );
+    }
+    if (priorCase.reviewItemId && reviewCenterPlatform && reviewCenterManaged) {
+      assertClaimedReviewItem({
+        reviewCenterPlatform,
+        companyId: priorCase.companyId,
+        reviewItemId: priorCase.reviewItemId,
+        actorId: resolvedActorId,
+        errorCode: "classification_case_review_center_claim_missing",
+        errorMessage: "Review center claim is required before the classification case can be corrected."
+      });
+    }
     const replacementCase = createClassificationCase({
       companyId: priorCase.companyId,
       documentId: priorCase.documentId,
@@ -332,8 +352,10 @@ export function createDocumentClassificationEngine({
       sourceOcrRunId: sourceOcrRunId || priorCase.sourceOcrRunId,
       extractedFields,
       lineInputs,
-      actorId: resolvedActorId
+      actorId: resolvedActorId,
+      suppressReviewCenterItem: Boolean(priorCase.reviewItemId && reviewCenterPlatform && reviewCenterManaged)
     });
+    const replacementCaseRecord = requireCase(state, priorCase.companyId, replacementCase.classificationCaseId);
     const now = nowIso(clock);
     const resolvedReasonCode = normalizeCode(reasonCode || "correction", "classification_correction_reason_required");
     priorCase.status = "corrected";
@@ -342,7 +364,11 @@ export function createDocumentClassificationEngine({
     priorCase.correctedToCaseId = replacementCase.classificationCaseId;
     priorCase.updatedAt = now;
     for (const intent of listCaseIntents(state, priorCase.classificationCaseId)) {
-      if (intent.targetDomainCode === "PAYROLL" && payrollPlatform?.reverseDocumentClassificationPayrollPayload) {
+      if (
+        intent.targetDomainCode === "PAYROLL" &&
+        payrollPlatform?.reverseDocumentClassificationPayrollPayload &&
+        ["dispatched", "realized"].includes(intent.status)
+      ) {
         payrollPlatform.reverseDocumentClassificationPayrollPayload({
           companyId: priorCase.companyId,
           treatmentIntentId: intent.treatmentIntentId,
@@ -358,6 +384,27 @@ export function createDocumentClassificationEngine({
         intent.status = "reversed";
         intent.updatedAt = now;
       }
+    }
+    if (priorCase.reviewItemId && reviewCenterPlatform && reviewCenterManaged) {
+      reviewCenterPlatform.retargetReviewCenterItem({
+        companyId: priorCase.companyId,
+        reviewItemId: priorCase.reviewItemId,
+        sourceObjectId: replacementCaseRecord.classificationCaseId,
+        sourceReference: replacementCaseRecord.documentId,
+        sourceObjectLabel: `Document ${replacementCaseRecord.documentId}`,
+        riskClass: replacementCaseRecord.reviewRiskClass,
+        title: `Document classification requires review for ${replacementCaseRecord.documentId}`,
+        summary: replacementCaseRecord.reviewReasonCodes.join(", "),
+        requestedPayload: {
+          documentId: replacementCaseRecord.documentId,
+          scenarioCode: replacementCaseRecord.scenarioCode,
+          reviewReasonCodes: replacementCaseRecord.reviewReasonCodes
+        },
+        evidenceRefs: [`document:${replacementCaseRecord.documentId}`, `classification_case:${replacementCaseRecord.classificationCaseId}`],
+        actorId: resolvedActorId
+      });
+      replacementCaseRecord.reviewItemId = priorCase.reviewItemId;
+      priorCase.reviewItemId = null;
     }
     const correction = Object.freeze({
       classificationCorrectionId: crypto.randomUUID(),
@@ -1150,6 +1197,26 @@ function assertApprovedReviewDecision({
   });
   if (!reviewItem || !["approved", "closed"].includes(reviewItem.status) || reviewItem.latestDecision?.decisionCode !== "approve") {
     throw createError(409, errorCode, errorMessage);
+  }
+}
+
+function assertClaimedReviewItem({
+  reviewCenterPlatform,
+  companyId,
+  reviewItemId,
+  actorId,
+  errorCode,
+  errorMessage
+}) {
+  const reviewItem = reviewCenterPlatform.getReviewCenterItem({
+    companyId,
+    reviewItemId
+  });
+  if (!reviewItem || !["claimed", "in_review", "waiting_input"].includes(reviewItem.status)) {
+    throw createError(409, errorCode, errorMessage);
+  }
+  if (reviewItem.claimedByActorId && reviewItem.claimedByActorId !== actorId) {
+    throw createError(409, "classification_case_claim_owner_required", "Only the claiming review-center actor can update the classification case.");
   }
 }
 

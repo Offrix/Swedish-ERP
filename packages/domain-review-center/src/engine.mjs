@@ -68,6 +68,7 @@ export function createReviewCenterEngine({
     claimReviewCenterItem,
     startReviewCenterItem,
     reassignReviewCenterItem,
+    retargetReviewCenterItem,
     requestReviewMoreInput,
     decideReviewCenterItem,
     closeReviewCenterItem,
@@ -445,6 +446,96 @@ export function createReviewCenterEngine({
       entityType: "review_item",
       entityId: item.reviewItemId,
       explanation: `Reassigned review item ${item.reviewItemId}.`
+    });
+    return presentItem(state, item, clock, { includeHistory: true });
+  }
+
+  function retargetReviewCenterItem({
+    companyId,
+    reviewItemId,
+    sourceObjectId,
+    sourceReference = null,
+    sourceObjectLabel = null,
+    riskClass = null,
+    title = null,
+    summary = null,
+    requestedPayload = null,
+    evidenceRefs = null,
+    actorId = "system"
+  } = {}) {
+    const item = requireItem(state, companyId, reviewItemId);
+    if (!REVIEW_ACTIVE_ITEM_STATUSES.includes(item.status)) {
+      throw createError(409, "review_item_not_retargetable", "Only active review items can be retargeted.");
+    }
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const previousDedupeKey = buildDedupeKey({
+      companyId: item.companyId,
+      reviewQueueId: item.reviewQueueId,
+      sourceDomainCode: item.sourceDomainCode,
+      sourceObjectType: item.sourceObjectType,
+      sourceObjectId: item.sourceObjectId,
+      reviewTypeCode: item.reviewTypeCode,
+      requiredDecisionType: item.requiredDecisionType
+    });
+    const nextSourceObjectId = requireText(sourceObjectId, "source_object_id_required");
+    const nextDedupeKey = buildDedupeKey({
+      companyId: item.companyId,
+      reviewQueueId: item.reviewQueueId,
+      sourceDomainCode: item.sourceDomainCode,
+      sourceObjectType: item.sourceObjectType,
+      sourceObjectId: nextSourceObjectId,
+      reviewTypeCode: item.reviewTypeCode,
+      requiredDecisionType: item.requiredDecisionType
+    });
+    const competingItemId = state.reviewItemIdByDedupeKey.get(nextDedupeKey);
+    if (competingItemId && competingItemId !== item.reviewItemId) {
+      const competingItem = state.reviewItems.get(competingItemId);
+      if (competingItem && REVIEW_ACTIVE_ITEM_STATUSES.includes(competingItem.status)) {
+        throw createError(409, "review_item_retarget_conflict", "Target source already has an active review item.");
+      }
+    }
+
+    state.reviewItemIdByDedupeKey.delete(previousDedupeKey);
+    state.reviewItemIdByDedupeKey.set(nextDedupeKey, item.reviewItemId);
+    item.sourceObjectId = nextSourceObjectId;
+    item.sourceReference = normalizeOptionalText(sourceReference);
+    item.sourceObjectLabel = normalizeOptionalText(sourceObjectLabel);
+    if (riskClass != null) {
+      item.riskClass = assertAllowed(normalizeEnumValue(riskClass, "review_risk_class_required"), REVIEW_RISK_CLASSES, "review_risk_class_invalid");
+    }
+    if (title != null) {
+      item.title = requireText(title, "review_item_title_required");
+    }
+    if (summary !== null) {
+      item.summary = normalizeOptionalText(summary);
+    }
+    if (requestedPayload !== null) {
+      item.requestedPayloadJson = copy(requestedPayload || {});
+    }
+    if (evidenceRefs !== null) {
+      item.evidenceRefs = normalizeStringList(evidenceRefs);
+    }
+    item.updatedAt = nowIso(clock);
+
+    pushReviewEvent(state, clock, {
+      companyId: item.companyId,
+      actorId: resolvedActorId,
+      eventType: "review_item.retargeted",
+      reviewItemId: item.reviewItemId,
+      reviewQueueId: item.reviewQueueId,
+      payload: {
+        sourceObjectId: item.sourceObjectId,
+        sourceReference: item.sourceReference,
+        sourceObjectLabel: item.sourceObjectLabel
+      }
+    });
+    pushAudit(state, clock, {
+      companyId: item.companyId,
+      actorId: resolvedActorId,
+      action: "review_center.item_retargeted",
+      entityType: "review_item",
+      entityId: item.reviewItemId,
+      explanation: `Retargeted review item ${item.reviewItemId} to source object ${item.sourceObjectId}.`
     });
     return presentItem(state, item, clock, { includeHistory: true });
   }
@@ -1143,4 +1234,3 @@ function shouldCreateSlaEscalation(item, queue, scanAt) {
 function diffMinutes(fromIso, toIso) {
   return Math.max(0, Math.floor((Date.parse(toIso) - Date.parse(fromIso)) / 60000));
 }
-

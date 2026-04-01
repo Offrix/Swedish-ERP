@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createLedgerPlatform } from "../../packages/domain-ledger/src/index.mjs";
+import { createReviewCenterPlatform } from "../../packages/domain-review-center/src/index.mjs";
 import { createVatEngine } from "../../packages/domain-vat/src/index.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
@@ -196,6 +197,36 @@ test("Phase 9.3 materializes VAT declaration basis, resolves review blockers and
   assert.equal(declaredResolved.lifecycleStatus, "declared");
   assert.equal(declaredDomestic.vatDeclarationRunIds.includes(declarationRun.vatDeclarationRunId), true);
   assert.equal(declaredResolved.vatDeclarationRunIds.includes(declarationRun.vatDeclarationRunId), true);
+});
+
+test("Phase 9.5 VAT domain blocks direct manual resolution when review center runtime is active", () => {
+  const clock = () => new Date("2026-03-28T10:00:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const reviewCenter = createReviewCenterPlatform({ clock, seedDemo: true });
+  const vat = createVatEngine({ clock, ledgerPlatform: ledger, reviewCenterPlatform: reviewCenter });
+
+  const review = vat.evaluateVatDecision({
+    companyId: COMPANY_ID,
+    actorId: "user-1",
+    transactionLine: buildTransactionLine({
+      source_id: "phase9-5-unit-review-center",
+      line_quantity: null
+    })
+  });
+
+  assert.equal(review.vatDecision.lifecycleStatus, "pending_review");
+  assert.throws(
+    () =>
+      vat.resolveVatReviewQueueItem({
+        companyId: COMPANY_ID,
+        vatReviewQueueItemId: review.reviewQueueItem.vatReviewQueueItemId,
+        vatCode: "VAT_SE_DOMESTIC_25",
+        resolutionCode: "manual_domestic_resolution",
+        resolutionNote: "Should be blocked outside review center",
+        actorId: "user-1"
+      }),
+    /review center/i
+  );
 });
 
 function buildTransactionLine(overrides = {}) {

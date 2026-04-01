@@ -346,6 +346,51 @@ test("Phase 9.5 review-center approval is the only manual approval path for clas
         companyId: DEMO_IDS.companyId
       }
     });
+    const directClassificationCorrect = await requestJson(
+      baseUrl,
+      `/v1/documents/${document.documentId}/classification-cases/${classificationCase.classificationCaseId}/correct`,
+      {
+        method: "POST",
+        token: adminToken,
+        expectedStatus: 409,
+        body: {
+          companyId: DEMO_IDS.companyId,
+          reasonCode: "manual_reclassification",
+          lineInputs: [
+            {
+              description: "Utlagg med aterbetalning",
+              amount: 990,
+              treatmentCode: "REIMBURSABLE_OUTLAY"
+            }
+          ]
+        }
+      }
+    );
+    assert.equal(directClassificationCorrect.error, "classification_case_review_center_required");
+
+    const classificationCorrected = await requestJson(baseUrl, `/v1/review-center/items/${classificationCase.reviewItemId}/source-action`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        actionCode: "correct",
+        actionPayload: {
+          reasonCode: "manual_reclassification",
+          lineInputs: [
+            {
+              description: "Utlagg med aterbetalning",
+              amount: 990,
+              treatmentCode: "REIMBURSABLE_OUTLAY"
+            }
+          ]
+        }
+      }
+    });
+    assert.equal(classificationCorrected.sourceObjectId, classificationCorrected.sourceObjectSnapshot.replacementCase.classificationCaseId);
+    assert.equal(classificationCorrected.sourceObjectSnapshot.priorCase.status, "corrected");
+    assert.equal(classificationCorrected.sourceObjectSnapshot.priorCase.reviewItemId, null);
+    assert.equal(classificationCorrected.sourceObjectSnapshot.replacementCase.reviewItemId, classificationCase.reviewItemId);
+
     const classificationApproved = await requestJson(baseUrl, `/v1/review-center/items/${classificationCase.reviewItemId}/approve`, {
       method: "POST",
       token: adminToken,
@@ -357,6 +402,7 @@ test("Phase 9.5 review-center approval is the only manual approval path for clas
     });
     assert.equal(classificationApproved.status, "approved");
     assert.equal(classificationApproved.sourceObjectSnapshot.status, "approved");
+    assert.equal(classificationApproved.sourceObjectSnapshot.classificationCaseId, classificationCorrected.sourceObjectSnapshot.replacementCase.classificationCaseId);
 
     const supplierDocument = platform.createDocumentRecord({
       companyId: DEMO_IDS.companyId,

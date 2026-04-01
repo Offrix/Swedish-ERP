@@ -13,6 +13,7 @@ export interface ImportCaseCorrectionRequest {
   readonly importCaseCorrectionRequestId: string;
   readonly companyId: string;
   readonly importCaseId: string;
+  readonly reviewItemId: string | null;
   readonly status: "open" | "approved" | "rejected" | "superseded";
   readonly reasonCode: string;
   readonly reasonNote: string | null;

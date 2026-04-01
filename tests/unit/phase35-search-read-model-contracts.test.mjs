@@ -241,6 +241,16 @@ test("Phase 9.4 search builds import case profile from canonical import case pro
     profile.sections.find((section) => section.sectionCode === "correctionRequests").fields.some((field) => field.fieldCode === "hasOpenCorrectionRequest" && field.value === true),
     true
   );
+  assert.equal(
+    profile.sections
+      .find((section) => section.sectionCode === "correctionRequests")
+      .fields.some((field) => field.fieldCode === "correctionRequestReviewItemIds" && typeof field.value === "string" && field.value.length > 0),
+    true
+  );
+  assert.equal(
+    profile.relatedObjects.some((item) => item.objectType === "reviewItem" && item.relationCode === "correction_request_review_item"),
+    true
+  );
 
   const financeWorkbench = engine.getWorkbench({
     companyId: DEMO_COMPANY_ID,

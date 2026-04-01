@@ -135,6 +135,24 @@ test("Phase 2.3 review queue supports manual correction and rerun creates new de
   });
   assert.equal(claimed.task.status, "claimed");
 
+  assert.throws(
+    () =>
+      engine.correctReviewTask({
+        companyId: "company-1",
+        reviewTaskId: reviewRun.reviewTask.reviewTaskId,
+        correctedDocumentType: "contract",
+        correctedFieldsJson: {
+          contractTitle: {
+            value: "Manual service agreement",
+            confidence: 1
+          }
+        },
+        correctionComment: "Contract title added manually.",
+        actorId: "reviewer-1"
+      }),
+    (error) => error?.code === "review_task_review_center_required"
+  );
+
   const corrected = engine.correctReviewTask({
     companyId: "company-1",
     reviewTaskId: reviewRun.reviewTask.reviewTaskId,
@@ -146,7 +164,8 @@ test("Phase 2.3 review queue supports manual correction and rerun creates new de
       }
     },
     correctionComment: "Contract title added manually.",
-    actorId: "reviewer-1"
+    actorId: "reviewer-1",
+    reviewCenterManaged: true
   });
   assert.equal(corrected.task.status, "corrected");
 

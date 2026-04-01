@@ -675,44 +675,9 @@ export function createVatEngine({
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedActorId = requireText(actorId, "actor_id_required");
     if (reviewCenterPlatform && typeof reviewCenterPlatform.getReviewCenterItem === "function") {
-      const vatDecision = requireVatDecisionByReviewQueueItem({
-        state,
-        vatReviewQueueItemId: requireText(vatReviewQueueItemId, "vat_review_queue_item_id_required")
-      });
-      const reviewItem = reviewCenterPlatform.getReviewCenterItem({
-        companyId: resolvedCompanyId,
-        reviewItemId: vatDecision.reviewQueueItemId
-      });
-      if (["open", "waiting_input", "escalated"].includes(reviewItem.status)) {
-        reviewCenterPlatform.claimReviewCenterItem({
-          companyId: resolvedCompanyId,
-          reviewItemId: reviewItem.reviewItemId,
-          actorId: resolvedActorId
-        });
-      }
-      reviewCenterPlatform.decideReviewCenterItem({
-        companyId: resolvedCompanyId,
-        reviewItemId: reviewItem.reviewItemId,
-        decisionCode: "approve",
-        reasonCode: "vat_treatment_resolved",
-        note: resolutionNote || `Resolved VAT review to ${requireText(vatCode, "vat_code_required").toUpperCase()}.`,
-        decisionPayload: {
-          vatCode: requireText(vatCode, "vat_code_required").toUpperCase(),
-          resolutionCode: normalizeLowerString(resolutionCode) || "manual_vat_resolution",
-          resolutionNote: typeof resolutionNote === "string" && resolutionNote.trim().length > 0 ? resolutionNote.trim() : null
-        },
-        actorId: resolvedActorId
-      });
-      return resolveVatDecisionReview({
-        companyId: resolvedCompanyId,
-        vatDecisionId: vatDecision.vatDecisionId,
-        vatCode,
-        resolutionCode,
-        resolutionNote,
-        actorId: resolvedActorId,
-        reviewCenterManaged: true,
-        correlationId
-      });
+      requireText(vatReviewQueueItemId, "vat_review_queue_item_id_required");
+      requireText(vatCode, "vat_code_required");
+      throw createError(409, "vat_review_center_required", "VAT review decisions must be resolved through review center.");
     }
 
     const reviewQueueItem = requireVatReviewQueueItemForCompany({

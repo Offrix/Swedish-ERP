@@ -262,6 +262,64 @@ export async function tryHandlePhase14MigrationIntakeRoutes({ req, res, url, pat
       objectId: importCaseCorrectionDecisionMatch.importCaseId,
       scopeCode: "import_case"
     });
+    const importCase = platform.getImportCase({
+      companyId,
+      importCaseId: importCaseCorrectionDecisionMatch.importCaseId
+    });
+    const correctionRequest = importCase.correctionRequests.find(
+      (candidate) => candidate.importCaseCorrectionRequestId === importCaseCorrectionDecisionMatch.importCaseCorrectionRequestId
+    );
+    if (correctionRequest?.reviewItemId) {
+      assertReviewCenterActionAccess({
+        platform,
+        principal,
+        companyId,
+        reviewItemId: correctionRequest.reviewItemId,
+        operation: "claim"
+      });
+      const reviewItem = platform.getReviewCenterItem({
+        companyId,
+        reviewItemId: correctionRequest.reviewItemId
+      });
+      if (reviewItem?.status === "open") {
+        platform.claimReviewCenterItem({
+          companyId,
+          reviewItemId: correctionRequest.reviewItemId,
+          actorId: principal.userId
+        });
+      }
+      const activeReviewItem = platform.getReviewCenterItem({
+        companyId,
+        reviewItemId: correctionRequest.reviewItemId
+      });
+      const resolvedReasonCode = resolveReviewCenterDecisionReasonCode({
+        reviewItem: activeReviewItem,
+        decisionCode: body.decisionCode,
+        reasonCode: body.reasonCode || null
+      });
+      const decided = platform.decideReviewCenterItem({
+        companyId,
+        reviewItemId: correctionRequest.reviewItemId,
+        decisionCode: body.decisionCode,
+        reasonCode: resolvedReasonCode,
+        note: body.decisionNote || null,
+        decisionPayload: {
+          replacementCaseReference: body.replacementCaseReference || null,
+          decisionNote: body.decisionNote || null
+        },
+        actorId: principal.userId
+      });
+      const sourceObjectSnapshot = applyReviewCenterDecisionSideEffects({
+        platform,
+        companyId,
+        reviewItem: decided,
+        decisionCode: body.decisionCode,
+        note: body.decisionNote || null,
+        actorId: principal.userId
+      });
+      writeJson(res, 200, sourceObjectSnapshot ? { ...decided, sourceObjectSnapshot } : decided);
+      return true;
+    }
     writeJson(
       res,
       200,

@@ -603,6 +603,7 @@ const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
     "listReviewCenterItems": "read",
     "listReviewCenterQueues": "read",
     "reassignReviewCenterItem": "write",
+    "retargetReviewCenterItem": "write",
     "requestReviewMoreInput": "write",
     "runReviewCenterSlaScan": "write",
     "snapshotReviewCenter": "read",

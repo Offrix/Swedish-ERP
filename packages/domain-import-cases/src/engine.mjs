@@ -507,6 +507,7 @@ export function createImportCasesEngine({
       importCaseCorrectionRequestId: crypto.randomUUID(),
       companyId: importCase.companyId,
       importCaseId: importCase.importCaseId,
+      reviewItemId: null,
       status: IMPORT_CASE_CORRECTION_REQUEST_STATUSES[0],
       reasonCode: requireAllowedStatus(
         reasonCode,
@@ -525,6 +526,10 @@ export function createImportCasesEngine({
     };
     state.correctionRequests.set(correctionRequest.importCaseCorrectionRequestId, correctionRequest);
     appendToIndex(state.correctionRequestIdsByCase, correctionRequest.importCaseId, correctionRequest.importCaseCorrectionRequestId);
+    createCorrectionRequestReviewItem({
+      importCase,
+      correctionRequest
+    });
     pushAudit(state, {
       companyId: importCase.companyId,
       actorId: resolvedActorId,
@@ -552,7 +557,8 @@ export function createImportCasesEngine({
     decisionCode,
     decisionNote = null,
     replacementCaseReference = null,
-    actorId = "system"
+    actorId = "system",
+    reviewCenterManaged = false
   } = {}) {
     const importCase = requireCase(state, companyId, importCaseId);
     const correctionRequest = requireCorrectionRequest({
@@ -566,6 +572,23 @@ export function createImportCasesEngine({
     }
     const resolvedDecisionCode = requireAllowedDecisionCode(decisionCode);
     const resolvedActorId = requireText(actorId, "actor_id_required");
+    if (correctionRequest.reviewItemId && reviewCenterPlatform && !reviewCenterManaged) {
+      throw createError(
+        409,
+        "import_case_correction_request_review_center_required",
+        "Import-case correction requests must be decided through review center."
+      );
+    }
+    if (correctionRequest.reviewItemId && reviewCenterPlatform && reviewCenterManaged) {
+      assertReviewDecision({
+        reviewCenterPlatform,
+        companyId: importCase.companyId,
+        reviewItemId: correctionRequest.reviewItemId,
+        decisionCode: resolvedDecisionCode,
+        errorCode: "import_case_correction_request_review_decision_missing",
+        errorMessage: "Review center decision is required before the correction request can be decided."
+      });
+    }
     const now = nowIso(clock);
     correctionRequest.status =
       resolvedDecisionCode === "approve"
@@ -843,6 +866,43 @@ export function createImportCasesEngine({
     return reviewItem;
   }
 
+  function createCorrectionRequestReviewItem({ importCase, correctionRequest }) {
+    if (!reviewCenterPlatform || typeof reviewCenterPlatform.createReviewItem !== "function") {
+      return null;
+    }
+    const reviewItem = reviewCenterPlatform.createReviewItem({
+      companyId: importCase.companyId,
+      queueCode: importCase.reviewQueueCode || IMPORT_CASE_REVIEW_QUEUE_CODE,
+      reviewTypeCode: "IMPORT_CASE_CORRECTION_REQUEST",
+      sourceDomainCode: "IMPORT_CASES",
+      sourceObjectType: "import_case_correction_request",
+      sourceObjectId: correctionRequest.importCaseCorrectionRequestId,
+      sourceReference: importCase.caseReference,
+      sourceObjectLabel: `Import case correction ${importCase.caseReference}`,
+      requiredDecisionType: "generic_review",
+      riskClass: importCase.reviewRiskClass,
+      title: `Import case ${importCase.caseReference} has an open correction request`,
+      summary: correctionRequest.reasonNote || correctionRequest.reasonCode,
+      requestedPayload: {
+        importCaseId: importCase.importCaseId,
+        importCaseCorrectionRequestId: correctionRequest.importCaseCorrectionRequestId,
+        caseReference: importCase.caseReference,
+        reasonCode: correctionRequest.reasonCode,
+        reasonNote: correctionRequest.reasonNote,
+        evidenceRefs: correctionRequest.evidenceRefs
+      },
+      evidenceRefs: [
+        `import_case:${importCase.importCaseId}`,
+        `import_case_correction_request:${correctionRequest.importCaseCorrectionRequestId}`,
+        ...correctionRequest.evidenceRefs
+      ],
+      policyCode: "DOCUMENT_REVIEW_AND_ECONOMIC_DECISION",
+      actorId: correctionRequest.requestedByActorId
+    });
+    correctionRequest.reviewItemId = reviewItem.reviewItemId;
+    return reviewItem;
+  }
+
   function settleLinkedReviewItem({ importCase, actorId, approvalNote }) {
     const current = reviewCenterPlatform.getReviewCenterItem({
       companyId: importCase.companyId,
@@ -911,10 +971,27 @@ export function createImportCasesEngine({
       companyId,
       reviewItemId
     });
-    if (!reviewItem || !["approved", "closed"].includes(reviewItem.status) || reviewItem.latestDecision?.decisionCode !== "approve") {
-      throw createError(409, errorCode, errorMessage);
-    }
+  if (!reviewItem || !["approved", "closed"].includes(reviewItem.status) || reviewItem.latestDecision?.decisionCode !== "approve") {
+    throw createError(409, errorCode, errorMessage);
   }
+}
+
+function assertReviewDecision({
+  reviewCenterPlatform,
+  companyId,
+  reviewItemId,
+  decisionCode,
+  errorCode,
+  errorMessage
+}) {
+  const reviewItem = reviewCenterPlatform.getReviewCenterItem({
+    companyId,
+    reviewItemId
+  });
+  if (!reviewItem || !["approved", "rejected", "closed"].includes(reviewItem.status) || reviewItem.latestDecision?.decisionCode !== decisionCode) {
+    throw createError(409, errorCode, errorMessage);
+  }
+}
 
   function attachDocumentInternal({ importCase, documentId, roleCode, metadataJson = {}, actorId }) {
     requireDocumentSnapshot({
@@ -1143,6 +1220,13 @@ function buildSearchProjectionDocument({ state, importCase }) {
           relationCode: "review_item"
         }
       : null,
+    ...importCase.correctionRequests
+      .filter((request) => typeof request.reviewItemId === "string" && request.reviewItemId.trim().length > 0)
+      .map((request) => ({
+        objectType: "reviewItem",
+        objectId: request.reviewItemId,
+        relationCode: "correction_request_review_item"
+      })),
     importCase.sourceClassificationCaseId
       ? {
           objectType: "classificationCase",
@@ -1232,6 +1316,13 @@ function buildSearchProjectionDocument({ state, importCase }) {
           { fieldCode: "hasOpenCorrectionRequest", value: hasOpenCorrectionRequest },
           { fieldCode: "correctionRequestCount", value: importCase.correctionRequests.length },
           {
+            fieldCode: "correctionRequestReviewItemIds",
+            value: importCase.correctionRequests
+              .map((request) => request.reviewItemId || null)
+              .filter(Boolean)
+              .join(", ") || "none"
+          },
+          {
             fieldCode: "evidenceRefCount",
             value: importCase.correctionRequests.reduce(
               (sum, request) => sum + ((request.evidenceRefs || []).length),
@@ -1299,6 +1390,7 @@ function buildSearchProjectionDocument({ state, importCase }) {
       parentImportCaseId: importCase.parentImportCaseId,
       correctedToImportCaseId: importCase.correctedToImportCaseId,
       correctionRequestIds: importCase.correctionRequests.map((request) => request.importCaseCorrectionRequestId),
+      correctionRequestReviewItemIds: importCase.correctionRequests.map((request) => request.reviewItemId || null).filter(Boolean),
       correctionIds: importCase.corrections.map((correction) => correction.importCaseCorrectionId)
     },
     auditRefs: {

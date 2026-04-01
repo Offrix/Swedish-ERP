@@ -239,6 +239,7 @@ test("Step 15 API drives import-case correction requests and replay-safe downstr
     );
     assert.equal(correctionRequested.completeness.status, "blocking");
     assert.deepEqual(correctionRequested.completeness.blockingReasonCodes, ["OPEN_CORRECTION_REQUESTS"]);
+    assert.equal(Boolean(correctionRequested.correctionRequests[0].reviewItemId), true);
     assert.deepEqual(correctionRequested.correctionRequests[0].evidenceRefs, [
       "document:api-import-supplier-0104-001",
       "note:downstream-check"
@@ -268,8 +269,10 @@ test("Step 15 API drives import-case correction requests and replay-safe downstr
         }
       }
     );
-    assert.equal(rejectedRequest.correctionRequest.status, "rejected");
-    assert.equal(rejectedRequest.importCase.completeness.status, "complete");
+    assert.equal(rejectedRequest.status, "rejected");
+    assert.equal(rejectedRequest.latestDecision.decisionCode, "reject");
+    assert.equal(rejectedRequest.sourceObjectSnapshot.correctionRequest.status, "rejected");
+    assert.equal(rejectedRequest.sourceObjectSnapshot.importCase.completeness.status, "complete");
 
     await requestJson(baseUrl, `/v1/review-center/items/${created.reviewItemId}/claim`, {
       method: "POST",
@@ -444,6 +447,16 @@ test("Phase 9.4 API reindexes import cases into search and object profiles", { c
     assert.equal(objectProfile.evidence.some((item) => item.evidenceId === "note:broker-statement-missing"), true);
     assert.equal(
       objectProfile.sections.find((section) => section.sectionCode === "correctionRequests").fields.some((field) => field.fieldCode === "hasOpenCorrectionRequest" && field.value === true),
+      true
+    );
+    assert.equal(
+      objectProfile.sections
+        .find((section) => section.sectionCode === "correctionRequests")
+        .fields.some((field) => field.fieldCode === "correctionRequestReviewItemIds" && typeof field.value === "string" && field.value.length > 0),
+      true
+    );
+    assert.equal(
+      objectProfile.relatedObjects.some((item) => item.objectType === "reviewItem" && item.relationCode === "correction_request_review_item"),
       true
     );
 
