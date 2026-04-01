@@ -416,9 +416,10 @@ test("Phase 8.1 blocks automatic bad debt VAT relief after partial settlement", 
   );
 });
 
-test("Phase 8.6 blocks cash-method AR allocation until payment-time recognition runtime is implemented", () => {
+test("Phase 8.6 cash-method AR allocation recognizes revenue and output VAT on payment date", () => {
   const clock = () => new Date("2026-09-03T08:00:00Z");
   const ledger = createLedgerPlatform({ clock });
+  const vat = createVatPlatform({ clock, ledgerPlatform: ledger });
   const integrations = createIntegrationEngine({ clock });
   const accountingMethod = createActiveAccountingMethodPlatform({
     clock,
@@ -430,12 +431,14 @@ test("Phase 8.6 blocks cash-method AR allocation until payment-time recognition 
     clock,
     seedDemo: false,
     accountingMethodPlatform: accountingMethod,
+    vatPlatform: vat,
     ledgerPlatform: ledger,
     integrationPlatform: integrations,
     ...AR_TEST_ENGINE_OPTIONS
   });
   ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
   ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
+  vat.installVatCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
 
   const customer = createCustomer(ar);
   const item = createItem(ar);
@@ -455,22 +458,141 @@ test("Phase 8.6 blocks cash-method AR allocation until payment-time recognition 
     actorId: "user-1"
   });
   const openItem = ar.listOpenItems({ companyId: COMPANY_ID })[0];
+  const allocation = ar.createOpenItemAllocation({
+    companyId: COMPANY_ID,
+    arOpenItemId: openItem.arOpenItemId,
+    allocationAmount: 500,
+    receiptAmount: 500,
+    allocatedOn: "2026-08-01",
+    sourceChannel: "manual",
+    bankTransactionUid: "bank-txn-cash-method",
+    reasonCode: "partial_payment",
+    actorId: "user-1"
+  });
+  const updatedInvoice = ar.getInvoice({
+    companyId: COMPANY_ID,
+    customerInvoiceId: invoice.customerInvoiceId
+  });
+  const updatedOpenItem = ar.getOpenItem({
+    companyId: COMPANY_ID,
+    arOpenItemId: openItem.arOpenItemId
+  });
+  const paymentJournal = ledger.getJournalEntry({
+    companyId: COMPANY_ID,
+    journalEntryId: allocation.journalEntryId
+  });
+  const vatDecision = vat.getVatDecision({
+    companyId: COMPANY_ID,
+    vatDecisionId: allocation.vatDecisionIds[0]
+  });
 
-  assert.throws(
-    () =>
-      ar.createOpenItemAllocation({
-        companyId: COMPANY_ID,
-        arOpenItemId: openItem.arOpenItemId,
-        allocationAmount: 500,
-        receiptAmount: 500,
-        allocatedOn: "2026-08-01",
-        sourceChannel: "manual",
-        bankTransactionUid: "bank-txn-cash-method",
-        reasonCode: "partial_payment",
-        actorId: "user-1"
-      }),
-    (error) => error?.code === "cash_method_payment_recognition_not_operationalized"
-  );
+  assert.equal(allocation.vatDecisionIds.length, 1);
+  assert.equal(allocation.recognizedGrossAmount, 500);
+  assert.equal(allocation.recognizedVatAmount, 100);
+  assert.equal(updatedInvoice.journalEntryId, null);
+  assert.equal(updatedInvoice.recognizedGrossAmount, 500);
+  assert.equal(updatedInvoice.recognizedVatAmount, 100);
+  assert.equal(updatedInvoice.lines[0].recognizedLineAmount, 400);
+  assert.equal(updatedInvoice.lines[0].recognizedVatAmount, 100);
+  assert.equal(updatedInvoice.lines[0].recognizedGrossAmount, 500);
+  assert.equal(updatedInvoice.lines[0].vatDecisionIds.length, 1);
+  assert.equal(updatedOpenItem.status, "partially_settled");
+  assert.equal(updatedOpenItem.openAmount, 750);
+  assert.equal(sumJournalAmount(paymentJournal, "1110", "debit"), 500);
+  assert.equal(sumJournalAmount(paymentJournal, "3010", "credit"), 400);
+  assert.equal(sumJournalAmount(paymentJournal, "2610", "credit"), 100);
+  assert.equal(vatDecision.status, "decided");
+});
+
+test("Phase 8.6 cash-method AR reversal rolls back recognition and mirrors VAT corrections", () => {
+  const clock = () => new Date("2026-09-03T09:00:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const vat = createVatPlatform({ clock, ledgerPlatform: ledger });
+  const integrations = createIntegrationEngine({ clock });
+  const accountingMethod = createActiveAccountingMethodPlatform({
+    clock,
+    companyId: COMPANY_ID,
+    methodCode: "KONTANTMETOD",
+    effectiveFrom: "2026-01-01"
+  });
+  const ar = createArEngine({
+    clock,
+    seedDemo: false,
+    accountingMethodPlatform: accountingMethod,
+    vatPlatform: vat,
+    ledgerPlatform: ledger,
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
+  vat.installVatCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+
+  const customer = createCustomer(ar);
+  const item = createItem(ar);
+  const invoice = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-07-01",
+    dueDate: "2026-07-31",
+    currencyCode: "SEK",
+    lines: [{ itemId: item.arItemId, quantity: 1, unitPrice: 1000 }],
+    actorId: "user-1"
+  });
+  ar.issueInvoice({
+    companyId: COMPANY_ID,
+    customerInvoiceId: invoice.customerInvoiceId,
+    actorId: "user-1"
+  });
+  const openItem = ar.listOpenItems({ companyId: COMPANY_ID })[0];
+  const allocation = ar.createOpenItemAllocation({
+    companyId: COMPANY_ID,
+    arOpenItemId: openItem.arOpenItemId,
+    allocationAmount: 500,
+    receiptAmount: 500,
+    allocatedOn: "2026-08-01",
+    sourceChannel: "manual",
+    bankTransactionUid: "bank-txn-cash-method-reversal",
+    reasonCode: "partial_payment",
+    actorId: "user-1"
+  });
+  const reversed = ar.reverseOpenItemAllocation({
+    companyId: COMPANY_ID,
+    arAllocationId: allocation.arAllocationId,
+    reasonCode: "wrong_customer_match",
+    actorId: "user-1"
+  });
+  const updatedInvoice = ar.getInvoice({
+    companyId: COMPANY_ID,
+    customerInvoiceId: invoice.customerInvoiceId
+  });
+  const updatedOpenItem = ar.getOpenItem({
+    companyId: COMPANY_ID,
+    arOpenItemId: openItem.arOpenItemId
+  });
+  const reversalJournal = ledger.getJournalEntry({
+    companyId: COMPANY_ID,
+    journalEntryId: reversed.reversalJournalEntryId
+  });
+  const reversalVatDecision = vat.getVatDecision({
+    companyId: COMPANY_ID,
+    vatDecisionId: reversed.reversalVatDecisionIds[0]
+  });
+
+  assert.equal(reversed.status, "reversed");
+  assert.equal(reversed.reversalVatDecisionIds.length, 1);
+  assert.equal(updatedInvoice.recognizedGrossAmount, 0);
+  assert.equal(updatedInvoice.recognizedVatAmount, 0);
+  assert.equal(updatedInvoice.lines[0].recognizedLineAmount, 0);
+  assert.equal(updatedInvoice.lines[0].recognizedVatAmount, 0);
+  assert.equal(updatedInvoice.lines[0].recognizedGrossAmount, 0);
+  assert.equal(updatedOpenItem.status, "open");
+  assert.equal(updatedOpenItem.openAmount, 1250);
+  assert.equal(sumJournalAmount(reversalJournal, "1110", "credit"), 500);
+  assert.equal(sumJournalAmount(reversalJournal, "3010", "debit"), 400);
+  assert.equal(sumJournalAmount(reversalJournal, "2610", "debit"), 100);
+  assert.equal(reversalVatDecision.status, "decided");
 });
 
 function createCustomer(ar, overrides = {}) {

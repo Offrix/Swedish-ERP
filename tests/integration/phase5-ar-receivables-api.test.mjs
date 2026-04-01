@@ -227,6 +227,256 @@ test("Phase 5.3 API handles payment matching, reversals, dunning and aging snaps
   }
 });
 
+test("Phase 8.6 API recognizes and reverses cash-method AR revenue on payment date", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2027-08-12T10:30:00Z")
+  });
+  const eligibilityAssessment = platform.assessCashMethodEligibility({
+    companyId: COMPANY_ID,
+    annualNetTurnoverSek: 500000,
+    legalFormCode: "AB",
+    actorId: "setup"
+  });
+  const methodProfile = platform.createMethodProfile({
+    companyId: COMPANY_ID,
+    methodCode: "KONTANTMETOD",
+    effectiveFrom: "2027-01-01",
+    fiscalYearStartDate: "2027-01-01",
+    eligibilityAssessmentId: eligibilityAssessment.assessmentId,
+    onboardingOverride: true,
+    actorId: "setup"
+  });
+  platform.activateMethodProfile({
+    companyId: COMPANY_ID,
+    methodProfileId: methodProfile.methodProfileId,
+    actorId: "setup"
+  });
+  const fiscalYearProfile = platform.createFiscalYearProfile({
+    companyId: COMPANY_ID,
+    legalFormCode: "AKTIEBOLAG",
+    actorId: "setup"
+  });
+  const fiscalYear = platform.createFiscalYear({
+    companyId: COMPANY_ID,
+    fiscalYearProfileId: fiscalYearProfile.fiscalYearProfileId,
+    startDate: "2027-01-01",
+    endDate: "2027-12-31",
+    approvalBasisCode: "BASELINE",
+    actorId: "setup"
+  });
+  platform.activateFiscalYear({
+    companyId: COMPANY_ID,
+    fiscalYearId: fiscalYear.fiscalYearId,
+    actorId: "setup"
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true,
+      phase5ArEnabled: true
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const sessionToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    await requestJson(baseUrl, "/v1/ledger/chart/install", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: { companyId: COMPANY_ID }
+    });
+
+    const customer = await requestJson(baseUrl, "/v1/ar/customers", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        legalName: "Cash Method API Customer AB",
+        organizationNumber: "5566778899",
+        countryCode: "SE",
+        languageCode: "SV",
+        currencyCode: "SEK",
+        paymentTermsCode: "NET30",
+        invoiceDeliveryMethod: "pdf_email",
+        reminderProfileCode: "standard",
+        billingAddress: {
+          line1: "Likviditetsgatan 1",
+          postalCode: "11157",
+          city: "Stockholm",
+          countryCode: "SE"
+        },
+        deliveryAddress: {
+          line1: "Likviditetsgatan 1",
+          postalCode: "11157",
+          city: "Stockholm",
+          countryCode: "SE"
+        }
+      }
+    });
+
+    const item = await requestJson(baseUrl, "/v1/ar/items", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        itemCode: "API-AR-8601",
+        description: "Cash method service",
+        itemType: "service",
+        unitCode: "hour",
+        standardPrice: 1000,
+        revenueAccountNumber: "3010",
+        vatCode: "VAT_SE_DOMESTIC_25"
+      }
+    });
+
+    const invoice = await requestJson(baseUrl, "/v1/ar/invoices", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        customerId: customer.customerId,
+        invoiceType: "standard",
+        issueDate: "2027-07-01",
+        dueDate: "2027-07-31",
+        lines: [
+          {
+            itemId: item.arItemId,
+            quantity: 1,
+            unitPrice: 1000
+          }
+        ]
+      }
+    });
+
+    const issued = await requestJson(baseUrl, `/v1/ar/invoices/${invoice.customerInvoiceId}/issue`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 200,
+      body: { companyId: COMPANY_ID }
+    });
+    assert.equal(issued.journalEntryId, null);
+    assert.equal(issued.primaryRecognitionTrigger, "AR_PAYMENT_ALLOCATION");
+
+    const openItems = await requestJson(baseUrl, `/v1/ar/open-items?companyId=${COMPANY_ID}`, {
+      token: sessionToken
+    });
+    const openItem = openItems.items.find((candidate) => candidate.customerInvoiceId === invoice.customerInvoiceId);
+    assert.ok(openItem);
+
+    const allocation = await requestJson(baseUrl, `/v1/ar/open-items/${openItem.arOpenItemId}/allocations`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        allocationAmount: 500,
+        receiptAmount: 500,
+        allocatedOn: "2027-08-12",
+        sourceChannel: "manual",
+        bankTransactionUid: "api-bank-txn-cash-method",
+        reasonCode: "partial_payment"
+      }
+    });
+    const recognizedInvoice = await requestJson(
+      baseUrl,
+      `/v1/ar/invoices/${invoice.customerInvoiceId}?companyId=${COMPANY_ID}`,
+      { token: sessionToken }
+    );
+    const recognizedOpenItem = await requestJson(
+      baseUrl,
+      `/v1/ar/open-items/${openItem.arOpenItemId}?companyId=${COMPANY_ID}`,
+      { token: sessionToken }
+    );
+    const paymentJournal = await requestJson(
+      baseUrl,
+      `/v1/ledger/journal-entries/${allocation.journalEntryId}?companyId=${COMPANY_ID}`,
+      { token: sessionToken }
+    );
+    const paymentVatDecision = await requestJson(
+      baseUrl,
+      `/v1/vat/decisions/${allocation.vatDecisionIds[0]}?companyId=${COMPANY_ID}`,
+      { token: sessionToken }
+    );
+
+    assert.equal(allocation.vatDecisionIds.length, 1);
+    assert.equal(allocation.recognizedGrossAmount, 500);
+    assert.equal(allocation.recognizedVatAmount, 100);
+    assert.equal(recognizedInvoice.journalEntryId, null);
+    assert.equal(recognizedInvoice.recognizedGrossAmount, 500);
+    assert.equal(recognizedInvoice.recognizedVatAmount, 100);
+    assert.equal(recognizedInvoice.lines[0].recognizedLineAmount, 400);
+    assert.equal(recognizedInvoice.lines[0].recognizedVatAmount, 100);
+    assert.equal(recognizedOpenItem.openAmount, 750);
+    assert.equal(recognizedOpenItem.status, "partially_settled");
+    assert.equal(sumJournalAmount(paymentJournal, "1110", "debit"), 500);
+    assert.equal(sumJournalAmount(paymentJournal, "3010", "credit"), 400);
+    assert.equal(sumJournalAmount(paymentJournal, "2610", "credit"), 100);
+    assert.equal(paymentVatDecision.status, "decided");
+
+    const reversed = await requestJson(baseUrl, `/v1/ar/allocations/${allocation.arAllocationId}/reverse`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 200,
+      body: {
+        companyId: COMPANY_ID,
+        reasonCode: "wrong_customer_match"
+      }
+    });
+    const reopenedInvoice = await requestJson(
+      baseUrl,
+      `/v1/ar/invoices/${invoice.customerInvoiceId}?companyId=${COMPANY_ID}`,
+      { token: sessionToken }
+    );
+    const reopenedOpenItem = await requestJson(
+      baseUrl,
+      `/v1/ar/open-items/${openItem.arOpenItemId}?companyId=${COMPANY_ID}`,
+      { token: sessionToken }
+    );
+    const reversalJournal = await requestJson(
+      baseUrl,
+      `/v1/ledger/journal-entries/${reversed.reversalJournalEntryId}?companyId=${COMPANY_ID}`,
+      { token: sessionToken }
+    );
+    const reversalVatDecision = await requestJson(
+      baseUrl,
+      `/v1/vat/decisions/${reversed.reversalVatDecisionIds[0]}?companyId=${COMPANY_ID}`,
+      { token: sessionToken }
+    );
+
+    assert.equal(reversed.status, "reversed");
+    assert.equal(reversed.reversalVatDecisionIds.length, 1);
+    assert.equal(reopenedInvoice.recognizedGrossAmount, 0);
+    assert.equal(reopenedInvoice.recognizedVatAmount, 0);
+    assert.equal(reopenedInvoice.lines[0].recognizedLineAmount, 0);
+    assert.equal(reopenedInvoice.lines[0].recognizedVatAmount, 0);
+    assert.equal(reopenedOpenItem.openAmount, 1250);
+    assert.equal(reopenedOpenItem.status, "open");
+    assert.equal(sumJournalAmount(reversalJournal, "1110", "credit"), 500);
+    assert.equal(sumJournalAmount(reversalJournal, "3010", "debit"), 400);
+    assert.equal(sumJournalAmount(reversalJournal, "2610", "debit"), 100);
+    assert.equal(reversalVatDecision.status, "decided");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("Phase 8.1 API posts bad-debt VAT relief with dual control and blocks it after partial settlement", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-09-02T10:00:00Z")

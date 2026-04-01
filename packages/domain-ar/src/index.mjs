@@ -1665,17 +1665,6 @@ export function createArEngine({
   } = {}) {
     const openItem = requireOpenItemRecord(state, companyId, arOpenItemId);
     const invoice = openItem.customerInvoiceId ? state.invoices.get(openItem.customerInvoiceId) || null : null;
-    if (
-      invoice &&
-      invoice.accountingMethodTimingMode === "payment_date_with_year_end_catch_up" &&
-      !invoice.journalEntryId
-    ) {
-      throw createError(
-        409,
-        "cash_method_payment_recognition_not_operationalized",
-        "Cash-method payment recognition is not yet operationalized for AR allocations."
-      );
-    }
     if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
       throw createError(500, "ledger_platform_missing", "Ledger platform is required for AR allocations.");
     }
@@ -1769,11 +1758,51 @@ export function createArEngine({
       suspenseAmount,
       journalEntryId: null,
       reversalJournalEntryId: null,
+      vatDecisionIds: [],
+      reversalVatDecisionIds: [],
+      recognizedGrossAmount: 0,
+      recognizedVatAmount: 0,
+      recognitionBreakdownJson: [],
       metadataJson: {},
       createdByActorId: actorId,
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
     };
+
+    const accountingDirective = invoice
+      ? resolveArExecutionDirective({
+          accountingMethodPlatform,
+          companyId: invoice.companyId,
+          accountingDate: resolvedAllocatedOn,
+          eventCode: "AR_PAYMENT_ALLOCATION"
+        })
+      : null;
+    const requiresCashMethodRecognition =
+      invoice &&
+      isCashMethodRecognitionPending(invoice) &&
+      accountingDirective?.primaryRecognitionRequired === true;
+    if (requiresCashMethodRecognition && resolvedAllocationType !== "payment") {
+      throw createError(
+        409,
+        "cash_method_allocation_type_not_supported",
+        "Cash-method payment recognition currently supports payment allocations only."
+      );
+    }
+    if (requiresCashMethodRecognition) {
+      allocation.realizedFxAmount = 0;
+    }
+    const cashMethodRecognition = requiresCashMethodRecognition
+      ? resolveCashMethodPaymentRecognition({
+          vatPlatform,
+          ledgerPlatform,
+          companyId: openItem.companyId,
+          invoice,
+          customer: requireCustomerRecord(state, invoice.companyId, invoice.customerId),
+          allocation,
+          actorId,
+          correlationId
+        })
+      : null;
 
     const journal = postArJournal({
       ledgerPlatform,
@@ -1795,14 +1824,44 @@ export function createArEngine({
       actorId,
       idempotencyKey: `ar_allocation:${allocation.externalEventRef}:${resolvedAllocationType}`,
       description: `AR allocation ${allocation.arAllocationId}`,
-      lines: buildAllocationJournalLines({
-        openItem,
-        allocation,
-        receiptAmount: resolvedReceiptAmount,
-        unmatchedReceipt
-      })
+      lines:
+        cashMethodRecognition == null
+          ? buildAllocationJournalLines({
+              openItem,
+              allocation,
+              receiptAmount: resolvedReceiptAmount,
+              unmatchedReceipt
+            })
+          : buildCashMethodRecognitionJournalLines({
+              ledgerPlatform,
+              openItem,
+              allocation,
+              receiptAmount: resolvedReceiptAmount,
+              unmatchedReceipt,
+              recognition: cashMethodRecognition
+            })
     });
     allocation.journalEntryId = journal.journalEntryId;
+    if (cashMethodRecognition != null) {
+      allocation.vatDecisionIds = cashMethodRecognition.vatDecisionIds;
+      allocation.recognizedGrossAmount = cashMethodRecognition.recognizedGrossAmount;
+      allocation.recognizedVatAmount = cashMethodRecognition.recognizedVatAmount;
+      allocation.recognitionBreakdownJson = copy(cashMethodRecognition.lineRecognitions);
+      applyCashMethodRecognitionToInvoice({
+        invoice,
+        journalEntryId: journal.journalEntryId,
+        recognition: cashMethodRecognition
+      });
+      if (vatPlatform && typeof vatPlatform.recordVatDecisionPosting === "function" && cashMethodRecognition.vatDecisionIds.length > 0) {
+        vatPlatform.recordVatDecisionPosting({
+          companyId: invoice.companyId,
+          vatDecisionIds: cashMethodRecognition.vatDecisionIds,
+          journalEntryId: journal.journalEntryId,
+          actorId,
+          correlationId
+        });
+      }
+    }
 
     state.allocations.set(allocation.arAllocationId, allocation);
     ensureCollection(state.allocationIdsByCompany, openItem.companyId).push(allocation.arAllocationId);
@@ -1871,6 +1930,7 @@ export function createArEngine({
       throw createError(500, "ledger_platform_missing", "Ledger platform is required to reverse AR allocations.");
     }
       const openItem = requireOpenItemRecord(state, allocation.companyId, allocation.arOpenItemId);
+      const invoice = allocation.customerInvoiceId ? state.invoices.get(allocation.customerInvoiceId) || null : null;
       const resolvedReversedOn = normalizeDate(reversedOn || nowIso(clock).slice(0, 10), "ar_allocation_reverse_date_invalid");
       const originalJournal = ledgerPlatform.getJournalEntry({
         companyId: allocation.companyId,
@@ -1898,6 +1958,34 @@ export function createArEngine({
       });
     allocation.status = "reversed";
     allocation.reversalJournalEntryId = reversalJournal.journalEntryId;
+    if (allocation.vatDecisionIds.length > 0) {
+      const reversalRecognition = resolveCashMethodAllocationReversal({
+        vatPlatform,
+        companyId: allocation.companyId,
+        invoice,
+        allocation,
+        reversedOn: resolvedReversedOn,
+        actorId,
+        correlationId
+      });
+      allocation.reversalVatDecisionIds = reversalRecognition.reversalVatDecisionIds;
+      if (vatPlatform && typeof vatPlatform.recordVatDecisionPosting === "function" && reversalRecognition.reversalVatDecisionIds.length > 0) {
+        vatPlatform.recordVatDecisionPosting({
+          companyId: allocation.companyId,
+          vatDecisionIds: reversalRecognition.reversalVatDecisionIds,
+          journalEntryId: reversalJournal.journalEntryId,
+          actorId,
+          correlationId
+        });
+      }
+      if (invoice) {
+        reverseCashMethodRecognitionOnInvoice({
+          invoice,
+          allocation,
+          reversalJournalEntryId: reversalJournal.journalEntryId
+        });
+      }
+    }
     allocation.updatedAt = nowIso(clock);
 
     const previousOpenAmount = openItem.openAmount;
@@ -3459,6 +3547,502 @@ function resolveBadDebtVatAdjustment({
     functionalNetLossAmount,
     vatReliefLines: [...vatReliefLineMap.values()]
   };
+}
+
+function resolveCashMethodPaymentRecognition({
+  vatPlatform,
+  ledgerPlatform,
+  companyId,
+  invoice,
+  customer,
+  allocation,
+  actorId,
+  correlationId
+}) {
+  if (!vatPlatform || typeof vatPlatform.evaluateVatDecision !== "function") {
+    throw createError(
+      500,
+      "vat_platform_missing",
+      "VAT platform is required for cash-method payment recognition."
+    );
+  }
+  const lineRecognitions = buildCashMethodLineRecognitions({
+    vatPlatform,
+    companyId,
+    invoice,
+    customer,
+    allocation,
+    actorId,
+    correlationId
+  });
+  const recognizedGrossAmount = roundMoney(
+    lineRecognitions.reduce((sum, recognition) => sum + recognition.recognizedGrossAmount, 0)
+  );
+  if (recognizedGrossAmount !== roundMoney(allocation.allocatedAmount)) {
+    throw createError(
+      409,
+      "cash_method_recognition_amount_mismatch",
+      "Cash-method payment recognition did not reconcile exactly to the allocated gross amount."
+    );
+  }
+  const recognizedFunctionalGrossAmount = applyCashMethodFunctionalRecognitionAmounts({
+    lineRecognitions,
+    targetFunctionalGrossAmount: roundMoney(
+      allocation.functionalSettledAmount || allocation.functionalAmount || allocation.allocatedAmount
+    )
+  });
+  return {
+    recognizedGrossAmount,
+    recognizedVatAmount: roundMoney(
+      lineRecognitions.reduce((sum, recognition) => sum + recognition.recognizedVatAmount, 0)
+    ),
+    recognizedFunctionalGrossAmount,
+    vatDecisionIds: lineRecognitions.map((recognition) => recognition.vatDecisionId),
+    lineRecognitions
+  };
+}
+
+function buildCashMethodLineRecognitions({
+  vatPlatform,
+  companyId,
+  invoice,
+  customer,
+  allocation,
+  actorId,
+  correlationId
+}) {
+  const linePlans = buildCashMethodRecognitionPlans({
+    vatPlatform,
+    companyId,
+    invoice,
+    targetGrossAmount: allocation.allocatedAmount
+  });
+  return linePlans.map((plan) => {
+    const vatDecisionResult = vatPlatform.evaluateVatDecision({
+      companyId,
+      actorId,
+      correlationId,
+      transactionLine: buildCashMethodVatTransactionLine({
+        vatPlatform,
+        invoice,
+        customer,
+        line: plan.line,
+        allocation,
+        recognizedNetAmount: plan.recognizedLineAmount
+      })
+    });
+    if (vatDecisionResult.reviewQueueItem || vatDecisionResult.vatDecision.status !== "decided") {
+      throw createError(
+        409,
+        "cash_method_vat_review_required",
+        `Cash-method payment recognition is blocked until VAT review is resolved for line ${plan.line.lineNumber}.`
+      );
+    }
+    const vatDecision = vatDecisionResult.vatDecision;
+    const recognizedVatAmount = calculateVatDecisionOutputVatAmount(vatDecision);
+    return {
+      line: plan.line,
+      lineId: plan.line.lineId,
+      lineNumber: plan.line.lineNumber,
+      revenueAccountNumber: plan.line.revenueAccountNumber,
+      recognizedLineAmount: plan.recognizedLineAmount,
+      recognizedVatAmount,
+      recognizedGrossAmount: roundMoney(plan.recognizedLineAmount + recognizedVatAmount),
+      vatDecisionId: vatDecision.vatDecisionId,
+      vatDecisionCategory: vatDecision.outputs?.decisionCategory || vatDecision.decisionCategory || null,
+      vatDeclarationBoxCodes: copy(vatDecision.outputs?.declarationBoxCodes || vatDecision.declarationBoxCodes || []),
+      vatPostingEntries: copy(vatDecision.outputs?.postingEntries || vatDecision.postingEntries || []),
+      vatEffectiveRate: Number(vatDecision.outputs?.vatRate ?? vatDecision.vatRate ?? 0),
+      functionalLineAmount: 0,
+      functionalVatAmount: 0,
+      functionalGrossAmount: 0
+    };
+  });
+}
+
+function buildCashMethodRecognitionPlans({ vatPlatform, companyId, invoice, targetGrossAmount }) {
+  const targetAmount = roundMoney(targetGrossAmount);
+  const candidates = (invoice.lines || [])
+    .map((line) => {
+      const totalVatAmount = estimateInvoiceLineOutputVatAmount({ vatPlatform, companyId, line });
+      const remainingLineAmount = roundMoney(Number(line.lineAmount || 0) - Number(line.recognizedLineAmount || 0));
+      const remainingVatAmount = roundMoney(totalVatAmount - Number(line.recognizedVatAmount || 0));
+      const remainingGrossAmount = roundMoney(remainingLineAmount + remainingVatAmount);
+      return {
+        line,
+        remainingLineAmount,
+        remainingGrossAmount
+      };
+    })
+    .filter((candidate) => candidate.remainingGrossAmount > 0);
+  const totalRemainingGrossAmount = roundMoney(
+    candidates.reduce((sum, candidate) => sum + candidate.remainingGrossAmount, 0)
+  );
+  if (targetAmount <= 0 || targetAmount > totalRemainingGrossAmount) {
+    throw createError(
+      409,
+      "cash_method_recognition_amount_invalid",
+      "Cash-method payment recognition amount is outside the remaining recognizable invoice gross amount."
+    );
+  }
+  const plans = [];
+  let remainingTargetGrossAmount = targetAmount;
+  for (const [index, candidate] of candidates.entries()) {
+    const remainingPoolGrossAmount = roundMoney(
+      candidates.slice(index).reduce((sum, item) => sum + item.remainingGrossAmount, 0)
+    );
+    const targetLineGrossAmount =
+      index === candidates.length - 1
+        ? remainingTargetGrossAmount
+        : roundMoney(remainingTargetGrossAmount * (candidate.remainingGrossAmount / remainingPoolGrossAmount));
+    const recognizedLineAmount = resolveCashMethodNetAmountForGross({
+      targetGrossAmount: targetLineGrossAmount,
+      remainingLineAmount: candidate.remainingLineAmount,
+      remainingGrossAmount: candidate.remainingGrossAmount
+    });
+    if (recognizedLineAmount <= 0) {
+      continue;
+    }
+    const estimatedVatAmount = estimateInvoiceLineOutputVatAmount({
+      vatPlatform,
+      companyId,
+      line: candidate.line,
+      lineAmount: recognizedLineAmount
+    });
+    const estimatedGrossAmount = roundMoney(recognizedLineAmount + estimatedVatAmount);
+    plans.push({
+      ...candidate,
+      recognizedLineAmount
+    });
+    remainingTargetGrossAmount = roundMoney(Math.max(0, remainingTargetGrossAmount - estimatedGrossAmount));
+  }
+  if (plans.length === 0) {
+    throw createError(
+      409,
+      "cash_method_recognition_amount_invalid",
+      "Cash-method payment recognition did not produce any recognizable invoice lines."
+    );
+  }
+  return plans;
+}
+
+function buildCashMethodVatTransactionLine({ vatPlatform, invoice, customer, line, allocation, recognizedNetAmount }) {
+  const reverseChargeFlag = typeof line.vatCode === "string" && line.vatCode.includes("_RC_");
+  const exportFlag = typeof line.vatCode === "string" && line.vatCode.includes("EXPORT");
+  const ossFlag = typeof line.vatCode === "string" && line.vatCode.includes("OSS");
+  const iossFlag = typeof line.vatCode === "string" && line.vatCode.includes("IOSS");
+  const constructionServiceFlag =
+    typeof line.vatCode === "string" && (line.vatCode.includes("RC_BUILD") || line.vatCode.includes("BUILD"));
+  return {
+    source_type: "AR_PAYMENT",
+    source_id: `${allocation.arAllocationId}:${line.lineId}`,
+    supply_type: "sale",
+    seller_country: "SE",
+    seller_vat_registration_country: "SE",
+    buyer_country: customer.countryCode || "SE",
+    goods_or_services: line.goodsOrServices || "services",
+    invoice_date: invoice.issueDate,
+    delivery_date: invoice.deliveryDate || invoice.supplyDate || invoice.issueDate,
+    tax_date: allocation.allocatedOn,
+    prepayment_date: null,
+    currency: invoice.currencyCode || "SEK",
+    line_amount_ex_vat: recognizedNetAmount,
+    line_quantity: line.quantity,
+    vat_rate: resolveVatRate(vatPlatform, invoice.companyId, line.vatCode),
+    vat_code_candidate: line.vatCode,
+    buyer_is_taxable_person: Boolean(invoice.buyerVatNumber),
+    buyer_vat_number: invoice.buyerVatNumber || null,
+    buyer_vat_number_status: invoice.buyerVatNumberStatus || null,
+    import_flag: false,
+    reverse_charge_flag: reverseChargeFlag,
+    export_flag: exportFlag,
+    oss_flag: ossFlag,
+    ioss_flag: iossFlag,
+    construction_service_flag: constructionServiceFlag,
+    credit_note_flag: false,
+    original_vat_decision_id: null,
+    project_id: line.projectId || null
+  };
+}
+
+function buildCashMethodRecognitionJournalLines({
+  ledgerPlatform,
+  openItem,
+  allocation,
+  receiptAmount,
+  unmatchedReceipt,
+  recognition
+}) {
+  const functionalReceiptAmount = roundMoney(
+    unmatchedReceipt ? recognition.recognizedFunctionalGrossAmount : allocation.functionalReceiptAmount || receiptAmount
+  );
+  const functionalSuspenseAmount = roundMoney(
+    Math.max(0, functionalReceiptAmount - recognition.recognizedFunctionalGrossAmount)
+  );
+  const lines = [];
+  let lineNumber = 1;
+  if (unmatchedReceipt) {
+    lines.push(
+      createJournalLine(
+        DEFAULT_UNALLOCATED_RECEIPT_ACCOUNT_NUMBER,
+        lineNumber,
+        allocation.allocatedAmount,
+        0,
+        "AR_PAYMENT",
+        allocation.arAllocationId,
+        {
+          currencyCode: allocation.currencyCode || openItem.currencyCode || openItem.functionalCurrencyCode || "SEK",
+          exchangeRate: allocation.settlementExchangeRate,
+          functionalDebitAmount: recognition.recognizedFunctionalGrossAmount,
+          functionalCreditAmount: 0
+        }
+      )
+    );
+  } else {
+    lines.push(
+      createJournalLine(DEFAULT_BANK_ACCOUNT_NUMBER, lineNumber, receiptAmount, 0, "AR_PAYMENT", allocation.arAllocationId, {
+        currencyCode: allocation.currencyCode || openItem.currencyCode || openItem.functionalCurrencyCode || "SEK",
+        exchangeRate: allocation.settlementExchangeRate,
+        functionalDebitAmount: functionalReceiptAmount,
+        functionalCreditAmount: 0
+      })
+    );
+  }
+  lineNumber += 1;
+  for (const lineRecognition of recognition.lineRecognitions) {
+    lines.push(
+      createJournalLine(
+        lineRecognition.revenueAccountNumber,
+        lineNumber,
+        0,
+        lineRecognition.recognizedLineAmount,
+        "AR_PAYMENT",
+        lineRecognition.lineId,
+        {
+          dimensionJson: buildRevenueDimensionJson({
+            companyId: openItem.companyId,
+            ledgerPlatform,
+            line: lineRecognition.line
+          }),
+          currencyCode: allocation.currencyCode || openItem.currencyCode || "SEK",
+          exchangeRate: allocation.settlementExchangeRate,
+          functionalCreditAmount: lineRecognition.functionalLineAmount
+        }
+      )
+    );
+    lineNumber += 1;
+    if (lineRecognition.recognizedVatAmount > 0) {
+      const vatAccountNumber = resolveOutputVatAccountNumber(lineRecognition.vatEffectiveRate);
+      if (!vatAccountNumber) {
+        throw createError(
+          409,
+          "cash_method_vat_account_missing",
+          `Cash-method payment recognition is missing an output VAT account for line ${lineRecognition.lineNumber}.`
+        );
+      }
+      lines.push(
+        createJournalLine(vatAccountNumber, lineNumber, 0, lineRecognition.recognizedVatAmount, "AR_PAYMENT", lineRecognition.vatDecisionId, {
+          currencyCode: allocation.currencyCode || openItem.currencyCode || "SEK",
+          exchangeRate: allocation.settlementExchangeRate,
+          functionalCreditAmount: lineRecognition.functionalVatAmount
+        })
+      );
+      lineNumber += 1;
+    }
+  }
+  if (!unmatchedReceipt && allocation.suspenseAmount > 0) {
+    lines.push(
+      createJournalLine(
+        DEFAULT_UNALLOCATED_RECEIPT_ACCOUNT_NUMBER,
+        lineNumber,
+        0,
+        allocation.suspenseAmount,
+        "AR_PAYMENT",
+        allocation.arAllocationId,
+        {
+          currencyCode: allocation.currencyCode || openItem.currencyCode || openItem.functionalCurrencyCode || "SEK",
+          exchangeRate: allocation.settlementExchangeRate,
+          functionalCreditAmount: functionalSuspenseAmount
+        }
+      )
+    );
+  }
+  return lines;
+}
+
+function applyCashMethodFunctionalRecognitionAmounts({ lineRecognitions, targetFunctionalGrossAmount }) {
+  const targetAmount = roundMoney(targetFunctionalGrossAmount);
+  const totalRecognizedGrossAmount = roundMoney(
+    lineRecognitions.reduce((sum, recognition) => sum + recognition.recognizedGrossAmount, 0)
+  );
+  let allocatedFunctionalGrossAmount = 0;
+  for (const [index, recognition] of lineRecognitions.entries()) {
+    const functionalGrossAmount =
+      index === lineRecognitions.length - 1
+        ? roundMoney(targetAmount - allocatedFunctionalGrossAmount)
+        : roundMoney(targetAmount * (recognition.recognizedGrossAmount / totalRecognizedGrossAmount));
+    const functionalLineAmount =
+      recognition.recognizedGrossAmount <= 0
+        ? 0
+        : roundMoney(functionalGrossAmount * (recognition.recognizedLineAmount / recognition.recognizedGrossAmount));
+    const functionalVatAmount = roundMoney(functionalGrossAmount - functionalLineAmount);
+    recognition.functionalLineAmount = functionalLineAmount;
+    recognition.functionalVatAmount = functionalVatAmount;
+    recognition.functionalGrossAmount = roundMoney(functionalLineAmount + functionalVatAmount);
+    allocatedFunctionalGrossAmount = roundMoney(allocatedFunctionalGrossAmount + recognition.functionalGrossAmount);
+  }
+  return targetAmount;
+}
+
+function applyCashMethodRecognitionToInvoice({ invoice, journalEntryId, recognition }) {
+  invoice.recognizedGrossAmount = roundMoney(
+    Number(invoice.recognizedGrossAmount || 0) + Number(recognition.recognizedGrossAmount || 0)
+  );
+  invoice.recognizedVatAmount = roundMoney(
+    Number(invoice.recognizedVatAmount || 0) + Number(recognition.recognizedVatAmount || 0)
+  );
+  invoice.recognitionJournalEntryIds = uniqueTexts([...(invoice.recognitionJournalEntryIds || []), journalEntryId]);
+  for (const lineRecognition of recognition.lineRecognitions) {
+    const invoiceLine = (invoice.lines || []).find((line) => line.lineId === lineRecognition.lineId);
+    if (!invoiceLine) {
+      continue;
+    }
+    invoiceLine.vatDecisionId = invoiceLine.vatDecisionId || lineRecognition.vatDecisionId;
+    invoiceLine.vatDecisionIds = uniqueTexts([...(invoiceLine.vatDecisionIds || []), lineRecognition.vatDecisionId]);
+    invoiceLine.vatDecisionCategory = lineRecognition.vatDecisionCategory || invoiceLine.vatDecisionCategory || null;
+    invoiceLine.vatDeclarationBoxCodes = [...new Set([...(invoiceLine.vatDeclarationBoxCodes || []), ...lineRecognition.vatDeclarationBoxCodes])];
+    invoiceLine.vatEffectiveRate = lineRecognition.vatEffectiveRate;
+    invoiceLine.vatPostingEntries = copy(lineRecognition.vatPostingEntries);
+    invoiceLine.recognizedLineAmount = roundMoney(
+      Number(invoiceLine.recognizedLineAmount || 0) + Number(lineRecognition.recognizedLineAmount || 0)
+    );
+    invoiceLine.recognizedVatAmount = roundMoney(
+      Number(invoiceLine.recognizedVatAmount || 0) + Number(lineRecognition.recognizedVatAmount || 0)
+    );
+    invoiceLine.recognizedGrossAmount = roundMoney(
+      Number(invoiceLine.recognizedGrossAmount || 0) + Number(lineRecognition.recognizedGrossAmount || 0)
+    );
+  }
+  invoice.updatedAt = nowIso();
+}
+
+function resolveCashMethodAllocationReversal({
+  vatPlatform,
+  companyId,
+  invoice,
+  allocation,
+  reversedOn,
+  actorId,
+  correlationId
+}) {
+  if (!vatPlatform || typeof vatPlatform.evaluateVatDecision !== "function" || typeof vatPlatform.getVatDecision !== "function") {
+    throw createError(
+      500,
+      "vat_platform_missing",
+      "VAT platform is required to reverse cash-method payment recognition."
+    );
+  }
+  const reversalVatDecisionIds = [];
+  for (const vatDecisionId of allocation.vatDecisionIds || []) {
+    const originalDecision = vatPlatform.getVatDecision({
+      companyId,
+      vatDecisionId
+    });
+    const vatDecisionResult = vatPlatform.evaluateVatDecision({
+      companyId,
+      actorId,
+      correlationId,
+      transactionLine: {
+        ...(originalDecision.transactionLine || {}),
+        source_type: "AR_PAYMENT_REVERSAL",
+        source_id: `reversal:${allocation.arAllocationId}:${vatDecisionId}`,
+        invoice_date: invoice?.issueDate || originalDecision.transactionLine?.invoice_date || reversedOn,
+        tax_date: reversedOn,
+        prepayment_date: null,
+        credit_note_flag: true,
+        bad_debt_adjustment_flag: false,
+        original_vat_decision_id: vatDecisionId
+      }
+    });
+    if (vatDecisionResult.reviewQueueItem || vatDecisionResult.vatDecision.status !== "decided") {
+      throw createError(
+        409,
+        "cash_method_vat_reversal_review_required",
+        "Cash-method payment reversal is blocked until mirrored VAT corrections can be resolved without manual review."
+      );
+    }
+    reversalVatDecisionIds.push(vatDecisionResult.vatDecision.vatDecisionId);
+  }
+  return { reversalVatDecisionIds };
+}
+
+function reverseCashMethodRecognitionOnInvoice({ invoice, allocation, reversalJournalEntryId }) {
+  invoice.recognizedGrossAmount = roundMoney(
+    Math.max(0, Number(invoice.recognizedGrossAmount || 0) - Number(allocation.recognizedGrossAmount || 0))
+  );
+  invoice.recognizedVatAmount = roundMoney(
+    Math.max(0, Number(invoice.recognizedVatAmount || 0) - Number(allocation.recognizedVatAmount || 0))
+  );
+  invoice.recognitionJournalEntryIds = uniqueTexts([...(invoice.recognitionJournalEntryIds || []), reversalJournalEntryId]);
+  for (const lineRecognition of allocation.recognitionBreakdownJson || []) {
+    const invoiceLine = (invoice.lines || []).find((line) => line.lineId === lineRecognition.lineId);
+    if (!invoiceLine) {
+      continue;
+    }
+    invoiceLine.recognizedLineAmount = roundMoney(
+      Math.max(0, Number(invoiceLine.recognizedLineAmount || 0) - Number(lineRecognition.recognizedLineAmount || 0))
+    );
+    invoiceLine.recognizedVatAmount = roundMoney(
+      Math.max(0, Number(invoiceLine.recognizedVatAmount || 0) - Number(lineRecognition.recognizedVatAmount || 0))
+    );
+    invoiceLine.recognizedGrossAmount = roundMoney(
+      Math.max(0, Number(invoiceLine.recognizedGrossAmount || 0) - Number(lineRecognition.recognizedGrossAmount || 0))
+    );
+  }
+  invoice.updatedAt = nowIso();
+}
+
+function isCashMethodRecognitionPending(invoice) {
+  return invoice?.accountingMethodTimingMode === "payment_date_with_year_end_catch_up" && !invoice?.journalEntryId;
+}
+
+function resolveCashMethodNetAmountForGross({ targetGrossAmount, remainingLineAmount, remainingGrossAmount }) {
+  if (remainingGrossAmount <= 0) {
+    return 0;
+  }
+  if (roundMoney(targetGrossAmount) >= roundMoney(remainingGrossAmount)) {
+    return roundMoney(remainingLineAmount);
+  }
+  return roundMoney(Number(remainingLineAmount || 0) * (Number(targetGrossAmount || 0) / Number(remainingGrossAmount || 1)));
+}
+
+function estimateInvoiceLineOutputVatAmount({ vatPlatform, companyId, line, lineAmount = null }) {
+  if (
+    Array.isArray(line?.vatPostingEntries) &&
+    line.vatPostingEntries.length > 0 &&
+    (lineAmount == null || Number(lineAmount) === Number(line.lineAmount || 0))
+  ) {
+    return calculateInvoiceLineOutputVatAmount(line);
+  }
+  if (
+    typeof line?.vatCode === "string" &&
+    (line.vatCode.includes("_RC_") || line.vatCode.includes("EXPORT") || line.vatCode.includes("EXEMPT"))
+  ) {
+    return 0;
+  }
+  const vatRate = Number(line?.vatEffectiveRate ?? resolveVatRate(vatPlatform, companyId, line?.vatCode) ?? 0);
+  return calculateVatAmount(vatRate, lineAmount ?? line?.lineAmount ?? 0);
+}
+
+function calculateVatDecisionOutputVatAmount(vatDecision) {
+  return roundMoney(
+    ((vatDecision?.outputs?.postingEntries || vatDecision?.postingEntries || [])).reduce((sum, entry) => {
+      if (entry?.vatEffect !== "output_vat") {
+        return sum;
+      }
+      return sum + Math.abs(Number(entry.amount || 0));
+    }, 0)
+  );
 }
 
 function buildWriteoffJournalLines({ openItem, ledgerAccountNumber, writeoffAmount, badDebtVatAdjustment = null }) {
