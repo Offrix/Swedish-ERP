@@ -7,6 +7,10 @@
   requireText,
   writeJson
 } from "./route-helpers.mjs";
+import {
+  applyReviewCenterDecisionSideEffects,
+  resolveReviewCenterDecisionReasonCode
+} from "./review-center-decision-effects.mjs";
 
 export async function tryHandlePhase14MigrationIntakeRoutes({ req, res, url, path, platform, helpers }) {
   const {
@@ -323,11 +327,21 @@ export async function tryHandlePhase14MigrationIntakeRoutes({ req, res, url, pat
         reviewItemId: decisionAliasMatch.reviewItemId,
         operation: "decide"
       });
-      writeJson(res, 200, platform.decideReviewCenterItem({
+      const reviewItem = platform.getReviewCenterItem({
+        companyId,
+        reviewItemId: decisionAliasMatch.reviewItemId,
+        viewerUserId: principal.userId,
+        viewerTeamIds: principal.teamIds || []
+      });
+      const decided = platform.decideReviewCenterItem({
         companyId,
         reviewItemId: decisionAliasMatch.reviewItemId,
         decisionCode,
-        reasonCode: body.reasonCode,
+        reasonCode: resolveReviewCenterDecisionReasonCode({
+          reviewItem,
+          decisionCode,
+          reasonCode: body.reasonCode || null
+        }),
         note: body.note || null,
         decisionPayload: body.decisionPayload || {},
         evidenceRefs: body.evidenceRefs || [],
@@ -335,7 +349,16 @@ export async function tryHandlePhase14MigrationIntakeRoutes({ req, res, url, pat
         resultingCommand: body.resultingCommand || null,
         targetQueueCode: body.targetQueueCode || null,
         actorId: principal.userId
-      }));
+      });
+      const sourceObjectSnapshot = applyReviewCenterDecisionSideEffects({
+        platform,
+        companyId,
+        reviewItem: decided,
+        decisionCode,
+        note: body.note || null,
+        actorId: principal.userId
+      });
+      writeJson(res, 200, sourceObjectSnapshot ? { ...decided, sourceObjectSnapshot } : decided);
       return true;
     }
   }

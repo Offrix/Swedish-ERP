@@ -202,13 +202,35 @@ export function createDocumentClassificationEngine({
     return presentCase(state, requireCase(state, companyId, classificationCaseId));
   }
 
-  function approveClassificationCase({ companyId, classificationCaseId, actorId = "system", approvalNote = null } = {}) {
+  function approveClassificationCase({
+    companyId,
+    classificationCaseId,
+    actorId = "system",
+    approvalNote = null,
+    reviewCenterManaged = false
+  } = {}) {
     const classificationCase = requireCase(state, companyId, classificationCaseId);
     if (!["ingested", "suggested", "under_review"].includes(classificationCase.status)) {
       throw createError(409, "classification_case_not_approvable", "Classification case cannot be approved from its current status.");
     }
     const resolvedActorId = requireText(actorId, "actor_id_required");
-    if (classificationCase.reviewItemId && reviewCenterPlatform) {
+    if (classificationCase.reviewItemId && reviewCenterPlatform && !reviewCenterManaged) {
+      throw createError(
+        409,
+        "classification_case_review_center_required",
+        "Classification cases with manual review must be approved through review center."
+      );
+    }
+    if (classificationCase.reviewItemId && reviewCenterPlatform && reviewCenterManaged) {
+      assertApprovedReviewDecision({
+        reviewCenterPlatform,
+        companyId: classificationCase.companyId,
+        reviewItemId: classificationCase.reviewItemId,
+        errorCode: "classification_case_review_decision_missing",
+        errorMessage: "Review center approval is required before the classification case can be approved."
+      });
+    }
+    if (classificationCase.reviewItemId && reviewCenterPlatform && !reviewCenterManaged) {
       settleLinkedReviewItem({
         reviewCenterPlatform,
         classificationCase,
@@ -219,6 +241,7 @@ export function createDocumentClassificationEngine({
 
     const now = nowIso(clock);
     classificationCase.status = "approved";
+    classificationCase.requiresReview = false;
     classificationCase.approvedAt = now;
     classificationCase.approvedByActorId = resolvedActorId;
     classificationCase.updatedAt = now;
@@ -1111,6 +1134,22 @@ function settleLinkedReviewItem({ reviewCenterPlatform, classificationCase, acto
       actorId,
       note: approvalNote || "Closed after classification approval."
     });
+  }
+}
+
+function assertApprovedReviewDecision({
+  reviewCenterPlatform,
+  companyId,
+  reviewItemId,
+  errorCode,
+  errorMessage
+}) {
+  const reviewItem = reviewCenterPlatform.getReviewCenterItem({
+    companyId,
+    reviewItemId
+  });
+  if (!reviewItem || !["approved", "closed"].includes(reviewItem.status) || reviewItem.latestDecision?.decisionCode !== "approve") {
+    throw createError(409, errorCode, errorMessage);
   }
 }
 

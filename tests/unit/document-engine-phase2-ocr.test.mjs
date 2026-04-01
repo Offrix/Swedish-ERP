@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createDocumentArchiveEngine } from "../../packages/document-engine/src/index.mjs";
+import { createReviewCenterPlatform } from "../../packages/domain-review-center/src/index.mjs";
 
 test("Phase 2.3 OCR distinguishes invoices, receipts and contracts", () => {
   const engine = createDocumentArchiveEngine({
@@ -38,8 +39,25 @@ test("Phase 2.3 OCR distinguishes invoices, receipts and contracts", () => {
 });
 
 test("Phase 2.3 review queue supports manual correction and rerun creates new derivative versions", () => {
-  const engine = createDocumentArchiveEngine({
+  const reviewCenterPlatform = createReviewCenterPlatform({
     clock: () => new Date("2026-03-21T16:30:00Z")
+  });
+  reviewCenterPlatform.createReviewQueue({
+    companyId: "company-1",
+    queueCode: "DOCUMENT_REVIEW",
+    label: "Document review",
+    ownerTeamId: "finance_ops",
+    priority: "high",
+    defaultRiskClass: "high",
+    defaultSlaHours: 8,
+    escalationPolicyCode: "DOCUMENT_ESCALATION",
+    allowedSourceDomains: ["DOCUMENTS"],
+    requiredDecisionTypes: ["classification"],
+    actorId: "system"
+  });
+  const engine = createDocumentArchiveEngine({
+    clock: () => new Date("2026-03-21T16:30:00Z"),
+    getReviewCenterPlatform: () => reviewCenterPlatform
   });
 
   const channel = engine.registerInboxChannel({
@@ -89,12 +107,31 @@ test("Phase 2.3 review queue supports manual correction and rerun creates new de
 
   assert.equal(reviewRun.reviewTask?.taskType, "document_review");
   assert.equal(reviewRun.reviewTask?.status, "open");
+  assert.equal(typeof reviewRun.reviewTask?.reviewItemId, "string");
   assert.equal(reviewRun.ocrRun.reviewRequired, true);
+
+  assert.throws(
+    () =>
+      engine.claimReviewTask({
+        companyId: "company-1",
+        reviewTaskId: reviewRun.reviewTask.reviewTaskId,
+        actorId: "reviewer-1"
+      }),
+    (error) => error?.code === "review_task_review_center_required"
+  );
+
+  const claimedReviewItem = reviewCenterPlatform.claimReviewCenterItem({
+    companyId: "company-1",
+    reviewItemId: reviewRun.reviewTask.reviewItemId,
+    actorId: "reviewer-1"
+  });
+  assert.equal(claimedReviewItem.status, "claimed");
 
   const claimed = engine.claimReviewTask({
     companyId: "company-1",
     reviewTaskId: reviewRun.reviewTask.reviewTaskId,
-    actorId: "reviewer-1"
+    actorId: "reviewer-1",
+    reviewCenterManaged: true
   });
   assert.equal(claimed.task.status, "claimed");
 
@@ -113,10 +150,30 @@ test("Phase 2.3 review queue supports manual correction and rerun creates new de
   });
   assert.equal(corrected.task.status, "corrected");
 
+  assert.throws(
+    () =>
+      engine.approveReviewTask({
+        companyId: "company-1",
+        reviewTaskId: reviewRun.reviewTask.reviewTaskId,
+        actorId: "reviewer-1"
+      }),
+    (error) => error?.code === "review_task_review_center_required"
+  );
+
+  const approvedReviewItem = reviewCenterPlatform.decideReviewCenterItem({
+    companyId: "company-1",
+    reviewItemId: reviewRun.reviewTask.reviewItemId,
+    decisionCode: "approve",
+    reasonCode: "document_review_complete",
+    actorId: "reviewer-1"
+  });
+  assert.equal(approvedReviewItem.status, "approved");
+
   const approved = engine.approveReviewTask({
     companyId: "company-1",
     reviewTaskId: reviewRun.reviewTask.reviewTaskId,
-    actorId: "reviewer-1"
+    actorId: "reviewer-1",
+    reviewCenterManaged: true
   });
   assert.equal(approved.task.status, "approved");
   assert.equal(approved.document.documentType, "contract");

@@ -239,7 +239,8 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     create: ({ options, getDomain }) =>
       createDocumentArchivePlatform({
         ...options,
-        getIntegrationsPlatform: () => getDomain("integrations")
+        getIntegrationsPlatform: () => getDomain("integrations"),
+        getReviewCenterPlatform: () => getDomain("reviewCenter")
       })
   }),
   createDomainDefinition({

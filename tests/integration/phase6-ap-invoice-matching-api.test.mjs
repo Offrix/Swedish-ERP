@@ -392,11 +392,24 @@ test("Phase 6.4 API blocks AP posting until linked import case is complete and a
       importCaseId: importCase.importCaseId,
       actorId: "user-1"
     });
+    platform.claimReviewCenterItem({
+      companyId: COMPANY_ID,
+      reviewItemId: importCase.reviewItemId,
+      actorId: "user-1"
+    });
+    platform.decideReviewCenterItem({
+      companyId: COMPANY_ID,
+      reviewItemId: importCase.reviewItemId,
+      decisionCode: "approve",
+      reasonCode: "import_case_complete",
+      actorId: "user-1"
+    });
     platform.approveImportCase({
       companyId: COMPANY_ID,
       importCaseId: importCase.importCaseId,
       approvalNote: "Complete import case for AP payment readiness.",
-      actorId: "user-1"
+      actorId: "user-1",
+      reviewCenterManaged: true
     });
 
     const approvedMatch = await requestJson(baseUrl, `/v1/ap/invoices/${ingested.supplierInvoiceId}/match`, {

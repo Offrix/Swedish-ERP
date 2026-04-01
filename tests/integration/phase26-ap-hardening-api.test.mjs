@@ -105,15 +105,23 @@ test("Step 26 AP stays blocked when a supplier invoice is both import-linked and
         ]
       }
     });
+    await requestJson(baseUrl, `/v1/review-center/items/${classification.reviewItemId}/claim`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
     await requestJson(
       baseUrl,
-      `/v1/documents/${sourceDocument.documentId}/classification-cases/${classification.classificationCaseId}/decide`,
+      `/v1/review-center/items/${classification.reviewItemId}/approve`,
       {
         method: "POST",
         token: adminToken,
         body: {
           companyId: DEMO_IDS.companyId,
-          approvalNote: "Privat utgift ska aldrig passera AP som bolagskostnad."
+          reasonCode: "classification_confirmed",
+          note: "Privat utgift ska aldrig passera AP som bolagskostnad."
         }
       }
     );
@@ -231,12 +239,20 @@ test("Step 26 AP stays blocked when a supplier invoice is both import-linked and
         companyId: DEMO_IDS.companyId
       }
     });
-    await requestJson(baseUrl, `/v1/import-cases/${importCase.importCaseId}/approve`, {
+    await requestJson(baseUrl, `/v1/review-center/items/${importCase.reviewItemId}/claim`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    await requestJson(baseUrl, `/v1/review-center/items/${importCase.reviewItemId}/approve`, {
       method: "POST",
       token: adminToken,
       body: {
         companyId: DEMO_IDS.companyId,
-        approvalNote: "Import case complete but AP must still stay blocked by person-linked handoff."
+        reasonCode: "import_case_complete",
+        note: "Import case complete but AP must still stay blocked by person-linked handoff."
       }
     });
 

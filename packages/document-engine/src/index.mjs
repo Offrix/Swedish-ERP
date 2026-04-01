@@ -44,6 +44,7 @@ export function createDocumentArchiveEngine({
   clock = () => new Date(),
   environmentMode = "test",
   getIntegrationsPlatform = null,
+  getReviewCenterPlatform = null,
   ocrProvider = null
 } = {}) {
   const defaultOcrProvider =
@@ -907,8 +908,31 @@ export function createDocumentArchiveEngine({
     };
   }
 
-  function claimReviewTask({ companyId, reviewTaskId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+  function claimReviewTask({
+    companyId,
+    reviewTaskId,
+    actorId = "system",
+    correlationId = crypto.randomUUID(),
+    reviewCenterManaged = false
+  } = {}) {
     const task = requireReviewTask({ companyId, reviewTaskId });
+    const reviewCenterPlatform = resolveReviewCenterPlatform();
+    if (task.reviewItemId && reviewCenterPlatform && !reviewCenterManaged) {
+      throw createError(409, "review_task_review_center_required", "Review task must be claimed through review center.");
+    }
+    if (task.reviewItemId && reviewCenterPlatform && reviewCenterManaged) {
+      assertClaimedReviewItem({
+        reviewCenterPlatform,
+        companyId: task.companyId,
+        reviewItemId: task.reviewItemId,
+        actorId,
+        errorCode: "review_task_review_center_claim_missing",
+        errorMessage: "Review center claim is required before the review task can be claimed."
+      });
+    }
+    if (task.status === "claimed" && task.claimedByActorId === actorId) {
+      return buildReviewTaskSummary(task);
+    }
     if (!["open", "requeued"].includes(task.status)) {
       throw createError(409, "review_task_not_claimable", "Review task cannot be claimed from its current status.");
     }
@@ -941,7 +965,17 @@ export function createDocumentArchiveEngine({
     correlationId = crypto.randomUUID()
   } = {}) {
     const task = requireReviewTask({ companyId, reviewTaskId });
-    if (task.status === "open" || task.status === "requeued") {
+    const reviewCenterPlatform = resolveReviewCenterPlatform();
+    if (task.reviewItemId && reviewCenterPlatform) {
+      assertClaimedReviewItem({
+        reviewCenterPlatform,
+        companyId: task.companyId,
+        reviewItemId: task.reviewItemId,
+        actorId,
+        errorCode: "review_task_review_center_claim_missing",
+        errorMessage: "Review center claim is required before the review task can be corrected."
+      });
+    } else if (task.status === "open" || task.status === "requeued") {
       claimReviewTask({ companyId, reviewTaskId, actorId, correlationId });
     }
     if (task.status !== "claimed") {
@@ -997,8 +1031,27 @@ export function createDocumentArchiveEngine({
     return buildReviewTaskSummary(task);
   }
 
-  function approveReviewTask({ companyId, reviewTaskId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
+  function approveReviewTask({
+    companyId,
+    reviewTaskId,
+    actorId = "system",
+    correlationId = crypto.randomUUID(),
+    reviewCenterManaged = false
+  } = {}) {
     const task = requireReviewTask({ companyId, reviewTaskId });
+    const reviewCenterPlatform = resolveReviewCenterPlatform();
+    if (task.reviewItemId && reviewCenterPlatform && !reviewCenterManaged) {
+      throw createError(409, "review_task_review_center_required", "Review task approval must go through review center.");
+    }
+    if (task.reviewItemId && reviewCenterPlatform && reviewCenterManaged) {
+      assertApprovedReviewDecision({
+        reviewCenterPlatform,
+        companyId: task.companyId,
+        reviewItemId: task.reviewItemId,
+        errorCode: "review_task_review_decision_missing",
+        errorMessage: "Review center approval is required before the review task can be approved."
+      });
+    }
     if (!["claimed", "corrected"].includes(task.status)) {
       throw createError(409, "review_task_not_approvable", "Review task cannot be approved from its current status.");
     }
@@ -1165,7 +1218,6 @@ export function createDocumentArchiveEngine({
 
     let reviewTask = null;
     if (reviewDecision.reviewRequired) {
-      document.metadataJson.pendingReviewQueueCode = reviewDecision.queueCode;
       reviewTask = createReviewTask({
         document,
         run,
@@ -1173,6 +1225,7 @@ export function createDocumentArchiveEngine({
         actorId,
         correlationId
       });
+      document.metadataJson.pendingReviewQueueCode = reviewTask.queueCode;
     } else {
       document.documentType = resolvedClassification.suggestedDocumentType;
       delete document.metadataJson.pendingReviewQueueCode;
@@ -1394,8 +1447,10 @@ export function createDocumentArchiveEngine({
       approvedByActorId: null,
       approvedAt: null,
       manualClassificationVersionId: null,
+      reviewItemId: null,
       metadataJson: {
-        reasonCode: reviewDecision.reasonCode
+        reasonCode: reviewDecision.reasonCode,
+        legacyQueueCode: reviewDecision.queueCode
       },
       createdAt: nowIso(),
       updatedAt: nowIso()
@@ -1403,6 +1458,18 @@ export function createDocumentArchiveEngine({
 
     state.reviewTasks.set(task.reviewTaskId, task);
     state.reviewTaskIdsByDocument.get(document.documentId).push(task.reviewTaskId);
+    const reviewItem = createOrReuseReviewCenterItem({
+      task,
+      document,
+      run,
+      reviewDecision,
+      actorId
+    });
+    if (reviewItem) {
+      task.reviewItemId = reviewItem.reviewItemId;
+      task.queueCode = reviewItem.queueCode;
+      task.updatedAt = nowIso();
+    }
 
     pushAudit({
       companyId: task.companyId,
@@ -1639,6 +1706,109 @@ export function createDocumentArchiveEngine({
         auditClass: "document_action"
       })
     );
+  }
+
+  function createOrReuseReviewCenterItem({ task, document, run, reviewDecision, actorId }) {
+    const reviewCenterPlatform = resolveReviewCenterPlatform();
+    if (!reviewCenterPlatform || typeof reviewCenterPlatform.createReviewItem !== "function") {
+      return null;
+    }
+    return reviewCenterPlatform.createReviewItem({
+      companyId: task.companyId,
+      queueCode: resolveReviewCenterQueueCode(reviewDecision),
+      reviewTypeCode: "DOCUMENT_OCR_REVIEW",
+      sourceDomainCode: "DOCUMENTS",
+      sourceObjectType: "review_task",
+      sourceObjectId: task.reviewTaskId,
+      sourceReference: `${document.documentId}:${run.ocrRunId}`,
+      sourceObjectLabel: `Document review ${document.documentId}`,
+      requiredDecisionType: "classification",
+      riskClass: resolveDocumentReviewRiskClass(reviewDecision),
+      title: `Document ${document.documentId} requires manual review`,
+      summary: buildDocumentReviewSummary({ document, run, reviewDecision }),
+      requestedPayload: {
+        documentId: document.documentId,
+        ocrRunId: run.ocrRunId,
+        suggestedDocumentType: task.suggestedDocumentType,
+        suggestedFieldsJson: copy(task.suggestedFieldsJson),
+        reviewReasonCode: reviewDecision.reasonCode,
+        legacyQueueCode: reviewDecision.queueCode
+      },
+      evidenceRefs: [run.ocrDocumentVersionId, run.classificationDocumentVersionId]
+        .filter((value) => typeof value === "string" && value.trim().length > 0)
+        .map((value) => `document_version:${value}`),
+      actorContext: {
+        taskType: task.taskType,
+        sourceChannel: document.sourceChannel || null,
+        documentType: document.documentType || null
+      },
+      actorId
+    });
+  }
+
+  function resolveReviewCenterPlatform() {
+    return typeof getReviewCenterPlatform === "function" ? getReviewCenterPlatform() : null;
+  }
+
+  function resolveReviewCenterQueueCode(reviewDecision) {
+    return reviewDecision?.queueCode ? "DOCUMENT_REVIEW" : "DOCUMENT_REVIEW";
+  }
+
+  function resolveDocumentReviewRiskClass(reviewDecision) {
+    if (!reviewDecision?.reasonCode) {
+      return "medium";
+    }
+    if (String(reviewDecision.reasonCode).startsWith("field_")) {
+      return "high";
+    }
+    if (String(reviewDecision.reasonCode).includes("unknown")) {
+      return "high";
+    }
+    return "medium";
+  }
+
+  function buildDocumentReviewSummary({ document, run, reviewDecision }) {
+    return [
+      `Document ${document.documentId} from channel ${document.sourceChannel || "unknown"} requires OCR/classification review.`,
+      `Suggested type: ${run.suggestedDocumentType || "unknown"}.`,
+      `Reason: ${reviewDecision.reasonCode || "manual_review_required"}.`
+    ].join(" ");
+  }
+
+  function assertClaimedReviewItem({
+    reviewCenterPlatform,
+    companyId,
+    reviewItemId,
+    actorId,
+    errorCode,
+    errorMessage
+  }) {
+    const reviewItem = reviewCenterPlatform.getReviewCenterItem({
+      companyId,
+      reviewItemId
+    });
+    if (!reviewItem || !["claimed", "in_review", "waiting_input"].includes(reviewItem.status)) {
+      throw createError(409, errorCode, errorMessage);
+    }
+    if (reviewItem.claimedByActorId && reviewItem.claimedByActorId !== actorId) {
+      throw createError(409, "review_task_claim_owner_required", "Only the claiming review-center actor can update the review task.");
+    }
+  }
+
+  function assertApprovedReviewDecision({
+    reviewCenterPlatform,
+    companyId,
+    reviewItemId,
+    errorCode,
+    errorMessage
+  }) {
+    const reviewItem = reviewCenterPlatform.getReviewCenterItem({
+      companyId,
+      reviewItemId
+    });
+    if (!reviewItem || !["approved", "closed"].includes(reviewItem.status) || reviewItem.latestDecision?.decisionCode !== "approve") {
+      throw createError(409, errorCode, errorMessage);
+    }
   }
 
   function nowIso() {

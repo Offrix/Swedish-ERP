@@ -540,10 +540,23 @@ test("Phase 6.4 direct platform flow blocks person-linked AP documents from post
     /approved without open variances/i
   );
 
+  platform.claimReviewCenterItem({
+    companyId: COMPANY_ID,
+    reviewItemId: classificationCase.reviewItemId,
+    actorId: "admin"
+  });
+  platform.decideReviewCenterItem({
+    companyId: COMPANY_ID,
+    reviewItemId: classificationCase.reviewItemId,
+    decisionCode: "approve",
+    reasonCode: "classification_confirmed",
+    actorId: "admin"
+  });
   platform.approveClassificationCase({
     companyId: COMPANY_ID,
     classificationCaseId: classificationCase.classificationCaseId,
-    actorId: "admin"
+    actorId: "admin",
+    reviewCenterManaged: true
   });
   const rematched = platform.runSupplierInvoiceMatch({
     companyId: COMPANY_ID,

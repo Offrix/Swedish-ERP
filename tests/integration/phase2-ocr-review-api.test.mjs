@@ -124,15 +124,26 @@ test("Phase 2.3 API runs OCR, opens review tasks, accepts manual correction and 
     const reviewRun = await runOcr(baseUrl, adminSession.sessionToken, ambiguousDocumentId);
     assert.equal(reviewRun.reviewTask.taskType, "document_review");
     assert.equal(reviewRun.reviewTask.status, "open");
+    assert.equal(typeof reviewRun.reviewTask.reviewItemId, "string");
 
-    const claimed = await requestJson(`${baseUrl}/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}/claim`, {
+    await requestJson(`${baseUrl}/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}/claim`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 409,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001"
+      }
+    });
+
+    const claimed = await requestJson(`${baseUrl}/v1/review-center/items/${reviewRun.reviewTask.reviewItemId}/claim`, {
       method: "POST",
       token: adminSession.sessionToken,
       body: {
         companyId: "00000000-0000-4000-8000-000000000001"
       }
     });
-    assert.equal(claimed.task.status, "claimed");
+    assert.equal(claimed.status, "claimed");
+    assert.equal(claimed.sourceObjectSnapshot?.task?.status, "claimed");
 
     const corrected = await requestJson(`${baseUrl}/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}/correct`, {
       method: "POST",
@@ -151,15 +162,25 @@ test("Phase 2.3 API runs OCR, opens review tasks, accepts manual correction and 
     });
     assert.equal(corrected.task.status, "corrected");
 
-    const approved = await requestJson(`${baseUrl}/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}/approve`, {
+    await requestJson(`${baseUrl}/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}/approve`, {
+      method: "POST",
+      token: adminSession.sessionToken,
+      expectedStatus: 409,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001"
+      }
+    });
+
+    const approved = await requestJson(`${baseUrl}/v1/review-center/items/${reviewRun.reviewTask.reviewItemId}/approve`, {
       method: "POST",
       token: adminSession.sessionToken,
       body: {
         companyId: "00000000-0000-4000-8000-000000000001"
       }
     });
-    assert.equal(approved.task.status, "approved");
-    assert.equal(approved.document.documentType, "contract");
+    assert.equal(approved.status, "approved");
+    assert.equal(approved.sourceObjectSnapshot?.task?.status, "approved");
+    assert.equal(approved.sourceObjectSnapshot?.document?.documentType, "contract");
 
     await requestJson(`${baseUrl}/v1/documents/${invoiceDocumentId}/ocr/runs`, {
       method: "POST",
@@ -214,6 +235,7 @@ test("Phase 2.3 API runs OCR, opens review tasks, accepts manual correction and 
     assert.equal(asyncCompleted.ocrRun.status, "completed");
     assert.equal(asyncCompleted.ocrRun.textConfidence < 0.9, true);
     assert.equal(asyncCompleted.reviewTask.status, "open");
+    assert.equal(typeof asyncCompleted.reviewTask.reviewItemId, "string");
   } finally {
     await stopServer(server);
   }

@@ -1125,12 +1125,16 @@ export function createSearchEngine({
         const listProjectionContracts =
           typeof candidate?.listSearchProjectionContracts === "function"
             ? (input) => candidate.listSearchProjectionContracts(input)
+            : typeof candidate?.listImportCaseSearchProjectionContracts === "function"
+              ? (input) => candidate.listImportCaseSearchProjectionContracts(input)
             : typeof candidate?.listDocumentClassificationSearchProjectionContracts === "function"
               ? (input) => candidate.listDocumentClassificationSearchProjectionContracts(input)
               : null;
         const listProjectionDocuments =
           typeof candidate?.listSearchProjectionDocuments === "function"
             ? (input) => candidate.listSearchProjectionDocuments(input)
+            : typeof candidate?.listImportCaseSearchProjectionDocuments === "function"
+              ? (input) => candidate.listImportCaseSearchProjectionDocuments(input)
             : typeof candidate?.listDocumentClassificationSearchProjectionDocuments === "function"
               ? (input) => candidate.listDocumentClassificationSearchProjectionDocuments(input)
               : null;

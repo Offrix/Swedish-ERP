@@ -94,11 +94,34 @@ test("Step 15 import cases block until customs evidence arrives and then approve
   assert.equal(withVat.completeness.importVatBaseAmount, 12750);
   assert.equal(withVat.completeness.importVatAmount, 3187.5);
 
+  assert.throws(
+    () =>
+      importCases.approveImportCase({
+        companyId: DEMO_COMPANY_ID,
+        importCaseId: created.importCaseId,
+        approvalNote: "Tullunderlag mottaget.",
+        actorId: "user_1"
+      }),
+    (error) => error?.code === "import_case_review_center_required"
+  );
+  reviewCenterPlatform.claimReviewCenterItem({
+    companyId: DEMO_COMPANY_ID,
+    reviewItemId: created.reviewItemId,
+    actorId: "user_1"
+  });
+  reviewCenterPlatform.decideReviewCenterItem({
+    companyId: DEMO_COMPANY_ID,
+    reviewItemId: created.reviewItemId,
+    decisionCode: "approve",
+    reasonCode: "import_case_complete",
+    actorId: "user_1"
+  });
   const approved = importCases.approveImportCase({
     companyId: DEMO_COMPANY_ID,
     importCaseId: created.importCaseId,
     approvalNote: "Tullunderlag mottaget.",
-    actorId: "user_1"
+    actorId: "user_1",
+    reviewCenterManaged: true
   });
   assert.equal(approved.status, "approved");
   assert.equal(approved.reviewRequired, false);
@@ -107,7 +130,7 @@ test("Step 15 import cases block until customs evidence arrives and then approve
     companyId: DEMO_COMPANY_ID,
     reviewItemId: approved.reviewItemId
   });
-  assert.equal(reviewItem.status, "closed");
+  assert.equal(reviewItem.status, "approved");
 });
 
 test("Step 15 import cases prevent document reuse across active cases and preserve correction chain", () => {
@@ -280,11 +303,24 @@ test("Step 15 import cases apply downstream idempotently and conflict on diverge
     actorId: "user_5"
   });
 
+  reviewCenterPlatform.claimReviewCenterItem({
+    companyId: DEMO_COMPANY_ID,
+    reviewItemId: created.reviewItemId,
+    actorId: "user_5"
+  });
+  reviewCenterPlatform.decideReviewCenterItem({
+    companyId: DEMO_COMPANY_ID,
+    reviewItemId: created.reviewItemId,
+    decisionCode: "approve",
+    reasonCode: "import_case_complete",
+    actorId: "user_5"
+  });
   importCases.approveImportCase({
     companyId: DEMO_COMPANY_ID,
     importCaseId: created.importCaseId,
     approvalNote: "Klar för downstream.",
-    actorId: "user_5"
+    actorId: "user_5",
+    reviewCenterManaged: true
   });
 
   const applied = importCases.applyImportCase({

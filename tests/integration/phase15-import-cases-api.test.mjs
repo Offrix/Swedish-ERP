@@ -16,7 +16,7 @@ test("Step 15 migration adds correction-request and downstream-apply storage for
   assert.match(migration, /ux_import_cases_applied_command/i);
 });
 
-test("Step 15 API exposes import case creation, document attachment, recalc and approval", { concurrency: false }, async () => {
+test("Step 15 API exposes import case creation, document attachment, recalc and review-center approval", { concurrency: false }, async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-24T18:45:00Z")
   });
@@ -128,15 +128,38 @@ test("Step 15 API exposes import case creation, document attachment, recalc and 
     assert.equal(recalculated.completeness.importVatBaseAmount, 12750);
     assert.equal(recalculated.completeness.importVatAmount, 3187.5);
 
-    const approved = await requestJson(baseUrl, `/v1/import-cases/${created.importCaseId}/approve`, {
+    const directApproveForbidden = await requestJson(baseUrl, `/v1/import-cases/${created.importCaseId}/approve`, {
       method: "POST",
       token: adminToken,
+      expectedStatus: 409,
       body: {
         companyId: DEMO_IDS.companyId,
         approvalNote: "Importfallet komplett."
       }
     });
+    assert.equal(directApproveForbidden.error, "import_case_review_center_required");
+
+    const reviewClaim = await requestJson(baseUrl, `/v1/review-center/items/${created.reviewItemId}/claim`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(reviewClaim.status, "claimed");
+
+    const approved = await requestJson(baseUrl, `/v1/review-center/items/${created.reviewItemId}/approve`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "import_case_complete",
+        note: "Importfallet komplett.",
+        evidenceRefs: ["import_case:review-center-approved"]
+      }
+    });
     assert.equal(approved.status, "approved");
+    assert.equal(approved.sourceObjectSnapshot.status, "approved");
 
     const fetched = await requestJson(
       baseUrl,
@@ -248,7 +271,15 @@ test("Step 15 API drives import-case correction requests and replay-safe downstr
     assert.equal(rejectedRequest.correctionRequest.status, "rejected");
     assert.equal(rejectedRequest.importCase.completeness.status, "complete");
 
-    const approved = await requestJson(baseUrl, `/v1/import-cases/${created.importCaseId}/approve`, {
+    await requestJson(baseUrl, `/v1/review-center/items/${created.reviewItemId}/claim`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+
+    const approved = await requestJson(baseUrl, `/v1/review-center/items/${created.reviewItemId}/approve`, {
       method: "POST",
       token: adminToken,
       body: {
@@ -257,6 +288,7 @@ test("Step 15 API drives import-case correction requests and replay-safe downstr
       }
     });
     assert.equal(approved.status, "approved");
+    assert.equal(approved.sourceObjectSnapshot?.status, "approved");
 
     const applied = await requestJson(baseUrl, `/v1/import-cases/${created.importCaseId}/apply`, {
       method: "POST",

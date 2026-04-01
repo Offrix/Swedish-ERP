@@ -165,10 +165,32 @@ test("Step 14 document classification opens review for private spend and preserv
   assert.equal(Boolean(created.reviewItemId), true);
   assert.equal(classification.listPendingReviewClassificationCases({ companyId: DEMO_COMPANY_ID }).length, 1);
 
+  assert.throws(
+    () =>
+      classification.approveClassificationCase({
+        companyId: DEMO_COMPANY_ID,
+        classificationCaseId: created.classificationCaseId,
+        actorId: "user_2"
+      }),
+    (error) => error?.code === "classification_case_review_center_required"
+  );
+  reviewCenterPlatform.claimReviewCenterItem({
+    companyId: DEMO_COMPANY_ID,
+    reviewItemId: created.reviewItemId,
+    actorId: "user_2"
+  });
+  reviewCenterPlatform.decideReviewCenterItem({
+    companyId: DEMO_COMPANY_ID,
+    reviewItemId: created.reviewItemId,
+    decisionCode: "approve",
+    reasonCode: "classification_confirmed",
+    actorId: "user_2"
+  });
   const approved = classification.approveClassificationCase({
     companyId: DEMO_COMPANY_ID,
     classificationCaseId: created.classificationCaseId,
-    actorId: "user_2"
+    actorId: "user_2",
+    reviewCenterManaged: true
   });
   assert.equal(approved.status, "approved");
 
@@ -277,10 +299,32 @@ test("Step 14 document classification dispatches payroll intents into pay runs w
     ]
   });
 
+  assert.throws(
+    () =>
+      classification.approveClassificationCase({
+        companyId: DEMO_COMPANY_ID,
+        classificationCaseId: created.classificationCaseId,
+        actorId: "user_3"
+      }),
+    (error) => error?.code === "classification_case_review_center_required"
+  );
+  reviewCenterPlatform.claimReviewCenterItem({
+    companyId: DEMO_COMPANY_ID,
+    reviewItemId: created.reviewItemId,
+    actorId: "user_3"
+  });
+  reviewCenterPlatform.decideReviewCenterItem({
+    companyId: DEMO_COMPANY_ID,
+    reviewItemId: created.reviewItemId,
+    decisionCode: "approve",
+    reasonCode: "classification_confirmed",
+    actorId: "user_3"
+  });
   const approved = classification.approveClassificationCase({
     companyId: DEMO_COMPANY_ID,
     classificationCaseId: created.classificationCaseId,
-    actorId: "user_3"
+    actorId: "user_3",
+    reviewCenterManaged: true
   });
   assert.equal(approved.status, "approved");
 

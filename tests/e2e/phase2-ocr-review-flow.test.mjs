@@ -108,14 +108,26 @@ test("Phase 2.3 OCR routes can be disabled and support review-driven correction 
       }
     });
     assert.equal(reviewRun.reviewTask.status, "open");
+    assert.equal(typeof reviewRun.reviewTask.reviewItemId, "string");
 
     await requestJson(enabledBaseUrl, `/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}/claim`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 409,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001"
+      }
+    });
+
+    const claimed = await requestJson(enabledBaseUrl, `/v1/review-center/items/${reviewRun.reviewTask.reviewItemId}/claim`, {
       method: "POST",
       token: sessionToken,
       body: {
         companyId: "00000000-0000-4000-8000-000000000001"
       }
     });
+    assert.equal(claimed.status, "claimed");
+    assert.equal(claimed.sourceObjectSnapshot?.task?.status, "claimed");
 
     await requestJson(enabledBaseUrl, `/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}/correct`, {
       method: "POST",
@@ -132,15 +144,25 @@ test("Phase 2.3 OCR routes can be disabled and support review-driven correction 
       }
     });
 
-    const approved = await requestJson(enabledBaseUrl, `/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}/approve`, {
+    await requestJson(enabledBaseUrl, `/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}/approve`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 409,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001"
+      }
+    });
+
+    const approved = await requestJson(enabledBaseUrl, `/v1/review-center/items/${reviewRun.reviewTask.reviewItemId}/approve`, {
       method: "POST",
       token: sessionToken,
       body: {
         companyId: "00000000-0000-4000-8000-000000000001"
       }
     });
-    assert.equal(approved.document.documentType, "contract");
-    assert.equal(approved.document.status, "reviewed");
+    assert.equal(approved.status, "approved");
+    assert.equal(approved.sourceObjectSnapshot?.document?.documentType, "contract");
+    assert.equal(approved.sourceObjectSnapshot?.document?.status, "reviewed");
 
     await requestJson(enabledBaseUrl, `/v1/documents/${documentId}/ocr/runs`, {
       method: "POST",
@@ -211,6 +233,7 @@ test("Phase 2.3 OCR routes can be disabled and support review-driven correction 
     );
     assert.equal(asyncCompleted.ocrRun.status, "completed");
     assert.equal(asyncCompleted.reviewTask.status, "open");
+    assert.equal(typeof asyncCompleted.reviewTask.reviewItemId, "string");
   } finally {
     await stopServer(disabledServer);
     await stopServer(enabledServer);

@@ -288,6 +288,127 @@ test("Step 12 API exposes review-center queues, items, claim and decide flow", a
   }
 });
 
+test("Phase 9.5 review-center approval is the only manual approval path for classification and import cases", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-04-01T12:00:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const document = platform.createDocumentRecord({
+      companyId: DEMO_IDS.companyId,
+      documentType: "expense_receipt",
+      sourceReference: "review-center-only-001",
+      actorId: DEMO_IDS.userId
+    });
+    const classificationCase = platform.createClassificationCase({
+      companyId: DEMO_IDS.companyId,
+      documentId: document.documentId,
+      actorId: DEMO_IDS.userId,
+      lineInputs: [
+        {
+          description: "Privat kortkop",
+          amount: 990,
+          treatmentCode: "PRIVATE_RECEIVABLE"
+        }
+      ]
+    });
+    assert.equal(Boolean(classificationCase.reviewItemId), true);
+
+    const directClassificationApprove = await requestJson(
+      baseUrl,
+      `/v1/documents/${document.documentId}/classification-cases/${classificationCase.classificationCaseId}/decide`,
+      {
+        method: "POST",
+        token: adminToken,
+        expectedStatus: 409,
+        body: {
+          companyId: DEMO_IDS.companyId,
+          approvalNote: "Ska blockeras."
+        }
+      }
+    );
+    assert.equal(directClassificationApprove.error, "classification_case_review_center_required");
+
+    await requestJson(baseUrl, `/v1/review-center/items/${classificationCase.reviewItemId}/claim`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    const classificationApproved = await requestJson(baseUrl, `/v1/review-center/items/${classificationCase.reviewItemId}/approve`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "classification_confirmed",
+        note: "Godkand via review center."
+      }
+    });
+    assert.equal(classificationApproved.status, "approved");
+    assert.equal(classificationApproved.sourceObjectSnapshot.status, "approved");
+
+    const supplierDocument = platform.createDocumentRecord({
+      companyId: DEMO_IDS.companyId,
+      documentType: "supplier_invoice",
+      sourceReference: "review-center-import-001",
+      actorId: DEMO_IDS.userId
+    });
+    const importCase = platform.createImportCase({
+      companyId: DEMO_IDS.companyId,
+      caseReference: "IMP-REVIEW-001",
+      goodsOriginCountry: "SE",
+      requiresCustomsEvidence: false,
+      initialDocuments: [{ documentId: supplierDocument.documentId, roleCode: "PRIMARY_SUPPLIER_DOCUMENT" }],
+      initialComponents: [{ componentType: "GOODS", amount: 1400 }],
+      actorId: DEMO_IDS.userId
+    });
+    assert.equal(Boolean(importCase.reviewItemId), true);
+
+    const directImportApprove = await requestJson(baseUrl, `/v1/import-cases/${importCase.importCaseId}/approve`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        approvalNote: "Ska blockeras."
+      }
+    });
+    assert.equal(directImportApprove.error, "import_case_review_center_required");
+
+    await requestJson(baseUrl, `/v1/review-center/items/${importCase.reviewItemId}/claim`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    const importApproved = await requestJson(baseUrl, `/v1/review-center/items/${importCase.reviewItemId}/approve`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        reasonCode: "import_case_complete",
+        note: "Godkand via review center."
+      }
+    });
+    assert.equal(importApproved.status, "approved");
+    assert.equal(importApproved.sourceObjectSnapshot.status, "approved");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("Step 17 API exposes backoffice SLA scan for review-center queues", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-26T00:30:00Z")

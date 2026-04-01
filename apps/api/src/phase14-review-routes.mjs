@@ -10,6 +10,10 @@
   requireText,
   writeJson
 } from "./route-helpers.mjs";
+import {
+  applyReviewCenterClaimSideEffects,
+  applyReviewCenterDecisionSideEffects
+} from "./review-center-decision-effects.mjs";
 
 export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platform, helpers }) {
   const {
@@ -460,13 +464,20 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
       reviewItemId: reviewCenterClaimMatch.reviewItemId,
       operation: "claim"
     });
-    writeJson(res, 200, platform.claimReviewCenterItem({
+    const claimed = platform.claimReviewCenterItem({
       companyId,
       reviewItemId: reviewCenterClaimMatch.reviewItemId,
       actorId: principal.userId,
       viewerUserId: principal.userId,
       viewerTeamIds: resolvePrincipalTeamIds(principal)
-    }));
+    });
+    const sourceObjectSnapshot = applyReviewCenterClaimSideEffects({
+      platform,
+      companyId,
+      reviewItem: claimed,
+      actorId: principal.userId
+    });
+    writeJson(res, 200, sourceObjectSnapshot ? { ...claimed, sourceObjectSnapshot } : claimed);
     return true;
   }
 
@@ -551,7 +562,7 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
       reviewItemId: reviewCenterDecideMatch.reviewItemId,
       operation: "decide"
     });
-    writeJson(res, 200, platform.decideReviewCenterItem({
+    const decided = platform.decideReviewCenterItem({
       companyId,
       reviewItemId: reviewCenterDecideMatch.reviewItemId,
       decisionCode: body.decisionCode,
@@ -565,7 +576,16 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
       actorId: principal.userId,
       viewerUserId: principal.userId,
       viewerTeamIds: resolvePrincipalTeamIds(principal)
-    }));
+    });
+    const sourceObjectSnapshot = applyReviewCenterDecisionSideEffects({
+      platform,
+      companyId,
+      reviewItem: decided,
+      decisionCode: body.decisionCode,
+      note: body.note || null,
+      actorId: principal.userId
+    });
+    writeJson(res, 200, sourceObjectSnapshot ? { ...decided, sourceObjectSnapshot } : decided);
     return true;
   }
 

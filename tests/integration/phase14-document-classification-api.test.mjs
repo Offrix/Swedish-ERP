@@ -265,19 +265,29 @@ test("Step 14 API dispatches private spend into payroll net deduction flow", asy
     });
     assert.equal(created.status, "under_review");
 
+    await requestJson(baseUrl, `/v1/review-center/items/${created.reviewItemId}/claim`, {
+      method: "POST",
+      token: adminToken,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+
     const approved = await requestJson(
       baseUrl,
-      `/v1/documents/${document.documentId}/classification-cases/${created.classificationCaseId}/decide`,
+      `/v1/review-center/items/${created.reviewItemId}/approve`,
       {
         method: "POST",
         token: adminToken,
         body: {
           companyId: DEMO_IDS.companyId,
-          approvalNote: "Privatkop ska regleras via nettoloneavdrag."
+          reasonCode: "classification_confirmed",
+          note: "Privatkop ska regleras via nettoloneavdrag."
         }
       }
     );
     assert.equal(approved.status, "approved");
+    assert.equal(approved.sourceObjectSnapshot.status, "approved");
 
     const dispatched = await requestJson(
       baseUrl,

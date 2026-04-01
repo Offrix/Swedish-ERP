@@ -424,7 +424,13 @@ export function createImportCasesEngine({
     return presentCase(state, importCase);
   }
 
-  function approveImportCase({ companyId, importCaseId, approvalNote = null, actorId = "system" } = {}) {
+  function approveImportCase({
+    companyId,
+    importCaseId,
+    approvalNote = null,
+    actorId = "system",
+    reviewCenterManaged = false
+  } = {}) {
     const importCase = requireCase(state, companyId, importCaseId);
     if (["approved", "applied"].includes(importCase.status)) {
       return presentCase(state, importCase);
@@ -444,7 +450,23 @@ export function createImportCasesEngine({
     }
 
     const resolvedActorId = requireText(actorId, "actor_id_required");
-    if (importCase.reviewItemId && reviewCenterPlatform) {
+    if (importCase.reviewItemId && reviewCenterPlatform && !reviewCenterManaged) {
+      throw createError(
+        409,
+        "import_case_review_center_required",
+        "Import cases with manual review must be approved through review center."
+      );
+    }
+    if (importCase.reviewItemId && reviewCenterPlatform && reviewCenterManaged) {
+      assertApprovedReviewDecision({
+        reviewCenterPlatform,
+        companyId: importCase.companyId,
+        reviewItemId: importCase.reviewItemId,
+        errorCode: "import_case_review_decision_missing",
+        errorMessage: "Review center approval is required before the import case can be approved."
+      });
+    }
+    if (importCase.reviewItemId && reviewCenterPlatform && !reviewCenterManaged) {
       settleLinkedReviewItem({ importCase, actorId: resolvedActorId, approvalNote });
     }
 
@@ -875,6 +897,22 @@ export function createImportCasesEngine({
         actorId,
         note: approvalNote || "Closed after import-case approval."
       });
+    }
+  }
+
+  function assertApprovedReviewDecision({
+    reviewCenterPlatform,
+    companyId,
+    reviewItemId,
+    errorCode,
+    errorMessage
+  }) {
+    const reviewItem = reviewCenterPlatform.getReviewCenterItem({
+      companyId,
+      reviewItemId
+    });
+    if (!reviewItem || !["approved", "closed"].includes(reviewItem.status) || reviewItem.latestDecision?.decisionCode !== "approve") {
+      throw createError(409, errorCode, errorMessage);
     }
   }
 
