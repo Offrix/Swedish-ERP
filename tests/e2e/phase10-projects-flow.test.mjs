@@ -169,6 +169,17 @@ test("Phase 10.1 e2e flow covers project setup, payroll-backed actuals, AR tie-o
         workedMinutes: 480
       }
     });
+    await requestJson(enabledBaseUrl, "/v1/time/approved-sets", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: employee.employment.employmentId,
+        startsOn: "2026-03-01",
+        endsOn: "2026-03-31"
+      }
+    });
     const projectBenefit = await requestJson(enabledBaseUrl, "/v1/benefits/events", {
       method: "POST",
       token: sessionToken,

@@ -101,6 +101,13 @@ async function seedPhase15Reporting(platform) {
     projectId: "project-demo-alpha",
     actorId: "phase15-unit"
   });
+  platform.approveTimeSet({
+    companyId: COMPANY_ID,
+    employmentId: employee.employment.employmentId,
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
+    actorId: "phase15-unit"
+  });
 
   const payCalendar = platform.listPayCalendars({ companyId: COMPANY_ID })[0];
   const payRun = platform.createPayRun({

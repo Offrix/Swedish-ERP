@@ -155,6 +155,17 @@ test("Phase 10.1 API manages projects, budgets, resource allocations and snapsho
         workedMinutes: 480
       }
     });
+    await requestJson(baseUrl, "/v1/time/approved-sets", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: employee.employment.employmentId,
+        startsOn: "2026-03-01",
+        endsOn: "2026-03-31"
+      }
+    });
 
     const projectBenefit = await requestJson(baseUrl, "/v1/benefits/events", {
       method: "POST",

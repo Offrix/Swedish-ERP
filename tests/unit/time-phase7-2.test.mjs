@@ -157,6 +157,17 @@ test("Phase 7.2 direct platform records clock events, links time to project/acti
   });
   assert.equal(approvedTimeSet.approvedEntryCount, 2);
   assert.equal(approvedTimeSet.status, "approved");
+  const payrollInput = timePlatform.getPayrollInputPeriod({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
+    reportingPeriod: "202603"
+  });
+  assert.equal(payrollInput.approvedTimeSet.approvedTimeSetId, approvedTimeSet.approvedTimeSetId);
+  assert.equal(payrollInput.approvedTimeEntries.length, 2);
+  assert.equal(payrollInput.approvedTimeEntriesOutsideSet.length, 0);
+  assert.equal(payrollInput.inputLocked, false);
 
   const firstBalance = timePlatform.listTimeBalances({
     companyId: COMPANY_ID,
@@ -188,6 +199,14 @@ test("Phase 7.2 direct platform records clock events, links time to project/acti
   });
   assert.equal(approvedTimeSets.length, 1);
   assert.equal(approvedTimeSets[0].status, "locked");
+  const lockedPayrollInput = timePlatform.getPayrollInputPeriod({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
+    reportingPeriod: "202603"
+  });
+  assert.equal(lockedPayrollInput.inputLocked, true);
 
   assert.throws(
     () =>

@@ -151,6 +151,16 @@ test("Phase 7.3 direct platform enforces signal completeness, manager approval, 
   assert.equal(approvedAbsenceDecisions.length, 1);
   assert.equal(approvedAbsenceDecisions[0].decisionStatus, "approved");
   assert.equal(approvedAbsenceDecisions[0].boundaryValidated, true);
+  const approvedPayrollInput = timePlatform.getPayrollInputPeriod({
+    companyId: COMPANY_ID,
+    employmentId: employeeEmployment.employmentId,
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
+    reportingPeriod: "202603"
+  });
+  assert.equal(approvedPayrollInput.approvedAbsenceDecisions.length, 1);
+  assert.equal(approvedPayrollInput.approvedLeaveEntries.length, 1);
+  assert.equal(approvedPayrollInput.approvedLeaveEntriesWithoutDecision.length, 0);
 
   const lateDraft = timePlatform.createLeaveEntry({
     companyId: COMPANY_ID,
@@ -165,6 +175,14 @@ test("Phase 7.3 direct platform enforces signal completeness, manager approval, 
     ],
     actorId: "unit-test"
   });
+  const pendingPayrollInput = timePlatform.getPayrollInputPeriod({
+    companyId: COMPANY_ID,
+    employmentId: employeeEmployment.employmentId,
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
+    reportingPeriod: "202603"
+  });
+  assert.equal(pendingPayrollInput.pendingLeaveEntries.length, 1);
 
   const lock = timePlatform.lockLeaveSignals({
     companyId: COMPANY_ID,
@@ -233,4 +251,83 @@ test("Phase 7.3 direct platform enforces signal completeness, manager approval, 
   assert.equal(adminView.events.some((event) => event.eventType === "created"), true);
   assert.equal(adminView.events.some((event) => event.eventType === "submitted"), true);
   assert.equal(adminView.events.some((event) => event.eventType === "approved"), true);
+});
+
+test("Phase 10.2 auto-approved leave types emit canonical absence decisions for payroll input", () => {
+  const hrPlatform = createHrPlatform({
+    clock: () => new Date("2026-03-10T08:00:00Z")
+  });
+  const timePlatform = createTimePlatform({
+    clock: () => new Date("2026-03-10T08:00:00Z"),
+    hrPlatform
+  });
+
+  const employee = hrPlatform.createEmployee({
+    companyId: COMPANY_ID,
+    givenName: "Sara",
+    familyName: "Signal",
+    workEmail: "sara.signal@example.com",
+    actorId: "unit-test"
+  });
+  const employment = hrPlatform.createEmployment({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentTypeCode: "permanent",
+    jobTitle: "Consultant",
+    payModelCode: "monthly_salary",
+    startDate: "2026-01-01",
+    actorId: "unit-test"
+  });
+  const leaveType = timePlatform.createLeaveType({
+    companyId: COMPANY_ID,
+    leaveTypeCode: "TEMP_PARENTAL_AUTO",
+    displayName: "Temporary parental auto",
+    signalType: "temporary_parental_benefit",
+    requiresManagerApproval: false,
+    actorId: "unit-test"
+  });
+
+  const leaveEntry = timePlatform.createLeaveEntry({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    leaveTypeId: leaveType.leaveTypeId,
+    reportingPeriod: "202603",
+    days: [
+      {
+        date: "2026-03-12",
+        extentPercent: 50
+      },
+      {
+        date: "2026-03-13",
+        extentPercent: 100
+      }
+    ],
+    actorId: "unit-test"
+  });
+  const submitted = timePlatform.submitLeaveEntry({
+    companyId: COMPANY_ID,
+    leaveEntryId: leaveEntry.leaveEntryId,
+    actorId: "unit-test"
+  });
+
+  assert.equal(submitted.status, "approved");
+  const decisions = timePlatform.listAbsenceDecisions({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    reportingPeriod: "202603"
+  });
+  assert.equal(decisions.length, 1);
+  assert.equal(decisions[0].decisionStatus, "approved");
+  assert.equal(decisions[0].leaveEntryId, leaveEntry.leaveEntryId);
+
+  const payrollInput = timePlatform.getPayrollInputPeriod({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
+    reportingPeriod: "202603"
+  });
+  assert.equal(payrollInput.approvedAbsenceDecisions.length, 1);
+  assert.equal(payrollInput.approvedLeaveEntries.length, 1);
+  assert.equal(payrollInput.approvedLeaveEntriesWithoutDecision.length, 0);
 });

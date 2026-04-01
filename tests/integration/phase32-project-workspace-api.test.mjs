@@ -136,6 +136,17 @@ test("Step 32 API exposes project workspace and deviation lifecycle across conne
         workedMinutes: 480
       }
     });
+    await requestJson(baseUrl, "/v1/time/approved-sets", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: employee.employment.employmentId,
+        startsOn: "2026-03-01",
+        endsOn: "2026-03-31"
+      }
+    });
 
     const payCalendar = (
       await requestJson(baseUrl, `/v1/payroll/pay-calendars?companyId=${COMPANY_ID}`, {

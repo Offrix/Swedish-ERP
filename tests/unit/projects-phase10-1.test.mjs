@@ -207,6 +207,13 @@ test("Phase 10.1 project payroll allocation keeps implicit time-share traceabili
     workedMinutes: 480,
     actorId: "unit-test"
   });
+  timePlatform.approveTimeSet({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
+    actorId: "unit-test"
+  });
 
   const payRun = payrollPlatform.createPayRun({
     companyId: COMPANY_ID,
@@ -431,6 +438,13 @@ function createProjectsFixture() {
     projectId: project.projectId,
     activityCode: "CONSULTING",
     workedMinutes: 480,
+    actorId: "unit-test"
+  });
+  timePlatform.approveTimeSet({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
     actorId: "unit-test"
   });
   const projectBenefit = benefitsPlatform.createBenefitEvent({

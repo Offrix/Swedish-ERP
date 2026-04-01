@@ -77,6 +77,13 @@ test("Phase 8.3 e2e flow posts payroll, exports payout, matches bank and reconst
       projectId: "project-demo-beta",
       actorId: "e2e-test"
     });
+    platform.approveTimeSet({
+      companyId: COMPANY_ID,
+      employmentId: employee.employment.employmentId,
+      startsOn: "2026-03-01",
+      endsOn: "2026-03-31",
+      actorId: "e2e-test"
+    });
 
     const payCalendar = (
       await requestJson(baseUrl, `/v1/payroll/pay-calendars?companyId=${COMPANY_ID}`, {

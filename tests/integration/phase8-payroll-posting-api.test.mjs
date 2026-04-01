@@ -103,6 +103,13 @@ test("Phase 8.3 API creates payroll postings, payout batches and vacation snapsh
       projectId: "project-demo-alpha",
       actorId: "integration-test"
     });
+    platform.approveTimeSet({
+      companyId: COMPANY_ID,
+      employmentId: employee.employment.employmentId,
+      startsOn: "2026-03-01",
+      endsOn: "2026-03-31",
+      actorId: "integration-test"
+    });
 
     const payCalendar = (
       await requestJson(baseUrl, `/v1/payroll/pay-calendars?companyId=${COMPANY_ID}`, {

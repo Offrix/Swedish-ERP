@@ -353,6 +353,13 @@ test("Step 10 payroll postings and payout matching resolve configurable voucher 
     projectId: "project-demo-alpha",
     actorId: "unit-test"
   });
+  timePlatform.approveTimeSet({
+    companyId: COMPANY_ID,
+    employmentId: employee.employment.employmentId,
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
+    actorId: "unit-test"
+  });
 
   const payCalendar = payrollPlatform.listPayCalendars({ companyId: COMPANY_ID })[0];
   const run = payrollPlatform.createPayRun({

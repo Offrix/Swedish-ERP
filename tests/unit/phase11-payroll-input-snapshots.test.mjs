@@ -48,6 +48,13 @@ test("Phase 11.5 payroll input snapshots lock immutable inputs and stable finger
     workedMinutes: 480,
     actorId: "unit-test"
   });
+  const approvedTimeSet = timePlatform.approveTimeSet({
+    companyId: COMPANY_ID,
+    employmentId: employee.employment.employmentId,
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
+    actorId: "unit-test"
+  });
 
   const payCalendar = payrollPlatform.listPayCalendars({ companyId: COMPANY_ID })[0];
   const run = payrollPlatform.createPayRun({
@@ -90,12 +97,76 @@ test("Phase 11.5 payroll input snapshots lock immutable inputs and stable finger
   assert.equal(run.payrollInputSnapshot.sourceSnapshotHash, run.sourceSnapshotHash);
   assert.equal(run.payrollInputSnapshot.balanceSnapshotHash, run.balanceSnapshotHash);
   assert.equal(run.payrollInputSnapshot.agreementSnapshotHash, run.agreementSnapshotHash);
+  assert.equal(
+    run.payrollInputSnapshot.sourceSnapshot[employee.employment.employmentId].approvedTimeSet.approvedTimeSetId,
+    approvedTimeSet.approvedTimeSetId
+  );
+  assert.equal(run.payrollInputSnapshot.sourceSnapshot[employee.employment.employmentId].timeEntries.length, 1);
+  assert.equal(run.payrollInputSnapshot.sourceSnapshot[employee.employment.employmentId].approvedTimeEntriesOutsideSet.length, 0);
   assert.equal(snapshotByRun.inputFingerprint, run.payrollInputFingerprint);
   assert.deepEqual(snapshotById, snapshotByRun);
   assert.deepEqual(rereadRun.payrollInputSnapshot, snapshotByRun);
   assert.equal(rereadRun.payRunFingerprint, run.payRunFingerprint);
   assert.equal(snapshotByRun.sourceSnapshot.manualInputs[0].dimensionJson.projectId, "project-snapshot-alpha");
   assert.equal(snapshotByRun.sourceSnapshot.employmentIds[0], employee.employment.employmentId);
+});
+
+test("Phase 10.2 payroll blocks approved time entries outside canonical approved time sets", () => {
+  const fixedNow = new Date("2026-03-28T08:00:00Z");
+  const orgAuthPlatform = createOrgAuthPlatform({
+    clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo"
+  });
+  const hrPlatform = createHrPlatform({ clock: () => fixedNow });
+  const timePlatform = createTimePlatform({
+    clock: () => fixedNow,
+    hrPlatform
+  });
+  const payrollPlatform = createPayrollPlatform({
+    clock: () => fixedNow,
+    bootstrapScenarioCode: "test_default_demo",
+    orgAuthPlatform,
+    hrPlatform,
+    timePlatform
+  });
+
+  const employee = createMonthlyEmployee({
+    hrPlatform,
+    givenName: "Nora",
+    familyName: "Freeze",
+    monthlySalary: 39500
+  });
+  payrollPlatform.upsertEmploymentStatutoryProfile({
+    companyId: COMPANY_ID,
+    employmentId: employee.employment.employmentId,
+    taxMode: "manual_rate",
+    manualRateReasonCode: "emergency_manual_transition",
+    taxRatePercent: 30,
+    contributionClassCode: "full",
+    actorId: "unit-test"
+  });
+  timePlatform.createTimeEntry({
+    companyId: COMPANY_ID,
+    employmentId: employee.employment.employmentId,
+    workDate: "2026-03-17",
+    workedMinutes: 480,
+    actorId: "unit-test"
+  });
+
+  const payCalendar = payrollPlatform.listPayCalendars({ companyId: COMPANY_ID })[0];
+  const run = payrollPlatform.createPayRun({
+    companyId: COMPANY_ID,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202603",
+    employmentIds: [employee.employment.employmentId],
+    actorId: "unit-test"
+  });
+  const codes = run.exceptions.map((item) => item.code).sort();
+
+  assert.equal(codes.includes("approved_time_set_missing"), true);
+  assert.equal(codes.includes("approved_time_entries_outside_time_set"), true);
+  assert.equal(run.payrollInputSnapshot.sourceSnapshot[employee.employment.employmentId].approvedTimeSet, null);
+  assert.equal(run.payrollInputSnapshot.sourceSnapshot[employee.employment.employmentId].timeEntries.length, 0);
 });
 
 function createMonthlyEmployee({ hrPlatform, givenName, familyName, monthlySalary }) {

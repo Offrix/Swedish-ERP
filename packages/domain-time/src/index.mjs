@@ -88,6 +88,7 @@ export function createTimeEngine({
     approveTimeSet,
     listTimeBalances,
     getEmploymentTimeBase,
+    getPayrollInputPeriod,
     listTimePeriodLocks,
     lockTimePeriod,
     listLeaveTypes,
@@ -713,6 +714,115 @@ export function createTimeEngine({
     };
   }
 
+  function getPayrollInputPeriod({
+    companyId,
+    employmentId,
+    startsOn,
+    endsOn,
+    reportingPeriod = null
+  } = {}) {
+    const employment = requireEmployment(companyId, employmentId, hrPlatform);
+    const resolvedStartsOn = normalizeRequiredDate(startsOn, "payroll_input_period_starts_on_required");
+    const resolvedEndsOn = normalizeRequiredDate(endsOn, "payroll_input_period_ends_on_required");
+    if (resolvedEndsOn < resolvedStartsOn) {
+      throw createError(400, "payroll_input_period_dates_invalid", "Payroll input period end date cannot be earlier than start date.");
+    }
+    const resolvedReportingPeriod = normalizeOptionalReportingPeriod(reportingPeriod, "payroll_input_reporting_period_invalid");
+
+    const timeEntriesInPeriod = listTimeEntries({
+      companyId: employment.companyId,
+      employmentId: employment.employmentId
+    }).filter((entry) => entry.workDate >= resolvedStartsOn && entry.workDate <= resolvedEndsOn);
+    const pendingTimeEntries = timeEntriesInPeriod.filter((entry) => ["draft", "submitted"].includes(entry.status));
+    const approvedTimeEntriesInPeriod = timeEntriesInPeriod.filter((entry) => entry.status === "approved");
+    const approvedTimeSet =
+      listApprovedTimeSets({
+        companyId: employment.companyId,
+        employmentId: employment.employmentId
+      })
+        .filter((candidate) => candidate.startsOn <= resolvedStartsOn && candidate.endsOn >= resolvedEndsOn)
+        .sort(
+          (left, right) =>
+            Number(right.status === "locked") - Number(left.status === "locked") ||
+            right.startsOn.localeCompare(left.startsOn) ||
+            right.updatedAt.localeCompare(left.updatedAt)
+        )[0] || null;
+    const approvedTimeEntryIds = new Set(approvedTimeSet?.approvedEntryIds || []);
+    const approvedTimeEntries = approvedTimeSet
+      ? (approvedTimeSet.approvedEntryIds || [])
+          .map((timeEntryId) => state.timeEntries.get(timeEntryId))
+          .filter(Boolean)
+          .filter((entry) => entry.workDate >= resolvedStartsOn && entry.workDate <= resolvedEndsOn)
+          .sort((left, right) => left.workDate.localeCompare(right.workDate) || left.timeEntryId.localeCompare(right.timeEntryId))
+          .map(copy)
+      : [];
+    const approvedTimeEntriesOutsideSet = approvedTimeEntriesInPeriod
+      .filter((entry) => !approvedTimeEntryIds.has(entry.timeEntryId))
+      .map(copy);
+
+    const approvedAbsenceDecisions = listAbsenceDecisions({
+      companyId: employment.companyId,
+      employmentId: employment.employmentId,
+      reportingPeriod: resolvedReportingPeriod,
+      decisionStatus: "approved"
+    })
+      .filter((decision) => {
+        if (resolvedReportingPeriod) {
+          return true;
+        }
+        return decision.startDate <= resolvedEndsOn && decision.endDate >= resolvedStartsOn;
+      })
+      .map(copy);
+    const approvedAbsenceDecisionEntryIds = new Set(approvedAbsenceDecisions.map((decision) => decision.leaveEntryId));
+    const approvedLeaveEntriesInPeriod = listLeaveEntries({
+      companyId: employment.companyId,
+      employmentId: employment.employmentId,
+      status: "approved"
+    }).filter((entry) => {
+      if (resolvedReportingPeriod) {
+        return entry.reportingPeriod === resolvedReportingPeriod;
+      }
+      return entry.startDate <= resolvedEndsOn && entry.endDate >= resolvedStartsOn;
+    });
+    const approvedLeaveEntries = approvedLeaveEntriesInPeriod
+      .filter((entry) => approvedAbsenceDecisionEntryIds.has(entry.leaveEntryId))
+      .map(copy);
+    const approvedLeaveEntriesWithoutDecision = approvedLeaveEntriesInPeriod
+      .filter((entry) => !approvedAbsenceDecisionEntryIds.has(entry.leaveEntryId))
+      .map(copy);
+    const pendingLeaveEntries = listLeaveEntries({
+      companyId: employment.companyId,
+      employmentId: employment.employmentId
+    })
+      .filter((entry) => ["draft", "submitted"].includes(entry.status))
+      .filter((entry) => {
+        if (resolvedReportingPeriod) {
+          return entry.reportingPeriod === resolvedReportingPeriod;
+        }
+        return entry.startDate <= resolvedEndsOn && entry.endDate >= resolvedStartsOn;
+      })
+      .map(copy);
+
+    return {
+      companyId: employment.companyId,
+      employeeId: employment.employeeId,
+      employmentId: employment.employmentId,
+      startsOn: resolvedStartsOn,
+      endsOn: resolvedEndsOn,
+      reportingPeriod: resolvedReportingPeriod,
+      approvedTimeSet: approvedTimeSet ? copy(approvedTimeSet) : null,
+      approvedTimeEntries,
+      pendingTimeEntries: pendingTimeEntries.map(copy),
+      approvedTimeEntriesOutsideSet,
+      approvedAbsenceDecisions,
+      approvedLeaveEntries,
+      approvedLeaveEntriesWithoutDecision,
+      pendingLeaveEntries,
+      timeSetRequired: approvedTimeEntriesInPeriod.length > 0,
+      inputLocked: approvedTimeSet?.status === "locked"
+    };
+  }
+
   function listTimePeriodLocks({ companyId, employmentId = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const keys = employmentId ? [employmentId] : Array.from(state.periodLockIdsByEmployment.keys());
@@ -1081,6 +1191,14 @@ export function createTimeEngine({
         status: "submitted",
         note: "Leave entry submitted.",
         actorId
+      });
+      upsertAbsenceDecision({
+        state,
+        entry,
+        leaveType,
+        decisionStatus: "approved",
+        actorId,
+        clock
       });
       appendLeaveEntryEvent({
         state,

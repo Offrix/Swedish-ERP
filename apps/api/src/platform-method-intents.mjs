@@ -715,6 +715,7 @@ const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
     "createScheduleTemplate": "write",
     "createTimeEntry": "write",
     "getEmploymentTimeBase": "read",
+    "getPayrollInputPeriod": "read",
     "getLeaveEntry": "read",
     "getTimeEntry": "read",
     "listAbsenceDecisions": "read",

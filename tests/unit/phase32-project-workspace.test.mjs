@@ -602,6 +602,13 @@ function createProjectWorkspaceFixture() {
     workedMinutes: 480,
     actorId: "unit-test"
   });
+  timePlatform.approveTimeSet({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
+    actorId: "unit-test"
+  });
 
   return {
     employee,

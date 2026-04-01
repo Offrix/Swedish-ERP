@@ -102,6 +102,10 @@ const PAYROLL_EXCEPTION_RULES = Object.freeze({
   payroll_tax_rate_missing: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
   payroll_tax_mode_invalid: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
   pending_time_approvals_exist: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
+  approved_time_set_missing: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
+  approved_time_entries_outside_time_set: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
+  pending_absence_approvals_exist: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
+  absence_decision_missing: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
   payroll_migration_batch_not_ready: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "fix_source" }),
   payroll_migration_open_diffs: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "fix_source" }),
   payroll_migration_validation_blocking: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "fix_source" }),
@@ -1698,6 +1702,12 @@ export function createPayrollEngine({
         period,
         timePlatform
       });
+      const payrollInputPeriod = resolveEmploymentPayrollInputPeriod({
+        companyId: resolvedCompanyId,
+        employmentId: employment.employmentId,
+        period,
+        timePlatform
+      });
       const agreementContext = resolveAgreementContext({
         companyId: resolvedCompanyId,
         employment,
@@ -1742,6 +1752,7 @@ export function createPayrollEngine({
         garnishmentDecisionSnapshot,
         executionBoundary,
         employmentTimeBase,
+        payrollInputPeriod,
         agreementContext,
         hrPlatform,
         timePlatform,
@@ -4846,6 +4857,7 @@ function calculateEmploymentRun({
   garnishmentDecisionSnapshot = null,
   executionBoundary = null,
   employmentTimeBase = null,
+  payrollInputPeriod = null,
   agreementContext = null,
   hrPlatform,
   timePlatform,
@@ -4858,10 +4870,14 @@ function calculateEmploymentRun({
   const employee = hrSnapshot?.employee || resolveEmployeeSnapshot({ employment, hrPlatform });
   const contract = hrSnapshot?.activeContract || resolveActiveEmploymentContract(employment, period.endsOn);
   const primaryBankAccount = hrSnapshot?.primaryBankAccount || resolvePrimaryBankAccount({ companyId: employment.companyId, employeeId: employment.employeeId, hrPlatform });
-  const timeEntries = timePlatform?.listTimeEntries
+  const timeEntries = payrollInputPeriod?.approvedTimeEntries
+    ? payrollInputPeriod.approvedTimeEntries.map(copy)
+    : timePlatform?.listTimeEntries
     ? listEmploymentTimeEntries({ companyId: employment.companyId, employmentId: employment.employmentId, period, timePlatform })
     : employmentTimeBase?.approvedTimeEntries || [];
-  const leaveEntries = listEmploymentLeaveEntries({ companyId: employment.companyId, employmentId: employment.employmentId, period, timePlatform });
+  const leaveEntries = payrollInputPeriod?.approvedLeaveEntries
+    ? payrollInputPeriod.approvedLeaveEntries.map(copy)
+    : listEmploymentLeaveEntries({ companyId: employment.companyId, employmentId: employment.employmentId, period, timePlatform });
   const balances =
     employmentTimeBase?.timeBalances ||
     (timePlatform?.listTimeBalances
@@ -4906,10 +4922,15 @@ function calculateEmploymentRun({
     contract,
     primaryBankAccount,
     scheduleAssignment: employmentTimeBase?.activeScheduleAssignment || null,
+    approvedTimeSet: payrollInputPeriod?.approvedTimeSet || null,
     timeEntries,
     leaveEntries,
+    absenceDecisions: payrollInputPeriod?.approvedAbsenceDecisions || [],
     balances,
-    pendingTimeEntries: employmentTimeBase?.pendingTimeEntries || [],
+    pendingTimeEntries: payrollInputPeriod?.pendingTimeEntries || employmentTimeBase?.pendingTimeEntries || [],
+    pendingLeaveEntries: payrollInputPeriod?.pendingLeaveEntries || [],
+    approvedTimeEntriesOutsideSet: payrollInputPeriod?.approvedTimeEntriesOutsideSet || [],
+    approvedLeaveEntriesWithoutDecision: payrollInputPeriod?.approvedLeaveEntriesWithoutDecision || [],
     externalBalanceSnapshots: employmentTimeBase?.balanceSnapshots || [],
     agreementOverlay,
     executionBoundary: copy(executionBoundary),
@@ -4969,7 +4990,11 @@ function calculateEmploymentRun({
   steps[2] = createCompletedStep(2, {
     timeEntryCount: timeEntries.length,
     leaveEntryCount: leaveEntries.length,
-    pendingTimeApprovalCount: (employmentTimeBase?.pendingTimeEntries || []).length,
+    pendingTimeApprovalCount: (payrollInputPeriod?.pendingTimeEntries || employmentTimeBase?.pendingTimeEntries || []).length,
+    pendingLeaveApprovalCount: (payrollInputPeriod?.pendingLeaveEntries || []).length,
+    approvedTimeSetId: payrollInputPeriod?.approvedTimeSet?.approvedTimeSetId || null,
+    approvedTimeSetStatus: payrollInputPeriod?.approvedTimeSet?.status || null,
+    absenceDecisionCount: (payrollInputPeriod?.approvedAbsenceDecisions || []).length,
     balanceSnapshotHash: buildSnapshotHash(balances),
     externalBalanceSnapshotHash: buildSnapshotHash(employmentTimeBase?.balanceSnapshots || []),
     agreementSnapshotHash: buildSnapshotHash(agreementOverlay)
@@ -5408,6 +5433,7 @@ function calculateEmploymentRun({
     employment,
     contract,
     employmentTimeBase,
+    payrollInputPeriod,
     agreementContext,
     sourceSnapshot,
     lines: lines.map(copy),
@@ -7105,7 +7131,20 @@ function resolveEmploymentTimeBase({ companyId, employmentId, period, timePlatfo
     companyId: requireText(companyId, "company_id_required"),
     employmentId: requireText(employmentId, "employment_id_required"),
     workDate: period.endsOn,
-    cutoffDate: period.endsOn
+      cutoffDate: period.endsOn
+    });
+}
+
+function resolveEmploymentPayrollInputPeriod({ companyId, employmentId, period, timePlatform }) {
+  if (!timePlatform?.getPayrollInputPeriod) {
+    return null;
+  }
+  return timePlatform.getPayrollInputPeriod({
+    companyId: requireText(companyId, "company_id_required"),
+    employmentId: requireText(employmentId, "employment_id_required"),
+    startsOn: period.startsOn,
+    endsOn: period.endsOn,
+    reportingPeriod: period.reportingPeriod
   });
 }
 
@@ -7256,7 +7295,7 @@ function rebuildPayrollExceptions({
         }
       });
     }
-    const pendingTimeEntries = result.employmentTimeBase?.pendingTimeEntries || [];
+    const pendingTimeEntries = result.payrollInputPeriod?.pendingTimeEntries || result.employmentTimeBase?.pendingTimeEntries || [];
     if (pendingTimeEntries.length > 0) {
       upsert({
         employmentId,
@@ -7266,6 +7305,58 @@ function rebuildPayrollExceptions({
         details: {
           pendingTimeEntryIds: pendingTimeEntries.map((entry) => entry.timeEntryId).filter(Boolean).sort(),
           pendingTimeApprovalCount: pendingTimeEntries.length
+        }
+      });
+    }
+    if (result.payrollInputPeriod?.timeSetRequired === true && !result.payrollInputPeriod?.approvedTimeSet) {
+      upsert({
+        employmentId,
+        employeeId,
+        code: "approved_time_set_missing",
+        message: `Employment ${employmentId} has approved time entries in the payroll period but no canonical approved time set covering the period.`,
+        details: {
+          reportingPeriod: run.reportingPeriod,
+          periodStartsOn: run.periodStartsOn,
+          periodEndsOn: run.periodEndsOn
+        }
+      });
+    }
+    const approvedTimeEntriesOutsideSet = result.payrollInputPeriod?.approvedTimeEntriesOutsideSet || [];
+    if (approvedTimeEntriesOutsideSet.length > 0) {
+      upsert({
+        employmentId,
+        employeeId,
+        code: "approved_time_entries_outside_time_set",
+        message: `Employment ${employmentId} has approved time entries that are not frozen by a canonical approved time set.`,
+        details: {
+          timeEntryIds: approvedTimeEntriesOutsideSet.map((entry) => entry.timeEntryId).filter(Boolean).sort(),
+          reportingPeriod: run.reportingPeriod
+        }
+      });
+    }
+    const pendingLeaveEntries = result.payrollInputPeriod?.pendingLeaveEntries || [];
+    if (pendingLeaveEntries.length > 0) {
+      upsert({
+        employmentId,
+        employeeId,
+        code: "pending_absence_approvals_exist",
+        message: `Employment ${employmentId} has leave entries that still await an approved absence decision for the payroll period.`,
+        details: {
+          leaveEntryIds: pendingLeaveEntries.map((entry) => entry.leaveEntryId).filter(Boolean).sort(),
+          reportingPeriod: run.reportingPeriod
+        }
+      });
+    }
+    const approvedLeaveEntriesWithoutDecision = result.payrollInputPeriod?.approvedLeaveEntriesWithoutDecision || [];
+    if (approvedLeaveEntriesWithoutDecision.length > 0) {
+      upsert({
+        employmentId,
+        employeeId,
+        code: "absence_decision_missing",
+        message: `Employment ${employmentId} has approved leave entries without a canonical absence decision.`,
+        details: {
+          leaveEntryIds: approvedLeaveEntriesWithoutDecision.map((entry) => entry.leaveEntryId).filter(Boolean).sort(),
+          reportingPeriod: run.reportingPeriod
         }
       });
     }
