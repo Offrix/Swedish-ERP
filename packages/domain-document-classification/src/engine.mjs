@@ -36,6 +36,34 @@ import {
 } from "./helpers.mjs";
 
 const ACTIVE_CASE_STATUSES = new Set(["ingested", "suggested", "under_review", "approved", "dispatched"]);
+const EXTRACTION_FIELD_LINEAGE_ALIASES = Object.freeze({
+  amount: Object.freeze(["totalAmount"]),
+  vatAmount: Object.freeze(["vatAmount"]),
+  currencyCode: Object.freeze(["currencyCode"]),
+  description: Object.freeze(["counterparty", "storeName", "vendorName", "contractTitle"]),
+  "factsJson.supplierName": Object.freeze(["supplierName", "counterparty", "vendorName", "storeName"]),
+  "factsJson.invoiceNumber": Object.freeze(["invoiceNumber"]),
+  "factsJson.invoiceDate": Object.freeze(["invoiceDate"]),
+  "factsJson.dueDate": Object.freeze(["dueDate"]),
+  "factsJson.totalAmount": Object.freeze(["totalAmount"]),
+  "factsJson.vatAmount": Object.freeze(["vatAmount"]),
+  "factsJson.paymentReference": Object.freeze(["reference"]),
+  "factsJson.purchaseOrderReference": Object.freeze(["purchaseOrderReference"]),
+  "factsJson.currencyCode": Object.freeze(["currencyCode"]),
+  "factsJson.benefitCode": Object.freeze(["benefitCode"]),
+  "factsJson.activityType": Object.freeze(["activityType"]),
+  "factsJson.activityDate": Object.freeze(["activityDate", "receiptDate"]),
+  "factsJson.vendorName": Object.freeze(["vendorName", "storeName", "counterparty"]),
+  "factsJson.reimbursementAmount": Object.freeze(["totalAmount"]),
+  "factsJson.expenseType": Object.freeze(["expenseType"]),
+  "factsJson.expenseDate": Object.freeze(["expenseDate", "receiptDate"]),
+  "factsJson.paymentMethod": Object.freeze(["paymentMethod"]),
+  "factsJson.hasReceiptSupport": Object.freeze([]),
+  "factsJson.contractTitle": Object.freeze(["contractTitle"]),
+  "factsJson.counterparty": Object.freeze(["counterparty", "storeName"]),
+  "factsJson.effectiveDate": Object.freeze(["effectiveDate"]),
+  "factsJson.attachmentCategory": Object.freeze([])
+});
 
 export function createDocumentClassificationPlatform(options = {}) {
   return createDocumentClassificationEngine(options);
@@ -578,6 +606,17 @@ function buildExtractionProjection({ classificationCase, treatmentLineId, lineIn
   const extractionFamilyCode = deriveExtractionFamilyCode(lineInput);
   const candidateObjectType = deriveCandidateObjectType(lineInput);
   const documentRoleCode = deriveDocumentRoleCode(lineInput);
+  const normalizedFieldsJson = buildNormalizedExtractionFields({ classificationCase, lineInput, extractionFamilyCode });
+  const attachmentRefs = Object.freeze(buildProjectionAttachmentRefs({ classificationCase }));
+  const fieldLineageJson = buildProjectionFieldLineage({
+    classificationCase,
+    normalizedFieldsJson,
+    attachmentRefs
+  });
+  const confidenceScore = deriveProjectionConfidenceScore({
+    classificationCase,
+    fieldLineageJson
+  });
   return {
     extractionProjectionId: crypto.randomUUID(),
     classificationCaseId: classificationCase.classificationCaseId,
@@ -593,11 +632,10 @@ function buildExtractionProjection({ classificationCase, treatmentLineId, lineIn
     requiresReview: lineInput.requiresReview,
     reviewRiskClass: lineInput.reviewRiskClass,
     reviewReasonCodes: Object.freeze([...lineInput.reviewReasonCodes]),
-    normalizedFieldsJson: buildNormalizedExtractionFields({ classificationCase, lineInput, extractionFamilyCode }),
-    attachmentRefs: Object.freeze([
-      `document:${classificationCase.documentId}`,
-      ...(classificationCase.sourceOcrRunId ? [`ocr_run:${classificationCase.sourceOcrRunId}`] : [])
-    ]),
+    confidenceScore,
+    normalizedFieldsJson,
+    fieldLineageJson,
+    attachmentRefs,
     payloadHash: crypto
       .createHash("sha256")
       .update(
@@ -607,7 +645,10 @@ function buildExtractionProjection({ classificationCase, treatmentLineId, lineIn
           extractionFamilyCode,
           candidateObjectType,
           targetDomainCode: lineInput.targetDomainCode,
-          factsJson: lineInput.factsJson,
+          confidenceScore,
+          normalizedFieldsJson,
+          fieldLineageJson,
+          attachmentRefs,
           reviewReasonCodes: lineInput.reviewReasonCodes
         })
       )
@@ -615,6 +656,76 @@ function buildExtractionProjection({ classificationCase, treatmentLineId, lineIn
     createdAt: classificationCase.createdAt,
     updatedAt: classificationCase.createdAt
   };
+}
+
+function buildProjectionAttachmentRefs({ classificationCase }) {
+  const documentSnapshot = classificationCase.sourceDocumentSnapshotJson || {};
+  const sourceOcrSnapshot = classificationCase.sourceOcrSnapshotJson || {};
+  return compactStringList([
+    `document:${classificationCase.documentId}`,
+    classificationCase.sourceOcrRunId ? `ocr_run:${classificationCase.sourceOcrRunId}` : null,
+    documentSnapshot.originalDocumentVersionId ? `document_version:${documentSnapshot.originalDocumentVersionId}` : null,
+    documentSnapshot.latestDocumentVersionId ? `document_version:${documentSnapshot.latestDocumentVersionId}` : null,
+    sourceOcrSnapshot.ocrDocumentVersionId ? `document_version:${sourceOcrSnapshot.ocrDocumentVersionId}` : null,
+    sourceOcrSnapshot.classificationDocumentVersionId
+      ? `document_version:${sourceOcrSnapshot.classificationDocumentVersionId}`
+      : null
+  ]);
+}
+
+function buildProjectionFieldLineage({ classificationCase, normalizedFieldsJson, attachmentRefs }) {
+  const extractedFields = classificationCase.extractedFieldsJson || {};
+  const lineageEntries = {};
+  const fieldPaths = [
+    "amount",
+    "vatAmount",
+    "currencyCode",
+    "description",
+    ...Object.keys(normalizedFieldsJson?.factsJson || {}).map((key) => `factsJson.${key}`)
+  ];
+  for (const fieldPath of fieldPaths) {
+    lineageEntries[fieldPath] = buildProjectionFieldLineageEntry({
+      classificationCase,
+      extractedFields,
+      fieldPath,
+      attachmentRefs
+    });
+  }
+  return Object.freeze(lineageEntries);
+}
+
+function buildProjectionFieldLineageEntry({ classificationCase, extractedFields, fieldPath, attachmentRefs }) {
+  const candidateFieldKeys = EXTRACTION_FIELD_LINEAGE_ALIASES[fieldPath] || [];
+  const matchedFieldKey = candidateFieldKeys.find((fieldKey) => extractedFields[fieldKey] != null) || null;
+  if (matchedFieldKey) {
+    return Object.freeze({
+      sourceKind: "extracted_field",
+      sourcePath: `extractedFields.${matchedFieldKey}`,
+      sourceFieldKey: matchedFieldKey,
+      sourceOcrRunId: classificationCase.sourceOcrRunId,
+      confidenceScore: readExtractedFieldConfidence(extractedFields[matchedFieldKey]),
+      attachmentRefs
+    });
+  }
+  return Object.freeze({
+    sourceKind: fieldPath.startsWith("factsJson.") ? "derived_rule" : "document_metadata",
+    sourcePath: fieldPath.startsWith("factsJson.") ? "derived_rule" : "document.metadataJson",
+    sourceFieldKey: null,
+    sourceOcrRunId: classificationCase.sourceOcrRunId,
+    confidenceScore: null,
+    attachmentRefs
+  });
+}
+
+function deriveProjectionConfidenceScore({ classificationCase, fieldLineageJson }) {
+  const confidences = Object.values(fieldLineageJson)
+    .map((entry) => (typeof entry?.confidenceScore === "number" ? entry.confidenceScore : null))
+    .filter((value) => value != null);
+  if (confidences.length > 0) {
+    return roundConfidence(Math.min(...confidences));
+  }
+  const ocrConfidence = classificationCase.sourceOcrSnapshotJson?.classificationConfidence;
+  return typeof ocrConfidence === "number" ? roundConfidence(ocrConfidence) : null;
 }
 
 function settleLinkedReviewItem({ reviewCenterPlatform, classificationCase, actorId, approvalNote }) {
@@ -1349,6 +1460,17 @@ function buildNormalizedExtractionFields({ classificationCase, lineInput, extrac
   };
 }
 
+function readExtractedFieldConfidence(field) {
+  if (field == null || typeof field !== "object" || Array.isArray(field) || !("confidence" in field)) {
+    return null;
+  }
+  const numeric = Number(field.confidence);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  return roundConfidence(numeric);
+}
+
 function readExtractedFieldValue(field) {
   if (field == null) {
     return null;
@@ -1365,6 +1487,14 @@ function readExtractedMoney(field) {
     return null;
   }
   return normalizeOptionalMoney(value, "classification_extracted_money_invalid");
+}
+
+function roundConfidence(value) {
+  return Math.max(0, Math.min(1, Number(Number(value).toFixed(2))));
+}
+
+function compactStringList(values) {
+  return [...new Set(values.filter((value) => typeof value === "string" && value.trim().length > 0))].sort();
 }
 
 function collectDerivedReviewReasonCodes({ targetDomainCode, extractedFields, extractedText }) {

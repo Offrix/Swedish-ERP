@@ -9,6 +9,15 @@ export type ClassificationCaseStatus =
 
 export type TreatmentIntentStatus = "draft" | "approved" | "dispatched" | "realized" | "reversed" | "failed";
 
+export interface ExtractionProjectionFieldLineageEntry {
+  readonly sourceKind: "extracted_field" | "derived_rule" | "document_metadata";
+  readonly sourcePath: string;
+  readonly sourceFieldKey: string | null;
+  readonly sourceOcrRunId: string | null;
+  readonly confidenceScore: number | null;
+  readonly attachmentRefs: readonly string[];
+}
+
 export interface ExtractionProjection {
   readonly extractionProjectionId: string;
   readonly classificationCaseId: string;
@@ -24,7 +33,9 @@ export interface ExtractionProjection {
   readonly requiresReview: boolean;
   readonly reviewRiskClass: "low" | "medium" | "high" | "critical";
   readonly reviewReasonCodes: readonly string[];
+  readonly confidenceScore: number | null;
   readonly normalizedFieldsJson: Record<string, unknown>;
+  readonly fieldLineageJson: Record<string, ExtractionProjectionFieldLineageEntry>;
   readonly attachmentRefs: readonly string[];
   readonly payloadHash: string;
   readonly createdAt: string;

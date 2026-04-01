@@ -371,6 +371,20 @@ test("Step 14 API derives canonical extraction projections when classification i
     assert.equal(supplierCase.treatmentIntents[0].targetDomainCode, "AP");
     assert.equal(supplierCase.extractionProjections[0].extractionFamilyCode, "AP_SUPPLIER_INVOICE");
     assert.equal(supplierCase.extractionProjections[0].candidateObjectType, "ap_supplier_invoice");
+    assert.equal(supplierCase.extractionProjections[0].confidenceScore, 0.91);
+    assert.equal(
+      supplierCase.extractionProjections[0].fieldLineageJson["factsJson.invoiceNumber"].sourceFieldKey,
+      "invoiceNumber"
+    );
+    assert.equal(
+      supplierCase.extractionProjections[0].fieldLineageJson["factsJson.invoiceNumber"].confidenceScore,
+      0.95
+    );
+    assert.equal(
+      supplierCase.extractionProjections[0].attachmentRefs.includes(`document:${supplierDocument.documentId}`),
+      true
+    );
+    assert.equal(supplierCase.extractionProjections[0].payloadHash.length, 64);
 
     const travelDocument = platform.createDocumentRecord({
       companyId: DEMO_IDS.companyId,
@@ -399,6 +413,15 @@ test("Step 14 API derives canonical extraction projections when classification i
     assert.equal(travelCase.reviewQueueCode, "PAYROLL_REVIEW");
     assert.equal(travelCase.treatmentIntents[0].targetDomainCode, "TRAVEL");
     assert.equal(travelCase.extractionProjections[0].extractionFamilyCode, "TRAVEL_EXPENSE_CANDIDATE");
+    assert.equal(travelCase.extractionProjections[0].confidenceScore, 0.93);
+    assert.equal(
+      travelCase.extractionProjections[0].fieldLineageJson["factsJson.expenseDate"].sourceFieldKey,
+      "receiptDate"
+    );
+    assert.equal(
+      travelCase.extractionProjections[0].fieldLineageJson["factsJson.expenseType"].sourceKind,
+      "derived_rule"
+    );
     assert.equal(travelCase.extractionProjections[0].normalizedFieldsJson.factsJson.expenseType, "lodging");
   } finally {
     await stopServer(server);

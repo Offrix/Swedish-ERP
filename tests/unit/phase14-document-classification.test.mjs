@@ -375,7 +375,12 @@ test("Step 14 document classification derives AP extraction projection from OCR 
   assert.equal(created.extractionProjections.length, 1);
   assert.equal(created.extractionProjections[0].extractionFamilyCode, "AP_SUPPLIER_INVOICE");
   assert.equal(created.extractionProjections[0].candidateObjectType, "ap_supplier_invoice");
+  assert.equal(created.extractionProjections[0].confidenceScore, 0.91);
   assert.equal(created.extractionProjections[0].documentRoleCode, "PRIMARY_SUPPLIER_DOCUMENT");
+  assert.equal(created.extractionProjections[0].fieldLineageJson["factsJson.invoiceNumber"].sourceFieldKey, "invoiceNumber");
+  assert.equal(created.extractionProjections[0].fieldLineageJson["factsJson.invoiceNumber"].confidenceScore, 0.96);
+  assert.equal(created.extractionProjections[0].attachmentRefs.includes(`document:${document.documentId}`), true);
+  assert.equal(created.extractionProjections[0].payloadHash.length, 64);
   assert.equal(created.extractionProjections[0].normalizedFieldsJson.factsJson.invoiceNumber, "SUP-2026-001");
 });
 
@@ -389,7 +394,6 @@ test("Step 14 document classification derives travel extraction projection and r
     documentPlatform,
     reviewCenterPlatform
   });
-
   const document = documentPlatform.createDocumentRecord({
     companyId: DEMO_COMPANY_ID,
     documentType: "expense_receipt",
@@ -417,5 +421,79 @@ test("Step 14 document classification derives travel extraction projection and r
   assert.equal(created.treatmentLines[0].treatmentCode, "REIMBURSABLE_OUTLAY");
   assert.equal(created.extractionProjections[0].extractionFamilyCode, "TRAVEL_EXPENSE_CANDIDATE");
   assert.equal(created.extractionProjections[0].candidateObjectType, "travel_claim_candidate");
+  assert.equal(created.extractionProjections[0].confidenceScore, 0.93);
+  assert.equal(created.extractionProjections[0].fieldLineageJson["factsJson.expenseDate"].sourceFieldKey, "receiptDate");
+  assert.equal(created.extractionProjections[0].fieldLineageJson["factsJson.expenseType"].sourceKind, "derived_rule");
   assert.equal(created.extractionProjections[0].normalizedFieldsJson.factsJson.expenseType, "lodging");
+});
+
+test("Step 14 document classification carries OCR-backed attachment refs and lineage into extraction projections", () => {
+  const clock = () => new Date("2026-03-28T11:00:00Z");
+  const documentPlatform = createDocumentArchivePlatform({ clock });
+  const reviewCenterPlatform = createReviewCenterPlatform({ clock, seedDemo: true });
+  const classification = createDocumentClassificationEngine({
+    clock,
+    seedDemo: false,
+    documentPlatform,
+    reviewCenterPlatform
+  });
+  const channel = documentPlatform.registerInboxChannel({
+    companyId: DEMO_COMPANY_ID,
+    channelCode: "ocr_projection",
+    inboundAddress: "ocr-projection@inbound.example.test",
+    useCase: "documents_inbox",
+    allowedMimeTypes: ["application/pdf"],
+    maxAttachmentSizeBytes: 1024 * 1024,
+    classificationConfidenceThreshold: 0.9,
+    fieldConfidenceThreshold: 0.9
+  });
+
+  const document = documentPlatform.createDocumentRecord({
+    companyId: DEMO_COMPANY_ID,
+    documentType: "supplier_invoice",
+    sourceChannel: "email_inbox",
+    sourceReference: "ocr-backed-supplier-001",
+    retentionPolicyCode: "supplier_invoice_standard",
+    actorId: "user_ocr",
+    metadataJson: {
+      inboxChannelId: channel.inboxChannelId,
+      filename: "ocr-backed-supplier-001.pdf",
+      senderAddress: "supplier@example.com",
+      mailboxCode: "ap-inbox",
+      totalAmount: 1250
+    }
+  });
+  const original = documentPlatform.appendDocumentVersion({
+    companyId: DEMO_COMPANY_ID,
+    documentId: document.documentId,
+    variantType: "original",
+    storageKey: "documents/originals/ocr-backed-supplier-001.pdf",
+    mimeType: "application/pdf",
+    contentText: "Invoice: SUP-UNIT-001 Supplier: Demo Leverantor AB Total: 1250.00 Due: 2026-04-27",
+    actorId: "user_ocr"
+  });
+  const ocrRun = documentPlatform.runDocumentOcr({
+    companyId: DEMO_COMPANY_ID,
+    documentId: document.documentId,
+    actorId: "user_ocr"
+  });
+
+  const created = classification.createClassificationCase({
+    companyId: DEMO_COMPANY_ID,
+    documentId: document.documentId,
+    actorId: "user_ocr"
+  });
+
+  assert.equal(created.sourceOcrRunId, ocrRun.ocrRun.ocrRunId);
+  assert.equal(created.extractionProjections[0].attachmentRefs.includes(`ocr_run:${ocrRun.ocrRun.ocrRunId}`), true);
+  assert.equal(
+    created.extractionProjections[0].attachmentRefs.includes(`document_version:${original.version.documentVersionId}`),
+    true
+  );
+  assert.equal(
+    created.extractionProjections[0].attachmentRefs.includes(`document_version:${ocrRun.ocrRun.ocrDocumentVersionId}`),
+    true
+  );
+  assert.equal(created.extractionProjections[0].fieldLineageJson["factsJson.invoiceNumber"].sourceOcrRunId, ocrRun.ocrRun.ocrRunId);
+  assert.equal(created.extractionProjections[0].payloadHash.length, 64);
 });
